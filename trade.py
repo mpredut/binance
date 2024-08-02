@@ -107,6 +107,7 @@ if last_state.price:
 
 current_buy_order_id = None
 current_sell_order_id = None
+buy_price = 0
 
 while True:
     try:
