@@ -156,14 +156,14 @@ while True:
                 print(f"Ordin de vânzare plasat la {sell_price}. ID ordin: {current_sell_order_id}")
 
         if price_changed_significantly_intime(last_state, current_state, price_change_threshold, timedelta(seconds = interval_time).total_seconds()):
-            print(f"Prețul s-a schimbat cu mai mult de {price_change_threshold * 100}% in intervalul de {interval_time} secunde.")
+            print(f"Prețul s-a schimbat cu {changed_proc}% care este mai mult de {price_change_threshold * 100}% in intervalul de {interval_time} secunde.")
             beep(2)
             print(f"Anulez ordinul existent de cumpărare dacă există (ID:{current_buy_order_id}).")
             if current_buy_order_id:
                 cancel_order(current_buy_order_id)
                 current_buy_order_id = None
 
-            buy_price = calculate_buy_price(current_state.price, buy_price)  
+            buy_price = calculate_buy_price(current_state.price, changed_proc)  
             if buy_price >= current_state.price :
                 buy_price = current_state.price * 0.999
             
