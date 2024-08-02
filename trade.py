@@ -5,10 +5,9 @@ from datetime import datetime, timedelta
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
-from utils import beep, precision, client, symbol, budget, order_cost_btc, price_change_threshold
+from utils import beep, precision, client, symbol, budget, order_cost_btc, price_change_threshold, interval_time
 
-interval_time = 2 * 3600 # 2 h * 3600 seconds.
-interval_time = 79
+
 def place_buy_order(price, quantity):
     try:
         buy_order = client.order_limit_buy(
@@ -60,11 +59,30 @@ def get_current_price():
         print(f"Eroare la obținerea prețului curent: {e}")
         return None
 
+def calculate_buy_price(current_price, changed_proc):
+    if changed_proc < 0: # Dacă prețul a scăzut
+        if abs(changed_proc) > 7: # Dacă scăderea este mai mare de 7%, cumpără apx la prețul curent
+            proc = 0.99
+        else:
+            # Calculează procentul suplimentar necesar pentru a ajunge la 7%
+            procent_suplimentar = 7 + changed_proc
+            proc = (1 - procent_suplimentar / 100)# Calculează prețul buy_price cu diferența suplimentară
+            if procent_suplimentar < 0 :
+                proc = 0.99
+    else:# Dacă prețul a crescut
+        proc = 0.93  # 7% sub prețul curent
+
+    buy_price = current_state.price * proc 
+    buy_price = max(buy_price, 0)
+    
+    return buy_price
+
+
 def price_changed(old_price, new_price):
     change = (new_price - old_price) / old_price
-    changeproc = change * 100  # În procente
-    print(f"{changeproc:.2f}%  BTC {new_price}")
-    return None
+    changed_proc = change * 100  # În procente
+    print(f"{changed_proc:.2f}%  BTC {new_price}")
+    return changed_proc
 
 class State:
     def __init__(self, price, timestamp):
@@ -97,7 +115,8 @@ while True:
             print("Eroare la obținerea prețului. Încerc din nou în câteva secunde.")
             time.sleep(1)
             continue
-        price_changed(last_state.price, current_state.price)
+            
+        changed_proc = price_changed(last_state.price, current_state.price)
 
         if current_sell_order_id and check_order_filled(current_sell_order_id):
             print("Ordinul de vânzare a fost executat.")
@@ -144,7 +163,11 @@ while True:
                 cancel_order(current_buy_order_id)
                 current_buy_order_id = None
 
-            buy_price = round(current_state.price * 0.93, 0)  # 7% sub prețul pieței
+            buy_price = calculate_buy_price(current_state.price, buy_price)  
+            if buy_price >= current_state.price :
+                buy_price = current_state.price * 0.999
+            
+            buy_price = round(buy_price, 0)
             btc_buy_quantity = round(budget / buy_price, 5)
             print(f"Plasez ordinul de cumpărare la prețul: {buy_price}, cantitate: {btc_buy_quantity}")
             buy_order = place_buy_order(buy_price, btc_buy_quantity)
