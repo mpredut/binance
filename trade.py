@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
-from utils import beep, precision, client, symbol, budget, order_cost_btc, price_change_threshold, interval_time
+from utils import beep, precision, client, symbol, budget, order_cost_btc, price_change_threshold, get_interval_time
 
 
 def place_buy_order(price, quantity):
@@ -59,22 +59,23 @@ def get_current_price():
         print(f"Eroare la obținerea prețului curent: {e}")
         return None
 
-def calculate_buy_price(current_price, changed_proc):
-    if changed_proc < 0: # Dacă prețul a scăzut
-        if abs(changed_proc) > 7: # Dacă scăderea este mai mare de 7%, cumpără apx la prețul curent
-            proc = 0.99
-        else:
-            # Calculează procentul suplimentar necesar pentru a ajunge la 7%
-            procent_suplimentar = 7 + changed_proc
-            proc = (1 - procent_suplimentar / 100)# Calculează prețul buy_price cu diferența suplimentară
-            if procent_suplimentar < 0 :
-                proc = 0.99
-    else:# Dacă prețul a crescut
-        proc = 0.93  # 7% sub prețul curent
 
-    buy_price = current_state.price * proc 
+def calculate_buy_price(current_price, changed_proc, decrease_proc=7):
+    if changed_proc < 0:  # Dacă prețul a scăzut
+        if abs(changed_proc) > decrease_threshold:  # Dacă scăderea este mai mare decât pragul specificat
+            proc = 1 - 0.01  # Aproape prețul curent
+        else:
+            # Calculează procentul suplimentar necesar pentru a ajunge la pragul de scădere
+            procent_suplimentar = decrease_threshold + changed_proc
+            proc = 1 - procent_suplimentar / 100
+            if procent_suplimentar < 0:
+                proc = 1 - 0.01  # Aproape prețul curent
+    else:  # Dacă prețul a crescut
+        proc = 1 - decrease_proc/100;
+
+    buy_price = current_price * proc
     buy_price = max(buy_price, 0)
-    
+
     return buy_price
 
 
@@ -155,7 +156,10 @@ while True:
             if sell_order:
                 current_sell_order_id = sell_order['orderId']
                 print(f"Ordin de vânzare plasat la {sell_price}. ID ordin: {current_sell_order_id}")
+                
+            #current_buy_order_id = None
 
+        interval_time = get_interval_time()
         if price_changed_significantly_intime(last_state, current_state, price_change_threshold, timedelta(seconds = interval_time).total_seconds()):
             print(f"Prețul s-a schimbat cu {changed_proc}% care este mai mult de {price_change_threshold * 100}% in intervalul de {interval_time} secunde.")
             beep(2)
@@ -164,7 +168,7 @@ while True:
                 cancel_order(current_buy_order_id)
                 current_buy_order_id = None
 
-            buy_price = calculate_buy_price(current_state.price, changed_proc)  
+            buy_price = calculate_buy_price(current_state.price, changed_proc, 5.7)  
             if buy_price >= current_state.price :
                 buy_price = current_state.price * 0.999
             
