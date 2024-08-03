@@ -24,7 +24,7 @@ order_cost_btc = 0.00004405  # BTC
 price_change_threshold = 0.007  # Pragul de schimbare a prețului, 0.7%
 #price_change_threshold = 0.07  # Pragul de schimbare a prețului, 7%
 interval_time = 2 * 3600 # 2 h * 3600 seconds.
-interval_time = 1 * 79
+interval_time = 14 * 79
 
 def get_quantity_precision(symbol):
     try:
