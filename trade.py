@@ -62,11 +62,11 @@ def get_current_price():
 
 def calculate_buy_price(current_price, changed_proc, decrease_proc=7):
     if changed_proc < 0:  # Dacă prețul a scăzut
-        if abs(changed_proc) > decrease_threshold:  # Dacă scăderea este mai mare decât pragul specificat
+        if abs(changed_proc) > decrease_proc:  # Dacă scăderea este mai mare decât pragul specificat
             proc = 1 - 0.01  # Aproape prețul curent
         else:
             # Calculează procentul suplimentar necesar pentru a ajunge la pragul de scădere
-            procent_suplimentar = decrease_threshold + changed_proc
+            procent_suplimentar = decrease_proc + changed_proc
             proc = 1 - procent_suplimentar / 100
             if procent_suplimentar < 0:
                 proc = 1 - 0.01  # Aproape prețul curent
@@ -102,7 +102,7 @@ def price_changed_significantly_intime(old_state, new_state, threshold, time_lim
         return False
 
 last_state = State(get_current_price(), timestamp=datetime.now())
-
+last_state.price = 55635
 if last_state.price:
     print(f"Prețul curent al BTC: {last_state.price}")
 
