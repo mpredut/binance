@@ -10,6 +10,8 @@ from utils import beep, precision, client, symbol, budget, order_cost_btc, price
 
 def place_buy_order(price, quantity):
     try:
+        price = round(price, 0)
+        quantity = round(quantity, 5)    
         buy_order = client.order_limit_buy(
             symbol=symbol,
             quantity=quantity,
@@ -22,6 +24,8 @@ def place_buy_order(price, quantity):
 
 def place_sell_order(price, quantity):
     try:
+        price = round(price, 0)
+        quantity = round(quantity, 5)    
         sell_order = client.order_limit_sell(
             symbol=symbol,
             quantity=quantity,
@@ -102,7 +106,7 @@ def price_changed_significantly_intime(old_state, new_state, threshold, time_lim
         return False
 
 last_state = State(get_current_price(), timestamp=datetime.now())
-last_state.price = 55635
+#last_state.price = 55635
 if last_state.price:
     print(f"Prețul curent al BTC: {last_state.price}")
 
@@ -110,6 +114,7 @@ current_buy_order_id = None
 current_sell_order_id = None
 buy_price = 0
 
+current_buy_order_id = 29189134843
 while True:
     try:
         current_state = State(get_current_price(), timestamp=datetime.now())
@@ -172,8 +177,8 @@ while True:
             if buy_price >= current_state.price :
                 buy_price = current_state.price * 0.999
             
-            buy_price = round(buy_price, 0)
-            btc_buy_quantity = round(budget / buy_price, 5)
+            buy_price = buy_price
+            btc_buy_quantity = budget / buy_price
             print(f"Plasez ordinul de cumpărare la prețul: {buy_price}, cantitate: {btc_buy_quantity}")
             buy_order = place_buy_order(buy_price, btc_buy_quantity)
 
