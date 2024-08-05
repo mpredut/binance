@@ -105,6 +105,24 @@ def price_changed_significantly_intime(old_state, new_state, threshold, time_lim
         print(f" Timpul rămas: {time_limit_seconds - time_elapsed.total_seconds():.2f} secunde")
         return False
 
+
+def update_sell_order(client, symbol, current_sell_order_id, initial_buy_price, btc_buy_quantity, order_cost_btc, iteration):
+    sell_price = calculate_new_sell_price(initial_buy_price, iteration)
+    btc_effective_quantity = btc_buy_quantity - order_cost_btc
+    
+    cancel_order(client, symbol, current_sell_order_id)
+    print(f"Ordinul de vânzare cu ID {current_sell_order_id} a fost anulat.")
+    
+    print(f"Plasez ordinul de vânzare la prețul: {sell_price}, cantitate: {btc_effective_quantity}")
+    sell_order = place_sell_order(sell_price, btc_effective_quantity)
+
+    if sell_order:
+        new_sell_order_id = sell_order['orderId']
+        print(f"Ordin de vânzare plasat la {sell_price}. ID ordin: {new_sell_order_id}")
+        return new_sell_order_id
+
+    return None
+
 last_state = State(get_current_price(), timestamp=datetime.now())
 #last_state.price = 55635
 if last_state.price:
@@ -149,6 +167,12 @@ while True:
         if current_buy_order_id and check_order_filled(current_buy_order_id):
             print("Ordinul de cumpărare a fost executat.")
             beep(1)
+            #current_buy_order_id = None
+            
+            if current_sell_order_id:
+                cancel_order(current_sell_order_id)
+                current_sell_order_id = None
+                
             buy_order = client.get_order(symbol=symbol, orderId=current_buy_order_id)
             buy_price = float(buy_order['price'])
             btc_buy_quantity = float(buy_order['origQty'])
@@ -161,8 +185,8 @@ while True:
             if sell_order:
                 current_sell_order_id = sell_order['orderId']
                 print(f"Ordin de vânzare plasat la {sell_price}. ID ordin: {current_sell_order_id}")
-                
-            #current_buy_order_id = None
+             
+           
 
         interval_time = get_interval_time()
         if price_changed_significantly_intime(last_state, current_state, price_change_threshold, timedelta(seconds = interval_time).total_seconds()):
