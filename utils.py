@@ -16,7 +16,7 @@ def beep(n):
             import winsound
             winsound.Beep(440, 500)  # frecvența de 440 Hz, durata de 500 ms
         else:
-            #os.system('echo -e "\a"')
+           os.system('echo -e "\a"')
         time.sleep(3)
 
 client = Client(api_key, api_secret)
