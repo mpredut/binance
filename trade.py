@@ -7,7 +7,7 @@ from binance.exceptions import BinanceAPIException
 
 from utils import beep, precision, client, symbol, budget, order_cost_btc, price_change_threshold, get_interval_time
 
-import numpy as np
+#import numpy as np
 
 def place_buy_order(price, quantity):
     try:
@@ -92,11 +92,11 @@ def calculate_sell_proc(initial_desired_proc, current_proc, i, max_i):
     print(f"Step {i}/{max_i}: Desired proc calculated as {desired_proc}")
 
     # Factor de ajustare exponențială inversată
-    adjustment_factor = np.exp(-i / max_i)
+    #adjustment_factor = np.exp(-i / max_i)
     #print(f"Step {i}/{max_i}: Adjustment factor calculated as {adjustment_factor}")
                     
     # Calculează procentul ajustat
-    adjusted_proc = current_proc * np.minimum(2, np.maximum(0, 1 + adjustment_factor * desired_proc))
+    #adjusted_proc = current_proc * np.minimum(2, np.maximum(0, 1 + adjustment_factor * desired_proc))
     #print(f"Step {i}/{max_i}: Adjusted proc calculated as {adjusted_proc}")
 
     return desired_proc
@@ -121,8 +121,8 @@ class State:
 
 states = []  # List to hold all trade states
 
-MAX_ITERATIONS = 5#20
-TIME_QUANT =  10#180 #3600  # Example: 1 hour
+MAX_ITERATIONS = 20
+TIME_QUANT =  180 #3600  # Example: 1 hour
 
 
 def price_changed_significantly_intime(old_state, new_state, threshold, time_limit_seconds):
@@ -228,7 +228,7 @@ while True:
             
             btc_buy_quantity = budget / buy_price
             print(f"Plasez ordinul de cumpărare la prețul: {buy_price}, cantitate: {btc_buy_quantity}")
-            #buy_order = place_buy_order(buy_price, btc_buy_quantity)
+            buy_order = place_buy_order(buy_price, btc_buy_quantity)
             
             if buy_order:
                 last_state = State("Profit",

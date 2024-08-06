@@ -12,12 +12,15 @@ from apikeys import api_key, api_secret
 
 def beep(n):
     for _ in range(n):
-        os.system('tput bel')
-        time.sleep(3)  # Pauză de 3 secunde între bipe
+        if platform.system() == 'Windows':
+            import winsound
+            winsound.Beep(440, 500)  # frecvența de 440 Hz, durata de 500 ms
+        else:
+            os.system('echo -e "\a"')
+        time.sleep(3)
 
 client = Client(api_key, api_secret)
 
-# Simbolul pentru perechea de tranzacționare
 symbol = 'BTCUSDT'
 
 # Bugetul inițial
