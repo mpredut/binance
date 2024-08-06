@@ -138,7 +138,7 @@ def price_changed_significantly_intime(old_state, new_state, threshold, time_lim
 
 
 
-
+beep(1)
 last_state = State("none", get_current_price(), timestamp=datetime.now())
 #last_state.price = 55635
 if last_state.price:

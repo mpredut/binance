@@ -2,6 +2,7 @@ import os
 import time
 import math
 import random
+import platform
 
 from datetime import datetime, timedelta
 
@@ -10,13 +11,16 @@ from binance.exceptions import BinanceAPIException
 
 from apikeys import api_key, api_secret
 
+
+
 def beep(n):
     for _ in range(n):
         if platform.system() == 'Windows':
             import winsound
             winsound.Beep(440, 500)  # frecvența de 440 Hz, durata de 500 ms
         else:
-           os.system('echo -e "\a"')
+            # Aici putem folosi o comanda de beep - nu  merge pt orice android
+            os.system('echo "\007"')
         time.sleep(3)
 
 client = Client(api_key, api_secret)
