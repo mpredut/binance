@@ -125,7 +125,7 @@ def ready_to_buy(old_state, new_state, threshold, max_treshold, time_limit_secon
     
     changed_proc = price_changed(last_state.price, current_state.price)
     if(abs(changed_proc) >= max_threshold) :
-        return abs(changed_proc) >= max_threshold
+        return changed_proc
         
     time_elapsed = datetime.now() - old_state.timestamp
     if time_elapsed.total_seconds() >= time_limit_seconds:
@@ -224,7 +224,9 @@ while True:
             if current_buy_order_id:#last_state.buy_order_id
                 cancel_order(current_buy_order_id)
                 current_buy_order_id = None
-
+            
+            
+            buy_price = 0
             buy_proc = calculate_buy_proc(current_state.price, changed_proc, 5.7)  
             buy_price = current_state.price * buy_proc
             if buy_price >= current_state.price :
