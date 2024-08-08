@@ -10,8 +10,8 @@ from binance.exceptions import BinanceAPIException
 #my imports
 import binanceapi as api
 import utils as u
-from binanceapi import get_quantity_precision, get_current_price, place_buy_order, place_sell_order, check_order_filled, cancel_order, get_open_sell_orders
-from utils import beep, get_interval_time, are_difference_equal_with_aprox_proc, are_values_very_close
+from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, place_buy_order, place_sell_order, check_order_filled, cancel_order, get_open_sell_orders
+from utils import beep, get_interval_time, are_difference_equal_with_aprox_proc, are_values_very_close, budget, order_cost_btc, price_change_threshold, max_threshold
 
 
 def calculate_commissions(amount, price):
