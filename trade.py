@@ -132,7 +132,7 @@ def ready_to_buy(old_state, new_state, threshold, max_treshold, time_limit_secon
         time_expired = True
     else:
         time_expired = False
-    print(f"Exp:{time_limit_seconds - time_elapsed.total_seconds():.2f} RefBTC {old_state.price}. {changed_proc:.2f}% BTC {new_state.price}")
+    print(f"Exp:{time_limit_seconds - time_elapsed.total_seconds():.0f} RefBTC {old_state.price:.0f} {changed_proc:.2f}% BTC {new_state.price:.0f}")
      
     if(time_expired and abs(changed_proc) >= threshold) :
         return changed_proc
@@ -218,7 +218,7 @@ while True:
             last_state = states[-1]
 
         if (abs(changed_proc) > 0):
-            print(f"Prețul s-a schimbat cu {changed_proc:.2f}% care este mai mult de {price_change_threshold}% in intervalul de {interval_time:.2f} secunde.")
+            print(f"Pretul s-a schimbat cu {changed_proc:.2f}% care este mai mult de {price_change_threshold}% in intervalul de {interval_time:.2f} secunde.")
             beep(2)
             print(f"Anulez ordinul existent de cumpărare dacă există (ID:{current_buy_order_id}).")
             if current_buy_order_id:#last_state.buy_order_id
