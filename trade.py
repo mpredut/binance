@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
-from utils import beep, precision, client, symbol, budget, order_cost_btc, price_change_threshold, get_interval_time
+from utils import beep, precision, client, symbol, budget, order_cost_btc, price_change_threshold, max_threshold, get_interval_time
 
 #import numpy as np
 
@@ -121,10 +121,12 @@ def price_changed(old_price, new_price):
     changed_proc = change * 100  # În procente
     return changed_proc
 
-def ready_to_buy(old_state, new_state, threshold, time_limit_seconds):
+def ready_to_buy(old_state, new_state, threshold, max_treshold, time_limit_seconds):
     
     changed_proc = price_changed(last_state.price, current_state.price)
-    
+    if(abs(changed_proc) >= max_threshold) :
+        return abs(changed_proc) >= max_threshold
+        
     time_elapsed = datetime.now() - old_state.timestamp
     if time_elapsed.total_seconds() >= time_limit_seconds:
         time_expired = True
@@ -160,7 +162,7 @@ while True:
             continue
         
         interval_time = get_interval_time()
-        changed_proc = ready_to_buy(last_state, current_state, price_change_threshold, timedelta(seconds = interval_time).total_seconds())
+        changed_proc = ready_to_buy(last_state, current_state, price_change_threshold, max_threshold, timedelta(seconds = interval_time).total_seconds())
                  
         for state in states[:]:  # Copy to avoid modifying the list while iterating
             if check_order_filled(state.buy_order_id):
