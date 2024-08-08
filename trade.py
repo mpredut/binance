@@ -80,7 +80,7 @@ def calculate_buy_proc(current_price, changed_proc, decrease_proc=7):
     else:  # Dacă prețul a crescut
         proc = 1 - decrease_proc/100;
 
-    return buy_price
+    return proc
 
 
 def calculate_sell_proc(initial_desired_proc, current_proc, i, max_i):
@@ -132,7 +132,7 @@ def ready_to_buy(old_state, new_state, threshold, max_treshold, time_limit_secon
         time_expired = True
     else:
         time_expired = False
-    print(f"Expired:{time_limit_seconds - time_elapsed.total_seconds():.2f} RefBTC {old_state.price}. {changed_proc:.2f}% BTC {new_state.price}")
+    print(f"Exp:{time_limit_seconds - time_elapsed.total_seconds():.2f} RefBTC {old_state.price}. {changed_proc:.2f}% BTC {new_state.price}")
      
     if(time_expired and abs(changed_proc) >= threshold) :
         return changed_proc
@@ -218,7 +218,7 @@ while True:
             last_state = states[-1]
 
         if (abs(changed_proc) > 0):
-            print(f"Prețul s-a schimbat cu {changed_proc}% care este mai mult de {price_change_threshold}% in intervalul de {interval_time} secunde.")
+            print(f"Prețul s-a schimbat cu {changed_proc:.2f}% care este mai mult de {price_change_threshold}% in intervalul de {interval_time:.2f} secunde.")
             beep(2)
             print(f"Anulez ordinul existent de cumpărare dacă există (ID:{current_buy_order_id}).")
             if current_buy_order_id:#last_state.buy_order_id
@@ -226,7 +226,6 @@ while True:
                 current_buy_order_id = None
             
             
-            buy_price = 0
             buy_proc = calculate_buy_proc(current_state.price, changed_proc, 5.7)  
             buy_price = current_state.price * buy_proc
             if buy_price >= current_state.price :
