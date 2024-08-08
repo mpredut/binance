@@ -31,11 +31,10 @@ symbol = 'BTCUSDT'
 budget = 1000  # USDT
 order_cost_btc = 0.00004405  # BTC
 price_change_threshold = 0.007  # Pragul de schimbare a prețului, 0.7%
-#price_change_threshold = 0.07  # Pragul de schimbare a prețului, 7%
 interval_time = 2 * 3600 # 2 h * 3600 seconds.
 interval_time = 97 * 79
 
-def get_interval_time(valoare_prestabilita=interval_time, marja_aleatoare=100):
+def get_interval_time(valoare_prestabilita=interval_time, marja_aleatoare=10):
     # Generarea unei valori aleatoare în intervalul [-marja_aleatoare, marja_aleatoare]
     valoare_aleatoare = random.uniform(-marja_aleatoare, marja_aleatoare)
     interval = abs(valoare_prestabilita + valoare_aleatoare)
