@@ -1,71 +1,23 @@
 import os
 import time
 from datetime import datetime, timedelta
+#import numpy as np
 
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
-from utils import beep, precision, client, symbol, budget, order_cost_btc, price_change_threshold, max_threshold, get_interval_time
 
-#import numpy as np
+#my imports
+import binanceapi as api
+import utils as u
+from binanceapi import get_quantity_precision, get_current_price, place_buy_order, place_sell_order, check_order_filled, cancel_order, get_open_sell_orders
+from utils import beep, get_interval_time, are_difference_equal_with_aprox_proc, are_values_very_close
 
-def place_buy_order(price, quantity):
-    try:
-        price = round(price, 0)
-        quantity = round(quantity, 5)    
-        buy_order = client.order_limit_buy(
-            symbol=symbol,
-            quantity=quantity,
-            price=str(price)
-        )
-        return buy_order
-    except BinanceAPIException as e:
-        print(f"Eroare la plasarea ordinului de cumpărare: {e}")
-        return None
-
-def place_sell_order(price, quantity):
-    try:
-        price = round(price, 0)
-        quantity = round(quantity, 5)    
-        sell_order = client.order_limit_sell(
-            symbol=symbol,
-            quantity=quantity,
-            price=str(price)
-        )
-        return sell_order
-    except BinanceAPIException as e:
-        print(f"Eroare la plasarea ordinului de vânzare: {e}")
-        return None
-
-def check_order_filled(order_id):
-    try:
-        if not order_id:
-            return False
-        order = client.get_order(symbol=symbol, orderId=order_id)
-        return order['status'] == 'FILLED'
-    except BinanceAPIException as e:
-        print(f"Eroare la verificarea stării ordinului: {e}")
-        return False
 
 def calculate_commissions(amount, price):
     # Comisionul de 0.10%
     return (0.001 * amount) * price
 
-def cancel_order(order_id):
-    try:
-        client.cancel_order(symbol=symbol, orderId=order_id)
-        print(f"Ordinul cu ID {order_id} a fost anulat.")
-    except BinanceAPIException as e:
-        print(f"Eroare la anularea ordinului: {e}")
-
-def get_current_price():
-    try:
-        ticker = client.get_symbol_ticker(symbol=symbol)
-        return float(ticker['price'])
-    except BinanceAPIException as e:
-        print(f"Eroare la obținerea prețului curent: {e}")
-        return None
-    
     
 def calculate_buy_proc(current_price, changed_proc, decrease_proc=7):
     if changed_proc < 0:  # Dacă prețul a scăzut
