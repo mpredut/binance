@@ -200,7 +200,7 @@ while True:
                 cost_sell_order_usdt = order_cost_btc * sell_price
 
                 profit_brut = value_sell - budget - cost_buy_order_usdt - cost_sell_order_usdt
-                commission = calculate_commissions(budget, buy_price) + calculate_commissions(btc_sell_quantity, sell_price)
+                commission = calculate_commissions(budget, state.buy_price) + calculate_commissions(btc_sell_quantity, sell_price)
 
                 profit_net = profit_brut - commission
                 budget += profit_net
