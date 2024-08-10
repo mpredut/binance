@@ -11,10 +11,19 @@ from binance.exceptions import BinanceAPIException
 import utils
 from apikeys import api_key, api_secret
 
-client = Client(api_key, api_secret)
-
 symbol = 'BTCUSDT'
 
+client = Client(api_key, api_secret)
+
+try:
+    # Cerere pentru a obține informații despre cont
+    account_info = client.get_account()
+    print("Cheile API sunt valide!")
+except Exception as e:
+    print(f"Eroare la verificarea cheilor API: {e}")
+
+    
+    
 def get_quantity_precision(symbol):
     try:
         info = client.get_symbol_info(symbol)
