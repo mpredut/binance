@@ -106,7 +106,9 @@ class PriceWindow:
         print(f"Panta calculată: {slope}")
         return slope
 
-def track_price_and_place_order(window_size=184, threshold_percent=2, decrease_percent=5, quantity=0.001):
+#window_size=   46 minute * 60 / 15 secunde sleep = 184
+
+def track_price_and_place_order(window_size=220, threshold_percent=2, decrease_percent=5, quantity=0.001):
     price_window = PriceWindow(window_size)
     order_placed = False
     order_id = None
