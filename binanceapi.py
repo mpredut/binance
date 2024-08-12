@@ -21,7 +21,7 @@ try:
     print("Cheile API sunt valide!")
 except Exception as e:
     print(f"Eroare la verificarea cheilor API: {e}")
-    exit 0
+    exit
 
     
     
