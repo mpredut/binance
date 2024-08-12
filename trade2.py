@@ -85,7 +85,7 @@ class PriceWindow:
         if not self.min_deque:
             return None
         min_price = self.min_deque[0][1]
-        print(f"Minimul curent din fereastră: {min_price}")
+        print(f"Minimul curent din fereastră: {min_price}, index {self.min_deque[0]}")
         return min_price
 
     def get_max(self):
@@ -93,7 +93,7 @@ class PriceWindow:
         if not self.max_deque:
             return None
         max_price = self.max_deque[0][1]
-        print(f"Maximul curent din fereastră: {max_price}")
+        print(f"Maximul curent din fereastră: {max_price}, index {self.min_deque[0]}")
         return max_price
 
     def calculate_slope(self):
@@ -124,6 +124,12 @@ def track_price_and_place_order(window_size=220, threshold_percent=2, decrease_p
         min_price = price_window.get_min()
         max_price = price_window.get_max()
 
+        slope = price_window.calculate_slope()
+        if slope is not None and slope > 0:
+            print("Prețul continuă să crească")
+        else:
+            print("Prețul continuă să scada")
+                        
         if min_price is not None and max_price is not None:
             # Calculăm procentul de schimbare
             price_change_percent = (max_price - min_price) / min_price * 100
