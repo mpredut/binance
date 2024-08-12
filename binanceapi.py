@@ -92,8 +92,10 @@ def cancel_order(order_id):
     try:
         client.cancel_order(symbol=symbol, orderId=order_id)
         print(f"Ordinul cu ID {order_id} a fost anulat.")
+        return True
     except BinanceAPIException as e:
         print(f"Eroare la anularea ordinului: {e}")
+        return False
 
 def get_open_sell_orders():
     try:

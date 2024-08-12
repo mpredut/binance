@@ -48,10 +48,14 @@ def monitor_sell_orders():
                     if not are_close:
                         print(f"Totusi prețul a scăzut prea mult față de prețul inițial ({initial_prices[order_id]}). Nu se mai modifică ordinul.")
                         continue
+                    else :
+                        print(f"Current price {current_price} and initial sell price {initial_prices[order_id]} are close!")
                     
-                    api.cancel_order(order_id)
+                    if not api.cancel_order(order_id) :
+                        initial_prices.pop(order_id)
+                        continue
                     
-                    new_sell_price = current_price * 1.001 + 20
+                    new_sell_price = current_price * 1.001 + 400
                     quantity = sell_order['quantity']
                     
                     new_order = api.place_sell_order(new_sell_price, quantity)
