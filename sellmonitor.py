@@ -9,12 +9,14 @@ from binance.exceptions import BinanceAPIException
 #my imports
 import binanceapi as api
 import utils
-#  
+# 
+MAX_PROC = 0.77
 monitor_interval = 3.7
+initial_prices = {}  # Dicționar pentru a reține prețurile inițiale ale ordinelor
+max_adjustments = 1000  # Număr maxim de ajustări pentru un ordin
+
 def monitor_sell_orders():
-   
-    
-   while True:
+    while True:
         try:
             sell_orders = api.get_open_sell_orders()  # Inițializăm cu ordinele curente de vânzare
             if not sell_orders:
@@ -30,15 +32,26 @@ def monitor_sell_orders():
                 sell_order = sell_orders[order_id]
                 sell_price = sell_order['price']
                 
-                difference_percent = abs(current_price - sell_price) / sell_price * 100
-                print(f"sell price {sell_price}, current price {current_price} difference: {difference_percent:.2f}%, Order ID {order_id} ")
+                if order_id not in initial_prices:
+                    initial_prices[order_id] = sell_price
                 
-                are_close, iterations, final_tolerance = utils.are_values_very_close(current_price, sell_price, 0.77)
+                difference_percent = abs(current_price - sell_price) / sell_price * 100
+                print(f"Sell price {sell_price}, current price {current_price} difference: {difference_percent:.2f}%, Order ID {order_id}")
+                
+                are_close = utils.are_values_very_close(current_price, sell_price, MAX_PROC)
                 if are_close:
-                    print(f"Current price {current_price} and sell price {sell_price} are close! ")
+                    print(f"Current price {current_price} and sell price {sell_price} are close!")
+                    
+                    difference_percent = abs(current_price - initial_prices[order_id]) / initial_prices[order_id] * 100
+                    
+                    are_close = utils.are_values_very_close(current_price, initial_prices[order_id], MAX_PROC)
+                    if not are_close:
+                        print(f"Totusi prețul a scăzut prea mult față de prețul inițial ({initial_prices[order_id]}). Nu se mai modifică ordinul.")
+                        continue
+                    
                     api.cancel_order(order_id)
                     
-                    new_sell_price = round(current_price * 1.001 + 20, 2)
+                    new_sell_price = current_price * 1.001 + 20
                     quantity = sell_order['quantity']
                     
                     new_order = api.place_sell_order(new_sell_price, quantity)
@@ -47,7 +60,8 @@ def monitor_sell_orders():
                             'price': new_sell_price,
                             'quantity': quantity
                         }
-                        del sell_orders[order_id]
+                        initial_prices[new_order['orderId']] = initial_prices.pop(order_id)  # Păstrăm prețul inițial
+                        #del sell_orders
                         print(f"Update order from {sell_price} to {new_sell_price}. New ID: {new_order['orderId']}")
                     else:
                         print("Eroare la plasarea noului ordin de vânzare.")
@@ -60,5 +74,6 @@ def monitor_sell_orders():
         except Exception as e:
             print(f"Eroare: {e}")
             time.sleep(1)
+
 
 monitor_sell_orders()
