@@ -10,7 +10,7 @@ from binance.exceptions import BinanceAPIException
 import binanceapi as api
 import utils
 #  
-monitor_interval = 7.7
+monitor_interval = 3.7
 def monitor_sell_orders():
    
     
@@ -38,7 +38,7 @@ def monitor_sell_orders():
                     print(f"Current price {current_price} and sell price {sell_price} are close! ")
                     api.cancel_order(order_id)
                     
-                    new_sell_price = round(current_price * 1.001 + 500, 2)
+                    new_sell_price = round(current_price * 1.001 + 20, 2)
                     quantity = sell_order['quantity']
                     
                     new_order = api.place_sell_order(new_sell_price, quantity)
