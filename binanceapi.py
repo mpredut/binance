@@ -2,6 +2,7 @@
 import time
 import datetime
 import math
+import sys
 
 ####Binance
 from binance.client import Client
@@ -21,9 +22,7 @@ try:
     print("Cheile API sunt valide!")
 except Exception as e:
     print(f"Eroare la verificarea cheilor API: {e}")
-    exit
-
-    
+    sys.exit()
     
 def get_quantity_precision(symbol):
     try:
