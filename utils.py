@@ -117,10 +117,10 @@ def are_values_very_close(value1, value2, target_tolerance_percent=1.0):
         #print(f"  Upper bound: {upper_bound:.4f}%")
         
         if difference_percent <= upper_bound:
-            return True, iteration, tolerance
+            return True#, iteration, tolerance
 
         tolerance += tolerance_step
         iteration += 1
 
-    return False, iteration, tolerance
+    return False#, iteration, tolerance
     
