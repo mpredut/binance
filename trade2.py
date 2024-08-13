@@ -93,22 +93,33 @@ class PriceWindow:
         if not self.max_deque:
             return None
         max_price = self.max_deque[0][1]
-        print(f"Maximul curent din fereastră: {max_price}, index {self.min_deque[0]}")
+        print(f"Maximul curent din fereastră: {max_price}, index {self.max_deque[0]}")
         return max_price
 
     def calculate_slope(self):
-        """Calculează panta dintre minim și maxim în fereastră."""
         min_price = self.get_min()
         max_price = self.get_max()
+        
         if min_price is None or max_price is None:
             return None
-        slope = (max_price - min_price) / self.window_size
+        
+        # Extragem indicii pentru minim și maxim
+        min_index = self.min_deque[0][0]
+        max_index = self.max_deque[0][0]
+        
+
+        # Asigurăm că nu împărțim la zero
+        if max_index == min_index:
+            return 0
+        
+        slope = (max_price - min_price) / (max_index - min_index)
         print(f"Panta calculată: {slope}")
+        
         return slope
 
-#window_size=   46 minute * 60 / 15 secunde sleep = 184
+    #window_size=   46 minute * 60 / 15 secunde sleep = 184
 
-def track_price_and_place_order(window_size=220, threshold_percent=2, decrease_percent=5, quantity=0.001):
+def track_price_and_place_order(window_size=220, threshold_percent=2, decrease_percent=4, quantity=0.001):
     price_window = PriceWindow(window_size)
     order_placed = False
     order_id = None
@@ -125,6 +136,9 @@ def track_price_and_place_order(window_size=220, threshold_percent=2, decrease_p
         max_price = price_window.get_max()
 
         slope = price_window.calculate_slope()
+        if slope is None:
+            print("Slope este null !!!")
+         
         if slope is not None and slope > 0:
             print("Prețul continuă să crească")
         else:
@@ -156,7 +170,7 @@ def track_price_and_place_order(window_size=220, threshold_percent=2, decrease_p
                                 order_id = order['orderId']
 
         # Așteptăm 15 secunde înainte de următoarea verificare
-        time.sleep(15)
+        time.sleep(3)
 
 # Începem monitorizarea și plasarea ordinului dacă condițiile sunt îndeplinite
 track_price_and_place_order()
