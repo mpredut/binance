@@ -7,7 +7,7 @@ from collections import deque
 
 from apikeys import api_key, api_secret
 
-#my imports
+# my imports
 import binanceapi as api
 import utils as u
 from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, place_buy_order, place_sell_order, check_order_filled, cancel_order, get_open_sell_orders
@@ -15,61 +15,73 @@ from utils import beep, get_interval_time, are_difference_equal_with_aprox_proc,
 import log
 import alert
 
+
 class PriceWindow:
-    def __init__(self, window_size, max_index=1000000, epsilon=1e-2):  # Modificat epsilon la 1e-2
+    def __init__(self, window_size, max_index=1000000, epsilon=1e-2):
         self.window_size = window_size
-        self.prices = deque()  # Păstrează toate prețurile din fereastră
-        self.min_deque = deque()  # Gestionarea minimului
-        self.max_deque = deque()  # Gestionarea maximului
-        self.current_index = 0  # Contor intern pentru a urmări indexul
-        self.max_index = max_index  # Pragul la care se face normalizarea
-        self.epsilon = 10#epsilon  # Toleranță pentru minimurile aproximativ egale
+        self.prices = deque()  # Store all prices in the window
+        self.min_deque = deque()  # Manage the minimums
+        self.max_deque = deque()  # Manage the maximums
+        self.current_index = 0  # Internal counter to keep track of index
+        self.max_index = max_index  # Threshold for normalization
+        self.epsilon = 10  # Tolerance for approximately equal minimums
 
     def process_price(self, price):
         self.prices.append(price)
-   
-        # Eliminăm prețurile care ies din fereastră
+
+        # Remove prices that fall out of the window
         if len(self.prices) > self.window_size:
             removed_price = self.prices.popleft()
-            print(f"Preț eliminat din fereastră: {removed_price}")
+            print(f"Price removed from window: {removed_price}")
 
         self._manage_minimum(price)
         self._manage_maximum(price)
 
-        # Incrementăm indexul intern
+        # Increment internal index
         self.current_index += 1
-        print(f"Index curent în fereastră: {self.current_index}")
+        print(f"Current index in window: {self.current_index}")
+        
+        # Normalize indices if they exceed max_index
+        if self.current_index > self.max_index:
+            print(f"Start normalize indexes")
+            self._normalize_indices()
 
+    def _normalize_indices(self):
+        """Normalize indices in the deques to prevent overflow."""
+        old_index = self.current_index
+        self.current_index = 0  # Reset current index
+        
+        # Adjust indices in min_deque and max_deque
+        self.min_deque = deque([(i - old_index, price) for i, price in self.min_deque])
+        self.max_deque = deque([(i - old_index, price) for i, price in self.max_deque])
+        
+        print(f"Indices normalized. Old index: {old_index}, New index: {self.current_index}")
+        
     def _manage_minimum(self, price):
         if self.min_deque and self.min_deque[0][0] <= self.current_index - self.window_size:
             removed_min = self.min_deque.popleft()
-            print(f"Minim eliminat deoarece este in afara ferestrei: {removed_min}")
+            print(f"Minimum removed as it is outside the window: {removed_min}")
 
-        # Verificăm dacă prețul curent este aproximativ egal cu oricare preț existent în `min_deque`
         for index, existing_price in self.min_deque:
-            if abs(existing_price - price) <= self.epsilon:  #are_values_very_close
-                print(f"Prețul {price} este aproape egal cu un minim existent: {existing_price}")
-                return  # Nu adăugăm prețul curent dacă există deja un echivalent
-        
-        # Eliminăm elementele din spate mai mari decât prețul curent
+            if abs(existing_price - price) <= self.epsilon: # are_values_very_close
+                print(f"Price {price} is approximately equal to an existing minimum: {existing_price}")
+                return  # Don't add the current price if an equivalent exists
+
         while self.min_deque and self.min_deque[-1][1] > price:
             removed_min = self.min_deque.pop()
-            print(f"Minim-uri eliminate din spate: {removed_min}")
+            print(f"Minimums removed from back: {removed_min}")
 
-        # Adăugăm prețul curent ca un nou potential minim
         self.min_deque.append((self.current_index, price))
 
     def _manage_maximum(self, price):
         if self.max_deque and self.max_deque[0][0] <= self.current_index - self.window_size:
             removed_max = self.max_deque.popleft()
-            print(f"Maxim eliminat deoarece este in afara ferestrei: {removed_max}")
+            print(f"Maximum removed as it is outside the window: {removed_max}")
 
-        # Eliminăm elementele din spate mai mici sau egale decât prețul curent
         while self.max_deque and self.max_deque[-1][1] <= price:
             removed_max = self.max_deque.pop()
-            print(f"Maxim-uri eliminate din spate: {removed_max}")
+            print(f"Maximums removed from back: {removed_max}")
 
-        # Adăugăm prețul curent ca nou potential maxim
         self.max_deque.append((self.current_index, price))
 
     def get_min(self):
@@ -91,67 +103,64 @@ class PriceWindow:
         if not self.max_deque:
             return None
         return self.max_deque[0]
-        
+
     def calculate_slope(self):
         min_price = self.get_min()
         max_price = self.get_max()
-        
+
         if min_price is None or max_price is None:
             return None
-        
-        # Extragem indicii pentru minim și maxim
+
         min_index = self.min_deque[0][0]
         max_index = self.max_deque[0][0]
 
-        # Asigurăm că nu împărțim la zero
         if max_index == min_index:
             return 0
-        
+
         slope = (max_price - min_price) / (max_index - min_index)
-        print(f"Panta calculată: {slope}")
-        
+        print(f"Slope calculated: {slope}")
+
         return slope
+
     def current_window_size(self):
         return len(self.prices)
+
 
 def track_and_place_order(price_window, current_price, threshold_percent=2, decrease_percent=4, quantity=0.0017, order_placed=False, order_id=None):
     min_price = price_window.get_min()
     max_price = price_window.get_max()
     min_price_index = price_window.get_min_and_index()
     max_price_index = price_window.get_max_and_index()
-    print(f"Minimul curent din fereastră: {min_price} la index {min_price_index}")
-    print(f"Maximul curent din fereastră: {max_price} la index {max_price_index}")
+    print(f"Current minimum in window: {min_price} at index {min_price_index}")
+    print(f"Current maximum in window: {max_price} at index {max_price_index}")
 
     slope = price_window.calculate_slope()
     if slope is None:
-        print("Slope este null !!!")
-     
+        print("Slope is null!")
+
     if slope is not None and slope > 0:
-        print("Prețul continuă să crească")
+        print("Price continues to rise")
     else:
-        print("Prețul continuă să scada")
-                    
+        print("Price continues to fall")
+
     if min_price is not None and max_price is not None:
-        # Calculăm procentul de schimbare
         price_change_percent = (max_price - min_price) / min_price * 100
-        print(f"Procentul de schimbare între minim și maxim: {price_change_percent:.2f}%")
-        
+        print(f"Percentage change between minimum and maximum: {price_change_percent:.2f}%")
+
         if price_change_percent > threshold_percent:
             alert.check_alert(True, f"price_change {price_change_percent:.2f}")
             buy_price = current_price * (1 - decrease_percent / 100)
 
             if not order_placed:
-                # Plasează ordinul de cumpărare
-                print(f"Plasarea ordinului de cumpărare la prețul: {buy_price:.2f} USDT")
+                print(f"Placing buy order at price: {buy_price:.2f} USDT")
                 order = place_buy_order(buy_price, quantity)
                 if order:
                     order_placed = True
                     order_id = order['orderId']
             else:
-                # Verificăm panta și anulăm ordinul dacă panta este pozitivă (prețul continuă să crească)
                 slope = price_window.calculate_slope()
                 if slope is not None and slope > 0:
-                    print("Prețul continuă să crească, anulăm ordinul și plasăm unul nou.")
+                    print("Price continues to rise, canceling order and placing a new one.")
                     if cancel_order(order_id):
                         order = place_buy_order(buy_price, quantity)
                         if order:
@@ -162,37 +171,39 @@ def track_and_place_order(price_window, current_price, threshold_percent=2, decr
                     else:
                         order_placed = False
 
-    return order_placed, order_id  # Returnăm starea actualizată a ordinului
+    return order_placed, order_id
 
 
-
-TIME_SLEEP = 14 # seconds to sleep
-WINDOWS_SIZE_MIN = 48 # minutes
-window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP
+TIME_SLEEP_PRICE = 4  # seconds to sleep for price collection
+TIME_SLEEP_ORDER = 30  # seconds to sleep for order placement
+WINDOWS_SIZE_MIN = 48  # minutes
+window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP_PRICE
 
 price_window = PriceWindow(window_size)
- 
+
 order_placed = False
 order_id = None
+last_order_time = time.time()
 
 while True:
     try:
         current_price = get_current_price()
         if current_price is None:
-            time.sleep(TIME_SLEEP)
+            time.sleep(TIME_SLEEP_PRICE)
             continue
         print(f"BTC: {current_price}")
-        
+
         price_window.process_price(current_price)
-        
-        order_placed, order_id = track_and_place_order(price_window, current_price, threshold_percent=1.5, order_placed=order_placed, order_id=order_id)
-        
-        # Așteptăm x secunde înainte de următoarea verificare
-        time.sleep(TIME_SLEEP)
+
+        if time.time() - last_order_time >= TIME_SLEEP_ORDER:
+            order_placed, order_id = track_and_place_order(price_window, current_price, threshold_percent=1.5, order_placed=order_placed, order_id=order_id)
+            last_order_time = time.time()
+
+        time.sleep(TIME_SLEEP_PRICE)
 
     except BinanceAPIException as e:
-        print(f"Eroare API Binance: {e}")
-        time.sleep(TIME_SLEEP)  # Așteaptă 1 secundă înainte de a reporni încercările
+        print(f"Binance API Error: {e}")
+        time.sleep(TIME_SLEEP_PRICE)
     except Exception as e:
-        print(f"Eroare: {e}")
-        time.sleep(TIME_SLEEP)  # Așteaptă 1 secundă înainte de a reporni încercările
+        print(f"Error: {e}")
+        time.sleep(TIME_SLEEP_PRICE)
