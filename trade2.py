@@ -111,7 +111,8 @@ class PriceWindow:
         print(f"Panta calculată: {slope}")
         
         return slope
-
+    def current_window_size(self):
+        return len(self.prices)
 
 def track_and_place_order(price_window, current_price, threshold_percent=2, decrease_percent=4, quantity=0.001, order_placed=False, order_id=None):
     min_price = price_window.get_min()
