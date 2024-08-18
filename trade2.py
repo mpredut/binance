@@ -122,67 +122,134 @@ class PriceWindow:
 
         return slope
 
+    def calculate_proximities(self, current_price):
+        min_price, _ = self.get_min_and_index()
+        max_price, _ = self.get_max_and_index()
+        if max_price != min_price:
+            min_proximity = (current_price - min_price) / (max_price - min_price)
+            max_proximity = (max_price - current_price) / (max_price - min_price)
+        else:
+            min_proximity = max_proximity = 0
+        return min_proximity, max_proximity
+
+    def calculate_positions(self):
+        min_index = self.min_deque[0][0] if self.min_deque else 0
+        max_index = self.max_deque[0][0] if self.max_deque else 0
+        return min_index / self.window_size, max_index / self.window_size
+        
+    def evaluate_buy_sell_opportunity(self, current_price, threshold_percent=2, decrease_percent=4):
+        slope = self.calculate_slope()
+        min_price, min_index = self.get_min_and_index()
+        max_price, max_index = self.get_max_and_index()
+        min_position, max_position = self.calculate_positions()
+        min_proximity, max_proximity = self.calculate_proximities(current_price)
+
+        price_change_percent = (max_price - min_price) / min_price * 100 if min_price and max_price else 0
+        
+        if price_change_percent <= threshold_percent:
+             action = 'HOLD'
+             return action, current_price, price_change_percent, slope
+
+        remaining_decrease_percent = max(0, decrease_percent - price_change_percent)
+        proposed_price = current_price * (1 - remaining_decrease_percent / 100)
+
+        # Determine buy/sell signal based on market trend and price proximity
+        if slope is not None and slope > 0:
+            # Market is trending upwards
+            if min_proximity < 0.2 and min_position > 0.8:
+                # Near recent low
+                action = 'BUY'
+                # proposed_price = max(current_price * 0.98, min(proposed_price, current_price * 0.998))
+                # proposed_price = max(current_price * 0.98, min_price * 1.01)
+                
+            else:
+                action = 'HOLD'
+        else:
+            # Market is trending downwards
+            if max_proximity < 0.2 and max_position > 0.8:
+                # Near recent high
+                action = 'SELL'
+                # proposed_price = min(current_price * 1.01, proposed_price)
+                # proposed_price = min(current_price * 0.998, max_price * 0.99)
+            else:
+                action = 'HOLD'
+
+
+        return action, proposed_price, price_change_percent, slope
+        
     def current_window_size(self):
         return len(self.prices)
 
-
 def track_and_place_order(price_window, current_price, threshold_percent=2, decrease_percent=4, quantity=0.0017, order_placed=False, order_id=None):
-    min_price = price_window.get_min()
-    max_price = price_window.get_max()
-    min_price_index = price_window.get_min_and_index()
-    max_price_index = price_window.get_max_and_index()
-    print(f"Current minimum in window: {min_price} at index {min_price_index}")
-    print(f"Current maximum in window: {max_price} at index {max_price_index}")
 
-    slope = price_window.calculate_slope()
-    if slope is None:
-        print("Slope is null!")
+    action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(current_price, threshold_percent, decrease_percent)
 
-    if slope is not None and slope > 0:
-        print("Price continues to rise")
+    if action == 'HOLD':
+        return
+        
+    if price_change_percent > threshold_percent:
+        alert.check_alert(True, f"price_change {price_change_percent:.2f}")
     else:
-        print("Price continues to fall")
+        return order_placed, order_id  # Exit early if no significant price change
 
-    if min_price is not None and max_price is not None:
-        price_change_percent = (max_price - min_price) / min_price * 100
-        print(f"Percentage change between minimum and maximum: {price_change_percent:.2f}%")
+    # Determine the number of orders and their spacing based on price trend
+    if slope is not None and slope > 0:
+        # Price is rising, place fewer, larger orders
+        num_orders = 3
+        price_step = 1.0  # Increase the spacing between orders
+        print(f"Placing fewer, larger orders due to rising price.")
+    else:
+        # Price is falling, place more, smaller orders
+        num_orders = 7
+        price_step = 0.5  # Reduce the spacing between orders
+        print(f"Placing more, smaller orders due to falling price.")
 
-        if price_change_percent > threshold_percent:
-            alert.check_alert(True, f"price_change {price_change_percent:.2f}")
+    if action == 'BUY':
+        # Cancel existing buy orders
+        open_buy_orders = get_open_buy_orders(symbol)
+        for order_id in open_buy_orders.keys():
+            cancel_order(order_id)
+            print(f"Cancelled buy order with ID: {order_id}")
 
-            # Cancel existing sell orders
-            open_sell_orders = get_open_sell_orders(symbol)
-            for order_id in open_sell_orders.keys():
-                cancel_order(order_id)
+        # Adjust the buy price based on market conditions
+        buy_price = min(proposed_price, current_price * 0.998)
+        print(f"Adjusted buy price: {buy_price:.2f} USDT")
 
-            # Calculate the base buy price
-            buy_price = current_price * (1 - decrease_percent / 100)
-            buy_price = min(buy_price, current_price * 0.998)
-            # Decide on the number of orders and their spacing based on price trend
-            num_orders = 5  # Default number of orders
-            price_step = 0.5  # Default step percentage between orders
+        # Place the custom buy orders
+        for i in range(num_orders):
+            adjusted_buy_price = buy_price * (1 - i * price_step / 100)
+            order_quantity = quantity / num_orders  # Divide quantity among orders
+            print(f"Placing buy order at price: {adjusted_buy_price:.2f} USDT for {order_quantity:.6f} BTC")
+            order = place_buy_order(adjusted_buy_price, order_quantity)
+            if order:
+                print(f"Buy order placed successfully with ID: {order['orderId']}")
+                order_placed = True
+                order_id = order['orderId']
 
-            if slope is not None and slope > 0:
-                # Price is rising, place fewer, larger orders
-                num_orders = 3
-                price_step = 1.0  # Increase the spacing between orders
-                print("Placing fewer, larger buy orders due to rising price.")
-            else:
-                # Price is falling, place more, smaller orders
-                num_orders = 7
-                price_step = 0.5  # Reduce the spacing between orders
-                print("Placing more, smaller buy orders due to falling price.")
+    elif action == 'SELL':
+        # Cancel existing sell orders
+        open_sell_orders = get_open_sell_orders(symbol)
+        for order_id in open_sell_orders.keys():
+            cancel_order(order_id)
+            print(f"Cancelled sell order with ID: {order_id}")
 
-            # Place the custom buy orders
-            for i in range(num_orders):
-                adjusted_buy_price = buy_price * (1 - i * price_step / 100)
-                order_quantity = quantity / num_orders  # Divide quantity among orders
-                print(f"Placing buy order at price: {adjusted_buy_price:.2f} USDT for {order_quantity:.6f} BTC")
-                order = place_buy_order(adjusted_buy_price, order_quantity)
-                if order:
-                    print(f"Order placed successfully with ID: {order['orderId']}")
+        # Adjust the sell price based on market conditions
+        sell_price = max(proposed_price, current_price * 1.002)
+        print(f"Adjusted sell price: {sell_price:.2f} USDT")
+
+        # Place the custom sell orders
+        for i in range(num_orders):
+            adjusted_sell_price = sell_price * (1 + i * price_step / 100)
+            order_quantity = quantity / num_orders  # Divide quantity among orders
+            print(f"Placing sell order at price: {adjusted_sell_price:.2f} USDT for {order_quantity:.6f} BTC")
+            order = place_sell_order(adjusted_sell_price, order_quantity)
+            if order:
+                print(f"Sell order placed successfully with ID: {order['orderId']}")
+                order_placed = True
+                order_id = order['orderId']
 
     return order_placed, order_id  # Return the updated order state
+
 
 
 
