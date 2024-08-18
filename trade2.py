@@ -164,7 +164,11 @@ def track_and_place_order(price_window, current_price, threshold_percent=2, decr
     return order_placed, order_id  # Returnăm starea actualizată a ordinului
 
 
-window_size = 220  # window_size = 46 minute * 60 / 15 secunde sleep = 184
+
+TIME_SLEEP = 14 # seconds to sleep
+WINDOWS_SIZE_MIN = 48 # minutes
+window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP
+
 price_window = PriceWindow(window_size)
  
 order_placed = False
@@ -174,7 +178,7 @@ while True:
     try:
         current_price = get_current_price()
         if current_price is None:
-            time.sleep(4)
+            time.sleep(TIME_SLEEP)
             continue
         print(f"BTC: {current_price}")
         
@@ -183,11 +187,11 @@ while True:
         order_placed, order_id = track_and_place_order(price_window, current_price, order_placed=order_placed, order_id=order_id)
         
         # Așteptăm x secunde înainte de următoarea verificare
-        time.sleep(4)
+        time.sleep(TIME_SLEEP)
 
     except BinanceAPIException as e:
         print(f"Eroare API Binance: {e}")
-        time.sleep(1)  # Așteaptă 1 secundă înainte de a reporni încercările
+        time.sleep(TIME_SLEEP)  # Așteaptă 1 secundă înainte de a reporni încercările
     except Exception as e:
         print(f"Eroare: {e}")
-        time.sleep(1)  # Așteaptă 1 secundă înainte de a reporni încercările
+        time.sleep(TIME_SLEEP)  # Așteaptă 1 secundă înainte de a reporni încercările
