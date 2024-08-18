@@ -22,19 +22,16 @@ class PriceWindow:
         self.max_deque = deque()  # Gestionarea maximului
         self.current_index = 0  # Contor intern pentru a urmări indexul
         self.max_index = max_index  # Pragul la care se face normalizarea
-        self.epsilon = epsilon  # Toleranță pentru minimurile aproximativ egale
+        self.epsilon = 10  # Toleranță pentru minimurile aproximativ egale
 
     def process_price(self, price):
-        # Adăugăm noul preț la lista de prețuri
         self.prices.append(price)
-        print(f"Preț adăugat la fereastră: {price}")
-
+   
         # Eliminăm prețurile care ies din fereastră
         if len(self.prices) > self.window_size:
             removed_price = self.prices.popleft()
             print(f"Preț eliminat din fereastră: {removed_price}")
 
-        # Gestionarea minimului și maximului curent
         self._manage_minimum(price)
         self._manage_maximum(price)
 
@@ -43,57 +40,47 @@ class PriceWindow:
         print(f"Index curent în fereastră: {self.current_index}")
 
     def _manage_minimum(self, price):
-        """Gestionarea minimului curent din fereastră."""
-        # Eliminăm elementele care sunt în afara ferestrei (prea vechi)
         if self.min_deque and self.min_deque[0][0] <= self.current_index - self.window_size:
             removed_min = self.min_deque.popleft()
-            print(f"Minim eliminat: {removed_min}")
+            print(f"Minim eliminat deoarece este in afara ferestrei: {removed_min}")
 
         # Verificăm dacă prețul curent este aproximativ egal cu oricare preț existent în `min_deque`
         for index, existing_price in self.min_deque:
-            if abs(existing_price - price) <= self.epsilon:
+            if abs(existing_price - price) <= self.epsilon:#are_values_very_close
                 print(f"Prețul {price} este aproape egal cu un minim existent: {existing_price}")
                 return  # Nu adăugăm prețul curent dacă există deja un echivalent
         
         # Eliminăm elementele din spate mai mari decât prețul curent
         while self.min_deque and self.min_deque[-1][1] > price:
             removed_min = self.min_deque.pop()
-            print(f"Minim eliminat din spate: {removed_min}")
+            print(f"Minim-uri eliminate din spate: {removed_min}")
 
-        # Adăugăm prețul curent
+        # Adăugăm prețul curent ca un nou potential minim
         self.min_deque.append((self.current_index, price))
-        print(f"Minim adăugat: {price}")
 
     def _manage_maximum(self, price):
-        """Gestionarea maximului curent din fereastră."""
-        # Eliminăm elementele care sunt în afara ferestrei (prea vechi)
         if self.max_deque and self.max_deque[0][0] <= self.current_index - self.window_size:
             removed_max = self.max_deque.popleft()
-            print(f"Maxim eliminat: {removed_max}")
+            print(f"Maxim eliminat deoarece este in afara ferestrei: {removed_max}")
 
         # Eliminăm elementele din spate mai mici sau egale decât prețul curent
         while self.max_deque and self.max_deque[-1][1] <= price:
             removed_max = self.max_deque.pop()
-            print(f"Maxim eliminat din spate: {removed_max}")
+            print(f"Maxim-uri eliminate din spate: {removed_max}")
 
-        # Adăugăm prețul curent ca nou maxim
+        # Adăugăm prețul curent ca nou potential maxim
         self.max_deque.append((self.current_index, price))
-        print(f"Maxim adăugat: {price}")
 
     def get_min(self):
-        """Returnează minimul curent din fereastră."""
         if not self.min_deque:
             return None
         min_price = self.min_deque[0][1]
-        print(f"Minimul curent din fereastră: {min_price}, index {self.min_deque[0]}")
         return min_price
 
     def get_max(self):
-        """Returnează maximul curent din fereastră."""
         if not self.max_deque:
             return None
         max_price = self.max_deque[0][1]
-        print(f"Maximul curent din fereastră: {max_price}, index {self.max_deque[0]}")
         return max_price
 
     def calculate_slope(self):
@@ -130,10 +117,12 @@ def track_price_and_place_order(window_size=220, threshold_percent=2, decrease_p
             time.sleep(15)
             continue
 
-        print(f"Preț curent obținut: {current_price}")
+        print(f"Preț curent: {current_price}")
         price_window.process_price(current_price)
         min_price = price_window.get_min()
         max_price = price_window.get_max()
+        print(f"Minimul curent din fereastră: {min_price}, index {self.min_deque[0]}")
+        print(f"Maximul curent din fereastră: {max_price}, index {self.max_deque[0]}")
 
         slope = price_window.calculate_slope()
         if slope is None:
@@ -168,9 +157,14 @@ def track_price_and_place_order(window_size=220, threshold_percent=2, decrease_p
                             order = place_buy_order(buy_price, quantity)
                             if order:
                                 order_id = order['orderId']
+                                order_placed = True
+                            else:
+                                order_placed = False
+                        else:
+                            order_placed = False
 
-        # Așteptăm 15 secunde înainte de următoarea verificare
-        time.sleep(3)
+        # Așteptăm x secunde înainte de următoarea verificare
+        time.sleep(4)
 
 # Începem monitorizarea și plasarea ordinului dacă condițiile sunt îndeplinite
 track_price_and_place_order()
