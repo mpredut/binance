@@ -135,8 +135,8 @@ def track_and_place_order(price_window, current_price, threshold_percent=2, decr
         price_change_percent = (max_price - min_price) / min_price * 100
         print(f"Procentul de schimbare între minim și maxim: {price_change_percent:.2f}%")
         
-        check_alert(price_change_percent > threshold_percent,"xxxxxxxxxxxx")
         if price_change_percent > threshold_percent:
+            alert.check_alert(True, f"price_change {price_change_percent.2f}")
             buy_price = current_price * (1 - decrease_percent / 100)
 
             if not order_placed:
