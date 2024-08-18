@@ -131,10 +131,7 @@ def monitor_orders_by_type(order_type):
             
             quantity = order['quantity']
             
-            if order_type == 'sell':
-                new_order = api.place_sell_order(new_price, quantity)
-            else:
-                new_order = api.place_buy_order(new_price, quantity)
+            new_order = api.place_order(order_type, new_price, quantity)
             
             if new_order:    
                 orders[new_order['orderId']] = {

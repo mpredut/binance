@@ -77,6 +77,33 @@ def place_sell_order(price, quantity):
         print(f"Eroare la plasarea ordinului de vânzare: {e}")
         return None
 
+def place_order(order_type, price, quantity):
+    try:
+        price = round(price, 0)
+        quantity = round(quantity, 5)
+        
+        if order_type.lower() == 'buy':
+            order = client.order_limit_buy(
+                symbol=symbol,
+                quantity=quantity,
+                price=str(price)
+            )
+        elif order_type.lower() == 'sell':
+            order = client.order_limit_sell(
+                symbol=symbol,
+                quantity=quantity,
+                price=str(price)
+            )
+        else:
+            print("Tipul ordinului este invalid. Trebuie să fie 'buy' sau 'sell'.")
+            return None
+        
+        return order
+    except BinanceAPIException as e:
+        print(f"Eroare la plasarea ordinului de {order_type}: {e}")
+        return None
+
+
 def check_order_filled(order_id):
     try:
         if not order_id:
