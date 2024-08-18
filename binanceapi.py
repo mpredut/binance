@@ -154,3 +154,21 @@ def get_open_buy_orders(symbol):
     except BinanceAPIException as e:
         print(f"Error getting open buy orders: {e}")
         return {}
+
+def get_open_orders(order_type, symbol):
+    try:
+        open_orders = client.get_open_orders(symbol=symbol)
+        
+        filtered_orders = {
+            order['orderId']: {
+                'price': float(order['price']),
+                'quantity': float(order['origQty'])
+            }
+            for order in open_orders if order['side'] == order_type.upper()
+        }
+        
+        return filtered_orders
+    except BinanceAPIException as e:
+        print(f"Error getting open {order_type} orders: {e}")
+        return {}
+
