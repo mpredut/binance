@@ -3,8 +3,6 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
-# Configurare Pushbullet
-PUSHBULLET_API_KEY = "o.wB42eNfZGHDH4JNjHTGW7b9i66ZOqLl6"
 pb = Pushbullet(PUSHBULLET_API_KEY)
 
 # Configurare SMTP
