@@ -155,7 +155,7 @@ def get_open_buy_orders(symbol):
         print(f"Error getting open buy orders: {e}")
         return {}
 
-def get_open_orders(order_type, symbol):
+def get_open_orders(order_type):
     try:
         open_orders = client.get_open_orders(symbol=symbol)
         
