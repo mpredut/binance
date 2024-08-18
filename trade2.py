@@ -13,6 +13,7 @@ import utils as u
 from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, place_buy_order, place_sell_order, check_order_filled, cancel_order, get_open_sell_orders
 from utils import beep, get_interval_time, are_difference_equal_with_aprox_proc, are_values_very_close, budget, order_cost_btc, price_change_threshold, max_threshold
 import log
+import alert
 
 class PriceWindow:
     def __init__(self, window_size, max_index=1000000, epsilon=1e-2):  # Modificat epsilon la 1e-2
