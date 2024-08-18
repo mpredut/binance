@@ -90,6 +90,8 @@ def check_order_filled(order_id):
         
 def cancel_order(order_id):
     try:
+        if not order_id:
+            return False
         client.cancel_order(symbol=symbol, orderId=order_id)
         print(f"Ordinul cu ID {order_id} a fost anulat.")
         return True
