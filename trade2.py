@@ -83,6 +83,16 @@ class PriceWindow:
         max_price = self.max_deque[0][1]
         return max_price
 
+    def get_min_and_index(self):
+        if not self.min_deque:
+            return None
+        return self.min_deque[0]
+
+    def get_max_and_index(self):
+        if not self.max_deque:
+            return None
+        return self.max_deque[0]
+        
     def calculate_slope(self):
         min_price = self.get_min()
         max_price = self.get_max()
@@ -104,72 +114,83 @@ class PriceWindow:
         
         return slope
 
-    #window_size=   46 minute * 60 / 15 secunde sleep = 184
 
-def track_price_and_place_order(window_size=220, threshold_percent=2, decrease_percent=4, quantity=0.001):
-    price_window = PriceWindow(window_size)
-    order_placed = False
-    order_id = None
+def track_and_place_order(price_window, current_price, threshold_percent=2, decrease_percent=4, quantity=0.001):
 
-    while True:
-        current_price = get_current_price()
-        if current_price is None:
-            time.sleep(15)
-            continue
+    min_price = price_window.get_min()
+    max_price = price_window.get_max()
+    min_price_index = price_window.get_min_and_index()
+    max_price_index = price_window.get_max_and_index()
+    print(f"Minimul curent din fereastră: {min_price} la index {min_price_index}")
+    print(f"Maximul curent din fereastră: {max_price} la index {max_price_index}")
 
-        print(f"Preț curent: {current_price}")
-        price_window.process_price(current_price)
-        min_price = price_window.get_min()
-        max_price = price_window.get_max()
-        print(f"Minimul curent din fereastră: {min_price}, index {self.min_deque[0]}")
-        print(f"Maximul curent din fereastră: {max_price}, index {self.max_deque[0]}")
+    slope = price_window.calculate_slope()
+    if slope is None:
+        print("Slope este null !!!")
+     
+    if slope is not None and slope > 0:
+        print("Prețul continuă să crească")
+    else:
+        print("Prețul continuă să scada")
+                    
+    if min_price is not None and max_price is not None:
+        # Calculăm procentul de schimbare
+        price_change_percent = (max_price - min_price) / min_price * 100
+        print(f"Procentul de schimbare între minim și maxim: {price_change_percent:.2f}%")
+        
+        if price_change_percent > threshold_percent:
+            buy_price = current_price * (1 - decrease_percent / 100)
 
-        slope = price_window.calculate_slope()
-        if slope is None:
-            print("Slope este null !!!")
-         
-        if slope is not None and slope > 0:
-            print("Prețul continuă să crească")
-        else:
-            print("Prețul continuă să scada")
-                        
-        if min_price is not None and max_price is not None:
-            # Calculăm procentul de schimbare
-            price_change_percent = (max_price - min_price) / min_price * 100
-            print(f"Procentul de schimbare între minim și maxim: {price_change_percent:.2f}%")
-            
-            if price_change_percent > threshold_percent:
-                buy_price = current_price * (1 - decrease_percent / 100)
-
-                if not order_placed:
-                    # Plasează ordinul de cumpărare
-                    print(f"Plasarea ordinului de cumpărare la prețul: {buy_price:.2f} USDT")
-                    order = place_buy_order(buy_price, quantity)
-                    if order:
-                        order_placed = True
-                        order_id = order['orderId']
-                else:
-                    # Verificăm panta și anulăm ordinul dacă panta este pozitivă (prețul continuă să crească)
-                    slope = price_window.calculate_slope()
-                    if slope is not None and slope > 0:
-                        print("Prețul continuă să crească, anulăm ordinul și plasăm unul nou.")
-                        if cancel_order(order_id):
-                            order = place_buy_order(buy_price, quantity)
-                            if order:
-                                order_id = order['orderId']
-                                order_placed = True
-                            else:
-                                order_placed = False
+            if not order_placed:
+                # Plasează ordinul de cumpărare
+                print(f"Plasarea ordinului de cumpărare la prețul: {buy_price:.2f} USDT")
+                order = place_buy_order(buy_price, quantity)
+                if order:
+                    order_placed = True
+                    order_id = order['orderId']
+            else:
+                # Verificăm panta și anulăm ordinul dacă panta este pozitivă (prețul continuă să crească)
+                slope = price_window.calculate_slope()
+                if slope is not None and slope > 0:
+                    print("Prețul continuă să crească, anulăm ordinul și plasăm unul nou.")
+                    if cancel_order(order_id):
+                        order = place_buy_order(buy_price, quantity)
+                        if order:
+                            order_id = order['orderId']
+                            order_placed = True
                         else:
                             order_placed = False
+                    else:
+                        order_placed = False
 
+    
+window_size = 220 #window_size = 46 minute * 60 / 15 secunde sleep = 184
+price_window = PriceWindow(window_size)
+ 
+order_placed = False
+order_id = None
+
+while True:
+    try:
+        current_price = get_current_price()
+        if current_price is None:
+            time.sleep(4)
+            continue
+        print(f"BTC: {current_price}")
+        
+        price_window.process_price(current_price)
+        
+        track_and_place_order(price_window, current_price)
+        
         # Așteptăm x secunde înainte de următoarea verificare
-        time.sleep(4)
+        #time.sleep(4)
 
-# Începem monitorizarea și plasarea ordinului dacă condițiile sunt îndeplinite
-track_price_and_place_order()
-
-
+    except BinanceAPIException as e:
+        print(f"Eroare API Binance: {e}")
+        time.sleep(1)  # Așteaptă 1 secundă înainte de a reporni încercările
+    except Exception as e:
+        print(f"Eroare: {e}")
+        time.sleep(1)  # Așteaptă 1 secundă înainte de a reporni încercările
 
 
 
