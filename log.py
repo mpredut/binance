@@ -6,7 +6,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     handlers=[
-        logging.FileHandler("trading_bot.log"),  # Scrie logurile într-un fișier
+        logging.FileHandler("bot.log"),  # Scrie logurile într-un fișier
         logging.StreamHandler()  # Afișează logurile în consola
     ]
 )
