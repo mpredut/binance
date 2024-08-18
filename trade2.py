@@ -149,29 +149,41 @@ def track_and_place_order(price_window, current_price, threshold_percent=2, decr
 
         if price_change_percent > threshold_percent:
             alert.check_alert(True, f"price_change {price_change_percent:.2f}")
+
+            # Cancel existing sell orders
+            open_sell_orders = get_open_sell_orders(symbol)
+            for order_id in open_sell_orders.keys():
+                cancel_order(order_id)
+
+            # Calculate the base buy price
             buy_price = current_price * (1 - decrease_percent / 100)
+            buy_price = min(buy_price, current_price * 0.998)
+            # Decide on the number of orders and their spacing based on price trend
+            num_orders = 5  # Default number of orders
+            price_step = 0.5  # Default step percentage between orders
 
-            if not order_placed:
-                print(f"Placing buy order at price: {buy_price:.2f} USDT")
-                order = place_buy_order(buy_price, quantity)
-                if order:
-                    order_placed = True
-                    order_id = order['orderId']
+            if slope is not None and slope > 0:
+                # Price is rising, place fewer, larger orders
+                num_orders = 3
+                price_step = 1.0  # Increase the spacing between orders
+                print("Placing fewer, larger buy orders due to rising price.")
             else:
-                slope = price_window.calculate_slope()
-                if slope is not None and slope > 0:
-                    print("Price continues to rise, canceling order and placing a new one.")
-                    if cancel_order(order_id):
-                        order = place_buy_order(buy_price, quantity)
-                        if order:
-                            order_id = order['orderId']
-                            order_placed = True
-                        else:
-                            order_placed = False
-                    else:
-                        order_placed = False
+                # Price is falling, place more, smaller orders
+                num_orders = 7
+                price_step = 0.5  # Reduce the spacing between orders
+                print("Placing more, smaller buy orders due to falling price.")
 
-    return order_placed, order_id
+            # Place the custom buy orders
+            for i in range(num_orders):
+                adjusted_buy_price = buy_price * (1 - i * price_step / 100)
+                order_quantity = quantity / num_orders  # Divide quantity among orders
+                print(f"Placing buy order at price: {adjusted_buy_price:.2f} USDT for {order_quantity:.6f} BTC")
+                order = place_buy_order(adjusted_buy_price, order_quantity)
+                if order:
+                    print(f"Order placed successfully with ID: {order['orderId']}")
+
+    return order_placed, order_id  # Return the updated order state
+
 
 
 TIME_SLEEP_PRICE = 4  # seconds to sleep for price collection
