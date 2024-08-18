@@ -114,7 +114,7 @@ class PriceWindow:
     def current_window_size(self):
         return len(self.prices)
 
-def track_and_place_order(price_window, current_price, threshold_percent=2, decrease_percent=4, quantity=0.001, order_placed=False, order_id=None):
+def track_and_place_order(price_window, current_price, threshold_percent=2, decrease_percent=4, quantity=0.0017, order_placed=False, order_id=None):
     min_price = price_window.get_min()
     max_price = price_window.get_max()
     min_price_index = price_window.get_min_and_index()
@@ -185,7 +185,7 @@ while True:
         
         price_window.process_price(current_price)
         
-        order_placed, order_id = track_and_place_order(price_window, current_price, order_placed=order_placed, order_id=order_id)
+        order_placed, order_id = track_and_place_order(price_window, current_price, threshold_percent=1.5, order_placed=order_placed, order_id=order_id)
         
         # Așteptăm x secunde înainte de următoarea verificare
         time.sleep(TIME_SLEEP)
