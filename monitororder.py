@@ -13,6 +13,8 @@ import utils
 MAX_PROC = 0.77
 monitor_interval = 3.7
 initial_prices = {}  # Dicționar pentru a reține prețurile inițiale ale ordinelor
+initial_sell_prices = {}  # Dicționar pentru a reține prețurile inițiale ale ordinelor de vânzare
+initial_buy_prices = {}  # Dicționar pentru a reține prețurile inițiale ale ordinelor de cumpărare
 max_adjustments = 1000  # Număr maxim de ajustări pentru un ordin
 
 def monitor_sell_orders():
