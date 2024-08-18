@@ -110,6 +110,20 @@ def get_open_sell_orders():
         }
         return sell_orders
     except BinanceAPIException as e:
-        print(f"Eroare la obținerea ordinelor deschise: {e}")
+        print(f"Error getting open sell orders: {e}")
         return {}
 
+def get_open_buy_orders(symbol):
+    try:
+        open_orders = client.get_open_orders(symbol=symbol)
+        buy_orders = {
+            order['orderId']: {
+                'price': float(order['price']),
+                'quantity': float(order['origQty'])
+            }
+            for order in open_orders if order['side'] == 'BUY'
+        }
+        return buy_orders
+    except BinanceAPIException as e:
+        print(f"Error getting open buy orders: {e}")
+        return {}
