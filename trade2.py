@@ -5,7 +5,6 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from collections import deque
 
-
 from apikeys import api_key, api_secret
 
 #my imports
@@ -13,16 +12,17 @@ import binanceapi as api
 import utils as u
 from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, place_buy_order, place_sell_order, check_order_filled, cancel_order, get_open_sell_orders
 from utils import beep, get_interval_time, are_difference_equal_with_aprox_proc, are_values_very_close, budget, order_cost_btc, price_change_threshold, max_threshold
+import log
 
 class PriceWindow:
-    def __init__(self, window_size, max_index=1000000, epsilon=1e-5):
+    def __init__(self, window_size, max_index=1000000, epsilon=1e-2):  # Modificat epsilon la 1e-2
         self.window_size = window_size
         self.prices = deque()  # Păstrează toate prețurile din fereastră
         self.min_deque = deque()  # Gestionarea minimului
         self.max_deque = deque()  # Gestionarea maximului
         self.current_index = 0  # Contor intern pentru a urmări indexul
         self.max_index = max_index  # Pragul la care se face normalizarea
-        self.epsilon = 10  # Toleranță pentru minimurile aproximativ egale
+        self.epsilon = 10#epsilon  # Toleranță pentru minimurile aproximativ egale
 
     def process_price(self, price):
         self.prices.append(price)
@@ -46,7 +46,7 @@ class PriceWindow:
 
         # Verificăm dacă prețul curent este aproximativ egal cu oricare preț existent în `min_deque`
         for index, existing_price in self.min_deque:
-            if abs(existing_price - price) <= self.epsilon:#are_values_very_close
+            if abs(existing_price - price) <= self.epsilon:  #are_values_very_close
                 print(f"Prețul {price} este aproape egal cu un minim existent: {existing_price}")
                 return  # Nu adăugăm prețul curent dacă există deja un echivalent
         
@@ -74,14 +74,12 @@ class PriceWindow:
     def get_min(self):
         if not self.min_deque:
             return None
-        min_price = self.min_deque[0][1]
-        return min_price
+        return self.min_deque[0][1]
 
     def get_max(self):
         if not self.max_deque:
             return None
-        max_price = self.max_deque[0][1]
-        return max_price
+        return self.max_deque[0][1]
 
     def get_min_and_index(self):
         if not self.min_deque:
@@ -103,7 +101,6 @@ class PriceWindow:
         # Extragem indicii pentru minim și maxim
         min_index = self.min_deque[0][0]
         max_index = self.max_deque[0][0]
-        
 
         # Asigurăm că nu împărțim la zero
         if max_index == min_index:
@@ -115,8 +112,7 @@ class PriceWindow:
         return slope
 
 
-def track_and_place_order(price_window, current_price, threshold_percent=2, decrease_percent=4, quantity=0.001):
-
+def track_and_place_order(price_window, current_price, threshold_percent=2, decrease_percent=4, quantity=0.001, order_placed=False, order_id=None):
     min_price = price_window.get_min()
     max_price = price_window.get_max()
     min_price_index = price_window.get_min_and_index()
@@ -138,6 +134,7 @@ def track_and_place_order(price_window, current_price, threshold_percent=2, decr
         price_change_percent = (max_price - min_price) / min_price * 100
         print(f"Procentul de schimbare între minim și maxim: {price_change_percent:.2f}%")
         
+        check_alert(price_change_percent > threshold_percent,"xxxxxxxxxxxx")
         if price_change_percent > threshold_percent:
             buy_price = current_price * (1 - decrease_percent / 100)
 
@@ -163,8 +160,10 @@ def track_and_place_order(price_window, current_price, threshold_percent=2, decr
                     else:
                         order_placed = False
 
-    
-window_size = 220 #window_size = 46 minute * 60 / 15 secunde sleep = 184
+    return order_placed, order_id  # Returnăm starea actualizată a ordinului
+
+
+window_size = 220  # window_size = 46 minute * 60 / 15 secunde sleep = 184
 price_window = PriceWindow(window_size)
  
 order_placed = False
@@ -180,10 +179,10 @@ while True:
         
         price_window.process_price(current_price)
         
-        track_and_place_order(price_window, current_price)
+        order_placed, order_id = track_and_place_order(price_window, current_price, order_placed=order_placed, order_id=order_id)
         
         # Așteptăm x secunde înainte de următoarea verificare
-        #time.sleep(4)
+        time.sleep(4)
 
     except BinanceAPIException as e:
         print(f"Eroare API Binance: {e}")
@@ -191,11 +190,3 @@ while True:
     except Exception as e:
         print(f"Eroare: {e}")
         time.sleep(1)  # Așteaptă 1 secundă înainte de a reporni încercările
-
-
-
-
-
-
-
-
