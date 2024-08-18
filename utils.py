@@ -32,7 +32,10 @@ def get_interval_time(valoare_prestabilita=interval_time, marja_aleatoare=10):
     interval = abs(valoare_prestabilita + valoare_aleatoare)
     
     return interval
-    
+ 
+def calculate_difference_percent(val1, val2):
+    return abs(val1 - val2) / ((val1 + val2) / 2) * 100
+
 
 #valorile sunt in jurul procentului ca interval
 def are_difference_equal_with_aprox_proc(value1, value2, target_percent = 10.0):
@@ -54,9 +57,7 @@ def are_difference_equal_with_aprox_proc(value1, value2, target_percent = 10.0):
         tolerance_step = (target_percent / 2 - initial_tolerance) / max_iterations
         print(f"tolerance_step adjust {tolerance_step}:")
 
-    def calculate_difference_percent(val1, val2):
-        return abs(val1 - val2) / ((val1 + val2) / 2) * 100
-
+ 
     iteration = 0
     tolerance = initial_tolerance
 
@@ -99,9 +100,6 @@ def are_values_very_close(value1, value2, target_tolerance_percent=1.0):
         # Ajustează tolerance_step pentru a respecta limita
         tolerance_step = (target_tolerance_percent / 2 - initial_tolerance) / max_iterations
         print(f"tolerance_step adjust {tolerance_step}:")
-
-    def calculate_difference_percent(val1, val2):
-        return abs(val1 - val2) / ((val1 + val2) / 2) * 100
 
     iteration = 0
     tolerance = initial_tolerance
