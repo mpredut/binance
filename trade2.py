@@ -118,7 +118,7 @@ class PriceWindow:
             return 0
 
         slope = (max_price - min_price) / (max_index - min_index)
-        print(f"Slope calculated: {slope:.f2}")
+        print(f"Slope calculated: {slope:.2f}")
 
         return slope
 
