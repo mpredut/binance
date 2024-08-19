@@ -1,3 +1,6 @@
+
+import time
+
 from pushbullet import Pushbullet
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -11,8 +14,9 @@ pb = Pushbullet(PUSHBULLET_API_KEY)
 SMTP_SERVER = "smtp.googl.com"  # Exemplu: smtp.gmail.com
 SMTP_PORT = 587  # Portul pentru TLS
 
+last_alert_time = None
+
 def send_push_notification(title, message):
-    """Trimite o notificare pe Android prin Pushbullet."""
     pb.push_note(title, message)
 
 def send_email(subject, body, to_email):
@@ -31,15 +35,26 @@ def send_email(subject, body, to_email):
     server.sendmail(SMTP_USERNAME, to_email, text)
     server.quit()
 
-def check_alert(condition, message):
-    """Verifică condiția și trimite o notificare dacă aceasta este adevărată."""
+def check_alert(condition, message, alert_interval=60):
+
+    global last_alert_time
+    current_time = time.time()
+
     if condition:
-        # Trimite notificare push pe Android
-        send_push_notification("Alertă Trading", message)
-        
-        # Trimite email
-        #send_email(
-        #    subject="Alertă Trading",
-        #    body=message,
-        #    to_email=TO_EMAIL
-        #)
+        if last_alert_time is None or (current_time - last_alert_time) >= alert_interval:
+            #timestamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(current_time))
+            timestamp = time.strftime('%H:%M:%S', time.localtime(current_time))
+            message_with_time = f"{message} at {timestamp}"
+            
+            # Trimite notificare push pe Android
+            send_push_notification("Alertă Trading", message_with_time)
+            
+            #send_email(
+            #    subject="Alertă Trading",
+            #    body=message_with_time,
+            #    to_email=TO_EMAIL
+            #)
+            
+            # Actualizează timpul ultimei alerte
+            last_alert_time = current_time
+

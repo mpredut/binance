@@ -184,11 +184,13 @@ def track_and_place_order(price_window, current_price, threshold_percent=2, decr
 
     action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(current_price, threshold_percent, decrease_percent)
 
+    #alert.check_alert(True, f"price_change {price_change_percent:.2f}")
+    
     if action == 'HOLD':
-        return
-        
+        return order_placed, order_id
+    
     if price_change_percent > threshold_percent:
-        alert.check_alert(True, f"price_change {price_change_percent:.2f}")
+         alert.check_alert(True, f"price_change {price_change_percent:.2f}")
     else:
         return order_placed, order_id  # Exit early if no significant price change
 
@@ -254,8 +256,8 @@ def track_and_place_order(price_window, current_price, threshold_percent=2, decr
 
 
 TIME_SLEEP_PRICE = 4  # seconds to sleep for price collection
-TIME_SLEEP_ORDER = 30  # seconds to sleep for order placement
-WINDOWS_SIZE_MIN = 48  # minutes
+TIME_SLEEP_ORDER = 30 # seconds to sleep for order placement
+WINDOWS_SIZE_MIN = 48 # minutes
 window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP_PRICE
 
 price_window = PriceWindow(window_size)
