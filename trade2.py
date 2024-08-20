@@ -17,7 +17,7 @@ import alert
 
 
 class PriceWindow:
-    def __init__(self, window_size, max_index=1000000, epsilon=1e-2):
+    def __init__(self, window_size, max_index=100, epsilon=1e-2):
         self.window_size = window_size
         self.prices = deque()  # Store all prices in the window
         self.min_deque = deque()  # Manage the minimums
