@@ -151,7 +151,7 @@ class PriceWindow:
 
         if price_change_percent <= threshold_percent:
             action = 'HOLD'
-            print(f"Price change within threshold. Action: {action}")
+            print(f"Action: {action}")
             return action, current_price, price_change_percent, slope
 
         remaining_decrease_percent = max(0, decrease_percent - price_change_percent)
