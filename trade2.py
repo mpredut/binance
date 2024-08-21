@@ -14,8 +14,6 @@ from binanceapi import client, symbol, precision, get_quantity_precision, get_cu
 from utils import beep, get_interval_time, are_difference_equal_with_aprox_proc, are_values_very_close, budget, order_cost_btc, price_change_threshold, max_threshold
 import log
 import alert
-
-
 class PriceWindow:
     def __init__(self, window_size, max_index=10000, epsilon=1e-2):
         self.window_size = window_size
@@ -29,7 +27,6 @@ class PriceWindow:
     def process_price(self, price):
         self.prices.append(price)
 
-        # Remove prices that fall out of the window
         if len(self.prices) > self.window_size:
             removed_price = self.prices.popleft()
             print(f"Price removed from window: {removed_price}")
@@ -37,72 +34,67 @@ class PriceWindow:
         self._manage_minimum(price)
         self._manage_maximum(price)
 
-        # Increment internal index
         self.current_index += 1
         print(f"Current index in window: {self.current_index}")
-        
-        # Normalize indices if they exceed max_index
+
         if self.current_index > self.max_index:
             print(f"Start normalize indexes")
             self._normalize_indices()
 
     def _normalize_indices(self):
-        """Normalize indices in the deques to prevent overflow."""
         old_index = self.current_index
         self.current_index = 0  # Reset current index
-        
-        # Adjust indices in min_deque and max_deque
-        self.min_deque = deque([(i - old_index, price) for i, price in self.min_deque])
-        self.max_deque = deque([(i - old_index, price) for i, price in self.max_deque])
-        
+
+        self.min_deque = deque([(i - old_index, price) for price, i in self.min_deque if i >= old_index])
+        self.max_deque = deque([(i - old_index, price) for price, i in self.max_deque if i >= old_index])
+
         print(f"Indices normalized. Old index: {old_index}, New index: {self.current_index}")
-        
+
     def _manage_minimum(self, price):
-        if self.min_deque and self.min_deque[0][0] <= self.current_index - self.window_size:
+        if self.min_deque and self.min_deque[0][1] <= self.current_index - self.window_size:
             removed_min = self.min_deque.popleft()
             print(f"Minimum removed as it is outside the window: {removed_min}")
 
-        for index, existing_price in self.min_deque:
-            if abs(existing_price - price) <= self.epsilon: # are_values_very_close
-                #print(f"Price {price} is approximately equal to an existing minimum: {existing_price}")
+        for existing_price, index in self.min_deque:
+            if abs(existing_price - price) <= self.epsilon: 
                 return  # Don't add the current price if an equivalent exists
 
-        while self.min_deque and self.min_deque[-1][1] > price:
+        while self.min_deque and self.min_deque[-1][0] > price:
             removed_min = self.min_deque.pop()
             print(f"Minimums removed from back: {removed_min}")
 
-        self.min_deque.append((self.current_index, price))
+        self.min_deque.append((price, self.current_index))
 
     def _manage_maximum(self, price):
-        if self.max_deque and self.max_deque[0][0] <= self.current_index - self.window_size:
+        if self.max_deque and self.max_deque[0][1] <= self.current_index - self.window_size:
             removed_max = self.max_deque.popleft()
             print(f"Maximum removed as it is outside the window: {removed_max}")
 
-        while self.max_deque and self.max_deque[-1][1] <= price:
+        while self.max_deque and self.max_deque[-1][0] <= price:
             removed_max = self.max_deque.pop()
             print(f"Maximums removed from back: {removed_max}")
 
-        self.max_deque.append((self.current_index, price))
+        self.max_deque.append((price, self.current_index))
 
     def get_min(self):
         if not self.min_deque:
             return None
-        return self.min_deque[0][1]
+        return self.min_deque[0][0]  # Return the minimum price
 
     def get_max(self):
         if not self.max_deque:
             return None
-        return self.max_deque[0][1]
+        return self.max_deque[0][0]  # Return the maximum price
 
     def get_min_and_index(self):
         if not self.min_deque:
             return None
-        return self.min_deque[0]
+        return self.min_deque[0][0], self.min_deque[0][1]  # Return min price and its index
 
     def get_max_and_index(self):
         if not self.max_deque:
             return None
-        return self.max_deque[0]
+        return self.max_deque[0][0], self.max_deque[0][1]  # Return max price and its index
 
     def calculate_slope(self):
         min_price = self.get_min()
@@ -111,8 +103,8 @@ class PriceWindow:
         if min_price is None or max_price is None:
             return None
 
-        min_index = self.min_deque[0][0]
-        max_index = self.max_deque[0][0]
+        min_index = self.min_deque[0][1]
+        max_index = self.max_deque[0][1]
 
         if max_index == min_index:
             return 0
@@ -133,9 +125,10 @@ class PriceWindow:
         return min_proximity, max_proximity
 
     def calculate_positions(self):
-        min_index = self.min_deque[0][0] if self.min_deque else 0
-        max_index = self.max_deque[0][0] if self.max_deque else 0
+        min_index = self.min_deque[0][1] if self.min_deque else 0
+        max_index = self.max_deque[0][1] if self.max_deque else 0
         return min_index / self.window_size, max_index / self.window_size
+
         
     def evaluate_buy_sell_opportunity(self, current_price, threshold_percent=2, decrease_percent=4):
         slope = self.calculate_slope()
