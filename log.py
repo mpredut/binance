@@ -25,8 +25,10 @@ def print(*args, **kwargs):
     # Apelează funcția print originală
     original_print(message, **kwargs)
     
-    # Scrie mesajul în fișierul de log la nivel de INFO
-    logger.info(message)
+    #logger.info(message)
+    # Scrie mesajul în fișierul de log direct fără a folosi logger.info
+    with open("bot.log", "a") as log_file:
+        log_file.write(message + "\n")
 
 # Redefinește funcția print din builtins pentru a funcționa în întreg codul
 builtins.print = print
