@@ -113,8 +113,6 @@ class PriceWindow:
             return 0
 
         slope = (max_price - min_price) / (max_index - min_index)
-        print(f"Slope calculated: {slope:.2f}")
-
         return slope
 
     def calculate_proximities(self, current_price):
@@ -135,7 +133,7 @@ class PriceWindow:
         
     def evaluate_buy_sell_opportunity(self, current_price, threshold_percent=2, decrease_percent=4):
         slope = self.calculate_slope()
-        print(f"Slope calculated: {slope}")
+        print(f"Slope calculated: {slope:.2f}")
 
         min_price, min_index = self.get_min_and_index()
         print(f"Min price: {min_price} at index: {min_index}")
