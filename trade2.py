@@ -14,6 +14,9 @@ from binanceapi import client, symbol, precision, get_quantity_precision, get_cu
 from utils import beep, get_interval_time, are_difference_equal_with_aprox_proc, are_values_very_close, budget, order_cost_btc, price_change_threshold, max_threshold
 import log
 import alert
+import utils
+
+
 class PriceWindow:
     def __init__(self, window_size, max_index=10000, epsilon=1e-2):
         self.window_size = window_size
@@ -149,7 +152,7 @@ class PriceWindow:
         price_change_percent = (max_price - min_price) / min_price * 100 if min_price and max_price else 0
         print(f"Price change percent: {price_change_percent}")
 
-        if price_change_percent <= threshold_percent:
+        if price_change_percent < threshold_percent and not utils.are_values_very_close(price_change_percent, threshold_percent):
             action = 'HOLD'
             print(f"Action: {action}")
             return action, current_price, price_change_percent, slope
@@ -162,20 +165,29 @@ class PriceWindow:
 
         if slope is not None and slope > 0:
             print("Market trending upwards")
-            if min_proximity < 0.2 and min_position > 0.8:
-                action = 'BUY'
-                print(f"Near recent low. Action: {action}")
+            if min_proximity < 0.2 or utils.are_values_very_close(min_proximity, 0.2, target_tolerance_percent=1.0):
+                if min_position > 0.8 or utils.are_values_very_close(min_position, 0.8, target_tolerance_percent=1.0):
+                    action = 'BUY'
+                    print(f"Near recent low. Action: {action}")
+                else:
+                    action = 'HOLD'
+                    print(f"Not near recent low. Action: {action}")
             else:
                 action = 'HOLD'
                 print(f"Not near recent low. Action: {action}")
         else:
             print("Market trending downwards")
-            if max_proximity < 0.2 and max_position > 0.8:
-                action = 'SELL'
-                print(f"Near recent high. Action: {action}")
+            if max_proximity < 0.2 or utils.are_values_very_close(max_proximity, 0.2, target_tolerance_percent=1.0):
+                if max_position > 0.8 or utils.are_values_very_close(max_position, 0.8, target_tolerance_percent=1.0):
+                    action = 'SELL'
+                    print(f"Near recent high. Action: {action}")
+                else:
+                    action = 'HOLD'
+                    print(f"Not near recent high. Action: {action}")
             else:
                 action = 'HOLD'
                 print(f"Not near recent high. Action: {action}")
+
 
         return action, proposed_price, price_change_percent, slope
 
@@ -192,7 +204,7 @@ def track_and_place_order(price_window, current_price, threshold_percent=2, decr
     if action == 'HOLD':
         return order_placed, order_id
     
-    if price_change_percent > threshold_percent:
+    if price_change_percent > threshold_percent or utils.are_values_very_close(price_change_percent, threshold_percent):
          alert.check_alert(True, f"price_change {price_change_percent:.2f}")
     else:
         return order_placed, order_id  # Exit early if no significant price change
