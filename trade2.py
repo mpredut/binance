@@ -64,7 +64,7 @@ class PriceWindow:
 
         for index, existing_price in self.min_deque:
             if abs(existing_price - price) <= self.epsilon: # are_values_very_close
-                print(f"Price {price} is approximately equal to an existing minimum: {existing_price}")
+                #print(f"Price {price} is approximately equal to an existing minimum: {existing_price}")
                 return  # Don't add the current price if an equivalent exists
 
         while self.min_deque and self.min_deque[-1][1] > price:
@@ -137,45 +137,55 @@ class PriceWindow:
         max_index = self.max_deque[0][0] if self.max_deque else 0
         return min_index / self.window_size, max_index / self.window_size
         
-    def evaluate_buy_sell_opportunity(self, current_price, threshold_percent=2, decrease_percent=4):
-        slope = self.calculate_slope()
-        min_price, min_index = self.get_min_and_index()
-        max_price, max_index = self.get_max_and_index()
-        min_position, max_position = self.calculate_positions()
-        min_proximity, max_proximity = self.calculate_proximities(current_price)
+   def evaluate_buy_sell_opportunity(self, current_price, threshold_percent=2, decrease_percent=4):
+    slope = self.calculate_slope()
+    print(f"Slope calculated: {slope}")
 
-        price_change_percent = (max_price - min_price) / min_price * 100 if min_price and max_price else 0
-        
-        if price_change_percent <= threshold_percent:
-             action = 'HOLD'
-             return action, current_price, price_change_percent, slope
+    min_price, min_index = self.get_min_and_index()
+    print(f"Min price: {min_price} at index: {min_index}")
 
-        remaining_decrease_percent = max(0, decrease_percent - price_change_percent)
-        proposed_price = current_price * (1 - remaining_decrease_percent / 100)
+    max_price, max_index = self.get_max_and_index()
+    print(f"Max price: {max_price} at index: {max_index}")
 
-        # Determine buy/sell signal based on market trend and price proximity
-        if slope is not None and slope > 0:
-            # Market is trending upwards
-            if min_proximity < 0.2 and min_position > 0.8:
-                # Near recent low
-                action = 'BUY'
-                # proposed_price = max(current_price * 0.98, min(proposed_price, current_price * 0.998))
-                # proposed_price = max(current_price * 0.98, min_price * 1.01)
-                
-            else:
-                action = 'HOLD'
+    min_position, max_position = self.calculate_positions()
+    print(f"Min position: {min_position}, Max position: {max_position}")
+
+    min_proximity, max_proximity = self.calculate_proximities(current_price)
+    print(f"Min proximity: {min_proximity}, Max proximity: {max_proximity}")
+
+    price_change_percent = (max_price - min_price) / min_price * 100 if min_price and max_price else 0
+    print(f"Price change percent: {price_change_percent}")
+
+    if price_change_percent <= threshold_percent:
+        action = 'HOLD'
+        print(f"Price change within threshold. Action: {action}")
+        return action, current_price, price_change_percent, slope
+
+    remaining_decrease_percent = max(0, decrease_percent - price_change_percent)
+    print(f"Remaining decrease percent: {remaining_decrease_percent}")
+
+    proposed_price = current_price * (1 - remaining_decrease_percent / 100)
+    print(f"Proposed price: {proposed_price}")
+
+    if slope is not None and slope > 0:
+        print("Market trending upwards")
+        if min_proximity < 0.2 and min_position > 0.8:
+            action = 'BUY'
+            print(f"Near recent low. Action: {action}")
         else:
-            # Market is trending downwards
-            if max_proximity < 0.2 and max_position > 0.8:
-                # Near recent high
-                action = 'SELL'
-                # proposed_price = min(current_price * 1.01, proposed_price)
-                # proposed_price = min(current_price * 0.998, max_price * 0.99)
-            else:
-                action = 'HOLD'
+            action = 'HOLD'
+            print(f"Not near recent low. Action: {action}")
+    else:
+        print("Market trending downwards")
+        if max_proximity < 0.2 and max_position > 0.8:
+            action = 'SELL'
+            print(f"Near recent high. Action: {action}")
+        else:
+            action = 'HOLD'
+            print(f"Not near recent high. Action: {action}")
 
+    return action, proposed_price, price_change_percent, slope
 
-        return action, proposed_price, price_change_percent, slope
         
     def current_window_size(self):
         return len(self.prices)
