@@ -318,11 +318,11 @@ while True:
 
         # Place orders based on the threshold
         if current_time - last_order_time >= TIME_SLEEP_ORDER:
-            if buy_count >= BUY_THRESHOLD:
+            if buy_count >= BUY_THRESHOLD or utils.are_values_very_close(buy_count, BUY_THRESHOLD, 1):
                 order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope, order_placed=order_placed, order_id=order_id)
                 last_order_time = current_time
                 buy_count = 0  # Reset buy count after placing the order
-            elif sell_count >= SELL_THRESHOLD:
+            elif sell_count >= SELL_THRESHOLD or utils.are_values_very_close(sell_count, SELL_THRESHOLD, 1):
                 order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope, order_placed=order_placed, order_id=order_id)
                 last_order_time = current_time
                 sell_count = 0  # Reset sell count after placing the order
