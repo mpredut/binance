@@ -131,7 +131,7 @@ class PriceWindow:
         return min_index / self.window_size, max_index / self.window_size
 
         
-    def evaluate_buy_sell_opportunity(self, current_price, threshold_percent=2, decrease_percent=4):
+    def evaluate_buy_sell_opportunity(self, current_price, threshold_percent=1, decrease_percent=3.7):
         slope = self.calculate_slope()
         print(f"Slope calculated: {slope:.2f}")
 
@@ -148,12 +148,14 @@ class PriceWindow:
         print(f"Min proximity: {min_proximity}, Max proximity: {max_proximity}")
 
         price_change_percent = (max_price - min_price) / min_price * 100 if min_price and max_price else 0
-        print(f"Price change percent: {price_change_percent}")
+        print(f"Price change percent: {price_change_percent:.2f}")
 
         if price_change_percent < threshold_percent and not utils.are_values_very_close(price_change_percent, threshold_percent):
             action = 'HOLD'
             print(f"Action: {action}")
             return action, current_price, price_change_percent, slope
+            
+        alert.check_alert(True, f"price_change {price_change_percent:.2f}")
 
         remaining_decrease_percent = max(0, decrease_percent - price_change_percent)
         print(f"Remaining decrease percent: {remaining_decrease_percent}")
@@ -193,20 +195,13 @@ class PriceWindow:
     def current_window_size(self):
         return len(self.prices)
 
-def track_and_place_order(price_window, current_price, threshold_percent=2, decrease_percent=4, quantity=0.0017, order_placed=False, order_id=None):
+def track_and_place_order(price_window, current_price, threshold_percent=2, decrease_percent=4, quantity=0.0017*3, order_placed=False, order_id=None):
 
     action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(current_price, threshold_percent, decrease_percent)
-
-    #alert.check_alert(True, f"price_change {price_change_percent:.2f}")
     
     if action == 'HOLD':
         return order_placed, order_id
-    
-    if price_change_percent > threshold_percent or utils.are_values_very_close(price_change_percent, threshold_percent):
-         alert.check_alert(True, f"price_change {price_change_percent:.2f}")
-    else:
-        return order_placed, order_id  # Exit early if no significant price change
-
+        
     # Determine the number of orders and their spacing based on price trend
     if slope is not None and slope > 0:
         # Price is rising, place fewer, larger orders
@@ -230,6 +225,8 @@ def track_and_place_order(price_window, current_price, threshold_percent=2, decr
         buy_price = min(proposed_price, current_price * 0.998)
         print(f"Adjusted buy price: {buy_price:.2f} USDT")
 
+        alert.check_alert(True, f"BUY order {buy_price:.2f}")
+       
         # Place the custom buy orders
         for i in range(num_orders):
             adjusted_buy_price = buy_price * (1 - i * price_step / 100)
@@ -251,6 +248,8 @@ def track_and_place_order(price_window, current_price, threshold_percent=2, decr
         # Adjust the sell price based on market conditions
         sell_price = max(proposed_price, current_price * 1.002)
         print(f"Adjusted sell price: {sell_price:.2f} USDT")
+        
+        alert.check_alert(True, f"SEL order {buy_price:.2f}")
 
         # Place the custom sell orders
         for i in range(num_orders):
@@ -269,7 +268,7 @@ def track_and_place_order(price_window, current_price, threshold_percent=2, decr
 
 
 TIME_SLEEP_PRICE = 4  # seconds to sleep for price collection
-TIME_SLEEP_ORDER = 30 # seconds to sleep for order placement
+TIME_SLEEP_ORDER = 97*79 # seconds to sleep for order placement
 WINDOWS_SIZE_MIN = 48 # minutes
 window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP_PRICE
 
@@ -289,7 +288,7 @@ while True:
 
         price_window.process_price(current_price)
 
-        if time.time() - last_order_time >= TIME_SLEEP_ORDER:
+        if time.time() - last_order_time >= get_interval_time(TIME_SLEEP_ORDER):
             order_placed, order_id = track_and_place_order(price_window, current_price, threshold_percent=1.5, order_placed=order_placed, order_id=order_id)
             last_order_time = time.time()
 

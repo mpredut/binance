@@ -66,7 +66,7 @@ class State:
 states = []  # List to hold all trade states
 
 MAX_ITERATIONS = 20
-TIME_QUANT =  180 #3600  # Example: 1 hour
+TIME_QUANT =  3600  # Example: 1 hour
 
 def price_changed(old_price, new_price):
     change = (new_price - old_price) / old_price
