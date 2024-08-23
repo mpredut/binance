@@ -195,9 +195,8 @@ class PriceWindow:
     def current_window_size(self):
         return len(self.prices)
 
-def track_and_place_order(price_window, current_price, threshold_percent=2, decrease_percent=4, quantity=0.0017*3, order_placed=False, order_id=None):
 
-    action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(current_price, threshold_percent, decrease_percent)
+def track_and_place_order(action, proposed_price, current_price, slope, quantity=0.0017*3, order_placed=False, order_id=None):
     
     if action == 'HOLD':
         return order_placed, order_id
@@ -249,7 +248,7 @@ def track_and_place_order(price_window, current_price, threshold_percent=2, decr
         sell_price = max(proposed_price, current_price * 1.002)
         print(f"Adjusted sell price: {sell_price:.2f} USDT")
         
-        alert.check_alert(True, f"SEL order {buy_price:.2f}")
+        alert.check_alert(True, f"SELL order {sell_price:.2f}")
 
         # Place the custom sell orders
         for i in range(num_orders):
@@ -264,12 +263,10 @@ def track_and_place_order(price_window, current_price, threshold_percent=2, decr
 
     return order_placed, order_id  # Return the updated order state
 
-
-
-
 TIME_SLEEP_PRICE = 4  # seconds to sleep for price collection
-TIME_SLEEP_ORDER = 97*79 # seconds to sleep for order placement
-WINDOWS_SIZE_MIN = 48 # minutes
+TIME_SLEEP_ORDER = 97 * 79  # seconds to sleep for order placement
+TIME_SLEEP_EVALUATE = 60  # seconds to sleep for buy/sell evaluation
+WINDOWS_SIZE_MIN = 48  # minutes
 window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP_PRICE
 
 price_window = PriceWindow(window_size)
@@ -277,6 +274,7 @@ price_window = PriceWindow(window_size)
 order_placed = False
 order_id = None
 last_order_time = time.time()
+last_evaluate_time = time.time()
 
 while True:
     try:
@@ -288,9 +286,18 @@ while True:
 
         price_window.process_price(current_price)
 
-        if time.time() - last_order_time >= get_interval_time(TIME_SLEEP_ORDER):
-            order_placed, order_id = track_and_place_order(price_window, current_price, threshold_percent=1.5, order_placed=order_placed, order_id=order_id)
-            last_order_time = time.time()
+        current_time = time.time()
+
+        # Evaluate buy/sell opportunity more frequently
+        if current_time - last_evaluate_time >= TIME_SLEEP_EVALUATE:
+            action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(current_price, threshold_percent=1.5, decrease_percent=4)
+            last_evaluate_time = current_time
+
+        # Place orders less frequently
+        if current_time - last_order_time >= TIME_SLEEP_ORDER:
+            if action in ['BUY', 'SELL']:
+                order_placed, order_id = track_and_place_order(action, proposed_price, current_price, slope, order_placed=order_placed, order_id=order_id)
+                last_order_time = current_time
 
         time.sleep(TIME_SLEEP_PRICE)
 
@@ -300,3 +307,4 @@ while True:
     except Exception as e:
         print(f"Error: {e}")
         time.sleep(TIME_SLEEP_PRICE)
+
