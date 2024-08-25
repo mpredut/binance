@@ -263,11 +263,11 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
 
     return order_placed, order_id  # Return the updated order state
 
-TIME_SLEEP_PRICE = 4  # seconds to sleep for price collection
+TIME_SLEEP_GET_PRICE = 4  # seconds to sleep for price collection
 TIME_SLEEP_ORDER = 4*79  # seconds to sleep for order placement
 TIME_SLEEP_EVALUATE = 60  # seconds to sleep for buy/sell evaluation
 WINDOWS_SIZE_MIN = 48  # minutes
-window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP_PRICE
+window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP_GET_PRICE
 
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
@@ -286,7 +286,7 @@ while True:
     try:
         current_price = get_current_price()
         if current_price is None:
-            time.sleep(TIME_SLEEP_PRICE)
+            time.sleep(TIME_SLEEP_GET_PRICE)
             continue
         print(f"BTC: {current_price}")
 
@@ -296,16 +296,16 @@ while True:
 
         # Evaluate buy/sell opportunity more frequently
         if current_time - last_evaluate_time >= TIME_SLEEP_EVALUATE:
-            action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(current_price, threshold_percent=1.5, decrease_percent=4)
+            action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(current_price, threshold_percent=0.8, decrease_percent=4)
             last_evaluate_time = current_time
 
             # Count consecutive BUY/SELL actions
             if action == 'BUY':
                 buy_count += 1
-                #sell_count -= 1  # Reset sell count if a BUY signal is received
+                sell_count -= 1  # Reset sell count if a BUY signal is received
             elif action == 'SELL':
                 sell_count += 1
-                #buy_count -= 1  # Reset buy count if a SELL signal is received
+                buy_count -= 1  # Reset buy count if a SELL signal is received
             else:
                 buy_count -= 1
                 sell_count -= 1
@@ -317,8 +317,8 @@ while True:
             
 
         # Place orders based on the threshold
-        if current_time - last_order_time >= TIME_SLEEP_ORDER and utils.are_values_very_close(max(buy_count, sell_count), SELL_BUY_THRESHOLD) :
-            if buy_count >= sell_count:
+        if current_time - last_order_time >= TIME_SLEEP_ORDER and utils.are_values_very_close(max(buy_count, sell_count), SELL_BUY_THRESHOLD, 1) :
+            if buy_count >= sell_count :
                 order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope, order_placed=order_placed, order_id=order_id)
                 last_order_time = current_time
                 #buy_count = 0  # Reset buy count after placing the order
@@ -327,11 +327,12 @@ while True:
                 last_order_time = current_time
                 #sell_count = 0  # Reset sell count after placing the order
 
-        time.sleep(TIME_SLEEP_PRICE)
+        time.sleep(TIME_SLEEP_GET_PRICE)
 
     except BinanceAPIException as e:
         print(f"Binance API Error: {e}")
-        time.sleep(TIME_SLEEP_PRICE)
+        time.sleep(TIME_SLEEP_GET_PRICE)
     except Exception as e:
         print(f"Error: {e}")
-        time.sleep(TIME_SLEEP_PRICE)
+        time.sleep(TIME_SLEEP_GET_PRICE)
+
