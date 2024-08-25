@@ -10,7 +10,7 @@ from apikeys import api_key, api_secret
 # my imports
 import binanceapi as api
 import utils as u
-from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, place_buy_order, place_sell_order, check_order_filled, cancel_order, get_open_sell_orders
+from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, check_order_filled, cancel_order, get_open_sell_orders
 from utils import beep, get_interval_time, are_difference_equal_with_aprox_proc, are_values_very_close, budget, order_cost_btc, price_change_threshold, max_threshold
 import log
 import alert
@@ -195,9 +195,8 @@ class PriceWindow:
     def current_window_size(self):
         return len(self.prices)
 
-def track_and_place_order(price_window, current_price, threshold_percent=2, decrease_percent=4, quantity=0.0017*3, order_placed=False, order_id=None):
 
-    action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(current_price, threshold_percent, decrease_percent)
+def track_and_place_order(action, proposed_price, current_price, slope, quantity=0.0017*3, order_placed=False, order_id=None):
     
     if action == 'HOLD':
         return order_placed, order_id
@@ -232,7 +231,7 @@ def track_and_place_order(price_window, current_price, threshold_percent=2, decr
             adjusted_buy_price = buy_price * (1 - i * price_step / 100)
             order_quantity = quantity / num_orders  # Divide quantity among orders
             print(f"Placing buy order at price: {adjusted_buy_price:.2f} USDT for {order_quantity:.6f} BTC")
-            order = place_buy_order(adjusted_buy_price, order_quantity)
+            order = place_order("buy", adjusted_buy_price, order_quantity)
             if order:
                 print(f"Buy order placed successfully with ID: {order['orderId']}")
                 order_placed = True
@@ -249,14 +248,14 @@ def track_and_place_order(price_window, current_price, threshold_percent=2, decr
         sell_price = max(proposed_price, current_price * 1.002)
         print(f"Adjusted sell price: {sell_price:.2f} USDT")
         
-        alert.check_alert(True, f"SEL order {buy_price:.2f}")
+        alert.check_alert(True, f"SELL order {sell_price:.2f}")
 
         # Place the custom sell orders
         for i in range(num_orders):
             adjusted_sell_price = sell_price * (1 + i * price_step / 100)
             order_quantity = quantity / num_orders  # Divide quantity among orders
             print(f"Placing sell order at price: {adjusted_sell_price:.2f} USDT for {order_quantity:.6f} BTC")
-            order = place_sell_order(adjusted_sell_price, order_quantity)
+            order = place_order("sell", adjusted_sell_price, order_quantity)
             if order:
                 print(f"Sell order placed successfully with ID: {order['orderId']}")
                 order_placed = True
@@ -264,19 +263,24 @@ def track_and_place_order(price_window, current_price, threshold_percent=2, decr
 
     return order_placed, order_id  # Return the updated order state
 
-
-
-
 TIME_SLEEP_PRICE = 4  # seconds to sleep for price collection
-TIME_SLEEP_ORDER = 97*79 # seconds to sleep for order placement
-WINDOWS_SIZE_MIN = 48 # minutes
+TIME_SLEEP_ORDER = 4*79  # seconds to sleep for order placement
+TIME_SLEEP_EVALUATE = 60  # seconds to sleep for buy/sell evaluation
+WINDOWS_SIZE_MIN = 48  # minutes
 window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP_PRICE
+
+SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
 price_window = PriceWindow(window_size)
 
 order_placed = False
 order_id = None
 last_order_time = time.time()
+last_evaluate_time = time.time()
+
+# Counters for BUY and SELL evaluations
+buy_count = 0
+sell_count = 0
 
 while True:
     try:
@@ -288,9 +292,40 @@ while True:
 
         price_window.process_price(current_price)
 
-        if time.time() - last_order_time >= get_interval_time(TIME_SLEEP_ORDER):
-            order_placed, order_id = track_and_place_order(price_window, current_price, threshold_percent=1.5, order_placed=order_placed, order_id=order_id)
-            last_order_time = time.time()
+        current_time = time.time()
+
+        # Evaluate buy/sell opportunity more frequently
+        if current_time - last_evaluate_time >= TIME_SLEEP_EVALUATE:
+            action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(current_price, threshold_percent=1.5, decrease_percent=4)
+            last_evaluate_time = current_time
+
+            # Count consecutive BUY/SELL actions
+            if action == 'BUY':
+                buy_count += 1
+                #sell_count -= 1  # Reset sell count if a BUY signal is received
+            elif action == 'SELL':
+                sell_count += 1
+                #buy_count -= 1  # Reset buy count if a SELL signal is received
+            else:
+                buy_count -= 1
+                sell_count -= 1
+            if buy_count < 0:
+                buy_count = 0
+            if sell_count < 0:
+                sell_count = 0
+            
+            
+
+        # Place orders based on the threshold
+        if current_time - last_order_time >= TIME_SLEEP_ORDER and utils.are_values_very_close(max(buy_count, sell_count), SELL_BUY_THRESHOLD) :
+            if buy_count >= sell_count:
+                order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope, order_placed=order_placed, order_id=order_id)
+                last_order_time = current_time
+                #buy_count = 0  # Reset buy count after placing the order
+            else:
+                order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope, order_placed=order_placed, order_id=order_id)
+                last_order_time = current_time
+                #sell_count = 0  # Reset sell count after placing the order
 
         time.sleep(TIME_SLEEP_PRICE)
 

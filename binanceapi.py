@@ -83,12 +83,27 @@ def place_order(order_type, price, quantity):
         quantity = round(quantity, 5)
         
         if order_type.lower() == 'buy':
+            open_sell_orders = get_open_sell_orders()
+            # Anulează ordinele de vânzare existente la un preț mai mic decât prețul de cumpărare dorit
+            for order_id, order_details in open_sell_orders.items():
+                if order_details['price'] < price:
+                    cancel_order(order_id)
+            
+            # Plasează ordinul de cumpărare
             order = client.order_limit_buy(
                 symbol=symbol,
                 quantity=quantity,
                 price=str(price)
             )
+        
         elif order_type.lower() == 'sell':
+            open_buy_orders = get_open_buy_orders(symbol)
+            # Anulează ordinele de cumpărare existente la un preț mai mare decât prețul de vânzare dorit
+            for order_id, order_details in open_buy_orders.items():
+                if order_details['price'] > price:
+                    cancel_order(order_id)
+            
+            # Plasează ordinul de vânzare
             order = client.order_limit_sell(
                 symbol=symbol,
                 quantity=quantity,
@@ -102,6 +117,7 @@ def place_order(order_type, price, quantity):
     except BinanceAPIException as e:
         print(f"Eroare la plasarea ordinului de {order_type}: {e}")
         return None
+
 
 
 def check_order_filled(order_id):

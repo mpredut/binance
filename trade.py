@@ -10,7 +10,7 @@ from binance.exceptions import BinanceAPIException
 #my imports
 import binanceapi as api
 import utils as u
-from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, place_buy_order, place_sell_order, check_order_filled, cancel_order, get_open_sell_orders
+from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, check_order_filled, cancel_order, get_open_sell_orders
 from utils import beep, get_interval_time, are_difference_equal_with_aprox_proc, are_values_very_close, budget, order_cost_btc, price_change_threshold, max_threshold
 
 
@@ -132,7 +132,7 @@ while True:
                     proc = calculate_sell_proc(5/100, changed_proc, state.iteration, MAX_ITERATIONS)
                     proc = max(1.001, 1 + proc)
                     sell_price = state.buy_price * proc
-                    sell_order = place_sell_order(sell_price, state.quantity)
+                    sell_order = place_order("sell", sell_price, state.quantity)
                     if sell_order:
                         state.sell_order_id = sell_order['orderId']
                         state.iteration += 1
@@ -185,7 +185,7 @@ while True:
             
             btc_buy_quantity = budget / buy_price
             print(f"Plasez ordinul de cumpărare la prețul: {buy_price}, cantitate: {btc_buy_quantity}")
-            buy_order = place_buy_order(buy_price, btc_buy_quantity)
+            buy_order = place_order("buy", buy_price, btc_buy_quantity)
             
             if buy_order:
                 last_state = State("Profit",
