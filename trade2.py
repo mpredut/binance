@@ -38,7 +38,7 @@ class PriceWindow:
         self._manage_maximum(price)
 
         self.current_index += 1
-        print(f"BTC: {current_price} Current index in window: {self.current_index}")
+        print(f"BTC: {round(current_price, 0):.0f} Current index in window: {self.current_index}")
        
         if self.current_index > self.max_index:
             print(f"Start normalize indexes")
@@ -138,7 +138,7 @@ class PriceWindow:
         max_price, max_index = self.get_max_and_index()
         
         print(
-            f"Min price: {min_price} at index: {min_index}"
+            f"Min price: {min_price} at index: {min_index} "
             f"Max price: {max_price} at index: {max_index}"
         )
 
@@ -146,7 +146,7 @@ class PriceWindow:
         min_proximity, max_proximity = self.calculate_proximities(current_price)
  
         print(
-            f"Min position: {min_position}, Max position: {max_position}"
+            f"Min position: {min_position}, Max position: {max_position} "
             f"Min proximity: {min_proximity}, Max proximity: {max_proximity}"
         )
         

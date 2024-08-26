@@ -41,7 +41,7 @@ precision = 8
 print(f"Precision is {precision}")
 
 
-def get_current_price():
+def get_current_price(symbol):
     try:
         ticker = client.get_symbol_ticker(symbol=symbol)
         return float(ticker['price'])
@@ -49,7 +49,7 @@ def get_current_price():
         print(f"Eroare la obținerea prețului curent: {e}")
         return None
     
-def place_buy_order(price, quantity):
+def place_buy_order(symbol, price, quantity):
     try:
         price = round(price, 0)
         quantity = round(quantity, 5)    
@@ -63,7 +63,7 @@ def place_buy_order(price, quantity):
         print(f"Eroare la plasarea ordinului de cumpărare: {e}")
         return None
 
-def place_sell_order(price, quantity):
+def place_sell_order(symbol, price, quantity):
     try:
         price = round(price, 0)
         quantity = round(quantity, 5)    
@@ -77,13 +77,13 @@ def place_sell_order(price, quantity):
         print(f"Eroare la plasarea ordinului de vânzare: {e}")
         return None
 
-def place_order(order_type, price, quantity):
+def place_order(order_type, symbol, price, quantity):
     try:
         price = round(price, 0)
         quantity = round(quantity, 5)
         
         if order_type.lower() == 'buy':
-            open_sell_orders = get_open_sell_orders()
+            open_sell_orders = get_open_sell_orders(symbol)
             # Anulează ordinele de vânzare existente la un preț mai mic decât prețul de cumpărare dorit
             for order_id, order_details in open_sell_orders.items():
                 if order_details['price'] < price:
@@ -141,7 +141,27 @@ def cancel_order(order_id):
         print(f"Eroare la anularea ordinului: {e}")
         return False
 
-def get_open_sell_orders():
+import time
+
+def cancel_expired_orders(order_type, symbol, expire_time):
+    if order_type == 'buy':
+        open_orders = get_open_buy_orders(symbol)
+    elif order_type == 'sell':
+        open_orders = get_open_sell_orders(symbol)
+    else:
+        raise ValueError("order_type must be 'buy' or 'sell'")
+    
+    current_time = time.time()
+
+    for order_id, order_details in open_orders.items():
+        order_time = order_details.get('timestamp')
+
+        if current_time - order_time > expire_time:
+            cancel_order(order_id)
+            print(f"Cancelled {order_type} order with ID: {order_id} due to expiration.")
+
+
+def get_open_sell_orders(symbol):
     try:
         open_orders = client.get_open_orders(symbol=symbol)
         sell_orders = {
@@ -171,7 +191,7 @@ def get_open_buy_orders(symbol):
         print(f"Error getting open buy orders: {e}")
         return {}
 
-def get_open_orders(order_type):
+def get_open_orders(order_type, symbol):
     try:
         open_orders = client.get_open_orders(symbol=symbol)
         
