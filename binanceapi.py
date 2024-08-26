@@ -177,10 +177,95 @@ def check_order_filled(order_id):
         print(f"Eroare la verificarea stării ordinului: {e}")
         return False
 
+def get_filled_orders(order_type, symbol):
 
+    all_orders = client.get_all_orders(symbol=symbol)
+    # Filtrăm ordinele complet executate și pe cele care corespund tipului de ordin specificat
+    filled_orders = [
+        {
+            'orderId': order['orderId'],
+            'price': float(order['price']),
+            'quantity': float(order['origQty']),
+            'timestamp': order['time'] / 1000,  # Timpul în secunde
+            'side': order['side'].lower()
+        }
+        for order in all_orders if order['status'] == 'FILLED' and order['side'].lower() == order_type.lower()
+    ]
+    
+    return filled_orders
+    
+def debug_get_filled_orders(order_type, symbol):
+    print(f"Fetching all orders for symbol: {symbol}")
+    all_orders = client.get_all_orders(symbol=symbol)
+    
+    print(f"Total orders fetched: {len(all_orders)}")
+    
+    filtered_orders = []
+    for order in all_orders:
+        # Afișăm fiecare ordin pentru a verifica structura și valorile cheilor relevante
+        print(f"Order ID: {order['orderId']}, Status: {order['status']}, Side: {order['side']}, Type: {order['type']}, Time: {order['time']}")
+        
+        # Verifică dacă ordinul este FILLED și are tipul corect (buy sau sell)
+        if order['status'] == 'FILLED' and order['side'].lower() == order_type.lower():
+            filtered_order = {
+                'orderId': order['orderId'],
+                'price': float(order['price']),
+                'quantity': float(order['origQty']),
+                'timestamp': order['time'] / 1000,  # Timpul în secunde
+                'side': order['side'].lower()
+            }
+            filtered_orders.append(filtered_order)
+    
+    print(f"Filtered filled orders of type '{order_type}': {len(filtered_orders)}")
+    print("First few filled orders for inspection:")
+    for filled_order in filtered_orders[:5]:  # Afișează primele 5 ordine complet executate
+        print(filled_order)
+    
+    return filtered_orders
+
+def get_old_orders(symbol, limit=1000):
+    start_date = datetime.datetime(2023, 6, 1)  # 1 iunie 2023
+    end_date = datetime.datetime(2023, 6, 30, 23, 59, 59)  # 30 iunie 2023, ora 23:59:59
+
+    # Obținem timestamp-urile în milisecunde
+    start_time = int(start_date.timestamp() * 1000)
+    end_time = int(end_date.timestamp() * 1000)
+    
+    delta = datetime.timedelta(days=1)
+    end_time = int((start_date + delta).timestamp() * 1000)
+
+    all_orders = []
+    
+    while True:
+        orders = client.get_all_orders(symbol=symbol, startTime=start_time, endTime=end_time, limit=limit)
+        if not orders:
+            break
+        
+        all_orders.extend(orders)
+        end_time = orders[-1]['time']  # Ajustează end_time pentru a continua de la ultimul ordin
+        
+        # Verifică dacă am ajuns la limitele ordinelor vechi
+        if len(orders) < limit:
+            break
+    
+    # Filtrează doar ordinele FILLED și sortează-le după timp
+    filled_orders = [order for order in all_orders if order['status'] == 'FILLED']
+    filled_orders.sort(key=lambda x: x['time'])
+    
+    return filled_orders
+
+# Exemplu de utilizare
+symbol = 'BTCUSDT'
+old_filled_orders = get_old_orders(symbol)
+
+# Afișează primele 5 ordine vechi FILLED
+for order in old_filled_orders[:5]:
+    print(order)
+
+    
 def get_recent_filled_orders(order_type, max_age_seconds):
 
-    all_filled_orders = api.get_filled_orders(order_type)
+    all_filled_orders = get_filled_orders(order_type, symbol)
     recent_filled_orders = []
     current_time = time.time()
 
