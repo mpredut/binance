@@ -38,8 +38,8 @@ class PriceWindow:
         self._manage_maximum(price)
 
         self.current_index += 1
-        print(f"Current index in window: {self.current_index}")
-
+        print(f"BTC: {current_price} Current index in window: {self.current_index}")
+       
         if self.current_index > self.max_index:
             print(f"Start normalize indexes")
             self._normalize_indices()
@@ -292,7 +292,6 @@ while True:
         if current_price is None:
             time.sleep(TIME_SLEEP_GET_PRICE)
             continue
-        print(f"BTC: {current_price}")
 
         price_window.process_price(current_price)
 
