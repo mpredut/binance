@@ -104,7 +104,7 @@ class PriceWindow:
         max_price = self.get_max()
 
         if min_price is None or max_price is None:
-            return None
+            return 0
 
         min_index = self.min_deque[0][1]
         max_index = self.max_deque[0][1]
@@ -133,37 +133,43 @@ class PriceWindow:
         
     def evaluate_buy_sell_opportunity(self, current_price, threshold_percent=1, decrease_percent=3.7):
         slope = self.calculate_slope()
-        print(f"Slope calculated: {slope:.2f}")
-
+     
         min_price, min_index = self.get_min_and_index()
-        print(f"Min price: {min_price} at index: {min_index}")
-
         max_price, max_index = self.get_max_and_index()
-        print(f"Max price: {max_price} at index: {max_index}")
+        
+        print(
+            f"Min price: {min_price} at index: {min_index}"
+            f"Max price: {max_price} at index: {max_index}"
+        )
 
         min_position, max_position = self.calculate_positions()
-        print(f"Min position: {min_position}, Max position: {max_position}")
-
         min_proximity, max_proximity = self.calculate_proximities(current_price)
-        print(f"Min proximity: {min_proximity}, Max proximity: {max_proximity}")
-
+ 
+        print(
+            f"Min position: {min_position}, Max position: {max_position}"
+            f"Min proximity: {min_proximity}, Max proximity: {max_proximity}"
+        )
+        
         price_change_percent = (max_price - min_price) / min_price * 100 if min_price and max_price else 0
-        print(f"Price change percent: {price_change_percent:.2f}")
+        print(
+            f"Price change percent: {price_change_percent:.2f} "
+            f"slope: {slope:.2f} "
+            f"Market trending: {'upwards' if slope > 0 else 'downwards'}"
+        )
 
         if price_change_percent < threshold_percent and not utils.are_values_very_close(price_change_percent, threshold_percent):
             action = 'HOLD'
             print(f"Action: {action}")
             return action, current_price, price_change_percent, slope
             
-        alert.check_alert(True, f"price_change {price_change_percent:.2f}")
+        alert.check_alert(True, f"Price changed {price_change_percent:.2f}%. Current price {current_price}")
         action = 'BUY'
         remaining_decrease_percent = max(0, decrease_percent - price_change_percent)
         print(f"Remaining decrease percent: {remaining_decrease_percent}")
         proposed_price = current_price * (1 - remaining_decrease_percent / 100)
-        print(f"Proposed price: {proposed_price}")
+        print(f"Proposed price: {proposed_price} Action: {action}")
         
-
-        if slope is not None and slope > 0:
+        if slope > 0:
             print("Market trending upwards")
             if min_proximity < 0.2 or utils.are_values_very_close(min_proximity, 0.2, target_tolerance_percent=1.0):
                 if min_position > 0.8 or utils.are_values_very_close(min_position, 0.8, target_tolerance_percent=1.0):
@@ -171,12 +177,6 @@ class PriceWindow:
                     print(f"Near recent low. Action: {action}")
                     proposed_price = current_price * 0.995
                     print(f"Proposed price updated  to {proposed_price} to be close to current price {current_price}")
-                else:
-                    #action = 'HOLD'
-                    print(f"Not near recent low. Action: {action}")
-            else:
-                #action = 'HOLD'
-                print(f"Not near recent low. Action: {action}")
         else:
             print("Market trending downwards")
             if max_proximity < 0.2 or utils.are_values_very_close(max_proximity, 0.2, target_tolerance_percent=1.0):
@@ -185,13 +185,6 @@ class PriceWindow:
                     print(f"Near recent high. Action: {action}")
                     proposed_price = current_price * 1.005
                     print(f"Proposed price updated  to {proposed_price} to be close to current price {current_price}")
-                else:
-                    #action = 'HOLD'
-                    print(f"Not near recent high. Action: {action}")
-            else:
-                #action = 'HOLD'
-                print(f"Not near recent high. Action: {action}")
-
 
         return action, proposed_price, price_change_percent, slope
 
