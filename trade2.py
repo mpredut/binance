@@ -10,7 +10,7 @@ from apikeys import api_key, api_secret
 # my imports
 import binanceapi as api
 import utils as u
-from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, check_order_filled, cancel_order
+from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, check_order_filled, place_order, cancel_order
 from utils import beep, get_interval_time, are_difference_equal_with_aprox_proc, are_values_very_close, budget, order_cost_btc, price_change_threshold, max_threshold
 import log
 import alert

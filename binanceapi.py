@@ -118,6 +118,53 @@ def place_order(order_type, symbol, price, quantity):
         print(f"Eroare la plasarea ordinului de {order_type}: {e}")
         return None
 
+def place_order_force(order_type, symbol, price, quantity):
+    try:
+        price = round(price, 0)
+        quantity = round(quantity, 5)
+        
+        # Obține ordinele deschise pentru tipul opus
+        if order_type.lower() == 'buy':
+            open_orders = get_open_sell_orders(symbol)
+        elif order_type.lower() == 'sell':
+            open_orders = get_open_buy_orders(symbol)
+        else:
+            print("Tipul ordinului este invalid. Trebuie să fie 'buy' sau 'sell'.")
+            return None
+        
+        # Anulează ordinele existente dacă e necesar
+        for order_id, order_details in open_orders.items():
+            if (order_type.lower() == 'buy' and order_details['price'] < price) or \
+               (order_type.lower() == 'sell' and order_details['price'] > price):
+                cancel_order(order_id)
+        
+        # Plasează ordinul
+        if order_type.lower() == 'buy':
+            order = client.order_limit_buy(
+                symbol=symbol,
+                quantity=quantity,
+                price=str(price)
+            )
+        else:
+            order = client.order_limit_sell(
+                symbol=symbol,
+                quantity=quantity,
+                price=str(price)
+            )
+        
+        return order
+    
+    except BinanceAPIException as e:
+        print(f"Eroare la plasarea ordinului de {order_type}: {e}")
+
+        if "insufficient funds" in str(e).lower():
+            print("Fonduri insuficiente detectate. Anulăm un ordin recent și încercăm din nou.")
+            
+            for order_id in open_orders:
+                if cancel_order(order_id):
+                    return place_order(order_type, symbol, price, quantity)
+        
+        return None
 
 
 def check_order_filled(order_id):
@@ -129,6 +176,22 @@ def check_order_filled(order_id):
     except BinanceAPIException as e:
         print(f"Eroare la verificarea stării ordinului: {e}")
         return False
+
+
+def get_recent_filled_orders(order_type, max_age_seconds):
+
+    all_filled_orders = api.get_filled_orders(order_type)
+    recent_filled_orders = []
+    current_time = time.time()
+
+    for order in all_filled_orders:
+        order_time = order['timestamp']
+        
+        if current_time - order_time <= max_age_seconds:
+            recent_filled_orders.append(order)
+    
+    return recent_filled_orders
+
         
 def cancel_order(order_id):
     try:
@@ -140,8 +203,6 @@ def cancel_order(order_id):
     except BinanceAPIException as e:
         print(f"Eroare la anularea ordinului: {e}")
         return False
-
-import time
 
 def cancel_expired_orders(order_type, symbol, expire_time):
     if order_type == 'buy':
