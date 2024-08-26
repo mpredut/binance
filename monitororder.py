@@ -18,6 +18,82 @@ initial_buy_prices = {}  # Dicționar pentru a reține prețurile inițiale ale 
 max_adjustments = 1000  # Număr maxim de ajustări pentru un ordin
 
 
+import threading
+import time
+
+def adjust_monitor_interval(initial_interval, min_interval, total_duration, elapsed_time):
+    if elapsed_time >= total_duration:
+        return min_interval
+    
+    interval_range = initial_interval - min_interval
+    time_fraction = elapsed_time / total_duration
+    current_interval = initial_interval - (interval_range * time_fraction)
+    
+    return max(current_interval, min_interval)
+
+def sell_order_gradually(order, start_time, end_time):
+    filled_quantity = order['quantity']
+    filled_price = order['price']
+    order_id = order.get('orderId')
+
+    initial_interval = 20  # Interval inițial de monitorizare (în secunde)
+    min_interval = 5       # Interval minim de monitorizare (în secunde)
+    total_duration = end_time - start_time  # Durata totală a procesului
+    
+    while time.time() < end_time:
+        elapsed_time = time.time() - start_time
+        monitor_interval = adjust_monitor_interval(initial_interval, min_interval, total_duration, elapsed_time)
+        
+        print(f"Monitor interval: {monitor_interval:.2f} seconds")
+
+        current_price = get_current_price(symbol)
+
+        if current_price is None:
+            print("Eroare la obținerea prețului. Încerc din nou în câteva secunde.")
+            time.sleep(monitor_interval)
+            continue
+
+        time_fraction = elapsed_time / total_duration
+
+        # Calculăm prețul propus
+        if current_price > filled_price:
+            target_price = max(filled_price * 1.01, current_price * 1.01)  # Preț mai mare cu 1%
+        else:
+            target_price = filled_price * (1 + time_fraction * (current_price / filled_price - 1))
+
+        print(f"Vânzare graduală: target_price={target_price:.2f}, current_price={current_price:.2f}")
+
+        # Anulăm ordinul anterior înainte de a plasa unul nou
+        if order_id:
+            cancel_order(order_id)
+            print(f"Anulat ordinul anterior cu ID: {order_id}")
+
+        # Plasăm ordinul de vânzare
+        new_order = place_sell_order(symbol, target_price, filled_quantity)
+        if new_order:
+            order_id = new_order['orderId']
+            print(f"Plasat ordin de vânzare la prețul {target_price:.2f}. New Order ID: {order_id}")
+        else:
+            print("Eroare la plasarea ordinului de vânzare.")
+            order_id = None  # Resetează ID-ul ordinului dacă plasarea eșuează
+        
+        # Așteptăm un interval ajustat înainte de următoarea ajustare
+        time.sleep(monitor_interval)
+
+def monitor_filled_buy_orders():
+    max_age_seconds = 2 * 3600  # Timpul maxim în care ordinele executate sunt considerate recente (2 ore)
+    filled_buy_orders = get_recent_filled_orders('buy', max_age_seconds)
+
+    for order in filled_buy_orders:
+        current_time = time.time()
+        end_time = current_time + 2 * 3600  # Procesul durează două ore
+
+        # Pornim un fir nou pentru fiecare ordin de cumpărare executat recent
+        thread = threading.Thread(target=sell_order_gradually, args=(order, current_time, end_time))
+        thread.start()
+
+
+
 def monitor_orders_by_type(order_type):
     orders = api.get_open_orders(order_type)  # Obține ordinele de vânzare sau cumpărare în funcție de tip
     if not orders:
