@@ -35,26 +35,30 @@ def send_email(subject, body, to_email):
     server.sendmail(SMTP_USERNAME, to_email, text)
     server.quit()
 
-def check_alert(condition, message, alert_interval=60):
 
+def check_alert(condition, message, alert_interval=60):
     global last_alert_time
     current_time = time.time()
 
-    if condition:
-        if last_alert_time is None or (current_time - last_alert_time) >= alert_interval:
-            #timestamp = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(current_time))
-            timestamp = time.strftime('%H:%M:%S', time.localtime(current_time))
-            message_with_time = f"{message} at {timestamp}"
+    try:
+        if condition:
+            if last_alert_time is None or (current_time - last_alert_time) >= alert_interval:
+                timestamp = time.strftime('%H:%M:%S', time.localtime(current_time))
+                message_with_time = f"{message} at {timestamp}"
+                
+                # Send push notification on Android
+                send_push_notification("Alertă Trading", message_with_time)
+                #send_email(
+                #    subject="Alertă Trading",
+                #    body=message_with_time,
+                #    to_email=TO_EMAIL
+                #)
             
-            # Trimite notificare push pe Android
-            send_push_notification("Alertă Trading", message_with_time)
-            
-            #send_email(
-            #    subject="Alertă Trading",
-            #    body=message_with_time,
-            #    to_email=TO_EMAIL
-            #)
-            
-            # Actualizează timpul ultimei alerte
-            last_alert_time = current_time
-
+                # Update the last alert time
+                last_alert_time = current_time
+                
+    except Exception as e:
+        # Handle the exception (e.g., log it, print it, etc.)
+        print(f"An error occurred: {str(e)}")
+        # Optionally, re-raise the exception if you want it to propagate further
+        # raise
