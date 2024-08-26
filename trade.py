@@ -94,7 +94,7 @@ def ready_to_buy(old_state, new_state, threshold, max_treshold, time_limit_secon
 
 
 beep(1)
-last_state = State("none", get_current_price(), timestamp=datetime.now())
+last_state = State("none", get_current_price(symbol), timestamp=datetime.now())
 #last_state.price = 55635
 if last_state.price:
    print(f"Prețul curent al BTC: {last_state.price}")
@@ -107,7 +107,7 @@ current_buy_order_id = None
 #states.append(last_state)
 while True:
     try:
-        current_state = State("none", get_current_price(), timestamp=datetime.now())
+        current_state = State("none", get_current_price(symbol), timestamp=datetime.now())
         if current_state.price is None:
             print("Eroare la obținerea prețului. Încerc din nou în câteva secunde.")
             time.sleep(1)
@@ -132,7 +132,7 @@ while True:
                     proc = calculate_sell_proc(5/100, changed_proc, state.iteration, MAX_ITERATIONS)
                     proc = max(1.001, 1 + proc)
                     sell_price = state.buy_price * proc
-                    sell_order = place_order("sell", sell_price, state.quantity)
+                    sell_order = place_order("sell", symbol, sell_price, state.quantity)
                     if sell_order:
                         state.sell_order_id = sell_order['orderId']
                         state.iteration += 1
@@ -185,7 +185,7 @@ while True:
             
             btc_buy_quantity = budget / buy_price
             print(f"Plasez ordinul de cumpărare la prețul: {buy_price}, cantitate: {btc_buy_quantity}")
-            buy_order = place_order("buy", buy_price, btc_buy_quantity)
+            buy_order = place_order("buy", symbol, buy_price, btc_buy_quantity)
             
             if buy_order:
                 last_state = State("Profit",
