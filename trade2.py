@@ -32,7 +32,7 @@ class PriceWindow:
 
         if len(self.prices) > self.window_size:
             removed_price = self.prices.popleft()
-            print(f"Price removed from window: {removed_price}")
+            #print(f"Price removed from window: {removed_price}")
 
         self._manage_minimum(price)
         self._manage_maximum(price)
@@ -64,7 +64,7 @@ class PriceWindow:
 
         while self.min_deque and self.min_deque[-1][0] > price:
             removed_min = self.min_deque.pop()
-            print(f"Minimums removed from back: {removed_min}")
+            #print(f"Minimums removed from back: {removed_min}")
 
         self.min_deque.append((price, self.current_index))
 
@@ -75,7 +75,7 @@ class PriceWindow:
 
         while self.max_deque and self.max_deque[-1][0] <= price:
             removed_max = self.max_deque.pop()
-            print(f"Maximums removed from back: {removed_max}")
+            #print(f"Maximums removed from back: {removed_max}")
 
         self.max_deque.append((price, self.current_index))
 
@@ -156,12 +156,12 @@ class PriceWindow:
             return action, current_price, price_change_percent, slope
             
         alert.check_alert(True, f"price_change {price_change_percent:.2f}")
-
+        action = 'BUY'
         remaining_decrease_percent = max(0, decrease_percent - price_change_percent)
         print(f"Remaining decrease percent: {remaining_decrease_percent}")
-
         proposed_price = current_price * (1 - remaining_decrease_percent / 100)
         print(f"Proposed price: {proposed_price}")
+        
 
         if slope is not None and slope > 0:
             print("Market trending upwards")
@@ -169,11 +169,13 @@ class PriceWindow:
                 if min_position > 0.8 or utils.are_values_very_close(min_position, 0.8, target_tolerance_percent=1.0):
                     action = 'BUY'
                     print(f"Near recent low. Action: {action}")
+                    proposed_price = current_price * 0.995
+                    print(f"Proposed price updated  to {proposed_price} to be close to current price {current_price}")
                 else:
-                    action = 'HOLD'
+                    #action = 'HOLD'
                     print(f"Not near recent low. Action: {action}")
             else:
-                action = 'HOLD'
+                #action = 'HOLD'
                 print(f"Not near recent low. Action: {action}")
         else:
             print("Market trending downwards")
@@ -181,11 +183,13 @@ class PriceWindow:
                 if max_position > 0.8 or utils.are_values_very_close(max_position, 0.8, target_tolerance_percent=1.0):
                     action = 'SELL'
                     print(f"Near recent high. Action: {action}")
+                    proposed_price = current_price * 1.005
+                    print(f"Proposed price updated  to {proposed_price} to be close to current price {current_price}")
                 else:
-                    action = 'HOLD'
+                    #action = 'HOLD'
                     print(f"Not near recent high. Action: {action}")
             else:
-                action = 'HOLD'
+                #action = 'HOLD'
                 print(f"Not near recent high. Action: {action}")
 
 
