@@ -95,12 +95,12 @@ def monitor_filled_buy_orders():
 
 
 def monitor_orders_by_type(order_type):
-    orders = api.get_open_orders(order_type)  # Obține ordinele de vânzare sau cumpărare în funcție de tip
+    orders = api.get_open_orders(order_type, api.symbol)  # Obține ordinele de vânzare sau cumpărare în funcție de tip
     if not orders:
         print(f"Nu există ordine de {order_type} deschise inițial.")
         return
     
-    current_price = api.get_current_price()
+    current_price = api.get_current_price(api.symbol)
     if current_price is None:
         print("Eroare la obținerea prețului. Încerc din nou în câteva secunde.")
         time.sleep(2)
@@ -144,7 +144,7 @@ def monitor_orders_by_type(order_type):
             
             quantity = order['quantity']
             
-            new_order = api.place_order(order_type, new_price, quantity)
+            new_order = api.place_order(order_type,  api.symbol, new_price, quantity)
             
             if new_order:    
                 orders[new_order['orderId']] = {
