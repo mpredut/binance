@@ -165,9 +165,9 @@ class PriceWindow:
         alert.check_alert(True, f"Price changed {price_change_percent:.2f}%. Current price {current_price}")
         action = 'BUY'
         remaining_decrease_percent = max(0, decrease_percent - price_change_percent)
-        print(f"Remaining decrease percent: {remaining_decrease_percent}")
+        print(f"Remaining decrease percent: {remaining_decrease_percent:.2f}")
         proposed_price = current_price * (1 - remaining_decrease_percent / 100)
-        print(f"Proposed price: {proposed_price} Action: {action}")
+        print(f"Proposed price: {proposed_price:.2f} Action: {action}")
         
         if slope > 0:
             print("Market trending upwards")
@@ -255,6 +255,8 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
 #       MAIN 
 #
 
+alert.check_alert(True, f"SELL order ")
+  
 TIME_SLEEP_GET_PRICE = 2  # seconds to sleep for price collection
 EXP_TIME_BUY_ORDER = (1.6 * 60) * 60 # dupa 2.6 ore
 EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
