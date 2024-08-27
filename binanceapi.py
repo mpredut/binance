@@ -51,7 +51,7 @@ def get_current_price(symbol):
     
 def place_buy_order(symbol, price, quantity):
     try:
-        price = round(price, 0)
+        price = round(min(price, get_current_price(symbol)), 0)
         quantity = round(quantity, 5)    
         buy_order = client.order_limit_buy(
             symbol=symbol,
@@ -65,7 +65,7 @@ def place_buy_order(symbol, price, quantity):
 
 def place_sell_order(symbol, price, quantity):
     try:
-        price = round(price, 0)
+        price = round(max(price, get_current_price(symbol)), 0)
         quantity = round(quantity, 5)    
         sell_order = client.order_limit_sell(
             symbol=symbol,
@@ -79,17 +79,20 @@ def place_sell_order(symbol, price, quantity):
 
 def place_order(order_type, symbol, price, quantity):
     try:
-        price = round(price, 0)
+        #price = round(price, 0)
         quantity = round(quantity, 5)
+        cancel = False
         
         if order_type.lower() == 'buy':
             open_sell_orders = get_open_sell_orders(symbol)
             # Anulează ordinele de vânzare existente la un preț mai mic decât prețul de cumpărare dorit
             for order_id, order_details in open_sell_orders.items():
                 if order_details['price'] < price:
-                    cancel_order(order_id)
+                    cancel = cancel_order(order_id)
+                    if not cancel:
+                        print(f"Fail cancel order {order_id} prep. for buy order")
             
-            # Plasează ordinul de cumpărare
+            price = round(min(price, get_current_price(symbol)), 0)
             order = client.order_limit_buy(
                 symbol=symbol,
                 quantity=quantity,
@@ -101,9 +104,11 @@ def place_order(order_type, symbol, price, quantity):
             # Anulează ordinele de cumpărare existente la un preț mai mare decât prețul de vânzare dorit
             for order_id, order_details in open_buy_orders.items():
                 if order_details['price'] > price:
-                    cancel_order(order_id)
-            
-            # Plasează ordinul de vânzare
+                    cancel = cancel_order(order_id)
+                    if not cancel:
+                        print(f"Fail cancel order {order_id} prep. for sell order")
+                   
+            price = round(max(price, get_current_price(symbol)), 0)
             order = client.order_limit_sell(
                 symbol=symbol,
                 quantity=quantity,
@@ -117,7 +122,8 @@ def place_order(order_type, symbol, price, quantity):
     except BinanceAPIException as e:
         print(f"Eroare la plasarea ordinului de {order_type}: {e}")
         return None
-
+        
+ #TODO: review it
 def place_order_force(order_type, symbol, price, quantity):
     try:
         price = round(price, 0)
@@ -140,12 +146,14 @@ def place_order_force(order_type, symbol, price, quantity):
         
         # Plasează ordinul
         if order_type.lower() == 'buy':
+            price = round(min(price, get_current_price(symbol)), 0)
             order = client.order_limit_buy(
                 symbol=symbol,
                 quantity=quantity,
                 price=str(price)
             )
         else:
+            price = round(max(price, get_current_price(symbol)), 0)
             order = client.order_limit_sell(
                 symbol=symbol,
                 quantity=quantity,

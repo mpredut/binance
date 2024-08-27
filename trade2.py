@@ -10,7 +10,7 @@ from apikeys import api_key, api_secret
 # my imports
 import binanceapi as api
 import utils as u
-from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, check_order_filled, place_order, cancel_order
+from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, check_order_filled, place_order, cancel_order, cancel_expired_orders
 from utils import beep, get_interval_time, are_difference_equal_with_aprox_proc, are_values_very_close, budget, order_cost_btc, price_change_threshold, max_threshold
 import log
 import alert
@@ -146,8 +146,8 @@ class PriceWindow:
         min_proximity, max_proximity = self.calculate_proximities(current_price)
  
         print(
-            f"Min position: {min_position}, Max position: {max_position} "
-            f"Min proximity: {min_proximity}, Max proximity: {max_proximity}"
+            f"Min position: {min_position:.2f}, Max position: {max_position:.2f} "
+            f"Min proximity: {min_proximity:.2f}, Max proximity: {max_proximity:.2f}"
         )
         
         price_change_percent = (max_price - min_price) / min_price * 100 if min_price and max_price else 0
@@ -202,21 +202,19 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
     if slope is not None and slope > 0:
         # Price is rising, place fewer, larger orders
         num_orders = 3
-        price_step = 1.0  # Increase the spacing between orders
-        print(f"Placing fewer, larger orders due to rising price.")
+        price_step = 0.2  # Increase the spacing between orders as procents
+        print(f"Placing fewer, {num_orders} larger orders due to rising price.")
     else:
         # Price is falling, place more, smaller orders
         num_orders = 7
-        price_step = 0.5  # Reduce the spacing between orders
-        print(f"Placing more, smaller orders due to falling price.")
+        price_step = 0.08  # Reduce the spacing between orders as procents
+        print(f"Placing more, {num_orders} smaller orders due to falling price.")
 
     if action == 'BUY':
-        # Cancel existing buy orders
         cancel_expired_orders("buy", symbol, EXP_TIME_BUY_ORDER)
 
-        # Adjust the buy price based on market conditions
         buy_price = min(proposed_price, current_price * 0.998)
-        print(f"Adjusted buy price: {buy_price:.2f} USDT")
+        print(f"BUY price: {buy_price:.2f} USDT")
 
         alert.check_alert(True, f"BUY order {buy_price:.2f}")
        
@@ -232,12 +230,10 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
                 order_id = order['orderId']
 
     elif action == 'SELL':
-        # Cancel existing sell orders
         cancel_expired_orders("sell", symbol, EXP_TIME_SELL_ORDER)
 
-        # Adjust the sell price based on market conditions
         sell_price = max(proposed_price, current_price * 1.002)
-        print(f"Adjusted sell price: {sell_price:.2f} USDT")
+        print(f"SELL price: {sell_price:.2f} USDT")
         
         alert.check_alert(True, f"SELL order {sell_price:.2f}")
 
@@ -309,7 +305,7 @@ while True:
             
 
         # Place orders based on the threshold
-        if current_time - last_order_time >= TIME_SLEEP_PLACE_ORDER and utils.are_values_very_close(max(buy_count, sell_count), SELL_BUY_THRESHOLD, 1) :
+        if current_time - last_order_time >= TIME_SLEEP_PLACE_ORDER or utils.are_values_very_close(max(buy_count, sell_count), SELL_BUY_THRESHOLD, 1) :
             if buy_count >= sell_count :
                 order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope, order_placed=order_placed, order_id=order_id)
                 last_order_time = current_time
