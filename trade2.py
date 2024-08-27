@@ -10,7 +10,7 @@ from apikeys import api_key, api_secret
 # my imports
 import binanceapi as api
 import utils as u
-from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, check_order_filled, place_order, cancel_order, cancel_expired_orders
+from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, check_order_filled, place_order, cancel_order, cancel_expired_orders, get_open_buy_orders
 from utils import beep, get_interval_time, are_difference_equal_with_aprox_proc, are_values_very_close, budget, order_cost_btc, price_change_threshold, max_threshold
 import log
 import alert
@@ -250,12 +250,17 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
 
     return order_placed, order_id  # Return the updated order state
 
+
+#
+#       MAIN 
+#
+
 TIME_SLEEP_GET_PRICE = 2  # seconds to sleep for price collection
 EXP_TIME_BUY_ORDER = (1.6 * 60) * 60 # dupa 2.6 ore
 EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
-TIME_SLEEP_PLACE_ORDER = 4*79  # seconds to sleep for order placement
-TIME_SLEEP_EVALUATE = 60  # seconds to sleep for buy/sell evaluation
-WINDOWS_SIZE_MIN = 48  # minutes
+TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
+TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + 4*79  # seconds to sleep for order placement
+WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 48  # minutes
 window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP_GET_PRICE
 
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
@@ -284,6 +289,7 @@ while True:
 
         # Evaluate buy/sell opportunity more frequently
         if current_time - last_evaluate_time >= TIME_SLEEP_EVALUATE:
+        
             action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(current_price, threshold_percent=0.8, decrease_percent=4)
             last_evaluate_time = current_time
 
@@ -297,15 +303,20 @@ while True:
             else:
                 buy_count -= 1
                 sell_count -= 1
+            
             if buy_count < 0:
                 buy_count = 0
             if sell_count < 0:
                 sell_count = 0
             
             
-
+        diff_count = abs(buy_count - sell_count)
         # Place orders based on the threshold
-        if current_time - last_order_time >= TIME_SLEEP_PLACE_ORDER or utils.are_values_very_close(max(buy_count, sell_count), SELL_BUY_THRESHOLD, 1) :
+        if current_time - last_order_time >= TIME_SLEEP_PLACE_ORDER and \
+        (utils.are_values_very_close(diff_count, SELL_BUY_THRESHOLD, 1) or diff_count >= SELL_BUY_THRESHOLD)  :
+            if abs(last_evaluate_time - time.time()) > 2:
+                action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(current_price, threshold_percent=0.8, decrease_percent=4)
+            last_evaluate_time = time.time()
             if buy_count >= sell_count :
                 order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope, order_placed=order_placed, order_id=order_id)
                 last_order_time = current_time

@@ -314,14 +314,14 @@ def cancel_expired_orders(order_type, symbol, expire_time):
             cancel_order(order_id)
             print(f"Cancelled {order_type} order with ID: {order_id} due to expiration.")
 
-
 def get_open_sell_orders(symbol):
     try:
         open_orders = client.get_open_orders(symbol=symbol)
         sell_orders = {
             order['orderId']: {
                 'price': float(order['price']),
-                'quantity': float(order['origQty'])
+                'quantity': float(order['origQty']),
+                'timestamp': order['time']
             }
             for order in open_orders if order['side'] == 'SELL'
         }
@@ -336,7 +336,8 @@ def get_open_buy_orders(symbol):
         buy_orders = {
             order['orderId']: {
                 'price': float(order['price']),
-                'quantity': float(order['origQty'])
+                'quantity': float(order['origQty']),
+                'timestamp': order['time']
             }
             for order in open_orders if order['side'] == 'BUY'
         }
@@ -352,7 +353,8 @@ def get_open_orders(order_type, symbol):
         filtered_orders = {
             order['orderId']: {
                 'price': float(order['price']),
-                'quantity': float(order['origQty'])
+                'quantity': float(order['origQty']),
+                'timestamp': order['time']
             }
             for order in open_orders if order['side'] == order_type.upper()
         }
@@ -361,4 +363,5 @@ def get_open_orders(order_type, symbol):
     except BinanceAPIException as e:
         print(f"Error getting open {order_type} orders: {e}")
         return {}
+
 
