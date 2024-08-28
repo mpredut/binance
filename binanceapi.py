@@ -250,7 +250,7 @@ def get_old_orders(symbol, limit=1000):
             break
         
         all_orders.extend(orders)
-        end_time = orders[-1]['time']  # Ajustează end_time pentru a continua de la ultimul ordin
+        end_time = orders[-1]['time']  # atentie pt secunde inparte la 10000. Ajustează end_time pentru a continua de la ultimul ordin
         
         # Verifică dacă am ajuns la limitele ordinelor vechi
         if len(orders) < limit:
@@ -305,14 +305,17 @@ def cancel_expired_orders(order_type, symbol, expire_time):
     else:
         raise ValueError("order_type must be 'buy' or 'sell'")
     
-    current_time = time.time()
+    #current_time = int(time.time() * 1000)  # Convert current time to milliseconds
+    current_time = int(time.time())
 
+    print(f"Try cancel orders... {len(open_orders)}")
     for order_id, order_details in open_orders.items():
         order_time = order_details.get('timestamp')
 
         if current_time - order_time > expire_time:
             cancel_order(order_id)
             print(f"Cancelled {order_type} order with ID: {order_id} due to expiration.")
+            
 
 def get_open_sell_orders(symbol):
     try:
@@ -321,7 +324,7 @@ def get_open_sell_orders(symbol):
             order['orderId']: {
                 'price': float(order['price']),
                 'quantity': float(order['origQty']),
-                'timestamp': order['time']
+                'timestamp': order['time'] / 1000
             }
             for order in open_orders if order['side'] == 'SELL'
         }
@@ -337,7 +340,7 @@ def get_open_buy_orders(symbol):
             order['orderId']: {
                 'price': float(order['price']),
                 'quantity': float(order['origQty']),
-                'timestamp': order['time']
+                'timestamp': order['time'] / 1000
             }
             for order in open_orders if order['side'] == 'BUY'
         }
@@ -354,7 +357,7 @@ def get_open_orders(order_type, symbol):
             order['orderId']: {
                 'price': float(order['price']),
                 'quantity': float(order['origQty']),
-                'timestamp': order['time']
+                'timestamp': order['time'] / 1000
             }
             for order in open_orders if order['side'] == order_type.upper()
         }
