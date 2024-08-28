@@ -1,5 +1,8 @@
 import logging
 import builtins
+import os
+
+process_id = os.getpid()
 
 # Configurare de bază pentru logging
 logging.basicConfig(
@@ -7,7 +10,7 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S',
     handlers=[
-        logging.FileHandler("bot.log"),  # Scrie logurile într-un fișier
+        logging.FileHandler(f"bot{process_id}.log"),  # Scrie logurile într-un fișier specific ID-ului de proces
         logging.StreamHandler()  # Afișează logurile în consola
     ]
 )
@@ -27,7 +30,7 @@ def print(*args, **kwargs):
     
     #logger.info(message)
     # Scrie mesajul în fișierul de log direct fără a folosi logger.info
-    with open("bot.log", "a") as log_file:
+    with open(f"bot{process_id}.log", "a") as log_file:
         log_file.write(message + "\n")
 
 # Redefinește funcția print din builtins pentru a funcționa în întreg codul

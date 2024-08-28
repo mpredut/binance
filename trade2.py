@@ -193,6 +193,18 @@ class PriceWindow:
         return len(self.prices)
 
 
+TIME_SLEEP_GET_PRICE = 2  # seconds to sleep for price collection
+EXP_TIME_BUY_ORDER = (1.6 * 60) * 60 # dupa 2.6 ore
+EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
+TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
+# am voie 6 ordere per perioada de expirare care este 2.6 ore. deaceea am impartit la 6
+TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + EXP_TIME_SELL_ORDER/ 6 + 4*79  # seconds to sleep for order placement
+WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 48  # minutes
+window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP_GET_PRICE
+
+SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
+
+
 def track_and_place_order(action, proposed_price, current_price, slope, quantity=0.0017*3, order_placed=False, order_id=None):
     
     if action == 'HOLD':
@@ -201,12 +213,12 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
     # Determine the number of orders and their spacing based on price trend
     if slope is not None and slope > 0:
         # Price is rising, place fewer, larger orders
-        num_orders = 3
+        num_orders = 1
         price_step = 0.2  # Increase the spacing between orders as procents
         print(f"Placing fewer, {num_orders} larger orders due to rising price.")
     else:
         # Price is falling, place more, smaller orders
-        num_orders = 7
+        num_orders = 1
         price_step = 0.08  # Reduce the spacing between orders as procents
         print(f"Placing more, {num_orders} smaller orders due to falling price.")
 
@@ -257,15 +269,6 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
 
 alert.check_alert(True, f"SELL order ")
   
-TIME_SLEEP_GET_PRICE = 2  # seconds to sleep for price collection
-EXP_TIME_BUY_ORDER = (1.6 * 60) * 60 # dupa 2.6 ore
-EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
-TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
-TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + 4*79  # seconds to sleep for order placement
-WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 48  # minutes
-window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP_GET_PRICE
-
-SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
 price_window = PriceWindow(window_size)
 
@@ -292,6 +295,9 @@ while True:
         # Evaluate buy/sell opportunity more frequently
         if current_time - last_evaluate_time >= TIME_SLEEP_EVALUATE:
         
+            cancel_expired_orders("buy", symbol, EXP_TIME_BUY_ORDER)
+            cancel_expired_orders("sell", symbol, EXP_TIME_SELL_ORDER)
+            
             action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(current_price, threshold_percent=0.8, decrease_percent=4)
             last_evaluate_time = current_time
 
