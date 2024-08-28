@@ -6,6 +6,8 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+import requests
+
 ####MYLIB
 from apikeys import PUSHBULLET_API_KEY, SMTP_USERNAME, SMTP_PASSWORD, TO_EMAIL
 pb = Pushbullet(PUSHBULLET_API_KEY)
@@ -36,6 +38,17 @@ def send_email(subject, body, to_email):
     server.quit()
 
 
+
+def send_tasker_notification(message):
+    url = "http://85.122.194.86:80/?message={}".format(message)
+    response = requests.get(url)
+    print(response.status_code, response.text)
+
+# Exemplu de utilizare
+#send_tasker_notification("Alertă Trading: Prețul acțiunii a scăzut sub 50$")
+
+
+
 def check_alert(condition, message, alert_interval=60):
     global last_alert_time
     current_time = time.time()
@@ -46,8 +59,9 @@ def check_alert(condition, message, alert_interval=60):
                 timestamp = time.strftime('%H:%M:%S', time.localtime(current_time))
                 message_with_time = f"{message} at {timestamp}"
                 
-                # Send push notification on Android
-                send_push_notification("Alertă Trading", message_with_time)
+                #send_tasker_notification(message_with_time)
+                #Send push notification on Android
+                #send_push_notification("Alertă Trading", message_with_time)
                 #send_email(
                 #    subject="Alertă Trading",
                 #    body=message_with_time,
