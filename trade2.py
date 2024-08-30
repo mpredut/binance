@@ -160,7 +160,7 @@ class PriceWindow:
         if price_change_percent < threshold_percent and not utils.are_values_very_close(price_change_percent, threshold_percent):
             action = 'HOLD'
             print(f"Action: {action}")
-            return action, current_price, price_change_percent, slope
+            return action, current_price * 0.8, price_change_percent, slope
             
         alert.check_alert(True, f"Price changed {price_change_percent:.2f}%. Current price {current_price}")
         action = 'BUY'
@@ -324,6 +324,8 @@ while True:
         (utils.are_values_very_close(diff_count, SELL_BUY_THRESHOLD, 1) or diff_count >= SELL_BUY_THRESHOLD)  :
             if abs(last_evaluate_time - time.time()) > 2:
                 action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(current_price, threshold_percent=0.8, decrease_percent=4)
+            if action == 'HOLD':
+                continue
             last_evaluate_time = time.time()
             if buy_count >= sell_count :
                 order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope, order_placed=order_placed, order_id=order_id)
