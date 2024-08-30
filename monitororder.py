@@ -106,23 +106,50 @@ def sell_order_gradually(order, start_time, end_time):
 
 
 
-def monitor_filled_buy_orders():
+def monitor_filled_buy_orders_old():
     if threading.active_count() > 1:  # Dacă sunt deja fire active (în afară de firul principal)
         print("Fire active detectate, ieșim din funcție pentru a nu porni fire noi.")
         return
  
-    max_age_seconds = 2 * 3600  # Timpul maxim în care ordinele executate sunt considerate recente (2 ore)
+    max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate sunt considerate recente (2 ore)
     filled_buy_orders = api.get_recent_filled_orders('buy', max_age_seconds)
 
     for order in filled_buy_orders:
         current_time = time.time()
         end_time = current_time + 2 * 3600  # Procesul durează două ore
-
+        print("marius")
+        print(order)
         # Pornim un fir nou pentru fiecare ordin de cumpărare executat recent
-        thread = threading.Thread(target=sell_order_gradually, args=(order, current_time, end_time))
-        #thread = threading.Thread(target=sell_order_gradually, args=(order, current_time, end_time, filled_price, current_price, procent_defined))
-      
-        thread.start()
+        #thread = threading.Thread(target=sell_order_gradually, args=(order, current_time, end_time))
+        #thread = threading.Thread(target=sell_order_gradually, args=(order, current_time, end_time, filled_price, current_price, procent_defined))      
+        #thread.start()
+
+
+def monitor_filled_buy_orders():
+    if threading.active_count() > 1:  # Dacă sunt deja fire active (în afară de firul principal)
+        print("Fire active detectate, ieșim din funcție pentru a nu porni fire noi.")
+        return
+ 
+    max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate sunt considerate recente (3 zile)
+    filled_buy_orders = api.get_recent_filled_orders('buy', max_age_seconds)
+
+    for order in filled_buy_orders:
+        current_time = time.time()
+        end_time = current_time + 2 * 3600  # Procesul durează două ore
+        filled_price = order['price']
+        quantity = order['quantity']
+
+        current_price = api.get_current_price(api.symbol) + 200
+
+        if current_price >= filled_price * 1.07:  # Dacă prețul curent este cu 7% mai mare
+            print(f"Prețul curent ({current_price}) este cu 7% mai mare decât prețul de cumpărare ({filled_price}). Inițiem vânzarea.")
+            
+            # Pornim un fir nou pentru a vinde BTC-ul
+            thread = threading.Thread(target=place_sell_order, args=(symbol, current_price, quantity))
+            thread.start()
+        else:
+            print(f"Prețul curent ({current_price}) nu a atins încă pragul de 7% față de prețul de cumpărare ({filled_price}).")
+            return
 
 
 
@@ -190,20 +217,21 @@ def monitor_orders_by_type(order_type):
     
     time.sleep(monitor_interval)
 
+
+TIME_SLEEP = 2  
 def monitor_orders():
-    monitor_filled_buy_orders()
-    monitor_filled_buy_orders()
+    #monitor_filled_buy_orders()
+    #return
     while True:
         try:
             monitor_orders_by_type('sell')
             monitor_orders_by_type('buy')
-            monitor_filled_buy_orders()
-            
+            monitor_filled_buy_orders()        
         except BinanceAPIException as e:
             print(f"Eroare API Binance: {e}")
-            time.sleep(1)
+            time.sleep(TIME_SLEEP)
         except Exception as e:
             print(f"Eroare: {e}")
-            time.sleep(1)
+            time.sleep(TIME_SLEEP)
 
 monitor_orders()
