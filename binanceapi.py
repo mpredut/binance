@@ -382,13 +382,15 @@ def get_recent_filled_orders(order_type, max_age_seconds):
     all_filled_orders = get_filled_orders(order_type, symbol)
     recent_filled_orders = []
     current_time = time.time()
+    if(len(all_filled_orders) < 1) :
+        return
 
     print(len(all_filled_orders))
+    order_time = current_time
     for order in all_filled_orders:
         order_time = order['timestamp']
-
-    if current_time - order_time <= max_age_seconds:
-        recent_filled_orders.append(order)
+        if current_time - order_time <= max_age_seconds:
+            recent_filled_orders.append(order)
 
     # Sort the recent_filled_orders by price in ascending order
     recent_filled_orders.sort(key=lambda x: x['price'])
