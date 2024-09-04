@@ -205,7 +205,7 @@ window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP_GET_PRICE
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
 
-def track_and_place_order(action, proposed_price, current_price, slope, quantity=0.0017*3, order_placed=False, order_id=None):
+def track_and_place_order(action, proposed_price, current_price, slope, quantity=0.0017, order_placed=False, order_id=None):
     
     if action == 'HOLD':
         return order_placed, order_id

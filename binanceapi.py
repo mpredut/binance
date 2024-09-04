@@ -4,9 +4,20 @@ import datetime
 import math
 import sys
 
+import asyncio
+import threading
+import websockets
+from threading import Thread
+import json
+#from twisted.internet import reactor
+
 ####Binance
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
+#from binance.streams import BinanceSocketManager
+#from binance.streams import BinanceSocketManager
+#print(dir(BinanceSocketManager))
+
 
 ####MYLIB
 import utils
@@ -14,7 +25,45 @@ from apikeys import api_key, api_secret
 
 symbol = 'BTCUSDT'
 
+import binance
+print(binance.__version__)
+
 client = Client(api_key, api_secret)
+binancecurrentprice = 0
+
+
+def listen_to_binance(symbol):
+    socket = f"wss://stream.binance.com:9443/ws/{symbol.lower()}@ticker"
+    
+    # Funcție asincronă pentru WebSocket
+    async def connect():
+        async with websockets.connect(socket) as websocket:
+            while True:
+                message = await websocket.recv()
+                message = json.loads(message)
+                process_message(message)
+
+    # Rulăm WebSocket-ul într-un event loop propriu în acest thread
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(connect())
+
+# Funcție de gestionare a mesajului primit de la WebSocket
+def process_message(message):
+    symbol = message['s']  # Simbolul criptomonedei
+    price = message['c']    # Prețul curent
+    binancecurrentprice = price
+    print(f"Prețul curent pentru {symbol} este {price}")
+
+# Funcția principală pentru a rula WebSocket-ul într-un thread separat
+def start_websocket_thread(symbol):
+    websocket_thread = threading.Thread(target=listen_to_binance, args=(symbol,))
+    websocket_thread.start()
+    return websocket_thread
+
+# Pornește WebSocket-ul într-un thread separat
+websocket_thread = start_websocket_thread(symbol)
+
 
 try:
     # Cerere pentru a obține informații despre cont
@@ -47,7 +96,8 @@ def get_current_price(symbol):
         return float(ticker['price'])
     except BinanceAPIException as e:
         print(f"Eroare la obținerea prețului curent: {e}")
-        return None
+        print(f"folosesc pretul obtinut prin websocket, BTC:{binancecurrentprice}")
+        return binancecurrentprice
     
 def place_buy_order(symbol, price, quantity):
     try:
@@ -131,9 +181,9 @@ def place_order_force(order_type, symbol, price, quantity):
         
         # Obține ordinele deschise pentru tipul opus
         if order_type.lower() == 'buy':
-            open_orders = get_open_sell_orders(symbol)
+            open_orders = get_open_orders("sell", symbol)
         elif order_type.lower() == 'sell':
-            open_orders = get_open_buy_orders(symbol)
+            open_orders = get_open_rders("buy", symbol)
         else:
             print("Tipul ordinului este invalid. Trebuie să fie 'buy' sau 'sell'.")
             return None
@@ -415,17 +465,13 @@ def cancel_order(order_id):
         return False
 
 def cancel_expired_orders(order_type, symbol, expire_time):
-    if order_type == 'buy':
-        open_orders = get_open_buy_orders(symbol)
-    elif order_type == 'sell':
-        open_orders = get_open_sell_orders(symbol)
-    else:
-        raise ValueError("order_type must be 'buy' or 'sell'")
     
+    open_orders = get_open_orders(order_type, symbol)
+
     #current_time = int(time.time() * 1000)  # Convert current time to milliseconds
     current_time = int(time.time())
 
-    print(f"Try cancel {len(open_orders)} {order_type} orders type ... ")
+    print(f"Available open orders {len(open_orders)}. Try cancel {order_type} orders type ... ")
     for order_id, order_details in open_orders.items():
         order_time = order_details.get('timestamp')
 
@@ -434,42 +480,13 @@ def cancel_expired_orders(order_type, symbol, expire_time):
             print(f"Cancelled {order_type} order with ID: {order_id} due to expiration.")
             
 
-def get_open_sell_orders(symbol):
-    try:
-        open_orders = client.get_open_orders(symbol=symbol)
-        sell_orders = {
-            order['orderId']: {
-                'price': float(order['price']),
-                'quantity': float(order['origQty']),
-                'timestamp': order['time'] / 1000
-            }
-            for order in open_orders if order['side'] == 'SELL'
-        }
-        return sell_orders
-    except BinanceAPIException as e:
-        print(f"Error getting open sell orders: {e}")
-        return {}
-
-def get_open_buy_orders(symbol):
-    try:
-        open_orders = client.get_open_orders(symbol=symbol)
-        buy_orders = {
-            order['orderId']: {
-                'price': float(order['price']),
-                'quantity': float(order['origQty']),
-                'timestamp': order['time'] / 1000
-            }
-            for order in open_orders if order['side'] == 'BUY'
-        }
-        return buy_orders
-    except BinanceAPIException as e:
-        print(f"Error getting open buy orders: {e}")
-        return {}
-
 def get_open_orders(order_type, symbol):
+    if order_type.upper() != 'BUY' and order_type.upper() != 'SELL':
+        raise ValueError(f"getting {order_type}. order_type must be 'buy' or 'sell'")
+        
     try:
         open_orders = client.get_open_orders(symbol=symbol)
-        
+        #print(open_orders)
         filtered_orders = {
             order['orderId']: {
                 'price': float(order['price']),

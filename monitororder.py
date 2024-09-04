@@ -125,8 +125,9 @@ def monitor_filled_buy_orders_old():
         #thread.start()
 
 
-def monitor_close_orders():
-    if threading.active_count() > 1:  # Dacă sunt deja fire active (în afară de firul principal)
+
+def monitor_filled_buy_orders():
+    if threading.active_count() > 2:  # Dacă sunt deja fire active (în afară de firul principal)
         print("Fire active detectate, ieșim din funcție pentru a nu porni fire noi.")
         return
  
