@@ -224,52 +224,56 @@ def get_filled_orders_Bed(order_type, symbol, backdays=2):
             filtered_orders.append(filtered_order)
     
     print(f"Filtered filled orders of type '{order_type}': {len(filtered_orders)}")
-    print("First few filled orders for inspection:")
-    for filled_order in filtered_orders[:5]:  # Afișează primele 5 ordine complet executate
-        print(filled_order)
+    #print("First few filled orders for inspection:")
+     #for filled_order in filtered_orders[:5]:  # Afișează primele 5 ordine complet executate
+        #print(filled_order)
         
     return filtered_orders
     
     
 def get_filled_orders(order_type, symbol, backdays=3):
-    end_time = int(time.time() * 1000)  # milisecunde
-    
-    interval_hours=1
-    interval_ms = interval_hours * 60 * 60 * 1000  # interval_hours de ore în milisecunde
-    #start_time = end_time - backdays * interval_ms
-    start_time = end_time - backdays * 24 * 60 * 60 * 1000
-    
-    all_filtered_orders = []
+    try:
+        end_time = int(time.time() * 1000)  # milisecunde
+        
+        interval_hours=1
+        interval_ms = interval_hours * 60 * 60 * 1000  # interval_hours de ore în milisecunde
+        start_time = end_time - backdays * 24 * 60 * 60 * 1000
+        
+        all_filtered_orders = []
 
-    # Parcurgem intervale de 24 de ore și colectăm ordinele
-    while start_time < end_time:
-        current_end_time = min(start_time + interval_ms, end_time)
-        orders = client.get_all_orders(symbol=symbol, startTime=start_time, endTime=current_end_time, limit=1000)
-        print(f"orders of type '{order_type}': {len(orders)}")
-        # Filtrăm ordinele complet executate și pe cele care corespund tipului de ordin specificat
-        filtered_orders = [
-            {
-                'orderId': order['orderId'],
-                'price': float(order['price']),
-                'quantity': float(order['origQty']),
-                'timestamp': order['time'] / 1000,  # Timpul în secunde
-                'side': order['side'].lower()
-            }
-            #print(f"Order ID: {order['orderId']}, Status: {order['status']}, Side: {order['side']}, Type: {order['type']}, Time: {order['time']}")
-            for order in orders if order['status'] == 'FILLED' and order['side'].lower() == order_type.lower()
-        ]
+        # Parcurgem intervale de 24 de ore și colectăm ordinele
+        while start_time < end_time:
+            current_end_time = min(start_time + interval_ms, end_time)
+            orders = client.get_all_orders(symbol=symbol, startTime=start_time, endTime=current_end_time, limit=1000)
+            print(f"orders of type '{order_type}': {len(orders)}")
+            
+            # Filtrăm ordinele complet executate și pe cele care corespund tipului de ordin specificat
+            filtered_orders = [
+                {
+                    'orderId': order['orderId'],
+                    'price': float(order['price']),
+                    'quantity': float(order['origQty']),
+                    'timestamp': order['time'] / 1000,  # Timpul în secunde
+                    'side': order['side'].lower()
+                }
+                for order in orders if order['status'] == 'FILLED' and order['side'].lower() == order_type.lower()
+            ]
+            
+            all_filtered_orders.extend(filtered_orders)
+            
+            # Actualizăm start_time pentru următorul interval
+            start_time = current_end_time
         
-        all_filtered_orders.extend(filtered_orders)
-        
-        # Actualizăm start_time pentru următorul interval
-        start_time = current_end_time
-    
-    print(f"Filtered filled orders of type '{order_type}': {len(all_filtered_orders)}")
-    print("First few filled orders for inspection:")
-    for filled_order in all_filtered_orders[:5]:  # Afișează primele 5 ordine complet executate
-        print(filled_order)
-        
-    return all_filtered_orders
+        print(f"Filtered filled orders of type '{order_type}': {len(all_filtered_orders)}")
+        #print("First few filled orders for inspection:")
+        #for filled_order in all_filtered_orders[:5]:  # Afișează primele 5 ordine complet executate
+            #print(filled_order)
+        return all_filtered_orders
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return []
+
 
 
 def get_all_orders_in_time_range(order_type, symbol, start_time, end_time):
@@ -383,7 +387,7 @@ def get_recent_filled_orders(order_type, max_age_seconds):
     recent_filled_orders = []
     current_time = time.time()
     if(len(all_filled_orders) < 1) :
-        return
+        return []
 
     print(len(all_filled_orders))
     order_time = current_time
