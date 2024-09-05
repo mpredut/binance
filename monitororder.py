@@ -17,11 +17,12 @@ initial_sell_prices = {}  # Dicționar pentru a reține prețurile inițiale ale
 initial_buy_prices = {}  # Dicționar pentru a reține prețurile inițiale ale ordinelor de cumpărare
 max_adjustments = 1000  # Număr maxim de ajustări pentru un ordin
 
-
-TIME_SLEEP = 2 
-
 import threading
 import time
+
+
+TIME_SLEEP_ERROR = 10
+
 
 def adjust_monitor_interval(initial_interval, min_interval, total_duration, elapsed_time):
     if elapsed_time >= total_duration:
@@ -53,7 +54,8 @@ def sell_order_gradually(order, start_time, end_time):
 
     filled_quantity = order['quantity']
     filled_price = order['price']
-    order_id = order.get('orderId')
+    close_order_id = order.get('orderId')
+    order_id = None
 
     initial_interval = 20  # Interval inițial de monitorizare (în secunde)
     min_interval = 5       # Interval minim de monitorizare (în secunde)
@@ -90,6 +92,8 @@ def sell_order_gradually(order, start_time, end_time):
 
         # Anulăm ordinul anterior înainte de a plasa unul nou
         if order_id:
+            if check_order_filled(order_id) :
+                return; #order filled!
             cancel_order(order_id)
             print(f"Anulat ordinul anterior cu ID: {order_id}")
 
@@ -127,7 +131,8 @@ def monitor_filled_buy_orders_old():
         #thread.start()
 
 
-def monitor_filled_buy_orders():
+
+def monitor_close_orders():
     if threading.active_count() > 2:  # Dacă sunt deja fire active (în afară de firul principal)
         print("Fire active detectate, ieșim din funcție pentru a nu porni fire noi.")
         return
@@ -148,6 +153,7 @@ def monitor_filled_buy_orders():
             
             # Pornim un fir nou pentru a vinde BTC-ul
             thread = threading.Thread(target=place_sell_order, args=(symbol, current_price, quantity))
+            #sell_order_gradually, args=(order, current_time, end_time))
             thread.start()
         else:
             print(f"Prețul curent ({current_price}) nu a atins încă pragul de 7% față de prețul de cumpărare ({filled_price}).")
@@ -163,8 +169,7 @@ def monitor_orders_by_type(order_type):
     
     current_price = api.get_current_price(api.symbol)
     if current_price is None:
-        print("Eroare la obținerea prețului. Încerc din nou în câteva secunde.")
-        time.sleep(2)
+        print("Eroare la obținerea prețului...")
         return
     
     print(f"Prețul curent BTC: {current_price:.2f}")
@@ -217,23 +222,38 @@ def monitor_orders_by_type(order_type):
             else:
                 print(f"Eroare la plasarea noului ordin de {order_type}.")
     
-    time.sleep(monitor_interval)
 
 
- 
+
+MONITOR_OPEN_ORDER_INTERVAL = 18
+MONITOR_CLOSE_ORDER_INTERVAL = 98
+
+
 def monitor_orders():
     #monitor_filled_buy_orders()
     #return
-    while True:
+    
+    monitor_open_orders_lasttime = time.time() - MONITOR_OPEN_ORDER_INTERVAL - TIME_SLEEP_ERROR
+    monitor_close_orders_lasttime = time.time() - MONITOR_CLOSE_ORDER_INTERVAL - TIME_SLEEP_ERROR
+
+    while not api.stop:
         try:
-            monitor_orders_by_type('sell')
-            monitor_orders_by_type('buy')
-            monitor_filled_buy_orders()        
+            currenttime = time.time()
+            if(currenttime - monitor_open_orders_lasttime > MONITOR_OPEN_ORDER_INTERVAL) :
+                monitor_orders_by_type('sell')
+                monitor_orders_by_type('buy')
+                monitor_open_orders_lasttime = currenttime
+            if(currenttime - monitor_close_orders_lasttime > MONITOR_CLOSE_ORDER_INTERVAL) :
+                monitor_close_orders()
+                monitor_close_orders_lasttime = currenttime   
+                
+            time.sleep(min(MONITOR_OPEN_ORDER_INTERVAL, MONITOR_CLOSE_ORDER_INTERVAL))
+            
         except BinanceAPIException as e:
             print(f"Eroare API Binance: {e}")
-            time.sleep(TIME_SLEEP)
+            time.sleep(TIME_SLEEP_ERROR)
         except Exception as e:
             print(f"Eroare: {e}")
-            time.sleep(TIME_SLEEP)
+            time.sleep(TIME_SLEEP_ERROR)
 
 monitor_orders()

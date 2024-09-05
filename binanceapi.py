@@ -4,6 +4,7 @@ import datetime
 import math
 import sys
 
+import signal
 import asyncio
 import threading
 import websockets
@@ -23,6 +24,7 @@ from binance.exceptions import BinanceAPIException
 import utils
 from apikeys import api_key, api_secret
 
+stop = False
 symbol = 'BTCUSDT'
 
 import binance
@@ -38,7 +40,7 @@ def listen_to_binance(symbol):
     # Funcție asincronă pentru WebSocket
     async def connect():
         async with websockets.connect(socket) as websocket:
-            while True:
+            while not stop:
                 message = await websocket.recv()
                 message = json.loads(message)
                 process_message(message)
@@ -51,18 +53,35 @@ def listen_to_binance(symbol):
 # Funcție de gestionare a mesajului primit de la WebSocket
 def process_message(message):
     symbol = message['s']  # Simbolul criptomonedei
-    price = message['c']    # Prețul curent
+    price = float(message['c'])  # Asigură-te că price este un float
     binancecurrentprice = price
-    print(f"Prețul curent pentru {symbol} este {price}")
+    print(f"ASYNC {symbol} is {price:.2f}")
 
-# Funcția principală pentru a rula WebSocket-ul într-un thread separat
 def start_websocket_thread(symbol):
     websocket_thread = threading.Thread(target=listen_to_binance, args=(symbol,))
+    websocket_thread.daemon = True
     websocket_thread.start()
     return websocket_thread
 
-# Pornește WebSocket-ul într-un thread separat
-websocket_thread = start_websocket_thread(symbol)
+# Start the WebSocket thread
+#websocket_thread = start_websocket_thread(symbol)
+
+# Function to handle Ctrl+C and shut down the WebSocket properly
+def signal_handler(sig, frame):
+    global websocket_thread, stop
+    print("Shutting down...")
+    stop = True
+    loop = asyncio.get_event_loop()
+    loop.stop()  # Stop the asyncio event loop
+    #websocket_thread.join()  # This makes the main thread wait for the websocket thread to finish
+    #if websocket_thread and websocket_thread.is_alive():
+    #    websocket_thread.join()
+    # Apelare handler implicit pentru SIGINT
+    signal.default_int_handler(sig, frame)
+    
+signal.signal(signal.SIGINT, signal_handler)
+
+
 
 
 try:
