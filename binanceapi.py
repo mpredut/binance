@@ -304,8 +304,7 @@ def check_order_filled(order_id):
 
 
 
-
-def get_my_trades_24(symbol, days_ago, limit=1000):
+def get_my_trades_24(symbol, days_ago, order_type=None, limit=1000):
     all_trades = []
     try:
         current_time = int(time.time() * 1000)
@@ -322,19 +321,30 @@ def get_my_trades_24(symbol, days_ago, limit=1000):
                 break
 
             print("GASIT")
-            all_trades.extend(trades)
+            
+            # Dacă order_type este specificat, filtrăm tranzacțiile
+            if order_type == "buy":
+                filtered_trades = [trade for trade in trades if trade['isBuyer']]
+            elif order_type == "sell":
+                filtered_trades = [trade for trade in trades if not trade['isBuyer']]
+            else:
+                # Dacă nu e specificat order_type, nu aplicăm niciun filtru
+                filtered_trades = trades
+
+            all_trades.extend(filtered_trades)
             
             if len(trades) < limit:
                 break
 
             # Ajustăm `start_time` la timpul celei mai noi tranzacții pentru a continua
-            start_time = trades[-1]['time'] + 1  # Ne mutăm inainte cu 1 ms pentru a evita duplicatele
-
+            start_time = trades[-1]['time'] + 1  # Ne mutăm înainte cu 1 ms pentru a evita duplicatele
+            
         return all_trades
 
     except Exception as e:
         print(f"An error occurred: {e}")
         return []
+
 
 symbol = 'BTCUSDT'
 limit = 2
@@ -350,7 +360,7 @@ for days_ago in range (0,20):
         print(f"No trades found for day {days_ago}.")
 
 
-def get_my_trades(symbol, backdays=3, limit=1000):
+def get_my_trades(order_type, symbol, backdays=3, limit=1000):
     all_trades = []
     
     try:
@@ -362,7 +372,8 @@ def get_my_trades(symbol, backdays=3, limit=1000):
                 print(f"No trades found for day {days_ago}.")
                 continue
             
-            all_trades.extend(trades)
+            filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "buy")]
+            all_trades.extend(filtered_trades)
 
             # Dacă depășim limita, ieșim din buclă
             if len(all_trades) >= limit:
@@ -377,7 +388,7 @@ def get_my_trades(symbol, backdays=3, limit=1000):
         return []
         
         
-def get_my_trades_simple(symbol, backdays=3, limit=1000):
+def get_my_trades_simple(order_type, symbol, backdays=3, limit=1000):
     all_trades = []
     try:
         current_time = int(time.time() * 1000) 
@@ -393,7 +404,8 @@ def get_my_trades_simple(symbol, backdays=3, limit=1000):
             trades = client.get_my_trades(symbol=symbol, limit=limit, startTime=start_time, endTime=end_time)
 
             if trades:
-                all_trades.extend(trades)
+                filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "buy")]
+                all_trades.extend(filtered_trades)
             
             # Actualizăm end_time pentru ziua anterioară (înainte de această perioadă de 24 de ore)
             end_time = start_time
@@ -406,36 +418,94 @@ def get_my_trades_simple(symbol, backdays=3, limit=1000):
 
 
 
-
 def test_get_my_trades():
     symbol = 'BTCUSDT'
     backdays = 30
     limit = 1000
 
-    # Apelăm varianta cu paginare
-    print("Testing get_my_trades with pagination...")
-    trades_pagination = get_my_trades(symbol, backdays, limit)
+    # Testare fără filtrare (fără 'buy' sau 'sell')
+    print("Testing get_my_trades with pagination (no order_type)...")
+    trades_pagination = get_my_trades(None, symbol, backdays=backdays, limit=limit)
 
-    # Apelăm varianta simplificată fără paginare
-    print("Testing get_my_trades_simple without pagination...")
-    trades_simple = get_my_trades_simple(symbol, backdays, limit)
+    print("Testing get_my_trades_simple without pagination (no order_type)...")
+    trades_simple = get_my_trades_simple(None, symbol, backdays=backdays, limit=limit)
 
-    # Comparăm rezultatele
+    # Testare pentru 'buy'
+    print("Testing get_my_trades with pagination (buy orders)...")
+    trades_pagination_buy = get_my_trades("buy", symbol, backdays=backdays, limit=limit)
+
+    print("Testing get_my_trades_simple without pagination (buy orders)...")
+    trades_simple_buy = get_my_trades_simple("buy", symbol, backdays=backdays, limit=limit)
+
+    # Testare pentru 'sell'
+    print("Testing get_my_trades with pagination (sell orders)...")
+    trades_pagination_sell = get_my_trades("sell", symbol, backdays=backdays, limit=limit)
+
+    print("Testing get_my_trades_simple without pagination (sell orders)...")
+    trades_simple_sell = get_my_trades_simple("sell", symbol, backdays=backdays, limit=limit)
+
+    # Comparăm rezultatele pentru tranzacțiile nefiltrate
+    print("\nComparing unfiltered results...")
     if trades_pagination == trades_simple:
-        print("Both functions returned the same results.")
+        print("Both functions returned the same results for unfiltered trades.")
     else:
-        print("The functions returned different results.")
+        print("The functions returned different results for unfiltered trades.")
         print(f"Trades with pagination: {len(trades_pagination)}")
         print(f"Trades without pagination: {len(trades_simple)}")
-        print("First few trades with pagination:")
-        for trade in trades_pagination[:5]:
-            print(trade)
-        print("First few trades without pagination:")
-        for trade in trades_simple[:5]:
-            print(trade)
+        print("Differences found in content for unfiltered trades.")
+        for i, (trade_p, trade_s) in enumerate(zip(trades_pagination, trades_simple)):
+            if trade_p != trade_s:
+                print(f"Difference at trade {i}:")
+                print(f"Pagination trade: {trade_p}")
+                print(f"Simple trade: {trade_s}")
+
+    # Comparăm rezultatele pentru tranzacțiile de tip 'buy'
+    print("\nComparing buy order results...")
+    if trades_pagination_buy == trades_simple_buy:
+        print("Both functions returned the same results for buy orders.")
+    else:
+        print("The functions returned different results for buy orders.")
+        print(f"Buy trades with pagination: {len(trades_pagination_buy)}")
+        print(f"Buy trades without pagination: {len(trades_simple_buy)}")
+        print("Differences found in content for buy trades.")
+        for i, (trade_p, trade_s) in enumerate(zip(trades_pagination_buy, trades_simple_buy)):
+            if trade_p != trade_s:
+                print(f"Difference at trade {i}:")
+                print(f"Pagination trade: {trade_p}")
+                print(f"Simple trade: {trade_s}")
+
+    # Comparăm rezultatele pentru tranzacțiile de tip 'sell'
+    print("\nComparing sell order results...")
+    if trades_pagination_sell == trades_simple_sell:
+        print("Both functions returned the same results for sell orders.")
+    else:
+        print("The functions returned different results for sell orders.")
+        print(f"Sell trades with pagination: {len(trades_pagination_sell)}")
+        print(f"Sell trades without pagination: {len(trades_simple_sell)}")
+        print("Differences found in content for sell trades.")
+        for i, (trade_p, trade_s) in enumerate(zip(trades_pagination_sell, trades_simple_sell)):
+            if trade_p != trade_s:
+                print(f"Difference at trade {i}:")
+                print(f"Pagination trade: {trade_p}")
+                print(f"Simple trade: {trade_s}")
+
+    # Afișăm câteva exemple pentru fiecare caz
+    print("\nFirst few trades for unfiltered pagination:")
+    for trade in trades_pagination[:5]:
+        print(trade)
+
+    print("\nFirst few buy trades with pagination:")
+    for trade in trades_pagination_buy[:5]:
+        print(trade)
+
+    print("\nFirst few sell trades with pagination:")
+    for trade in trades_pagination_sell[:5]:
+        print(trade)
 
 # Apelăm funcția de testare
 test_get_my_trades()
+
+
 
 
 
