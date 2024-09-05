@@ -117,7 +117,28 @@ def get_current_price(symbol):
         print(f"Eroare la obținerea prețului curent: {e}")
         print(f"folosesc pretul obtinut prin websocket, BTC:{binancecurrentprice}")
         return binancecurrentprice
-    
+
+def get_open_orders(order_type, symbol):
+    if order_type.upper() != 'BUY' and order_type.upper() != 'SELL':
+        raise ValueError(f"getting {order_type}. order_type must be 'buy' or 'sell'")
+        
+    try:
+        open_orders = client.get_open_orders(symbol=symbol)
+        #print(open_orders)
+        filtered_orders = {
+            order['orderId']: {
+                'price': float(order['price']),
+                'quantity': float(order['origQty']),
+                'timestamp': order['time'] / 1000
+            }
+            for order in open_orders if order['side'] == order_type.upper()
+        }
+        
+        return filtered_orders
+    except BinanceAPIException as e:
+        print(f"Error getting open {order_type} orders: {e}")
+        return {}
+        
 def place_buy_order(symbol, price, quantity):
     try:
         price = round(min(price, get_current_price(symbol)), 0)
@@ -243,6 +264,33 @@ def place_order_force(order_type, symbol, price, quantity):
         
         return None
 
+        
+def cancel_order(order_id):
+    try:
+        if not order_id:
+            return False
+        client.cancel_order(symbol=symbol, orderId=order_id)
+        print(f"Ordinul cu ID {order_id} a fost anulat.")
+        return True
+    except BinanceAPIException as e:
+        print(f"Eroare la anularea ordinului: {e}")
+        return False
+
+def cancel_expired_orders(order_type, symbol, expire_time):
+    
+    open_orders = get_open_orders(order_type, symbol)
+
+    #current_time = int(time.time() * 1000)  # Convert current time to milliseconds
+    current_time = int(time.time())
+
+    print(f"Available open orders {len(open_orders)}. Try cancel {order_type} orders type ... ")
+    for order_id, order_details in open_orders.items():
+        order_time = order_details.get('timestamp')
+
+        if current_time - order_time > expire_time:
+            cancel_order(order_id)
+            print(f"Cancelled {order_type} order with ID: {order_id} due to expiration.")
+        
 
 def check_order_filled(order_id):
     try:
@@ -471,53 +519,31 @@ def get_recent_filled_orders(order_type, max_age_seconds):
     return recent_filled_orders
 
 
-        
-def cancel_order(order_id):
-    try:
-        if not order_id:
-            return False
-        client.cancel_order(symbol=symbol, orderId=order_id)
-        print(f"Ordinul cu ID {order_id} a fost anulat.")
-        return True
-    except BinanceAPIException as e:
-        print(f"Eroare la anularea ordinului: {e}")
-        return False
-
-def cancel_expired_orders(order_type, symbol, expire_time):
+def get_close_buy_orders_without_sell(api, max_age_seconds, profit_percentage):
+    close_buy_orders = api.get_recent_filled_orders('buy', max_age_seconds)
+    close_sell_orders = api.get_recent_filled_orders('sell', max_age_seconds)
     
-    open_orders = get_open_orders(order_type, symbol)
+    # Lista de ordere 'buy' care nu au un 'sell' asociat cu profitul dorit
+    buy_orders_without_sell = []
 
-    #current_time = int(time.time() * 1000)  # Convert current time to milliseconds
-    current_time = int(time.time())
-
-    print(f"Available open orders {len(open_orders)}. Try cancel {order_type} orders type ... ")
-    for order_id, order_details in open_orders.items():
-        order_time = order_details.get('timestamp')
-
-        if current_time - order_time > expire_time:
-            cancel_order(order_id)
-            print(f"Cancelled {order_type} order with ID: {order_id} due to expiration.")
-            
-
-def get_open_orders(order_type, symbol):
-    if order_type.upper() != 'BUY' and order_type.upper() != 'SELL':
-        raise ValueError(f"getting {order_type}. order_type must be 'buy' or 'sell'")
+    for buy_order in close_buy_orders:
+        filled_price = buy_order['filled_price']
+        symbol = buy_order['symbol']
+        buy_quantity = buy_order['quantity']  # Cantitatea cumpărată
         
-    try:
-        open_orders = client.get_open_orders(symbol=symbol)
-        #print(open_orders)
-        filtered_orders = {
-            order['orderId']: {
-                'price': float(order['price']),
-                'quantity': float(order['origQty']),
-                'timestamp': order['time'] / 1000
-            }
-            for order in open_orders if order['side'] == order_type.upper()
-        }
+        # Filtrează orderele de tip 'sell' asociate cu acest 'buy' (același simbol și cu prețul dorit)
+        related_sell_orders = [
+            order for order in close_sell_orders 
+            if order['symbol'] == symbol and order['filled_price'] >= filled_price * (1 + profit_percentage / 100)
+        ]
         
-        return filtered_orders
-    except BinanceAPIException as e:
-        print(f"Error getting open {order_type} orders: {e}")
-        return {}
+        # Calculează suma cantității vândute pentru orderele 'sell' găsite
+        total_sell_quantity = sum(order['quantity'] for order in related_sell_orders)
+        
+        # Dacă cantitatea totală vândută este mai mică decât cantitatea cumpărată
+        if total_sell_quantity < buy_quantity:
+            # Adaugă buy_order la lista de ordere care încă nu au sell complet
+            buy_orders_without_sell.append(buy_order)
 
+    return buy_orders_without_sell
 

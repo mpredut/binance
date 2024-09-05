@@ -132,15 +132,14 @@ def monitor_filled_buy_orders_old():
 
 
 
-def monitor_close_orders():
+def monitor_close_orders_by_age(max_age_seconds):
     if threading.active_count() > 2:  # Dacă sunt deja fire active (în afară de firul principal)
         print("Fire active detectate, ieșim din funcție pentru a nu porni fire noi.")
         return
  
-    max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate sunt considerate recente (3 zile)
-    filled_buy_orders = api.get_recent_filled_orders('buy', max_age_seconds)
+    close_buy_orders = api.get_recent_filled_orders('buy', max_age_seconds)
 
-    for order in filled_buy_orders:
+    for order in close_buy_orders:
         current_time = time.time()
         end_time = current_time + 2 * 3600  # Procesul durează două ore
         filled_price = order['price']
@@ -161,7 +160,7 @@ def monitor_close_orders():
 
 
 
-def monitor_orders_by_type(order_type):
+def monitor_open_orders_by_type(order_type):
     orders = api.get_open_orders(order_type, api.symbol)  # Obține ordinele de vânzare sau cumpărare în funcție de tip
     if not orders:
         print(f"Nu există ordine de {order_type} deschise inițial.")
@@ -227,25 +226,25 @@ def monitor_orders_by_type(order_type):
 
 MONITOR_OPEN_ORDER_INTERVAL = 18
 MONITOR_CLOSE_ORDER_INTERVAL = 98
-
+max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate/filled sunt considerate recente (3 zile)
 
 def monitor_orders():
     #monitor_filled_buy_orders()
     #return
     
     monitor_open_orders_lasttime = time.time() - MONITOR_OPEN_ORDER_INTERVAL - TIME_SLEEP_ERROR
-    monitor_close_orders_lasttime = time.time() - MONITOR_CLOSE_ORDER_INTERVAL - TIME_SLEEP_ERROR
+    monitor_close_orders_by_age_lasttime = time.time() - MONITOR_CLOSE_ORDER_INTERVAL - TIME_SLEEP_ERROR
 
     while not api.stop:
         try:
             currenttime = time.time()
             if(currenttime - monitor_open_orders_lasttime > MONITOR_OPEN_ORDER_INTERVAL) :
-                monitor_orders_by_type('sell')
-                monitor_orders_by_type('buy')
+                monitor_open_orders_by_type('sell')
+                monitor_open_orders_by_type('buy')
                 monitor_open_orders_lasttime = currenttime
-            if(currenttime - monitor_close_orders_lasttime > MONITOR_CLOSE_ORDER_INTERVAL) :
-                monitor_close_orders()
-                monitor_close_orders_lasttime = currenttime   
+            if(currenttime - monitor_close_orders_by_age_lasttime > MONITOR_CLOSE_ORDER_INTERVAL) :
+                monitor_close_orders_by_age(max_age_seconds)
+                monitor_close_orders_by_age_lasttime = currenttime   
                 
             time.sleep(min(MONITOR_OPEN_ORDER_INTERVAL, MONITOR_CLOSE_ORDER_INTERVAL))
             
