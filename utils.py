@@ -122,3 +122,16 @@ def are_values_very_close(value1, value2, target_tolerance_percent=1.0):
 
     return False#, iteration, tolerance
     
+    
+    from datetime import datetime
+
+def convert_timestamp_to_human_readable(timestamp_ms):
+    # Convertim timpul din milisecunde în secunde
+    timestamp_sec = timestamp_ms / 1000.0
+    
+    # Convertim în format datetime
+    human_readable_time = datetime.utcfromtimestamp(timestamp_sec)
+    
+    # Returnăm timpul ca string în format citibil
+    return human_readable_time.strftime('%Y-%m-%d %H:%M:%S')
+

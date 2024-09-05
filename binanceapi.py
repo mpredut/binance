@@ -303,7 +303,7 @@ def check_order_filled(order_id):
         return False
 
 
-
+################
 def get_my_trades_24(symbol, days_ago, order_type=None, limit=1000):
     all_trades = []
     try:
@@ -346,18 +346,18 @@ def get_my_trades_24(symbol, days_ago, order_type=None, limit=1000):
         return []
 
 
-symbol = 'BTCUSDT'
-limit = 2
+# symbol = 'BTCUSDT'
+# limit = 2
 
-for days_ago in range (0,20):
-    print(f"Testing get_my_trades_24 for {symbol} on day {days_ago}...")
-    trades = get_my_trades_24(symbol, days_ago, limit)
-    if trades:
-        print(f"Found {len(trades)} trades for day {days_ago}.")
-        for trade in trades[:5]:  # Afișează primele 5 tranzacții
-            print(trade)
-    else:
-        print(f"No trades found for day {days_ago}.")
+# for days_ago in range (0,20):
+    # print(f"Testing get_my_trades_24 for {symbol} on day {days_ago}...")
+    # trades = get_my_trades_24(symbol, days_ago, limit)
+    # if trades:
+        # print(f"Found {len(trades)} trades for day {days_ago}.")
+        # for trade in trades[:5]:  # Afișează primele 5 tranzacții
+            # print(trade)
+    # else:
+        # print(f"No trades found for day {days_ago}.")
 
 
 def get_my_trades(order_type, symbol, backdays=3, limit=1000):
@@ -372,16 +372,17 @@ def get_my_trades(order_type, symbol, backdays=3, limit=1000):
                 print(f"No trades found for day {days_ago}.")
                 continue
             
-            filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "buy")]
+            #filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "buy")]
+            if order_type == "buy":
+                filtered_trades = [trade for trade in trades if trade['isBuyer']]
+            elif order_type == "sell":
+                filtered_trades = [trade for trade in trades if not trade['isBuyer']]
+            else:
+                filtered_trades = trades
+                
             all_trades.extend(filtered_trades)
 
-            # Dacă depășim limita, ieșim din buclă
-            if len(all_trades) >= limit:
-                print(f"Reached trade limit of {limit}.")
-                break
-
-        # Returnăm doar tranzacțiile până la limita specificată
-        return all_trades[:limit]
+        return all_trades
 
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -404,7 +405,14 @@ def get_my_trades_simple(order_type, symbol, backdays=3, limit=1000):
             trades = client.get_my_trades(symbol=symbol, limit=limit, startTime=start_time, endTime=end_time)
 
             if trades:
-                filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "buy")]
+                #filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "buy")]
+                if order_type == "buy":
+                    filtered_trades = [trade for trade in trades if trade['isBuyer']]
+                elif order_type == "sell":
+                    filtered_trades = [trade for trade in trades if not trade['isBuyer']]
+                else:
+                    filtered_trades = trades
+                
                 all_trades.extend(filtered_trades)
             
             # Actualizăm end_time pentru ziua anterioară (înainte de această perioadă de 24 de ore)
@@ -503,12 +511,61 @@ def test_get_my_trades():
         print(trade)
 
 # Apelăm funcția de testare
-test_get_my_trades()
+#test_get_my_trades()
 
+import os
+# Funcția care salvează tranzacțiile noi în fișier (completare dacă există deja)
+def save_trades_to_file(order_type, symbol, filename, limit=1000):
+    all_trades = []
 
+    # Verificăm dacă fișierul există deja
+    if os.path.exists(filename):
+        with open(filename, 'r') as f:
+            try:
+                existing_trades = json.load(f)
+                print(f"Loaded {len(existing_trades)} existing trades from {filename}.")
+            except json.JSONDecodeError:
+                existing_trades = []
+    else:
+        existing_trades = []
 
+    # Dacă există deja tranzacții, găsim cea mai recentă tranzacție salvată
+    if existing_trades:
+        most_recent_trade_time = max(trade['time'] for trade in existing_trades)
+        print(f"Most recent trade time from file: {most_recent_trade_time}")
 
+        # Calculăm câte zile au trecut de la most_recent_trade_time până la acum
+        current_time = int(time.time() * 1000)
+        time_diff_ms = current_time - most_recent_trade_time
+        backdays = time_diff_ms // (24 * 60 * 60 * 1000) + 1  # Câte zile au trecut de la ultima tranzacție
+    else:
+        most_recent_trade_time = 0  # Dacă nu există tranzacții, începem de la 0
+        backdays = 60  # Adăugăm tranzacții pentru ultimele 60 de zile dacă fișierul e gol
 
+    print(f"Fetching trades from the last {backdays} days.")
+
+    # Apelăm funcția pentru a obține tranzacțiile recente doar din perioada lipsă
+    new_trades = get_my_trades_simple(order_type, symbol, backdays=backdays, limit=limit)
+
+    # Filtrăm doar tranzacțiile care sunt mai recente decât cea mai recentă tranzacție din fișier
+    new_trades = [trade for trade in new_trades if trade['time'] > most_recent_trade_time]
+
+    if new_trades:
+        print(f"Found {len(new_trades)} new trades.")
+        
+        # Adăugăm doar tranzacțiile noi la cele existente
+        all_trades = existing_trades + new_trades
+        all_trades = sorted(all_trades, key=lambda x: x['time'])  # Sortăm după timp
+
+        # Salvăm doar tranzacțiile noi la fișier
+        with open(filename, 'w') as f:
+            json.dump(all_trades, f)
+
+        print(f"Updated file with {len(all_trades)} total trades.")
+    else:
+        print("No new trades found to save.")
+
+#save_trades_to_file(None, "BTCUSDT", "trades_BTCUSDT.json", limit=1000)
 
 # Exemplu de utilizare pentru a obține tranzacțiile de tip buy
 #buy_trades = get_filled_trades('buy', 'BTCUSDT', backdays=7*2, limit=2)

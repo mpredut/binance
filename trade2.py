@@ -10,7 +10,7 @@ from apikeys import api_key, api_secret
 # my imports
 import binanceapi as api
 import utils as u
-from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, check_order_filled, place_order, cancel_order, cancel_expired_orders, get_open_buy_orders
+from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, check_order_filled, place_order, cancel_order, cancel_expired_orders
 from utils import beep, get_interval_time, are_difference_equal_with_aprox_proc, are_values_very_close, budget, order_cost_btc, price_change_threshold, max_threshold
 import log
 import alert
@@ -188,7 +188,17 @@ class PriceWindow:
 
         return action, proposed_price, price_change_percent, slope
 
-        
+    def check_price_change(self, threshold):
+        if len(self.prices) < 2:
+            return None
+        oldest_price = self.prices[0]
+        newest_price = self.prices[-1]
+        price_diff = newest_price - oldest_price
+        if abs(price_diff) >= threshold:
+            return price_diff
+        else:
+            return None
+            
     def current_window_size(self):
         return len(self.prices)
 
@@ -199,7 +209,7 @@ EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
 TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
 # am voie 6 ordere per perioada de expirare care este 2.6 ore. deaceea am impartit la 6
 TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + EXP_TIME_SELL_ORDER/ 6 + 4*79  # seconds to sleep for order placement
-WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 48  # minutes
+WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 5  # minutes
 window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP_GET_PRICE
 
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
@@ -213,12 +223,12 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
     # Determine the number of orders and their spacing based on price trend
     if slope is not None and slope > 0:
         # Price is rising, place fewer, larger orders
-        num_orders = 1
+        num_orders = 2
         price_step = 0.2  # Increase the spacing between orders as procents
         print(f"Placing fewer, {num_orders} larger orders due to rising price.")
     else:
         # Price is falling, place more, smaller orders
-        num_orders = 1
+        num_orders = 2
         price_step = 0.08  # Reduce the spacing between orders as procents
         print(f"Placing more, {num_orders} smaller orders due to falling price.")
 
@@ -281,6 +291,8 @@ last_evaluate_time = time.time()
 buy_count = 0
 sell_count = 0
 
+PRICE_CHANGE_THRESHOLD_EUR = 400  # €400 price change threshold
+
 while True:
     try:
         current_price = get_current_price(symbol)
@@ -290,6 +302,26 @@ while True:
 
         price_window.process_price(current_price)
 
+        # Check for significant price changes
+        price_change = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
+        if price_change is not None:
+            if price_change >= PRICE_CHANGE_THRESHOLD_EUR:
+                action = 'SELL'
+                proposed_price = current_price  + 750   # You may adjust this as needed
+                print(f"Significant price increase detected: {price_change} EUR. SELL order at {proposed_price:.2f} EUR")
+                order_placed, order_id = track_and_place_order(action, proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
+            elif price_change <= -PRICE_CHANGE_THRESHOLD_EUR:
+                # Price decreased significantly, place a buy order
+                action = 'BUY'
+                proposed_price = current_price - 750  # You may adjust this as needed
+                print(f"Significant price decrease detected: {price_change} EUR. BUY order at {proposed_price:.2f} EUR")
+                order_placed, order_id = track_and_place_order(action, proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
+            # Reset the price window after action
+            price_window = PriceWindow(window_size)
+            
+
+
+        #########
         current_time = time.time()
 
         # Evaluate buy/sell opportunity more frequently
