@@ -174,7 +174,7 @@ def place_order(order_type, symbol, price, quantity):
         cancel = False
         
         if order_type.lower() == 'buy':
-            open_sell_orders = get_open_sell_orders(symbol)
+            open_sell_orders = get_open_orders("sell", symbol)
             # Anulează ordinele de vânzare existente la un preț mai mic decât prețul de cumpărare dorit
             for order_id, order_details in open_sell_orders.items():
                 if order_details['price'] < price:
@@ -190,7 +190,7 @@ def place_order(order_type, symbol, price, quantity):
             )
         
         elif order_type.lower() == 'sell':
-            open_buy_orders = get_open_buy_orders(symbol)
+            open_buy_orders = get_open_orders("buy", symbol)
             # Anulează ordinele de cumpărare existente la un preț mai mare decât prețul de vânzare dorit
             for order_id, order_details in open_buy_orders.items():
                 if order_details['price'] > price:
@@ -303,66 +303,167 @@ def check_order_filled(order_id):
         return False
 
 
-def get_filled_orders_Bed(order_type, symbol, backdays=2):
 
-    #all_orders = client.get_all_orders(symbol=symbol)
-    end_time = int(time.time()) * 1000 #miliseconds
-    start_time = end_time - backdays * 24 * 60 * 60 * 1000 -  60 * 60 * 1000  # numărul de zile convertit în milisecunde
-    start_time = int((datetime.datetime.now() - datetime.timedelta(days=backdays)).timestamp() * 1000)
-        
-    all_orders = client.get_all_orders(symbol=symbol, startTime=start_time, endTime=end_time, limit=1000000)
-    print(f"Total orders fetched: {len(all_orders)}")
-    # Filtrăm ordinele complet executate și pe cele care corespund tipului de ordin specificat
-    filtered_orders = [
-        {
-            'orderId': order['orderId'],
-            'price': float(order['price']),
-            'quantity': float(order['origQty']),
-            'timestamp': order['time'] / 1000,  # Timpul în secunde
-            'side': order['side'].lower()
-        }
-        #print(f"Order ID: {order['orderId']}, Status: {order['status']}, Side: {order['side']}, Type: {order['type']}, Time: {order['time']}")
-        for order in all_orders if order['status'] == 'FILLED' and order['side'].lower() == order_type.lower()
-    ]
-    
-    for order in all_orders:
-        # Afișăm fiecare ordin pentru a verifica structura și valorile cheilor relevante
-        #print(f"Order ID: {order['orderId']}, Status: {order['status']}, Side: {order['side']}, Type: {order['type']}, Time: {order['time']}")
 
-        # Verifică dacă ordinul este FILLED și are tipul corect (buy sau sell)
-        if order['status'] == 'FILLED' and order['side'].lower() == order_type.lower():
-            filtered_order = {
-                'orderId': order['orderId'],
-                'price': float(order['price']),
-                'quantity': float(order['origQty']),
-                'timestamp': order['time'] / 1000,  # Timpul în secunde
-                'side': order['side'].lower()
-            }
-            filtered_orders.append(filtered_order)
-    
-    print(f"Filtered filled orders of type '{order_type}': {len(filtered_orders)}")
-    #print("First few filled orders for inspection:")
-     #for filled_order in filtered_orders[:5]:  # Afișează primele 5 ordine complet executate
-        #print(filled_order)
+def get_my_trades_24(symbol, days_ago, limit=1000):
+    all_trades = []
+    try:
+        current_time = int(time.time() * 1000)
         
-    return filtered_orders
+        # Calculăm start_time și end_time pentru ziua specificată în urmă
+        end_time = current_time - days_ago * 24 * 60 * 60 * 1000
+        start_time = end_time - 24 * 60 * 60 * 1000  # Cu 24 de ore în urmă de la end_time
+
+        # Apelăm API-ul pentru tranzacții în intervalul specificat
+        while start_time < end_time:
+            trades = client.get_my_trades(symbol=symbol, limit=limit, startTime=start_time, endTime=end_time)
+
+            if not trades:
+                break
+
+            print("GASIT")
+            all_trades.extend(trades)
+            
+            if len(trades) < limit:
+                break
+
+            # Ajustăm `start_time` la timpul celei mai noi tranzacții pentru a continua
+            start_time = trades[-1]['time'] + 1  # Ne mutăm inainte cu 1 ms pentru a evita duplicatele
+
+        return all_trades
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return []
+
+symbol = 'BTCUSDT'
+limit = 2
+
+for days_ago in range (0,20):
+    print(f"Testing get_my_trades_24 for {symbol} on day {days_ago}...")
+    trades = get_my_trades_24(symbol, days_ago, limit)
+    if trades:
+        print(f"Found {len(trades)} trades for day {days_ago}.")
+        for trade in trades[:5]:  # Afișează primele 5 tranzacții
+            print(trade)
+    else:
+        print(f"No trades found for day {days_ago}.")
+
+
+def get_my_trades(symbol, backdays=3, limit=1000):
+    all_trades = []
     
-    
+    try:
+        for days_ago in range(backdays):
+            print(f"Fetching trades for day {days_ago}...")
+            trades = get_my_trades_24(symbol, days_ago, limit)
+            
+            if not trades:
+                print(f"No trades found for day {days_ago}.")
+                continue
+            
+            all_trades.extend(trades)
+
+            # Dacă depășim limita, ieșim din buclă
+            if len(all_trades) >= limit:
+                print(f"Reached trade limit of {limit}.")
+                break
+
+        # Returnăm doar tranzacțiile până la limita specificată
+        return all_trades[:limit]
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return []
+        
+        
+def get_my_trades_simple(symbol, backdays=3, limit=1000):
+    all_trades = []
+    try:
+        current_time = int(time.time() * 1000) 
+
+        max_interval = 24 * 60 * 60 * 1000
+
+        end_time = current_time
+
+        for day in range(backdays):
+            # Calculăm start_time pentru ziua curentă în intervalul de 24 de ore
+            start_time = end_time - max_interval
+            
+            trades = client.get_my_trades(symbol=symbol, limit=limit, startTime=start_time, endTime=end_time)
+
+            if trades:
+                all_trades.extend(trades)
+            
+            # Actualizăm end_time pentru ziua anterioară (înainte de această perioadă de 24 de ore)
+            end_time = start_time
+
+        return all_trades
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return []
+
+
+
+
+def test_get_my_trades():
+    symbol = 'BTCUSDT'
+    backdays = 30
+    limit = 1000
+
+    # Apelăm varianta cu paginare
+    print("Testing get_my_trades with pagination...")
+    trades_pagination = get_my_trades(symbol, backdays, limit)
+
+    # Apelăm varianta simplificată fără paginare
+    print("Testing get_my_trades_simple without pagination...")
+    trades_simple = get_my_trades_simple(symbol, backdays, limit)
+
+    # Comparăm rezultatele
+    if trades_pagination == trades_simple:
+        print("Both functions returned the same results.")
+    else:
+        print("The functions returned different results.")
+        print(f"Trades with pagination: {len(trades_pagination)}")
+        print(f"Trades without pagination: {len(trades_simple)}")
+        print("First few trades with pagination:")
+        for trade in trades_pagination[:5]:
+            print(trade)
+        print("First few trades without pagination:")
+        for trade in trades_simple[:5]:
+            print(trade)
+
+# Apelăm funcția de testare
+test_get_my_trades()
+
+
+
+
+# Exemplu de utilizare pentru a obține tranzacțiile de tip buy
+#buy_trades = get_filled_trades('buy', 'BTCUSDT', backdays=7*2, limit=2)
+#sell_trades = get_filled_trades('sell', 'BTCUSDT', backdays=7*2, limit=4)
+
+  
+  
+  
+  #######
+#start_time = int((datetime.datetime.now() - datetime.timedelta(days=backdays)).timestamp() * 1000)
 def get_filled_orders(order_type, symbol, backdays=3):
     try:
         end_time = int(time.time() * 1000)  # milisecunde
         
-        interval_hours=1
+        interval_hours = 1
         interval_ms = interval_hours * 60 * 60 * 1000  # interval_hours de ore în milisecunde
         start_time = end_time - backdays * 24 * 60 * 60 * 1000
-        
+       
         all_filtered_orders = []
 
         # Parcurgem intervale de 24 de ore și colectăm ordinele
         while start_time < end_time:
             current_end_time = min(start_time + interval_ms, end_time)
             orders = client.get_all_orders(symbol=symbol, startTime=start_time, endTime=current_end_time, limit=1000)
-            print(f"orders of type '{order_type}': {len(orders)}")
+            print(f"orders : {len(orders)}")
             
             # Filtrăm ordinele complet executate și pe cele care corespund tipului de ordin specificat
             filtered_orders = [
@@ -393,60 +494,6 @@ def get_filled_orders(order_type, symbol, backdays=3):
 
 
 
-def get_all_orders_in_time_range(order_type, symbol, start_time, end_time):
-    all_orders = []
-    last_order_id = None
-    first_request = True
-
-    while True:
-        # Pregătim parametrii pentru cererea API
-        params = {
-            'symbol': symbol,
-            'startTime': start_time,
-            'endTime': end_time,
-            'limit': 1000
-        }
-        
-        # Adăugăm `orderId` doar pentru cererile următoare după prima
-        #if not first_request:
-            #params['orderId'] = last_order_id
-
-        # Obținem ordinele cu parametrii actuali
-        orders = client.get_all_orders(**params)
-        
-        if not orders:
-            break
-
-        # Setăm flagul pentru prima cerere la False după prima cerere
-        first_request = False
-        
-        # Filtrăm ordinele dacă este specificat `order_type`
-        if order_type:
-            orders = [order for order in orders if order['side'].lower() == order_type.lower()]
-        
-        all_orders.extend(orders)
-        last_order_id = orders[-1]['orderId']
-
-        # Dacă ultimele ordine din pagină sunt în afara intervalului de timp, ne oprim
-        if orders[-1]['time'] >= end_time:
-            break
-
-    # Filtrăm ordinele care sunt complet executate (FILLED)
-    filled_orders = [
-        {
-            'orderId': order['orderId'],
-            'price': float(order['price']),
-            'quantity': float(order['origQty']),
-            'timestamp': order['time'] / 1000,  # Timpul în secunde
-            'side': order['side'].lower()
-        }
-        for order in all_orders if order['status'] == 'FILLED'
-    ]
-
-    return filled_orders
-
-
-   
 start_time = int(time.time() * 1000) - 1 * 24 * 60 * 60 * 1000  # Cu 3 zile în urmă
 end_time = int(time.time() * 1000)  # Momentul curent
 order_type = "buy"  # sau "sell", sau None pentru ambele tipuri
@@ -458,45 +505,6 @@ order_type = "buy"  # sau "sell", sau None pentru ambele tipuri
 #for filled_order in all_filtered_orders[:5]:  # Afișează primele 5 ordine complet executate
     #print(filled_order)
         
-
-def get_old_orders(symbol, limit=1000):
-    start_date = datetime.datetime(2023, 6, 1)  # 1 iunie 2023
-    end_date = datetime.datetime(2023, 6, 30, 23, 59, 59)  # 30 iunie 2023, ora 23:59:59
-
-    # Obținem timestamp-urile în milisecunde
-    start_time = int(start_date.timestamp() * 1000)
-    end_time = int(end_date.timestamp() * 1000)
-    
-    delta = datetime.timedelta(days=1)
-    end_time = int((start_date + delta).timestamp() * 1000)
-
-    all_orders = []
-    
-    while True:
-        orders = client.get_all_orders(symbol=symbol, startTime=start_time, endTime=end_time, limit=limit)
-        if not orders:
-            break
-        
-        all_orders.extend(orders)
-        end_time = orders[-1]['time']  # atentie pt secunde inparte la 10000. Ajustează end_time pentru a continua de la ultimul ordin
-        
-        # Verifică dacă am ajuns la limitele ordinelor vechi
-        if len(orders) < limit:
-            break
-    
-    # Filtrează doar ordinele FILLED și sortează-le după timp
-    filled_orders = [order for order in all_orders if order['status'] == 'FILLED']
-    filled_orders.sort(key=lambda x: x['time'])
-    
-    return filled_orders
-
-# Exemplu de utilizare
-symbol = 'BTCUSDT'
-old_filled_orders = get_old_orders(symbol)
-
-# Afișează primele 5 ordine vechi FILLED
-for order in old_filled_orders[:5]:
-    print(order)
 
 def get_recent_filled_orders(order_type, max_age_seconds):
 
