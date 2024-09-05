@@ -18,6 +18,8 @@ initial_buy_prices = {}  # Dicționar pentru a reține prețurile inițiale ale 
 max_adjustments = 1000  # Număr maxim de ajustări pentru un ordin
 
 
+TIME_SLEEP = 2 
+
 import threading
 import time
 
@@ -187,7 +189,7 @@ def monitor_orders_by_type(order_type):
             
             are_close = utils.are_values_very_close(current_price, initial_prices[order_id], MAX_PROC)
             if not are_close:
-                print(f"Totusi prețul s-a modificat prea mult față de prețul inițial ({initial_prices[order_id]}). Nu se mai modifică ordinul.")
+                print(f"Totusi prețul s-a modificat prea mult({difference_percent}%) față de prețul inițial ({initial_prices[order_id]}). Nu se mai modifică ordinul.")
                 continue
             else:
                 print(f"Current price {current_price} and initial {order_type} price {initial_prices[order_id]} are close!")
@@ -197,9 +199,9 @@ def monitor_orders_by_type(order_type):
                 continue
             
             if order_type == 'sell':
-                new_price = current_price * 1.001 + 200
+                new_price = current_price * 1.001 + 100
             else:
-                new_price = current_price * 0.999 - 200
+                new_price = current_price * 0.999 - 100
             
             quantity = order['quantity']
             
@@ -218,7 +220,7 @@ def monitor_orders_by_type(order_type):
     time.sleep(monitor_interval)
 
 
-TIME_SLEEP = 2  
+ 
 def monitor_orders():
     #monitor_filled_buy_orders()
     #return
