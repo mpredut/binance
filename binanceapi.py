@@ -654,31 +654,4 @@ def get_recent_filled_orders(order_type, max_age_seconds):
     return recent_filled_orders
 
 
-def get_close_buy_orders_without_sell(api, max_age_seconds, profit_percentage):
-    close_buy_orders = api.get_recent_filled_orders('buy', max_age_seconds)
-    close_sell_orders = api.get_recent_filled_orders('sell', max_age_seconds)
-    
-    # Lista de ordere 'buy' care nu au un 'sell' asociat cu profitul dorit
-    buy_orders_without_sell = []
-
-    for buy_order in close_buy_orders:
-        filled_price = buy_order['filled_price']
-        symbol = buy_order['symbol']
-        buy_quantity = buy_order['quantity']  # Cantitatea cumpărată
-        
-        # Filtrează orderele de tip 'sell' asociate cu acest 'buy' (același simbol și cu prețul dorit)
-        related_sell_orders = [
-            order for order in close_sell_orders 
-            if order['symbol'] == symbol and order['filled_price'] >= filled_price * (1 + profit_percentage / 100)
-        ]
-        
-        # Calculează suma cantității vândute pentru orderele 'sell' găsite
-        total_sell_quantity = sum(order['quantity'] for order in related_sell_orders)
-        
-        # Dacă cantitatea totală vândută este mai mică decât cantitatea cumpărată
-        if total_sell_quantity < buy_quantity:
-            # Adaugă buy_order la lista de ordere care încă nu au sell complet
-            buy_orders_without_sell.append(buy_order)
-
-    return buy_orders_without_sell
 
