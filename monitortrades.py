@@ -211,7 +211,7 @@ if __name__ == "__main__":
     # Simulare: extragem ordinele recente de tip 'buy'
     while True:
         time.sleep(10)  # Periodic, verificăm ordinele în cache
-        close_orders = apitrades.get_trade_orders('buy', max_age_seconds=86400)  # Extragere ordine de 'buy' în ultimele 24 de ore
+        close_orders = apitrades.get_trade_orders('buy', symbol, max_age_seconds=86400)  # Extragere ordine de 'buy' în ultimele 24 de ore
         print(f"get_trade_orders: Found {len(close_orders)} close 'buy' orders in the last 24 hours.")
         close_orders_all = apiorders.get_recent_filled_orders('buy', symbol, max_age_seconds=86400)  # Extragere ordine de 'buy' în ultimele 24 de ore
         print(f"get_recent_filled_orders: Found {len(close_orders_all)} close 'buy' orders in the last 24 hours.")
