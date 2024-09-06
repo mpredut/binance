@@ -10,6 +10,7 @@ from binance.exceptions import BinanceAPIException
 
 #my imports
 from binanceapi import client
+import utils
  
   
 #######
@@ -73,7 +74,7 @@ def get_recent_filled_orders(order_type, symbol, max_age_seconds):
     if(len(all_filled_orders) < 1) :
         return []
     
-    print(f"have len(all_filled_orders) orders. ignore oldest.")
+    print(f"have {len(all_filled_orders)} orders. ignore oldest.")
     for order in all_filled_orders:
         if current_time - order['timestamp'] <= max_age_seconds:
             recent_filled_orders.append(order)
