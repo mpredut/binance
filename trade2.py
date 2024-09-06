@@ -194,7 +194,7 @@ class PriceWindow:
         oldest_price = self.prices[0]
         newest_price = self.prices[-1]
         price_diff = newest_price - oldest_price
-        if abs(price_diff) >= threshold:
+        if abs(price_diff) >= threshold or utils.are_values_very_close(price_diff, threshold) :
             return price_diff
         else:
             return None
@@ -204,7 +204,7 @@ class PriceWindow:
 
 
 TIME_SLEEP_GET_PRICE = 2  # seconds to sleep for price collection
-EXP_TIME_BUY_ORDER = (1.6 * 60) * 60 # dupa 1.6 ore
+EXP_TIME_BUY_ORDER = (2.6 * 60) * 60 # dupa 1.6 ore
 EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
 TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
 # am voie 6 ordere per perioada de expirare care este 2.6 ore. deaceea am impartit la 6
@@ -273,6 +273,63 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
     return order_placed, order_id  # Return the updated order state
 
 
+import time
+
+class TrendState:
+    def __init__(self, max_duration_seconds, expiration_threshold):
+        self.state = 'HOLD'  # Inițial, starea este 'HOLD'
+        self.start_time = None  # Timpul de început al trendului
+        self.end_time = None  # Timpul de sfârșit al trendului
+        self.last_confirmation_time = None  # Ultimul timp de confirmare al trendului
+        self.max_duration_seconds = max_duration_seconds  # Durata maximă permisă pentru un trend
+        self.confirm_count = 0  # Contorul de confirmări pentru trend
+        self.expiration_threshold = expiration_threshold  # Pragul de timp între confirmări (în secunde)
+
+    def start_trend(self, new_state):
+        old_state = self.state
+        if self.state != 'HOLD':  # Dacă schimbăm trendul, considerăm sfârșitul trendului anterior
+            self.end_trend()  # Marchează sfârșitul trendului anterior
+        
+        self.state = new_state
+        self.start_time = time.time()
+        self.last_confirmation_time = self.start_time
+        self.confirm_count = 1  # Prima confirmare
+        self.end_time = None  # Resetăm timpul de sfârșit
+        print(f"Trend started: {self.state} at {time.ctime(self.start_time)}")
+        return old_state
+
+    def confirm_trend(self):
+        self.last_confirmation_time = time.time()
+        self.confirm_count += 1
+        print(f"Trend confirmed: {self.state} at {time.ctime(self.last_confirmation_time)}")
+
+    def check_trend_expiration(self):
+        """Verifică dacă trendul a expirat din cauza lipsei confirmărilor în intervalul permis."""
+        if self.last_confirmation_time:
+            time_since_last_confirmation = time.time() - self.last_confirmation_time
+            if time_since_last_confirmation > self.expiration_threshold:
+                print(f"Trend expired: {self.state}. Time since last confirmation: {time_since_last_confirmation} seconds")
+                self.end_time = self.last_confirmation_time  # Sfârșitul trendului este la ultima confirmare
+                return True
+        return False
+
+    def end_trend(self):
+        """Marchează sfârșitul trendului curent și returnează starea trendului care s-a încheiat."""
+        self.end_time = self.last_confirmation_time  # Timpul de sfârșit al trendului este ultimul timp de confirmare
+        print(f"Trend ended: {self.state} at {time.ctime(self.end_time)} after {self.confirm_count} confirmations.")
+
+    def is_trend_up(self):
+        return self.state == 'UP'
+
+    def is_trend_down(self):
+        return self.state == 'DOWN'
+
+    def is_hold(self):
+        return self.state == 'HOLD'
+        
+trend_state = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_threshold=10 * 60)  # Expiră în 10 minute
+
+
 #
 #       MAIN 
 #
@@ -291,7 +348,7 @@ last_evaluate_time = time.time()
 buy_count = 0
 sell_count = 0
 
-PRICE_CHANGE_THRESHOLD_EUR = 400  # €400 price change threshold
+PRICE_CHANGE_THRESHOLD_EUR = 300
 
 while True:
     try:
@@ -302,23 +359,66 @@ while True:
 
         price_window.process_price(current_price)
 
-        # Check for significant price changes
+        # Verificăm periodic dacă trendul curent a expirat
+        if trend_state.check_trend_expiration():
+            expired_trend = trend_state.state  # Reținem trendul care a expirat
+            trend_state.end_trend()  # Marchează sfârșitul trendului
+
+            # Aplicăm ordine la sfârșitul unui trend
+            if expired_trend == 'UP':
+                proposed_price = current_price + 142  # Preț de vânzare
+                print(f"End of UP trend. SELL order at {proposed_price:.2f} EUR")
+                order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
+            elif expired_trend == 'DOWN':
+                proposed_price = current_price - 142  # Preț de cumpărare
+                print(f"End of DOWN trend. BUY order at {proposed_price:.2f} EUR")
+                order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
+
+        # Verificăm schimbările de preț și gestionăm trendurile
         price_change = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
-        if price_change is not None:
-            if price_change >= PRICE_CHANGE_THRESHOLD_EUR:
-                action = 'SELL'
-                proposed_price = current_price  + 750   # You may adjust this as needed
-                print(f"Significant price increase detected: {price_change} EUR. SELL order at {proposed_price:.2f} EUR")
-                order_placed, order_id = track_and_place_order(action, proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
-            elif price_change <= -PRICE_CHANGE_THRESHOLD_EUR:
-                # Price decreased significantly, place a buy order
-                action = 'BUY'
-                proposed_price = current_price - 750  # You may adjust this as needed
-                print(f"Significant price decrease detected: {price_change} EUR. BUY order at {proposed_price:.2f} EUR")
-                order_placed, order_id = track_and_place_order(action, proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
-            # Reset the price window after action
-            price_window = PriceWindow(window_size)
-            
+        
+        if price_change is not None and price_change > 0:
+            # Confirmăm un trend de creștere
+            if trend_state.is_trend_up():
+                trend_state.confirm_trend()  # Confirmăm că trendul de creștere continuă
+            else:
+                expired_trend = trend_state.start_trend('UP')  # Începem un trend nou de creștere
+
+                # Dacă trendul anterior a fost DOWN, cumpărăm la începutul trendului de UP
+                if expired_trend == 'DOWN':
+                    proposed_price = current_price - 142
+                    print(f"Start of UP trend. BUY order at {proposed_price:.2f} EUR")
+                    order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
+
+        elif price_change is not None and price_change < 0:
+            # Confirmăm un trend de scădere
+            if trend_state.is_trend_down():
+                trend_state.confirm_trend()  # Confirmăm că trendul de scădere continuă
+            else:
+                expired_trend = trend_state.start_trend('DOWN')  # Începem un trend nou de scădere
+
+                # Dacă trendul anterior a fost UP, vindem la începutul trendului de DOWN
+                if expired_trend == 'UP':
+                    proposed_price = current_price + 142
+                    print(f"Start of DOWN trend. SELL order at {proposed_price:.2f} EUR")
+                    order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
+
+
+        # Confirmarea trendului folosind `evaluate_buy_sell_opportunity`
+        action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(
+            current_price, threshold_percent=0.8, decrease_percent=4
+        )
+
+        if action == 'BUY':
+            if trend_state.is_trend_up():
+                trend_state.confirm_trend()  # Confirmăm trendul de creștere
+               
+        elif action == 'SELL':
+            if trend_state.is_trend_down():
+                trend_state.confirm_trend()  # Confirmăm trendul de scădere
+ 
+        # Resetează fereastra de prețuri după acțiune
+        #price_window = PriceWindow(window_size)           
 
 
         #########
@@ -360,11 +460,11 @@ while True:
                 continue
             last_evaluate_time = time.time()
             if buy_count >= sell_count :
-                order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope, order_placed=order_placed, order_id=order_id)
+                #order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope, order_placed=order_placed, order_id=order_id)
                 last_order_time = current_time
                 #buy_count = 0  # Reset buy count after placing the order
             else:
-                order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope, order_placed=order_placed, order_id=order_id)
+                #order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope, order_placed=order_placed, order_id=order_id)
                 last_order_time = current_time
                 #sell_count = 0  # Reset sell count after placing the order
 
