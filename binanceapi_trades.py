@@ -302,19 +302,20 @@ def load_trades_from_file(filename):
         print(f"File {filename} not found.")
         trade_cache = []
 
-
-# Funcția care returnează tranzacțiile de tip 'buy' sau 'sell' din cache
-def get_trade_orders(order_type, max_age_seconds):
+   
+# Funcția care returnează tranzacțiile de tip 'buy' sau 'sell' din cache pentru un anumit simbol
+def get_trade_orders(order_type, symbol, max_age_seconds):
     current_time_ms = int(time.time() * 1000)
     max_age_ms = max_age_seconds * 1000
 
-    # Filtrăm tranzacțiile din cache care sunt de tipul corect și mai recente decât max_age_seconds
+    # Filtrăm tranzacțiile din cache care sunt de tipul corect, pentru simbolul specificat și mai recente decât max_age_seconds
     filtered_trades = [
         trade for trade in trade_cache
-        if trade['isBuyer'] == (order_type == 'buy') and (current_time_ms - trade['time']) <= max_age_ms
+        if trade['symbol'] == symbol and trade['isBuyer'] == (order_type == 'buy') and (current_time_ms - trade['time']) <= max_age_ms
     ]
 
     return filtered_trades
+
 
 
 
