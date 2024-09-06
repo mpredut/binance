@@ -352,12 +352,31 @@ PRICE_CHANGE_THRESHOLD_EUR = 300
 
 while True:
     try:
+        
+        current_time = time.time()
         current_price = get_current_price(symbol)
         if current_price is None:
             time.sleep(TIME_SLEEP_GET_PRICE)
             continue
 
         price_window.process_price(current_price)
+        
+        if current_time - last_order_time <= TIME_SLEEP_PLACE_ORDER :
+            continue
+            
+        # Confirmarea trendului folosind `evaluate_buy_sell_opportunity`
+        action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(
+            current_price, threshold_percent=0.8, decrease_percent=4
+        )
+
+        if action == 'BUY':
+            if trend_state.is_trend_up():
+                trend_state.confirm_trend()  # Confirmăm trendul de creștere
+               
+        elif action == 'SELL':
+            if trend_state.is_trend_down():
+                trend_state.confirm_trend()  # Confirmăm trendul de scădere
+
 
         # Verificăm periodic dacă trendul curent a expirat
         if trend_state.check_trend_expiration():
@@ -366,11 +385,11 @@ while True:
 
             # Aplicăm ordine la sfârșitul unui trend
             if expired_trend == 'UP':
-                proposed_price = current_price + 142  # Preț de vânzare
+                proposed_price = proposed_price + 142  # Preț de vânzare
                 print(f"End of UP trend. SELL order at {proposed_price:.2f} EUR")
                 order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
             elif expired_trend == 'DOWN':
-                proposed_price = current_price - 142  # Preț de cumpărare
+                proposed_price = proposed_price - 142  # Preț de cumpărare
                 print(f"End of DOWN trend. BUY order at {proposed_price:.2f} EUR")
                 order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
 
@@ -386,7 +405,7 @@ while True:
 
                 # Dacă trendul anterior a fost DOWN, cumpărăm la începutul trendului de UP
                 if expired_trend == 'DOWN':
-                    proposed_price = current_price - 142
+                    proposed_price = proposed_price - 142
                     print(f"Start of UP trend. BUY order at {proposed_price:.2f} EUR")
                     order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
 
@@ -399,30 +418,18 @@ while True:
 
                 # Dacă trendul anterior a fost UP, vindem la începutul trendului de DOWN
                 if expired_trend == 'UP':
-                    proposed_price = current_price + 142
+                    proposed_price = proposed_price + 142
                     print(f"Start of DOWN trend. SELL order at {proposed_price:.2f} EUR")
                     order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
 
 
-        # Confirmarea trendului folosind `evaluate_buy_sell_opportunity`
-        action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(
-            current_price, threshold_percent=0.8, decrease_percent=4
-        )
-
-        if action == 'BUY':
-            if trend_state.is_trend_up():
-                trend_state.confirm_trend()  # Confirmăm trendul de creștere
-               
-        elif action == 'SELL':
-            if trend_state.is_trend_down():
-                trend_state.confirm_trend()  # Confirmăm trendul de scădere
+   
  
         # Resetează fereastra de prețuri după acțiune
         #price_window = PriceWindow(window_size)           
 
 
-        #########
-        current_time = time.time()
+        ########
 
         # Evaluate buy/sell opportunity more frequently
         if current_time - last_evaluate_time >= TIME_SLEEP_EVALUATE:
