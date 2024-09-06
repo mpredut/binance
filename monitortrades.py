@@ -143,8 +143,8 @@ def monitor_filled_buy_orders_old():
 
 
 def get_close_buy_orders_without_sell(api, max_age_seconds, profit_percentage):
-    close_buy_orders = apiorders.get_trade_orders('buy', symbol, max_age_seconds)
-    close_sell_orders = apiorders.get_trade_orders('sell', symbol, max_age_seconds)
+    close_buy_orders = apitrades.get_trade_orders('buy', symbol, max_age_seconds)
+    close_sell_orders = apitrades.get_trade_orders('sell', symbol, max_age_seconds)
     
     # Lista de ordere 'buy' care nu au un 'sell' asociat cu profitul dorit
     buy_orders_without_sell = []
@@ -178,7 +178,7 @@ def monitor_close_orders_by_age(max_age_seconds):
         print("Fire active detectate, ieșim din funcție pentru a nu porni fire noi.")
         return
  
-    close_buy_orders = apiorders.get_trade_orders('buy',  symbol, max_age_seconds)
+    close_buy_orders = apitrades.get_trade_orders('buy',  symbol, max_age_seconds)
 
     for order in close_buy_orders:
         current_time = time.time()
