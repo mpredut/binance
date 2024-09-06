@@ -11,6 +11,7 @@ import threading
 
 #my imports
 import binanceapi as api
+import binanceapi_allorders as apiall
 import utils
 # 
 
@@ -55,7 +56,7 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=
     print(f"Fetching trades from the last {backdays} days.")
 
     # Apelăm funcția pentru a obține tranzacțiile recente doar din perioada lipsă
-    new_trades = api.get_my_trades_simple(order_type, symbol, backdays=backdays, limit=limit)
+    new_trades = apiall.get_my_trades_simple(order_type, symbol, backdays=backdays, limit=limit)
 
     # Filtrăm doar tranzacțiile care sunt mai recente decât cea mai recentă tranzacție din fișier
     new_trades = [trade for trade in new_trades if trade['time'] > most_recent_trade_time]
@@ -217,7 +218,7 @@ def monitor_filled_buy_orders_old():
         return
  
     max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate sunt considerate recente (2 ore)
-    filled_buy_orders = api.get_recent_filled_orders('buy', max_age_seconds)
+    filled_buy_orders = apiall.get_recent_filled_orders('buy', symbol, max_age_seconds)
 
     for order in filled_buy_orders:
         current_time = time.time()
@@ -231,8 +232,8 @@ def monitor_filled_buy_orders_old():
 
 
 def get_close_buy_orders_without_sell(api, max_age_seconds, profit_percentage):
-    close_buy_orders = api.get_recent_filled_orders('buy', symbol, max_age_seconds)
-    close_sell_orders = api.get_recent_filled_orders('sell', symbol, max_age_seconds)
+    close_buy_orders = apiall.get_recent_filled_orders('buy', symbol, max_age_seconds)
+    close_sell_orders = apiall.get_recent_filled_orders('sell', symbol, max_age_seconds)
     
     # Lista de ordere 'buy' care nu au un 'sell' asociat cu profitul dorit
     buy_orders_without_sell = []
@@ -266,7 +267,7 @@ def monitor_close_orders_by_age(max_age_seconds):
         print("Fire active detectate, ieșim din funcție pentru a nu porni fire noi.")
         return
  
-    close_buy_orders = api.get_recent_filled_orders('buy', max_age_seconds)
+    close_buy_orders = apiall.get_recent_filled_orders('buy',  symbol, max_age_seconds)
 
     for order in close_buy_orders:
         current_time = time.time()
