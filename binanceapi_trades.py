@@ -309,15 +309,26 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
     current_time_ms = int(time.time() * 1000)
     max_age_ms = max_age_seconds * 1000
 
-    # Filtrăm tranzacțiile din cache care sunt de tipul corect, pentru simbolul specificat și mai recente decât max_age_seconds
     filtered_trades = [
-        trade for trade in trade_cache
+        {
+            'symbol': trade['symbol'],
+            'id': trade['id'],
+            'orderId': trade['orderId'],
+            'orderListId': trade['orderListId'],
+            'price': float(trade['price']),
+            'qty': float(trade['qty']),
+            'quoteQty': float(trade['quoteQty']),
+            'commission': float(trade['commission']),
+            'commissionAsset': trade['commissionAsset'],
+            'time': trade['time'],
+            'isBuyer': trade['isBuyer'],
+            'isMaker': trade['isMaker'],
+            'isBestMatch': trade['isBestMatch']
+        }
+        for trade in trade_cache
         if trade['symbol'] == symbol and trade['isBuyer'] == (order_type == 'buy') and (current_time_ms - trade['time']) <= max_age_ms
     ]
 
     return filtered_trades
-
-
-
 
   
