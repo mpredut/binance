@@ -12,6 +12,11 @@ from binance.exceptions import BinanceAPIException
 #my imports
 from binanceapi import client
 
+# 
+# Cache global pentru tranzacții
+#
+trade_cache = []
+
 #######
 #######      get_my_trades     #######
 #######
@@ -217,11 +222,12 @@ def test_get_my_trades():
         print(trade)
 
 # Apelăm funcția de testare
-#test_get_my_trades()
+test_get_my_trades()
 
 import os
+
 # Funcția care salvează tranzacțiile noi în fișier (completare dacă există deja)
-def save_trades_to_file(order_type, symbol, filename, limit=1000):
+def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=2):
     all_trades = []
 
     # Verificăm dacă fișierul există deja
@@ -235,14 +241,21 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000):
     else:
         existing_trades = []
 
+    # Calculăm timpul de la care păstrăm tranzacțiile (doar cele mai recente decât 'years_to_keep' ani)
+    current_time_ms = int(time.time() * 1000)
+    cutoff_time_ms = current_time_ms - (years_to_keep * 365 * 24 * 60 * 60 * 1000)  # Ani convertiți în milisecunde
+
+    # Eliminăm tranzacțiile care sunt mai vechi decât perioada dorită
+    filtered_existing_trades = [trade for trade in existing_trades if trade['time'] > cutoff_time_ms]
+    print(f"Kept {len(filtered_existing_trades)} trades after filtering out old trades (older than {years_to_keep} years).")
+
     # Dacă există deja tranzacții, găsim cea mai recentă tranzacție salvată
-    if existing_trades:
-        most_recent_trade_time = max(trade['time'] for trade in existing_trades)
-        print(f"Most recent trade time from file: {most_recent_trade_time}")
+    if filtered_existing_trades:
+        most_recent_trade_time = max(trade['time'] for trade in filtered_existing_trades)
+        print(f"Most recent trade time from file: {utils.convert_timestamp_to_human_readable(most_recent_trade_time)}")
 
         # Calculăm câte zile au trecut de la most_recent_trade_time până la acum
-        current_time = int(time.time() * 1000)
-        time_diff_ms = current_time - most_recent_trade_time
+        time_diff_ms = current_time_ms - most_recent_trade_time
         backdays = time_diff_ms // (24 * 60 * 60 * 1000) + 1  # Câte zile au trecut de la ultima tranzacție
     else:
         most_recent_trade_time = 0  # Dacă nu există tranzacții, începem de la 0
@@ -251,7 +264,7 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000):
     print(f"Fetching trades from the last {backdays} days.")
 
     # Apelăm funcția pentru a obține tranzacțiile recente doar din perioada lipsă
-    new_trades = get_my_trades_simple(order_type, symbol, backdays=backdays, limit=limit)
+    new_trades = apitrades.get_my_trades_simple(order_type, symbol, backdays=backdays, limit=limit)
 
     # Filtrăm doar tranzacțiile care sunt mai recente decât cea mai recentă tranzacție din fișier
     new_trades = [trade for trade in new_trades if trade['time'] > most_recent_trade_time]
@@ -259,17 +272,50 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000):
     if new_trades:
         print(f"Found {len(new_trades)} new trades.")
         
-        # Adăugăm doar tranzacțiile noi la cele existente
-        all_trades = existing_trades + new_trades
+        # Adăugăm doar tranzacțiile noi la cele existente, dar fără cele vechi
+        all_trades = filtered_existing_trades + new_trades
         all_trades = sorted(all_trades, key=lambda x: x['time'])  # Sortăm după timp
 
-        # Salvăm doar tranzacțiile noi la fișier
+        # Salvăm doar tranzacțiile filtrate și actualizate în fișier
         with open(filename, 'w') as f:
             json.dump(all_trades, f)
 
         print(f"Updated file with {len(all_trades)} total trades.")
     else:
         print("No new trades found to save.")
+
+
+
+def load_trades_from_file(filename):
+
+    global trade_cache
+
+    if os.path.exists(filename):
+        with open(filename, 'r') as f:
+            try:
+                trade_cache = json.load(f)
+                print(f"Cache loaded with {len(trade_cache)} trades.")
+            except json.JSONDecodeError:
+                print("Error reading file.")
+                trade_cache = []
+    else:
+        print(f"File {filename} not found.")
+        trade_cache = []
+
+
+# Funcția care returnează tranzacțiile de tip 'buy' sau 'sell' din cache
+def get_trade_orders(order_type, max_age_seconds):
+    current_time_ms = int(time.time() * 1000)
+    max_age_ms = max_age_seconds * 1000
+
+    # Filtrăm tranzacțiile din cache care sunt de tipul corect și mai recente decât max_age_seconds
+    filtered_trades = [
+        trade for trade in trade_cache
+        if trade['isBuyer'] == (order_type == 'buy') and (current_time_ms - trade['time']) <= max_age_ms
+    ]
+
+    return filtered_trades
+
 
 
   

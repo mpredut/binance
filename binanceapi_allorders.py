@@ -33,7 +33,7 @@ def get_filled_orders(order_type, symbol, backdays=3):
         while start_time < end_time:
             current_end_time = min(start_time + interval_ms, end_time)
             orders = client.get_all_orders(symbol=symbol, startTime=start_time, endTime=current_end_time, limit=1000)
-            print(f"orders : {len(orders)}")
+            print(f"{len(orders)} orders get for interval")
             
             filtered_orders = [
                 {

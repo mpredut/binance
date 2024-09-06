@@ -11,99 +11,10 @@ import threading
 
 #my imports
 import binanceapi as api
-import binanceapi_allorders as apiall
+import binanceapi_trades as apitrades
+import binanceapi_allorders as apiorders
+
 import utils
-# 
-
-# Cache global pentru tranzacții
-trade_cache = []
-
-# Funcția care salvează tranzacțiile noi în fișier (completare dacă există deja)
-def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=2):
-    all_trades = []
-
-    # Verificăm dacă fișierul există deja
-    if os.path.exists(filename):
-        with open(filename, 'r') as f:
-            try:
-                existing_trades = json.load(f)
-                print(f"Loaded {len(existing_trades)} existing trades from {filename}.")
-            except json.JSONDecodeError:
-                existing_trades = []
-    else:
-        existing_trades = []
-
-    # Calculăm timpul de la care păstrăm tranzacțiile (doar cele mai recente decât 'years_to_keep' ani)
-    current_time_ms = int(time.time() * 1000)
-    cutoff_time_ms = current_time_ms - (years_to_keep * 365 * 24 * 60 * 60 * 1000)  # Ani convertiți în milisecunde
-
-    # Eliminăm tranzacțiile care sunt mai vechi decât perioada dorită
-    filtered_existing_trades = [trade for trade in existing_trades if trade['time'] > cutoff_time_ms]
-    print(f"Kept {len(filtered_existing_trades)} trades after filtering out old trades (older than {years_to_keep} years).")
-
-    # Dacă există deja tranzacții, găsim cea mai recentă tranzacție salvată
-    if filtered_existing_trades:
-        most_recent_trade_time = max(trade['time'] for trade in filtered_existing_trades)
-        print(f"Most recent trade time from file: {utils.convert_timestamp_to_human_readable(most_recent_trade_time)}")
-
-        # Calculăm câte zile au trecut de la most_recent_trade_time până la acum
-        time_diff_ms = current_time_ms - most_recent_trade_time
-        backdays = time_diff_ms // (24 * 60 * 60 * 1000) + 1  # Câte zile au trecut de la ultima tranzacție
-    else:
-        most_recent_trade_time = 0  # Dacă nu există tranzacții, începem de la 0
-        backdays = 60  # Adăugăm tranzacții pentru ultimele 60 de zile dacă fișierul e gol
-
-    print(f"Fetching trades from the last {backdays} days.")
-
-    # Apelăm funcția pentru a obține tranzacțiile recente doar din perioada lipsă
-    new_trades = apiall.get_my_trades_simple(order_type, symbol, backdays=backdays, limit=limit)
-
-    # Filtrăm doar tranzacțiile care sunt mai recente decât cea mai recentă tranzacție din fișier
-    new_trades = [trade for trade in new_trades if trade['time'] > most_recent_trade_time]
-
-    if new_trades:
-        print(f"Found {len(new_trades)} new trades.")
-        
-        # Adăugăm doar tranzacțiile noi la cele existente, dar fără cele vechi
-        all_trades = filtered_existing_trades + new_trades
-        all_trades = sorted(all_trades, key=lambda x: x['time'])  # Sortăm după timp
-
-        # Salvăm doar tranzacțiile filtrate și actualizate în fișier
-        with open(filename, 'w') as f:
-            json.dump(all_trades, f)
-
-        print(f"Updated file with {len(all_trades)} total trades.")
-    else:
-        print("No new trades found to save.")
-
-# Funcția care încarcă tranzacțiile din fișier în cache
-def load_trades_from_file(filename):
-    global trade_cache
-
-    if os.path.exists(filename):
-        with open(filename, 'r') as f:
-            try:
-                trade_cache = json.load(f)
-                print(f"Cache loaded with {len(trade_cache)} trades.")
-            except json.JSONDecodeError:
-                print("Error reading file.")
-                trade_cache = []
-    else:
-        print(f"File {filename} not found.")
-        trade_cache = []
-
-# Funcția care returnează tranzacțiile de tip 'buy' sau 'sell' din cache
-def get_close_orders(order_type, max_age_seconds):
-    current_time_ms = int(time.time() * 1000)
-    max_age_ms = max_age_seconds * 1000
-
-    # Filtrăm tranzacțiile din cache care sunt de tipul corect și mai recente decât max_age_seconds
-    filtered_trades = [
-        trade for trade in trade_cache
-        if trade['isBuyer'] == (order_type == 'buy') and (current_time_ms - trade['time']) <= max_age_ms
-    ]
-
-    return filtered_trades
 
 # Funcția principală care rulează periodic actualizările și cache-ul
 def monitor_trades(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=2):
@@ -218,7 +129,7 @@ def monitor_filled_buy_orders_old():
         return
  
     max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate sunt considerate recente (2 ore)
-    filled_buy_orders = apiall.get_recent_filled_orders('buy', symbol, max_age_seconds)
+    filled_buy_orders = apiorders.get_recent_filled_orders('buy', symbol, max_age_seconds)
 
     for order in filled_buy_orders:
         current_time = time.time()
@@ -232,8 +143,8 @@ def monitor_filled_buy_orders_old():
 
 
 def get_close_buy_orders_without_sell(api, max_age_seconds, profit_percentage):
-    close_buy_orders = apiall.get_recent_filled_orders('buy', symbol, max_age_seconds)
-    close_sell_orders = apiall.get_recent_filled_orders('sell', symbol, max_age_seconds)
+    close_buy_orders = apiorders.get_recent_filled_orders('buy', symbol, max_age_seconds)
+    close_sell_orders = apiorders.get_recent_filled_orders('sell', symbol, max_age_seconds)
     
     # Lista de ordere 'buy' care nu au un 'sell' asociat cu profitul dorit
     buy_orders_without_sell = []
@@ -267,7 +178,7 @@ def monitor_close_orders_by_age(max_age_seconds):
         print("Fire active detectate, ieșim din funcție pentru a nu porni fire noi.")
         return
  
-    close_buy_orders = apiall.get_recent_filled_orders('buy',  symbol, max_age_seconds)
+    close_buy_orders = apiorders.get_recent_filled_orders('buy',  symbol, max_age_seconds)
 
     for order in close_buy_orders:
         current_time = time.time()
@@ -300,6 +211,6 @@ if __name__ == "__main__":
     # Simulare: extragem ordinele recente de tip 'buy'
     while True:
         time.sleep(10)  # Periodic, verificăm ordinele în cache
-        close_orders = get_close_orders('buy', max_age_seconds=86400)  # Extragere ordine de 'buy' în ultimele 24 de ore
+        close_orders = get_trade_orders('buy', max_age_seconds=86400)  # Extragere ordine de 'buy' în ultimele 24 de ore
         print(f"Found {len(close_orders)} close 'buy' orders in the last 24 hours.")
         monitor_close_orders_by_age(max_age_seconds)
