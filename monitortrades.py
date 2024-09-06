@@ -184,7 +184,7 @@ def monitor_close_orders_by_age(max_age_seconds):
         current_time = time.time()
         end_time = current_time + 2 * 3600  # Procesul durează două ore
         filled_price = order['price']
-        quantity = order['quantity']
+        quantity = order['qty'] #quantity
 
         current_price = api.get_current_price(api.symbol) + 200
 
