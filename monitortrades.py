@@ -143,8 +143,8 @@ def monitor_filled_buy_orders_old():
 
 
 def get_close_buy_orders_without_sell(api, max_age_seconds, profit_percentage):
-    close_buy_orders = apiorders.get_recent_filled_orders('buy', symbol, max_age_seconds)
-    close_sell_orders = apiorders.get_recent_filled_orders('sell', symbol, max_age_seconds)
+    close_buy_orders = apiorders.get_trade_orders('buy', symbol, max_age_seconds)
+    close_sell_orders = apiorders.get_trade_orders('sell', symbol, max_age_seconds)
     
     # Lista de ordere 'buy' care nu au un 'sell' asociat cu profitul dorit
     buy_orders_without_sell = []
@@ -178,7 +178,7 @@ def monitor_close_orders_by_age(max_age_seconds):
         print("Fire active detectate, ieșim din funcție pentru a nu porni fire noi.")
         return
  
-    close_buy_orders = apiorders.get_recent_filled_orders('buy',  symbol, max_age_seconds)
+    close_buy_orders = apiorders.get_trade_orders('buy',  symbol, max_age_seconds)
 
     for order in close_buy_orders:
         current_time = time.time()
@@ -214,8 +214,8 @@ if __name__ == "__main__":
         max_age_seconds = 86400 *8
         close_orders = apitrades.get_trade_orders('buy', symbol, max_age_seconds)  # Extragere ordine de 'buy' în ultimele 24 de ore
         print(f"get_trade_orders:           Found {len(close_orders)} close 'buy' orders in the last 24 hours.")
-        close_orders_all = apiorders.get_recent_filled_orders('buy', symbol, max_age_seconds)  # Extragere ordine de 'buy' în ultimele 24 de ore
-        print(f"get_recent_filled_orders:   Found {len(close_orders_all)} close 'buy' orders in the last 24 hours.")
-        print(close_orders)
-        print(close_orders_all)
-        #monitor_close_orders_by_age(max_age_seconds)
+        #close_orders_all = apiorders.get_recent_filled_orders('buy', symbol, max_age_seconds)  # Extragere ordine de 'buy' în ultimele 24 de ore
+        #print(f"get_recent_filled_orders:   Found {len(close_orders_all)} close 'buy' orders in the last 24 hours.")
+        #print(close_orders)
+        #print(close_orders_all)
+        monitor_close_orders_by_age(max_age_seconds)
