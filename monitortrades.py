@@ -188,16 +188,38 @@ def monitor_close_orders_by_age(max_age_seconds):
 
         current_price = api.get_current_price(api.symbol) + 200
 
-        if current_price >= filled_price * 1.07:  # Dacă prețul curent este cu 7% mai mare
+        if current_price >= filled_price * 1.04:  # Dacă prețul curent este cu 7% mai mare
             print(f"Prețul curent ({current_price}) este cu 7% mai mare decât prețul de cumpărare ({filled_price}). Inițiem vânzarea.")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=place_sell_order, args=(symbol, current_price, quantity))
+            thread = threading.Thread(target=place_sell_order, args=(symbol, "sell", current_price, quantity))
             #sell_order_gradually, args=(order, current_time, end_time))
             thread.start()
         else:
             print(f"Prețul curent ({current_price}) nu a atins încă pragul de 7% față de prețul de cumpărare ({filled_price}).")
             return
+            
+    close_sell_orders = apitrades.get_trade_orders('sell',  symbol, max_age_seconds)
+
+    for order in close_sell_orders:
+        current_time = time.time()
+        end_time = current_time + 2 * 3600  # Procesul durează două ore
+        filled_price = order['price']
+        quantity = order['qty'] #quantity
+
+        current_price = api.get_current_price(api.symbol) + 200
+
+        if current_price <= filled_price * 1.04:  # Dacă prețul curent este cu 7% mai mare
+            print(f"Prețul curent ({current_price}) este cu 4% mai mic decât prețul de vanzare ({filled_price}). Inițiem vânzarea.")
+            
+            # Pornim un fir nou pentru a vinde BTC-ul
+            thread = threading.Thread(target=place_order, args=(symbol, "buy", current_price, quantity))
+            #sell_order_gradually, args=(order, current_time, end_time))
+            thread.start()
+        else:
+            print(f"Prețul curent ({current_price}) nu a atins încă pragul de 7% față de prețul de cumpărare ({filled_price}).")
+            return        
+            
 # Exemplu de apel pentru a porni monitorizarea periodică
 if __name__ == "__main__":
     symbol = "BTCUSDT"
