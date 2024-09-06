@@ -204,7 +204,7 @@ class PriceWindow:
 
 
 TIME_SLEEP_GET_PRICE = 2  # seconds to sleep for price collection
-EXP_TIME_BUY_ORDER = (2.6 * 60) * 60 # dupa 1.6 ore
+EXP_TIME_BUY_ORDER = (1.6 * 60) * 60 # dupa 1.6 ore
 EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
 TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
 # am voie 6 ordere per perioada de expirare care este 2.6 ore. deaceea am impartit la 6
@@ -348,7 +348,7 @@ last_evaluate_time = time.time()
 buy_count = 0
 sell_count = 0
 
-PRICE_CHANGE_THRESHOLD_EUR = 300
+PRICE_CHANGE_THRESHOLD_EUR = 350
 
 while True:
     try:
@@ -387,11 +387,11 @@ while True:
             if expired_trend == 'UP':
                 proposed_price = proposed_price + 142  # Preț de vânzare
                 print(f"End of UP trend. SELL order at {proposed_price:.2f} EUR")
-                order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
+                #order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
             elif expired_trend == 'DOWN':
                 proposed_price = proposed_price - 142  # Preț de cumpărare
                 print(f"End of DOWN trend. BUY order at {proposed_price:.2f} EUR")
-                order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
+                #order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
 
         # Verificăm schimbările de preț și gestionăm trendurile
         price_change = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
