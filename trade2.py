@@ -360,10 +360,7 @@ while True:
             continue
 
         price_window.process_price(current_price)
-        
-        if current_time - last_order_time <= TIME_SLEEP_PLACE_ORDER :
-            continue
-            
+           
         # Confirmarea trendului folosind `evaluate_buy_sell_opportunity`
         action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(
             current_price, threshold_percent=0.8, decrease_percent=4
@@ -407,7 +404,10 @@ while True:
                 if expired_trend == 'DOWN':
                     proposed_price = proposed_price - 142
                     print(f"Start of UP trend. BUY order at {proposed_price:.2f} EUR")
+                    if current_time - last_order_time <= TIME_SLEEP_PLACE_ORDER :
+                        continue
                     order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
+                    last_order_time = current_time
 
         elif price_change is not None and price_change < 0:
             # Confirmăm un trend de scădere
@@ -420,7 +420,10 @@ while True:
                 if expired_trend == 'UP':
                     proposed_price = proposed_price + 142
                     print(f"Start of DOWN trend. SELL order at {proposed_price:.2f} EUR")
+                    if current_time - last_order_time <= TIME_SLEEP_PLACE_ORDER :
+                        continue
                     order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
+                    last_order_time = current_time
 
 
    
