@@ -222,7 +222,7 @@ def test_get_my_trades():
         print(trade)
 
 # Apelăm funcția de testare
-test_get_my_trades()
+#test_get_my_trades()
 
 import os
 
