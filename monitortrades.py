@@ -231,8 +231,8 @@ def monitor_filled_buy_orders_old():
 
 
 def get_close_buy_orders_without_sell(api, max_age_seconds, profit_percentage):
-    close_buy_orders = api.get_recent_filled_orders('buy', max_age_seconds)
-    close_sell_orders = api.get_recent_filled_orders('sell', max_age_seconds)
+    close_buy_orders = api.get_recent_filled_orders('buy', symbol, max_age_seconds)
+    close_sell_orders = api.get_recent_filled_orders('sell', symbol, max_age_seconds)
     
     # Lista de ordere 'buy' care nu au un 'sell' asociat cu profitul dorit
     buy_orders_without_sell = []
