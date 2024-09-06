@@ -127,7 +127,7 @@ def get_my_trades_simple(order_type, symbol, backdays=3, limit=1000):
 
 def test_get_my_trades():
     symbol = 'BTCUSDT'
-    limit = 2
+    limit = 4
 
     for days_ago in range (0,20):
         print(f"Testing get_my_trades_24 for {symbol} on day {days_ago}...")
@@ -140,7 +140,7 @@ def test_get_my_trades():
             print(f"No trades found for day {days_ago}.")
 
     backdays = 30
-    limit = 2
+    limit = 10000
 
     # Testare fără filtrare (fără 'buy' sau 'sell')
     print("Testing get_my_trades with pagination (no order_type)...")
@@ -264,7 +264,7 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=
     print(f"Fetching trades from the last {backdays} days.")
 
     # Apelăm funcția pentru a obține tranzacțiile recente doar din perioada lipsă
-    new_trades = apitrades.get_my_trades_simple(order_type, symbol, backdays=backdays, limit=limit)
+    new_trades = get_my_trades_simple(order_type, symbol, backdays=backdays, limit=limit)
 
     # Filtrăm doar tranzacțiile care sunt mai recente decât cea mai recentă tranzacție din fișier
     new_trades = [trade for trade in new_trades if trade['time'] > most_recent_trade_time]

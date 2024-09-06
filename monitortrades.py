@@ -20,10 +20,10 @@ import utils
 def monitor_trades(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=2):
     while True:
         # Actualizăm fișierul de tranzacții
-        save_trades_to_file(order_type, symbol, filename, limit=limit, years_to_keep=years_to_keep)
+        apitrades.save_trades_to_file(order_type, symbol, filename, limit=limit, years_to_keep=years_to_keep)
         
         # Reîncărcăm tranzacțiile în cache
-        load_trades_from_file(filename)
+        apitrades.load_trades_from_file(filename)
         
         # Așteptăm intervalul configurat înainte de a repeta procesul
         time.sleep(interval)
@@ -211,6 +211,8 @@ if __name__ == "__main__":
     # Simulare: extragem ordinele recente de tip 'buy'
     while True:
         time.sleep(10)  # Periodic, verificăm ordinele în cache
-        close_orders = get_trade_orders('buy', max_age_seconds=86400)  # Extragere ordine de 'buy' în ultimele 24 de ore
-        print(f"Found {len(close_orders)} close 'buy' orders in the last 24 hours.")
-        monitor_close_orders_by_age(max_age_seconds)
+        close_orders = apitrades.get_trade_orders('buy', max_age_seconds=86400)  # Extragere ordine de 'buy' în ultimele 24 de ore
+        print(f"get_trade_orders: Found {len(close_orders)} close 'buy' orders in the last 24 hours.")
+        close_orders_all = apiorders.get_recent_filled_orders('buy', max_age_seconds=86400)  # Extragere ordine de 'buy' în ultimele 24 de ore
+        print(f"get_recent_filled_orders: Found {len(close_orders_all)} close 'buy' orders in the last 24 hours.")
+        #monitor_close_orders_by_age(max_age_seconds)
