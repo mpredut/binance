@@ -135,3 +135,11 @@ def convert_timestamp_to_human_readable(timestamp_ms):
     # Returnăm timpul ca string în format citibil
     return human_readable_time.strftime('%Y-%m-%d %H:%M:%S')
 
+def convert_seconds_to_days(max_age_seconds):
+    # Definim numărul de secunde într-o zi
+    seconds_in_a_day = 86400  # 24 ore * 60 minute * 60 secunde
+    
+    # Calculăm numărul de zile
+    days = max_age_seconds / seconds_in_a_day
+    
+    return days

@@ -107,15 +107,24 @@ precision = get_quantity_precision(symbol)
 precision = 8
 print(f"Precision is {precision}")
 
-
 def get_current_price(symbol):
     try:
         ticker = client.get_symbol_ticker(symbol=symbol)
         return float(ticker['price'])
     except BinanceAPIException as e:
-        print(f"Eroare la obținerea prețului curent: {e}")
-        print(f"folosesc pretul obtinut prin websocket, BTC:{binancecurrentprice}")
+        print(f"Eroare la obținerea prețului curent de la Binance API: {e}")
+        print(f"Folosesc prețul obținut prin websocket, BTC: {binancecurrentprice}")
         return binancecurrentprice
+    except ReadTimeout as e:
+        print(f"Eroare: Timeout la încercarea de a contacta Binance API: {e}")
+        print(f"Folosesc prețul obținut prin websocket, BTC: {binancecurrentprice}")
+        return binancecurrentprice
+    except Exception as e:
+        # Handle any other exceptions that might occur
+        print(f"A apărut o eroare neașteptată: {e}")
+        print(f"Folosesc prețul obținut prin websocket, BTC: {binancecurrentprice}")
+        return binancecurrentprice
+
 
 def get_open_orders(order_type, symbol):
     if order_type.upper() != 'BUY' and order_type.upper() != 'SELL':
@@ -181,7 +190,8 @@ def place_order(order_type, symbol, price, quantity):
                     if not cancel:
                         print(f"Fail cancel order {order_id} prep. for buy order")
             
-            price = round(min(price, get_current_price(symbol)), 0)
+            price = min(price, get_current_price(symbol))
+            price = round(price * 0.999, 0)
             order = client.order_limit_buy(
                 symbol=symbol,
                 quantity=quantity,
@@ -197,7 +207,8 @@ def place_order(order_type, symbol, price, quantity):
                     if not cancel:
                         print(f"Fail cancel order {order_id} prep. for sell order")
                    
-            price = round(max(price, get_current_price(symbol)), 0)
+            price = max(price, get_current_price(symbol))
+            price = round(price * (1 + 0.001), 0)
             order = client.order_limit_sell(
                 symbol=symbol,
                 quantity=quantity,
@@ -283,6 +294,8 @@ def cancel_expired_orders(order_type, symbol, expire_time):
     current_time = int(time.time())
 
     print(f"Available open orders {len(open_orders)}. Try cancel {order_type} orders type ... ")
+    if len(open_orders) < 1:
+        return
     for order_id, order_details in open_orders.items():
         order_time = order_details.get('timestamp')
 

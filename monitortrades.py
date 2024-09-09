@@ -109,7 +109,7 @@ def sell_order_gradually(order, start_time, end_time):
             print(f"Anulat ordinul anterior cu ID: {order_id}")
 
         # Plasăm ordinul de vânzare
-        new_order = api.place_sell_order(symbol, target_price, filled_quantity)
+        new_order = api.place_order(symbol, "sell", target_price, filled_quantity)
         if new_order:
             order_id = new_order['orderId']
             print(f"Plasat ordin de vânzare la prețul {target_price:.2f}. New Order ID: {order_id}")
@@ -171,73 +171,272 @@ def get_close_buy_orders_without_sell(api, max_age_seconds, profit_percentage):
     return buy_orders_without_sell
     
 
-max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate/filled sunt considerate recente (3 zile)
-
-def monitor_close_orders_by_age(max_age_seconds):
+def monitor_close_orders_by_age1(max_age_seconds):
     if threading.active_count() > 2:  # Dacă sunt deja fire active (în afară de firul principal)
         print("Fire active detectate, ieșim din funcție pentru a nu porni fire noi.")
         return
  
     close_buy_orders = apitrades.get_trade_orders('buy',  symbol, max_age_seconds)
 
+    print(f"BUY ORDERS, {len(close_buy_orders)}")
+    current_price = api.get_current_price(api.symbol)
     for order in close_buy_orders:
         current_time = time.time()
         end_time = current_time + 2 * 3600  # Procesul durează două ore
         filled_price = order['price']
-        quantity = order['qty'] #quantity
+        quantity = float(order['qty']) #quantity
 
-        current_price = api.get_current_price(api.symbol) + 200
-
-        if current_price >= filled_price * 1.04:  # Dacă prețul curent este cu 7% mai mare
-            print(f"Prețul curent ({current_price}) este cu 7% mai mare decât prețul de cumpărare ({filled_price}). Inițiem vânzarea.")
+        if current_price >= filled_price * 1.04 or utils.are_values_very_close(current_price, filled_price * 1.04):  # Dacă prețul curent este cu 7% mai mare
+            print(f"Prețul curent ({current_price}) este cu 4% mai mare decât prețul de cumpărare ({filled_price}). Inițiem vânzarea.cantitate{quantity}")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=place_sell_order, args=(symbol, "sell", current_price, quantity))
+            thread = threading.Thread(target=api.place_order, args=("sell", symbol, current_price + 200, quantity))
             #sell_order_gradually, args=(order, current_time, end_time))
             thread.start()
+            #return
         else:
-            print(f"Prețul curent ({current_price}) nu a atins încă pragul de 7% față de prețul de cumpărare ({filled_price}).")
-            return
+            print(f"Prețul curent ({current_price}) nu a atins încă pragul de 4% față de prețul de cumpărare ({filled_price}).")
+            #return
             
     close_sell_orders = apitrades.get_trade_orders('sell',  symbol, max_age_seconds)
-
+    sorted_sell_orders = sorted(close_sell_orders, key=lambda x: x['price'])
+    close_sell_orders = sorted_sell_orders
+    print(f"SELL ORDERS, {len(close_sell_orders)}")
     for order in close_sell_orders:
         current_time = time.time()
         end_time = current_time + 2 * 3600  # Procesul durează două ore
         filled_price = order['price']
-        quantity = order['qty'] #quantity
+        quantity = float(order['qty']) #quantity
 
-        current_price = api.get_current_price(api.symbol) + 200
-
-        if current_price <= filled_price * 1.04:  # Dacă prețul curent este cu 7% mai mare
-            print(f"Prețul curent ({current_price}) este cu 4% mai mic decât prețul de vanzare ({filled_price}). Inițiem vânzarea.")
+        if current_price <= filled_price * 0.94 or utils.are_values_very_close(current_price, filled_price * 0.94):  # Dacă prețul curent este cu 7% mai mare
+            print(f"Prețul curent ({current_price}) este cu 4% mai mic decât prețul de vanzare ({filled_price}). Inițiem cumpararea.cantitate{quantity}.")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=place_order, args=(symbol, "buy", current_price, quantity))
+            thread = threading.Thread(target=api.place_order, args=("buy", symbol, current_price - 200, quantity))
             #sell_order_gradually, args=(order, current_time, end_time))
             thread.start()
+            #return
         else:
-            print(f"Prețul curent ({current_price}) nu a atins încă pragul de 7% față de prețul de cumpărare ({filled_price}).")
-            return        
+            print(f"Prețul curent ({current_price}) nu a atins încă pragul de 4% față de prețul de vanzare ({filled_price}).")
+            #return        
+
+
+
+# Variabilă globală care stochează timpul de început al monitorizării
+start_time_global = None
+
+def monitor_close_orders_by_age2(max_age_seconds):
+    global start_time_global
+    
+    if threading.active_count() > 2:  # Dacă sunt deja fire active (în afară de firul principal)
+        print("Fire active detectate, ieșim din funcție pentru a nu porni fire noi.")
+        return
+    
+    # Inițializăm timpul global la prima execuție
+    if start_time_global is None:
+        start_time_global = time.time()
+
+    # Calculăm timpul total scurs de la prima execuție a funcției
+    current_time = time.time()
+    elapsed_time = current_time - start_time_global
+    interval_durata = 2 * 3600  # Durata maximă (2 ore)
+
+    # Calculăm procentul în funcție de timpul scurs (de la 4% până la 0%)
+    procent_scazut = max(0, 4 - (4 * (elapsed_time / interval_durata)))
+    
+    print(f"Procentul actual: {procent_scazut:.2f}%")
+
+    # Obținem comenzile de cumpărare
+    close_buy_orders = apitrades.get_trade_orders('buy', symbol, max_age_seconds)
+    print(f"BUY ORDERS, {len(close_buy_orders)}")
+    
+    current_price = api.get_current_price(api.symbol)
+
+    for order in close_buy_orders:
+        filled_price = order['price']
+        quantity = float(order['qty'])  # Cantitatea
+
+        # Verificăm dacă prețul curent a crescut cu procentul dinamic
+        if current_price >= filled_price * (1 + procent_scazut / 100) or utils.are_values_very_close(current_price, filled_price * (1 + procent_scazut / 100)):
+            print(f"Prețul curent ({current_price}) este cu {procent_scazut:.2f}% mai mare decât prețul de cumpărare ({filled_price}). Inițiem vânzarea. Cantitate: {quantity}")
             
+            # Pornim un fir nou pentru a vinde BTC-ul
+            thread = threading.Thread(target=api.place_order, args=("sell", symbol, current_price + 200, quantity))
+            thread.start()
+            
+            # Resetăm timpul global pentru a reporni procesul
+            start_time_global = time.time()
+            return  # Ieșim din funcție după prima tranzacție
+        else:
+            print(f"Prețul curent ({current_price}) nu a atins pragul de {procent_scazut:.2f}% față de prețul de cumpărare ({filled_price}).")
+    
+    # Obținem comenzile de vânzare
+    close_sell_orders = apitrades.get_trade_orders('sell', symbol, max_age_seconds)
+    sorted_sell_orders = sorted(close_sell_orders, key=lambda x: x['price'])
+    close_sell_orders = sorted_sell_orders
+    print(f"SELL ORDERS, {len(close_sell_orders)}")
+    
+    for order in close_sell_orders:
+        filled_price = order['price']
+        quantity = float(order['qty'])  # Cantitatea
+
+        # Verificăm dacă prețul curent a scăzut cu procentul dinamic
+        if current_price <= filled_price * (1 - procent_scazut / 100) or utils.are_values_very_close(current_price, filled_price * (1 - procent_scazut / 100)):
+            print(f"Prețul curent ({current_price}) este cu {procent_scazut:.2f}% mai mic decât prețul de vânzare ({filled_price}). Inițiem cumpărarea. Cantitate: {quantity}")
+            
+            # Pornim un fir nou pentru a cumpăra BTC-ul
+            thread = threading.Thread(target=api.place_order, args=("buy", symbol, current_price - 200, quantity))
+            thread.start()
+
+            # Resetăm timpul global pentru a reporni procesul
+            start_time_global = time.time()
+            return  # Ieșim din funcție după prima tranzacție
+        else:
+            print(f"Prețul curent ({current_price}) nu a atins pragul de {procent_scazut:.2f}% față de prețul de vânzare ({filled_price}).")
+
+
+
+import time
+trades = []
+class ProcentDistributor:
+    def __init__(self, t1, expired_duration, procent, unitate_timp=60):
+        self.t1 = t1
+        self.t2 = self.t1 + expired_duration
+        self.procent = procent
+        self.unitate_timp = unitate_timp
+        self.total_units = (self.t2 - self.t1) / self.unitate_timp
+        self.procent_per_unit = self.procent / self.total_units
+
+    def get_procent(self, current_time):
+        if current_time < self.t1:
+            return self.procent
+        if current_time > self.t2:
+            return 0
+        units_passed = (current_time - self.t1) / self.unitate_timp
+        return max(self.procent - (units_passed * self.procent_per_unit), 0)
+    
+    def update_init_procent(self, procent):
+        self.procent = procent
+        self.total_units = (self.t2 - self.t1) / self.unitate_timp
+        self.procent_per_unit = self.procent / self.total_units
+    def update_init_time(self, t1):
+        self.t1 = t1
+        self.update_init_procent(self.procent)
+    
+    def update_procent(self, current_price, buy_price):
+        procent_desired_profit = self.procent
+        price_difference_percentage = ((current_price - buy_price) / buy_price) * 100
+        if current_price > buy_price:
+            procent_desired_profit += abs(price_difference_percentage)
+        else:
+            procent_desired_profit -= abs(price_difference_percentage)
+        procent_desired_profit = max(procent_desired_profit, 0)
+        self.update_init_procent(procent_desired_profit)
+        
+        
+class BuyTransaction:
+    def __init__(self, trade_id, qty, price, procent_desired_profit, expired_duration, time_trade):
+        self.trade_id = trade_id
+        self.qty = qty
+        self.price = price
+        self.t1 = time_trade  # Timpul tranzacției de cumpărare
+        self.expired_duration = expired_duration
+        self.distributor = ProcentDistributor(self.t1, expired_duration, procent_desired_profit)
+        self.sell_order_id = None
+
+    def get_proposed_sell_price(self, current_price, current_time):
+        price = max(self.price, current_price)
+        if current_time - self.t1 >= self.expired_duration:
+            self.distributor.update_init_time(current_time)
+            price = current_price
+        procent = self.distributor.get_procent(current_time)
+        return price * (1 + procent / 100)
+
+
+def update_trades(trades, symbol, max_age_seconds):
+    new_trades = apitrades.get_trade_orders('buy', symbol, max_age_seconds)
+    for trade in new_trades:
+        if not any(t.trade_id == trade['id'] for t in trades):
+            trades.append(BuyTransaction(
+                trade_id=trade['id'],
+                qty=trade['qty'],
+                price=trade['price'],
+                procent_desired_profit=7.0,  # Procentul inițial
+                expired_duration=3600,  # Durată de 1 oră (3600 secunde)
+                time_trade=trade['time'] / 1000  # Convertim timpul din milisecunde în secunde
+            ))
+    new_trade_ids = {trade['id'] for trade in new_trades}
+    trades[:] = [t for t in trades if t.trade_id in new_trade_ids]
+
+
+def apply_sell_orders(trades, current_price, current_time, expired_duration, procent_desired_profit, symbol):
+    placed_order_count = 0
+    total_weighted_price = 0
+    total_quantity = 0
+
+    for trade in trades:
+            
+        if trade.sell_order_id and check_order_filled(trade.sell_order_id):
+            trade.sell_order_id = 0  # Marcăm ca executat
+        if trade.sell_order_id == 0:
+            continue  # Sărim peste tranzacțiile marcate ca executate
+   
+        trade.distributor.update_procent(current_price, trade.price)
+        sell_price = trade.get_proposed_sell_price(current_price, current_time)
+
+        if trade.sell_order_id:
+            api.cancel_order(trade.sell_order_id)
+            trade.sell_order_id = None
+
+        # Verificăm dacă numărul de ordine a depășit 8
+        if placed_order_count < 6:
+            print(f"Plasare ordin de vânzare: Cantitate {trade.qty}, Preț {sell_price}")
+            new_sell_order_id = api.place_sell_order(symbol, trade.qty, sell_price)
+            trade.sell_order_id = new_sell_order_id
+            placed_order_count += 1
+        else:
+            # Adăugăm tranzacția în calculul mediei ponderate
+            total_weighted_price += sell_price * trade.qty
+            total_quantity += trade.qty
+            trade.sell_order_id = None  # Nu plasăm imediat ordinul, dar marcăm ca în proces
+
+
+    # Dacă au fost ordine suplimentare, calculăm media ponderată și plasăm un singur ordin
+    if total_quantity > 0:
+        average_sell_price = total_weighted_price / total_quantity
+        api.place_order("sell", symbol, total_quantity, average_sell_price)
+
+
+max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate/filled sunt considerate recente (3 zile)
 # Exemplu de apel pentru a porni monitorizarea periodică
 if __name__ == "__main__":
     symbol = "BTCUSDT"
     filename = "trades_BTCUSDT.json"
-    order_type = "buy"
-    interval = 3600  # 1 oră
+    order_type = None
+    interval = 3600/2  # 1 oră
 
     # Pornim monitorizarea periodică a tranzacțiilor
     start_monitoring(order_type, symbol, filename, interval=interval, limit=1000, years_to_keep=2)
 
     # Simulare: extragem ordinele recente de tip 'buy'
     while True:
-        time.sleep(10)  # Periodic, verificăm ordinele în cache
-        max_age_seconds = 86400 *8
-        close_orders = apitrades.get_trade_orders('buy', symbol, max_age_seconds)  # Extragere ordine de 'buy' în ultimele 24 de ore
-        print(f"get_trade_orders:           Found {len(close_orders)} close 'buy' orders in the last 24 hours.")
+        time.sleep(60*2)  # Periodic, verificăm ordinele în cache
+        #max_age_seconds = 86400 *8
+        close_buy_orders = apitrades.get_trade_orders('buy', symbol, max_age_seconds)  # Extragere ordine de 'buy' în ultimele 24 de ore
+        print(f"get_trade_orders:           Found {len(close_buy_orders)} close 'buy' orders in the last {utils.convert_seconds_to_days(max_age_seconds)} days.")
+        close_sell_orders = apitrades.get_trade_orders('sell', symbol, max_age_seconds)  # Extragere ordine de 'buy' în ultimele 24 de ore
+        print(f"get_trade_orders:           Found {len(close_sell_orders)} close 'sell' orders in the last {utils.convert_seconds_to_days(max_age_seconds)} days.")
         #close_orders_all = apiorders.get_recent_filled_orders('buy', symbol, max_age_seconds)  # Extragere ordine de 'buy' în ultimele 24 de ore
         #print(f"get_recent_filled_orders:   Found {len(close_orders_all)} close 'buy' orders in the last 24 hours.")
         #print(close_orders)
         #print(close_orders_all)
-        monitor_close_orders_by_age(max_age_seconds)
+        # Pasul 1: Obține ordinele din ultimele 24 de ore
+        orders = apitrades.get_trade_orders(None, symbol, 60 * 60 * 24)
+        print(f"get_trade_orders:           Found {len(orders)} orders in the last {utils.convert_seconds_to_days(60 * 60 * 24)} day.")
+                
+        procent_desired_profit = 0.07 #0.7%
+        current_time = time.time()    
+        current_price = api.get_current_price(api.symbol)
+        update_trades(trades, symbol, max_age_seconds)
+        expired_duration = 3600 * 2.5 #h
+        apply_sell_orders(trades, current_price, current_time, expired_duration, procent_desired_profit, api.symbol)
