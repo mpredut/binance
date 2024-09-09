@@ -160,7 +160,7 @@ class PriceWindow:
         if price_change_percent < threshold_percent and not utils.are_values_very_close(price_change_percent, threshold_percent):
             action = 'HOLD'
             print(f"Action: {action}")
-            return action, current_price * 0.8, price_change_percent, slope
+            return action, current_price, price_change_percent, slope
             
         alert.check_alert(True, f"Price changed {price_change_percent:.2f}%. Current price {current_price}")
         action = 'BUY'
@@ -204,7 +204,7 @@ class PriceWindow:
 
 
 TIME_SLEEP_GET_PRICE = 2  # seconds to sleep for price collection
-EXP_TIME_BUY_ORDER = (1.6 * 60) * 60 # dupa 1.6 ore
+EXP_TIME_BUY_ORDER = (2.3 * 60) * 60 # dupa 1.6 ore
 EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
 TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
 # am voie 6 ordere per perioada de expirare care este 2.6 ore. deaceea am impartit la 6
@@ -212,6 +212,7 @@ TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + EXP_TIME_SELL_ORDER/ 6 + 4*79  # 
 WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 5  # minutes
 window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP_GET_PRICE
 
+window_size2 = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
 
@@ -338,6 +339,7 @@ alert.check_alert(True, f"SELL order ")
   
 
 price_window = PriceWindow(window_size)
+price_window2 = PriceWindow(window_size2)
 
 order_placed = False
 order_id = None
@@ -360,6 +362,7 @@ while True:
             continue
 
         price_window.process_price(current_price)
+        price_window2.process_price(current_price)
            
         # Confirmarea trendului folosind `evaluate_buy_sell_opportunity`
         action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(
@@ -379,16 +382,16 @@ while True:
         if trend_state.check_trend_expiration():
             expired_trend = trend_state.state  # Reținem trendul care a expirat
             trend_state.end_trend()  # Marchează sfârșitul trendului
-
             # Aplicăm ordine la sfârșitul unui trend
             if expired_trend == 'UP':
                 proposed_price = proposed_price + 142  # Preț de vânzare
                 print(f"End of UP trend. SELL order at {proposed_price:.2f} EUR")
-                #order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
+                order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
             elif expired_trend == 'DOWN':
                 proposed_price = proposed_price - 142  # Preț de cumpărare
                 print(f"End of DOWN trend. BUY order at {proposed_price:.2f} EUR")
-                #order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
+                order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
+            #last_order_time = current_time
 
         # Verificăm schimbările de preț și gestionăm trendurile
         price_change = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
@@ -404,10 +407,9 @@ while True:
                 if expired_trend == 'DOWN':
                     proposed_price = proposed_price - 142
                     print(f"Start of UP trend. BUY order at {proposed_price:.2f} EUR")
-                    if current_time - last_order_time <= TIME_SLEEP_PLACE_ORDER :
-                        continue
+                    
                     order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
-                    last_order_time = current_time
+                    #last_order_time = current_time
 
         elif price_change is not None and price_change < 0:
             # Confirmăm un trend de scădere
@@ -420,10 +422,8 @@ while True:
                 if expired_trend == 'UP':
                     proposed_price = proposed_price + 142
                     print(f"Start of DOWN trend. SELL order at {proposed_price:.2f} EUR")
-                    if current_time - last_order_time <= TIME_SLEEP_PLACE_ORDER :
-                        continue
                     order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
-                    last_order_time = current_time
+                    #last_order_time = current_time
 
 
    
@@ -440,7 +440,7 @@ while True:
             cancel_expired_orders("buy", symbol, EXP_TIME_BUY_ORDER)
             cancel_expired_orders("sell", symbol, EXP_TIME_SELL_ORDER)
             
-            action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(current_price, threshold_percent=0.8, decrease_percent=4)
+            action, proposed_price, price_change_percent, slope = price_window2.evaluate_buy_sell_opportunity(current_price, threshold_percent=0.8, decrease_percent=4)
             last_evaluate_time = current_time
 
             # Count consecutive BUY/SELL actions
@@ -465,19 +465,17 @@ while True:
         if current_time - last_order_time >= TIME_SLEEP_PLACE_ORDER and \
         (utils.are_values_very_close(diff_count, SELL_BUY_THRESHOLD, 1) or diff_count >= SELL_BUY_THRESHOLD)  :
             if abs(last_evaluate_time - time.time()) > 2:
-                action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(current_price, threshold_percent=0.8, decrease_percent=4)
+                action, proposed_price, price_change_percent, slope = price_window2.evaluate_buy_sell_opportunity(current_price, threshold_percent=0.8, decrease_percent=4)
             if action == 'HOLD':
                 continue
             last_evaluate_time = time.time()
             if buy_count >= sell_count :
-                #order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope, order_placed=order_placed, order_id=order_id)
-                last_order_time = current_time
+                order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope, order_placed=order_placed, order_id=order_id)
                 #buy_count = 0  # Reset buy count after placing the order
             else:
-                #order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope, order_placed=order_placed, order_id=order_id)
-                last_order_time = current_time
+                order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope, order_placed=order_placed, order_id=order_id)
                 #sell_count = 0  # Reset sell count after placing the order
-
+            last_order_time = current_time
         time.sleep(TIME_SLEEP_GET_PRICE)
 
     except BinanceAPIException as e:
