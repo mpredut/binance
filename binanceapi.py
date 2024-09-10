@@ -245,7 +245,7 @@ def place_order(order_type, symbol, price, quantity, numar_ore=24, fee_percentag
             print(f"No sufficient quantity available to place the {order_type.lower()} order.")
             return None
         
-        print(f"available_quantity {available_quantity} versus requested {quantity}")
+        print(f"available_quantity {available_quantity:.8f} versus requested {quantity:.8f}")
         
         adjusted_quantity = quantity * (1 + fee_percentage)
 
