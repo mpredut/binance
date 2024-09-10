@@ -170,7 +170,7 @@ def manage_quantity(order_type, symbol, required_quantity, hours=24):
             cutoff_time = datetime.now().timestamp() - timedelta(hours=hours).total_seconds()
             for order_id, order_info in sorted_orders:
                 if order_info['timestamp'] >= cutoff_time:
-                    cancel_order(order_id, symbol)
+                    cancel_order(order_id)
                     available_quantity += order_info['quantity']
                     print(f"New available quantity: {available_quantity}")
                 
@@ -370,7 +370,7 @@ def cancel_order(order_id):
         print(f"Ordinul cu ID {order_id} a fost anulat.")
         return True
     except BinanceAPIException as e:
-        print(f"Eroare la anularea ordinului: {e}")
+        print(f"Eroare la anularea ordinului: {order_id} {e}")
         return False
 
 def cancel_expired_orders(order_type, symbol, expire_time):

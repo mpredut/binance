@@ -300,7 +300,7 @@ import time
 trades = []
 
 class ProcentDistributor:
-    def __init__(self, t1, expired_duration, init_pt, min_pt = 0.005, unitate_timp=60):
+    def __init__(self, t1, expired_duration, init_pt, min_pt = 0.008, unitate_timp=60):
         if init_pt < min_pt:
             raise ValueError(f"init_pt ({init_pt}) cannot be smaller than min_pt ({min_pt})")
         self.init_pt = init_pt
@@ -406,7 +406,7 @@ def apply_sell_orders(trades, current_price, current_time, expired_duration, pro
             trade.sell_order_id = new_sell_order_id
             placed_order_count += 1
         else:
-            print(f"Plasare un singur ordin de vazare: Cantitate {trade.qty}, Pret {sell_price}")
+            #print(f"Plasare un singur ordin de vazare: Cantitate {trade.qty}, Pret {sell_price}")
             # Adăugăm tranzacția în calculul mediei ponderate
             total_weighted_price += sell_price * trade.qty
             total_quantity += trade.qty
