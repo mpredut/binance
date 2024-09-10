@@ -299,39 +299,39 @@ def monitor_close_orders_by_age2(max_age_seconds):
 import time
 trades = []
 class ProcentDistributor:
-    def __init__(self, t1, expired_duration, procent, unitate_timp=60):
-        self.t1 = t1
-        self.t2 = self.t1 + expired_duration
-        self.procent = procent
+    def __init__(self, t1, expired_duration, init_pt, min_pt = 0.005, unitate_timp=60):
+        self.init_pt = init_pt
+        self.min_pt = min_pt
         self.unitate_timp = unitate_timp
-        self.total_units = (self.t2 - self.t1) / self.unitate_timp
-        self.procent_per_unit = self.procent / self.total_units
-
+        self.update_init_time(t1, expired_duration, init_pt)      
+        self.update_init_procent(max(init_pt, min_pt))
+        
     def get_procent(self, current_time):
         if current_time < self.t1:
-            return self.procent
+            return self.init_pt
         if current_time > self.t2:
             print(f"current_time {current_time} > self.t2{self.t2}")
-            return 0
+            return max(0, self.min_pt)
         units_passed = (current_time - self.t1) / self.unitate_timp
-        return max(self.procent - (units_passed * self.procent_per_unit), 0)
+        return max(self.init_pt - (units_passed * self.procent_per_unit), 0)
     
-    def update_init_procent(self, procent):
-        self.procent = procent
-        self.total_units = (self.t2 - self.t1) / self.unitate_timp
-        self.procent_per_unit = self.procent / self.total_units
-    def update_init_time(self, t1):
+    def update_init_time(self, t1, expired_duration, init_pt = None):
         self.t1 = t1
-        self.update_init_procent(self.procent)
-    
-    def update_procent(self, current_price, buy_price):
-        procent_desired_profit = self.procent
+        self.t2 = self.t1 + max(expired_duration, 1)
+        self.total_units = (self.t2 - self.t1) / self.unitate_timp
+        if init_pt is None:
+            init_pt = self.init_pt
+        self.update_init_procent(init_pt)
+   
+    def update_init_procent(self, procent):
+        self.init_pt = procent
+        self.procent_per_unit = self.init_pt / self.total_units
+      
+    def adjust_init_procent_by(self, current_price, buy_price):
         price_difference_percentage = ((current_price - buy_price) / buy_price) * 100
-        if current_price > buy_price:
-            procent_desired_profit += abs(price_difference_percentage)
-        else:
-            procent_desired_profit -= abs(price_difference_percentage)
-        procent_desired_profit = max(procent_desired_profit, 0)
+        procent_desired_profit = self.init_pt
+        procent_desired_profit += (price_difference_percentage)
+        procent_desired_profit = max(procent_desired_profit, self.min_pt)
         self.update_init_procent(procent_desired_profit)
         
         
@@ -365,12 +365,13 @@ def update_trades(trades, symbol, max_age_seconds):
                 qty=trade['qty'],
                 price=trade['price'],
                 procent_desired_profit=0.07,  # Procentul inițial
-                expired_duration=3600,  # Durată de 1 oră (3600 secunde)
+                expired_duration=2*3600,  # Durată de 1 oră (3600 secunde)
                 time_trade=trade['time'] / 1000  # Convertim timpul din milisecunde în secunde
             ))
     new_trade_ids = {trade['id'] for trade in new_trades}
     trades[:] = [t for t in trades if t.trade_id in new_trade_ids]
-    trades.sort(key=lambda t: t.price)
+    #trades.sort(key=lambda t: t.price)
+    trades.sort(key=lambda t: t.price, reverse=True)
 
 
 def apply_sell_orders(trades, current_price, current_time, expired_duration, procent_desired_profit, symbol):
@@ -386,7 +387,7 @@ def apply_sell_orders(trades, current_price, current_time, expired_duration, pro
         if trade.sell_order_id == 0:
             continue  # Sărim peste tranzacțiile marcate ca executate
    
-        trade.distributor.update_procent(current_price, trade.price)
+        trade.distributor.adjust_init_procent_by(current_price, trade.price)
         sell_price = trade.get_proposed_sell_price(current_price, current_time)
 
         if trade.sell_order_id:

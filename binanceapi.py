@@ -128,10 +128,6 @@ def get_current_price(symbol):
         print(f"Eroare la obținerea prețului curent de la Binance API: {e}")
         print(f"Folosesc prețul obținut prin websocket, BTC: {binancecurrentprice}")
         return binancecurrentprice
-    except ReadTimeout as e:
-        print(f"Eroare: Timeout la încercarea de a contacta Binance API: {e}")
-        print(f"Folosesc prețul obținut prin websocket, BTC: {binancecurrentprice}")
-        return binancecurrentprice
     except Exception as e:
         # Handle any other exceptions that might occur
         print(f"A apărut o eroare neașteptată: {e}")
@@ -252,7 +248,7 @@ def place_order(order_type, symbol, price, quantity):
                 price=str(price)
             )
             # appy pair
-            price = max(price * 1.1, current_price)
+            price = max(price * 1.12, current_price)
             price = round(price * 1.001, 0)
             order = client.order_limit_sell(
                 symbol=symbol,
@@ -277,7 +273,7 @@ def place_order(order_type, symbol, price, quantity):
                 price=str(price)
             )
             # appy pair
-            price = min(price * 0.1, current_price)
+            price = min(price * 0.12, current_price)
             price = round(price * 0.999, 0)
             order = client.order_limit_buy(
                 symbol=symbol,
