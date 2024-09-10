@@ -235,7 +235,7 @@ def place_sell_order(symbol, price, quantity):
         print(f"Eroare la plasarea ordinului de vânzare: {e}")
         return None
 
-def place_order_new(order_type, symbol, price, quantity, numar_ore=24):
+def place_order(order_type, symbol, price, quantity, numar_ore=24):
     try:
         available_quantity = manage_quantity(order_type, symbol, quantity, numar_ore)
         

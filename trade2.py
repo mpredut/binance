@@ -216,7 +216,7 @@ window_size2 = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
 
-def track_and_place_order(action, proposed_price, current_price, slope, quantity=0.0017, order_placed=False, order_id=None):
+def track_and_place_order(action, proposed_price, current_price, slope, quantity=0.017, order_placed=False, order_id=None):
     
     if action == 'HOLD':
         return order_placed, order_id
@@ -366,7 +366,7 @@ while True:
            
         # Confirmarea trendului folosind `evaluate_buy_sell_opportunity`
         action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(
-            current_price, threshold_percent=0.8, decrease_percent=4
+            current_price, threshold_percent=0.8, decrease_percent=7
         )
 
         if action == 'BUY':
@@ -386,7 +386,7 @@ while True:
             if expired_trend == 'UP':
                 proposed_price = proposed_price + 142  # Preț de vânzare
                 print(f"End of UP trend. SELL order at {proposed_price:.2f} EUR")
-                order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
+                #order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
             elif expired_trend == 'DOWN':
                 proposed_price = proposed_price - 142  # Preț de cumpărare
                 print(f"End of DOWN trend. BUY order at {proposed_price:.2f} EUR")

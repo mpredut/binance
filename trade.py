@@ -105,6 +105,56 @@ current_buy_order_id = None
 #last_state.buy_price = 56473
 #last_state.quantity = 0.01771
 #states.append(last_state)
+
+
+def check_orders(symbol):
+    # Preluăm toate ordinele deschise de vânzare
+    open_orders = api.get_open_orders("sell", symbol)
+
+    # Preluăm prețul curent pentru simbolul respectiv
+    current_price = api.get_current_price(symbol)
+
+    min_price = 899999
+    max_price = 0
+    # Parcurgem toate ordinele deschise
+    for order_id, order_info in open_orders.items():
+        order_price = order_info['price']  # Prețul ordinului
+        if(order_price > max_price) :
+            max_price = order_price
+        if(order_price < min_price) :
+            min_price = order_price
+    print(f"Min vanzare {min_price} Max vanzare {max_price}")
+
+def check_and_close_orders(symbol):
+    # Preluăm toate ordinele deschise de vânzare
+    open_orders = api.get_open_orders("sell", symbol)
+
+    # Preluăm prețul curent pentru simbolul respectiv
+    current_price = api.get_current_price(symbol)
+
+    # Parcurgem toate ordinele deschise
+    for order_id, order_info in open_orders.items():
+        order_price = order_info['price']  # Prețul ordinului
+        print(f"check {order_price}  < {(current_price) + 300}")
+        #Verificăm dacă prețul ordinului este cu 2% mai mic decât prețul curent
+        #api.cancel_order(order_id) 
+        #print(f"Ordinul {order_id} a fost închis deoarece prețul său ({order_price}) este sub 2% din prețul curent ({current_price}).{(order_price) + 300 < (current_price)}")
+        if (order_price)  < (current_price) + 300:
+            api.cancel_order(order_id) 
+            print(f"Ordinul {order_id} a fost închis deoarece prețul său ({order_price}) este sub 2% din prețul curent ({current_price}).")
+        if (order_price)  > 59500:
+            print(f"Ordinul {order_id} a fost închis deoarece prețul său ({order_price}) este foarte mare fata de  ({current_price}).")
+            api.cancel_order(order_id) 
+            
+            
+# Exemplu de utilizare:
+check_and_close_orders("BTCUSDT")
+usdt = api.get_asset_info("sell", symbol)
+btc = api.get_asset_info("buy", symbol)
+print(f" BTC {btc}")
+print(f" USDT {usdt}")
+
+
 while True:
     try:
         current_state = State("none", get_current_price(symbol), timestamp=datetime.now())
@@ -112,7 +162,7 @@ while True:
             print("Eroare la obținerea prețului. Încerc din nou în câteva secunde.")
             time.sleep(1)
             continue
-        
+        check_orders("BTCUSDT")
         interval_time = get_interval_time()
         changed_proc = ready_to_buy(last_state, current_state, price_change_threshold, max_threshold, timedelta(seconds = interval_time).total_seconds())
                  
