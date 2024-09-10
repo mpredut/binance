@@ -298,8 +298,11 @@ def monitor_close_orders_by_age2(max_age_seconds):
 
 import time
 trades = []
+
 class ProcentDistributor:
     def __init__(self, t1, expired_duration, init_pt, min_pt = 0.005, unitate_timp=60):
+        if init_pt < min_pt:
+            raise ValueError(f"init_pt ({init_pt}) cannot be smaller than min_pt ({min_pt})")
         self.init_pt = init_pt
         self.min_pt = min_pt
         self.unitate_timp = unitate_timp
@@ -313,7 +316,7 @@ class ProcentDistributor:
             print(f"current_time {current_time} > self.t2{self.t2}")
             return max(0, self.min_pt)
         units_passed = (current_time - self.t1) / self.unitate_timp
-        return max(self.init_pt - (units_passed * self.procent_per_unit), 0)
+        return max(self.init_pt - (units_passed * self.procent_per_unit), self.min_pt)
     
     def update_init_time(self, t1, expired_duration, init_pt = None):
         self.t1 = t1
@@ -336,23 +339,24 @@ class ProcentDistributor:
         
         
 class BuyTransaction:
-    def __init__(self, trade_id, qty, price, procent_desired_profit, expired_duration, time_trade):
+    def __init__(self, trade_id, qty, buy_price, procent_desired_profit, expired_duration, time_trade):
         self.trade_id = trade_id
         self.qty = qty
-        self.price = price
+        self.buy_price = buy_price
         self.t1 = time.time()#time_trade  # Timpul tranzacției de cumpărare
         self.expired_duration = expired_duration
         self.distributor = ProcentDistributor(self.t1, expired_duration, procent_desired_profit)
         self.sell_order_id = None
 
     def get_proposed_sell_price(self, current_price, current_time):
-        price = max(self.price, current_price)
+        price = max(self.buy_price, current_price)
         if current_time - self.t1 >= self.expired_duration:
             print(f"prince update distriutor")
-            self.distributor.update_init_time(current_time)
+            self.distributor.update_init_time(current_time, expired_duration)
             price = current_price
+        price = max(self.buy_price, current_price)
         procent = self.distributor.get_procent(current_time)
-        print(f"prince {price} procent - {procent} calcul {price * (1 + procent / 100)}")
+        print(f"prince {price} procent: {procent} calcul pret propus {price * (1 + procent / 100)}")
         return price * (1 + procent / 100)
 
 
@@ -363,9 +367,9 @@ def update_trades(trades, symbol, max_age_seconds):
             trades.append(BuyTransaction(
                 trade_id=trade['id'],
                 qty=trade['qty'],
-                price=trade['price'],
+                buy_price=trade['price'],
                 procent_desired_profit=0.07,  # Procentul inițial
-                expired_duration=2*3600,  # Durată de 1 oră (3600 secunde)
+                expired_duration=2*3600,  # Durată de 2 ore 2 * (3600 secunde)
                 time_trade=trade['time'] / 1000  # Convertim timpul din milisecunde în secunde
             ))
     new_trade_ids = {trade['id'] for trade in new_trades}
@@ -412,9 +416,9 @@ def apply_sell_orders(trades, current_price, current_time, expired_duration, pro
     # Dacă au fost ordine suplimentare, calculăm media ponderată și plasăm un singur ordin
     if total_quantity > 0:
         average_sell_price = total_weighted_price / total_quantity
-        quantity = min(api.get_asset_info('BTC'), total_quantity)
+        quantity = min(api.get_asset_info("sell", symbol), total_quantity)
         print(f"Total: Cantitate {quantity}, Pret {average_sell_price}")
-        #new_sell_order_id = api.place_order("sell", symbol, average_sell_price, quantity)
+        new_sell_order_id = api.place_order("sell", symbol, average_sell_price, quantity)
         #trade.sell_order_id = new_sell_order_id
 
 
