@@ -238,7 +238,7 @@ def place_sell_order(symbol, price, quantity):
         print(f"Eroare la plasarea ordinului de vânzare: {e}")
         return None
 
-
+from decimal import Decimal, ROUND_DOWN
 def place_order(order_type, symbol, price, quantity, numar_ore=24, fee_percentage=0.001):
     try:
         available_quantity = manage_quantity(order_type, symbol, quantity, numar_ore)
@@ -260,14 +260,15 @@ def place_order(order_type, symbol, price, quantity, numar_ore=24, fee_percentag
         # Rotunjim cantitatea la 5 zecimale în jos
         quantity = math.floor(quantity * 10**5) / 10**5  # Rotunjire în jos la 5 zecimale
         quantity = round(quantity, 5)
-        
+        quantity = Decimal(quantity).quantize(Decimal('0.00001'), rounding=ROUND_DOWN)  # Rotunjit la 5 zecimale
         if quantity <= 0:
             print("Adjusted quantity is too small after rounding.")
-            return None
-        
+            return None          
+        #quantity = ('{:.8f}'.format(quantity)).rstrip('0').rstrip('.') ## todo check it 
+ 
         if order_type.upper() == 'SELL':
             price = round(max(price, current_price), 0)
-            print(f"Trying to place SELL order for quantity {quantity} at price {price}")
+            print(f"Trying to place SELL order for quantity {quantity:.8f} at price {price}")
             order = client.order_limit_sell(
                 symbol=symbol,
                 quantity=quantity,
@@ -275,7 +276,7 @@ def place_order(order_type, symbol, price, quantity, numar_ore=24, fee_percentag
             )
         elif order_type.upper() == 'BUY':
             price = round(min(price, current_price), 0)
-            print(f"Trying to place BUY order for quantity {quantity} at price {price}")
+            print(f"Trying to place BUY order for quantity {quantity:.8f} at price {price}")
             order = client.order_limit_buy(
                 symbol=symbol,
                 quantity=quantity,
@@ -314,19 +315,21 @@ def place_order_smart(order_type, symbol, price, quantity):
             
             price = min(price, current_price)
             price = round(price * 0.999, 0)
-            order = client.order_limit_buy(
-                symbol=symbol,
-                quantity=quantity,
-                price=str(price)
-            )
+            place_order("buy", symbol, price, quantity)
+            #order = client.order_limit_buy(
+            #    symbol=symbol,
+            #    quantity=quantity,
+            #    price=str(price)
+            #)
             # appy pair
-            price = max(price * 1.12, current_price)
+            price = max(price * 1.11, current_price)
             price = round(price * 1.001, 0)
-            order = client.order_limit_sell(
-                symbol=symbol,
-                quantity=quantity,
-                price=str(price)
-            )
+            place_order("sell", symbol, price=price, quantity=quantity)
+            #order = client.order_limit_sell(
+            #    symbol=symbol,
+            #    quantity=quantity,
+            #    price=str(price)
+            #)
         
         elif order_type.lower() == 'sell':
             open_buy_orders = get_open_orders("buy", symbol)
@@ -339,19 +342,21 @@ def place_order_smart(order_type, symbol, price, quantity):
                    
             price = max(price, current_price)
             price = round(price * (1 + 0.001), 0)
-            order = client.order_limit_sell(
-                symbol=symbol,
-                quantity=quantity,
-                price=str(price)
-            )
+            place_order("sell", symbol, price=price, quantity=quantity)
+            #order = client.order_limit_sell(
+            #    symbol=symbol,
+            #    quantity=quantity,
+            #    price=str(price)
+            #)
             # appy pair
-            price = min(price * 0.12, current_price)
+            price = min(price * 0.11, current_price)
             price = round(price * 0.999, 0)
-            order = client.order_limit_buy(
-                symbol=symbol,
-                quantity=quantity,
-                price=str(price)
-            )
+            place_order("buy", symbol, price=price, quantity=quantity)
+            #order = client.order_limit_buy(
+            #    symbol=symbol,
+            #    quantity=quantity,
+            #    price=str(price)
+            #)
         else:
             print("Tipul ordinului este invalid. Trebuie să fie 'buy' sau 'sell'.")
             return None

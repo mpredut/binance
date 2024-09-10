@@ -216,7 +216,7 @@ window_size2 = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
 
-def track_and_place_order(action, proposed_price, current_price, slope, quantity=0.017, order_placed=False, order_id=None):
+def track_and_place_order(action, proposed_price, current_price, slope, quantity=0.017/2, order_placed=False, order_id=None):
     
     if action == 'HOLD':
         return order_placed, order_id
@@ -224,12 +224,12 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
     # Determine the number of orders and their spacing based on price trend
     if slope is not None and slope > 0:
         # Price is rising, place fewer, larger orders
-        num_orders = 2
+        num_orders = 3
         price_step = 0.2  # Increase the spacing between orders as procents
         print(f"Placing fewer, {num_orders} larger orders due to rising price.")
     else:
         # Price is falling, place more, smaller orders
-        num_orders = 2
+        num_orders = 3
         price_step = 0.08  # Reduce the spacing between orders as procents
         print(f"Placing more, {num_orders} smaller orders due to falling price.")
 
@@ -246,7 +246,7 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
             adjusted_buy_price = buy_price * (1 - i * price_step / 100)
             order_quantity = quantity / num_orders  # Divide quantity among orders
             print(f"Placing buy order at price: {adjusted_buy_price:.2f} USDT for {order_quantity:.6f} BTC")
-            order = place_order("buy", symbol, adjusted_buy_price, order_quantity)
+            order = place_order_smart("buy", symbol, adjusted_buy_price, order_quantity)
             if order:
                 print(f"Buy order placed successfully with ID: {order['orderId']}")
                 order_placed = True
@@ -265,7 +265,7 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
             adjusted_sell_price = sell_price * (1 + i * price_step / 100)
             order_quantity = quantity / num_orders  # Divide quantity among orders
             print(f"Placing sell order at price: {adjusted_sell_price:.2f} USDT for {order_quantity:.6f} BTC")
-            order = place_order("sell", symbol, adjusted_sell_price, order_quantity)
+            order = place_order_smart("sell", symbol, adjusted_sell_price, order_quantity)
             if order:
                 print(f"Sell order placed successfully with ID: {order['orderId']}")
                 order_placed = True
@@ -350,7 +350,7 @@ last_evaluate_time = time.time()
 buy_count = 0
 sell_count = 0
 
-PRICE_CHANGE_THRESHOLD_EUR = 350
+PRICE_CHANGE_THRESHOLD_EUR = 330
 
 while True:
     try:

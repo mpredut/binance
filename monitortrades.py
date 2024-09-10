@@ -109,7 +109,7 @@ def sell_order_gradually(order, start_time, end_time):
             print(f"Anulat ordinul anterior cu ID: {order_id}")
 
         # Plasăm ordinul de vânzare
-        new_order = api.place_order("sell", symbol, target_price, filled_quantity)
+        new_order = api.place_order_smart("sell", symbol, target_price, filled_quantity)
         if new_order:
             order_id = new_order['orderId']
             print(f"Plasat ordin de vânzare la prețul {target_price:.2f}. New Order ID: {order_id}")
@@ -190,7 +190,7 @@ def monitor_close_orders_by_age1(max_age_seconds):
             print(f"Prețul curent ({current_price}) este cu 4% mai mare decât prețul de cumpărare ({filled_price}). Inițiem vânzarea.cantitate{quantity}")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=api.place_order, args=("sell", symbol, current_price + 200, quantity))
+            thread = threading.Thread(target=api.place_order_smart, args=("sell", symbol, current_price + 200, quantity))
             #sell_order_gradually, args=(order, current_time, end_time))
             thread.start()
             #return
@@ -212,7 +212,7 @@ def monitor_close_orders_by_age1(max_age_seconds):
             print(f"Prețul curent ({current_price}) este cu 4% mai mic decât prețul de vanzare ({filled_price}). Inițiem cumpararea.cantitate{quantity}.")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=api.place_order, args=("buy", symbol, current_price - 200, quantity))
+            thread = threading.Thread(target=api.place_order_smart, args=("buy", symbol, current_price - 200, quantity))
             #sell_order_gradually, args=(order, current_time, end_time))
             thread.start()
             #return
@@ -261,7 +261,7 @@ def monitor_close_orders_by_age2(max_age_seconds):
             print(f"Prețul curent ({current_price}) este cu {procent_scazut:.2f}% mai mare decât prețul de cumpărare ({filled_price}). Inițiem vânzarea. Cantitate: {quantity}")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=api.place_order, args=("sell", symbol, current_price + 200, quantity))
+            thread = threading.Thread(target=api.place_order_smart, args=("sell", symbol, current_price + 200, quantity))
             thread.start()
             
             # Resetăm timpul global pentru a reporni procesul
@@ -285,7 +285,7 @@ def monitor_close_orders_by_age2(max_age_seconds):
             print(f"Prețul curent ({current_price}) este cu {procent_scazut:.2f}% mai mic decât prețul de vânzare ({filled_price}). Inițiem cumpărarea. Cantitate: {quantity}")
             
             # Pornim un fir nou pentru a cumpăra BTC-ul
-            thread = threading.Thread(target=api.place_order, args=("buy", symbol, current_price - 200, quantity))
+            thread = threading.Thread(target=api.place_order_smart, args=("buy", symbol, current_price - 200, quantity))
             thread.start()
 
             # Resetăm timpul global pentru a reporni procesul
@@ -420,7 +420,7 @@ def apply_sell_orders(trades, current_price, current_time, expired_duration, pro
         # Verificăm dacă numărul de ordine a depășit 8
         if placed_order_count < 6:
             print(f"Plasare ordin de vanzare: Cantitate {trade.qty}, Preț {sell_price}")
-            new_sell_order_id = api.place_order("sell", symbol, sell_price, trade.qty)
+            new_sell_order_id = api.place_order_smart("sell", symbol, sell_price, trade.qty)
             trade.sell_order_id = new_sell_order_id
             placed_order_count += 1
         else:
@@ -436,7 +436,7 @@ def apply_sell_orders(trades, current_price, current_time, expired_duration, pro
         average_sell_price = total_weighted_price / total_quantity
         quantity = min(api.get_asset_info("sell", symbol), total_quantity)
         print(f"Total: Cantitate {quantity}, Pret {average_sell_price}")
-        new_sell_order_id = api.place_order("sell", symbol, average_sell_price, quantity)
+        new_sell_order_id = api.place_order_smart("sell", symbol, average_sell_price, quantity)
         #trade.sell_order_id = new_sell_order_id
 
 
@@ -451,7 +451,7 @@ def main():
 
     # Simulare: extragem ordinele recente de tip 'buy'
     while True:
-        time.sleep(10*2)  # Periodic, verificăm ordinele în cache
+        time.sleep(60*4)  # Periodic, verificăm ordinele în cache
         #max_age_seconds = 86400 *8
         close_buy_orders = apitrades.get_trade_orders('buy', symbol, max_age_seconds)  # Extragere ordine de 'buy' în ultimele 24 de ore
         print(f"get_trade_orders:           Found {len(close_buy_orders)} close 'buy' orders in the last {utils.convert_seconds_to_days(max_age_seconds)} days.")
