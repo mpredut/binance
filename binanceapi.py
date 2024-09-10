@@ -3,6 +3,7 @@ import time
 import datetime
 import math
 import sys
+from datetime import datetime, timedelta
 
 import signal
 import asyncio
@@ -151,13 +152,13 @@ def get_asset_info(order_type, symbol):
         print(f"A apărut o eroare: {e}")
 
 
-def manage_quantity(order_type, symbol, required_quantity, numar_ore=24):
+def manage_quantity(order_type, symbol, required_quantity, hours=24):
 
     available_quantity = get_asset_info(order_type, symbol)
     
     if available_quantity < required_quantity:
-        print(f"Not enough available {symbol}. Available: {available_quantity}, Required: {required_quantity}")
-        
+        print(f"Not enough available {symbol}. Available: {available_quantity:.8f}, Required: {required_quantity:.8f}")
+     
         open_orders = get_open_orders(order_type, symbol)
         if open_orders:
             sorted_orders = sorted(
@@ -249,7 +250,7 @@ def place_order(order_type, symbol, price, quantity, numar_ore=24, fee_percentag
         adjusted_quantity = quantity * (1 + fee_percentage)
 
         if available_quantity < adjusted_quantity:
-            print(f"Adjusting {order_type.lower()} order quantity from {quantity} to {available_quantity / (1 + fee_percentage)} to cover fees")
+            print(f"Adjusting {order_type.lower()} order quantity from {quantity:.8f} to {available_quantity / (1 + fee_percentage):.8f} to cover fees")
             quantity = available_quantity / (1 + fee_percentage)
         
         current_price = get_current_price(symbol)
