@@ -8,13 +8,14 @@ from collections import deque
 from apikeys import api_key, api_secret
 
 # my imports
+
 import binanceapi as api
-import utils as u
-from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, check_order_filled, place_order, cancel_order, cancel_expired_orders
-from utils import beep, get_interval_time, are_difference_equal_with_aprox_proc, are_values_very_close, budget, order_cost_btc, price_change_threshold, max_threshold
+import binanceapi_trades as apitrades
+import binanceapi_allorders as apiorders
 import log
 import alert
 import utils
+import utils as u
 
 
 class PriceWindow:
@@ -234,7 +235,7 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
         print(f"Placing more, {num_orders} smaller orders due to falling price.")
 
     if action == 'BUY':
-        cancel_expired_orders("buy", symbol, EXP_TIME_BUY_ORDER)
+        api.cancel_expired_orders("buy", api.symbol, EXP_TIME_BUY_ORDER)
 
         buy_price = min(proposed_price, current_price * 0.998)
         print(f"BUY price: {buy_price:.2f} USDT")
@@ -246,14 +247,14 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
             adjusted_buy_price = buy_price * (1 - i * price_step / 100)
             order_quantity = quantity / num_orders  # Divide quantity among orders
             print(f"Placing buy order at price: {adjusted_buy_price:.2f} USDT for {order_quantity:.6f} BTC")
-            order = place_order_smart("buy", symbol, adjusted_buy_price, order_quantity)
+            order = api.place_order_smart("buy", api.symbol, adjusted_buy_price, order_quantity)
             if order:
                 print(f"Buy order placed successfully with ID: {order['orderId']}")
                 order_placed = True
                 order_id = order['orderId']
 
     elif action == 'SELL':
-        cancel_expired_orders("sell", symbol, EXP_TIME_SELL_ORDER)
+        api.cancel_expired_orders("sell", api.symbol, EXP_TIME_SELL_ORDER)
 
         sell_price = max(proposed_price, current_price * 1.002)
         print(f"SELL price: {sell_price:.2f} USDT")
@@ -265,7 +266,7 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
             adjusted_sell_price = sell_price * (1 + i * price_step / 100)
             order_quantity = quantity / num_orders  # Divide quantity among orders
             print(f"Placing sell order at price: {adjusted_sell_price:.2f} USDT for {order_quantity:.6f} BTC")
-            order = place_order_smart("sell", symbol, adjusted_sell_price, order_quantity)
+            order = api.place_order_smart("sell", api.symbol, adjusted_sell_price, order_quantity)
             if order:
                 print(f"Sell order placed successfully with ID: {order['orderId']}")
                 order_placed = True
@@ -356,7 +357,7 @@ while True:
     try:
         
         current_time = time.time()
-        current_price = get_current_price(symbol)
+        current_price = api.get_current_price(api.symbol)
         if current_price is None:
             time.sleep(TIME_SLEEP_GET_PRICE)
             continue
@@ -437,8 +438,8 @@ while True:
         # Evaluate buy/sell opportunity more frequently
         if current_time - last_evaluate_time >= TIME_SLEEP_EVALUATE:
         
-            cancel_expired_orders("buy", symbol, EXP_TIME_BUY_ORDER)
-            cancel_expired_orders("sell", symbol, EXP_TIME_SELL_ORDER)
+            api.cancel_expired_orders("buy", api.symbol, EXP_TIME_BUY_ORDER)
+            api.cancel_expired_orders("sell", api.symbol, EXP_TIME_SELL_ORDER)
             
             action, proposed_price, price_change_percent, slope = price_window2.evaluate_buy_sell_opportunity(current_price, threshold_percent=0.8, decrease_percent=4)
             last_evaluate_time = current_time
