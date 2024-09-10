@@ -138,10 +138,10 @@ def get_current_price(symbol):
 
 def get_asset_info(order_type, symbol):
     try:
-        if order_type.lower() == 'buy':
-            symbol = symbol[:-4]
         if order_type.lower() == 'sell':
-            symbol = symbol[3:] 
+            symbol = symbol[:-4] #BTC
+        if order_type.lower() == 'buy':
+            symbol = symbol[3:] #USDT
         print(f"asset_info for {symbol}")
         asset_info = client.get_asset_balance(asset=symbol)
         print(f"asset_info: {asset_info}")
@@ -156,9 +156,9 @@ def manage_quantity(order_type, symbol, required_quantity, numar_ore=24):
     available_quantity = get_asset_info(order_type, symbol)
     
     if available_quantity < required_quantity:
-        print(f"Not enough available {asset_symbol}. Available: {available_quantity}, Required: {required_quantity}")
+        print(f"Not enough available {symbol}. Available: {available_quantity}, Required: {required_quantity}")
         
-        open_orders = get_open_orders(order_type, symbol_pair)
+        open_orders = get_open_orders(order_type, symbol)
         if open_orders:
             sorted_orders = sorted(
                 open_orders.items(),
@@ -169,7 +169,7 @@ def manage_quantity(order_type, symbol, required_quantity, numar_ore=24):
             cutoff_time = datetime.now().timestamp() - timedelta(hours=hours).total_seconds()
             for order_id, order_info in sorted_orders:
                 if order_info['timestamp'] >= cutoff_time:
-                    cancel_order(order_id, symbol_pair)
+                    cancel_order(order_id, symbol)
                     available_quantity += order_info['quantity']
                     print(f"New available quantity: {available_quantity}")
                 
@@ -235,7 +235,8 @@ def place_sell_order(symbol, price, quantity):
         print(f"Eroare la plasarea ordinului de vânzare: {e}")
         return None
 
-def place_order(order_type, symbol, price, quantity, numar_ore=24):
+
+def place_order(order_type, symbol, price, quantity, numar_ore=24, fee_percentage=0.001):
     try:
         available_quantity = manage_quantity(order_type, symbol, quantity, numar_ore)
         
@@ -243,15 +244,27 @@ def place_order(order_type, symbol, price, quantity, numar_ore=24):
             print(f"No sufficient quantity available to place the {order_type.lower()} order.")
             return None
         
-        if available_quantity < quantity:
-            print(f"Adjusting {order_type.lower()} order quantity from {quantity} to {available_quantity}")
-            quantity = available_quantity
+        print(f"available_quantity {available_quantity} versus requested {quantity}")
+        
+        adjusted_quantity = quantity * (1 + fee_percentage)
+
+        if available_quantity < adjusted_quantity:
+            print(f"Adjusting {order_type.lower()} order quantity from {quantity} to {available_quantity / (1 + fee_percentage)} to cover fees")
+            quantity = available_quantity / (1 + fee_percentage)
         
         current_price = get_current_price(symbol)
+
+        # Rotunjim cantitatea la 5 zecimale în jos
+        quantity = math.floor(quantity * 10**5) / 10**5  # Rotunjire în jos la 5 zecimale
         quantity = round(quantity, 5)
+        
+        if quantity <= 0:
+            print("Adjusted quantity is too small after rounding.")
+            return None
         
         if order_type.upper() == 'SELL':
             price = round(max(price, current_price), 0)
+            print(f"Trying to place SELL order for quantity {quantity} at price {price}")
             order = client.order_limit_sell(
                 symbol=symbol,
                 quantity=quantity,
@@ -259,6 +272,7 @@ def place_order(order_type, symbol, price, quantity, numar_ore=24):
             )
         elif order_type.upper() == 'BUY':
             price = round(min(price, current_price), 0)
+            print(f"Trying to place BUY order for quantity {quantity} at price {price}")
             order = client.order_limit_buy(
                 symbol=symbol,
                 quantity=quantity,
@@ -268,7 +282,7 @@ def place_order(order_type, symbol, price, quantity, numar_ore=24):
             print(f"Invalid order type: {order_type}")
             return None
         
-        print(f"{order_type.capitalize()} order placed successfully: {order}")
+        print(f"{order_type.capitalize()} order placed successfully: {order['orderId']}")
         return order
 
     except BinanceAPIException as e:
@@ -277,6 +291,7 @@ def place_order(order_type, symbol, price, quantity, numar_ore=24):
     except Exception as e:
         print(f"A apărut o eroare: {e}")
         return None
+
 
 
 def place_order_smart(order_type, symbol, price, quantity):

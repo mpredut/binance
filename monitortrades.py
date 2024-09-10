@@ -374,8 +374,8 @@ def update_trades(trades, symbol, max_age_seconds):
             ))
     new_trade_ids = {trade['id'] for trade in new_trades}
     trades[:] = [t for t in trades if t.trade_id in new_trade_ids]
-    #trades.sort(key=lambda t: t.price)
-    trades.sort(key=lambda t: t.price, reverse=True)
+    #trades.sort(key=lambda t: t.buy_price)
+    trades.sort(key=lambda t: t.buy_price, reverse=True)
 
 
 def apply_sell_orders(trades, current_price, current_time, expired_duration, procent_desired_profit, symbol):
@@ -391,7 +391,7 @@ def apply_sell_orders(trades, current_price, current_time, expired_duration, pro
         if trade.sell_order_id == 0:
             continue  # Sărim peste tranzacțiile marcate ca executate
    
-        trade.distributor.adjust_init_procent_by(current_price, trade.price)
+        trade.distributor.adjust_init_procent_by(current_price, trade.buy_price)
         sell_price = trade.get_proposed_sell_price(current_price, current_time)
 
         if trade.sell_order_id:
