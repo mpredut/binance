@@ -109,7 +109,7 @@ def sell_order_gradually(order, start_time, end_time):
             print(f"Anulat ordinul anterior cu ID: {order_id}")
 
         # Plasăm ordinul de vânzare
-        new_order = api.place_order(symbol, "sell", target_price, filled_quantity)
+        new_order = api.place_order("sell", symbol, target_price, filled_quantity)
         if new_order:
             order_id = new_order['orderId']
             print(f"Plasat ordin de vânzare la prețul {target_price:.2f}. New Order ID: {order_id}")
@@ -298,44 +298,56 @@ def monitor_close_orders_by_age2(max_age_seconds):
 
 import time
 trades = []
-
+  
 class ProcentDistributor:
-    def __init__(self, t1, expired_duration, init_pt, min_pt = 0.008, unitate_timp=60):
-        if init_pt < min_pt:
-            raise ValueError(f"init_pt ({init_pt}) cannot be smaller than min_pt ({min_pt})")
-        self.init_pt = init_pt
-        self.min_pt = min_pt
+    def __init__(self, t1, expired_duration, max_procent, min_procent = 0.008, unitate_timp=60):
+        if max_procent < min_procent:
+            raise ValueError(f"max_procent ({max_procent}) cannot be smaller than min_procent ({min_procent})")
+        self.procent = max_procent #TOTO remove self.
+        self.max_procent = max_procent
+        self.min_procent = min_procent
         self.unitate_timp = unitate_timp
-        self.update_init_time(t1, expired_duration, init_pt)      
-        self.update_init_procent(max(init_pt, min_pt))
+        self.update_period_time(t1, expired_duration)      
+        self.update_max_procent(max(max_procent, min_procent))
         
     def get_procent(self, current_time):
         if current_time < self.t1:
-            return self.init_pt
+            return self.max_procent
         if current_time > self.t2:
-            print(f"current_time {current_time} > self.t2{self.t2}")
-            return max(0, self.min_pt)
+            print(f"current_time {current_time} > self.t2 {self.t2}")
+            return max(0, self.min_procent)
         units_passed = (current_time - self.t1) / self.unitate_timp
-        return max(self.init_pt - (units_passed * self.procent_per_unit), self.min_pt)
+        print(f"units_passed: {units_passed}")
+        print(f"procent_per_unit: {self.procent_per_unit}")
+        return max(self.max_procent - (units_passed * self.procent_per_unit), self.min_procent)
     
-    def update_init_time(self, t1, expired_duration, init_pt = None):
+    def get_procent_by(self, current_time, current_price, buy_price):
+        if current_time < self.t1:
+            return self.procent
+        if current_time > self.t2:
+            return max(0, self.min_procent)
+        self.procent = self.calculate_procent_by(current_price, buy_price) #TOTO remove self.
+        units_passed = (current_time - self.t1) / self.unitate_timp
+        procent_per_unit = self.procent / self.total_units
+        return max(self.procent - (units_passed * self.procent_per_unit), self.min_procent)
+    
+    def update_period_time(self, t1, expired_duration):
         self.t1 = t1
         self.t2 = self.t1 + max(expired_duration, 1)
         self.total_units = (self.t2 - self.t1) / self.unitate_timp
-        if init_pt is None:
-            init_pt = self.init_pt
-        self.update_init_procent(init_pt)
    
-    def update_init_procent(self, procent):
-        self.init_pt = procent
-        self.procent_per_unit = self.init_pt / self.total_units
+    def update_max_procent(self, procent):
+        if procent is not None:
+            self.max_procent = procent
+            self.procent_per_unit = self.max_procent / self.total_units
       
-    def adjust_init_procent_by(self, current_price, buy_price):
-        price_difference_percentage = ((current_price - buy_price) / buy_price) * 100
-        procent_desired_profit = self.init_pt
-        procent_desired_profit += (price_difference_percentage)
-        procent_desired_profit = max(procent_desired_profit, self.min_pt)
-        self.update_init_procent(procent_desired_profit)
+    def calculate_procent_by(self, current_price, buy_price):
+        price_difference_percentage = ((current_price - buy_price) / buy_price)
+        procent_desired_profit = self.max_procent
+        procent_desired_profit += price_difference_percentage
+        procent_desired_profit = max(procent_desired_profit, self.min_procent) #TODO: review if max
+        print(f"adjust_init_procent_by: {procent_desired_profit}")
+        return procent_desired_profit
         
         
 class BuyTransaction:
@@ -349,15 +361,22 @@ class BuyTransaction:
         self.sell_order_id = None
 
     def get_proposed_sell_price(self, current_price, current_time):
-        price = max(self.buy_price, current_price)
         if current_time - self.t1 >= self.expired_duration:
-            print(f"prince update distriutor")
-            self.distributor.update_init_time(current_time, expired_duration)
-            price = current_price
+            print(f"Time expired. Updating distributor period for current_time {current_time} with duration {self.expired_duration}.")
+            self.distributor.update_period_time(current_time, self.expired_duration)
+        
         price = max(self.buy_price, current_price)
-        procent = self.distributor.get_procent(current_time)
-        print(f"prince {price} procent: {procent} calcul pret propus {price * (1 + procent / 100)}")
-        return price * (1 + procent / 100)
+        
+        procent_time_based = self.distributor.get_procent(current_time)
+        procent_price_based = self.distributor.get_procent_by(current_time, current_price, self.buy_price)
+        
+        proposed_sell_price = price * (1 + procent_time_based / 100)
+        
+        print(f"Current Price: {current_price}, Buy Price: {self.buy_price}")
+        print(f"Using Time-based Procent versus Price-based Procent: {procent_time_based:.5f}<->{procent_price_based:.5f}")
+        print(f"Proposed Sell Price Calculation: {proposed_sell_price:.2f}")
+        
+        return proposed_sell_price
 
 
 def update_trades(trades, symbol, max_age_seconds):
@@ -390,12 +409,11 @@ def apply_sell_orders(trades, current_price, current_time, expired_duration, pro
             trade.sell_order_id = 0  # Marcăm ca executat
         if trade.sell_order_id == 0:
             continue  # Sărim peste tranzacțiile marcate ca executate
-   
-        trade.distributor.adjust_init_procent_by(current_price, trade.buy_price)
+
         sell_price = trade.get_proposed_sell_price(current_price, current_time)
 
         if trade.sell_order_id:
-            print(f"cancel {trade.sell_order_id}")
+            #print(f"cancel {trade.sell_order_id}")
             api.cancel_order(trade.sell_order_id['orderId'])
             trade.sell_order_id = None
 

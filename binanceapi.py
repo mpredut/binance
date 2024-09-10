@@ -30,9 +30,10 @@ symbol = 'BTCUSDT'
 
 import binance
 print(binance.__version__)
+binancecurrentprice = 0
 
 client = Client(api_key, api_secret)
-binancecurrentprice = 0
+
 
 
 def listen_to_binance(symbol):
@@ -53,6 +54,7 @@ def listen_to_binance(symbol):
 
 # Funcție de gestionare a mesajului primit de la WebSocket
 def process_message(message):
+    global binancecurrentprice
     symbol = message['s']  # Simbolul criptomonedei
     price = float(message['c'])  # Asigură-te că price este un float
     binancecurrentprice = price
@@ -123,6 +125,7 @@ def get_symbol_limits(symbol):
 
 def get_current_price(symbol):
     try:
+        global binancecurrentprice
         ticker = client.get_symbol_ticker(symbol=symbol)
         binancecurrentprice = float(ticker['price'])
         return binancecurrentprice
@@ -143,12 +146,11 @@ def get_asset_info(order_type, symbol):
             symbol = symbol[:-4] #BTC
         if order_type.lower() == 'buy':
             symbol = symbol[3:] #USDT
-        print(f"asset_info for {symbol}")
+        #print(f"asset_info for {symbol}")
         asset_info = client.get_asset_balance(asset=symbol)
-        print(f"asset_info: {asset_info}")
+        #print(f"asset_info: {asset_info}")
         return float(asset_info['free']) # info ['locked']
     except Exception as e:
-        # Gestionarea altor erori neprevăzute
         print(f"A apărut o eroare: {e}")
 
 
@@ -204,7 +206,7 @@ def get_open_orders(order_type, symbol):
         }
         
         return filtered_orders
-    except BinanceAPIException as e:
+    except Exception as e:
         print(f"Error getting open {order_type} orders: {e}")
         return {}
         
@@ -369,7 +371,7 @@ def cancel_order(order_id):
         client.cancel_order(symbol=symbol, orderId=order_id)
         print(f"Ordinul cu ID {order_id} a fost anulat.")
         return True
-    except BinanceAPIException as e:
+    except Exception as e:
         print(f"Eroare la anularea ordinului: {order_id} {e}")
         return False
 
@@ -397,7 +399,7 @@ def check_order_filled(order_id):
             return False
         order = client.get_order(symbol=symbol, orderId=order_id)
         return order['status'] == 'FILLED'
-    except BinanceAPIException as e:
+    except Exception as e:
         print(f"Eroare la verificarea stării ordinului: {e}")
         return False
 
