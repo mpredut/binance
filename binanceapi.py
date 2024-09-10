@@ -107,6 +107,19 @@ precision = get_quantity_precision(symbol)
 precision = 8
 print(f"Precision is {precision}")
 
+def get_symbol_limits(symbol):
+    info = client.get_symbol_info(symbol)
+    if info:
+        filters = info['filters']
+        for f in filters:
+            if f['filterType'] == 'LOT_SIZE':
+                min_qty = float(f['minQty'])
+                max_qty = float(f['maxQty'])
+                step_size = float(f['stepSize'])
+                print(f"Min quantity: {min_qty}, Max quantity: {max_qty}, Step size: {step_size}")
+                return min_qty, max_qty, step_size
+    return None, None, None
+
 def get_current_price(symbol):
     try:
         ticker = client.get_symbol_ticker(symbol=symbol)
@@ -124,6 +137,17 @@ def get_current_price(symbol):
         print(f"A apărut o eroare neașteptată: {e}")
         print(f"Folosesc prețul obținut prin websocket, BTC: {binancecurrentprice}")
         return binancecurrentprice
+        
+
+def get_asset_info(symbol):
+    try:
+
+        asset_info = client.get_asset_balance(asset=symbol)
+        print(f"asset_info: {asset_info}")
+        return float(asset_info['free']) # info ['locked']
+    except Exception as e:
+        # Gestionarea altor erori neprevăzute
+        print(f"A apărut o eroare: {e}")
 
 
 def get_open_orders(order_type, symbol):
@@ -160,6 +184,35 @@ def place_buy_order(symbol, price, quantity):
     except BinanceAPIException as e:
         print(f"Eroare la plasarea ordinului de cumpărare: {e}")
         return None
+
+def place_sell_order_(symbol, price, quantity):
+    try:
+        # Verificăm limitele pentru simbolul dat
+        min_qty, max_qty, step_size = get_symbol_limits(symbol)
+
+        # Asigură-te că cantitatea respectă limitele
+        if min_qty is not None and (quantity < min_qty or quantity > max_qty):
+            print(f"Quantity {quantity} is out of bounds (min: {min_qty}, max: {max_qty})")
+            return None
+
+        # Rotunjim cantitatea la pasul acceptat
+        quantity = round(quantity // step_size * step_size, 5)
+
+        # Rotunjim prețul
+        price = round(max(price, get_current_price(symbol)), 0)
+
+        # Plasăm ordinul de vânzare
+        sell_order = client.order_limit_sell(
+            symbol=symbol,
+            quantity=quantity,
+            price=str(price)
+        )
+        return sell_order
+    except BinanceAPIException as e:
+        print(f"Eroare la plasarea ordinului de vânzare: {e}")
+        return None
+
+
 
 def place_sell_order(symbol, price, quantity):
     try:

@@ -103,7 +103,7 @@ def sell_order_gradually(order, start_time, end_time):
 
         # Anulăm ordinul anterior înainte de a plasa unul nou
         if order_id:
-            if check_order_filled(order_id) :
+            if api.check_order_filled(order_id) :
                 return; #order filled!
             cancel_order(order_id)
             print(f"Anulat ordinul anterior cu ID: {order_id}")
@@ -311,6 +311,7 @@ class ProcentDistributor:
         if current_time < self.t1:
             return self.procent
         if current_time > self.t2:
+            print(f"current_time {current_time} > self.t2{self.t2}")
             return 0
         units_passed = (current_time - self.t1) / self.unitate_timp
         return max(self.procent - (units_passed * self.procent_per_unit), 0)
@@ -339,7 +340,7 @@ class BuyTransaction:
         self.trade_id = trade_id
         self.qty = qty
         self.price = price
-        self.t1 = time_trade  # Timpul tranzacției de cumpărare
+        self.t1 = time.time()#time_trade  # Timpul tranzacției de cumpărare
         self.expired_duration = expired_duration
         self.distributor = ProcentDistributor(self.t1, expired_duration, procent_desired_profit)
         self.sell_order_id = None
@@ -347,9 +348,11 @@ class BuyTransaction:
     def get_proposed_sell_price(self, current_price, current_time):
         price = max(self.price, current_price)
         if current_time - self.t1 >= self.expired_duration:
+            print(f"prince update distriutor")
             self.distributor.update_init_time(current_time)
             price = current_price
         procent = self.distributor.get_procent(current_time)
+        print(f"prince {price} procent - {procent} calcul {price * (1 + procent / 100)}")
         return price * (1 + procent / 100)
 
 
@@ -361,12 +364,13 @@ def update_trades(trades, symbol, max_age_seconds):
                 trade_id=trade['id'],
                 qty=trade['qty'],
                 price=trade['price'],
-                procent_desired_profit=7.0,  # Procentul inițial
+                procent_desired_profit=0.07,  # Procentul inițial
                 expired_duration=3600,  # Durată de 1 oră (3600 secunde)
                 time_trade=trade['time'] / 1000  # Convertim timpul din milisecunde în secunde
             ))
     new_trade_ids = {trade['id'] for trade in new_trades}
     trades[:] = [t for t in trades if t.trade_id in new_trade_ids]
+    trades.sort(key=lambda t: t.price)
 
 
 def apply_sell_orders(trades, current_price, current_time, expired_duration, procent_desired_profit, symbol):
@@ -376,7 +380,8 @@ def apply_sell_orders(trades, current_price, current_time, expired_duration, pro
 
     for trade in trades:
             
-        if trade.sell_order_id and check_order_filled(trade.sell_order_id):
+        if trade.sell_order_id and api.check_order_filled(trade.sell_order_id['orderId']):
+            print(f"check_order_filled {trade.sell_order_id}")
             trade.sell_order_id = 0  # Marcăm ca executat
         if trade.sell_order_id == 0:
             continue  # Sărim peste tranzacțiile marcate ca executate
@@ -385,16 +390,18 @@ def apply_sell_orders(trades, current_price, current_time, expired_duration, pro
         sell_price = trade.get_proposed_sell_price(current_price, current_time)
 
         if trade.sell_order_id:
-            api.cancel_order(trade.sell_order_id)
+            print(f"cancel {trade.sell_order_id}")
+            api.cancel_order(trade.sell_order_id['orderId'])
             trade.sell_order_id = None
 
         # Verificăm dacă numărul de ordine a depășit 8
         if placed_order_count < 6:
-            print(f"Plasare ordin de vânzare: Cantitate {trade.qty}, Preț {sell_price}")
-            new_sell_order_id = api.place_sell_order(symbol, trade.qty, sell_price)
+            print(f"Plasare ordin de vanzare: Cantitate {trade.qty}, Preț {sell_price}")
+            new_sell_order_id = api.place_sell_order(symbol, sell_price, trade.qty)
             trade.sell_order_id = new_sell_order_id
             placed_order_count += 1
         else:
+            print(f"Plasare un singur ordin de vazare: Cantitate {trade.qty}, Pret {sell_price}")
             # Adăugăm tranzacția în calculul mediei ponderate
             total_weighted_price += sell_price * trade.qty
             total_quantity += trade.qty
@@ -404,23 +411,24 @@ def apply_sell_orders(trades, current_price, current_time, expired_duration, pro
     # Dacă au fost ordine suplimentare, calculăm media ponderată și plasăm un singur ordin
     if total_quantity > 0:
         average_sell_price = total_weighted_price / total_quantity
-        api.place_order("sell", symbol, total_quantity, average_sell_price)
+        quantity = min(api.get_asset_info('BTC'), total_quantity)
+        print(f"Total: Cantitate {quantity}, Pret {average_sell_price}")
+        #new_sell_order_id = api.place_sell_order(symbol, average_sell_price, quantity)
+        #trade.sell_order_id = new_sell_order_id
 
 
 max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate/filled sunt considerate recente (3 zile)
 # Exemplu de apel pentru a porni monitorizarea periodică
-if __name__ == "__main__":
-    symbol = "BTCUSDT"
-    filename = "trades_BTCUSDT.json"
-    order_type = None
-    interval = 3600/2  # 1 oră
+
+def main():
+
 
     # Pornim monitorizarea periodică a tranzacțiilor
     start_monitoring(order_type, symbol, filename, interval=interval, limit=1000, years_to_keep=2)
 
     # Simulare: extragem ordinele recente de tip 'buy'
     while True:
-        time.sleep(60*2)  # Periodic, verificăm ordinele în cache
+        time.sleep(10*2)  # Periodic, verificăm ordinele în cache
         #max_age_seconds = 86400 *8
         close_buy_orders = apitrades.get_trade_orders('buy', symbol, max_age_seconds)  # Extragere ordine de 'buy' în ultimele 24 de ore
         print(f"get_trade_orders:           Found {len(close_buy_orders)} close 'buy' orders in the last {utils.convert_seconds_to_days(max_age_seconds)} days.")
@@ -437,6 +445,17 @@ if __name__ == "__main__":
         procent_desired_profit = 0.07 #0.7%
         current_time = time.time()    
         current_price = api.get_current_price(api.symbol)
-        update_trades(trades, symbol, max_age_seconds)
+        #update_trades(trades, symbol, max_age_seconds)
         expired_duration = 3600 * 2.5 #h
-        apply_sell_orders(trades, current_price, current_time, expired_duration, procent_desired_profit, api.symbol)
+        #apply_sell_orders(trades, current_price, current_time, expired_duration, procent_desired_profit, api.symbol)
+        monitor_close_orders_by_age2(max_age_seconds)
+        
+        
+if __name__ == "__main__":
+    symbol = "BTCUSDT"
+    filename = "trades_BTCUSDT.json"
+    order_type = None
+    interval = 3600/2  # 1 oră
+    main()
+
+    
