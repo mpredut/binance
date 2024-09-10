@@ -146,9 +146,9 @@ def get_asset_info(order_type, symbol):
             symbol = symbol[:-4] #BTC
         if order_type.lower() == 'buy':
             symbol = symbol[3:] #USDT
-        #print(f"asset_info for {symbol}")
+        print(f"asset_info for {order_type} {symbol}")
         asset_info = client.get_asset_balance(asset=symbol)
-        #print(f"asset_info: {asset_info}")
+        print(f"asset_info: {asset_info}")
         return float(asset_info['free']) # info ['locked']
     except Exception as e:
         print(f"A apărut o eroare: {e}")
@@ -243,18 +243,30 @@ def place_order(order_type, symbol, price, quantity, numar_ore=24, fee_percentag
     try:
         available_quantity = manage_quantity(order_type, symbol, quantity, numar_ore)
         
-        if available_quantity <= 0:
-            print(f"No sufficient quantity available to place the {order_type.lower()} order.")
-            return None
-        
-        print(f"available_quantity {available_quantity:.8f} versus requested {quantity:.8f}")
-        
-        adjusted_quantity = quantity * (1 + fee_percentage)
+        if order_type.upper() == 'SELL':
+            # Verifică dacă ai destulă criptomonedă pentru a vinde
+            if available_quantity <= 0:
+                print(f"No sufficient quantity available to place the {order_type.lower()} order.")
+                return None
+            
+            print(f"available_quantity {available_quantity:.8f} versus requested {quantity:.8f}")
+            
+            adjusted_quantity = quantity * (1 + fee_percentage)
 
-        if available_quantity < adjusted_quantity:
-            print(f"Adjusting {order_type.lower()} order quantity from {quantity:.8f} to {available_quantity / (1 + fee_percentage):.8f} to cover fees")
-            quantity = available_quantity / (1 + fee_percentage)
-        
+            if available_quantity < adjusted_quantity:
+                print(f"Adjusting {order_type.lower()} order quantity from {quantity:.8f} to {available_quantity / (1 + fee_percentage):.8f} to cover fees")
+                quantity = available_quantity / (1 + fee_percentage)
+
+        elif order_type.upper() == 'BUY':
+            # În cazul unei comenzi de BUY, trebuie să calculezi cantitatea necesară de USDT pentru achiziționare
+            total_usdt_needed = quantity * price * (1 + fee_percentage)
+
+            if available_quantity < total_usdt_needed:
+                print(f"Not enough USDT available. You need {total_usdt_needed:.8f} USDT, but you only have {available_quantity:.8f} USDT.")
+                # Ajustează cantitatea pe care o poți cumpăra cu USDT disponibili
+                quantity = available_quantity / (price * (1 + fee_percentage))
+                print(f"Adjusting {order_type.lower()} order quantity to {quantity:.8f} based on available USDT.")
+
         current_price = get_current_price(symbol)
 
         # Rotunjim cantitatea la 5 zecimale în jos
@@ -264,8 +276,7 @@ def place_order(order_type, symbol, price, quantity, numar_ore=24, fee_percentag
         if quantity <= 0:
             print("Adjusted quantity is too small after rounding.")
             return None          
-        #quantity = ('{:.8f}'.format(quantity)).rstrip('0').rstrip('.') ## todo check it 
- 
+
         if order_type.upper() == 'SELL':
             price = round(max(price, current_price), 0)
             print(f"Trying to place SELL order for quantity {quantity:.8f} at price {price}")
@@ -297,7 +308,6 @@ def place_order(order_type, symbol, price, quantity, numar_ore=24, fee_percentag
         return None
 
 
-
 def place_order_smart(order_type, symbol, price, quantity):
     try:
         quantity = round(quantity, 5)
@@ -315,7 +325,7 @@ def place_order_smart(order_type, symbol, price, quantity):
             
             price = min(price, current_price)
             price = round(price * 0.999, 0)
-            place_order("buy", symbol, price, quantity)
+            order = place_order("buy", symbol, price=price, quantity=quantity)
             #order = client.order_limit_buy(
             #    symbol=symbol,
             #    quantity=quantity,
@@ -324,7 +334,7 @@ def place_order_smart(order_type, symbol, price, quantity):
             # appy pair
             price = max(price * 1.11, current_price)
             price = round(price * 1.001, 0)
-            place_order("sell", symbol, price=price, quantity=quantity)
+            order = place_order("sell", symbol, price=price, quantity=quantity)
             #order = client.order_limit_sell(
             #    symbol=symbol,
             #    quantity=quantity,
@@ -342,16 +352,16 @@ def place_order_smart(order_type, symbol, price, quantity):
                    
             price = max(price, current_price)
             price = round(price * (1 + 0.001), 0)
-            place_order("sell", symbol, price=price, quantity=quantity)
+            order = place_order("sell", symbol, price=price, quantity=quantity)
             #order = client.order_limit_sell(
             #    symbol=symbol,
             #    quantity=quantity,
             #    price=str(price)
             #)
             # appy pair
-            price = min(price * 0.11, current_price)
+            price = min(price * (1 - 0.11), current_price)
             price = round(price * 0.999, 0)
-            place_order("buy", symbol, price=price, quantity=quantity)
+            order = place_order("buy", symbol, price=price, quantity=quantity)
             #order = client.order_limit_buy(
             #    symbol=symbol,
             #    quantity=quantity,
@@ -364,10 +374,12 @@ def place_order_smart(order_type, symbol, price, quantity):
         return order
     except BinanceAPIException as e:
         print(f"Eroare la plasarea ordinului de {order_type}: {e}")
-        return place_order(order_type, symbol, price, quantity)
+        return None
+        #return place_order(order_type, symbol, price, quantity)
     except Exception as e:
         print(f"A apărut o eroare: {e}")
-        return place_order(order_type, symbol, price, quantity)
+        return None
+        #return place_order(order_type, symbol, price, quantity)
           
 def cancel_order(order_id):
     try:

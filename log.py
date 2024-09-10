@@ -28,15 +28,19 @@ def print(*args, **kwargs):
     # Apelează funcția print originală
     original_print(message, **kwargs)
     
-    bot_folder = "bot"
+    bot_folder = "bott"
     if not os.path.exists(bot_folder):
         os.makedirs(bot_folder)
     
     # Scrie mesajul în fișierul de log din folderul "bot"
-    #logger.info(message)
--   # Scrie mesajul în fișierul de log direct fără a folosi logger.info
-    with open(f"{bot_folder}/bot{process_id}.log", "a") as log_file:
-        log_file.write(message + "\n")
+    # logger.info(message)
+    # Scrie mesajul în fișierul de log direct fără a folosi logger.info
+    bot_folder = os.path.join(os.getcwd(), bot_folder)
+    try:
+        with open(f"{bot_folder}/bot{process_id}.log", "a") as log_file:
+            log_file.write(message + "\n")
+    except PermissionError as e:
+        original_print(f"Error writing log: {e}")
 
 
 # Redefinește funcția print din builtins pentru a funcționa în întreg codul

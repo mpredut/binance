@@ -451,7 +451,7 @@ def main():
 
     # Simulare: extragem ordinele recente de tip 'buy'
     while True:
-        time.sleep(60*4)  # Periodic, verificăm ordinele în cache
+        time.sleep(1*4)  # Periodic, verificăm ordinele în cache
         #max_age_seconds = 86400 *8
         close_buy_orders = apitrades.get_trade_orders('buy', symbol, max_age_seconds)  # Extragere ordine de 'buy' în ultimele 24 de ore
         print(f"get_trade_orders:           Found {len(close_buy_orders)} close 'buy' orders in the last {utils.convert_seconds_to_days(max_age_seconds)} days.")
