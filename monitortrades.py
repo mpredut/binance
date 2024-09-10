@@ -397,7 +397,7 @@ def apply_sell_orders(trades, current_price, current_time, expired_duration, pro
         # Verificăm dacă numărul de ordine a depășit 8
         if placed_order_count < 6:
             print(f"Plasare ordin de vanzare: Cantitate {trade.qty}, Preț {sell_price}")
-            new_sell_order_id = api.place_sell_order(symbol, sell_price, trade.qty)
+            new_sell_order_id = api.place_order("sell", symbol, sell_price, trade.qty)
             trade.sell_order_id = new_sell_order_id
             placed_order_count += 1
         else:
@@ -413,7 +413,7 @@ def apply_sell_orders(trades, current_price, current_time, expired_duration, pro
         average_sell_price = total_weighted_price / total_quantity
         quantity = min(api.get_asset_info('BTC'), total_quantity)
         print(f"Total: Cantitate {quantity}, Pret {average_sell_price}")
-        #new_sell_order_id = api.place_sell_order(symbol, average_sell_price, quantity)
+        #new_sell_order_id = api.place_order("sell", symbol, average_sell_price, quantity)
         #trade.sell_order_id = new_sell_order_id
 
 
@@ -445,10 +445,10 @@ def main():
         procent_desired_profit = 0.07 #0.7%
         current_time = time.time()    
         current_price = api.get_current_price(api.symbol)
-        #update_trades(trades, symbol, max_age_seconds)
+        update_trades(trades, symbol, max_age_seconds)
         expired_duration = 3600 * 2.5 #h
-        #apply_sell_orders(trades, current_price, current_time, expired_duration, procent_desired_profit, api.symbol)
-        monitor_close_orders_by_age2(max_age_seconds)
+        apply_sell_orders(trades, current_price, current_time, expired_duration, procent_desired_profit, api.symbol)
+        #monitor_close_orders_by_age2(max_age_seconds)
         
         
 if __name__ == "__main__":

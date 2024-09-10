@@ -233,6 +233,7 @@ def place_order(order_type, symbol, price, quantity):
         #price = round(price, 0)
         quantity = round(quantity, 5)
         cancel = False
+        current_price = get_current_price(symbol)
         
         if order_type.lower() == 'buy':
             open_sell_orders = get_open_orders("sell", symbol)
@@ -243,9 +244,17 @@ def place_order(order_type, symbol, price, quantity):
                     if not cancel:
                         print(f"Fail cancel order {order_id} prep. for buy order")
             
-            price = min(price, get_current_price(symbol))
+            price = min(price, current_price)
             price = round(price * 0.999, 0)
             order = client.order_limit_buy(
+                symbol=symbol,
+                quantity=quantity,
+                price=str(price)
+            )
+            # appy pair
+            price = max(price * 1.1, current_price)
+            price = round(price * 1.001, 0)
+            order = client.order_limit_sell(
                 symbol=symbol,
                 quantity=quantity,
                 price=str(price)
@@ -260,9 +269,17 @@ def place_order(order_type, symbol, price, quantity):
                     if not cancel:
                         print(f"Fail cancel order {order_id} prep. for sell order")
                    
-            price = max(price, get_current_price(symbol))
+            price = max(price, current_price)
             price = round(price * (1 + 0.001), 0)
             order = client.order_limit_sell(
+                symbol=symbol,
+                quantity=quantity,
+                price=str(price)
+            )
+            # appy pair
+            price = min(price * 0.1, current_price)
+            price = round(price * 0.999, 0)
+            order = client.order_limit_buy(
                 symbol=symbol,
                 quantity=quantity,
                 price=str(price)
