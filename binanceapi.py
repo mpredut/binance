@@ -135,7 +135,7 @@ def get_current_price(symbol):
         return binancecurrentprice
     except Exception as e:
         # Handle any other exceptions that might occur
-        print(f"A apărut o eroare neașteptată: {e}")
+        print(f"get_current_price: A apărut o eroare neașteptată: {e}")
         print(f"Folosesc prețul obținut prin websocket, BTC: {binancecurrentprice}")
         return binancecurrentprice
         
@@ -153,7 +153,7 @@ def get_asset_info(order_type, symbol):
             return 0
         return float(asset_info['free']) # info ['locked']
     except Exception as e:
-        print(f"A apărut o eroare: {e}")
+        print(f"get_asset_info: A apărut o eroare: {e}")
 
 
 def manage_quantity(order_type, symbol, required_quantity, hours=24):
@@ -274,12 +274,12 @@ def place_order(order_type, symbol, price, quantity, numar_ore=24, fee_percentag
         # Rotunjim cantitatea la 5 zecimale în jos
         quantity = math.floor(quantity * 10**5) / 10**5  # Rotunjire în jos la 5 zecimale
         quantity = round(quantity, 5)
-        quantity = Decimal(quantity).quantize(Decimal('0.00001'), rounding=ROUND_DOWN)  # Rotunjit la 5 zecimale
+        quantity = float(Decimal(quantity).quantize(Decimal('0.00001'), rounding=ROUND_DOWN))  # Rotunjit la 5 zecimale
         if quantity <= 0:
             print("Adjusted quantity is too small after rounding.")
             return None          
         if quantity * current_price < 100:
-            print(" Value {quantity * current_price} of {symbol} is too small to make sense to be traded :-) .by by!")
+            print(f"Value {quantity * current_price} of {symbol} is too small to make sense to be traded :-) .by by!")
             return None
         if order_type.upper() == 'SELL':
             price = round(max(price, current_price), 0)
@@ -308,7 +308,7 @@ def place_order(order_type, symbol, price, quantity, numar_ore=24, fee_percentag
         print(f"Error placing {order_type.lower()} order: {e}")
         return None
     except Exception as e:
-        print(f"A apărut o eroare: {e}")
+        print(f"place_order: A apărut o eroare: {e}")
         return None
 
 
@@ -381,7 +381,7 @@ def place_order_smart(order_type, symbol, price, quantity):
         return None
         #return place_order(order_type, symbol, price, quantity)
     except Exception as e:
-        print(f"A apărut o eroare: {e}")
+        print(f"place_order_smart: A apărut o eroare: {e}")
         return None
         #return place_order(order_type, symbol, price, quantity)
           

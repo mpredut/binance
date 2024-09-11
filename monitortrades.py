@@ -23,11 +23,8 @@ def monitor_trades(order_type, symbol, filename, interval=3600, limit=1000, year
     while True:
         # Actualizăm fișierul de tranzacții
         apitrades.save_trades_to_file(order_type, symbol, filename, limit=limit, years_to_keep=years_to_keep)
-        
         # Reîncărcăm tranzacțiile în cache
-        apitrades.load_trades_from_file(filename)
-        
-        # Așteptăm intervalul configurat înainte de a repeta procesul
+        apitrades.load_trades_from_file(filename)   
         time.sleep(interval)
 
 # Funcția pentru a porni monitorizarea periodică într-un thread separat
@@ -381,8 +378,9 @@ class BuyTransaction:
         return proposed_sell_price
 
 
-def update_trades(trades, symbol, max_age_seconds):
+def update_trades(trades, symbol, max_age_seconds, expired_duration):
     new_trades = apitrades.get_trade_orders('buy', symbol, max_age_seconds)
+    #TODO fiter trades care sunt prea recente sub 2 ore
     for trade in new_trades:
         if not any(t.trade_id == trade['id'] for t in trades):
             trades.append(BuyTransaction(
@@ -390,7 +388,7 @@ def update_trades(trades, symbol, max_age_seconds):
                 qty=trade['qty'],
                 buy_price=trade['price'],
                 procent_desired_profit=0.07,  # Procentul inițial
-                expired_duration=2*3600,  # Durată de 2 ore 2 * (3600 secunde)
+                expired_duration=expired_duration,  # Durată de 2.7 ore * (3600 secunde)
                 time_trade=trade['time'] / 1000  # Convertim timpul din milisecunde în secunde
             ))
     new_trade_ids = {trade['id'] for trade in new_trades}
@@ -399,7 +397,7 @@ def update_trades(trades, symbol, max_age_seconds):
     trades.sort(key=lambda t: t.buy_price, reverse=True)
 
 
-def apply_sell_orders(trades, current_price, current_time, expired_duration, procent_desired_profit, symbol):
+def apply_sell_orders(trades, current_price, current_time, procent_desired_profit):
     placed_order_count = 0
     total_weighted_price = 0
     total_quantity = 0
@@ -444,7 +442,9 @@ def apply_sell_orders(trades, current_price, current_time, expired_duration, pro
 
 max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate/filled sunt considerate recente (3 zile)
 # Exemplu de apel pentru a porni monitorizarea periodică
+expired_duration = 3600 * 3.7 #s * h
 
+interval = 60 * 25 #25 minute
 def main():
 
 
@@ -453,7 +453,7 @@ def main():
 
     # Simulare: extragem ordinele recente de tip 'buy'
     while True:
-        time.sleep(60*4)  # Periodic, verificăm ordinele în cache
+        time.sleep(60*6)  # Periodic, verificăm ordinele în cache
         #max_age_seconds = 86400 *8
         close_buy_orders = apitrades.get_trade_orders('buy', symbol, max_age_seconds)  # Extragere ordine de 'buy' în ultimele 24 de ore
         print(f"get_trade_orders:           Found {len(close_buy_orders)} close 'buy' orders in the last {utils.convert_seconds_to_days(max_age_seconds)} days.")
@@ -470,9 +470,8 @@ def main():
         procent_desired_profit = 0.07 #0.7%
         current_time = time.time()    
         current_price = api.get_current_price(api.symbol)
-        update_trades(trades, symbol, max_age_seconds)
-        expired_duration = 3600 * 2.5 #h
-        apply_sell_orders(trades, current_price, current_time, expired_duration, procent_desired_profit, api.symbol)
+        update_trades(trades, symbol, max_age_seconds, expired_duration)
+        apply_sell_orders(trades, current_price, current_time, procent_desired_profit)
         #monitor_close_orders_by_age2(max_age_seconds)
         
         
@@ -480,7 +479,6 @@ if __name__ == "__main__":
     symbol = "BTCUSDT"
     filename = "trades_BTCUSDT.json"
     order_type = None
-    interval = 3600/2  # 1 oră
     main()
 
     
