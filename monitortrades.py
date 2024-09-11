@@ -15,6 +15,8 @@ import binanceapi_trades as apitrades
 import binanceapi_allorders as apiorders
 
 import utils
+import log
+#import alert
 
 # Funcția principală care rulează periodic actualizările și cache-ul
 def monitor_trades(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=2):

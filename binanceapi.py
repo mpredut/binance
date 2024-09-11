@@ -278,7 +278,9 @@ def place_order(order_type, symbol, price, quantity, numar_ore=24, fee_percentag
         if quantity <= 0:
             print("Adjusted quantity is too small after rounding.")
             return None          
-
+        if quantity * current_price < 100:
+            print(" Value {quantity * current_price} of {symbol} is too small to make sense to be traded :-) .by by!")
+            return None
         if order_type.upper() == 'SELL':
             price = round(max(price, current_price), 0)
             print(f"Trying to place SELL order for quantity {quantity:.8f} at price {price}")
@@ -323,7 +325,7 @@ def place_order_smart(order_type, symbol, price, quantity):
                 if order_details['price'] < price:
                     cancel = cancel_order(order_id)
                     if not cancel:
-                        print(f"Fail cancel order {order_id} prep. for buy order")
+                        print(f"Fail cancel order {order_id} prep. for buy order. We wanted becuse low price for sell.")
             
             price = min(price, current_price)
             price = round(price * 0.999, 0)
@@ -350,7 +352,7 @@ def place_order_smart(order_type, symbol, price, quantity):
                 if order_details['price'] > price:
                     cancel = cancel_order(order_id)
                     if not cancel:
-                        print(f"Fail cancel order {order_id} prep. for sell order")
+                        print(f"Fail cancel order {order_id} prep. for sell order. We wanted becuse high price for buy")
                    
             price = max(price, current_price)
             price = round(price * (1 + 0.001), 0)
@@ -404,12 +406,18 @@ def cancel_expired_orders(order_type, symbol, expire_time):
     print(f"Available open orders {len(open_orders)}. Try cancel {order_type} orders type ... ")
     if len(open_orders) < 1:
         return
+    count = 0   
     for order_id, order_details in open_orders.items():
         order_time = order_details.get('timestamp')
 
         if current_time - order_time > expire_time:
-            cancel_order(order_id)
-            print(f"Cancelled {order_type} order with ID: {order_id} due to expiration.")
+            cancel = cancel_order(order_id)
+            if cancel:
+                print(f"Cancelled {order_type} order with ID: {order_id} due to expiration.")
+            else:
+                 print(f"Needs cancel because expiration!")
+            cance +=1
+    print(f"Cancelled {count} orders")
         
 
 def check_order_filled(order_id):
