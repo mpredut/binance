@@ -149,6 +149,8 @@ def get_asset_info(order_type, symbol):
         print(f"asset_info for {order_type} {symbol}")
         asset_info = client.get_asset_balance(asset=symbol)
         print(f"asset_info: {asset_info}")
+        if asset_info['free'] is None:
+            return 0
         return float(asset_info['free']) # info ['locked']
     except Exception as e:
         print(f"A apărut o eroare: {e}")
