@@ -143,3 +143,29 @@ def convert_seconds_to_days(max_age_seconds):
     days = max_age_seconds / seconds_in_a_day
     
     return days
+
+    """
+    Gradually decreases the percentage asymptotically as `passs` increases.
+    Once `passs` reaches a point where expired_duration * passs > half_life_duration 
+    (24 hours as the default constant), the percentage will decrease to half of its initial value.
+    This decrease continues as `passs` increases, causing the percentage to approach zero
+    asymptotically but never fully reach zero.
+
+    :param initial_procent: The initial percentage (e.g., 0.7 for 7%)
+    :param expired_duration: The duration in seconds for which the percentage should decrease
+    :param passs: The variable that grows over time and influences the percentage decrease
+    :param half_life_duration: The default value after which the percentage is halved (24 hours in seconds)
+    :return: The adjusted percentage based on `passs`
+    """
+def asymptotic_decrease(initial_procent, expired_duration, passs, half_life_duration=24*60*60):
+    k = expired_duration / half_life_duration  # Calculate the constant k
+    return initial_procent / (1 + k * passs)  # Asymptotic decrease formula
+    """
+    Decreases the percentage exponentially as `passs` increases like asymptotic_decrease but exponential.
+    """
+
+def exponential_decrease(initial_procent, expired_duration, passs, half_life_duration=24*60*60):
+
+    T = half_life_duration / expired_duration  # Calculate the time constant T
+    #return initial_procent * (2 ** (-passs / T))  # Exponential decrease formula
+    return initial_procent * math.exp(-passs / T)  # Exponential decrease formula using e
