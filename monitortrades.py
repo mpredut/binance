@@ -367,14 +367,14 @@ class BuyTransaction:
     def get_proposed_sell_price(self, current_price, current_time):
         if current_time - self.t1 >= self.expired_duration:
             self.passed +=1
-            print(f"Time expired at pass {passed}. Updating distrib with new duration {utils.convert_seconds_to_days(2*self.expired_duration)}.")
+            print(f"Time expired at pass {self.passed}. Updating distrib with new duration {utils.convert_seconds_to_days(2*self.expired_duration)}.")
             self.t1 = current_time
             self.distributor.update_period_time(current_time, 2*self.expired_duration)
             #self.distributor.update_max_procent(passed)
-            self.distributor.update_tick(passed)
-        if passed == 0 :
+            self.distributor.update_tick(self.passed)
+        if self.passed == 0 :
             price = max(self.buy_price, current_price)
-        elif passed * self.expired_duration < 24 * 60 * 60 : #on profit 24h
+        elif self.passed * self.expired_duration < 24 * 60 * 60 : #on profit 24h
             price = self.buy_price
         else :
             price = current_price                   #escape sell no profit after 24h
