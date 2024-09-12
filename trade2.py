@@ -351,7 +351,7 @@ last_evaluate_time = time.time()
 buy_count = 0
 sell_count = 0
 
-PRICE_CHANGE_THRESHOLD_EUR = 330
+PRICE_CHANGE_THRESHOLD_EUR = 280
 
 while True:
     try:
