@@ -305,15 +305,18 @@ class ProcentDistributor:
         self.procent = max_procent #TOTO remove self.
         self.max_procent = max_procent
         self.min_procent = min_procent
+        self.t1 = t1
         self.unitate_timp = unitate_timp
-        self.update_period_time(t1, expired_duration)      
+        self.expired_duration = expired_duration
+        self.update_period_time(t1, self.expired_duration)      
         self.update_max_procent(max(max_procent, min_procent))
         
     def get_procent(self, current_time):
         if current_time < self.t1:
+            print(f"get max procent {self.max_procent} because before start time {convert_timestamp_to_human_readable(self.t1)}")
             return self.max_procent
-        if current_time > self.t2:
-            print(f"current_time {current_time} > self.t2 {self.t2}")
+        if current_time > self.t1 + self.expired_duration:#t2
+            print(f"get min procent {self.min_procent} because expiration {self.expired_duration}")
             return max(0, self.min_procent)
         units_passed = (current_time - self.t1) / self.unitate_timp
         print(f"units_passed: {units_passed}")
@@ -324,7 +327,7 @@ class ProcentDistributor:
         self.procent = self.calculate_procent_by(current_price, buy_price) #TOTO remove self.
         if current_time < self.t1:
             return self.procent
-        if current_time > self.t2:
+        if current_time > self.t1 + self.expired_duration:#t2
             return max(0, self.min_procent)
         units_passed = (current_time - self.t1) / self.unitate_timp
         procent_per_unit = self.procent / self.total_units
@@ -332,11 +335,14 @@ class ProcentDistributor:
     
     def update_period_time(self, t1, expired_duration):
         self.t1 = t1
-        self.t2 = self.t1 + max(expired_duration, 1)
-        self.total_units = (self.t2 - self.t1) / self.unitate_timp
-   
+        self.expired_duration = max(expired_duration, 1)
+        self.total_units = expired_duration / self.unitate_timp
+        #self.update_max_procent(max(max_procent, min_procent))
+     
+   #don't call from outside class!!
     def update_max_procent(self, procent):
         if procent is not None:
+            self.update_period_time(self.t1, self.expired_duration)
             self.max_procent = procent
             self.procent_per_unit = self.max_procent / self.total_units
       
@@ -348,8 +354,9 @@ class ProcentDistributor:
         print(f"adjust_init_procent_by: {procent_desired_profit}")
         return procent_desired_profit
         
-    def update_tick(passs = 0,  half_life_duration=24*60*60) :
-        max_procent = utils.exponential_decrease(self.max_procent, expired_duration, passs, half_life_duration)
+    def update_tick(self, passs = 0,  half_life_duration=24*60*60) :
+        #todo cheama update_period_time inaite
+        max_procent = utils.exponential_decrease(self.max_procent, self.expired_duration, passs, half_life_duration)
         self.update_max_procent(max_procent)
         
         
@@ -370,8 +377,7 @@ class BuyTransaction:
             print(f"Time expired at pass {self.passed}. Updating distrib with new duration {utils.convert_seconds_to_days(2*self.expired_duration)}.")
             self.t1 = current_time
             self.distributor.update_period_time(current_time, 2*self.expired_duration)
-            #self.distributor.update_max_procent(passed)
-            self.distributor.update_tick(self.passed)
+            self.distributor.update_tick(self.passed, half_life_duration=24*60*60)
         if self.passed == 0 :
             price = max(self.buy_price, current_price)
         elif self.passed * self.expired_duration < 24 * 60 * 60 : #on profit 24h
