@@ -167,15 +167,15 @@ def manage_quantity(order_type, symbol, required_quantity, hours=24):
         if open_orders:
             sorted_orders = sorted(
                 open_orders.items(),
-                key=lambda x: (-x[1]['price'] if order_type == 'SELL' else x[1]['price'], -x[1]['timestamp'])
+                key=lambda x: (x[1]['price'] if order_type == 'SELL' else -x[1]['price'])
             )
                      
             # Filtrăm ordinele recente (în funcție de numărul de ore specificat)
             cutoff_time = datetime.now().timestamp() - timedelta(hours=hours).total_seconds()
             for order_id, order_info in sorted_orders:
                 if order_info['timestamp'] >= cutoff_time:
-                    cancel_order(order_id)
-                    available_quantity += order_info['quantity']
+                    #cancel_order(order_id)
+                    #available_quantity += order_info['quantity']
                     print(f"New available quantity: {available_quantity}")
                 
                 if available_quantity >= required_quantity:
