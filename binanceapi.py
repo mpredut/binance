@@ -336,10 +336,11 @@ def place_order_smart(order_type, symbol, price, quantity):
             #    price=str(price)
             #)
             # appy pair
-            price = max(price * 1.11, current_price)
-            price = round(price * 1.001, 0)
-            order = place_order("sell", symbol, price=price, quantity=quantity)
-            #order = client.order_limit_sell(
+            if order :            
+                price = max(price * 1.11, current_price)
+                price = round(price * 1.001, 0)
+                place_order("sell", symbol, price=price, quantity=quantity)
+            #client.order_limit_sell(
             #    symbol=symbol,
             #    quantity=quantity,
             #    price=str(price)
@@ -363,10 +364,11 @@ def place_order_smart(order_type, symbol, price, quantity):
             #    price=str(price)
             #)
             # appy pair
-            price = min(price * (1 - 0.11), current_price)
-            price = round(price * 0.999, 0)
-            order = place_order("buy", symbol, price=price, quantity=quantity)
-            #order = client.order_limit_buy(
+            if order :
+                price = min(price * (1 - 0.11), current_price)
+                price = round(price * 0.999, 0)
+                place_order("buy", symbol, price=price, quantity=quantity)
+            #client.order_limit_buy(
             #    symbol=symbol,
             #    quantity=quantity,
             #    price=str(price)
