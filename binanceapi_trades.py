@@ -12,6 +12,7 @@ from binance.exceptions import BinanceAPIException
 #my imports
 from binanceapi import client
 import utils
+import log
 
 # 
 # Cache global pentru tranzacții
