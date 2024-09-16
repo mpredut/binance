@@ -75,7 +75,7 @@ def price_changed(old_price, new_price):
 
 def ready_to_buy(old_state, new_state, threshold, max_treshold, time_limit_seconds):
     
-    changed_proc = price_changed(last_state.price, current_state.price)
+    changed_proc = price_changed(old_state.price, current_state.price)
     if(abs(changed_proc) >= max_threshold) :
         return changed_proc
         
