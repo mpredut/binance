@@ -176,7 +176,7 @@ def manage_quantity(order_type, symbol, required_quantity, hours=24):
                 if order_info['timestamp'] >= cutoff_time:
                     #cancel_order(order_id)
                     #available_quantity += order_info['quantity']
-                    print(f"New available quantity: {available_quantity}")
+                    print(f"New available quantity: {available_quantity:.8f}")
                 
                 if available_quantity >= required_quantity:
                     break
