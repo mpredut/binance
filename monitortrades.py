@@ -446,6 +446,7 @@ def apply_sell_orders(trades, current_price, current_time, procent_desired_profi
             trade.sell_order_id = None  # Nu plasăm imediat ordinul, dar marcăm ca în proces
 
 
+    print("\n")
     # Dacă au fost ordine suplimentare, calculăm media ponderată și plasăm un singur ordin
     if total_quantity > 0:
         average_sell_price = total_weighted_price / total_quantity
