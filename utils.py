@@ -125,7 +125,7 @@ def are_values_very_close(value1, value2, target_tolerance_percent=1.0):
     
     from datetime import datetime
 
-def convert_timestamp_to_human_readable(timestamp_ms):
+def timestampToTime(timestamp_ms):
     # Convertim timpul din milisecunde în secunde
     timestamp_sec = timestamp_ms / 1000.0
     
@@ -135,7 +135,9 @@ def convert_timestamp_to_human_readable(timestamp_ms):
     # Returnăm timpul ca string în format citibil
     return human_readable_time.strftime('%Y-%m-%d %H:%M:%S')
 
-def convert_seconds_to_days(max_age_seconds):
+    
+    # Funcția care convertește secunde în zile
+def secondsToDays(max_age_seconds):
     # Definim numărul de secunde într-o zi
     seconds_in_a_day = 86400  # 24 ore * 60 minute * 60 secunde
     
@@ -143,6 +145,27 @@ def convert_seconds_to_days(max_age_seconds):
     days = max_age_seconds / seconds_in_a_day
     
     return days
+
+# Funcția care convertește secunde în ore
+def secondsToHours(max_age_seconds):
+    # Definim numărul de secunde într-o oră
+    seconds_in_an_hour = 3600  # 60 minute * 60 secunde
+    
+    # Calculăm numărul de ore
+    hours = max_age_seconds / seconds_in_an_hour
+    
+    return hours
+
+# Funcția care convertește secunde în minute
+def secondsToMinutes(max_age_seconds):
+    # Definim numărul de secunde într-un minut
+    seconds_in_a_minute = 60  # 60 secunde
+    
+    # Calculăm numărul de minute
+    minutes = max_age_seconds / seconds_in_a_minute
+    
+    return minutes
+
 
     """
     Gradually decreases the percentage asymptotically as `passs` increases.
