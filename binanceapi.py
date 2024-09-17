@@ -418,7 +418,7 @@ def cancel_expired_orders(order_type, symbol, expire_time):
                 print(f"Cancelled {order_type} order with ID: {order_id} due to expiration.")
             else:
                  print(f"Needs cancel because expiration!")
-            cance +=1
+            cancel +=1
     print(f"Cancelled {count} orders")
         
 
