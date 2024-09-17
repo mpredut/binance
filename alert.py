@@ -21,22 +21,6 @@ last_alert_time = None
 def send_push_notification(title, message):
     pb.push_note(title, message)
 
-def send_email(subject, body, to_email):
-    """Trimite un email."""
-    msg = MIMEMultipart()
-    msg['From'] = SMTP_USERNAME
-    msg['To'] = to_email
-    msg['Subject'] = subject
-
-    msg.attach(MIMEText(body, 'plain'))
-
-    server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-    server.starttls()
-    server.login(SMTP_USERNAME, SMTP_PASSWORD)
-    text = msg.as_string()
-    server.sendmail(SMTP_USERNAME, to_email, text)
-    server.quit()
-
 
 
 def send_tasker_notification(message):
@@ -58,7 +42,7 @@ def check_alert(condition, message, alert_interval=60):
             if last_alert_time is None or (current_time - last_alert_time) >= alert_interval:
                 timestamp = time.strftime('%H:%M:%S', time.localtime(current_time))
                 message_with_time = f"{message} at {timestamp}"
-                
+                beep(4)
                 #send_tasker_notification(message_with_time)
                 #Send push notification on Android
                 #send_push_notification("Alertă Trading", message_with_time)
@@ -76,3 +60,20 @@ def check_alert(condition, message, alert_interval=60):
         print(f"An error occurred: {str(e)}")
         # Optionally, re-raise the exception if you want it to propagate further
         # raise
+
+
+def send_email(subject, body, to_email):
+    """Trimite un email."""
+    msg = MIMEMultipart()
+    msg['From'] = SMTP_USERNAME
+    msg['To'] = to_email
+    msg['Subject'] = subject
+
+    msg.attach(MIMEText(body, 'plain'))
+
+    server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+    server.starttls()
+    server.login(SMTP_USERNAME, SMTP_PASSWORD)
+    text = msg.as_string()
+    server.sendmail(SMTP_USERNAME, to_email, text)
+    server.quit()

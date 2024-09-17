@@ -148,7 +148,7 @@ def check_and_close_orders(symbol):
             
             
 # Exemplu de utilizare:
-check_and_close_orders("BTCUSDT")
+#check_and_close_orders("BTCUSDT")
 usdt = api.get_asset_info("sell", symbol)
 btc = api.get_asset_info("buy", symbol)
 print(f" BTC {btc}")

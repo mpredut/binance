@@ -39,9 +39,6 @@ def print(*args, **kwargs):
     # Convertește toate argumentele în stringuri și le unește într-un singur mesaj
     message = " ".join(map(str, args))
     
-    # Apelează funcția print originală
-    original_print(message, **kwargs)
-    
     new_date = datetime.datetime.now().strftime("%Y-%m-%d")
     if new_date != current_date:
         current_date = new_date
@@ -56,6 +53,8 @@ def print(*args, **kwargs):
     # Obține ora și minutul curent
     current_time = datetime.datetime.now().strftime("%H:%M")
 
+    # Apelează funcția print originală
+    original_print(f"{current_time} {message}", **kwargs)
     # Scrie mesajul în fișierul de log
     try:
         with open(log_file_path, "a") as log_file:
