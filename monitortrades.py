@@ -18,21 +18,6 @@ import utils
 import log
 #import alert
 
-# Funcția principală care rulează periodic actualizările și cache-ul
-def monitor_trades(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=2):
-    while True:
-        # Actualizăm fișierul de tranzacții
-        apitrades.save_trades_to_file(order_type, symbol, filename, limit=limit, years_to_keep=years_to_keep)
-        # Reîncărcăm tranzacțiile în cache
-        apitrades.load_trades_from_file(filename)   
-        time.sleep(interval)
-
-# Funcția pentru a porni monitorizarea periodică într-un thread separat
-def start_monitoring(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=2):
-    monitoring_thread = Thread(target=monitor_trades, args=(order_type, symbol, filename, interval, limit, years_to_keep), daemon=True)
-    monitoring_thread.start()
-
-
 
 def adjust_monitor_interval(initial_interval, min_interval, total_duration, elapsed_time):
     if elapsed_time >= total_duration:
@@ -313,14 +298,13 @@ class ProcentDistributor:
         
     def get_procent(self, current_time):
         if current_time < self.t1:
-            print(f"get max procent {self.max_procent} because before start time {convert_timestamp_to_human_readable(self.t1)}")
+            print(f"get max procent {self.max_procent} because before start time {utils.timestampToTime(self.t1)}")
             return self.max_procent
         if current_time > self.t1 + self.expired_duration:#t2
             print(f"get min procent {self.min_procent} because expiration {self.expired_duration}")
             return max(0, self.min_procent)
         units_passed = (current_time - self.t1) / self.unitate_timp
-        print(f"units_passed: {units_passed}")
-        print(f"procent_per_unit: {self.procent_per_unit}")
+        #print(f"units_passed: {units_passed} procent_per_unit: {self.procent_per_unit:.2f}")
         return max(self.max_procent - (units_passed * self.procent_per_unit), self.min_procent)
     
     def get_procent_by(self, current_time, current_price, buy_price):
@@ -345,18 +329,20 @@ class ProcentDistributor:
             self.update_period_time(self.t1, self.expired_duration)
             self.max_procent = procent
             self.procent_per_unit = self.max_procent / self.total_units
+            #print(f"aici max_procent{self.max_procent} procent_per_unit{self.procent_per_unit:.8f} , total_units{ self.total_units}")
       
     def calculate_procent_by(self, current_price, buy_price):
         price_difference_percentage = ((current_price - buy_price) / buy_price)
         procent_desired_profit = self.max_procent
         procent_desired_profit += price_difference_percentage
         procent_desired_profit = max(procent_desired_profit, self.min_procent) #TODO: review if max
-        print(f"adjust_init_procent_by: {procent_desired_profit}")
+        #print(f"adjusted_init_procent_by: {procent_desired_profit}")
         return procent_desired_profit
         
     def update_tick(self, passs = 0,  half_life_duration=24*60*60) :
         #todo cheama update_period_time inaite
         max_procent = utils.exponential_decrease(self.max_procent, self.expired_duration, passs, half_life_duration)
+        print(f"max procent from : {self.max_procent:.2f} to {max_procent}")
         self.update_max_procent(max_procent)
         
         
@@ -364,35 +350,42 @@ class BuyTransaction:
     def __init__(self, trade_id, qty, buy_price, procent_desired_profit, expired_duration, time_trade):
         self.trade_id = trade_id
         self.buy_price = buy_price
-        self.t1 = time_trade  # Timpul tranzacției de cumpărare sau time.time()
+        self.t1 = time_trade 
+        self.time_trade = time_trade  # Timpul tranzacției de cumpărare sau time.time()
         self.expired_duration = expired_duration
         self.distributor = ProcentDistributor(self.t1, expired_duration, procent_desired_profit)
         self.sell_order_id = None
-        self.passed = 0
+        self.current_time = time.time()
+        self.passed = (self.current_time - self.t1) // self.expired_duration
         self.qty = qty
 
     def get_proposed_sell_price(self, current_price, current_time):
+        print(f"Time away {utils.secondsToHours(current_time - self.time_trade):.2f} h. We are at pass {self.passed}")
+         
         if current_time - self.t1 >= self.expired_duration:
             self.passed +=1
-            print(f"Time expired at pass {self.passed}. Updating distrib with new duration {utils.convert_seconds_to_days(2*self.expired_duration)}.")
+            print(f" Updating distrib with new duration {utils.secondsToHours(2*self.expired_duration):.2f} h.")
             self.t1 = current_time
             self.distributor.update_period_time(current_time, 2*self.expired_duration)
             self.distributor.update_tick(self.passed, half_life_duration=24*60*60)
+            
         if self.passed == 0 :
             price = max(self.buy_price, current_price)
         elif self.passed * self.expired_duration < 24 * 60 * 60 : #on profit 24h
+            print(f"Still less than 24h. Use buy price {self.buy_price} as reference")
             price = self.buy_price
         else :
+            print(f"Use current price {current_price} as reference")
             price = current_price                   #escape sell no profit after 24h
         
         procent_time_based = self.distributor.get_procent(current_time)
         procent_price_based = self.distributor.get_procent_by(current_time, current_price, self.buy_price)
-        
-        proposed_sell_price = max(price * (1 + procent_price_based), current_price * 1.001)
-        
         print(f"Current Price: {current_price}, Buy Price: {self.buy_price}")
         print(f"Using Time-based Procent versus Price-based Procent: {procent_time_based:.5f}<->{procent_price_based:.5f}")
-        print(f"Proposed Sell Price Calculation: {proposed_sell_price:.2f}")
+  
+        procent = procent_price_based
+        proposed_sell_price = max(price * (1 + procent), current_price * 1.001)
+        print(f"Proposed Sell Price Calculation: {proposed_sell_price:.2f} , procent used {procent}")
         
         return proposed_sell_price
 
@@ -421,8 +414,11 @@ def apply_sell_orders(trades, current_price, current_time, procent_desired_profi
     total_weighted_price = 0
     total_quantity = 0
 
+    count = 0
     for trade in trades:
-            
+        
+        print(f"\nTrade {count} ({trade.trade_id})") 
+        count+=1
         if trade.sell_order_id and api.check_order_filled(trade.sell_order_id['orderId']):
             print(f"check_order_filled {trade.sell_order_id}")
             trade.sell_order_id = 0  # Marcăm ca executat
@@ -459,39 +455,48 @@ def apply_sell_orders(trades, current_price, current_time, procent_desired_profi
         #trade.sell_order_id = new_sell_order_id
 
 
-max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate/filled sunt considerate recente (3 zile)
-# Exemplu de apel pentru a porni monitorizarea periodică
-expired_duration = 3600 * 3.7 #s * h
+# Funcția principală care rulează periodic actualizările și cache-ul
+def monitor_trades(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=2):
+    while True:
+        # Actualizăm fișierul de tranzacții
+        apitrades.save_trades_to_file(order_type, symbol, filename, limit=limit, years_to_keep=years_to_keep)
+        # Reîncărcăm tranzacțiile în cache
+        apitrades.load_trades_from_file(filename)   
+        time.sleep(interval)
 
+# Funcția pentru a porni monitorizarea periodică într-un thread separat
+def start_monitoring(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=2):
+    monitoring_thread = Thread(target=monitor_trades, args=(order_type, symbol, filename, interval, limit, years_to_keep), daemon=True)
+    monitoring_thread.start()
+
+
+max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate/filled sunt considerate recente (3 zile)
+expired_duration = 3600 * 3.7 #s * h
 interval = 60 * 4 #4 minute
+
 def main():
 
+    #monitor_trades(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=2)
 
     # Pornim monitorizarea periodică a tranzacțiilor
     start_monitoring(order_type, symbol, filename, interval=interval, limit=1000, years_to_keep=2)
-
-    # Simulare: extragem ordinele recente de tip 'buy'
+    time.sleep(5)
+    
     while True:
-        time.sleep(60*4)  # Periodic, verificăm ordinele în cache
-        #max_age_seconds = 86400 *8
-        close_buy_orders = apitrades.get_trade_orders('buy', symbol, max_age_seconds)  # Extragere ordine de 'buy' în ultimele 24 de ore
-        print(f"get_trade_orders:           Found {len(close_buy_orders)} close 'buy' orders in the last {utils.convert_seconds_to_days(max_age_seconds)} days.")
-        close_sell_orders = apitrades.get_trade_orders('sell', symbol, max_age_seconds)  # Extragere ordine de 'buy' în ultimele 24 de ore
-        print(f"get_trade_orders:           Found {len(close_sell_orders)} close 'sell' orders in the last {utils.convert_seconds_to_days(max_age_seconds)} days.")
-        #close_orders_all = apiorders.get_recent_filled_orders('buy', symbol, max_age_seconds)  # Extragere ordine de 'buy' în ultimele 24 de ore
-        #print(f"get_recent_filled_orders:   Found {len(close_orders_all)} close 'buy' orders in the last 24 hours.")
-        #print(close_orders)
-        #print(close_orders_all)
-        # Pasul 1: Obține ordinele din ultimele 24 de ore
-        orders = apitrades.get_trade_orders(None, symbol, 60 * 60 * 24)
-        print(f"get_trade_orders:           Found {len(orders)} orders in the last {utils.convert_seconds_to_days(60 * 60 * 24)} day.")
-                
+        close_buy_orders = apitrades.get_trade_orders('buy', symbol, max_age_seconds)
+        print(f"get_trade_orders:           Found {len(close_buy_orders)} close 'buy' orders in the last {utils.secondsToDays(max_age_seconds)} days.")
+        close_sell_orders = apitrades.get_trade_orders('sell', symbol, max_age_seconds)
+        print(f"get_trade_orders:           Found {len(close_sell_orders)} close 'sell' orders in the last {utils.secondsToDays(max_age_seconds)} days.")
+        orders = apitrades.get_trade_orders(None, symbol, max_age_seconds)
+        print(f"get_trade_orders:           Total found {len(orders)} orders in the last {utils.secondsToDays(max_age_seconds)} day.")
+        time.sleep(2)       
         procent_desired_profit = 0.07 #0.7%
         current_time = time.time()    
         current_price = api.get_current_price(api.symbol)
         update_trades(trades, symbol, max_age_seconds, expired_duration)
         apply_sell_orders(trades, current_price, current_time, procent_desired_profit)
         #monitor_close_orders_by_age2(max_age_seconds)
+        time.sleep(10*4)  # Periodic, verificăm ordinele în cache
         
         
 if __name__ == "__main__":
