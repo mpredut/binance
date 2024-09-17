@@ -254,7 +254,7 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=
     # Dacă există deja tranzacții, găsim cea mai recentă tranzacție salvată
     if filtered_existing_trades:
         most_recent_trade_time = max(trade['time'] for trade in filtered_existing_trades)
-        print(f"Most recent trade time from file: {utils.convert_timestamp_to_human_readable(most_recent_trade_time)}")
+        print(f"Most recent trade time from file: {utils.timestampToTime(most_recent_trade_time)}")
 
         # Calculăm câte zile au trecut de la most_recent_trade_time până la acum
         time_diff_ms = current_time_ms - most_recent_trade_time
@@ -327,9 +327,12 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
             'isBestMatch': trade['isBestMatch']
         }
         for trade in trade_cache
-        if trade['symbol'] == symbol and trade['isBuyer'] == (order_type == 'buy') and (current_time_ms - trade['time']) <= max_age_ms
+        if trade['symbol'] == symbol 
+        and (order_type is None or trade['isBuyer'] == (order_type == 'buy'))  # Verifică doar dacă order_type nu este None
+        and (current_time_ms - trade['time']) <= max_age_ms
     ]
 
     return filtered_trades
+
 
   
