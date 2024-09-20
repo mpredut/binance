@@ -164,6 +164,7 @@ def get_asset_info(order_type, symbol):
             return 0
         return float(asset_info['free']) # info ['locked']
     except Exception as e:
+        return 0
         print(f"get_asset_info: A apărut o eroare: {e}")
 
 
