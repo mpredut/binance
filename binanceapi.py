@@ -105,10 +105,30 @@ try:
 except Exception as e:
     print(f"Eroare la verificarea cheilor API: {e}")
     sys.exit()
-    
+
+
 precision = get_quantity_precision(symbol)
 precision = 8
 print(f"Precision is {precision}")
+
+def normalize_quantity(symbol, quantity):
+    min_qty, max_qty, step_size = get_symbol_limits(symbol)
+  if quantity < min_qty:
+        print(f"Quantity {quantity} is below the minimum limit. Setting to minimum: {min_qty}")
+        quantity = min_qty
+     elif quantity > max_qty:
+        print(f"Quantity {quantity} is above the maximum limit. Setting to maximum: {max_qty}")
+        quantity = max_qty
+    
+    adjusted_quantity = round(quantity // step_size * step_size, 5)
+    
+    if adjusted_quantity < min_qty:
+        adjusted_quantity = min_qty
+    elif adjusted_quantity > max_qty:
+        adjusted_quantity = max_qty
+    
+    return adjusted_quantity
+
 
 def get_symbol_limits(symbol):
     info = client.get_symbol_info(symbol)
@@ -453,85 +473,3 @@ def check_order_filled(order_id):
         return False
 
 
-
-
-######
-
-def place_sell_order_(symbol, price, quantity):
-    try:
-        # Verificăm limitele pentru simbolul dat
-        min_qty, max_qty, step_size = get_symbol_limits(symbol)
-
-        # Asigură-te că cantitatea respectă limitele
-        if min_qty is not None and (quantity < min_qty or quantity > max_qty):
-            print(f"Quantity {quantity} is out of bounds (min: {min_qty}, max: {max_qty})")
-            return None
-
-        # Rotunjim cantitatea la pasul acceptat
-        quantity = round(quantity // step_size * step_size, 5)
-
-        # Rotunjim prețul
-        price = round(max(price, get_current_price(symbol)), 0)
-
-        # Plasăm ordinul de vânzare
-        sell_order = client.order_limit_sell(
-            symbol=symbol,
-            quantity=quantity,
-            price=str(price)
-        )
-        return sell_order
-    except BinanceAPIException as e:
-        print(f"Eroare la plasarea ordinului de vânzare: {e}")
-        return None
-        
-              
- #TODO: review it
-def place_order_force(order_type, symbol, price, quantity):
-    try:
-        price = round(price, 0)
-        quantity = round(quantity, 5)
-        
-        # Obține ordinele deschise pentru tipul opus
-        if order_type.lower() == 'buy':
-            open_orders = get_open_orders("sell", symbol)
-        elif order_type.lower() == 'sell':
-            open_orders = get_open_rders("buy", symbol)
-        else:
-            print("Tipul ordinului este invalid. Trebuie să fie 'buy' sau 'sell'.")
-            return None
-        
-        # Anulează ordinele existente dacă e necesar
-        for order_id, order_details in open_orders.items():
-            if (order_type.lower() == 'buy' and order_details['price'] < price) or \
-               (order_type.lower() == 'sell' and order_details['price'] > price):
-                cancel_order(order_id)
-        
-        # Plasează ordinul
-        if order_type.lower() == 'buy':
-            price = round(min(price, get_current_price(symbol)), 0)
-            order = client.order_limit_buy(
-                symbol=symbol,
-                quantity=quantity,
-                price=str(price)
-            )
-        else:
-            price = round(max(price, get_current_price(symbol)), 0)
-            order = client.order_limit_sell(
-                symbol=symbol,
-                quantity=quantity,
-                price=str(price)
-            )
-        
-        return order
-    
-    except BinanceAPIException as e:
-        print(f"Eroare la plasarea ordinului de {order_type}: {e}")
-
-        if "insufficient funds" in str(e).lower():
-            print("Fonduri insuficiente detectate. Anulăm un ordin recent și încercăm din nou.")
-            
-            for order_id in open_orders:
-                if cancel_order(order_id):
-                    return place_order(order_type, symbol, price, quantity)
-        
-        return None
