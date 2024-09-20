@@ -1,9 +1,11 @@
 import json
 import os
 import time
-from threading import Thread
+
 from datetime import datetime
 import threading
+from threading import Thread,Timer
+import pandas as pd
 
 ####Binance
 #from binance.client import Client
@@ -341,42 +343,42 @@ class ProcentDistributor:
         
     def update_tick(self, passs = 0,  half_life_duration=24*60*60) :
         #todo cheama update_period_time inaite
-        max_procent = utils.exponential_decrease(self.max_procent, self.expired_duration, passs, half_life_duration)
+        max_procent = utils.asymptotic_decrease(self.max_procent, self.expired_duration, passs, half_life_duration)
         print(f"max procent from : {self.max_procent:.2f} to {max_procent}")
         self.update_max_procent(max_procent)
         
         
 class BuyTransaction:
-    def __init__(self, trade_id, qty, buy_price, procent_desired_profit, expired_duration, time_trade):
+    def __init__(self, trade_id, qty, buy_price, procent_desired_profit, min_procent, expired_duration, time_trade):
         self.trade_id = trade_id
         self.buy_price = buy_price
         self.t1 = time_trade 
         self.time_trade = time_trade  # Timpul tranzacției de cumpărare sau time.time()
         self.expired_duration = expired_duration
-        self.distributor = ProcentDistributor(self.t1, expired_duration, procent_desired_profit)
+        self.distributor = ProcentDistributor(self.t1, expired_duration, procent_desired_profit, min_procent)
         self.sell_order_id = None
         self.current_time = time.time()
         self.passed = (self.current_time - self.t1) // self.expired_duration
         self.qty = qty
 
-    def get_proposed_sell_price(self, current_price, current_time):
+    def get_proposed_sell_price(self, current_price, current_time, days=7):
         print(f"Time away {utils.secondsToHours(current_time - self.time_trade):.2f} h. We are at pass {self.passed}")
          
         if current_time - self.t1 >= self.expired_duration:
             self.passed +=1
-            print(f" Updating distrib with new duration {utils.secondsToHours(2*self.expired_duration):.2f} h.")
+            print(f" Updating distrib with new duration {utils.secondsToHours(2 * self.expired_duration):.2f} h.")
             self.t1 = current_time
-            self.distributor.update_period_time(current_time, 2*self.expired_duration)
+            self.distributor.update_period_time(current_time, 2 * self.expired_duration)
             self.distributor.update_tick(self.passed, half_life_duration=24*60*60)
             
         if self.passed == 0 :
             price = max(self.buy_price, current_price)
-        elif self.passed * self.expired_duration < 24 * 60 * 60 : #on profit 24h
+        elif self.passed * self.expired_duration < days * 24 * 60 * 60 : #on profit for x days * 24h
             print(f"Still less than 24h. Use buy price {self.buy_price} as reference")
             price = self.buy_price
         else :
             print(f"Use current price {current_price} as reference")
-            price = current_price                   #escape sell no profit after 24h
+            price = current_price                   #escape sell no profit after x days * 24h
         
         procent_time_based = self.distributor.get_procent(current_time)
         procent_price_based = self.distributor.get_procent_by(current_time, current_price, self.buy_price)
@@ -390,7 +392,7 @@ class BuyTransaction:
         return proposed_sell_price
 
 
-def update_trades(trades, symbol, max_age_seconds, expired_duration):
+def update_trades(trades, symbol, max_age_seconds, procent_desired_profit, expired_duration, min_procent):
     new_trades = apitrades.get_trade_orders('buy', symbol, max_age_seconds)
     #TODO fiter trades care sunt prea recente sub 2 ore
     for trade in new_trades:
@@ -399,7 +401,8 @@ def update_trades(trades, symbol, max_age_seconds, expired_duration):
                 trade_id=trade['id'],
                 qty=trade['qty'],
                 buy_price=trade['price'],
-                procent_desired_profit=0.07,  # Procentul inițial
+                procent_desired_profit=procent_desired_profit,  # Procentul inițial
+                min_procent=min_procent,
                 expired_duration=expired_duration,  # Durată de 2.7 ore * (3600 secunde)
                 time_trade=trade['time'] / 1000  # Convertim timpul din milisecunde în secunde
             ))
@@ -409,10 +412,14 @@ def update_trades(trades, symbol, max_age_seconds, expired_duration):
     trades.sort(key=lambda t: t.buy_price, reverse=True)
 
 
-def apply_sell_orders(trades, current_price, current_time, procent_desired_profit):
+def apply_sell_orders(trades, days, force_sell):
     placed_order_count = 0
     total_weighted_price = 0
     total_quantity = 0
+
+      
+    current_time = time.time()    
+    current_price = api.get_current_price(api.symbol)
 
     count = 0
     for trade in trades:
@@ -425,7 +432,9 @@ def apply_sell_orders(trades, current_price, current_time, procent_desired_profi
         if trade.sell_order_id == 0:
             continue  # Sărim peste tranzacțiile marcate ca executate
 
-        sell_price = trade.get_proposed_sell_price(current_price, current_time)
+        sell_price = trade.get_proposed_sell_price(current_price, current_time, days=days)
+        if force_sell: #disperare!!!
+            sell_price = min(sell_price, current_price * 1.001)
 
         if trade.sell_order_id:
             #print(f"cancel {trade.sell_order_id}")
@@ -470,12 +479,66 @@ def start_monitoring(order_type, symbol, filename, interval=3600, limit=1000, ye
     monitoring_thread.start()
 
 
+
+# Cache-ul care va fi actualizat periodic
+default_values_sell_recommendation = {
+    "BTCUSDT": {
+        'force_sell': 1,
+        'procent_desired_profit': 0.07,
+        'expired_duration': 3600 * 3.7,
+        'min_procent': 0.0099,
+        'days_after_use_current_price': 7
+    },
+    "ETHUSDT": {
+        'force_sell': 1,
+        'procent_desired_profit': 0.07,
+        'expired_duration': 3600 * 3.7,
+        'min_procent': 0.0099,
+        'days_after_use_current_price': 7
+    }
+}
+sell_recommendation = {}
+
+def update_sell_recommendation(file_path):
+    global sell_recommendation
+    try:
+        df = pd.read_csv(file_path)
+        sell_recommendation = {
+            row['symbol']: {
+                'force_sell': row['force_sell'],
+                'procent_desired_profit': row['procent_desired_profit'],
+                'expired_duration': eval(str(row['expired_duration'])),  # Evaluăm expresiile matematice
+                'min_procent': row['min_procent'],
+                'days_after_use_current_price': row['days_after_use_current_price']
+            } for index, row in df.iterrows()
+        }
+        print(f"sell_recommendation updated from file: {sell_recommendation}")
+    except FileNotFoundError:
+        print(f"Error: File {file_path} not found. Using default values.")
+        sell_recommendation = default_values_sell_recommendation
+    except Exception as e:
+        print(f"Error reading file: {e}. Using default values.")
+        sell_recommendation = default_values_sell_recommendation
+
+    # Reprogramăm citirea fișierului la fiecare 2 minute
+    Timer(120, update_sell_recommendation, [file_path]).start()
+    
+def display_sell_recommendation():
+    print("Current sell_recommendation content:")
+    for symbol, data in sell_recommendation.items():
+        print(f"Symbol: {symbol}")
+        for key, value in data.items():
+            print(f"  {key}: {value}")
+        print()
+    
 max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate/filled sunt considerate recente (3 zile)
-expired_duration = 3600 * 3.7 #s * h
 interval = 60 * 4 #4 minute
 
 def main():
 
+    file_path = "sell_recommendation.csv"
+    update_sell_recommendation(file_path)
+    display_sell_recommendation()
     #monitor_trades(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=2)
 
     # Pornim monitorizarea periodică a tranzacțiilor
@@ -483,6 +546,14 @@ def main():
     time.sleep(5)
     
     while True:
+        data = sell_recommendation[symbol]
+        procent_desired_profit = data['procent_desired_profit']
+        expired_duration = data['expired_duration']
+        min_procent = data['min_procent']
+        
+        force_sell = data['force_sell']
+        days_after_use_current_price = data['days_after_use_current_price']
+        
         close_buy_orders = apitrades.get_trade_orders('buy', symbol, max_age_seconds)
         print(f"get_trade_orders:           Found {len(close_buy_orders)} close 'buy' orders in the last {utils.secondsToDays(max_age_seconds)} days.")
         close_sell_orders = apitrades.get_trade_orders('sell', symbol, max_age_seconds)
@@ -490,11 +561,9 @@ def main():
         orders = apitrades.get_trade_orders(None, symbol, max_age_seconds)
         print(f"get_trade_orders:           Total found {len(orders)} orders in the last {utils.secondsToDays(max_age_seconds)} day.")
         time.sleep(2)       
-        procent_desired_profit = 0.07 #0.7%
-        current_time = time.time()    
-        current_price = api.get_current_price(api.symbol)
-        update_trades(trades, symbol, max_age_seconds, expired_duration)
-        apply_sell_orders(trades, current_price, current_time, procent_desired_profit)
+    
+        update_trades(trades, symbol, max_age_seconds, procent_desired_profit, expired_duration, min_procent)
+        apply_sell_orders(trades, days_after_use_current_price, force_sell)
         #monitor_close_orders_by_age2(max_age_seconds)
         time.sleep(10*4)  # Periodic, verificăm ordinele în cache
         

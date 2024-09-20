@@ -113,10 +113,10 @@ print(f"Precision is {precision}")
 
 def normalize_quantity(symbol, quantity):
     min_qty, max_qty, step_size = get_symbol_limits(symbol)
-  if quantity < min_qty:
+    if quantity < min_qty:
         print(f"Quantity {quantity} is below the minimum limit. Setting to minimum: {min_qty}")
         quantity = min_qty
-     elif quantity > max_qty:
+    elif quantity > max_qty:
         print(f"Quantity {quantity} is above the maximum limit. Setting to maximum: {max_qty}")
         quantity = max_qty
     
