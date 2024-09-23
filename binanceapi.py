@@ -370,7 +370,7 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
             )
         elif order_type.upper() == 'BUY':
             price = round(min(price, current_price), 0)
-            print(f"Trying to place BUY order of of {symbol} for quantity {qty:.8f} at price {price}")
+            print(f"Trying to place BUY order of {symbol} for quantity {qty:.8f} at price {price}")
             order = client.order_limit_buy(
                 symbol=symbol,
                 quantity=qty,

@@ -7,17 +7,17 @@ import datetime
 process_id = os.getpid()
 
 # Configurare de bază pentru logging
-logging.basicConfig(
-    level=logging.INFO,  # Setează nivelul de logging dorit
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S',
-    handlers=[
-        logging.FileHandler(f"bot{process_id}.log"),  # Scrie logurile într-un fișier specific ID-ului de proces
-        logging.StreamHandler()  # Afișează logurile în consola
-    ]
-)
+#logging.basicConfig(
+#    level=logging.INFO,  # Setează nivelul de logging dorit
+#    format='%(asctime)s - %(levelname)s - %(message)s',
+#    datefmt='%Y-%m-%d %H:%M:%S',
+#    handlers=[
+#        logging.FileHandler(f"bot{process_id}.log"),  # Scrie logurile într-un fișier specific ID-ului de proces
+#        logging.StreamHandler()  # Afișează logurile în consola
+#    ]
+#)
 
-logger = logging.getLogger(__name__)  # Obține un logger
+#logger = logging.getLogger(__name__)  # Obține un logger
 
 # Salvează funcția originală print
 original_print = builtins.print
