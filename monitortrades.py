@@ -434,6 +434,7 @@ def apply_sell_orders(trades, days, force_sell):
 
         sell_price = trade.get_proposed_sell_price(current_price, current_time, days=days)
         if force_sell: #disperare!!!
+            print("\nDISPERARE\n Vand la pretul curent!")
             sell_price = min(sell_price, current_price * 1.001)
 
         if trade.sell_order_id:
@@ -483,14 +484,14 @@ def start_monitoring(order_type, symbol, filename, interval=3600, limit=1000, ye
 # Cache-ul care va fi actualizat periodic
 default_values_sell_recommendation = {
     "BTCUSDT": {
-        'force_sell': 1,
+        'force_sell': 0,
         'procent_desired_profit': 0.07,
         'expired_duration': 3600 * 3.7,
         'min_procent': 0.0099,
         'days_after_use_current_price': 7
     },
     "ETHUSDT": {
-        'force_sell': 1,
+        'force_sell': 0,
         'procent_desired_profit': 0.07,
         'expired_duration': 3600 * 3.7,
         'min_procent': 0.0099,
@@ -533,7 +534,14 @@ def display_sell_recommendation():
     
 max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate/filled sunt considerate recente (3 zile)
 interval = 60 * 4 #4 minute
+taosymbol = 'TAOUSDT'
+api.get_binance_symbols(taosymbol)
 
+api.get_symbol_limits(taosymbol)
+taosymbol_target_price = api.get_current_price(taosymbol)
+api.place_order("buy", taosymbol, taosymbol_target_price - 10, 1)
+
+        
 def main():
 
     file_path = "sell_recommendation.csv"
