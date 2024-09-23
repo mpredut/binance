@@ -36,16 +36,20 @@ client = Client(api_key, api_secret)
 
 
 def get_binance_symbols(keysearch):
-    
-    exchange_info = client.get_exchange_info()
-    print(f"Numer symboluri pe binance {len(exchange_info)}")
-    symbols = [s['symbol'] for s in exchange_info['symbols']]
+    try:
+        exchange_info = client.get_exchange_info()
+        print(f"Number of symbols on Binance: {len(exchange_info['symbols'])}")
 
-    if keysearch:
-        matching_symbols = [symbol for symbol in symbols if keysearch in symbol]
-        print(f"Symboluri care conțin '{keysearch}': {matching_symbols}")
-    else:
-       print(f"{exchange_info}")
+        symbols = [s for s in exchange_info['symbols']]  # Extragem doar simbolul
+        
+         if keysearch:
+            matching_symbols = [symbol for symbol in symbols if keysearch.upper() in symbol]
+            print(f"Symbols containing '{keysearch}': {matching_symbols}")
+        else:
+             print(f"All symbols: {symbols}")
+    
+    except Exception as e:
+        print(f"An error occurred: {e}")
 
 
 def listen_to_binance(symbol):
@@ -314,7 +318,7 @@ def place_sell_order(symbol, price, quantity):
 from decimal import Decimal, ROUND_DOWN
 def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee_percentage=0.001):
     try:
-        print(f"Order Request {order_type.upper()} qty {qty}, Price {price}")
+        print(f"Order Request {order_type.upper()} {symbol} qty {qty}, Price {price}")
         available_qty = manage_quantity(order_type, symbol, qty, cancelorders=cancelorders, hours=hours)
         
         if order_type.upper() == 'SELL':
@@ -355,7 +359,7 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
             return None
         if order_type.upper() == 'SELL':
             price = round(max(price, current_price), 0)
-            print(f"Trying to place SELL order for quantity {qty:.8f} at price {price}")
+            print(f"Trying to place SELL order of {symbol} for quantity {qty:.8f} at price {price}")
             order = client.order_limit_sell(
                 symbol=symbol,
                 quantity=qty,
@@ -363,7 +367,7 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
             )
         elif order_type.upper() == 'BUY':
             price = round(min(price, current_price), 0)
-            print(f"Trying to place BUY order for quantity {qty:.8f} at price {price}")
+            print(f"Trying to place BUY order of of {symbol} for quantity {qty:.8f} at price {price}")
             order = client.order_limit_buy(
                 symbol=symbol,
                 quantity=qty,

@@ -534,12 +534,11 @@ def display_sell_recommendation():
     
 max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate/filled sunt considerate recente (3 zile)
 interval = 60 * 4 #4 minute
-taosymbol = 'TAOUSDT'
+taosymbol = 'TAO'
 api.get_binance_symbols(taosymbol)
-
-api.get_symbol_limits(taosymbol)
-taosymbol_target_price = api.get_current_price(taosymbol)
-api.place_order("buy", taosymbol, taosymbol_target_price - 10, 1)
+taosymbol = 'TAOUSDT'
+#taosymbol_target_price = api.get_current_price(taosymbol)
+#api.place_order("buy", taosymbol, taosymbol_target_price - 10, 1)
 
         
 def main():
