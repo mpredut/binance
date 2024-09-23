@@ -391,7 +391,7 @@ while True:
             elif expired_trend == 'DOWN':
                 proposed_price = proposed_price - 242  # Preț de cumpărare
                 print(f"End of DOWN trend. BUY order at {proposed_price:.2f} EUR")
-                #order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
+                order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
             #last_order_time = current_time
 
         # Verificăm schimbările de preț și gestionăm trendurile
@@ -403,7 +403,7 @@ while True:
                 trend_state.confirm_trend()  # Confirmăm că trendul de creștere continuă
             else:
                 expired_trend = trend_state.start_trend('UP')  # Începem un trend nou de creștere
-
+                 order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
                 # Dacă trendul anterior a fost DOWN, cumpărăm la începutul trendului de UP
                 if expired_trend == 'DOWN':
                     proposed_price = proposed_price - 142
