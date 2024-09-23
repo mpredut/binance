@@ -544,7 +544,7 @@ taosymbol = 'TAOUSDT'
 #api.place_order("buy", taosymbol, taosymbol_target_price - 10, 1)
 
 
-def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_increse_threshold=0.19, percentage_decrese_threshold=0.01):
+def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_increse_threshold=0.19, percentage_decrese_threshold=0.02):
     try:
         # 1. Obține ultimul trade pentru acest simbol (asumăm că este ordinul de cumpărare)
         trade_orders = apitrades.get_trade_orders("buy", taosymbol, max_age_seconds)
