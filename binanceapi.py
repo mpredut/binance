@@ -30,10 +30,22 @@ symbol = 'BTCUSDT'
 
 import binance
 print(binance.__version__)
-binancecurrentprice = 0
+currentprice = {}
 currenttime = time.time()
 client = Client(api_key, api_secret)
 
+
+def get_binance_symbols(keysearch):
+    
+    exchange_info = client.get_exchange_info()
+    print(f"Numer symboluri pe binance {len(exchange_info)}")
+    symbols = [s['symbol'] for s in exchange_info['symbols']]
+
+    if keysearch:
+        matching_symbols = [symbol for symbol in symbols if keysearch in symbol]
+        print(f"Symboluri care conțin '{keysearch}': {matching_symbols}")
+    else:
+       print(f"{exchange_info}")
 
 
 def listen_to_binance(symbol):
@@ -45,7 +57,7 @@ def listen_to_binance(symbol):
             while not stop:
                 message = await websocket.recv()
                 message = json.loads(message)
-                process_message(message)
+                process_message(symbol, message)
 
     # Rulăm WebSocket-ul într-un event loop propriu în acest thread
     loop = asyncio.new_event_loop()
@@ -53,11 +65,11 @@ def listen_to_binance(symbol):
     loop.run_until_complete(connect())
 
 # Funcție de gestionare a mesajului primit de la WebSocket
-def process_message(message):
-    global binancecurrentprice
+def process_message(symbol, message):
+    global currentprice
     symbol = message['s']  # Simbolul criptomonedei
     price = float(message['c'])  # Asigură-te că price este un float
-    binancecurrentprice = price
+    currentprice[symbol] = price
     print(f"ASYNC {symbol} is {price:.2f}")
 
 def start_websocket_thread(symbol):
@@ -146,25 +158,25 @@ def get_symbol_limits(symbol):
 
 def get_current_price(symbol):
     global currenttime
-    global binancecurrentprice
+    global currentprice
     refresh_interval = 2 # Intervalul în care să se facă actualizarea (în secunde)
 
     try:
 
         if(currenttime + refresh_interval < time.time()) :
             ticker = client.get_symbol_ticker(symbol=symbol)
-            binancecurrentprice = float(ticker['price'])
+            currentprice[symbol] = float(ticker['price'])
             currenttime = time.time()
         
-        return binancecurrentprice
+        return currentprice[symbol]
     except BinanceAPIException as e:
         print(f"Eroare la obținerea prețului curent de la Binance API: {e}")
-        print(f"Folosesc prețul obținut prin websocket, BTC: {binancecurrentprice}")
-        return binancecurrentprice
+        print(f"Folosesc prețul obținut prin websocket, {symbol}: { currentprice[symbol]}")
+        return  currentprice[symbol]
     except Exception as e:         # Handle any other exceptions that might occur
         print(f"get_current_price: A apărut o eroare neașteptată: {e}")
-        print(f"Folosesc prețul obținut prin websocket, BTC: {binancecurrentprice}")
-        return binancecurrentprice
+        print(f"Folosesc prețul obținut prin websocket, {symbol}: { currentprice[symbol]}")
+        return currentprice[symbol]
         
 def get_current_time():
         global currenttime
