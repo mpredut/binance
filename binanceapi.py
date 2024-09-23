@@ -35,18 +35,19 @@ currenttime = time.time()
 client = Client(api_key, api_secret)
 
 
+
+
 def get_binance_symbols(keysearch):
     try:
         exchange_info = client.get_exchange_info()
         print(f"Number of symbols on Binance: {len(exchange_info['symbols'])}")
 
-        symbols = [s for s in exchange_info['symbols']]  # Extragem doar simbolul
-        
-         if keysearch:
+        symbols = [s['symbol'] for s in exchange_info['symbols']]  # Extragem doar simbolul
+        if keysearch:
             matching_symbols = [symbol for symbol in symbols if keysearch.upper() in symbol]
             print(f"Symbols containing '{keysearch}': {matching_symbols}")
         else:
-             print(f"All symbols: {symbols}")
+            print(f"All symbols: {symbols}")
     
     except Exception as e:
         print(f"An error occurred: {e}")
