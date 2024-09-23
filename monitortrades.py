@@ -513,7 +513,7 @@ def update_sell_recommendation(file_path):
                 'days_after_use_current_price': row['days_after_use_current_price']
             } for index, row in df.iterrows()
         }
-        print(f"sell_recommendation updated from file: {sell_recommendation}")
+        print(f"sell_recommendation updated from file! ")
     except FileNotFoundError:
         print(f"Error: File {file_path} not found. Using default values.")
         sell_recommendation = default_values_sell_recommendation
