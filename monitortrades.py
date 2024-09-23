@@ -463,20 +463,23 @@ def apply_sell_orders(trades, days, force_sell):
         #quantity = min(api.get_asset_info("sell", symbol), total_quantity)
         new_sell_order_id = api.place_order("sell", symbol, average_sell_price, total_quantity)
         #trade.sell_order_id = new_sell_order_id
+        
+
 
 
 # Funcția principală care rulează periodic actualizările și cache-ul
-def monitor_trades(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=2):
+def monitor_trades(order_type, filename, interval=3600, limit=1000, years_to_keep=2):
     while True:
         # Actualizăm fișierul de tranzacții
-        apitrades.save_trades_to_file(order_type, symbol, filename, limit=limit, years_to_keep=years_to_keep)
+        apitrades.save_trades_to_file(order_type, "BTCUSDT", filename, limit=limit, years_to_keep=years_to_keep)
+        apitrades.save_trades_to_file(order_type, "TAOUSDT", filename, limit=limit, years_to_keep=years_to_keep)
         # Reîncărcăm tranzacțiile în cache
         apitrades.load_trades_from_file(filename)   
         time.sleep(interval)
 
 # Funcția pentru a porni monitorizarea periodică într-un thread separat
 def start_monitoring(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=2):
-    monitoring_thread = Thread(target=monitor_trades, args=(order_type, symbol, filename, interval, limit, years_to_keep), daemon=True)
+    monitoring_thread = Thread(target=monitor_trades, args=(order_type, filename, interval, limit, years_to_keep), daemon=True)
     monitoring_thread.start()
 
 
@@ -540,6 +543,44 @@ taosymbol = 'TAOUSDT'
 #taosymbol_target_price = api.get_current_price(taosymbol)
 #api.place_order("buy", taosymbol, taosymbol_target_price - 10, 1)
 
+
+def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_increse_threshold=0.19, percentage_decrese_threshold=0.01):
+    try:
+        # 1. Obține ultimul trade pentru acest simbol (asumăm că este ordinul de cumpărare)
+        trade_orders = apitrades.get_trade_orders("buy", taosymbol, max_age_seconds)
+        
+        if not trade_orders:
+            print(f"No trade orders found for {taosymbol} in the last {max_age_seconds} seconds.")
+            return
+        
+        # Ultimul ordin de cumpărare
+        buy_order = trade_orders[0]  # presupunem că primul ordin este ultimul
+        buy_price = float(buy_order['price'])  # Prețul de cumpărare
+
+        print(f"Buy price for {taosymbol}: {buy_price}")
+
+        # 2. Obține prețul curent de pe piață
+        current_price = api.get_current_price(taosymbol)
+        print(f"Current price for {taosymbol}: {current_price}")
+
+        # 3. Verifică dacă prețul a crescut sau a scăzut cu mai mult de 1%
+        price_increase = (current_price - buy_price) / buy_price
+        price_decrease = (buy_price - current_price) / buy_price
+
+        if price_increase > percentage_increse_threshold:
+            print(f"Price increased by more than {percentage_increse_threshold * 100}%: Placing sell order")
+            api.cancel_open_orders("sell", taosymbol)  # Anulează ordinele deschise
+            api.place_order("sell", taosymbol, current_price - 5, qty)
+        elif price_decrease > percentage_decrese_threshold:
+            print(f"Price decreased by more than {percentage_decrese_threshold * 100}%: Placing sell order")
+            api.cancel_open_orders("sell", taosymbol)  # Anulează ordinele deschise
+            api.place_order("sell", taosymbol, current_price - 5, qty)
+        else:
+            print(f"Price price_increase {price_increase * 100}% range, price_decrease {price_decrease * 100} range. no action taken.")
+
+    except Exception as e:
+        print(f"An error occurred while monitoring the price: {e}")
+
         
 def main():
 
@@ -549,10 +590,12 @@ def main():
     #monitor_trades(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=2)
 
     # Pornim monitorizarea periodică a tranzacțiilor
+    print(f"order_type{order_type} si symbol {symbol}")
     start_monitoring(order_type, symbol, filename, interval=interval, limit=1000, years_to_keep=2)
     time.sleep(5)
     
     while True:
+        monitor_price_and_trade(taosymbol, 1 , 3600 * 24 * 7)
         data = sell_recommendation[symbol]
         procent_desired_profit = data['procent_desired_profit']
         expired_duration = data['expired_duration']

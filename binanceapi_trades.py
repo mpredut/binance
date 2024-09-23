@@ -263,7 +263,7 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=
         most_recent_trade_time = 0  # Dacă nu există tranzacții, începem de la 0
         backdays = 60  # Adăugăm tranzacții pentru ultimele 60 de zile dacă fișierul e gol
 
-    print(f"Fetching trades from the last {backdays} days.")
+    print(f"Fetching trades from the last {backdays} days for {symbol}, order type {order_type}.")
 
     # Apelăm funcția pentru a obține tranzacțiile recente doar din perioada lipsă
     new_trades = get_my_trades_simple(order_type, symbol, backdays=backdays, limit=limit)

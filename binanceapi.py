@@ -160,15 +160,17 @@ def get_symbol_limits(symbol):
                 return min_qty, max_qty, step_size
     return None, None, None
 
-
+refresh_interval = 0 # Intervalul în care să se facă actualizarea (în secunde)
 def get_current_price(symbol):
     global currenttime
     global currentprice
-    refresh_interval = 2 # Intervalul în care să se facă actualizarea (în secunde)
+    global refresh_interval
+    #refresh_interval = 0 # Intervalul în care să se facă actualizarea (în secunde)
 
     try:
 
         if(currenttime + refresh_interval < time.time()) :
+            refresh_interval = 2
             ticker = client.get_symbol_ticker(symbol=symbol)
             currentprice[symbol] = float(ticker['price'])
             currenttime = time.time()
@@ -455,6 +457,15 @@ def cancel_order(order_id):
         print(f"Eroare la anularea ordinului: {order_id} {e}")
         return False
 
+def cancel_open_orders(order_type, symbol):
+    try:
+        open_orders = api.get_open_orders(order_type, symbol)
+        for order in open_orders:
+            print(f"Cancelling order {order['orderId']} for {symbol}")
+            api.cancel_order(symbol, order['orderId'])
+    except Exception as e:
+        print(f"Error cancelling orders for {symbol}: {e}")
+        
 def cancel_expired_orders(order_type, symbol, expire_time):
     
     open_orders = get_open_orders(order_type, symbol)
