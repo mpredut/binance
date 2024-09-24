@@ -66,9 +66,9 @@ def monitor_open_orders_by_type(order_type):
                 continue
             
             if order_type == 'sell':
-                new_price = current_price * 1.001 + 100
+                new_price = current_price * 1.001 + 20
             else:
-                new_price = current_price * 0.999 - 100
+                new_price = current_price * 0.999 - 20
             
             quantity = order['quantity']
             
@@ -87,7 +87,7 @@ def monitor_open_orders_by_type(order_type):
 
 
 
-MONITOR_OPEN_ORDER_INTERVAL = 18
+MONITOR_OPEN_ORDER_INTERVAL = 28
 MONITOR_CLOSE_ORDER_INTERVAL = 98
 max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate/filled sunt considerate recente (3 zile)
 

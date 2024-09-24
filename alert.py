@@ -7,6 +7,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 import requests
+import utils
 
 ####MYLIB
 from apikeys import PUSHBULLET_API_KEY, SMTP_USERNAME, SMTP_PASSWORD, TO_EMAIL
@@ -42,7 +43,7 @@ def check_alert(condition, message, alert_interval=60):
             if last_alert_time is None or (current_time - last_alert_time) >= alert_interval:
                 timestamp = time.strftime('%H:%M:%S', time.localtime(current_time))
                 message_with_time = f"{message} at {timestamp}"
-                beep(4)
+                utils.beep(4)
                 #send_tasker_notification(message_with_time)
                 #Send push notification on Android
                 #send_push_notification("Alertă Trading", message_with_time)
