@@ -127,7 +127,7 @@ class PriceWindow:
 
             # Verificare pentru valori negative și declanșare excepție
             if min_proximity < 0 or max_proximity < 0:
-                printf(f"Negative proximity detected! min_proximity: {min_proximity}, max_proximity: {max_proximity}")
+                print(f"Negative proximity detected! min_proximity: {min_proximity}, max_proximity: {max_proximity}")
                 sys.exit(1)
         else:
             min_proximity = max_proximity = 0
