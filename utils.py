@@ -11,18 +11,18 @@ def beep(n):
     for _ in range(n):
         if platform.system() == 'Windows':
             import winsound
-            winsound.Beep(440, 500)  # frecvența de 440 Hz, durata de 500 ms
+            winsound.Beep(440, 500)  # frecventa de 440 Hz, durata de 500 ms
         else:
             # Aici putem folosi o comanda de beep - nu  merge pt orice android
             os.system('echo "\007"')
         time.sleep(3)
 
 
-# Bugetul inițial
+# Bugetul initial
 budget = 1000  # USDT
 order_cost_btc = 0.00004405  # BTC
 max_threshold = 1.5 #% procent * 100
-price_change_threshold = 0.07  # Pragul de schimbare a prețului, 0.7%
+price_change_threshold = 0.07  # Pragul de schimbare a pretului, 0.7%
 interval_time = 2 * 3600 # 2 h * 3600 seconds.
 interval_time = 97 * 79
 
@@ -44,16 +44,16 @@ def are_difference_equal_with_aprox_proc(value1, value2, target_percent = 10.0):
         max_iterations = 1
     if max_iterations > 100:
         max_iterations = 100
-    # Calculează initial_tolerance ca 1% din target_percent
+    # Calculeaza initial_tolerance ca 1% din target_percent
     initial_tolerance = target_percent * 0.01
     tolerance_step = initial_tolerance * 0.1
     #print(f"initial_tolerance {initial_tolerance}:")
     #print(f"tolerance_step {tolerance_step}:")
 
-    #valoarea maximă a toleranței  nu depășește jumătate din target_percent
+    #valoarea maxima a tolerantei  nu depaseste jumatate din target_percent
     max_tolerance = max_iterations * tolerance_step + initial_tolerance
     if max_tolerance > target_percent / 2:
-        # Ajustează tolerance_step pentru a respecta limita
+        # Ajusteaza tolerance_step pentru a respecta limita
         tolerance_step = (target_percent / 2 - initial_tolerance) / max_iterations
         print(f"tolerance_step adjust {tolerance_step}:")
 
@@ -88,16 +88,16 @@ def are_values_very_close(value1, value2, target_tolerance_percent=1.0):
         max_iterations = 1
     if max_iterations > 100:
         max_iterations = 100
-    # Calculează initial_tolerance ca 1% din target_tolerance_percent
+    # Calculeaza initial_tolerance ca 1% din target_tolerance_percent
     initial_tolerance = target_tolerance_percent * 0.01
     tolerance_step = initial_tolerance * 0.1
     #print(f"initial_tolerance {initial_tolerance}:")
     #print(f"tolerance_step {tolerance_step}:")
 
-    #valoarea maximă a toleranței  nu depășește jumătate din target_tolerance_percent
+    #valoarea maxima a tolerantei  nu depaseste jumatate din target_tolerance_percent
     max_tolerance = max_iterations * tolerance_step + initial_tolerance
     if max_tolerance > target_tolerance_percent / 2:
-        # Ajustează tolerance_step pentru a respecta limita
+        # Ajusteaza tolerance_step pentru a respecta limita
         tolerance_step = (target_tolerance_percent / 2 - initial_tolerance) / max_iterations
         print(f"tolerance_step adjust {tolerance_step}:")
 
@@ -132,36 +132,36 @@ def timestampToTime(timestamp_ms):
     # Convertim în format datetime
     human_readable_time = datetime.utcfromtimestamp(timestamp_sec)
     
-    # Returnăm timpul ca string în format citibil
+    # Returnam timpul ca string în format citibil
     return human_readable_time.strftime('%Y-%m-%d %H:%M:%S')
 
     
-    # Funcția care convertește secunde în zile
+    # Functia care converteste secunde în zile
 def secondsToDays(max_age_seconds):
-    # Definim numărul de secunde într-o zi
+    # Definim numarul de secunde într-o zi
     seconds_in_a_day = 86400  # 24 ore * 60 minute * 60 secunde
     
-    # Calculăm numărul de zile
+    # Calculam numarul de zile
     days = max_age_seconds / seconds_in_a_day
     
     return days
 
-# Funcția care convertește secunde în ore
+# Functia care converteste secunde în ore
 def secondsToHours(max_age_seconds):
-    # Definim numărul de secunde într-o oră
+    # Definim numarul de secunde într-o ora
     seconds_in_an_hour = 3600  # 60 minute * 60 secunde
     
-    # Calculăm numărul de ore
+    # Calculam numarul de ore
     hours = max_age_seconds / seconds_in_an_hour
     
     return hours
 
-# Funcția care convertește secunde în minute
+# Functia care converteste secunde în minute
 def secondsToMinutes(max_age_seconds):
-    # Definim numărul de secunde într-un minut
+    # Definim numarul de secunde într-un minut
     seconds_in_a_minute = 60  # 60 secunde
     
-    # Calculăm numărul de minute
+    # Calculam numarul de minute
     minutes = max_age_seconds / seconds_in_a_minute
     
     return minutes

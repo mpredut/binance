@@ -12,9 +12,9 @@ import utils
 # 
 MAX_PROC = 0.77
 monitor_interval = 3.7
-initial_prices = {}  # Dicționar pentru a reține prețurile inițiale ale ordinelor
-initial_sell_prices = {}  # Dicționar pentru a reține prețurile inițiale ale ordinelor de vânzare
-initial_buy_prices = {}  # Dicționar pentru a reține prețurile inițiale ale ordinelor de cumpărare
+initial_prices = {}  # Dictionar pentru a retine preturile initiale ale ordinelor
+initial_sell_prices = {}  # Dictionar pentru a retine preturile initiale ale ordinelor de vanzare
+initial_buy_prices = {}  # Dictionar pentru a retine preturile initiale ale ordinelor de cumparare
 
 import time
 
@@ -24,17 +24,17 @@ TIME_SLEEP_ERROR = 10
 
 
 def monitor_open_orders_by_type(order_type):
-    orders = api.get_open_orders(order_type, api.symbol)  # Obține ordinele de vânzare sau cumpărare în funcție de tip
+    orders = api.get_open_orders(order_type, api.symbol)  # Obtine ordinele de vanzare sau cumparare în functie de tip
     if not orders:
-        print(f"Nu există ordine de {order_type} deschise inițial.")
+        print(f"Nu exista ordine de {order_type} deschise initial.")
         return
     
     current_price = api.get_current_price(api.symbol)
     if current_price is None:
-        print("Eroare la obținerea prețului...")
+        print("Eroare la obtinerea pretului...")
         return
     
-    print(f"Prețul curent BTC: {current_price:.2f}")
+    print(f"Pretul curent BTC: {current_price:.2f}")
     
     initial_prices = initial_sell_prices if order_type == 'sell' else initial_buy_prices
 
@@ -56,7 +56,7 @@ def monitor_open_orders_by_type(order_type):
             
             are_close = utils.are_values_very_close(current_price, initial_prices[order_id], MAX_PROC)
             if not are_close:
-                print(f"Totusi prețul s-a modificat prea mult({difference_percent}%) față de prețul inițial ({initial_prices[order_id]}). Nu se mai modifică ordinul.")
+                print(f"Totusi pretul s-a modificat prea mult({difference_percent}%) fata de pretul initial ({initial_prices[order_id]}). Nu se mai modifica ordinul.")
                 continue
             else:
                 print(f"Current price {current_price} and initial {order_type} price {initial_prices[order_id]} are close!")
@@ -79,7 +79,7 @@ def monitor_open_orders_by_type(order_type):
                     'price': new_price,
                     'quantity': quantity
                 }
-                initial_prices[new_order['orderId']] = initial_prices.pop(order_id)  # Păstrăm prețul inițial
+                initial_prices[new_order['orderId']] = initial_prices.pop(order_id)  # Pastram pretul initial
                 print(f"Update order from {price} to {new_price}. New ID: {new_order['orderId']}")
             else:
                 print(f"Eroare la plasarea noului ordin de {order_type}.")

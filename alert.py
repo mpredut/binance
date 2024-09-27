@@ -30,7 +30,7 @@ def send_tasker_notification(message):
     print(response.status_code, response.text)
 
 # Exemplu de utilizare
-#send_tasker_notification("Alertă Trading: Prețul acțiunii a scăzut sub 50$")
+#send_tasker_notification("Alerta Trading: Pretul actiunii a scazut sub 50$")
 
 
 
@@ -46,9 +46,9 @@ def check_alert(condition, message, alert_interval=60):
                 utils.beep(4)
                 #send_tasker_notification(message_with_time)
                 #Send push notification on Android
-                #send_push_notification("Alertă Trading", message_with_time)
+                #send_push_notification("Alerta Trading", message_with_time)
                 #send_email(
-                #    subject="Alertă Trading",
+                #    subject="Alerta Trading",
                 #    body=message_with_time,
                 #    to_email=TO_EMAIL
                 #)
