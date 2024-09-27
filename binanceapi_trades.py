@@ -15,7 +15,7 @@ import utils
 import log
 
 # 
-# Cache global pentru tranzacții
+# Cache global pentru tranzactii
 #
 trade_cache = []
 
@@ -28,9 +28,9 @@ def get_my_trades_24(symbol, days_ago, order_type=None, limit=1000):
     try:
         current_time = int(time.time() * 1000)
         
-        # Calculăm start_time și end_time pentru ziua specificată în urmă
+        # Calculam start_time si end_time pentru ziua specificata în urma
         end_time = current_time - days_ago * 24 * 60 * 60 * 1000
-        start_time = end_time - 24 * 60 * 60 * 1000  # Cu 24 de ore în urmă de la end_time
+        start_time = end_time - 24 * 60 * 60 * 1000  # Cu 24 de ore în urma de la end_time
 
         while start_time < end_time:
             trades = client.get_my_trades(symbol=symbol, limit=limit, startTime=start_time, endTime=end_time)
@@ -50,8 +50,8 @@ def get_my_trades_24(symbol, days_ago, order_type=None, limit=1000):
             if len(trades) < limit:
                 break
 
-            # Ajustăm `start_time` la timpul celei mai noi tranzacții pentru a continua
-            start_time = trades[-1]['time'] + 1  # Ne mutăm înainte cu 1 ms pentru a evita duplicatele
+            # Ajustam `start_time` la timpul celei mai noi tranzactii pentru a continua
+            start_time = trades[-1]['time'] + 1  # Ne mutam înainte cu 1 ms pentru a evita duplicatele
             
         return all_trades
 
@@ -100,7 +100,7 @@ def get_my_trades_simple(order_type, symbol, backdays=3, limit=1000):
         end_time = current_time
 
         for day in range(backdays):
-            # Calculăm start_time pentru ziua curentă în intervalul de 24 de ore
+            # Calculam start_time pentru ziua curenta în intervalul de 24 de ore
             start_time = end_time - max_interval
             
             trades = client.get_my_trades(symbol=symbol, limit=limit, startTime=start_time, endTime=end_time)
@@ -116,7 +116,7 @@ def get_my_trades_simple(order_type, symbol, backdays=3, limit=1000):
                 
                 all_trades.extend(filtered_trades)
             
-            # Actualizăm end_time pentru ziua anterioară (înainte de această perioadă de 24 de ore)
+            # Actualizam end_time pentru ziua anterioara (înainte de aceasta perioada de 24 de ore)
             end_time = start_time
 
         return all_trades
@@ -136,7 +136,7 @@ def test_get_my_trades():
         trades = get_my_trades_24(symbol, days_ago, limit)
         if trades:
             print(f"Found {len(trades)} trades for day {days_ago}.")
-            for trade in trades[:10]:  # Afișează primele 10 tranzacții
+            for trade in trades[:10]:  # Afiseaza primele 10 tranzactii
                 print(trade)
         else:
             print(f"No trades found for day {days_ago}.")
@@ -144,7 +144,7 @@ def test_get_my_trades():
     backdays = 30
     limit = 10000
 
-    # Testare fără filtrare (fără 'buy' sau 'sell')
+    # Testare fara filtrare (fara 'buy' sau 'sell')
     print("Testing get_my_trades with pagination (no order_type)...")
     trades_pagination = get_my_trades(None, symbol, backdays=backdays, limit=limit)
 
@@ -165,7 +165,7 @@ def test_get_my_trades():
     print("Testing get_my_trades_simple without pagination (sell orders)...")
     trades_simple_sell = get_my_trades_simple("sell", symbol, backdays=backdays, limit=limit)
 
-    # Comparăm rezultatele pentru tranzacțiile nefiltrate
+    # Comparam rezultatele pentru tranzactiile nefiltrate
     print("\nComparing unfiltered results...")
     if trades_pagination == trades_simple:
         print("Both functions returned the same results for unfiltered trades.")
@@ -180,7 +180,7 @@ def test_get_my_trades():
                 print(f"Pagination trade: {trade_p}")
                 print(f"Simple trade: {trade_s}")
 
-    # Comparăm rezultatele pentru tranzacțiile de tip 'buy'
+    # Comparam rezultatele pentru tranzactiile de tip 'buy'
     print("\nComparing buy order results...")
     if trades_pagination_buy == trades_simple_buy:
         print("Both functions returned the same results for buy orders.")
@@ -195,7 +195,7 @@ def test_get_my_trades():
                 print(f"Pagination trade: {trade_p}")
                 print(f"Simple trade: {trade_s}")
 
-    # Comparăm rezultatele pentru tranzacțiile de tip 'sell'
+    # Comparam rezultatele pentru tranzactiile de tip 'sell'
     print("\nComparing sell order results...")
     if trades_pagination_sell == trades_simple_sell:
         print("Both functions returned the same results for sell orders.")
@@ -210,7 +210,7 @@ def test_get_my_trades():
                 print(f"Pagination trade: {trade_p}")
                 print(f"Simple trade: {trade_s}")
 
-    # Afișăm câteva exemple pentru fiecare caz
+    # Afisam cateva exemple pentru fiecare caz
     print("\nFirst few trades for unfiltered pagination:")
     for trade in trades_pagination[:5]:
         print(trade)
@@ -223,16 +223,16 @@ def test_get_my_trades():
     for trade in trades_pagination_sell[:5]:
         print(trade)
 
-# Apelăm funcția de testare
+# Apelam functia de testare
 #test_get_my_trades()
 
 import os
 
-# Funcția care salvează tranzacțiile noi în fișier (completare dacă există deja)
+# Functia care salveaza tranzactiile noi în fisier (completare daca exista deja)
 def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=2):
     all_trades = []
 
-    # Verificăm dacă fișierul există deja
+    # Verificam daca fisierul exista deja
     if os.path.exists(filename):
         with open(filename, 'r') as f:
             try:
@@ -243,42 +243,42 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=
     else:
         existing_trades = []
 
-    # Calculăm timpul de la care păstrăm tranzacțiile (doar cele mai recente decât 'years_to_keep' ani)
+    # Calculam timpul de la care pastram tranzactiile (doar cele mai recente decat 'years_to_keep' ani)
     current_time_ms = int(time.time() * 1000)
-    cutoff_time_ms = current_time_ms - (years_to_keep * 365 * 24 * 60 * 60 * 1000)  # Ani convertiți în milisecunde
+    cutoff_time_ms = current_time_ms - (years_to_keep * 365 * 24 * 60 * 60 * 1000)  # Ani convertiti în milisecunde
 
-    # Eliminăm tranzacțiile care sunt mai vechi decât perioada dorită
+    # Eliminam tranzactiile care sunt mai vechi decat perioada dorita
     filtered_existing_trades = [trade for trade in existing_trades if trade['time'] > cutoff_time_ms]
     print(f"Kept {len(filtered_existing_trades)} trades after filtering out old trades (older than {years_to_keep} years).")
 
-    # Dacă există deja tranzacții, găsim cea mai recentă tranzacție salvată
+    # Daca exista deja tranzactii, gasim cea mai recenta tranzactie salvata
     if filtered_existing_trades:
         most_recent_trade_time = max(trade['time'] for trade in filtered_existing_trades)
         print(f"Most recent trade time from file: {utils.timestampToTime(most_recent_trade_time)}")
 
-        # Calculăm câte zile au trecut de la most_recent_trade_time până la acum
+        # Calculam cate zile au trecut de la most_recent_trade_time pana la acum
         time_diff_ms = current_time_ms - most_recent_trade_time
-        backdays = time_diff_ms // (24 * 60 * 60 * 1000) + 1  # Câte zile au trecut de la ultima tranzacție
+        backdays = time_diff_ms // (24 * 60 * 60 * 1000) + 1  # Cate zile au trecut de la ultima tranzactie
     else:
-        most_recent_trade_time = 0  # Dacă nu există tranzacții, începem de la 0
-        backdays = 60  # Adăugăm tranzacții pentru ultimele 60 de zile dacă fișierul e gol
+        most_recent_trade_time = 0  # Daca nu exista tranzactii, începem de la 0
+        backdays = 60  # Adaugam tranzactii pentru ultimele 60 de zile daca fisierul e gol
 
     print(f"Fetching trades from the last {backdays} days for {symbol}, order type {order_type}.")
 
-    # Apelăm funcția pentru a obține tranzacțiile recente doar din perioada lipsă
+    # Apelam functia pentru a obtine tranzactiile recente doar din perioada lipsa
     new_trades = get_my_trades_simple(order_type, symbol, backdays=backdays, limit=limit)
 
-    # Filtrăm doar tranzacțiile care sunt mai recente decât cea mai recentă tranzacție din fișier
+    # Filtram doar tranzactiile care sunt mai recente decat cea mai recenta tranzactie din fisier
     new_trades = [trade for trade in new_trades if trade['time'] > most_recent_trade_time]
 
     if new_trades:
         print(f"Found {len(new_trades)} new trades.")
         
-        # Adăugăm doar tranzacțiile noi la cele existente, dar fără cele vechi
+        # Adaugam doar tranzactiile noi la cele existente, dar fara cele vechi
         all_trades = filtered_existing_trades + new_trades
-        all_trades = sorted(all_trades, key=lambda x: x['time'])  # Sortăm după timp
+        all_trades = sorted(all_trades, key=lambda x: x['time'])  # Sortam dupa timp
 
-        # Salvăm doar tranzacțiile filtrate și actualizate în fișier
+        # Salvam doar tranzactiile filtrate si actualizate în fisier
         with open(filename, 'w') as f:
             json.dump(all_trades, f)
 
@@ -305,7 +305,7 @@ def load_trades_from_file(filename):
         trade_cache = []
 
    
-# Funcția care returnează tranzacțiile de tip 'buy' sau 'sell' din cache pentru un anumit simbol
+# Functia care returneaza tranzactiile de tip 'buy' sau 'sell' din cache pentru un anumit simbol
 def get_trade_orders(order_type, symbol, max_age_seconds):
     current_time_ms = int(time.time() * 1000)
     max_age_ms = max_age_seconds * 1000
@@ -328,7 +328,7 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
         }
         for trade in trade_cache
         if trade['symbol'] == symbol 
-        and (order_type is None or trade['isBuyer'] == (order_type == 'buy'))  # Verifică doar dacă order_type nu este None
+        and (order_type is None or trade['isBuyer'] == (order_type == 'buy'))  # Verifica doar daca order_type nu este None
         and (current_time_ms - trade['time']) <= max_age_ms
     ]
 

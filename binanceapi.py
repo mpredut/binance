@@ -56,7 +56,7 @@ def get_binance_symbols(keysearch):
 def listen_to_binance(symbol):
     socket = f"wss://stream.binance.com:9443/ws/{symbol.lower()}@ticker"
     
-    # Funcție asincronă pentru WebSocket
+    # Functie asincrona pentru WebSocket
     async def connect():
         async with websockets.connect(socket) as websocket:
             while not stop:
@@ -64,16 +64,16 @@ def listen_to_binance(symbol):
                 message = json.loads(message)
                 process_message(symbol, message)
 
-    # Rulăm WebSocket-ul într-un event loop propriu în acest thread
+    # Rulam WebSocket-ul într-un event loop propriu în acest thread
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(connect())
 
-# Funcție de gestionare a mesajului primit de la WebSocket
+# Functie de gestionare a mesajului primit de la WebSocket
 def process_message(symbol, message):
     global currentprice
     symbol = message['s']  # Simbolul criptomonedei
-    price = float(message['c'])  # Asigură-te că price este un float
+    price = float(message['c'])  # Asigura-te ca price este un float
     currentprice[symbol] = price
     print(f"ASYNC {symbol} is {price:.2f}")
 
@@ -112,11 +112,11 @@ def get_quantity_precision(symbol):
                 precision = -int(round(-math.log10(float(step_size)), 0))
                 return precision
     except BinanceAPIException as e:
-        print(f"Eroare la obținerea preciziei cantității: {e}")
-    return 8  # Valoare implicită
+        print(f"Eroare la obtinerea preciziei cantitatii: {e}")
+    return 8  # Valoare implicita
 
 try:
-    # Cerere pentru a obține informații despre cont
+    # Cerere pentru a obtine informatii despre cont
     account_info = client.get_account()
     print("Cheile API sunt valide!")
 except Exception as e:
@@ -160,12 +160,12 @@ def get_symbol_limits(symbol):
                 return min_qty, max_qty, step_size
     return None, None, None
 
-refresh_interval = 0 # Intervalul în care să se facă actualizarea (în secunde)
+refresh_interval = 0 # Intervalul în care sa se faca actualizarea (în secunde)
 def get_current_price(symbol):
     global currenttime
     global currentprice
     global refresh_interval
-    #refresh_interval = 0 # Intervalul în care să se facă actualizarea (în secunde)
+    #refresh_interval = 0 # Intervalul în care sa se faca actualizarea (în secunde)
 
     try:
 
@@ -177,12 +177,12 @@ def get_current_price(symbol):
         
         return currentprice[symbol]
     except BinanceAPIException as e:
-        print(f"Eroare la obținerea prețului curent de la Binance API: {e}")
-        print(f"Folosesc prețul obținut prin websocket, {symbol}: { currentprice[symbol]}")
+        print(f"Eroare la obtinerea pretului curent de la Binance API: {e}")
+        print(f"Folosesc pretul obtinut prin websocket, {symbol}: { currentprice[symbol]}")
         return  currentprice[symbol]
     except Exception as e:         # Handle any other exceptions that might occur
-        print(f"get_current_price: A apărut o eroare neașteptată: {e}")
-        print(f"Folosesc prețul obținut prin websocket, {symbol}: { currentprice[symbol]}")
+        print(f"get_current_price: A aparut o eroare neasteptata: {e}")
+        print(f"Folosesc pretul obtinut prin websocket, {symbol}: { currentprice[symbol]}")
         return currentprice[symbol]
         
 def get_current_time():
@@ -204,7 +204,7 @@ def get_asset_info(order_type, symbol):
         return float(asset_info['free']) # info ['locked']
     except Exception as e:
         return 0
-        print(f"get_asset_info: A apărut o eroare: {e}")
+        print(f"get_asset_info: A aparut o eroare: {e}")
 
 
 def manage_quantity(order_type, symbol, required_qty, cancelorders=False, hours=5):
@@ -233,16 +233,16 @@ def manage_quantity(order_type, symbol, required_qty, cancelorders=False, hours=
 
 def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5, price_difference_percentage=0.1):
     open_orders = get_open_orders(order_type, symbol)
-    available_qty = 0  # Inițial nu ai nicio cantitate disponibilă
+    available_qty = 0  # Initial nu ai nicio cantitate disponibila
     current_price = get_current_price(symbol)
     if open_orders:
-        # Sortează ordinele descrescător pentru SELL sau crescător pentru BUY
+        # Sorteaza ordinele descrescator pentru SELL sau crescator pentru BUY
         sorted_orders = sorted(
             open_orders.items(),
             key=lambda x: (x[1]['price'] if order_type == 'BUY' else -x[1]['price'])
         )
 
-        # Timpul limită (cutoff) pentru ordinele recente
+        # Timpul limita (cutoff) pentru ordinele recente
         cutoff_time = datetime.now().timestamp() - timedelta(hours=hours).total_seconds()
 
         for order_id, order_info in sorted_orders:
@@ -300,7 +300,7 @@ def place_buy_order(symbol, price, quantity):
         )
         return buy_order
     except BinanceAPIException as e:
-        print(f"Eroare la plasarea ordinului de cumpărare: {e}")
+        print(f"Eroare la plasarea ordinului de cumparare: {e}")
         return None
 
 def place_sell_order(symbol, price, quantity):
@@ -314,7 +314,7 @@ def place_sell_order(symbol, price, quantity):
         )
         return sell_order
     except BinanceAPIException as e:
-        print(f"Eroare la plasarea ordinului de vânzare: {e}")
+        print(f"Eroare la plasarea ordinului de vanzare: {e}")
         return None
 
 
@@ -325,7 +325,7 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
         available_qty = manage_quantity(order_type, symbol, qty, cancelorders=cancelorders, hours=hours)
         
         if order_type.upper() == 'SELL':
-            # Verifică dacă ai destulă criptomonedă pentru a vinde
+            # Verifica daca ai destula criptomoneda pentru a vinde
             if available_qty <= 0:
                 print(f"No sufficient quantity available to place the {order_type.lower()} order.")
                 return None
@@ -339,12 +339,12 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
                 qty = available_qty / (1 + fee_percentage)
 
         elif order_type.upper() == 'BUY':
-            # În cazul unei comenzi de BUY, trebuie să calculezi cantitatea necesară de USDT pentru achiziționare
+            # În cazul unei comenzi de BUY, trebuie sa calculezi cantitatea necesara de USDT pentru achizitionare
             total_usdt_needed = qty * price * (1 + fee_percentage)
 
             if available_qty < total_usdt_needed:
                 print(f"Not enough USDT available. You need {total_usdt_needed:.8f} USDT, but you only have {available_qty:.8f} USDT.")
-                # Ajustează cantitatea pe care o poți cumpăra cu USDT disponibili
+                # Ajusteaza cantitatea pe care o poti cumpara cu USDT disponibili
                 qty = available_qty / (price * (1 + fee_percentage))
                 print(f"Adjusting {order_type.lower()} order quantity to {qty:.8f} based on available USDT.")
 
@@ -387,7 +387,7 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
         print(f"Error placing {order_type.lower()} order: {e}")
         return None
     except Exception as e:
-        print(f"place_order: A apărut o eroare: {e}")
+        print(f"place_order: A aparut o eroare: {e}")
         return None
 
 
@@ -399,7 +399,7 @@ def place_order_smart(order_type, symbol, price, qty, cancelorders=True):
         
         if order_type.lower() == 'buy':
             open_sell_orders = get_open_orders("sell", symbol)
-            # Anulează ordinele de vânzare existente la un preț mai mic decât prețul de cumpărare dorit
+            # Anuleaza ordinele de vanzare existente la un pret mai mic decat pretul de cumparare dorit
             for order_id, order_details in open_sell_orders.items():
                 if order_details['price'] < price:
                     cancel = cancel_order(order_id)
@@ -417,7 +417,7 @@ def place_order_smart(order_type, symbol, price, qty, cancelorders=True):
                 
         elif order_type.lower() == 'sell':
             open_buy_orders = get_open_orders("buy", symbol)
-            # Anulează ordinele de cumpărare existente la un preț mai mare decât prețul de vânzare dorit
+            # Anuleaza ordinele de cumparare existente la un pret mai mare decat pretul de vanzare dorit
             for order_id, order_details in open_buy_orders.items():
                 if order_details['price'] > price:
                     cancel = cancel_order(order_id)
@@ -433,7 +433,7 @@ def place_order_smart(order_type, symbol, price, qty, cancelorders=True):
                 price = round(price * 0.999, 0)
                 place_order("buy", symbol, price=price, qty=qty)
         else:
-            print("Tipul ordinului este invalid. Trebuie să fie 'buy' sau 'sell'.")
+            print("Tipul ordinului este invalid. Trebuie sa fie 'buy' sau 'sell'.")
             return None
         
         return order
@@ -442,7 +442,7 @@ def place_order_smart(order_type, symbol, price, qty, cancelorders=True):
         return None
         #return place_order(order_type, symbol, price, qty)
     except Exception as e:
-        print(f"place_order_smart: A apărut o eroare: {e}")
+        print(f"place_order_smart: A aparut o eroare: {e}")
         return None
         #return place_order(order_type, symbol, price, qty)
           
@@ -497,7 +497,7 @@ def check_order_filled(order_id):
         order = client.get_order(symbol=symbol, orderId=order_id)
         return order['status'] == 'FILLED'
     except Exception as e:
-        print(f"Eroare la verificarea stării ordinului: {e}")
+        print(f"Eroare la verificarea starii ordinului: {e}")
         return False
 
 
