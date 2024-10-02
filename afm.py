@@ -2,8 +2,7 @@ from plyer import notification
 import requests
 import hashlib
 import time
-import os
-import platform
+import utils  # Presupunem că utils.py conține funcția beep
 
 # Funcție pentru a genera hash-ul paginii
 def get_page_hash(url):
@@ -27,20 +26,12 @@ def show_notification(title, text):
         timeout=10  # Durata notificării în secunde
     )
 
-# Funcție pentru a reda un sunet de alertă specific pentru Windows
+# Funcție pentru a reda sunetul folosind utils.beep
 def play_sound():
-    if platform.system() == "Windows":
-        # Sunet de alertă pe Windows (folosind un sunet standard de pe Windows)
-        os.system('powershell -c "(New-Object Media.SoundPlayer \\"C:\\Windows\\Media\\chord.wav\\").PlaySync()"')
-    elif platform.system() == "Linux":
-        # Sunet pe Linux
-        os.system('play --no-show-progress --null --channels 1 synth %s sine %f' % (0.1, 440))
-    elif platform.system() == "Darwin":
-        # Sunet pe macOS
-        os.system('afplay /System/Library/Sounds/Glass.aiff')
-    else:
-        # Pe Android sau alte platforme, nu facem nimic (se poate integra un sunet manual dacă e nevoie)
-        pass
+    try:
+        utils.beep(5)  # Apelăm funcția beep din utils.py
+    except Exception as e:
+        print(f"Eroare la redarea sunetului: {e}")
 
 # URL-ul paginii
 url = 'https://depunerefotovoltaice.afm.ro/'
@@ -54,10 +45,9 @@ if last_hash:
     while True:
         time.sleep(1)  # Verifică la fiecare secundă
         current_hash = get_page_hash(url)
-        print("Pagina s-a schimbat!")
-        show_notification("Alertă!", "Pagina s-a modificat!")
+        print(f"Nimic")
+        #show_notification("Alertă!", "Pagina s-a modificat!")
         play_sound()
-
         if current_hash and current_hash != last_hash:
             print("Pagina s-a schimbat!")
             show_notification("Alertă!", "Pagina s-a modificat!")
