@@ -29,7 +29,7 @@ def show_notification(title, text):
 # Funcție pentru a reda sunetul folosind utils.beep
 def play_sound():
     try:
-        utils.beep(5)  # Apelăm funcția beep din utils.py
+        utils.beep(3)  # Apelăm funcția beep din utils.py
     except Exception as e:
         print(f"Eroare la redarea sunetului: {e}")
 
