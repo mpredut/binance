@@ -47,7 +47,7 @@ if last_hash:
         current_hash = get_page_hash(url)
         print(f"Nimic")
         #show_notification("Alertă!", "Pagina s-a modificat!")
-        play_sound()
+        #play_sound()
         if current_hash and current_hash != last_hash:
             print("Pagina s-a schimbat!")
             show_notification("Alertă!", "Pagina s-a modificat!")
