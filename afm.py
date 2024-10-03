@@ -53,7 +53,7 @@ if last_hash:
             #show_notification("Alertă!", "Pagina s-a modificat!")
             play_sound()
             last_hash = current_hash  # Actualizează hash-ul paginii
-            return
+            exit
         elif not current_hash:
             print("Eroare la preluarea paginii. Reîncercăm...")
 
