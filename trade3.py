@@ -284,7 +284,7 @@ import time
 class TrendState:
     def __init__(self, max_duration_seconds, expiration_threshold):
         self.state = 'HOLD'  # Inițial, starea este 'HOLD'
-        self.old_state = elf.state 
+        self.old_state = self.state 
         self.start_time = None  # Timpul de început al trendului
         self.end_time = None  # Timpul de sfârșit al trendului
         self.last_confirmation_time = None  # Ultimul timp de confirmare al trendului
@@ -331,12 +331,12 @@ class TrendState:
         return 0
 
     def is_trend_down(self):
-         if not check_trend_expiration(self) and self.state == 'DOWN':
+        if not check_trend_expiration(self) and self.state == 'DOWN':
             return confirm_count
         return 0
 
     def is_hold(self):
-       if check_trend_expiration(self) or self.state == 'HOLD':
+        if check_trend_expiration(self) or self.state == 'HOLD':
             return confirm_count
         return 0
         
