@@ -338,17 +338,17 @@ class TrendState:
         return 0
 
     def is_trend_down(self):
-         if not check_trend_expiration(self) and self.state == 'DOWN':
+        if not check_trend_expiration(self) and self.state == 'DOWN':
             return confirm_count
         return 0
 
     def is_hold(self):
-       if check_trend_expiration(self) or self.state == 'HOLD':
+        if check_trend_expiration(self) or self.state == 'HOLD':
             return confirm_count
         return 0
         
 trend_state = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_threshold=10 * 60)  # Expira în 10 minute
-
+trend_state2 = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_threshold=10 * 60)  # Expira în 10 minute
 
 #
 #       MAIN 
