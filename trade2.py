@@ -1,5 +1,6 @@
 import time
 import datetime
+import sys
 import math
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
@@ -128,7 +129,7 @@ class PriceWindow:
             # Verificare pentru valori negative si declansare exceptie
             if min_proximity < 0 or max_proximity < 0:
                 print(f"Negative proximity detected! min_proximity: {min_proximity}, max_proximity: {max_proximity}")
-                sys.exit(1)
+                #sys.exit(1)
         else:
             min_proximity = max_proximity = 0
 
@@ -289,26 +290,26 @@ import time
 
 class TrendState:
     def __init__(self, max_duration_seconds, expiration_threshold):
-        self.state = 'HOLD'  # Initial, starea este 'HOLD'
+        self.state = 'HOLD'  # Inițial, starea este 'HOLD'
+        self.old_state = elf.state 
         self.start_time = None  # Timpul de început al trendului
-        self.end_time = None  # Timpul de sfarsit al trendului
+        self.end_time = None  # Timpul de sfârșit al trendului
         self.last_confirmation_time = None  # Ultimul timp de confirmare al trendului
-        self.max_duration_seconds = max_duration_seconds  # Durata maxima permisa pentru un trend
-        self.confirm_count = 0  # Contorul de confirmari pentru trend
-        self.expiration_threshold = expiration_threshold  # Pragul de timp între confirmari (în secunde)
+        self.max_duration_seconds = max_duration_seconds  # Durata maximă permisă pentru un trend
+        self.confirm_count = 0  # Contorul de confirmări pentru trend
+        self.expiration_threshold = expiration_threshold  # Pragul de timp între confirmări (în secunde)
 
     def start_trend(self, new_state):
-        old_state = self.state
-        if self.state != 'HOLD':  # Daca schimbam trendul, consideram sfarsitul trendului anterior
-            self.end_trend()  # Marcheaza sfarsitul trendului anterior
+        
+        self.end_trend()  # Marchează sfârșitul trendului anterior
         
         self.state = new_state
         self.start_time = time.time()
         self.last_confirmation_time = self.start_time
         self.confirm_count = 1  # Prima confirmare
-        self.end_time = None  # Resetam timpul de sfarsit
+        self.end_time = None  # Resetăm timpul de sfârșit
         print(f"Trend started: {self.state} at {time.ctime(self.start_time)}")
-        return old_state
+        return self.old_state
 
     def confirm_trend(self):
         self.last_confirmation_time = time.time()
@@ -316,29 +317,35 @@ class TrendState:
         print(f"Trend confirmed: {self.state} at {time.ctime(self.last_confirmation_time)}")
 
     def check_trend_expiration(self):
-        """Verifica daca trendul a expirat din cauza lipsei confirmarilor în intervalul permis."""
+        """Verifică dacă trendul a expirat din cauza lipsei confirmărilor în intervalul permis."""
         if self.last_confirmation_time:
             time_since_last_confirmation = time.time() - self.last_confirmation_time
             if time_since_last_confirmation > self.expiration_threshold:
                 print(f"Trend expired: {self.state}. Time since last confirmation: {time_since_last_confirmation} seconds")
-                self.end_time = self.last_confirmation_time  # Sfarsitul trendului este la ultima confirmare
+                end_trend()
                 return True
         return False
 
     def end_trend(self):
-        """Marcheaza sfarsitul trendului curent si returneaza starea trendului care s-a încheiat."""
-        self.end_time = self.last_confirmation_time  # Timpul de sfarsit al trendului este ultimul timp de confirmare
+        self.old_state = self.state
+        self.end_time = self.last_confirmation_time  # Timpul de sfârșit al trendului este ultimul timp de confirmare
+        self.confirm_count = 0
         print(f"Trend ended: {self.state} at {time.ctime(self.end_time)} after {self.confirm_count} confirmations.")
-        self.state == 'HOLD'
-
+  
     def is_trend_up(self):
-        return self.state == 'UP'
+        if not check_trend_expiration(self) and self.state == 'UP':
+            return confirm_count
+        return 0
 
     def is_trend_down(self):
-        return self.state == 'DOWN'
+         if not check_trend_expiration(self) and self.state == 'DOWN':
+            return confirm_count
+        return 0
 
     def is_hold(self):
-        return self.state == 'HOLD'
+       if check_trend_expiration(self) or self.state == 'HOLD':
+            return confirm_count
+        return 0
         
 trend_state = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_threshold=10 * 60)  # Expira în 10 minute
 
