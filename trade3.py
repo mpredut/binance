@@ -59,9 +59,10 @@ class PriceWindow:
             removed_min = self.min_deque.popleft()
             print(f"Minimum removed as it is outside the window: {removed_min}")
 
-        for existing_price, index in self.min_deque:
-            if abs(existing_price - price) <= self.epsilon: 
-                return  # Don't add the current price if an equivalent exists
+        #do this also for max
+        #for existing_price, index in self.min_deque:
+        #    if abs(existing_price - price) <= self.epsilon: 
+        #        return  # Don't add the current price if an equivalent exists
 
         while self.min_deque and self.min_deque[-1][0] > price:
             removed_min = self.min_deque.pop()
@@ -130,10 +131,14 @@ class PriceWindow:
 
             # Verificare pentru valori negative și declanșare excepție
             if min_proximity < 0 or max_proximity < 0:
-                printf(f"Negative proximity detected! min_proximity: {min_proximity}, max_proximity: {max_proximity}")
+                print(f"Negative proximity detected! min_proximity: {min_proximity}, max_proximity: {max_proximity}")
+                min_proximity = max_proximity = 0
                 sys.exit(1)
         else:
-            min_proximity = max_proximity = 0
+            min_proximity = max_proximity = 0 # aprope total de min si de max
+        #min_proximity + max_proximity = 1 
+        #daca min_proximity -> 0 inseamna ca pretul este mai aprope de min
+        #daca max_proximity -> 0 inseamna ca pretul este mai aprope de max
 
         return min_proximity, max_proximity
 
@@ -315,7 +320,7 @@ class TrendState:
             time_since_last_confirmation = time.time() - self.last_confirmation_time
             if time_since_last_confirmation > self.expiration_threshold:
                 print(f"Trend expired: {self.state}. Time since last confirmation: {time_since_last_confirmation} seconds")
-                end_trend()
+                self.end_trend()
                 return True
         return False
 
@@ -326,18 +331,18 @@ class TrendState:
         print(f"Trend ended: {self.state} at {time.ctime(self.end_time)} after {self.confirm_count} confirmations.")
   
     def is_trend_up(self):
-        if not check_trend_expiration(self) and self.state == 'UP':
-            return confirm_count
+        if not  self.check_trend_expiration() and self.state == 'UP':
+            return self.confirm_count
         return 0
 
     def is_trend_down(self):
-        if not check_trend_expiration(self) and self.state == 'DOWN':
-            return confirm_count
+        if not self.check_trend_expiration() and self.state == 'DOWN':
+            return self.confirm_count
         return 0
 
     def is_hold(self):
-        if check_trend_expiration(self) or self.state == 'HOLD':
-            return confirm_count
+        if self.check_trend_expiration() or self.state == 'HOLD':
+            return self.confirm_count
         return 0
         
 trend_state1 = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_threshold=10 * 60)  # Expiră în 10 minute
@@ -347,7 +352,7 @@ trend_state2 = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_threshol
 #       MAIN 
 #
 
-alert.check_alert(True, f"SELL order ")
+#alert.check_alert(True, f"SELL order ")
   
 
 price_window = PriceWindow(window_size)
