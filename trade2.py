@@ -238,6 +238,8 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
     
     if action == 'HOLD':
         return order_placed, order_id
+    
+    api.cancel_expired_orders(action, api.symbol, EXP_TIME_BUY_ORDER if action == 'BUY' else EXP_TIME_SELL_ORDER)
         
     # Determine the number of orders and their spacing based on price trend
     if slope is not None and slope > 0:
@@ -252,8 +254,6 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
         print(f"Placing more, {num_orders} smaller orders due to falling price.")
 
     if action == 'BUY':
-        api.cancel_expired_orders("buy", api.symbol, EXP_TIME_BUY_ORDER)
-
         buy_price = min(proposed_price, current_price * 0.998)
         print(f"BUY price: {buy_price:.2f} USDT")
 
@@ -271,8 +271,6 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
                 order_id = order['orderId']
 
     elif action == 'SELL':
-        api.cancel_expired_orders("sell", api.symbol, EXP_TIME_SELL_ORDER)
-
         sell_price = max(proposed_price, current_price * 1.002)
         print(f"SELL price: {sell_price:.2f} USDT")
         

@@ -128,7 +128,7 @@ class PriceWindow:
             min_proximity = (current_price - min_price) / (max_price - min_price)
             max_proximity = (max_price - current_price) / (max_price - min_price)
 
-            # Verificare pentru valori negative și declanșare excepție
+            # Verificare pentru valori negative si declansare excepție
             if min_proximity < 0 or max_proximity < 0:
                 print(f"Negative proximity detected! min_proximity: {min_proximity}, max_proximity: {max_proximity}")
                 min_proximity = max_proximity = 0
@@ -155,10 +155,10 @@ class PriceWindow:
         min_price, min_index = self.get_min_and_index()
         max_price, max_index = self.get_max_and_index()
         
-        print(
-            f"Min price: {min_price} at index: {min_index} "
-            f"Max price: {max_price} at index: {max_index}"
-        )
+        #print(
+        #    f"Min price: {min_price} at index: {min_index} "
+        #    f"Max price: {max_price} at index: {max_index}"
+        #)
 
         min_proximity, max_proximity = self.calculate_proximities(current_price)
    
@@ -225,26 +225,28 @@ window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP_GET_PRICE
 window_size2 = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
+def track_and_place_order(action, proposed_price, current_price, quantity=0.017/2, order_ids=None):
+    # Initialize order_ids as an empty list if it is None
+    if order_ids is None:
+        order_ids = []
 
-def track_and_place_order(action, proposed_price, current_price, slope, quantity=0.017/2, order_placed=False, order_id=None):
-    
     if action == 'HOLD':
-        return order_placed, order_id
-        
-    # Determine the number of orders and their spacing based on price trend
-    if slope is not None and slope > 0:
-        # Price is rising, place fewer, larger orders
-        num_orders = 3
-        price_step = 0.2  # Increase the spacing between orders as procents
-        print(f"Placing fewer, {num_orders} larger orders due to rising price.")
-    else:
-        # Price is falling, place more, smaller orders
-        num_orders = 3
-        price_step = 0.08  # Reduce the spacing between orders as procents
-        print(f"Placing more, {num_orders} smaller orders due to falling price.")
+        return order_ids
 
+    # Cancel any existing orders
+    if order_ids:
+        for order_id in order_ids:
+            if not api.cancel_order(order_id):
+                alert.check_alert(True, f"Order executed! be Happy :-){order_id:.2f}")
+        
+    api.cancel_expired_orders(action, api.symbol, EXP_TIME_BUY_ORDER if action == 'BUY' else EXP_TIME_SELL_ORDER)
+        
+    num_orders, price_step = (2, 0.2) if action == "BUY" > 0 else (3, 0.08); 
+    # Price is rising, place fewer, larger orders. # Increase the spacing between orders as percents
+    # Price is falling, place more, smaller orders # Reduce the spacing between orders as percents
+   
     if action == 'BUY':
-        api.cancel_expired_orders("buy", api.symbol, EXP_TIME_BUY_ORDER)
+        api.cancel_expired_orders(action, api.symbol, EXP_TIME_BUY_ORDER)
 
         buy_price = min(proposed_price, current_price * 0.998)
         print(f"BUY price: {buy_price:.2f} USDT")
@@ -259,11 +261,10 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
             order = api.place_order_smart("buy", api.symbol, adjusted_buy_price, order_quantity)
             if order:
                 print(f"Buy order placed successfully with ID: {order['orderId']}")
-                order_placed = True
-                order_id = order['orderId']
+                order_ids.append(order['orderId']) 
 
     elif action == 'SELL':
-        api.cancel_expired_orders("sell", api.symbol, EXP_TIME_SELL_ORDER)
+        api.cancel_expired_orders(action, api.symbol, EXP_TIME_SELL_ORDER)
 
         sell_price = max(proposed_price, current_price * 1.002)
         print(f"SELL price: {sell_price:.2f} USDT")
@@ -278,44 +279,43 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
             order = api.place_order_smart("sell", api.symbol, adjusted_sell_price, order_quantity)
             if order:
                 print(f"Sell order placed successfully with ID: {order['orderId']}")
-                order_placed = True
-                order_id = order['orderId']
+                order_ids.append(order['orderId']) 
 
-    return order_placed, order_id  # Return the updated order state
+    return order_ids
 
 
-import time
 
 class TrendState:
     def __init__(self, max_duration_seconds, expiration_threshold):
         self.state = 'HOLD'  # Inițial, starea este 'HOLD'
         self.old_state = self.state 
-        self.start_time = None  # Timpul de început al trendului
-        self.end_time = None  # Timpul de sfârșit al trendului
+        self.start_time = None  # Timpul de Inceput al trendului
+        self.end_time = None  # Timpul de sfârsit al trendului
         self.last_confirmation_time = None  # Ultimul timp de confirmare al trendului
-        self.max_duration_seconds = max_duration_seconds  # Durata maximă permisă pentru un trend
-        self.confirm_count = 0  # Contorul de confirmări pentru trend
-        self.expiration_threshold = expiration_threshold  # Pragul de timp între confirmări (în secunde)
+        self.max_duration_seconds = max_duration_seconds  # Durata maxima permisa pentru un trend
+        self.confirm_count = 0  # Contorul de confirmari pentru trend
+        self.expiration_threshold = expiration_threshold  # Pragul de timp Intre confirmari (In secunde)
 
     def start_trend(self, new_state):
         
-        self.end_trend()  # Marchează sfârșitul trendului anterior
+        self.end_trend()  # Marcheaza sfârsitul trendului anterior
         
         self.state = new_state
         self.start_time = time.time()
         self.last_confirmation_time = self.start_time
         self.confirm_count = 1  # Prima confirmare
-        self.end_time = None  # Resetăm timpul de sfârșit
-        print(f"Trend started: {self.state} at {time.ctime(self.start_time)}")
+        self.end_time = None  # Resetam timpul de sfârsit
+        print(f"Start of {self.state} trend at {u.timeToHMS(self.start_time)}")
         return self.old_state
 
     def confirm_trend(self):
         self.last_confirmation_time = time.time()
         self.confirm_count += 1
-        print(f"Trend confirmed: {self.state} at {time.ctime(self.last_confirmation_time)}")
+        print(f"Trend confirmed: {self.state} at {u.timeToHMS(self.last_confirmation_time)}")
+        return self.confirm_count
 
     def check_trend_expiration(self):
-        """Verifică dacă trendul a expirat din cauza lipsei confirmărilor în intervalul permis."""
+        """Verifica daca trendul a expirat din cauza lipsei confirmarilor In intervalul permis."""
         if self.last_confirmation_time:
             time_since_last_confirmation = time.time() - self.last_confirmation_time
             if time_since_last_confirmation > self.expiration_threshold:
@@ -326,7 +326,7 @@ class TrendState:
 
     def end_trend(self):
         self.old_state = self.state
-        self.end_time = self.last_confirmation_time  # Timpul de sfârșit al trendului este ultimul timp de confirmare
+        self.end_time = self.last_confirmation_time  # Timpul de sfârsit al trendului este ultimul timp de confirmare
         print(f"Trend ended: {self.state} at {time.ctime(self.end_time)} after {self.confirm_count} confirmations.")
         self.confirm_count = 0
   
@@ -345,8 +345,8 @@ class TrendState:
             return self.confirm_count
         return 0
         
-trend_state1 = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_threshold=10 * 60)  # Expiră în 10 minute
-trend_state2 = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_threshold=10 * 60)  # Expiră în 10 minute
+trend_state1 = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_threshold=10 * 60)  # Expira In 10 minute
+trend_state2 = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_threshold=10 * 60)  # Expira In 10 minute
 
 #
 #       MAIN 
@@ -357,8 +357,7 @@ trend_state2 = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_threshol
 
 price_window = PriceWindow(window_size)
 
-order_placed = False
-order_id = None
+order_ids = []
 last_order_time = time.time()
 last_evaluate_time = time.time()
 
@@ -396,47 +395,44 @@ while True:
            if trend_state1.is_hold():
               trend_state1.confirm_trend()
         
-        if trend_state1.is_trend_up() > 3:
-            order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)   
-        if trend_state1.is_trend_down() > 3:
-            order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)   
+        if trend_state1.is_trend_up() == 3:
+            track_and_place_order('BUY', proposed_price, current_price, order_ids=order_ids)   
+        if trend_state1.is_trend_down() == 3:
+            track_and_place_order('SELL', proposed_price, current_price, order_ids=order_ids)   
 
         #
-        # Verificăm schimbările de preț și gestionăm trendurile
+        # Verificam schimbarile de preț si gestionam trendurile
         #
-        proposed_price = current_price        
+        proposed_price = current_price
+        initial_difference = 147
         price_change = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
         
         if price_change is not None and price_change > 0:
-            # Confirmăm un trend de creștere
+            # Confirmam un trend de crestere
             print("DIFERENTA MARE UP!")
             if trend_state2.is_trend_up():
-                trend_state2.confirm_trend()  # Confirmăm că trendul de creștere continuă
+                count = trend_state2.confirm_trend() # Confirmam ca trendul de crestere continua
+                diff = decrese_value_by_increment_exp(initial_difference, count)
+                proposed_price = current_price - diff
+                track_and_place_order('BUY', proposed_price, current_price, order_ids=order_ids)
             else:
-                expired_trend = trend_state2.start_trend('UP')  # Începem un trend nou de creștere
-                order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
-                # Dacă trendul anterior a fost DOWN, cumpărăm la începutul trendului de UP
-                if expired_trend == 'DOWN' or expired_trend == 'HOLD':
-                    proposed_price = proposed_price - 142
-                    print(f"Start of UP trend. BUY order at {proposed_price:.2f} EUR")
-                    order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
-                    #last_order_time = current_time
+                expired_trend = trend_state2.start_trend('UP')  # Incepem un trend nou de crestere
+                proposed_price = current_price - initial_difference
+                track_and_place_order('BUY', proposed_price, current_price, order_ids=order_ids)
+               
 
         elif price_change is not None and price_change < 0:
-            # Confirmăm un trend de scădere
+            # Confirmam un trend de scadere
             print("DIFERENTA MARE DOWN!")
             if trend_state2.is_trend_down():
-                trend_state2.confirm_trend()  # Confirmăm că trendul de scădere continuă
+                count = trend_state2.confirm_trend() # Confirmam ca trendul de scadere continua
+                diff = decrese_value_by_increment_exp(initial_difference, count)
+                proposed_price = proposed_price + diff
+                track_and_place_order('SELL', proposed_price, current_price, order_ids=order_ids)
             else:
-                expired_trend = trend_state2.start_trend('DOWN')  # Începem un trend nou de scădere
-
-                # Dacă trendul anterior a fost UP, vindem la începutul trendului de DOWN
-                if expired_trend == 'UP' or expired_trend == 'HOLD':
-                    proposed_price = proposed_price + 142
-                    print(f"Start of DOWN trend. SELL order at {proposed_price:.2f} EUR")
-                    order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
-                    #last_order_time = current_time
-
+                expired_trend = trend_state2.start_trend('DOWN')  # Incepem un trend nou de scadere
+                proposed_price = current_price + initial_difference
+                track_and_place_order('SELL', proposed_price, current_price, order_ids=order_ids)
 
    
             

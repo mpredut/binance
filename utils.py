@@ -15,7 +15,7 @@ def beep(n):
         else:
             # Aici putem folosi o comanda de beep - nu  merge pt orice android
             os.system('echo "\007"')
-        time.sleep(3)
+        time.sleep(2)
 
 
 # Bugetul initial
@@ -135,7 +135,19 @@ def timestampToTime(timestamp_ms):
     # Returnam timpul ca string în format citibil
     return human_readable_time.strftime('%Y-%m-%d %H:%M:%S')
 
+
+def timeToHMS(timestamp_ms):
+    # Convertim timpul din milisecunde în secunde
+    timestamp_sec = timestamp_ms / 1000.0
     
+    # Convertim în format datetime
+    human_readable_time = datetime.utcfromtimestamp(timestamp_sec)
+    
+    # Returnăm timpul ca string în format oră, minut și secundă
+    return human_readable_time.strftime('%H:%M:%S')
+    #print(f"Start of {self.state} trend at {time.ctime(self.start_time)}")
+    #print(f"Start of {self.state} trend at {time.strftime('%H:%M:%S', time.localtime(self.start_time))}")
+
     # Functia care converteste secunde în zile
 def secondsToDays(max_age_seconds):
     # Definim numarul de secunde într-o zi
@@ -192,3 +204,10 @@ def exponential_decrease(initial_procent, expired_duration, passs, half_life_dur
     T = half_life_duration / expired_duration  # Calculate the time constant T
     #return initial_procent * (2 ** (-passs / T))  # Exponential decrease formula
     return initial_procent * math.exp(-passs / T)  # Exponential decrease formula using e
+    
+def decrese_value_by_increment_exp(increment_factor, value, coeficient=0.05):
+    adjustment_v0 = value / (increment_factor + 1)
+    adjustment_v1 = value / (1 + coeficient * increment_factor**2)
+    adjustment_v2 = value * math.exp(-coeficient * increment_factor)
+    return adjustment_v1, adjustment_v2
+   
