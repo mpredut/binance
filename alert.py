@@ -43,7 +43,7 @@ def check_alert(condition, message, alert_interval=60):
             if last_alert_time is None or (current_time - last_alert_time) >= alert_interval:
                 timestamp = time.strftime('%H:%M:%S', time.localtime(current_time))
                 message_with_time = f"{message} at {timestamp}"
-                utils.beep(4)
+                utils.beep(2)
                 #send_tasker_notification(message_with_time)
                 #Send push notification on Android
                 #send_push_notification("Alerta Trading", message_with_time)
