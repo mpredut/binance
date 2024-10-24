@@ -116,7 +116,6 @@ class PriceWindow:
 
         price_change_percent = (max_price - min_price) / min_price
         slope_normalized = price_change_percent / (max_index - min_index)
-
         return slope_normalized
 
 
@@ -166,7 +165,7 @@ class PriceWindow:
         price_change_percent = (max_price - min_price) / min_price * 100 if min_price and max_price else 0
         print(
             f"Price change percent: {price_change_percent:.2f} "
-            f"slope: {slope:.2f} "
+            f"slope: {slope:.4f} "
             f"Market trending: {'upwards' if slope > 0 else 'downwards'}"
         )
 

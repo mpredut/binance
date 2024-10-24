@@ -431,12 +431,12 @@ while True:
                 expired_trend = trend_state.start_trend('UP')  # Începem un trend nou de crestere
                 order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
                 # Daca trendul anterior a fost DOWN, cumparam la începutul trendului de UP
-                if expired_trend == 'DOWN':
-                    proposed_price = proposed_price - 142
-                    print(f"Start of UP trend. BUY order at {proposed_price:.2f} EUR")
-                    
-                    order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
-                    #last_order_time = current_time
+                # if expired_trend == 'DOWN':
+                proposed_price = proposed_price - 142
+                print(f"Start of UP trend. BUY order at {proposed_price:.2f} EUR")
+                
+                order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
+                #last_order_time = current_time
 
         elif price_change is not None and price_change < 0:
             # Confirmam un trend de scadere
@@ -446,11 +446,11 @@ while True:
                 expired_trend = trend_state.start_trend('DOWN')  # Începem un trend nou de scadere
 
                 # Daca trendul anterior a fost UP, vindem la începutul trendului de DOWN
-                if expired_trend == 'UP':
-                    proposed_price = proposed_price + 142
-                    print(f"Start of DOWN trend. SELL order at {proposed_price:.2f} EUR")
-                    #order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
-                    #last_order_time = current_time
+                # if expired_trend == 'UP':
+                proposed_price = proposed_price + 142
+                print(f"Start of DOWN trend. SELL order at {proposed_price:.2f} EUR")
+                #order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
+                #last_order_time = current_time
 
 
    
