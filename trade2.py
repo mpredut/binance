@@ -60,9 +60,10 @@ class PriceWindow:
             removed_min = self.min_deque.popleft()
             print(f"Minimum removed as it is outside the window: {removed_min}")
 
-        for existing_price, index in self.min_deque:
-            if abs(existing_price - price) <= self.epsilon: 
-                return  # Don't add the current price if an equivalent exists
+        #do this also for max
+        #for existing_price, index in self.min_deque:
+        #    if abs(existing_price - price) <= self.epsilon: 
+        #        return  # Don't add the current price if an equivalent exists
 
         while self.min_deque and self.min_deque[-1][0] > price:
             removed_min = self.min_deque.pop()

@@ -170,9 +170,7 @@ class PriceWindow:
             f"Market trending: {'upwards' if slope > 0 else 'downwards'}"
         )
 
-        remaining_decrease_percent = max(0, decrease_percent - price_change_percent)
-        print(f"Remaining decrease percent: {remaining_decrease_percent:.2f}")
-        if price_change_percent < threshold_percent and not utils.are_values_very_close(price_change_percent, threshold_percent):
+           if price_change_percent < threshold_percent and not utils.are_values_very_close(price_change_percent, threshold_percent):
             action = 'HOLD'
             return action, current_price, price_change_percent, slope
             
@@ -184,6 +182,7 @@ class PriceWindow:
                 print(f"Near recent high. Action: {action}")
                 proposed_price = current_price * 0.995
                 print(f"Proposed price updated  to {proposed_price} to be close to current price {current_price}")
+                return action, proposed_price, price_change_percent, slope 
         else:
             print("Market trending downwards")
             if min_position < 0.2 or utils.are_values_very_close(min_position, 0.2, target_tolerance_percent=1.0):
@@ -191,11 +190,13 @@ class PriceWindow:
                 print(f"Near recent low. Action: {action}")
                 proposed_price = current_price * 1.005
                 print(f"Proposed price updated  to {proposed_price} to be close to current price {current_price}")
+                return action, proposed_price, price_change_percent, slope
 
         action = 'BUY'
+        remaining_decrease_percent = max(0, decrease_percent - price_change_percent)
+        print(f"Remaining decrease percent: {remaining_decrease_percent:.2f}")
         proposed_price = current_price * (1 - remaining_decrease_percent / 100)
         print(f"Trending not well defined propose price: {proposed_price:.2f} Action: {action}")
-        
         return action, proposed_price, price_change_percent, slope
 
     def check_price_change(self, threshold):
@@ -327,8 +328,8 @@ class TrendState:
     def end_trend(self):
         self.old_state = self.state
         self.end_time = self.last_confirmation_time  # Timpul de sfârșit al trendului este ultimul timp de confirmare
-        self.confirm_count = 0
         print(f"Trend ended: {self.state} at {time.ctime(self.end_time)} after {self.confirm_count} confirmations.")
+        self.confirm_count = 0
   
     def is_trend_up(self):
         if not  self.check_trend_expiration() and self.state == 'UP':
@@ -401,8 +402,10 @@ while True:
         if trend_state1.is_trend_down() > 3:
             order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)   
 
-
+        #
         # Verificăm schimbările de preț și gestionăm trendurile
+        #
+        proposed_price = current_price        
         price_change = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
         
         if price_change is not None and price_change > 0:
@@ -414,7 +417,7 @@ while True:
                 expired_trend = trend_state2.start_trend('UP')  # Începem un trend nou de creștere
                 order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
                 # Dacă trendul anterior a fost DOWN, cumpărăm la începutul trendului de UP
-                if expired_trend == 'DOWN':
+                if expired_trend == 'DOWN' or expired_trend == 'HOLD':
                     proposed_price = proposed_price - 142
                     print(f"Start of UP trend. BUY order at {proposed_price:.2f} EUR")
                     order_placed, order_id = track_and_place_order('BUY', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
@@ -429,7 +432,7 @@ while True:
                 expired_trend = trend_state2.start_trend('DOWN')  # Începem un trend nou de scădere
 
                 # Dacă trendul anterior a fost UP, vindem la începutul trendului de DOWN
-                if expired_trend == 'UP':
+                if expired_trend == 'UP' or expired_trend == 'HOLD':
                     proposed_price = proposed_price + 142
                     print(f"Start of DOWN trend. SELL order at {proposed_price:.2f} EUR")
                     order_placed, order_id = track_and_place_order('SELL', proposed_price, current_price, slope=None, order_placed=order_placed, order_id=order_id)
