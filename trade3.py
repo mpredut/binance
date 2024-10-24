@@ -170,7 +170,7 @@ class PriceWindow:
             f"Market trending: {'upwards' if slope > 0 else 'downwards'}"
         )
 
-           if price_change_percent < threshold_percent and not utils.are_values_very_close(price_change_percent, threshold_percent):
+        if price_change_percent < threshold_percent and not utils.are_values_very_close(price_change_percent, threshold_percent):
             action = 'HOLD'
             return action, current_price, price_change_percent, slope
             
