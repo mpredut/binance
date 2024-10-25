@@ -42,9 +42,9 @@ class PriceWindow:
         self.current_index += 1
         print(f"BTC: {round(price, 0):.0f} Current index in window: {self.current_index}")
        
-        if self.current_index > self.max_index:
-            print(f"Start normalize indexes")
-            self._normalize_indices()
+        #if self.current_index > self.max_index:
+        #    print(f"Start normalize indexes")
+        #    self._normalize_indices()
 
     def _normalize_indices(self):
         old_index = self.current_index
@@ -189,16 +189,16 @@ class PriceWindow:
         
         if slope > 0:
             print("Market trending upwards")
-            if min_proximity < 0.2 or utils.are_values_very_close(min_proximity, 0.2, target_tolerance_percent=1.0):
-                if min_position > 0.8 or utils.are_values_very_close(min_position, 0.8, target_tolerance_percent=1.0):
+            if min_proximity <= 0.2 or utils.are_values_very_close(min_proximity, 0.2, target_tolerance_percent=1.0):
+                if min_position >= 0.8 or utils.are_values_very_close(min_position, 0.8, target_tolerance_percent=1.0):
                     action = 'BUY'
                     print(f"Near recent low. Action: {action}")
                     proposed_price = current_price * 0.995
                     print(f"Proposed price updated  to {proposed_price} to be close to current price {current_price}")
         else:
             print("Market trending downwards")
-            if max_proximity < 0.2 or utils.are_values_very_close(max_proximity, 0.2, target_tolerance_percent=1.0):
-                if max_position > 0.8 or utils.are_values_very_close(max_position, 0.8, target_tolerance_percent=1.0):
+            if max_proximity <= 0.2 or utils.are_values_very_close(max_proximity, 0.2, target_tolerance_percent=1.0):
+                if max_position >= 0.8 or utils.are_values_very_close(max_position, 0.8, target_tolerance_percent=1.0):
                     action = 'SELL'
                     print(f"Near recent high. Action: {action}")
                     proposed_price = current_price * 1.005
@@ -227,11 +227,11 @@ EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
 TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
 # am voie 6 ordere per perioada de expirare care este 2.6 ore. deaceea am impartit la 6
 TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + EXP_TIME_SELL_ORDER/ 6 + 4*79  # seconds to sleep for order placement
-WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 5  # minutes
+WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 4  # minutes
 window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP_GET_PRICE
 
 window_size2 = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
-SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
+SELL_BUY_THRESHOLD = 3  # Threshold for the number of consecutive signals
 
 
 def track_and_place_order(action, proposed_price, current_price, slope, quantity=0.017/2, order_placed=False, order_id=None):

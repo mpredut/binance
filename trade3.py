@@ -19,7 +19,7 @@ import utils as u
 
 
 class PriceWindow:
-    def __init__(self, window_size, max_index=10000, epsilon=1e-2):
+    def __init__(self, window_size, max_index=230, epsilon=1e-2):
         self.window_size = window_size
         self.prices = deque()  # Store all prices in the window
         self.min_deque = deque()  # Manage the minimums
@@ -30,29 +30,55 @@ class PriceWindow:
 
     def process_price(self, price):
         self.prices.append(price)
-
         if len(self.prices) > self.window_size:
             removed_price = self.prices.popleft()
             #print(f"Price removed from window: {removed_price}")
-
         self._manage_minimum(price)
         self._manage_maximum(price)
 
         self.current_index += 1
         print(f"BTC: {round(price, 0):.0f} Current index in window: {self.current_index}")
        
-        if self.current_index > self.max_index:
-            print(f"Start normalize indexes")
-            self._normalize_indices()
+        #if self.current_index > self.max_index:
+            #print(f"Start normalize indexes")
+            # self._normalize_indices()
 
     def _normalize_indices(self):
         old_index = self.current_index
         self.current_index = 0  # Reset current index
 
-        self.min_deque = deque([(i - old_index, price) for price, i in self.min_deque if i >= old_index])
-        self.max_deque = deque([(i - old_index, price) for price, i in self.max_deque if i >= old_index])
+        # Verifică indecșii din min_deque
+        print("idecsi dubiosi1:")
+        for price, i in self.min_deque:
+            if i < old_index - self.window_size:
+                print(f"  Price: {price}, Index: {i}")
+
+        # Verifică indecșii din max_deque
+        print("idecsi dubiosi2:")
+        for price, i in self.max_deque:
+            if i < old_index - self.window_size:
+                print(f"  Price: {price}, Index: {i}")
+
+        self.min_deque = deque([(price, i - (old_index - self.window_size + 1))
+                                 for price, i in self.min_deque if i >= old_index - self.window_size])
+
+        # Normalizează max_deque
+        self.max_deque = deque([(price, i - (old_index - self.window_size + 1))
+                                 for price, i in self.max_deque if i >= old_index - self.window_size])
+
+
+        # Verifică dacă există indexuri negative
+        negative_min_indices = [i for i, _ in self.min_deque if i < 0]
+        negative_max_indices = [i for i, _ in self.max_deque if i < 0]
+
+        if negative_min_indices:
+            print(f"Warning: Negative indices found in min_deque: {negative_min_indices}")
+
+        if negative_max_indices:
+            print(f"Warning: Negative indices found in max_deque: {negative_max_indices}")
 
         print(f"Indices normalized. Old index: {old_index}, New index: {self.current_index}")
+
 
     def _manage_minimum(self, price):
         if self.min_deque and self.min_deque[0][1] <= self.current_index - self.window_size:
@@ -155,10 +181,10 @@ class PriceWindow:
         min_price, min_index = self.get_min_and_index()
         max_price, max_index = self.get_max_and_index()
         
-        #print(
-        #    f"Min price: {min_price} at index: {min_index} "
-        #    f"Max price: {max_price} at index: {max_index}"
-        #)
+        print(
+            f"Min price: {min_price} at index: {min_index} "
+            f"Max price: {max_price} at index: {max_index}"
+        )
 
         min_proximity, max_proximity = self.calculate_proximities(current_price)
    
@@ -219,8 +245,8 @@ EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
 TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
 # am voie 6 ordere per perioada de expirare care este 2.6 ore. deaceea am impartit la 6
 TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + EXP_TIME_SELL_ORDER/ 6 + 4*79  # seconds to sleep for order placement
-WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 5  # minutes
-window_size = WINDOWS_SIZE_MIN * 60 / TIME_SLEEP_GET_PRICE
+WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 3.7 * 60  # minutes
+window_size = WINDOWS_SIZE_MIN / TIME_SLEEP_GET_PRICE
 
 window_size2 = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
@@ -238,10 +264,12 @@ def track_and_place_order(action, proposed_price, current_price, quantity=0.017/
         for order_id in order_ids:
             if not api.cancel_order(order_id):
                 alert.check_alert(True, f"Order executed! be Happy :-){order_id:.2f}")
+        order_ids.clear()
         
     api.cancel_expired_orders(action, api.symbol, EXP_TIME_BUY_ORDER if action == 'BUY' else EXP_TIME_SELL_ORDER)
         
-    num_orders, price_step = (2, 0.2) if action == "BUY" > 0 else (3, 0.08); 
+    num_orders, price_step = (2, 0.2) if action == "BUY" else (3, 0.08)
+
     # Price is rising, place fewer, larger orders. # Increase the spacing between orders as percents
     # Price is falling, place more, smaller orders # Reduce the spacing between orders as percents
    
@@ -298,7 +326,7 @@ class TrendState:
 
     def start_trend(self, new_state):
         
-        self.end_trend()  # Marcheaza sfârsitul trendului anterior
+        #self.end_trend()  # Marcheaza sfârsitul trendului anterior
         
         self.state = new_state
         self.start_time = time.time()
@@ -327,15 +355,20 @@ class TrendState:
     def end_trend(self):
         self.old_state = self.state
         self.end_time = self.last_confirmation_time  # Timpul de sfârsit al trendului este ultimul timp de confirmare
-        print(f"Trend ended: {self.state} at {time.ctime(self.end_time)} after {self.confirm_count} confirmations.")
+        print(f"Trend ended: {self.state} at {u.timeToHMS(self.end_time)} after {self.confirm_count} confirmations.")
+        self.old_confirm_count = self.confirm_count
         self.confirm_count = 0
   
     def is_trend_up(self):
+        if not self.confirm_count : 
+            return 0
         if not  self.check_trend_expiration() and self.state == 'UP':
             return self.confirm_count
         return 0
 
     def is_trend_down(self):
+        if not self.confirm_count : 
+            return 0
         if not self.check_trend_expiration() and self.state == 'DOWN':
             return self.confirm_count
         return 0
@@ -404,7 +437,7 @@ while True:
         # Verificam schimbarile de preț si gestionam trendurile
         #
         proposed_price = current_price
-        initial_difference = 147
+        initial_difference = 247
         price_change = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
         
         if price_change is not None and price_change > 0:
@@ -412,7 +445,7 @@ while True:
             print("DIFERENTA MARE UP!")
             if trend_state2.is_trend_up():
                 count = trend_state2.confirm_trend() # Confirmam ca trendul de crestere continua
-                diff = decrese_value_by_increment_exp(initial_difference, count)
+                diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
                 proposed_price = current_price - diff
                 track_and_place_order('BUY', proposed_price, current_price, order_ids=order_ids)
             else:
@@ -426,7 +459,7 @@ while True:
             print("DIFERENTA MARE DOWN!")
             if trend_state2.is_trend_down():
                 count = trend_state2.confirm_trend() # Confirmam ca trendul de scadere continua
-                diff = decrese_value_by_increment_exp(initial_difference, count)
+                diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
                 proposed_price = proposed_price + diff
                 track_and_place_order('SELL', proposed_price, current_price, order_ids=order_ids)
             else:
