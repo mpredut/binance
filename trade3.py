@@ -245,7 +245,7 @@ EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
 TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
 # am voie 6 ordere per perioada de expirare care este 2.6 ore. deaceea am impartit la 6
 TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + EXP_TIME_SELL_ORDER/ 6 + 4*79  # seconds to sleep for order placement
-WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 3.7 * 60  # minutes
+WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 1.7 * 60  # minutes
 window_size = WINDOWS_SIZE_MIN / TIME_SLEEP_GET_PRICE
 
 window_size2 = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
@@ -457,6 +457,7 @@ while True:
         elif price_change is not None and price_change < 0:
             # Confirmam un trend de scadere
             print("DIFERENTA MARE DOWN!")
+            initial_difference = 447
             if trend_state2.is_trend_down():
                 count = trend_state2.confirm_trend() # Confirmam ca trendul de scadere continua
                 diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)

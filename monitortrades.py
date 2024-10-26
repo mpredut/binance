@@ -544,7 +544,7 @@ taosymbol = 'TAOUSDT'
 #api.place_order("buy", taosymbol, taosymbol_target_price - 10, 1)
 
 
-def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_increse_threshold=0.19, percentage_decrese_threshold=0.02):
+def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_increse_threshold=0.08, percentage_decrese_threshold=0.02):
     try:
         # 1. Obtine ultimul trade pentru acest simbol (asumam ca este ordinul de cumparare)
         trade_orders = apitrades.get_trade_orders("buy", taosymbol, max_age_seconds)
@@ -570,11 +570,11 @@ def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_inc
         if price_increase > percentage_increse_threshold:
             print(f"Price increased by more than {percentage_increse_threshold * 100}%: Placing sell order")
             api.cancel_open_orders("sell", taosymbol)  # Anuleaza ordinele deschise
-            api.place_order("sell", taosymbol, current_price - 5, qty)
+            api.place_order("sell", taosymbol, current_price + 5, qty)
         elif price_decrease > percentage_decrese_threshold:
             print(f"Price decreased by more than {percentage_decrese_threshold * 100}%: Placing sell order")
             api.cancel_open_orders("sell", taosymbol)  # Anuleaza ordinele deschise
-            api.place_order("sell", taosymbol, current_price - 5, qty)
+            api.place_order("sell", taosymbol, current_price + 1, qty)
         else:
             print(f"Price price_increase {price_increase * 100}% range, price_decrease {price_decrease * 100} range. no action taken.")
 
