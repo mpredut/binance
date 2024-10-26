@@ -459,10 +459,10 @@ def cancel_order(order_id):
 
 def cancel_open_orders(order_type, symbol):
     try:
-        open_orders = api.get_open_orders(order_type, symbol)
-        for order in open_orders:
-            print(f"Cancelling order {order['orderId']} for {symbol}")
-            api.cancel_order(symbol, order['orderId'])
+        open_orders = get_open_orders(order_type, symbol)
+        for order_id, order_details in open_orders.items():
+            print(f"Cancelling order {order_id} for {symbol}")
+            cancel_order(symbol, order_id)
     except Exception as e:
         print(f"Error cancelling orders for {symbol}: {e}")
         

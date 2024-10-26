@@ -553,8 +553,10 @@ def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_inc
             print(f"No trade orders found for {taosymbol} in the last {max_age_seconds} seconds.")
             return
         
+        sorted_trade_orders = sorted(trade_orders, key=lambda x: x['price'])
+        #sorted_trade_orders = sorted(trade_orders, key=lambda x: x['time'], reverse=True)
         # Ultimul ordin de cumparare
-        buy_order = trade_orders[0]  # presupunem ca primul ordin este ultimul
+        buy_order = sorted_trade_orders[0]  # presupunem ca primul ordin este ultimul
         buy_price = float(buy_order['price'])  # Pretul de cumparare
 
         print(f"Buy price for {taosymbol}: {buy_price}")
