@@ -35,7 +35,12 @@ def get_interval_time(valoare_prestabilita=interval_time, marja_aleatoare=10):
  
 def calculate_difference_percent(val1, val2):
     return abs(val1 - val2) / ((val1 + val2) / 2) * 100
-
+    
+    
+def value_diff_to_percent(value1, value2):
+    diff = value1 - value2
+    percent = (diff / value1) * 100
+    return percent
 
 #valorile sunt in jurul procentului ca interval
 def are_difference_equal_with_aprox_proc(value1, value2, target_percent = 10.0):

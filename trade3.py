@@ -227,11 +227,14 @@ class PriceWindow:
     def check_price_change(self, threshold):
         if len(self.prices) < 2:
             return None
-        oldest_price = self.prices[0]
-        newest_price = self.prices[-1]
-        price_diff = newest_price - oldest_price
+        min_price, min_index = self.get_min_and_index()
+        max_price, max_index = self.get_max_and_index()
+        #oldest_price = self.prices[0]
+        #newest_price = self.prices[-1]
+        #price_diff = max_price - min_price
+        price_diff = u.calculate_difference_percent(max_price, min_price)
         if abs(price_diff) >= threshold or utils.are_values_very_close(price_diff, threshold) :
-            return price_diff
+            return max_index - min_index
         else:
             return None
             
@@ -317,6 +320,7 @@ class TrendState:
     def __init__(self, max_duration_seconds, expiration_threshold):
         self.state = 'HOLD'  # Inițial, starea este 'HOLD'
         self.old_state = self.state 
+        self.expired = False
         self.start_time = None  # Timpul de Inceput al trendului
         self.end_time = None  # Timpul de sfârsit al trendului
         self.last_confirmation_time = None  # Ultimul timp de confirmare al trendului
@@ -333,6 +337,7 @@ class TrendState:
         self.last_confirmation_time = self.start_time
         self.confirm_count = 1  # Prima confirmare
         self.end_time = None  # Resetam timpul de sfârsit
+        self.expired = False
         print(f"Start of {self.state} trend at {u.timeToHMS(self.start_time)}")
         return self.old_state
 
@@ -343,12 +348,14 @@ class TrendState:
         return self.confirm_count
 
     def check_trend_expiration(self):
-        """Verifica daca trendul a expirat din cauza lipsei confirmarilor In intervalul permis."""
+        if self.expired :
+            return True
         if self.last_confirmation_time:
             time_since_last_confirmation = time.time() - self.last_confirmation_time
             if time_since_last_confirmation > self.expiration_threshold:
                 print(f"Trend expired: {self.state}. Time since last confirmation: {time_since_last_confirmation} seconds")
                 self.end_trend()
+                self.expired = True
                 return True
         return False
 
@@ -395,7 +402,7 @@ last_order_time = time.time()
 last_evaluate_time = time.time()
 
 
-PRICE_CHANGE_THRESHOLD_EUR = 260
+PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 260)
 
 while True:
     try:
