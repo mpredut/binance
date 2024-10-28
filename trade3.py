@@ -245,7 +245,7 @@ EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
 TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
 # am voie 6 ordere per perioada de expirare care este 2.6 ore. deaceea am impartit la 6
 TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + EXP_TIME_SELL_ORDER/ 6 + 4*79  # seconds to sleep for order placement
-WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 1.7 * 60  # minutes
+WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 7.7 * 60  # minutes
 window_size = WINDOWS_SIZE_MIN / TIME_SLEEP_GET_PRICE
 
 window_size2 = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
@@ -413,36 +413,37 @@ while True:
             current_price, threshold_percent=0.8, decrease_percent=7
         )
 
-        expired_trend = 'HOLD'
-        if action == 'BUY':
-            if trend_state1.is_trend_up():
-                trend_state1.confirm_trend()
-            else:
-                expired_trend = trend_state1.start_trend('UP')
-        if action == 'SELL':
-            if trend_state1.is_trend_down():
-                trend_state1.confirm_trend()  
-            else:
-                expired_trend = trend_state1.start_trend('DOWN')
-        if action == "HOLD":
-           if trend_state1.is_hold():
-              trend_state1.confirm_trend()
+        # expired_trend = 'HOLD'
+        # if action == 'BUY':
+            # if trend_state1.is_trend_up():
+                # trend_state1.confirm_trend()
+            # else:
+                # expired_trend = trend_state1.start_trend('UP')
+        # if action == 'SELL':
+            # if trend_state1.is_trend_down():
+                # trend_state1.confirm_trend()  
+            # else:
+                # expired_trend = trend_state1.start_trend('DOWN')
+        # if action == "HOLD":
+           # if trend_state1.is_hold():
+              # trend_state1.confirm_trend()
         
-        if trend_state1.is_trend_up() == 3:
-            track_and_place_order('BUY', proposed_price, current_price, order_ids=order_ids)   
-        if trend_state1.is_trend_down() == 3:
-            track_and_place_order('SELL', proposed_price, current_price, order_ids=order_ids)   
+        # if trend_state1.is_trend_up() == 3:
+            # track_and_place_order('BUY', proposed_price, current_price, order_ids=order_ids)   
+        # if trend_state1.is_trend_down() == 3:
+            # track_and_place_order('SELL', proposed_price, current_price, order_ids=order_ids)   
 
         #
         # Verificam schimbarile de preț si gestionam trendurile
         #
         proposed_price = current_price
-        initial_difference = 247
+       
         price_change = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
         
         if price_change is not None and price_change > 0:
             # Confirmam un trend de crestere
             print("DIFERENTA MARE UP!")
+            initial_difference = 247
             if trend_state2.is_trend_up():
                 count = trend_state2.confirm_trend() # Confirmam ca trendul de crestere continua
                 diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)

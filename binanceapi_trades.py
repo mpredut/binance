@@ -332,6 +332,7 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
         and (current_time_ms - trade['time']) <= max_age_ms
     ]
 
+    #  filtered_trades.sort(key=lambda x: x['price'])
     return filtered_trades
 
 
