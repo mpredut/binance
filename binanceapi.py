@@ -391,7 +391,7 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
         return None
 
 
-def place_order_smart(order_type, symbol, price, qty, cancelorders=True):
+def place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5, pair=True):
     try:
         qty = round(qty, 5)
         cancel = False
@@ -408,12 +408,12 @@ def place_order_smart(order_type, symbol, price, qty, cancelorders=True):
             
             price = min(price, current_price)
             price = round(price * 0.999, 0)
-            order = place_order("buy", symbol, price=price, qty=qty, cancelorders=cancelorders)
+            order = place_order("buy", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
             # appy pair
-            if order :            
+            if order and pair :            
                 price = max(price * 1.11, current_price)
                 price = round(price * 1.001, 0)
-                place_order("sell", symbol, price=price, qty=qty)
+                place_order("sell", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
                 
         elif order_type.lower() == 'sell':
             open_buy_orders = get_open_orders("buy", symbol)
@@ -426,12 +426,12 @@ def place_order_smart(order_type, symbol, price, qty, cancelorders=True):
                    
             price = max(price, current_price)
             price = round(price * (1 + 0.001), 0)
-            order = place_order("sell", symbol, price=price, qty=qty, cancelorders=cancelorders)
+            order = place_order("sell", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
             # appy pair
-            if order :
+            if order and pair :
                 price = min(price * (1 - 0.11), current_price)
                 price = round(price * 0.999, 0)
-                place_order("buy", symbol, price=price, qty=qty)
+                place_order("buy", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
         else:
             print("Tipul ordinului este invalid. Trebuie sa fie 'buy' sau 'sell'.")
             return None
