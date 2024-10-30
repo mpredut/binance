@@ -232,7 +232,7 @@ class PriceWindow:
         #oldest_price = self.prices[0]
         #newest_price = self.prices[-1]
         #price_diff = max_price - min_price
-        price_diff = u.calculate_difference_percent(max_price, min_price)
+        price_diff = u.calculate_difference_percent(max_price, self.prices[-1])
         if abs(price_diff) >= threshold or utils.are_values_very_close(price_diff, threshold) :
             return max_index - min_index
         else:
