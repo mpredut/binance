@@ -42,6 +42,12 @@ def value_diff_to_percent(value1, value2):
     percent = (diff / value1) * 100
     return percent
 
+def slope(val1, idx1, val2, idx2):
+    if idx1 == idx2:
+        raise ValueError("Panta este indefinită (împărțire la zero) deoarece idx1 și idx2 sunt egale.")
+    
+    return (val2 - val1) / (idx2 - idx1)
+
 #valorile sunt in jurul procentului ca interval
 def are_difference_equal_with_aprox_proc(value1, value2, target_percent = 10.0):
     max_iterations = random.randint(1, 100)

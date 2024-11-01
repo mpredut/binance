@@ -226,17 +226,29 @@ class PriceWindow:
 
     def check_price_change(self, threshold):
         if len(self.prices) < 2:
-            return None
+            return None, None
         min_price, min_index = self.get_min_and_index()
         max_price, max_index = self.get_max_and_index()
         #oldest_price = self.prices[0]
-        #newest_price = self.prices[-1]
+        newest_price = self.prices[-1]
         #price_diff = max_price - min_price
-        price_diff = u.calculate_difference_percent(max_price, self.prices[-1])
+        price_diff_min = u.calculate_difference_percent(min_price, newest_price)
+        price_diff_max = u.calculate_difference_percent(max_price, newest_price)
+        grow = price_diff_max < price_diff_min # pret curent inspre max
+        price_diff = max(price_diff_min, price_diff_max) ## check if abs(price_diff_min,price_diff_max) > treshold
         if abs(price_diff) >= threshold or utils.are_values_very_close(price_diff, threshold) :
-            return max_index - min_index
+            min_position, max_position = self.calculate_positions()
+            position = min(min_position, max_position)
+            position = min_position if grow else max_position
+            if(position < 0.5 or utils.are_values_very_close( position, 0.5)):                
+                return u.slope(min_price, min_index, newest_price, self.current_index), position #2.76 pt ungi de 70
+            else:
+                print("OUTLAIER!! but can indicate something will came !!!!")
         else:
-            return None
+            return None, None
+            
+        return None, None
+            
             
     def current_window_size(self):
         return len(self.prices)
@@ -254,8 +266,10 @@ window_size = WINDOWS_SIZE_MIN / TIME_SLEEP_GET_PRICE
 window_size2 = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
-def track_and_place_order(action, proposed_price, current_price, quantity=0.017/2, order_ids=None):
-    # Initialize order_ids as an empty list if it is None
+def track_and_place_order(action, count, proposed_price, current_price, quantity=0.017/2, order_ids=None):
+    
+    print(f"Iteration {count} generated price {proposed_price} versus {current_price}")
+                    
     if order_ids is None:
         order_ids = []
 
@@ -344,7 +358,7 @@ class TrendState:
     def confirm_trend(self):
         self.last_confirmation_time = time.time()
         self.confirm_count += 1
-        print(f"Trend confirmed: {self.state} at {u.timeToHMS(self.last_confirmation_time)}")
+        print(f"{self.confirm_count} times trend confirmed: {self.state} at {u.timeToHMS(self.last_confirmation_time)}")
         return self.confirm_count
 
     def check_trend_expiration(self):
@@ -405,7 +419,7 @@ last_evaluate_time = time.time()
 PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 260)
 
 while True:
-    try:
+    #try:
         time.sleep(TIME_SLEEP_GET_PRICE)
 
         current_time = time.time()
@@ -445,45 +459,45 @@ while True:
         #
         proposed_price = current_price
        
-        price_change = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
+        slope, pos = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
         
-        if price_change is not None and price_change > 0:
+        if slope is not None and slope > 0:
             # Confirmam un trend de crestere
-            print("DIFERENTA MARE UP!")
-            initial_difference = 247
+            initial_difference = 247 * (pos + 0.5)/abs(slope)
+            print(f"DIFERENTA MARE UP! DIFF start {initial_difference}")
             if trend_state2.is_trend_up():
                 count = trend_state2.confirm_trend() # Confirmam ca trendul de crestere continua
                 diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
                 proposed_price = current_price - diff
-                track_and_place_order('BUY', proposed_price, current_price, order_ids=order_ids)
+                track_and_place_order('BUY',count, proposed_price, current_price, order_ids=order_ids)
             else:
                 expired_trend = trend_state2.start_trend('UP')  # Incepem un trend nou de crestere
                 proposed_price = current_price - initial_difference
-                track_and_place_order('BUY', proposed_price, current_price, order_ids=order_ids)
+                track_and_place_order('BUY',count, proposed_price, current_price, order_ids=order_ids)
                
 
-        elif price_change is not None and price_change < 0:
+        elif slope is not None and slope < 0:
             # Confirmam un trend de scadere
-            print("DIFERENTA MARE DOWN!")
-            initial_difference = 447
+            initial_difference = 447  * (pos + 0.5) /abs(slope)
+            print(f"DIFERENTA MARE DOWN! DIFF start {initial_difference}")
             if trend_state2.is_trend_down():
                 count = trend_state2.confirm_trend() # Confirmam ca trendul de scadere continua
                 diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
                 proposed_price = proposed_price + diff
-                track_and_place_order('SELL', proposed_price, current_price, order_ids=order_ids)
+                track_and_place_order('SELL',count, proposed_price, current_price, order_ids=order_ids)
             else:
                 expired_trend = trend_state2.start_trend('DOWN')  # Incepem un trend nou de scadere
                 proposed_price = current_price + initial_difference
-                track_and_place_order('SELL', proposed_price, current_price, order_ids=order_ids)
+                track_and_place_order('SELL',count, proposed_price, current_price, order_ids=order_ids)
 
    
             
         
 
-    except BinanceAPIException as e:
-        print(f"Binance API Error: {e}")
-        time.sleep(TIME_SLEEP_GET_PRICE)
-    except Exception as e:
-        print(f"Error: {e}")
-        time.sleep(TIME_SLEEP_GET_PRICE)
+    #except BinanceAPIException as e:
+        #print(f"Binance API Error: {e}")
+        #time.sleep(TIME_SLEEP_GET_PRICE)
+    #except Exception as e:
+        #print(f"Error: {e}")
+        #time.sleep(TIME_SLEEP_GET_PRICE)
 
