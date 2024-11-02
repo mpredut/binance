@@ -473,7 +473,7 @@ while True:
             else:
                 expired_trend = trend_state2.start_trend('UP')  # Incepem un trend nou de crestere
                 proposed_price = current_price - initial_difference
-                track_and_place_order('BUY',count, proposed_price, current_price, order_ids=order_ids)
+                track_and_place_order('BUY',1, proposed_price, current_price, order_ids=order_ids)
                
 
         elif slope is not None and slope < 0:
@@ -488,7 +488,7 @@ while True:
             else:
                 expired_trend = trend_state2.start_trend('DOWN')  # Incepem un trend nou de scadere
                 proposed_price = current_price + initial_difference
-                track_and_place_order('SELL',count, proposed_price, current_price, order_ids=order_ids)
+                track_and_place_order('SELL',1, proposed_price, current_price, order_ids=order_ids)
 
    
             
