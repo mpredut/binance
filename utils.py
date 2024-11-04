@@ -34,10 +34,15 @@ def get_interval_time(valoare_prestabilita=interval_time, marja_aleatoare=10):
     return interval
  
 def calculate_difference_percent(val1, val2):
-    return abs(val1 - val2) / ((val1 + val2) / 2) * 100
-    
+    if val1 == 0 and val2 == 0:
+        return 0.0  # Dacă ambele valori sunt zero, considerăm că sunt identice
+    return abs(val1 - val2) / ((abs(val1) + abs(val2)) / 2) * 100
+
     
 def value_diff_to_percent(value1, value2):
+    if val1 == 0:
+        return value2 
+        
     diff = value1 - value2
     percent = (diff / value1) * 100
     return percent

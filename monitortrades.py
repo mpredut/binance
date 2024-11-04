@@ -413,13 +413,15 @@ def update_trades(trades, symbol, max_age_seconds, procent_desired_profit, expir
 
 
 def apply_sell_orders(trades, days, force_sell):
+    symbol = api.symbol
+
     placed_order_count = 0
     total_weighted_price = 0
     total_quantity = 0
 
       
     current_time = time.time()    
-    current_price = api.get_current_price(api.symbol)
+    current_price = api.get_current_price(symbol)
 
     count = 0
     for trade in trades:
@@ -468,18 +470,22 @@ def apply_sell_orders(trades, days, force_sell):
 
 
 # Functia principala care ruleaza periodic actualizarile si cache-ul
-def monitor_trades(order_type, filename, interval=3600, limit=1000, years_to_keep=2):
+def monitor_trades(filename, interval=3600, limit=1000, years_to_keep=2):
+    #print(f"monitor_trades: order_type {order_type} and symbol {symbol}")
+    symbols = ["BTCUSDT", "TAOUSDT"]
+    order_type = None
     while True:
         # Actualizam fisierul de tranzactii
-        apitrades.save_trades_to_file(order_type, "BTCUSDT", filename, limit=limit, years_to_keep=years_to_keep)
-        apitrades.save_trades_to_file(order_type, "TAOUSDT", filename, limit=limit, years_to_keep=years_to_keep)
+        for symbol in symbols:
+            apitrades.save_trades_to_file(order_type, symbol, filename, limit=limit, years_to_keep=years_to_keep)
+        
         # Reîncarcam tranzactiile în cache
         apitrades.load_trades_from_file(filename)   
         time.sleep(interval)
 
 # Functia pentru a porni monitorizarea periodica într-un thread separat
-def start_monitoring(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=2):
-    monitoring_thread = Thread(target=monitor_trades, args=(order_type, filename, interval, limit, years_to_keep), daemon=True)
+def start_monitoring(filename, interval=3600, limit=1000, years_to_keep=2):
+    monitoring_thread = Thread(target=monitor_trades, args=(filename, interval, limit, years_to_keep), daemon=True)
     monitoring_thread.start()
 
 
@@ -534,51 +540,65 @@ def display_sell_recommendation():
         for key, value in data.items():
             print(f"  {key}: {value}")
         print()
-    
-max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate/filled sunt considerate recente (3 zile)
-interval = 60 * 4 #4 minute
-taosymbol = 'TAO'
-api.get_binance_symbols(taosymbol)
-taosymbol = 'TAOUSDT'
-#taosymbol_target_price = api.get_current_price(taosymbol)
-#api.place_order("buy", taosymbol, taosymbol_target_price - 10, 1)
 
 
 def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_increse_threshold=0.08, percentage_decrese_threshold=0.02):
     try:
         # 1. Obtine ultimul trade pentru acest simbol (asumam ca este ordinul de cumparare)
-        trade_orders = apitrades.get_trade_orders("buy", taosymbol, max_age_seconds)
+        trade_orders_buy = apitrades.get_trade_orders("buy", taosymbol, max_age_seconds)
+        trade_orders_sell = apitrades.get_trade_orders("sell", taosymbol, max_age_seconds)
         
-        if not trade_orders:
+        if not (trade_orders_buy or trade_orders_sell):
             print(f"No trade orders found for {taosymbol} in the last {max_age_seconds} seconds.")
             return
-        
-        sorted_trade_orders = sorted(trade_orders, key=lambda x: x['price'])
-        #sorted_trade_orders = sorted(trade_orders, key=lambda x: x['time'], reverse=True)
-        # Ultimul ordin de cumparare
-        buy_order = sorted_trade_orders[0]  # presupunem ca primul ordin este ultimul
-        buy_price = float(buy_order['price'])  # Pretul de cumparare
-
-        print(f"Buy price for {taosymbol}: {buy_price}")
-
+      
         # 2. Obtine pretul curent de pe piata
         current_price = api.get_current_price(taosymbol)
         print(f"Current price for {taosymbol}: {current_price}")
 
-        # 3. Verifica daca pretul a crescut sau a scazut cu mai mult de 1%
-        price_increase = (current_price - buy_price) / buy_price
-        price_decrease = (buy_price - current_price) / buy_price
 
-        if price_increase > percentage_increse_threshold:
-            print(f"Price increased by more than {percentage_increse_threshold * 100}%: Placing sell order")
-            api.cancel_open_orders("sell", taosymbol)  # Anuleaza ordinele deschise
-            api.place_order("sell", taosymbol, current_price + 5, qty)
-        elif price_decrease > percentage_decrese_threshold:
-            print(f"Price decreased by more than {percentage_decrese_threshold * 100}%: Placing sell order")
-            api.cancel_open_orders("sell", taosymbol)  # Anuleaza ordinele deschise
-            api.place_order("sell", taosymbol, current_price + 1, qty)
-        else:
-            print(f"Price price_increase {price_increase * 100}% range, price_decrease {price_decrease * 100} range. no action taken.")
+        if trade_orders_buy:
+            print(f"Buy trade orders found for {taosymbol} in the last {max_age_seconds} seconds.") 
+            sorted_trade_orders_buy = sorted(trade_orders_buy, key=lambda x: x['price'])
+            #sorted_trade_orders = sorted(trade_orders, key=lambda x: x['time'], reverse=True)
+            # Ultimul ordin de cumparare
+            buy_order = sorted_trade_orders_buy[0]  # presupunem ca primul ordin este ultimul
+            buy_price = float(buy_order['price'])  # Pretul de cumparare
+            print(f"Buy price for {taosymbol}: {buy_price}")
+
+
+
+            # 3. Verifica daca pretul a crescut sau a scazut cu mai mult de 1%
+            price_increase = (current_price - buy_price) / buy_price
+            price_decrease = (buy_price - current_price) / buy_price
+            
+            # verifica tenditna in csv si daca este de crestere accelerata creste procentul
+            if price_increase > percentage_increse_threshold or utils.are_values_very_close(price_increase, percentage_increse_threshold, target_tolerance_percent=1.0):
+                print(f"Price increased by more than {percentage_increse_threshold * 100}% versus buy price: Placing sell order")
+                api.cancel_open_orders("sell", taosymbol)  # Anuleaza ordinele deschise
+                api.place_order("sell", taosymbol, current_price + 5, qty)
+            elif price_decrease > percentage_decrese_threshold or utils.are_values_very_close(price_decrease, percentage_decrese_threshold, target_tolerance_percent=1.0):
+                print(f"Price decreased by more than {percentage_decrese_threshold * 100}% versus buy price: Placing sell order")
+                api.cancel_open_orders("sell", taosymbol)  # Anuleaza ordinele deschise
+                api.place_order("sell", taosymbol, current_price + 1, qty)
+            else:
+                print(f"Price price_increase {price_increase * 100}% range, price_decrease {price_decrease * 100} range. no action taken.")
+            
+            
+        if trade_orders_sell:
+            print(f"Sell trade orders found for {taosymbol} in the last {max_age_seconds} seconds.")
+            sorted_trade_orders_sell = sorted(trade_orders_sell, key=lambda x: x['price'])
+            sell_order = sorted_trade_orders_sell[0]  # presupunem ca primul ordin este ultimul
+            sell_price = float(sell_order['price'])  # Pretul de cumparare
+            print(f"Sell price for {taosymbol}: {sell_price}")
+            
+            price_decrease_versus_sell = (sell_price - current_price) / buy_price
+            
+            # verifica tendinta in csv si daca este de descrestere accelerata creste procentul
+            if(price_decrease_versus_sell > percentage_decrese_threshold) or utils.are_values_very_close(price_decrease_versus_sell, percentage_decrese_threshold, target_tolerance_percent=1.0):
+                print(f"Price decreased by more than {percentage_decrese_threshold * 100}% versus sell price: Placing buy order")
+                api.cancel_open_orders("buy", taosymbol)  # Anuleaza ordinele deschise
+                api.place_order("buy", taosymbol, current_price - 1, qty)
 
     except Exception as e:
         print(f"An error occurred while monitoring the price: {e}")
@@ -586,16 +606,27 @@ def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_inc
         
 def main():
 
+    filename = "trades_BTCUSDT.json"    
+    max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate/filled sunt considerate recente (3 zile)
+    interval = 60 * 4 #4 minute
+
+    #taosymbol = 'TAO'
+    #api.get_binance_symbols(taosymbol)
+
     file_path = "sell_recommendation.csv"
     update_sell_recommendation(file_path)
     display_sell_recommendation()
     #monitor_trades(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=2)
 
     # Pornim monitorizarea periodica a tranzactiilor
-    print(f"order_type{order_type} si symbol {symbol}")
-    start_monitoring(order_type, symbol, filename, interval=interval, limit=1000, years_to_keep=2)
+    start_monitoring(filename, interval=interval, limit=1000, years_to_keep=2)
     time.sleep(5)
     
+    symbol = "BTCUSDT"
+    taosymbol = 'TAOUSDT'
+    #taosymbol_target_price = api.get_current_price(taosymbol)
+    #api.place_order("buy", taosymbol, taosymbol_target_price - 10, 1)
+
     while True:
         monitor_price_and_trade(taosymbol, 1 , 3600 * 24 * 7)
         data = sell_recommendation[symbol]
@@ -621,9 +652,7 @@ def main():
         
         
 if __name__ == "__main__":
-    symbol = "BTCUSDT"
     filename = "trades_BTCUSDT.json"
-    order_type = None
     main()
 
     
