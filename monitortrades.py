@@ -580,7 +580,8 @@ def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_inc
             elif price_decrease > percentage_decrese_threshold or utils.are_values_very_close(price_decrease, percentage_decrese_threshold, target_tolerance_percent=1.0):
                 print(f"Price decreased by more than {percentage_decrese_threshold * 100}% versus buy price: Placing sell order")
                 api.cancel_open_orders("sell", taosymbol)  # Anuleaza ordinele deschise
-                api.place_order("sell", taosymbol, current_price + 1, qty)
+                #api.place_order("sell", taosymbol, current_price + 1, qty)
+                api.place_order_smart("sell", taosymbol, current_price + 1, qty, cancelorders=True, hours=0.1, pair=False)
             else:
                 print(f"Price price_increase {price_increase * 100}% range, price_decrease {price_decrease * 100} range. no action taken.")
             
@@ -598,7 +599,10 @@ def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_inc
             if(price_decrease_versus_sell > percentage_decrese_threshold) or utils.are_values_very_close(price_decrease_versus_sell, percentage_decrese_threshold, target_tolerance_percent=1.0):
                 print(f"Price decreased by more than {percentage_decrese_threshold * 100}% versus sell price: Placing buy order")
                 api.cancel_open_orders("buy", taosymbol)  # Anuleaza ordinele deschise
-                api.place_order("buy", taosymbol, current_price - 1, qty)
+                #api.cancel_expired_orders("buy", "BTCUSDT", 60*25)
+                api.cancel_orders_old_or_outlier("buy", "BTCUSDT", qty, hours=0.5, price_difference_percentage=0.1)
+                #api.place_order("buy", taosymbol, current_price - 1, qty)
+                api.place_order_smart("buy", taosymbol, current_price + 1, qty, cancelorders=True, hours=0.1, pair=False)
 
     except Exception as e:
         print(f"An error occurred while monitoring the price: {e}")
