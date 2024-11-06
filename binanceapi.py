@@ -255,7 +255,7 @@ def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5,
                     cancel = True
 
             if cancel:
-                cancel_order(order_id)
+                cancel_order(symbol, order_id)
                 available_qty += order_info['quantity']
                 print(f"New available quantity: {available_qty:.8f}")
 
@@ -402,7 +402,7 @@ def place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5
             # Anuleaza ordinele de vanzare existente la un pret mai mic decat pretul de cumparare dorit
             for order_id, order_details in open_sell_orders.items():
                 if order_details['price'] < price:
-                    cancel = cancel_order(order_id)
+                    cancel = cancel_order(symbol, order_id)
                     if not cancel:
                         print(f"Fail cancel order {order_id} prep. for buy order. We wanted becuse low price for sell.")
             
@@ -420,7 +420,7 @@ def place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5
             # Anuleaza ordinele de cumparare existente la un pret mai mare decat pretul de vanzare dorit
             for order_id, order_details in open_buy_orders.items():
                 if order_details['price'] > price:
-                    cancel = cancel_order(order_id)
+                    cancel = cancel_order(symbol, order_id)
                     if not cancel:
                         print(f"Fail cancel order {order_id} prep. for sell order. We wanted becuse high price for buy")
                    
@@ -446,7 +446,7 @@ def place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5
         return None
         #return place_order(order_type, symbol, price, qty)
           
-def cancel_order(order_id):
+def cancel_order(symbol, order_id):
     try:
         if not order_id:
             return False
@@ -481,7 +481,7 @@ def cancel_expired_orders(order_type, symbol, expire_time):
         order_time = order_details.get('timestamp')
 
         if current_time - order_time > expire_time:
-            cancel = cancel_order(order_id)
+            cancel = cancel_order(symbol, order_id)
             if cancel:
                 print(f"Cancelled {order_type} order with ID: {order_id} due to expiration.")
             else:
