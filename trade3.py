@@ -501,6 +501,8 @@ initialize_csv_file(filename)
 
 PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 260)
 
+count = 0
+        
 while True:
     #try:
         time.sleep(TIME_SLEEP_GET_PRICE)
@@ -543,8 +545,11 @@ while True:
         proposed_price = current_price
        
         slope, pos = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
-        count = 0
         gradient = 0
+        if slope == 0:
+            count = count + 1
+        else 
+            count = 0
         
         if slope > 0:
             # Confirmam un trend de crestere
@@ -558,9 +563,7 @@ while True:
             else:
                 expired_trend = trend_state2.start_trend('UP')  # Incepem un trend nou de crestere
                 proposed_price = current_price - initial_difference
-                #track_and_place_order('BUY',1, proposed_price, current_price, order_ids=order_ids)
-               
-
+                #track_and_place_order('BUY',1, proposed_price, current_price, order_ids=order_ids)          
         elif slope < 0:
             # Confirmam un trend de scadere
             initial_difference = 447  * (pos + 0.5) /abs(slope)
