@@ -1,11 +1,12 @@
 import json
 import os
 import time
-
 from datetime import datetime
+
+import pandas as pd
+
 import threading
 from threading import Thread,Timer
-import pandas as pd
 
 ####Binance
 #from binance.client import Client
@@ -489,7 +490,6 @@ def start_monitoring(filename, interval=3600, limit=1000, years_to_keep=2):
     monitoring_thread.start()
 
 
-
 # Cache-ul care va fi actualizat periodic
 default_values_sell_recommendation = {
     "BTCUSDT": {
@@ -497,49 +497,132 @@ default_values_sell_recommendation = {
         'procent_desired_profit': 0.07,
         'expired_duration': 3600 * 3.7,
         'min_procent': 0.0099,
-        'days_after_use_current_price': 7
+        'days_after_use_current_price': 7,
+        'slope': 0.0,      # Valoare default pentru slope
+        'pos': 0,          # Valoare default pentru pos
+        'gradient': 0.0,   # Valoare default pentru gradient
+        'tick': 0,         # Valoare default pentru tick
+        'min': 0.0,        # Valoare default pentru min
+        'max': 0.0         # Valoare default pentru max
     },
     "ETHUSDT": {
         'force_sell': 0,
         'procent_desired_profit': 0.07,
         'expired_duration': 3600 * 3.7,
         'min_procent': 0.0099,
-        'days_after_use_current_price': 7
+        'days_after_use_current_price': 7,
+        'slope': 0.0,      # Valoare default pentru slope
+        'pos': 0,          # Valoare default pentru pos
+        'gradient': 0.0,   # Valoare default pentru gradient
+        'tick': 0,         # Valoare default pentru tick
+        'min': 0.0,        # Valoare default pentru min
+        'max': 0.0         # Valoare default pentru max
     }
 }
 sell_recommendation = {}
 
-def update_sell_recommendation(file_path):
-    global sell_recommendation
-    try:
-        df = pd.read_csv(file_path)
-        sell_recommendation = {
-            row['symbol']: {
-                'force_sell': row['force_sell'],
-                'procent_desired_profit': row['procent_desired_profit'],
-                'expired_duration': eval(str(row['expired_duration'])),  # Evaluam expresiile matematice
-                'min_procent': row['min_procent'],
-                'days_after_use_current_price': row['days_after_use_current_price']
-            } for index, row in df.iterrows()
-        }
-        print(f"sell_recommendation updated from file! ")
-    except FileNotFoundError:
-        print(f"Error: File {file_path} not found. Using default values.")
-        sell_recommendation = default_values_sell_recommendation
-    except Exception as e:
-        print(f"Error reading file: {e}. Using default values.")
-        sell_recommendation = default_values_sell_recommendation
+class StateTracker:
+    def __init__(self):
+        self.states = {}  # To hold states for each symbol
 
-    # Reprogramam citirea fisierului la fiecare 2 minute
-    Timer(120, update_sell_recommendation, [file_path]).start()
-    
-def display_sell_recommendation():
-    print("Current sell_recommendation content:")
-    for symbol, data in sell_recommendation.items():
-        print(f"Symbol: {symbol}")
-        for key, value in data.items():
-            print(f"  {key}: {value}")
-        print()
+    def update_sell_recommendation(self, file_path):
+        global sell_recommendation
+        try:
+            df = pd.read_csv(file_path)
+            sell_recommendation = {
+                row['symbol']: {
+                    'force_sell': row['force_sell'],
+                    'procent_desired_profit': row['procent_desired_profit'],
+                    'expired_duration': eval(str(row['expired_duration'])),  # Evaluam expresiile matematice
+                    'min_procent': row['min_procent'],
+                    'days_after_use_current_price': row['days_after_use_current_price'],
+                    'slope': row.get('slope', 0.0),         # Citire cu valoare default daca nu exista
+                    'pos': row.get('pos', 0),               # Citire cu valoare default daca nu exista
+                    'gradient': row.get('gradient', 0.0),   # Citire cu valoare default daca nu exista
+                    'tick': row.get('tick', 0),             # Citire cu valoare default pentru tick daca nu exista
+                    'min': row.get('min', 0.0),             # Citire cu valoare default pentru min daca nu exista
+                    'max': row.get('max', 0.0)              # Citire cu valoare default pentru max daca nu exista
+                } for index, row in df.iterrows()
+            }
+            print(f"sell_recommendation updated from file!")
+            
+            # Update the states based on the current sell_recommendation
+            self.update_states_from_sell_recommendation()
+        except FileNotFoundError:
+            print(f"Error: File {file_path} not found. Using default values.")
+            sell_recommendation = default_values_sell_recommendation
+        except Exception as e:
+            print(f"Error reading file: {e}. Using default values.")
+            sell_recommendation = default_values_sell_recommendation
+
+        # Reprogram the update for every 2 minutes
+        Timer(120, self.update_sell_recommendation, [file_path]).start()
+
+    def update_states_from_sell_recommendation(self):
+        for symbol, data in sell_recommendation.items():
+            slope = data['slope']
+            tick = data['tick']
+            min_val = data['min']
+            max_val = data['max']
+            
+            # If the symbol does not exist in the states, initialize it
+            if symbol not in self.states:
+                self.states[symbol] = []
+
+            # Get the last state for this symbol (if it exists)
+            last_state = self.states[symbol][-1] if self.states[symbol] else None
+
+            # Process the state based on slope conditions
+            self.process_state(symbol, slope, tick, min_val, max_val, last_state)
+
+    def process_state(self, symbol, slope, tick, min_val, max_val, last_state):
+        # If there is no previous state, create a new one
+        if last_state is None:
+            new_state = {
+                'slope': slope,
+                'tick': tick,
+                'min': min_val,
+                'max': max_val
+            }
+            self.states[symbol].append(new_state)
+            return
+
+        # If slope is the same as the last state, update the current state's tick and min/max
+        if slope == last_state['slope']:
+            last_state['tick'] = tick
+            last_state['min'] = min(last_state['min'], min_val)
+            last_state['max'] = max(last_state['max'], max_val)
+        else:
+            # If slope has changed, create a new state
+            new_state = {
+                'slope': slope,
+                'tick': tick,
+                'min': min_val,
+                'max': max_val
+            }
+            self.states[symbol].append(new_state)
+
+    def display_states(self):
+        print("Current states:")
+        for symbol, states_list in self.states.items():
+            print(f"Symbol: {symbol}")
+            for i, state in enumerate(states_list):
+                print(f"  State {i + 1}:")
+                for key, value in state.items():
+                    print(f"    {key}: {value}")
+            print()
+
+
+    def display_sell_recommendation(self):
+        print("Current sell_recommendation content:")
+        for symbol, data in sell_recommendation.items():
+            print(f"Symbol: {symbol}")
+            for key, value in data.items():
+                print(f"  {key}: {value}")
+            print()
+
+
+state_tracker = StateTracker()
 
 
 def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_increse_threshold=0.08, percentage_decrese_threshold=0.02):
@@ -575,6 +658,11 @@ def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_inc
             # verifica tenditna in csv si daca este de crestere accelerata creste procentul
             if price_increase > percentage_increse_threshold or utils.are_values_very_close(price_increase, percentage_increse_threshold, target_tolerance_percent=1.0):
                 print(f"Price increased by more than {percentage_increse_threshold * 100}% versus buy price: Placing sell order")
+                if(sell_recommendation[taosymbol]['slope'] > 0 ) : next; # continua sa cresca
+                if(sell_recommendation[taosymbol]['slope'] == 0 and sell_recommendation[taosymbol]['gradient'] > 0 ) : next
+                # and state_tracker.states[-1][taosymbol]['tick'] <3&& cresteri inante dar nu multe
+                #if(data['slope'] < 0 && putine descresteri) : next;
+                ## cresteri multe inante sau multe descresteri inate
                 api.cancel_open_orders("sell", taosymbol)  # Anuleaza ordinele deschise
                 api.place_order("sell", taosymbol, current_price + 5, qty)
             elif price_decrease > percentage_decrese_threshold or utils.are_values_very_close(price_decrease, percentage_decrese_threshold, target_tolerance_percent=1.0):
@@ -598,6 +686,8 @@ def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_inc
             # verifica tendinta in csv si daca este de descrestere accelerata creste procentul
             if(price_decrease_versus_sell > percentage_decrese_threshold) or utils.are_values_very_close(price_decrease_versus_sell, percentage_decrese_threshold, target_tolerance_percent=1.0):
                 print(f"Price decreased by more than {percentage_decrese_threshold * 100}% versus sell price: Placing buy order")
+                if(sell_recommendation[taosymbol]['slope'] < 0 ) : next; # continua sa descreasca
+                if(sell_recommendation[taosymbol]['slope'] == 0 and sell_recommendation[taosymbol]['gradient'] < 0 ) : next
                 api.cancel_open_orders("buy", taosymbol)  # Anuleaza ordinele deschise
                 #api.cancel_expired_orders("buy", "BTCUSDT", 60*25)
                 api.cancel_orders_old_or_outlier("buy", "BTCUSDT", qty, hours=0.5, price_difference_percentage=0.1)
@@ -618,8 +708,8 @@ def main():
     #api.get_binance_symbols(taosymbol)
 
     file_path = "sell_recommendation.csv"
-    update_sell_recommendation(file_path)
-    display_sell_recommendation()
+    state_tracker.update_sell_recommendation(file_path)
+    state_tracker.display_sell_recommendation()
     #monitor_trades(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=2)
 
     # Pornim monitorizarea periodica a tranzactiilor
@@ -633,6 +723,7 @@ def main():
 
     while True:
         monitor_price_and_trade(taosymbol, 1 , 3600 * 24 * 7)
+        monitor_price_and_trade(symbol, 1, 3600 * 24 * 7)
         data = sell_recommendation[symbol]
         procent_desired_profit = data['procent_desired_profit']
         expired_duration = data['expired_duration']

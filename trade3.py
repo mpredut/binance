@@ -18,6 +18,10 @@ import utils
 import utils as u
 
 
+import pandas as pd
+import os
+
+
 class PriceWindow:
     def __init__(self, window_size, max_index=230, epsilon=1e-2):
         self.window_size = window_size
@@ -226,7 +230,7 @@ class PriceWindow:
 
     def check_price_change(self, threshold):
         if len(self.prices) < 2:
-            return None, None
+            return 0, 1
         min_price, min_index = self.get_min_and_index()
         max_price, max_index = self.get_max_and_index()
         #oldest_price = self.prices[0]
@@ -245,9 +249,9 @@ class PriceWindow:
             else:
                 print("OUTLAIER!! but can indicate something will came !!!!")
         else:
-            return None, None
+            return 0, 1
             
-        return None, None
+        return 0, 1
             
             
     def current_window_size(self):
@@ -416,6 +420,85 @@ last_order_time = time.time()
 last_evaluate_time = time.time()
 
 
+
+
+# Cache-ul care va fi actualizat periodic
+default_values_sell_recommendation = {
+    "BTCUSDT": {
+        'force_sell': 0,
+        'procent_desired_profit': 0.07,
+        'expired_duration': 3600 * 3.7,
+        'min_procent': 0.0099,
+        'days_after_use_current_price': 7,
+        'slope': 0.0,      # Valoare default pentru slope
+        'pos': 0,          # Valoare default pentru pos
+        'gradient': 0.0,   # Valoare default pentru gradient
+        'tick': 0,         # Valoare default pentru tick
+        'min': 0.0,        # Valoare default pentru min
+        'max': 0.0         # Valoare default pentru max
+    },
+    "ETHUSDT": {
+        'force_sell': 0,
+        'procent_desired_profit': 0.07,
+        'expired_duration': 3600 * 3.7,
+        'min_procent': 0.0099,
+        'days_after_use_current_price': 7,
+        'slope': 0.0,      # Valoare default pentru slope
+        'pos': 0,          # Valoare default pentru pos
+        'gradient': 0.0,   # Valoare default pentru gradient
+        'tick': 0,         # Valoare default pentru tick
+        'min': 0.0,        # Valoare default pentru min
+        'max': 0.0         # Valoare default pentru max
+    }
+}
+def initialize_csv_file(file_path):
+    if not os.path.exists(file_path):
+        # Convert the default values dictionary to a DataFrame
+        df = pd.DataFrame.from_dict(default_values_sell_recommendation, orient='index').reset_index()
+        df.rename(columns={'index': 'symbol'}, inplace=True)
+        
+        # Write the DataFrame to CSV
+        df.to_csv(file_path, index=False)
+        print(f"CSV file created with default values at {file_path}.")
+    else:
+        print(f"CSV file already exists at {file_path}.")
+
+def update_csv_file(file_path, symbol, slope, tick, min_val, max_val, pos, gradient):
+    try:
+        # Load the existing CSV data
+        df = pd.read_csv(file_path)
+
+        # Check if the symbol already exists in the CSV
+        if symbol in df['symbol'].values:
+            # Update existing row with new values
+            df.loc[df['symbol'] == symbol, ['slope', 'tick', 'min', 'max', 'pos', 'gradient']] = [
+                slope, tick, min_val, max_val, pos, gradient
+            ]
+        else:
+            # Append a new row if symbol does not exist
+            new_row = {
+                'symbol': symbol,
+                'slope': slope,
+                'tick': tick,
+                'min': min_val,
+                'max': max_val,
+                'pos': pos,
+                'gradient': gradient,
+                # Ensure other columns are populated from default values
+                **default_values_sell_recommendation.get(symbol, {})
+            }
+            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+
+        # Write the updated DataFrame back to the CSV
+        df.to_csv(file_path, index=False)
+        print(f"Updated {symbol} in CSV with slope: {slope}, tick: {tick}, min: {min_val}, max: {max_val}, pos: {pos}, gradient: {gradient}")
+    except Exception as e:
+        print(f"Error updating CSV file: {e}")
+    
+filename = "trades_BTCUSDT.csv"    
+initialize_csv_file(filename)
+    
+
 PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 260)
 
 while True:
@@ -460,8 +543,10 @@ while True:
         proposed_price = current_price
        
         slope, pos = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
+        count = 0
+        gradient = 0
         
-        if slope is not None and slope > 0:
+        if slope > 0:
             # Confirmam un trend de crestere
             initial_difference = 247 * (pos + 0.5)/abs(slope)
             print(f"DIFERENTA MARE UP! DIFF start {initial_difference}")
@@ -469,14 +554,14 @@ while True:
                 count = trend_state2.confirm_trend() # Confirmam ca trendul de crestere continua
                 diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
                 proposed_price = current_price - diff
-                track_and_place_order('BUY',count, proposed_price, current_price, order_ids=order_ids)
+                #track_and_place_order('BUY',count, proposed_price, current_price, order_ids=order_ids)
             else:
                 expired_trend = trend_state2.start_trend('UP')  # Incepem un trend nou de crestere
                 proposed_price = current_price - initial_difference
-                track_and_place_order('BUY',1, proposed_price, current_price, order_ids=order_ids)
+                #track_and_place_order('BUY',1, proposed_price, current_price, order_ids=order_ids)
                
 
-        elif slope is not None and slope < 0:
+        elif slope < 0:
             # Confirmam un trend de scadere
             initial_difference = 447  * (pos + 0.5) /abs(slope)
             print(f"DIFERENTA MARE DOWN! DIFF start {initial_difference}")
@@ -484,13 +569,13 @@ while True:
                 count = trend_state2.confirm_trend() # Confirmam ca trendul de scadere continua
                 diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
                 proposed_price = proposed_price + diff
-                track_and_place_order('SELL',count, proposed_price, current_price, order_ids=order_ids)
+                #track_and_place_order('SELL',count, proposed_price, current_price, order_ids=order_ids)
             else:
                 expired_trend = trend_state2.start_trend('DOWN')  # Incepem un trend nou de scadere
                 proposed_price = current_price + initial_difference
-                track_and_place_order('SELL',1, proposed_price, current_price, order_ids=order_ids)
+                #track_and_place_order('SELL',1, proposed_price, current_price, order_ids=order_ids)
 
-   
+        update_csv_file(filename, api.symbol, slope, count, 0, 0, pos, gradient)
             
         
 
