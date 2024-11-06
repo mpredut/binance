@@ -22,6 +22,116 @@ import pandas as pd
 import os
 
 
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import linregress
+from sklearn.preprocessing import PolynomialFeatures
+from sklearn.linear_model import LinearRegression
+
+class PriceTrendAnalyzer:
+    def __init__(self, prices):
+        self.prices = prices
+
+    def linear_regression_trend(self):
+        if len(self.prices) < 2:  # Avem nevoie de cel puțin două puncte pentru regresie
+            print("Regresie Liniară: Nu sunt suficiente date pentru a calcula trendul.")
+            return None, None, None
+
+        x = np.arange(len(self.prices))
+        y = np.array(self.prices)
+        
+        # Verificăm variabilitatea prețurilor pentru a evita NaN
+        if np.std(y) == 0:
+            print("Regresie Liniară: Prețurile sunt constante, trendul nu poate fi determinat.")
+            return None, None, None
+
+        slope, intercept, r_value, _, _ = linregress(x, y)
+        trend_line = slope * x + intercept
+        return trend_line, slope, r_value
+
+    def polynomial_regression_trend(self, degree=2):
+        x = np.arange(len(self.prices)).reshape(-1, 1)
+        y = np.array(self.prices)
+        poly_features = PolynomialFeatures(degree=degree)
+        x_poly = poly_features.fit_transform(x)
+        
+        model = LinearRegression().fit(x_poly, y)
+        trend_poly = model.predict(x_poly)
+        return trend_poly, model.coef_
+
+    def exponential_moving_average(self, span=5):
+        prices_list = list(self.prices)  # Convertim deque în listă
+        ema = [prices_list[0]]
+        alpha = 2 / (span + 1)
+        
+        for price in prices_list[1:]:  # Parcurgem prețurile începând de la al doilea element
+            ema.append(alpha * price + (1 - alpha) * ema[-1])
+    
+        return ema
+
+
+    def calculate_gradient(self):
+        if len(self.prices) < 2:
+            print("Gradient: Nu sunt suficiente date pentru a calcula gradientul.")
+            return [], 0
+        y = np.array(self.prices)  # Convertim la array pentru numpy
+        gradient = np.gradient(y)
+        avg_gradient = np.mean(gradient)
+        return gradient, avg_gradient
+    
+    def plot_trends(self, trend_line, trend_poly, ema, gradient):
+        x = np.arange(len(self.prices))
+
+        fig, ax1 = plt.subplots(figsize=(10, 6))
+
+        # Graficul prețurilor
+        ax1.plot(x, self.prices, label='Prețuri', marker='o', color='blue')
+        ax1.plot(x, trend_line, label='Regresie Liniară', color='orange')
+        ax1.plot(x, trend_poly, label='Regresie Polinomială', color='purple')
+        ax1.plot(x, ema, label='Media Mobilă Exponențială', color='green')
+        ax1.set_xlabel("Timp")
+        ax1.set_ylabel("Preț")
+        
+        # Graficul gradientului
+        ax2 = ax1.twinx()
+        ax2.plot(x, gradient, 'r--', label='Gradient')
+        ax2.set_ylabel("Gradient", color='red')
+
+        fig.legend(loc="upper left")
+        plt.title("Analiza Tendinței Prețurilor")
+        plt.show()
+    
+    def analyze_trends(self, poly_degree=2, ema_span=5):
+        # Regresie liniară
+        trend_line, slope, r_value = self.linear_regression_trend()
+        if not slope is None:
+            lin_trend = "creștere" if slope > 0 else "descreștere"
+        lin_trend = "nedefinit"
+        print(f"Regresie Liniară: Slope = {slope:.2f}, R = {r_value:.2f} -> Tendință estimată de {lin_trend}")
+
+        # Regresie polinomială
+        trend_poly, poly_coef = self.polynomial_regression_trend(degree=poly_degree)
+        poly_trend = "creștere" if poly_coef[-1] > 0 else "descreștere"
+        print(f"Regresie Polinomială (grad {poly_degree}): Coeficient final = {poly_coef[-1]:.2f} -> Tendință de {poly_trend}")
+
+        # Media Mobilă Exponențială
+        ema = self.exponential_moving_average(span=ema_span)
+        print(f"Media Mobilă Exponențială: Ultima valoare EMA = {ema[-1]:.2f}")
+
+        # Gradientul
+        gradient, avg_gradient = self.calculate_gradient()
+        grad_trend = "1" if avg_gradient > 0 else "-1"
+        print(f"Gradient Mediu: {avg_gradient:.2f} -> Tendință locală de {grad_trend}")
+
+        # Plotarea tendințelor
+        self.plot_trends(trend_line, trend_poly, ema, gradient)
+
+# Exemplu de utilizare:
+#prices = [100, 102, 101, 105, 107, 110, 108, 112, 115, 117]  # Înlocuiește cu lista ta de prețuri
+#analyzer = PriceTrendAnalyzer(prices)
+#analyzer.analyze_trends(poly_degree=2, ema_span=5)
+
+
 class PriceWindow:
     def __init__(self, window_size, max_index=230, epsilon=1e-2):
         self.window_size = window_size
@@ -31,6 +141,7 @@ class PriceWindow:
         self.current_index = 0  # Internal counter to keep track of index
         self.max_index = max_index  # Threshold for normalization
         self.epsilon = 10  # Tolerance for approximately equal minimums
+        
 
     def process_price(self, price):
         self.prices.append(price)
@@ -210,7 +321,7 @@ class PriceWindow:
                 action = 'BUY'
                 print(f"Near recent high. Action: {action}")
                 proposed_price = current_price * 0.995
-                print(f"Proposed price updated  to {proposed_price} to be close to current price {current_price}")
+                print(f"Proposed price updated to {proposed_price} to be close to current price {current_price}")
                 return action, proposed_price, price_change_percent, slope 
         else:
             print("Market trending downwards")
@@ -257,6 +368,35 @@ class PriceWindow:
     def current_window_size(self):
         return len(self.prices)
 
+    def get_trend(self):
+        analyzer = PriceTrendAnalyzer(self.prices)
+         # Regresie liniară
+        trend_line, slope, r_value = analyzer.linear_regression_trend()
+        if not slope is None:
+            lin_trend = "creștere" if slope > 0 else "descreștere"
+            print(f"Regresie Liniară: Slope = {slope:.2f}, R = {r_value:.2f} -> Tendință estimată de {lin_trend}")
+        else :
+            lin_trend = "nedefinit"
+            print(f"Regresie Liniară:  -> Tendință estimată de {lin_trend}")
+
+        # Regresie polinomială
+        poly_degree=2; ema_span=5
+        trend_poly, poly_coef = analyzer.polynomial_regression_trend(degree=poly_degree)
+        poly_trend = "creștere" if poly_coef[-1] > 0 else "descreștere"
+        print(f"Regresie Polinomială (grad {poly_degree}): Coeficient final = {poly_coef[-1]:.2f} -> Tendință de {poly_trend}")
+
+        # Media Mobilă Exponențială
+        ema = analyzer.exponential_moving_average(span=ema_span)
+        print(f"Media Mobilă Exponențială: Ultima valoare EMA = {ema[-1]:.2f}")
+
+        # Gradientul
+        gradient, avg_gradient = analyzer.calculate_gradient()
+        grad_trend = "1" if avg_gradient > 0 else "-1"
+        print(f"Gradient Mediu: {avg_gradient:.2f} -> Tendință locală de {grad_trend}")
+
+        return grad_trend
+        
+    
 
 TIME_SLEEP_GET_PRICE = 2  # seconds to sleep for price collection
 EXP_TIME_BUY_ORDER = (2.6 * 60) * 60 # dupa 1.6 ore
@@ -495,7 +635,7 @@ def update_csv_file(file_path, symbol, slope, tick, min_val, max_val, pos, gradi
     except Exception as e:
         print(f"Error updating CSV file: {e}")
     
-filename = "trades_BTCUSDT.csv"    
+filename = "sell_recommendation.csv"    
 initialize_csv_file(filename)
     
 
@@ -545,10 +685,10 @@ while True:
         proposed_price = current_price
        
         slope, pos = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
-        gradient = 0
+        gradient = price_window.get_trend()
         if slope == 0:
             count = count + 1
-        else 
+        else :
             count = 0
         
         if slope > 0:

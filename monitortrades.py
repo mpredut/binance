@@ -92,7 +92,7 @@ def sell_order_gradually(order, start_time, end_time):
         if order_id:
             if api.check_order_filled(order_id) :
                 return; #order filled!
-            cancel_order(order_id)
+            api.cancel_order(order_id)
             print(f"Anulat ordinul anterior cu ID: {order_id}")
 
         # Plasam ordinul de vanzare
@@ -531,21 +531,21 @@ class StateTracker:
             df = pd.read_csv(file_path)
             sell_recommendation = {
                 row['symbol']: {
-                    'force_sell': row['force_sell'],
-                    'procent_desired_profit': row['procent_desired_profit'],
+                    'force_sell': eval(str(row['force_sell'])),
+                    'procent_desired_profit': eval(str(row['procent_desired_profit'])),
                     'expired_duration': eval(str(row['expired_duration'])),  # Evaluam expresiile matematice
-                    'min_procent': row['min_procent'],
-                    'days_after_use_current_price': row['days_after_use_current_price'],
-                    'slope': row.get('slope', 0.0),         # Citire cu valoare default daca nu exista
-                    'pos': row.get('pos', 0),               # Citire cu valoare default daca nu exista
-                    'gradient': row.get('gradient', 0.0),   # Citire cu valoare default daca nu exista
-                    'tick': row.get('tick', 0),             # Citire cu valoare default pentru tick daca nu exista
-                    'min': row.get('min', 0.0),             # Citire cu valoare default pentru min daca nu exista
-                    'max': row.get('max', 0.0)              # Citire cu valoare default pentru max daca nu exista
+                    'min_procent': eval(str(row['min_procent'])),
+                    'days_after_use_current_price': eval(str(row['days_after_use_current_price'])),
+                    'slope': eval(str(row.get('slope', 0.0))),         # Citire cu valoare default daca nu exista
+                    'pos': eval(str(row.get('pos', 0))),               # Citire cu valoare default daca nu exista
+                    'gradient': eval(str(row.get('gradient', 0.0))),   # Citire cu valoare default daca nu exista
+                    'tick': eval(str(row.get('tick', 0))),             # Citire cu valoare default pentru tick daca nu exista
+                    'min': eval(str(row.get('min', 0.0))),             # Citire cu valoare default pentru min daca nu exista
+                    'max': eval(str(row.get('max', 0.0)))              # Citire cu valoare default pentru max daca nu exista
                 } for index, row in df.iterrows()
             }
             print(f"sell_recommendation updated from file!")
-            
+                
             # Update the states based on the current sell_recommendation
             self.update_states_from_sell_recommendation()
         except FileNotFoundError:
@@ -722,6 +722,7 @@ def main():
     #api.place_order("buy", taosymbol, taosymbol_target_price - 10, 1)
 
     while True:
+        state_tracker.display_states()
         monitor_price_and_trade(taosymbol, 1 , 3600 * 24 * 7)
         monitor_price_and_trade(symbol, 1, 3600 * 24 * 7)
         data = sell_recommendation[symbol]
