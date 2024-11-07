@@ -10,7 +10,7 @@ from binance.exceptions import BinanceAPIException
 #my imports
 import binanceapi as api
 import utils as u
-from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, check_order_filled,  place_order, cancel_order
+from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, check_order_filled,  place_order
 from utils import beep, get_interval_time, are_difference_equal_with_aprox_proc, are_values_very_close, budget, order_cost_btc, price_change_threshold, max_threshold
 
 import log
@@ -141,11 +141,11 @@ def check_and_close_orders(symbol):
         #api.cancel_order(order_id) 
         #print(f"Ordinul {order_id} a fost închis deoarece pretul sau ({order_price}) este sub 2% din pretul curent ({current_price}).{(order_price) + 300 < (current_price)}")
         if (order_price)  < (current_price) + 300:
-            api.cancel_order(order_id) 
+            api.cancel_order(symbol, order_id) 
             print(f"Ordinul {order_id} a fost închis deoarece pretul sau ({order_price}) este sub 2% din pretul curent ({current_price}).")
         if (order_price)  > 59500:
             print(f"Ordinul {order_id} a fost închis deoarece pretul sau ({order_price}) este foarte mare fata de  ({current_price}).")
-            api.cancel_order(order_id) 
+            api.cancel_order(symbol, order_id) 
             
             
 # Exemplu de utilizare:
@@ -175,7 +175,7 @@ while True:
                     expiration_time = state.timestamp + timedelta(seconds=TIME_QUANT * state.iteration)
                     #print(f"Debug: Current time: {datetime.now()}, Expiration time: {expiration_time}")
                     if datetime.now() > expiration_time:
-                        cancel_order(state.sell_order_id)
+                        api.cancel_order(api.symbol, state.sell_order_id)
                         state.sell_order_id = None
 
                 # Place or update sell order
@@ -225,7 +225,7 @@ while True:
             beep(2)
             print(f"Anulez ordinul existent de cumparare daca exista (ID:{current_buy_order_id}).")
             if current_buy_order_id:#last_state.buy_order_id
-                cancel_order(current_buy_order_id)
+                api.cancel_order(api.symbol, current_buy_order_id)
                 current_buy_order_id = None
             
             

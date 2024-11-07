@@ -588,7 +588,7 @@ class StateTracker:
             return
 
         # If slope is the same as the last state, update the current state's tick and min/max
-        if slope == last_state['slope']:
+        if slope * last_state['slope'] > 0:  # Au același semn:
             last_state['tick'] = tick
             last_state['min'] = min(last_state['min'], min_val)
             last_state['max'] = max(last_state['max'], max_val)

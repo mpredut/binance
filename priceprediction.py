@@ -32,10 +32,11 @@ class PricePrediction:
         
         self.train_lstm_model()
         self.trained = True
-        
-		# Facem predicția pe baza ferestrei curente de prețuri
-		#prediction = self.predict_next_price()
-		#print(f"Prețul prezis pentru următoarea perioadă: {prediction:.2f}")
+        if len(self.prices) % 5 == 0:
+            #self.train_lstm_model()
+            self.trained = True
+
+
     def process_prices(self, prices):
         if len(prices) < self.window_size:
             return
@@ -48,7 +49,7 @@ class PricePrediction:
         self.train_lstm_model()
         self.trained = True
         
-    def prepare_data(self):
+    def prepare_data_old(self):
         prices_array = np.array(self.prices).reshape(-1, 1)
         prices_scaled = self.scaler.fit_transform(prices_array)
 
@@ -64,7 +65,21 @@ class PricePrediction:
 
         return X, y
 
+    def prepare_data(self):
+        prices_array = np.array(self.prices).reshape(-1, 1)
+        self.scaler.fit(prices_array)  # Resetează scalerul pe toate datele istorice
+        prices_scaled = self.scaler.transform(prices_array)
 
+        X, y = [], []
+        for i in range(len(prices_scaled) - self.window_size):
+            X.append(prices_scaled[i:i + self.window_size])
+            y.append(prices_scaled[i + self.window_size])
+
+        return np.array(X), np.array(y)
+
+    
+    
+    
     def train_lstm_model(self):
         # Pregătim datele pentru antrenare
         X, y = self.prepare_data()
@@ -75,7 +90,7 @@ class PricePrediction:
         self.model.fit(X, y, epochs=100, verbose=1)
         ##print("Modelul LSTM a fost antrenat cu succes!")
 
-    def predict_next_price(self):
+    def predict_next_price_old(self):
         if self.trained == False:
             return None
             
@@ -89,6 +104,27 @@ class PricePrediction:
         # Rescalăm valoarea prezisă înapoi la intervalul original
         predicted_price = self.scaler.inverse_transform(predicted_price_scaled)
         return predicted_price[0][0]
+
+
+
+    def predict_next_price(self):
+        if not self.trained:
+            return None
+        
+        # Folosim toate datele de preț pentru predicție
+        all_prices = np.array(self.prices).reshape(-1, 1)
+        all_prices_scaled = self.scaler.transform(all_prices)
+        
+        # Selectăm ultimul segment de lungime `window_size` din istoric pentru predicție
+        input_sequence = all_prices_scaled[-self.window_size:].reshape(1, self.window_size, 1)
+        
+        # Realizăm predicția
+        predicted_price_scaled = self.model.predict(input_sequence)
+        
+        # Rescalăm valoarea prezisă înapoi la intervalul original
+        predicted_price = self.scaler.inverse_transform(predicted_price_scaled)
+        return predicted_price[0][0]
+
 
 # Exemplu de utilizare:
 #price_window = PriceWindow(window_size=10)

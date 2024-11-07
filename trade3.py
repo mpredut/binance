@@ -16,7 +16,7 @@ import log
 import alert
 import utils
 import utils as u
-
+import priceprediction as pp
 
 import pandas as pd
 import os
@@ -554,6 +554,7 @@ trend_state2 = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_threshol
   
 
 price_window = PriceWindow(window_size)
+prediction = pp.PricePrediction(10)  
 
 order_ids = []
 last_order_time = time.time()
@@ -642,7 +643,7 @@ initialize_csv_file(filename)
 PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 260)
 
 count = 0
-        
+    
 while True:
     #try:
         time.sleep(TIME_SLEEP_GET_PRICE)
@@ -654,6 +655,9 @@ while True:
             continue
 
         price_window.process_price(current_price)
+        prediction.process_price(current_price)
+        ppredict = prediction.predict_next_price()
+        print(f"predicted price : {ppredict}")
            
         action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(
             current_price, threshold_percent=0.8, decrease_percent=7
