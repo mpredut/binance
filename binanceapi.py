@@ -31,6 +31,9 @@ symbol = 'BTCUSDT'
 import binance
 print(binance.__version__)
 currentprice = {}
+#currentprice[symbol] = 0
+#currentprice['TAOUSDT'] = 0
+
 currenttime = time.time()
 client = Client(api_key, api_secret)
 
@@ -166,24 +169,25 @@ def get_current_price(symbol):
     global currentprice
     global refresh_interval
     #refresh_interval = 0 # Intervalul în care sa se faca actualizarea (în secunde)
-
     try:
-
-        if(currenttime + refresh_interval < time.time()) :
+        if symbol not in currentprice or (currenttime + refresh_interval <= time.time()):
             refresh_interval = 2
-            ticker = client.get_symbol_ticker(symbol=symbol)
+            ticker = client.get_symbol_ticker(symbol=symbol)  # Obțineți prețul curent de la Binance API
             currentprice[symbol] = float(ticker['price'])
             currenttime = time.time()
-        
+
         return currentprice[symbol]
+    
     except BinanceAPIException as e:
         print(f"Eroare la obtinerea pretului curent de la Binance API: {e}")
-        print(f"Folosesc pretul obtinut prin websocket, {symbol}: { currentprice[symbol]}")
-        return  currentprice[symbol]
-    except Exception as e:         # Handle any other exceptions that might occur
+        print(f"Folosesc pretul obtinut prin websocket, {symbol}: {currentprice.get(symbol, 'N/A')}")
+        return currentprice.get(symbol, None)  # Returnăm None dacă simbolul nu există
+    
+    except Exception as e:
         print(f"get_current_price: A aparut o eroare neasteptata: {e}")
-        print(f"Folosesc pretul obtinut prin websocket, {symbol}: { currentprice[symbol]}")
-        return currentprice[symbol]
+        print(f"Folosesc pretul obtinut prin websocket, {symbol}: {currentprice.get(symbol, 'N/A')}")
+        return currentprice.get(symbol, None)  # Returnăm None dacă simbolul nu există
+
         
 def get_current_time():
         global currenttime

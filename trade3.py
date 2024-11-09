@@ -655,9 +655,9 @@ while True:
             continue
 
         price_window.process_price(current_price)
-        prediction.process_price(current_price)
-        ppredict = prediction.predict_next_price()
-        print(f"predicted price : {ppredict}")
+        #prediction.process_price(current_price)
+        #ppredict = prediction.predict_next_price()
+        #print(f"predicted price : {ppredict}")
            
         action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(
             current_price, threshold_percent=0.8, decrease_percent=7
