@@ -423,7 +423,7 @@ def track_and_place_order(action, count, proposed_price, current_price, quantity
     # Cancel any existing orders
     if order_ids:
         for order_id in order_ids:
-            if not api.cancel_order(order_id):
+            if not api.cancel_order(api.symbol, order_id):
                 alert.check_alert(True, f"Order executed! be Happy :-){order_id:.2f}")
         order_ids.clear()
         
@@ -703,7 +703,7 @@ while True:
                 count = trend_state2.confirm_trend() # Confirmam ca trendul de crestere continua
                 diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
                 proposed_price = current_price - diff
-                #track_and_place_order('BUY',count, proposed_price, current_price, order_ids=order_ids)
+                track_and_place_order('BUY', count, proposed_price, current_price, order_ids=order_ids)
             else:
                 expired_trend = trend_state2.start_trend('UP')  # Incepem un trend nou de crestere
                 proposed_price = current_price - initial_difference
@@ -716,13 +716,14 @@ while True:
                 count = trend_state2.confirm_trend() # Confirmam ca trendul de scadere continua
                 diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
                 proposed_price = proposed_price + diff
-                #track_and_place_order('SELL',count, proposed_price, current_price, order_ids=order_ids)
+                track_and_place_order('SELL', count, proposed_price, current_price, order_ids=order_ids)
             else:
                 expired_trend = trend_state2.start_trend('DOWN')  # Incepem un trend nou de scadere
                 proposed_price = current_price + initial_difference
                 #track_and_place_order('SELL',1, proposed_price, current_price, order_ids=order_ids)
 
         update_csv_file(filename, api.symbol, slope, count, 0, 0, pos, gradient)
+        update_csv_file(filename, 'TAOUSDT', slope, count, 0, 0, pos, gradient)
             
         
 
