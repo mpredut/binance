@@ -671,7 +671,7 @@ def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_inc
                 print(f"Price decreased by more than {percentage_decrese_threshold * 100}% versus buy price: Placing sell order")
                 #api.cancel_open_orders("sell", taosymbol)  # Anuleaza ordinele deschise
                 #api.place_order("sell", taosymbol, current_price + 1, qty)
-                api.place_order_smart("sell", taosymbol, current_price + 1, qty, cancelorders=True, hours=1, pair=False)
+                api.place_order_smart("sell", taosymbol, current_price + 1, qty, cancelorders=True, hours=0.1, pair=False)
             else:
                 print(f"Price price_increase {price_increase * 100}% range, price_decrease {price_decrease * 100} range. no action taken.")
             
