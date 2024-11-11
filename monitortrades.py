@@ -588,7 +588,7 @@ class StateTracker:
             return
 
         # If slope is the same as the last state, update the current state's tick and min/max
-        if slope * last_state['slope'] > 0:  # Au același semn:
+        if slope * last_state['slope'] > 0 or (slope == last_state['slope']):  # Au același semn:
             last_state['tick'] = tick
             last_state['min'] = min(last_state['min'], min_val)
             last_state['max'] = max(last_state['max'], max_val)
@@ -626,7 +626,7 @@ state_tracker = StateTracker()
 
 
 def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_increse_threshold=0.08, percentage_decrese_threshold=0.02):
-    try:
+    #try:
         # 1. Obtine ultimul trade pentru acest simbol (asumam ca este ordinul de cumparare)
         trade_orders_buy = apitrades.get_trade_orders("buy", taosymbol, max_age_seconds)
         trade_orders_sell = apitrades.get_trade_orders("sell", taosymbol, max_age_seconds)
@@ -642,16 +642,17 @@ def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_inc
 
         if trade_orders_buy:
             print(f"Buy trade orders found for {taosymbol} in the last {max_age_seconds} seconds.") 
-            sorted_trade_orders_buy = sorted(trade_orders_buy, key=lambda x: x['price'])
+            #sorted_trade_orders_buy = sorted(trade_orders_buy, key=lambda x: x['price'])
+            trade_orders_buy.sort(key=lambda x: x['time'], reverse=True)
             #sorted_trade_orders = sorted(trade_orders, key=lambda x: x['time'], reverse=True)
             # Ultimul ordin de cumparare
-            buy_order = sorted_trade_orders_buy[0]  # presupunem ca primul ordin este ultimul
+            buy_order = trade_orders_buy[0]  # presupunem ca primul ordin este ultimul
             buy_price = float(buy_order['price'])  # Pretul de cumparare
             print(f"Buy price for {taosymbol}: {buy_price}")
 
 
 
-            # 3. Verifica daca pretul a crescut sau a scazut cu mai mult de 1%
+            # 3. Verifica daca pretul a crescut sau a scazut cu mai mult de x%
             price_increase = (current_price - buy_price) / buy_price
             price_decrease = (buy_price - current_price) / buy_price
             
@@ -663,21 +664,23 @@ def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_inc
                 # and state_tracker.states[-1][taosymbol]['tick'] <3&& cresteri inante dar nu multe
                 #if(data['slope'] < 0 && putine descresteri) : next;
                 ## cresteri multe inante sau multe descresteri inate
-                api.cancel_open_orders("sell", taosymbol)  # Anuleaza ordinele deschise
-                api.place_order("sell", taosymbol, current_price + 5, qty)
+                #api.cancel_open_orders("sell", taosymbol)  # Anuleaza ordinele deschise
+                #api.place_order("sell", taosymbol, current_price + 5, qty)
+                api.place_order_smart("sell", taosymbol, current_price + 5, qty, cancelorders=True, hours=1, pair=False)
             elif price_decrease > percentage_decrese_threshold or utils.are_values_very_close(price_decrease, percentage_decrese_threshold, target_tolerance_percent=1.0):
                 print(f"Price decreased by more than {percentage_decrese_threshold * 100}% versus buy price: Placing sell order")
-                api.cancel_open_orders("sell", taosymbol)  # Anuleaza ordinele deschise
+                #api.cancel_open_orders("sell", taosymbol)  # Anuleaza ordinele deschise
                 #api.place_order("sell", taosymbol, current_price + 1, qty)
-                api.place_order_smart("sell", taosymbol, current_price + 1, qty, cancelorders=True, hours=0.1, pair=False)
+                api.place_order_smart("sell", taosymbol, current_price + 1, qty, cancelorders=True, hours=1, pair=False)
             else:
                 print(f"Price price_increase {price_increase * 100}% range, price_decrease {price_decrease * 100} range. no action taken.")
             
             
         if trade_orders_sell:
             print(f"Sell trade orders found for {taosymbol} in the last {max_age_seconds} seconds.")
-            sorted_trade_orders_sell = sorted(trade_orders_sell, key=lambda x: x['price'])
-            sell_order = sorted_trade_orders_sell[0]  # presupunem ca primul ordin este ultimul
+            #sorted_trade_orders_sell = sorted(trade_orders_sell, key=lambda x: x['price'])
+            trade_orders_sell.sort(key=lambda x: x['time'], reverse=True)
+            sell_order = trade_orders_sell[0]  # presupunem ca primul ordin este ultimul
             sell_price = float(sell_order['price'])  # Pretul de cumparare
             print(f"Sell price for {taosymbol}: {sell_price}")
             
@@ -688,14 +691,14 @@ def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_inc
                 print(f"Price decreased by more than {percentage_decrese_threshold * 100}% versus sell price: Placing buy order")
                 if(sell_recommendation[taosymbol]['slope'] < 0 ) : next; # continua sa descreasca
                 if(sell_recommendation[taosymbol]['slope'] == 0 and sell_recommendation[taosymbol]['gradient'] < 0 ) : next
-                api.cancel_open_orders("buy", taosymbol)  # Anuleaza ordinele deschise
+                #api.cancel_open_orders("buy", taosymbol)  # Anuleaza ordinele deschise
                 #api.cancel_expired_orders("buy", "BTCUSDT", 60*25)
                 api.cancel_orders_old_or_outlier("buy", "BTCUSDT", qty, hours=0.5, price_difference_percentage=0.1)
                 #api.place_order("buy", taosymbol, current_price - 1, qty)
-                api.place_order_smart("buy", taosymbol, current_price + 1, qty, cancelorders=True, hours=0.1, pair=False)
+                api.place_order_smart("buy", taosymbol, current_price + 1, qty, cancelorders=True, hours=1, pair=False)
 
-    except Exception as e:
-        print(f"An error occurred while monitoring the price: {e}")
+    #except Exception as e:
+    #    print(f"An error occurred while monitoring the price: {e}")
 
         
 def main():
