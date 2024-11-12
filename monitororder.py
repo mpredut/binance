@@ -64,6 +64,7 @@ def monitor_open_orders_by_type(order_type):
             if not api.cancel_order(api.symbol, order_id):
                 initial_prices.pop(order_id)
                 continue
+            time.sleep(min(MONITOR_OPEN_ORDER_INTERVAL, MONITOR_CLOSE_ORDER_INTERVAL))
             
             if order_type == 'sell':
                 new_price = current_price * 1.001 + 20
@@ -83,11 +84,16 @@ def monitor_open_orders_by_type(order_type):
                 print(f"Update order from {price} to {new_price}. New ID: {new_order['orderId']}")
             else:
                 print(f"Eroare la plasarea noului ordin de {order_type}.")
+                orders[new_order['orderId']] = {
+                    'price': new_price,
+                    'quantity': quantity
+                }
+                initial_prices[new_order['orderId']] = initial_prices.pop(order_id)  # Pastram pretul initial
     
 
 
 
-MONITOR_OPEN_ORDER_INTERVAL = 28
+MONITOR_OPEN_ORDER_INTERVAL = 38
 MONITOR_CLOSE_ORDER_INTERVAL = 98
 max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate/filled sunt considerate recente (3 zile)
 
