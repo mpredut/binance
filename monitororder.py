@@ -22,9 +22,8 @@ import time
 TIME_SLEEP_ERROR = 10
 
 
-
 def monitor_open_orders_by_type(order_type):
-    orders = api.get_open_orders(order_type, api.symbol)  # Obtine ordinele de vanzare sau cumparare în functie de tip
+    orders = api.get_open_orders(order_type, api.symbol)  # Obtine ordinele deschise de vanzare sau cumparare in functie de tip
     if not orders:
         print(f"Nu exista ordine de {order_type} deschise initial.")
         return
@@ -37,7 +36,8 @@ def monitor_open_orders_by_type(order_type):
     print(f"Pretul curent BTC: {current_price:.2f}")
     
     initial_prices = initial_sell_prices if order_type == 'sell' else initial_buy_prices
-
+    failed_orders = []  # Lista pentru a salva ordinele care dau eroare la plasare
+    
     for order_id in list(orders.keys()):
         order = orders[order_id]
         price = order['price']
@@ -53,10 +53,9 @@ def monitor_open_orders_by_type(order_type):
             print(f"Current price {current_price} and {order_type} price {price} are close!")
             
             difference_percent = abs(current_price - initial_prices[order_id]) / initial_prices[order_id] * 100
-            
             are_close = utils.are_values_very_close(current_price, initial_prices[order_id], MAX_PROC)
             if not are_close:
-                print(f"Totusi pretul s-a modificat prea mult({difference_percent}%) fata de pretul initial ({initial_prices[order_id]}). Nu se mai modifica ordinul.")
+                print(f"Totusi pretul s-a modificat prea mult ({difference_percent}%) fata de pretul initial ({initial_prices[order_id]}). Nu se mai modifica ordinul.")
                 continue
             else:
                 print(f"Current price {current_price} and initial {order_type} price {initial_prices[order_id]} are close!")
@@ -64,8 +63,9 @@ def monitor_open_orders_by_type(order_type):
             if not api.cancel_order(api.symbol, order_id):
                 initial_prices.pop(order_id)
                 continue
-            time.sleep(min(MONITOR_OPEN_ORDER_INTERVAL, MONITOR_CLOSE_ORDER_INTERVAL))
+            time.sleep(MONITOR_BETWEEN_ORDERS_INTERVAL)
             
+            # Calculeaza noul pret in functie de tipul ordinului
             if order_type == 'sell':
                 new_price = current_price * 1.001 + 20
             else:
@@ -73,29 +73,48 @@ def monitor_open_orders_by_type(order_type):
             
             quantity = order['quantity']
             
-            new_order = api.place_order(order_type,  api.symbol, new_price, quantity)
+            # incearca sa plaseze un nou ordin
+            new_order = api.place_order(order_type, api.symbol, new_price, quantity)
             
-            if new_order:    
+            if new_order:
                 orders[new_order['orderId']] = {
                     'price': new_price,
                     'quantity': quantity
                 }
                 initial_prices[new_order['orderId']] = initial_prices.pop(order_id)  # Pastram pretul initial
-                print(f"Update order from {price} to {new_price}. New ID: {new_order['orderId']}")
+                print(f"Updated order from {price} to {new_price}. New ID: {new_order['orderId']}")
             else:
+                # Save fail order
                 print(f"Eroare la plasarea noului ordin de {order_type}.")
-                orders[new_order['orderId']] = {
+                failed_orders.append({
+                    'order_type': order_type,
+                    'symbol': api.symbol,
                     'price': new_price,
                     'quantity': quantity
-                }
-                initial_prices[new_order['orderId']] = initial_prices.pop(order_id)  # Pastram pretul initial
+                })
+
+    # Retry ...
+    for failed_order in failed_orders:
+        print(f"Reincercare plasare ordin esuat: {failed_order}")
+        time.sleep(MONITOR_BETWEEN_ORDERS_INTERVAL)
+        retry_order = api.place_order(
+            failed_order['order_type'],
+            failed_order['symbol'],
+            failed_order['price'],
+            failed_order['quantity']
+        )
+        if retry_order:
+            print(f"Ordin plasat cu succes la reincercare. ID nou: {retry_order['orderId']}")
+        else:
+            print("Eroare la reincercarea plasarii ordinului.")
+
     
 
 
-
+MONITOR_BETWEEN_ORDERS_INTERVAL = 5
 MONITOR_OPEN_ORDER_INTERVAL = 38
 MONITOR_CLOSE_ORDER_INTERVAL = 98
-max_age_seconds =  3 * 24 * 3600  # Timpul maxim în care ordinele executate/filled sunt considerate recente (3 zile)
+max_age_seconds =  3 * 24 * 3600  # Timpul maxim in care ordinele executate/filled sunt considerate recente (3 zile)
 
 def monitor_orders():
     #monitor_filled_buy_orders()
