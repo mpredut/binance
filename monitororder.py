@@ -61,7 +61,7 @@ def monitor_open_orders_by_type(order_type):
             else:
                 print(f"Current price {current_price} and initial {order_type} price {initial_prices[order_id]} are close!")
             
-            if not api.cancel_order(order_id):
+            if not api.cancel_order(api.symbol, order_id):
                 initial_prices.pop(order_id)
                 continue
             

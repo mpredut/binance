@@ -92,7 +92,7 @@ def sell_order_gradually(order, start_time, end_time):
         if order_id:
             if api.check_order_filled(order_id) :
                 return; #order filled!
-            api.cancel_order(order_id)
+            api.cancel_order(api.symbol, order_id)
             print(f"Anulat ordinul anterior cu ID: {order_id}")
 
         # Plasam ordinul de vanzare
@@ -442,7 +442,7 @@ def apply_sell_orders(trades, days, force_sell):
 
         if trade.sell_order_id:
             #print(f"cancel {trade.sell_order_id}")
-            api.cancel_order(trade.sell_order_id['orderId'])
+            api.cancel_order(api.symbol, trade.sell_order_id['orderId'])
             trade.sell_order_id = None
 
         # Verificam daca numarul de ordine a depasit 8
@@ -745,7 +745,7 @@ def main():
         time.sleep(2)       
     
         update_trades(trades, symbol, max_age_seconds, procent_desired_profit, expired_duration, min_procent)
-        apply_sell_orders(trades, days_after_use_current_price, force_sell)
+        #apply_sell_orders(trades, days_after_use_current_price, force_sell)
         #monitor_close_orders_by_age2(max_age_seconds)
         time.sleep(10*4)  # Periodic, verificam ordinele în cache
         

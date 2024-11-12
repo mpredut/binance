@@ -429,7 +429,7 @@ def track_and_place_order(action, count, proposed_price, current_price, quantity
         
     api.cancel_expired_orders(action, api.symbol, EXP_TIME_BUY_ORDER if action == 'BUY' else EXP_TIME_SELL_ORDER)
         
-    num_orders, price_step = (2, 0.2) if action == "BUY" else (3, 0.08)
+    num_orders, price_step = (1, 0.2) if action == "BUY" else (1, 0.08)
 
     # Price is rising, place fewer, larger orders. # Increase the spacing between orders as percents
     # Price is falling, place more, smaller orders # Reduce the spacing between orders as percents
@@ -640,7 +640,7 @@ filename = "sell_recommendation.csv"
 initialize_csv_file(filename)
     
 
-PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 290)
+PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 310)
 
 count = 0
     
@@ -697,7 +697,7 @@ while True:
         
         if slope > 0:
             # Confirmam un trend de crestere
-            initial_difference = 247 * (pos + 0.5)/abs(slope)
+            initial_difference = 147 * (pos + 0.5)/abs(slope)
             print(f"DIFERENTA MARE UP! DIFF start {initial_difference}")
             if trend_state2.is_trend_up():
                 count = trend_state2.confirm_trend() # Confirmam ca trendul de crestere continua
@@ -710,7 +710,7 @@ while True:
                 track_and_place_order('BUY',1, proposed_price, current_price, order_ids=order_ids)          
         elif slope < 0:
             # Confirmam un trend de scadere
-            initial_difference = 447  * (pos + 0.5) /abs(slope)
+            initial_difference = 7  * (pos + 0.5) /abs(slope)
             print(f"DIFERENTA MARE DOWN! DIFF start {initial_difference}")
             if trend_state2.is_trend_down():
                 count = trend_state2.confirm_trend() # Confirmam ca trendul de scadere continua
@@ -720,7 +720,7 @@ while True:
             else:
                 expired_trend = trend_state2.start_trend('DOWN')  # Incepem un trend nou de scadere
                 proposed_price = current_price + initial_difference
-                #track_and_place_order('SELL',1, proposed_price, current_price, order_ids=order_ids)
+                track_and_place_order('SELL',1, proposed_price, current_price, order_ids=order_ids)
 
         update_csv_file(filename, api.symbol, slope, count, 0, 0, pos, gradient)
         update_csv_file(filename, 'TAOUSDT', slope, count, 0, 0, pos, gradient)
