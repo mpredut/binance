@@ -22,13 +22,13 @@ import time
 TIME_SLEEP_ERROR = 10
 
 
-def monitor_open_orders_by_type(order_type):
-    orders = api.get_open_orders(order_type, api.symbol)  # Obtine ordinele deschise de vanzare sau cumparare in functie de tip
+def monitor_open_orders_by_type(symbol, order_type):
+    orders = api.get_open_orders(order_type, symbol)  # Obtine ordinele deschise de vanzare sau cumparare in functie de tip
     if not orders:
         print(f"Nu exista ordine de {order_type} deschise initial.")
         return
     
-    current_price = api.get_current_price(api.symbol)
+    current_price = api.get_current_price(symbol)
     if current_price is None:
         print("Eroare la obtinerea pretului...")
         return
@@ -60,21 +60,21 @@ def monitor_open_orders_by_type(order_type):
             else:
                 print(f"Current price {current_price} and initial {order_type} price {initial_prices[order_id]} are close!")
             
-            if not api.cancel_order(api.symbol, order_id):
+            if not api.cancel_order(symbol, order_id):
                 initial_prices.pop(order_id)
                 continue
             time.sleep(MONITOR_BETWEEN_ORDERS_INTERVAL)
             
             # Calculeaza noul pret in functie de tipul ordinului
             if order_type == 'sell':
-                new_price = current_price * 1.001 + 20
+                new_price = current_price * 1.001 + 1
             else:
-                new_price = current_price * 0.999 - 20
+                new_price = current_price * 0.999 - 1
             
             quantity = order['quantity']
             
             # incearca sa plaseze un nou ordin
-            new_order = api.place_order(order_type, api.symbol, new_price, quantity)
+            new_order = api.place_order(order_type, symbol, new_price, quantity)
             
             if new_order:
                 orders[new_order['orderId']] = {
@@ -88,7 +88,7 @@ def monitor_open_orders_by_type(order_type):
                 print(f"Eroare la plasarea noului ordin de {order_type}.")
                 failed_orders.append({
                     'order_type': order_type,
-                    'symbol': api.symbol,
+                    'symbol': symbol,
                     'price': new_price,
                     'quantity': quantity
                 })
@@ -111,9 +111,9 @@ def monitor_open_orders_by_type(order_type):
     
 
 
-MONITOR_BETWEEN_ORDERS_INTERVAL = 5
-MONITOR_OPEN_ORDER_INTERVAL = 38
-MONITOR_CLOSE_ORDER_INTERVAL = 98
+MONITOR_BETWEEN_ORDERS_INTERVAL = 2
+MONITOR_OPEN_ORDER_INTERVAL = 8
+MONITOR_CLOSE_ORDER_INTERVAL = 8
 max_age_seconds =  3 * 24 * 3600  # Timpul maxim in care ordinele executate/filled sunt considerate recente (3 zile)
 
 def monitor_orders():
@@ -127,9 +127,10 @@ def monitor_orders():
         try:
             currenttime = time.time()
             if(currenttime - monitor_open_orders_lasttime > MONITOR_OPEN_ORDER_INTERVAL) :
-                monitor_open_orders_by_type('sell')
-                monitor_open_orders_by_type('buy')
-                monitor_open_orders_lasttime = currenttime
+                for symbol in api.symbols:
+                    monitor_open_orders_by_type(symbol, 'sell')
+                    monitor_open_orders_by_type(symbol, 'buy')
+                    monitor_open_orders_lasttime = currenttime
             if(currenttime - monitor_close_orders_by_age_lasttime > MONITOR_CLOSE_ORDER_INTERVAL) :
                 #monitor_close_orders_by_age(max_age_seconds)
                 monitor_close_orders_by_age_lasttime = currenttime   

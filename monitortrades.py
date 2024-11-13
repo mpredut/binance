@@ -625,7 +625,7 @@ class StateTracker:
 state_tracker = StateTracker()
 
 
-def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_gain_threshold=0.08, percentage_lost_threshold=0.01):
+def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_gain_threshold=0.08, percentage_lost_threshold=0.013):
     #try:
         # 1. Obtine ultimul trade pentru acest simbol (asumam ca este ordinul de cumparare)
         trade_orders_buy = apitrades.get_trade_orders("buy", taosymbol, max_age_seconds)
@@ -658,7 +658,7 @@ def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_gai
             
             # verifica tenditna in csv si daca este de crestere accelerata creste procentul
             if price_increase > percentage_gain_threshold or utils.are_values_very_close(price_increase, percentage_gain_threshold, target_tolerance_percent=1.0):
-                print(f"Price increased by more than {percentage_gain_threshold * 100}% versus buy price: Placing sell order")
+                print(f"Price increased with {price_increase}% by more than {percentage_gain_threshold * 100}% versus buy price: Placing sell order")
                 if(sell_recommendation[taosymbol]['slope'] > 0 ) : next; # continua sa cresca
                 if(sell_recommendation[taosymbol]['slope'] == 0 and sell_recommendation[taosymbol]['gradient'] > 0 ) : next
                 # and state_tracker.states[-1][taosymbol]['tick'] <3&& cresteri inante dar nu multe
@@ -668,10 +668,13 @@ def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_gai
                 #api.place_order("sell", taosymbol, current_price + 5, qty)
                 api.place_order_smart("sell", taosymbol, current_price + 5, qty, cancelorders=True, hours=1, pair=False)
             elif price_decrease > percentage_lost_threshold or utils.are_values_very_close(price_decrease, percentage_lost_threshold, target_tolerance_percent=1.0):
-                print(f"Price decreased by more than {percentage_lost_threshold * 100}% versus buy price: Placing sell order")
+                print(f"Price decreased with {price_decrease * 100}% by more than {percentage_lost_threshold * 100}% versus buy price. Check current trend ...")
+                if(sell_recommendation[taosymbol]['slope'] > 0 ) : next; # continua sa descreasca
+                if(sell_recommendation[taosymbol]['slope'] == 0 and sell_recommendation[taosymbol]['gradient'] > 0 ) : next
+                print(f"Price decreased with {price_decrease * 100}% by more than {percentage_lost_threshold * 100}% versus buy price: Placing sell order")
                 #api.cancel_open_orders("sell", taosymbol)  # Anuleaza ordinele deschise
                 #api.place_order("sell", taosymbol, current_price + 1, qty)
-                api.place_order_smart("sell", taosymbol, current_price + 1, qty, cancelorders=True, hours=0.1, pair=False)
+                api.place_order_smart("sell", taosymbol, current_price + 0.5, qty, cancelorders=True, hours=0.1, pair=False)
             else:
                 print(f"Price price_increase {price_increase * 100}% range, price_decrease {price_decrease * 100} range. no action taken.")
             
@@ -688,14 +691,14 @@ def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_gai
             
             # verifica tendinta in csv si daca este de descrestere accelerata creste procentul
             if(price_decrease_versus_sell > percentage_gain_threshold) or utils.are_values_very_close(price_decrease_versus_sell, percentage_gain_threshold, target_tolerance_percent=1.0):
-                print(f"Price decreased by more than {percentage_gain_threshold * 100}% versus sell price: Placing buy order")
+                print(f"Price decreased with {price_decrease_versus_sell * 100}% by more than {percentage_gain_threshold * 100}% versus sell price: Placing buy order")
                 if(sell_recommendation[taosymbol]['slope'] < 0 ) : next; # continua sa descreasca
                 if(sell_recommendation[taosymbol]['slope'] == 0 and sell_recommendation[taosymbol]['gradient'] < 0 ) : next
                 #api.cancel_open_orders("buy", taosymbol)  # Anuleaza ordinele deschise
                 #api.cancel_expired_orders("buy", "BTCUSDT", 60*25)
                 api.cancel_orders_old_or_outlier("buy", "BTCUSDT", qty, hours=0.5, price_difference_percentage=0.1)
                 #api.place_order("buy", taosymbol, current_price - 1, qty)
-                api.place_order_smart("buy", taosymbol, current_price + 1, qty, cancelorders=True, hours=1, pair=False)
+                api.place_order_smart("buy", taosymbol, current_price + 0.5, qty, cancelorders=True, hours=1, pair=False)
 
     #except Exception as e:
     #    print(f"An error occurred while monitoring the price: {e}")

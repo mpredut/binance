@@ -27,6 +27,8 @@ from apikeys import api_key, api_secret
 
 stop = False
 symbol = 'BTCUSDT'
+taosymbol = 'TAOUSDT'
+symbols = [symbol, taosymbol]
 
 import binance
 print(binance.__version__)
@@ -356,8 +358,8 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
 
         # Rotunjim cantitatea la 5 zecimale în jos
         #qty = math.floor(qty * 10**5) / 10**5  # Rotunjire în jos la 5 zecimale
-        qty = round(qty, 5)
-        qty = float(Decimal(qty).quantize(Decimal('0.00001'), rounding=ROUND_DOWN))  # Rotunjit la 5 zecimale
+        qty = round(qty, 4)
+        qty = float(Decimal(qty).quantize(Decimal('0.0001'), rounding=ROUND_DOWN))  # Rotunjit la 5 zecimale
         if qty <= 0:
             print("Adjusted quantity is too small after rounding.")
             return None          
@@ -396,6 +398,7 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
 
 
 def place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5, pair=True):
+    pair = False
     try:
         qty = round(qty, 5)
         cancel = False
