@@ -16,7 +16,7 @@ import log
 import alert
 import utils
 import utils as u
-import priceprediction as pp
+#import priceprediction as pp
 
 import pandas as pd
 import os
@@ -131,164 +131,124 @@ class PriceTrendAnalyzer:
 #analyzer = PriceTrendAnalyzer(prices)
 #analyzer.analyze_trends(poly_degree=2, ema_span=5)
 
-
+from collections import deque
+from bisect import insort, bisect_left
 class PriceWindow:
-    def __init__(self, window_size, max_index=230, epsilon=1e-2):
-        self.window_size = window_size
-        self.prices = deque()  # Store all prices in the window
-        self.min_deque = deque()  # Manage the minimums
-        self.max_deque = deque()  # Manage the maximums
-        self.current_index = 0  # Internal counter to keep track of index
-        self.max_index = max_index  # Threshold for normalization
-        self.epsilon = 10  # Tolerance for approximately equal minimums
+    def __init__(self, window_size, initial_prices=None):
+        self.window_size = int(window_size)
+        self.prices = deque(maxlen=self.window_size)
+        self.sorted_prices = []
         
+        if initial_prices:
+            for price in initial_prices[-self.window_size:]:  # Doar ultimele `window_size` elemente
+                self.process_price(price)
+
+    @classmethod
+    def from_existing_window(cls, existing_prices, window_size):
+        """ Creează o instanță nouă de PriceWindow cu ultimele `window_size` elemente din `existing_prices`. """
+        return cls(window_size, initial_prices=existing_prices)
 
     def process_price(self, price):
+        if len(self.prices) == self.window_size:
+            oldest_price = self.prices.popleft()
+            index = bisect_left(self.sorted_prices, oldest_price)
+            if index < len(self.sorted_prices) and self.sorted_prices[index] == oldest_price:
+                del self.sorted_prices[index]
+
         self.prices.append(price)
-        if len(self.prices) > self.window_size:
-            removed_price = self.prices.popleft()
-            #print(f"Price removed from window: {removed_price}")
-        self._manage_minimum(price)
-        self._manage_maximum(price)
+        insort(self.sorted_prices, price)
 
-        self.current_index += 1
-        print(f"BTC: {round(price, 0):.0f} Current index in window: {self.current_index}")
-       
-        #if self.current_index > self.max_index:
-            #print(f"Start normalize indexes")
-            # self._normalize_indices()
-
-    def _normalize_indices(self):
-        old_index = self.current_index
-        self.current_index = 0  # Reset current index
-
-        # Verifică indecșii din min_deque
-        print("idecsi dubiosi1:")
-        for price, i in self.min_deque:
-            if i < old_index - self.window_size:
-                print(f"  Price: {price}, Index: {i}")
-
-        # Verifică indecșii din max_deque
-        print("idecsi dubiosi2:")
-        for price, i in self.max_deque:
-            if i < old_index - self.window_size:
-                print(f"  Price: {price}, Index: {i}")
-
-        self.min_deque = deque([(price, i - (old_index - self.window_size + 1))
-                                 for price, i in self.min_deque if i >= old_index - self.window_size])
-
-        # Normalizează max_deque
-        self.max_deque = deque([(price, i - (old_index - self.window_size + 1))
-                                 for price, i in self.max_deque if i >= old_index - self.window_size])
-
-
-        # Verifică dacă există indexuri negative
-        negative_min_indices = [i for i, _ in self.min_deque if i < 0]
-        negative_max_indices = [i for i, _ in self.max_deque if i < 0]
-
-        if negative_min_indices:
-            print(f"Warning: Negative indices found in min_deque: {negative_min_indices}")
-
-        if negative_max_indices:
-            print(f"Warning: Negative indices found in max_deque: {negative_max_indices}")
-
-        print(f"Indices normalized. Old index: {old_index}, New index: {self.current_index}")
-
-
-    def _manage_minimum(self, price):
-        if self.min_deque and self.min_deque[0][1] <= self.current_index - self.window_size:
-            removed_min = self.min_deque.popleft()
-            print(f"Minimum removed as it is outside the window: {removed_min}")
-
-        #do this also for max
-        #for existing_price, index in self.min_deque:
-        #    if abs(existing_price - price) <= self.epsilon: 
-        #        return  # Don't add the current price if an equivalent exists
-
-        while self.min_deque and self.min_deque[-1][0] > price:
-            removed_min = self.min_deque.pop()
-            #print(f"Minimums removed from back: {removed_min}")
-
-        self.min_deque.append((price, self.current_index))
-
-    def _manage_maximum(self, price):
-        if self.max_deque and self.max_deque[0][1] <= self.current_index - self.window_size:
-            removed_max = self.max_deque.popleft()
-            print(f"Maximum removed as it is outside the window: {removed_max}")
-
-        while self.max_deque and self.max_deque[-1][0] <= price:
-            removed_max = self.max_deque.pop()
-            #print(f"Maximums removed from back: {removed_max}")
-
-        self.max_deque.append((price, self.current_index))
-
+    def get_newest_index(self):
+        return len(self.prices) - 1 if self.prices else None
+    
     def get_min(self):
-        if not self.min_deque:
+        if not self.sorted_prices:
             return None
-        return self.min_deque[0][0]  # Return the minimum price
+
+        #print("Sorted prices:", self.sorted_prices)  # Debug
+        min_price = self.sorted_prices[0]
+        close_min_values = [price for price in self.sorted_prices if utils.are_values_very_close(price, min_price, 0.01)]
+        
+        #print("Close minimum values:", close_min_values)  # Debug
+        avg_min = sum(close_min_values) / len(close_min_values) if close_min_values else min_price
+        #print("Average minimum value:", avg_min)  # Debug
+        return avg_min
 
     def get_max(self):
-        if not self.max_deque:
+        if not self.sorted_prices:
             return None
-        return self.max_deque[0][0]  # Return the maximum price
+
+        #print("Sorted prices:", self.sorted_prices)  # Debug
+        max_price = self.sorted_prices[-1]
+        close_max_values = [price for price in reversed(self.sorted_prices) if utils.are_values_very_close(price, max_price, 0.01)]
+        
+        #print("Close maximum values:", close_max_values)  # Debug
+        avg_max = sum(close_max_values) / len(close_max_values) if close_max_values else max_price
+        #print("Average maximum value:", avg_max)  # Debug
+        return avg_max
 
     def get_min_and_index(self):
-        if not self.min_deque:
-            return None
-        return self.min_deque[0][0], self.min_deque[0][1]  # Return min price and its index
+        if not self.sorted_prices:
+            print("BED1")
+            return None, None
+
+        min_price = self.get_min()
+        min_indices = [i for i, price in enumerate(self.prices) if utils.are_values_very_close(price, min_price, 0.01)]
+        
+        #print("Min indices:", min_indices)  # Debug
+        centroid_index = sum(min_indices) / len(min_indices) if min_indices else None
+        #print(f"Min price: {min_price}, Centroid index for min: {centroid_index}")  # Debug
+        return min_price, centroid_index
 
     def get_max_and_index(self):
-        if not self.max_deque:
-            return None
-        return self.max_deque[0][0], self.max_deque[0][1]  # Return max price and its index
+        if not self.sorted_prices:
+            print("BED2")
+            return None, None
+
+        max_price = self.get_max()
+        max_indices = [i for i, price in enumerate(self.prices) if utils.are_values_very_close(price, max_price, 0.01)]
+        
+        #print("Max indices:", max_indices)  # Debug
+        centroid_index = sum(max_indices) / len(max_indices) if max_indices else None
+        #print(f"Max price: {max_price}, Centroid index for max: {centroid_index}")  # Debug
+        return max_price, centroid_index
 
     def calculate_slope(self):
-        min_price = self.get_min()
-        max_price = self.get_max()
-
-        if min_price is None or max_price is None:
+        if len(self.sorted_prices) < 2:
             return 0
 
-        min_index = self.min_deque[0][1]
-        max_index = self.max_deque[0][1]
+        min_price, min_index = self.get_min_and_index()
+        max_price, max_index = self.get_max_and_index()
 
-        if max_index == min_index:
+        if min_price is None or max_price is None or max_index == min_index:
+            #print(f"BED3 - Min index: {min_index}, Max index: {max_index}")  # Debug
             return 0
 
-        price_change_percent = (max_price - min_price) / min_price
-        slope_normalized = price_change_percent / (max_index - min_index)
-        return slope_normalized
-
+        slope = (max_price - min_price) / (max_index - min_index)
+        #print(f"Slope: {slope}, Min price: {min_price}, Max price: {max_price}, Min index: {min_index}, Max index: {max_index}")  # Debug
+        return slope
 
 
     def calculate_proximities(self, current_price):
         min_price, _ = self.get_min_and_index()
         max_price, _ = self.get_max_and_index()
 
-        if max_price != min_price:
-            min_proximity = (current_price - min_price) / (max_price - min_price)
-            max_proximity = (max_price - current_price) / (max_price - min_price)
-
-            # Verificare pentru valori negative si declansare excepție
-            if min_proximity < 0 or max_proximity < 0:
-                print(f"Negative proximity detected! min_proximity: {min_proximity}, max_proximity: {max_proximity}")
-                min_proximity = max_proximity = 0
-                sys.exit(1)
-        else:
-            min_proximity = max_proximity = 0 # aprope total de min si de max
-        #min_proximity + max_proximity = 1 
-        #daca min_proximity -> 0 inseamna ca pretul este mai aprope de min
-        #daca max_proximity -> 0 inseamna ca pretul este mai aprope de max
-
-        return min_proximity, max_proximity
+        if min_price is None or max_price is None or max_price == min_price:
+            return 0, 0
+        min_proximity = (current_price - min_price) / (max_price - min_price)
+        max_proximity = (max_price - current_price) / (max_price - min_price)
+        
+        # Asigurăm că valorile de proximitate sunt pozitive
+        return max(min_proximity, 0), max(max_proximity, 0)
 
     def calculate_positions(self):
-        min_index = self.min_deque[0][1] if self.min_deque else 0
-        max_index = self.max_deque[0][1] if self.max_deque else 0
-        min_position = (min_index % self.window_size) / self.window_size
-        max_position = (max_index % self.window_size) / self.window_size
+        min_price, min_index = self.get_min_and_index()
+        max_price, max_index = self.get_max_and_index()
+        
+        min_position = min_index / self.window_size if min_index is not None else None
+        max_position = max_index / self.window_size if max_index is not None else None
         return min_position, max_position
-
+        
         
     def evaluate_buy_sell_opportunity(self, current_price, threshold_percent=1, decrease_percent=3.7):
         slope = self.calculate_slope()
@@ -351,14 +311,52 @@ class PriceWindow:
         price_diff_max = u.calculate_difference_percent(max_price, newest_price)
         grow = price_diff_max < price_diff_min # pret curent inspre max
         price_diff = max(price_diff_min, price_diff_max) ## check if abs(price_diff_min,price_diff_max) > treshold
+
+        
         if abs(price_diff) >= threshold or utils.are_values_very_close(price_diff, threshold) :
+            
             min_position, max_position = self.calculate_positions()
-            position = min(min_position, max_position)
-            position = min_position if grow else max_position
-            if(position < 0.5 or utils.are_values_very_close( position, 0.5)):                
-                return u.slope(min_price, min_index, newest_price, self.current_index), position #2.76 pt ungi de 70
-            else:
-                print("OUTLAIER!! but can indicate something will came !!!!")
+            
+            slope_min = u.slope(min_price, min_index, newest_price, self.get_newest_index())
+            slope_max = u.slope(max_price, max_index, newest_price, self.get_newest_index())
+            slope_max_min = u.slope(min_price, min_index, max_price, max_index)
+            return slope_max_min, price_diff
+            
+            diff_min_max_close = utils.are_values_very_close(price_diff_max , price_diff_min, 1.0)
+            if(diff_min_max_close) :
+                if(min_index < max_index) :
+                    grow = 1
+                    return -slope_max, price_diff
+                else : 
+                    grow = 0
+                    return slope_min, price_diff
+            
+            min_loc = 1 #center position
+            if (min_position < 0.3 or utils.are_values_very_close( min_position, 0.3)) : 
+                 min_loc = 0 #left position
+            if (min_position > 0.7 or utils.are_values_very_close( min_position, 0.7)) : 
+                 min_loc = 2 #right position
+                 
+            max_loc = 1 #center position
+            if (max_position > 0.7 or utils.are_values_very_close( max_position, 0.7)) :
+                max_loc = 2 #right position        
+            if (max_position < 0.3 or utils.are_values_very_close( max_position, 0.3)) :
+                max_loc = 0 #left position
+                    
+            if grow :
+                if (min_loc == 0): #left position
+                    return slope_min, price_diff #2.76 pt ungi de 70
+                if (min_loc == 1 and max_loc == 2): #center position and left position
+                    return slope_max_min, price_diff
+                else:
+                    print("OUTLAIER!! but can indicate something will came !!!!")     
+            if not grow:
+                if(min_loc == 2): #right position               
+                    return slope_max, price_diff #2.76 pt ungi de 70
+                if(min_loc == 1 and max_loc == 0): #center position and left position               
+                    return slope_max_min, price_diff #2.76 pt ungi de 70
+                else:
+                    print("OUTLAIER!! but can indicate something will came !!!!")    
         else:
             return 0, 1
             
@@ -370,31 +368,64 @@ class PriceWindow:
 
     def get_trend(self):
         analyzer = PriceTrendAnalyzer(self.prices)
-         # Regresie liniară
+        
+        lin_trend = 0
+        poly_trend = 0
+        '''
         trend_line, slope, r_value = analyzer.linear_regression_trend()
-        if not slope is None:
-            lin_trend = "creștere" if slope > 0 else "descreștere"
-            print(f"Regresie Liniară: Slope = {slope:.2f}, R = {r_value:.2f} -> Tendință estimată de {lin_trend}")
-        else :
-            lin_trend = "nedefinit"
-            print(f"Regresie Liniară:  -> Tendință estimată de {lin_trend}")
-
-        # Regresie polinomială
-        poly_degree=2; ema_span=5
+        lin_trend = slope if slope is not None else 0
+        print(f"Regresie Liniară: Slope = {slope:.2f} -> {'creștere' if slope > 0 else 'descreștere' if slope < 0 else 'nedefinit'}")
+        
+        poly_degree = 2
         trend_poly, poly_coef = analyzer.polynomial_regression_trend(degree=poly_degree)
-        poly_trend = "creștere" if poly_coef[-1] > 0 else "descreștere"
-        print(f"Regresie Polinomială (grad {poly_degree}): Coeficient final = {poly_coef[-1]:.2f} -> Tendință de {poly_trend}")
-
+        poly_trend = poly_coef[-1]
+        print(f"Regresie Polinomială (grad {poly_degree}): Coeficient final = {poly_trend:.2f} -> {'creștere' if poly_trend > 0 else 'descreștere'}")
+        '''
+        
         # Media Mobilă Exponențială
-        ema = analyzer.exponential_moving_average(span=ema_span)
-        print(f"Media Mobilă Exponențială: Ultima valoare EMA = {ema[-1]:.2f}")
+        #ema_span = 5
+        #ema = analyzer.exponential_moving_average(span=ema_span)
+        ema_diff = 0
+        #if len(ema) > 1:
+        #    ema_diff = ema[-1] - ema[-2] 
+        #print(f"Media Mobilă Exponențială: Ultima valoare EMA = {ema[-1]:.2f} -> {'creștere' if ema_diff > 0 else 'descreștere'}")
 
         # Gradientul
-        gradient, avg_gradient = analyzer.calculate_gradient()
-        grad_trend = "1" if avg_gradient > 0 else "-1"
-        print(f"Gradient Mediu: {avg_gradient:.2f} -> Tendință locală de {grad_trend}")
+        gradient_lst, avg_gradient = analyzer.calculate_gradient()
+        print(f"Gradient Mediu: {avg_gradient:.2f} -> {'creștere' if avg_gradient > 0 else 'descreștere'}")
+        gradient = 0
+        if len(gradient_lst) >= 3:
+            gradient = np.mean(gradient_lst[:3])
+        else:
+            gradient = np.mean(gradient_lst)
+        #print(f"Gradient local: {gradient:.2f} -> {'creștere' if gradient > 0 else 'descreștere'}")
 
-        return grad_trend
+
+
+        # Calculare vot final și coeficient de creștere
+        trends = [#1 if slope > 0 else -1 if slope < 0 else 0,
+                  #1 if poly_trend > 0 else -1,
+                  1 if ema_diff > 0 else -1,
+                  1 if gradient > 0 else -1,
+                  1 if avg_gradient > 0 else -1]
+        final_trend = sum(trends)
+        final_trend = avg_gradient
+        
+        growth_coefficient = (lin_trend + poly_trend + ema_diff + gradient + avg_gradient) / len(trends)
+        growth_coefficient = avg_gradient
+        
+        if final_trend > 0:
+            final_trend = 1
+        elif final_trend < 0:
+            final_trend = -1
+        else:
+            final_trend = 0
+
+        print(f"Tendință de {'creștere' if final_trend == 1 else 'descreștere' if final_trend == -1 else 'nedefinit'}")
+        print(f"Coeficient : {growth_coefficient:.2f}")
+
+        return final_trend, growth_coefficient
+
         
     
 
@@ -410,7 +441,7 @@ window_size = WINDOWS_SIZE_MIN / TIME_SLEEP_GET_PRICE
 window_size2 = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
-def track_and_place_order(action, count, proposed_price, current_price, quantity=0.017/2, order_ids=None):
+def track_and_place_order(action, count, proposed_price, current_price, quantity=0.017, order_ids=None):
     
     print(f"Iteration {count} generated price {proposed_price} versus {current_price}")
                     
@@ -449,7 +480,7 @@ def track_and_place_order(action, count, proposed_price, current_price, quantity
             print(f"Placing buy order at price: {adjusted_buy_price:.2f} USDT for {order_quantity:.6f} BTC")
             order = api.place_order_smart("buy", api.symbol, adjusted_buy_price, order_quantity, cancelorders=True, hours=0.3, pair=True)
             if order:
-                print(f"Buy order placed successfully with ID: {order['orderId']}")
+                #print(f"Buy order placed successfully with ID: {order['orderId']}")
                 order_ids.append(order['orderId']) 
 
     elif action == 'SELL':
@@ -554,7 +585,7 @@ trend_state2 = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_threshol
   
 
 price_window = PriceWindow(window_size)
-prediction = pp.PricePrediction(10)  
+#prediction = pp.PricePrediction(10)  
 
 order_ids = []
 last_order_time = time.time()
@@ -643,7 +674,10 @@ initialize_csv_file(filename)
 PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 310)
 
 count = 0
-    
+
+trades = apitrades.get_my_trades_24(api.symbol, 0, 1000)
+print (f" --------- {len(trades)}");
+print (f" {(trades)}");
 while True:
     #try:
         time.sleep(TIME_SLEEP_GET_PRICE)
@@ -689,13 +723,22 @@ while True:
         proposed_price = current_price
        
         slope, pos = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
-        gradient = price_window.get_trend()
+        gradient, gradient_coff = price_window.get_trend()
+          
+        if(slope * gradient < 0 ) :
+            print(f"ALERT slope = {slope} gradient = {gradient}")
+        if(slope * price_window.calculate_slope() < 0 ) :
+            print(f"ALERT slope = {slope} calculate_slope() = {price_window.calculate_slope()}")
+        if(gradient * price_window.calculate_slope() < 0 ) :
+            print(f"ALERT gradient = {gradient} calculate_slope() = {price_window.calculate_slope()}")
         if slope == 0:
             count = count + 1
         else :
             count = 0
         
-        if slope > 0:
+        gradient = price_window.calculate_slope()
+        
+        if gradient > 0 and slope != 0 :
             # Confirmam un trend de crestere
             initial_difference = 147 * (pos + 0.5)/abs(slope)
             print(f"DIFERENTA MARE UP! DIFF start {initial_difference}")
@@ -708,7 +751,7 @@ while True:
                 expired_trend = trend_state2.start_trend('UP')  # Incepem un trend nou de crestere
                 proposed_price = current_price - initial_difference
                 track_and_place_order('BUY',1, proposed_price, current_price, order_ids=order_ids)          
-        elif slope < 0:
+        elif gradient < 0 and slope != 0 :
             # Confirmam un trend de scadere
             initial_difference = 7  * (pos + 0.5) /abs(slope)
             print(f"DIFERENTA MARE DOWN! DIFF start {initial_difference}")

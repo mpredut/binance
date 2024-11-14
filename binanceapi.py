@@ -374,13 +374,19 @@ def place_safe_order(order_type, symbol, price, quantity, time_back_in_seconds=3
         if recent_opposite_trades:
             if order_type == "BUY":
                 last_sell_price = min(float(trade['price']) for trade in recent_opposite_trades)
-                diff_percent = value_diff_to_percent(last_sell_price, current_price)
+                diff_percent = utils.value_diff_to_percent(last_sell_price, current_price)
             else:  # pentru `sell`
                 last_buy_price = max(float(trade['price']) for trade in recent_opposite_trades)
-                diff_percent = value_diff_to_percent(current_price, last_buy_price)
+                diff_percent = utils.value_diff_to_percent(current_price, last_buy_price)
                 
-            if diff_percent < required_percentage_diff:
-                    print(f"Diferenta procentuala ({diff_percent:.2f}%) este sub pragul necesar de {required_percentage_diff}%. Ordinul de {order_type} nu a fost plasat.")
+                # Debugging output for the 'sell' case
+                print(f"[DEBUG] Order Type: {order_type}")
+                print(f"[DEBUG] Last Buy Price: {last_buy_price}")
+                print(f"[DEBUG] Current Price: {current_price}")
+                print(f"[DEBUG] Difference Percent: {diff_percent:.2f}%")
+                print(f"[DEBUG] Required Percentage Diff: {profit_percentage}%")    
+            if diff_percent < profit_percentage:
+                    print(f"Diferenta procentuala ({diff_percent:.2f}%) este sub pragul necesar de {profit_percentage}%. Ordinul de {order_type} nu a fost plasat.")
                     return None
             
         order = None

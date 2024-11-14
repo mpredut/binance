@@ -40,7 +40,7 @@ def calculate_difference_percent(val1, val2):
 
     
 def value_diff_to_percent(value1, value2):
-    if val1 == 0:
+    if value1 == 0:
         return value2 
         
     diff = value1 - value2
