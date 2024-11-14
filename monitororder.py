@@ -48,12 +48,12 @@ def monitor_open_orders_by_type(symbol, order_type):
         difference_percent = abs(current_price - price) / price * 100
         print(f"{order_type.capitalize()} price {price}, current price {current_price} difference: {difference_percent:.2f}%, Order ID {order_id}")
         
-        are_close = utils.are_values_very_close(current_price, price, MAX_PROC)
+        are_close = u.are_close(current_price, price, MAX_PROC)
         if are_close:
             print(f"Current price {current_price} and {order_type} price {price} are close!")
             
             difference_percent = abs(current_price - initial_prices[order_id]) / initial_prices[order_id] * 100
-            are_close = utils.are_values_very_close(current_price, initial_prices[order_id], MAX_PROC)
+            are_close = u.are_close(current_price, initial_prices[order_id], MAX_PROC)
             if not are_close:
                 print(f"Totusi pretul s-a modificat prea mult ({difference_percent}%) fata de pretul initial ({initial_prices[order_id]}). Nu se mai modifica ordinul.")
                 continue

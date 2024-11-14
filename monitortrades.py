@@ -173,7 +173,7 @@ def monitor_close_orders_by_age1(max_age_seconds):
         filled_price = order['price']
         quantity = float(order['qty']) #quantity
 
-        if current_price >= filled_price * 1.04 or utils.are_close(current_price, filled_price * 1.04):  # Daca pretul curent este cu 7% mai mare
+        if current_price >= filled_price * 1.04 or u.are_close(current_price, filled_price * 1.04):  # Daca pretul curent este cu 7% mai mare
             print(f"Pretul curent ({current_price}) este cu 4% mai mare decat pretul de cumparare ({filled_price}). Initiem vanzarea.cantitate{quantity}")
             
             # Pornim un fir nou pentru a vinde BTC-ul
@@ -195,7 +195,7 @@ def monitor_close_orders_by_age1(max_age_seconds):
         filled_price = order['price']
         quantity = float(order['qty']) #quantity
 
-        if current_price <= filled_price * 0.94 or utils.are_close(current_price, filled_price * 0.94):  # Daca pretul curent este cu 7% mai mare
+        if current_price <= filled_price * 0.94 or u.are_close(current_price, filled_price * 0.94):  # Daca pretul curent este cu 7% mai mare
             print(f"Pretul curent ({current_price}) este cu 4% mai mic decat pretul de vanzare ({filled_price}). Initiem cumpararea.cantitate{quantity}.")
             
             # Pornim un fir nou pentru a vinde BTC-ul
@@ -244,7 +244,7 @@ def monitor_close_orders_by_age2(max_age_seconds):
         quantity = float(order['qty'])  # Cantitatea
 
         # Verificam daca pretul curent a crescut cu procentul dinamic
-        if current_price >= filled_price * (1 + procent_scazut / 100) or utils.are_close(current_price, filled_price * (1 + procent_scazut / 100)):
+        if current_price >= filled_price * (1 + procent_scazut / 100) or u.are_close(current_price, filled_price * (1 + procent_scazut / 100)):
             print(f"Pretul curent ({current_price}) este cu {procent_scazut:.2f}% mai mare decat pretul de cumparare ({filled_price}). Initiem vanzarea. Cantitate: {quantity}")
             
             # Pornim un fir nou pentru a vinde BTC-ul
@@ -268,7 +268,7 @@ def monitor_close_orders_by_age2(max_age_seconds):
         quantity = float(order['qty'])  # Cantitatea
 
         # Verificam daca pretul curent a scazut cu procentul dinamic
-        if current_price <= filled_price * (1 - procent_scazut / 100) or utils.are_close(current_price, filled_price * (1 - procent_scazut / 100)):
+        if current_price <= filled_price * (1 - procent_scazut / 100) or u.are_close(current_price, filled_price * (1 - procent_scazut / 100)):
             print(f"Pretul curent ({current_price}) este cu {procent_scazut:.2f}% mai mic decat pretul de vanzare ({filled_price}). Initiem cumpararea. Cantitate: {quantity}")
             
             # Pornim un fir nou pentru a cumpara BTC-ul
@@ -301,7 +301,7 @@ class ProcentDistributor:
         
     def get_procent(self, current_time):
         if current_time < self.t1:
-            print(f"get max procent {self.max_procent} because before start time {utils.timestampToTime(self.t1)}")
+            print(f"get max procent {self.max_procent} because before start time {u.timestampToTime(self.t1)}")
             return self.max_procent
         if current_time > self.t1 + self.expired_duration:#t2
             print(f"get min procent {self.min_procent} because expiration {self.expired_duration}")
@@ -344,7 +344,7 @@ class ProcentDistributor:
         
     def update_tick(self, passs = 0,  half_life_duration=24*60*60) :
         #todo cheama update_period_time inaite
-        max_procent = utils.asymptotic_decrease(self.max_procent, self.expired_duration, passs, half_life_duration)
+        max_procent = u.asymptotic_decrease(self.max_procent, self.expired_duration, passs, half_life_duration)
         print(f"max procent from : {self.max_procent:.2f} to {max_procent}")
         self.update_max_procent(max_procent)
         
@@ -363,11 +363,11 @@ class BuyTransaction:
         self.qty = qty
 
     def get_proposed_sell_price(self, current_price, current_time, days=7):
-        print(f"Time away {utils.secondsToHours(current_time - self.time_trade):.2f} h. We are at pass {self.passed}")
+        print(f"Time away {u.secondsToHours(current_time - self.time_trade):.2f} h. We are at pass {self.passed}")
          
         if current_time - self.t1 >= self.expired_duration:
             self.passed +=1
-            print(f" Updating distrib with new duration {utils.secondsToHours(2 * self.expired_duration):.2f} h.")
+            print(f" Updating distrib with new duration {u.secondsToHours(2 * self.expired_duration):.2f} h.")
             self.t1 = current_time
             self.distributor.update_period_time(current_time, 2 * self.expired_duration)
             self.distributor.update_tick(self.passed, half_life_duration=24*60*60)
@@ -657,12 +657,12 @@ def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_t
         price_decrease = (buy_price - current_price) / buy_price
 
         # 3.1. Verifica daca trebuie sa plasezi un ordin de vanzare
-        if price_increase > percentage_gain_threshold or utils.are_close(price_increase, percentage_gain_threshold, target_tolerance_percent=1.0):
+        if price_increase > percentage_gain_threshold or u.are_close(price_increase, percentage_gain_threshold, target_tolerance_percent=1.0):
             if not is_trend_up(symbol):
                 print(f"Price increased with {price_increase * 100}% by more than {percentage_gain_threshold * 100}% versus buy price: Placing sell order")
                 api.place_order_smart("sell", symbol, current_price + 0.5, qty, cancelorders=True, hours=5, pair=False)
         
-        elif price_decrease > percentage_lost_threshold or utils.are_close(price_decrease, percentage_lost_threshold, target_tolerance_percent=1.0):
+        elif price_decrease > percentage_lost_threshold or u.are_close(price_decrease, percentage_lost_threshold, target_tolerance_percent=1.0):
             if not is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease * 100}% by more than {percentage_lost_threshold * 100}% versus buy price: Placing sell order")
                 api.place_order_smart("sell", symbol, current_price + 0.5, qty, cancelorders=True, hours=0.1, pair=False)
@@ -677,7 +677,7 @@ def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_t
         
         price_decrease_versus_sell = (sell_price - current_price) / sell_price
 
-        if price_decrease_versus_sell > percentage_gain_threshold or utils.are_close(price_decrease_versus_sell, percentage_gain_threshold, target_tolerance_percent=1.0):
+        if price_decrease_versus_sell > percentage_gain_threshold or u.are_close(price_decrease_versus_sell, percentage_gain_threshold, target_tolerance_percent=1.0):
             if is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease_versus_sell * 100}% by more than {percentage_gain_threshold * 100}% versus sell price: Placing buy order")
                 #api.cancel_orders_old_or_outlier("buy", "BTCUSDT", qty, hours=0.5, price_difference_percentage=0.1)
@@ -724,11 +724,11 @@ def main():
         days_after_use_current_price = data['days_after_use_current_price']
         
         close_buy_orders = apitrades.get_trade_orders('buy', symbol, max_age_seconds)
-        print(f"get_trade_orders:           Found {len(close_buy_orders)} close 'buy' orders in the last {utils.secondsToDays(max_age_seconds)} days.")
+        print(f"get_trade_orders:           Found {len(close_buy_orders)} close 'buy' orders in the last {u.secondsToDays(max_age_seconds)} days.")
         close_sell_orders = apitrades.get_trade_orders('sell', symbol, max_age_seconds)
-        print(f"get_trade_orders:           Found {len(close_sell_orders)} close 'sell' orders in the last {utils.secondsToDays(max_age_seconds)} days.")
+        print(f"get_trade_orders:           Found {len(close_sell_orders)} close 'sell' orders in the last {u.secondsToDays(max_age_seconds)} days.")
         orders = apitrades.get_trade_orders(None, symbol, max_age_seconds)
-        print(f"get_trade_orders:           Total found {len(orders)} orders in the last {utils.secondsToDays(max_age_seconds)} day.")
+        print(f"get_trade_orders:           Total found {len(orders)} orders in the last {u.secondsToDays(max_age_seconds)} day.")
         time.sleep(2)       
     
         update_trades(trades, symbol, max_age_seconds, procent_desired_profit, expired_duration, min_procent)

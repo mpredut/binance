@@ -310,7 +310,7 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=
     # Daca exista deja tranzactii, gasim cea mai recenta tranzactie salvata
     if filtered_existing_trades:
         most_recent_trade_time = max(trade['time'] for trade in filtered_existing_trades)
-        print(f"Most recent trade time from file: {utils.timestampToTime(most_recent_trade_time)}")
+        print(f"Most recent trade time from file: {u.timestampToTime(most_recent_trade_time)}")
 
         # Calculam cate zile au trecut de la most_recent_trade_time pana la acum
         time_diff_ms = current_time_ms - most_recent_trade_time

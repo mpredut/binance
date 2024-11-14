@@ -374,10 +374,10 @@ def place_safe_order(order_type, symbol, price, quantity, time_back_in_seconds=3
         if recent_opposite_trades:
             if order_type == "BUY":
                 last_sell_price = min(float(trade['price']) for trade in recent_opposite_trades)
-                diff_percent = utils.value_diff_to_percent(last_sell_price, current_price)
+                diff_percent = u.value_diff_to_percent(last_sell_price, current_price)
             else:  # pentru `sell`
                 last_buy_price = max(float(trade['price']) for trade in recent_opposite_trades)
-                diff_percent = utils.value_diff_to_percent(current_price, last_buy_price)
+                diff_percent = u.value_diff_to_percent(current_price, last_buy_price)
                 
                 # Debugging output for the 'sell' case
                 print(f"[DEBUG] Order Type: {order_type}")

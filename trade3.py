@@ -14,7 +14,6 @@ import binanceapi_trades as apitrades
 import binanceapi_allorders as apiorders
 import log
 import alert
-import utils
 import utils as u
 #import priceprediction as pp
 
@@ -167,7 +166,7 @@ class PriceWindow:
 
         #print("Sorted prices:", self.sorted_prices)  # Debug
         min_price = self.sorted_prices[0]
-        close_min_values = [price for price in self.sorted_prices if utils.are_values_very_close(price, min_price, 0.01)]
+        close_min_values = [price for price in self.sorted_prices if u.are_close(price, min_price, 0.01)]
         
         #print("Close minimum values:", close_min_values)  # Debug
         avg_min = sum(close_min_values) / len(close_min_values) if close_min_values else min_price
@@ -180,7 +179,7 @@ class PriceWindow:
 
         #print("Sorted prices:", self.sorted_prices)  # Debug
         max_price = self.sorted_prices[-1]
-        close_max_values = [price for price in reversed(self.sorted_prices) if utils.are_values_very_close(price, max_price, 0.01)]
+        close_max_values = [price for price in reversed(self.sorted_prices) if u.are_close(price, max_price, 0.01)]
         
         #print("Close maximum values:", close_max_values)  # Debug
         avg_max = sum(close_max_values) / len(close_max_values) if close_max_values else max_price
@@ -193,7 +192,7 @@ class PriceWindow:
             return None, None
 
         min_price = self.get_min()
-        min_indices = [i for i, price in enumerate(self.prices) if utils.are_values_very_close(price, min_price, 0.01)]
+        min_indices = [i for i, price in enumerate(self.prices) if u.are_close(price, min_price, 0.01)]
         
         #print("Min indices:", min_indices)  # Debug
         centroid_index = sum(min_indices) / len(min_indices) if min_indices else None
@@ -206,7 +205,7 @@ class PriceWindow:
             return None, None
 
         max_price = self.get_max()
-        max_indices = [i for i, price in enumerate(self.prices) if utils.are_values_very_close(price, max_price, 0.01)]
+        max_indices = [i for i, price in enumerate(self.prices) if u.are_close(price, max_price, 0.01)]
         
         #print("Max indices:", max_indices)  # Debug
         centroid_index = sum(max_indices) / len(max_indices) if max_indices else None
@@ -270,14 +269,14 @@ class PriceWindow:
             f"Market trending: {'upwards' if slope > 0 else 'downwards'}"
         )
 
-        if price_change_percent < threshold_percent and not utils.are_values_very_close(price_change_percent, threshold_percent):
+        if price_change_percent < threshold_percent and not u.are_close(price_change_percent, threshold_percent):
             action = 'HOLD'
             return action, current_price, price_change_percent, slope
             
         min_position, max_position = self.calculate_positions()
         if slope > 0: #slope > slope_normalized=0.0000833
             print("Market trending upwards")
-            if max_position > 0.8 or utils.are_values_very_close(max_position, 0.8, target_tolerance_percent=1.0):
+            if max_position > 0.8 or u.are_close(max_position, 0.8, target_tolerance_percent=1.0):
                 action = 'BUY'
                 print(f"Near recent high. Action: {action}")
                 proposed_price = current_price * 0.995
@@ -285,7 +284,7 @@ class PriceWindow:
                 return action, proposed_price, price_change_percent, slope 
         else:
             print("Market trending downwards")
-            if min_position < 0.2 or utils.are_values_very_close(min_position, 0.2, target_tolerance_percent=1.0):
+            if min_position < 0.2 or u.are_close(min_position, 0.2, target_tolerance_percent=1.0):
                 action = 'SELL'
                 print(f"Near recent low. Action: {action}")
                 proposed_price = current_price * 1.005
@@ -313,7 +312,7 @@ class PriceWindow:
         price_diff = max(price_diff_min, price_diff_max) ## check if abs(price_diff_min,price_diff_max) > treshold
 
         
-        if abs(price_diff) >= threshold or utils.are_values_very_close(price_diff, threshold) :
+        if abs(price_diff) >= threshold or u.are_close(price_diff, threshold) :
             
             min_position, max_position = self.calculate_positions()
             
@@ -322,7 +321,7 @@ class PriceWindow:
             slope_max_min = u.slope(min_price, min_index, max_price, max_index)
             return slope_max_min, price_diff
             
-            diff_min_max_close = utils.are_values_very_close(price_diff_max , price_diff_min, 1.0)
+            diff_min_max_close = u.are_close(price_diff_max , price_diff_min, 1.0)
             if(diff_min_max_close) :
                 if(min_index < max_index) :
                     grow = 1
@@ -332,15 +331,15 @@ class PriceWindow:
                     return slope_min, price_diff
             
             min_loc = 1 #center position
-            if (min_position < 0.3 or utils.are_values_very_close( min_position, 0.3)) : 
+            if (min_position < 0.3 or u.are_close( min_position, 0.3)) : 
                  min_loc = 0 #left position
-            if (min_position > 0.7 or utils.are_values_very_close( min_position, 0.7)) : 
+            if (min_position > 0.7 or u.are_close( min_position, 0.7)) : 
                  min_loc = 2 #right position
                  
             max_loc = 1 #center position
-            if (max_position > 0.7 or utils.are_values_very_close( max_position, 0.7)) :
+            if (max_position > 0.7 or u.are_close( max_position, 0.7)) :
                 max_loc = 2 #right position        
-            if (max_position < 0.3 or utils.are_values_very_close( max_position, 0.3)) :
+            if (max_position < 0.3 or u.are_close( max_position, 0.3)) :
                 max_loc = 0 #left position
                     
             if grow :
