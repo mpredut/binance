@@ -98,7 +98,7 @@ def are_difference_equal_with_aprox_proc(value1, value2, target_percent = 10.0):
    
 
 #valorile sunt aproximativ egale nu mai  mult decat procentul aproximativ
-def are_values_very_close(value1, value2, target_tolerance_percent=1.0):
+def are_close(value1, value2, target_tolerance_percent=1.0):
     max_iterations = random.randint(1, 100)
     if max_iterations < 1:
         max_iterations = 1

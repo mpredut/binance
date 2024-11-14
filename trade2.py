@@ -175,7 +175,7 @@ class PriceWindow:
             f"Market trending: {'upwards' if slope > 0 else 'downwards'}"
         )
 
-        if price_change_percent < threshold_percent and not utils.are_values_very_close(price_change_percent, threshold_percent):
+        if price_change_percent < threshold_percent and not utils.are_close(price_change_percent, threshold_percent):
             action = 'HOLD'
             print(f"Action: {action}")
             return action, current_price, price_change_percent, slope
@@ -189,16 +189,16 @@ class PriceWindow:
         
         if slope > 0:
             print("Market trending upwards")
-            if min_proximity <= 0.2 or utils.are_values_very_close(min_proximity, 0.2, target_tolerance_percent=1.0):
-                if min_position >= 0.8 or utils.are_values_very_close(min_position, 0.8, target_tolerance_percent=1.0):
+            if min_proximity <= 0.2 or utils.are_close(min_proximity, 0.2, target_tolerance_percent=1.0):
+                if min_position >= 0.8 or utils.are_close(min_position, 0.8, target_tolerance_percent=1.0):
                     action = 'BUY'
                     print(f"Near recent low. Action: {action}")
                     proposed_price = current_price * 0.995
                     print(f"Proposed price updated  to {proposed_price} to be close to current price {current_price}")
         else:
             print("Market trending downwards")
-            if max_proximity <= 0.2 or utils.are_values_very_close(max_proximity, 0.2, target_tolerance_percent=1.0):
-                if max_position >= 0.8 or utils.are_values_very_close(max_position, 0.8, target_tolerance_percent=1.0):
+            if max_proximity <= 0.2 or utils.are_close(max_proximity, 0.2, target_tolerance_percent=1.0):
+                if max_position >= 0.8 or utils.are_close(max_position, 0.8, target_tolerance_percent=1.0):
                     action = 'SELL'
                     print(f"Near recent high. Action: {action}")
                     proposed_price = current_price * 1.005
@@ -212,7 +212,7 @@ class PriceWindow:
         oldest_price = self.prices[0]
         newest_price = self.prices[-1]
         price_diff = newest_price - oldest_price
-        if abs(price_diff) >= threshold or utils.are_values_very_close(price_diff, threshold) :
+        if abs(price_diff) >= threshold or utils.are_close(price_diff, threshold) :
             return price_diff
         else:
             return None
@@ -488,7 +488,7 @@ while True:
         diff_count = abs(buy_count - sell_count)
         # Place orders based on the threshold
         if current_time - last_order_time >= TIME_SLEEP_PLACE_ORDER and \
-        (utils.are_values_very_close(diff_count, SELL_BUY_THRESHOLD, 1) or diff_count >= SELL_BUY_THRESHOLD)  :
+        (utils.are_close(diff_count, SELL_BUY_THRESHOLD, 1) or diff_count >= SELL_BUY_THRESHOLD)  :
             if abs(last_evaluate_time - time.time()) > 2:
                 action, proposed_price, price_change_percent, slope = price_window2.evaluate_buy_sell_opportunity(current_price, threshold_percent=0.8, decrease_percent=4)
             if action == 'HOLD':
