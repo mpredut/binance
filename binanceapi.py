@@ -41,7 +41,7 @@ client = Client(api_key, api_secret)
 
 
 def validate_params(order_type, symbol, price = 1, quantity = 1):
-    if order_type.upper() not in ['BUY', 'SELL']:
+    if order_type not in ['BUY', 'SELL']:
         raise ValueError(f"Invalid order_type '{order_type}'. It must be either 'BUY' or 'SELL'.")
     
     if not isinstance(price, (int, float)) or price <= 0:
@@ -196,12 +196,12 @@ def get_current_price(symbol):
     except BinanceAPIException as e:
         print(f"Eroare la obtinerea pretului curent de la Binance API: {e}")
         print(f"Folosesc pretul obtinut prin websocket, {symbol}: {currentprice.get(symbol, 'N/A')}")
-        return currentprice.get(symbol, None)  # Returnăm None dacă simbolul nu există
+        return currentprice.get(symbol, None)  # Returnam None daca simbolul nu exista
     
     except Exception as e:
         print(f"get_current_price: A aparut o eroare neasteptata: {e}")
         print(f"Folosesc pretul obtinut prin websocket, {symbol}: {currentprice.get(symbol, 'N/A')}")
-        return currentprice.get(symbol, None)  # Returnăm None dacă simbolul nu există
+        return currentprice.get(symbol, None)  # Returnam None daca simbolul nu exista
 
         
 def get_current_time():
@@ -251,6 +251,8 @@ def manage_quantity(order_type, symbol, required_qty, cancelorders=False, hours=
 
 
 def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5, price_difference_percentage=0.1):
+
+    order_type = order_type.upper()
     validate_params(order_type, symbol, 1, required_quantity)
     
     open_orders = get_open_orders(order_type, symbol)
@@ -291,6 +293,7 @@ def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5,
 
 def get_open_orders(order_type, symbol):
 
+    order_type = order_type.upper()
     validate_params(order_type, symbol)
         
     try:
@@ -342,6 +345,7 @@ def place_SELL_order(symbol, price, quantity):
 def place_safe_order(order_type, symbol, price, quantity, time_back_in_seconds=3600*2, max_daily_trades=20, profit_percentage = 0.4):
     import binanceapi_trades as apitrades
 
+    order_type = order_type.upper()
     validate_params(order_type, symbol, price, quantity)    
     try:
         
@@ -357,34 +361,36 @@ def place_safe_order(order_type, symbol, price, quantity, time_back_in_seconds=3
         opposite_order_type = "SELL" if order_type == "BUY" else "BUY"
         previous_trades = apitrades.get_my_trades(opposite_order_type, symbol, backdays=0, limit=1000) ## curent date
         if len(previous_trades) >= max_daily_trades:
-            print(f"Am {len(previous_trades)} trades. Limita zilnică este de {max_daily_trades} pentru'{order_type}'.")
+            print(f"Am {len(previous_trades)} trades. Limita zilnica este de {max_daily_trades} pentru'{order_type}'.")
             return None
         print(f"Am {len(previous_trades)} trades");
         
         time_limit = int(time.time() * 1000) - (time_back_in_seconds * 1000)  # în milisecunde
         
-        # Filtrăm tranzactiile opuse care au avut loc în intervalul specificat
+        # Filtram tranzactiile opuse care au avut loc în intervalul specificat
         recent_opposite_trades = [trade for trade in previous_trades if trade['time'] >= time_limit]
         
+        #max_SELL_price = max(float(trade['quoteQty']) / float(trade['qty']) for trade in recent_opposite_trades)
         if recent_opposite_trades:
             if order_type == "BUY":
-                max_SELL_price = max(float(trade['quoteQty']) / float(trade['qty']) for trade in recent_opposite_trades)
-                profit = ((current_price - max_SELL_price) / max_SELL_price) * 100
-            else:  # pentru "SELL"
-                min_BUY_price = min(float(trade['quoteQty']) / float(trade['qty']) for trade in recent_opposite_trades)
-                profit = ((min_BUY_price - current_price) / min_BUY_price) * 100
+                last_sell_price = min(float(trade['price']) for trade in recent_opposite_trades)
+                diff_percent = value_diff_to_percent(last_sell_price, current_price)
+            else:  # pentru `sell`
+                last_buy_price = max(float(trade['price']) for trade in recent_opposite_trades)
+                diff_percent = value_diff_to_percent(current_price, last_buy_price)
+                
+            if diff_percent < required_percentage_diff:
+                    print(f"Diferenta procentuala ({diff_percent:.2f}%) este sub pragul necesar de {required_percentage_diff}%. Ordinul de {order_type} nu a fost plasat.")
+                    return None
             
-            if profit < profit_percentage:
-                print(f"Profitul potential este sub {profit:.2f}%. Ordinul de {order_type} nu a fost plasat.")
-                return None
-        
+        order = None
         if order_type == "BUY":
             order = client.order_limit_buy(
                 symbol=symbol,
                 quantity=quantity,
                 price=str(price)
             )
-        else:  # pentru "SELL"
+        elif order_type == "SELL":
             order = client.order_limit_sell(
                 symbol=symbol,
                 quantity=quantity,
@@ -392,7 +398,9 @@ def place_safe_order(order_type, symbol, price, quantity, time_back_in_seconds=3
             )
         
         if order:
-            print(f"{order_type.capitalize()} order placed successfully: {order['orderId']}")
+            print(f"{order_type} order placed successfully: {order['orderId']}")
+        else :
+            print(f"Eroare la plasarea ordinului de {order_type}")
         return order
 
     except BinanceAPIException as e:
@@ -400,8 +408,11 @@ def place_safe_order(order_type, symbol, price, quantity, time_back_in_seconds=3
         return None
 
 
+
 from decimal import Decimal, ROUND_DOWN
 def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee_percentage=0.001):
+    
+    order_type = order_type.upper()
     validate_params(order_type, symbol, price, qty)  
     
     try:
@@ -467,6 +478,8 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
 
 
 def place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5, pair=True):
+    
+    order_type = order_type.upper()
     validate_params(order_type, symbol, price, qty) 
     pair = False
     try:
@@ -535,6 +548,8 @@ def cancel_order(symbol, order_id):
         return False
 
 def cancel_open_orders(order_type, symbol):
+    
+    order_type = order_type.upper()
     validate_params(order_type, symbol) 
     
     try:
@@ -546,6 +561,8 @@ def cancel_open_orders(order_type, symbol):
         print(f"Error cancelling orders for {symbol}: {e}")
         
 def cancel_expired_orders(order_type, symbol, expire_time):
+    
+    order_type = order_type.upper()
     validate_params(order_type, symbol)
     
     open_orders = get_open_orders(order_type, symbol)
