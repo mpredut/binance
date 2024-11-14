@@ -625,47 +625,47 @@ class StateTracker:
 state_tracker = StateTracker()
 
 # Functie simplificata care verifica daca trendul este de crestere
-def is_trend_up():
-    slope = sell_recommendation[taosymbol]['slope']
-    gradient = sell_recommendation[taosymbol]['gradient']
+def is_trend_up(symbol):
+    slope = sell_recommendation[symbol]['slope']
+    gradient = sell_recommendation[symbol]['gradient']
     return slope > 0 or (slope == 0 and gradient > 0)
 
 
 #//todo: review 0.5
-def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_gain_threshold=0.08, percentage_lost_threshold=0.013):
+def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_threshold=0.08, percentage_lost_threshold=0.013):
     #try:
     
     # 1. Obtine ordinele de cumparare si vanzare recente pentru simbol
-    trade_orders_buy = apitrades.get_trade_orders("buy", taosymbol, max_age_seconds)
-    trade_orders_sell = apitrades.get_trade_orders("sell", taosymbol, max_age_seconds)
+    trade_orders_buy = apitrades.get_trade_orders("buy", symbol, max_age_seconds)
+    trade_orders_sell = apitrades.get_trade_orders("sell", symbol, max_age_seconds)
     
     if not (trade_orders_buy or trade_orders_sell):
-        print(f"No trade orders found for {taosymbol} in the last {max_age_seconds} seconds.")
+        print(f"No trade orders found for {symbol} in the last {max_age_seconds} seconds.")
         return
     
     # 2. Obtine pretul curent de pe piata
-    current_price = api.get_current_price(taosymbol)
-    print(f"Current price for {taosymbol}: {current_price}")
+    current_price = api.get_current_price(symbol)
+    print(f"Current price for {symbol}: {current_price}")
 
     # 3. Verifica ordinele de cumparare
     if trade_orders_buy:
         trade_orders_buy.sort(key=lambda x: x['time'], reverse=True)
         buy_price = float(trade_orders_buy[0]['price'])
-        print(f"Buy price for {taosymbol}: {buy_price}")
+        print(f"Buy price for {symbol}: {buy_price}")
         
         price_increase = (current_price - buy_price) / buy_price
         price_decrease = (buy_price - current_price) / buy_price
 
         # 3.1. Verifica daca trebuie sa plasezi un ordin de vanzare
         if price_increase > percentage_gain_threshold or utils.are_values_very_close(price_increase, percentage_gain_threshold, target_tolerance_percent=1.0):
-            if not is_trend_up():
+            if not is_trend_up(symbol):
                 print(f"Price increased with {price_increase * 100}% by more than {percentage_gain_threshold * 100}% versus buy price: Placing sell order")
-                api.place_order_smart("sell", taosymbol, current_price + 0.5, qty, cancelorders=True, hours=5, pair=False)
+                api.place_order_smart("sell", symbol, current_price + 0.5, qty, cancelorders=True, hours=5, pair=False)
         
         elif price_decrease > percentage_lost_threshold or utils.are_values_very_close(price_decrease, percentage_lost_threshold, target_tolerance_percent=1.0):
-            if not is_trend_up():
+            if not is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease * 100}% by more than {percentage_lost_threshold * 100}% versus buy price: Placing sell order")
-                api.place_order_smart("sell", taosymbol, current_price + 0.5, qty, cancelorders=True, hours=0.1, pair=False)
+                api.place_order_smart("sell", symbol, current_price + 0.5, qty, cancelorders=True, hours=0.1, pair=False)
         else:
             print(f"(increase: {price_increase * 100}%, decrease: {price_decrease * 100}%). No action taken.")
 
@@ -673,15 +673,15 @@ def monitor_price_and_trade(taosymbol, qty, max_age_seconds=3600, percentage_gai
     if trade_orders_sell:
         trade_orders_sell.sort(key=lambda x: x['time'], reverse=True)
         sell_price = float(trade_orders_sell[0]['price'])
-        print(f"Sell price for {taosymbol}: {sell_price}")
+        print(f"Sell price for {symbol}: {sell_price}")
         
         price_decrease_versus_sell = (sell_price - current_price) / sell_price
 
         if price_decrease_versus_sell > percentage_gain_threshold or utils.are_values_very_close(price_decrease_versus_sell, percentage_gain_threshold, target_tolerance_percent=1.0):
-            if is_trend_up():
+            if is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease_versus_sell * 100}% by more than {percentage_gain_threshold * 100}% versus sell price: Placing buy order")
                 #api.cancel_orders_old_or_outlier("buy", "BTCUSDT", qty, hours=0.5, price_difference_percentage=0.1)
-                api.place_order_smart("buy", taosymbol, current_price + 0.5, qty, cancelorders=True, hours=5, pair=False)
+                api.place_order_smart("buy", symbol, current_price + 0.5, qty, cancelorders=True, hours=5, pair=False)
 
 
     #except Exception as e:
