@@ -25,7 +25,7 @@ TIME_SLEEP_ERROR = 10
 def monitor_open_orders_by_type(symbol, order_type):
     orders = api.get_open_orders(order_type, symbol)  # Obtine ordinele deschise de vanzare sau cumparare in functie de tip
     if not orders:
-        print(f"Nu exista ordine de {order_type} deschise initial.")
+        print(f"Pentru {symbol} Nu exista ordine de {order_type} deschise initial.")
         return
     
     current_price = api.get_current_price(symbol)

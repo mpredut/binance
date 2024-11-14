@@ -23,6 +23,49 @@ trade_cache = []
 #######      get_my_trades     #######
 #######
 
+def aggregate_trades(trades):
+    aggregated_trades = defaultdict(lambda: {
+        'symbol': '', 'price': '', 'qty': 0, 'quoteQty': 0, 'commission': 0, 'commissionAsset': '', 'time': 0, 'isBuyer': None, 'isMaker': None, 'isBestMatch': None, 'id': 0
+    })
+    
+    # Grupa tranzacțiile pe orderId
+    for trade in trades:
+        orderId = trade['orderId']
+        
+        # Agregăm datele pentru aceleași orderId
+        aggregated_trades[orderId]['symbol'] = trade['symbol']
+        aggregated_trades[orderId]['price'] = trade['price']
+        aggregated_trades[orderId]['qty'] += float(trade['qty'])
+        aggregated_trades[orderId]['quoteQty'] += float(trade['quoteQty'])
+        aggregated_trades[orderId]['commission'] += float(trade['commission'])
+        aggregated_trades[orderId]['commissionAsset'] = trade['commissionAsset']
+        aggregated_trades[orderId]['time'] = max(aggregated_trades[orderId]['time'], trade['time'])  # selectăm timpul maxim
+        aggregated_trades[orderId]['isBuyer'] = trade['isBuyer']
+        aggregated_trades[orderId]['isMaker'] = trade['isMaker']
+        aggregated_trades[orderId]['isBestMatch'] = trade['isBestMatch']
+        aggregated_trades[orderId]['id'] = trade['id']  # păstrăm id-ul primei tranzacții (pentru referință)
+
+    # Creăm lista agregată
+    aggregated_list = []
+    for aggregated in aggregated_trades.values():
+        aggregated_list.append({
+            'symbol': aggregated['symbol'],
+            'id': aggregated['id'],
+            'orderId': 0,  # Setăm orderId-ul la 0
+            'orderListId': -1,
+            'price': aggregated['price'],
+            'qty': f"{aggregated['qty']:.8f}",  # păstrăm formatul cu 8 zecimale
+            'quoteQty': f"{aggregated['quoteQty']:.8f}",
+            'commission': f"{aggregated['commission']:.8f}",
+            'commissionAsset': aggregated['commissionAsset'],
+            'time': aggregated['time'],
+            'isBuyer': aggregated['isBuyer'],
+            'isMaker': aggregated['isMaker'],
+            'isBestMatch': aggregated['isBestMatch']
+        })
+
+    return aggregated_list
+    
 def get_my_trades_24(symbol, days_ago, order_type=None, limit=1000):
     all_trades = []
     try:
@@ -52,8 +95,17 @@ def get_my_trades_24(symbol, days_ago, order_type=None, limit=1000):
 
             # Ajustam `start_time` la timpul celei mai noi tranzactii pentru a continua
             start_time = trades[-1]['time'] + 1  # Ne mutam înainte cu 1 ms pentru a evita duplicatele
+        
+        latest_trades = {}
+        for trade in all_trades:
+            order_id = trade['orderId']
             
-        return all_trades
+            # Verificăm dacă nu avem deja acest `orderId` sau dacă tranzacția curentă este mai recentă
+            if order_id not in latest_trades or trade['time'] > latest_trades[order_id]['time']:
+                latest_trades[order_id] = trade  # Actualizăm cu cea mai recentă tranzacție
+
+        return list(latest_trades.values()) #lista nu dictionar!
+        
 
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -65,13 +117,16 @@ def get_my_trades(order_type, symbol, backdays=3, limit=1000):
     all_trades = []
     
     try:
-        for days_ago in range(backdays):
+        for days_ago in range(backdays + 1):
             print(f"Fetching trades for day {days_ago}...")
             trades = get_my_trades_24(symbol, days_ago, limit)
             
             if not trades:
-                print(f"No trades found for day {days_ago}.")
-                continue
+                # retry from cache .....
+                trades = get_trade_orders_24(order_type, symbol, days_ago)
+                if not trades:
+                    print(f"No trades found for day {days_ago}.")
+                    continue
             
             #filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "buy")]
             if order_type == "buy":
@@ -86,8 +141,9 @@ def get_my_trades(order_type, symbol, backdays=3, limit=1000):
         return all_trades
 
     except Exception as e:
-        print(f"An error occurred: {e}")
-        return []
+        print(f"An error occurred: {e}") #3600 * 24 * 7
+        return get_trade_orders(order_type, symbol, (backdays + 1) * 24 * 3600 )
+        
         
         
 def get_my_trades_simple(order_type, symbol, backdays=3, limit=1000):
@@ -99,7 +155,7 @@ def get_my_trades_simple(order_type, symbol, backdays=3, limit=1000):
 
         end_time = current_time
 
-        for day in range(backdays):
+        for day in range(backdays + 1):
             # Calculam start_time pentru ziua curenta în intervalul de 24 de ore
             start_time = end_time - max_interval
             
@@ -304,7 +360,26 @@ def load_trades_from_file(filename):
         print(f"File {filename} not found.")
         trade_cache = []
 
-   
+  
+# Funcția care returnează tranzacțiile de tip 'buy' sau 'sell' din cache pentru un anumit simbol
+def get_trade_orders_pt_referinta(order_type, symbol, max_age_seconds):
+    current_time_ms = int(time.time() * 1000)
+    max_age_ms = max_age_seconds * 1000
+
+    filtered_trades = [
+        {
+            key: (float(value) if isinstance(value, str) and value.replace('.', '', 1).isdigit() else value)
+            for key, value in trade.items()
+        }
+        for trade in trade_cache
+        if trade.get('symbol') == symbol
+        and (order_type is None or trade.get('isBuyer') == (order_type == 'buy'))  # Verificăm doar dacă order_type nu este None
+        and (current_time_ms - trade.get('time', 0)) <= max_age_ms
+    ]
+
+    return filtered_trades
+
+  
 # Functia care returneaza tranzactiile de tip 'buy' sau 'sell' din cache pentru un anumit simbol
 def get_trade_orders(order_type, symbol, max_age_seconds):
     current_time_ms = int(time.time() * 1000)
@@ -335,5 +410,30 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
     #  filtered_trades.sort(key=lambda x: x['price'])
     return filtered_trades
 
+    
+    # Funcția care returnează tranzacțiile de tip 'buy' sau 'sell' din cache pentru un anumit simbol, filtrate pe zile
+def get_trade_orders_24(order_type, symbol, days_back):
+    # Calculăm începutul și sfârșitul zilei dorite (cu days_back zile în urmă)
+    target_day_start = (datetime.now() - timedelta(days=days_back)).replace(hour=0, minute=0, second=0, microsecond=0)
+    target_day_end = target_day_start.replace(hour=23, minute=59, second=59, microsecond=999999)
+    
+    # Convertim timpii la timestamp în milisecunde
+    start_timestamp = int(target_day_start.timestamp() * 1000)
+    end_timestamp = int(target_day_end.timestamp() * 1000)
+    
+    # Filtrăm tranzacțiile în funcție de criteriile specificate
+    filtered_trades = [
+        {
+            key: (float(value) if isinstance(value, str) and value.replace('.', '', 1).isdigit() else value)
+            for key, value in trade.items()
+        }
+        for trade in trade_cache
+        if trade.get('symbol') == symbol
+        and (order_type is None or trade.get('isBuyer') == (order_type == 'buy'))  # Verificăm doar dacă order_type nu este None
+        and start_timestamp <= trade.get('time', 0) <= end_timestamp
+    ]
 
-  
+    # Sortăm tranzacțiile după timp, opțional
+    # filtered_trades.sort(key=lambda x: x['time'])
+    
+    return filtered_trades
