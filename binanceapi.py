@@ -41,7 +41,7 @@ client = Client(api_key, api_secret)
 
 
 def validate_params(order_type, symbol, price = 1, quantity = 1):
-     if order_type.upper() not in ['BUY', 'SELL']:
+    if order_type.upper() not in ['BUY', 'SELL']:
         raise ValueError(f"Invalid order_type '{order_type}'. It must be either 'BUY' or 'SELL'.")
     
     if not isinstance(price, (int, float)) or price <= 0:
