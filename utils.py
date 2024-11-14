@@ -49,7 +49,7 @@ def value_diff_to_percent(value1, value2):
 
 def slope(val1, idx1, val2, idx2):
     if idx1 == idx2:
-        raise ValueError("Panta este indefinită (împărțire la zero) deoarece idx1 și idx2 sunt egale.")
+        return 0
     
     return (val2 - val1) / (idx2 - idx1)
 
