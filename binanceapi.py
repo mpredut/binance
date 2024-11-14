@@ -342,7 +342,7 @@ def place_SELL_order(symbol, price, quantity):
         return None
 
 
-def place_safe_order(order_type, symbol, price, quantity, time_back_in_seconds=3600*2, max_daily_trades=20, profit_percentage = 0.4):
+def place_safe_order(order_type, symbol, price, quantity, time_back_in_seconds=3600/2, max_daily_trades=20, profit_percentage = 0.4):
     import binanceapi_trades as apitrades
 
     order_type = order_type.upper()
