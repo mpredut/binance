@@ -8,7 +8,7 @@ from binance.exceptions import BinanceAPIException
 
 #my imports
 import binanceapi as api
-import utils
+import utils as u
 # 
 MAX_PROC = 0.77
 monitor_interval = 3.7
