@@ -17,7 +17,7 @@ import binanceapi as api
 import binanceapi_trades as apitrades
 import binanceapi_allorders as apiorders
 
-import utils
+import utils as u
 import log
 #import alert
 

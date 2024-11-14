@@ -22,7 +22,7 @@ from binance.exceptions import BinanceAPIException
 
 
 ####MYLIB
-import utils
+import utils as u
 from apikeys import api_key, api_secret
 
 stop = False
