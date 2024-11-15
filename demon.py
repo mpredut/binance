@@ -7,7 +7,7 @@ import json
 # Fișier pentru a salva referința inițială a proceselor
 REFERENCE_FILE = "demon_reference.json"
 # Fișier pentru log-uri
-LOG_FILE = "demon_monitor.log"
+LOG_FILE = "demon.log"
 
 def log_message(message):
     """Scrie mesaje în fișierul log."""
@@ -62,6 +62,7 @@ def monitor_processes():
     reference = load_reference_file()
     first_run = not bool(reference)  # Dacă fișierul de referință e gol, e prima rulare
 
+    first_run = True
     if first_run:
         log_message("Prima rulare: salvăm referința inițială a proceselor.")
         # Extrage procesele Python active și construiește referința
