@@ -316,12 +316,18 @@ def get_open_orders(order_type, symbol):
 def place_BUY_order(symbol, price, quantity):
     try:
         price = round(min(price, get_current_price(symbol)), 0)
-        quantity = round(quantity, 5)    
+        quantity = round(quantity, 4)    
         BUY_order = client.order_limit_buy(
             symbol=symbol,
             quantity=quantity,
             price=str(price)
         )
+        
+        if BUY_order:
+            print(f"BUY order placed successfully: {BUY_order['orderId']}")
+        else :
+            print(f"Eroare la plasarea ordinului de BUY")
+        
         return BUY_order
     except BinanceAPIException as e:
         print(f"Eroare la plasarea ordinului de cumparare: {e}")
@@ -330,19 +336,49 @@ def place_BUY_order(symbol, price, quantity):
 def place_SELL_order(symbol, price, quantity):
     try:
         price = round(max(price, get_current_price(symbol)), 0)
-        quantity = round(quantity, 5)    
+        quantity = round(quantity, 4)    
         SELL_order = client.order_limit_sell(
             symbol=symbol,
             quantity=quantity,
             price=str(price)
         )
+        
+        if SELL_order:
+            print(f"SELL order placed successfully: {SELL_order['orderId']}")
+        else :
+            print(f"Eroare la plasarea ordinului de SELL")
+        
         return SELL_order
     except BinanceAPIException as e:
         print(f"Eroare la plasarea ordinului de vanzare: {e}")
         return None
 
 
-def place_safe_order(order_type, symbol, price, quantity, time_back_in_seconds=3600/2, max_daily_trades=20, profit_percentage = 0.4):
+def place_ord() :
+ 
+    order = None
+    if order_type == "BUY":
+        order = client.order_limit_buy(
+            symbol=symbol,
+            quantity=quantity,
+            price=str(price)
+        )
+    elif order_type == "SELL":
+        order = client.order_limit_sell(
+            symbol=symbol,
+            quantity=quantity,
+            price=str(price)
+        )
+    
+    if order:
+        print(f"{order_type} order placed successfully: {order['orderId']}")
+    else :
+        print(f"Eroare la plasarea ordinului de {order_type}")
+    return order
+
+        
+
+def if_place_safe_order(order_type, symbol, price, quantity, time_back_in_seconds=3600/2, max_daily_trades=20, profit_percentage = 0.4):
     import binanceapi_trades as apitrades
 
     order_type = order_type.upper()
@@ -362,7 +398,7 @@ def place_safe_order(order_type, symbol, price, quantity, time_back_in_seconds=3
         previous_trades = apitrades.get_my_trades(opposite_order_type, symbol, backdays=0, limit=1000) ## curent date
         if len(previous_trades) >= max_daily_trades:
             print(f"Am {len(previous_trades)} trades. Limita zilnica este de {max_daily_trades} pentru'{order_type}'.")
-            return None
+            return False
         print(f"Am {len(previous_trades)} trades");
         
         time_limit = int(time.time() * 1000) - (time_back_in_seconds * 1000)  # în milisecunde
@@ -387,31 +423,12 @@ def place_safe_order(order_type, symbol, price, quantity, time_back_in_seconds=3
                 print(f"[DEBUG] Required Percentage Diff: {profit_percentage}%")    
             if diff_percent < profit_percentage:
                     print(f"Diferenta procentuala ({diff_percent:.2f}%) este sub pragul necesar de {profit_percentage}%. Ordinul de {order_type} nu a fost plasat.")
-                    return None
-            
-        order = None
-        if order_type == "BUY":
-            order = client.order_limit_buy(
-                symbol=symbol,
-                quantity=quantity,
-                price=str(price)
-            )
-        elif order_type == "SELL":
-            order = client.order_limit_sell(
-                symbol=symbol,
-                quantity=quantity,
-                price=str(price)
-            )
-        
-        if order:
-            print(f"{order_type} order placed successfully: {order['orderId']}")
-        else :
-            print(f"Eroare la plasarea ordinului de {order_type}")
-        return order
+                    return False
+        return True
 
     except BinanceAPIException as e:
-        print(f"Eroare la plasarea ordinului de {order_type}: {e}")
-        return None
+        print(f"Eroare la verificare if place safe order {order_type}: {e}")
+        return False
 
 
 
@@ -421,6 +438,9 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
     order_type = order_type.upper()
     validate_params(order_type, symbol, price, qty)  
     
+    if not if_place_safe_order(order_type, symbol, price, quantity, time_back_in_seconds=3600/2, max_daily_trades=20, profit_percentage = 0.4) :
+        return None
+        
     try:
         print(f"Order Request {order_type.upper()} {symbol} qty {qty}, Price {price}")
         available_qty = manage_quantity(order_type, symbol, qty, cancelorders=cancelorders, hours=hours)
@@ -464,11 +484,11 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
         if order_type.upper() == 'SELL':
             price = round(max(price, current_price), 0)
             print(f"Trying to place SELL order of {symbol} for quantity {qty:.8f} at price {price}")
-            order = place_safe_order(order_type, symbol, price, qty);
+            order = place_SELL_order(symbol, price, qty);
         elif order_type.upper() == 'BUY':
             price = round(min(price, current_price), 0)
             print(f"Trying to place BUY order of {symbol} for quantity {qty:.8f} at price {price}")
-            order = place_safe_order(order_type, symbol, price, qty);
+            order = place_BUY_order(symbol, price, qty);
         else:
             print(f"Invalid order type: {order_type}")
             return None
