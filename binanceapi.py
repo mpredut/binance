@@ -532,12 +532,12 @@ def place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5
             
             price = min(price, current_price)
             price = round(price * 0.999, 0)
-            order = place_order("BUY", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
+            order = place_safe_order("BUY", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
             # appy pair
             if order and pair :            
                 price = max(price * 1.11, current_price)
                 price = round(price * 1.001, 0)
-                place_order("SELL", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
+                place_safe_order("SELL", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
                 
         elif order_type.upper() == 'SELL':
             open_BUY_orders = get_open_orders("BUY", symbol)
@@ -550,12 +550,12 @@ def place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5
                    
             price = max(price, current_price)
             price = round(price * (1 + 0.001), 0)
-            order = place_order("SELL", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
+            order = place_safe_order("SELL", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
             # appy pair
             if order and pair :
                 price = min(price * (1 - 0.11), current_price)
                 price = round(price * 0.999, 0)
-                place_order("BUY", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
+                place_safe_order("BUY", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
         else:
             print("Tipul ordinului este invalid. Trebuie sa fie 'BUY' sau 'SELL'.")
             return None

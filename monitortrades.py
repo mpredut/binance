@@ -713,7 +713,7 @@ def main():
 
     while True:
         state_tracker.display_states()
-        monitor_price_and_trade(taosymbol, 1 , 3600 * 24 * 7)
+        monitor_price_and_trade(taosymbol, 1 , 3600 * 24 * 7, percentage_gain_threshold=0.099, percentage_lost_threshold=0.013)
         monitor_price_and_trade(symbol, 1, 3600 * 24 * 7)
         data = sell_recommendation[symbol]
         procent_desired_profit = data['procent_desired_profit']
