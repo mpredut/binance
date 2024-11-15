@@ -44,10 +44,13 @@ class TradingBot:
                 print(f"[{self.symbol}] Ignore BUY order. It was previously filled at {self.filled_buy_price:f2}")
                 return self.filled_buy_price
             
-            buy_order = api.place_BUY_order(self.symbol, target_buy_price, self.qty)
+            if adjustment_percent > 0:
+                buy_order = api.place_BUY_order(self.symbol, target_buy_price, self.qty)
+            else:
+                buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty)
             if buy_order is None:
                 print("[{self.symbol}] Order BUY fail, retry ...")
-                cancel_recent_orders(order_type, symbol, WAIT_FOR_ORDER)
+                api.cancel_recent_orders(order_type, symbol, WAIT_FOR_ORDER)
                 time.sleep(WAIT_FOR_ORDER)
                 continue
 
@@ -92,10 +95,14 @@ class TradingBot:
                 print(f"[{self.symbol}] Ignore SELL order. It was previously filled at {self.filled_sell_price:.2f}")
                 return self.filled_sell_price
 
-            sell_order = api.place_SELL_order(self.symbol, target_sell_price, self.qty)
+            
+            if adjustment_percent > 0:
+                sell_order = api.place_SELL_order(self.symbol, target_sell_price, self.qty)
+            else:
+                sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty)
             if sell_order is None:
                 print(f"[{self.symbol}] Order SELL failed, retrying...")
-                cancel_recent_orders(order_type, symbol, WAIT_FOR_ORDER)
+                api.cancel_recent_orders(order_type, symbol, WAIT_FOR_ORDER)
                 time.sleep(WAIT_FOR_ORDER)
                 continue
 
