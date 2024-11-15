@@ -82,7 +82,7 @@ def listen_to_binance(symbol):
                 message = json.loads(message)
                 process_message(symbol, message)
 
-    # Rulam WebSocket-ul într-un event loop propriu în acest thread
+    # Rulam WebSocket-ul intr-un event loop propriu in acest thread
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(connect())
@@ -178,12 +178,12 @@ def get_symbol_limits(symbol):
                 return min_qty, max_qty, step_size
     return None, None, None
 
-refresh_interval = 0 # Intervalul în care sa se faca actualizarea (în secunde)
+refresh_interval = 0 # Intervalul in care sa se faca actualizarea (in secunde)
 def get_current_price(symbol):
     global currenttime
     global currentprice
     global refresh_interval
-    #refresh_interval = 0 # Intervalul în care sa se faca actualizarea (în secunde)
+    #refresh_interval = 0 # Intervalul in care sa se faca actualizarea (in secunde)
     try:
         if symbol not in currentprice or (currenttime + refresh_interval <= time.time()):
             refresh_interval = 2
@@ -274,7 +274,7 @@ def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5,
                 cancel = True
             else:
                 price_diff_percentage = abs(order_info['price'] - current_price) / current_price * 100
-                if price_diff_percentage >= price_difference_percentage * 100:  # Convertim 0.1 în 10%
+                if price_diff_percentage >= price_difference_percentage * 100:  # Convertim 0.1 in 10%
                     cancel = True
 
             if cancel:
@@ -354,7 +354,7 @@ def place_SELL_order(symbol, price, qty):
         return None
 
 
-def place_ord() :
+def place_SELL_BUY_order(order_type, symbol, price, qty) :
  
     order = None
     if order_type == "BUY":
@@ -373,7 +373,7 @@ def place_ord() :
     if order:
         print(f"{order_type} order placed successfully: {order['orderId']}")
     else :
-        print(f"Eroare la plasarea ordinului de {order_type}")
+        print(f"Eroare la plasarea ordinului de {order_type}, pret {price:.2f}")
     return order
 
         
@@ -401,9 +401,9 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=360
             return False
         print(f"Am {len(previous_trades)} trades");
         
-        time_limit = int(time.time() * 1000) - (time_back_in_seconds * 1000)  # în milisecunde
+        time_limit = int(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
         
-        # Filtram tranzactiile opuse care au avut loc în intervalul specificat
+        # Filtram tranzactiile opuse care au avut loc in intervalul specificat
         recent_opposite_trades = [trade for trade in previous_trades if trade['time'] >= time_limit]
         
         #max_SELL_price = max(float(trade['quoteQty']) / float(trade['qty']) for trade in recent_opposite_trades)
@@ -437,9 +437,6 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
     
     order_type = order_type.upper()
     validate_params(order_type, symbol, price, qty)  
-    
-    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600/2, max_daily_trades=20, profit_percentage = 0.4) :
-        return None
         
     try:
         print(f"Order Request {order_type.upper()} {symbol} qty {qty}, Price {price}")
@@ -460,7 +457,7 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
                 qty = available_qty / (1 + fee_percentage)
 
         elif order_type.upper() == 'BUY':
-            # În cazul unei comenzi de BUY, trebuie sa calculezi cantitatea necesara de USDT pentru achizitionare
+            # in cazul unei comenzi de BUY, trebuie sa calculezi cantitatea necesara de USDT pentru achizitionare
             total_usdt_needed = qty * price * (1 + fee_percentage)
 
             if available_qty < total_usdt_needed:
@@ -471,8 +468,8 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
 
         current_price = get_current_price(symbol)
 
-        # Rotunjim cantitatea la 5 zecimale în jos
-        #qty = math.floor(qty * 10**5) / 10**5  # Rotunjire în jos la 5 zecimale
+        # Rotunjim cantitatea la 5 zecimale in jos
+        #qty = math.floor(qty * 10**5) / 10**5  # Rotunjire in jos la 5 zecimale
         qty = round(qty, 4)
         qty = float(Decimal(qty).quantize(Decimal('0.0001'), rounding=ROUND_DOWN))  # Rotunjit la 5 zecimale
         if qty <= 0:
@@ -502,6 +499,17 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
         print(f"place_order: A aparut o eroare: {e}")
         return None
 
+
+def place_safe_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee_percentage=0.001):
+    
+    order_type = order_type.upper()
+    validate_params(order_type, symbol, price, qty)  
+    
+    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600/2, max_daily_trades=20, profit_percentage = 0.4) :
+        return None
+        
+    return place_order(order_type, symbol, price, qty, cancelorders=cancelorders, hours=hours, fee_percentage=fee_percentage)    
+    
 
 def place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5, pair=True):
     
@@ -595,10 +603,11 @@ def cancel_expired_orders(order_type, symbol, expire_time):
 
     #current_time = int(time.time() * 1000)  # Convert current time to milliseconds
     current_time = int(time.time())
-
-    print(f"Available open orders {len(open_orders)}. Try cancel {order_type} orders type ... ")
+  
     if len(open_orders) < 1:
         return
+    print(f"Available open orders {len(open_orders)}. Try cancel {order_type} orders type ... ")
+      
     count = 0   
     for order_id, order_details in open_orders.items():
         order_time = order_details.get('timestamp')
@@ -613,6 +622,34 @@ def cancel_expired_orders(order_type, symbol, expire_time):
     print(f"Cancelled {count} orders")
         
 
+import time
+
+def cancel_recent_orders(order_type, symbol, max_age_seconds):
+
+    order_type = order_type.upper()
+    validate_params(order_type, symbol)
+    
+    open_orders = get_open_orders(order_type, symbol)
+    current_time = int(time.time())  # Current time in seconds
+
+    if len(open_orders) < 1:
+        return
+    print(f"Available open orders {len(open_orders)}. Checking for recent {order_type} orders to cancel... ")
+   
+    count = 0
+    for order_id, order_details in open_orders.items():
+        order_time = order_details.get('timestamp')  # Assuming timestamp is in seconds
+        if current_time - order_time <= max_age_seconds:  # Order is recent
+            cancel = cancel_order(symbol, order_id)
+            if cancel:
+                print(f"Cancelled {order_type} order with ID: {order_id} (recent order).")
+                count += 1
+            else:
+                print(f"Failed to cancel {order_type} order with ID: {order_id}. Needs cancel because recent order.")
+    
+    print(f"Cancelled {count} recent orders.")
+
+
 def check_order_filled(order_id):
     try:
         if not order_id:
@@ -623,4 +660,25 @@ def check_order_filled(order_id):
         print(f"Eroare la verificarea starii ordinului: {e}")
         return False
 
+
+def check_order_filled_by_time(order_type, symbol, time_back_in_seconds, pret_min=None, pret_max=None):
+    import binanceapi_trades as apitrades
+    
+    previous_trades = apitrades.get_my_trades(order_type, symbol, backdays=0, limit=1000)  # Curent date
+    time_limit = int(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
+
+    # Filtram tranzactiile in functie de timp si optional in functie de pret total
+    tranzactii_recente = [
+        trade for trade in previous_trades
+        if trade['time'] >= time_limit and
+           (pret_min is None or trade['price'] * trade['qty'] >= pret_min) and
+           (pret_max is None or trade['price'] * trade['qty'] <= pret_max)
+    ]
+
+    if tranzactii_recente:
+        # Gasim cea mai recenta tranzactie (dupa timp)
+        tranzactia_recenta = max(tranzactii_recente, key=lambda trade: trade['time'])
+        return tranzactia_recenta['price']
+
+    return None  # Daca nu exista tranzactii recente, returnam None
 
