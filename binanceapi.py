@@ -40,15 +40,15 @@ currenttime = time.time()
 client = Client(api_key, api_secret)
 
 
-def validate_params(order_type, symbol, price = 1, quantity = 1):
+def validate_params(order_type, symbol, price = 1, qty = 1):
     if order_type not in ['BUY', 'SELL']:
         raise ValueError(f"Invalid order_type '{order_type}'. It must be either 'BUY' or 'SELL'.")
     
     if not isinstance(price, (int, float)) or price <= 0:
         raise ValueError(f"Invalid price '{price}'. Price must be a positive number.")
     
-    if not isinstance(quantity, (int, float)) or quantity <= 0:
-        raise ValueError(f"Invalid quantity '{quantity}'. Quantity must be a positive number.")
+    if not isinstance(qty, (int, float)) or qty <= 0:
+        raise ValueError(f"Invalid quantity '{qty}'. Quantity must be a positive number.")
     
     if symbol.upper() not in symbols:
         raise ValueError(f"Invalid symbol '{symbol}'. Symbol must be one of {valid_symbols}.")
@@ -313,13 +313,13 @@ def get_open_orders(order_type, symbol):
         print(f"Error getting open {order_type} orders: {e}")
         return {}
         
-def place_BUY_order(symbol, price, quantity):
+def place_BUY_order(symbol, price, qty):
     try:
         price = round(min(price, get_current_price(symbol)), 0)
-        quantity = round(quantity, 4)    
+        qty = round(qty, 4)    
         BUY_order = client.order_limit_buy(
             symbol=symbol,
-            quantity=quantity,
+            quantity=qty,
             price=str(price)
         )
         
@@ -333,13 +333,13 @@ def place_BUY_order(symbol, price, quantity):
         print(f"Eroare la plasarea ordinului de cumparare: {e}")
         return None
 
-def place_SELL_order(symbol, price, quantity):
+def place_SELL_order(symbol, price, qty):
     try:
         price = round(max(price, get_current_price(symbol)), 0)
-        quantity = round(quantity, 4)    
+        qty = round(qty, 4)    
         SELL_order = client.order_limit_sell(
             symbol=symbol,
-            quantity=quantity,
+            quantity=qty,
             price=str(price)
         )
         
@@ -360,13 +360,13 @@ def place_ord() :
     if order_type == "BUY":
         order = client.order_limit_buy(
             symbol=symbol,
-            quantity=quantity,
+            quantity=qty,
             price=str(price)
         )
     elif order_type == "SELL":
         order = client.order_limit_sell(
             symbol=symbol,
-            quantity=quantity,
+            quantity=qty,
             price=str(price)
         )
     
@@ -378,11 +378,11 @@ def place_ord() :
 
         
 
-def if_place_safe_order(order_type, symbol, price, quantity, time_back_in_seconds=3600/2, max_daily_trades=20, profit_percentage = 0.4):
+def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600/2, max_daily_trades=20, profit_percentage = 0.4):
     import binanceapi_trades as apitrades
 
     order_type = order_type.upper()
-    validate_params(order_type, symbol, price, quantity)    
+    validate_params(order_type, symbol, price, qty)    
     try:
         
         current_price = get_current_price(symbol)
@@ -392,7 +392,7 @@ def if_place_safe_order(order_type, symbol, price, quantity, time_back_in_second
         else:  # pentru "SELL"
             price = round(max(price, current_price), 0)
 
-        quantity = round(quantity, 4)
+        qty = round(qty, 4)
 
         opposite_order_type = "SELL" if order_type == "BUY" else "BUY"
         previous_trades = apitrades.get_my_trades(opposite_order_type, symbol, backdays=0, limit=1000) ## curent date
@@ -438,7 +438,7 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
     order_type = order_type.upper()
     validate_params(order_type, symbol, price, qty)  
     
-    if not if_place_safe_order(order_type, symbol, price, quantity, time_back_in_seconds=3600/2, max_daily_trades=20, profit_percentage = 0.4) :
+    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600/2, max_daily_trades=20, profit_percentage = 0.4) :
         return None
         
     try:

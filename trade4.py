@@ -23,14 +23,14 @@ CHECK_INTERVAL = 10
 
 DEFAULT_ADJUSTMENT_PERCENT = u.calculate_difference_percent(60000, 60000 - 310)/100
 
-def repetitive_buy(current_price, symbol, quantity, filled_sell_price):
+def repetitive_buy(current_price, symbol, qty, filled_sell_price):
     
     adjustment_percent = DEFAULT_ADJUSTMENT_PERCENT
     
     while True:
         target_buy_price = current_price * (1 - adjustment_percent)
         print(f"Ordin de BUY la prețul: {target_buy_price}")
-        buy_order = api.place_BUY_order(symbol, target_buy_price, quantity)
+        buy_order = api.place_BUY_order(symbol, target_buy_price, qty)
         if buy_order is None:
             print("Eroare la plasarea ordinului de cumpărare. Încerc din nou.")
             time.sleep(CHECK_INTERVAL)
@@ -57,14 +57,14 @@ def repetitive_buy(current_price, symbol, quantity, filled_sell_price):
         
 
 
-def repetitive_sell(current_price, symbol, quantity, filled_buy_price):
+def repetitive_sell(current_price, symbol, qty, filled_buy_price):
     
     adjustment_percent = DEFAULT_ADJUSTMENT_PERCENT
     
     while True:
         target_sell_price = current_price * (1 + adjustment_percent)
         print(f"Ordin de SELL la prețul: {target_sell_price}")
-        sell_order = api.place_SELL_order(symbol, target_sell_price, quantity)
+        sell_order = api.place_order("SELL", symbol, target_sell_price, qty)
         if sell_order is None:
             print("Eroare la plasarea ordinului de vânzare. Încerc din nou.")
             time.sleep(CHECK_INTERVAL)
