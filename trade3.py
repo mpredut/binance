@@ -468,7 +468,7 @@ def track_and_place_order(action, count, proposed_price, current_price, quantity
     if action == 'BUY':
         api.cancel_expired_orders(action, api.symbol, EXP_TIME_BUY_ORDER)
 
-        buy_price = min(proposed_price, current_price * 0.998)
+        buy_price = min(proposed_price, current_price * 0.999)
         print(f"BUY price: {buy_price:.2f} USDT")
 
         alert.check_alert(True, f"BUY order {buy_price:.2f}")
@@ -486,7 +486,7 @@ def track_and_place_order(action, count, proposed_price, current_price, quantity
     elif action == 'SELL':
         api.cancel_expired_orders(action, api.symbol, EXP_TIME_SELL_ORDER)
 
-        sell_price = max(proposed_price, current_price * 1.002)
+        sell_price = max(proposed_price, current_price * 1.001)
         print(f"SELL price: {sell_price:.2f} USDT")
         
         alert.check_alert(True, f"SELL order {sell_price:.2f}")
