@@ -32,7 +32,6 @@ class TradingBot:
         self.buy_filled = False
         self.sell_filled = False
         self.DEFAULT_ADJUSTMENT_PERCENT = DEFAULT_ADJUSTMENT_PERCENT
-        print(f"[{self.symbol}] Transaction complete: Bought at {self.filled_buy_price:.2f}, Sold at {self.filled_sell_price:.2f}")
 
     def repetitive_buy(self, current_price, filled_sell_price):
         adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
