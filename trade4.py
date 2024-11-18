@@ -50,7 +50,7 @@ class TradingBot:
                 buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty)
             if buy_order is None:
                 print("[{self.symbol}] Order BUY fail, retry ...")
-                api.cancel_recent_orders(order_type, symbol, WAIT_FOR_ORDER)
+                api.cancel_recent_orders(order_type, self.symbol, WAIT_FOR_ORDER)
                 time.sleep(WAIT_FOR_ORDER)
                 continue
 
@@ -64,24 +64,27 @@ class TradingBot:
                 self.sell_filled = False
                 return self.filled_buy_price
                 
-            filled_buy_price = api.check_order_filled_by_time("BUY", symbol, time_back_in_seconds = WAIT_FOR_ORDER)
+            filled_buy_price = api.check_order_filled_by_time("BUY", self.symbol, time_back_in_seconds = WAIT_FOR_ORDER)
             if not filled_buy_price is None:
-                print(f"[{self.symbol}] BUY order probababliy filled at {filled_buy_price:.f2}")
+                print(f"[{self.symbol}] BUY order may be was filled :-) at {filled_buy_price:.f2}")
                 self.buy_filled = True
                 self.sell_filled = False
                 self.filled_buy_price = filled_buy_price
                 return self.filled_buy_price
                 
-            current_price = api.get_current_price(symbol)
+            current_price = api.get_current_price(self.symbol)
             if current_price > filled_sell_price:
                 print(f"[{self.symbol}] Bed day :-(. try buy at current price {current_price}")
                 adjustment_percent = 0
             else:
                 adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
 
-            if not api.cancel_order(symbol, order_id):
-                print(f"[{self.symbol}] Cancel SELL order failed. may be was filled :-)? Continue...")
-                return self.filled_buy_price
+            if not api.cancel_order(self.symbol, order_id):
+                if api.check_order_filled(order_id):
+                    print(f"[{self.symbol}] Cancel BUY order failed. may be was filled :-)? Move to SELL ...")
+                    return self.filled_buy_price
+                else :
+                    print(f"[{self.symbol}] Cancel BUY order failed. someone cancel it. Continue buy...")
 
 
     def repetitive_sell(self, current_price, filled_buy_price):
@@ -102,7 +105,7 @@ class TradingBot:
                 sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty)
             if sell_order is None:
                 print(f"[{self.symbol}] Order SELL failed, retrying...")
-                api.cancel_recent_orders(order_type, symbol, WAIT_FOR_ORDER)
+                api.cancel_recent_orders(order_type, self.symbol, WAIT_FOR_ORDER)
                 time.sleep(WAIT_FOR_ORDER)
                 continue
 
@@ -116,9 +119,9 @@ class TradingBot:
                 self.sell_filled = True
                 return self.filled_sell_price
                 
-            filled_sell_price = api.check_order_filled_by_time("SELL", symbol, time_back_in_seconds = WAIT_FOR_ORDER)
+            filled_sell_price = api.check_order_filled_by_time("SELL", self.symbol, time_back_in_seconds = WAIT_FOR_ORDER)
             if not filled_sell_price is None:
-                print(f"[{self.symbol}] SELL order probababliy filled at {filled_sell_price:.f2}")
+                print(f"[{self.symbol}] SELL order may be was filled :-) at {filled_sell_price:.f2}")
                 self.buy_filled = True
                 self.sell_filled = False
                 self.filled_sell_price = filled_sell_price
@@ -132,8 +135,11 @@ class TradingBot:
                 adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
 
             if not api.cancel_order(self.symbol, order_id):
-                print(f"[{self.symbol}] Cancel SELL order failed. may be was filled :-)? Continue...")
-                return self.filled_sell_price
+                if api.check_order_filled(order_id):
+                    print(f"[{self.symbol}] Cancel SELL order failed. may be was filled :-)? Move to SELL ...")
+                    return self.filled_sell_price
+                else :
+                    print(f"[{self.symbol}] Cancel SELL order failed. someone cancel it. Continue buy...")
 
     def run(self):
         while True:
