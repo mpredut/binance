@@ -50,7 +50,7 @@ class TradingBot:
                 buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty)
             if buy_order is None:
                 print("[{self.symbol}] Order BUY fail, retry ...")
-                api.cancel_recent_orders(order_type, self.symbol, WAIT_FOR_ORDER)
+                api.cancel_recent_orders("BUY", symbol, WAIT_FOR_ORDER)
                 time.sleep(WAIT_FOR_ORDER)
                 continue
 
@@ -105,7 +105,7 @@ class TradingBot:
                 sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty)
             if sell_order is None:
                 print(f"[{self.symbol}] Order SELL failed, retrying...")
-                api.cancel_recent_orders(order_type, self.symbol, WAIT_FOR_ORDER)
+                api.cancel_recent_orders("SELL", symbol, WAIT_FOR_ORDER)
                 time.sleep(WAIT_FOR_ORDER)
                 continue
 
