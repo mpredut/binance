@@ -32,6 +32,7 @@ class TradingBot:
         self.buy_filled = False
         self.sell_filled = False
         self.DEFAULT_ADJUSTMENT_PERCENT = DEFAULT_ADJUSTMENT_PERCENT
+        print(f"[{self.symbol}] Transaction complete: Bought at {self.filled_buy_price:.2f}, Sold at {self.filled_sell_price:.2f}")
 
     def repetitive_buy(self, current_price, filled_sell_price):
         adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
@@ -59,14 +60,14 @@ class TradingBot:
             self.filled_buy_price = round(float(buy_order['price']), 4)
             
             if api.check_order_filled(order_id):
-                print(f"[{self.symbol}] BUY order filled at {self.filled_buy_price:.f2}")
+                print(f"[{self.symbol}] BUY order filled at {self.filled_buy_price:.2f}")
                 self.buy_filled = True
                 self.sell_filled = False
                 return self.filled_buy_price
                 
             filled_buy_price = api.check_order_filled_by_time("BUY", self.symbol, time_back_in_seconds = WAIT_FOR_ORDER)
             if not filled_buy_price is None:
-                print(f"[{self.symbol}] BUY order may be was filled :-) at {filled_buy_price:.f2}")
+                print(f"[{self.symbol}] BUY order may be was filled :-) at {filled_buy_price:.2f}")
                 self.buy_filled = True
                 self.sell_filled = False
                 self.filled_buy_price = filled_buy_price
@@ -121,7 +122,7 @@ class TradingBot:
                 
             filled_sell_price = api.check_order_filled_by_time("SELL", self.symbol, time_back_in_seconds = WAIT_FOR_ORDER)
             if not filled_sell_price is None:
-                print(f"[{self.symbol}] SELL order may be was filled :-) at {filled_sell_price:.f2}")
+                print(f"[{self.symbol}] SELL order may be was filled :-) at {filled_sell_price:.2f}")
                 self.buy_filled = True
                 self.sell_filled = False
                 self.filled_sell_price = filled_sell_price
@@ -149,7 +150,7 @@ class TradingBot:
 
                 filled_sell_price = self.repetitive_sell(current_price, self.filled_buy_price)
                 current_price = api.get_current_price(self.symbol)
-                filled_buy_price = self.repetitive_buy(current_price, filled_sell_price)
+                filled_buy_price = self.repetitive_buy(current_price, filled_sell_price) + 0.0001 ## avoid zero
 
                 print(f"[{self.symbol}] Transaction complete: Bought at {filled_buy_price:.2f}, Sold at {filled_sell_price:.2f}")
                 if filled_buy_price < filled_sell_price:
@@ -165,6 +166,8 @@ class TradingBot:
                 print(f"[{self.symbol}] Unexpected error: {e}")
                 if self.buy_filled == self.sell_filled:
                     self.buy_filled = not self.sell_filled
+                api.cancel_recent_orders("SELL", symbol, WAIT_FOR_ORDER)
+                api.cancel_recent_orders("BUY", symbol, WAIT_FOR_ORDER)
                 time.sleep(1)
 
 
