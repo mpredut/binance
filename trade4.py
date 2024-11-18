@@ -60,6 +60,8 @@ class TradingBot:
             
             if api.check_order_filled(order_id):
                 print(f"[{self.symbol}] BUY order filled at {self.filled_buy_price:.2f}")
+                print(f"[{self.symbol}] |BUY disperat tot....")
+                api.place_safe_order("BUY", self.symbol, api.get_current_price(self.symbol), 0.2)
                 self.buy_filled = True
                 self.sell_filled = False
                 return self.filled_buy_price
@@ -115,6 +117,8 @@ class TradingBot:
 
             if api.check_order_filled(order_id):
                 print(f"[{self.symbol}] SELL order filled at {self.filled_sell_price:.2f}")
+                print(f"[{self.symbol}] SELL disperat tot....")
+                api.place_safe_order("SELL", self.symbol, api.get_current_price(self.symbol), 0.2)
                 self.buy_filled = False
                 self.sell_filled = True
                 return self.filled_sell_price

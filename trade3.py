@@ -148,6 +148,7 @@ class PriceWindow:
         return cls(window_size, initial_prices=existing_prices)
 
     def process_price(self, price):
+        print(f"BTC : {price}")
         if len(self.prices) == self.window_size:
             oldest_price = self.prices.popleft()
             index = bisect_left(self.sorted_prices, oldest_price)
@@ -505,7 +506,7 @@ def track_and_place_order(action, count, proposed_price, current_price, quantity
 
 
 class TrendState:
-    def __init__(self, max_duration_seconds, expiration_threshold):
+    def __init__(self, max_duration_seconds, expiration_trend_time, fresh_trend_time):
         self.state = 'HOLD'  # Inițial, starea este 'HOLD'
         self.old_state = self.state 
         self.expired = False
@@ -514,7 +515,9 @@ class TrendState:
         self.last_confirmation_time = None  # Ultimul timp de confirmare al trendului
         self.max_duration_seconds = max_duration_seconds  # Durata maxima permisa pentru un trend
         self.confirm_count = 0  # Contorul de confirmari pentru trend
-        self.expiration_threshold = expiration_threshold  # Pragul de timp Intre confirmari (In secunde)
+        self.expiration_trend_time = expiration_trend_time  # Pragul de timp Intre confirmari (In secunde)
+        self.fresh_trend_time = fresh_trend_time  # Pragul pentru a fi considerat fresh
+      
 
     def start_trend(self, new_state):
         
@@ -528,6 +531,12 @@ class TrendState:
         self.expired = False
         print(f"Start of {self.state} trend at {u.timeToHMS(self.start_time)}")
         return self.old_state
+        
+    def is_trend_fresh(self) :
+        if time.time() < self.start_time + self.fresh_trend_time:
+            return True
+        return False
+        
 
     def confirm_trend(self):
         self.last_confirmation_time = time.time()
@@ -540,7 +549,7 @@ class TrendState:
             return True
         if self.last_confirmation_time:
             time_since_last_confirmation = time.time() - self.last_confirmation_time
-            if time_since_last_confirmation > self.expiration_threshold:
+            if time_since_last_confirmation > self.expiration_trend_time:
                 print(f"Trend expired: {self.state}. Time since last confirmation: {time_since_last_confirmation} seconds")
                 self.end_trend()
                 self.expired = True
@@ -573,8 +582,8 @@ class TrendState:
             return self.confirm_count
         return 0
         
-trend_state1 = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_threshold=10 * 60)  # Expira In 10 minute
-trend_state2 = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_threshold=10 * 60)  # Expira In 10 minute
+trend_state1 = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_trend_time=10 * 60, fresh_trend_time = 1.7 * 60)  # Expira In 10 minute
+trend_state2 = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_trend_time=10 * 60, fresh_trend_time = 1.7 * 60)  # Expira In 10 minute
 
 #
 #       MAIN 
@@ -745,10 +754,11 @@ while True:
                 count = trend_state2.confirm_trend() # Confirmam ca trendul de crestere continua
                 diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
                 proposed_price = current_price - diff
+                if trend_state2.is_trend_fresh() : proposed_price = current_price
                 track_and_place_order('BUY', count, proposed_price, current_price, order_ids=order_ids)
             else:
                 expired_trend = trend_state2.start_trend('UP')  # Incepem un trend nou de crestere
-                proposed_price = current_price - initial_difference
+                proposed_price = current_price #- initial_difference
                 track_and_place_order('BUY',1, proposed_price, current_price, order_ids=order_ids)          
         elif gradient < 0 and slope != 0 :
             # Confirmam un trend de scadere
@@ -758,10 +768,11 @@ while True:
                 count = trend_state2.confirm_trend() # Confirmam ca trendul de scadere continua
                 diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
                 proposed_price = proposed_price + diff
+                if trend_state2.is_trend_fresh() : proposed_price = current_price
                 track_and_place_order('SELL', count, proposed_price, current_price, order_ids=order_ids)
             else:
                 expired_trend = trend_state2.start_trend('DOWN')  # Incepem un trend nou de scadere
-                proposed_price = current_price + initial_difference
+                proposed_price = current_price #+ initial_difference
                 track_and_place_order('SELL',1, proposed_price, current_price, order_ids=order_ids)
 
         update_csv_file(filename, api.symbol, slope, count, 0, 0, pos, gradient)
