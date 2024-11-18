@@ -396,7 +396,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=360
 
         opposite_order_type = "SELL" if order_type == "BUY" else "BUY"
         previous_trades = apitrades.get_my_trades(opposite_order_type, symbol, backdays=0, limit=1000) ## curent date
-        if len(previous_trades) >= max_daily_trades:
+        if len(apitrades.get_my_trades(order_type, symbol, backdays=0, limit=1000)) > max_daily_trades:
             print(f"Am {len(previous_trades)} trades. Limita zilnica este de {max_daily_trades} pentru'{order_type}'.")
             return False
         print(f"Am {len(previous_trades)} trades");
@@ -505,7 +505,7 @@ def place_safe_order(order_type, symbol, price, qty, cancelorders=False, hours=5
     order_type = order_type.upper()
     validate_params(order_type, symbol, price, qty)  
     
-    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600/2, max_daily_trades=20, profit_percentage = 0.4) :
+    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600/2, max_daily_trades=30, profit_percentage = 0.4) :
         return None
         
     return place_order(order_type, symbol, price, qty, cancelorders=cancelorders, hours=hours, fee_percentage=fee_percentage)    
