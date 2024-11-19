@@ -755,11 +755,11 @@ while True:
                 diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
                 proposed_price = current_price - diff
                 if trend_state2.is_trend_fresh() : proposed_price = current_price
-                track_and_place_order('BUY', count, proposed_price, current_price, order_ids=order_ids)
+                #track_and_place_order('BUY', count, proposed_price, current_price, order_ids=order_ids)
             else:
                 expired_trend = trend_state2.start_trend('UP')  # Incepem un trend nou de crestere
                 proposed_price = current_price #- initial_difference
-                track_and_place_order('BUY',1, proposed_price, current_price, order_ids=order_ids)          
+                #track_and_place_order('BUY',1, proposed_price, current_price, order_ids=order_ids)          
         elif gradient < 0 and slope != 0 :
             # Confirmam un trend de scadere
             initial_difference = 7  * (pos + 0.5) /abs(slope)
@@ -769,11 +769,11 @@ while True:
                 diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
                 proposed_price = proposed_price + diff
                 if trend_state2.is_trend_fresh() : proposed_price = current_price
-                track_and_place_order('SELL', count, proposed_price, current_price, order_ids=order_ids)
+                #track_and_place_order('SELL', count, proposed_price, current_price, order_ids=order_ids)
             else:
                 expired_trend = trend_state2.start_trend('DOWN')  # Incepem un trend nou de scadere
                 proposed_price = current_price #+ initial_difference
-                track_and_place_order('SELL',1, proposed_price, current_price, order_ids=order_ids)
+                #track_and_place_order('SELL',1, proposed_price, current_price, order_ids=order_ids)
 
         update_csv_file(filename, api.symbol, slope, count, 0, 0, pos, gradient)
         update_csv_file(filename, 'TAOUSDT', slope, count, 0, 0, pos, gradient)
