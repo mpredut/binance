@@ -24,6 +24,7 @@ from binance.exceptions import BinanceAPIException
 ####MYLIB
 import utils as u
 from apikeys import api_key, api_secret
+import config as cfg
 
 stop = False
 symbol = 'BTCUSDT'
@@ -315,6 +316,10 @@ def get_open_orders(order_type, symbol):
         
 def place_BUY_order(symbol, price, qty):
     try:
+        if not cfg.is_trade_enabled() :
+            print(f"Trade is desabled!")
+            return None
+            
         price = round(min(price, get_current_price(symbol)), 2)
         qty = round(qty, 4)    
         BUY_order = client.order_limit_buy(
@@ -335,6 +340,10 @@ def place_BUY_order(symbol, price, qty):
 
 def place_SELL_order(symbol, price, qty):
     try:
+        if not cfg.is_trade_enabled() :
+            print(f"Trade is desabled!")
+            return None
+            
         price = round(max(price, get_current_price(symbol)), 2)
         qty = round(qty, 4)    
         SELL_order = client.order_limit_sell(
