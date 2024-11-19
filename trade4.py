@@ -56,6 +56,8 @@ class TradingBot:
                 failure_count += 1  # Incrementăm contorul de eșecuri
                 if failure_count >= max_failures:
                     print(f"[{self.symbol}] Order BUY failed {failure_count} times. Exiting.")
+                    self.buy_filled = True
+                    self.sell_filled = False
                     return round(api.get_current_price(symbol) * (1 - 0.1), 4)
                 api.cancel_recent_orders("BUY", self.symbol, WAIT_FOR_ORDER)
                 time.sleep(WAIT_FOR_ORDER)
@@ -91,6 +93,8 @@ class TradingBot:
             if not api.cancel_order(self.symbol, order_id):
                 if api.check_order_filled(order_id):
                     print(f"[{self.symbol}] Cancel BUY order failed. Maybe it was filled :-)? Moving to BUY ...")
+                    self.buy_filled = True
+                    self.sell_filled = False
                     return self.filled_buy_price
                 else:
                     print(f"[{self.symbol}] Cancel BUY order failed. Someone canceled it. Continuing BUY...")
