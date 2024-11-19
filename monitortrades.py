@@ -656,18 +656,23 @@ def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_t
         price_increase = (current_price - buy_price) / buy_price
         price_decrease = (buy_price - current_price) / buy_price
 
+        print(f"(increase: {price_increase * 100}%, decrease: {price_decrease * 100}%)")
         # 3.1. Verifica daca trebuie sa plasezi un ordin de vanzare
         if price_increase > percentage_gain_threshold or u.are_close(price_increase, percentage_gain_threshold, target_tolerance_percent=1.0):
             if not is_trend_up(symbol):
-                print(f"Price increased with {price_increase * 100}% by more than {percentage_gain_threshold * 100}% versus buy price: Placing sell order")
+                print(f"Price increased with {price_increase * 100}% by more than {percentage_gain_threshold * 100}% versus buy price and not trend up!")
                 api.place_order_smart("sell", symbol, current_price + 0.5, qty, cancelorders=True, hours=5, pair=False)
-        
+                api.place_SELL_order(symbol, current_price, qty)
+            else :
+                print(f"No action taken, because trend is up!")
         elif price_decrease > percentage_lost_threshold or u.are_close(price_decrease, percentage_lost_threshold, target_tolerance_percent=1.0):
             if not is_trend_up(symbol):
-                print(f"Price decreased with {price_decrease * 100}% by more than {percentage_lost_threshold * 100}% versus buy price: Placing sell order")
+                print(f"Price decreased with {price_decrease * 100}% by more than {percentage_lost_threshold * 100}% versus buy price and not trend up!")
                 api.place_order_smart("sell", symbol, current_price + 0.5, qty, cancelorders=True, hours=0.1, pair=False)
-        else:
-            print(f"(increase: {price_increase * 100}%, decrease: {price_decrease * 100}%). No action taken.")
+                api.place_SELL_order(symbol, current_price, qty)
+            else:
+                print(f"No action taken, because trend is up!")
+       
 
     # 4. Verifica ordinele de vanzare
     if trade_orders_sell:
@@ -676,12 +681,14 @@ def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_t
         print(f"Sell price for {symbol}: {sell_price}")
         
         price_decrease_versus_sell = (sell_price - current_price) / sell_price
-
+        print(f"(price_decrease_versus_sell: {price_decrease_versus_sell * 100}%)")
         if price_decrease_versus_sell > percentage_gain_threshold or u.are_close(price_decrease_versus_sell, percentage_gain_threshold, target_tolerance_percent=1.0):
             if is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease_versus_sell * 100}% by more than {percentage_gain_threshold * 100}% versus sell price: Placing buy order")
                 #api.cancel_orders_old_or_outlier("buy", "BTCUSDT", qty, hours=0.5, price_difference_percentage=0.1)
                 api.place_order_smart("buy", symbol, current_price + 0.5, qty, cancelorders=True, hours=5, pair=False)
+            else :
+                print(f"No action taken, because trend is down!")
 
 
     #except Exception as e:
@@ -713,7 +720,9 @@ def main():
 
     while True:
         state_tracker.display_states()
+        print("-----TAO------")
         monitor_price_and_trade(taosymbol, 1 , 3600 * 24 * 7, percentage_gain_threshold=0.099, percentage_lost_threshold=0.013)
+        print("-----BTC------")
         monitor_price_and_trade(symbol, 1, 3600 * 24 * 7)
         data = sell_recommendation[symbol]
         procent_desired_profit = data['procent_desired_profit']

@@ -4,6 +4,7 @@ import datetime
 import math
 import sys
 import json
+from datetime import datetime, timedelta
 
 ####Binance
 from binance.client import Client
