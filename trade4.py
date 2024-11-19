@@ -53,14 +53,14 @@ class TradingBot:
 
             if buy_order is None:
                 print(f"[{self.symbol}] Order BUY failed, retrying...")
-                failure_count += 1  # Incrementăm contorul de eșecuri
+                api.cancel_recent_orders("BUY", self.symbol, WAIT_FOR_ORDER)
+                time.sleep(WAIT_FOR_ORDER)
+                failure_count += 1
                 if failure_count >= max_failures:
                     print(f"[{self.symbol}] Order BUY failed {failure_count} times. Exiting.")
                     self.buy_filled = True
                     self.sell_filled = False
-                    return round(api.get_current_price(symbol) * (1 - 0.1), 4)
-                api.cancel_recent_orders("BUY", self.symbol, WAIT_FOR_ORDER)
-                time.sleep(WAIT_FOR_ORDER)
+                    return round(api.get_current_price(symbol) * (1 - 0.01), 4)
                 continue
 
             time.sleep(WAIT_FOR_ORDER)
@@ -70,7 +70,7 @@ class TradingBot:
             if api.check_order_filled(order_id):
                 print(f"[{self.symbol}] BUY order filled at {self.filled_buy_price:.2f}")
                 print(f"[{self.symbol}] BUY disperat tot....")
-                api.place_smart_order("BUY", self.symbol, api.get_current_price(self.symbol), 0.2)
+                api.place_smart_order("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + 0.01), 0.2)
                 self.buy_filled = True
                 self.sell_filled = False
                 return self.filled_buy_price
@@ -120,12 +120,14 @@ class TradingBot:
 
             if sell_order is None:
                 print(f"[{self.symbol}] Order SELL failed, retrying...")
+                api.cancel_recent_orders("SELL", self.symbol, WAIT_FOR_ORDER)
+                time.sleep(WAIT_FOR_ORDER)
                 failure_count += 1  # Incrementăm contorul de eșecuri
                 if failure_count >= max_failures:
                     print(f"[{self.symbol}] Order SELL failed {failure_count} times. Exiting.")
+                    self.buy_filled = False
+                    self.sell_filled = True
                     return round(api.get_current_price(symbol) * (1 + 0.1), 4)
-                api.cancel_recent_orders("SELL", self.symbol, WAIT_FOR_ORDER)
-                time.sleep(WAIT_FOR_ORDER)
                 continue
 
             time.sleep(WAIT_FOR_ORDER)
@@ -135,7 +137,7 @@ class TradingBot:
             if api.check_order_filled(order_id):
                 print(f"[{self.symbol}] SELL order filled at {self.filled_sell_price:.2f}")
                 print(f"[{self.symbol}] SELL disperat tot....")
-                api.place_smart_order("SELL", self.symbol, api.get_current_price(self.symbol), 0.2)
+                api.place_smart_order("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - 0.01), 0.2)
                 self.buy_filled = False
                 self.sell_filled = True
                 return self.filled_sell_price
@@ -143,8 +145,8 @@ class TradingBot:
             filled_sell_price = api.check_order_filled_by_time("SELL", self.symbol, time_back_in_seconds=WAIT_FOR_ORDER)
             if filled_sell_price is not None:
                 print(f"[{self.symbol}] SELL order may have been filled :-) at {filled_sell_price:.2f}")
-                self.buy_filled = True
-                self.sell_filled = False
+                self.buy_filled = False
+                self.sell_filled = True
                 self.filled_sell_price = filled_sell_price
                 return self.filled_sell_price
 
@@ -158,6 +160,8 @@ class TradingBot:
             if not api.cancel_order(self.symbol, order_id):
                 if api.check_order_filled(order_id):
                     print(f"[{self.symbol}] Cancel SELL order failed. Maybe it was filled :-)? Moving to SELL ...")
+                    self.buy_filled = False
+                    self.sell_filled = True                   
                     return self.filled_sell_price
                 else:
                     print(f"[{self.symbol}] Cancel SELL order failed. Someone canceled it. Continuing buy...")
