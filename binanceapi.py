@@ -341,7 +341,7 @@ def place_BUY_order(symbol, price, qty):
 def place_SELL_order(symbol, price, qty):
     try:
         if not cfg.is_trade_enabled() :
-            print(f"Trade is desabled!")
+            print(f"Trade is disabled!")
             return None
             
         price = round(max(price, get_current_price(symbol)), 2)
