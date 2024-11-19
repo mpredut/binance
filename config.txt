@@ -1,0 +1,3 @@
+# Exemplu de configurare
+trade_enabled = false
+some_other_setting = value
