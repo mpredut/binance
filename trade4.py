@@ -38,7 +38,7 @@ class TradingBot:
         
         while True:
             target_buy_price = round(current_price * (1 - adjustment_percent), 4)
-            print(f"[{self.symbol}] Order BUY initiated at {target_buy_price:.2f}")
+            print(f"[{self.symbol}] Order BUY initiated at {target_buy_price:.2f} procent {adjustment_percent}%")
             
             if self.buy_filled:
                 print(f"[{self.symbol}] Ignore BUY order. It was previously filled at {self.filled_buy_price:f2}")
@@ -61,7 +61,7 @@ class TradingBot:
             if api.check_order_filled(order_id):
                 print(f"[{self.symbol}] BUY order filled at {self.filled_buy_price:.2f}")
                 print(f"[{self.symbol}] |BUY disperat tot....")
-                api.place_safe_order("BUY", self.symbol, api.get_current_price(self.symbol), 0.2)
+                api.place_smart_order("BUY", self.symbol, api.get_current_price(self.symbol), 0.2)
                 self.buy_filled = True
                 self.sell_filled = False
                 return self.filled_buy_price
@@ -94,7 +94,7 @@ class TradingBot:
 
         while True:
             target_sell_price = round(current_price * (1 + adjustment_percent), 4)
-            print(f"[{self.symbol}] Order SELL initiated at {target_sell_price:.2f}")
+            print(f"[{self.symbol}] Order SELL initiated at {target_sell_price:.2f} procent {adjustment_percent}%")
 
             if self.sell_filled:
                 print(f"[{self.symbol}] Ignore SELL order. It was previously filled at {self.filled_sell_price:.2f}")
@@ -118,7 +118,7 @@ class TradingBot:
             if api.check_order_filled(order_id):
                 print(f"[{self.symbol}] SELL order filled at {self.filled_sell_price:.2f}")
                 print(f"[{self.symbol}] SELL disperat tot....")
-                api.place_safe_order("SELL", self.symbol, api.get_current_price(self.symbol), 0.2)
+                api.place_smart_order("SELL", self.symbol, api.get_current_price(self.symbol), 0.2)
                 self.buy_filled = False
                 self.sell_filled = True
                 return self.filled_sell_price

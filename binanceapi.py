@@ -315,7 +315,7 @@ def get_open_orders(order_type, symbol):
         
 def place_BUY_order(symbol, price, qty):
     try:
-        price = round(min(price, get_current_price(symbol)), 0)
+        price = round(min(price, get_current_price(symbol)), 2)
         qty = round(qty, 4)    
         BUY_order = client.order_limit_buy(
             symbol=symbol,
@@ -335,7 +335,7 @@ def place_BUY_order(symbol, price, qty):
 
 def place_SELL_order(symbol, price, qty):
     try:
-        price = round(max(price, get_current_price(symbol)), 0)
+        price = round(max(price, get_current_price(symbol)), 2)
         qty = round(qty, 4)    
         SELL_order = client.order_limit_sell(
             symbol=symbol,
@@ -466,15 +466,15 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
                 qty = available_qty / (price * (1 + fee_percentage))
                 print(f"Adjusting {order_type.upper()} order quantity to {qty:.8f} based on available USDT.")
 
-        current_price = get_current_price(symbol)
-
         # Rotunjim cantitatea la 5 zecimale in jos
         #qty = math.floor(qty * 10**5) / 10**5  # Rotunjire in jos la 5 zecimale
         qty = round(qty, 4)
         qty = float(Decimal(qty).quantize(Decimal('0.0001'), rounding=ROUND_DOWN))  # Rotunjit la 5 zecimale
         if qty <= 0:
             print("Adjusted quantity is too small after rounding.")
-            return None          
+            return None   
+
+        current_price = get_current_price(symbol)
         if qty * current_price < 100:
             print(f"Value {qty * current_price} of {symbol} is too small to make sense to be traded :-) .by by!")
             return None
