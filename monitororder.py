@@ -74,7 +74,7 @@ def monitor_open_orders_by_type(symbol, order_type):
             quantity = order['quantity']
             
             # incearca sa plaseze un nou ordin
-            new_order = api.place_order(order_type, symbol, new_price, quantity)
+            new_order = api.place_safe_order(order_type, symbol, new_price, quantity)
             
             if new_order:
                 orders[new_order['orderId']] = {
@@ -97,7 +97,7 @@ def monitor_open_orders_by_type(symbol, order_type):
     for failed_order in failed_orders:
         print(f"Reincercare plasare ordin esuat: {failed_order}")
         time.sleep(MONITOR_BETWEEN_ORDERS_INTERVAL)
-        retry_order = api.place_order(
+        retry_order = api.place_safe_order(
             failed_order['order_type'],
             failed_order['symbol'],
             failed_order['price'],
