@@ -96,7 +96,7 @@ def sell_order_gradually(order, start_time, end_time):
             print(f"Anulat ordinul anterior cu ID: {order_id}")
 
         # Plasam ordinul de vanzare
-        new_order = api.place_order("sell", symbol, target_price, filled_quantity)
+        new_order = api.place_safe_order("sell", symbol, target_price, filled_quantity)
         if new_order:
             order_id = new_order['orderId']
             print(f"Plasat ordin de vanzare la pretul {target_price:.2f}. New Order ID: {order_id}")
@@ -177,7 +177,7 @@ def monitor_close_orders_by_age1(max_age_seconds):
             print(f"Pretul curent ({current_price}) este cu 4% mai mare decat pretul de cumparare ({filled_price}). Initiem vanzarea.cantitate{quantity}")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=api.place_order, args=("sell", symbol, current_price + 200, quantity))
+            thread = threading.Thread(target=api.place_safe_order, args=("sell", symbol, current_price + 200, quantity))
             #sell_order_gradually, args=(order, current_time, end_time))
             thread.start()
             #return
@@ -199,7 +199,7 @@ def monitor_close_orders_by_age1(max_age_seconds):
             print(f"Pretul curent ({current_price}) este cu 4% mai mic decat pretul de vanzare ({filled_price}). Initiem cumpararea.cantitate{quantity}.")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=api.place_order, args=("buy", symbol, current_price - 200, quantity))
+            thread = threading.Thread(target=api.place_safe_order, args=("buy", symbol, current_price - 200, quantity))
             #sell_order_gradually, args=(order, current_time, end_time))
             thread.start()
             #return
@@ -248,7 +248,7 @@ def monitor_close_orders_by_age2(max_age_seconds):
             print(f"Pretul curent ({current_price}) este cu {procent_scazut:.2f}% mai mare decat pretul de cumparare ({filled_price}). Initiem vanzarea. Cantitate: {quantity}")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=api.place_order, args=("sell", symbol, current_price + 200, quantity))
+            thread = threading.Thread(target=api.place_safe_order, args=("sell", symbol, current_price + 200, quantity))
             thread.start()
             
             # Resetam timpul global pentru a reporni procesul
@@ -272,7 +272,7 @@ def monitor_close_orders_by_age2(max_age_seconds):
             print(f"Pretul curent ({current_price}) este cu {procent_scazut:.2f}% mai mic decat pretul de vanzare ({filled_price}). Initiem cumpararea. Cantitate: {quantity}")
             
             # Pornim un fir nou pentru a cumpara BTC-ul
-            thread = threading.Thread(target=api.place_order, args=("buy", symbol, current_price - 200, quantity))
+            thread = threading.Thread(target=api.place_safe_order, args=("buy", symbol, current_price - 200, quantity))
             thread.start()
 
             # Resetam timpul global pentru a reporni procesul
@@ -447,7 +447,7 @@ def apply_sell_orders(trades, days, force_sell):
 
         # Verificam daca numarul de ordine a depasit 8
         if placed_order_count < 6:
-            new_sell_order_id = api.place_order("sell", symbol, sell_price, trade.qty)
+            new_sell_order_id = api.place_safe_order("sell", symbol, sell_price, trade.qty)
             trade.sell_order_id = new_sell_order_id
             placed_order_count += 1
         else:
@@ -464,7 +464,7 @@ def apply_sell_orders(trades, days, force_sell):
         average_sell_price = total_weighted_price / total_quantity
         print(f"Total: Cantitate {total_quantity}, Pret {average_sell_price}")
         #quantity = min(api.get_asset_info("sell", symbol), total_quantity)
-        new_sell_order_id = api.place_order("sell", symbol, average_sell_price, total_quantity)
+        new_sell_order_id = api.place_safe_order("sell", symbol, average_sell_price, total_quantity)
         #trade.sell_order_id = new_sell_order_id
         
 
@@ -669,7 +669,7 @@ def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_t
             if not is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease * 100}% by more than {percentage_lost_threshold * 100}% versus buy price and not trend up!")
                 api.place_order_smart("sell", symbol, current_price + 0.5, qty, cancelorders=True, hours=0.1, pair=False)
-                api.place_SELL_order(symbol, current_price, qty)
+                #api.place_SELL_order(symbol, current_price, qty)
             else:
                 print(f"No action taken, because trend is up!")
        
@@ -716,7 +716,7 @@ def main():
     symbol = "BTCUSDT"
     taosymbol = 'TAOUSDT'
     #taosymbol_target_price = api.get_current_price(taosymbol)
-    #api.place_order("buy", taosymbol, taosymbol_target_price - 10, 1)
+    #api.place_safe_order("buy", taosymbol, taosymbol_target_price - 10, 1)
 
     while True:
         state_tracker.display_states()
