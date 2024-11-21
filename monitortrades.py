@@ -632,7 +632,7 @@ def is_trend_up(symbol):
 
 
 #//todo: review 0.5
-def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_threshold=0.08, percentage_lost_threshold=0.013):
+def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_threshold=0.08, percentage_lost_threshold=0.023):
     #try:
     
     # 1. Obtine ordinele de cumparare si vanzare recente pentru simbol
@@ -721,7 +721,7 @@ def main():
     while True:
         state_tracker.display_states()
         print("-----TAO------")
-        monitor_price_and_trade(taosymbol, 1 , 3600 * 24 * 7, percentage_gain_threshold=0.099, percentage_lost_threshold=0.013)
+        monitor_price_and_trade(taosymbol, 1 , 3600 * 24 * 7, percentage_gain_threshold=0.099, percentage_lost_threshold=0.019)
         print("-----BTC------")
         monitor_price_and_trade(symbol, 1, 3600 * 24 * 7)
         data = sell_recommendation[symbol]
