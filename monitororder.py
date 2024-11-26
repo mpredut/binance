@@ -33,7 +33,7 @@ def monitor_open_orders_by_type(symbol, order_type):
         print("Eroare la obtinerea pretului...")
         return
     
-    print(f"Pretul curent BTC: {current_price:.2f}")
+    print(f"Pretul curent : {current_price:.2f}")
     
     initial_prices = initial_sell_prices if order_type == 'sell' else initial_buy_prices
     failed_orders = []  # Lista pentru a salva ordinele care dau eroare la plasare
