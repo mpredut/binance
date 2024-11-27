@@ -423,16 +423,15 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=360
             if order_type == "BUY":
                 last_sell_price = min(float(trade['price']) for trade in recent_opposite_trades)
                 diff_percent = u.value_diff_to_percent(last_sell_price, current_price)
+                print(f"[DEBUG] Last SELL Price: {last_sell_price}")
             else:  # pentru `sell`
                 last_buy_price = max(float(trade['price']) for trade in recent_opposite_trades)
-                diff_percent = u.value_diff_to_percent(current_price, last_buy_price)
+                diff_percent = u.value_diff_to_percent(current_price, last_buy_price)           
+                print(f"[DEBUG] Last Buy Price: {last_buy_price}")                
                 
-                # Debugging output for the 'sell' case
-                print(f"[DEBUG] Order Type: {order_type}")
-                print(f"[DEBUG] Last Buy Price: {last_buy_price}")
-                print(f"[DEBUG] Current Price: {current_price}")
-                print(f"[DEBUG] Difference Percent: {diff_percent:.2f}%")
-                print(f"[DEBUG] Required Percentage Diff: {profit_percentage}%")    
+            print(f"[DEBUG] Difference Percent: {diff_percent:.2f}%")
+            print(f"[DEBUG] Required Percentage Diff: {profit_percentage}%")   
+            
             if diff_percent < profit_percentage:
                     print(f"Diferenta procentuala ({diff_percent:.2f}%) este sub pragul necesar de {profit_percentage}%. Ordinul de {order_type} nu a fost plasat.")
                     return False
@@ -520,8 +519,7 @@ def place_safe_order(order_type, symbol, price, qty, cancelorders=False, hours=5
     if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600, max_daily_trades=30, profit_percentage = 0.4) :
         return None
       
-    return None
-    #return place_order(order_type, symbol, price, qty, cancelorders=cancelorders, hours=hours, fee_percentage=fee_percentage)    
+    return place_order(order_type, symbol, price, qty, cancelorders=cancelorders, hours=hours, fee_percentage=fee_percentage)    
     
 
 def place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5, pair=True):

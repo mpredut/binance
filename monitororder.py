@@ -22,7 +22,7 @@ import time
 TIME_SLEEP_ERROR = 10
 
 
-def monitor_open_orders_by_type(symbol, order_type):
+def monitor_open_orders_by_type(symbol, order_type, failed_orders):
     orders = api.get_open_orders(order_type, symbol)  # Obtine ordinele deschise de vanzare sau cumparare in functie de tip
     if not orders:
         print(f"Pentru {symbol} Nu exista ordine de {order_type} deschise initial.")
@@ -36,7 +36,6 @@ def monitor_open_orders_by_type(symbol, order_type):
     print(f"Pretul curent : {current_price:.2f}")
     
     initial_prices = initial_sell_prices if order_type == 'sell' else initial_buy_prices
-    failed_orders = []  # Lista pentru a salva ordinele care dau eroare la plasare
     
     for order_id in list(orders.keys()):
         order = orders[order_id]
@@ -94,8 +93,8 @@ def monitor_open_orders_by_type(symbol, order_type):
                 })
 
     # Retry ...
-    for failed_order in failed_orders:
-        print(f"Reincercare plasare ordin esuat: {failed_order}")
+    for failed_order in failed_orders[:]:  # Iteram pe o copie a listei 
+        print(f"retry order failed: {failed_order}")
         time.sleep(MONITOR_BETWEEN_ORDERS_INTERVAL)
         retry_order = api.place_safe_order(
             failed_order['order_type'],
@@ -104,10 +103,10 @@ def monitor_open_orders_by_type(symbol, order_type):
             failed_order['quantity']
         )
         if retry_order:
-            print(f"Ordin plasat cu succes la reincercare. ID nou: {retry_order['orderId']}")
+            print(f"Ordin plasat cu succes la retry. ID nou: {retry_order['orderId']}")
+            failed_orders.remove(failed_order)  # Eliminăm ordinul din lista inițială
         else:
-            print("Eroare la reincercarea plasarii ordinului.")
-
+            print("Error at resubmit order retry.")
     
 
 
@@ -123,13 +122,14 @@ def monitor_orders():
     monitor_open_orders_lasttime = time.time() - MONITOR_OPEN_ORDER_INTERVAL - TIME_SLEEP_ERROR
     monitor_close_orders_by_age_lasttime = time.time() - MONITOR_CLOSE_ORDER_INTERVAL - TIME_SLEEP_ERROR
 
+    failed_orders = []  # Lista pentru a salva ordinele care dau eroare la plasare
     while not api.stop:
         try:
             currenttime = time.time()
             if(currenttime - monitor_open_orders_lasttime > MONITOR_OPEN_ORDER_INTERVAL) :
                 for symbol in api.symbols:
-                    monitor_open_orders_by_type(symbol, 'sell')
-                    monitor_open_orders_by_type(symbol, 'buy')
+                    monitor_open_orders_by_type(symbol, 'sell', failed_orders)
+                    monitor_open_orders_by_type(symbol, 'buy', failed_orders)
                     monitor_open_orders_lasttime = currenttime
             if(currenttime - monitor_close_orders_by_age_lasttime > MONITOR_CLOSE_ORDER_INTERVAL) :
                 #monitor_close_orders_by_age(max_age_seconds)
