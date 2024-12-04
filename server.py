@@ -6,7 +6,6 @@ from pydantic import BaseModel
 
 from fastapi.middleware.cors import CORSMiddleware
 
-
 app = FastAPI()
 
 # Configurare CORS
@@ -17,6 +16,18 @@ app.add_middleware(
     allow_methods=["*"],  # Permite toate metodele (GET, POST etc.)
     allow_headers=["*"],  # Permite toate anteturile
 )
+
+
+from binance.client import Client
+from binance.exceptions import BinanceAPIException
+
+from apikeys import api_key, api_secret
+
+# my imports
+import binanceapi as api
+import log
+
+
 
 
 @app.get("/")
@@ -37,6 +48,9 @@ class AlertRequest(BaseModel):
 @app.post("/trade/sell")
 async def sell(request: TradeRequest):
     # Logica de vânzare prin Binance API
+    print(f"Vândut {request.amount} din {request.currency}")
+    api.place_order_smart("SELL", str(request.currency), api.get_current_price(str(request.currency)) * (1 + 0.01 + 500), request.amount)
+    # place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5, pair=True)
     return {"message": f"Vândut {request.amount} din {request.currency}"}
 
 @app.post("/trade/buy")

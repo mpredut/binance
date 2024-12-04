@@ -2,12 +2,13 @@ import os
 
 # Datele monedelor (poți înlocui cu datele generate dinamic)
 monede = [
-    {"nume": "BTC", "cantitate": 0.5},
+    {"nume": "BTCUSDT", "cantitate": 0.5},
     {"nume": "ETH", "cantitate": 2.0},
     {"nume": "ADA", "cantitate": 150.0},
     {"nume": "ADA", "cantitate": 222.0},
 ]
-
+monede_empty = [
+]
 def genereaza_html(monede, refresh_interval=10):
     # Stilizare CSS minimală
     stil_css = """
