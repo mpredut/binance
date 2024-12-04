@@ -75,7 +75,7 @@ def get_running_python_processes():
     try:
         output = subprocess.check_output(["ps", "-aux"], text=True)
         processes = [line.split(None, 10) for line in output.split("\n") if "python" in line and len(line.split(None, 10)) > 10]
-        print(processes)
+        #print(processes)
         return {
             remove_absolute_paths(proc[-1]): ensure_absolute_paths(proc[-1]) for proc in processes
         }
@@ -186,14 +186,18 @@ def monitor_processes():
                 processes_to_add.append((script_name, expected_command))
 
         # După ce am terminat de iterat prin procese, actualizăm referința
+        changed = False
         for script_name in processes_to_remove:
             if script_name in reference:
                 reference.pop(script_name)
+                changed = True
 
         for script_name, expected_command in processes_to_add:
             reference[script_name] = expected_command
-
-        save_reference_file(reference)
+            changed = True
+        
+        if changed:
+            save_reference_file(reference)
 
         time.sleep(10)
 
