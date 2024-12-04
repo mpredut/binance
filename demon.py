@@ -83,17 +83,33 @@ def get_running_python_processes():
         log_message(f"Eroare la executarea comenzii ps: {e}")
         return {}
 
-#Pornește un script Python
 def start_process(script_name, script_path):
     try:
         command_parts = script_path.split()
         subprocess.Popen(command_parts)
+        #command = f"xterm -hold -e {script_path}"  # Sau "gnome-terminal -- bash -c 'python3 {script_path}; exec bash'"
+        #subprocess.Popen(command, shell=True)
         log_message(f"Procesul {script_name} a fost pornit cu comanda: {script_path}")
         return script_path
     except Exception as e:
         log_message(f"Eroare la pornirea procesului {script_path}: {e}")
         return None
 
+def start_process_decuplat(script_name, script_path):
+    try:
+        command_parts = script_path.split()
+        subprocess.Popen(
+            command_parts,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True
+        )
+        log_message(f"Procesul {script_name} a fost pornit ca proces independent cu comanda: {script_path}")
+        return script_path
+    except Exception as e:
+        log_message(f"Eroare la pornirea procesului {script_path}: {e}")
+        return None
 
 def monitor_processes_v0():
     reference = load_reference_file()
@@ -177,7 +193,6 @@ def monitor_processes():
         for script_name, expected_command in processes_to_add:
             reference[script_name] = expected_command
 
-        log_message(f"Referința actualizată: {reference}")
         save_reference_file(reference)
 
         time.sleep(10)
