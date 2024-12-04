@@ -36,11 +36,11 @@ def read_root():
     
 # Modele de date
 class TradeRequest(BaseModel):
-    currency: str
+    symbol: str
     amount: float
 
 class AlertRequest(BaseModel):
-    currency: str
+    symbol: str
     threshold: float
     direction: str  # "up" sau "down"
 
@@ -48,25 +48,28 @@ class AlertRequest(BaseModel):
 @app.post("/trade/sell")
 async def sell(request: TradeRequest):
     # Logica de vânzare prin Binance API
-    print(f"Vândut {request.amount} din {request.currency}")
-    api.place_order_smart("SELL", str(request.currency), api.get_current_price(str(request.currency)) * (1 + 0.01 + 500), request.amount)
+    print(f"Vândut {request.amount} din {request.symbol}")
+    current_price = api.get_current_price(str(request.symbol))
+    sell_price = current_price * (1 + 0.01 ) + 500
+    print(f"Pret BTC {current_price} {sell_price}")
+    api.place_order_smart("SELL", str(request.symbol), sell_price, request.amount)
     # place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5, pair=True)
-    return {"message": f"Vândut {request.amount} din {request.currency}"}
+    return {"message": f"Vândut {request.amount} din {request.symbol}"}
 
 @app.post("/trade/buy")
 async def buy(request: TradeRequest):
     # Logica de cumpărare prin Binance API
-    return {"message": f"Cumpărat {request.amount} din {request.currency}"}
+    return {"message": f"Cumpărat {request.amount} din {request.symbol}"}
 
 @app.get("/status/get")
-async def get_status(currency: str):
+async def get_status(symbol: str):
     # Logica pentru a obține starea pieței
-    return {"currency": currency, "status": "Stable"}
+    return {"symbol": symbol, "status": "Stable"}
 
 @app.post("/alert/set")
 async def set_alert(request: AlertRequest):
     # Logica pentru a seta alerta
     return {
-        "message": f"Alertă setată pentru {request.currency}: {request.direction} la {request.threshold}"
+        "message": f"Alertă setată pentru {request.symbol}: {request.direction} la {request.threshold}"
     }
 

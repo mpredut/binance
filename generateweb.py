@@ -125,7 +125,7 @@ def genereaza_html(monede, refresh_interval=10):
                     headers: {{
                         'Content-Type': 'application/json'
                     }},
-                    body: JSON.stringify({{ currency: moneda, amount: parseFloat(cantitate) }})
+                    body: JSON.stringify({{ symbol: moneda, amount: parseFloat(cantitate) }})
                 }})
                 .then(response => response.json())
                 .then(data => alert(`Vândut cantitate moneda: data.message`))
@@ -139,7 +139,7 @@ def genereaza_html(monede, refresh_interval=10):
                     headers: {{
                         'Content-Type': 'application/json'
                     }},
-                    body: JSON.stringify({{ currency: moneda, amount: parseFloat(cantitate) }})
+                    body: JSON.stringify({{ symbol: moneda, amount: parseFloat(cantitate) }})
                 }})
                 .then(response => response.json())
                 .then(data => alert(`Cumparat cantitate moneda: data.message`))
