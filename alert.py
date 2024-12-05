@@ -11,7 +11,7 @@ import utils
 
 ####MYLIB
 from apikeys import PUSHBULLET_API_KEY, SMTP_USERNAME, SMTP_PASSWORD, TO_EMAIL
-pb = Pushbullet(PUSHBULLET_API_KEY)
+#pb = Pushbullet(PUSHBULLET_API_KEY)
 
 # Configurare SMTP
 SMTP_SERVER = "smtp.googl.com"  # Exemplu: smtp.gmail.com
