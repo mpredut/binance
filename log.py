@@ -43,7 +43,7 @@ def print(*args, **kwargs):
     if new_date != current_date:
         current_date = new_date
     
-    bot_folder = "bott"
+    bot_folder = "bot_logger"
     if not os.path.exists(bot_folder):
         os.makedirs(bot_folder)
     
