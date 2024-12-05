@@ -83,7 +83,7 @@ def get_running_python_processes():
         log_message(f"Eroare la executarea comenzii ps: {e}")
         return {}
 
-def start_process(script_name, script_path):
+def start_process_old(script_name, script_path):
     try:
         command_parts = script_path.split()
         subprocess.Popen(command_parts)
@@ -94,6 +94,22 @@ def start_process(script_name, script_path):
     except Exception as e:
         log_message(f"Eroare la pornirea procesului {script_path}: {e}")
         return None
+
+import subprocess
+import os
+
+def start_process(script_name, script_path):
+    try:
+        virtual_env_path = "myenv/bin/activate"
+        command = f"source {virtual_env_path} && python3 {script_path}"        
+        # Lansează comanda într-un subprocess
+        subprocess.Popen(command, shell=True, executable="/bin/bash")
+        log_message(f"Procesul {script_name} a fost pornit cu comanda: {command}")
+        return script_path
+    except Exception as e:
+        log_message(f"Eroare la pornirea procesului {script_path}: {e}")
+        return None
+
 
 def start_process_decuplat(script_name, script_path):
     try:
