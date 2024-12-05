@@ -516,7 +516,7 @@ def place_safe_order(order_type, symbol, price, qty, cancelorders=False, hours=5
     order_type = order_type.upper()
     validate_params(order_type, symbol, price, qty)  
     
-    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600, max_daily_trades=30, profit_percentage = 0.4) :
+    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=2*3600, max_daily_trades=30, profit_percentage = 0.4) :
         return None
       
     return place_order(order_type, symbol, price, qty, cancelorders=cancelorders, hours=hours, fee_percentage=fee_percentage)    
