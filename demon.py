@@ -102,7 +102,7 @@ def start_process(script_name, script_path):
     try:
         virtual_env_path = "myenv/bin/activate"
         command = f"source {virtual_env_path} && {script_path}"        
-        command = f"nohup bash -c 'source {virtual_env_path} && python3 {script_path}' &"
+        #command = f"nohup bash -c 'source {virtual_env_path} && python3 {script_path}' &"
         # Lansează comanda într-un subprocess
         subprocess.Popen(command, shell=True, executable="/bin/bash")
         log_message(f"Procesul {script_name} a fost pornit cu comanda: {command}")
