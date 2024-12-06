@@ -198,7 +198,7 @@ class TradingBot:
                 time.sleep(1)
 
 
-DEFAULT_ADJUSTMENT_PERCENT = round(u.calculate_difference_percent(60000, 60000 - 360) / 100, 4)
+DEFAULT_ADJUSTMENT_PERCENT = round(u.calculate_difference_percent(60000, 60000 - 380) / 100, 4)
 print(f"[INFO] DEFAULT_ADJUSTMENT_PERCENT = {DEFAULT_ADJUSTMENT_PERCENT}")
 
 symbol = api.symbol
