@@ -47,7 +47,7 @@ class TradingBot:
                 return self.filled_buy_price
             
             if adjustment_percent > 0:
-                buy_order = api.place_BUY_order(self.symbol, target_buy_price, self.qty)
+                buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty)
             else:
                 buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty)
 
@@ -70,7 +70,8 @@ class TradingBot:
             if api.check_order_filled(order_id):
                 print(f"[{self.symbol}] BUY order filled at {self.filled_buy_price:.2f}")
                 print(f"[{self.symbol}] SELL disperat tot....")
-                api.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + 0.01), 0.2)
+                api.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + 0.01), 0.2, 
+                    force=True, cancelorders=True, hours=1)
                 self.buy_filled = True
                 self.sell_filled = False
                 return self.filled_buy_price
@@ -85,8 +86,8 @@ class TradingBot:
                 
             current_price = api.get_current_price(self.symbol)
             if current_price > filled_sell_price:
-                print(f"[{self.symbol}] Bed day :-(. Trying BUY at current price {current_price:.2f}")
-                adjustment_percent = 0
+                print(f"[{self.symbol}] Bed day :-(. Trying BUY at current price - x2 {current_price:.2f}")
+                adjustment_percent = 2 * self.DEFAULT_ADJUSTMENT_PERCENT
             else:
                 adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
 
@@ -114,7 +115,7 @@ class TradingBot:
                 return self.filled_sell_price
 
             if adjustment_percent > 0:
-                sell_order = api.place_SELL_order(self.symbol, target_sell_price, self.qty)
+                sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty)
             else:
                 sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty)
 
@@ -137,7 +138,8 @@ class TradingBot:
             if api.check_order_filled(order_id):
                 print(f"[{self.symbol}] SELL order filled at {self.filled_sell_price:.2f}")
                 print(f"[{self.symbol}] BUY disperat tot....")
-                api.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - 0.01), 0.2)
+                api.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - 0.01), 0.2, 
+                    force=True, cancelorders=True, hours=1)
                 self.buy_filled = False
                 self.sell_filled = True
                 return self.filled_sell_price
@@ -152,8 +154,8 @@ class TradingBot:
 
             current_price = api.get_current_price(self.symbol)
             if current_price < filled_buy_price:
-                print(f"[{self.symbol}] Bed day :-(. Trying SELL at current price {current_price:.2f}")
-                adjustment_percent = 0
+                print(f"[{self.symbol}] Bed day :-(. Trying SELL at current price + x2 {current_price:.2f}")
+                adjustment_percent = 2 * self.DEFAULT_ADJUSTMENT_PERCENT
             else:
                 adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
 

@@ -385,7 +385,58 @@ def place_SELL_BUY_order(order_type, symbol, price, qty) :
         print(f"Eroare la plasarea ordinului de {order_type}, pret {price:.2f}")
     return order
 
+def place_BUY_order_at_market(symbol, qty):
+    try:
+        if not cfg.is_trade_enabled():
+            print(f"Trade este dezactivat!")
+            return None
+    
+        #if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600, max_daily_trades=30, profit_percentage = 0.4) :
+            #return None
+            
+        qty = round(qty, 4)  # Rotunjim cantitatea la 4 zecimale
+        BUY_order = client.order_market_buy(
+            symbol=symbol,
+            quantity=qty
+        )
         
+        if BUY_order:
+            print(f"BUY order executat cu succes: {BUY_order['orderId']}")
+        else:
+            print(f"Eroare la plasarea ordinului de BUY")
+        
+        return BUY_order
+    except BinanceAPIException as e:
+        print(f"Eroare la plasarea ordinului de cumpărare: {e}")
+        return None
+
+
+def place_SELL_order_at_market(symbol, qty):
+    try:
+        if not cfg.is_trade_enabled():
+            print(f"Trade este dezactivat!")
+            return None
+    
+        #if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600, max_daily_trades=30, profit_percentage = 0.4) :
+            #return None
+
+        qty = round(qty, 4)  # Rotunjim cantitatea la 4 zecimale
+        SELL_order = client.order_market_sell(
+            symbol=symbol,
+            quantity=qty
+        )
+        
+        if SELL_order:
+            print(f"SELL order executat cu succes: {SELL_order['orderId']}")
+        else:
+            print(f"Eroare la plasarea ordinului de SELL")
+        
+        return SELL_order
+    except BinanceAPIException as e:
+        print(f"Eroare la plasarea ordinului de vânzare: {e}")
+        return None
+
+
 
 def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600, max_daily_trades=20, profit_percentage = 0.4):
     import binanceapi_trades as apitrades
@@ -444,7 +495,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=360
 
 
 from decimal import Decimal, ROUND_DOWN
-def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee_percentage=0.001):
+def place_order(order_type, symbol, price, qty, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
     
     order_type = order_type.upper()
     validate_params(order_type, symbol, price, qty)  
@@ -492,11 +543,17 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
         if order_type.upper() == 'SELL':
             price = round(max(price, current_price), 0)
             print(f"Trying to place SELL order of {symbol} for quantity {qty:.8f} at price {price}")
-            order = place_SELL_order(symbol, price, qty);
+            if force:
+                 order = place_SELL_order_at_market(symbol, qty);
+            else:
+                order = place_SELL_order(symbol, price, qty);
         elif order_type.upper() == 'BUY':
             price = round(min(price, current_price), 0)
             print(f"Trying to place BUY order of {symbol} for quantity {qty:.8f} at price {price}")
-            order = place_BUY_order(symbol, price, qty);
+            if force:
+                 order = place_BUY_order_at_market(symbol, qty);
+            else:
+                order = place_BUY_order(symbol, price, qty);
         else:
             print(f"Invalid order type: {order_type}")
             return None
@@ -511,7 +568,7 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
         return None
 
 
-def place_safe_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee_percentage=0.001):
+def place_safe_order(order_type, symbol, price, qty, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
     
     order_type = order_type.upper()
     validate_params(order_type, symbol, price, qty)  
@@ -519,10 +576,10 @@ def place_safe_order(order_type, symbol, price, qty, cancelorders=False, hours=5
     if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600, max_daily_trades=30, profit_percentage = 0.4) :
         return None
       
-    return place_order(order_type, symbol, price, qty, cancelorders=cancelorders, hours=hours, fee_percentage=fee_percentage)    
+    return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders, hours=hours, fee_percentage=fee_percentage)    
     
 
-def place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5, pair=True):
+def place_order_smart(order_type, symbol, price, qty, force=False, cancelorders=True, hours=5, pair=True):
     
     order_type = order_type.upper()
     validate_params(order_type, symbol, price, qty) 
@@ -543,12 +600,12 @@ def place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5
             
             price = min(price, current_price)
             price = round(price * 0.999, 0)
-            order = place_safe_order("BUY", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
+            order = place_safe_order("BUY", symbol, price=price, qty=qty, force=force,cancelorders=cancelorders, hours=hours)
             # appy pair
             if order and pair :            
                 price = max(price * 1.11, current_price)
                 price = round(price * 1.001, 0)
-                place_safe_order("SELL", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
+                place_safe_order("SELL", symbol, price=price, qty=qty, force=force, cancelorders=cancelorders, hours=hours)
                 
         elif order_type.upper() == 'SELL':
             open_BUY_orders = get_open_orders("BUY", symbol)
@@ -561,12 +618,12 @@ def place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5
                    
             price = max(price, current_price)
             price = round(price * (1 + 0.001), 0)
-            order = place_safe_order("SELL", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
+            order = place_safe_order("SELL", symbol, price=price, qty=qty, force=force, cancelorders=cancelorders, hours=hours)
             # appy pair
             if order and pair :
                 price = min(price * (1 - 0.11), current_price)
                 price = round(price * 0.999, 0)
-                place_safe_order("BUY", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
+                place_safe_order("BUY", symbol, price=price, qty=qty, force=force, cancelorders=cancelorders, hours=hours)
         else:
             print("Tipul ordinului este invalid. Trebuie sa fie 'BUY' sau 'SELL'.")
             return None
