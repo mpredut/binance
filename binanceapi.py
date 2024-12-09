@@ -14,7 +14,6 @@ import json
 #from twisted.internet import reactor
 
 ####Binance
-from binance.client import Client
 from binance.exceptions import BinanceAPIException
 #from binance.streams import BinanceSocketManager
 #from binance.streams import BinanceSocketManager
@@ -23,13 +22,11 @@ from binance.exceptions import BinanceAPIException
 
 ####MYLIB
 import utils as u
-from apikeys import api_key, api_secret
+import symbols as sym
 import config as cfg
+from binanceclient import client
 
 stop = False
-symbol = 'BTCUSDT'
-taosymbol = 'TAOUSDT'
-symbols = [symbol, taosymbol]
 
 import binance
 print(binance.__version__)
@@ -38,38 +35,6 @@ currentprice = {}
 #currentprice['TAOUSDT'] = 0
 
 currenttime = time.time()
-client = Client(api_key, api_secret)
-
-
-def validate_params(order_type, symbol, price = 1, qty = 1):
-    if order_type not in ['BUY', 'SELL']:
-        raise ValueError(f"Invalid order_type '{order_type}'. It must be either 'BUY' or 'SELL'.")
-    
-    if not isinstance(price, (int, float)) or price <= 0:
-        raise ValueError(f"Invalid price '{price}'. Price must be a positive number.")
-    
-    if not isinstance(qty, (int, float)) or qty <= 0:
-        raise ValueError(f"Invalid quantity '{qty}'. Quantity must be a positive number.")
-    
-    if symbol.upper() not in symbols:
-        raise ValueError(f"Invalid symbol '{symbol}'. Symbol must be one of {valid_symbols}.")
-
-
-
-def get_binance_symbols(keysearch):
-    try:
-        exchange_info = client.get_exchange_info()
-        print(f"Number of symbols on Binance: {len(exchange_info['symbols'])}")
-
-        symbols = [s['symbol'] for s in exchange_info['symbols']]  # Extragem doar simbolul
-        if keysearch:
-            matching_symbols = [symbol for symbol in symbols if keysearch.upper() in symbol]
-            print(f"Symbols containing '{keysearch}': {matching_symbols}")
-        else:
-            print(f"All symbols: {symbols}")
-    
-    except Exception as e:
-        print(f"An error occurred: {e}")
 
 
 def listen_to_binance(symbol):
@@ -121,31 +86,7 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 
 
-  
-def get_quantity_precision(symbol):
-    try:
-        info = client.get_symbol_info(symbol)
-        for filter in info['filters']:
-            if filter['filterType'] == 'LOT_SIZE':
-                step_size = filter['stepSize']
-                precision = -int(round(-math.log10(float(step_size)), 0))
-                return precision
-    except BinanceAPIException as e:
-        print(f"Eroare la obtinerea preciziei cantitatii: {e}")
-    return 8  # Valoare implicita
 
-try:
-    # Cerere pentru a obtine informatii despre cont
-    account_info = client.get_account()
-    print("Cheile API sunt valide!")
-except Exception as e:
-    print(f"Eroare la verificarea cheilor API: {e}")
-    sys.exit()
-
-
-precision = get_quantity_precision(symbol)
-precision = 8
-print(f"Precision is {precision}")
 
 def normalize_quantity(symbol, quantity):
     min_qty, max_qty, step_size = get_symbol_limits(symbol)
@@ -254,7 +195,7 @@ def manage_quantity(order_type, symbol, required_qty, cancelorders=False, hours=
 def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5, price_difference_percentage=0.1):
 
     order_type = order_type.upper()
-    validate_params(order_type, symbol, 1, required_quantity)
+    sym.validate_params(order_type, symbol, 1, required_quantity)
     
     open_orders = get_open_orders(order_type, symbol)
     available_qty = 0  # Initial nu ai nicio cantitate disponibila
@@ -295,7 +236,7 @@ def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5,
 def get_open_orders(order_type, symbol):
 
     order_type = order_type.upper()
-    validate_params(order_type, symbol)
+    sym.validate_params(order_type, symbol)
         
     try:
         open_orders = client.get_open_orders(symbol=symbol)
@@ -436,7 +377,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=360
     import binanceapi_trades as apitrades
 
     order_type = order_type.upper()
-    validate_params(order_type, symbol, price, qty)    
+    sym.validate_params(order_type, symbol, price, qty)    
     try:
         
         current_price = get_current_price(symbol)
@@ -492,7 +433,7 @@ from decimal import Decimal, ROUND_DOWN
 def place_order(order_type, symbol, price, qty, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
     
     order_type = order_type.upper()
-    validate_params(order_type, symbol, price, qty)  
+    sym.validate_params(order_type, symbol, price, qty)  
         
     try:
         print(f"Order Request {order_type.upper()} {symbol} qty {qty}, Price {price}")
@@ -565,7 +506,7 @@ def place_order(order_type, symbol, price, qty, force=False, cancelorders=False,
 def place_safe_order(order_type, symbol, price, qty, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
     
     order_type = order_type.upper()
-    validate_params(order_type, symbol, price, qty)  
+    sym.validate_params(order_type, symbol, price, qty)  
     
     if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3*3600 + 60, max_daily_trades=30, profit_percentage = 0.4) :
         return None
@@ -576,7 +517,7 @@ def place_safe_order(order_type, symbol, price, qty, force=False, cancelorders=F
 def place_order_smart(order_type, symbol, price, qty, force=False, cancelorders=True, hours=5, pair=True):
     
     order_type = order_type.upper()
-    validate_params(order_type, symbol, price, qty) 
+    sym.validate_params(order_type, symbol, price, qty) 
     pair = False
     try:
         qty = round(qty, 5)
@@ -646,7 +587,7 @@ def cancel_order(symbol, order_id):
 def cancel_open_orders(order_type, symbol):
     
     order_type = order_type.upper()
-    validate_params(order_type, symbol) 
+    sym.validate_params(order_type, symbol) 
     
     try:
         open_orders = get_open_orders(order_type, symbol)
@@ -659,7 +600,7 @@ def cancel_open_orders(order_type, symbol):
 def cancel_expired_orders(order_type, symbol, expire_time):
     
     order_type = order_type.upper()
-    validate_params(order_type, symbol)
+    sym.validate_params(order_type, symbol)
     
     open_orders = get_open_orders(order_type, symbol)
 
@@ -689,7 +630,7 @@ import time
 def cancel_recent_orders(order_type, symbol, max_age_seconds):
 
     order_type = order_type.upper()
-    validate_params(order_type, symbol)
+    sym.validate_params(order_type, symbol)
     
     open_orders = get_open_orders(order_type, symbol)
     current_time = int(time.time())  # Current time in seconds
