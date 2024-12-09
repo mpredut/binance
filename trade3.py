@@ -1,31 +1,27 @@
+import os
 import time
 import datetime
 import math
-from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from collections import deque
 
-from apikeys import api_key, api_secret
-
-# my imports
-
-import binanceapi as api
-import binanceapi_trades as apitrades
-import binanceapi_allorders as apiorders
+#my imports
 import log
 import alert
 import utils as u
+import symbols as sym
+import binanceapi as api
+import binanceapi_trades as apitrades
+import binanceapi_allorders as apiorders
+
 #import priceprediction as pp
-
 import pandas as pd
-import os
-
-
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.stats import linregress
 from sklearn.preprocessing import PolynomialFeatures
 from sklearn.linear_model import LinearRegression
+
 
 class PriceTrendAnalyzer:
     def __init__(self, prices):
@@ -441,7 +437,7 @@ window_size = WINDOWS_SIZE_MIN / TIME_SLEEP_GET_PRICE
 window_size2 = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
-def track_and_place_order(action, count, proposed_price, current_price, quantity=0.017, order_ids=None):
+def track_and_place_order(action, symbol, count, proposed_price, current_price, quantity=0.017, order_ids=None):
     
     print(f"Iteration {count} generated price {proposed_price} versus {current_price}")
                     
@@ -454,11 +450,11 @@ def track_and_place_order(action, count, proposed_price, current_price, quantity
     # Cancel any existing orders
     if order_ids:
         for order_id in order_ids:
-            if not api.cancel_order(api.symbol, order_id):
+            if not api.cancel_order(symbol, order_id):
                 alert.check_alert(True, f"Order executed! be Happy :-){order_id:.2f}")
         order_ids.clear()
         
-    api.cancel_expired_orders(action, api.symbol, EXP_TIME_BUY_ORDER if action == 'BUY' else EXP_TIME_SELL_ORDER)
+    api.cancel_expired_orders(action, symbol, EXP_TIME_BUY_ORDER if action == 'BUY' else EXP_TIME_SELL_ORDER)
         
     num_orders, price_step = (1, 0.2) if action == "BUY" else (1, 0.08)
 
@@ -466,7 +462,7 @@ def track_and_place_order(action, count, proposed_price, current_price, quantity
     # Price is falling, place more, smaller orders # Reduce the spacing between orders as percents
    
     if action == 'BUY':
-        api.cancel_expired_orders(action, api.symbol, EXP_TIME_BUY_ORDER)
+        api.cancel_expired_orders(action, symbol, EXP_TIME_BUY_ORDER)
 
         buy_price = min(proposed_price, current_price * 0.999)
         print(f"BUY price: {buy_price:.2f} USDT")
@@ -478,13 +474,13 @@ def track_and_place_order(action, count, proposed_price, current_price, quantity
             adjusted_buy_price = buy_price * (1 - i * price_step / 100)
             order_quantity = quantity / num_orders  # Divide quantity among orders
             print(f"Placing buy order at price: {adjusted_buy_price:.2f} USDT for {order_quantity:.6f} BTC")
-            order = api.place_order_smart("buy", api.symbol, adjusted_buy_price, order_quantity, cancelorders=True, hours=0.3, pair=True)
+            order = api.place_order_smart("buy", symbol, adjusted_buy_price, order_quantity, cancelorders=True, hours=0.3, pair=True)
             if order:
                 #print(f"Buy order placed successfully with ID: {order['orderId']}")
                 order_ids.append(order['orderId']) 
 
     elif action == 'SELL':
-        api.cancel_expired_orders(action, api.symbol, EXP_TIME_SELL_ORDER)
+        api.cancel_expired_orders(action, symbol, EXP_TIME_SELL_ORDER)
 
         sell_price = max(proposed_price, current_price * 1.001)
         print(f"SELL price: {sell_price:.2f} USDT")
@@ -496,7 +492,7 @@ def track_and_place_order(action, count, proposed_price, current_price, quantity
             adjusted_sell_price = sell_price * (1 + i * price_step / 100)
             order_quantity = quantity / num_orders  # Divide quantity among orders
             print(f"Placing sell order at price: {adjusted_sell_price:.2f} USDT for {order_quantity:.6f} BTC")
-            order = api.place_order_smart("sell", api.symbol, adjusted_sell_price, order_quantity, cancelorders=True, hours=0.3, pair=True)
+            order = api.place_order_smart("sell", symbol, adjusted_sell_price, order_quantity, cancelorders=True, hours=0.3, pair=True)
             if order:
                 print(f"Sell order placed successfully with ID: {order['orderId']}")
                 order_ids.append(order['orderId']) 
@@ -683,7 +679,7 @@ PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 310)
 
 count = 0
 
-trades = apitrades.get_my_trades_24(api.symbol, 0, 1000)
+trades = apitrades.get_my_trades_24(order_type=None, symbol=sym.btcsymbol, days_ago=0, limit=1000)
 print (f" --------- {len(trades)}");
 print (f" {(trades)}");
 while True:
@@ -691,7 +687,7 @@ while True:
         time.sleep(TIME_SLEEP_GET_PRICE)
 
         current_time = time.time()
-        current_price = api.get_current_price(api.symbol)
+        current_price = api.get_current_price(sym.btcsymbol)
         if current_price is None:
             time.sleep(TIME_SLEEP_GET_PRICE)
             continue
@@ -755,11 +751,11 @@ while True:
                 diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
                 proposed_price = current_price - diff
                 if trend_state2.is_trend_fresh() : proposed_price = current_price
-                track_and_place_order('BUY', count, proposed_price, current_price, order_ids=order_ids)
+                track_and_place_order('BUY', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
             else:
                 expired_trend = trend_state2.start_trend('UP')  # Incepem un trend nou de crestere
                 proposed_price = current_price #- initial_difference
-                #track_and_place_order('BUY',1, proposed_price, current_price, order_ids=order_ids)          
+                #track_and_place_order('BUY', sym.btcsymbol, 1, proposed_price, current_price, order_ids=order_ids)          
         elif gradient < 0 and slope != 0 :
             # Confirmam un trend de scadere
             initial_difference = 7  * (pos + 0.5) /abs(slope)
@@ -769,14 +765,14 @@ while True:
                 diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
                 proposed_price = proposed_price + diff
                 if trend_state2.is_trend_fresh() : proposed_price = current_price
-                track_and_place_order('SELL', count, proposed_price, current_price, order_ids=order_ids)
+                track_and_place_order('SELL', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
             else:
                 expired_trend = trend_state2.start_trend('DOWN')  # Incepem un trend nou de scadere
                 proposed_price = current_price #+ initial_difference
-                #track_and_place_order('SELL',1, proposed_price, current_price, order_ids=order_ids)
+                #track_and_place_order('SELL', sym.btcsymbol, 1, proposed_price, current_price, order_ids=order_ids)
 
-        update_csv_file(filename, api.symbol, slope, count, 0, 0, pos, gradient)
-        update_csv_file(filename, 'TAOUSDT', slope, count, 0, 0, pos, gradient)
+        update_csv_file(filename, sym.btcsymbol, slope, count, 0, 0, pos, gradient)
+        update_csv_file(filename, sym.taosymbol, slope, count, 0, 0, pos, gradient)
             
         
 
