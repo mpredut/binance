@@ -390,9 +390,6 @@ def place_BUY_order_at_market(symbol, qty):
         if not cfg.is_trade_enabled():
             print(f"Trade este dezactivat!")
             return None
-    
-        #if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600, max_daily_trades=30, profit_percentage = 0.4) :
-            #return None
             
         qty = round(qty, 4)  # Rotunjim cantitatea la 4 zecimale
         BUY_order = client.order_market_buy(
@@ -407,7 +404,7 @@ def place_BUY_order_at_market(symbol, qty):
         
         return BUY_order
     except BinanceAPIException as e:
-        print(f"Eroare la plasarea ordinului de cumpărare: {e}")
+        print(f"Eroare la plasarea ordinului de market de cumparare: {e}")
         return None
 
 
@@ -416,9 +413,6 @@ def place_SELL_order_at_market(symbol, qty):
         if not cfg.is_trade_enabled():
             print(f"Trade este dezactivat!")
             return None
-    
-        #if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600, max_daily_trades=30, profit_percentage = 0.4) :
-            #return None
 
         qty = round(qty, 4)  # Rotunjim cantitatea la 4 zecimale
         SELL_order = client.order_market_sell(
@@ -433,7 +427,7 @@ def place_SELL_order_at_market(symbol, qty):
         
         return SELL_order
     except BinanceAPIException as e:
-        print(f"Eroare la plasarea ordinului de vânzare: {e}")
+        print(f"Eroare la plasarea ordinului de market de vanzare: {e}")
         return None
 
 
@@ -573,7 +567,7 @@ def place_safe_order(order_type, symbol, price, qty, force=False, cancelorders=F
     order_type = order_type.upper()
     validate_params(order_type, symbol, price, qty)  
     
-    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=2*3600, max_daily_trades=30, profit_percentage = 0.4) :
+    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3*3600 + 60, max_daily_trades=30, profit_percentage = 0.4) :
         return None
       
     return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders, hours=hours, fee_percentage=fee_percentage)    
