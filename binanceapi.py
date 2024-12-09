@@ -402,7 +402,8 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=360
         recent_opposite_trades = [trade for trade in previous_trades if trade['time'] >= time_limit]
         print("Tranzacții anterioare:")
         for trade in previous_trades:
-            print(f"  Tranzacție: {trade}, Comparare: {trade['time']} >= {time_limit}")
+            print(apitrades.format_trade(trade, time_limit))
+            #print(f"  Tranzacție: {trade}, Comparare: {trade['time']} >= {time_limit}")
         
         #max_SELL_price = max(float(trade['quoteQty']) / float(trade['qty']) for trade in recent_opposite_trades)
         if recent_opposite_trades:
@@ -653,7 +654,7 @@ def cancel_recent_orders(order_type, symbol, max_age_seconds):
     print(f"Cancelled {count} recent orders.")
 
 
-def check_order_filled(order_id):
+def check_order_filled(order_id, symbol):
     try:
         if not order_id:
             return False

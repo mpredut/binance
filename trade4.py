@@ -66,7 +66,7 @@ class TradingBot:
             order_id = buy_order['orderId']
             self.filled_buy_price = round(float(buy_order['price']), 4)
             
-            if api.check_order_filled(order_id):
+            if api.check_order_filled(order_id, self.symbol):
                 print(f"[{self.symbol}] BUY order filled at {self.filled_buy_price:.2f}")
                 print(f"[{self.symbol}] SELL disperat tot....")
                 api.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + 0.01), 0.2, 
@@ -91,7 +91,7 @@ class TradingBot:
                 adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
 
             if not api.cancel_order(self.symbol, order_id):
-                if api.check_order_filled(order_id):
+                if api.check_order_filled(order_id, self.symbol):
                     print(f"[{self.symbol}] Cancel BUY order failed. Maybe it was filled :-)? Moving to BUY ...")
                     self.buy_filled = True
                     self.sell_filled = False
@@ -134,7 +134,7 @@ class TradingBot:
             order_id = sell_order['orderId']
             self.filled_sell_price = round(float(sell_order['price']), 4)
 
-            if api.check_order_filled(order_id):
+            if api.check_order_filled(order_id, self.symbol):
                 print(f"[{self.symbol}] SELL order filled at {self.filled_sell_price:.2f}")
                 print(f"[{self.symbol}] BUY disperat tot....")
                 api.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - 0.01), 0.2, 
@@ -159,7 +159,7 @@ class TradingBot:
                 adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
 
             if not api.cancel_order(self.symbol, order_id):
-                if api.check_order_filled(order_id):
+                if api.check_order_filled(order_id, self.symbol):
                     print(f"[{self.symbol}] Cancel SELL order failed. Maybe it was filled :-)? Moving to SELL ...")
                     self.buy_filled = False
                     self.sell_filled = True                   

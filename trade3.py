@@ -474,7 +474,7 @@ def track_and_place_order(action, symbol, count, proposed_price, current_price, 
             adjusted_buy_price = buy_price * (1 - i * price_step / 100)
             order_quantity = quantity / num_orders  # Divide quantity among orders
             print(f"Placing buy order at price: {adjusted_buy_price:.2f} USDT for {order_quantity:.6f} BTC")
-            order = api.place_order_smart("buy", symbol, adjusted_buy_price, order_quantity, cancelorders=True, hours=0.3, pair=True)
+            order = api.place_order_smart("BUY", symbol, adjusted_buy_price, order_quantity, cancelorders=True, hours=0.3, pair=True)
             if order:
                 #print(f"Buy order placed successfully with ID: {order['orderId']}")
                 order_ids.append(order['orderId']) 
@@ -492,7 +492,7 @@ def track_and_place_order(action, symbol, count, proposed_price, current_price, 
             adjusted_sell_price = sell_price * (1 + i * price_step / 100)
             order_quantity = quantity / num_orders  # Divide quantity among orders
             print(f"Placing sell order at price: {adjusted_sell_price:.2f} USDT for {order_quantity:.6f} BTC")
-            order = api.place_order_smart("sell", symbol, adjusted_sell_price, order_quantity, cancelorders=True, hours=0.3, pair=True)
+            order = api.place_order_smart("SELL", symbol, adjusted_sell_price, order_quantity, cancelorders=True, hours=0.3, pair=True)
             if order:
                 print(f"Sell order placed successfully with ID: {order['orderId']}")
                 order_ids.append(order['orderId']) 

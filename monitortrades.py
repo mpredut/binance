@@ -13,6 +13,7 @@ from threading import Thread,Timer
 #from binance.exceptions import BinanceAPIException
 
 #my imports
+import symbols as sym
 import binanceapi as api
 import binanceapi_trades as apitrades
 import binanceapi_allorders as apiorders
@@ -50,6 +51,7 @@ def calculate_target_price(filled_price, current_price, procent_defined, time_fr
 procent_defined = 0.10  # Procentul initial (10%)
 def sell_order_gradually(order, start_time, end_time):
 
+    symbol = sym.btcsymbol
     filled_quantity = order['quantity']
     filled_price = order['price']
     close_order_id = order.get('orderId')
@@ -68,7 +70,7 @@ def sell_order_gradually(order, start_time, end_time):
          
         print(f"Monitor interval: {monitor_interval:.2f} seconds")
 
-        current_price = get_current_price(api.symbol)
+        current_price = get_current_price(symbol)
 
         if current_price is None:
             print("Eroare la obtinerea pretului. incerc din nou in cateva secunde.")
@@ -90,13 +92,13 @@ def sell_order_gradually(order, start_time, end_time):
 
         # Anulam ordinul anterior inainte de a plasa unul nou
         if order_id:
-            if api.check_order_filled(order_id) :
+            if api.check_order_filled(order_id, symbol) :
                 return; #order filled!
-            api.cancel_order(api.symbol, order_id)
+            api.cancel_order(symbol, order_id)
             print(f"Anulat ordinul anterior cu ID: {order_id}")
 
         # Plasam ordinul de vanzare
-        new_order = api.place_safe_order("sell", symbol, target_price, filled_quantity)
+        new_order = api.place_safe_order("SELL", symbol, target_price, filled_quantity)
         if new_order:
             order_id = new_order['orderId']
             print(f"Plasat ordin de vanzare la pretul {target_price:.2f}. New Order ID: {order_id}")
@@ -116,7 +118,7 @@ def monitor_filled_buy_orders_old():
         return
  
     max_age_seconds =  3 * 24 * 3600  # Timpul maxim in care ordinele executate sunt considerate recente (2 ore)
-    filled_buy_orders = apiorders.get_recent_filled_orders('buy', symbol, max_age_seconds)
+    filled_buy_orders = apiorders.get_recent_filled_orders("BUY", sym.btcsymbol, max_age_seconds)
 
     for order in filled_buy_orders:
         current_time = time.time()
@@ -130,10 +132,11 @@ def monitor_filled_buy_orders_old():
 
 
 def get_close_buy_orders_without_sell(api, max_age_seconds, profit_percentage):
-    close_buy_orders = apitrades.get_trade_orders('buy', symbol, max_age_seconds)
-    close_sell_orders = apitrades.get_trade_orders('sell', symbol, max_age_seconds)
+    symbol = sym.btcsymbol
+    close_buy_orders = apitrades.get_trade_orders("BUY", symbol, max_age_seconds)
+    close_sell_orders = apitrades.get_trade_orders("SELL", symbol, max_age_seconds)
     
-    # Lista de ordere 'buy' care nu au un 'sell' asociat cu profitul dorit
+    # Lista de ordere "BUY" care nu au un "SELL" asociat cu profitul dorit
     buy_orders_without_sell = []
 
     for buy_order in close_buy_orders:
@@ -141,13 +144,13 @@ def get_close_buy_orders_without_sell(api, max_age_seconds, profit_percentage):
         symbol = buy_order['symbol']
         buy_quantity = buy_order['quantity']  # Cantitatea cumparata
         
-        # Filtreaza orderele de tip 'sell' asociate cu acest 'buy' (acelasi simbol si cu pretul dorit)
+        # Filtreaza orderele de tip "SELL" asociate cu acest "BUY" (acelasi simbol si cu pretul dorit)
         related_sell_orders = [
             order for order in close_sell_orders 
             if order['symbol'] == symbol and order['filled_price'] >= filled_price * (1 + profit_percentage / 100)
         ]
         
-        # Calculeaza suma cantitatii vandute pentru orderele 'sell' gasite
+        # Calculeaza suma cantitatii vandute pentru orderele "SELL" gasite
         total_sell_quantity = sum(order['quantity'] for order in related_sell_orders)
         
         # Daca cantitatea totala vanduta este mai mica decat cantitatea cumparata
@@ -163,10 +166,11 @@ def monitor_close_orders_by_age1(max_age_seconds):
         print("Fire active detectate, iesim din functie pentru a nu porni fire noi.")
         return
  
-    close_buy_orders = apitrades.get_trade_orders('buy',  symbol, max_age_seconds)
+    symbol = sym.btcsymbol
+    close_buy_orders = apitrades.get_trade_orders("BUY",  symbol, max_age_seconds)
 
     print(f"BUY ORDERS, {len(close_buy_orders)}")
-    current_price = api.get_current_price(api.symbol)
+    current_price = api.get_current_price(symbol)
     for order in close_buy_orders:
         current_time = time.time()
         end_time = current_time + 2 * 3600  # Procesul dureaza doua ore
@@ -177,7 +181,7 @@ def monitor_close_orders_by_age1(max_age_seconds):
             print(f"Pretul curent ({current_price}) este cu 4% mai mare decat pretul de cumparare ({filled_price}). Initiem vanzarea.cantitate{quantity}")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=api.place_safe_order, args=("sell", symbol, current_price + 200, quantity))
+            thread = threading.Thread(target=api.place_safe_order, args=("SELL", symbol, current_price + 200, quantity))
             #sell_order_gradually, args=(order, current_time, end_time))
             thread.start()
             #return
@@ -185,7 +189,7 @@ def monitor_close_orders_by_age1(max_age_seconds):
             print(f"Pretul curent ({current_price}) nu a atins inca pragul de 4% fata de pretul de cumparare ({filled_price}).")
             #return
             
-    close_sell_orders = apitrades.get_trade_orders('sell',  symbol, max_age_seconds)
+    close_sell_orders = apitrades.get_trade_orders("SELL",  symbol, max_age_seconds)
     sorted_sell_orders = sorted(close_sell_orders, key=lambda x: x['price'])
     close_sell_orders = sorted_sell_orders
     print(f"SELL ORDERS, {len(close_sell_orders)}")
@@ -199,7 +203,7 @@ def monitor_close_orders_by_age1(max_age_seconds):
             print(f"Pretul curent ({current_price}) este cu 4% mai mic decat pretul de vanzare ({filled_price}). Initiem cumpararea.cantitate{quantity}.")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=api.place_safe_order, args=("buy", symbol, current_price - 200, quantity))
+            thread = threading.Thread(target=api.place_safe_order, args=("BUY", symbol, current_price - 200, quantity))
             #sell_order_gradually, args=(order, current_time, end_time))
             thread.start()
             #return
@@ -215,6 +219,7 @@ start_time_global = None
 def monitor_close_orders_by_age2(max_age_seconds):
     global start_time_global
     
+    symbol = sym.btcsymbol
     if threading.active_count() > 2:  # Daca sunt deja fire active (in afara de firul principal)
         print("Fire active detectate, iesim din functie pentru a nu porni fire noi.")
         return
@@ -234,10 +239,10 @@ def monitor_close_orders_by_age2(max_age_seconds):
     print(f"Procentul actual: {procent_scazut:.2f}%")
 
     # Obtinem comenzile de cumparare
-    close_buy_orders = apitrades.get_trade_orders('buy', symbol, max_age_seconds)
+    close_buy_orders = apitrades.get_trade_orders("BUY", symbol, max_age_seconds)
     print(f"BUY ORDERS, {len(close_buy_orders)}")
     
-    current_price = api.get_current_price(api.symbol)
+    current_price = api.get_current_price(symbol)
 
     for order in close_buy_orders:
         filled_price = order['price']
@@ -248,7 +253,7 @@ def monitor_close_orders_by_age2(max_age_seconds):
             print(f"Pretul curent ({current_price}) este cu {procent_scazut:.2f}% mai mare decat pretul de cumparare ({filled_price}). Initiem vanzarea. Cantitate: {quantity}")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=api.place_safe_order, args=("sell", symbol, current_price + 200, quantity))
+            thread = threading.Thread(target=api.place_safe_order, args=("SELL", symbol, current_price + 200, quantity))
             thread.start()
             
             # Resetam timpul global pentru a reporni procesul
@@ -258,7 +263,7 @@ def monitor_close_orders_by_age2(max_age_seconds):
             print(f"Pretul curent ({current_price}) nu a atins pragul de {procent_scazut:.2f}% fata de pretul de cumparare ({filled_price}).")
     
     # Obtinem comenzile de vanzare
-    close_sell_orders = apitrades.get_trade_orders('sell', symbol, max_age_seconds)
+    close_sell_orders = apitrades.get_trade_orders("SELL", symbol, max_age_seconds)
     sorted_sell_orders = sorted(close_sell_orders, key=lambda x: x['price'])
     close_sell_orders = sorted_sell_orders
     print(f"SELL ORDERS, {len(close_sell_orders)}")
@@ -272,7 +277,7 @@ def monitor_close_orders_by_age2(max_age_seconds):
             print(f"Pretul curent ({current_price}) este cu {procent_scazut:.2f}% mai mic decat pretul de vanzare ({filled_price}). Initiem cumpararea. Cantitate: {quantity}")
             
             # Pornim un fir nou pentru a cumpara BTC-ul
-            thread = threading.Thread(target=api.place_safe_order, args=("buy", symbol, current_price - 200, quantity))
+            thread = threading.Thread(target=api.place_safe_order, args=("BUY", symbol, current_price - 200, quantity))
             thread.start()
 
             # Resetam timpul global pentru a reporni procesul
@@ -394,7 +399,7 @@ class BuyTransaction:
 
 
 def update_trades(trades, symbol, max_age_seconds, procent_desired_profit, expired_duration, min_procent):
-    new_trades = apitrades.get_trade_orders('buy', symbol, max_age_seconds)
+    new_trades = apitrades.get_trade_orders("BUY", symbol, max_age_seconds)
     #TODO fiter trades care sunt prea recente sub 2 ore
     for trade in new_trades:
         if not any(t.trade_id == trade['id'] for t in trades):
@@ -414,7 +419,7 @@ def update_trades(trades, symbol, max_age_seconds, procent_desired_profit, expir
 
 
 def apply_sell_orders(trades, days, force_sell):
-    symbol = api.symbol
+    symbol = sym.btcsymbol
 
     placed_order_count = 0
     total_weighted_price = 0
@@ -429,7 +434,7 @@ def apply_sell_orders(trades, days, force_sell):
         
         print(f"\nTrade {count} ({trade.trade_id})") 
         count+=1
-        if trade.sell_order_id and api.check_order_filled(trade.sell_order_id['orderId']):
+        if trade.sell_order_id and api.check_order_filled(trade.sell_order_id['orderId'], symbol):
             print(f"check_order_filled {trade.sell_order_id}")
             trade.sell_order_id = 0  # Marcam ca executat
         if trade.sell_order_id == 0:
@@ -442,12 +447,12 @@ def apply_sell_orders(trades, days, force_sell):
 
         if trade.sell_order_id:
             #print(f"cancel {trade.sell_order_id}")
-            api.cancel_order(api.symbol, trade.sell_order_id['orderId'])
+            api.cancel_order(symbol, trade.sell_order_id['orderId'])
             trade.sell_order_id = None
 
         # Verificam daca numarul de ordine a depasit 8
         if placed_order_count < 6:
-            new_sell_order_id = api.place_safe_order("sell", symbol, sell_price, trade.qty)
+            new_sell_order_id = api.place_safe_order("SELL", symbol, sell_price, trade.qty)
             trade.sell_order_id = new_sell_order_id
             placed_order_count += 1
         else:
@@ -463,8 +468,8 @@ def apply_sell_orders(trades, days, force_sell):
     if total_quantity > 0:
         average_sell_price = total_weighted_price / total_quantity
         print(f"Total: Cantitate {total_quantity}, Pret {average_sell_price}")
-        #quantity = min(api.get_asset_info("sell", symbol), total_quantity)
-        new_sell_order_id = api.place_safe_order("sell", symbol, average_sell_price, total_quantity)
+        #quantity = min(api.get_asset_info("SELL", symbol), total_quantity)
+        new_sell_order_id = api.place_safe_order("SELL", symbol, average_sell_price, total_quantity)
         #trade.sell_order_id = new_sell_order_id
         
 
@@ -636,8 +641,8 @@ def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_t
     #try:
     
     # 1. Obtine ordinele de cumparare si vanzare recente pentru simbol
-    trade_orders_buy = apitrades.get_trade_orders("buy", symbol, max_age_seconds)
-    trade_orders_sell = apitrades.get_trade_orders("sell", symbol, max_age_seconds)
+    trade_orders_buy = apitrades.get_trade_orders("BUY", symbol, max_age_seconds)
+    trade_orders_sell = apitrades.get_trade_orders("SELL", symbol, max_age_seconds)
     
     if not (trade_orders_buy or trade_orders_sell):
         print(f"No trade orders found for {symbol} in the last {max_age_seconds} seconds.")
@@ -661,14 +666,14 @@ def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_t
         if price_increase > percentage_gain_threshold or u.are_close(price_increase, percentage_gain_threshold, target_tolerance_percent=1.0):
             if not is_trend_up(symbol):
                 print(f"Price increased with {price_increase * 100}% by more than {percentage_gain_threshold * 100}% versus buy price and not trend up!")
-                api.place_order_smart("sell", symbol, current_price + 0.5, qty, cancelorders=True, hours=5, pair=False)
+                api.place_order_smart("SELL", symbol, current_price + 0.5, qty, cancelorders=True, hours=5, pair=False)
                 api.place_SELL_order(symbol, current_price, qty)
             else :
                 print(f"No action taken, because trend is up!")
         elif price_decrease > percentage_lost_threshold or u.are_close(price_decrease, percentage_lost_threshold, target_tolerance_percent=1.0):
             if not is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease * 100}% by more than {percentage_lost_threshold * 100}% versus buy price and not trend up!")
-                api.place_order_smart("sell", symbol, current_price + 0.5, qty, cancelorders=True, hours=0.1, pair=False)
+                api.place_order_smart("SELL", symbol, current_price + 0.5, qty, cancelorders=True, hours=0.1, pair=False)
                 #api.place_SELL_order(symbol, current_price, qty)
             else:
                 print(f"No action taken, because trend is up!")
@@ -685,8 +690,8 @@ def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_t
         if price_decrease_versus_sell > percentage_gain_threshold or u.are_close(price_decrease_versus_sell, percentage_gain_threshold, target_tolerance_percent=1.0):
             if is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease_versus_sell * 100}% by more than {percentage_gain_threshold * 100}% versus sell price: Placing buy order")
-                #api.cancel_orders_old_or_outlier("buy", "BTCUSDT", qty, hours=0.5, price_difference_percentage=0.1)
-                api.place_order_smart("buy", symbol, current_price + 0.5, qty, cancelorders=True, hours=5, pair=False)
+                #api.cancel_orders_old_or_outlier("BUY", "BTCUSDT", qty, hours=0.5, price_difference_percentage=0.1)
+                api.place_order_smart("BUY", symbol, current_price + 0.5, qty, cancelorders=True, hours=5, pair=False)
             else :
                 print(f"No action taken, because trend is down!")
 
@@ -716,7 +721,7 @@ def main():
     symbol = "BTCUSDT"
     taosymbol = 'TAOUSDT'
     #taosymbol_target_price = api.get_current_price(taosymbol)
-    #api.place_safe_order("buy", taosymbol, taosymbol_target_price - 10, 1)
+    #api.place_safe_order("BUY", taosymbol, taosymbol_target_price - 10, 1)
 
     while True:
         state_tracker.display_states()
@@ -732,10 +737,10 @@ def main():
         force_sell = data['force_sell']
         days_after_use_current_price = data['days_after_use_current_price']
         
-        close_buy_orders = apitrades.get_trade_orders('buy', symbol, max_age_seconds)
-        print(f"get_trade_orders:           Found {len(close_buy_orders)} close 'buy' orders in the last {u.secondsToDays(max_age_seconds)} days.")
-        close_sell_orders = apitrades.get_trade_orders('sell', symbol, max_age_seconds)
-        print(f"get_trade_orders:           Found {len(close_sell_orders)} close 'sell' orders in the last {u.secondsToDays(max_age_seconds)} days.")
+        close_buy_orders = apitrades.get_trade_orders("BUY", symbol, max_age_seconds)
+        print(f"get_trade_orders:           Found {len(close_buy_orders)} close "BUY" orders in the last {u.secondsToDays(max_age_seconds)} days.")
+        close_sell_orders = apitrades.get_trade_orders("SELL", symbol, max_age_seconds)
+        print(f"get_trade_orders:           Found {len(close_sell_orders)} close "SELL" orders in the last {u.secondsToDays(max_age_seconds)} days.")
         orders = apitrades.get_trade_orders(None, symbol, max_age_seconds)
         print(f"get_trade_orders:           Total found {len(orders)} orders in the last {u.secondsToDays(max_age_seconds)} day.")
         time.sleep(2)       

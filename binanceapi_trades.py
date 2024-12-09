@@ -467,3 +467,10 @@ def get_trade_orders_24(order_type, symbol, days_back):
     # filtered_trades.sort(key=lambda x: x['time'])
     
     return filtered_trades
+
+
+def format_trade(trade, time_limit):
+    trade_time = u.timestampToTime(trade['time'])
+    is_within_limit = trade['time'] >= time_limit
+    buy_or_sell = "BUY" if trade['isBuyer'] else "SELL"
+    return f"Time: {trade_time}, OrderID: {trade['orderId']}, {buy_or_sell}, Price: {trade['price']}, Selected: {is_within_limit}"
