@@ -738,9 +738,9 @@ def main():
         days_after_use_current_price = data['days_after_use_current_price']
         
         close_buy_orders = apitrades.get_trade_orders("BUY", symbol, max_age_seconds)
-        print(f"get_trade_orders:           Found {len(close_buy_orders)} close "BUY" orders in the last {u.secondsToDays(max_age_seconds)} days.")
+        print(f"get_trade_orders:           Found {len(close_buy_orders)} close 'BUY' orders in the last {u.secondsToDays(max_age_seconds)} days.")
         close_sell_orders = apitrades.get_trade_orders("SELL", symbol, max_age_seconds)
-        print(f"get_trade_orders:           Found {len(close_sell_orders)} close "SELL" orders in the last {u.secondsToDays(max_age_seconds)} days.")
+        print(f"get_trade_orders:           Found {len(close_sell_orders)} close 'SELL' orders in the last {u.secondsToDays(max_age_seconds)} days.")
         orders = apitrades.get_trade_orders(None, symbol, max_age_seconds)
         print(f"get_trade_orders:           Total found {len(orders)} orders in the last {u.secondsToDays(max_age_seconds)} day.")
         time.sleep(2)       

@@ -192,8 +192,8 @@ class TradingBot:
                 print(f"[{self.symbol}] Unexpected error: {e}")
                 if self.buy_filled == self.sell_filled:
                     self.buy_filled = not self.sell_filled
-                api.cancel_recent_orders("SELL", symbol, WAIT_FOR_ORDER)
-                api.cancel_recent_orders("BUY", symbol, WAIT_FOR_ORDER)
+                api.cancel_recent_orders("SELL", self.symbol, WAIT_FOR_ORDER)
+                api.cancel_recent_orders("BUY", self.symbol, WAIT_FOR_ORDER)
                 time.sleep(1)
 
 
