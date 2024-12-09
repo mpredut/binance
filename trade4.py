@@ -1,22 +1,21 @@
-
+import os
 import time
 import datetime
 import math
-from binance.client import Client
-from binance.exceptions import BinanceAPIException
 from collections import deque
 
-from apikeys import api_key, api_secret
+####Binance
+#from binance.exceptions import BinanceAPIException
 
 # my imports
-
-import binanceapi as api
 import log
 import alert
 import utils as u
+import symbols as sym
+import binanceapi as api
+
 #import priceprediction as pp
 
-import os
 
 # Intervalul de timp între încercările de anulare și recreere a ordinului (în secunde)
 WAIT_FOR_ORDER = 22
@@ -201,8 +200,7 @@ class TradingBot:
 DEFAULT_ADJUSTMENT_PERCENT = round(u.calculate_difference_percent(60000, 60000 - 380) / 100, 4)
 print(f"[INFO] DEFAULT_ADJUSTMENT_PERCENT = {DEFAULT_ADJUSTMENT_PERCENT}")
 
-symbol = api.symbol
-bot = TradingBot(symbol, 0.017, DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
+bot = TradingBot(sym.btcsymbol, 0.017, DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
 bot.run()
 
     
