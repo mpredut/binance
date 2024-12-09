@@ -81,7 +81,7 @@ if __name__ == "__main__":
     print("Monitorizarea logurilor a început.")
     try:
         while True:
-            monitor_and_cleanup(folder_to_monitor, max_file_age_days=10, max_file_size_mb=1024/600, min_free_space_mb=1024 * 60 )
+            monitor_and_cleanup(folder_to_monitor, max_file_age_days=60, max_file_size_mb=1024/10, min_free_space_mb=1024 * 2) #2 GB
             #time.sleep(24 * 60 * 60) # seconds
             time.sleep(100)
     except KeyboardInterrupt:
