@@ -400,10 +400,9 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=360
         
         # Filtram tranzactiile opuse care au avut loc in intervalul specificat
         recent_opposite_trades = [trade for trade in previous_trades if trade['time'] >= time_limit]
-        print("Tranzacții anterioare:")
-        for trade in previous_trades:
-            print(apitrades.format_trade(trade, time_limit))
-            #print(f"  Tranzacție: {trade}, Comparare: {trade['time']} >= {time_limit}")
+        #print("Tranzacții anterioare:")
+        #for trade in previous_trades:
+            #print(apitrades.format_trade(trade, time_limit))
         
         #max_SELL_price = max(float(trade['quoteQty']) / float(trade['qty']) for trade in recent_opposite_trades)
         if recent_opposite_trades:
@@ -509,7 +508,7 @@ def place_safe_order(order_type, symbol, price, qty, force=False, cancelorders=F
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)  
     
-    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3*3600 + 60, max_daily_trades=30, profit_percentage = 0.4) :
+    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3*3600 + 60, max_daily_trades=30, profit_percentage = 0.25) :
         return None
       
     return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders, hours=hours, fee_percentage=fee_percentage)    
@@ -665,24 +664,26 @@ def check_order_filled(order_id, symbol):
         return False
 
 
+
 def check_order_filled_by_time(order_type, symbol, time_back_in_seconds, pret_min=None, pret_max=None):
     import binanceapi_trades as apitrades
-    
-    previous_trades = apitrades.get_my_trades(order_type, symbol, backdays=0, limit=1000)  # Curent date
+
+    previous_trades = apitrades.get_my_trades(order_type, symbol, backdays=0, limit=1000)
     time_limit = int(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
 
+                
     # Filtram tranzactiile in functie de timp si optional in functie de pret total
     tranzactii_recente = [
         trade for trade in previous_trades
         if trade['time'] >= time_limit and
-           (pret_min is None or trade['price'] * trade['qty'] >= pret_min) and
-           (pret_max is None or trade['price'] * trade['qty'] <= pret_max)
+           (pret_min is None or float(trade['price']) * float(trade['qty']) >= pret_min) and
+           (pret_max is None or float(trade['price']) * float(trade['qty']) <= pret_max)
     ]
 
     if tranzactii_recente:
         # Gasim cea mai recenta tranzactie (dupa timp)
         tranzactia_recenta = max(tranzactii_recente, key=lambda trade: trade['time'])
-        return tranzactia_recenta['price']
+        return float(tranzactia_recenta['price'])
 
-    return None  # Daca nu exista tranzactii recente, returnam None
-
+    print(f"[DEBUG] Nicio tranzactie recenta pentru simbolul {symbol}.")
+    return None
