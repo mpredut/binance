@@ -474,3 +474,11 @@ def format_trade(trade, time_limit):
     is_within_limit = trade['time'] >= time_limit
     buy_or_sell = "BUY" if trade['isBuyer'] else "SELL"
     return f"Time: {trade_time}, OrderID: {trade['orderId']}, {buy_or_sell}, Price: {trade['price']}, Selected: {is_within_limit}"
+    
+
+def validate_keys_in_trades(trades):
+    required_keys = ['time', 'price', 'qty', 'orderId']
+    for idx, trade in enumerate(trades):
+        for key in required_keys:
+            if key not in trade:
+                raise ValueError(f"Tranzacția {idx} este invalidă. Lipsește cheia '{key}'. Date: {trade}")

@@ -215,13 +215,13 @@ def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5,
             if order_info['timestamp'] <= cutoff_time:
                 cancel = True
             else:
-                price_diff_percentage = abs(order_info['price'] - current_price) / current_price * 100
+                price_diff_percentage = abs(float(order_info['price']) - current_price) / current_price * 100
                 if price_diff_percentage >= price_difference_percentage * 100:  # Convertim 0.1 in 10%
                     cancel = True
 
             if cancel:
                 cancel_order(symbol, order_id)
-                available_qty += order_info['quantity']
+                available_qty += float(order_info['quantity'])
                 print(f"New available quantity: {available_qty:.8f}")
 
             if available_qty >= required_quantity:
