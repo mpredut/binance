@@ -339,9 +339,9 @@ def place_BUY_order_at_market(symbol, qty):
         )
         
         if BUY_order:
-            print(f"BUY order executat cu succes: {BUY_order['orderId']}")
+            print(f"BUY order de market executat cu succes: {BUY_order['orderId']}")
         else:
-            print(f"Eroare la plasarea ordinului de BUY")
+            print(f"Eroare la plasarea ordinului de BUY de market")
         
         return BUY_order
     except BinanceAPIException as e:
@@ -362,9 +362,9 @@ def place_SELL_order_at_market(symbol, qty):
         )
         
         if SELL_order:
-            print(f"SELL order executat cu succes: {SELL_order['orderId']}")
+            print(f"SELL order de market executat cu succes: {SELL_order['orderId']}")
         else:
-            print(f"Eroare la plasarea ordinului de SELL")
+            print(f"Eroare la plasarea ordinului de SELL de market")
         
         return SELL_order
     except BinanceAPIException as e:
