@@ -7,8 +7,10 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
 #my imports
-import binanceapi as api
 import utils as u
+import symbols as sym
+import binanceapi as api
+
 # 
 MAX_PROC = 0.77
 monitor_interval = 3.7
@@ -127,7 +129,7 @@ def monitor_orders():
         try:
             currenttime = time.time()
             if(currenttime - monitor_open_orders_lasttime > MONITOR_OPEN_ORDER_INTERVAL) :
-                for symbol in api.symbols:
+                for symbol in sym.symbols:
                     monitor_open_orders_by_type(symbol, "SELL", failed_orders)
                     monitor_open_orders_by_type(symbol, "BUY", failed_orders)
                     monitor_open_orders_lasttime = currenttime
