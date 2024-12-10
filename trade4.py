@@ -59,7 +59,7 @@ class TradingBot:
                     print(f"[{self.symbol}] Order BUY failed {failure_count} times. Exiting.")
                     self.buy_filled = True
                     self.sell_filled = False
-                    return round(api.get_current_price(symbol) * (1 - 0.01), 4)
+                    return round(api.get_current_price(self.symbol) * (1 - 0.01), 4)
                 continue
 
             time.sleep(WAIT_FOR_ORDER)
@@ -127,7 +127,7 @@ class TradingBot:
                     print(f"[{self.symbol}] Order SELL failed {failure_count} times. Exiting.")
                     self.buy_filled = False
                     self.sell_filled = True
-                    return round(api.get_current_price(symbol) * (1 + 0.1), 4)
+                    return round(api.get_current_price(self.symbol) * (1 + 0.1), 4)
                 continue
 
             time.sleep(WAIT_FOR_ORDER)
