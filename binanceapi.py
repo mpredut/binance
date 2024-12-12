@@ -436,13 +436,13 @@ def place_order(order_type, symbol, price, qty, force=False, cancelorders=False,
     sym.validate_params(order_type, symbol, price, qty)  
         
     try:
-        print(f"Order Request {order_type.upper()} {symbol} qty {qty}, Price {price}")
+        print(f"Order Request {order_type} {symbol} qty {qty}, Price {price}")
         available_qty = manage_quantity(order_type, symbol, qty, cancelorders=cancelorders, hours=hours)
         
-        if order_type.upper() == 'SELL':
+        if order_type == 'SELL':
             # Verifica daca ai destula criptomoneda pentru a vinde
             if available_qty <= 0:
-                print(f"No sufficient quantity available to place the {order_type.upper()} order.")
+                print(f"No sufficient quantity available to place the {order_type} order.")
                 return None
             
             print(f"available_qty {available_qty:.8f} versus requested {qty:.8f}")
@@ -450,10 +450,10 @@ def place_order(order_type, symbol, price, qty, force=False, cancelorders=False,
             adjusted_qty = qty * (1 + fee_percentage)
 
             if available_qty < adjusted_qty:
-                print(f"Adjusting {order_type.upper()} order quantity from {qty:.8f} to {available_qty / (1 + fee_percentage):.8f} to cover fees")
+                print(f"Adjusting {order_type} order quantity from {qty:.8f} to {available_qty / (1 + fee_percentage):.8f} to cover fees")
                 qty = available_qty / (1 + fee_percentage)
 
-        elif order_type.upper() == 'BUY':
+        elif order_type == 'BUY':
             # in cazul unei comenzi de BUY, trebuie sa calculezi cantitatea necesara de USDT pentru achizitionare
             total_usdt_needed = qty * price * (1 + fee_percentage)
 
@@ -461,7 +461,7 @@ def place_order(order_type, symbol, price, qty, force=False, cancelorders=False,
                 print(f"Not enough USDT available. You need {total_usdt_needed:.8f} USDT, but you only have {available_qty:.8f} USDT.")
                 # Ajusteaza cantitatea pe care o poti cumpara cu USDT disponibili
                 qty = available_qty / (price * (1 + fee_percentage))
-                print(f"Adjusting {order_type.upper()} order quantity to {qty:.8f} based on available USDT.")
+                print(f"Adjusting {order_type} order quantity to {qty:.8f} based on available USDT.")
 
         # Rotunjim cantitatea la 5 zecimale in jos
         #qty = math.floor(qty * 10**5) / 10**5  # Rotunjire in jos la 5 zecimale
@@ -475,16 +475,17 @@ def place_order(order_type, symbol, price, qty, force=False, cancelorders=False,
         if qty * current_price < 100:
             print(f"Value {qty * current_price} of {symbol} is too small to make sense to be traded :-) .by by!")
             return None
-        if order_type.upper() == 'SELL':
+        
+        print(f"Trying to place {order_type} order of {symbol} for quantity {qty:.8f} at {'market price' if force else f'price {price}'}")
+
+        if order_type == 'SELL':
             price = round(max(price, current_price), 0)
-            print(f"Trying to place SELL order of {symbol} for quantity {qty:.8f} at price {price}")
             if force:
                  order = place_SELL_order_at_market(symbol, qty);
             else:
                 order = place_SELL_order(symbol, price, qty);
-        elif order_type.upper() == 'BUY':
+        elif order_type == 'BUY':
             price = round(min(price, current_price), 0)
-            print(f"Trying to place BUY order of {symbol} for quantity {qty:.8f} at price {price}")
             if force:
                  order = place_BUY_order_at_market(symbol, qty);
             else:
@@ -508,7 +509,7 @@ def place_safe_order(order_type, symbol, price, qty, force=False, cancelorders=F
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)  
     
-    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3*3600 + 60, max_daily_trades=30, profit_percentage = 0.25) :
+    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=5*3600 + 60, max_daily_trades=30, profit_percentage = 0.25) :
         return None
       
     return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders, hours=hours, fee_percentage=fee_percentage)    
