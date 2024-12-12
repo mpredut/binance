@@ -702,6 +702,8 @@ def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_t
         
 def main():
 
+    #api.place_SELL_order_at_market("BTCUSDT", 0.017)
+    #return
     filename = "trades_BTCUSDT.json"    
     max_age_seconds =  3 * 24 * 3600  # Timpul maxim in care ordinele executate/filled sunt considerate recente (3 zile)
     interval = 60 * 4 #4 minute
