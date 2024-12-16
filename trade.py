@@ -10,9 +10,7 @@ from binance.exceptions import BinanceAPIException
 #my imports
 import binanceapi as api
 import utils as u
-from binanceapi import client, symbol, precision, get_quantity_precision, get_current_price, check_order_filled,  place_order
-from utils import beep, get_interval_time, are_difference_equal_with_aprox_proc, are_close, budget, order_cost_btc, price_change_threshold, max_threshold
-
+import symbols as sym
 import log
 
 def calculate_commissions(amount, price):
@@ -94,8 +92,8 @@ def ready_to_buy(old_state, new_state, threshold, max_treshold, time_limit_secon
     
 
 
-beep(1)
-last_state = State("none", get_current_price(symbol), timestamp=datetime.now())
+u.beep(1)
+last_state = State("none", api.get_current_price(sym.btcsymbol), timestamp=datetime.now())
 #last_state.price = 55635
 if last_state.price:
    print(f"Pretul curent al BTC: {last_state.price}")
@@ -156,15 +154,24 @@ print(f" BTC {btc}")
 print(f" USDT {usdt}")
 
 
+
+# Bugetul initial
+budget = 1000  # USDT
+order_cost_btc = 0.00004405  # BTC
+max_threshold = 1.5 #% procent * 100
+price_change_threshold = 0.07  # Pragul de schimbare a pretului, 0.7%
+interval_time = 2 * 3600 # 2 h * 3600 seconds.
+#interval_time = 97 * 79
+
 while True:
     try:
-        current_state = State("none", get_current_price(symbol), timestamp=datetime.now())
+        current_state = State("none", api.get_current_price(symbol), timestamp=datetime.now())
         if current_state.price is None:
             print("Eroare la obtinerea pretului. Încerc din nou în cateva secunde.")
             time.sleep(1)
             continue
         check_orders("BTCUSDT")
-        interval_time = get_interval_time()
+        interval_time = u.get_interval_time()
         changed_proc = ready_to_buy(last_state, current_state, price_change_threshold, max_threshold, timedelta(seconds = interval_time).total_seconds())
                  
         for state in states[:]:  # Copy to avoid modifying the list while iterating
@@ -193,7 +200,7 @@ while True:
         for state in states[:]:  # Copy to avoid modifying the list while iterating
             if check_order_filled(state.sell_order_id):
                 print("Ordinul de vanzare a fost executat.")
-                beep(5)
+                u.beep(5)
                 sell_order = client.get_order(symbol=symbol, orderId=state.sell_order_id)
                 sell_price = float(sell_order['price'])
                 btc_sell_quantity = float(sell_order['origQty'])
@@ -222,7 +229,7 @@ while True:
 
         if (abs(changed_proc) > 0):
             print(f"Pretul s-a schimbat cu {changed_proc:.2f}% care este mai mult de {price_change_threshold}% in intervalul de {interval_time:.2f} secunde.")
-            beep(2)
+            u.beep(2)
             print(f"Anulez ordinul existent de cumparare daca exista (ID:{current_buy_order_id}).")
             if current_buy_order_id:#last_state.buy_order_id
                 api.cancel_order(api.symbol, current_buy_order_id)
