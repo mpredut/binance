@@ -1,22 +1,21 @@
-
+import os
 import time
 import datetime
 import math
-from binance.client import Client
-from binance.exceptions import BinanceAPIException
 from collections import deque
 
-from apikeys import api_key, api_secret
+####Binance
+#from binance.exceptions import BinanceAPIException
 
 # my imports
-
-import binanceapi as api
 import log
 import alert
 import utils as u
+import symbols as sym
+import binanceapi as api
+
 #import priceprediction as pp
 
-import os
 
 # Intervalul de timp între încercările de anulare și recreere a ordinului (în secunde)
 WAIT_FOR_ORDER = 22
@@ -47,7 +46,7 @@ class TradingBot:
                 return self.filled_buy_price
             
             if adjustment_percent > 0:
-                buy_order = api.place_BUY_order(self.symbol, target_buy_price, self.qty)
+                buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty)
             else:
                 buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty)
 
@@ -60,17 +59,18 @@ class TradingBot:
                     print(f"[{self.symbol}] Order BUY failed {failure_count} times. Exiting.")
                     self.buy_filled = True
                     self.sell_filled = False
-                    return round(api.get_current_price(symbol) * (1 - 0.01), 4)
+                    return round(api.get_current_price(self.symbol) * (1 - 0.01), 4)
                 continue
 
             time.sleep(WAIT_FOR_ORDER)
             order_id = buy_order['orderId']
             self.filled_buy_price = round(float(buy_order['price']), 4)
             
-            if api.check_order_filled(order_id):
+            if api.check_order_filled(order_id, self.symbol):
                 print(f"[{self.symbol}] BUY order filled at {self.filled_buy_price:.2f}")
                 print(f"[{self.symbol}] SELL disperat tot....")
-                api.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + 0.01), 0.2)
+                api.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + 0.01), 0.2, 
+                    force=True, cancelorders=True, hours=1)
                 self.buy_filled = True
                 self.sell_filled = False
                 return self.filled_buy_price
@@ -78,6 +78,9 @@ class TradingBot:
             filled_buy_price = api.check_order_filled_by_time("BUY", self.symbol, time_back_in_seconds=WAIT_FOR_ORDER)
             if filled_buy_price is not None:
                 print(f"[{self.symbol}] BUY order may have been filled :-) at {filled_buy_price:.2f}")
+                print(f"[{self.symbol}] SELL disperat tot....")
+                api.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + 0.01), 0.2, 
+                    force=True, cancelorders=True, hours=1)
                 self.buy_filled = True
                 self.sell_filled = False
                 self.filled_buy_price = filled_buy_price
@@ -85,14 +88,17 @@ class TradingBot:
                 
             current_price = api.get_current_price(self.symbol)
             if current_price > filled_sell_price:
-                print(f"[{self.symbol}] Bed day :-(. Trying BUY at current price {current_price:.2f}")
-                adjustment_percent = 0
+                print(f"[{self.symbol}] Bed day :-(. Trying BUY at current price - x2 {current_price:.2f}")
+                adjustment_percent = 2 * self.DEFAULT_ADJUSTMENT_PERCENT
             else:
                 adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
 
             if not api.cancel_order(self.symbol, order_id):
-                if api.check_order_filled(order_id):
+                if api.check_order_filled(order_id, self.symbol):
                     print(f"[{self.symbol}] Cancel BUY order failed. Maybe it was filled :-)? Moving to BUY ...")
+                    print(f"[{self.symbol}] SELL disperat tot....")
+                    api.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + 0.01), 0.2, 
+                    force=True, cancelorders=True, hours=1)
                     self.buy_filled = True
                     self.sell_filled = False
                     return self.filled_buy_price
@@ -114,7 +120,7 @@ class TradingBot:
                 return self.filled_sell_price
 
             if adjustment_percent > 0:
-                sell_order = api.place_SELL_order(self.symbol, target_sell_price, self.qty)
+                sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty)
             else:
                 sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty)
 
@@ -127,17 +133,18 @@ class TradingBot:
                     print(f"[{self.symbol}] Order SELL failed {failure_count} times. Exiting.")
                     self.buy_filled = False
                     self.sell_filled = True
-                    return round(api.get_current_price(symbol) * (1 + 0.1), 4)
+                    return round(api.get_current_price(self.symbol) * (1 + 0.1), 4)
                 continue
 
             time.sleep(WAIT_FOR_ORDER)
             order_id = sell_order['orderId']
             self.filled_sell_price = round(float(sell_order['price']), 4)
 
-            if api.check_order_filled(order_id):
+            if api.check_order_filled(order_id, self.symbol):
                 print(f"[{self.symbol}] SELL order filled at {self.filled_sell_price:.2f}")
                 print(f"[{self.symbol}] BUY disperat tot....")
-                api.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - 0.01), 0.2)
+                api.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - 0.01), 0.2, 
+                    force=True, cancelorders=True, hours=1)
                 self.buy_filled = False
                 self.sell_filled = True
                 return self.filled_sell_price
@@ -145,6 +152,9 @@ class TradingBot:
             filled_sell_price = api.check_order_filled_by_time("SELL", self.symbol, time_back_in_seconds=WAIT_FOR_ORDER)
             if filled_sell_price is not None:
                 print(f"[{self.symbol}] SELL order may have been filled :-) at {filled_sell_price:.2f}")
+                print(f"[{self.symbol}] BUY disperat tot....")
+                api.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - 0.01), 0.2, 
+                    force=True, cancelorders=True, hours=1)
                 self.buy_filled = False
                 self.sell_filled = True
                 self.filled_sell_price = filled_sell_price
@@ -152,14 +162,17 @@ class TradingBot:
 
             current_price = api.get_current_price(self.symbol)
             if current_price < filled_buy_price:
-                print(f"[{self.symbol}] Bed day :-(. Trying SELL at current price {current_price:.2f}")
-                adjustment_percent = 0
+                print(f"[{self.symbol}] Bed day :-(. Trying SELL at current price + x2 {current_price:.2f}")
+                adjustment_percent = 2 * self.DEFAULT_ADJUSTMENT_PERCENT
             else:
                 adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
 
             if not api.cancel_order(self.symbol, order_id):
-                if api.check_order_filled(order_id):
+                if api.check_order_filled(order_id, self.symbol):
                     print(f"[{self.symbol}] Cancel SELL order failed. Maybe it was filled :-)? Moving to SELL ...")
+                    print(f"[{self.symbol}] BUY disperat tot....")
+                    api.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - 0.01), 0.2, 
+                        force=True, cancelorders=True, hours=1)                     
                     self.buy_filled = False
                     self.sell_filled = True                   
                     return self.filled_sell_price
@@ -191,16 +204,15 @@ class TradingBot:
                 print(f"[{self.symbol}] Unexpected error: {e}")
                 if self.buy_filled == self.sell_filled:
                     self.buy_filled = not self.sell_filled
-                api.cancel_recent_orders("SELL", symbol, WAIT_FOR_ORDER)
-                api.cancel_recent_orders("BUY", symbol, WAIT_FOR_ORDER)
+                api.cancel_recent_orders("SELL", self.symbol, WAIT_FOR_ORDER)
+                api.cancel_recent_orders("BUY", self.symbol, WAIT_FOR_ORDER)
                 time.sleep(1)
 
 
-DEFAULT_ADJUSTMENT_PERCENT = round(u.calculate_difference_percent(60000, 60000 - 360) / 100, 4)
+DEFAULT_ADJUSTMENT_PERCENT = round(u.calculate_difference_percent(60000, 60000 - 380) / 100, 4)
 print(f"[INFO] DEFAULT_ADJUSTMENT_PERCENT = {DEFAULT_ADJUSTMENT_PERCENT}")
 
-symbol = api.symbol
-bot = TradingBot(symbol, 0.017, DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
+bot = TradingBot(sym.btcsymbol, 0.017, DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
 bot.run()
 
     

@@ -7,13 +7,13 @@ import json
 from datetime import datetime, timedelta
 
 ####Binance
-from binance.client import Client
-from binance.exceptions import BinanceAPIException
+#from binance.exceptions import BinanceAPIException
 
 #my imports
-from binanceapi import client
-import utils as u
 import log
+import utils as u
+import symbols as sym
+import binanceapi as api
 
 # 
 # Cache global pentru tranzactii
@@ -29,33 +29,33 @@ def aggregate_trades(trades):
         'symbol': '', 'price': '', 'qty': 0, 'quoteQty': 0, 'commission': 0, 'commissionAsset': '', 'time': 0, 'isBuyer': None, 'isMaker': None, 'isBestMatch': None, 'id': 0
     })
     
-    # Grupa tranzacțiile pe orderId
+    # Grupa tranzactiile pe orderId
     for trade in trades:
         orderId = trade['orderId']
         
-        # Agregăm datele pentru aceleași orderId
+        # Agregam datele pentru aceleasi orderId
         aggregated_trades[orderId]['symbol'] = trade['symbol']
         aggregated_trades[orderId]['price'] = trade['price']
         aggregated_trades[orderId]['qty'] += float(trade['qty'])
         aggregated_trades[orderId]['quoteQty'] += float(trade['quoteQty'])
         aggregated_trades[orderId]['commission'] += float(trade['commission'])
         aggregated_trades[orderId]['commissionAsset'] = trade['commissionAsset']
-        aggregated_trades[orderId]['time'] = max(aggregated_trades[orderId]['time'], trade['time'])  # selectăm timpul maxim
+        aggregated_trades[orderId]['time'] = max(aggregated_trades[orderId]['time'], trade['time'])  # selectam timpul maxim
         aggregated_trades[orderId]['isBuyer'] = trade['isBuyer']
         aggregated_trades[orderId]['isMaker'] = trade['isMaker']
         aggregated_trades[orderId]['isBestMatch'] = trade['isBestMatch']
-        aggregated_trades[orderId]['id'] = trade['id']  # păstrăm id-ul primei tranzacții (pentru referință)
+        aggregated_trades[orderId]['id'] = trade['id']  # pastram id-ul primei tranzactii (pentru referinta)
 
-    # Creăm lista agregată
+    # Cream lista agregata
     aggregated_list = []
     for aggregated in aggregated_trades.values():
         aggregated_list.append({
             'symbol': aggregated['symbol'],
             'id': aggregated['id'],
-            'orderId': 0,  # Setăm orderId-ul la 0
+            'orderId': 0,  # Setam orderId-ul la 0
             'orderListId': -1,
             'price': aggregated['price'],
-            'qty': f"{aggregated['qty']:.8f}",  # păstrăm formatul cu 8 zecimale
+            'qty': f"{aggregated['qty']:.8f}",  # pastram formatul cu 8 zecimale
             'quoteQty': f"{aggregated['quoteQty']:.8f}",
             'commission': f"{aggregated['commission']:.8f}",
             'commissionAsset': aggregated['commissionAsset'],
@@ -67,24 +67,29 @@ def aggregate_trades(trades):
 
     return aggregated_list
     
-def get_my_trades_24(symbol, days_ago, order_type=None, limit=1000):
+def get_my_trades_24(order_type, symbol, days_ago=0, limit=1000):
+    
+    sym.validate_ordertype(order_type)
+    sym.validate_symbols(symbol)
+    
+    
     all_trades = []
     try:
         current_time = int(time.time() * 1000)
         
-        # Calculam start_time si end_time pentru ziua specificata în urma
+        # Calculam start_time si end_time pentru ziua specificata in urma
         end_time = current_time - days_ago * 24 * 60 * 60 * 1000
-        start_time = end_time - 24 * 60 * 60 * 1000  # Cu 24 de ore în urma de la end_time
+        start_time = end_time - 24 * 60 * 60 * 1000  # Cu 24 de ore in urma de la end_time
 
         while start_time < end_time:
-            trades = client.get_my_trades(symbol=symbol, limit=limit, startTime=start_time, endTime=end_time)
+            trades = api.client.get_my_trades(symbol=symbol, limit=limit, startTime=start_time, endTime=end_time)
 
             if not trades:
                 break
 
-            if order_type == "buy":
+            if order_type == "BUY":
                 filtered_trades = [trade for trade in trades if trade['isBuyer']]
-            elif order_type == "sell":
+            elif order_type == "SELL":
                 filtered_trades = [trade for trade in trades if not trade['isBuyer']]
             else:
                 filtered_trades = trades
@@ -95,15 +100,15 @@ def get_my_trades_24(symbol, days_ago, order_type=None, limit=1000):
                 break
 
             # Ajustam `start_time` la timpul celei mai noi tranzactii pentru a continua
-            start_time = trades[-1]['time'] + 1  # Ne mutam înainte cu 1 ms pentru a evita duplicatele
+            start_time = trades[-1]['time'] + 1  # Ne mutam inainte cu 1 ms pentru a evita duplicatele
         
         latest_trades = {}
         for trade in all_trades:
             order_id = trade['orderId']
             
-            # Verificăm dacă nu avem deja acest `orderId` sau dacă tranzacția curentă este mai recentă
+            # Verificam daca nu avem deja acest `orderId` sau daca tranzactia curenta este mai recenta
             if order_id not in latest_trades or trade['time'] > latest_trades[order_id]['time']:
-                latest_trades[order_id] = trade  # Actualizăm cu cea mai recentă tranzacție
+                latest_trades[order_id] = trade  # Actualizam cu cea mai recenta tranzactie
 
         return list(latest_trades.values()) #lista nu dictionar!
         
@@ -115,12 +120,16 @@ def get_my_trades_24(symbol, days_ago, order_type=None, limit=1000):
 
 
 def get_my_trades(order_type, symbol, backdays=3, limit=1000):
+    
+    sym.validate_ordertype(order_type)
+    sym.validate_symbols(symbol)
+    
     all_trades = []
     
     try:
         for days_ago in range(backdays + 1):
             print(f"Fetching trades for day {days_ago}...")
-            trades = get_my_trades_24(symbol, days_ago, limit)
+            trades = get_my_trades_24(order_type, symbol, days_ago=days_ago, limit=limit)
             
             if not trades:
                 # retry from cache .....
@@ -129,10 +138,10 @@ def get_my_trades(order_type, symbol, backdays=3, limit=1000):
                     print(f"No trades found for day {days_ago}.")
                     continue
             
-            #filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "buy")]
-            if order_type == "buy":
+            #filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "BUY")]
+            if order_type == "BUY":
                 filtered_trades = [trade for trade in trades if trade['isBuyer']]
-            elif order_type == "sell":
+            elif order_type == "SELL":
                 filtered_trades = [trade for trade in trades if not trade['isBuyer']]
             else:
                 filtered_trades = trades
@@ -148,6 +157,10 @@ def get_my_trades(order_type, symbol, backdays=3, limit=1000):
         
         
 def get_my_trades_simple(order_type, symbol, backdays=3, limit=1000):
+   
+    sym.validate_ordertype(order_type)
+    sym.validate_symbols(symbol)
+    
     all_trades = []
     try:
         current_time = int(time.time() * 1000) 
@@ -157,23 +170,23 @@ def get_my_trades_simple(order_type, symbol, backdays=3, limit=1000):
         end_time = current_time
 
         for day in range(backdays + 1):
-            # Calculam start_time pentru ziua curenta în intervalul de 24 de ore
+            # Calculam start_time pentru ziua curenta in intervalul de 24 de ore
             start_time = end_time - max_interval
             
-            trades = client.get_my_trades(symbol=symbol, limit=limit, startTime=start_time, endTime=end_time)
+            trades = api.client.get_my_trades(symbol=symbol, limit=limit, startTime=start_time, endTime=end_time)
 
             if trades:
-                #filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "buy")]
-                if order_type == "buy":
+                #filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "BUY")]
+                if order_type == "BUY":
                     filtered_trades = [trade for trade in trades if trade['isBuyer']]
-                elif order_type == "sell":
+                elif order_type == "SELL":
                     filtered_trades = [trade for trade in trades if not trade['isBuyer']]
                 else:
                     filtered_trades = trades
                 
                 all_trades.extend(filtered_trades)
             
-            # Actualizam end_time pentru ziua anterioara (înainte de aceasta perioada de 24 de ore)
+            # Actualizam end_time pentru ziua anterioara (inainte de aceasta perioada de 24 de ore)
             end_time = start_time
 
         return all_trades
@@ -190,7 +203,7 @@ def test_get_my_trades():
 
     for days_ago in range (0,20):
         print(f"Testing get_my_trades_24 for {symbol} on day {days_ago}...")
-        trades = get_my_trades_24(symbol, days_ago, limit)
+        trades = get_my_trades_24(None, symbol, days_ago=days_ago, limit=limit)
         if trades:
             print(f"Found {len(trades)} trades for day {days_ago}.")
             for trade in trades[:10]:  # Afiseaza primele 10 tranzactii
@@ -201,26 +214,26 @@ def test_get_my_trades():
     backdays = 30
     limit = 10000
 
-    # Testare fara filtrare (fara 'buy' sau 'sell')
+    # Testare fara filtrare (fara "BUY" sau "SELL")
     print("Testing get_my_trades with pagination (no order_type)...")
     trades_pagination = get_my_trades(None, symbol, backdays=backdays, limit=limit)
 
     print("Testing get_my_trades_simple without pagination (no order_type)...")
     trades_simple = get_my_trades_simple(None, symbol, backdays=backdays, limit=limit)
 
-    # Testare pentru 'buy'
+    # Testare pentru "BUY"
     print("Testing get_my_trades with pagination (buy orders)...")
-    trades_pagination_buy = get_my_trades("buy", symbol, backdays=backdays, limit=limit)
+    trades_pagination_buy = get_my_trades("BUY", symbol, backdays=backdays, limit=limit)
 
     print("Testing get_my_trades_simple without pagination (buy orders)...")
-    trades_simple_buy = get_my_trades_simple("buy", symbol, backdays=backdays, limit=limit)
+    trades_simple_buy = get_my_trades_simple("BUY", symbol, backdays=backdays, limit=limit)
 
-    # Testare pentru 'sell'
+    # Testare pentru "SELL"
     print("Testing get_my_trades with pagination (sell orders)...")
-    trades_pagination_sell = get_my_trades("sell", symbol, backdays=backdays, limit=limit)
+    trades_pagination_sell = get_my_trades("SELL", symbol, backdays=backdays, limit=limit)
 
     print("Testing get_my_trades_simple without pagination (sell orders)...")
-    trades_simple_sell = get_my_trades_simple("sell", symbol, backdays=backdays, limit=limit)
+    trades_simple_sell = get_my_trades_simple("SELL", symbol, backdays=backdays, limit=limit)
 
     # Comparam rezultatele pentru tranzactiile nefiltrate
     print("\nComparing unfiltered results...")
@@ -237,7 +250,7 @@ def test_get_my_trades():
                 print(f"Pagination trade: {trade_p}")
                 print(f"Simple trade: {trade_s}")
 
-    # Comparam rezultatele pentru tranzactiile de tip 'buy'
+    # Comparam rezultatele pentru tranzactiile de tip "BUY"
     print("\nComparing buy order results...")
     if trades_pagination_buy == trades_simple_buy:
         print("Both functions returned the same results for buy orders.")
@@ -252,7 +265,7 @@ def test_get_my_trades():
                 print(f"Pagination trade: {trade_p}")
                 print(f"Simple trade: {trade_s}")
 
-    # Comparam rezultatele pentru tranzactiile de tip 'sell'
+    # Comparam rezultatele pentru tranzactiile de tip "SELL"
     print("\nComparing sell order results...")
     if trades_pagination_sell == trades_simple_sell:
         print("Both functions returned the same results for sell orders.")
@@ -285,8 +298,12 @@ def test_get_my_trades():
 
 import os
 
-# Functia care salveaza tranzactiile noi în fisier (completare daca exista deja)
+# Functia care salveaza tranzactiile noi in fisier (completare daca exista deja)
 def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=2):
+    
+    sym.validate_ordertype(order_type)
+    sym.validate_symbols(symbol)
+    
     all_trades = []
 
     # Verificam daca fisierul exista deja
@@ -302,7 +319,7 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=
 
     # Calculam timpul de la care pastram tranzactiile (doar cele mai recente decat 'years_to_keep' ani)
     current_time_ms = int(time.time() * 1000)
-    cutoff_time_ms = current_time_ms - (years_to_keep * 365 * 24 * 60 * 60 * 1000)  # Ani convertiti în milisecunde
+    cutoff_time_ms = current_time_ms - (years_to_keep * 365 * 24 * 60 * 60 * 1000)  # Ani convertiti in milisecunde
 
     # Eliminam tranzactiile care sunt mai vechi decat perioada dorita
     filtered_existing_trades = [trade for trade in existing_trades if trade['time'] > cutoff_time_ms]
@@ -317,7 +334,7 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=
         time_diff_ms = current_time_ms - most_recent_trade_time
         backdays = time_diff_ms // (24 * 60 * 60 * 1000) + 1  # Cate zile au trecut de la ultima tranzactie
     else:
-        most_recent_trade_time = 0  # Daca nu exista tranzactii, începem de la 0
+        most_recent_trade_time = 0  # Daca nu exista tranzactii, incepem de la 0
         backdays = 60  # Adaugam tranzactii pentru ultimele 60 de zile daca fisierul e gol
 
     print(f"Fetching trades from the last {backdays} days for {symbol}, order type {order_type}.")
@@ -335,7 +352,7 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=
         all_trades = filtered_existing_trades + new_trades
         all_trades = sorted(all_trades, key=lambda x: x['time'])  # Sortam dupa timp
 
-        # Salvam doar tranzactiile filtrate si actualizate în fisier
+        # Salvam doar tranzactiile filtrate si actualizate in fisier
         with open(filename, 'w') as f:
             json.dump(all_trades, f)
 
@@ -362,8 +379,12 @@ def load_trades_from_file(filename):
         trade_cache = []
 
   
-# Funcția care returnează tranzacțiile de tip 'buy' sau 'sell' din cache pentru un anumit simbol
+# Functia care returneaza tranzactiile de tip "BUY" sau "SELL" din cache pentru un anumit simbol
 def get_trade_orders_pt_referinta(order_type, symbol, max_age_seconds):
+
+    sym.validate_ordertype(order_type)
+    sym.validate_symbols(symbol)
+    
     current_time_ms = int(time.time() * 1000)
     max_age_ms = max_age_seconds * 1000
 
@@ -374,15 +395,19 @@ def get_trade_orders_pt_referinta(order_type, symbol, max_age_seconds):
         }
         for trade in trade_cache
         if trade.get('symbol') == symbol
-        and (order_type is None or trade.get('isBuyer') == (order_type == 'buy'))  # Verificăm doar dacă order_type nu este None
+        and (order_type is None or trade.get('isBuyer') == (order_type == "BUY"))  # Verificam doar daca order_type nu este None
         and (current_time_ms - trade.get('time', 0)) <= max_age_ms
     ]
 
     return filtered_trades
 
   
-# Functia care returneaza tranzactiile de tip 'buy' sau 'sell' din cache pentru un anumit simbol
+# Functia care returneaza tranzactiile de tip "BUY" sau "SELL" din cache pentru un anumit simbol
 def get_trade_orders(order_type, symbol, max_age_seconds):
+    
+    sym.validate_ordertype(order_type)
+    sym.validate_symbols(symbol)
+    
     current_time_ms = int(time.time() * 1000)
     max_age_ms = max_age_seconds * 1000
 
@@ -404,7 +429,7 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
         }
         for trade in trade_cache
         if trade['symbol'] == symbol 
-        and (order_type is None or trade['isBuyer'] == (order_type == 'buy'))  # Verifica doar daca order_type nu este None
+        and (order_type is None or trade['isBuyer'] == (order_type == "BUY"))  # Verifica doar daca order_type nu este None
         and (current_time_ms - trade['time']) <= max_age_ms
     ]
 
@@ -412,17 +437,21 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
     return filtered_trades
 
     
-    # Funcția care returnează tranzacțiile de tip 'buy' sau 'sell' din cache pentru un anumit simbol, filtrate pe zile
+    # Functia care returneaza tranzactiile de tip "BUY" sau "SELL" din cache pentru un anumit simbol, filtrate pe zile
 def get_trade_orders_24(order_type, symbol, days_back):
-    # Calculăm începutul și sfârșitul zilei dorite (cu days_back zile în urmă)
+
+    sym.validate_ordertype(order_type)
+    sym.validate_symbols(symbol)
+        
+    # Calculam inceputul si sfarsitul zilei dorite (cu days_back zile in urma)
     target_day_start = (datetime.now() - timedelta(days=days_back)).replace(hour=0, minute=0, second=0, microsecond=0)
     target_day_end = target_day_start.replace(hour=23, minute=59, second=59, microsecond=999999)
     
-    # Convertim timpii la timestamp în milisecunde
+    # Convertim timpii la timestamp in milisecunde
     start_timestamp = int(target_day_start.timestamp() * 1000)
     end_timestamp = int(target_day_end.timestamp() * 1000)
     
-    # Filtrăm tranzacțiile în funcție de criteriile specificate
+    # Filtram tranzactiile in functie de criteriile specificate
     filtered_trades = [
         {
             key: (float(value) if isinstance(value, str) and value.replace('.', '', 1).isdigit() else value)
@@ -430,11 +459,26 @@ def get_trade_orders_24(order_type, symbol, days_back):
         }
         for trade in trade_cache
         if trade.get('symbol') == symbol
-        and (order_type is None or trade.get('isBuyer') == (order_type == 'buy'))  # Verificăm doar dacă order_type nu este None
+        and (order_type is None or trade.get('isBuyer') == (order_type == "BUY"))  # Verificam doar daca order_type nu este None
         and start_timestamp <= trade.get('time', 0) <= end_timestamp
     ]
 
-    # Sortăm tranzacțiile după timp, opțional
+    # Sortam tranzactiile dupa timp, optional
     # filtered_trades.sort(key=lambda x: x['time'])
     
     return filtered_trades
+
+
+def format_trade(trade, time_limit):
+    trade_time = u.timestampToTime(trade['time'])
+    is_within_limit = trade['time'] >= time_limit
+    buy_or_sell = "BUY" if trade['isBuyer'] else "SELL"
+    return f"Time: {trade_time}, OrderID: {trade['orderId']}, {buy_or_sell}, Price: {trade['price']}, Selected: {is_within_limit}"
+    
+
+def validate_keys_in_trades(trades):
+    required_keys = ['time', 'price', 'qty', 'orderId']
+    for idx, trade in enumerate(trades):
+        for key in required_keys:
+            if key not in trade:
+                raise ValueError(f"Tranzacția {idx} este invalidă. Lipsește cheia '{key}'. Date: {trade}")

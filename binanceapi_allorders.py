@@ -5,12 +5,12 @@ import math
 import sys
 
 ####Binance
-from binance.client import Client
-from binance.exceptions import BinanceAPIException
+#from binance.exceptions import BinanceAPIException
 
 #my imports
-from binanceapi import client
 import utils as u
+from binanceapi import client
+
  
   
 #######

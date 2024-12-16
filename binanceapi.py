@@ -14,7 +14,6 @@ import json
 #from twisted.internet import reactor
 
 ####Binance
-from binance.client import Client
 from binance.exceptions import BinanceAPIException
 #from binance.streams import BinanceSocketManager
 #from binance.streams import BinanceSocketManager
@@ -23,13 +22,11 @@ from binance.exceptions import BinanceAPIException
 
 ####MYLIB
 import utils as u
-from apikeys import api_key, api_secret
+import symbols as sym
 import config as cfg
+from binanceclient import client
 
 stop = False
-symbol = 'BTCUSDT'
-taosymbol = 'TAOUSDT'
-symbols = [symbol, taosymbol]
 
 import binance
 print(binance.__version__)
@@ -38,38 +35,6 @@ currentprice = {}
 #currentprice['TAOUSDT'] = 0
 
 currenttime = time.time()
-client = Client(api_key, api_secret)
-
-
-def validate_params(order_type, symbol, price = 1, qty = 1):
-    if order_type not in ['BUY', 'SELL']:
-        raise ValueError(f"Invalid order_type '{order_type}'. It must be either 'BUY' or 'SELL'.")
-    
-    if not isinstance(price, (int, float)) or price <= 0:
-        raise ValueError(f"Invalid price '{price}'. Price must be a positive number.")
-    
-    if not isinstance(qty, (int, float)) or qty <= 0:
-        raise ValueError(f"Invalid quantity '{qty}'. Quantity must be a positive number.")
-    
-    if symbol.upper() not in symbols:
-        raise ValueError(f"Invalid symbol '{symbol}'. Symbol must be one of {valid_symbols}.")
-
-
-
-def get_binance_symbols(keysearch):
-    try:
-        exchange_info = client.get_exchange_info()
-        print(f"Number of symbols on Binance: {len(exchange_info['symbols'])}")
-
-        symbols = [s['symbol'] for s in exchange_info['symbols']]  # Extragem doar simbolul
-        if keysearch:
-            matching_symbols = [symbol for symbol in symbols if keysearch.upper() in symbol]
-            print(f"Symbols containing '{keysearch}': {matching_symbols}")
-        else:
-            print(f"All symbols: {symbols}")
-    
-    except Exception as e:
-        print(f"An error occurred: {e}")
 
 
 def listen_to_binance(symbol):
@@ -121,31 +86,7 @@ def signal_handler(sig, frame):
 signal.signal(signal.SIGINT, signal_handler)
 
 
-  
-def get_quantity_precision(symbol):
-    try:
-        info = client.get_symbol_info(symbol)
-        for filter in info['filters']:
-            if filter['filterType'] == 'LOT_SIZE':
-                step_size = filter['stepSize']
-                precision = -int(round(-math.log10(float(step_size)), 0))
-                return precision
-    except BinanceAPIException as e:
-        print(f"Eroare la obtinerea preciziei cantitatii: {e}")
-    return 8  # Valoare implicita
 
-try:
-    # Cerere pentru a obtine informatii despre cont
-    account_info = client.get_account()
-    print("Cheile API sunt valide!")
-except Exception as e:
-    print(f"Eroare la verificarea cheilor API: {e}")
-    sys.exit()
-
-
-precision = get_quantity_precision(symbol)
-precision = 8
-print(f"Precision is {precision}")
 
 def normalize_quantity(symbol, quantity):
     min_qty, max_qty, step_size = get_symbol_limits(symbol)
@@ -254,7 +195,7 @@ def manage_quantity(order_type, symbol, required_qty, cancelorders=False, hours=
 def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5, price_difference_percentage=0.1):
 
     order_type = order_type.upper()
-    validate_params(order_type, symbol, 1, required_quantity)
+    sym.validate_params(order_type, symbol, 1, required_quantity)
     
     open_orders = get_open_orders(order_type, symbol)
     available_qty = 0  # Initial nu ai nicio cantitate disponibila
@@ -274,13 +215,13 @@ def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5,
             if order_info['timestamp'] <= cutoff_time:
                 cancel = True
             else:
-                price_diff_percentage = abs(order_info['price'] - current_price) / current_price * 100
+                price_diff_percentage = abs(float(order_info['price']) - current_price) / current_price * 100
                 if price_diff_percentage >= price_difference_percentage * 100:  # Convertim 0.1 in 10%
                     cancel = True
 
             if cancel:
                 cancel_order(symbol, order_id)
-                available_qty += order_info['quantity']
+                available_qty += float(order_info['quantity'])
                 print(f"New available quantity: {available_qty:.8f}")
 
             if available_qty >= required_quantity:
@@ -295,7 +236,7 @@ def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5,
 def get_open_orders(order_type, symbol):
 
     order_type = order_type.upper()
-    validate_params(order_type, symbol)
+    sym.validate_params(order_type, symbol)
         
     try:
         open_orders = client.get_open_orders(symbol=symbol)
@@ -385,13 +326,58 @@ def place_SELL_BUY_order(order_type, symbol, price, qty) :
         print(f"Eroare la plasarea ordinului de {order_type}, pret {price:.2f}")
     return order
 
+def place_BUY_order_at_market(symbol, qty):
+    try:
+        if not cfg.is_trade_enabled():
+            print(f"Trade este dezactivat!")
+            return None
+            
+        qty = round(qty, 4)  # Rotunjim cantitatea la 4 zecimale
+        BUY_order = client.order_market_buy(
+            symbol=symbol,
+            quantity=qty
+        )
         
+        if BUY_order:
+            print(f"BUY order de market executat cu succes: {BUY_order['orderId']}")
+        else:
+            print(f"Eroare la plasarea ordinului de BUY de market")
+        
+        return BUY_order
+    except BinanceAPIException as e:
+        print(f"Eroare la plasarea ordinului de market de cumparare: {e}")
+        return None
+
+
+def place_SELL_order_at_market(symbol, qty):
+    try:
+        if not cfg.is_trade_enabled():
+            print(f"Trade este dezactivat!")
+            return None
+
+        qty = round(qty, 4)  # Rotunjim cantitatea la 4 zecimale
+        SELL_order = client.order_market_sell(
+            symbol=symbol,
+            quantity=qty
+        )
+        
+        if SELL_order:
+            print(f"SELL order de market executat cu succes: {SELL_order['orderId']}")
+        else:
+            print(f"Eroare la plasarea ordinului de SELL de market")
+        
+        return SELL_order
+    except BinanceAPIException as e:
+        print(f"Eroare la plasarea ordinului de market de vanzare: {e}")
+        return None
+
+
 
 def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600, max_daily_trades=20, profit_percentage = 0.4):
     import binanceapi_trades as apitrades
 
     order_type = order_type.upper()
-    validate_params(order_type, symbol, price, qty)    
+    sym.validate_params(order_type, symbol, price, qty)    
     try:
         
         current_price = get_current_price(symbol)
@@ -414,9 +400,9 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=360
         
         # Filtram tranzactiile opuse care au avut loc in intervalul specificat
         recent_opposite_trades = [trade for trade in previous_trades if trade['time'] >= time_limit]
-        print("Tranzacții anterioare:")
-        for trade in previous_trades:
-            print(f"  Tranzacție: {trade}, Comparare: {trade['time']} >= {time_limit}")
+        #print("Tranzacții anterioare:")
+        #for trade in previous_trades:
+            #print(apitrades.format_trade(trade, time_limit))
         
         #max_SELL_price = max(float(trade['quoteQty']) / float(trade['qty']) for trade in recent_opposite_trades)
         if recent_opposite_trades:
@@ -444,19 +430,19 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=360
 
 
 from decimal import Decimal, ROUND_DOWN
-def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee_percentage=0.001):
+def place_order(order_type, symbol, price, qty, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
     
     order_type = order_type.upper()
-    validate_params(order_type, symbol, price, qty)  
+    sym.validate_params(order_type, symbol, price, qty)  
         
     try:
-        print(f"Order Request {order_type.upper()} {symbol} qty {qty}, Price {price}")
+        print(f"Order Request {order_type} {symbol} qty {qty}, Price {price}")
         available_qty = manage_quantity(order_type, symbol, qty, cancelorders=cancelorders, hours=hours)
         
-        if order_type.upper() == 'SELL':
+        if order_type == 'SELL':
             # Verifica daca ai destula criptomoneda pentru a vinde
             if available_qty <= 0:
-                print(f"No sufficient quantity available to place the {order_type.upper()} order.")
+                print(f"No sufficient quantity available to place the {order_type} order.")
                 return None
             
             print(f"available_qty {available_qty:.8f} versus requested {qty:.8f}")
@@ -464,10 +450,10 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
             adjusted_qty = qty * (1 + fee_percentage)
 
             if available_qty < adjusted_qty:
-                print(f"Adjusting {order_type.upper()} order quantity from {qty:.8f} to {available_qty / (1 + fee_percentage):.8f} to cover fees")
+                print(f"Adjusting {order_type} order quantity from {qty:.8f} to {available_qty / (1 + fee_percentage):.8f} to cover fees")
                 qty = available_qty / (1 + fee_percentage)
 
-        elif order_type.upper() == 'BUY':
+        elif order_type == 'BUY':
             # in cazul unei comenzi de BUY, trebuie sa calculezi cantitatea necesara de USDT pentru achizitionare
             total_usdt_needed = qty * price * (1 + fee_percentage)
 
@@ -475,7 +461,7 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
                 print(f"Not enough USDT available. You need {total_usdt_needed:.8f} USDT, but you only have {available_qty:.8f} USDT.")
                 # Ajusteaza cantitatea pe care o poti cumpara cu USDT disponibili
                 qty = available_qty / (price * (1 + fee_percentage))
-                print(f"Adjusting {order_type.upper()} order quantity to {qty:.8f} based on available USDT.")
+                print(f"Adjusting {order_type} order quantity to {qty:.8f} based on available USDT.")
 
         # Rotunjim cantitatea la 5 zecimale in jos
         #qty = math.floor(qty * 10**5) / 10**5  # Rotunjire in jos la 5 zecimale
@@ -489,14 +475,21 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
         if qty * current_price < 100:
             print(f"Value {qty * current_price} of {symbol} is too small to make sense to be traded :-) .by by!")
             return None
-        if order_type.upper() == 'SELL':
+        
+        print(f"Trying to place {order_type} order of {symbol} for quantity {qty:.8f} at {'market price' if force else f'price {price}'}")
+
+        if order_type == 'SELL':
             price = round(max(price, current_price), 0)
-            print(f"Trying to place SELL order of {symbol} for quantity {qty:.8f} at price {price}")
-            order = place_SELL_order(symbol, price, qty);
-        elif order_type.upper() == 'BUY':
+            if force:
+                 order = place_SELL_order_at_market(symbol, qty);
+            else:
+                order = place_SELL_order(symbol, price, qty);
+        elif order_type == 'BUY':
             price = round(min(price, current_price), 0)
-            print(f"Trying to place BUY order of {symbol} for quantity {qty:.8f} at price {price}")
-            order = place_BUY_order(symbol, price, qty);
+            if force:
+                 order = place_BUY_order_at_market(symbol, qty);
+            else:
+                order = place_BUY_order(symbol, price, qty);
         else:
             print(f"Invalid order type: {order_type}")
             return None
@@ -511,21 +504,21 @@ def place_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee
         return None
 
 
-def place_safe_order(order_type, symbol, price, qty, cancelorders=False, hours=5, fee_percentage=0.001):
+def place_safe_order(order_type, symbol, price, qty,safeback_seconds=5*3600+60, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
     
     order_type = order_type.upper()
-    validate_params(order_type, symbol, price, qty)  
+    sym.validate_params(order_type, symbol, price, qty)  
     
-    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600, max_daily_trades=30, profit_percentage = 0.4) :
+    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=safeback_seconds, max_daily_trades=30, profit_percentage = 0.25) :
         return None
       
-    return place_order(order_type, symbol, price, qty, cancelorders=cancelorders, hours=hours, fee_percentage=fee_percentage)    
+    return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders, hours=hours, fee_percentage=fee_percentage)    
     
 
-def place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5, pair=True):
+def place_order_smart(order_type, symbol, price, qty, safeback_seconds=5*3600+60, force=False, cancelorders=True, hours=5, pair=True):
     
     order_type = order_type.upper()
-    validate_params(order_type, symbol, price, qty) 
+    sym.validate_params(order_type, symbol, price, qty) 
     pair = False
     try:
         qty = round(qty, 5)
@@ -543,12 +536,14 @@ def place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5
             
             price = min(price, current_price)
             price = round(price * 0.999, 0)
-            order = place_safe_order("BUY", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
+            order = place_safe_order("BUY", symbol, price=price, qty=qty, 
+                safeback_seconds=safeback_seconds, force=force, cancelorders=cancelorders, hours=hours)
             # appy pair
             if order and pair :            
                 price = max(price * 1.11, current_price)
                 price = round(price * 1.001, 0)
-                place_safe_order("SELL", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
+                place_safe_order("SELL", symbol, price=price, qty=qty,
+                    time_back_in_seconds=time_back_in_seconds, force=force, cancelorders=cancelorders, hours=hours)
                 
         elif order_type.upper() == 'SELL':
             open_BUY_orders = get_open_orders("BUY", symbol)
@@ -561,12 +556,14 @@ def place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5
                    
             price = max(price, current_price)
             price = round(price * (1 + 0.001), 0)
-            order = place_safe_order("SELL", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
+            order = place_safe_order("SELL", symbol, price=price, qty=qty,
+                safeback_seconds=safeback_seconds, force=force, cancelorders=cancelorders, hours=hours)
             # appy pair
             if order and pair :
                 price = min(price * (1 - 0.11), current_price)
                 price = round(price * 0.999, 0)
-                place_safe_order("BUY", symbol, price=price, qty=qty, cancelorders=cancelorders, hours=hours)
+                place_safe_order("BUY", symbol, price=price, qty=qty,
+                    safeback_seconds=safeback_seconds, force=force, cancelorders=cancelorders, hours=hours)
         else:
             print("Tipul ordinului este invalid. Trebuie sa fie 'BUY' sau 'SELL'.")
             return None
@@ -595,7 +592,7 @@ def cancel_order(symbol, order_id):
 def cancel_open_orders(order_type, symbol):
     
     order_type = order_type.upper()
-    validate_params(order_type, symbol) 
+    sym.validate_params(order_type, symbol) 
     
     try:
         open_orders = get_open_orders(order_type, symbol)
@@ -608,7 +605,7 @@ def cancel_open_orders(order_type, symbol):
 def cancel_expired_orders(order_type, symbol, expire_time):
     
     order_type = order_type.upper()
-    validate_params(order_type, symbol)
+    sym.validate_params(order_type, symbol)
     
     open_orders = get_open_orders(order_type, symbol)
 
@@ -638,7 +635,7 @@ import time
 def cancel_recent_orders(order_type, symbol, max_age_seconds):
 
     order_type = order_type.upper()
-    validate_params(order_type, symbol)
+    sym.validate_params(order_type, symbol)
     
     open_orders = get_open_orders(order_type, symbol)
     current_time = int(time.time())  # Current time in seconds
@@ -661,7 +658,7 @@ def cancel_recent_orders(order_type, symbol, max_age_seconds):
     print(f"Cancelled {count} recent orders.")
 
 
-def check_order_filled(order_id):
+def check_order_filled(order_id, symbol):
     try:
         if not order_id:
             return False
@@ -672,24 +669,26 @@ def check_order_filled(order_id):
         return False
 
 
+
 def check_order_filled_by_time(order_type, symbol, time_back_in_seconds, pret_min=None, pret_max=None):
     import binanceapi_trades as apitrades
-    
-    previous_trades = apitrades.get_my_trades(order_type, symbol, backdays=0, limit=1000)  # Curent date
+
+    previous_trades = apitrades.get_my_trades(order_type, symbol, backdays=0, limit=1000)
     time_limit = int(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
 
+                
     # Filtram tranzactiile in functie de timp si optional in functie de pret total
     tranzactii_recente = [
         trade for trade in previous_trades
         if trade['time'] >= time_limit and
-           (pret_min is None or trade['price'] * trade['qty'] >= pret_min) and
-           (pret_max is None or trade['price'] * trade['qty'] <= pret_max)
+           (pret_min is None or float(trade['price']) * float(trade['qty']) >= pret_min) and
+           (pret_max is None or float(trade['price']) * float(trade['qty']) <= pret_max)
     ]
 
     if tranzactii_recente:
         # Gasim cea mai recenta tranzactie (dupa timp)
         tranzactia_recenta = max(tranzactii_recente, key=lambda trade: trade['time'])
-        return tranzactia_recenta['price']
+        return float(tranzactia_recenta['price'])
 
-    return None  # Daca nu exista tranzactii recente, returnam None
-
+    print(f"[DEBUG] Nicio tranzactie recenta pentru simbolul {symbol}.")
+    return None

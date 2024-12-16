@@ -18,15 +18,8 @@ def beep(n):
         time.sleep(2)
 
 
-# Bugetul initial
-budget = 1000  # USDT
-order_cost_btc = 0.00004405  # BTC
-max_threshold = 1.5 #% procent * 100
-price_change_threshold = 0.07  # Pragul de schimbare a pretului, 0.7%
-interval_time = 2 * 3600 # 2 h * 3600 seconds.
-interval_time = 97 * 79
 
-def get_interval_time(valoare_prestabilita=interval_time, marja_aleatoare=10):
+def get_interval_time(valoare_prestabilita=97 * 79, marja_aleatoare=10):
     # Generarea unei valori aleatoare în intervalul [-marja_aleatoare, marja_aleatoare]
     valoare_aleatoare = random.uniform(-marja_aleatoare, marja_aleatoare)
     interval = abs(valoare_prestabilita + valoare_aleatoare)

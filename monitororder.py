@@ -7,8 +7,10 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
 #my imports
-import binanceapi as api
 import utils as u
+import symbols as sym
+import binanceapi as api
+
 # 
 MAX_PROC = 0.77
 monitor_interval = 3.7
@@ -35,7 +37,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
     
     print(f"Pretul curent : {current_price:.2f}")
     
-    initial_prices = initial_sell_prices if order_type == 'sell' else initial_buy_prices
+    initial_prices = initial_sell_prices if order_type == "SELL" else initial_buy_prices
     
     for order_id in list(orders.keys()):
         order = orders[order_id]
@@ -65,7 +67,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
             time.sleep(MONITOR_BETWEEN_ORDERS_INTERVAL)
             
             # Calculeaza noul pret in functie de tipul ordinului
-            if order_type == 'sell':
+            if order_type == "SELL":
                 new_price = current_price * 1.001 + 1
             else:
                 new_price = current_price * 0.999 - 1
@@ -127,9 +129,9 @@ def monitor_orders():
         try:
             currenttime = time.time()
             if(currenttime - monitor_open_orders_lasttime > MONITOR_OPEN_ORDER_INTERVAL) :
-                for symbol in api.symbols:
-                    monitor_open_orders_by_type(symbol, 'sell', failed_orders)
-                    monitor_open_orders_by_type(symbol, 'buy', failed_orders)
+                for symbol in sym.symbols:
+                    monitor_open_orders_by_type(symbol, "SELL", failed_orders)
+                    monitor_open_orders_by_type(symbol, "BUY", failed_orders)
                     monitor_open_orders_lasttime = currenttime
             if(currenttime - monitor_close_orders_by_age_lasttime > MONITOR_CLOSE_ORDER_INTERVAL) :
                 #monitor_close_orders_by_age(max_age_seconds)
