@@ -373,7 +373,7 @@ def place_SELL_order_at_market(symbol, qty):
 
 
 
-def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600, max_daily_trades=20, profit_percentage = 0.4):
+def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600, max_daily_trades=10, profit_percentage = 0.4):
     import binanceapi_trades as apitrades
 
     order_type = order_type.upper()
@@ -509,7 +509,7 @@ def place_safe_order(order_type, symbol, price, qty,safeback_seconds=5*3600+60, 
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)  
     
-    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=safeback_seconds, max_daily_trades=30, profit_percentage = 0.25) :
+    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=safeback_seconds, max_daily_trades=15, profit_percentage = 0.25) :
         return None
       
     return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders, hours=hours, fee_percentage=fee_percentage)    
