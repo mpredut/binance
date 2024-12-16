@@ -176,7 +176,7 @@ while True:
         # changed_proc = ready_to_buy(last_state, current_state, u.price_change_threshold, u.max_threshold, timedelta(seconds = interval_time).total_seconds())
                  
         for state in states[:]:  # Copy to avoid modifying the list while iterating
-            if api.check_order_filled(state.buy_order_id):
+            if api.check_order_filled(state.buy_order_id, sym.btcsymbol):
                 print(f"Ordinul de cumparare a fost executat. Incercam vanzarea in {state.name}. interatia {state.iteration}....")
                 if state.sell_order_id:
                     # Check if sell order has expired
@@ -199,7 +199,7 @@ while True:
 
                         
         for state in states[:]:  # Copy to avoid modifying the list while iterating
-            if api.check_order_filled(state.sell_order_id):
+            if api.check_order_filled(state.sell_order_id, sym.btcsymbol):
                 print("Ordinul de vanzare a fost executat.")
                 u.beep(5)
                 sell_order = client.get_order(symbol=sym.btcsymbol, orderId=state.sell_order_id)
