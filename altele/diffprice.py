@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 from apikeys import api_key, api_secret
-from utils import beep, precision, client, symbol, budget, order_cost_btc, price_change_threshold, get_interval_time
 
 
 # Initialize the client for Binance.com
