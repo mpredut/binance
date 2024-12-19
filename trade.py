@@ -52,7 +52,7 @@ def calculate_sell_proc(initial_desired_proc, current_proc, i, max_i):
 
 
 class State:
-    def __init__(self, name, price, timestamp, buy_price = None, quantity = None, buy_order_id = None, sell_order_id = None, iteration = 0):
+    def __init__(self, name, price, timestamp, buy_price = None, quantity = 0.017, buy_order_id = None, sell_order_id = None, iteration = 0):
         self.name = name
         self.buy_order_id = buy_order_id
         self.sell_order_id = sell_order_id
