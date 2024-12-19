@@ -640,6 +640,9 @@ def is_trend_up(symbol):
 def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_threshold=0.08, percentage_lost_threshold=0.023):
     #try:
     
+    threshold_s = 1.5 * 60 * 60 # 1.5 h
+    current_time_s = int(time.time())
+    
     # 1. Obtine ordinele de cumparare si vanzare recente pentru simbol
     trade_orders_buy = apitrades.get_trade_orders("BUY", symbol, max_age_seconds)
     trade_orders_sell = apitrades.get_trade_orders("SELL", symbol, max_age_seconds)
@@ -656,6 +659,7 @@ def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_t
     if trade_orders_buy:
         trade_orders_buy.sort(key=lambda x: x['time'], reverse=True)
         buy_price = float(trade_orders_buy[0]['price'])
+        buy_time = float(trade_orders_buy[0]['time']) / 1000  # Timpul în secunde
         print(f"Buy price for {symbol}: {buy_price}")
         
         price_increase = (current_price - buy_price) / buy_price
@@ -667,13 +671,17 @@ def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_t
             if not is_trend_up(symbol):
                 print(f"Price increased with {price_increase * 100}% by more than {percentage_gain_threshold * 100}% versus buy price and not trend up!")
                 api.place_order_smart("SELL", symbol, current_price + 0.5, qty, cancelorders=True, hours=5, pair=False)
-                api.place_SELL_order(symbol, current_price, qty)
+                #api.place_SELL_order(symbol, current_price, qty)
             else :
                 print(f"No action taken, because trend is up!")
         elif price_decrease > percentage_lost_threshold or u.are_close(price_decrease, percentage_lost_threshold, target_tolerance_percent=1.0):
             if not is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease * 100}% by more than {percentage_lost_threshold * 100}% versus buy price and not trend up!")
-                api.place_order_smart("SELL", symbol, current_price + 0.5, qty, cancelorders=True, hours=0.1, pair=False)
+                #if datetime.utcnow() - buy_time > timedelta(hours=1.5):
+                if current_time_s - buy_time > threshold_s:
+                    api.place_order_smart("SELL", symbol, current_price + 0.5, qty, cancelorders=True, hours=0.1, pair=False)
+                else:
+                    print(f"Conditions for selling not met despite the buy order being older than 1.5 hour.")    
                 #api.place_SELL_order(symbol, current_price, qty)
             else:
                 print(f"No action taken, because trend is up!")
@@ -699,7 +707,6 @@ def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_t
     #except Exception as e:
     #    print(f"An error occurred while monitoring the price: {e}")
 
-        
 def main():
 
     #api.place_SELL_order_at_market("BTCUSDT", 0.017)
