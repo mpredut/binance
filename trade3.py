@@ -519,6 +519,7 @@ class TrendState:
         
         #self.end_trend()  # Marcheaza sfârsitul trendului anterior
         
+        self.old_state = self.state
         self.state = new_state
         self.start_time = time.time()
         self.last_confirmation_time = self.start_time
@@ -528,11 +529,16 @@ class TrendState:
         print(f"Start of {self.state} trend at {u.timeToHMS(self.start_time)}")
         return self.old_state
         
-    def is_trend_fresh(self) :
-        if time.time() < self.start_time + self.fresh_trend_time:
+    def get_trend_time(self):
+        return time.time() - self.start_time
+    
+    def is_trend_fresh(self, fresh_trend_time=1.7 * 60):
+        if time.time() < self.start_time + fresh_trend_time:
             return True
         return False
         
+    def is_trend_old(self, old_trend_time):
+        return get_trend_time(self) > old_trend_time 
 
     def confirm_trend(self):
         self.last_confirmation_time = time.time()
@@ -549,8 +555,8 @@ class TrendState:
                 print(f"Trend expired: {self.state}. Time since last confirmation: {time_since_last_confirmation} seconds")
                 self.end_trend()
                 self.expired = True
-                return True
-        return False
+                return self.expired
+        return False #self.expired
 
     def end_trend(self):
         self.old_state = self.state
