@@ -504,7 +504,7 @@ def place_order(order_type, symbol, price, qty, force=False, cancelorders=False,
         return None
 
 
-def place_safe_order(order_type, symbol, price, qty,safeback_seconds=5*3600+60, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
+def place_safe_order(order_type, symbol, price, qty, safeback_seconds=5*3600+60, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
     
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)  
@@ -515,7 +515,7 @@ def place_safe_order(order_type, symbol, price, qty,safeback_seconds=5*3600+60, 
     return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders, hours=hours, fee_percentage=fee_percentage)    
     
 
-def place_order_smart(order_type, symbol, price, qty, safeback_seconds=5*3600+60, force=False, cancelorders=True, hours=5, pair=True):
+def place_order_smart(order_type, symbol, price, qty, safeback_seconds=8*3600+60, force=False, cancelorders=True, hours=5, pair=True):
     
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty) 
@@ -543,7 +543,7 @@ def place_order_smart(order_type, symbol, price, qty, safeback_seconds=5*3600+60
                 price = max(price * 1.11, current_price)
                 price = round(price * 1.001, 0)
                 place_safe_order("SELL", symbol, price=price, qty=qty,
-                    time_back_in_seconds=time_back_in_seconds, force=force, cancelorders=cancelorders, hours=hours)
+                    safeback_seconds=safeback_seconds, force=force, cancelorders=cancelorders, hours=hours)
                 
         elif order_type.upper() == 'SELL':
             open_BUY_orders = get_open_orders("BUY", symbol)

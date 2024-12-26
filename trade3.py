@@ -598,9 +598,6 @@ price_window = PriceWindow(window_size)
 #prediction = pp.PricePrediction(10)  
 
 order_ids = []
-last_order_time = time.time()
-last_evaluate_time = time.time()
-
 
 
 
