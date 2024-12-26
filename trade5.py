@@ -530,6 +530,8 @@ class TrendState:
         return self.old_state
         
     def get_trend_time(self):
+        if self.start_time is None:
+            return 0
         return time.time() - self.start_time
     
     def is_trend_fresh(self, fresh_trend_time=1.7 * 60): #1.7 minutes
@@ -538,7 +540,7 @@ class TrendState:
         return False
         
     def is_trend_old(self, old_trend_time):
-        return get_trend_time(self) > old_trend_time 
+        return self.get_trend_time() > old_trend_time 
 
     def confirm_trend(self):
         self.last_confirmation_time = time.time()
@@ -704,15 +706,17 @@ def logic(win, gradient, slope, trend_state) :
             
             
     #25 de confirmari per minut * 3 minute
-    if gradient <= 0 and (trend_state.is_trend_up() > 25 * 3 or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
-        print(f"ATENTIE SELL ALL {win} .... ")
-        api.place_order_smart("SELL", self.symbol, proposed_price, 0.2, safeback_seconds=8*3600+60,
-            force=True, cancelorders=True, hours=1)
+    if gradient <= 0 and trend_state.is_trend_up():
+        if (trend_state.is_trend_up() > 25 * 3 or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
+            print(f"ATENTIE SELL ALL {win} .... ")
+            api.place_order_smart("SELL", self.symbol, proposed_price, 0.2, safeback_seconds=8*3600+60,
+                force=True, cancelorders=True, hours=1)
     #25 de confirmari per minut * 3 minute
-    if gradient >= 0 and (trend_state.is_trend_down() > 25 * 3 or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
-        print(f"ATENTIE BUY ALL {win} .... ")
-        api.place_order_smart("BUY", self.symbol, proposed_price, 0.2, safeback_seconds=8*3600+60,
-            force=True, cancelorders=True, hours=1) 
+    if gradient >= 0 and trend_state.is_trend_down(): 
+        if (trend_state.is_trend_down() > 25 * 3 or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
+            print(f"ATENTIE BUY ALL {win} .... ")
+            api.place_order_smart("BUY", self.symbol, proposed_price, 0.2, safeback_seconds=8*3600+60,
+                force=True, cancelorders=True, hours=1) 
                     
 
 #
