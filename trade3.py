@@ -751,7 +751,7 @@ while True:
                 diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
                 proposed_price = current_price - diff
                 if trend_state2.is_trend_fresh() : proposed_price = current_price
-                track_and_place_order('BUY', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
+                #track_and_place_order('BUY', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
             else:
                 expired_trend = trend_state2.start_trend('UP')  # Incepem un trend nou de crestere
                 proposed_price = current_price #- initial_difference
@@ -765,7 +765,7 @@ while True:
                 diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
                 proposed_price = proposed_price + diff
                 if trend_state2.is_trend_fresh() : proposed_price = current_price
-                track_and_place_order('SELL', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
+                #track_and_place_order('SELL', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
             else:
                 expired_trend = trend_state2.start_trend('DOWN')  # Incepem un trend nou de scadere
                 proposed_price = current_price #+ initial_difference
