@@ -434,7 +434,7 @@ TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + EXP_TIME_SELL_ORDER/ 6 + 4*79  # 
 WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 7.7 * 60  # minutes
 window_size = WINDOWS_SIZE_MIN / TIME_SLEEP_GET_PRICE
 
-window_size2 = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
+window_size_big = 3 * 60 * 60 / TIME_SLEEP_GET_PRICE
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
 def track_and_place_order(action, symbol, count, proposed_price, current_price, quantity=0.017, order_ids=None):
@@ -530,15 +530,17 @@ class TrendState:
         return self.old_state
         
     def get_trend_time(self):
+        if self.start_time is None:
+            return 0
         return time.time() - self.start_time
     
-    def is_trend_fresh(self, fresh_trend_time=1.7 * 60):
+    def is_trend_fresh(self, fresh_trend_time=1.7 * 60): #1.7 minutes
         if time.time() < self.start_time + fresh_trend_time:
             return True
         return False
         
     def is_trend_old(self, old_trend_time):
-        return get_trend_time(self) > old_trend_time 
+        return self.get_trend_time() > old_trend_time 
 
     def confirm_trend(self):
         self.last_confirmation_time = time.time()
@@ -583,22 +585,7 @@ class TrendState:
         if self.check_trend_expiration() or self.state == 'HOLD':
             return self.confirm_count
         return 0
-        
-trend_state1 = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_trend_time=10 * 60, fresh_trend_time = 1.7 * 60)  # Expira In 10 minute
-trend_state2 = TrendState(max_duration_seconds= 2 * 60 * 60, expiration_trend_time=10 * 60, fresh_trend_time = 1.7 * 60)  # Expira In 10 minute
-
-#
-#       MAIN 
-#
-
-#alert.check_alert(True, f"SELL order ")
   
-
-price_window = PriceWindow(window_size)
-#prediction = pp.PricePrediction(10)  
-
-order_ids = []
-
 
 
 # Cache-ul care va fi actualizat periodic
@@ -676,15 +663,79 @@ def update_csv_file(file_path, symbol, slope, tick, min_val, max_val, pos, gradi
     
 filename = "sell_recommendation.csv"    
 initialize_csv_file(filename)
-    
-
-PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 310)
-
-count = 0
 
 trades = apitrades.get_my_trades_24(order_type=None, symbol=sym.btcsymbol, days_ago=0, limit=1000)
 print (f" --------- {len(trades)}");
 print (f" {(trades)}");
+
+def logic(win, gradient, slope, trend_state) :
+
+    #todo adjust safeback_seconds
+    if gradient > 0 and slope != 0 :
+        # Confirmam un trend de crestere
+        print(f"DIFERENTA MARE {win} UP!")
+        proposed_price = current_price # * (1 - 0.01)
+        if trend_state.is_trend_up():
+            count = trend_state.confirm_trend() # Confirmam ca trendul de crestere continua         
+            #25 de confirmari per minut * 1.5 minute
+            if trend_state.is_trend_up() < 25 * 1.5 and trend_state.is_trend_fresh(): 
+                #track_and_place_order('BUY', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
+                api.place_order_smart("BUY", self.symbol, proposed_price, 0.017, safeback_seconds=8*3600+60,
+                    force=True, cancelorders=True, hours=1)
+        else:
+            expired_trend = trend_state.start_trend('UP')  # Incepem un trend nou de crestere
+            #track_and_place_order('BUY', sym.btcsymbol, 1, proposed_price, current_price, order_ids=order_ids) 
+            api.place_order_smart("BUY", self.symbol, proposed_price, 0.017, safeback_seconds=8*3600+60,
+                force=True, cancelorders=True, hours=1)             
+    
+    if gradient < 0 and slope != 0 :
+        # Confirmam un trend de scadere
+        print(f"DIFERENTA MARE {win} DOWN!")
+        proposed_price = current_price #  * (1 + 0.01)
+        if trend_state.is_trend_down():
+            count = trend_state.confirm_trend() # Confirmam ca trendul de scadere continua
+            if trend_state.is_trend_down() < 25 * 1.5 and trend_state.is_trend_fresh() :
+                #track_and_place_order('SELL', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
+                api.place_order_smart("SELL", self.symbol, proposed_price, 0.017, safeback_seconds=8*3600+60,
+                    force=True, cancelorders=True, hours=1)
+        else:
+            expired_trend = trend_state.start_trend('DOWN')  # Incepem un trend nou de scadere
+            #track_and_place_order('SELL', sym.btcsymbol, 1, proposed_price, current_price, order_ids=order_ids)
+            api.place_order_smart("SELL", self.symbol, proposed_price, 0.017, safeback_seconds=8*3600+60,
+                force=True, cancelorders=True, hours=1)                  
+            
+            
+    #25 de confirmari per minut * 3 minute
+    if gradient <= 0 and trend_state.is_trend_up():
+        if (trend_state.is_trend_up() > 25 * 3 or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
+            print(f"ATENTIE SELL ALL {win} .... ")
+            api.place_order_smart("SELL", self.symbol, proposed_price, 0.2, safeback_seconds=8*3600+60,
+                force=True, cancelorders=True, hours=1)
+    #25 de confirmari per minut * 3 minute
+    if gradient >= 0 and trend_state.is_trend_down(): 
+        if (trend_state.is_trend_down() > 25 * 3 or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
+            print(f"ATENTIE BUY ALL {win} .... ")
+            api.place_order_smart("BUY", self.symbol, proposed_price, 0.2, safeback_seconds=8*3600+60,
+                force=True, cancelorders=True, hours=1) 
+                    
+
+#
+#       MAIN 
+#
+
+price_window = PriceWindow(window_size)
+price_window_big = PriceWindow(window_size_big) 
+
+order_ids = []
+
+PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 310)
+PRICE_CHANGE_THRESHOLD_BIG_EUR = u.calculate_difference_percent(97000, 95000 - 677)
+count = 0
+
+TREND_TO_BE_OLD_SECONDS=60 * 60 * 1.5 # 1.5h -> 2.5h   
+trend_state = TrendState(max_duration_seconds= 2.5 * 60 * 60, expiration_trend_time=10 * 60, fresh_trend_time = 1.7 * 60)  # Expira In 10 minute
+trend_state_big = TrendState(max_duration_seconds= 2.5 * 60 * 60, expiration_trend_time=10 * 60, fresh_trend_time = 1.7 * 60)  # Expira In 10 minute
+                   
 while True:
     #try:
         time.sleep(TIME_SLEEP_GET_PRICE)
@@ -696,37 +747,8 @@ while True:
             continue
 
         price_window.process_price(current_price)
-        #prediction.process_price(current_price)
-        #ppredict = prediction.predict_next_price()
-        #print(f"predicted price : {ppredict}")
-           
-        action, proposed_price, price_change_percent, slope = price_window.evaluate_buy_sell_opportunity(
-            current_price, threshold_percent=0.8, decrease_percent=7
-        )
+        price_window_big.process_price(current_price)
 
-        # expired_trend = 'HOLD'
-        # if action == 'BUY':
-            # if trend_state1.is_trend_up():
-                # trend_state1.confirm_trend()
-            # else:
-                # expired_trend = trend_state1.start_trend('UP')
-        # if action == 'SELL':
-            # if trend_state1.is_trend_down():
-                # trend_state1.confirm_trend()  
-            # else:
-                # expired_trend = trend_state1.start_trend('DOWN')
-        # if action == "HOLD":
-           # if trend_state1.is_hold():
-              # trend_state1.confirm_trend()
-        
-        # if trend_state1.is_trend_up() == 3:
-            # track_and_place_order('BUY', proposed_price, current_price, order_ids=order_ids)   
-        # if trend_state1.is_trend_down() == 3:
-            # track_and_place_order('SELL', proposed_price, current_price, order_ids=order_ids)   
-
-        #
-        # Verificam schimbarile de preț si gestionam trendurile
-        #
         proposed_price = current_price
        
         slope, pos = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
@@ -744,40 +766,19 @@ while True:
             count = 0
         
         gradient = price_window.calculate_slope()
-        
-        if gradient > 0 and slope != 0 :
-            # Confirmam un trend de crestere
-            initial_difference = 147 * (pos + 0.5)/abs(slope)
-            print(f"DIFERENTA MARE UP! DIFF start {initial_difference}")
-            if trend_state2.is_trend_up():
-                count = trend_state2.confirm_trend() # Confirmam ca trendul de crestere continua
-                diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
-                proposed_price = current_price - diff
-                if trend_state2.is_trend_fresh() : proposed_price = current_price
-                #track_and_place_order('BUY', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
-            else:
-                expired_trend = trend_state2.start_trend('UP')  # Incepem un trend nou de crestere
-                proposed_price = current_price #- initial_difference
-                #track_and_place_order('BUY', sym.btcsymbol, 1, proposed_price, current_price, order_ids=order_ids)          
-        elif gradient < 0 and slope != 0 :
-            # Confirmam un trend de scadere
-            initial_difference = 7  * (pos + 0.5) /abs(slope)
-            print(f"DIFERENTA MARE DOWN! DIFF start {initial_difference}")
-            if trend_state2.is_trend_down():
-                count = trend_state2.confirm_trend() # Confirmam ca trendul de scadere continua
-                diff, _ = u.decrese_value_by_increment_exp(initial_difference, count)
-                proposed_price = proposed_price + diff
-                if trend_state2.is_trend_fresh() : proposed_price = current_price
-                #track_and_place_order('SELL', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
-            else:
-                expired_trend = trend_state2.start_trend('DOWN')  # Incepem un trend nou de scadere
-                proposed_price = current_price #+ initial_difference
-                #track_and_place_order('SELL', sym.btcsymbol, 1, proposed_price, current_price, order_ids=order_ids)
+       
 
         update_csv_file(filename, sym.btcsymbol, slope, count, 0, 0, pos, gradient)
         update_csv_file(filename, sym.taosymbol, slope, count, 0, 0, pos, gradient)
-            
         
+        logic("SMALL" , gradient, slope, trend_state)
+    
+        #
+        # BIG ONE!!!
+        #
+        slope_big, _ = price_window_big.check_price_change(PRICE_CHANGE_THRESHOLD_BIG_EUR)
+        logic("BIG", gradient, slope_big, trend_state_big)
+
 
     #except BinanceAPIException as e:
         #print(f"Binance API Error: {e}")
