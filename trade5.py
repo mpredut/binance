@@ -696,7 +696,7 @@ def logic(win, gradient, slope, trend_state) :
             count = trend_state.confirm_trend() # Confirmam ca trendul de scadere continua
             if trend_state.is_trend_down() < 25 * 1.5 and trend_state.is_trend_fresh() :
                 #track_and_place_order('SELL', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
-                api.place_order_smart("SELL", self.symbol, proposed_price, 0.017, safeback_seconds=8*3600+60,
+                api.place_order_smart("SELL", sym.symbol, proposed_price, 0.017, safeback_seconds=8*3600+60,
                     force=True, cancelorders=True, hours=1)
         else:
             expired_trend = trend_state.start_trend('DOWN')  # Incepem un trend nou de scadere
@@ -765,7 +765,7 @@ while True:
         else :
             count = 0
         
-        gradient = price_window.calculate_slope()
+        #gradient = price_window.calculate_slope()
        
 
         update_csv_file(filename, sym.btcsymbol, slope, count, 0, 0, pos, gradient)
