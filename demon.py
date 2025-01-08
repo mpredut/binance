@@ -53,6 +53,12 @@ def remove_absolute_paths(command):
     
     return new_command
 
+def remove_python_executable_name(command):
+    parts = command.split(None, 1)  # Împarte comanda în maxim 2 părți: executabil + restul
+    if len(parts) > 1 and parts[0].startswith("python"):
+        return parts[1]  # Returnează doar partea rămasă (fără executabil)
+    return command  # Dacă nu este un executabil Python, returnează comanda originală
+
 
 def log_message(message):
     with open(LOG_FILE, "a") as log:
@@ -77,7 +83,7 @@ def get_running_python_processes():
         processes = [line.split(None, 10) for line in output.split("\n") if "python" in line and len(line.split(None, 10)) > 10]
         #print(processes)
         return {
-            remove_absolute_paths(proc[-1]): ensure_absolute_paths(proc[-1]) for proc in processes
+            remove_python_executable_name(remove_absolute_paths(proc[-1])): ensure_absolute_paths(proc[-1]) for proc in processes
         }
     except subprocess.CalledProcessError as e:
         log_message(f"Eroare la executarea comenzii ps: {e}")
