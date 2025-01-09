@@ -704,7 +704,7 @@ def logic(win, gradient, slope, trend_state) :
             api.place_order_smart("SELL", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=8*3600+60,
                 force=True, cancelorders=True, hours=1)                  
             
-            
+    proposed_price = current_price        
     #25 de confirmari per minut * 3 minute
     if gradient <= 0 and trend_state.is_trend_up():
         if (trend_state.is_trend_up() > 25 * 3 or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
@@ -735,7 +735,9 @@ count = 0
 TREND_TO_BE_OLD_SECONDS=60 * 60 * 1.5 # 1.5h -> 2.5h   
 trend_state = TrendState(max_duration_seconds= 2.5 * 60 * 60, expiration_trend_time=10 * 60, fresh_trend_time = 1.7 * 60)  # Expira In 10 minute
 trend_state_big = TrendState(max_duration_seconds= 2.5 * 60 * 60, expiration_trend_time=10 * 60, fresh_trend_time = 1.7 * 60)  # Expira In 10 minute
-                   
+
+
+                
 while True:
     #try:
         time.sleep(TIME_SLEEP_GET_PRICE)
