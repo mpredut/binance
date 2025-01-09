@@ -557,7 +557,7 @@ class StateTracker:
             print(f"Error: File {file_path} not found. Using default values.")
             sell_recommendation = default_values_sell_recommendation
         except Exception as e:
-            print(f"Error reading file: {e}. Using default values.")
+            print(f"Error reading file: {file_path}. Error : {e}. Using default values.")
             sell_recommendation = default_values_sell_recommendation
 
         # Reprogram the update for every 2 minutes

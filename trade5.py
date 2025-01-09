@@ -729,7 +729,7 @@ price_window_big = PriceWindow(window_size_big)
 order_ids = []
 
 PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 310)
-PRICE_CHANGE_THRESHOLD_BIG_EUR = u.calculate_difference_percent(97000, 95000 - 677)
+PRICE_CHANGE_THRESHOLD_BIG_EUR = u.calculate_difference_percent(97000, 95000 - 377)
 count = 0
 
 TREND_TO_BE_OLD_SECONDS=60 * 60 * 1.5 # 1.5h -> 2.5h   
@@ -768,8 +768,8 @@ while True:
         #gradient = price_window.calculate_slope()
        
 
-        update_csv_file(filename, sym.btcsymbol, slope, count, 0, 0, pos, gradient)
-        update_csv_file(filename, sym.taosymbol, slope, count, 0, 0, pos, gradient)
+        #update_csv_file(filename, sym.btcsymbol, slope, count, 0, 0, pos, gradient)
+        #update_csv_file(filename, sym.taosymbol, slope, count, 0, 0, pos, gradient)
         
         logic("SMALL" , gradient, slope, trend_state)
     
