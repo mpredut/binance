@@ -739,7 +739,7 @@ trend_state_big = TrendState(max_duration_seconds= 2.5 * 60 * 60, expiration_tre
 
                 
 while True:
-    #try:
+    try:
         time.sleep(TIME_SLEEP_GET_PRICE)
 
         current_time = time.time()
@@ -782,10 +782,10 @@ while True:
         logic("BIG", gradient, slope_big, trend_state_big)
 
 
-    #except BinanceAPIException as e:
-        #print(f"Binance API Error: {e}")
-        #time.sleep(TIME_SLEEP_GET_PRICE)
-    #except Exception as e:
-        #print(f"Error: {e}")
-        #time.sleep(TIME_SLEEP_GET_PRICE)
+    except BinanceAPIException as e:
+        print(f"Binance API Error: {e}")
+        time.sleep(TIME_SLEEP_GET_PRICE)
+    except Exception as e:
+        print(f"Error: {e}")
+        time.sleep(TIME_SLEEP_GET_PRICE)
 
