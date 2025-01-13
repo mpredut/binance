@@ -390,19 +390,22 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=360
         qty = round(qty, 4)
 
         opposite_order_type = "SELL" if order_type == "BUY" else "BUY"
-        previous_trades = apitrades.get_my_trades(opposite_order_type, symbol, backdays=0, limit=1000) ## curent date
-        if len(apitrades.get_my_trades(order_type, symbol, backdays=0, limit=1000)) > max_daily_trades:
-            print(f"Am {len(previous_trades)} trades. Limita zilnica este de {max_daily_trades} pentru'{order_type}'.")
+        backdays = math.ceil(secunde / 86400)
+        oposite_trades = apitrades.get_my_trades(opposite_order_type, symbol, backdays=backdays, limit=1000) ## curent date
+        if len(apitrades.get_my_trades(order_type, symbol, backdays=backdays, limit=1000)) > max_daily_trades:
+            print(f"Am {len(oposite_trades)} trades. Limita zilnica este de {max_daily_trades} pentru'{order_type}'.")
             return False
-        print(f"Am {len(previous_trades)} trades .Ma raportrez doar la cele care sunt cu {time_back_in_seconds} seconds in urma");
+        #print("Tranzacții anterioare:")
+        #for trade in oposite_trades:
+            #print(apitrades.format_trade(trade, time_limit))
+            
+        print(f"Am {len(oposite_trades)} trades de tip {opposite_order_type} pentru {backdays} zile. ")
         
         time_limit = int(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
-        
         # Filtram tranzactiile opuse care au avut loc in intervalul specificat
-        recent_opposite_trades = [trade for trade in previous_trades if trade['time'] >= time_limit]
-        #print("Tranzacții anterioare:")
-        #for trade in previous_trades:
-            #print(apitrades.format_trade(trade, time_limit))
+        recent_opposite_trades = [trade for trade in oposite_trades if trade['time'] >= time_limit]
+        print(f"Ma raportrez doar la cele care sunt cu {time_back_in_seconds} seconds in urma")
+       
         
         #max_SELL_price = max(float(trade['quoteQty']) / float(trade['qty']) for trade in recent_opposite_trades)
         if recent_opposite_trades:
@@ -504,7 +507,7 @@ def place_order(order_type, symbol, price, qty, force=False, cancelorders=False,
         return None
 
 
-def place_safe_order(order_type, symbol, price, qty, safeback_seconds=5*3600+60, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
+def place_safe_order(order_type, symbol, price, qty, safeback_seconds=48*3600+60, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
     
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)  
@@ -515,7 +518,7 @@ def place_safe_order(order_type, symbol, price, qty, safeback_seconds=5*3600+60,
     return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders, hours=hours, fee_percentage=fee_percentage)    
     
 
-def place_order_smart(order_type, symbol, price, qty, safeback_seconds=8*3600+60, force=False, cancelorders=True, hours=5, pair=True):
+def place_order_smart(order_type, symbol, price, qty, safeback_seconds=48*3600+60, force=False, cancelorders=True, hours=5, pair=True):
     
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty) 
@@ -673,13 +676,14 @@ def check_order_filled(order_id, symbol):
 def check_order_filled_by_time(order_type, symbol, time_back_in_seconds, pret_min=None, pret_max=None):
     import binanceapi_trades as apitrades
 
-    previous_trades = apitrades.get_my_trades(order_type, symbol, backdays=0, limit=1000)
+    backdays = math.ceil(time_back_in_seconds / 86400)
+    trades = apitrades.get_my_trades(order_type, symbol, backdays=backdays, limit=1000)
     time_limit = int(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
 
                 
     # Filtram tranzactiile in functie de timp si optional in functie de pret total
     tranzactii_recente = [
-        trade for trade in previous_trades
+        trade for trade in trades
         if trade['time'] >= time_limit and
            (pret_min is None or float(trade['price']) * float(trade['qty']) >= pret_min) and
            (pret_max is None or float(trade['price']) * float(trade['qty']) <= pret_max)

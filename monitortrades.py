@@ -670,7 +670,7 @@ def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_t
         if price_increase > percentage_gain_threshold or u.are_close(price_increase, percentage_gain_threshold, target_tolerance_percent=1.0):
             if not is_trend_up(symbol):
                 print(f"Price increased with {price_increase * 100}% by more than {percentage_gain_threshold * 100}% versus buy price and not trend up!")
-                api.place_order_smart("SELL", symbol, current_price + 0.5, qty, cancelorders=True, hours=5, pair=False)
+                api.place_order_smart("SELL", symbol, current_price + 0.5, qty, cancelorders=True, hours=24, pair=False)
                 #api.place_SELL_order(symbol, current_price, qty)
             else :
                 print(f"No action taken, because trend is up!")
@@ -679,7 +679,7 @@ def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_t
                 print(f"Price decreased with {price_decrease * 100}% by more than {percentage_lost_threshold * 100}% versus buy price and not trend up!")
                 #if datetime.utcnow() - buy_time > timedelta(hours=1.5):
                 if current_time_s - buy_time > threshold_s:
-                    api.place_order_smart("SELL", symbol, current_price + 0.5, qty, cancelorders=True, hours=0.1, pair=False)
+                    api.place_order_smart("SELL", symbol, current_price + 0.5, qty, cancelorders=True, hours=48, pair=False)
                 else:
                     print(f"Conditions for selling not met despite the buy order being older than 1.5 hour.")    
                 #api.place_SELL_order(symbol, current_price, qty)
@@ -699,7 +699,7 @@ def monitor_price_and_trade(symbol, qty, max_age_seconds=3600, percentage_gain_t
             if is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease_versus_sell * 100}% by more than {percentage_gain_threshold * 100}% versus sell price: Placing buy order")
                 #api.cancel_orders_old_or_outlier("BUY", "BTCUSDT", qty, hours=0.5, price_difference_percentage=0.1)
-                api.place_order_smart("BUY", symbol, current_price + 0.5, qty, cancelorders=True, hours=5, pair=False)
+                api.place_order_smart("BUY", symbol, current_price + 0.5, qty, cancelorders=True, hours=48, pair=False)
             else :
                 print(f"No action taken, because trend is down!")
 
@@ -733,7 +733,7 @@ def main():
     #api.place_safe_order("BUY", taosymbol, taosymbol_target_price - 10, 1)
 
     while True:
-        state_tracker.display_states()
+        #state_tracker.display_states()
         print("-----TAO------")
         monitor_price_and_trade(taosymbol, 1 , 3600 * 24 * 7, percentage_gain_threshold=0.082, percentage_lost_threshold=0.019)
         print("-----BTC------")
