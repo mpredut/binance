@@ -390,7 +390,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=360
         qty = round(qty, 4)
 
         opposite_order_type = "SELL" if order_type == "BUY" else "BUY"
-        backdays = math.ceil(secunde / 86400)
+        backdays = math.ceil(time_back_in_seconds / 86400)
         oposite_trades = apitrades.get_my_trades(opposite_order_type, symbol, backdays=backdays, limit=1000) ## curent date
         if len(apitrades.get_my_trades(order_type, symbol, backdays=backdays, limit=1000)) > max_daily_trades:
             print(f"Am {len(oposite_trades)} trades. Limita zilnica este de {max_daily_trades} pentru'{order_type}'.")
