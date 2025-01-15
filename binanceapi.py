@@ -404,7 +404,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=360
         time_limit = int(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
         # Filtram tranzactiile opuse care au avut loc in intervalul specificat
         recent_opposite_trades = [trade for trade in oposite_trades if trade['time'] >= time_limit]
-        print(f"Ma raportrez doar la cele care sunt cu {time_back_in_seconds} seconds in urma")
+        print(f"Ma raportrez doar la cele care sunt cu {time_back_in_seconds} sec. back , in numar de '{len(recent_opposite_trades)}'")
        
         
         #max_SELL_price = max(float(trade['quoteQty']) / float(trade['qty']) for trade in recent_opposite_trades)

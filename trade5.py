@@ -670,38 +670,39 @@ print (f" {(trades)}");
 
 def logic(win, gradient, slope, trend_state) :
 
+    print(f"gradient={gradient}, slope={slope}")
     #todo adjust safeback_seconds
-    if gradient > 0 and slope != 0 :
+    if gradient > 0 and slope < 0 :
         # Confirmam un trend de crestere
-        print(f"DIFERENTA MARE {win} UP!")
+        print(f"DIFERENTA MARE {win} DOWN!")
         proposed_price = current_price # * (1 - 0.01)
         if trend_state.is_trend_up():
             count = trend_state.confirm_trend() # Confirmam ca trendul de crestere continua         
             #25 de confirmari per minut * 1.5 minute
             if trend_state.is_trend_up() < 25 * 1.5 and trend_state.is_trend_fresh(): 
                 #track_and_place_order('BUY', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
-                api.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=8*3600+60,
+                api.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
                     force=True, cancelorders=True, hours=1)
         else:
             expired_trend = trend_state.start_trend('UP')  # Incepem un trend nou de crestere
             #track_and_place_order('BUY', sym.btcsymbol, 1, proposed_price, current_price, order_ids=order_ids) 
-            api.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=8*3600+60,
+            api.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
                 force=True, cancelorders=True, hours=1)             
     
-    if gradient < 0 and slope != 0 :
+    if gradient < 0 and slope > 0 :
         # Confirmam un trend de scadere
-        print(f"DIFERENTA MARE {win} DOWN!")
+        print(f"DIFERENTA MARE {win} UP!")
         proposed_price = current_price #  * (1 + 0.01)
         if trend_state.is_trend_down():
             count = trend_state.confirm_trend() # Confirmam ca trendul de scadere continua
             if trend_state.is_trend_down() < 25 * 1.5 and trend_state.is_trend_fresh() :
                 #track_and_place_order('SELL', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
-                api.place_order_smart("SELL", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=8*3600+60,
+                api.place_order_smart("SELL", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
                     force=True, cancelorders=True, hours=1)
         else:
             expired_trend = trend_state.start_trend('DOWN')  # Incepem un trend nou de scadere
             #track_and_place_order('SELL', sym.btcsymbol, 1, proposed_price, current_price, order_ids=order_ids)
-            api.place_order_smart("SELL", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=8*3600+60,
+            api.place_order_smart("SELL", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
                 force=True, cancelorders=True, hours=1)                  
             
     proposed_price = current_price        
@@ -709,13 +710,13 @@ def logic(win, gradient, slope, trend_state) :
     if gradient <= 0 and trend_state.is_trend_up():
         if (trend_state.is_trend_up() > 25 * 3 or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE SELL ALL {win} .... ")
-            api.place_order_smart("SELL", sym.btcsymbol, proposed_price, 0.2, safeback_seconds=8*3600+60,
+            api.place_order_smart("SELL", sym.btcsymbol, proposed_price, 0.2, safeback_seconds=16*3600+60,
                 force=True, cancelorders=True, hours=1)
     #25 de confirmari per minut * 3 minute
     if gradient >= 0 and trend_state.is_trend_down(): 
         if (trend_state.is_trend_down() > 25 * 3 or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE BUY ALL {win} .... ")
-            api.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.2, safeback_seconds=8*3600+60,
+            api.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.2, safeback_seconds=16*3600+60,
                 force=True, cancelorders=True, hours=1) 
                     
 
@@ -739,7 +740,7 @@ trend_state_big = TrendState(max_duration_seconds= 2.5 * 60 * 60, expiration_tre
 
                 
 while True:
-    try:
+    #try:
         time.sleep(TIME_SLEEP_GET_PRICE)
 
         current_time = time.time()
@@ -757,9 +758,9 @@ while True:
         gradient, gradient_coff = price_window.get_trend()
           
         if(slope * gradient < 0 ) :
-            print(f"ALERT slope = {slope} gradient = {gradient}")
+            print(f"ALERT slope1 = {slope} gradient = {gradient}")
         if(slope * price_window.calculate_slope() < 0 ) :
-            print(f"ALERT slope = {slope} calculate_slope() = {price_window.calculate_slope()}")
+            print(f"ALERT slope2 = {slope} calculate_slope() = {price_window.calculate_slope()}")
         if(gradient * price_window.calculate_slope() < 0 ) :
             print(f"ALERT gradient = {gradient} calculate_slope() = {price_window.calculate_slope()}")
         if slope == 0:
@@ -773,7 +774,7 @@ while True:
         #update_csv_file(filename, sym.btcsymbol, slope, count, 0, 0, pos, gradient)
         #update_csv_file(filename, sym.taosymbol, slope, count, 0, 0, pos, gradient)
         
-        logic("SMALL" , gradient, slope, trend_state)
+        #logic("SMALL" , gradient, slope, trend_state)
     
         #
         # BIG ONE!!!
@@ -782,10 +783,10 @@ while True:
         logic("BIG", gradient, slope_big, trend_state_big)
 
 
-    except BinanceAPIException as e:
-        print(f"Binance API Error: {e}")
-        time.sleep(TIME_SLEEP_GET_PRICE)
-    except Exception as e:
-        print(f"Error: {e}")
-        time.sleep(TIME_SLEEP_GET_PRICE)
+    #except BinanceAPIException as e:
+        #print(f"Binance API Error: {e}")
+        #time.sleep(TIME_SLEEP_GET_PRICE)
+    #except Exception as e:
+        #print(f"Error: {e}")
+        #time.sleep(TIME_SLEEP_GET_PRICE)
 
