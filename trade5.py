@@ -679,15 +679,15 @@ def logic(win, gradient, slope, trend_state) :
         if trend_state.is_trend_up():
             count = trend_state.confirm_trend() # Confirmam ca trendul de crestere continua         
             #25 de confirmari per minut * 1.5 minute
-            if trend_state.is_trend_up() < 25 * 1.5 and trend_state.is_trend_fresh(): 
+            if count > 25 * 1.1 and count < 25 * 1.7 and trend_state.is_trend_fresh(): 
                 #track_and_place_order('BUY', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
                 api.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
                     force=True, cancelorders=True, hours=1)
         else:
             expired_trend = trend_state.start_trend('UP')  # Incepem un trend nou de crestere
             #track_and_place_order('BUY', sym.btcsymbol, 1, proposed_price, current_price, order_ids=order_ids) 
-            api.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
-                force=True, cancelorders=True, hours=1)             
+            #api.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
+            #    force=True, cancelorders=True, hours=1)             
     
     if gradient < 0 and slope > 0 :
         # Confirmam un trend de scadere
@@ -695,28 +695,28 @@ def logic(win, gradient, slope, trend_state) :
         proposed_price = current_price #  * (1 + 0.01)
         if trend_state.is_trend_down():
             count = trend_state.confirm_trend() # Confirmam ca trendul de scadere continua
-            if trend_state.is_trend_down() < 25 * 1.5 and trend_state.is_trend_fresh() :
+            if count > 25 * 1.1 and count < 25 * 1.7 and trend_state.is_trend_fresh() :
                 #track_and_place_order('SELL', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
                 api.place_order_smart("SELL", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
                     force=True, cancelorders=True, hours=1)
         else:
             expired_trend = trend_state.start_trend('DOWN')  # Incepem un trend nou de scadere
             #track_and_place_order('SELL', sym.btcsymbol, 1, proposed_price, current_price, order_ids=order_ids)
-            api.place_order_smart("SELL", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
-                force=True, cancelorders=True, hours=1)                  
+            #api.place_order_smart("SELL", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
+            #    force=True, cancelorders=True, hours=1)                  
             
     proposed_price = current_price        
     #25 de confirmari per minut * 3 minute
-    if gradient <= 0 and trend_state.is_trend_up():
+    if slope <= 0 and trend_state.is_trend_up():
         if (trend_state.is_trend_up() > 25 * 3 or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
-            print(f"ATENTIE SELL ALL {win} .... ")
-            api.place_order_smart("SELL", sym.btcsymbol, proposed_price, 0.2, safeback_seconds=16*3600+60,
-                force=True, cancelorders=True, hours=1)
-    #25 de confirmari per minut * 3 minute
-    if gradient >= 0 and trend_state.is_trend_down(): 
-        if (trend_state.is_trend_down() > 25 * 3 or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE BUY ALL {win} .... ")
             api.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.2, safeback_seconds=16*3600+60,
+                force=True, cancelorders=True, hours=1)
+    #25 de confirmari per minut * 3 minute
+    if slope >= 0 and trend_state.is_trend_down(): 
+        if (trend_state.is_trend_down() > 25 * 3 or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
+            print(f"ATENTIE SELL ALL {win} .... ")
+            api.place_order_smart("SELL", sym.btcsymbol, proposed_price, 0.2, safeback_seconds=16*3600+60,
                 force=True, cancelorders=True, hours=1) 
                     
 
