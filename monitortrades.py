@@ -652,14 +652,24 @@ def is_trend_up(symbol):
     return slope > 0 or (slope == 0 and gradient > 0)
 
 
-def get_relevant_trade(trade_orders, trade_type, current_time_s, threshold_s, symbol):
+def get_relevant_trade(trade_orders, trade_type, threshold_s, symbol):
     if not trade_orders:
-        return None, None
+        return None, None, None
+        
+    current_time_s = int(time.time())
+     
     trade_orders.sort(key=lambda x: x['time'], reverse=True)
     trade_price = float(trade_orders[0]['price'])
     trade_time = float(trade_orders[0]['time']) / 1000  # Timpul în secunde
     print(f"{trade_type.capitalize()} price for {symbol}: {trade_price}")
-    return trade_price, trade_time
+    
+    can_trade = True
+    if current_time_s - trade_time < threshold_s:
+        print(f"Tranzactii de {trade_type.upper()} prea recente."
+            f"A trecut doar {u.secondsToHours(current_time_s - trade_time):.2f} h. Astept sa treaca {u.secondsToHours(threshold_s)}")
+        can_trade = False
+          
+    return trade_price, trade_time, can_trade
 
 
 #//todo: review 0.5
@@ -676,20 +686,9 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
     if not (trade_orders_buy or trade_orders_sell):
         print(f"No trade orders found for {symbol} in the last {maxage_trade_s} seconds.")
         return 
-    buy_price, buy_time = get_relevant_trade(trade_orders_buy, "buy", current_time_s, threshold_s, symbol)
-    sell_price, sell_time = get_relevant_trade(trade_orders_sell, "sell", current_time_s, threshold_s, symbol)
-  
-    if trade_orders_buy:
-        if trade_orders_sell and current_time_s - buy_time < threshold_s:
-            print(f"Tranzactii de BUY prea recente. A trecut doar {u.secondsToHours(current_time_s - buy_time):.2f} h."
-                f"Astept sa treaca {u.secondsToHours(threshold_s)}")              
-            return
-    if trade_orders_sell:
-       if trade_orders_buy and current_time_s - sell_time < threshold_s:
-            print(f"Tranzactii de SELL prea recente. A trecut doar {u.secondsToHours(current_time_s - sell_time):.2f} h."
-                f"Astept sa treaca {u.secondsToHours(threshold_s)}")    
-            return 
-  
+    buy_price, buy_time, can_buy = get_relevant_trade(trade_orders_buy, "BUY", threshold_s, symbol)
+    sell_price, sell_time, can_sell = get_relevant_trade(trade_orders_sell, "SELL", threshold_s, symbol)
+   
     # 2. Obtine pretul curent de pe piata
     current_price = api.get_current_price(symbol)
     print(f"Current price for {symbol}: {current_price}")
@@ -704,7 +703,9 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
         if price_increase > gain_threshold or u.are_close(price_increase, gain_threshold, target_tolerance_percent=1.0):
             if not is_trend_up(symbol):
                 print(f"Price increased with {price_increase * 100}% by more than {gain_threshold * 100}% versus buy price and not trend up!")
-                api.place_order_smart("SELL", symbol, current_price, qty, safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=False)
+                if can_sell:
+                    api.place_order_smart("SELL", symbol, current_price, 
+                        qty, safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=False)
                 #api.place_SELL_order(symbol, current_price, qty)
                 #api.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
                 #    force=True, cancelorders=True, hours=1)
@@ -713,7 +714,9 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
         elif price_decrease > lost_threshold or u.are_close(price_decrease, lost_threshold, target_tolerance_percent=1.0):
             if not is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease * 100}% by more than {lost_threshold * 100}% versus buy price and not trend up!")
-                api.place_order_smart("SELL", symbol, current_price, qty, safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=True)
+                if can_sell:
+                    api.place_order_smart("SELL", symbol, current_price, 
+                        qty, safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=True)
                 #api.place_SELL_order(symbol, current_price, qty)
             else:
                 print(f"No action taken, because trend is up!")
@@ -727,7 +730,9 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
             if is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease_versus_sell * 100}% by more than {gain_threshold * 100}% versus sell price: Placing buy order")
                 #api.cancel_orders_old_or_outlier("BUY", "BTCUSDT", qty, hours=0.5, price_difference_percentage=0.1)
-                api.place_order_smart("BUY", symbol, current_price + 0.5, qty, safeback_seconds=sbs, cancelorders=True, hours=48, pair=False)
+                if can_buy:
+                    api.place_order_smart("BUY", symbol, current_price + 0.5, 
+                        qty, safeback_seconds=sbs, cancelorders=True, hours=48, pair=False)
             else :
                 print(f"No action taken, because trend is down!")
 
@@ -735,8 +740,7 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
     #except Exception as e:
     #    print(f"An error occurred while monitoring the price: {e}")
 
-def main():
-              
+def main():             
     #api.place_SELL_order_at_market("BTCUSDT", 0.017)
     #return
     filename = "trades_BTCUSDT.json"    
