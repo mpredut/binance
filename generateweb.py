@@ -120,7 +120,7 @@ def genereaza_html(monede, refresh_interval=10):
         <script>
             function actionSell(moneda) {{
                 const cantitate = document.getElementById(`qty-${{moneda}}`).value;
-                fetch('http://127.0.0.1:8000/trade/sell', {{
+                fetch('http://127.0.0.1:23624/trade/sell', {{
                     method: 'POST',
                     headers: {{
                         'Content-Type': 'application/json'
@@ -134,7 +134,7 @@ def genereaza_html(monede, refresh_interval=10):
 
             function actionBuy(moneda) {{
                 const cantitate = document.getElementById(`qty-${{moneda}}`).value;
-                fetch('http://127.0.0.1:8000/trade/buy', {{
+                fetch('http://127.0.0.1:23624/trade/buy', {{
                     method: 'POST',
                     headers: {{
                         'Content-Type': 'application/json'
