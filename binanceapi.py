@@ -373,11 +373,13 @@ def place_SELL_order_at_market(symbol, qty):
 
 
 
-def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=3600, max_daily_trades=10, profit_percentage = 0.4):
+def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, max_daily_trades=10, profit_percentage=0.4):
     import binanceapi_trades as apitrades
 
     order_type = order_type.upper()
-    sym.validate_params(order_type, symbol, price, qty)    
+    sym.validate_params(order_type, symbol, price, qty)
+    minutes_ago = time.time() - 3 * 60  # With 3 min in urma , time.time() => seconds
+        
     try:
         
         current_price = get_current_price(symbol)
@@ -391,10 +393,17 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=360
 
         opposite_order_type = "SELL" if order_type == "BUY" else "BUY"
         backdays = math.ceil(time_back_in_seconds / 86400)
+        all_trades = apitrades.get_my_trades(order_type, symbol, backdays=backdays, limit=1000)
         oposite_trades = apitrades.get_my_trades(opposite_order_type, symbol, backdays=backdays, limit=1000) ## curent date
-        if len(apitrades.get_my_trades(order_type, symbol, backdays=backdays, limit=1000)) > max_daily_trades:
+        if len(all_trades) > max_daily_trades:
             print(f"Am {len(oposite_trades)} trades. Limita zilnica este de {max_daily_trades} pentru'{order_type}'.")
             return False
+        for trade in all_trades:
+            trade_time = trade['time'] / 1000  # 'time' este in milisecunde
+            if trade_time > minutes_ago:
+                print(f"Are recent transactions in last {minutes_ago} minits")
+                return False
+                
         #print("Tranzacții anterioare:")
         #for trade in oposite_trades:
             #print(apitrades.format_trade(trade, time_limit))
@@ -422,7 +431,8 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=360
             print(f"[DEBUG] Required Percentage Diff: {profit_percentage}%")   
             
             if diff_percent < profit_percentage:
-                    print(f"Diferenta procentuala ({diff_percent:.2f}%) este sub pragul necesar de {profit_percentage}%. Ordinul de {order_type} nu a fost plasat.")
+                    print(f"Diferenta procentuala ({diff_percent:.2f}%) este sub pragul necesar"
+                        f"de {profit_percentage}%. Ordinul de {order_type} nu a fost plasat.")
                     return False
         return True
 
@@ -510,7 +520,7 @@ def place_order(order_type, symbol, price, qty, force=False, cancelorders=False,
 def place_safe_order(order_type, symbol, price, qty, safeback_seconds=48*3600+60, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
     
     order_type = order_type.upper()
-    sym.validate_params(order_type, symbol, price, qty)  
+    sym.validate_params(order_type, symbol, price, qty)
     
     if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=safeback_seconds, max_daily_trades=15, profit_percentage = 0.25) :
         return None
