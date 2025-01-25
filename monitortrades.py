@@ -749,7 +749,7 @@ def main():
         print("-----TAO------")
         monitor_price_and_trade(taosymbol,sbs=72*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
         print("-----BTC------")
-        monitor_price_and_trade(symbol, sbs=72*3600+60, maxage_trade_s=3600*24*17)
+        monitor_price_and_trade(symbol, sbs=142*3600+60, maxage_trade_s=3600*24*7)
         data = sell_recommendation[symbol]
         procent_desired_profit = data['procent_desired_profit']
         expired_duration = data['expired_duration']
