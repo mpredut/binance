@@ -495,6 +495,22 @@ def start_monitoring(filename, interval=3600, limit=1000, years_to_keep=2):
     monitoring_thread.start()
 
 
+def print_number_of_trades(maxage_trade_s):
+    print(f"TRADE COUNT")
+    for symbol in sym.symbols:
+        print(f"For {symbol}")
+        close_buy_orders = apitrades.get_trade_orders("BUY", symbol, maxage_trade_s)
+        print(f"get_trade_orders:           Found {len(close_buy_orders)} close 'BUY' orders in the last {u.secondsToDays(maxage_trade_s)} days.")
+
+        close_sell_orders = apitrades.get_trade_orders("SELL", symbol, maxage_trade_s)
+        print(f"get_trade_orders:           Found {len(close_sell_orders)} close 'SELL' orders in the last {u.secondsToDays(maxage_trade_s)} days.")
+
+        orders = apitrades.get_trade_orders(None, symbol, maxage_trade_s)
+        print(f"get_trade_orders:           Total found {len(orders)} orders in the last {u.secondsToDays(maxage_trade_s)} days.")
+
+
+
+
 # Cache-ul care va fi actualizat periodic
 default_values_sell_recommendation = {
     "BTCUSDT": {
@@ -745,31 +761,28 @@ def main():
     #api.place_safe_order("BUY", taosymbol, taosymbol_target_price - 10, 1)
 
     while True:
+
         #state_tracker.display_states()
-        print("-----TAO------")
-        monitor_price_and_trade(taosymbol,sbs=72*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
+
+        print_number_of_trades(maxage_trade_s)
+        
         print("-----BTC------")
         monitor_price_and_trade(symbol, sbs=142*3600+60, maxage_trade_s=3600*24*7)
+        print("-----TAO------")
+        monitor_price_and_trade(taosymbol,sbs=72*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
+        print("--------------")
+  
         data = sell_recommendation[symbol]
         procent_desired_profit = data['procent_desired_profit']
         expired_duration = data['expired_duration']
         min_procent = data['min_procent']
-        
         force_sell = data['force_sell']
-        days_after_use_current_price = data['days_after_use_current_price']
+        days_after_use_current_price = data['days_after_use_current_price']      
         
-        close_buy_orders = apitrades.get_trade_orders("BUY", symbol, maxage_trade_s)
-        print(f"get_trade_orders:           Found {len(close_buy_orders)} close 'BUY' orders in the last {u.secondsToDays(maxage_trade_s)} days.")
-        close_sell_orders = apitrades.get_trade_orders("SELL", symbol, maxage_trade_s)
-        print(f"get_trade_orders:           Found {len(close_sell_orders)} close 'SELL' orders in the last {u.secondsToDays(maxage_trade_s)} days.")
-        orders = apitrades.get_trade_orders(None, symbol, maxage_trade_s)
-        print(f"get_trade_orders:           Total found {len(orders)} orders in the last {u.secondsToDays(maxage_trade_s)} day.")
-        time.sleep(2)       
-    
         update_trades(trades, symbol, maxage_trade_s, procent_desired_profit, expired_duration, min_procent)
         #apply_sell_orders(trades, days_after_use_current_price, force_sell)
         #monitor_close_orders_by_age2(maxage_trade_s)
-        time.sleep(10*4)  # Periodic, verificam ordinele in cache
+        time.sleep(60*1.8)  # Astept 1.8 minute.
         
         
 if __name__ == "__main__":
