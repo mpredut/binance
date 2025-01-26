@@ -30,12 +30,6 @@ stop = False
 
 import binance
 print(binance.__version__)
-currentprice = {}
-#currentprice[symbol] = 0
-#currentprice['TAOUSDT'] = 0
-
-currenttime = time.time()
-
 
 def listen_to_binance(symbol):
     socket = f"wss://stream.binance.com:9443/ws/{symbol.lower()}@ticker"
@@ -120,18 +114,26 @@ def get_symbol_limits(symbol):
                 return min_qty, max_qty, step_size
     return None, None, None
 
-refresh_interval = 0 # Intervalul in care sa se faca actualizarea (in secunde)
+currentprice = {}
+lasttime = {}
+refresh_interval = {}
+currentprice = {}
+
+for symbol in sym.symbols:
+    refresh_interval[symbol] = 1  # Timp de refresh în secunde
+    currentprice[symbol] = None
+    lasttime[symbol] = 0
+    
 def get_current_price(symbol):
-    global currenttime
     global currentprice
     global refresh_interval
     #refresh_interval = 0 # Intervalul in care sa se faca actualizarea (in secunde)
-    try:
-        if symbol not in currentprice or (currenttime + refresh_interval <= time.time()):
-            refresh_interval = 2
-            ticker = client.get_symbol_ticker(symbol=symbol)  # Obtineti pretul curent de la Binance API
+    try:     
+        if symbol not in currentprice or (lasttime[symbol] + refresh_interval[symbol] <= time.time()):
+            ticker = client.get_symbol_ticker(symbol=symbol)  # Obțineți prețul curent de la Binance API
             currentprice[symbol] = float(ticker['price'])
-            currenttime = time.time()
+            lasttime[symbol] = time.time()
+            print(f"Refresh price {symbol}: {currentprice[symbol]}")
 
         return currentprice[symbol]
     
@@ -145,7 +147,7 @@ def get_current_price(symbol):
         print(f"Folosesc pretul obtinut prin websocket, {symbol}: {currentprice.get(symbol, 'N/A')}")
         return currentprice.get(symbol, None)  # Returnam None daca simbolul nu exista
 
-        
+currenttime = time.time()       
 def get_current_time():
         global currenttime
         currenttime = time.time()
