@@ -346,7 +346,7 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=
     new_trades = [trade for trade in new_trades if trade['time'] > most_recent_trade_time]
 
     if new_trades:
-        print(f"Found {len(new_trades)} new trades.")
+        print(f"Found {len(new_trades)} new trades for {symbol}.")
         
         # Adaugam doar tranzactiile noi la cele existente, dar fara cele vechi
         all_trades = filtered_existing_trades + new_trades
