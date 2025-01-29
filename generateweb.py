@@ -4,8 +4,6 @@ import os
 monede = [
     {"nume": "BTCUSDT", "cantitate": 0.5},
     {"nume": "ETH", "cantitate": 2.0},
-    {"nume": "ADA", "cantitate": 150.0},
-    {"nume": "ADA", "cantitate": 222.0},
 ]
 monede_empty = [
 ]
@@ -73,10 +71,17 @@ def genereaza_html(monede, refresh_interval=10):
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Monede de tranzacționat</title>
         {stil_css}
+        <button onclick="enableAudio()">Activează sunetul</button>
+<script>
+    let audio = new Audio('/static/bip.wav');
+    function enableAudio() {{
+        audio.play().catch(err => console.error("Eroare la redarea sunetului:", err));
+    }}
+</script>
         <script>
             // Redă un sunet dacă există monede
             if ({'true' if monede else 'false'}) {{
-                const audio = new Audio('bip.wav'); // Calea către fișierul audio
+                const audio = new Audio('/static/bip.wav'); // Calea către fișierul audio
                 audio.play().catch(err => console.error("Eroare la redarea sunetului:", err));
             }}
             // Reîncarcă pagina la fiecare {refresh_interval} secunde
