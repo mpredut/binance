@@ -1,7 +1,9 @@
 # server.py
+import os
 from fastapi import FastAPI
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,11 +32,17 @@ import log
 
 
 
+
 @app.get("/")
 def read_root():
     headers = {"ngrok-skip-browser-warning": "true"}
-    return Response(content="Welcome to my API!", headers=headers)
-    #return {"message": "Hello, World!"}
+    index_path = "index.html"
+    
+    if os.path.exists(index_path):
+        return FileResponse(index_path, headers=headers)
+    else:
+        return Response(content="index.html not found", headers=headers, status_code=404)
+
     
 # Modele de date
 class TradeRequest(BaseModel):
