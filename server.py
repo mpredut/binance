@@ -6,6 +6,9 @@ from pydantic import BaseModel
 
 from fastapi.middleware.cors import CORSMiddleware
 
+from fastapi.staticfiles import StaticFiles
+app.mount("/static", StaticFiles(directory="static"), name="static")
+#app.mount("/files", StaticFiles(directory="/home/predut/binance"), name="files")
 app = FastAPI()
 
 # Configurare CORS
