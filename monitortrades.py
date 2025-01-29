@@ -477,12 +477,9 @@ def apply_sell_orders(trades, days, force_sell):
 
 # Functia principala care ruleaza periodic actualizarile si cache-ul
 def monitor_trades(filename, interval=3600, limit=1000, years_to_keep=2):
-    #print(f"monitor_trades: order_type {order_type} and symbol {symbol}")
-    symbols = ["BTCUSDT", "TAOUSDT"]
     order_type = None
     while True:
-        # Actualizam fisierul de tranzactii
-        for symbol in symbols:
+        for symbol in sym.symbols:
             apitrades.save_trades_to_file(order_type, symbol, filename, limit=limit, years_to_keep=years_to_keep)
         
         # Reincarcam tranzactiile in cache
@@ -654,6 +651,7 @@ def is_trend_up(symbol):
 
 def get_relevant_trade(trade_orders, trade_type, threshold_s, symbol):
     if not trade_orders:
+        print(f"Warning: No {trade_type} transactions for that currency!!!")
         return None, None, None
         
     current_time_s = int(time.time())
@@ -661,14 +659,14 @@ def get_relevant_trade(trade_orders, trade_type, threshold_s, symbol):
     trade_orders.sort(key=lambda x: x['time'], reverse=True)
     trade_price = float(trade_orders[0]['price'])
     trade_time = float(trade_orders[0]['time']) / 1000  # Timpul în secunde
-    print(f"{trade_type.capitalize()} price for {symbol}: {trade_price}")
+    print(f"{trade_type.capitalize()} price for {symbol}: {trade_price} at {u.timeToHMS(trade_time)}")
     
     can_trade = True
     if current_time_s - trade_time < threshold_s:
         print(f"Tranzactii de {trade_type.upper()} prea recente."
-            f"A trecut doar {u.secondsToHours(current_time_s - trade_time):.2f} h. Astept sa treaca {u.secondsToHours(threshold_s)}")
+            f"A trecut doar {u.secondsToHours(current_time_s - trade_time):.2f} h. Astept sa treaca {u.secondsToHours(threshold_s)} h.")
         can_trade = False
-          
+
     return trade_price, trade_time, can_trade
 
 
@@ -688,7 +686,7 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
         return 
     buy_price, buy_time, can_buy = get_relevant_trade(trade_orders_buy, "BUY", threshold_s, symbol)
     sell_price, sell_time, can_sell = get_relevant_trade(trade_orders_sell, "SELL", threshold_s, symbol)
-   
+
     # 2. Obtine pretul curent de pe piata
     current_price = api.get_current_price(symbol)
     print(f"Current price for {symbol}: {current_price}")
@@ -706,6 +704,8 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
                 if can_sell:
                     api.place_order_smart("SELL", symbol, current_price, 
                         qty, safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=False)
+                else:
+                    print("No can sell")
                 #api.place_SELL_order(symbol, current_price, qty)
                 #api.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
                 #    force=True, cancelorders=True, hours=1)
@@ -718,6 +718,8 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
                     api.place_order_smart("SELL", symbol, current_price, 
                         qty, safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=True)
                 #api.place_SELL_order(symbol, current_price, qty)
+                else:
+                    print("No can sell")
             else:
                 print(f"No action taken, because trend is up!")
        
@@ -733,6 +735,8 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
                 if can_buy:
                     api.place_order_smart("BUY", symbol, current_price + 0.5, 
                         qty, safeback_seconds=sbs, cancelorders=True, hours=48, pair=False)
+                else:
+                   print("No can buy")
             else :
                 print(f"No action taken, because trend is down!")
 
@@ -743,7 +747,9 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
 def main():             
     #api.place_SELL_order_at_market("BTCUSDT", 0.017)
     #return
-    filename = "trades_BTCUSDT.json"    
+  
+    filename = "trades.json" 
+    
     maxage_trade_s =  3 * 24 * 3600  # Timpul maxim in care ordinele executate/filled sunt considerate recente (3 zile)
     interval = 60 * 4 #4 minute
 
@@ -753,11 +759,15 @@ def main():
     file_path = "sell_recommendation.csv"
     state_tracker.update_sell_recommendation(file_path)
     state_tracker.display_sell_recommendation()
-    #monitor_trades(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=2)
+    #monitor_trades(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=01)
 
     # Pornim monitorizarea periodica a tranzactiilor
-    start_monitoring(filename, interval=interval, limit=1000, years_to_keep=2)
+    start_monitoring(filename, interval=interval, limit=1000, years_to_keep=0.02)
     time.sleep(5)
+
+    close_sell_orders = apitrades.get_trade_orders("SELL", "TAOUSDT", maxage_trade_s)
+    print(f"get_trade_orders:           Found {len(close_sell_orders)} close 'SELL' orders in the last {u.secondsToDays(maxage_trade_s)} days.")
+    #return
     
     symbol = "BTCUSDT"
     taosymbol = 'TAOUSDT'
@@ -772,8 +782,10 @@ def main():
         
         print("-----BTC------")
         monitor_price_and_trade(symbol, sbs=142*3600+60, maxage_trade_s=3600*24*7)
-        print("-----TAO------")
+        print("-----TAOUSDT------")
         monitor_price_and_trade(taosymbol,sbs=72*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
+        print("-----TAOUSDC------")
+        monitor_price_and_trade('TAOUSDC',sbs=72*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
         print("--------------")
   
         data = sell_recommendation[symbol]
@@ -790,7 +802,6 @@ def main():
         
         
 if __name__ == "__main__":
-    filename = "trades_BTCUSDT.json"
     main()
 
     

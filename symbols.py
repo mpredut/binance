@@ -9,8 +9,7 @@ from binanceclient import client
 
 btcsymbol = 'BTCUSDT'
 taosymbol = 'TAOUSDT'
-symbols = [btcsymbol, taosymbol]
-
+symbols = ["BTCUSDT", "BTCUSDC", "TAOUSDT", "TAOUSDC"]
 
 def validate_ordertype(order_type):
     if order_type not in [None, 'BUY', 'SELL']:

@@ -133,7 +133,7 @@ def get_current_price(symbol):
             ticker = client.get_symbol_ticker(symbol=symbol)  # Obțineți prețul curent de la Binance API
             currentprice[symbol] = float(ticker['price'])
             lasttime[symbol] = time.time()
-            print(f"Refresh price {symbol}: {currentprice[symbol]}")
+            #print(f"Refresh price {symbol}: {currentprice[symbol]}")
 
         return currentprice[symbol]
     
@@ -397,7 +397,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
         backdays = math.ceil(time_back_in_seconds / 86400)
         all_trades = apitrades.get_my_trades(order_type, symbol, backdays=backdays, limit=1000)
         oposite_trades = apitrades.get_my_trades(opposite_order_type, symbol, backdays=backdays, limit=1000) ## curent date
-        if len(all_trades) > max_daily_trades:
+        if len(all_trades)/backdays > max_daily_trades:
             print(f"Am {len(oposite_trades)} trades. Limita zilnica este de {max_daily_trades} pentru'{order_type}'.")
             return False
         for trade in all_trades:

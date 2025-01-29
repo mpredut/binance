@@ -172,9 +172,8 @@ def get_my_trades_simple(order_type, symbol, backdays=3, limit=1000):
         for day in range(backdays + 1):
             # Calculam start_time pentru ziua curenta in intervalul de 24 de ore
             start_time = end_time - max_interval
-            
+            print(f"Fetching trades for day {day}...")
             trades = api.client.get_my_trades(symbol=symbol, limit=limit, startTime=start_time, endTime=end_time)
-
             if trades:
                 #filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "BUY")]
                 if order_type == "BUY":
@@ -300,65 +299,73 @@ import os
 
 # Functia care salveaza tranzactiile noi in fisier (completare daca exista deja)
 def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=2):
-    
     sym.validate_ordertype(order_type)
     sym.validate_symbols(symbol)
-    
-    all_trades = []
 
-    # Verificam daca fisierul exista deja
+    print(f"save_trades_to_file: for symbol {symbol} and order_type {order_type} ")
+     
+    # Inițializăm structura principală ca listă
+    all_trades_list = []
+
+    # Verificăm dacă fișierul există și încărcăm datele
     if os.path.exists(filename):
         with open(filename, 'r') as f:
             try:
-                existing_trades = json.load(f)
-                print(f"Loaded {len(existing_trades)} existing trades from {filename}.")
+                all_trades_list = json.load(f)  # Încărcăm datele ca o listă
+                print(f"Loaded {len(all_trades_list)} total trades from {filename}.")
             except json.JSONDecodeError:
-                existing_trades = []
-    else:
-        existing_trades = []
+                print(f"Warning: Failed to decode JSON from {filename}. Starting with an empty list.")
+                all_trades_list = []
 
-    # Calculam timpul de la care pastram tranzactiile (doar cele mai recente decat 'years_to_keep' ani)
+    # Filtrăm tranzacțiile existente doar pentru simbolul curent
+    existing_trades = [trade for trade in all_trades_list if trade['symbol'] == symbol]
+
+    # Calculăm timpul cutoff
     current_time_ms = int(time.time() * 1000)
-    cutoff_time_ms = current_time_ms - (years_to_keep * 365 * 24 * 60 * 60 * 1000)  # Ani convertiti in milisecunde
+    cutoff_time_ms = current_time_ms - (years_to_keep * 365 * 24 * 60 * 60 * 1000)
 
-    # Eliminam tranzactiile care sunt mai vechi decat perioada dorita
+    # Eliminăm tranzacțiile mai vechi decât perioada dorită
     filtered_existing_trades = [trade for trade in existing_trades if trade['time'] > cutoff_time_ms]
-    print(f"Kept {len(filtered_existing_trades)} trades after filtering out old trades (older than {years_to_keep} years).")
 
-    # Daca exista deja tranzactii, gasim cea mai recenta tranzactie salvata
-    if filtered_existing_trades:
-        most_recent_trade_time = max(trade['time'] for trade in filtered_existing_trades)
-        print(f"Most recent trade time from file: {u.timestampToTime(most_recent_trade_time)}")
+    # Găsim cea mai recentă tranzacție pentru simbolul curent
+    most_recent_trade_time = max((trade['time'] for trade in filtered_existing_trades), default=0)
 
-        # Calculam cate zile au trecut de la most_recent_trade_time pana la acum
-        time_diff_ms = current_time_ms - most_recent_trade_time
-        backdays = time_diff_ms // (24 * 60 * 60 * 1000) + 1  # Cate zile au trecut de la ultima tranzactie
+    # Calculăm câte zile să cerem
+    if most_recent_trade_time == 0:
+        backdays = years_to_keep * 365
     else:
-        most_recent_trade_time = 0  # Daca nu exista tranzactii, incepem de la 0
-        backdays = 60  # Adaugam tranzactii pentru ultimele 60 de zile daca fisierul e gol
+        time_diff_ms = current_time_ms - most_recent_trade_time
+        backdays = time_diff_ms // (24 * 60 * 60 * 1000) + 1
 
     print(f"Fetching trades from the last {backdays} days for {symbol}, order type {order_type}.")
 
-    # Apelam functia pentru a obtine tranzactiile recente doar din perioada lipsa
-    new_trades = get_my_trades_simple(order_type, symbol, backdays=backdays, limit=limit)
+    # Obținem tranzacțiile noi
+    new_trades = get_my_trades_simple(order_type, symbol, backdays=math.ceil(backdays), limit=limit)
 
-    # Filtram doar tranzactiile care sunt mai recente decat cea mai recenta tranzactie din fisier
-    new_trades = [trade for trade in new_trades if trade['time'] > most_recent_trade_time]
+    # Eliminăm duplicatele
+    # new_trades = [trade for trade in new_trades if trade['time'] > most_recent_trade_time]    #
+    existing_trade_ids = {trade['id'] for trade in filtered_existing_trades}
+    unique_new_trades = [trade for trade in new_trades if trade['id'] not in existing_trade_ids]
 
-    if new_trades:
-        print(f"Found {len(new_trades)} new trades for {symbol}.")
+    if unique_new_trades:
+        print(f"Found {len(unique_new_trades)} new trades for {symbol}.")
         
-        # Adaugam doar tranzactiile noi la cele existente, dar fara cele vechi
-        all_trades = filtered_existing_trades + new_trades
-        all_trades = sorted(all_trades, key=lambda x: x['time'])  # Sortam dupa timp
+        # Combinăm tranzacțiile existente și cele noi
+        updated_trades = filtered_existing_trades + unique_new_trades
+        updated_trades.sort(key=lambda x: x['time'])
 
-        # Salvam doar tranzactiile filtrate si actualizate in fisier
+        # Înlocuim tranzacțiile pentru simbolul curent în lista principală
+        all_trades_list = [trade for trade in all_trades_list if trade['symbol'] != symbol]
+        all_trades_list.extend(updated_trades)
+
+        # Salvăm lista actualizată în fișier
         with open(filename, 'w') as f:
-            json.dump(all_trades, f)
+            json.dump(all_trades_list, f)
 
-        print(f"Updated file with {len(all_trades)} total trades.")
+        print(f"Updated file with {len(updated_trades)} trades for {symbol}. Total trades in file: {len(all_trades_list)}.")
     else:
-        print("No new trades found to save.")
+        print(f"No new trades found to save for {symbol}.")
+
 
 
 
@@ -481,4 +488,4 @@ def validate_keys_in_trades(trades):
     for idx, trade in enumerate(trades):
         for key in required_keys:
             if key not in trade:
-                raise ValueError(f"Tranzacția {idx} este invalidă. Lipsește cheia '{key}'. Date: {trade}")
+                raise ValueError(f"Tranzactia {idx} este invalida. Lipseste cheia '{key}'. Date: {trade}")
