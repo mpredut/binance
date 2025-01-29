@@ -1,7 +1,7 @@
 # server.py
 from fastapi import FastAPI
-
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,10 +21,10 @@ app.add_middleware(
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
-from apikeys import api_key, api_secret
+#from apikeys import api_key, api_secret
 
 # my imports
-import binanceapi as api
+#import binanceapi as api
 import log
 
 
@@ -32,7 +32,9 @@ import log
 
 @app.get("/")
 def read_root():
-    return {"message": "Hello, World!"}
+    headers = {"ngrok-skip-browser-warning": "true"}
+    return Response(content="Welcome to my API!", headers=headers)
+    #return {"message": "Hello, World!"}
     
 # Modele de date
 class TradeRequest(BaseModel):
