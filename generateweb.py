@@ -7,7 +7,7 @@ monede = [
 ]
 monede_empty = [
 ]
-def genereaza_html(monede, refresh_interval=10, base_url="https://22d8-85-122-194-86.ngrok-free.app/"):
+def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-194-86.ngrok-free.app/"):
     # Stilizare CSS minimală
     stil_css = """
     <style>
