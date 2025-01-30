@@ -7,7 +7,7 @@ monede = [
 ]
 monede_empty = [
 ]
-def genereaza_html(monede, refresh_interval=10):
+def genereaza_html(monede, refresh_interval=10, base_url="https://22d8-85-122-194-86.ngrok-free.app/"):
     # Stilizare CSS minimală
     stil_css = """
     <style>
@@ -125,7 +125,7 @@ def genereaza_html(monede, refresh_interval=10):
         <script>
             function actionSell(moneda) {{
                 const cantitate = document.getElementById(`qty-${{moneda}}`).value;
-                fetch('http://127.0.0.1:23624/trade/sell', {{
+                fetch('{base_url}trade/sell', {{
                     method: 'POST',
                     headers: {{
                         'Content-Type': 'application/json'
@@ -139,7 +139,7 @@ def genereaza_html(monede, refresh_interval=10):
 
             function actionBuy(moneda) {{
                 const cantitate = document.getElementById(`qty-${{moneda}}`).value;
-                fetch('http://127.0.0.1:23624/trade/buy', {{
+                fetch('{base_url}trade/buy', {{
                     method: 'POST',
                     headers: {{
                         'Content-Type': 'application/json'
