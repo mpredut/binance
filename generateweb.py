@@ -3,7 +3,9 @@ import os
 # Datele monedelor (poți înlocui cu datele generate dinamic)
 monede = [
     {"nume": "BTCUSDT", "cantitate": 0.5},
-    {"nume": "ETH", "cantitate": 2.0},
+    {"nume": "BTCUSDC", "cantitate": 0.5},
+    {"nume": "TAOUSDT", "cantitate": 2.0},
+    {"nume": "TAOUSDC", "cantitate": 2.0}
 ]
 monede_empty = [
 ]
