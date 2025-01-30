@@ -130,7 +130,7 @@ def get_current_price(symbol):
     #refresh_interval = 0 # Intervalul in care sa se faca actualizarea (in secunde)
     try:     
         if symbol not in currentprice or (lasttime[symbol] + refresh_interval[symbol] <= time.time()):
-            ticker = client.get_symbol_ticker(symbol=symbol)  # Obțineți prețul curent de la Binance API
+            ticker = client.get_symbol_ticker(symbol=symbol)  # Obtineti pretul curent de la Binance API
             currentprice[symbol] = float(ticker['price'])
             lasttime[symbol] = time.time()
             #print(f"Refresh price {symbol}: {currentprice[symbol]}")
@@ -406,7 +406,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
                 print(f"Are recent transactions in last {minutes_ago} minits")
                 return False
                 
-        #print("Tranzacții anterioare:")
+        #print("Tranzactii anterioare:")
         #for trade in oposite_trades:
             #print(apitrades.format_trade(trade, time_limit))
             
