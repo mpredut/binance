@@ -9,9 +9,11 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 
 from fastapi.staticfiles import StaticFiles
-app.mount("/static", StaticFiles(directory="static"), name="static")
-#app.mount("/files", StaticFiles(directory="/home/predut/binance"), name="files")
+
 app = FastAPI()
+
+app.mount("/static", StaticFiles(directory="/static"), name="static")
+#app.mount("/files", StaticFiles(directory="/home/predut/binance"), name="files")
 
 # Configurare CORS
 app.add_middleware(
@@ -26,10 +28,10 @@ app.add_middleware(
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
-#from apikeys import api_key, api_secret
+from apikeys import api_key, api_secret
 
 # my imports
-#import binanceapi as api
+import binanceapi as api
 import log
 
 
