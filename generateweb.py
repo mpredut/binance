@@ -72,17 +72,27 @@ def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-19
         <title>Monede de tranzacționat</title>
         {stil_css}
         <button onclick="enableAudio()">Activează sunetul</button>
+        <button onclick="disableAudio()">Dezactivează sunetul</button>
 <script>
     let audio = new Audio('/static/bip.wav');
+    let audioEnabled = true; // Flag pentru activarea/dezactivarea audio
     function enableAudio() {{
+        audioEnabled = true;
         audio.play().catch(err => console.error("Eroare la redarea sunetului:", err));
+    }}
+    function disableAudio() {{
+        audioEnabled = false;
+        audio.pause();
+        audio.currentTime = 0; // Resetează sunetul la început
     }}
 </script>
         <script>
             // Redă un sunet dacă există monede
             if ({'true' if monede else 'false'}) {{
-                const audio = new Audio('/static/bip.wav'); // Calea către fișierul audio
-                audio.play().catch(err => console.error("Eroare la redarea sunetului:", err));
+                if (audioEnabled) {{
+                    const audio = new Audio('/static/bip.wav'); // Calea către fișierul audio
+                    audio.play().catch(err => console.error("Eroare la redarea sunetului:", err));
+                }}
             }}
             // Reîncarcă pagina la fiecare {refresh_interval} secunde
             setTimeout(() => {{
