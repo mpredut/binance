@@ -100,7 +100,7 @@ def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-19
         <script>
             // Redă un sunet dacă există monede          
             if ({'true' if any(moneda["watch"] for moneda in monede) else 'false'}) {{
-                if (audioEnabled) {
+                if (audioEnabled) {{
                     const audio = new Audio('/static/bip.wav'); // Calea către fișierul audio
                     audio.play().catch(err => console.error("Eroare la redarea sunetului:", err));
                 }}
