@@ -1,12 +1,21 @@
 import os
 
-# Datele monedelor (poți înlocui cu datele generate dinamic)
+
+# Lista inițială de monede (top 10)
 monede = [
-    {"nume": "BTCUSDT", "cantitate": 0.5},
-    {"nume": "BTCUSDC", "cantitate": 0.5},
-    {"nume": "TAOUSDT", "cantitate": 2.0},
-    {"nume": "TAOUSDC", "cantitate": 2.0}
+    {"nume": "BTCUSDT", "cantitate": 0.5, "watch": True},
+    {"nume": "TAOUSDT", "cantitate": 0.5, "watch": True},
+    {"nume": "ETHUSDT", "cantitate": 1.5, "watch": False},
+    {"nume": "BNBUSDT", "cantitate": 3.0, "watch": False},
+    {"nume": "SOLUSDT", "cantitate": 4.0, "watch": False},
+    {"nume": "XRPUSDT", "cantitate": 5.0, "watch": False},
+    {"nume": "ADAUSDT", "cantitate": 6.0, "watch": False},
+    {"nume": "DOGEUSDT", "cantitate": 7.0, "watch": False},
+    {"nume": "MATICUSDT", "cantitate": 8.0, "watch": False},
+    {"nume": "DOTUSDT", "cantitate": 9.0, "watch": False},
+    {"nume": "LTCUSDT", "cantitate": 10.0, "watch": False}
 ]
+
 monede_empty = [
 ]
 def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-194-86.ngrok-free.app/"):
@@ -89,9 +98,9 @@ def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-19
     }}
 </script>
         <script>
-            // Redă un sunet dacă există monede
-            if ({'true' if monede else 'false'}) {{
-                if (audioEnabled) {{
+            // Redă un sunet dacă există monede          
+            if ({'true' if any(moneda["watch"] for moneda in monede) else 'false'}) {{
+                if (audioEnabled) {
                     const audio = new Audio('/static/bip.wav'); // Calea către fișierul audio
                     audio.play().catch(err => console.error("Eroare la redarea sunetului:", err));
                 }}
@@ -119,16 +128,17 @@ def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-19
 
     # Adaugă rânduri pentru fiecare monedă
     for moneda in monede:
-        html += f"""
-        <tr>
-            <td>{moneda['nume']}</td>
-            <td><input type="number" value="{moneda['cantitate']}" id="qty-{moneda['nume']}"></td>
-            <td>
-                <button class="btn-sell" onclick="actionSell('{moneda['nume']}')">Sell</button>
-                <button class="btn-buy" onclick="actionBuy('{moneda['nume']}')">Buy</button>
-            </td>
-        </tr>
-        """
+        if moneda["watch"]:
+            html += f"""
+            <tr>
+                <td>{moneda['nume']}</td>
+                <td><input type="number" value="{moneda['cantitate']}" id="qty-{moneda['nume']}"></td>
+                <td>
+                    <button class="btn-sell" onclick="actionSell('{moneda['nume']}')">Sell</button>
+                    <button class="btn-buy" onclick="actionBuy('{moneda['nume']}')">Buy</button>
+                </td>
+            </tr>
+            """
 
     # Închide tabelul și adaugă scripturile JS
     html += f"""

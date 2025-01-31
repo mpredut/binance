@@ -23,6 +23,8 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.linear_model import LinearRegression
 
 
+import generateweb as web
+
 class PriceTrendAnalyzer:
     def __init__(self, prices):
         self.prices = prices
@@ -759,6 +761,17 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
     #
     slope_big, _ = price_window_big.check_price_change(PRICE_CHANGE_THRESHOLD_BIG_EUR)
     logic("BIG", gradient, slope_big, trend_state_big)
+    
+     
+    for moneda in web.monede:
+        if moneda["nume"] == symbol:
+            moneda["watch"] = True if slope_big != 0 or slope !=0 else False
+
+
+    web.monede[0]["watch"] = True
+    # Generare și salvare
+    html_content = web.genereaza_html(web.monede)
+    web.salveaza_html(html_content, "index.html")
                 
 
 #
@@ -787,8 +800,9 @@ TIME_SLEEP_BETWEEN_SYMBOLS=0#TIME_SLEEP_GET_PRICE
 while True:
     
     time.sleep(TIME_SLEEP_GET_PRICE)    
+    print(f"----------------------------------")
     for symbol in sym.symbols:
-        print(f"----------------------------------")
+        print(f"")
         # Get the appropriate price window and trend state for the symbol
         price_window = price_windows[symbol]
         price_window_big = price_windows_big[symbol]
@@ -804,6 +818,7 @@ while True:
         
         # Call handle_symbol for the current symbol    
         handle_symbol(symbol, current_price, price_window, price_window_big, trend_state, trend_state_big)
+       
 
 #try
 #except BinanceAPIException as e:
