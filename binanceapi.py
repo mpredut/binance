@@ -24,6 +24,8 @@ from binance.exceptions import BinanceAPIException
 import utils as u
 import symbols as sym
 import config as cfg
+import generateweb as web
+
 from binanceclient import client
 
 stop = False
@@ -119,7 +121,8 @@ lasttime = {}
 refresh_interval = {}
 currentprice = {}
 
-for symbol in sym.symbols:
+for moneda in web.monede:
+    symbol = moneda["nume"]
     refresh_interval[symbol] = 1  # Timp de refresh în secunde
     currentprice[symbol] = None
     lasttime[symbol] = 0
@@ -403,7 +406,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
         for trade in all_trades:
             trade_time = trade['time'] / 1000  # 'time' este in milisecunde
             if trade_time > minutes_ago:
-                print(f"Are recent transactions in last {minutes_ago} minits")
+                print(f"Are recent transactions in last 3 minutes")
                 return False
                 
         #print("Tranzactii anterioare:")
