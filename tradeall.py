@@ -711,7 +711,7 @@ def logic(win, gradient, slope, trend_state) :
     proposed_price = current_price        
     #25 de confirmari per minut * 3 minute
     if slope <= 0 and trend_state.is_trend_up():
-        if ((trend_state.is_trend_up() > 25 * 3 and trend_state.is_trend_down() < 25 * 5 )
+        if ((trend_state.is_trend_up() > 25 * 3 and trend_state.is_trend_up() < 25 * 5 )
         or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE BUY ALL {win} .... ")
             api.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.2, safeback_seconds=16*3600+60,
