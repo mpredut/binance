@@ -760,7 +760,9 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
     # BIG ONE!!!
     #
     slope_big, _ = price_window_big.check_price_change(PRICE_CHANGE_THRESHOLD_BIG_EUR)
-    logic("BIG", gradient, slope_big, trend_state_big)
+    
+    if symbol in sym.symbols:
+        logic("BIG", gradient, slope_big, trend_state_big)
     
      
     for moneda in web.monede:
@@ -789,7 +791,7 @@ price_windows_big = {}
 trend_states = {}
 trend_states_big = {}
 # First loop: Create instances for each symbol
-for symbol in sym.symbols:
+for symbol in web.monede:
     price_windows[symbol] = PriceWindow(symbol, window_size)
     price_windows_big[symbol] = PriceWindow(symbol, window_size_big)
     trend_states[symbol] = TrendState(max_duration_seconds= 2.5 * 60 * 60, expiration_trend_time=10 * 60, fresh_trend_time = 1.7 * 60)  # Expira In 10 minute
@@ -801,7 +803,7 @@ while True:
     
     time.sleep(TIME_SLEEP_GET_PRICE)    
     print(f"----------------------------------")
-    for symbol in sym.symbols:
+    for symbol in web.monede:
         print(f"")
         # Get the appropriate price window and trend state for the symbol
         price_window = price_windows[symbol]
