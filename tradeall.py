@@ -761,8 +761,8 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
     #
     slope_big, _ = price_window_big.check_price_change(PRICE_CHANGE_THRESHOLD_BIG_EUR)
     
-    if symbol in sym.symbols:
-        logic("BIG", gradient, slope_big, trend_state_big)
+    #if symbol in sym.symbols:
+    #    logic("BIG", gradient, slope_big, trend_state_big)
     
      
     for moneda in web.monede:
@@ -770,7 +770,7 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
             moneda["watch"] = True if slope_big != 0 else False
 
 
-    #web.monede[0]["watch"] = True # for debug
+    # web.monede[0]["watch"] = True # for debug
     # Generare și salvare
     html_content = web.genereaza_html(web.monede)
     web.salveaza_html(html_content, "index.html")
