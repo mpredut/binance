@@ -791,7 +791,8 @@ price_windows_big = {}
 trend_states = {}
 trend_states_big = {}
 # First loop: Create instances for each symbol
-for symbol in web.monede:
+for moneda in web.monede:
+    symbol = moneda["nume"]
     price_windows[symbol] = PriceWindow(symbol, window_size)
     price_windows_big[symbol] = PriceWindow(symbol, window_size_big)
     trend_states[symbol] = TrendState(max_duration_seconds= 2.5 * 60 * 60, expiration_trend_time=10 * 60, fresh_trend_time = 1.7 * 60)  # Expira In 10 minute
@@ -803,7 +804,8 @@ while True:
     
     time.sleep(TIME_SLEEP_GET_PRICE)    
     print(f"----------------------------------")
-    for symbol in web.monede:
+    for moneda in web.monede:
+        symbol = moneda["nume"]
         print(f"")
         # Get the appropriate price window and trend state for the symbol
         price_window = price_windows[symbol]
