@@ -765,10 +765,10 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
      
     for moneda in web.monede:
         if moneda["nume"] == symbol:
-            moneda["watch"] = True if slope_big != 0 or slope !=0 else False
+            moneda["watch"] = True if slope_big != 0 else False
 
 
-    # web.monede[0]["watch"] = True # for debug
+    #web.monede[0]["watch"] = True # for debug
     # Generare și salvare
     html_content = web.genereaza_html(web.monede)
     web.salveaza_html(html_content, "index.html")
