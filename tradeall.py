@@ -319,15 +319,18 @@ class PriceWindow:
             slope_min = u.slope(min_price, min_index, newest_price, self.get_newest_index())
             slope_max = u.slope(max_price, max_index, newest_price, self.get_newest_index())
             slope_max_min = u.slope(min_price, min_index, max_price, max_index)
+            print(f"retun {slope_max_min}, {price_diff}")
             return slope_max_min, price_diff
             
             diff_min_max_close = u.are_close(price_diff_max , price_diff_min, 1.0)
             if(diff_min_max_close) :
                 if(min_index < max_index) :
                     grow = 1
+                    print(f"retun {-slope_max}, {price_diff}")
                     return -slope_max, price_diff
                 else : 
                     grow = 0
+                    print(f"retun {slope_min}, {price_diff}")
                     return slope_min, price_diff
             
             min_loc = 1 #center position
@@ -344,15 +347,19 @@ class PriceWindow:
                     
             if grow :
                 if (min_loc == 0): #left position
+                    print(f"retun {slope_min}, {price_diff}")
                     return slope_min, price_diff #2.76 pt ungi de 70
                 if (min_loc == 1 and max_loc == 2): #center position and left position
+                    print(f"retun {slope_max_min}, {price_diff}")
                     return slope_max_min, price_diff
                 else:
                     print("OUTLAIER!! but can indicate something will came !!!!")     
             if not grow:
-                if(min_loc == 2): #right position               
+                if(min_loc == 2): #right position
+                    print(f"retun {slope_max}, {price_diff}")
                     return slope_max, price_diff #2.76 pt ungi de 70
-                if(min_loc == 1 and max_loc == 0): #center position and left position               
+                if(min_loc == 1 and max_loc == 0): #center position and left position 
+                    print(f"retun {slope_max_min}, {price_diff}")
                     return slope_max_min, price_diff #2.76 pt ungi de 70
                 else:
                     print("OUTLAIER!! but can indicate something will came !!!!")    
@@ -671,7 +678,7 @@ trades = apitrades.get_my_trades_24(order_type=None, symbol=sym.btcsymbol, days_
 print (f" --------- {len(trades)}");
 print (f" my trades of today : {(trades)}");
 
-def logic(win, gradient, slope, trend_state) :
+def logic(win, enable, symbol, gradient, slope, trend_state) :
 
     print(f"gradient={gradient}, slope={slope}")
     #todo adjust safeback_seconds
@@ -684,12 +691,14 @@ def logic(win, gradient, slope, trend_state) :
             #25 de confirmari per minut * 1.5 minute
             if count > 25 * 1.1 and count < 25 * 1.7 and trend_state.is_trend_fresh(): 
                 #track_and_place_order('BUY', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
-                api.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
-                    force=True, cancelorders=True, hours=1)
+                if enable:
+                    api.place_order_smart("BUY", symbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
+                        force=True, cancelorders=True, hours=1)
+                print(f"place_order_smart BUY")
         else:
             expired_trend = trend_state.start_trend('UP')  # Incepem un trend nou de crestere
             #track_and_place_order('BUY', sym.btcsymbol, 1, proposed_price, current_price, order_ids=order_ids) 
-            #api.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
+            #api.place_order_smart("BUY", symbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
             #    force=True, cancelorders=True, hours=1)             
     
     if gradient < 0 and slope > 0 :
@@ -699,13 +708,15 @@ def logic(win, gradient, slope, trend_state) :
         if trend_state.is_trend_down():
             count = trend_state.confirm_trend() # Confirmam ca trendul de scadere continua
             if count > 25 * 1.1 and count < 25 * 1.7 and trend_state.is_trend_fresh() :
-                #track_and_place_order('SELL', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
-                api.place_order_smart("SELL", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
-                    force=True, cancelorders=True, hours=1)
+                #track_and_place_order('SELL', symbol, count, proposed_price, current_price, order_ids=order_ids)
+                if enable:
+                    api.place_order_smart("SELL", symbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
+                        force=True, cancelorders=True, hours=1)
+                print(f"place_order_smart SELL")
         else:
             expired_trend = trend_state.start_trend('DOWN')  # Incepem un trend nou de scadere
-            #track_and_place_order('SELL', sym.btcsymbol, 1, proposed_price, current_price, order_ids=order_ids)
-            #api.place_order_smart("SELL", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
+            #track_and_place_order('SELL', symbol, 1, proposed_price, current_price, order_ids=order_ids)
+            #api.place_order_smart("SELL", symbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
             #    force=True, cancelorders=True, hours=1)                  
             
     proposed_price = current_price        
@@ -714,15 +725,17 @@ def logic(win, gradient, slope, trend_state) :
         if ((trend_state.is_trend_up() > 25 * 3 and trend_state.is_trend_up() < 25 * 5 )
         or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE BUY ALL {win} .... ")
-            api.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.2, safeback_seconds=16*3600+60,
-                force=True, cancelorders=True, hours=1)
+            if enable:
+                api.place_order_smart("BUY", symbol, proposed_price, 0.2, safeback_seconds=16*3600+60,
+                    force=True, cancelorders=True, hours=1)
     #25 de confirmari per minut * 3 minute
     if slope >= 0 and trend_state.is_trend_down(): 
         if ((trend_state.is_trend_down() > 25 * 3 and trend_state.is_trend_down() < 25 * 5 )
         or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE SELL ALL {win} .... ")
-            api.place_order_smart("SELL", sym.btcsymbol, proposed_price, 0.2, safeback_seconds=16*3600+60,
-                force=True, cancelorders=True, hours=1) 
+            if enable:
+                api.place_order_smart("SELL", symbol, proposed_price, 0.2, safeback_seconds=16*3600+60,
+                    force=True, cancelorders=True, hours=1) 
 
 
 # Function to handle the price logic for a specific currency
@@ -762,7 +775,7 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
     slope_big, _ = price_window_big.check_price_change(PRICE_CHANGE_THRESHOLD_BIG_EUR)
     
     #if symbol in sym.symbols:
-    #    logic("BIG", gradient, slope_big, trend_state_big)
+    logic("BIG", 0, symbol, gradient, slope_big, trend_state_big)
     
      
     for moneda in web.monede:
@@ -771,10 +784,6 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
 
 
     # web.monede[0]["watch"] = True # for debug
-    # Generare și salvare
-    html_content = web.genereaza_html(web.monede)
-    web.salveaza_html(html_content, "index.html")
-                
 
 #
 #       MAIN 
@@ -822,7 +831,11 @@ while True:
         
         # Call handle_symbol for the current symbol    
         handle_symbol(symbol, current_price, price_window, price_window_big, trend_state, trend_state_big)
-       
+    
+    # Generare și salvare
+    html_content = web.genereaza_html(web.monede)
+    web.salveaza_html(html_content, "index.html")
+                    
 
 #try
 #except BinanceAPIException as e:
