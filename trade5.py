@@ -305,12 +305,13 @@ class PriceWindow:
         #price_diff = max_price - min_price
         price_diff_min = u.calculate_difference_percent(min_price, newest_price)
         price_diff_max = u.calculate_difference_percent(max_price, newest_price)
+
         grow = price_diff_max < price_diff_min # pret curent inspre max
         price_diff = max(price_diff_min, price_diff_max) ## check if abs(price_diff_min,price_diff_max) > treshold
 
         
         if abs(price_diff) >= threshold or u.are_close(price_diff, threshold) :
-            
+   
             min_position, max_position = self.calculate_positions()
             
             slope_min = u.slope(min_price, min_index, newest_price, self.get_newest_index())
@@ -434,7 +435,7 @@ TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + EXP_TIME_SELL_ORDER/ 6 + 4*79  # 
 WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 7.7 * 60  # minutes
 window_size = WINDOWS_SIZE_MIN / TIME_SLEEP_GET_PRICE
 
-window_size_big = 3 * 60 * 60 / TIME_SLEEP_GET_PRICE
+window_size_big = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
 def track_and_place_order(action, symbol, count, proposed_price, current_price, quantity=0.017, order_ids=None):
