@@ -3,10 +3,10 @@ import json
 
 # Lista inițială de monede (top 10)
 
- monede = [
-     {"nume": "BTCUSDT", "cantitate": 0.5, "watch": True},
-     {"nume": "TAOUSDT", "cantitate": 0.5, "watch": True},
-     {"nume": "ETHUSDT", "cantitate": 1.5, "watch": False}#,
+#monede = [
+#    {"nume": "BTCUSDT", "cantitate": 0.5, "watch": True},
+#    {"nume": "TAOUSDT", "cantitate": 0.5, "watch": True},
+#    {"nume": "ETHUSDT", "cantitate": 1.5, "watch": False},
 #    {"nume": "BNBUSDT", "cantitate": 3.0, "watch": False},
 #    {"nume": "SOLUSDT", "cantitate": 4.0, "watch": False},
 #    {"nume": "ADAUSDT", "cantitate": 6.0, "watch": False},
@@ -14,7 +14,14 @@ import json
 #    {"nume": "DOTUSDT", "cantitate": 9.0, "watch": False},
 #    {"nume": "LTCUSDT", "cantitate": 10.0, "watch": False}
 #    {"nume": "ETHUSDT", "cantitate": 1.5, "watch": False}
- ]
+#]
+ 
+monede = [
+    {"nume": "BTCUSDT", "cantitate": 0.5, "watch": True},
+    {"nume": "TAOUSDT", "cantitate": 0.5, "watch": True},
+    {"nume": "ETHUSDT", "cantitate": 1.5, "watch": False}
+]
+
 monede_empty = [
 ]
 
