@@ -34,6 +34,8 @@ def aggregate_trades(trades):
         orderId = trade['orderId']
         
         # Agregam datele pentru aceleasi orderId
+        aggregated_trades[orderId]['id'] = trade['id']  # pastram id-ul primei tranzactii (pentru referinta)
+        aggregated_trades[orderId]['orderId'] = orderId
         aggregated_trades[orderId]['symbol'] = trade['symbol']
         aggregated_trades[orderId]['price'] = trade['price']
         aggregated_trades[orderId]['qty'] += float(trade['qty'])
@@ -44,15 +46,14 @@ def aggregate_trades(trades):
         aggregated_trades[orderId]['isBuyer'] = trade['isBuyer']
         aggregated_trades[orderId]['isMaker'] = trade['isMaker']
         aggregated_trades[orderId]['isBestMatch'] = trade['isBestMatch']
-        aggregated_trades[orderId]['id'] = trade['id']  # pastram id-ul primei tranzactii (pentru referinta)
 
     # Cream lista agregata
     aggregated_list = []
     for aggregated in aggregated_trades.values():
         aggregated_list.append({
-            'symbol': aggregated['symbol'],
             'id': aggregated['id'],
-            'orderId': 0,  # Setam orderId-ul la 0
+            'orderId': aggregated['orderId'],
+            'symbol': aggregated['symbol'],
             'orderListId': -1,
             'price': aggregated['price'],
             'qty': f"{aggregated['qty']:.8f}",  # pastram formatul cu 8 zecimale
@@ -188,7 +189,17 @@ def get_my_trades_simple(order_type, symbol, backdays=3, limit=1000):
             # Actualizam end_time pentru ziua anterioara (inainte de aceasta perioada de 24 de ore)
             end_time = start_time
 
-        return all_trades
+        #return all_trades
+        ##HACK elimin trades duplicate pe baza orderId
+        latest_trades = {}
+        for trade in all_trades:
+            order_id = trade['orderId']
+            
+            # Verificam daca nu avem deja acest `orderId` sau daca tranzactia curenta este mai recenta
+            if order_id not in latest_trades or trade['time'] > latest_trades[order_id]['time']:
+                latest_trades[order_id] = trade  # Actualizam cu cea mai recenta tranzactie
+
+        return list(latest_trades.values()) #lista nu dictionar!
 
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -302,7 +313,8 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=
     sym.validate_ordertype(order_type)
     sym.validate_symbols(symbol)
 
-    print(f"save_trades_to_file: for symbol {symbol} and order_type {order_type} ")
+    print(f"save_trades_to_file")
+    print(f"{symbol} symbol and order_type {order_type} ")
      
     # Inițializăm structura principală ca listă
     all_trades_list = []
@@ -319,6 +331,7 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=
 
     # Filtrăm tranzacțiile existente doar pentru simbolul curent
     existing_trades = [trade for trade in all_trades_list if trade['symbol'] == symbol]
+    print(f"Already saved in file {len(existing_trades)} trades for {symbol}")
 
     # Calculăm timpul cutoff
     current_time_ms = int(time.time() * 1000)
@@ -326,10 +339,13 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=
 
     # Eliminăm tranzacțiile mai vechi decât perioada dorită
     filtered_existing_trades = [trade for trade in existing_trades if trade['time'] > cutoff_time_ms]
+    print(f"Preserve ony {len(filtered_existing_trades)} trades for {symbol} , "
+        f"rest are too old , less than {u.secondsToDays(cutoff_time_ms)} days")
 
     # Găsim cea mai recentă tranzacție pentru simbolul curent
     most_recent_trade_time = max((trade['time'] for trade in filtered_existing_trades), default=0)
-
+    print(f"Most recent saved trade time is {u.timestampToTime(most_recent_trade_time)} for {symbol}")
+    
     # Calculăm câte zile să cerem
     if most_recent_trade_time == 0:
         backdays = years_to_keep * 365
@@ -362,10 +378,10 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=
         with open(filename, 'w') as f:
             json.dump(all_trades_list, f)
 
-        print(f"Updated file with {len(updated_trades)} trades for {symbol}. Total trades in file: {len(all_trades_list)}.")
+        print(f"Updated file with {len(updated_trades)} new trades for {symbol}.")
     else:
         print(f"No new trades found to save for {symbol}.")
-
+    print(f"Total trades in file: {len(all_trades_list)}.")
 
 
 
@@ -384,6 +400,8 @@ def load_trades_from_file(filename):
     else:
         print(f"File {filename} not found.")
         trade_cache = []
+        
+    print(set(trade['symbol'] for trade in trade_cache))
 
   
 # Functia care returneaza tranzactiile de tip "BUY" sau "SELL" din cache pentru un anumit simbol
@@ -416,8 +434,8 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
     sym.validate_symbols(symbol)
     
     current_time_ms = int(time.time() * 1000)
-    max_age_ms = max_age_seconds * 1000
-
+    max_age_ms = max_age_seconds * 1000 #convert to ms
+    
     filtered_trades = [
         {
             'symbol': trade['symbol'],
