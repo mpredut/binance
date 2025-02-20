@@ -817,8 +817,23 @@ def main():
         time.sleep(60*1.8)  # Astept 1.8 minute.
         
         
+def test() :
+    filename="trades.json"
+    limit=1000
+    years_to_keep=0.09
+    order_type=None
+    #for symbol in sym.symbols:
+    #    apitrades.save_trades_to_file(order_type, symbol, filename, limit=limit, years_to_keep=years_to_keep)
+    
+    apitrades.save_trades_to_file(order_type, "TAOUSDT", filename, limit=limit, years_to_keep=years_to_keep)
+    apitrades.load_trades_from_file(filename)
+    trade_orders_buy = apitrades.get_trade_orders(None, "TAOUSDT", 24 * 60 * 60 * 11)
+    print(f"{len(trade_orders_buy)}, {trade_orders_buy}")
+    sys.exit(1)
+    
 if __name__ == "__main__":
     
+    #test()
     try:
         main()
     except Exception as e:
