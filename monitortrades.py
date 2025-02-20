@@ -728,7 +728,7 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
                     print("No can sell")
             else:
                 print(f"No action taken, because trend is up!")
-        elif:
+        else:
             print(f"Nothing interesting")
 
     # 4. Verifica ordinele de vanzare
@@ -811,11 +811,11 @@ def main():
         
 if __name__ == "__main__":
     
-try:
-    main()
-except Exception as e:
-    print(f"Eroare capturata: {e}")
-finally:
-    print("Fortare inchidere...")
-    sys.exit(1)  # opreste toate daemon threads
+    try:
+        main()
+    except Exception as e:
+        print(f"Eroare capturata: {e}")
+    finally:
+        print("Fortare inchidere...")
+        sys.exit(1)  # opreste toate daemon threads
     
