@@ -574,7 +574,13 @@ class StateTracker:
             sell_recommendation = default_values_sell_recommendation
 
         # Reprogram the update for every 2 minutes
-        Timer(120, self.update_sell_recommendation, [file_path]).start()
+        #Timer(120, self.update_sell_recommendation, [file_path]).start()
+        
+        t = Timer(120, self.update_sell_recommendation, [file_path])
+        t.daemon = True  # Asigură că acest thread nu blochează închiderea procesului
+        t.start()
+
+
 
     def update_states_from_sell_recommendation(self):
         for symbol, data in sell_recommendation.items():
@@ -722,7 +728,8 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
                     print("No can sell")
             else:
                 print(f"No action taken, because trend is up!")
-       
+        elif:
+            print(f"Nothing interesting")
 
     # 4. Verifica ordinele de vanzare
     if trade_orders_sell:     
@@ -740,6 +747,7 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
             else :
                 print(f"No action taken, because trend is down!")
 
+    return
 
     #except Exception as e:
     #    print(f"An error occurred while monitoring the price: {e}")
@@ -802,6 +810,12 @@ def main():
         
         
 if __name__ == "__main__":
+    
+try:
     main()
-
+except Exception as e:
+    print(f"Eroare capturata: {e}")
+finally:
+    print("Fortare inchidere...")
+    sys.exit(1)  # opreste toate daemon threads
     
