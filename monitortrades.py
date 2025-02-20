@@ -694,7 +694,7 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
     buy_price, buy_time, can_buy = get_relevant_trade(trade_orders_buy, "BUY", threshold_s, symbol)
     sell_price, sell_time, can_sell = get_relevant_trade(trade_orders_sell, "SELL", threshold_s, symbol)
 
-     threshold_all_s = 1 * 60 * 60 # 1 h
+    threshold_all_s = 1 * 60 * 60 # 1 h
     if current_time_s - max(buy_time, sell_time)  < threshold_all_s:
         print(f"Trades too ... recente."
             f"Pass only {u.secondsToHours(current_time_s -  max(buy_time, sell_time)):.2f} h. Wait to pass {u.secondsToHours(threshold_all_s)} h.")
