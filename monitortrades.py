@@ -659,7 +659,7 @@ def is_trend_up(symbol):
 def get_relevant_trade(trade_orders, trade_type, threshold_s, symbol):
     if not trade_orders:
         print(f"Warning: No {trade_type} transactions for that currency!!!")
-        return None, None, True
+        return None, 0, True
         
     current_time_s = int(time.time())
      
