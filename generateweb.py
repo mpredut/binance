@@ -16,11 +16,11 @@ import json
 #    {"nume": "ETHUSDT", "cantitate": 1.5, "watch": False}
 #]
  
-monede = [
-    {"nume": "BTCUSDT", "cantitate": 0.5, "watch": True},
-    {"nume": "TAOUSDT", "cantitate": 0.5, "watch": True},
-    {"nume": "ETHUSDT", "cantitate": 1.5, "watch": False}
-]
+# monede = [
+    # {"nume": "BTCUSDT", "cantitate": 0.5, "watch": True},
+    # {"nume": "TAOUSDT", "cantitate": 0.5, "watch": True},
+    # {"nume": "ETHUSDT", "cantitate": 1.5, "watch": False}
+# ]
 
 monede_empty = [
 ]
