@@ -452,7 +452,7 @@ TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + EXP_TIME_SELL_ORDER/ 6 + 4*79  # 
 WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 7.7 * 60  # minutes
 window_size = WINDOWS_SIZE_MIN / TIME_SLEEP_GET_PRICE
 
-window_size_big = 2.5 * 60 * 60 / TIME_SLEEP_GET_PRICE
+window_size_big = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
 def track_and_place_order(action, symbol, count, proposed_price, current_price, quantity=0.017, order_ids=None):
@@ -704,7 +704,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
             if count > 25 * 1.1 and count < 25 * 1.7 and trend_state.is_trend_fresh():
                 #track_and_place_order('BUY', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
                 if enable:
-                    api.place_order_smart("BUY", symbol, proposed_price, 0.017, safeback_seconds=h*d*3600+60,
+                    api.place_order_smart("BUY", symbol, proposed_price, 0.017, safeback_seconds=d*h*3600+60,
                         force=True, cancelorders=True, hours=1)
                 print(f"place_order_smart BUY")
         else:
@@ -722,7 +722,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
             if count > 25 * 1.1 and count < 25 * 1.7 and trend_state.is_trend_fresh() :
                 #track_and_place_order('SELL', symbol, count, proposed_price, current_price, order_ids=order_ids)
                 if enable:
-                    api.place_order_smart("SELL", symbol, proposed_price, 0.017, safeback_seconds=h*d*3600+60,
+                    api.place_order_smart("SELL", symbol, proposed_price, 0.017, safeback_seconds=d*h*3600+60,
                         force=True, cancelorders=True, hours=1)
                 print(f"place_order_smart SELL")
         else:
@@ -738,7 +738,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
         or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE BUY ALL {win} .... ")
             if enable:
-                api.place_order_smart("BUY", symbol, proposed_price, 0.018, safeback_seconds=h*d*3600+60,
+                api.place_order_smart("BUY", symbol, proposed_price, 0.018, safeback_seconds=d*h*3600+60,
                     force=True, cancelorders=True, hours=1)
     #25 de confirmari per minut * 3 minute
     if slope >= 0 and trend_state.is_trend_down():
@@ -746,7 +746,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
         or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE SELL ALL {win} .... ")
             if enable:
-                api.place_order_smart("SELL", symbol, proposed_price, 0.018, safeback_seconds=h*d*3600+60,
+                api.place_order_smart("SELL", symbol, proposed_price, 0.018, safeback_seconds=d*h*3600+60,
                     force=True, cancelorders=True, hours=1)
                                                                                                                                                                  
                     
@@ -823,6 +823,8 @@ for moneda in web.monede:
 
 TIME_SLEEP_BETWEEN_SYMBOLS=0#TIME_SLEEP_GET_PRICE
 # Second loop: Call handle_symbol for each symbol indefinitely
+
+                   
 while True:
     
     time.sleep(TIME_SLEEP_GET_PRICE)    
