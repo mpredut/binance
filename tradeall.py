@@ -689,7 +689,7 @@ print (f" my trades of today : {(trades)}");
 
 def logic(win, enable, symbol, gradient, slope, trend_state) :
 
-    d = 3
+    d = 7
     h = 24
     
     print(f"gradient={gradient}, slope={slope}")

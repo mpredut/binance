@@ -670,7 +670,7 @@ print (f" --------- {len(trades)}");
 print (f" {(trades)}");
 
 def logic(win, gradient, slope, trend_state) :
-    d = 3
+    d = 7
     h = 24
     
     print(f"gradient={gradient}, slope={slope}")
