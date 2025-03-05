@@ -319,14 +319,15 @@ class PriceWindow:
 
         
         if abs(price_diff) >= threshold or u.are_close(price_diff, threshold) :
-            print(f'min price ={min_price}, max_price = {max_price}, newest_price={newest_price}, min_index={min_index}, max_index={min_index}')
+            print(f'min price ={min_price}, max_price = {max_price}, newest_price={newest_price}, min_index={min_index}, max_index={max_index}')
             print(f'price_diff={price_diff} threshold={threshold}are_close={u.are_close(price_diff, threshold)}')
                   
             min_position, max_position = self.calculate_positions()
             
             slope_min = u.slope(min_price, min_index, newest_price, self.get_newest_index())
             slope_max = u.slope(max_price, max_index, newest_price, self.get_newest_index())
-            slope_max_min = u.slope(min_price, min_index, max_price, max_index)
+            #slope_max_min = u.slope(min_price, min_index, max_price, max_index)
+            slope_max_min = slope_max if abs(slope_max) > abs(slope_min) else slope_min
             print(f"retun1 {slope_max_min}, {price_diff}")
             return slope_max_min, price_diff
             
@@ -827,7 +828,9 @@ TIME_SLEEP_BETWEEN_SYMBOLS=0#TIME_SLEEP_GET_PRICE
                    
 while True:
     
+    time.sleep(TIME_SLEEP_GET_PRICE)
     time.sleep(TIME_SLEEP_GET_PRICE)    
+    time.sleep(TIME_SLEEP_GET_PRICE)
     print(f"----------------------------------")
     for moneda in web.monede:
         symbol = moneda["nume"]

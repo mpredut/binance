@@ -316,7 +316,8 @@ class PriceWindow:
             
             slope_min = u.slope(min_price, min_index, newest_price, self.get_newest_index())
             slope_max = u.slope(max_price, max_index, newest_price, self.get_newest_index())
-            slope_max_min = u.slope(min_price, min_index, max_price, max_index)
+            #slope_max_min = u.slope(min_price, min_index, max_price, max_index)
+            slope_max_min = slope_max if abs(slope_max) > abs(slope_min) else slope_min
             return slope_max_min, price_diff
             
             diff_min_max_close = u.are_close(price_diff_max , price_diff_min, 1.0)
