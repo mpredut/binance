@@ -779,8 +779,7 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
     #gradient = price_window.calculate_slope()
    
 
-    #update_csv_file(filename, sym.btcsymbol, slope, count, 0, 0, pos, gradient)
-    #update_csv_file(filename, sym.taosymbol, slope, count, 0, 0, pos, gradient)
+    update_csv_file(filename, symbol, slope, count, 0, 0, pos, gradient)
     
     #logic("SMALL" , gradient, slope, trend_state)
 
@@ -790,7 +789,7 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
     slope_big, _ = price_window_big.check_price_change(PRICE_CHANGE_THRESHOLD_BIG_EUR)
     
     #if symbol in sym.symbols:
-    logic("BIG", True, symbol, gradient, slope_big, trend_state_big)
+    logic("BIG", False, symbol, gradient, slope_big, trend_state_big)
     
      
     for moneda in web.monede:
