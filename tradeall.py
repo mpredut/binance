@@ -217,7 +217,7 @@ class PriceWindow:
         #print(f"Max price: {max_price}, Centroid index for max: {centroid_index}")  # Debug
         return max_price, centroid_index
 
-    def calculate_slope(self):
+    def calculate_slope_max_min(self):
         if len(self.sorted_prices) < 2:
             return 0
 
@@ -255,7 +255,7 @@ class PriceWindow:
         
         
     def evaluate_buy_sell_opportunity(self, current_price, threshold_percent=1, decrease_percent=3.7):
-        slope = self.calculate_slope()
+        slope = self.calculate_slope_max_min()
      
         min_price, min_index = self.get_min_and_index()
         max_price, max_index = self.get_max_and_index()
@@ -306,76 +306,85 @@ class PriceWindow:
     def check_price_change(self, threshold):
         if len(self.prices) < 2:
             return 0, 1
+
         min_price, min_index = self.get_min_and_index()
         max_price, max_index = self.get_max_and_index()
-        #oldest_price = self.prices[0]
         newest_price = self.prices[-1]
-        #price_diff = max_price - min_price
+        newest_index = self.get_newest_index()
+
         price_diff_min = u.calculate_difference_percent(min_price, newest_price)
         price_diff_max = u.calculate_difference_percent(max_price, newest_price)
-        print(f'min_price={min_price}, max_price={max_price}, newest_price={newest_price}')        
-        grow = price_diff_max < price_diff_min # pret curent inspre max
-        price_diff = max(price_diff_min, price_diff_max) ## check if abs(price_diff_min,price_diff_max) > treshold
 
-        
-        if abs(price_diff) >= threshold or u.are_close(price_diff, threshold) :
+        grow = price_diff_max < price_diff_min  
+        price_diff_newest = max(price_diff_min, price_diff_max)  #price_diff = max_price - min_price
+
+        if abs(price_diff_newest) >= threshold or u.are_close(price_diff_newest, threshold):
+            #todo use grow
+            print(f'price_diff_newest={price_diff_newest} threshold={threshold}are_close={u.are_close(price_diff_newest, threshold)}')
             print(f'min price ={min_price}, max_price = {max_price}, newest_price={newest_price}, min_index={min_index}, max_index={max_index}')
-            print(f'price_diff={price_diff} threshold={threshold}are_close={u.are_close(price_diff, threshold)}')
-                  
-            min_position, max_position = self.calculate_positions()
-            
-            slope_min = u.slope(min_price, min_index, newest_price, self.get_newest_index())
-            slope_max = u.slope(max_price, max_index, newest_price, self.get_newest_index())
-            #slope_max_min = u.slope(min_price, min_index, max_price, max_index)
-            slope_max_min = slope_max if abs(slope_max) > abs(slope_min) else slope_min
-            print(f"retun1 {slope_max_min}, {price_diff}")
-            return slope_max_min, price_diff
-            
-            diff_min_max_close = u.are_close(price_diff_max , price_diff_min, 1.0)
-            if(diff_min_max_close) :
-                if(min_index < max_index) :
-                    grow = 1
-                    print(f"retun2 {-slope_max}, {price_diff}")
-                    return -slope_max, price_diff
-                else : 
-                    grow = 0
-                    print(f"retun3 {slope_min}, {price_diff}")
-                    return slope_min, price_diff
-            
-            min_loc = 1 #center position
-            if (min_position < 0.3 or u.are_close( min_position, 0.3)) : 
-                 min_loc = 0 #left position
-            if (min_position > 0.7 or u.are_close( min_position, 0.7)) : 
-                 min_loc = 2 #right position
-                 
-            max_loc = 1 #center position
-            if (max_position > 0.7 or u.are_close( max_position, 0.7)) :
-                max_loc = 2 #right position        
-            if (max_position < 0.3 or u.are_close( max_position, 0.3)) :
-                max_loc = 0 #left position
-                    
-            if grow :
-                if (min_loc == 0): #left position
-                    print(f"retun4 {slope_min}, {price_diff}")
-                    return slope_min, price_diff #2.76 pt ungi de 70
-                if (min_loc == 1 and max_loc == 2): #center position and left position
-                    print(f"retun {slope_max_min}, {price_diff}")
-                    return slope_max_min, price_diff
-                else:
-                    print("OUTLAIER!! but can indicate something will came !!!!")     
-            if not grow:
-                if(min_loc == 2): #right position
-                    print(f"retun5 {slope_max}, {price_diff}")
-                    return slope_max, price_diff #2.76 pt ungi de 70
-                if(min_loc == 1 and max_loc == 0): #center position and left position 
-                    print(f"retun6 {slope_max_min}, {price_diff}")
-                    return slope_max_min, price_diff #2.76 pt ungi de 70
-                else:
-                    print("OUTLAIER!! but can indicate something will came !!!!")    
-        else:
-            return 0, 1
-            
+               
+            return -price_diff_newest if price_diff_max > price_diff_min else price_diff_newest, 0
+            return self._analyze_price_movement(min_price, min_index, max_price, max_index, 
+                newest_price, newest_index, price_diff_newest)
+        
+        return 0, 0
+    
+    def _analyze_price_movement(self, min_price, min_index, max_price, max_index, newest_price, newest_index, price_diff):
+        
+     
+        price_diff_min = u.calculate_difference_percent(min_price, newest_price)
+        price_diff_max = u.calculate_difference_percent(max_price, newest_price)
+        grow = price_diff_max < price_diff_min 
+        
+        slope_min = u.slope(min_price, min_index, newest_price, newest_index)
+        slope_max = u.slope(max_price, max_index, newest_price, newest_index)
+        #todo slope_min = pozitiv 
+        # slope_max = negativ
+        slope_max_min = slope_max if abs(slope_max) > abs(slope_min) else slope_min  #slope_max_min = u.slope(min_price, min_index, max_price, max_index)
+        print(f"retun1 {slope_max_min}, {price_diff}")
+        return slope_max_min, price_diff
+
+        diff_min_max_close = u.are_close(price_diff_max, price_diff_min, 1.0)
+        if diff_min_max_close:
+            if min_index < max_index:
+                grow = 1
+                print(f"retun2 {-slope_max}, {price_diff}")
+                return -slope_max, price_diff
+            else:
+                grow = 0
+                print(f"retun3 {slope_min}, {price_diff}")
+                return slope_min, price_diff
+
+        min_position, max_position = self.calculate_positions()
+        min_loc = 1  
+        if min_position < 0.3 or u.are_close(min_position, 0.3):
+            min_loc = 0  
+        if min_position > 0.7 or u.are_close(min_position, 0.7):
+            min_loc = 2  
+
+        max_loc = 1  
+        if max_position > 0.7 or u.are_close(max_position, 0.7):
+            max_loc = 2  
+        if max_position < 0.3 or u.are_close(max_position, 0.3):
+            max_loc = 0  
+
+        if grow:
+            if min_loc == 0:  
+                return slope_min, price_diff
+            if min_loc == 1 and max_loc == 2:  
+                return slope_max_min, price_diff
+            else:
+                print("OUTLIER!! but can indicate something will come!!!")
+        else: #if not grow:
+            if min_loc == 2:  
+                return slope_max, price_diff
+            if min_loc == 1 and max_loc == 0:  
+                return slope_max_min, price_diff
+            else:
+                print("OUTLIER!! but can indicate something will come!!!")
+
         return 0, 1
+    
             
             
     def current_window_size(self):
@@ -768,15 +777,15 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
 
     if(slope * gradient < 0):
         print(f"ALERT slope1 = {slope} gradient = {gradient}")
-    if(slope * price_window.calculate_slope() < 0):
-        print(f"ALERT slope2 = {slope} calculate_slope() = {price_window.calculate_slope()}")
-    if(gradient * price_window.calculate_slope() < 0):
-        print(f"ALERT gradient = {gradient} calculate_slope() = {price_window.calculate_slope()}")
+    if(slope * price_window.calculate_slope_max_min() < 0):
+        print(f"ALERT slope2 = {slope} calculate_slope_max_min() = {price_window.calculate_slope_max_min()}")
+    if(gradient * price_window.calculate_slope_max_min() < 0):
+        print(f"ALERT gradient = {gradient} calculate_slope_max_min() = {price_window.calculate_slope_max_min()}")
     if slope == 0:
         count = count + 1
     else:
         count = 0
-    #gradient = price_window.calculate_slope()
+    #gradient = price_window.calculate_slope_max_min()
    
 
     update_csv_file(filename, symbol, slope, count, 0, 0, pos, gradient)

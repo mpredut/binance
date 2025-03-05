@@ -38,6 +38,7 @@ def value_diff_to_percent(value1, value2):
         
     diff = value1 - value2
     percent = (diff / value1) * 100
+    #percent = (diff / ((abs(val1) + abs(val2)) / 2)  * 100
     return percent
 
 def slope(val1, idx1, val2, idx2):

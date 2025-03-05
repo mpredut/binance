@@ -298,6 +298,29 @@ class PriceWindow:
     def check_price_change(self, threshold):
         if len(self.prices) < 2:
             return 0, 1
+
+        min_price, min_index = self.get_min_and_index()
+        max_price, max_index = self.get_max_and_index()
+        newest_price = self.prices[-1]
+        newest_index = self.get_newest_index()
+
+        price_diff_min = u.calculate_difference_percent(min_price, newest_price)
+        price_diff_max = u.calculate_difference_percent(max_price, newest_price)
+
+        grow = price_diff_max < price_diff_min  
+        price_diff_newest = max(price_diff_min, price_diff_max)  #price_diff = max_price - min_price
+
+        if abs(price_diff_newest) >= threshold or u.are_close(price_diff_newest, threshold):
+            #todo use grow
+            print(f'price_diff_newest={price_diff_newest} threshold={threshold}are_close={u.are_close(price_diff_newest, threshold)}')
+            print(f'min price ={min_price}, max_price = {max_price}, newest_price={newest_price}, min_index={min_index}, max_index={max_index}')
+            return -price_diff_newest if price_diff_max > price_diff_min else price_diff_newest, 0
+        
+        return 0, 0
+        
+    def check_price_change_Old(self, threshold):
+        if len(self.prices) < 2:
+            return 0, 1
         min_price, min_index = self.get_min_and_index()
         max_price, max_index = self.get_max_and_index()
         #oldest_price = self.prices[0]
