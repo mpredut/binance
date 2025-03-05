@@ -463,13 +463,13 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
 
     
     # Functia care returneaza tranzactiile de tip "BUY" sau "SELL" din cache pentru un anumit simbol, filtrate pe zile
-def get_trade_orders_24(order_type, symbol, days_back):
+def get_trade_orders_for_day_24(order_type, symbol, day_back):
 
     sym.validate_ordertype(order_type)
     sym.validate_symbols(symbol)
         
     # Calculam inceputul si sfarsitul zilei dorite (cu days_back zile in urma)
-    target_day_start = (datetime.now() - timedelta(days=days_back)).replace(hour=0, minute=0, second=0, microsecond=0)
+    target_day_start = (datetime.now() - timedelta(days=day_back)).replace(hour=0, minute=0, second=0, microsecond=0)
     target_day_end = target_day_start.replace(hour=23, minute=59, second=59, microsecond=999999)
     
     # Convertim timpii la timestamp in milisecunde
