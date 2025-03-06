@@ -134,7 +134,7 @@ def get_my_trades(order_type, symbol, backdays=3, limit=1000):
             
             if not trades:
                 # retry from cache .....
-                trades = get_trade_orders_24(order_type, symbol, days_ago)
+                trades = get_trade_orders_for_day_24(order_type, symbol, days_ago)
                 if not trades:
                     print(f"No trades found for day {days_ago}.")
                     continue
