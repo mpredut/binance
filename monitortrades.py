@@ -790,6 +790,7 @@ def main():
     #taosymbol_target_price = api.get_current_price(taosymbol)
     #api.place_safe_order("BUY", taosymbol, taosymbol_target_price - 10, 1)
 
+    d = 14
     while True:
 
         #state_tracker.display_states()
@@ -797,11 +798,11 @@ def main():
         print_number_of_trades(maxage_trade_s)
         
         print("-----BTC------")
-        monitor_price_and_trade(symbol, sbs=142*3600+60, maxage_trade_s=3600*24*7)
+        monitor_price_and_trade(symbol, sbs=d*24*3600+60, maxage_trade_s=3600*24*7)
         print("-----TAOUSDT------")
-        monitor_price_and_trade(taosymbol,sbs=72*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
+        monitor_price_and_trade(taosymbol,sbs=d*24*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
         print("-----TAOUSDC------")
-        monitor_price_and_trade('TAOUSDC',sbs=72*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
+        monitor_price_and_trade('TAOUSDC',sbs=d*24*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
         print("--------------")
   
         data = sell_recommendation[symbol]
@@ -811,7 +812,7 @@ def main():
         force_sell = data['force_sell']
         days_after_use_current_price = data['days_after_use_current_price']      
         
-        update_trades(trades, symbol, maxage_trade_s, procent_desired_profit, expired_duration, min_procent)
+        #update_trades(trades, symbol, maxage_trade_s, procent_desired_profit, expired_duration, min_procent)
         #apply_sell_orders(trades, days_after_use_current_price, force_sell)
         #monitor_close_orders_by_age2(maxage_trade_s)
         time.sleep(60*1.8)  # Astept 1.8 minute.
