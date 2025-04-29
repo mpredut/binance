@@ -120,10 +120,7 @@ cprice = {}
 cprice_time = {}
 cprice_refresh_int = {}
 cprice = {}
-for symbol in symbols:
-    update_price(symbol)
-    
-  
+      
 def update_price(symbol):
     ticker = client.get_symbol_ticker(symbol=symbol)
     cprice[symbol] = float(ticker['price'])
@@ -131,6 +128,10 @@ def update_price(symbol):
     cprice_refresh_int[symbol] = 1
     return cprice[symbol]
     
+for symbol in sym.symbols:
+    update_price(symbol)
+
+
 def get_current_price(symbol):
     global cprice
     global cprice_refresh_int
