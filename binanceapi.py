@@ -51,10 +51,10 @@ def listen_to_binance(symbol):
 
 # Functie de gestionare a mesajului primit de la WebSocket
 def process_message(symbol, message):
-    global currentprice
+    global cprice
     symbol = message['s']  # Simbolul criptomonedei
     price = float(message['c'])  # Asigura-te ca price este un float
-    currentprice[symbol] = price
+    cprice[symbol] = price
     print(f"ASYNC {symbol} is {price:.2f}")
 
 def start_websocket_thread(symbol):
@@ -116,39 +116,38 @@ def get_symbol_limits(symbol):
                 return min_qty, max_qty, step_size
     return None, None, None
 
-currentprice = {}
-lasttime = {}
-refresh_interval = {}
-currentprice = {}
-
-for moneda in web.monede:
-    symbol = moneda["nume"]
-    refresh_interval[symbol] = 1  # Timp de refresh în secunde
-    currentprice[symbol] = None
-    lasttime[symbol] = 0
+cprice = {}
+cprice_time = {}
+cprice_refresh_int = {}
+cprice = {}
+for symbol in symbols:
+    update_price(symbol)
+    
+  
+def update_price(symbol):
+    ticker = client.get_symbol_ticker(symbol=symbol)
+    cprice[symbol] = float(ticker['price'])
+    cprice_time[symbol] = time.time()
+    cprice_refresh_int[symbol] = 1
+    return cprice[symbol]
     
 def get_current_price(symbol):
-    global currentprice
-    global refresh_interval
-    #refresh_interval = 0 # Intervalul in care sa se faca actualizarea (in secunde)
+    global cprice
+    global cprice_refresh_int
     try:     
-        if symbol not in currentprice or (lasttime[symbol] + refresh_interval[symbol] <= time.time()):
-            ticker = client.get_symbol_ticker(symbol=symbol)  # Obtineti pretul curent de la Binance API
-            currentprice[symbol] = float(ticker['price'])
-            lasttime[symbol] = time.time()
-            #print(f"Refresh price {symbol}: {currentprice[symbol]}")
-
-        return currentprice[symbol]
+        if (cprice_time[symbol] + cprice_refresh_int[symbol] <= time.time()) :
+            update_price(symbol)
+        return cprice[symbol]
     
     except BinanceAPIException as e:
         print(f"Eroare la obtinerea pretului curent de la Binance API: {e}")
-        print(f"Folosesc pretul obtinut prin websocket, {symbol}: {currentprice.get(symbol, 'N/A')}")
-        return currentprice.get(symbol, None)  # Returnam None daca simbolul nu exista
+        print(f"Folosesc pretul obtinut prin websocket, {symbol}: {cprice.get(symbol, 'N/A')}")
+        return cprice.get(symbol, None)  # Returnam None daca simbolul nu exista
     
-    except Exception as e:
-        print(f"get_current_price: A aparut o eroare neasteptata: {e}")
-        print(f"Folosesc pretul obtinut prin websocket, {symbol}: {currentprice.get(symbol, 'N/A')}")
-        return currentprice.get(symbol, None)  # Returnam None daca simbolul nu exista
+#    except Exception as e:
+#        print(f"get_current_price: A aparut o eroare neasteptata: {e}")
+#        print(f"Folosesc pretul obtinut prin websocket, {symbol}: {cprice.get(symbol, 'N/A')}")
+#        return cprice.get(symbol, None)  # Returnam None daca simbolul nu exista
 
 currenttime = time.time()       
 def get_current_time():
