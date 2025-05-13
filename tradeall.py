@@ -760,7 +760,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
             #    force=True, cancelorders=True, hours=1)
 
     proposed_price = current_price
-    18 de confirmari per minut * 3 minute
+    #18 de confirmari per minut * 3 minute
     if slope <= 0 and trend_state.is_trend_up():
         if ((trend_state.is_trend_up() > 18 * 3 and trend_state.is_trend_up() < 18 * 5 )
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
