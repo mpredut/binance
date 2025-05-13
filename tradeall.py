@@ -528,56 +528,73 @@ def track_and_place_order(action, symbol, count, proposed_price, current_price, 
     return order_ids
 
 
-
 class TrendState:
     def __init__(self, max_duration_seconds, expiration_trend_time, fresh_trend_time):
-        self.state = 'HOLD'  # Inițial, starea este 'HOLD'
-        self.old_state = self.state 
+        self.state = 'HOLD'
+        self.old_state = self.state
         self.expired = False
-        self.start_time = None  # Timpul de Inceput al trendului
-        self.end_time = None  # Timpul de sfârsit al trendului
-        self.last_confirmation_time = None  # Ultimul timp de confirmare al trendului
-        self.max_duration_seconds = max_duration_seconds  # Durata maxima permisa pentru un trend
-        self.confirm_count = 0  # Contorul de confirmari pentru trend
+        self.start_time = None
+        self.end_time = None
+        self.last_confirmation_time = None
+        self.max_duration_seconds = max_duration_seconds    # Nefolosit - Durata maxima permisa pentru un trend
+        self.confirm_count = 0
         self.expiration_trend_time = expiration_trend_time  # Pragul de timp Intre confirmari (In secunde)
-        self.fresh_trend_time = fresh_trend_time  # Pragul pentru a fi considerat fresh
-      
+        self.fresh_trend_time = fresh_trend_time            # Pragul pentru a fi considerat fresh
 
     def start_trend(self, new_state):
-        
         #self.end_trend()  # Marcheaza sfârsitul trendului anterior
-        
+        assert new_state in ['UP', 'DOWN', 'HOLD'], "Invalid trend state"
         self.old_state = self.state
         self.state = new_state
         self.start_time = time.time()
         self.last_confirmation_time = self.start_time
-        self.confirm_count = 1  # Prima confirmare
-        self.end_time = None  # Resetam timpul de sfârsit
+        self.confirm_count = 1
+        self.end_time = None
         self.expired = False
         print(f"Start of {self.state} trend at {u.timeToHMS(self.start_time)}")
         return self.old_state
-        
-    def get_trend_time(self):
-        if self.start_time is None:
-            return 0
-        return time.time() - self.start_time
-    
-    def is_trend_fresh(self, fresh_trend_time=1.7 * 60): #1.7 minutes
-        if time.time() < self.start_time + fresh_trend_time:
-            return True
-        return False
-        
-    def is_trend_old(self, old_trend_time):
-        return self.get_trend_time() > old_trend_time 
 
     def confirm_trend(self):
+        assert self.start_time is not None, "Trend must be started before confirming"
         self.last_confirmation_time = time.time()
         self.confirm_count += 1
         print(f"{self.confirm_count} times trend confirmed: {self.state} at {u.timeToHMS(self.last_confirmation_time)}")
         return self.confirm_count
 
+    def get_confirmed_trend_duration(self):
+        if self.start_time is None or self.last_confirmation_time is None:
+            raise ValueError("Start and confirmation time must be set")
+        if self.last_confirmation_time <= self.start_time:
+            raise ValueError("Start time must be before confirmation time")
+        return self.last_confirmation_time - self.start_time
+
+    def is_trend_fresh(self, fresh_trend_time=None):
+        if fresh_trend_time is None:
+            fresh_trend_time = self.fresh_trend_time
+        assert self.start_time is not None, "Trend must be started before checking freshness"
+        if time.time() < self.start_time + fresh_trend_time:
+            return True
+        print(f"No fresh trend! : {fresh_trend_time} vs. {self.start_time}")
+        return False
+
+    def is_trend_uniform_confirmed(self):
+        assert self.confirm_count > 0, "Cannot compute rate with zero confirmations"
+        trend_duration = self.get_confirmed_trend_duration()
+        if trend_duration == 0:
+            return False
+        rate = self.confirm_count * TIME_SLEEP_GET_PRICE / trend_duration
+        return rate > 0.5
+
+    def get_started_trend_time(self):
+        if self.start_time is None:
+            return 0
+        return time.time() - self.start_time
+
+    def is_started_trend_older_than(self, old_trend_time):
+        return self.get_started_trend_time() > old_trend_time
+
     def check_trend_expiration(self):
-        if self.expired :
+        if self.expired:
             return True
         if self.last_confirmation_time:
             time_since_last_confirmation = time.time() - self.last_confirmation_time
@@ -590,20 +607,20 @@ class TrendState:
 
     def end_trend(self):
         self.old_state = self.state
-        self.end_time = self.last_confirmation_time  # Timpul de sfârsit al trendului este ultimul timp de confirmare
+        self.end_time = self.last_confirmation_time
         print(f"Trend ended: {self.state} at {u.timeToHMS(self.end_time)} after {self.confirm_count} confirmations.")
         self.old_confirm_count = self.confirm_count
         self.confirm_count = 0
-  
+
     def is_trend_up(self):
-        if not self.confirm_count : 
+        if not self.confirm_count:
             return 0
-        if not  self.check_trend_expiration() and self.state == 'UP':
+        if not self.check_trend_expiration() and self.state == 'UP':
             return self.confirm_count
         return 0
 
     def is_trend_down(self):
-        if not self.confirm_count : 
+        if not self.confirm_count:
             return 0
         if not self.check_trend_expiration() and self.state == 'DOWN':
             return self.confirm_count
@@ -745,7 +762,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
     #25 de confirmari per minut * 3 minute
     if slope <= 0 and trend_state.is_trend_up():
         if ((trend_state.is_trend_up() > 25 * 3 and trend_state.is_trend_up() < 25 * 5 )
-        or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
+        or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE BUY ALL {win} .... ")
             if enable:
                 api.place_order_smart("BUY", symbol, proposed_price, 0.018, safeback_seconds=d*h*3600+60,
@@ -753,7 +770,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
     #25 de confirmari per minut * 3 minute
     if slope >= 0 and trend_state.is_trend_down():
         if ((trend_state.is_trend_down() > 25 * 3 and trend_state.is_trend_down() < 25 * 5 )
-        or trend_state.is_trend_old(TREND_TO_BE_OLD_SECONDS)) :
+        or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE SELL ALL {win} .... ")
             if enable:
                 api.place_order_smart("SELL", symbol, proposed_price, 0.018, safeback_seconds=d*h*3600+60,
@@ -800,7 +817,7 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
     #if symbol in sym.symbols:
     logic("BIG", True, symbol, gradient, slope_big, trend_state_big)
     
-     
+    
     for moneda in web.monede:
         if moneda["nume"] == symbol:
             moneda["watch"] = True if slope_big != 0 else False
