@@ -583,7 +583,9 @@ class TrendState:
         if trend_duration == 0:
             return False
         rate = self.confirm_count * TIME_SLEEP_GET_PRICE / trend_duration
-        return rate > 0.5
+        print(f"uniform rate is {rate}")
+        #25 de confirmari per minut * 1.5 minute
+        return rate > 0.1
 
     def get_started_trend_time(self):
         if self.start_time is None:
@@ -727,8 +729,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
         proposed_price = current_price # * (1 - 0.01)
         if trend_state.is_trend_up():
             count = trend_state.confirm_trend() # Confirmam ca trendul de crestere continua
-            #25 de confirmari per minut * 1.5 minute
-            if count > 25 * 1.1 and count < 25 * 1.7 and trend_state.is_trend_fresh():
+            if trend_state.is_trend_uniform_confirmed() and trend_state.is_trend_fresh():
                 #track_and_place_order('BUY', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
                 if enable:
                     api.place_order_smart("BUY", symbol, proposed_price, 0.017, safeback_seconds=d*h*3600+60,
@@ -746,7 +747,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
         proposed_price = current_price #  * (1 + 0.01)
         if trend_state.is_trend_down():
             count = trend_state.confirm_trend() # Confirmam ca trendul de scadere continua
-            if count > 25 * 1.1 and count < 25 * 1.7 and trend_state.is_trend_fresh() :
+            if trend_state.is_trend_uniform_confirmed() and trend_state.is_trend_fresh() :
                 #track_and_place_order('SELL', symbol, count, proposed_price, current_price, order_ids=order_ids)
                 if enable:
                     api.place_order_smart("SELL", symbol, proposed_price, 0.017, safeback_seconds=d*h*3600+60,
@@ -759,17 +760,17 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
             #    force=True, cancelorders=True, hours=1)
 
     proposed_price = current_price
-    #25 de confirmari per minut * 3 minute
+    18 de confirmari per minut * 3 minute
     if slope <= 0 and trend_state.is_trend_up():
-        if ((trend_state.is_trend_up() > 25 * 3 and trend_state.is_trend_up() < 25 * 5 )
+        if ((trend_state.is_trend_up() > 18 * 3 and trend_state.is_trend_up() < 18 * 5 )
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE BUY ALL {win} .... ")
             if enable:
                 api.place_order_smart("BUY", symbol, proposed_price, 0.018, safeback_seconds=d*h*3600+60,
                     force=True, cancelorders=True, hours=1)
-    #25 de confirmari per minut * 3 minute
+    #18 de confirmari per minut * 3 minute
     if slope >= 0 and trend_state.is_trend_down():
-        if ((trend_state.is_trend_down() > 25 * 3 and trend_state.is_trend_down() < 25 * 5 )
+        if ((trend_state.is_trend_down() > 18 * 3 and trend_state.is_trend_down() < 18 * 5 )
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE SELL ALL {win} .... ")
             if enable:
