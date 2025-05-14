@@ -7,8 +7,8 @@ import math
 from binanceclient import client
 
 
-btcsymbol = 'BTCUSDT'
-taosymbol = 'TAOUSDT'
+btcsymbol = 'BTCUSDC'
+taosymbol = 'TAOUSDC'
 #symbols = ["BTCUSDT", "BTCUSDC", "TAOUSDT", "TAOUSDC"]
 symbols = ["BTCUSDC",  "TAOUSDC"]
 def validate_ordertype(order_type):
