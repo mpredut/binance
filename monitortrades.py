@@ -769,26 +769,23 @@ def main():
     maxage_trade_s =  3 * 24 * 3600  # Timpul maxim in care ordinele executate/filled sunt considerate recente (3 zile)
     interval = 60 * 4 #4 minute
 
-    #taosymbol = 'TAO'
-    #api.get_binance_symbols(taosymbol)
+    #api.get_binance_symbols(sym.taosymbol)
 
     file_path = "sell_recommendation.csv"
     state_tracker.update_sell_recommendation(file_path)
     state_tracker.display_sell_recommendation()
-    #monitor_trades(order_type, symbol, filename, interval=3600, limit=1000, years_to_keep=01)
+    #monitor_trades(order_type, sym.symbol, filename, interval=3600, limit=1000, years_to_keep=01)
 
     # Pornim monitorizarea periodica a tranzactiilor
     start_monitoring(filename, interval=interval, limit=1000, years_to_keep=0.09)
     time.sleep(5)
 
-    close_sell_orders = apitrades.get_trade_orders("SELL", "TAOUSDT", maxage_trade_s)
+    close_sell_orders = apitrades.get_trade_orders("SELL", sym.taosymbol, maxage_trade_s)
     print(f"get_trade_orders:           Found {len(close_sell_orders)} close 'SELL' orders in the last {u.secondsToDays(maxage_trade_s)} days.")
     #return
     
-    symbol = "BTCUSDT"
-    taosymbol = 'TAOUSDT'
-    #taosymbol_target_price = api.get_current_price(taosymbol)
-    #api.place_safe_order("BUY", taosymbol, taosymbol_target_price - 10, 1)
+    #taosymbol_target_price = api.get_current_price(sym.taosymbol)
+    #api.place_safe_order("BUY", sym.taosymbol, taosymbol_target_price - 10, 1)
 
     d = 14
     while True:
@@ -798,21 +795,21 @@ def main():
         print_number_of_trades(maxage_trade_s)
         
         print("-----BTC------")
-        monitor_price_and_trade(symbol, sbs=d*24*3600+60, maxage_trade_s=3600*24*7)
-        print("-----TAOUSDT------")
-        #monitor_price_and_trade(taosymbol,sbs=d*24*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
+        monitor_price_and_trade(sym.btcsymbol, sbs=d*24*3600+60, maxage_trade_s=3600*24*7)
+        #print("-----TAOUSDT------")
+        #monitor_price_and_trade(sym.taosymbol,sbs=d*24*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
         print("-----TAOUSDC------")
-        monitor_price_and_trade('TAOUSDC',sbs=d*24*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
+        monitor_price_and_trade(sym.taosymbol,sbs=d*24*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
         print("--------------")
   
-        data = sell_recommendation[symbol]
+        data = sell_recommendation[sym.btcsymbol]
         procent_desired_profit = data['procent_desired_profit']
         expired_duration = data['expired_duration']
         min_procent = data['min_procent']
         force_sell = data['force_sell']
         days_after_use_current_price = data['days_after_use_current_price']      
         
-        #update_trades(trades, symbol, maxage_trade_s, procent_desired_profit, expired_duration, min_procent)
+        #update_trades(trades, sym.btcsymbol, maxage_trade_s, procent_desired_profit, expired_duration, min_procent)
         #apply_sell_orders(trades, days_after_use_current_price, force_sell)
         #monitor_close_orders_by_age2(maxage_trade_s)
         time.sleep(60*0.8)  # Astept 1.8 minute.
