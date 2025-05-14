@@ -800,7 +800,7 @@ def main():
         print("-----BTC------")
         monitor_price_and_trade(symbol, sbs=d*24*3600+60, maxage_trade_s=3600*24*7)
         print("-----TAOUSDT------")
-        monitor_price_and_trade(taosymbol,sbs=d*24*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
+        #monitor_price_and_trade(taosymbol,sbs=d*24*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
         print("-----TAOUSDC------")
         monitor_price_and_trade('TAOUSDC',sbs=d*24*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
         print("--------------")
@@ -815,7 +815,7 @@ def main():
         #update_trades(trades, symbol, maxage_trade_s, procent_desired_profit, expired_duration, min_procent)
         #apply_sell_orders(trades, days_after_use_current_price, force_sell)
         #monitor_close_orders_by_age2(maxage_trade_s)
-        time.sleep(60*1.8)  # Astept 1.8 minute.
+        time.sleep(60*0.8)  # Astept 1.8 minute.
         
         
 def test() :
@@ -834,12 +834,13 @@ def test() :
     
 if __name__ == "__main__":
     
+     main()
     #test()
-    try:
-        main()
-    except Exception as e:
-        print(f"Eroare capturata: {e}")
-    finally:
-        print("Fortare inchidere...")
-        sys.exit(1)  # opreste toate daemon threads
+    # try:
+        # main()
+    # except Exception as e:
+        # print(f"Eroare capturata: {e}")
+    # finally:
+        # print("Fortare inchidere...")
+        # sys.exit(1)  # opreste toate daemon threads
     
