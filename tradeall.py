@@ -772,7 +772,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
     proposed_price = current_price
     #18 de confirmari per minut * 3 minute ->defapt 6 confirmari per minut
     if slope <= 0 and trend_state.is_trend_up():
-        if (trend_state.is_trend_consistent_validated())
+        if (trend_state.is_trend_consistent_validated()
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE BUY ALL {win} .... ")
             if enable:
@@ -780,7 +780,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
                     force=True, cancelorders=True, hours=1)
     #18 de confirmari per minut * 3 minute
     if slope >= 0 and trend_state.is_trend_down():
-        if ((trend_state.is_trend_consistent_validated())
+        if (trend_state.is_trend_consistent_validated()
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE SELL ALL {win} .... ")
             if enable:
@@ -791,7 +791,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
     #new case
     #
     if slope <= -5.4 and trend_state.is_trend_up():
-        if (trend_state.is_trend_consistent_validated())
+        if (trend_state.is_trend_consistent_validated()
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 2: BUY ALL {win} .... ")
             if enable:
@@ -799,7 +799,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
                     force=True, cancelorders=True, hours=1)
     #18 de confirmari per minut * 3 minute
     if slope >= 5.4 and trend_state.is_trend_down():
-        if ((trend_state.is_trend_consistent_validated())
+        if (trend_state.is_trend_consistent_validated()
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 2: SELL ALL {win} .... ")
             if enable:
@@ -810,7 +810,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
     #new case
     #
     if slope <= -5.4 and trend_state.is_trend_down():
-        if (trend_state.is_trend_consistent_validated())
+        if (trend_state.is_trend_consistent_validated()
         and trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 3: BUY ALL {win} .... ")
             if enable:
@@ -818,7 +818,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
                     force=True, cancelorders=True, hours=1)
     #18 de confirmari per minut * 3 minute
     if slope >= 5.4 and trend_state.is_trend_up():
-        if ((trend_state.is_trend_consistent_validated())
+        if (trend_state.is_trend_consistent_validated()
         and trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 3: SELL ALL {win} .... ")
             if enable:
