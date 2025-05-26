@@ -567,7 +567,12 @@ class TrendState:
         if self.last_confirmation_time <= self.start_time:
             raise ValueError("Start time must be before confirmation time")
         return self.last_confirmation_time - self.start_time
-
+        
+    def get_started_trend_time(self):
+        if self.start_time is None:
+            return 0
+        return time.time() - self.start_time
+        
     def is_trend_fresh(self, fresh_trend_time=None):
         if fresh_trend_time is None:
             fresh_trend_time = self.fresh_trend_time
@@ -577,20 +582,24 @@ class TrendState:
         print(f"No fresh trend! : {fresh_trend_time} vs. {self.start_time}")
         return False
 
+    def is_trend_a_minim_validated(self) :
+        return self.last_confirmation_time - self.start_time > 30 and self.confirm_count > 3
+    
+    def is_trend_consistent_validated(self) :
+         #14 de confirmari per minut * 3 minute ->defapt 6 confirmari per minut  
+        return self.confirm_count > 14 * 3 and self.is_trend_uniform_confirmed() # and  self.confirm_count < 100 * 3
+    
     def is_trend_uniform_confirmed(self):
-        assert self.confirm_count > 0, "Cannot compute rate with zero confirmations"
-        trend_duration = self.get_confirmed_trend_duration()
+        if not self.is_trend_a_minim_validated() :
+            return False
+        
+        trend_duration = self.get_started_trend_time() #self.get_confirmed_trend_duration()
         if trend_duration == 0:
             return False
         rate = self.confirm_count * TIME_SLEEP_GET_PRICE / trend_duration
-        print(f"uniform rate is {rate}")
-        #25 de confirmari per minut * 1.5 minute
+        print(f"uniform rate is {rate} <> 0.1")
+        #10 confirmari per 1.5 minute
         return rate > 0.1
-
-    def get_started_trend_time(self):
-        if self.start_time is None:
-            return 0
-        return time.time() - self.start_time
 
     def is_started_trend_older_than(self, old_trend_time):
         return self.get_started_trend_time() > old_trend_time
@@ -612,19 +621,20 @@ class TrendState:
         self.end_time = self.last_confirmation_time
         print(f"Trend ended: {self.state} at {u.timeToHMS(self.end_time)} after {self.confirm_count} confirmations.")
         self.old_confirm_count = self.confirm_count
+        self.state == 'HOLD'
         self.confirm_count = 0
 
     def is_trend_up(self):
-        if not self.confirm_count:
-            return 0
-        if not self.check_trend_expiration() and self.state == 'UP':
+        if self.check_trend_expiration() :
+           return 0
+        if self.state == 'UP':
             return self.confirm_count
         return 0
 
     def is_trend_down(self):
-        if not self.confirm_count:
-            return 0
-        if not self.check_trend_expiration() and self.state == 'DOWN':
+        if self.check_trend_expiration() :
+           return 0
+        if self.state == 'DOWN':
             return self.confirm_count
         return 0
 
@@ -736,7 +746,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
                         force=True, cancelorders=True, hours=1)
                 print(f"place_order_smart BUY")
         else:
-            expired_trend = trend_state.start_trend('UP')  # Incepem un trend nou de crestere
+            old_trend = trend_state.start_trend('UP')  # Incepem un trend nou de crestere
             #track_and_place_order('BUY', sym.btcsymbol, 1, proposed_price, current_price, order_ids=order_ids)
             #api.place_order_smart("BUY", symbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
             #    force=True, cancelorders=True, hours=1)
@@ -754,15 +764,15 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
                         force=True, cancelorders=True, hours=1)
                 print(f"place_order_smart SELL")
         else:
-            expired_trend = trend_state.start_trend('DOWN')  # Incepem un trend nou de scadere
+            old_trend = trend_state.start_trend('DOWN')  # Incepem un trend nou de scadere
             #track_and_place_order('SELL', symbol, 1, proposed_price, current_price, order_ids=order_ids)
             #api.place_order_smart("SELL", symbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
             #    force=True, cancelorders=True, hours=1)
 
     proposed_price = current_price
-    #18 de confirmari per minut * 3 minute
+    #18 de confirmari per minut * 3 minute ->defapt 6 confirmari per minut
     if slope <= 0 and trend_state.is_trend_up():
-        if ((trend_state.is_trend_up() > 18 * 3 and trend_state.is_trend_up() < 18 * 5 )
+        if (trend_state.is_trend_consistent_validated())
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE BUY ALL {win} .... ")
             if enable:
@@ -770,14 +780,52 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
                     force=True, cancelorders=True, hours=1)
     #18 de confirmari per minut * 3 minute
     if slope >= 0 and trend_state.is_trend_down():
-        if ((trend_state.is_trend_down() > 18 * 3 and trend_state.is_trend_down() < 18 * 5 )
+        if ((trend_state.is_trend_consistent_validated())
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE SELL ALL {win} .... ")
             if enable:
                 api.place_order_smart("SELL", symbol, proposed_price, 0.018, safeback_seconds=d*h*3600+60,
                     force=True, cancelorders=True, hours=1)
-                                                                                                                                                                 
                     
+    #
+    #new case
+    #
+    if slope <= -5.4 and trend_state.is_trend_up():
+        if (trend_state.is_trend_consistent_validated())
+        or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
+            print(f"ATENTIE 2: BUY ALL {win} .... ")
+            if enable:
+                api.place_order_smart("BUY", symbol, proposed_price, 0.018, safeback_seconds=d*h*3600+60,
+                    force=True, cancelorders=True, hours=1)
+    #18 de confirmari per minut * 3 minute
+    if slope >= 5.4 and trend_state.is_trend_down():
+        if ((trend_state.is_trend_consistent_validated())
+        or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
+            print(f"ATENTIE 2: SELL ALL {win} .... ")
+            if enable:
+                api.place_order_smart("SELL", symbol, proposed_price, 0.018, safeback_seconds=d*h*3600+60,
+                    force=True, cancelorders=True, hours=1)
+                                                                                                                                                                 
+    #
+    #new case
+    #
+    if slope <= -5.4 and trend_state.is_trend_down():
+        if (trend_state.is_trend_consistent_validated())
+        and trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
+            print(f"ATENTIE 3: BUY ALL {win} .... ")
+            if enable:
+                api.place_order_smart("BUY", symbol, proposed_price, 0.018, safeback_seconds=d*h*3600+60,
+                    force=True, cancelorders=True, hours=1)
+    #18 de confirmari per minut * 3 minute
+    if slope >= 5.4 and trend_state.is_trend_up():
+        if ((trend_state.is_trend_consistent_validated())
+        and trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
+            print(f"ATENTIE 3: SELL ALL {win} .... ")
+            if enable:
+                api.place_order_smart("SELL", symbol, proposed_price, 0.018, safeback_seconds=d*h*3600+60,
+                    force=True, cancelorders=True, hours=1)
+   
+#todo ia acceleratiea pe timp scurt get minute 1-3 si daca e mare cumpara!   
 
 
 # Function to handle the price logic for a specific currency
@@ -856,7 +904,6 @@ while True:
     
     time.sleep(TIME_SLEEP_GET_PRICE)
     time.sleep(TIME_SLEEP_GET_PRICE)    
-    time.sleep(TIME_SLEEP_GET_PRICE)
     print(f"----------------------------------")
     for symbol in sym.symbols:
         #symbol = moneda["nume"]

@@ -140,24 +140,29 @@ def timestampToTime(timestamp_ms):
     timestamp_sec = timestamp_ms / 1000.0
     
     # Convertim în format datetime
-    human_readable_time = datetime.utcfromtimestamp(timestamp_sec)
+    #human_readable_time = datetime.utcfromtimestamp(timestamp_sec) ->UTC
+    human_readable_time = datetime.fromtimestamp(timestamp_sec)
     
     # Returnam timpul ca string în format citibil
     return human_readable_time.strftime('%Y-%m-%d %H:%M:%S')
 
 
-def timeToHMS(timestamp_ms):
+def timeMsToHMS(timestamp_ms):
     # Convertim timpul din milisecunde în secunde
     timestamp_sec = timestamp_ms / 1000.0
     
     # Convertim în format datetime
-    human_readable_time = datetime.utcfromtimestamp(timestamp_sec)
+    human_readable_time = datetime.fromtimestamp(timestamp_sec)
     
     # Returnăm timpul ca string în format oră, minut și secundă
     return human_readable_time.strftime('%H:%M:%S')
     #print(f"Start of {self.state} trend at {time.ctime(self.start_time)}")
     #print(f"Start of {self.state} trend at {time.strftime('%H:%M:%S', time.localtime(self.start_time))}")
 
+def timeToHMS(timestamp_sec):
+    human_readable_time = datetime.fromtimestamp(timestamp_sec)
+    return human_readable_time.strftime('%H:%M:%S')
+    
     # Functia care converteste secunde în zile
 def secondsToDays(max_age_seconds):
     # Definim numarul de secunde într-o zi
