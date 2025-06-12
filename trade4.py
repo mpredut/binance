@@ -31,7 +31,15 @@ class TradingBot:
         self.buy_filled = False
         self.sell_filled = False
         self.DEFAULT_ADJUSTMENT_PERCENT = DEFAULT_ADJUSTMENT_PERCENT
-
+        
+    def mark_buy_filled() :
+        self.buy_filled = True
+        self.sell_filled = False
+        
+    def mark_sell_filled() :
+        self.buy_filled = False
+        self.sell_filled = True
+        
     def repetitive_buy(self, current_price, filled_sell_price):
         adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
         failure_count = 0  # Adaugăm un contor pentru numărul de eșecuri
@@ -57,8 +65,7 @@ class TradingBot:
                 failure_count += 1
                 if failure_count >= max_failures:
                     print(f"[{self.symbol}] Order BUY failed {failure_count} times. Exiting.")
-                    self.buy_filled = True
-                    self.sell_filled = False
+                    self.mark_buy_filled()
                     return round(api.get_current_price(self.symbol) * (1 - 0.01), 4)
                 continue
 
@@ -71,8 +78,7 @@ class TradingBot:
                 print(f"[{self.symbol}] SELL disperat tot....")
                 api.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + 0.01), 0.2, 
                     force=True, cancelorders=True, hours=1)
-                self.buy_filled = True
-                self.sell_filled = False
+                self.mark_buy_filled()
                 return self.filled_buy_price
                 
             filled_buy_price = api.check_order_filled_by_time("BUY", self.symbol, time_back_in_seconds=WAIT_FOR_ORDER)
@@ -81,8 +87,7 @@ class TradingBot:
                 print(f"[{self.symbol}] SELL disperat tot....")
                 api.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + 0.01), 0.2, 
                     force=True, cancelorders=True, hours=1)
-                self.buy_filled = True
-                self.sell_filled = False
+                self.mark_buy_filled()
                 self.filled_buy_price = filled_buy_price
                 return self.filled_buy_price
                 
@@ -93,14 +98,15 @@ class TradingBot:
             else:
                 adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
 
+            # if arrived here it means 
+            # current order was not filled , so try cancel and retry in the loop
             if not api.cancel_order(self.symbol, order_id):
                 if api.check_order_filled(order_id, self.symbol):
-                    print(f"[{self.symbol}] Cancel BUY order failed. Maybe it was filled :-)? Moving to BUY ...")
+                    print(f"[{self.symbol}] Cancel BUY order failed. Maybe it was filled :-)? Moving to SELL ...")
                     print(f"[{self.symbol}] SELL disperat tot....")
                     api.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + 0.01), 0.2, 
                     force=True, cancelorders=True, hours=1)
-                    self.buy_filled = True
-                    self.sell_filled = False
+                    self.mark_buy_filled()
                     return self.filled_buy_price
                 else:
                     print(f"[{self.symbol}] Cancel BUY order failed. Someone canceled it. Continuing BUY...")
@@ -131,8 +137,7 @@ class TradingBot:
                 failure_count += 1  # Incrementăm contorul de eșecuri
                 if failure_count >= max_failures:
                     print(f"[{self.symbol}] Order SELL failed {failure_count} times. Exiting.")
-                    self.buy_filled = False
-                    self.sell_filled = True
+                    self.mark_sell_filled()
                     return round(api.get_current_price(self.symbol) * (1 + 0.1), 4)
                 continue
 
@@ -145,8 +150,7 @@ class TradingBot:
                 print(f"[{self.symbol}] BUY disperat tot....")
                 api.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - 0.01), 0.2, 
                     force=True, cancelorders=True, hours=1)
-                self.buy_filled = False
-                self.sell_filled = True
+                self.mark_sell_filled()
                 return self.filled_sell_price
 
             filled_sell_price = api.check_order_filled_by_time("SELL", self.symbol, time_back_in_seconds=WAIT_FOR_ORDER)
@@ -155,8 +159,7 @@ class TradingBot:
                 print(f"[{self.symbol}] BUY disperat tot....")
                 api.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - 0.01), 0.2, 
                     force=True, cancelorders=True, hours=1)
-                self.buy_filled = False
-                self.sell_filled = True
+                self.mark_sell_filled()
                 self.filled_sell_price = filled_sell_price
                 return self.filled_sell_price
 
@@ -166,10 +169,12 @@ class TradingBot:
                 adjustment_percent = 2 * self.DEFAULT_ADJUSTMENT_PERCENT
             else:
                 adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
-
+           
+            # if arrived here it means 
+            # current order was not filled , so try cancel and retry in the loop
             if not api.cancel_order(self.symbol, order_id):
                 if api.check_order_filled(order_id, self.symbol):
-                    print(f"[{self.symbol}] Cancel SELL order failed. Maybe it was filled :-)? Moving to SELL ...")
+                    print(f"[{self.symbol}] Cancel SELL order failed. Maybe it was filled :-)? Moving to BUY ...")
                     print(f"[{self.symbol}] BUY disperat tot....")
                     api.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - 0.01), 0.2, 
                         force=True, cancelorders=True, hours=1)                     
@@ -177,7 +182,7 @@ class TradingBot:
                     self.sell_filled = True                   
                     return self.filled_sell_price
                 else:
-                    print(f"[{self.symbol}] Cancel SELL order failed. Someone canceled it. Continuing buy...")
+                    print(f"[{self.symbol}] Cancel SELL order failed. Someone canceled it. Continuing sell...")
 
 
     def run(self):
