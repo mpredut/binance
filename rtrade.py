@@ -3,6 +3,7 @@ import time
 import datetime
 import math
 from collections import deque
+import threading
 
 ####Binance
 #from binance.exceptions import BinanceAPIException
@@ -184,16 +185,32 @@ class TradingBot:
                 else:
                     print(f"[{self.symbol}] Cancel SELL order failed. Someone canceled it. Continuing sell...")
 
-
     def run(self):
         while True:
             try:
                 current_price = api.get_current_price(self.symbol)
                 print(f"[{self.symbol}] Current price: {current_price:.2f}")
 
-                filled_sell_price = self.repetitive_sell(current_price, self.filled_buy_price)
-                current_price = api.get_current_price(self.symbol)
-                filled_buy_price = self.repetitive_buy(current_price, filled_sell_price) + 0.0001 ## avoid zero
+                buy_result = [None]
+                sell_result = [None]
+
+                def run_buy():
+                    buy_result[0] = self.repetitive_buy(current_price, self.filled_sell_price)
+
+                def run_sell():
+                    sell_result[0] = self.repetitive_sell(current_price, self.filled_buy_price)
+
+                t1 = threading.Thread(target=run_buy)
+                t2 = threading.Thread(target=run_sell)
+
+                t1.start()
+                t2.start()
+
+                t1.join()
+                t2.join()
+
+                filled_buy_price = buy_result[0] + 0.0001  # avoid zero
+                filled_sell_price = sell_result[0]
 
                 print(f"[{self.symbol}] Transaction complete: Bought at {filled_buy_price:.2f}, Sold at {filled_sell_price:.2f}")
                 if filled_buy_price < filled_sell_price:
@@ -203,17 +220,19 @@ class TradingBot:
 
                 time.sleep(1)
 
-                if self.buy_filled == self.sell_filled:
-                    self.buy_filled = not self.sell_filled
+                # Reset pentru următoarea rundă
+                self.buy_filled = self.sell_filled = False
+                #if self.buy_filled == self.sell_filled:
+                    #self.buy_filled = not self.sell_filled
             except Exception as e:
                 print(f"[{self.symbol}] Unexpected error: {e}")
-                if self.buy_filled == self.sell_filled:
-                    self.buy_filled = not self.sell_filled
+                #if self.buy_filled == self.sell_filled:
+                    #self.buy_filled = not self.sell_filled
                 api.cancel_recent_orders("SELL", self.symbol, WAIT_FOR_ORDER)
                 api.cancel_recent_orders("BUY", self.symbol, WAIT_FOR_ORDER)
                 time.sleep(1)
-
-
+                
+                
 DEFAULT_ADJUSTMENT_PERCENT = round(u.calculate_difference_percent(60000, 60000 - 380) / 100, 4)
 print(f"[INFO] DEFAULT_ADJUSTMENT_PERCENT = {DEFAULT_ADJUSTMENT_PERCENT}")
 
