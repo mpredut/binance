@@ -32,14 +32,17 @@ class TradingBot:
         self.buy_filled = False
         self.sell_filled = False
         self.DEFAULT_ADJUSTMENT_PERCENT = DEFAULT_ADJUSTMENT_PERCENT
+        self.lock = threading.Lock()  # Lock pentru sincronizare
         
-    def mark_buy_filled(self) :
-        self.buy_filled = True
-        self.sell_filled = False
-        
-    def mark_sell_filled(self) :
-        self.buy_filled = False
-        self.sell_filled = True
+    def mark_buy_filled(self):
+        with self.lock:
+            self.buy_filled = True
+            self.sell_filled = False
+
+    def mark_sell_filled(self):
+        with self.lock:
+            self.buy_filled = False
+            self.sell_filled = True
         
     def repetitive_buy(self, current_price, filled_sell_price):
         adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
@@ -47,6 +50,9 @@ class TradingBot:
         max_failures = 5  # Definim numărul maxim de eșecuri acceptabile
 
         while True:
+            if self.sell_filled:
+                adjustment_percent = max(0.001, adjustment_percent - adjustment_percent * 0.01)
+            
             target_buy_price = round(current_price * (1 - adjustment_percent), 4)
             print(f"[{self.symbol}] Order BUY initiated at {target_buy_price:.2f} procent {adjustment_percent}%")
             
@@ -119,6 +125,10 @@ class TradingBot:
         max_failures = 5  # Definim numărul maxim de eșecuri acceptabile
 
         while True:
+
+            if self.buy_filled:
+                adjustment_percent = max(0.001, adjustment_percent - adjustment_percent * 0.01)
+                
             target_sell_price = round(current_price * (1 + adjustment_percent), 4)
             print(f"[{self.symbol}] Order SELL initiated at {target_sell_price:.2f} procent {adjustment_percent}%")
 
