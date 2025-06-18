@@ -66,8 +66,8 @@ class TradingBot:
                 failure_count += 1
                 if failure_count >= max_failures:
                     print(f"[{self.symbol}] Order BUY failed {failure_count} times. Exiting.")
-                    self.mark_buy_filled()
-                    return round(api.get_current_price(self.symbol) * (1 - 0.01), 4)
+                    #self.mark_buy_filled()
+                    #return round(api.get_current_price(self.symbol) * (1 - 0.01), 4)
                 continue
 
             time.sleep(WAIT_FOR_ORDER)
@@ -138,8 +138,8 @@ class TradingBot:
                 failure_count += 1  # Incrementăm contorul de eșecuri
                 if failure_count >= max_failures:
                     print(f"[{self.symbol}] Order SELL failed {failure_count} times. Exiting.")
-                    self.mark_sell_filled()
-                    return round(api.get_current_price(self.symbol) * (1 + 0.1), 4)
+                    #self.mark_sell_filled()
+                    #return round(api.get_current_price(self.symbol) * (1 + 0.1), 4)
                 continue
 
             time.sleep(WAIT_FOR_ORDER)
