@@ -465,7 +465,7 @@ window_size = WINDOWS_SIZE_MIN / TIME_SLEEP_GET_PRICE
 window_size_big = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
-def track_and_place_order(action, symbol, count, proposed_price, current_price, quantity=0.017, order_ids=None):
+def track_and_place_order(action, symbol, count, proposed_price, current_price, quantity=api.quantities[symbol], order_ids=None):
     
     print(f"Iteration {count} generated price {proposed_price} versus {current_price}")
                     
@@ -732,6 +732,17 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
     h = 24
     
     print(f"gradient={gradient}, slope={slope}")
+    if gradient < 0 and slope < 0 :
+        if enable:
+            api.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
+                force=True, cancelorders=True, hours=1)
+            print(f"place_order_smart SELL")
+    if gradient > 0 and slope > 0 :
+        if enable:
+            api.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
+                force=True, cancelorders=True, hours=1)
+        print(f"place_order_smart BUY")
+
     #todo adjust safeback_seconds
     if gradient > 0 and slope < 0 :
         # Confirmam un trend de crestere
@@ -742,13 +753,13 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
             if trend_state.is_trend_uniform_confirmed() and trend_state.is_trend_fresh():
                 #track_and_place_order('BUY', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
                 if enable:
-                    api.place_order_smart("BUY", symbol, proposed_price, 0.017, safeback_seconds=d*h*3600+60,
+                    api.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
                         force=True, cancelorders=True, hours=1)
                 print(f"place_order_smart BUY")
         else:
             old_trend = trend_state.start_trend('UP')  # Incepem un trend nou de crestere
             #track_and_place_order('BUY', sym.btcsymbol, 1, proposed_price, current_price, order_ids=order_ids)
-            #api.place_order_smart("BUY", symbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
+            #api.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=16*3600+60,
             #    force=True, cancelorders=True, hours=1)
 
     if gradient < 0 and slope > 0 :
@@ -760,13 +771,13 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
             if trend_state.is_trend_uniform_confirmed() and trend_state.is_trend_fresh() :
                 #track_and_place_order('SELL', symbol, count, proposed_price, current_price, order_ids=order_ids)
                 if enable:
-                    api.place_order_smart("SELL", symbol, proposed_price, 0.017, safeback_seconds=d*h*3600+60,
+                    api.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
                         force=True, cancelorders=True, hours=1)
                 print(f"place_order_smart SELL")
         else:
             old_trend = trend_state.start_trend('DOWN')  # Incepem un trend nou de scadere
             #track_and_place_order('SELL', symbol, 1, proposed_price, current_price, order_ids=order_ids)
-            #api.place_order_smart("SELL", symbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
+            #api.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=16*3600+60,
             #    force=True, cancelorders=True, hours=1)
 
     proposed_price = current_price
@@ -899,7 +910,8 @@ for symbol in sym.symbols:
 TIME_SLEEP_BETWEEN_SYMBOLS=0#TIME_SLEEP_GET_PRICE
 # Second loop: Call handle_symbol for each symbol indefinitely
 
-                   
+print(f"Quantities: {api.quantities}")
+
 while True:
     
     time.sleep(TIME_SLEEP_GET_PRICE)

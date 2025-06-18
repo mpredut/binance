@@ -117,12 +117,13 @@ def get_symbol_limits(symbol):
 cprice = {}
 cprice_time = {}
 cprice_refresh_int = {}
-cprice = {}
       
 def update_price(symbol):
+    #global quantities
     try:
         ticker = client.get_symbol_ticker(symbol=symbol)
         cprice[symbol] = float(ticker['price'])
+        quantities[symbol] = 1000 / cprice[symbol]
     except Exception as e:
         print(f"get_symbol_ticker: A aparut o eroare neasteptata: {e}")
         
@@ -135,7 +136,8 @@ for symbol in sym.symbols:
     update_price(symbol)
     # Start the WebSocket thread
     websocket_thread = start_websocket_thread(symbol)
-
+    
+quantities = {symbol: 1000 / cprice[symbol] for symbol in sym.symbols}
 
 def get_current_price(symbol):
     global cprice
