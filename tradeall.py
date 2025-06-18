@@ -465,8 +465,8 @@ window_size = WINDOWS_SIZE_MIN / TIME_SLEEP_GET_PRICE
 window_size_big = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
-def track_and_place_order(action, symbol, count, proposed_price, current_price, quantity=api.quantities[symbol], order_ids=None):
-    
+def track_and_place_order(action, symbol, count, proposed_price, current_price, order_ids=None):
+    quantity = api.quantities[symbol]
     print(f"Iteration {count} generated price {proposed_price} versus {current_price}")
                     
     if order_ids is None:
