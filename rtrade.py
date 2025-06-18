@@ -33,11 +33,11 @@ class TradingBot:
         self.sell_filled = False
         self.DEFAULT_ADJUSTMENT_PERCENT = DEFAULT_ADJUSTMENT_PERCENT
         
-    def mark_buy_filled() :
+    def mark_buy_filled(self) :
         self.buy_filled = True
         self.sell_filled = False
         
-    def mark_sell_filled() :
+    def mark_sell_filled(self) :
         self.buy_filled = False
         self.sell_filled = True
         
@@ -236,7 +236,7 @@ class TradingBot:
 DEFAULT_ADJUSTMENT_PERCENT = round(u.calculate_difference_percent(60000, 60000 - 380) / 100, 4)
 print(f"[INFO] DEFAULT_ADJUSTMENT_PERCENT = {DEFAULT_ADJUSTMENT_PERCENT}")
 
-bot = TradingBot(sym.taosymbol, 0.017, DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
+bot = TradingBot(sym.taosymbol, 2, DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
 bot.run()
 
     
