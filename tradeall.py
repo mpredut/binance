@@ -730,6 +730,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
 
     d = 14
     h = 24
+    proposed_price = current_price = api.get_current_price(symbol)
     
     print(f"gradient={gradient}, slope={slope}")
     if gradient < 0 and slope < 0 :
@@ -846,8 +847,6 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
 
     price_window.process_price(current_price)
     price_window_big.process_price(current_price)
-
-    proposed_price = current_price
 
     slope, pos = 0, 0 #price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
     gradient, gradient_coff = price_window.get_trend()
