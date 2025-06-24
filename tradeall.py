@@ -737,12 +737,12 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
         if enable:
             api.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
                 force=True, cancelorders=True, hours=1)
-            print(f"place_order_smart SELL")
+            print(f"FINISH place_order_smart SELL")
     if gradient > 0 and slope > 0 :
         if enable:
             api.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
                 force=True, cancelorders=True, hours=1)
-        print(f"place_order_smart BUY")
+        print(f"FINISH place_order_smart BUY")
 
     #todo adjust safeback_seconds
     if gradient > 0 and slope < 0 :
