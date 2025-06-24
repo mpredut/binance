@@ -425,7 +425,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
             
         print(f"Am {len(oposite_trades)} trades de tip {opposite_order_type} pentru {backdays} zile. ")
         
-        time_limit = int(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
+        time_limit = float(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
         # Filtram tranzactiile opuse care au avut loc in intervalul specificat
         recent_opposite_trades = [trade for trade in oposite_trades if float(trade['time']) >= float(time_limit)]
         print(f"Ma raportrez doar la cele care sunt cu {time_back_in_seconds} sec. back , in numar de '{len(recent_opposite_trades)}'")
