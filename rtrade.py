@@ -61,7 +61,7 @@ class TradingBot:
                 print(f"[{self.symbol}] Ignore BUY order. It was previously filled at {self.filled_buy_price:.2f}")
                 return self.filled_buy_price
             
-           if self.sell_filled: # sunt disperat
+            if self.sell_filled: # sunt disperat
                 if adjustment_percent == MIN_adjustment_percent:
                     buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, 
                         safeback_seconds=0*3600+60, force=True, cancelorders=True, hours=0.01)
