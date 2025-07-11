@@ -453,7 +453,7 @@ class PriceWindow:
         
     
 
-TIME_SLEEP_GET_PRICE = 0.01  # seconds to sleep for price collection
+TIME_SLEEP_GET_PRICE = 0.4  # seconds to sleep for price collection
 EXP_TIME_BUY_ORDER = (2.6 * 60) * 60 # dupa 1.6 ore
 EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
 TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
