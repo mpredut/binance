@@ -20,6 +20,7 @@ import binanceapi as api
 
 # Intervalul de timp între încercările de anulare și recreere a ordinului (în secunde)
 WAIT_FOR_ORDER = 22
+MIN_adjustment_percent = 0.001
 
 class TradingBot:
     def __init__(self, symbol, qty, DEFAULT_ADJUSTMENT_PERCENT):
@@ -51,7 +52,7 @@ class TradingBot:
 
         while True:
             if self.sell_filled:
-                adjustment_percent = max(0.001, adjustment_percent - adjustment_percent * 0.01)
+                adjustment_percent = max(MIN_adjustment_percent, adjustment_percent - adjustment_percent * 0.01)
             
             target_buy_price = round(current_price * (1 - adjustment_percent), 4)
             print(f"[{self.symbol}] Order BUY initiated at {target_buy_price:.2f} procent {adjustment_percent}%")
@@ -60,10 +61,15 @@ class TradingBot:
                 print(f"[{self.symbol}] Ignore BUY order. It was previously filled at {self.filled_buy_price:.2f}")
                 return self.filled_buy_price
             
-            if adjustment_percent > 0:
-                buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty)
+            if self.sell_filled: # sunt disperat
+                if adjustment_percent == MIN_adjustment_percent:
+                    buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, 
+                        safeback_seconds=0*3600+60, force=True, cancelorders=True, hours=0.01)
+                else:
+                    buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, 
+                        safeback_seconds=0*3600+60, force=False, cancelorders=True, hours=0.01)
             else:
-                buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty)
+                buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty)     
 
             if buy_order is None:
                 print(f"[{self.symbol}] Order BUY failed, retryed {failure_count} times. Retrying again ...")
@@ -127,7 +133,7 @@ class TradingBot:
         while True:
 
             if self.buy_filled:
-                adjustment_percent = max(0.001, adjustment_percent - adjustment_percent * 0.01)
+                adjustment_percent = max(MIN_adjustment_percent, adjustment_percent - adjustment_percent * 0.01)
                 
             target_sell_price = round(current_price * (1 + adjustment_percent), 4)
             print(f"[{self.symbol}] Order SELL initiated at {target_sell_price:.2f} procent {adjustment_percent}%")
@@ -136,8 +142,13 @@ class TradingBot:
                 print(f"[{self.symbol}] Ignore SELL order. It was previously filled at {self.filled_sell_price:.2f}")
                 return self.filled_sell_price
 
-            if adjustment_percent > 0:
-                sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty)
+            if self.buy_filled: # sunt disperat
+                if adjustment_percent == MIN_adjustment_percent:
+                    sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, 
+                        safeback_seconds=0*3600+60, force=True, cancelorders=True, hours=0.01)
+                else:
+                    sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, 
+                        safeback_seconds=0*3600+60, force=False, cancelorders=True, hours=0.01)
             else:
                 sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty)
 

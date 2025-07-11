@@ -488,10 +488,10 @@ def place_order(order_type, symbol, price, qty, force=False, cancelorders=False,
             total_usdt_needed = qty * price * (1 + fee_percentage)
 
             if available_qty < total_usdt_needed:
-                print(f"Not enough USDT available. You need {total_usdt_needed:.8f} USDT, but you only have {available_qty:.8f} USDT.")
+                print(f"Not enough {symbol} available. You need {total_usdt_needed:.8f}, but you only have {available_qty:.8f} {symbol}.")
                 # Ajusteaza cantitatea pe care o poti cumpara cu USDT disponibili
                 qty = available_qty / (price * (1 + fee_percentage))
-                print(f"Adjusting {order_type} order quantity to {qty:.8f} based on available USDT.")
+                print(f"Adjusting {order_type} order quantity to {qty:.8f} based on available {symbol}.")
 
         # Rotunjim cantitatea la 5 zecimale in jos
         #qty = math.floor(qty * 10**5) / 10**5  # Rotunjire in jos la 5 zecimale
