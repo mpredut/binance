@@ -320,7 +320,7 @@ class PriceWindow:
 
         if abs(price_diff_newest) >= threshold or u.are_close(price_diff_newest, threshold):
             #todo use grow
-            print(f'price_diff_newest={price_diff_newest} threshold={threshold}are_close={u.are_close(price_diff_newest, threshold)}')
+            print(f'price_diff_minmax_versus_newest(slope)={price_diff_newest}(threshold={threshold}) are_close={u.are_close(price_diff_newest, threshold)}')
             print(f'min price ={min_price}, max_price = {max_price}, newest_price={newest_price}, min_index={min_index}, max_index={max_index}')
                
             return -price_diff_newest if price_diff_max > price_diff_min else price_diff_newest, 0
@@ -726,6 +726,27 @@ print (f" --------- {len(trades)}");
 print (f" my trades of today : {(trades)}");
 
 
+
+def logic_small(win, enable, symbol, gradient, slope, trend_state) :
+
+    d = 0
+    h = 0
+    proposed_price = current_price = api.get_current_price(symbol)
+    
+    print(f" SE ACTIVEAZA DUPA 3.5 la slope: gradient={gradient}, slope={slope}")
+    if gradient < 0 and slope < 0 and slope < 3.5:
+        if enable:
+            api.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
+                force=True, cancelorders=True, hours=1)
+            print(f"FINISH place_order_smart SELL")
+    if gradient > 0 and slope > 0 and slope > 3.5:
+        if enable:
+            api.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
+                force=True, cancelorders=True, hours=1)
+        print(f"FINISH place_order_smart BUY")
+
+
+
 def logic(win, enable, symbol, gradient, slope, trend_state) :
 
     d = 14
@@ -733,16 +754,16 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
     proposed_price = current_price = api.get_current_price(symbol)
     
     print(f"gradient={gradient}, slope={slope}")
-    if gradient < 0 and slope < 0 :
-        if enable:
-            api.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
-                force=True, cancelorders=True, hours=1)
-            print(f"FINISH place_order_smart SELL")
-    if gradient > 0 and slope > 0 :
-        if enable:
-            api.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
-                force=True, cancelorders=True, hours=1)
-        print(f"FINISH place_order_smart BUY")
+    # if gradient < 0 and slope < 0 :
+        # if enable:
+            # api.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
+                # force=True, cancelorders=True, hours=1)
+            # print(f"FINISH place_order_smart SELL")
+    # if gradient > 0 and slope > 0 :
+        # if enable:
+            # api.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
+                # force=True, cancelorders=True, hours=1)
+        # print(f"FINISH place_order_smart BUY")
 
     #todo adjust safeback_seconds
     if gradient > 0 and slope < 0 :
@@ -866,7 +887,8 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
 
     update_csv_file(filename, symbol, slope, count, 0, 0, pos, gradient)
     
-    #logic("SMALL" , gradient, slope, trend_state)
+    #logic("SMALL" ,True, symbol, gradient, slope, trend_state)
+    logic_small("SMALL" ,True, symbol, gradient, slope, trend_state)
 
     #
     # BIG ONE!!!
