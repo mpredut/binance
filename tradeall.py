@@ -753,7 +753,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
     h = 24
     proposed_price = current_price = api.get_current_price(symbol)
     
-    print(f"gradient={gradient}, slope={slope}")
+    print(f"LOGIC gradient={gradient}, slope={slope}")
     # if gradient < 0 and slope < 0 :
         # if enable:
             # api.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
@@ -883,13 +883,12 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
     else:
         count = 0
     #gradient = price_window.calculate_slope_max_min()
-   
-
-    update_csv_file(filename, symbol, slope, count, 0, 0, pos, gradient)
     
+    # SMALL ONE!!
     #logic("SMALL" ,True, symbol, gradient, slope, trend_state)
     logic_small("SMALL" ,True, symbol, gradient, slope, trend_state)
-
+    #
+    
     #
     # BIG ONE!!!
     #
@@ -899,6 +898,8 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
     logic("BIG", True, symbol, gradient, slope_big, trend_state_big)
     
     
+    update_csv_file(filename, symbol, slope, count, 0, 0, pos, gradient)
+        
     for moneda in web.monede:
         if moneda["nume"] == symbol:
             moneda["watch"] = True if slope_big != 0 else False
