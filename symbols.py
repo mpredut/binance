@@ -11,6 +11,7 @@ btcsymbol = 'BTCUSDC'
 taosymbol = 'TAOUSDC'
 #symbols = ["BTCUSDT", "BTCUSDC", "TAOUSDT", "TAOUSDC"]
 symbols = ["BTCUSDC",  "TAOUSDC"]
+forcesellsymbol = ["TAOUSDC", "BTCUSDC"]
 def validate_ordertype(order_type):
     if order_type not in [None, 'BUY', 'SELL']:
         raise ValueError(f"Invalid order_type '{order_type}'. It must be either 'BUY' or 'SELL' or None.")

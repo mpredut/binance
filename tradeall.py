@@ -809,7 +809,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE BUY ALL {win} .... ")
             if enable:
-                api.place_order_smart("BUY", symbol, proposed_price, 0.018, safeback_seconds=d*h*3600+60,
+                api.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
                     force=True, cancelorders=True, hours=1)
     #18 de confirmari per minut * 3 minute
     if slope >= 0 and trend_state.is_trend_down():
@@ -817,7 +817,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE SELL ALL {win} .... ")
             if enable:
-                api.place_order_smart("SELL", symbol, proposed_price, 0.018, safeback_seconds=d*h*3600+60,
+                api.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
                     force=True, cancelorders=True, hours=1)
                     
     #
@@ -828,7 +828,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 2: BUY ALL {win} .... ")
             if enable:
-                api.place_order_smart("BUY", symbol, proposed_price, 0.018, safeback_seconds=d*h*3600+60,
+                api.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
                     force=True, cancelorders=True, hours=1)
     #18 de confirmari per minut * 3 minute
     if slope >= 5.4 and trend_state.is_trend_down():
@@ -836,7 +836,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 2: SELL ALL {win} .... ")
             if enable:
-                api.place_order_smart("SELL", symbol, proposed_price, 0.018, safeback_seconds=d*h*3600+60,
+                api.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
                     force=True, cancelorders=True, hours=1)
                                                                                                                                                                  
     #
@@ -847,7 +847,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
         and trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 3: BUY ALL {win} .... ")
             if enable:
-                api.place_order_smart("BUY", symbol, proposed_price, 0.018, safeback_seconds=d*h*3600+60,
+                api.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
                     force=True, cancelorders=True, hours=1)
     #18 de confirmari per minut * 3 minute
     if slope >= 5.4 and trend_state.is_trend_up():
@@ -855,7 +855,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
         and trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 3: SELL ALL {win} .... ")
             if enable:
-                api.place_order_smart("SELL", symbol, proposed_price, 0.018, safeback_seconds=d*h*3600+60,
+                api.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
                     force=True, cancelorders=True, hours=1)
    
 #todo ia acceleratiea pe timp scurt get minute 1-3 si daca e mare cumpara!   

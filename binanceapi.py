@@ -243,7 +243,6 @@ def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5,
     return available_qty
 
 
-    
 
 
 def get_open_orders(order_type, symbol):
@@ -385,7 +384,6 @@ def place_SELL_order_at_market(symbol, qty):
         return None
 
 
-
 def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, max_daily_trades=10, profit_percentage=0.4):
     import binanceapi_trades as apitrades
 
@@ -458,9 +456,21 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
         return False
 
 
+def place_order(order_type, symbol, price, qty, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
+    order = __place_order(order_type, symbol, price, qty, force, cancelorders, hours, fee_percentage)
+    
+    if order is None:
+        if force and order_type == 'BUY':
+            order = place_SELL_order_at_market(forcesellsymbol[symbol], api.quantities[symbol]) 
+        else:
+            time.sleep(0.2)
+            order = __place_order(order_type, symbol, price, qty, force, cancelorders, hours, fee_percentage)
+            
+    return order
+         
 
 from decimal import Decimal, ROUND_DOWN
-def place_order(order_type, symbol, price, qty, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
+def __place_order(order_type, symbol, price, qty, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
     
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)  
@@ -499,7 +509,7 @@ def place_order(order_type, symbol, price, qty, force=False, cancelorders=False,
         qty = float(Decimal(qty).quantize(Decimal('0.0001'), rounding=ROUND_DOWN))  # Rotunjit la 5 zecimale
         if qty <= 0:
             print("Adjusted quantity is too small after rounding.")
-            return None   
+            return None
 
         current_price = get_current_price(symbol)
         if qty * current_price < 100:
@@ -632,6 +642,7 @@ def cancel_open_orders(order_type, symbol):
     except Exception as e:
         print(f"Error cancelling orders for {symbol}: {e}")
         
+
 def cancel_expired_orders(order_type, symbol, expire_time):
     
     order_type = order_type.upper()
@@ -659,8 +670,6 @@ def cancel_expired_orders(order_type, symbol, expire_time):
             cancel +=1
     print(f"Cancelled {count} orders")
         
-
-import time
 
 def cancel_recent_orders(order_type, symbol, max_age_seconds):
 
