@@ -64,10 +64,10 @@ class TradingBot:
             if self.sell_filled: # sunt disperat
                 if adjustment_percent == MIN_adjustment_percent:
                     buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, 
-                        safeback_seconds=0*3600+60, force=True, cancelorders=True, hours=0.01)
+                        safeback_seconds=1*3600+60, force=True, cancelorders=True, hours=0.01)
                 else:
                     buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, 
-                        safeback_seconds=0*3600+60, force=False, cancelorders=True, hours=0.01)
+                        safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=0.01)
             else:
                 buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty)     
 
@@ -145,10 +145,10 @@ class TradingBot:
             if self.buy_filled: # sunt disperat
                 if adjustment_percent == MIN_adjustment_percent:
                     sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, 
-                        safeback_seconds=0*3600+60, force=True, cancelorders=True, hours=0.01)
+                        safeback_seconds=1*3600+60, force=True, cancelorders=True, hours=0.01)
                 else:
                     sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, 
-                        safeback_seconds=0*3600+60, force=False, cancelorders=True, hours=0.01)
+                        safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=0.01)
             else:
                 sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty)
 
