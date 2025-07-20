@@ -511,7 +511,7 @@ def print_number_of_trades(maxage_trade_s):
 
 # Cache-ul care va fi actualizat periodic
 default_values_sell_recommendation = {
-    "BTCUSDT": {
+    "BTCUSDC": {
         'force_sell': 0,
         'procent_desired_profit': 0.07,
         'expired_duration': 3600 * 3.7,
@@ -524,7 +524,20 @@ default_values_sell_recommendation = {
         'min': 0.0,        # Valoare default pentru min
         'max': 0.0         # Valoare default pentru max
     },
-    "ETHUSDT": {
+    "TAOUSDC": {
+        'force_sell': 0,
+        'procent_desired_profit': 0.07,
+        'expired_duration': 3600 * 3.7,
+        'min_procent': 0.0099,
+        'days_after_use_current_price': 7,
+        'slope': 0.0,      # Valoare default pentru slope
+        'pos': 0,          # Valoare default pentru pos
+        'gradient': 0.0,   # Valoare default pentru gradient
+        'tick': 0,         # Valoare default pentru tick
+        'min': 0.0,        # Valoare default pentru min
+        'max': 0.0         # Valoare default pentru max
+    },
+    "ETHUSDC": {
         'force_sell': 0,
         'procent_desired_profit': 0.07,
         'expired_duration': 3600 * 3.7,
