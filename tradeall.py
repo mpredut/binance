@@ -459,7 +459,7 @@ EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
 TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
 # am voie 6 ordere per perioada de expirare care este 2.6 ore. deaceea am impartit la 6
 TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + EXP_TIME_SELL_ORDER/ 6 + 4*79  # seconds to sleep for order placement
-WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 7.7 * 60  # minutes
+WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 3.7 * 60  # minutes
 window_size = WINDOWS_SIZE_MIN / TIME_SLEEP_GET_PRICE
 
 window_size_big = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
@@ -730,20 +730,20 @@ print (f" my trades of today : {(trades)}");
 def logic_small(win, enable, symbol, gradient, slope, trend_state) :
 
     d = 0
-    h = 0
+    h = 1
     proposed_price = current_price = api.get_current_price(symbol)
     
     print(f" SE ACTIVEAZA DUPA 3.5 la slope: gradient={gradient}, slope={slope}")
-    if gradient < 0 and slope < 0 and slope < 3.5:
+    if gradient < 0 and slope < -3.5:
         if enable:
-            api.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
-                force=True, cancelorders=True, hours=1)
-            print(f"FINISH place_order_smart SELL")
-    if gradient > 0 and slope > 0 and slope > 3.5:
+            #api.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
+            #    force=True, cancelorders=False, hours=1)
+            print(f"FINISH FORCE place_order_smart SELL")
+    if gradient > 0 and slope > 3.5:
         if enable:
-            api.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
-                force=True, cancelorders=True, hours=1)
-        print(f"FINISH place_order_smart BUY")
+            #api.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
+            #    force=True, cancelorders=False, hours=1)
+        print(f"FINISH FORCE place_order_smart BUY")
 
 
 
@@ -869,7 +869,7 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
     price_window.process_price(current_price)
     price_window_big.process_price(current_price)
 
-    slope, pos = 0, 0 #price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
+    slope, pos = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
     gradient, gradient_coff = price_window.get_trend()
 
     if(slope * gradient < 0):
@@ -898,7 +898,7 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
     logic("BIG", True, symbol, gradient, slope_big, trend_state_big)
     
     
-    update_csv_file(filename, symbol, slope, count, 0, 0, pos, gradient)
+    update_csv_file(filename, symbol, slope_big, count, 0, 0, pos, gradient)
         
     for moneda in web.monede:
         if moneda["nume"] == symbol:
