@@ -743,7 +743,7 @@ def logic_small(win, enable, symbol, gradient, slope, trend_state) :
         if enable:
             #api.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
             #    force=True, cancelorders=False, hours=1)
-        print(f"FINISH FORCE place_order_smart BUY")
+            print(f"FINISH FORCE place_order_smart BUY")
 
 
 
