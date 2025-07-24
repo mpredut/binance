@@ -145,7 +145,7 @@ class TradingBot:
 
             if self.buy_filled: # sunt disperat
                 if adjustment_percent == MIN_adjustment_percent:
-                     print(f"[{self.symbol}] sunt disperat!")
+                    print(f"[{self.symbol}] sunt disperat!")
                     sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, 
                         safeback_seconds=1*3600+60, force=True, cancelorders=True, hours=0.1)
                 else:
