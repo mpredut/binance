@@ -14,6 +14,7 @@ import log
 import utils as u
 import symbols as sym
 import binanceapi as api
+import cacheManager as tcm
 
 # 
 # Cache global pentru tranzactii
@@ -459,6 +460,7 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
     ]
 
     #  filtered_trades.sort(key=lambda x: x['price'])
+    
     return filtered_trades
 
     
@@ -507,3 +509,75 @@ def validate_keys_in_trades(trades):
         for key in required_keys:
             if key not in trade:
                 raise ValueError(f"Tranzactia {idx} este invalida. Lipseste cheia '{key}'. Date: {trade}")
+
+
+def print_trade(trade):
+    if not trade:
+        return
+    print(json.dumps(trade, indent=2))
+
+def compare_trade_sources(symbol, order_type="BUY", max_age_seconds=3600, limit=1000):
+    
+    print(f"\n🔍 Comparare pentru simbolul {symbol}, order_type {order_type}")
+
+    current_time_ms = int(time.time() * 1000)
+    max_age_ms = max_age_seconds * 1000
+
+    def filter_trades(trades):
+        return {
+            trade['id']: trade for trade in trades
+            if trade['symbol'] == symbol
+            and (order_type is None or trade['isBuyer'] == (order_type == "BUY"))
+            and (current_time_ms - trade['time']) <= max_age_ms
+        }
+
+    # 1. Cache principal
+    main_map = filter_trades(trade_cache)
+
+    # 2. TCM cache
+    tcm_map = filter_trades(tcm.trade_cache_manager.cache)
+
+    # 3. API Binance
+    try:
+        api_raw = api.client.get_my_trades(symbol=symbol, limit=limit)
+        api_map = filter_trades(api_raw)
+    except Exception as e:
+        print(f"❌ Eroare la interogarea Binance API: {e}")
+        return
+
+    # Seturi de ID-uri
+    main_ids = set(main_map)
+    tcm_ids = set(tcm_map)
+    api_ids = set(api_map)
+
+    all_ids = main_ids | tcm_ids | api_ids
+
+    # Comparație pe baza ID-urilor
+    for tid in sorted(all_ids):
+        sources = []
+        if tid in main_map: sources.append("main")
+        if tid in tcm_map: sources.append("tcm")
+        if tid in api_map: sources.append("api")
+
+        if len(sources) == 1:
+            print(f"⚠️ Trade ID {tid} există doar în: {sources[0]}")
+            print_trade(main_map.get(tid) or tcm_map.get(tid) or api_map.get(tid))
+        else:
+            # Compară conținutul dacă apare în mai multe surse
+            ref = main_map.get(tid) or tcm_map.get(tid)
+            inconsistencies = {}
+
+            for source_name, trade in [('main', main_map.get(tid)),
+                                       ('tcm', tcm_map.get(tid)),
+                                       ('api', api_map.get(tid))]:
+                if trade and ref:
+                    diffs = {k: (ref[k], trade[k]) for k in ref if k in trade and ref[k] != trade[k]}
+                    if diffs:
+                        inconsistencies[source_name] = diffs
+
+            if inconsistencies:
+                print(f"🔄 Trade ID {tid} are diferențe între surse:")
+                for src, diff in inconsistencies.items():
+                    print(f"  ↪️ {src}:")
+                    for k, (v1, v2) in diff.items():
+                        print(f"    {k}: {v1} ≠ {v2}")
