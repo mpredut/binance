@@ -12,7 +12,7 @@ import symbols as sym
 import binanceapi as api
 
 SYNC_INTERVAL_SEC = 600/10*5  # 10 minute
-SYNC_INTERVAL_SEC = 300  # 5 minute
+SYNC_INTERVAL_SEC = 300/30  # 5 minute
 
 class CacheManagerInterface(ABC):
     def __init__(self, symbols, filename, api_client=api):
@@ -34,8 +34,9 @@ class CacheManagerInterface(ABC):
         last_times = self.rebuild_fetchtime_times()
         if not last_times:
             # Fallback: folosim data fișierului
-            fallback_time = int(os.path.getmtime(self.filename) * 1000) - 60_000
-            return {symbol: fallback_time for symbol in self.get_all_symbols_from_cache()}
+            if os.path.exists(self.filename):
+                fallback_time = int(os.path.getmtime(self.filename) * 1000) - 60_000
+                return {symbol: fallback_time for symbol in self.get_all_symbols_from_cache()}
         return last_times
           
         
@@ -66,7 +67,7 @@ class CacheManagerInterface(ABC):
 
     @abstractmethod
     def get_remote_items(self, symbol, startTime):
-         """Metoda abstractă – trebuie implementată de clasele derivate."""
+        """Metoda abstractă – trebuie implementată de clasele derivate."""
         pass 
                            
     def update_cache_per_symbol(self, symbol):
@@ -106,6 +107,8 @@ class CacheManagerInterface(ABC):
 class TradeCacheManager(CacheManagerInterface):
     def __init__(self, symbols=sym.symbols, filename="cachetrade.json", api_client=api):
         super().__init__(symbols, filename, api_client)
+        self.first = True
+        self.days_back = 30
 
     def _is_valid_trade(self, trade):
         required_keys = ['symbol', 'id', 'orderId', 'price', 'qty', 'time', 'isBuyer']
@@ -126,26 +129,31 @@ class TradeCacheManager(CacheManagerInterface):
         # Offset de siguranță (60 sec)
         for symbol in last_times:
             last_times[symbol] = max(0, last_times[symbol] - 60_000)
-
-        if not last_times:
-            # Fallback: folosim data fișierului
-            fallback_time = int(os.path.getmtime(self.filename) * 1000) - 60_000
-            return {symbol: fallback_time for symbol in self.get_all_symbols_from_cache()}
-        
+      
         return dict(last_times)
         
     def get_remote_items(self, symbol, startTime):
+            
+        current_time = int(time.time() * 1000)
+        
+        if self.first:
+            # startTime = timpul curent minus numărul de zile configurabil (convertit în milisecunde)
+            startTime = current_time - self.days_back * 24 * 60 * 60 * 1000
+            
         try:
-            new_trades = api.client.get_my_trades(symbol=symbol, start_time=startTime)
+            new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime, limit=1000)
         except Exception as e:
             print(f"[Eroare] Binance API pentru {symbol}: {e}")
             return []
+            
+        self.first = False
 
         # Elimină duplicatele (după id dacă există, altfel după time + symbol)
         existing_keys = set(
             (t.get("id"), t["symbol"]) for t in self.cache if "id" in t
         )
 
+        print(f"Număr de trades noi: {len(new_trades)}")
         unique_new_trades = []
         for t in new_trades:
             if not self._is_valid_trade(t):
@@ -155,7 +163,8 @@ class TradeCacheManager(CacheManagerInterface):
             if key not in existing_keys:
                 unique_new_trades.append(t)
                 existing_keys.add(key)
-                    
+        
+        print(f"Număr de unique_new_trades trades noi: {len(unique_new_trades)}")            
         return unique_new_trades
         
 
