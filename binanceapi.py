@@ -390,6 +390,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)
     minutes_ago = time.time() - 3 * 60  # With 3 min in urma , time.time() => seconds
+    #apitrades.compare_trade_sources(symbol, order_type=order_type, max_age_seconds=time_back_in_seconds, limit=1000)
         
     try:
         
@@ -407,7 +408,8 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
         #all_trades = apitrades.get_my_trades(order_type, symbol, backdays=backdays, limit=1000)
         all_trades = apitrades.get_trade_orders(order_type, symbol, max_age_seconds=time_back_in_seconds)
         #all_trades = apitrades.get_trade_orders_24(order_type, symbol, days_back=backdays)
-        oposite_trades = apitrades.get_my_trades(opposite_order_type, symbol, backdays=backdays, limit=1000) ## curent date
+        #oposite_trades = apitrades.get_my_trades(opposite_order_type, symbol, backdays=backdays, limit=1000) ## curent date
+        oposite_trades = apitrades.get_trade_orders(opposite_order_type, symbol, max_age_seconds=time_back_in_seconds) ## curent date
         if len(all_trades)/backdays > max_daily_trades:
             print(f"Am {len(oposite_trades)} trades. Limita zilnica este de {max_daily_trades} pentru'{order_type}'.")
             return False
@@ -713,7 +715,8 @@ def check_order_filled_by_time(order_type, symbol, time_back_in_seconds, pret_mi
     import binanceapi_trades as apitrades
 
     backdays = math.ceil(time_back_in_seconds / 86400)
-    trades = apitrades.get_my_trades(order_type, symbol, backdays=backdays, limit=1000)
+    #trades = apitrades.get_my_trades(order_type, symbol, backdays=backdays, limit=1000)
+    trades = apitrades.get_trades_order(order_type, symbol, time_back_in_seconds=time_back_in_seconds, limit=1000)
     time_limit = int(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
 
                 
