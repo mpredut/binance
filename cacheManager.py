@@ -12,7 +12,7 @@ import symbols as sym
 import binanceapi as api
 
 SYNC_INTERVAL_SEC = 600/10*5  # 10 minute
-SYNC_INTERVAL_SEC = 300/30  # 5 minute
+SYNC_INTERVAL_SEC = 300/30  # 5 minute / 30 = 10 secunde
 
 class CacheManagerInterface(ABC):
     def __init__(self, symbols, filename, api_client=api):
@@ -101,9 +101,9 @@ class CacheManagerInterface(ABC):
 
 
 
-
-#implemetarile specifice pentru cache
-
+# ###### 
+# ###### Implemetarile specifice pentru cache
+# ###### 
 class TradeCacheManager(CacheManagerInterface):
     def __init__(self, symbols=sym.symbols, filename="cachetrade.json", api_client=api):
         super().__init__(symbols, filename, api_client)
@@ -196,9 +196,14 @@ class PriceCacheManager(CacheManagerInterface):
     def get_all_symbols_from_cache(self):
         return self.symbols
 
-#######
+# ###### 
+# ###### GLOBAL VARIABLE FOR CACHE ####### 
+# ###### 
+
+# trade cache
 trade_cache_manager = TradeCacheManager(filename="cache_trade.json", symbols=sym.symbols, api_client=api)
     
+# price cache
 price_cache_manager = {}
 for symbol in sym.symbols:
     price_cache_manager[symbol] = PriceCacheManager(filename=f"cache_price_{symbol}.json",
