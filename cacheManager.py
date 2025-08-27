@@ -12,9 +12,8 @@ import log
 import utils as u
 import symbols as sym
 import binanceapi as api
+import binanceapi_trades as apitrades
 
-SYNC_INTERVAL_SEC = 600/10*5  # 10 minute
-SYNC_INTERVAL_SEC = 300/30  # 5 minute / 30 = 10 secunde
 
 class CacheManagerInterface(ABC):
     def __init__(self, symbols, filename, api_client=api):
@@ -25,7 +24,7 @@ class CacheManagerInterface(ABC):
         self.fetchtime_time_per_symbol = {}
 
         self.load_state()
-        self.periodic_sync()
+        # self.periodic_sync()
 
     @abstractmethod
     def rebuild_fetchtime_times(self):
@@ -90,16 +89,19 @@ class CacheManagerInterface(ABC):
         self.save_state()
 
    
-    def periodic_sync(self):
+    def periodic_sync(self, sync_interval_sec):
         def run():
             while True:
-                print(f"\n--- Sync started at {time.strftime('%Y-%m-%d %H:%M:%S')} ---")
+                cls_name = self.__class__.__name__
+                print(f"\n--- [{cls_name}] Sync started at {time.strftime('%Y-%m-%d %H:%M:%S')} ---")
                 self.update_cache()
-                print("--- Sync completed ---")
-                time.sleep(SYNC_INTERVAL_SEC)
+                print(f"--- [{cls_name}] Sync completed ---")
+            
+                time.sleep(sync_interval_sec)
 
-        thread = threading.Thread(target=run, daemon=True)
+        thread = threading.Thread(target=run, daemon=False)
         thread.start()
+        return thread
 
 
 
@@ -137,13 +139,16 @@ class TradeCacheManager(CacheManagerInterface):
     def get_remote_items(self, symbol, startTime):
             
         current_time = int(time.time() * 1000)
-        
+        backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
+   
         if self.first:
             # startTime = timpul curent minus numărul de zile configurabil (convertit în milisecunde)
-            startTime = current_time - self.days_back * 24 * 60 * 60 * 1000
+            startTime = current_time - self.days_back * (24 * 60 * 60 * 1000)
+            backdays = self.days_back
             
         try:
-            new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime, limit=1000)
+            #new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime, limit=1000)
+            new_trades = apitrades.get_my_trades(order_type = None, symbol=symbol, backdays=backdays, limit=1000)
         except Exception as e:
             print(f"[Eroare] Binance API pentru {symbol}: {e}")
             return []
@@ -215,3 +220,25 @@ for symbol in sym.symbols:
     price_cache_manager[symbol] = PriceCacheManager(filename=f"cache_price_{symbol}.json",
                                                     symbols=[symbol],
                                                     api_client=api)
+                                                    
+
+
+TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
+PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
+# ###### 
+# ###### FORCE CACHE TO BE UPDATEING ####### 
+# ###### 
+        
+if __name__ == "__main__":
+    threads = []
+    threads.append(trade_cache_manager.periodic_sync(TRADE_SYNC_INTERVAL_SEC))
+    for symbol in sym.symbols:
+        threads.append(price_cache_manager[symbol].periodic_sync(PRICE_SYNC_INTERVAL_SEC))
+
+    try:
+        for t in threads:
+            t.join()
+    except KeyboardInterrupt:
+        print("Oprit manual.")
+    finally:
+        print("Cleanup / închidere resurse...")
