@@ -121,7 +121,7 @@ def get_my_trades_24(order_type, symbol, days_ago=0, limit=1000):
 
 
 
-def get_my_trades(order_type, symbol, backdays=3, limit=1000):
+def get_my_trades(order_type, symbol, backdays: int = 3, limit=1000):
     
     sym.validate_ordertype(order_type)
     sym.validate_symbols(symbol)
@@ -130,7 +130,7 @@ def get_my_trades(order_type, symbol, backdays=3, limit=1000):
     
     try:
         for days_ago in range(backdays + 1):
-            print(f"Fetching trades for day {days_ago}...")
+            print(f"get_my_trades: Fetching trades for day {days_ago}...")
             trades = get_my_trades_24(order_type, symbol, days_ago=days_ago, limit=limit)
             
             if not trades:
@@ -174,7 +174,7 @@ def get_my_trades_simple(order_type, symbol, backdays=3, limit=1000):
         for day in range(backdays + 1):
             # Calculam start_time pentru ziua curenta in intervalul de 24 de ore
             start_time = end_time - max_interval
-            print(f"Fetching trades for day {day}...")
+            print(f"get_my_trades_simple: Fetching trades for day {day}...")
             trades = api.client.get_my_trades(symbol=symbol, limit=limit, startTime=start_time, endTime=end_time)
             if trades:
                 #filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "BUY")]
