@@ -17,6 +17,7 @@ import binanceapi_trades as apitrades
 
 class CacheManagerInterface(ABC):
     def __init__(self, symbols, filename, api_client=api):
+        self.cls_name = self.__class__.__name__
         self.api_client = api_client
         self.symbols = symbols
         self.filename = filename
@@ -49,7 +50,7 @@ class CacheManagerInterface(ABC):
                     self.cache = data.get("items", [])
                     self.fetchtime_time_per_symbol = data.get("fetchtime", {})
             except Exception as e:
-                print(f"[Eroare] La citirea fișierului cache {self.filename} : {e}")
+                print(f"[{self.cls_name}][Eroare] La citirea fișierului cache {self.filename} : {e}")
 
         if not self.fetchtime_time_per_symbol:
             self.fetchtime_time_per_symbol = self._rebuild_fetchtime_times()
@@ -64,7 +65,7 @@ class CacheManagerInterface(ABC):
                 }, f)
             os.replace(tmp_file, self.filename)
         except Exception as e:
-            print(f"[Eroare] La salvarea fișierului cache: {e}")
+            print(f"[{self.cls_name}][Eroare] La salvarea fișierului cache: {e}")
 
     @abstractmethod
     def get_remote_items(self, symbol, startTime):
@@ -81,7 +82,7 @@ class CacheManagerInterface(ABC):
         self.cache.extend(unique_new_items)
         self.fetchtime_time_per_symbol[symbol] = current_time
 
-        print(f"[Info] {symbol}: Adăugate {len(unique_new_items)} items noi.")
+        print(f"[{self.cls_name}][Info] {symbol}: Adăugate {len(unique_new_items)} items noi.")
 
     def update_cache(self):
         for symbol in self.symbols:
@@ -92,10 +93,9 @@ class CacheManagerInterface(ABC):
     def periodic_sync(self, sync_interval_sec):
         def run():
             while True:
-                cls_name = self.__class__.__name__
-                print(f"\n--- [{cls_name}] Sync started at {time.strftime('%Y-%m-%d %H:%M:%S')} ---")
+                print(f"\n[{self.cls_name}] Sync started at {time.strftime('%Y-%m-%d %H:%M:%S')} for {self.symbols}")
                 self.update_cache()
-                print(f"--- [{cls_name}] Sync completed ---")
+                print(f"[{self.cls_name}] Sync completed for {self.symbols}")
             
                 time.sleep(sync_interval_sec)
 
@@ -150,7 +150,7 @@ class TradeCacheManager(CacheManagerInterface):
             #new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime, limit=1000)
             new_trades = apitrades.get_my_trades(order_type = None, symbol=symbol, backdays=backdays, limit=1000)
         except Exception as e:
-            print(f"[Eroare] Binance API pentru {symbol}: {e}")
+            print(f"[{self.cls_name}][Eroare] Binance API pentru {symbol}: {e}")
             return []
             
         self.first = False
@@ -160,18 +160,18 @@ class TradeCacheManager(CacheManagerInterface):
             (t.get("id"), t["symbol"]) for t in self.cache if "id" in t
         )
 
-        print(f"Număr de trades noi: {len(new_trades)}")
+        print(f"[{self.cls_name}][info] Număr de trades noi: {len(new_trades)}")
         unique_new_trades = []
         for t in new_trades:
             if not self._is_valid_trade(t):
-                print(f"BED DAY???")
+                print(f"[{self.cls_name}] BED DAY???")
                 continue 
             key = (t.get("id"), t["symbol"]) if "id" in t else (t["symbol"], t["time"])
             if key not in existing_keys:
                 unique_new_trades.append(t)
                 existing_keys.add(key)
         
-        print(f"Număr de unique_new_trades trades noi: {len(unique_new_trades)}")            
+        print(f"[{self.cls_name}][info] Număr de unique_new_trades trades noi: {len(unique_new_trades)}")            
         return unique_new_trades
         
 
@@ -192,7 +192,7 @@ class PriceCacheManager(CacheManagerInterface):
         try:
             price = self.api_client.get_current_price(symbol=symbol)
         except Exception as e:
-            print(f"[Eroare] Binance API pentru {symbol}: {e}")
+            print(f"[{self.cls_name}][Eroare] Binance API pentru {symbol}: {e}")
             return []
 
         timestamp = int(time.time())  # timestamp UTC în secunde
