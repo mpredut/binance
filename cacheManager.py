@@ -1,6 +1,8 @@
 import json
 import os
 import time
+import datetime
+from datetime import datetime
 from abc import ABC, abstractmethod
 from collections import defaultdict
 import threading
@@ -188,8 +190,12 @@ class PriceCacheManager(CacheManagerInterface):
             print(f"[Eroare] Binance API pentru {symbol}: {e}")
             return []
 
-        timestamp = int(time.time() * 1000)
-        price_entry = [timestamp, price]
+        timestamp = int(time.time())  # timestamp UTC în secunde
+        # Conversie în local
+        local_dt = datetime.fromtimestamp(timestamp)  # local time
+        local_ts_ms = int(local_dt.timestamp() * 1000)
+
+        price_entry = [local_ts_ms, price]
 
         return [price_entry]
 
