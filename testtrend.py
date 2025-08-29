@@ -62,7 +62,7 @@ def get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=14, quant_seco
     timestamp = trend['timestamp']
     if last_timestamp.get(symbol) is not None and timestamp == last_timestamp[symbol]:
         print(f"timestamp wrong in fc")
-        return None
+        #return None
     last_timestamp[symbol] = timestamp
                 
     # convertim last_period din secunde în număr de quanta
@@ -109,7 +109,10 @@ try:
             print(f"[{symbol}] direction = {direction}, duration_hours = {last_period/3600} h")
 
             # folosim funcția gaussiană
-            t, w = u.gaussian_full_shifted(T=15*24, last_period=last_period, trend=direction)
+            #t, w = u.gaussian_full_shifted(T=15*24, last_period=last_period, trend=direction)
+            quant_seconds=3600*24
+            last_period = trend['duration_seconds']  / quant_seconds
+            t, w = u.gaussian_full_shifted(T=14, last_period=last_period, trend=direction)
 
             # exemplu: afișăm suma ponderilor și primele valori
             print(f"[{symbol}] suma ponderilor = {w.sum():.2f}")
