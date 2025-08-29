@@ -114,11 +114,13 @@ def get_my_trades_24(order_type, symbol, days_ago=0, limit=1000):
             # if oid not in aggregated_trades:
                 # aggregated_trades[oid] = {
                     # 'symbol': trade['symbol'],
-                    # 'Id': oid
+                    # 'id': oid,
                     # 'orderId': oid,
+                    # 'isBuyer': trade['isBuyer'],
                     # 'side': 'BUY' if trade['isBuyer'] else 'SELL',
                     # 'qty': 0.0,
                     # 'price': 0.0,
+                    # 'time': trade['time'],
                     # 'trades': []
                 # }
             # # Adaugăm tranzacția la lista internă
@@ -129,17 +131,17 @@ def get_my_trades_24(order_type, symbol, days_ago=0, limit=1000):
             # aggregated_trades[oid]['qty'] += qty
             # aggregated_trades[oid]['price'] += qty * price
 
-        # # Poți adăuga și prețul mediu
+        # Poți adăuga și prețul mediu
         # for agg in aggregated_trades.values():
-            # agg['avg_price'] = agg['price'] / agg['qty'] if agg['qty'] else 0
+        #    agg['avg_price'] = agg['price'] / agg['qty'] if agg['qty'] else 0
             
-        ###########
+        ##########
         latest_trades = {}
         for trade in all_trades:
-           order_id = trade['orderId']
+            order_id = trade['orderId']
             
-            #Verificam daca nu avem deja acest `orderId` sau daca tranzactia curenta este mai recenta
-           if order_id not in latest_trades or trade['time'] > latest_trades[order_id]['time']:
+            # # Verificam daca nu avem deja acest `orderId` sau daca tranzactia curenta este mai recenta
+            if order_id not in latest_trades or trade['time'] > latest_trades[order_id]['time']:
                latest_trades[order_id] = trade  # Actualizam cu cea mai recenta tranzactie
 
         return list(latest_trades.values()) #lista nu dictionar!
@@ -537,18 +539,18 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
             'symbol': trade['symbol'],
             'id': trade['id'],
             'orderId': trade['orderId'],
-            'orderListId': trade['orderListId'],
+            'orderListId': trade['orderId'],
             'price': float(trade['price']),
             'qty': float(trade['qty']),
-            'quoteQty': float(trade['quoteQty']),
-            'commission': float(trade['commission']),
-            'commissionAsset': trade['commissionAsset'],
+            #'quoteQty': float(trade['quoteQty']),
+            #'commission': float(trade['commission']),
+            #'commissionAsset': trade['commissionAsset'],
             'time': trade['time'],
             'isBuyer': trade['isBuyer'],
-            'isMaker': trade['isMaker'],
-            'isBestMatch': trade['isBestMatch']
+            #'isMaker': trade['isMaker'],
+            #'isBestMatch': trade['isBestMatch']
         }
-        for trade in trade_cache
+        for trade in trade_cache_manager.cache
         if trade['symbol'] == symbol 
         and (order_type is None or trade['isBuyer'] == (order_type == "BUY"))  # Verifica doar daca order_type nu este None
         and (current_time_ms - trade['time']) <= max_age_ms
@@ -579,7 +581,7 @@ def get_trade_orders_for_day_24(order_type, symbol, day_back):
             key: (float(value) if isinstance(value, str) and value.replace('.', '', 1).isdigit() else value)
             for key, value in trade.items()
         }
-        for trade in trade_cache
+        for trade in trade_cache_manager.cache
         if trade.get('symbol') == symbol
         and (order_type is None or trade.get('isBuyer') == (order_type == "BUY"))  # Verificam doar daca order_type nu este None
         and start_timestamp <= trade.get('time', 0) <= end_timestamp

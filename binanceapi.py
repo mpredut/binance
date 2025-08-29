@@ -398,7 +398,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)
     minutes_ago = time.time() - 3 * 60  # With 3 min in urma , time.time() => seconds
-    apitrades.compare_trade_sources(symbol, order_type=order_type, max_age_seconds=time_back_in_seconds, limit=1000)
+    #apitrades.compare_trade_sources(symbol, order_type=order_type, max_age_seconds=time_back_in_seconds, limit=1000)
         
     try:
         
