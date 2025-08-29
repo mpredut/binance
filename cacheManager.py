@@ -67,6 +67,7 @@ class CacheManagerInterface(ABC):
                     "fetchtime": self.fetchtime_time_per_symbol
                 }, f)
             os.replace(tmp_file, self.filename)
+            print(f"[{self.cls_name}][info] Save cache to {self.filename}")
         except Exception as e:
             print(f"[{self.cls_name}][Eroare] La salvarea fișierului cache: {e}")
 
@@ -98,6 +99,7 @@ class CacheManagerInterface(ABC):
             while True:
                 print(f"\n[{self.cls_name}] Sync started at {time.strftime('%Y-%m-%d %H:%M:%S')} for {self.symbols}")
                 self.update_cache()
+                print(f"[{self.cls_name}] save state is {save_state}.")
                 if save_state:
                     self.save_state()
                 print(f"[{self.cls_name}] Sync completed for {self.symbols}")
@@ -116,7 +118,7 @@ class CacheManagerInterface(ABC):
 class TradeCacheManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols=sym.symbols, filename="cachetrade.json", api_client=api):
         super().__init__(sync_ts, symbols, filename, api_client)
-        self.first = True
+        self.first = {symbol: True for symbol in symbols}
         self.days_back = 30
 
     def _is_valid_trade(self, trade):
@@ -147,7 +149,7 @@ class TradeCacheManager(CacheManagerInterface):
         current_time = int(time.time() * 1000)
         backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
    
-        if self.first:
+        if self.first[symbol]:
             # startTime = timpul curent minus numărul de zile configurabil (convertit în milisecunde)
             startTime = current_time - self.days_back * (24 * 60 * 60 * 1000)
             backdays = self.days_back
@@ -159,24 +161,25 @@ class TradeCacheManager(CacheManagerInterface):
             print(f"[{self.cls_name}][Eroare] Binance API pentru {symbol}: {e}")
             return []
             
-        self.first = False
-
-        # Elimină duplicatele (după id dacă există, altfel după time + symbol)
-        existing_keys = set(
-            (t.get("id"), t["symbol"]) for t in self.cache if "id" in t
-        )
+        self.first[symbol] = False
+      
+        # Setul de id-uri existente
+        existing_ids = set(str(t["id"]) for t in self.cache if "id" in t)
 
         print(f"[{self.cls_name}][info] Număr de trades noi: {len(new_trades)}")
         unique_new_trades = []
+
         for t in new_trades:
             if not self._is_valid_trade(t):
-                print(f"[{self.cls_name}] BED DAY???")
-                continue 
-            key = (t.get("id"), t["symbol"]) if "id" in t else (t["symbol"], t["time"])
-            if key not in existing_keys:
+                print(f"[{self.cls_name}] Trade invalid: {t}")
+                continue
+
+            trade_id = str(t["id"])
+            if trade_id not in existing_ids:
                 unique_new_trades.append(t)
-                existing_keys.add(key)
-        
+                existing_ids.add(trade_id)
+
+
         print(f"[{self.cls_name}][info] Număr de unique_new_trades trades noi: {len(unique_new_trades)}")            
         return unique_new_trades
         

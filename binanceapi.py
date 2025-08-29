@@ -203,7 +203,11 @@ def manage_quantity(order_type, symbol, required_qty, cancelorders=False, hours=
     else:
         #data = read_trends()
         weight = pa.get_weight_for_cash_permission_at_quant_time(symbol)
-        print(f"Weight {weight} is applied to available {available_qty} quantity. result {available_qty * weight}")
+        if weight is None:
+            print(f"Weight is None, set it at default 0.03")
+            weight = 0.03
+        else:
+            print(f"Weight {weight} is applied to available {available_qty} quantity. result {available_qty * weight}")
         return available_qty * weight
     
     return available_qty
@@ -394,7 +398,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)
     minutes_ago = time.time() - 3 * 60  # With 3 min in urma , time.time() => seconds
-    #apitrades.compare_trade_sources(symbol, order_type=order_type, max_age_seconds=time_back_in_seconds, limit=1000)
+    apitrades.compare_trade_sources(symbol, order_type=order_type, max_age_seconds=time_back_in_seconds, limit=1000)
         
     try:
         
