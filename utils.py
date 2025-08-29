@@ -3,8 +3,9 @@ import time
 import math
 import random
 import platform
-
+import numpy as np
 from datetime import datetime, timedelta
+
 
 
 def beep(n):
@@ -226,3 +227,52 @@ def decrese_value_by_increment_exp(increment_factor, value, coeficient=0.05):
     adjustment_v2 = value * math.exp(-coeficient * increment_factor)
     return adjustment_v1, adjustment_v2
    
+ 
+ 
+def gaussian_full_shifted1(T, last_period, trend="down", steps=None):
+    remaining = max(T - last_period, 1)
+
+    if steps is None:
+        steps = remaining
+
+    t = np.linspace(0, remaining-1, steps)
+
+    mu = (remaining - 1) / 2
+    sigma = remaining / 4
+
+    w = np.exp(-0.5 * ((t - mu) / sigma) ** 2)
+
+    if trend == "down":
+        w_normalized = w / w.max()
+        w = 1 - w_normalized
+        w = w / w.sum()
+    else:
+        w = w / w.sum()
+
+    return t, w
+
+
+def gaussian_full_shifted(T, last_period, trend="down", steps=None):
+    remaining = int(max(T - last_period, 1))
+
+    if steps is None:
+        steps = remaining
+    else:
+        steps = int(steps)
+
+    t = np.linspace(0, remaining - 1, steps)
+
+    mu = (remaining - 1) / 2
+    sigma = remaining / 4
+
+    w = np.exp(-0.5 * ((t - mu) / sigma) ** 2)
+
+    if trend == "down":
+        w_normalized = w / w.max()
+        w = 1 - w_normalized
+        w = w / w.sum()
+    else:
+        w = w / w.sum()
+
+    return t, w
+

@@ -179,7 +179,7 @@ def getTrendLongTerm(symbol: str, window_hours: int = 3, step_hours: int = 1,
         'timestamp': int(time.time()),
         'direction': trend_direction,
         'start_timestamp': trend_start_ts,
-        'duration_hours': duration_hours,
+        'duration_seconds': duration_seconds,
         'estimated_future_hours': estimated_future_hours
     }
 

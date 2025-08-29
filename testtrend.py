@@ -38,7 +38,7 @@ def get_weight_for_cash_permission(symbol, T=14*24):
         return None
     last_timestamp[symbol] = timestamp
                 
-    last_period = trend['duration_hours']
+    last_period = trend['duration_seconds']
     direction = trend['direction']
 
     _, w = u.gaussian_full_shifted(T=T, last_period=last_period, trend=direction)
@@ -103,10 +103,10 @@ try:
             last_timestamp[symbol] = timestamp
             
             direction = trend['direction']
-            last_period = trend['duration_hours']
+            last_period = trend['duration_seconds']
             
             print(f"[{symbol}] timestamp = {u.timeToHMS(timestamp)}")
-            print(f"[{symbol}] direction = {direction}, duration_hours = {last_period} h")
+            print(f"[{symbol}] direction = {direction}, duration_hours = {last_period/3600} h")
 
             # folosim funcția gaussiană
             t, w = u.gaussian_full_shifted(T=15*24, last_period=last_period, trend=direction)
@@ -120,7 +120,8 @@ try:
             # dacă vrei să vizualizezi
             plt.plot(t, w, label=symbol)
             
-            gw = get_weight_for_cash_permission(symbol)
+            #gw = get_weight_for_cash_permission(symbol)
+            gw = get_weight_for_cash_permission_at_quant_time(symbol)
             if gw is None:
                 shm = shmu.shmConnectForRead(shmu.shmname)
                 break
