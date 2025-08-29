@@ -4,6 +4,8 @@ import os
 import math
 import time
 import json
+import psutil
+
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional
 
@@ -14,6 +16,7 @@ from multiprocessing import shared_memory
 ### my import
 import symbols as sym
 import cacheManager as cm
+import shmutils as shmu
 
 
 def priceLstFor(symbol) -> List[Tuple[int, float]]:
@@ -22,7 +25,8 @@ def priceLstFor(symbol) -> List[Tuple[int, float]]:
 
 
 def drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_direction, duration_hours):
-      # Vizualizare
+    # Vizualizare
+    #plt.clf()  # curăță figura curentă (nu creează alta)
     plt.figure(figsize=(12,5))
     plt.plot(timestamps, prices, label='Price', color='blue')
 
@@ -35,6 +39,7 @@ def drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_directio
     plt.title(f"{symbol} - Trend {trend_direction}, durata {duration_hours:.2f}h")
     plt.legend()
     plt.show()
+    plt.close()
 
 
 def weighted_moving_average(prices: np.ndarray, window: int) -> np.ndarray:
@@ -167,47 +172,41 @@ def getTrendLongTerm(symbol: str, window_hours: int = 3, step_hours: int = 1,
     estimated_future_hours = duration_hours * persistence_factor
     trend_direction = 'up' if last_slope > 0 else 'down'
 
-    drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_direction, duration_hours)
+    if draw:
+        drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_direction, duration_hours)
 
     return {
+        'timestamp': int(time.time()),
         'direction': trend_direction,
         'start_timestamp': trend_start_ts,
         'duration_hours': duration_hours,
         'estimated_future_hours': estimated_future_hours
     }
 
-#####
-#####   Utilitare
-#####
-def write_dict(data: dict):
-    payload = json.dumps(data).encode("utf-8")
-    if len(payload) >= BUF_SIZE - 4:
-        raise ValueError("Mesaj prea mare pentru buffer")
-
-    # scriem lungimea mesajului în primii 4 bytes (int pe 4 bytes)
-    shm.buf[:4] = len(payload).to_bytes(4, "little")
-    shm.buf[4:4+len(payload)] = payload
+   
     
-
-BUF_SIZE = 1024  # rezervăm 1 KB
-try:
-    shm = shared_memory.SharedMemory(name="trend_data", create=True, size=BUF_SIZE)
-except FileExistsError:
-    shm = shared_memory.SharedMemory(name="trend_data")
-    
-    
+shm = shmu.shmConnectForWrite(shmu.shmname)
+ 
 if __name__ == "__main__":
     symbols = sym.symbols
     try:
         while True:
+            process = psutil.Process(os.getpid())
+            print("Memorie folosită (MB):", process.memory_info().rss / 1024**2)
+            
             all_trends = {}
             for symbol in symbols:
-                all_trends[symbol] = getTrendLongTerm(symbol)
+                all_trends[symbol] = getTrendLongTerm(symbol, draw=False)
             print(f"write : {all_trends}")
-            write_dict(all_trends)
+            shmu.shmWrite(shm, all_trends)
             time.sleep(3)
     except KeyboardInterrupt:
-        print("Închidere manuală...")
+        print(f"Închidere manuală...")
+    except :
+        print(f"Oprire ? ...")
     finally:
         shm.close()
         shm.unlink()
+        
+    shm.close()
+    shm.unlink()
