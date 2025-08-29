@@ -138,7 +138,7 @@ def get_my_trades_24(order_type, symbol, days_ago=0, limit=1000):
         for trade in all_trades:
            order_id = trade['orderId']
             
-            Verificam daca nu avem deja acest `orderId` sau daca tranzactia curenta este mai recenta
+            #Verificam daca nu avem deja acest `orderId` sau daca tranzactia curenta este mai recenta
            if order_id not in latest_trades or trade['time'] > latest_trades[order_id]['time']:
                latest_trades[order_id] = trade  # Actualizam cu cea mai recenta tranzactie
 
