@@ -12,20 +12,23 @@ import log
 import utils as u
 import symbols as sym
 import binanceapi as api
-import binanceapi_trades as apitrades
+#import binanceapi_trades as apitrades
 
 
 class CacheManagerInterface(ABC):
-    def __init__(self, symbols, filename, api_client=api):
+    def __init__(self, sync_ts, symbols, filename, api_client=api):
         self.cls_name = self.__class__.__name__
-        self.api_client = api_client
+        
+        self.sync_ts = sync_ts
         self.symbols = symbols
         self.filename = filename
+        self.api_client = api_client
+        
         self.cache = []
         self.fetchtime_time_per_symbol = {}
 
         self.load_state()
-        # self.periodic_sync()
+        self.periodic_sync(sync_ts, False)
 
     @abstractmethod
     def rebuild_fetchtime_times(self):
@@ -87,17 +90,19 @@ class CacheManagerInterface(ABC):
     def update_cache(self):
         for symbol in self.symbols:
             self.update_cache_per_symbol(symbol)
-        self.save_state()
 
-   
-    def periodic_sync(self, sync_interval_sec):
+    def periodic_sync(self, sync_ts=None, save_state=True):
+        if sync_ts is None:
+            sync_ts = self.sync_ts
         def run():
             while True:
                 print(f"\n[{self.cls_name}] Sync started at {time.strftime('%Y-%m-%d %H:%M:%S')} for {self.symbols}")
                 self.update_cache()
+                if save_state:
+                    self.save_state()
                 print(f"[{self.cls_name}] Sync completed for {self.symbols}")
             
-                time.sleep(sync_interval_sec)
+                time.sleep(sync_ts)
 
         thread = threading.Thread(target=run, daemon=False)
         thread.start()
@@ -109,8 +114,8 @@ class CacheManagerInterface(ABC):
 # ###### Implemetarile specifice pentru cache
 # ###### 
 class TradeCacheManager(CacheManagerInterface):
-    def __init__(self, symbols=sym.symbols, filename="cachetrade.json", api_client=api):
-        super().__init__(symbols, filename, api_client)
+    def __init__(self, sync_ts, symbols=sym.symbols, filename="cachetrade.json", api_client=api):
+        super().__init__(sync_ts, symbols, filename, api_client)
         self.first = True
         self.days_back = 30
 
@@ -137,7 +142,8 @@ class TradeCacheManager(CacheManagerInterface):
         return dict(last_times)
         
     def get_remote_items(self, symbol, startTime):
-            
+        import binanceapi_trades as apitrades
+        
         current_time = int(time.time() * 1000)
         backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
    
@@ -177,8 +183,8 @@ class TradeCacheManager(CacheManagerInterface):
 
 
 class PriceCacheManager(CacheManagerInterface):
-    def __init__(self, symbols, filename="cacheprice.json", api_client=api):
-        super().__init__(symbols, filename, api_client)
+    def __init__(self, sync_ts, symbols, filename="cacheprice.json", api_client=api):
+        super().__init__(sync_ts, symbols, filename, api_client)
 
 
     def rebuild_fetchtime_times(self):
@@ -212,19 +218,23 @@ class PriceCacheManager(CacheManagerInterface):
 # ###### 
 
 # trade cache
-trade_cache_manager = TradeCacheManager(filename="cache_trade.json", symbols=sym.symbols, api_client=api)
+TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
+trade_cache_manager = TradeCacheManager(sync_ts=TRADE_SYNC_INTERVAL_SEC,
+                                        filename="cache_trade.json", 
+                                        symbols=sym.symbols, 
+                                        api_client=api)
     
 # price cache
+PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
 price_cache_manager = {}
 for symbol in sym.symbols:
-    price_cache_manager[symbol] = PriceCacheManager(filename=f"cache_price_{symbol}.json",
+    price_cache_manager[symbol] = PriceCacheManager(sync_ts=PRICE_SYNC_INTERVAL_SEC,
+                                                    filename=f"cache_price_{symbol}.json",
                                                     symbols=[symbol],
                                                     api_client=api)
                                                     
 
 
-TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
-PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
 # ###### 
 # ###### FORCE CACHE TO BE UPDATEING ####### 
 # ###### 
