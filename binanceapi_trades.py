@@ -14,11 +14,13 @@ import log
 import utils as u
 import symbols as sym
 import binanceapi as api
-import cacheManager as tcm
+import cacheManager as cm
 
 # 
 # Cache global pentru tranzactii
 #
+trade_cache_manager = cm.get_trade_cache_manager() 
+
 trade_cache = []
 
 #######
@@ -535,7 +537,7 @@ def compare_trade_sources(symbol, order_type="BUY", max_age_seconds=3600, limit=
     main_map = filter_trades(trade_cache)
 
     # 2. TCM cache
-    tcm_map = filter_trades(tcm.trade_cache_manager.cache)
+    tcm_map = filter_trades(trade_cache_manager.cache)
 
     # 3. API Binance
     try:
