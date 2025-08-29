@@ -25,6 +25,7 @@ import utils as u
 import symbols as sym
 import config as cfg
 import generateweb as web
+import priceAnalysis as pa
 
 from binanceclient import client
 
@@ -200,7 +201,10 @@ def manage_quantity(order_type, symbol, required_qty, cancelorders=False, hours=
             print(f"Still not enough quantity. Adjusting order quantity to {available_qty:.8f}")
             return available_qty
     else:
-        return available_qty
+        #data = read_trends()
+        weight = pa.get_weight_for_cash_permission_at_quant_time(symbol)
+        print(f"Weight {weight} is applied to available {available_qty} quantity. result {available_qty * weight}")
+        return available_qty * weight
     
     return available_qty
 
@@ -716,7 +720,7 @@ def check_order_filled_by_time(order_type, symbol, time_back_in_seconds, pret_mi
 
     backdays = math.ceil(time_back_in_seconds / 86400)
     #trades = apitrades.get_my_trades(order_type, symbol, backdays=backdays, limit=1000)
-    trades = apitrades.get_trades_order(order_type, symbol, time_back_in_seconds=time_back_in_seconds, limit=1000)
+    trades = apitrades.get_trade_orders(order_type, symbol, max_age_seconds=time_back_in_seconds)
     time_limit = int(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
 
                 
