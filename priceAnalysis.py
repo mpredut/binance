@@ -262,7 +262,7 @@ def get_weight_for_cash_permission(symbol, T=14*24):
     return w[0]  # prima pondere
 
 
-def get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=14, quant_seconds=3600*24):
+def get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=14, quant_seconds=3600*24, draw=False):
    
     global last_timestamp
     
@@ -287,7 +287,17 @@ def get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=14, quant_seco
     direction = trend['direction']
 
     # apelăm gaussian_full_shifted cu T și last_period în aceeași unitate (quanta)
-    _, w = u.gaussian_full_shifted(T=T_quanta, last_period=last_period_quanta, trend=direction)
+    t, w = u.gaussian_full_shifted(T=T_quanta, last_period=last_period_quanta, trend=direction)
+    
+    print(f"[{symbol}] primele 5 ponderi: {w[:5]}")
+    sum_first_24 = w[:24].sum()
+    print(f"Suma primelor 24 ponderi =", sum_first_24)
+
+    # dacă vrei să vizualizezi
+    if draw:
+        plt.plot(t, w, label=symbol)
+        plt.legend()
+        plt.show()
     
     # returnăm prima pondere pentru primul quanta
     if len(w) == 0:
