@@ -216,22 +216,53 @@ class PriceCacheManager(CacheManagerInterface):
 # ###### 
 # ###### GLOBAL VARIABLE FOR CACHE ####### 
 # ###### 
+               
+TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
+PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
+
+_trade_cache_manager = None
+_price_cache_manager = None
 
 # trade cache
-TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
-trade_cache_manager = TradeCacheManager(sync_ts=TRADE_SYNC_INTERVAL_SEC,
-                                        filename="cache_trade.json", 
-                                        symbols=sym.symbols, 
-                                        api_client=api)
-    
+#TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
+#trade_cache_manager = TradeCacheManager(sync_ts=TRADE_SYNC_INTERVAL_SEC,
+#                                        filename="cache_trade.json", 
+#                                        symbols=sym.symbols, 
+#                                        api_client=api)
+
+def get_trade_cache_manager():
+    global _trade_cache_manager
+    if _trade_cache_manager is None:
+        _trade_cache_manager = TradeCacheManager(
+            sync_ts=TRADE_SYNC_INTERVAL_SEC,
+            filename="cache_trade.json",
+            symbols=sym.symbols,
+            api_client=api,
+        )
+    return _trade_cache_manager
+
+
 # price cache
-PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
-price_cache_manager = {}
-for symbol in sym.symbols:
-    price_cache_manager[symbol] = PriceCacheManager(sync_ts=PRICE_SYNC_INTERVAL_SEC,
-                                                    filename=f"cache_price_{symbol}.json",
-                                                    symbols=[symbol],
-                                                    api_client=api)
+#PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
+#price_cache_manager = {}
+#for symbol in sym.symbols:
+#    price_cache_manager[symbol] = PriceCacheManager(sync_ts=PRICE_SYNC_INTERVAL_SEC,
+#                                                    filename=f"cache_price_{symbol}.json",
+#                                                    symbols=[symbol],
+#                                                    api_client=api)
+def get_price_cache_manager():
+    global _price_cache_manager
+    if _price_cache_manager is None:
+        _price_cache_manager = {
+            symbol: PriceCacheManager(
+                sync_ts=PRICE_SYNC_INTERVAL_SEC,
+                filename=f"cache_price_{symbol}.json",
+                symbols=[symbol],
+                api_client=api,
+            )
+            for symbol in sym.symbols
+        }
+    return _price_cache_manager
                                                     
 
 
@@ -240,6 +271,9 @@ for symbol in sym.symbols:
 # ###### 
         
 if __name__ == "__main__":
+    trade_cache_manager = get_trade_cache_manager()
+    price_cache_manager = get_price_cache_manager()
+    
     threads = []
     threads.append(trade_cache_manager.periodic_sync(TRADE_SYNC_INTERVAL_SEC))
     for symbol in sym.symbols:
