@@ -106,16 +106,108 @@ def get_my_trades_24(order_type, symbol, days_ago=0, limit=1000):
             # Ajustam `start_time` la timpul celei mai noi tranzactii pentru a continua
             start_time = trades[-1]['time'] + 1  # Ne mutam inainte cu 1 ms pentru a evita duplicatele
         
+        
+        # aggregated_trades = {}
+
+        # for trade in all_trades:
+            # oid = trade['orderId']
+            # if oid not in aggregated_trades:
+                # aggregated_trades[oid] = {
+                    # 'symbol': trade['symbol'],
+                    # 'Id': oid
+                    # 'orderId': oid,
+                    # 'side': 'BUY' if trade['isBuyer'] else 'SELL',
+                    # 'qty': 0.0,
+                    # 'price': 0.0,
+                    # 'trades': []
+                # }
+            # # Adaugăm tranzacția la lista internă
+            # aggregated_trades[oid]['trades'].append(trade)
+            # # Actualizăm cantitatea totală și costul total
+            # qty = float(trade['qty'])
+            # price = float(trade['price'])
+            # aggregated_trades[oid]['qty'] += qty
+            # aggregated_trades[oid]['price'] += qty * price
+
+        # # Poți adăuga și prețul mediu
+        # for agg in aggregated_trades.values():
+            # agg['avg_price'] = agg['price'] / agg['qty'] if agg['qty'] else 0
+            
+        ###########
         latest_trades = {}
         for trade in all_trades:
-            order_id = trade['orderId']
+           order_id = trade['orderId']
             
-            # Verificam daca nu avem deja acest `orderId` sau daca tranzactia curenta este mai recenta
-            if order_id not in latest_trades or trade['time'] > latest_trades[order_id]['time']:
-                latest_trades[order_id] = trade  # Actualizam cu cea mai recenta tranzactie
+            Verificam daca nu avem deja acest `orderId` sau daca tranzactia curenta este mai recenta
+           if order_id not in latest_trades or trade['time'] > latest_trades[order_id]['time']:
+               latest_trades[order_id] = trade  # Actualizam cu cea mai recenta tranzactie
 
         return list(latest_trades.values()) #lista nu dictionar!
         
+        return list(aggregated_trades.values())
+        
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return []
+
+
+def get_my_trades_24_NEW(order_type, symbol, days_ago=0, limit=1000):
+    import time
+    sym.validate_ordertype(order_type)
+    sym.validate_symbols(symbol)
+
+    all_orders = []
+    try:
+        current_time = int(time.time() * 1000)
+        end_time = current_time - days_ago * 24 * 60 * 60 * 1000
+        start_time = end_time - 24 * 60 * 60 * 1000
+
+        # Paginare simplă
+        while True:
+            orders = api.client.get_all_orders(
+                symbol=symbol, 
+                limit=limit, 
+                startTime=start_time, 
+                endTime=end_time
+            )
+
+            if not orders:
+                break
+
+            # Filtrare după BUY/SELL
+            if order_type == "BUY":
+                filtered_orders = [o for o in orders if o['side'] == "BUY"]
+            elif order_type == "SELL":
+                filtered_orders = [o for o in orders if o['side'] == "SELL"]
+            else:
+                filtered_orders = orders
+
+            # Transformăm fiecare order într-un "trade-like dict"
+            for o in filtered_orders:
+                trade_like = {
+                    'symbol': o['symbol'],
+                    'Id': o['orderId'],
+                    'orderId': o['orderId'],
+                    'price': o['price'],
+                    'qty': o['executedQty'],       # cantitatea total executată
+                    'quoteQty': o.get('cummulativeQuoteQty', 0),
+                    'time': o['updateTime'],
+                    'isBuyer': o['side'] == "BUY",
+                    'isMaker': None,               # Binance nu returnează maker/taker direct aici
+                    'commission': None,
+                    'commissionAsset': None,
+                }
+                all_orders.append(trade_like)
+
+            # Dacă am luat mai puțin decât limit, ieșim
+            if len(orders) < limit:
+                break
+
+            # Paginare: mutăm start_time la ultima comandă
+            start_time = orders[-1]['updateTime'] + 1
+
+        return all_orders
 
     except Exception as e:
         print(f"An error occurred: {e}")
@@ -132,16 +224,17 @@ def get_my_trades(order_type, symbol, backdays: int = 3, limit=1000):
     
     try:
         for days_ago in range(backdays + 1):
-            print(f"get_my_trades: Fetching trades for day {days_ago}...")
+            print(f"[{symbol}] get_my_trades: Fetching trades for day {days_ago:03d}... ", end=" ")
             trades = get_my_trades_24(order_type, symbol, days_ago=days_ago, limit=limit)
             
             if not trades:
                 # retry from cache .....
                 trades = get_trade_orders_for_day_24(order_type, symbol, days_ago)
                 if not trades:
-                    print(f"No trades found for day {days_ago}.")
+                    print(f"No trades found for day {days_ago:03d}.")
                     continue
             
+            print(f"[{len(trades)}] found for day {days_ago:03d}.")
             #filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "BUY")]
             if order_type == "BUY":
                 filtered_trades = [trade for trade in trades if trade['isBuyer']]
@@ -564,6 +657,27 @@ def compare_trade_sources(symbol, order_type="BUY", max_age_seconds=3600, limit=
         if len(sources) == 1:
             print(f"⚠️ Trade ID {tid} există doar în: {sources[0]}")
             print_trade(main_map.get(tid) or tcm_map.get(tid) or api_map.get(tid))
+        elif len(sources) == 2:
+            missing = {"main", "tcm", "api"} - set(sources)
+            print(f"ℹ️ Trade ID {tid} există în {sources}, dar lipsește din {list(missing)[0]}")
+            
+            # compară cele două surse existente
+            ref = main_map.get(tid) or tcm_map.get(tid)
+            inconsistencies = {}
+            for source_name, trade in [('main', main_map.get(tid)),
+                                       ('tcm', tcm_map.get(tid)),
+                                       ('api', api_map.get(tid))]:
+                if trade and ref:
+                    diffs = {k: (ref[k], trade[k]) for k in ref if k in trade and ref[k] != trade[k]}
+                    if diffs:
+                        inconsistencies[source_name] = diffs
+
+            if inconsistencies:
+                print(f"🔄 Trade ID {tid} are diferențe între cele două surse găsite:")
+                for src, diff in inconsistencies.items():
+                    print(f"  ↪️ {src}:")
+                    for k, (v1, v2) in diff.items():
+                        print(f"    {k}: {v1} ≠ {v2}")
         else:
             # Compară conținutul dacă apare în mai multe surse
             ref = main_map.get(tid) or tcm_map.get(tid)
