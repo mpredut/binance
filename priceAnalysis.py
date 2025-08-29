@@ -203,10 +203,8 @@ def getTrendLongTerm(symbol: str, window_hours: int = 3, step_hours: int = 1,
     }
 
    
-    
-shm = shmu.shmConnectForWrite(shmu.shmname)
- 
 if __name__ == "__main__":
+    shm = shmu.shmConnectForWrite(shmu.shmname)
     build_price_cache_manager()
     symbols = sym.symbols
     try:
