@@ -202,9 +202,20 @@ def getTrendLongTerm(symbol: str, window_hours: int = 3, step_hours: int = 1,
         'estimated_future_hours': estimated_future_hours
     }
 
-   
+                
+def write_all_trends(symbols, filename="priceanalysis.json"):      
+    try:
+        with open(filename, "w") as f:
+            json.dump(all_trends, f, indent=2)
+        print(f"[write_all_trends] Rezultatele au fost scrise în {filename}")
+    except Exception as e:
+        print(f"[write_all_trends][Eroare] Nu pot scrie fișierul {filename}: {e}")
+    return all_trends
+
+
+REFRESH_TREND = 60*1 # un minut 
 if __name__ == "__main__":
-    shm = shmu.shmConnectForWrite(shmu.shmname)
+    #shm = shmu.shmConnectForWrite(shmu.shmname)
     build_price_cache_manager()
     symbols = sym.symbols
     try:
@@ -215,33 +226,37 @@ if __name__ == "__main__":
             all_trends = {}
             for symbol in symbols:
                 all_trends[symbol] = getTrendLongTerm(symbol, draw=False)
+            write_all_trends(all_trends);
+
             print(f"write : {all_trends}")
-            shmu.shmWrite(shm, all_trends)
-            time.sleep(3)
+            #shmu.shmWrite(shm, all_trends)
+            time.sleep(REFRESH_TREND)
     except KeyboardInterrupt:
         print(f"Închidere manuală...")
-    except :
-        print(f"Oprire ? ...")
-    finally:
-        shm.close()
-        shm.unlink()
+    except Exception as e:
+        print(f"Oprire ? ...{e}")
+    #finally:
+        #shm.close()
+        #shm.unlink()
         
-    shm.close()
-    shm.unlink()
+    #shm.close()
+    #shm.unlink()
     
 
-######################3
+######################
 
 def get_weight_for_cash_permission(symbol, T=14*24):
+    import cacheManager as cm
     global last_timestamp
     """
     Primește un simbol și returnează prima pondere gaussiană bazată pe trendul curent.
     - T = 2 săptămâni în ore
-    """
-    data = shmu.shmRead(shm)
-    if data is None:
-        print(f"Nu există date în shared memory încă.")
-        return None
+    # """
+    # data = shmu.shmRead(shm)
+    # if data is None:
+        # print(f"Nu există date în shared memory încă.")
+        # return None
+    data = cm.get_price_trend_cache_manager().cache
     if symbol not in data:
         print(f"Simbolul {symbol} nu există în trendurile citite.")
         return None
@@ -263,23 +278,27 @@ def get_weight_for_cash_permission(symbol, T=14*24):
 
 
 def get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=14, quant_seconds=3600*24, draw=False):
-   
+    import cacheManager as cm
     global last_timestamp
+    global last_w
     
-    data = shmu.shmRead(shm)
-    if data is None:
-        print(f"Nu există date în shared memory încă.")
-        return None
+    # data = shmu.shmRead(shm)
+    # if data is None:
+        # print(f"Nu există date în shared memory încă.")
+        # return None
+    data = cm.get_price_trend_cache_manager().cache
     if symbol not in data:
         print(f"Simbolul {symbol} nu există în trendurile citite.")
         return None
 
+    print(f"Data from cache {data}")
     trend = data[symbol]
     
     timestamp = trend['timestamp']
     if last_timestamp.get(symbol) is not None and timestamp == last_timestamp[symbol]:
-        print(f"timestamp wrong in fc")
-        #return None
+        print(f"not new timestamp,  use data from cache.")
+        return last_w[symbol]
+        
     last_timestamp[symbol] = timestamp
                 
     # convertim last_period din secunde în număr de quanta
@@ -291,7 +310,7 @@ def get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=14, quant_seco
     
     print(f"[{symbol}] primele 5 ponderi: {w[:5]}")
     sum_first_24 = w[:24].sum()
-    print(f"Suma primelor 24 ponderi =", sum_first_24)
+    print(f"Suma tuturor {len(w)} ponderi =", sum_first_24)
 
     # dacă vrei să vizualizezi
     if draw:
@@ -304,8 +323,10 @@ def get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=14, quant_seco
         print("Vectorul ponderilor este gol.")
         return None
    
+    last_w[symbol] = w
     return w[0]
 
 
-shm = shmu.shmConnectForRead(shmu.shmname)
+#shm = shmu.shmConnectForRead(shmu.shmname)
 last_timestamp = {}
+last_w = {}

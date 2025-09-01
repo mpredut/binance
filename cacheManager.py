@@ -16,15 +16,16 @@ import binanceapi as api
 
 
 class CacheManagerInterface(ABC):
-    def __init__(self, sync_ts, symbols, filename, api_client=api):
+    def __init__(self, sync_ts, symbols, filename, append_mode = True, api_client=api):
         self.cls_name = self.__class__.__name__
         
         self.sync_ts = sync_ts
         self.symbols = symbols
         self.filename = filename
+        self.append_mode = append_mode
         self.api_client = api_client
         
-        self.cache = []
+        self.cache = {}
         self.fetchtime_time_per_symbol = {}
 
         self.load_state()
@@ -46,14 +47,26 @@ class CacheManagerInterface(ABC):
           
         
     def load_state(self):
+        print(f"[{self.cls_name}][Info] Load state from {self.filename} ...")
         if os.path.exists(self.filename):
             try:
                 with open(self.filename, "r") as f:
                     data = json.load(f)
                     self.cache = data.get("items", [])
                     self.fetchtime_time_per_symbol = data.get("fetchtime", {})
+                    if not self.cache:
+                        print(f"[{self.cls_name}][warning] cache is None")
+                    if not self.fetchtime_time_per_symbol:
+                        print(f"[{self.cls_name}][warning] fetchtime_time_per_symbol is None")    
+                    
             except Exception as e:
                 print(f"[{self.cls_name}][Eroare] La citirea fișierului cache {self.filename} : {e}")
+                self.update_cache()
+                self.save_state()
+        else :
+            print(f"[{self.cls_name}][Info] File is missing, may be first time - create it")
+            self.update_cache()
+            self.save_state()
 
         if not self.fetchtime_time_per_symbol:
             self.fetchtime_time_per_symbol = self._rebuild_fetchtime_times()
@@ -81,12 +94,22 @@ class CacheManagerInterface(ABC):
         current_time = int(time.time() * 1000)
         startTime = self.fetchtime_time_per_symbol.get(symbol, 0)
 
-        unique_new_items = self.get_remote_items(symbol=symbol, startTime=startTime)
+        new_items = self.get_remote_items(symbol=symbol, startTime=startTime)
+        if not new_items:
+             print(f"[{self.cls_name}][Info] {symbol}:  None return by remote items!!! ")
+             return
+        print(f"[{self.cls_name}][Info] {symbol}:  new_items {new_items}")     
+        if not self.append_mode:  # snapshot mode (trenduri)
+            self.cache[symbol] = new_items[0]
+        else:  # history mode (trade-uri)
+            if symbol not in self.cache:
+                self.cache[symbol] = []
+            self.cache[symbol].extend(new_items)
+    
         
-        self.cache.extend(unique_new_items)
         self.fetchtime_time_per_symbol[symbol] = current_time
 
-        print(f"[{self.cls_name}][Info] {symbol}: Adăugate {len(unique_new_items)} items noi.")
+        print(f"[{self.cls_name}][Info] {symbol}: Adăugate {len(new_items)} items noi.")
 
     def update_cache(self):
         for symbol in self.symbols:
@@ -116,8 +139,8 @@ class CacheManagerInterface(ABC):
 # ###### Implemetarile specifice pentru cache
 # ###### 
 class TradeCacheManager(CacheManagerInterface):
-    def __init__(self, sync_ts, symbols=sym.symbols, filename="cachetrade.json", api_client=api):
-        super().__init__(sync_ts, symbols, filename, api_client)
+    def __init__(self, sync_ts, symbols=sym.symbols, filename="cache_trade.json", api_client=api):
+        super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
         self.first = {symbol: True for symbol in symbols}
         self.days_back = 30
 
@@ -186,8 +209,8 @@ class TradeCacheManager(CacheManagerInterface):
 
 
 class PriceCacheManager(CacheManagerInterface):
-    def __init__(self, sync_ts, symbols, filename="cacheprice.json", api_client=api):
-        super().__init__(sync_ts, symbols, filename, api_client)
+    def __init__(self, sync_ts, symbols, filename, api_client=api):
+        super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api)
 
 
     def rebuild_fetchtime_times(self):
@@ -216,15 +239,62 @@ class PriceCacheManager(CacheManagerInterface):
     def get_all_symbols_from_cache(self):
         return self.symbols
 
+
+class PriceTrendCacheManager(CacheManagerInterface):
+    def __init__(self, sync_ts, symbols, filename="price_trend_cache.json", api_client=api):
+        super().__init__(sync_ts, symbols, filename, append_mode=False)
+        self.first = {symbol: True for symbol in symbols}
+
+    def get_all_symbols_from_cache(self):
+        return [t.get("symbol") for t in self.cache if "symbol" in t]
+
+    def rebuild_fetchtime_times(self):
+        """
+        Deducem timpul ultimei înregistrări per simbol din self.cache
+        """
+        last_times = defaultdict(int)
+        for price_trend in self.cache:
+            symbol = price_trend.get("symbol")
+            ts = price_trend.get("timestamp", 0) * 1000
+            if ts > last_times[symbol]:
+                last_times[symbol] = ts
+
+        # offset de siguranță (-60 secunde)
+        for symbol in last_times:
+            last_times[symbol] = max(0, last_times[symbol] - 60_000)
+
+        return dict(last_times)
+        
+    def get_remote_items(self, symbol, startTime):
+        # TODO : import priceanalysis name file
+        filename = "priceanalysis.json"
+        if not os.path.exists(filename):
+            print(f"[{self.cls_name}] Fișierul {self.filename} nu există.")
+            return []
+
+        try:
+            with open(filename, "r") as f:
+                data = json.load(f)
+        except Exception as e:
+            print(f"[{self.cls_name}] Eroare citire {self.filename}: {e}")
+            return []
+
+        if symbol not in data:
+            return []
+
+        return [data[symbol]]
+            
 # ###### 
 # ###### GLOBAL VARIABLE FOR CACHE ####### 
 # ###### 
                
 TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
 PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
+PRICETREND_SYNC_INTERVAL_SEC = 1 * 60/6   # 1 minute
 
 _trade_cache_manager = None
 _price_cache_manager = None
+_price_trend_cache_manager = None
 
 # trade cache
 #TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
@@ -232,7 +302,6 @@ _price_cache_manager = None
 #                                        filename="cache_trade.json", 
 #                                        symbols=sym.symbols, 
 #                                        api_client=api)
-
 def get_trade_cache_manager():
     global _trade_cache_manager
     if _trade_cache_manager is None:
@@ -244,12 +313,11 @@ def get_trade_cache_manager():
         )
     return _trade_cache_manager
 
-
 # price cache
 #PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
 #price_cache_manager = {}
 #for symbol in sym.symbols:
-#    price_cache_manager[symbol] = PriceCacheManager(sync_ts=PRICE_SYNC_INTERVAL_SEC,
+#    price_cache_manager[symbol] = PricePriceTrendCacheManager(sync_ts=PRICE_SYNC_INTERVAL_SEC,
 #                                                    filename=f"cache_price_{symbol}.json",
 #                                                    symbols=[symbol],
 #                                                    api_client=api)
@@ -267,7 +335,23 @@ def get_price_cache_manager():
         }
     return _price_cache_manager
                                                     
+# price trend cache
+#PRICETREND_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
+#price_trend_cache_manager = `PriceTrendCacheManager(sync_ts=PRICETREND_SYNC_INTERVAL_SEC,
+#                                        filename="cache_price_trend.json", 
+#                                        symbols=sym.symbols, 
+#                                        api_client=api)
 
+def get_price_trend_cache_manager():
+    global _price_trend_cache_manager
+    if _price_trend_cache_manager is None:
+        _price_trend_cache_manager = PriceTrendCacheManager(
+            sync_ts=PRICETREND_SYNC_INTERVAL_SEC,
+            filename="cache_price_trend.json",
+            symbols=sym.symbols,
+            api_client=api,
+        )
+    return _price_trend_cache_manager
 
 # ###### 
 # ###### FORCE CACHE TO BE UPDATEING ####### 
@@ -276,12 +360,14 @@ def get_price_cache_manager():
 if __name__ == "__main__":
     trade_cache_manager = get_trade_cache_manager()
     price_cache_manager = get_price_cache_manager()
+    price_trend_cache_manager = get_trade_cache_manager()
     
     threads = []
     threads.append(trade_cache_manager.periodic_sync(TRADE_SYNC_INTERVAL_SEC))
     for symbol in sym.symbols:
         threads.append(price_cache_manager[symbol].periodic_sync(PRICE_SYNC_INTERVAL_SEC))
-
+    threads.append(price_trend_cache_manager.periodic_sync(PRICETREND_SYNC_INTERVAL_SEC))
+    
     try:
         for t in threads:
             t.join()
