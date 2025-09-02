@@ -39,8 +39,15 @@ def build_price_cache_manager():
 
 
 def priceLstFor(symbol) -> List[Tuple[int, float]]:
-    raw = price_cache_manager[symbol].cache
+    #raw = price_cache_manager[symbol].cache
+    #return [(int(ts), float(p)) for ts, p in raw]
+    
+    raw = price_cache_manager[symbol].cache.get(symbol, [])
+    price_cache_manager[symbol].save_state()
     return [(int(ts), float(p)) for ts, p in raw]
+    
+    #raw = price_cache_manager.cache["items"].get(symbol, [])
+    #return [(int(ts), float(p)) for ts, p in raw]
 
 
 def drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_direction, duration_hours):

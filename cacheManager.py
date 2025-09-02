@@ -13,6 +13,7 @@ import utils as u
 import symbols as sym
 import binanceapi as api
 #import binanceapi_trades as apitrades
+import binanceapi_allorders as apiorders
 
 
 class CacheManagerInterface(ABC):
@@ -78,7 +79,7 @@ class CacheManagerInterface(ABC):
                 json.dump({
                     "items": self.cache,
                     "fetchtime": self.fetchtime_time_per_symbol
-                }, f)
+                }, f, indent=1)
             os.replace(tmp_file, self.filename)
             print(f"[{self.cls_name}][info] Save cache to {self.filename}")
         except Exception as e:
@@ -138,6 +139,7 @@ class CacheManagerInterface(ABC):
 # ###### 
 # ###### Implemetarile specifice pentru cache
 # ###### 
+
 class TradeCacheManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols=sym.symbols, filename="cache_trade.json", api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
@@ -207,6 +209,74 @@ class TradeCacheManager(CacheManagerInterface):
         return unique_new_trades
         
 
+class OrderCacheManager(CacheManagerInterface):
+    def __init__(self, sync_ts, symbols=sym.symbols, filename="cache_orders.json", api_client=api):
+        super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
+        self.first = {symbol: True for symbol in symbols}
+        self.days_back = 30
+
+    def _is_valid_trade(self, trade):
+        required_keys = ['symbol', 'id', 'orderId', 'price', 'qty', 'time', 'isBuyer']
+        return all(k in trade for k in required_keys)
+ 
+    def get_all_symbols_from_cache(self):
+        return list(set(t.get("symbol") for t in self.cache if "symbol" in t))
+
+    def rebuild_fetchtime_times(self):
+        # Deducem timpul ultimei interogări per simbol din cache
+        last_times = defaultdict(int)
+        for trade in self.cache:
+            symbol = trade.get("symbol")
+            time_ = trade.get("time", 0)
+            if time_ > last_times[symbol]:
+                last_times[symbol] = time_
+
+        # Offset de siguranță (60 sec)
+        for symbol in last_times:
+            last_times[symbol] = max(0, last_times[symbol] - 60_000)
+      
+        return dict(last_times)
+        
+    def get_remote_items(self, symbol, startTime):
+        #import binanceapi_trades as apitrades
+        
+        current_time = int(time.time() * 1000)
+        backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
+   
+        if self.first[symbol]:
+            # startTime = timpul curent minus numărul de zile configurabil (convertit în milisecunde)
+            startTime = current_time - self.days_back * (24 * 60 * 60 * 1000)
+            backdays = self.days_back
+            
+        try:
+            #new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime, limit=1000)
+            #new_trades = apitrades.get_my_trades(order_type = None, symbol=symbol, backdays=backdays, limit=1000)
+            new_orders = apiorders.get_filled_orders(order_type = None, symbol=symbol, backdays=backdays, limit=1000)
+        except Exception as e:
+            print(f"[{self.cls_name}][Eroare] Binance API pentru {symbol}: {e}")
+            return []
+            
+        self.first[symbol] = False
+      
+        # Setul de id-uri existente
+        existing_ids = set(str(t["id"]) for t in self.cache if "id" in t)
+
+        print(f"[{self.cls_name}][info] Număr de trades noi: {len(new_orders)}")
+        unique_new_orders = []
+
+        for t in new_orders:
+            if not self._is_valid_trade(t):
+                print(f"[{self.cls_name}] Trade invalid: {t}")
+                continue
+
+            trade_id = str(t["id"])
+            if trade_id not in existing_ids:
+                unique_new_orders.append(t)
+                existing_ids.add(trade_id)
+
+
+        print(f"[{self.cls_name}][info] Număr de unique_new_orders orders noi: {len(unique_new_orders)}")            
+        return unique_new_orders
 
 class PriceCacheManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
@@ -287,7 +357,8 @@ class PriceTrendCacheManager(CacheManagerInterface):
 # ###### 
 # ###### GLOBAL VARIABLE FOR CACHE ####### 
 # ###### 
-               
+     
+ORDER_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute     
 TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
 PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
 PRICETREND_SYNC_INTERVAL_SEC = 1 * 60/6   # 1 minute
@@ -312,6 +383,23 @@ def get_trade_cache_manager():
             api_client=api,
         )
     return _trade_cache_manager
+    
+# order cache
+#ORDER_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
+#order_cache_manager = OrderCacheManager(sync_ts=ORDER_SYNC_INTERVAL_SEC,
+#                                        filename="cache_order.json", 
+#                                        symbols=sym.symbols, 
+#                                        api_client=api)
+def get_order_cache_manager():
+    global _order_cache_manager
+    if _order_cache_manager is None:
+        _order_cache_manager = OrderCacheManager(
+            sync_ts=order_SYNC_INTERVAL_SEC,
+            filename="cache_order.json",
+            symbols=sym.symbols,
+            api_client=api,
+        )
+    return _order_cache_manager
 
 # price cache
 #PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
@@ -358,14 +446,20 @@ def get_price_trend_cache_manager():
 # ###### 
         
 if __name__ == "__main__":
+    order_cache_manager = get_order_cache_manager()
     trade_cache_manager = get_trade_cache_manager()
     price_cache_manager = get_price_cache_manager()
     price_trend_cache_manager = get_trade_cache_manager()
     
     threads = []
+    # order
+    threads.append(trade_cache_manager.periodic_sync(ORDER_SYNC_INTERVAL_SEC))    
+    # trade
     threads.append(trade_cache_manager.periodic_sync(TRADE_SYNC_INTERVAL_SEC))
+    # price
     for symbol in sym.symbols:
         threads.append(price_cache_manager[symbol].periodic_sync(PRICE_SYNC_INTERVAL_SEC))
+    # price trend
     threads.append(price_trend_cache_manager.periodic_sync(PRICETREND_SYNC_INTERVAL_SEC))
     
     try:
