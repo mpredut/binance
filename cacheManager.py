@@ -100,7 +100,7 @@ class CacheManagerInterface(ABC):
 
         new_items = self.get_remote_items(symbol=symbol, startTime=startTime)
         if not new_items:
-             print(f"[{self.cls_name}][Info] {symbol}:  None return by remote items!!! ")
+             print(f"[{self.cls_name}][Info] {symbol}:  No remote items starting with {u.timestampToTime(startTime)} ")
              return
         print(f"[{self.cls_name}][Info] {symbol}:  new_items {new_items}")     
         if not self.append_mode:  # snapshot mode (trenduri)
@@ -182,12 +182,12 @@ class TradeCacheManager(CacheManagerInterface):
             startTime = current_time - self.days_back * (24 * 60 * 60 * 1000)
             backdays = self.days_back
             
-        try:
+        #try:
             #new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime, limit=1000)
-            new_trades = apitrades.get_my_trades(order_type = None, symbol=symbol, backdays=backdays, limit=1000)
-        except Exception as e:
-            print(f"[{self.cls_name}][Eroare] Binance API pentru {symbol}: {e}")
-            return []
+        new_trades = apitrades.get_my_trades(order_type = None, symbol=symbol, backdays=backdays, limit=1000)
+        #except Exception as e:
+        #    print(f"[{self.cls_name}][Eroare] Binance API pentru {symbol}: {e}")
+        #    return []
             
         self.first[symbol] = False
       
