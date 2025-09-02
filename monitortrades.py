@@ -697,9 +697,9 @@ def get_relevant_trade(trade_orders, trade_type, threshold_s, symbol):
         
     current_time_s = int(time.time())
      
-    trade_orders.sort(key=lambda x: x['time'], reverse=True)
+    trade_orders.sort(key=lambda x: x['timestamp'], reverse=True)
     trade_price = float(trade_orders[0]['price'])
-    trade_time = float(trade_orders[0]['time']) / 1000  # Timpul în secunde
+    trade_time = float(trade_orders[0]['timestamp']) / 1000  # Timpul în secunde
     print(f"{trade_type.capitalize()} price for {symbol}: {trade_price} at {u.timeToHMS(trade_time)}")
     
     can_trade = True
@@ -743,6 +743,9 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
 
     # 3. Verifica ordinele de cumparare
     if trade_orders_buy:
+        if not buy_price:
+            print(f"No buy_price !!!!!")
+            return
         price_increase = (current_price - buy_price) / buy_price
         price_decrease = (buy_price - current_price) / buy_price
 
@@ -777,6 +780,9 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
 
     # 4. Verifica ordinele de vanzare
     if trade_orders_sell:     
+        if not buy_price:
+            print(f"No sell_price !!!!!")
+        return
         price_decrease_versus_sell = (sell_price - current_price) / sell_price
         print(f"(price_decrease_versus_sell: {price_decrease_versus_sell * 100}%)")
         if price_decrease_versus_sell > gain_threshold or u.are_close(price_decrease_versus_sell, gain_threshold, target_tolerance_percent=1.0):
