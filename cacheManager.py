@@ -26,6 +26,9 @@ class CacheManagerInterface(ABC):
         self.append_mode = append_mode
         self.api_client = api_client
         
+        self.first = {symbol: True for symbol in symbols}
+        self.days_back = 30
+        
         self.cache = {}
         self.fetchtime_time_per_symbol = {}
 
@@ -53,7 +56,7 @@ class CacheManagerInterface(ABC):
             try:
                 with open(self.filename, "r") as f:
                     data = json.load(f)
-                    self.cache = data.get("items", [])
+                    self.cache = data.get("items", {})
                     self.fetchtime_time_per_symbol = data.get("fetchtime", {})
                     if not self.cache:
                         print(f"[{self.cls_name}][warning] cache is None")
@@ -216,8 +219,9 @@ class OrderCacheManager(CacheManagerInterface):
         self.days_back = 30
 
     def _is_valid_trade(self, trade):
-        required_keys = ['symbol', 'id', 'orderId', 'price', 'qty', 'time', 'isBuyer']
-        return all(k in trade for k in required_keys)
+       required_keys = ['orderId', 'price', 'quantity', 'timestamp', 'side']
+       #'orderId': 273466555, 'price': 359.0, 'quantity': 11.142, 'timestamp': 1755770187866, 'side': 'sell'}         
+       return all(k in trade for k in required_keys)
  
     def get_all_symbols_from_cache(self):
         return list(set(t.get("symbol") for t in self.cache if "symbol" in t))
@@ -251,7 +255,7 @@ class OrderCacheManager(CacheManagerInterface):
         try:
             #new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime, limit=1000)
             #new_trades = apitrades.get_my_trades(order_type = None, symbol=symbol, backdays=backdays, limit=1000)
-            new_orders = apiorders.get_filled_orders(order_type = None, symbol=symbol, backdays=backdays, limit=1000)
+            new_orders = apiorders.get_filled_orders(order_type = None, symbol=symbol, backdays=backdays)
         except Exception as e:
             print(f"[{self.cls_name}][Eroare] Binance API pentru {symbol}: {e}")
             return []
@@ -259,7 +263,7 @@ class OrderCacheManager(CacheManagerInterface):
         self.first[symbol] = False
       
         # Setul de id-uri existente
-        existing_ids = set(str(t["id"]) for t in self.cache if "id" in t)
+        existing_ids = set(str(t["orderId"]) for t in self.cache if "orderId" in t)
 
         print(f"[{self.cls_name}][info] Număr de trades noi: {len(new_orders)}")
         unique_new_orders = []
@@ -269,7 +273,7 @@ class OrderCacheManager(CacheManagerInterface):
                 print(f"[{self.cls_name}] Trade invalid: {t}")
                 continue
 
-            trade_id = str(t["id"])
+            trade_id = str(t["orderId"])
             if trade_id not in existing_ids:
                 unique_new_orders.append(t)
                 existing_ids.add(trade_id)
@@ -364,6 +368,7 @@ PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
 PRICETREND_SYNC_INTERVAL_SEC = 1 * 60/6   # 1 minute
 
 _trade_cache_manager = None
+_order_cache_manager = None
 _price_cache_manager = None
 _price_trend_cache_manager = None
 
@@ -394,7 +399,7 @@ def get_order_cache_manager():
     global _order_cache_manager
     if _order_cache_manager is None:
         _order_cache_manager = OrderCacheManager(
-            sync_ts=order_SYNC_INTERVAL_SEC,
+            sync_ts=ORDER_SYNC_INTERVAL_SEC,
             filename="cache_order.json",
             symbols=sym.symbols,
             api_client=api,
@@ -453,7 +458,7 @@ if __name__ == "__main__":
     
     threads = []
     # order
-    threads.append(trade_cache_manager.periodic_sync(ORDER_SYNC_INTERVAL_SEC))    
+    threads.append(order_cache_manager.periodic_sync(ORDER_SYNC_INTERVAL_SEC))    
     # trade
     threads.append(trade_cache_manager.periodic_sync(TRADE_SYNC_INTERVAL_SEC))
     # price

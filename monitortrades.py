@@ -134,8 +134,10 @@ def monitor_filled_buy_orders_old():
 
 def get_close_buy_orders_without_sell(api, maxage_trade_s, profit_percentage):
     symbol = sym.btcsymbol
-    close_buy_orders = apitrades.get_trade_orders("BUY", symbol, maxage_trade_s)
-    close_sell_orders = apitrades.get_trade_orders("SELL", symbol, maxage_trade_s)
+    #close_buy_orders = apitrades.get_trade_orders("BUY", symbol, maxage_trade_s)
+    #close_sell_orders = apitrades.get_trade_orders("SELL", symbol, maxage_trade_s)
+    close_buy_orders = apiorders.get_trade_orders("BUY", symbol, maxage_trade_s)
+    close_sell_orders = apiorders.get_trade_orders("SELL", symbol, maxage_trade_s)
     
     # Lista de ordere "BUY" care nu au un "SELL" asociat cu profitul dorit
     buy_orders_without_sell = []
@@ -168,7 +170,8 @@ def monitor_close_orders_by_age1(maxage_trade_s):
         return
  
     symbol = sym.btcsymbol
-    close_buy_orders = apitrades.get_trade_orders("BUY",  symbol, maxage_trade_s)
+    #close_buy_orders = apitrades.get_trade_orders("BUY",  symbol, maxage_trade_s)
+    close_buy_orders = apiorders.get_trade_orders("BUY",  symbol, maxage_trade_s)
 
     print(f"BUY ORDERS, {len(close_buy_orders)}")
     current_price = api.get_current_price(symbol)
@@ -190,7 +193,8 @@ def monitor_close_orders_by_age1(maxage_trade_s):
             print(f"Pretul curent ({current_price}) nu a atins inca pragul de 4% fata de pretul de cumparare ({filled_price}).")
             #return
             
-    close_sell_orders = apitrades.get_trade_orders("SELL",  symbol, maxage_trade_s)
+    #close_sell_orders = apitrades.get_trade_orders("SELL",  symbol, maxage_trade_s)
+    close_sell_orders = apiorders.get_trade_orders("SELL",  symbol, maxage_trade_s)
     sorted_sell_orders = sorted(close_sell_orders, key=lambda x: x['price'])
     close_sell_orders = sorted_sell_orders
     print(f"SELL ORDERS, {len(close_sell_orders)}")
@@ -240,7 +244,8 @@ def monitor_close_orders_by_age2(maxage_trade_s):
     print(f"Procentul actual: {procent_scazut:.2f}%")
 
     # Obtinem comenzile de cumparare
-    close_buy_orders = apitrades.get_trade_orders("BUY", symbol, maxage_trade_s)
+    #close_buy_orders = apitrades.get_trade_orders("BUY", symbol, maxage_trade_s)
+    close_buy_orders = apiorders.get_trade_orders("BUY", symbol, maxage_trade_s)
     print(f"BUY ORDERS, {len(close_buy_orders)}")
     
     current_price = api.get_current_price(symbol)
@@ -264,7 +269,8 @@ def monitor_close_orders_by_age2(maxage_trade_s):
             print(f"Pretul curent ({current_price}) nu a atins pragul de {procent_scazut:.2f}% fata de pretul de cumparare ({filled_price}).")
     
     # Obtinem comenzile de vanzare
-    close_sell_orders = apitrades.get_trade_orders("SELL", symbol, maxage_trade_s)
+    #close_sell_orders = apitrades.get_trade_orders("SELL", symbol, maxage_trade_s)
+    close_sell_orders = apiorders.get_trade_orders("SELL", symbol, maxage_trade_s)
     sorted_sell_orders = sorted(close_sell_orders, key=lambda x: x['price'])
     close_sell_orders = sorted_sell_orders
     print(f"SELL ORDERS, {len(close_sell_orders)}")
@@ -400,7 +406,8 @@ class BuyTransaction:
 
 
 def update_trades(trades, symbol, maxage_trade_s, procent_desired_profit, expired_duration, min_procent):
-    new_trades = apitrades.get_trade_orders("BUY", symbol, maxage_trade_s)
+    #new_trades = apitrades.get_trade_orders("BUY", symbol, maxage_trade_s)
+    new_trades = apiorders.get_trade_orders("BUY", symbol, maxage_trade_s)
     #TODO fiter trades care sunt prea recente sub 2 ore
     for trade in new_trades:
         if not any(t.trade_id == trade['id'] for t in trades):
@@ -504,6 +511,20 @@ def print_number_of_trades(maxage_trade_s):
         print(f"get_trade_orders:           Found {len(close_sell_orders)} close 'SELL' orders in the last {u.secondsToDays(maxage_trade_s)} days.")
 
         orders = apitrades.get_trade_orders(None, symbol, maxage_trade_s)
+        print(f"get_trade_orders:           Total found {len(orders)} orders in the last {u.secondsToDays(maxage_trade_s)} days.")
+
+
+def print_number_of_orders(maxage_trade_s):
+    print(f"ORDER COUNT")
+    for symbol in sym.symbols:
+        print(f"For {symbol}")
+        close_buy_orders = apiorders.get_trade_orders("BUY", symbol, maxage_trade_s)
+        print(f"get_trade_orders:           Found {len(close_buy_orders)} close 'BUY' orders in the last {u.secondsToDays(maxage_trade_s)} days.")
+
+        close_sell_orders = apiorders.get_trade_orders("SELL", symbol, maxage_trade_s)
+        print(f"get_trade_orders:           Found {len(close_sell_orders)} close 'SELL' orders in the last {u.secondsToDays(maxage_trade_s)} days.")
+
+        orders = apiorders.get_trade_orders(None, symbol, maxage_trade_s)
         print(f"get_trade_orders:           Total found {len(orders)} orders in the last {u.secondsToDays(maxage_trade_s)} days.")
 
 
@@ -699,8 +720,10 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
     current_time_s = int(time.time())
     
     # 1. Obtine ordinele de cumparare si vanzare recente pentru simbol
-    trade_orders_buy = apitrades.get_trade_orders("BUY", symbol, maxage_trade_s)
-    trade_orders_sell = apitrades.get_trade_orders("SELL", symbol, maxage_trade_s)
+    #trade_orders_buy = apitrades.get_trade_orders("BUY", symbol, maxage_trade_s)
+    #trade_orders_sell = apitrades.get_trade_orders("SELL", symbol, maxage_trade_s)
+    trade_orders_buy = apiorders.get_trade_orders("BUY", symbol, maxage_trade_s)
+    trade_orders_sell = apiorders.get_trade_orders("SELL", symbol, maxage_trade_s)
     if not (trade_orders_buy or trade_orders_sell):
         print(f"No trade orders found for {symbol} in the last {maxage_trade_s} seconds.")
         return 
@@ -793,7 +816,8 @@ def main():
     start_monitoring(filename, interval=interval, limit=1000, years_to_keep=0.09)
     time.sleep(5)
 
-    close_sell_orders = apitrades.get_trade_orders("SELL", sym.taosymbol, maxage_trade_s)
+    #close_sell_orders = apitrades.get_trade_orders("SELL", sym.taosymbol, maxage_trade_s)
+    close_sell_orders = apiorders.get_trade_orders("SELL", sym.taosymbol, maxage_trade_s)
     print(f"get_trade_orders:           Found {len(close_sell_orders)} close 'SELL' orders in the last {u.secondsToDays(maxage_trade_s)} days.")
     #return
     
@@ -804,7 +828,7 @@ def main():
     while True:
 
         #state_tracker.display_states()
-
+        print_number_of_orders(maxage_trade_s)
         print_number_of_trades(maxage_trade_s)
         
         print("-----BTC------")
@@ -838,7 +862,11 @@ def test() :
     
     apitrades.save_trades_to_file(order_type, sym.taosymbol, filename, limit=limit, years_to_keep=years_to_keep)
     apitrades.load_trades_from_file(filename)
-    trade_orders_buy = apitrades.get_trade_orders(None, sym.taosymbol, 24 * 60 * 60 * 11)
+    #trade_orders_buy = apitrades.get_trade_orders(None, sym.taosymbol, 24 * 60 * 60 * 11)
+    #trade_orders_buy = apiorders.get_trade_orders(None, sym.taosymbol, 24 * 60 * 60 * 11)
+    trade_orders_buy = apiorders.get_trade_orders(None, sym.taosymbol, 24 * 60 * 60 * 11)
+    trade_orders_buy = apiorders.get_trade_orders(None, sym.taosymbol, 24 * 60 * 60 * 11)
+    
     print(f"{len(trade_orders_buy)}, {trade_orders_buy}")
     sys.exit(1)
     

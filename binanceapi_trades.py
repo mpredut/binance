@@ -517,7 +517,7 @@ def get_trade_orders_pt_referinta(order_type, symbol, max_age_seconds):
             for key, value in trade.items()
         }
         for trade in trade_cache
-        if trade.get('symbol') == symbol
+        if trade.get('symbol', None) == symbol
         and (order_type is None or trade.get('isBuyer') == (order_type == "BUY"))  # Verificam doar daca order_type nu este None
         and (current_time_ms - trade.get('time', 0)) <= max_age_ms
     ]
@@ -581,8 +581,8 @@ def get_trade_orders_for_day_24(order_type, symbol, day_back):
             key: (float(value) if isinstance(value, str) and value.replace('.', '', 1).isdigit() else value)
             for key, value in trade.items()
         }
-        for trade in trade_cache_manager.cache
-        if trade.get('symbol') == symbol
+        for trade in trade_cache_manager.cache[symbol]
+        #if trade.get('symbol') == symbol
         and (order_type is None or trade.get('isBuyer') == (order_type == "BUY"))  # Verificam doar daca order_type nu este None
         and start_timestamp <= trade.get('time', 0) <= end_timestamp
     ]

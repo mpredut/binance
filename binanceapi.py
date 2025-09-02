@@ -393,7 +393,9 @@ def place_SELL_order_at_market(symbol, qty):
 
 
 def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, max_daily_trades=10, profit_percentage=0.4):
-    import binanceapi_trades as apitrades
+    #import binanceapi_trades as apitrades
+    import binanceapi_allorders as apiorders
+    
 
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)
@@ -414,10 +416,13 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
         opposite_order_type = "SELL" if order_type == "BUY" else "BUY"
         backdays = math.ceil(time_back_in_seconds / 86400)
         #all_trades = apitrades.get_my_trades(order_type, symbol, backdays=backdays, limit=1000)
-        all_trades = apitrades.get_trade_orders(order_type, symbol, max_age_seconds=time_back_in_seconds)
+        #all_trades = apitrades.get_trade_orders(order_type, symbol, max_age_seconds=time_back_in_seconds)
+        all_trades = apiorders.get_trade_orders(order_type, symbol, max_age_seconds=time_back_in_seconds)
+        
         #all_trades = apitrades.get_trade_orders_24(order_type, symbol, days_back=backdays)
         #oposite_trades = apitrades.get_my_trades(opposite_order_type, symbol, backdays=backdays, limit=1000) ## curent date
-        oposite_trades = apitrades.get_trade_orders(opposite_order_type, symbol, max_age_seconds=time_back_in_seconds) ## curent date
+        #oposite_trades = apitrades.get_trade_orders(opposite_order_type, symbol, max_age_seconds=time_back_in_seconds) ## curent date
+        oposite_trades = apiorders.get_trade_orders(opposite_order_type, symbol, max_age_seconds=time_back_in_seconds) ## curent date
         if len(all_trades)/backdays > max_daily_trades:
             print(f"Am {len(oposite_trades)} trades. Limita zilnica este de {max_daily_trades} pentru'{order_type}'.")
             return False
