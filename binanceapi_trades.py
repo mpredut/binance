@@ -595,7 +595,7 @@ def get_trade_orders_for_day_24(order_type, symbol, day_back):
         }
         for trade in trade_cache_manager.cache.get(symbol, [])
         #if trade.get('symbol') == symbol
-        and (order_type is None or trade.get('isBuyer') == (order_type == "BUY"))  # Verificam doar daca order_type nu este None
+        if (order_type is None or trade.get('isBuyer') == (order_type == "BUY"))  # Verificam doar daca order_type nu este None
         and start_timestamp <= trade.get('time', 0) <= end_timestamp
     ]
 
