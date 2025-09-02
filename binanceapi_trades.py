@@ -150,7 +150,7 @@ def get_my_trades_24(order_type, symbol, days_ago=0, limit=1000):
         
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"get_my_trades_24: An error occurred: {e}")
         return []
 
 
@@ -212,7 +212,7 @@ def get_my_trades_24_NEW(order_type, symbol, days_ago=0, limit=1000):
         return all_orders
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"get_my_trades_24_NEW An error occurred: {e}")
         return []
 
 
@@ -224,34 +224,34 @@ def get_my_trades(order_type, symbol, backdays: int = 3, limit=1000):
     
     all_trades = []
     
-    try:
-        for days_ago in range(backdays + 1):
-            print(f"[{symbol}] get_my_trades: Fetching trades for day {days_ago:03d}... ", end=" ")
-            trades = get_my_trades_24(order_type, symbol, days_ago=days_ago, limit=limit)
-            
+    #try:
+    for days_ago in range(backdays + 1):
+        print(f"[{symbol}] get_my_trades: Fetching trades for day {days_ago:03d}... ", end=" ")
+        trades = get_my_trades_24(order_type, symbol, days_ago=days_ago, limit=limit)
+        
+        if not trades:
+            # retry from cache .....
+            trades = get_trade_orders_for_day_24(order_type, symbol, days_ago)
             if not trades:
-                # retry from cache .....
-                trades = get_trade_orders_for_day_24(order_type, symbol, days_ago)
-                if not trades:
-                    print(f"No trades found for day {days_ago:03d}.")
-                    continue
+                print(f"No trades found for day {days_ago:03d}.")
+                continue
+        
+        print(f"[{len(trades)}] found for day {days_ago:03d}.")
+        #filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "BUY")]
+        if order_type == "BUY":
+            filtered_trades = [trade for trade in trades if trade['isBuyer']]
+        elif order_type == "SELL":
+            filtered_trades = [trade for trade in trades if not trade['isBuyer']]
+        else:
+            filtered_trades = trades
             
-            print(f"[{len(trades)}] found for day {days_ago:03d}.")
-            #filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "BUY")]
-            if order_type == "BUY":
-                filtered_trades = [trade for trade in trades if trade['isBuyer']]
-            elif order_type == "SELL":
-                filtered_trades = [trade for trade in trades if not trade['isBuyer']]
-            else:
-                filtered_trades = trades
-                
-            all_trades.extend(filtered_trades)
+        all_trades.extend(filtered_trades)
 
-        return all_trades
+    return all_trades
 
-    except Exception as e:
-        print(f"An error occurred: {e}") #3600 * 24 * 7
-        return get_trade_orders(order_type, symbol, (backdays + 1) * 24 * 3600 )
+    #except Exception as e:
+    #    print(f"get_my_trades: An error occurred: {e}") #3600 * 24 * 7
+    #    return get_trade_orders(order_type, symbol, (backdays + 1) * 24 * 3600 )
         
         
         
@@ -531,6 +531,12 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
     sym.validate_ordertype(order_type)
     sym.validate_symbols(symbol)
     
+      # verifică cache
+    if not trade_cache_manager.cache:
+        return []
+    if symbol not in trade_cache_manager.cache:
+        return []
+        
     current_time_ms = int(time.time() * 1000)
     max_age_ms = max_age_seconds * 1000 #convert to ms
     
@@ -550,8 +556,8 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
             #'isMaker': trade['isMaker'],
             #'isBestMatch': trade['isBestMatch']
         }
-        for trade in trade_cache_manager.cache
-        if trade['symbol'] == symbol 
+        for trade in trade_cache_manager.cache.get(symbol, [])
+        #if trade['symbol'] == symbol
         and (order_type is None or trade['isBuyer'] == (order_type == "BUY"))  # Verifica doar daca order_type nu este None
         and (current_time_ms - trade['time']) <= max_age_ms
     ]
@@ -566,6 +572,12 @@ def get_trade_orders_for_day_24(order_type, symbol, day_back):
 
     sym.validate_ordertype(order_type)
     sym.validate_symbols(symbol)
+    
+    # verifică cache
+    if not trade_cache_manager.cache:
+        return []
+    if symbol not in trade_cache_manager.cache:
+        return []
         
     # Calculam inceputul si sfarsitul zilei dorite (cu days_back zile in urma)
     target_day_start = (datetime.now() - timedelta(days=day_back)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -581,7 +593,7 @@ def get_trade_orders_for_day_24(order_type, symbol, day_back):
             key: (float(value) if isinstance(value, str) and value.replace('.', '', 1).isdigit() else value)
             for key, value in trade.items()
         }
-        for trade in trade_cache_manager.cache[symbol]
+        for trade in trade_cache_manager.cache.get(symbol, [])
         #if trade.get('symbol') == symbol
         and (order_type is None or trade.get('isBuyer') == (order_type == "BUY"))  # Verificam doar daca order_type nu este None
         and start_timestamp <= trade.get('time', 0) <= end_timestamp

@@ -427,7 +427,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
             print(f"Am {len(oposite_trades)} trades. Limita zilnica este de {max_daily_trades} pentru'{order_type}'.")
             return False
         for trade in all_trades:
-            trade_time = trade['time'] / 1000  # 'time' este in milisecunde
+            trade_time = trade['timestamp'] / 1000  # 'time' este in milisecunde
             if trade_time > minutes_ago:
                 print(f"Are recent transactions in last 3 minutes")
                 return False
@@ -440,11 +440,11 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
         
         time_limit = float(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
         # Filtram tranzactiile opuse care au avut loc in intervalul specificat
-        recent_opposite_trades = [trade for trade in oposite_trades if float(trade['time']) >= float(time_limit)]
+        recent_opposite_trades = [trade for trade in oposite_trades if float(trade['timestamp']) >= float(time_limit)]
         print(f"Ma raportrez doar la cele care sunt cu {time_back_in_seconds} sec. back , in numar de '{len(recent_opposite_trades)}'")
         for trade in recent_opposite_trades:
-            readable = datetime.fromtimestamp(trade['time'] / 1000)
-            print(f"[CHECK] {readable} - price: {trade['price']} - included: {float(trade['time']) >= time_limit}")
+            readable = datetime.fromtimestamp(trade['timestamp'] / 1000)
+            print(f"[CHECK] {readable} - price: {trade['price']} - included: {float(trade['timestamp']) >= time_limit}")
         
         #max_SELL_price = max(float(trade['quoteQty']) / float(trade['qty']) for trade in recent_opposite_trades)
         if recent_opposite_trades:
@@ -628,9 +628,9 @@ def place_order_smart(order_type, symbol, price, qty, safeback_seconds=48*3600+6
         print(f"Eroare la plasarea ordinului de {order_type}: {e}")
         return None
         #return place_order(order_type, symbol, price, qty)
-    except Exception as e:
-        print(f"place_order_smart: A aparut o eroare: {e}")
-        return None
+    #except Exception as e:
+    #    print(f"place_order_smart: A aparut o eroare: {e}")
+    #    return None
         #return place_order(order_type, symbol, price, qty)
           
 def cancel_order(symbol, order_id):
@@ -736,14 +736,14 @@ def check_order_filled_by_time(order_type, symbol, time_back_in_seconds, pret_mi
     # Filtram tranzactiile in functie de timp si optional in functie de pret total
     tranzactii_recente = [
         trade for trade in trades
-        if trade['time'] >= time_limit and
+        if trade['timestamp'] >= time_limit and
            (pret_min is None or float(trade['price']) * float(trade['qty']) >= pret_min) and
            (pret_max is None or float(trade['price']) * float(trade['qty']) <= pret_max)
     ]
 
     if tranzactii_recente:
         # Gasim cea mai recenta tranzactie (dupa timp)
-        tranzactia_recenta = max(tranzactii_recente, key=lambda trade: trade['time'])
+        tranzactia_recenta = max(tranzactii_recente, key=lambda trade: trade['timestamp'])
         return float(tranzactia_recenta['price'])
 
     print(f"[DEBUG] Nicio tranzactie recenta pentru simbolul {symbol}.")

@@ -106,22 +106,26 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
 
     if not order_cache_manager.cache:  # dacă e None sau gol
         return []
+        
+    # extrage lista pentru simbol
+    orders_for_symbol = order_cache_manager.cache.get(symbol, [])
+    if not orders_for_symbol:
+        return []
 
     current_time_ms = int(time.time() * 1000)
     max_age_ms = max_age_seconds * 1000  # convert to ms
 
     filtered_orders = [
         {
-            'orderId': order['orderId'],
-            'price': float(order['price']),
-            'quantity': float(order['origQty']),
-            'timestamp': order['time'],  # timp în ms
-            'side': order['side'].lower()
+            'orderId': order.get('orderId'),
+            'price': float(order.get('price', 0)),
+            'quantity': float(order.get('quantity', 0)),  # atenție: aici e 'quantity', nu 'origQty'
+            'timestamp': order.get('timestamp'),  # deja în ms în cache
+            'side': order.get('side', '').lower()
         }
-        for order in order_cache_manager.cache
-        if order['symbol'] == symbol
-        and (order_type is None or order['side'].upper() == order_type)
-        and (current_time_ms - order['time']) <= max_age_ms
+        for order in orders_for_symbol
+        if (order_type is None or order.get('side', '').upper() == order_type)
+        and (current_time_ms - order.get('timestamp', 0)) <= max_age_ms
     ]
 
     return filtered_orders
