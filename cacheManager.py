@@ -108,10 +108,10 @@ class CacheManagerInterface(ABC):
             #self.cache[symbol] = new_items[0]
             self.cache[symbol] = new_items if isinstance(new_items, list) else [new_items]
         else:  # history mode (trade-uri)
-            self.cache.setdefault(symbol, []).extend(new_items)
-            #if symbol not in self.cache:
-            #    self.cache[symbol] = []
-            #self.cache[symbol].extend(new_items)
+            #self.cache.setdefault(symbol, []).extend(new_items)
+            if symbol not in self.cache:
+                self.cache[symbol] = []
+            self.cache[symbol].extend(new_items)
     
         
         self.fetchtime_time_per_symbol[symbol] = current_time
