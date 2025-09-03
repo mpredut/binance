@@ -176,8 +176,8 @@ class TradeCacheManager(CacheManagerInterface):
         
     def get_remote_items(self, symbol, startTime):
         #import binanceapi_trades as apitrades
-        #import importlib
-        #apitrades = importlib.import_module("binanceapi_trades")  # import dinamic
+        import importlib
+        apitrades = importlib.import_module("binanceapi_trades")  # import dinamic
         
         current_time = int(time.time() * 1000)
         backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
