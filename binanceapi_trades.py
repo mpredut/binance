@@ -86,8 +86,10 @@ def get_my_trades_24(order_type, symbol, days_ago=0, limit=1000):
         start_time = end_time - 24 * 60 * 60 * 1000  # Cu 24 de ore in urma de la end_time
 
         while start_time < end_time:
-            trades = api.client.get_my_trades(symbol=symbol, limit=limit, startTime=start_time, endTime=end_time)
 
+            trades = api.client.get_my_trades(symbol=symbol, limit=limit, startTime=start_time, endTime=end_time)
+            time.sleep(2)
+                        
             if not trades:
                 break
 
@@ -272,6 +274,7 @@ def get_my_trades_simple(order_type, symbol, backdays=3, limit=1000):
             # Calculam start_time pentru ziua curenta in intervalul de 24 de ore
             start_time = end_time - max_interval
             print(f"get_my_trades_simple: Fetching trades for day {day}...")
+            time.sleep(2)
             trades = api.client.get_my_trades(symbol=symbol, limit=limit, startTime=start_time, endTime=end_time)
             if trades:
                 #filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "BUY")]

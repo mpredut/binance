@@ -365,7 +365,7 @@ class PriceTrendCacheManager(CacheManagerInterface):
 ORDER_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute     
 TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
 PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
-PRICETREND_SYNC_INTERVAL_SEC = 1 * 60/6   # 1 minute
+PRICETREND_SYNC_INTERVAL_SEC = 10 * 60   # 10 minute
 
 _trade_cache_manager = None
 _order_cache_manager = None

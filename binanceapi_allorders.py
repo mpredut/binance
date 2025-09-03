@@ -33,6 +33,7 @@ def get_filled_orders(order_type, symbol, backdays=3, limit=1000):
         while start_time < end_time:
             current_end_time = min(start_time + interval_ms, end_time)
             try:
+                time.sleep(2)
                 orders = client.get_all_orders(
                     symbol=symbol,
                     startTime=start_time,
