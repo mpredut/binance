@@ -454,7 +454,7 @@ if __name__ == "__main__":
     order_cache_manager = get_order_cache_manager()
     trade_cache_manager = get_trade_cache_manager()
     price_cache_manager = get_price_cache_manager()
-    price_trend_cache_manager = get_trade_cache_manager()
+    price_trend_cache_manager = get_price_trend_cache_manager()
     
     threads = []
     # order
