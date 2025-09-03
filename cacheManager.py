@@ -96,7 +96,7 @@ class CacheManagerInterface(ABC):
     def update_cache_per_symbol(self, symbol):
         # Timpul curent ca referință de endTime
         current_time = int(time.time() * 1000)
-        startTime = self.fetchtime_time_per_symbol.get(symbol, 0)
+        startTime = self.fetchtime_time_per_symbol.get(symbol, current_time - 30*24*60*60*1000)
 
         new_items = self.get_remote_items(symbol=symbol, startTime=startTime)
         if not new_items:
@@ -175,7 +175,9 @@ class TradeCacheManager(CacheManagerInterface):
         return dict(last_times)
         
     def get_remote_items(self, symbol, startTime):
-        import binanceapi_trades as apitrades
+        #import binanceapi_trades as apitrades
+        #import importlib
+        #apitrades = importlib.import_module("binanceapi_trades")  # import dinamic
         
         current_time = int(time.time() * 1000)
         backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
