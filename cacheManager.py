@@ -31,6 +31,7 @@ class CacheManagerInterface(ABC):
 
         self.load_state()
         
+        self.thread = None
         self.save_state = False
         self.fallback_time_default = int(time.time() * 1000) - self.days_back*24*60*60*1000
         self.thread = self.periodic_sync(sync_ts, False)
@@ -91,14 +92,14 @@ class CacheManagerInterface(ABC):
             except Exception as e:
                 print(f"[{self.cls_name}][Eroare] La citirea fișierului cache {self.filename} : {e}")
                 self.update_cache()
-                self.save_state()
+                self.save_state_to_file()
         else :
             print(f"[{self.cls_name}][Info] File is missing, may be is it first time run. Creating it ....")
             self.update_cache()
-            self.save_state()
+            self.save_state_to_file()
 
 
-    def save_state(self):
+    def save_state_to_file(self):
         try:
             tmp_file = self.filename + ".tmp"
             with open(tmp_file, "w") as f:
@@ -132,6 +133,7 @@ class CacheManagerInterface(ABC):
             # history mode (trade-uri) 
             if symbol not in self.cache:  # Pentru PriceOrders / Price / (Price)Trade , păstrăm toată lista de elemente
                 self.cache[symbol] = [] #self.cache.setdefault(symbol, []).extend(new_items)
+            #TODO : daca este dic convert to list
             self.cache[symbol].extend(new_items)
         else:  
             # snapshot mode (trenduri)
@@ -143,7 +145,7 @@ class CacheManagerInterface(ABC):
 
     def update_cache(self):
         if not self.fetchtime_time_per_symbol:
-        self.fetchtime_time_per_symbol = self.__rebuild_fetchtime_times()
+            self.fetchtime_time_per_symbol = self.__rebuild_fetchtime_times()
         
         for symbol in self.symbols:
             self.update_cache_per_symbol(symbol)
@@ -160,7 +162,7 @@ class CacheManagerInterface(ABC):
                 self.update_cache()
                 print(f"[{self.cls_name}] save state is {self.save_state}.")
                 if self.save_state:
-                    self.save_state()
+                    self.save_state_to_file()
                 print(f"[{self.cls_name}] Sync completed for {self.symbols}")
             
                 time.sleep(self.sync_ts)
@@ -170,8 +172,8 @@ class CacheManagerInterface(ABC):
             self.thread.start()
         return self.thread
     
-    def enable_save_state():
-        this.save_state = True
+    def enable_save_state_to_file():
+        self.save_state = True
 
 
 
