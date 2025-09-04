@@ -48,7 +48,7 @@ def priceLstFor(symbol: str) -> List[Tuple[int, float]]:
 
     # obține lista curentă din cache pentru simbol
     raw = manager.cache.get(symbol, [])
-    manager.save_state()
+    manager.save_state_to_file()
     
     return [(int(ts), float(p)) for ts, p in raw]
 
@@ -251,8 +251,8 @@ if __name__ == "__main__":
             time.sleep(REFRESH_TREND)
     except KeyboardInterrupt:
         print(f"Închidere manuală...")
-    except Exception as e:
-        print(f"Oprire ? ...{e}")
+    #except Exception as e:
+        #print(f"Oprire ? ...{e}")
     #finally:
         #shm.close()
         #shm.unlink()
