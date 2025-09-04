@@ -174,7 +174,10 @@ def getTrendLongTerm(symbol: str, window_hours: int = 3, step_hours: int = 1,
     delta = np.median(np.diff(timestamps))
     points_per_hour = int(3600 / delta)
     window = points_per_hour * window_hours
+    window = min(window, len(prices))  #window size is never larger than the number of price points:
     step = points_per_hour * step_hours
+    
+    print(f"[DEBUG] {symbol}: număr puncte={len(prices)}, window={window}, step={step}")
 
     last_slope = None
     trend_start_ts = timestamps[-1]
@@ -187,6 +190,7 @@ def getTrendLongTerm(symbol: str, window_hours: int = 3, step_hours: int = 1,
         y_block = prices[start:end]
 
         slope, intercept = np.polyfit(x_block, y_block, 1)
+        #print(f"[DEBUG] {symbol}: start={start}, end={end}, slope={slope:.6f}")
 
         if last_slope is None or abs(slope - last_slope) <= slope_tolerance:
             trend_start_ts = timestamps[start]
@@ -199,6 +203,10 @@ def getTrendLongTerm(symbol: str, window_hours: int = 3, step_hours: int = 1,
     duration_seconds = timestamps[-1] - trend_start_ts
     duration_hours = duration_seconds / 3600
     estimated_future_hours = duration_hours * persistence_factor
+    
+    if last_slope is None:
+        # Not enough data to calculate slope
+        return None
     trend_direction = 'up' if last_slope > 0 else 'down'
 
     if draw:
