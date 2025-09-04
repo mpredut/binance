@@ -124,7 +124,7 @@ class CacheManagerInterface(ABC):
         pass 
         
      
-    def filter_new_items(cache_items, new_items):
+    def filter_new_items(self, cache_items, new_items):
         seen = {json.dumps(it, sort_keys=True) for it in cache_items}
         unique_new = []
         for item in new_items:
@@ -151,7 +151,7 @@ class CacheManagerInterface(ABC):
         count_new_items = len(new_items)
         print(f"[{self.cls_name}][Info] {symbol}:  new_items {new_items}") 
        
-        new_items = filter_new_items(self.cache[symbol], new_items)
+        new_items = self.filter_new_items(self.cache[symbol], new_items)
         print(f"[{self.cls_name}][Info] {symbol}:  Din {count_new_items} pastrez doar {len(new_items)}") 
 
         with self.lock:  # 👈 scriere protejată
@@ -218,26 +218,18 @@ class CacheTradeManager(CacheManagerInterface):
         return None
         
     def get_remote_items(self, symbol, startTime):
-        #import binanceapi_trades as apitrades
         import importlib
-        apitrades = importlib.import_module("binanceapi_trades")  # import dinamic
+        apitrades = importlib.import_module("binanceapi_trades")
         
         current_time = int(time.time() * 1000)
         backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
-            
-        #try:
-            #new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime, limit=1000)
-        new_trades = apitrades.get_my_trades(order_type = None, symbol=symbol, backdays=backdays, limit=1000)
-        #except Exception as e:
-        #    print(f"[{self.cls_name}][Eroare] Binance API pentru {symbol}: {e}")
-        #    return []
-            
-        # Setul de id-uri existente
-        existing_ids = set(str(t["id"]) for t in self.cache if "id" in t)
-
-        print(f"[{self.cls_name}][info] Număr de trades noi: {len(new_trades)}")
+        
+        #new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime, limit=1000)
+        new_trades = apitrades.get_my_trades(order_type=None, symbol=symbol, backdays=backdays, limit=1000)
+ 
+        existing_ids = set(str(t["id"]) for t in self.cache.get(symbol, []) if "id" in t)
+        print(f"[{self.cls_name}][info] Număr de trades noi: {len(new_trades)}")     
         unique_new_trades = []
-
         for t in new_trades:
             if not self._is_valid_trade(t):
                 print(f"[{self.cls_name}] Trade invalid: {t}")
@@ -247,7 +239,6 @@ class CacheTradeManager(CacheManagerInterface):
             if trade_id not in existing_ids:
                 unique_new_trades.append(t)
                 existing_ids.add(trade_id)
-
 
         print(f"[{self.cls_name}][info] Număr de unique_new_trades trades noi: {len(unique_new_trades)}")            
         return unique_new_trades
@@ -274,15 +265,10 @@ class CacheOrderManager(CacheManagerInterface):
         current_time = int(time.time() * 1000)
         backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
                
-        try:
-            #new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime, limit=1000)
-            #new_trades = apitrades.get_my_trades(order_type = None, symbol=symbol, backdays=backdays, limit=1000)
-            new_orders = apiorders.get_filled_orders(order_type = None, symbol=symbol, backdays=backdays)
-        except Exception as e:
-            print(f"[{self.cls_name}][Eroare] Binance API pentru {symbol}: {e}")
-            return []
+        #new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime, limit=1000)
+        #new_trades = apitrades.get_my_trades(order_type = None, symbol=symbol, backdays=backdays, limit=1000)
+        new_orders = apiorders.get_filled_orders(order_type = None, symbol=symbol, backdays=backdays)
                
-        # Setul de id-uri existente
         existing_ids = set(str(t["orderId"]) for t in self.cache if "orderId" in t)
 
         print(f"[{self.cls_name}][info] Număr de trades noi: {len(new_orders)}")
@@ -298,7 +284,6 @@ class CacheOrderManager(CacheManagerInterface):
                 unique_new_orders.append(t)
                 existing_ids.add(trade_id)
 
-
         print(f"[{self.cls_name}][info] Număr de unique_new_orders orders noi: {len(unique_new_orders)}")            
         return unique_new_orders
 
@@ -307,13 +292,11 @@ class CachePriceManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api)
 
-
     def rebuild_fetchtime_times(self):
         if not self.cache:
             return {}
         last_times = {symbol: max(entry[0] for entry in self.cache if entry) for symbol in self.symbols}
         return last_times
-
 
     def get_remote_items(self, symbol, startTime):
         try:
