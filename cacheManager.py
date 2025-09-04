@@ -153,7 +153,9 @@ class CacheManagerInterface(ABC):
        
         new_items = self.filter_new_items(self.cache[symbol], new_items)
         print(f"[{self.cls_name}][Info] {symbol}:  Din {count_new_items} pastrez doar {len(new_items)}") 
-
+        if not new_items:
+            return
+            
         with self.lock:  # 👈 scriere protejată
             if self.append_mode:    # history mode (trade-uri) - # Pentru PriceOrders / Price / (Price)Trade , păstrăm toată lista de elemente   
                 #if isinstance(new_items, dict):
@@ -224,8 +226,8 @@ class CacheTradeManager(CacheManagerInterface):
         current_time = int(time.time() * 1000)
         backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
         
-        #new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime, limit=1000)
-        new_trades = apitrades.get_my_trades(order_type=None, symbol=symbol, backdays=backdays, limit=1000)
+        new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime, limit=1000)
+        #new_trades = apitrades.get_my_trades(order_type=None, symbol=symbol, backdays=backdays, limit=1000)
  
         existing_ids = set(str(t["id"]) for t in self.cache.get(symbol, []) if "id" in t)
         print(f"[{self.cls_name}][info] Număr de trades noi: {len(new_trades)}")     
@@ -369,7 +371,7 @@ class CachePriceTrendManager(CacheManagerInterface):
 ORDER_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute     
 TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
 PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
-PRICETREND_SYNC_INTERVAL_SEC = 10 * 60/100   # 10 minute
+PRICETREND_SYNC_INTERVAL_SEC = 10 * 60   # 10 minute
 
 class CacheFactory:
     _instances = {}
