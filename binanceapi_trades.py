@@ -239,7 +239,7 @@ def get_my_trades(order_type, symbol, backdays: int = 3, limit=1000):
                 #print(f"No trades found for day {days_ago:03d}.")
                 #continue
         
-        print(f"[{len(trades)}] found for day {days_ago:03d}.")
+        print(f" [{len(trades)}] found ")
         #filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "BUY")]
         if order_type == "BUY":
             filtered_trades = [trade for trade in trades if trade['isBuyer']]
@@ -250,6 +250,7 @@ def get_my_trades(order_type, symbol, backdays: int = 3, limit=1000):
             
         all_trades.extend(filtered_trades)
 
+    print(f"")
     return all_trades
 
     #except Exception as e:

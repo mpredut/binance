@@ -28,19 +28,22 @@ class CacheManagerInterface(ABC):
         
         self.cache = {}
         self.fetchtime_time_per_symbol = {}
-
-        self.load_state()
         
         self.thread = None
         self.save_state = False
+        self.lock = threading.Lock()
+      
         self.fallback_time_default = int(time.time() * 1000) - self.days_back*24*60*60*1000
+      
+        # function calls here after all inint vars
+        self.load_state()
         self.thread = self.periodic_sync(sync_ts, False)
 
     #def get_all_symbols_from_cache(self):
     #    return list(set(t.get("symbol") for t in self.cache if "symbol" in t))
     def get_all_symbols_from_cache(self):
-        return list(self.cache.keys())
-        
+        with self.lock:
+            return list(self.cache.keys())       
         
     @abstractmethod
     def rebuild_fetchtime_times(self):
@@ -77,17 +80,18 @@ class CacheManagerInterface(ABC):
             try:
                 with open(self.filename, "r") as f:
                     data = json.load(f)
-                    self.cache = data.get("items", {})
-                    if not isinstance(self.cache, dict):
-                        # dacă fișierul avea format vechi (listă), transformăm în dict
-                        self.cache = {sym: item for sym, item in zip(self.symbols, self.cache)}
-                        print(f"[{self.cls_name}][warning] self.cache is not Dict!!!!")    
-                    
-                    self.fetchtime_time_per_symbol = data.get("fetchtime", {})
-                    if not self.cache:
-                        print(f"[{self.cls_name}][warning] cache is None")
-                    if not self.fetchtime_time_per_symbol:
-                        print(f"[{self.cls_name}][warning] fetchtime_time_per_symbol is None")    
+                    with self.lock:
+                        self.cache = data.get("items", {})
+                        if not isinstance(self.cache, dict):
+                            # dacă fișierul avea format vechi (listă), transformăm în dict
+                            self.cache = {sym: item for sym, item in zip(self.symbols, self.cache)}
+                            print(f"[{self.cls_name}][warning] self.cache is not Dict!!!!")    
+                        
+                        self.fetchtime_time_per_symbol = data.get("fetchtime", {})
+                        if not self.cache:
+                            print(f"[{self.cls_name}][warning] cache is None")
+                        if not self.fetchtime_time_per_symbol:
+                            print(f"[{self.cls_name}][warning] fetchtime_time_per_symbol is None")    
                     
             except Exception as e:
                 print(f"[{self.cls_name}][Eroare] La citirea fișierului cache {self.filename} : {e}")
@@ -101,14 +105,15 @@ class CacheManagerInterface(ABC):
 
     def save_state_to_file(self):
         try:
-            tmp_file = self.filename + ".tmp"
-            with open(tmp_file, "w") as f:
-                json.dump({
-                    "items": self.cache,
-                    "fetchtime": self.fetchtime_time_per_symbol
-                }, f, indent=1)
-            os.replace(tmp_file, self.filename)
-            print(f"[{self.cls_name}][info] Save cache to {self.filename}")
+            with self.lock:
+                tmp_file = self.filename + ".tmp"
+                with open(tmp_file, "w") as f:
+                    json.dump({
+                        "items": self.cache,
+                        "fetchtime": self.fetchtime_time_per_symbol
+                    }, f, indent=1)
+                os.replace(tmp_file, self.filename)
+                print(f"[{self.cls_name}][info] Save cache to {self.filename}")
         except Exception as e:
             print(f"[{self.cls_name}][Eroare] La salvarea fișierului cache {self.filename} / .tmp : {e}")
 
@@ -128,18 +133,25 @@ class CacheManagerInterface(ABC):
         if not new_items:
              print(f"[{self.cls_name}][Info] {symbol}:  No remote items starting with {u.timestampToTime(startTime)} ")
              return
-        print(f"[{self.cls_name}][Info] {symbol}:  new_items {new_items}")     
-        if self.append_mode: 
-            # history mode (trade-uri) 
-            if symbol not in self.cache:  # Pentru PriceOrders / Price / (Price)Trade , păstrăm toată lista de elemente
-                self.cache[symbol] = [] #self.cache.setdefault(symbol, []).extend(new_items)
-            #TODO : daca este dic convert to list
-            self.cache[symbol].extend(new_items)
-        else:  
-            # snapshot mode (trenduri)
-            self.cache[symbol] = new_items if isinstance(new_items, list) else [new_items]             #self.cache[symbol] = new_items[0]
-      
-        self.fetchtime_time_per_symbol[symbol] = current_time
+        print(f"[{self.cls_name}][Info] {symbol}:  new_items {new_items}")    
+        
+        with self.lock:  # 👈 scriere protejată
+            if self.append_mode: 
+                # history mode (trade-uri) 
+                if symbol not in self.cache:  # Pentru PriceOrders / Price / (Price)Trade , păstrăm toată lista de elemente
+                    self.cache[symbol] = [] #self.cache.setdefault(symbol, []).extend(new_items)
+                
+                #if isinstance(new_items, dict):
+                #    new_items = [new_items]
+                #elif not isinstance(new_items, list):
+                #    new_items = [new_items]
+                    
+                self.cache[symbol].extend(new_items)
+            else:  
+                # snapshot mode (trenduri)
+                self.cache[symbol] = new_items if isinstance(new_items, list) else [new_items]             #self.cache[symbol] = new_items[0]
+          
+            self.fetchtime_time_per_symbol[symbol] = current_time
 
         print(f"[{self.cls_name}][Info] {symbol}: Adăugate {len(new_items)} items noi.")
 
@@ -172,7 +184,7 @@ class CacheManagerInterface(ABC):
             self.thread.start()
         return self.thread
     
-    def enable_save_state_to_file():
+    def enable_save_state_to_file(self):
         self.save_state = True
 
 
