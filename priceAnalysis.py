@@ -35,19 +35,22 @@ price_cache_manager = None
 def build_price_cache_manager():
     global price_cache_manager
     import cacheManager as cm
-    price_cache_manager = cm.get_price_cache_manager() 
+    price_cache_manager = cm.get_cache_manager("Price")  # dict per simbol
 
+def priceLstFor(symbol: str) -> List[Tuple[int, float]]:
 
-def priceLstFor(symbol) -> List[Tuple[int, float]]:
-    #raw = price_cache_manager[symbol].cache
-    #return [(int(ts), float(p)) for ts, p in raw]
+    if price_cache_manager is None:
+        raise RuntimeError("Price cache manager nu a fost inițializat. Rulează build_price_cache_manager() mai întâi.")
+
+    manager = price_cache_manager.get(symbol)
+    if manager is None:
+        return []
+
+    # obține lista curentă din cache pentru simbol
+    raw = manager.cache.get(symbol, [])
+    manager.save_state()
     
-    raw = price_cache_manager[symbol].cache.get(symbol, [])
-    price_cache_manager[symbol].save_state()
     return [(int(ts), float(p)) for ts, p in raw]
-    
-    #raw = price_cache_manager.cache["items"].get(symbol, [])
-    #return [(int(ts), float(p)) for ts, p in raw]
 
 
 def drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_direction, duration_hours):
