@@ -57,6 +57,11 @@ class CacheManagerInterface(ABC):
                 with open(self.filename, "r") as f:
                     data = json.load(f)
                     self.cache = data.get("items", {})
+                    if not isinstance(self.cache, dict):
+                        # dacă fișierul avea format vechi (listă), transformăm în dict
+                        self.cache = {sym: item for sym, item in zip(self.symbols, self.cache)}
+                        print(f"[{self.cls_name}][warning] self.cache is not Dict!!!!")    
+                    
                     self.fetchtime_time_per_symbol = data.get("fetchtime", {})
                     if not self.cache:
                         print(f"[{self.cls_name}][warning] cache is None")
