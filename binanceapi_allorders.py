@@ -100,16 +100,16 @@ def get_recent_filled_orders(order_type, symbol, max_age_seconds):
 
 def get_trade_orders(order_type, symbol, max_age_seconds):
     import cacheManager as cm
-    order_cache_manager = cm.get_order_cache_manager()
+    cache_order_manager = cm.get_cache_manager("Order")
 
     sym.validate_ordertype(order_type)
     sym.validate_symbols(symbol)
 
-    if not order_cache_manager.cache:  # dacă e None sau gol
+    if not cache_order_manager.cache:  # dacă e None sau gol
         return []
         
     # extrage lista pentru simbol
-    orders_for_symbol = order_cache_manager.cache.get(symbol, [])
+    orders_for_symbol = cache_order_manager.cache.get(symbol, [])
     if not orders_for_symbol:
         return []
 

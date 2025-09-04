@@ -14,12 +14,17 @@ import log
 import utils as u
 import symbols as sym
 import binanceapi as api
-import cacheManager as cm
 
 # 
 # Cache global pentru tranzactii
 #
-trade_cache_manager = cm.get_trade_cache_manager() 
+cache_trade_manager = None
+
+def init_cache_trade_manager() :
+    import cacheManager as cm
+    cache_trade_manager = cm.get_cache_manager("Trade") 
+
+init_cache_trade_manager()
 
 trade_cache = []
 
@@ -532,14 +537,14 @@ def get_trade_orders_pt_referinta(order_type, symbol, max_age_seconds):
   
 # Functia care returneaza tranzactiile de tip "BUY" sau "SELL" din cache pentru un anumit simbol
 def get_trade_orders(order_type, symbol, max_age_seconds):
-    
+   
     sym.validate_ordertype(order_type)
     sym.validate_symbols(symbol)
     
       # verifică cache
-    if not trade_cache_manager.cache:
+    if not cache_trade_manager.cache:
         return []
-    if symbol not in trade_cache_manager.cache:
+    if symbol not in cache_trade_manager.cache:
         return []
         
     current_time_ms = int(time.time() * 1000)
@@ -561,7 +566,7 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
             #'isMaker': trade['isMaker'],
             #'isBestMatch': trade['isBestMatch']
         }
-        for trade in trade_cache_manager.cache.get(symbol, [])
+        for trade in cache_trade_manager.cache.get(symbol, [])
         #if trade['symbol'] == symbol
         if (order_type is None or trade['isBuyer'] == (order_type == "BUY"))  # Verifica doar daca order_type nu este None
         and (current_time_ms - trade['time']) <= max_age_ms
@@ -579,9 +584,9 @@ def get_trade_orders_for_day_24(order_type, symbol, day_back):
     sym.validate_symbols(symbol)
     
     # verifică cache
-    if not trade_cache_manager.cache:
+    if not cache_trade_manager.cache:
         return []
-    if symbol not in trade_cache_manager.cache:
+    if symbol not in cache_trade_manager.cache:
         return []
         
     # Calculam inceputul si sfarsitul zilei dorite (cu days_back zile in urma)
@@ -598,7 +603,7 @@ def get_trade_orders_for_day_24(order_type, symbol, day_back):
             key: (float(value) if isinstance(value, str) and value.replace('.', '', 1).isdigit() else value)
             for key, value in trade.items()
         }
-        for trade in trade_cache_manager.cache.get(symbol, [])
+        for trade in cache_trade_manager.cache.get(symbol, [])
         #if trade.get('symbol') == symbol
         if (order_type is None or trade.get('isBuyer') == (order_type == "BUY"))  # Verificam doar daca order_type nu este None
         and start_timestamp <= trade.get('time', 0) <= end_timestamp
@@ -649,7 +654,7 @@ def compare_trade_sources(symbol, order_type="BUY", max_age_seconds=3600, limit=
     main_map = filter_trades(trade_cache)
 
     # 2. TCM cache
-    tcm_map = filter_trades(trade_cache_manager.cache)
+    tcm_map = filter_trades(cache_trade_manager.cache)
 
     # 3. API Binance
     try:

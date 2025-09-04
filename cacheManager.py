@@ -123,7 +123,18 @@ class CacheManagerInterface(ABC):
         """Metoda abstractă – trebuie implementată de clasele derivate."""
         pass 
         
+     
+    def filter_new_items(cache_items, new_items):
+        seen = {json.dumps(it, sort_keys=True) for it in cache_items}
+        unique_new = []
+        for item in new_items:
+            key = json.dumps(item, sort_keys=True)
+            if key not in seen:
+                seen.add(key)
+                unique_new.append(item)
+        return unique_new
         
+    
     def update_cache_per_symbol(self, symbol):
         
         current_time = int(time.time() * 1000)
@@ -133,22 +144,24 @@ class CacheManagerInterface(ABC):
         if not new_items:
              print(f"[{self.cls_name}][Info] {symbol}:  No remote items starting with {u.timestampToTime(startTime)} ")
              return
-        print(f"[{self.cls_name}][Info] {symbol}:  new_items {new_items}")    
         
+        if symbol not in self.cache:
+            self.cache[symbol] = [] #self.cache.setdefault(symbol, []).extend(new_items)
+            
+        count_new_items = len(new_items)
+        print(f"[{self.cls_name}][Info] {symbol}:  new_items {new_items}") 
+       
+        new_items = filter_new_items(self.cache[symbol], new_items)
+        print(f"[{self.cls_name}][Info] {symbol}:  Din {count_new_items} pastrez doar {len(new_items)}") 
+
         with self.lock:  # 👈 scriere protejată
-            if self.append_mode: 
-                # history mode (trade-uri) 
-                if symbol not in self.cache:  # Pentru PriceOrders / Price / (Price)Trade , păstrăm toată lista de elemente
-                    self.cache[symbol] = [] #self.cache.setdefault(symbol, []).extend(new_items)
-                
+            if self.append_mode:    # history mode (trade-uri) - # Pentru PriceOrders / Price / (Price)Trade , păstrăm toată lista de elemente   
                 #if isinstance(new_items, dict):
                 #    new_items = [new_items]
                 #elif not isinstance(new_items, list):
-                #    new_items = [new_items]
-                    
+                #    new_items = [new_items]                    
                 self.cache[symbol].extend(new_items)
-            else:  
-                # snapshot mode (trenduri)
+            else: # snapshot mode (trenduri)  
                 self.cache[symbol] = new_items if isinstance(new_items, list) else [new_items]             #self.cache[symbol] = new_items[0]
           
             self.fetchtime_time_per_symbol[symbol] = current_time
@@ -193,7 +206,7 @@ class CacheManagerInterface(ABC):
 # ###### Implemetarile specifice pentru cache
 # ###### 
 
-class TradeCacheManager(CacheManagerInterface):
+class CacheTradeManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols=sym.symbols, filename="cache_trade.json", api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
 
@@ -240,7 +253,7 @@ class TradeCacheManager(CacheManagerInterface):
         return unique_new_trades
         
 
-class OrderCacheManager(CacheManagerInterface):
+class CacheOrderManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols=sym.symbols, filename="cache_orders.json", api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
 
@@ -289,7 +302,8 @@ class OrderCacheManager(CacheManagerInterface):
         print(f"[{self.cls_name}][info] Număr de unique_new_orders orders noi: {len(unique_new_orders)}")            
         return unique_new_orders
 
-class PriceCacheManager(CacheManagerInterface):
+
+class CachePriceManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api)
 
@@ -321,7 +335,7 @@ class PriceCacheManager(CacheManagerInterface):
         return self.symbols
 
 
-class PriceTrendCacheManager(CacheManagerInterface):
+class CachePriceTrendManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename="price_trend_cache.json", api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=False)
 
@@ -374,106 +388,87 @@ TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
 PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
 PRICETREND_SYNC_INTERVAL_SEC = 10 * 60/100   # 10 minute
 
-_trade_cache_manager = None
-_order_cache_manager = None
-_price_cache_manager = None
-_price_trend_cache_manager = None
+class CacheFactory:
+    _instances = {}
 
-# trade cache
-#TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
-#trade_cache_manager = TradeCacheManager(sync_ts=TRADE_SYNC_INTERVAL_SEC,
-#                                        filename="cache_trade.json", 
-#                                        symbols=sym.symbols, 
-#                                        api_client=api)
-def get_trade_cache_manager():
-    global _trade_cache_manager
-    if _trade_cache_manager is None:
-        _trade_cache_manager = TradeCacheManager(
-            sync_ts=TRADE_SYNC_INTERVAL_SEC,
-            filename="cache_trade.json",
-            symbols=sym.symbols,
-            api_client=api,
-        )
-    return _trade_cache_manager
-    
-# order cache
-#ORDER_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
-#order_cache_manager = OrderCacheManager(sync_ts=ORDER_SYNC_INTERVAL_SEC,
-#                                        filename="cache_order.json", 
-#                                        symbols=sym.symbols, 
-#                                        api_client=api)
-def get_order_cache_manager():
-    global _order_cache_manager
-    if _order_cache_manager is None:
-        _order_cache_manager = OrderCacheManager(
-            sync_ts=ORDER_SYNC_INTERVAL_SEC,
-            filename="cache_order.json",
-            symbols=sym.symbols,
-            api_client=api,
-        )
-    return _order_cache_manager
+    _CONFIG = {
+        "Trade": {
+            "class": CacheTradeManager,
+            "filename": "cache_trade.json",
+            "sync_ts": lambda: TRADE_SYNC_INTERVAL_SEC,
+        },
+        "Order": {
+            "class": CacheOrderManager,
+            "filename": "cache_order.json",
+            "sync_ts": lambda: ORDER_SYNC_INTERVAL_SEC,
+        },
+        "Price": {
+            "class": CachePriceManager,
+            "filename": None,  # dict per simbol
+            "sync_ts": lambda: PRICE_SYNC_INTERVAL_SEC,
+        },
+        "PriceTrend": {
+            "class": CachePriceTrendManager,
+            "filename": "cache_price_trend.json",
+            "sync_ts": lambda: PRICETREND_SYNC_INTERVAL_SEC,
+        },
+    }
 
-# price cache
-#PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
-#price_cache_manager = {}
-#for symbol in sym.symbols:
-#    price_cache_manager[symbol] = PricePriceTrendCacheManager(sync_ts=PRICE_SYNC_INTERVAL_SEC,
-#                                                    filename=f"cache_price_{symbol}.json",
-#                                                    symbols=[symbol],
-#                                                    api_client=api)
-def get_price_cache_manager():
-    global _price_cache_manager
-    if _price_cache_manager is None:
-        _price_cache_manager = {
-            symbol: PriceCacheManager(
-                sync_ts=PRICE_SYNC_INTERVAL_SEC,
-                filename=f"cache_price_{symbol}.json",
-                symbols=[symbol],
-                api_client=api,
-            )
-            for symbol in sym.symbols
-        }
-    return _price_cache_manager
-                                                    
-# price trend cache
-#PRICETREND_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
-#price_trend_cache_manager = `PriceTrendCacheManager(sync_ts=PRICETREND_SYNC_INTERVAL_SEC,
-#                                        filename="cache_price_trend.json", 
-#                                        symbols=sym.symbols, 
-#                                        api_client=api)
+    @classmethod
+    def get(cls, name, symbols=None):
+        if name not in cls._CONFIG:
+            raise ValueError(f"Unknown cache type: {name}")
 
-def get_price_trend_cache_manager():
-    global _price_trend_cache_manager
-    if _price_trend_cache_manager is None:
-        _price_trend_cache_manager = PriceTrendCacheManager(
-            sync_ts=PRICETREND_SYNC_INTERVAL_SEC,
-            filename="cache_price_trend.json",
-            symbols=sym.symbols,
-            api_client=api,
-        )
-    return _price_trend_cache_manager
+        if name not in cls._instances:
+            config = cls._CONFIG[name]
+            manager_class = config["class"]
+            sync_ts = config["sync_ts"]()
+            if symbols is None:
+                symbols = sym.symbols
+
+            if name == "Price":
+                # dict per simbol
+                cls._instances[name] = {
+                    s: manager_class(
+                        sync_ts=sync_ts,
+                        filename=f"cache_price_{s}.json",
+                        symbols=[s],
+                        api_client=api,
+                    )
+                    for s in symbols
+                }
+            else:
+                cls._instances[name] = manager_class(
+                    sync_ts=sync_ts,
+                    filename=config["filename"],
+                    symbols=symbols,
+                    api_client=api,
+                )
+
+        return cls._instances[name]
+        
+def get_cache_manager(name, symbols=None):
+    return CacheFactory.get(name, symbols)
+
 
 # ###### 
 # ###### FORCE CACHE TO BE UPDATEING ####### 
 # ###### 
         
 if __name__ == "__main__":
-    order_cache_manager = get_order_cache_manager()
-    trade_cache_manager = get_trade_cache_manager()
-    price_cache_manager = get_price_cache_manager()
-    price_trend_cache_manager = get_price_trend_cache_manager()
-    
     threads = []
-    # order
-    threads.append(order_cache_manager.periodic_sync(ORDER_SYNC_INTERVAL_SEC))    
-    # trade
-    threads.append(trade_cache_manager.periodic_sync(TRADE_SYNC_INTERVAL_SEC))
-    # price
-    for symbol in sym.symbols:
-        threads.append(price_cache_manager[symbol].periodic_sync(PRICE_SYNC_INTERVAL_SEC))
-    # price trend
-    threads.append(price_trend_cache_manager.periodic_sync(PRICETREND_SYNC_INTERVAL_SEC))
-    
+
+    for name, config in CacheFactory._CONFIG.items():
+        cache = get_cache_manager(name)
+        interval = config["sync_ts"]()  # obținem intervalul de sincronizare
+
+        if name == "Price":
+            # dict per simbol
+            for manager in cache.values():
+                threads.append(manager.periodic_sync(interval))
+        else:
+            threads.append(cache.periodic_sync(interval))
+
     try:
         for t in threads:
             t.join()
