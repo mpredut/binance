@@ -561,7 +561,7 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
         }
         for trade in trade_cache_manager.cache.get(symbol, [])
         #if trade['symbol'] == symbol
-        and (order_type is None or trade['isBuyer'] == (order_type == "BUY"))  # Verifica doar daca order_type nu este None
+        if (order_type is None or trade['isBuyer'] == (order_type == "BUY"))  # Verifica doar daca order_type nu este None
         and (current_time_ms - trade['time']) <= max_age_ms
     ]
 
