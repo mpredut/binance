@@ -161,8 +161,10 @@ class TradeCacheManager(CacheManagerInterface):
         required_keys = ['symbol', 'id', 'orderId', 'price', 'qty', 'time', 'isBuyer']
         return all(k in trade for k in required_keys)
  
+    #def get_all_symbols_from_cache(self):
+    #    return list(set(t.get("symbol") for t in self.cache if "symbol" in t))
     def get_all_symbols_from_cache(self):
-        return list(set(t.get("symbol") for t in self.cache if "symbol" in t))
+        return list(self.cache.keys())
 
     def rebuild_fetchtime_times(self):
         # Deducem timpul ultimei interogări per simbol din cache
