@@ -12,8 +12,6 @@ import log
 import utils as u
 import symbols as sym
 import binanceapi as api
-#import binanceapi_trades as apitrades
-import binanceapi_allorders as apiorders
 
 
 class CacheManagerInterface(ABC):
@@ -25,29 +23,51 @@ class CacheManagerInterface(ABC):
         self.filename = filename
         self.append_mode = append_mode
         self.api_client = api_client
-        
-        self.first = {symbol: True for symbol in symbols}
+
         self.days_back = 30
         
         self.cache = {}
         self.fetchtime_time_per_symbol = {}
 
         self.load_state()
-        self.periodic_sync(sync_ts, False)
+        
+        self.save_state = False
+        self.fallback_time_default = int(time.time() * 1000) - self.days_back*24*60*60*1000
+        self.thread = self.periodic_sync(sync_ts, False)
 
+    #def get_all_symbols_from_cache(self):
+    #    return list(set(t.get("symbol") for t in self.cache if "symbol" in t))
+    def get_all_symbols_from_cache(self):
+        return list(self.cache.keys())
+        
+        
     @abstractmethod
     def rebuild_fetchtime_times(self):
         """Metoda abstractă – trebuie implementată de clasele derivate."""
         pass 
-        
-    def _rebuild_fetchtime_times(self):
-        last_times = self.rebuild_fetchtime_times()
-        if not last_times:
+    
+    
+    def __rebuild_fetchtime_times(self):
+        last_times_per_sym = self.rebuild_fetchtime_times()
+        if not last_times_per_sym:
+            last_times_per_sym = defaultdict(int)
+            for symbol, trades in self.cache.items():
+                for trade in trades:
+                    # Caută "time" sau "timestamp", dacă nu există -> 0
+                    time_ = trade.get("time") or trade.get("timestamp") or 0
+                    if time_ > last_times_per_sym[symbol]:
+                        last_times_per_sym[symbol] = time_
+            # Offset de siguranță (60 sec)
+            for symbol in last_times_per_sym:
+                last_times_per_sym[symbol] = max(0, last_times_per_sym[symbol] - 60_000)                
+        if not last_times_per_sym:
             # Fallback: folosim data fișierului
-            if os.path.exists(self.filename):
-                fallback_time = int(os.path.getmtime(self.filename) * 1000) - 60_000
-                return {symbol: fallback_time for symbol in self.get_all_symbols_from_cache()}
-        return last_times
+            fallback_time_file = 0
+            if os.path.exists(self.filename): #TODO is daca am date in fisier
+                fallback_time_file = int(os.path.getmtime(self.filename) * 1000) - 60_000
+            fallback_time = min(self.fallback_time_default, fallback_time_file)
+            return {symbol: fallback_time for symbol in self.symbols}
+        return last_times_per_sym
           
         
     def load_state(self):
@@ -73,12 +93,10 @@ class CacheManagerInterface(ABC):
                 self.update_cache()
                 self.save_state()
         else :
-            print(f"[{self.cls_name}][Info] File is missing, may be first time - create it")
+            print(f"[{self.cls_name}][Info] File is missing, may be is it first time run. Creating it ....")
             self.update_cache()
             self.save_state()
 
-        if not self.fetchtime_time_per_symbol:
-            self.fetchtime_time_per_symbol = self._rebuild_fetchtime_times()
 
     def save_state(self):
         try:
@@ -91,59 +109,69 @@ class CacheManagerInterface(ABC):
             os.replace(tmp_file, self.filename)
             print(f"[{self.cls_name}][info] Save cache to {self.filename}")
         except Exception as e:
-            print(f"[{self.cls_name}][Eroare] La salvarea fișierului cache: {e}")
+            print(f"[{self.cls_name}][Eroare] La salvarea fișierului cache {self.filename} / .tmp : {e}")
+
 
     @abstractmethod
     def get_remote_items(self, symbol, startTime):
         """Metoda abstractă – trebuie implementată de clasele derivate."""
         pass 
-                           
+        
+        
     def update_cache_per_symbol(self, symbol):
-        # Timpul curent ca referință de endTime
+        
         current_time = int(time.time() * 1000)
-        startTime = self.fetchtime_time_per_symbol.get(symbol, current_time - 30*24*60*60*1000)
+        startTime = self.fetchtime_time_per_symbol.get(symbol, self.fallback_time_default)
 
         new_items = self.get_remote_items(symbol=symbol, startTime=startTime)
         if not new_items:
              print(f"[{self.cls_name}][Info] {symbol}:  No remote items starting with {u.timestampToTime(startTime)} ")
              return
         print(f"[{self.cls_name}][Info] {symbol}:  new_items {new_items}")     
-        if not self.append_mode:  # snapshot mode (trenduri)
-            # Pentru PriceTrend / PriceCache, păstrăm toată lista de elemente
-            #self.cache[symbol] = new_items[0]
-            self.cache[symbol] = new_items if isinstance(new_items, list) else [new_items]
-        else:  # history mode (trade-uri)
-            #self.cache.setdefault(symbol, []).extend(new_items)
-            if symbol not in self.cache:
-                self.cache[symbol] = []
+        if self.append_mode: 
+            # history mode (trade-uri) 
+            if symbol not in self.cache:  # Pentru PriceOrders / Price / (Price)Trade , păstrăm toată lista de elemente
+                self.cache[symbol] = [] #self.cache.setdefault(symbol, []).extend(new_items)
             self.cache[symbol].extend(new_items)
-    
-        
+        else:  
+            # snapshot mode (trenduri)
+            self.cache[symbol] = new_items if isinstance(new_items, list) else [new_items]             #self.cache[symbol] = new_items[0]
+      
         self.fetchtime_time_per_symbol[symbol] = current_time
 
         print(f"[{self.cls_name}][Info] {symbol}: Adăugate {len(new_items)} items noi.")
 
     def update_cache(self):
+        if not self.fetchtime_time_per_symbol:
+        self.fetchtime_time_per_symbol = self.__rebuild_fetchtime_times()
+        
         for symbol in self.symbols:
             self.update_cache_per_symbol(symbol)
 
+
     def periodic_sync(self, sync_ts=None, save_state=True):
-        if sync_ts is None:
-            sync_ts = self.sync_ts
+        if sync_ts is not None:
+            self.sync_ts = sync_ts
+        self.save_state = save_state
+        
         def run():
             while True:
                 print(f"\n[{self.cls_name}] Sync started at {time.strftime('%Y-%m-%d %H:%M:%S')} for {self.symbols}")
                 self.update_cache()
-                print(f"[{self.cls_name}] save state is {save_state}.")
-                if save_state:
+                print(f"[{self.cls_name}] save state is {self.save_state}.")
+                if self.save_state:
                     self.save_state()
                 print(f"[{self.cls_name}] Sync completed for {self.symbols}")
             
-                time.sleep(sync_ts)
+                time.sleep(self.sync_ts)
 
-        thread = threading.Thread(target=run, daemon=False)
-        thread.start()
-        return thread
+        if self.thread is None:
+            self.thread = threading.Thread(target=run, daemon=False)
+            self.thread.start()
+        return self.thread
+    
+    def enable_save_state():
+        this.save_state = True
 
 
 
@@ -154,32 +182,13 @@ class CacheManagerInterface(ABC):
 class TradeCacheManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols=sym.symbols, filename="cache_trade.json", api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
-        self.first = {symbol: True for symbol in symbols}
-        self.days_back = 30
 
     def _is_valid_trade(self, trade):
         required_keys = ['symbol', 'id', 'orderId', 'price', 'qty', 'time', 'isBuyer']
         return all(k in trade for k in required_keys)
- 
-    #def get_all_symbols_from_cache(self):
-    #    return list(set(t.get("symbol") for t in self.cache if "symbol" in t))
-    def get_all_symbols_from_cache(self):
-        return list(self.cache.keys())
 
     def rebuild_fetchtime_times(self):
-        # Deducem timpul ultimei interogări per simbol din cache
-        last_times = defaultdict(int)
-        for trade in self.cache:
-            symbol = trade.get("symbol")
-            time_ = trade.get("time", 0)
-            if time_ > last_times[symbol]:
-                last_times[symbol] = time_
-
-        # Offset de siguranță (60 sec)
-        for symbol in last_times:
-            last_times[symbol] = max(0, last_times[symbol] - 60_000)
-      
-        return dict(last_times)
+        return None
         
     def get_remote_items(self, symbol, startTime):
         #import binanceapi_trades as apitrades
@@ -188,11 +197,6 @@ class TradeCacheManager(CacheManagerInterface):
         
         current_time = int(time.time() * 1000)
         backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
-   
-        if self.first[symbol]:
-            # startTime = timpul curent minus numărul de zile configurabil (convertit în milisecunde)
-            startTime = current_time - self.days_back * (24 * 60 * 60 * 1000)
-            backdays = self.days_back
             
         #try:
             #new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime, limit=1000)
@@ -201,8 +205,6 @@ class TradeCacheManager(CacheManagerInterface):
         #    print(f"[{self.cls_name}][Eroare] Binance API pentru {symbol}: {e}")
         #    return []
             
-        self.first[symbol] = False
-      
         # Setul de id-uri existente
         existing_ids = set(str(t["id"]) for t in self.cache if "id" in t)
 
@@ -227,43 +229,24 @@ class TradeCacheManager(CacheManagerInterface):
 class OrderCacheManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols=sym.symbols, filename="cache_orders.json", api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
-        self.first = {symbol: True for symbol in symbols}
-        self.days_back = 30
 
     def _is_valid_trade(self, trade):
-       required_keys = ['orderId', 'price', 'quantity', 'timestamp', 'side']
-       #'orderId': 273466555, 'price': 359.0, 'quantity': 11.142, 'timestamp': 1755770187866, 'side': 'sell'}         
+       required_keys = ['orderId', 'price', 'quantity', 'timestamp', 'side']    
        return all(k in trade for k in required_keys)
  
     def get_all_symbols_from_cache(self):
         return list(set(t.get("symbol") for t in self.cache if "symbol" in t))
 
     def rebuild_fetchtime_times(self):
-        # Deducem timpul ultimei interogări per simbol din cache
-        last_times = defaultdict(int)
-        for trade in self.cache:
-            symbol = trade.get("symbol")
-            time_ = trade.get("time", 0)
-            if time_ > last_times[symbol]:
-                last_times[symbol] = time_
-
-        # Offset de siguranță (60 sec)
-        for symbol in last_times:
-            last_times[symbol] = max(0, last_times[symbol] - 60_000)
-      
-        return dict(last_times)
+        return None
         
     def get_remote_items(self, symbol, startTime):
         #import binanceapi_trades as apitrades
+        import binanceapi_allorders as apiorders
         
         current_time = int(time.time() * 1000)
         backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
-   
-        if self.first[symbol]:
-            # startTime = timpul curent minus numărul de zile configurabil (convertit în milisecunde)
-            startTime = current_time - self.days_back * (24 * 60 * 60 * 1000)
-            backdays = self.days_back
-            
+               
         try:
             #new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime, limit=1000)
             #new_trades = apitrades.get_my_trades(order_type = None, symbol=symbol, backdays=backdays, limit=1000)
@@ -271,9 +254,7 @@ class OrderCacheManager(CacheManagerInterface):
         except Exception as e:
             print(f"[{self.cls_name}][Eroare] Binance API pentru {symbol}: {e}")
             return []
-            
-        self.first[symbol] = False
-      
+               
         # Setul de id-uri existente
         existing_ids = set(str(t["orderId"]) for t in self.cache if "orderId" in t)
 
@@ -329,7 +310,6 @@ class PriceCacheManager(CacheManagerInterface):
 class PriceTrendCacheManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename="price_trend_cache.json", api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=False)
-        self.first = {symbol: True for symbol in symbols}
 
     def get_all_symbols_from_cache(self):
         return [t.get("symbol") for t in self.cache if "symbol" in t]
@@ -369,6 +349,7 @@ class PriceTrendCacheManager(CacheManagerInterface):
             return []
 
         return [data[symbol]]
+        
             
 # ###### 
 # ###### GLOBAL VARIABLE FOR CACHE ####### 
@@ -377,7 +358,7 @@ class PriceTrendCacheManager(CacheManagerInterface):
 ORDER_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute     
 TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
 PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
-PRICETREND_SYNC_INTERVAL_SEC = 10 * 60   # 10 minute
+PRICETREND_SYNC_INTERVAL_SEC = 10 * 60/100   # 10 minute
 
 _trade_cache_manager = None
 _order_cache_manager = None

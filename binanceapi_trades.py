@@ -232,11 +232,12 @@ def get_my_trades(order_type, symbol, backdays: int = 3, limit=1000):
         trades = get_my_trades_24(order_type, symbol, days_ago=days_ago, limit=limit)
         
         if not trades:
+            continue
             # retry from cache .....
-            trades = get_trade_orders_for_day_24(order_type, symbol, days_ago)
-            if not trades:
-                print(f"No trades found for day {days_ago:03d}.")
-                continue
+            #trades = get_trade_orders_for_day_24(order_type, symbol, days_ago)
+            #if not trades:
+                #print(f"No trades found for day {days_ago:03d}.")
+                #continue
         
         print(f"[{len(trades)}] found for day {days_ago:03d}.")
         #filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "BUY")]
