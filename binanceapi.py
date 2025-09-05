@@ -554,9 +554,9 @@ def __place_order(order_type, symbol, price, qty, force=False, cancelorders=Fals
     except BinanceAPIException as e:
         print(f"Error placing {order_type.upper()} order: {e}")
         return None
-    except Exception as e:
-        print(f"place_order: A aparut o eroare: {e}")
-        return None
+    #except Exception as e:
+    #    print(f"place_order: A aparut o eroare: {e}")
+    #    return None
 
 
 def place_safe_order(order_type, symbol, price, qty, safeback_seconds=48*3600+60, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
@@ -725,11 +725,13 @@ def check_order_filled(order_id, symbol):
 
 
 def check_order_filled_by_time(order_type, symbol, time_back_in_seconds, pret_min=None, pret_max=None):
-    import binanceapi_trades as apitrades
+    #import binanceapi_trades as apitrades
+    import binanceapi_allorders as apiorders
 
     backdays = math.ceil(time_back_in_seconds / 86400)
     #trades = apitrades.get_my_trades(order_type, symbol, backdays=backdays, limit=1000)
-    trades = apitrades.get_trade_orders(order_type, symbol, max_age_seconds=time_back_in_seconds)
+    #trades = apitrades.get_trade_orders(order_type, symbol, max_age_seconds=time_back_in_seconds)
+    trades = apiorders.get_trade_orders(order_type, symbol, max_age_seconds=time_back_in_seconds)
     time_limit = int(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
 
                 

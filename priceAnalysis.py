@@ -304,13 +304,13 @@ def get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=14, quant_seco
     # if data is None:
         # print(f"Nu există date în shared memory încă.")
         # return None
-    data = cm.get_price_trend_cache_manager().cache
+    data = cm.get_cache_manager("PriceTrend").cache
     if symbol not in data:
         print(f"Simbolul {symbol} nu există în trendurile citite.")
         return None
 
     print(f"Data from cache {data}")
-    trend = data[symbol]
+    trend = data[symbol][0]
     
     timestamp = trend['timestamp']
     if last_timestamp.get(symbol) is not None and timestamp == last_timestamp[symbol]:
