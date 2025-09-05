@@ -315,7 +315,7 @@ def get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=14, quant_seco
     timestamp = trend['timestamp']
     if last_timestamp.get(symbol) is not None and timestamp == last_timestamp[symbol]:
         print(f"not new timestamp,  use data from cache.")
-        return last_w[symbol]
+        return last_w[symbol][0]
         
     last_timestamp[symbol] = timestamp
                 
