@@ -21,6 +21,7 @@ import binanceapi as api
 cache_trade_manager = None
 
 def init_cache_trade_manager() :
+    global cache_trade_manager
     import cacheManager as cm
     cache_trade_manager = cm.get_cache_manager("Trade") 
 
