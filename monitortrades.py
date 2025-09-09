@@ -780,7 +780,7 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
 
     # 4. Verifica ordinele de vanzare
     if trade_orders_sell:     
-        if not buy_price:
+        if not sell_price:
             print(f"No sell_price !!!!!")
         return
         price_decrease_versus_sell = (sell_price - current_price) / sell_price
