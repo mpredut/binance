@@ -54,7 +54,7 @@ def get_filled_orders_bed(order_type, symbol, backdays=3, limit=1000):
                     'price': float(order.get('price', 0)),
                     'quantity': float(order.get('origQty', 0)),
                     'timestamp': order.get('time'),  # ms
-                    'side': order.get('side', '').lower()
+                    'side': order.get('side', '').upper()
                 }
                 for order in orders
                 if order.get('status') == 'FILLED'
@@ -81,6 +81,7 @@ def get_filled_orders_bed(order_type, symbol, backdays=3, limit=1000):
 def get_filled_orders(order_type, symbol, backdays=3, limit=1000):
     try:
         sym.validate_symbols(symbol)
+        sym.validate_ordertype(order_type)
 
         end_time = int(time.time() * 1000)  # ms
         start_time = end_time - backdays * 24 * 60 * 60 * 1000
@@ -92,7 +93,7 @@ def get_filled_orders(order_type, symbol, backdays=3, limit=1000):
                 'price': float(trade.get('price', 0)),
                 'quantity': float(trade.get('qty', 0)),
                 'timestamp': trade.get('time'),  # ms
-                'side': 'buy' if trade.get('isBuyer') else 'sell'
+                'side': 'BUY' if trade.get('isBuyer') else 'SELL'
             }
             for trade in trades
             if start_time <= trade.get('time', 0) <= end_time
@@ -150,6 +151,7 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
     if not orders_for_symbol:
         return []
 
+    #print(f" orders_for_symbol {orders_for_symbol}")
     current_time_ms = int(time.time() * 1000)
     max_age_ms = max_age_seconds * 1000  # convert to ms
 
@@ -159,11 +161,12 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
             'price': float(order.get('price', 0)),
             'quantity': float(order.get('quantity', 0)),  # atenție: aici e 'quantity', nu 'origQty'
             'timestamp': order.get('timestamp'),  # deja în ms în cache
-            'side': order.get('side', '').lower()
+            'side': order.get('side', '').upper()
         }
         for order in orders_for_symbol
         if (order_type is None or order.get('side', '').upper() == order_type)
         and (current_time_ms - order.get('timestamp', 0)) <= max_age_ms
     ]
 
+    #print(f" filtered_orders {filtered_orders} , current_time_ms {current_time_ms} timestamp  max_age+ms {max_age_ms}")
     return filtered_orders

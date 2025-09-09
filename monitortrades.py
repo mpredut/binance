@@ -808,7 +808,7 @@ def main():
   
     filename = "trades.json" 
     
-    maxage_trade_s =  3 * 24 * 3600  # Timpul maxim in care ordinele executate/filled sunt considerate recente (3 zile)
+    maxage_trade_s =  4 * 24 * 3600  # Timpul maxim in care ordinele executate/filled sunt considerate recente (3 zile)
     interval = 60 * 4 #4 minute
 
     #api.get_binance_symbols(sym.taosymbol)
@@ -822,9 +822,15 @@ def main():
     start_monitoring(filename, interval=interval, limit=1000, years_to_keep=0.09)
     time.sleep(5)
 
+    #for i in range(0, 5):
     #close_sell_orders = apitrades.get_trade_orders("SELL", sym.taosymbol, maxage_trade_s)
     close_sell_orders = apiorders.get_trade_orders("SELL", sym.taosymbol, maxage_trade_s)
     print(f"get_trade_orders:           Found {len(close_sell_orders)} close 'SELL' orders in the last {u.secondsToDays(maxage_trade_s)} days.")
+    close_buy_orders = apiorders.get_trade_orders("BUY", sym.taosymbol, maxage_trade_s)
+    print(f"get_trade_orders:           Found {len(close_buy_orders)} close 'BUY' orders in the last {u.secondsToDays(maxage_trade_s)} days.")
+    print(f"close_buy_orders {close_buy_orders}")
+    print(f"close_sell_orders {close_sell_orders}")
+    
     #return
     
     #taosymbol_target_price = api.get_current_price(sym.taosymbol)
