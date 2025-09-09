@@ -13,7 +13,9 @@ import symbols as sym
 #######
 #######      get_all_orders     #######
 #######
-def get_filled_orders(order_type, symbol, backdays=3, limit=1000):
+
+####fixed
+def get_filled_orders_bed(order_type, symbol, backdays=3, limit=1000):
     try:
         # Validare simbol
         sym.validate_symbols(symbol)
@@ -74,6 +76,41 @@ def get_filled_orders(order_type, symbol, backdays=3, limit=1000):
     except Exception as e:
         print(f"Unexpected error in get_filled_orders: {e}")
         return []
+
+
+def get_filled_orders(order_type, symbol, backdays=3, limit=1000):
+    try:
+        sym.validate_symbols(symbol)
+
+        end_time = int(time.time() * 1000)  # ms
+        start_time = end_time - backdays * 24 * 60 * 60 * 1000
+
+        trades = client.get_my_trades(symbol=symbol, limit=limit) or []
+        filtered_trades = [
+            {
+                'orderId': trade.get('orderId'),
+                'price': float(trade.get('price', 0)),
+                'quantity': float(trade.get('qty', 0)),
+                'timestamp': trade.get('time'),  # ms
+                'side': 'buy' if trade.get('isBuyer') else 'sell'
+            }
+            for trade in trades
+            if start_time <= trade.get('time', 0) <= end_time
+            and (order_type is None or 
+                 (order_type.upper() == "BUY" and trade.get('isBuyer')) or
+                 (order_type.upper() == "SELL" and not trade.get('isBuyer')))
+        ]
+
+        print(f"Filtered filled trades ({'ALL' if order_type is None else order_type}): {len(filtered_trades)}")
+        for t in filtered_trades[:5]:
+            print(t)
+
+        return filtered_trades
+
+    except Exception as e:
+        print(f"Unexpected error in get_filled_orders: {e}")
+        return []
+
 
 
 def get_recent_filled_orders(order_type, symbol, max_age_seconds):

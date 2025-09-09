@@ -199,19 +199,17 @@ def manage_quantity(order_type, symbol, required_qty, cancelorders=False, hours=
 
         if available_qty < required_qty:
             print(f"Still not enough quantity. Adjusting order quantity to {available_qty:.8f}")
-            return available_qty
-    else:
-        #data = read_trends()
-        weight = pa.get_weight_for_cash_permission_at_quant_time(symbol)
-        if weight is None:
-            print(f"Weight is None, set it at default 0.03")
-            weight = 0.03
-        else:
-            print(f"Weight {weight} is applied to available {available_qty} quantity. result {available_qty * weight}")
-        return available_qty * weight
     
-    return available_qty
-
+    #data = read_trends()
+    weight = pa.get_weight_for_cash_permission_at_quant_time(symbol)
+    if weight is None:
+        print(f"Weight is None, set it at default 0.03")
+        weight = 0.03
+    else:
+        print(f"Weight {weight} is applied to available {available_qty} quantity. result {available_qty * weight}")
+    
+    return available_qty * weight
+    
 
 def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5, price_difference_percentage=0.1):
 
