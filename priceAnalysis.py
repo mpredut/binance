@@ -66,7 +66,7 @@ def drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_directio
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
     plt.gcf().autofmt_xdate()  # întoarce etichetele să nu se suprapună
 
-    plt.savefig("plot.png")  # Salvează
+    plt.savefig("plot_{symbol}.png")  # Salvează
     plt.show()
     plt.close()
 
@@ -310,7 +310,7 @@ if __name__ == "__main__":
             
             all_trends = {}
             for symbol in symbols:
-                all_trends[symbol] = getTrendLongTerm(symbol, draw=False)
+                all_trends[symbol] = getTrendLongTerm(symbol, draw=True)
             write_all_trends(all_trends);
 
             print(f"write : {all_trends}")
