@@ -40,12 +40,14 @@ def priceLstFor(symbol: str) -> List[Tuple[int, float]]:
 
     # obține lista curentă din cache pentru simbol
     raw = manager.cache.get(symbol, [])
-    manager.save_state_to_file()
+    #manager.save_state_to_file()
     
     return [(int(ts), float(p)) for ts, p in raw]
 
 
 def drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_direction, duration_hours):
+    import matplotlib
+    print(matplotlib.get_backend())
     # Conversie timestamps -> datetime
     times = [datetime.fromtimestamp(ts) for ts in timestamps]
 
@@ -310,7 +312,7 @@ if __name__ == "__main__":
             
             all_trends = {}
             for symbol in symbols:
-                all_trends[symbol] = getTrendLongTerm(symbol, draw=True)
+                all_trends[symbol] = getTrendLongTerm(symbol, draw=False)
             write_all_trends(all_trends);
 
             print(f"write : {all_trends}")
