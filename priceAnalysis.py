@@ -63,6 +63,8 @@ def drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_directio
     for start, end in trend_block_indices:
         plt.plot(timestamps[start:end], prices[start:end], color='red', linewidth=2)
 
+    plt.savefig("plot.png")  # Save instead of showing
+    
     plt.xlabel('Timestamp')
     plt.ylabel('Price')
     plt.title(f"{symbol} - Trend {trend_direction}, durata {duration_hours:.2f}h")
@@ -158,7 +160,7 @@ def trend_wma(symbol: str, window_hours: int = 6):
 
 
 
-def getTrendLongTerm(symbol: str, window_hours: int = 3, step_hours: int = 1,
+def getTrendLongTerm(symbol: str, window_hours: int = 48, step_hours: int = 8,
                                 slope_tolerance: float = 1e-5, persistence_factor: float = 1.5
                                , draw: bool = True) -> Optional[dict]:
    
@@ -243,7 +245,7 @@ if __name__ == "__main__":
             
             all_trends = {}
             for symbol in symbols:
-                all_trends[symbol] = getTrendLongTerm(symbol, draw=False)
+                all_trends[symbol] = getTrendLongTerm(symbol, draw=True)
             write_all_trends(all_trends);
 
             print(f"write : {all_trends}")
