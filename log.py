@@ -32,6 +32,9 @@ process_id = os.getpid()
 
 current_date = datetime.datetime.now().strftime("%Y-%m-%d")
 
+import threading
+lock = threading.Lock()
+
 # Redefineste functia print pentru a adauga logare
 def print(*args, **kwargs):
     global current_date  # Facem referire la variabila globala
@@ -40,27 +43,29 @@ def print(*args, **kwargs):
     message = " ".join(map(str, args))
     
     new_date = datetime.datetime.now().strftime("%Y-%m-%d")
-    if new_date != current_date:
-        current_date = new_date
     
-    bot_folder = "bot_logger"
-    if not os.path.exists(bot_folder):
-        os.makedirs(bot_folder)
-    
-    # Construieste calea completa a fisierului de log, incluzand numele aplicatiei, data curenta si ID-ul procesului
-    log_file_path = os.path.join(os.getcwd(), bot_folder, f"{app_name}_{current_date}_pid{process_id}.log")
-    
-    # Obtine ora si minutul curent
-    current_time = datetime.datetime.now().strftime("%H:%M")
+    with lock:
+        if new_date != current_date:
+            current_date = new_date
+        
+        bot_folder = "bot_logger"
+        if not os.path.exists(bot_folder):
+            os.makedirs(bot_folder)
+        
+        # Construieste calea completa a fisierului de log, incluzand numele aplicatiei, data curenta si ID-ul procesului
+        log_file_path = os.path.join(os.getcwd(), bot_folder, f"{app_name}_{current_date}_pid{process_id}.log")
+        
+        # Obtine ora si minutul curent
+        current_time = datetime.datetime.now().strftime("%H:%M")
 
-    # Apeleaza functia print originala
-    original_print(f"{current_time} {message}", **kwargs)
-    # Scrie mesajul în fisierul de log
-    try:
-        with open(log_file_path, "a") as log_file:
-            log_file.write(f"{current_time} {message}\n")
-    except PermissionError as e:
-        original_print(f"Error writing log: {e}")
+        # Apeleaza functia print originala
+        original_print(f"{current_time} {message}", **kwargs)
+        # Scrie mesajul în fisierul de log
+        try:
+            with open(log_file_path, "a") as log_file:
+                log_file.write(f"{current_time} {message}\n")
+        except PermissionError as e:
+            original_print(f"Error writing log: {e}")
 
 
 
