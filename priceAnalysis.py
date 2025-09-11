@@ -1,33 +1,25 @@
 
-import time
-import json
-from multiprocessing import shared_memory
-
-import numpy as np
-import matplotlib.pyplot as plt
-
-#my import
-import utils as u
-import shmutils as shmu
-
-
-
-
 import os
 import math
 import time
 import json
 import psutil
 
-from datetime import datetime
+import numpy as np
 from typing import List, Dict, Tuple, Optional
 
+#for draw
 import matplotlib.pyplot as plt
-import numpy as np
-from multiprocessing import shared_memory
+import matplotlib.dates as mdates
+from datetime import datetime
+#from zoneinfo import ZoneInfo  # disponibil din Python 3.9+
 
-### my import
+#my import
+import utils as u
 import symbols as sym
+
+### SHM import + my SHM import
+from multiprocessing import shared_memory
 import shmutils as shmu
 
 price_cache_manager = None
@@ -54,23 +46,30 @@ def priceLstFor(symbol: str) -> List[Tuple[int, float]]:
 
 
 def drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_direction, duration_hours):
-    # Vizualizare
+    # Conversie timestamps -> datetime
+    times = [datetime.fromtimestamp(ts) for ts in timestamps]
+
     #plt.clf()  # curăță figura curentă (nu creează alta)
     plt.figure(figsize=(12,5))
-    plt.plot(timestamps, prices, label='Price', color='blue')
+    plt.plot(times, prices, label='Price', color='blue')
 
     # Evidențiem blocurile de trend
     for start, end in trend_block_indices:
-        plt.plot(timestamps[start:end], prices[start:end], color='red', linewidth=2)
+        plt.plot(times[start:end], prices[start:end], color='red', linewidth=2)
 
-    plt.savefig("plot.png")  # Save instead of showing
-    
-    plt.xlabel('Timestamp')
+    plt.xlabel('Time')
     plt.ylabel('Price')
     plt.title(f"{symbol} - Trend {trend_direction}, durata {duration_hours:.2f}h")
     plt.legend()
+
+    # Format data/ora pe axa X
+    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+    plt.gcf().autofmt_xdate()  # întoarce etichetele să nu se suprapună
+
+    plt.savefig("plot.png")  # Salvează
     plt.show()
     plt.close()
+
 
 
 def weighted_moving_average(prices: np.ndarray, window: int) -> np.ndarray:
@@ -158,10 +157,22 @@ def trend_wma(symbol: str, window_hours: int = 6):
 
     # return {'direction': trend_direction, 'fitted': fitted, 'forecast': future}
 
+def slope_tolerance_per_(symbol, price, 
+                              base_tolerance = 0.0015, 
+                              ):
+  
+    min_tol = 0.0005 
+    max_tol = 2000.0
+                              
+    relative_tolerance = base_tolerance * price
+    adaptive_tolerance = min(max(relative_tolerance, min_tol), max_tol)
+    #print(f"[DEBUG] {symbol}: price={price}, base_tol={base_tolerance}, adaptive_tolerance={adaptive_tolerance}")
+    return adaptive_tolerance       
 
 
-def getTrendLongTerm(symbol: str, window_hours: int = 48, step_hours: int = 8,
-                                slope_tolerance: float = 1e-5, persistence_factor: float = 1.5
+
+def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
+                                slope_tolerance: float = 0.0028, persistence_factor: float = 1.5
                                , draw: bool = True) -> Optional[dict]:
    
     data: List[Tuple[int, float]] = priceLstFor(symbol)
@@ -174,42 +185,96 @@ def getTrendLongTerm(symbol: str, window_hours: int = 48, step_hours: int = 8,
     prices = np.array(prices)
 
     delta = np.median(np.diff(timestamps))
-    points_per_hour = int(3600 / delta)
-    window = points_per_hour * window_hours
-    window = min(window, len(prices))  #window size is never larger than the number of price points:
-    step = points_per_hour * step_hours
+    points_per_hour = int(3600 / delta) # cate secunde am intr-o ora ditribuite per puncte de pret
+    window = points_per_hour * window_hours # numar de puncte per fereastra
+    window = min(window, len(prices))       # window size is never larger than the number of price points:
+    step = points_per_hour * step_hours     # numar de puncte per step
     
-    print(f"[DEBUG] {symbol}: număr puncte={len(prices)}, window={window}, step={step}")
-
-    last_slope = None
+    print(f"[DEBUG] {symbol}: numar puncte={len(prices)}, window={window}, step={step}, delta(s)={delta}")
+    print(f"[DEBUG] {symbol}: numar de ferestre={len(prices)/window}, numar de pasi in price {len(prices)/step}")
+    print(f"[DEBUG] {symbol}: slope_tolerance={slope_tolerance}")
+ 
+    last_slope_h = None
+    sum_slope = 0
     trend_start_ts = timestamps[-1]
-    trend_blocks = 0
+    trend_ref_slope_h = None
+    trend_ref_count = 1
+    trend_block = 0
+    trend_block_ups = 0
     trend_block_indices = []
-
+    
+    trend_block_indices_test=[]
+    
     for start in range(len(prices) - window, -1, -step):
+        print(f"[DEBUG] start{start}")
+        trend_block +=1
         end = start + window
         x_block = timestamps[start:end] - timestamps[start]
         y_block = prices[start:end]
 
-        slope, intercept = np.polyfit(x_block, y_block, 1)
+        slope_s, intercept = np.polyfit(x_block, y_block, 1) # cu cat creste pe secunda - viteza slope
+        
+        trend_block_indices_test.append((0, window))
+            
         #print(f"[DEBUG] {symbol}: start={start}, end={end}, slope={slope:.6f}")
+        slope_h = slope_s * 3600 # slope per h
+        if slope_h > 0 :
+            trend_block_ups +=1
 
-        if last_slope is None or abs(slope - last_slope) <= slope_tolerance:
+        #avg_price = np.mean(y_block)
+        avg_price = prices[0]
+        relative_tolerance = slope_tolerance_per_(symbol, avg_price, slope_tolerance) 
+
+        print(f"[DEBUG] {symbol}: relative_tolerance={relative_tolerance}, slope_h={slope_h}, last_slope_h={last_slope_h}")
+        #drawPriceLst(x_block, y_block, trend_block_indices, symbol, "up", slope_h)
+     
+        if trend_ref_slope_h is None or last_slope_h is None:
+            trend_ref_slope_h = slope_h
             trend_start_ts = timestamps[start]
-            trend_blocks += 1
-            trend_block_indices.append((start, end))
-            last_slope = slope
+            last_slope_h = slope_h
+
+        continue_trend = True
+                    
+        if(trend_ref_slope_h * slope_h < 0): # semn trend diferit
+            avg_slope = sum_slope / len(trend_block_indices)
+            print(f"[DEBUG] trendul curent difera {slope_h}. Se compara cu trend_ref_slope_h={trend_ref_slope_h} si avg_slope={avg_slope}")
+            if abs(slope_h - trend_ref_slope_h) >= relative_tolerance: # diferență semificativa fata de trend start
+                continue_trend = False;
+            if abs(slope_h - avg_slope) >= relative_tolerance:  # diferență mare fata de medie
+                continue_trend = False;
         else:
+            continue_trend = True
+                        
+        if continue_trend:
+            if (trend_ref_slope_h * slope_h < 0): # semn schimbat
+                trend_ref_slope_h = slope_h
+                trend_ref_count = 1
+                print(f"CONTINUE ... ")
+            else : # medie sau ceva 
+                
+                #w = 1 w < 1 => media veche contează mai puțin decât un singur număr nou 
+                #trend_ref_slope_h = (w * trend_ref_slope_h + slope_h) / (w + 1)              
+                trend_ref_slope_h =  (trend_ref_slope_h * trend_ref_count + slope_h) / (trend_ref_count + 1);
+                trend_ref_count += 1
+            
+            sum_slope += slope_h            
+            trend_block_indices.append((start, end))
+            last_slope_h = slope_h
+        else:
+            # trendul s-a rupt
+            print(f"BREAK!")
             break
+           
 
     duration_seconds = timestamps[-1] - trend_start_ts
     duration_hours = duration_seconds / 3600
     estimated_future_hours = duration_hours * persistence_factor
     
-    if last_slope is None:
-        # Not enough data to calculate slope
-        return None
-    trend_direction = 'up' if last_slope > 0 else 'down'
+    if trend_ref_slope_h is None:
+        return None        # Not enough data to calculate slope
+    
+    print(f"trend_block {trend_block} and trend_block_ups {trend_block_ups}")
+    trend_direction = 'up' if trend_ref_slope_h > 0 else 'down'
 
     if draw:
         drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_direction, duration_hours)
@@ -245,7 +310,7 @@ if __name__ == "__main__":
             
             all_trends = {}
             for symbol in symbols:
-                all_trends[symbol] = getTrendLongTerm(symbol, draw=True)
+                all_trends[symbol] = getTrendLongTerm(symbol, draw=False)
             write_all_trends(all_trends);
 
             print(f"write : {all_trends}")
