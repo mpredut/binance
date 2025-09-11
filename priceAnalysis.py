@@ -66,7 +66,7 @@ def drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_directio
     plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
     plt.gcf().autofmt_xdate()  # întoarce etichetele să nu se suprapună
 
-    plt.savefig("plot_{symbol}.png")  # Salvează
+    plt.savefig(f"plot_{symbol}.png")  # Salvează
     plt.show()
     plt.close()
 
