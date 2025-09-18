@@ -185,7 +185,7 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
     timestamps, prices = zip(*data)
     timestamps = np.array(timestamps) / 1000  # conversie din ms în secunde
     prices = np.array(prices)
-
+    
     delta = np.median(np.diff(timestamps))
     points_per_hour = int(3600 / delta) # cate secunde am intr-o ora ditribuite per puncte de pret
     window = points_per_hour * window_hours # numar de puncte per fereastra
@@ -364,6 +364,7 @@ def get_weight_for_cash_permission(symbol, T=14*24):
     return w[0]  # prima pondere
 
 
+# mylock = threading.Lock()  # lock global
 def get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=14, quant_seconds=3600*24, draw=False):
     import cacheManager as cm
     global last_timestamp
@@ -382,11 +383,13 @@ def get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=14, quant_seco
     trend = data[symbol][0]
     
     timestamp = trend['timestamp']
+    
+    #with mylock:  # blocăm accesul la last_timestamp și last_w
     if last_timestamp.get(symbol) is not None and timestamp == last_timestamp[symbol]:
         print(f"not new timestamp,  use data from cache.")
         return last_w[symbol][0]
-        
-    last_timestamp[symbol] = timestamp
+    #am mutat pt race condition    
+    #last_timestamp[symbol] = timestamp
                 
     # convertim last_period din secunde în număr de quanta
     last_period_quanta = trend['duration_seconds']  / quant_seconds
@@ -411,6 +414,7 @@ def get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=14, quant_seco
         return None
    
     last_w[symbol] = w
+    last_timestamp[symbol] = timestamp
     return w[0]
 
 

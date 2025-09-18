@@ -13,10 +13,23 @@ import utils as u
 import symbols as sym
 import binanceapi as api
 
+#from log import PRINT_CONTEXT
+
+
+# disable logs by redefine with dummy
+def print(*args, **kwargs):
+    pass
+log.print = lambda *args, **kwargs: None
+
+#log.disable_print()
 
 class CacheManagerInterface(ABC):
     def __init__(self, sync_ts, symbols, filename, append_mode = True, api_client=api):
         self.cls_name = self.__class__.__name__
+        
+        #self.enable_print = True
+        #global PRINT_CONTEXT
+        #log.PRINT_CONTEXT = self
         
         self.sync_ts = sync_ts
         self.symbols = symbols
@@ -38,6 +51,7 @@ class CacheManagerInterface(ABC):
         # function calls here after all inint vars
         self.load_state()
         self.thread = self.periodic_sync(sync_ts, False)
+    
 
     #def get_all_symbols_from_cache(self):
     #    return list(set(t.get("symbol") for t in self.cache if "symbol" in t))
@@ -249,7 +263,7 @@ class CacheTradeManager(CacheManagerInterface):
 class CacheOrderManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols=sym.symbols, filename="cache_orders.json", api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
-
+        
     def _is_valid_trade(self, trade):
        required_keys = ['orderId', 'price', 'quantity', 'timestamp', 'side']    
        return all(k in trade for k in required_keys)
@@ -286,7 +300,8 @@ class CacheOrderManager(CacheManagerInterface):
                 unique_new_orders.append(t)
                 existing_ids.add(trade_id)
 
-        print(f"[{self.cls_name}][info] Număr de unique_new_orders orders noi: {len(unique_new_orders)}")            
+        print(f"[{self.cls_name}][info] Număr de unique_new_orders orders noi: {len(unique_new_orders)}")
+        
         return unique_new_orders
 
 
