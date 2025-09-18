@@ -28,23 +28,25 @@ app_name = os.path.splitext(os.path.basename(__file__))[0]
 app_name = os.path.splitext(os.path.basename(sys.argv[0]))[0]
 
 
-process_id = os.getpid()
-
 current_date = datetime.datetime.now().strftime("%Y-%m-%d")
 
 import threading
 lock = threading.Lock()
 
+PRINT_CONTEXT = None
 # Redefineste functia print pentru a adauga logare
 def print(*args, **kwargs):
-    global current_date  # Facem referire la variabila globala
-    
+    if PRINT_CONTEXT is not None:
+        if not getattr(PRINT_CONTEXT, "enable_print", True):
+            original_print(f"BLOCK >>>>> BLOCK ...")
+            return  # blocăm afișarea
     # Converteste toate argumentele în stringuri si le uneste într-un singur mesaj
     message = " ".join(map(str, args))
     
     new_date = datetime.datetime.now().strftime("%Y-%m-%d")
     
     with lock:
+        global current_date
         if new_date != current_date:
             current_date = new_date
         
@@ -71,3 +73,9 @@ def print(*args, **kwargs):
 
 # Redefineste functia print din builtins pentru a functiona în întreg codul
 builtins.print = print
+
+def dumy_print(*args, **kwargs):
+    pass
+    
+def disable_print():
+    builtins.print = dumy_print
