@@ -102,7 +102,7 @@ def get_filled_orders(order_type, symbol, backdays=3, limit=1000):
                  (order_type.upper() == "SELL" and not trade.get('isBuyer')))
         ]
 
-        print(f"Filtered filled trades ({'ALL' if order_type is None else order_type}): {len(filtered_trades)}")
+        #print(f"Filtered filled trades ({'ALL' if order_type is None else order_type}): {len(filtered_trades)} from {len(trades)} trades")
         for t in filtered_trades[:5]:
             print(t)
 
