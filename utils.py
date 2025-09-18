@@ -115,8 +115,8 @@ def are_close(value1, value2, target_tolerance_percent=1.0):
     iteration = 0
     tolerance = initial_tolerance
 
+    difference_percent = calculate_difference_percent(value1, value2)
     while iteration < max_iterations:
-        difference_percent = calculate_difference_percent(value1, value2)
         #lower_bound = target_tolerance_percent - tolerance
         upper_bound = target_tolerance_percent + tolerance
         #return lower_bound <= difference_percent <= upper_bound
