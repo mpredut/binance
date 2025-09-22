@@ -81,7 +81,7 @@ class TradingBot:
 
             if buy_order is None:
                 print(f"[{self.symbol}] Order BUY failed, retryed {failure_count} times. Retrying again ...")
-                api.cancel_recent_orders("BUY", self.symbol, WAIT_FOR_ORDER)
+                api.cancel_recent_orders("BUY", self.symbol, max_failures * WAIT_FOR_ORDER/2)
                 time.sleep(WAIT_FOR_ORDER)
                 failure_count += 1
                 if failure_count >= max_failures:
@@ -162,7 +162,7 @@ class TradingBot:
 
             if sell_order is None:
                 print(f"[{self.symbol}] Order SELL failed, retryed {failure_count} times. Retrying again ...")
-                api.cancel_recent_orders("SELL", self.symbol, WAIT_FOR_ORDER)
+                api.cancel_recent_orders("SELL", self.symbol, max_failures * WAIT_FOR_ORDER/2)
                 time.sleep(WAIT_FOR_ORDER)
                 failure_count += 1  # Incrementăm contorul de eșecuri
                 if failure_count >= max_failures:
