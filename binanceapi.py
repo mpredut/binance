@@ -212,7 +212,7 @@ def manage_quantity(order_type, symbol, required_qty, cancelorders=False, hours=
         if available_qty < required_qty:
             print(f"Still not enough quantity. Adjusting order quantity to {available_qty:.8f}")
        
-    return required_qty
+    return min(available_qty,required_qty)
     
 
 def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5, price_difference_percentage=0.1):
