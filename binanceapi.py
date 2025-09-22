@@ -183,6 +183,18 @@ def get_asset_info(order_type, symbol):
 
 
 def manage_quantity(order_type, symbol, required_qty, cancelorders=False, hours=5):
+    
+    # first weight required_qty because I have limited amout to be traded per day! :-)
+    # TODO: substract also the amout already traded!
+    #data = read_trends()
+    weight = pa.get_weight_for_cash_permission_at_quant_time(symbol)
+    if weight is None:
+        print(f"Weight is None, set it at default 0.03")
+        weight = 0.03
+    else:
+        print(f"Weight {weight} is applied to required {required_qty} quantity. result {required_qty * weight}")
+    
+    required_qty = required_qty * weight
 
     available_qty = get_asset_info(order_type, symbol)
     
@@ -192,23 +204,15 @@ def manage_quantity(order_type, symbol, required_qty, cancelorders=False, hours=
         freed_quantity = 0
         if cancelorders:
             freed_quantity = cancel_orders_old_or_outlier(
-                order_type, symbol, required_qty, hours=hours, price_difference_percentage=0.1
+                order_type, symbol, required_qty, hours=hours, price_difference_percentage=0.15
             )
         
         available_qty += freed_quantity
 
         if available_qty < required_qty:
             print(f"Still not enough quantity. Adjusting order quantity to {available_qty:.8f}")
-    
-    #data = read_trends()
-    weight = pa.get_weight_for_cash_permission_at_quant_time(symbol)
-    if weight is None:
-        print(f"Weight is None, set it at default 0.03")
-        weight = 0.03
-    else:
-        print(f"Weight {weight} is applied to available {available_qty} quantity. result {available_qty * weight}")
-    
-    return available_qty * weight
+       
+    return available_qty
     
 
 def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5, price_difference_percentage=0.1):
@@ -491,13 +495,12 @@ def __place_order(order_type, symbol, price, qty, force=False, cancelorders=Fals
     try:
         print(f"Order Request {order_type} {symbol} qty {qty}, Price {price}")
         available_qty = manage_quantity(order_type, symbol, qty, cancelorders=cancelorders, hours=hours)
-        
-        if order_type == 'SELL':
-            # Verifica daca ai destula criptomoneda pentru a vinde
-            if available_qty <= 0:
-                print(f"No sufficient quantity available to place the {order_type} order.")
-                return None
-            
+
+        if available_qty <= 0:
+            print(f"No sufficient quantity available to place the {order_type} order.")
+            return None
+                
+        if order_type == 'SELL':      
             print(f"available_qty {available_qty:.8f} versus requested {qty:.8f}")
             
             adjusted_qty = qty * (1 + fee_percentage)
@@ -520,9 +523,6 @@ def __place_order(order_type, symbol, price, qty, force=False, cancelorders=Fals
         #qty = math.floor(qty * 10**5) / 10**5  # Rotunjire in jos la 5 zecimale
         qty = round(qty, 4)
         qty = float(Decimal(qty).quantize(Decimal('0.0001'), rounding=ROUND_DOWN))  # Rotunjit la 5 zecimale
-        if qty <= 0:
-            print("Adjusted quantity is too small after rounding.")
-            return None
 
         current_price = get_current_price(symbol)
         if qty * current_price < 100:

@@ -19,7 +19,7 @@ import binanceapi as api
 
 
 # Intervalul de timp între încercările de anulare și recreere a ordinului (în secunde)
-WAIT_FOR_ORDER = 22 #seconds
+WAIT_FOR_ORDER = 32 #seconds
 MIN_adjustment_percent = 0.001
 
 class TradingBot:
@@ -72,10 +72,10 @@ class TradingBot:
                 if adjustment_percent == MIN_adjustment_percent:
                     print(f"[{self.symbol}] sunt disperat!")
                     buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, 
-                        safeback_seconds=1*3600+60, force=True, cancelorders=True, hours=0.2)
+                        safeback_seconds=1*3600+60, force=True, cancelorders=True, hours=0.3)
                 else:
                     buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, 
-                        safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=0.2)
+                        safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=0.3)
             else:
                 buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty)     
 
@@ -153,10 +153,10 @@ class TradingBot:
                 if adjustment_percent == MIN_adjustment_percent:
                     print(f"[{self.symbol}] sunt disperat!")
                     sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, 
-                        safeback_seconds=1*3600+60, force=True, cancelorders=True, hours=0.1)
+                        safeback_seconds=1*3600+60, force=True, cancelorders=True, hours=0.23)
                 else:
                     sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, 
-                        safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=0.1)
+                        safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=0.23)
             else:
                 sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty)
 
