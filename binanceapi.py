@@ -125,7 +125,7 @@ def update_price(symbol):
     try:
         ticker = client.get_symbol_ticker(symbol=symbol)
         cprice[symbol] = float(ticker['price'])
-        quantities[symbol] = 1000 / cprice[symbol]
+        quantities[symbol] = 10000 / cprice[symbol]
     except Exception as e:
         print(f"update_price: A aparut o eroare neasteptata: {e}")
         
@@ -212,7 +212,7 @@ def manage_quantity(order_type, symbol, required_qty, cancelorders=False, hours=
         if available_qty < required_qty:
             print(f"Still not enough quantity. Adjusting order quantity to {available_qty:.8f}")
        
-    return available_qty
+    return required_qty
     
 
 def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5, price_difference_percentage=0.1):
