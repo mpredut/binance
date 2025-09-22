@@ -53,8 +53,8 @@ class TradingBot:
         
     def repetitive_buy(self, current_price, filled_sell_price):
         adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
-        failure_count = 0  # Adaugăm un contor pentru numărul de eșecuri
-        max_failures = 5  # Definim numărul maxim de eșecuri acceptabile
+        failure_count = 1  # Adaugăm un contor pentru numărul de eșecuri
+        max_failures = 10  # Definim numărul maxim de eșecuri acceptabile
 
         while True:
             if self.sell_filled:
@@ -68,23 +68,24 @@ class TradingBot:
                 return self.mark_buy_filled(self.filled_buy_price)
             
             buy_order = None
+            h = 0.3/failure_count
             if self.sell_filled: # sunt disperat
                 if adjustment_percent == MIN_adjustment_percent:
                     print(f"[{self.symbol}] sunt disperat!")
                     buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, 
-                        safeback_seconds=1*3600+60, force=True, cancelorders=True, hours=0.3)
+                        safeback_seconds=1*3600+60, force=True, cancelorders=True, hours=h)
                 else:
                     buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, 
-                        safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=0.3)
+                        safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
             else:
-                buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty)     
+                buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, cancelorders=True, hours=16)     
 
             if buy_order is None:
                 print(f"[{self.symbol}] Order BUY failed, retryed {failure_count} times. Retrying again ...")
-                api.cancel_recent_orders("BUY", self.symbol, max_failures * WAIT_FOR_ORDER/2)
+                #api.cancel_recent_orders("BUY", self.symbol, max_failures * WAIT_FOR_ORDER/2)
                 time.sleep(WAIT_FOR_ORDER)
                 failure_count += 1
-                if failure_count >= max_failures:
+                if failure_count > max_failures:
                     print(f"[{self.symbol}] Order BUY failed {failure_count} times. Exiting.")
                     #self.mark_buy_filled()
                     #return round(api.get_current_price(self.symbol) * (1 - 0.01), 4)
@@ -133,8 +134,8 @@ class TradingBot:
 
     def repetitive_sell(self, current_price, filled_buy_price):
         adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
-        failure_count = 0  # Adaugăm un contor pentru numărul de eșecuri
-        max_failures = 5  # Definim numărul maxim de eșecuri acceptabile
+        failure_count = 1  # Adaugăm un contor pentru numărul de eșecuri
+        max_failures = 10  # Definim numărul maxim de eșecuri acceptabile
 
         while True:
 
@@ -149,23 +150,24 @@ class TradingBot:
                 return self.mark_sell_filled(self.filled_sell_price)
 
             sell_order = None
+            h = 0.23/failure_count
             if self.buy_filled: # sunt disperat
                 if adjustment_percent == MIN_adjustment_percent:
                     print(f"[{self.symbol}] sunt disperat!")
                     sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, 
-                        safeback_seconds=1*3600+60, force=True, cancelorders=True, hours=0.23)
+                        safeback_seconds=1*3600+60, force=True, cancelorders=True, hours=h)
                 else:
                     sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, 
-                        safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=0.23)
+                        safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
             else:
-                sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty)
+                sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price,  self.qty, cancelorders=True, hours=12)
 
             if sell_order is None:
                 print(f"[{self.symbol}] Order SELL failed, retryed {failure_count} times. Retrying again ...")
-                api.cancel_recent_orders("SELL", self.symbol, max_failures * WAIT_FOR_ORDER/2)
+                #api.cancel_recent_orders("SELL", self.symbol, max_failures * WAIT_FOR_ORDER/2)
                 time.sleep(WAIT_FOR_ORDER)
-                failure_count += 1  # Incrementăm contorul de eșecuri
-                if failure_count >= max_failures:
+                failure_count += 1
+                if failure_count > max_failures:
                     print(f"[{self.symbol}] Order SELL failed {failure_count} times. Exiting.")
                     #self.mark_sell_filled()
                     #return round(api.get_current_price(self.symbol) * (1 + 0.1), 4)
