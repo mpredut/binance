@@ -242,13 +242,15 @@ def gaussian_full_shifted1(T, last_period, trend="down", steps=None):
 
     w = np.exp(-0.5 * ((t - mu) / sigma) ** 2)
 
-    if trend == "down":
-        w_normalized = w / w.max()
-        w = 1 - w_normalized
-        w = w / w.sum()
-    else:
-        w = w / w.sum()
-
+    # if trend == "down":
+        # w_normalized = w / w.max()
+        # w = 1 - w_normalized
+        # w = w / w.sum()
+    # else:
+        # w = w / w.sum()
+    
+    w = w / w.sum()
+    
     return t, w
 
 

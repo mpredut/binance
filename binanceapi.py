@@ -165,54 +165,111 @@ def get_current_time():
         currenttime = time.time()
         return currenttime
 
-def get_asset_info(order_type, symbol):
-    try:
-        if order_type.upper() == 'SELL':
-            symbol = symbol[:-4] #BTC
-        if order_type.upper() == 'BUY':
-            symbol = symbol[3:] #USDT
-        #print(f"asset_info for {order_type} {symbol}")
-        asset_info = client.get_asset_balance(asset=symbol)
-        #print(f"asset_info: {asset_info}")
-        if asset_info['free'] is None:
-            return 0
-        return float(asset_info['free']) # info ['locked']
-    except Exception as e:
-        return 0
-        print(f"get_asset_info: A aparut o eroare: {e}")
 
-
-def manage_quantity(order_type, symbol, required_qty, cancelorders=False, hours=5):
-    
-    # first weight required_qty because I have limited amout to be traded per day! :-)
-    # TODO: substract also the amout already traded!
-    #data = read_trends()
-    weight = pa.get_weight_for_cash_permission_at_quant_time(symbol, order_type)
-    if weight is None:
-        print(f"Weight is None, set it at default 0.03")
-        weight = 0.03
+def split_symbol(symbol: str):
+    # Split symbol in base and quote/cotare. TAOUSDC -> (TAO, USDC) Work for sym end in USDT/USDC.   
+   if symbol.endswith("USDT"):
+        return symbol[:-4], "USDT"
+    elif symbol.endswith("USDC"):
+        return symbol[:-4], "USDC"
     else:
-        print(f"Weight {weight} is applied to required {required_qty} quantity. result {required_qty * weight}")
-    
-    required_qty = required_qty * weight
+        raise ValueError(f"Simbol necunoscut: {symbol}")
 
-    available_qty = get_asset_info(order_type, symbol)
-    
+
+def get_free_balance(asset: str) -> float:
+    try:
+        #  Returneaza balanta libera pentru un asset din Binance.
+        asset_info = client.get_asset_balance(asset=asset)
+        return float(asset_info.get("free", 0))
+    except Exception as e:
+        print(f"get_free_balance: Eroare pentru {asset}: {e}")
+        return 0.0
+
+
+def get_asset_info(order_type, symbol, price):
+    """
+    Returnează cantitatea disponibilă exprimată mereu în asset-ul de bază (qty).
+    - SELL: cantitatea de bază disponibilă (ex: BTC).
+    - BUY: cât din baza se poate cumpăra cu balanța de cotare (ex: USDC / preț curent).
+    """
+    try:
+        base, quote = split_symbol(symbol)
+
+        if order_type.upper() == "SELL":
+            return get_free_balance(base)
+
+        elif order_type.upper() == "BUY":
+            if not price:
+                print(f"get_asset_info: price is invalid ({price}), returning 0 qty for {symbol}")
+                return 0.0            
+            free_quote = get_free_balance(quote)
+            return free_quote / price
+
+        return 0.0
+
+    except Exception as e:
+        print(f"get_asset_info: Error: {e}, order_type {order_type} and {symbol}")
+        return 0.0
+
+
+def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
+    try:
+        # weight din permisiuni
+        weight = pa.get_weight_for_cash_permission_at_quant_time(symbol, order_type)
+        if weight is None:
+            print("Weight is None, set it at default 0.03")
+            weight = 0.03
+
+        # valoare maximă tranzacționabilă (în USDC) pe baza qty disponibile
+        max_trade_value = available_qty * price * weight
+
+        # qty maxim în baza (BTC, TAO etc.)
+        max_trade_qty = max_trade_value / price
+
+        # alegem cantitatea cea mai mică între ce vreau și cât am voie
+        adjusted_qty = min(required_qty, max_trade_qty)
+
+        print(f"apply_weight_limit → {order_type} {symbol}, "
+              f"Available qty {available_qty:.8f}, "
+              f"Weight {weight}, "
+              f"Max value {max_trade_value:.2f} USDC, "
+              f"Required qty {required_qty:.8f}, "
+              f"Final qty {adjusted_qty:.8f}")
+
+
+        return adjusted_qty
+
+    except Exception as e:
+        print(f"apply_weight_limit: Error: {e}, order_type {order_type} and {symbol}")
+        return required_qty
+
+def manage_quantity(order_type, symbol, required_qty, price_to_be_traded, cancelorders=False, hours=5):
+
+    current_price = get_current_price(symbol)
+                
+    # 1. cat am efectiv disponibil
+    available_qty = get_asset_info(order_type, symbol, current_price)
+
+    # 2. aplicam limita de cash/weight
+    required_qty = apply_weight_limit(symbol, order_type, current_price, required_qty, available_qty)
+
+
     if available_qty < required_qty:
         print(f"Not enough available {symbol}. Available: {available_qty:.8f}, Required: {required_qty:.8f}")
-     
+
         freed_quantity = 0
         if cancelorders:
             freed_quantity = cancel_orders_old_or_outlier(
                 order_type, symbol, required_qty, hours=hours, price_difference_percentage=0.15
-            )
-        
+            ) or 0
+
         available_qty += freed_quantity
 
         if available_qty < required_qty:
             print(f"Still not enough quantity. Adjusting order quantity to {available_qty:.8f}")
-       
-    return min(available_qty,required_qty)
+
+    return min(available_qty, required_qty)
+
     
 
 def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5, price_difference_percentage=0.1):
@@ -494,7 +551,7 @@ def __place_order(order_type, symbol, price, qty, force=False, cancelorders=Fals
         
     try:
         print(f"Order Request {order_type} {symbol} qty {qty}, Price {price}")
-        available_qty = manage_quantity(order_type, symbol, qty, cancelorders=cancelorders, hours=hours)
+        available_qty = manage_quantity(order_type, symbol, qty, price_to_be_traded=price, cancelorders=cancelorders, hours=hours)
 
         if available_qty <= 0:
             print(f"No sufficient quantity available to place the {order_type} order.")

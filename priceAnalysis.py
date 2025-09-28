@@ -365,7 +365,7 @@ def get_weight_for_cash_permission(symbol, T=14*24):
 
 
 # mylock = threading.Lock()  # lock global
-def get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=14, quant_seconds=3600*24, draw=False):
+def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=14, quant_seconds=3600*24, draw=False):
     import cacheManager as cm
     global last_timestamp
     global last_w
@@ -397,7 +397,12 @@ def get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=14, quant_seco
 
     # apelăm gaussian_full_shifted cu T și last_period în aceeași unitate (quanta)
     t, w = u.gaussian_full_shifted(T=T_quanta, last_period=last_period_quanta, trend=direction)
-    
+    if(order_type.upper() == "SELL"):
+        if(direction=="UP"):
+            w = w / 2
+        if(direction=="DOWN"):
+            w = 2 * (1 - w)
+              
     print(f"[{symbol}] primele 5 ponderi: {w[:5]}")
     sum_first_24 = w[:24].sum()
     print(f"Suma tuturor {len(w)} ponderi =", sum_first_24)
