@@ -187,7 +187,7 @@ def manage_quantity(order_type, symbol, required_qty, cancelorders=False, hours=
     # first weight required_qty because I have limited amout to be traded per day! :-)
     # TODO: substract also the amout already traded!
     #data = read_trends()
-    weight = pa.get_weight_for_cash_permission_at_quant_time(symbol)
+    weight = pa.get_weight_for_cash_permission_at_quant_time(symbol, order_type)
     if weight is None:
         print(f"Weight is None, set it at default 0.03")
         weight = 0.03
@@ -394,7 +394,7 @@ def place_SELL_order_at_market(symbol, qty):
         return None
 
 
-def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, max_daily_trades=10, profit_percentage=0.4):
+def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, max_daily_trades=10, profit_percentage=0.01):
     #import binanceapi_trades as apitrades
     import binanceapi_allorders as apiorders
     
@@ -464,7 +464,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
             
             if diff_percent < profit_percentage:
                     print(f"Diferenta procentuala ({diff_percent:.2f}%) este sub pragul necesar"
-                        f"de {profit_percentage}%. Ordinul de {order_type} nu a fost plasat.")
+                        f" de {profit_percentage}%. Ordinul de {order_type} nu a fost plasat.")
                     return False
         return True
 
@@ -514,7 +514,7 @@ def __place_order(order_type, symbol, price, qty, force=False, cancelorders=Fals
             total_usdt_needed = qty * price * (1 + fee_percentage)
 
             if available_qty < total_usdt_needed:
-                print(f"Not enough {symbol} available. You need {total_usdt_needed:.8f}, but you only have {available_qty:.8f} {symbol}.")
+                print(f"Not enough {symbol} available for {order_type}. You need {total_usdt_needed:.8f}, but you only have {available_qty:.8f} {symbol}.")
                 # Ajusteaza cantitatea pe care o poti cumpara cu USDT disponibili
                 qty = available_qty / (price * (1 + fee_percentage))
                 print(f"Adjusting {order_type} order quantity to {qty:.8f} based on available {symbol}.")
@@ -562,7 +562,7 @@ def place_safe_order(order_type, symbol, price, qty, safeback_seconds=48*3600+60
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)
     
-    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=safeback_seconds, max_daily_trades=15, profit_percentage = 0.25) :
+    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=safeback_seconds, max_daily_trades=15, profit_percentage = 0.15) :
         return None
       
     return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders, hours=hours, fee_percentage=fee_percentage)    
