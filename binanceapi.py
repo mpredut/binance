@@ -268,7 +268,7 @@ def manage_quantity(order_type, symbol, required_qty, price_to_be_traded, cancel
         if available_qty < required_qty:
             print(f"Still not enough quantity. Adjusting order quantity to {available_qty:.8f}")
 
-    return min(available_qty, required_qty)
+    return required_qty, available_qty
 
     
 
@@ -551,7 +551,7 @@ def __place_order(order_type, symbol, price, qty, force=False, cancelorders=Fals
         
     try:
         print(f"Order Request {order_type} {symbol} qty {qty}, Price {price}")
-        available_qty = manage_quantity(order_type, symbol, qty, price_to_be_traded=price, cancelorders=cancelorders, hours=hours)
+        qty, available_qty = manage_quantity(order_type, symbol, qty, price_to_be_traded=price, cancelorders=cancelorders, hours=hours)
 
         if available_qty <= 0:
             print(f"No sufficient quantity available to place the {order_type} order.")
@@ -570,7 +570,7 @@ def __place_order(order_type, symbol, price, qty, force=False, cancelorders=Fals
             # in cazul unei comenzi de BUY, trebuie sa calculezi cantitatea necesara de USDT pentru achizitionare
             total_usdt_needed = qty * price * (1 + fee_percentage)
 
-            if available_qty < total_usdt_needed:
+            if available_qty * price < total_usdt_needed:
                 print(f"Not enough {symbol} available for {order_type}. You need {total_usdt_needed:.8f}, but you only have {available_qty:.8f} {symbol}.")
                 # Ajusteaza cantitatea pe care o poti cumpara cu USDT disponibili
                 qty = available_qty / (price * (1 + fee_percentage))

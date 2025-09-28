@@ -208,7 +208,7 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
     trend_block_indices_test=[]
     
     for start in range(len(prices) - window, -1, -step):
-        print(f"[DEBUG] start{start}")
+        print(f"[DEBUG] start {start}")
         trend_block +=1
         end = start + window
         x_block = timestamps[start:end] - timestamps[start]
@@ -379,7 +379,7 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=14
         print(f"Simbolul {symbol} nu există în trendurile citite.")
         return None
 
-    print(f"Data from cache {data}")
+    #print(f"Data from cache {data}")
     trend = data[symbol][0]
     
     timestamp = trend['timestamp']
