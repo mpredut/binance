@@ -170,9 +170,9 @@ def split_symbol(symbol: str):
     # Split symbol in base and quote/cotare. TAOUSDC -> (TAO, USDC) Work for sym end in USDT/USDC.   
    if symbol.endswith("USDT"):
         return symbol[:-4], "USDT"
-    elif symbol.endswith("USDC"):
+   elif symbol.endswith("USDC"):
         return symbol[:-4], "USDC"
-    else:
+   else:
         raise ValueError(f"Simbol necunoscut: {symbol}")
 
 
