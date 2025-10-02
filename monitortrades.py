@@ -819,7 +819,7 @@ def main():
     #monitor_trades(order_type, sym.symbol, filename, interval=3600, limit=1000, years_to_keep=01)
 
     # Pornim monitorizarea periodica a tranzactiilor
-    start_monitoring(filename, interval=interval, limit=1000, years_to_keep=0.09)
+    #start_monitoring(filename, interval=interval, limit=1000, years_to_keep=0.09)
     time.sleep(5)
 
     #for i in range(0, 5):
