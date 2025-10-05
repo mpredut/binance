@@ -803,5 +803,5 @@ def check_order_filled_by_time(order_type, symbol, time_back_in_seconds, pret_mi
         tranzactia_recenta = max(tranzactii_recente, key=lambda trade: trade['timestamp'])
         return float(tranzactia_recenta['price'])
 
-    print(f"[DEBUG] Nicio tranzactie recenta pentru simbolul {symbol}.")
+    print(f"[DEBUG] Nicio tranzactie recenta pentru simbolul {symbol}. in ultimele {time_back_in_seconds} secunde ")
     return None

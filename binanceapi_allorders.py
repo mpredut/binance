@@ -78,15 +78,15 @@ def get_filled_orders_bed(order_type, symbol, backdays=3, limit=1000):
         return []
 
 
-def get_filled_orders(order_type, symbol, backdays=3, limit=1000):
+def get_filled_orders(order_type, symbol, startTime, limit=1000):
     try:
         sym.validate_symbols(symbol)
         sym.validate_ordertype(order_type)
 
         end_time = int(time.time() * 1000)  # ms
-        start_time = end_time - backdays * 24 * 60 * 60 * 1000
+        #start_time = end_time - backdays * 24 * 60 * 60 * 1000
 
-        trades = client.get_my_trades(symbol=symbol, limit=limit) or []
+        trades = client.get_my_trades(symbol=symbol, startTime=startTime, limit=limit) or []
         filtered_trades = [
             {
                 'orderId': trade.get('orderId'),
@@ -116,9 +116,9 @@ def get_filled_orders(order_type, symbol, backdays=3, limit=1000):
 
 def get_recent_filled_orders(order_type, symbol, max_age_seconds):
 
-    backdays = math.ceil(max_age_seconds / (24 * 60 * 60))  # Aproximăm numărul de zile
+    #backdays = math.ceil(max_age_seconds / (24 * 60 * 60))  # Aproximăm numărul de zile
 
-    all_filled_orders = get_filled_orders(order_type, symbol, backdays)    
+    all_filled_orders = get_filled_orders(order_type, symbol, max_age_seconds)    
     recent_filled_orders = []
     current_time = time.time()
     if(len(all_filled_orders) < 1) :

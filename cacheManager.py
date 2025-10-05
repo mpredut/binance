@@ -17,9 +17,9 @@ import binanceapi as api
 
 
 # disable logs by redefine with dummy
-def print(*args, **kwargs):
-    pass
-log.print = lambda *args, **kwargs: None
+#def print(*args, **kwargs):
+ #   pass
+#log.print = lambda *args, **kwargs: None
 
 #log.disable_print()
 
@@ -279,11 +279,11 @@ class CacheOrderManager(CacheManagerInterface):
         import binanceapi_allorders as apiorders
         
         current_time = int(time.time() * 1000)
-        backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
+        #backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
                
         #new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime, limit=1000)
         #new_trades = apitrades.get_my_trades(order_type = None, symbol=symbol, backdays=backdays, limit=1000)
-        new_orders = apiorders.get_filled_orders(order_type = None, symbol=symbol, backdays=backdays)
+        new_orders = apiorders.get_filled_orders(order_type = None, symbol=symbol, startTime=startTime)
                
         existing_ids = set(str(t["orderId"]) for t in self.cache if "orderId" in t)
 
