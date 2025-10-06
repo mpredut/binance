@@ -232,7 +232,7 @@ def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
         print(f"apply_weight_limit → {order_type} {symbol}, "
               f"Available qty {available_qty:.8f}, "
               f"Weight {weight}, "
-              f"Max value {max_trade_value:.2f} USDC, "
+              f"Max trade permited {max_trade_value:.2f} USDC, "
               f"Required qty {required_qty:.8f}, "
               f"Final qty {adjusted_qty:.8f}")
 

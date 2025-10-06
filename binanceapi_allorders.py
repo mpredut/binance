@@ -96,7 +96,7 @@ def get_filled_orders(order_type, symbol, startTime, limit=1000):
                 'side': 'BUY' if trade.get('isBuyer') else 'SELL'
             }
             for trade in trades
-            if start_time <= trade.get('time', 0) <= end_time
+            if startTime <= trade.get('time', 0) <= end_time
             and (order_type is None or 
                  (order_type.upper() == "BUY" and trade.get('isBuyer')) or
                  (order_type.upper() == "SELL" and not trade.get('isBuyer')))
