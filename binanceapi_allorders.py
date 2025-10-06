@@ -197,3 +197,27 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
 
     #print(f" filtered_orders {filtered_orders} , current_time_ms {current_time_ms} timestamp  max_age+ms {max_age_ms}")
     return filtered_orders
+
+# (default: ultimele 24h).
+def get_total_traded_stats(symbol, period_seconds=86400):
+    
+    trades = get_trade_orders(order_type=None, symbol=symbol, max_age_seconds=period_seconds)
+
+    stats = {
+        'BUY': {'total_quantity': 0, 'total_value': 0, 'trade_count': 0},
+        'SELL': {'total_quantity': 0, 'total_value': 0, 'trade_count': 0}
+    }
+
+    for t in trades:
+        side = t['side'].upper()
+        if side in stats:
+            stats[side]['total_quantity'] += t['quantity']
+            stats[side]['total_value'] += t['price'] * t['quantity']
+            stats[side]['trade_count'] += 1
+
+    # Rotunjim valorile
+    for side in stats:
+        stats[side]['total_quantity'] = round(stats[side]['total_quantity'], 8)
+        stats[side]['total_value'] = round(stats[side]['total_value'], 8)
+
+    return stats

@@ -213,6 +213,7 @@ def get_asset_info(order_type, symbol, price):
 
 
 def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
+    import binanceapi_allorders as apiorders
     try:
         # weight din permisiuni
         weight = pa.get_weight_for_cash_permission_at_quant_time(symbol, order_type)
@@ -220,21 +221,33 @@ def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
             print("Weight is None, set it at default 0.03")
             weight = 0.03
 
-        # valoare maximă tranzacționabilă (în USDC) pe baza qty disponibile
-        max_trade_value = available_qty * price * weight
+        # 2. Obține cât s-a tranzacționat deja în ultimele 24h (în quote)
+        stats = apiorders.get_total_traded_stats(symbol)
+        traded_value = stats.get(order_type.upper(), {}).get('total_value', 0)
 
-        # qty maxim în baza (BTC, TAO etc.)
-        max_trade_qty = max_trade_value / price
+        # 3. Calculează valoarea totală tranzacționabilă (tranzacționată + disponibilă)
+        total_value_reference = traded_value + available_qty * price
+        # 4. Calculează plafonul maxim permis (în quote) pe baza weight
+        max_trade_value = total_value_reference * weight
+        #max_trade_value = available_qty * price * weight
+
+        # 5. Cât mai pot tranzacționa în quote asset (USDC, USDT etc.)
+        remaining_trade_value = max(0, max_trade_value - traded_value)
+
+        # qty maxim în în cantitate/baza (BTC, TAO etc.)
+        remaining_trade_qty = remaining_trade_value / price if price else 0
 
         # alegem cantitatea cea mai mică între ce vreau și cât am voie
-        adjusted_qty = min(required_qty, max_trade_qty)
+        adjusted_qty = min(required_qty, remaining_trade_qty)
 
         print(f"apply_weight_limit → {order_type} {symbol}, "
               f"Available qty {available_qty:.8f}, "
               f"Weight {weight}, "
-              f"Max trade permited {max_trade_value:.2f} USDC, "
-              f"Required qty {required_qty:.8f}, "
-              f"Final qty {adjusted_qty:.8f}")
+              f"Traded in 24h {traded_value:.2f} USDC, "
+              f"Max trade allowed (24h): {max_trade_value:.2f} USDC, "
+              f"Remaining: {remaining_trade_value:.2f} USDC, "
+              f"Required qty: {required_qty:.8f}, "
+              f"Final qty: {adjusted_qty:.8f}")
 
 
         return adjusted_qty
@@ -483,7 +496,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
         #oposite_trades = apitrades.get_trade_orders(opposite_order_type, symbol, max_age_seconds=time_back_in_seconds) ## curent date
         oposite_trades = apiorders.get_trade_orders(opposite_order_type, symbol, max_age_seconds=time_back_in_seconds) ## curent date
         if len(all_trades)/backdays > max_daily_trades:
-            print(f"Am {len(oposite_trades)} trades. Limita zilnica este de {max_daily_trades} pentru'{order_type}'.")
+            print(f"Am {len(oposite_trades)} trades. Limita zilnica este de {max_daily_trades} pentru '{order_type}'.")
             return False
         for trade in all_trades:
             trade_time = trade['timestamp'] / 1000  # 'time' este in milisecunde
@@ -535,8 +548,7 @@ def place_order(order_type, symbol, price, qty, force=False, cancelorders=False,
     
     if order is None:
         if force and order_type == 'BUY':
-            order = place_SELL_order_at_market(forcesellsymbol[symbol], api.quantities[symbol]) 
-        else:
+            order = place_SELL_order_at_market(symbol.forcesellsymbol[symbol], symbol.quantities[symbol]) 
             time.sleep(0.2)
             order = __place_order(order_type, symbol, price, qty, force, cancelorders, hours, fee_percentage)
             
