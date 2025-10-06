@@ -20,7 +20,7 @@ import binanceapi as api
 
 # Intervalul de timp între încercările de anulare și recreere a ordinului (în secunde)
 WAIT_FOR_ORDER = 32 #seconds
-MIN_adjustment_percent = 0.001
+MIN_adjustment_percent = 0.01
 
 class TradingBot:
     def __init__(self, symbol, qty, DEFAULT_ADJUSTMENT_PERCENT):
@@ -58,7 +58,7 @@ class TradingBot:
 
         while True:
             if self.sell_filled:
-                adjustment_percent = max(MIN_adjustment_percent, adjustment_percent - adjustment_percent * 0.01)
+                adjustment_percent = max(MIN_adjustment_percent, adjustment_percent - adjustment_percent * 0.005)
             
             target_buy_price = round(current_price * (1 - adjustment_percent), 4)
             print(f"[{self.symbol}] Order BUY initiated at {target_buy_price:.2f} procent {adjustment_percent}%")
@@ -72,8 +72,8 @@ class TradingBot:
             if self.sell_filled: # sunt disperat
                 if adjustment_percent == MIN_adjustment_percent:
                     print(f"[{self.symbol}] sunt disperat!")
-                    buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, 
-                        safeback_seconds=1*3600+60, force=True, cancelorders=True, hours=h)
+                    #buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, 
+                    #    safeback_seconds=1*3600+60, force=True, cancelorders=True, hours=h)
                 else:
                     buy_order = api.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, 
                         safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
@@ -113,7 +113,7 @@ class TradingBot:
                 return self.mark_buy_filled(filled_buy_price)
                 
             current_price = api.get_current_price(self.symbol)
-            if current_price > filled_sell_price and not are_close(current_price, filled_sell_price, 0.1):
+            if current_price > filled_sell_price and not u.are_close(current_price, filled_sell_price, 0.1):
                 print(f"[{self.symbol}] Bed day :-(. Trying BUY at current price - x2 {current_price:.2f}")
                 adjustment_percent = 1.7 * self.DEFAULT_ADJUSTMENT_PERCENT
             #else:
@@ -154,8 +154,8 @@ class TradingBot:
             if self.buy_filled: # sunt disperat
                 if adjustment_percent == MIN_adjustment_percent:
                     print(f"[{self.symbol}] sunt disperat!")
-                    sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, 
-                        safeback_seconds=1*3600+60, force=True, cancelorders=True, hours=h)
+                    #sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, 
+                    #    safeback_seconds=1*3600+60, force=True, cancelorders=True, hours=h)
                 else:
                     sell_order = api.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, 
                         safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
@@ -195,7 +195,7 @@ class TradingBot:
                 return self.mark_sell_filled(filled_sell_price)
 
             current_price = api.get_current_price(self.symbol)
-            if current_price < filled_buy_price and not are_close(current_price, filled_buy_price, 0.1):
+            if current_price < filled_buy_price and not u.are_close(current_price, filled_buy_price, 0.1):
                 print(f"[{self.symbol}] Bed day :-(. Trying SELL at current price + x2 {current_price:.2f}")
                 adjustment_percent = 1.7 * self.DEFAULT_ADJUSTMENT_PERCENT
             else:
@@ -267,7 +267,7 @@ class TradingBot:
 DEFAULT_ADJUSTMENT_PERCENT = round(u.calculate_difference_percent(60000, 60000 - 380) / 100, 4)
 print(f"[INFO] DEFAULT_ADJUSTMENT_PERCENT = {DEFAULT_ADJUSTMENT_PERCENT}")
 
-bot = TradingBot(sym.taosymbol, 108, DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
+bot = TradingBot(sym.taosymbol, 100, DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
 #bot = TradingBot(sym.taosymbol, api.quantities[sym.taosymbol], DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
 bot.run()
 

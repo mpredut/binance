@@ -119,7 +119,8 @@ def monitor_filled_buy_orders_old():
         return
  
     maxage_trade_s =  3 * 24 * 3600  # Timpul maxim in care ordinele executate sunt considerate recente (2 ore)
-    filled_buy_orders = apiorders.get_recent_filled_orders("BUY", sym.btcsymbol, maxage_trade_s)
+    starttime = int(time.time()) -  maxage_trade_s
+    filled_buy_orders = apiorders.get_recent_filled_orders("BUY", sym.btcsymbol, starttime)
 
     for order in filled_buy_orders:
         current_time = time.time()

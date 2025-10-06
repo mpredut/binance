@@ -77,7 +77,7 @@ def get_filled_orders_bed(order_type, symbol, backdays=3, limit=1000):
         print(f"Unexpected error in get_filled_orders: {e}")
         return []
 
-
+from collections import defaultdict
 def get_filled_orders(order_type, symbol, startTime, limit=1000):
     try:
         sym.validate_symbols(symbol)
@@ -87,7 +87,7 @@ def get_filled_orders(order_type, symbol, startTime, limit=1000):
         #start_time = end_time - backdays * 24 * 60 * 60 * 1000
 
         trades = client.get_my_trades(symbol=symbol, startTime=startTime, limit=limit) or []
-        filtered_trades = [
+        filtered = [
             {
                 'orderId': trade.get('orderId'),
                 'price': float(trade.get('price', 0)),
@@ -103,10 +103,37 @@ def get_filled_orders(order_type, symbol, startTime, limit=1000):
         ]
 
         #print(f"Filtered filled trades ({'ALL' if order_type is None else order_type}): {len(filtered_trades)} from {len(trades)} trades")
-        for t in filtered_trades[:5]:
+        for t in filtered[:5]:
             print(t)
 
-        return filtered_trades
+        if not filtered:
+            return []
+        
+        grouped = defaultdict(lambda: {'price_qty': 0, 'quantity': 0, 'timestamp': 0, 'side': ''})
+
+        for t in filtered:
+            key = t['orderId']
+            grouped[key]['price_qty'] += t['price'] * t['quantity']
+            grouped[key]['quantity'] += t['quantity']
+            grouped[key]['timestamp'] = max(grouped[key]['timestamp'], t['timestamp'])
+            grouped[key]['side'] = t['side']
+
+        result = [
+            {
+                'orderId': oid,
+                'price': round(data['price_qty'] / data['quantity'], 8) if data['quantity'] else 0,
+                'quantity': round(data['quantity'], 8),
+                'timestamp': data['timestamp'],
+                'side': data['side']
+            }
+            for oid, data in grouped.items()
+        ]
+
+        for r in result[:5]:
+            print(r)
+
+        return result
+
 
     except Exception as e:
         print(f"Unexpected error in get_filled_orders: {e}")
