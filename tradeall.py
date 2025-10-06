@@ -596,7 +596,7 @@ class TrendState:
         trend_duration = self.get_started_trend_time() #self.get_confirmed_trend_duration()
         if trend_duration == 0:
             return False
-        rate = self.confirm_count * TIME_SLEEP_GET_PRICE / trend_duration
+        rate = self.confirm_count * 2.5 * TIME_SLEEP_GET_PRICE / trend_duration
         print(f"uniform rate is {rate} <> 0.1")
         #10 confirmari per 1.5 minute
         return rate > 0.1
