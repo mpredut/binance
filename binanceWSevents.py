@@ -137,9 +137,10 @@ def run_ws(listen_key, external_handler=None):
 # ------------------------------
 def keepalive_loop(listen_key):
     while True:
-        time.sleep(30 * 60)  # la fiecare 30 minute
+        time.sleep(1 * 60)  # la fiecare 30 minute
         try:
-            api.client.keepalive_listen_key(listen_key)
+            #api.client.keepalive_listen_key(listen_key)
+            listen_key = api.client.stream_get_listen_key()
             print("♻️ ListenKey reînnoit")
             # pt debug
             print(f"Orders: {len(orders_cache)}, Trades: {len(trades_cache)}, Balances: {len(balances_cache)}")

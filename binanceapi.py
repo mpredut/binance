@@ -549,9 +549,9 @@ def place_order(order_type, symbol, price, qty, force=False, cancelorders=False,
     if order is None:
         if force and order_type == 'BUY':
             print("ULTRA DUBIOS!!!!")
-            order = place_SELL_order_at_market(symbol.forcesellsymbol[symbol], symbol.quantities[symbol]) 
-            time.sleep(0.2)
-            order = __place_order(order_type, symbol, price, qty, force, cancelorders, hours, fee_percentage)
+            #order = place_SELL_order_at_market(symbol.forcesellsymbol[symbol], symbol.quantities[symbol]) 
+            #time.sleep(0.2)
+            #order = __place_order(order_type, symbol, price, qty, force, cancelorders, hours, fee_percentage)
             
     return order
          

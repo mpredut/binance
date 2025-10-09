@@ -12,6 +12,7 @@ import log
 import utils as u
 import symbols as sym
 import binanceapi as api
+import binanceWSevents as ws
 
 #from log import PRINT_CONTEXT
 
@@ -454,7 +455,15 @@ def get_cache_manager(name, symbols=None):
 # ###### 
 # ###### FORCE CACHE TO BE UPDATEING ####### 
 # ###### 
-        
+
+def handler(event_type, data):
+    print("cacheManager handler call from binance ....")
+    if event_type == "executionReport":
+        get_cache_manager("Order").update_cache()
+
+print("⚙️ cacheManager importat!")
+ws.startWSevents(handler)
+               
 if __name__ == "__main__":
     threads = []
 
