@@ -599,6 +599,7 @@ class StateTracker:
                 } for index, row in df.iterrows()
             }
             print(f"sell_recommendation updated from file!")
+            self.display_sell_recommendation()
                 
             # Update the states based on the current sell_recommendation
             self.update_states_from_sell_recommendation()
@@ -612,7 +613,7 @@ class StateTracker:
         # Reprogram the update for every 2 minutes
         #Timer(120, self.update_sell_recommendation, [file_path]).start()
         
-        t = Timer(120, self.update_sell_recommendation, [file_path])
+        t = Timer(40, self.update_sell_recommendation, [file_path])
         t.daemon = True  # Asigură că acest thread nu blochează închiderea procesului
         t.start()
 

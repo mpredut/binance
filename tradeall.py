@@ -324,8 +324,8 @@ class PriceWindow:
             print(f'min price ={min_price}, max_price = {max_price}, newest_price={newest_price}, min_index={min_index}, max_index={max_index}')
                
             return -price_diff_newest if price_diff_max > price_diff_min else price_diff_newest, 0
-            return self._analyze_price_movement(min_price, min_index, max_price, max_index, 
-                newest_price, newest_index, price_diff_newest)
+            #return self._analyze_price_movement(min_price, min_index, max_price, max_index, 
+            #    newest_price, newest_index, price_diff_newest)
         
         return 0, 0
     
@@ -453,16 +453,16 @@ class PriceWindow:
         
     
 
-TIME_SLEEP_GET_PRICE = 0.4  # seconds to sleep for price collection
+TIME_SLEEP_GET_PRICE = 0.8  # seconds to sleep for price collection
 EXP_TIME_BUY_ORDER = (2.6 * 60) * 60 # dupa 1.6 ore
 EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
 TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
 # am voie 6 ordere per perioada de expirare care este 2.6 ore. deaceea am impartit la 6
 TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + EXP_TIME_SELL_ORDER/ 6 + 4*79  # seconds to sleep for order placement
 WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 3.7 * 60  # minutes
-window_size = WINDOWS_SIZE_MIN / TIME_SLEEP_GET_PRICE
+window_size = WINDOWS_SIZE_MIN / TIME_SLEEP_GET_PRICE / 2
 
-window_size_big = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE
+window_size_big = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE / 3  # in realitate 2.5 ore
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
 def track_and_place_order(action, symbol, count, proposed_price, current_price, order_ids=None):
@@ -573,14 +573,20 @@ class TrendState:
             return 0
         return time.time() - self.start_time
         
+    
     def is_trend_fresh(self, fresh_trend_time=None):
         if fresh_trend_time is None:
             fresh_trend_time = self.fresh_trend_time
         assert self.start_time is not None, "Trend must be started before checking freshness"
-        if time.time() < self.start_time + fresh_trend_time:
+
+        elapsed_time = time.time() - self.start_time
+        if elapsed_time < fresh_trend_time:
             return True
-        print(f"No fresh trend! : {fresh_trend_time} vs. {self.start_time}")
+
+        print(f"No fresh trend! Current trend start {int(elapsed_time)} sec back > {int(fresh_trend_time)} sec ")
         return False
+
+
 
     def is_trend_a_minim_validated(self) :
         return self.last_confirmation_time - self.start_time > 30 and self.confirm_count > 3
@@ -870,6 +876,7 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
     price_window_big.process_price(current_price)
 
     slope, pos = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
+    print(f"small slope {slope}")
     gradient, gradient_coff = price_window.get_trend()
 
     if(slope * gradient < 0):
@@ -892,13 +899,13 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
     #
     # BIG ONE!!!
     #
-    slope_big, _ = price_window_big.check_price_change(PRICE_CHANGE_THRESHOLD_BIG_EUR)
+    slope_big, price_diff = price_window_big.check_price_change(PRICE_CHANGE_THRESHOLD_BIG_EUR)
     
     #if symbol in sym.symbols:
     logic("BIG", True, symbol, gradient, slope_big, trend_state_big)
     
     
-    update_csv_file(filename, symbol, slope_big, count, 0, 0, pos, gradient)
+    update_csv_file(filename, symbol, slope, count, 0, 0, pos, gradient)
         
     for moneda in web.monede:
         if moneda["nume"] == symbol:
@@ -926,8 +933,8 @@ for symbol in sym.symbols:
     #symbol = moneda["nume"]
     price_windows[symbol] = PriceWindow(symbol, window_size)
     price_windows_big[symbol] = PriceWindow(symbol, window_size_big)
-    trend_states[symbol] = TrendState(max_duration_seconds= 2.5 * 60 * 60, expiration_trend_time=10 * 60, fresh_trend_time = 1.7 * 60)  # Expira In 10 minute
-    trend_states_big[symbol] = TrendState(max_duration_seconds= 3 * 60 * 60, expiration_trend_time=10 * 60, fresh_trend_time = 1.7 * 60)  # Expira In 10 minute
+    trend_states[symbol] = TrendState(max_duration_seconds= 2.5 * 60 * 60, expiration_trend_time=1.7 * 60, fresh_trend_time = 2.7 * 60)  # Expira In 10 minute
+    trend_states_big[symbol] = TrendState(max_duration_seconds= 3 * 60 * 60, expiration_trend_time=1.7 * 60, fresh_trend_time = 2.7 * 60)  # Expira In 10 minute
 
 TIME_SLEEP_BETWEEN_SYMBOLS=0#TIME_SLEEP_GET_PRICE
 # Second loop: Call handle_symbol for each symbol indefinitely

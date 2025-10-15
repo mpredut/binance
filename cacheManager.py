@@ -18,9 +18,9 @@ import binanceWSevents as ws
 
 
 # disable logs by redefine with dummy
-#def print(*args, **kwargs):
- #   pass
-#log.print = lambda *args, **kwargs: None
+def print(*args, **kwargs):
+   pass
+log.print = lambda *args, **kwargs: None
 
 #log.disable_print()
 
