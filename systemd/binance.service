@@ -1,0 +1,16 @@
+[Unit]
+Description=Binance Python MultiScript Runner
+After=pia.service
+Requires=pia.service
+
+[Service]
+Type=simple
+User=predut
+WorkingDirectory=/home/predut/binance
+ExecStart=/bin/bash /home/predut/binance/binance_start.sh
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+
