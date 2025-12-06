@@ -9,7 +9,7 @@ User=predut
 WorkingDirectory=/home/predut/binance
 ExecStart=/bin/bash /home/predut/binance/binance_start.sh
 Restart=always
-RestartSec=10
+RestartSec=901
 
 [Install]
 WantedBy=multi-user.target
