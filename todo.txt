@@ -1,0 +1,25 @@
+sudo nano /etc/rsyslog.conf
+$SystemLogRateLimitInterval 5
+$SystemLogRateLimitBurst 500
+
+sudo systemctl restart rsyslog
+
+sudo nano /etc/systemd/journald.conf
+SystemMaxUse=200M
+SystemKeepFree=500M
+RuntimeMaxUse=100M
+
+sudo systemctl restart systemd-journald
+
+
+import logging
+from logging.handlers import RotatingFileHandler
+
+handler = RotatingFileHandler(
+    "/var/log/myapp.log",
+    maxBytes=10*1024*1024,
+    backupCount=5
+)
+
+logging.basicConfig(level=logging.WARNING, handlers=[handler])
+
