@@ -21,7 +21,7 @@ piactl get portforward
 
 # ======= MENȚINE SERVICE-UL ACTIV =========
 while true; do
-    sleep 60*3 # la 3 minute
+    sleep $((60*3)) # la 3 minute
     echo " Checking PIA connection ..."
 
     state=$(piactl get connectionstate)
