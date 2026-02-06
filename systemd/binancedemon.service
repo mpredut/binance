@@ -1,0 +1,15 @@
+[Unit]
+Description=PIA VPN and Python Demon Script
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStartPre=/usr/local/bin/piactl connect
+ExecStart=/bin/bash -c 'source /home/predut/binance/myenv/bin/activate && python3 /home/predut/binance/demon.py'
+Restart=always
+User=predut
+WorkingDirectory=/home/predut/binance
+
+[Install]
+WantedBy=multi-user.target
+
