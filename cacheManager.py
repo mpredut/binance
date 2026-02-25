@@ -73,7 +73,13 @@ class CacheManagerInterface(ABC):
             for symbol, trades in self.cache.items():
                 for trade in trades:
                     # Caută "time" sau "timestamp", dacă nu există -> 0
-                    time_ = trade.get("time") or trade.get("timestamp") or 0
+                    #time_ = trade.get("time") or trade.get("timestamp") or 0
+                    if isinstance(trade, dict):
+                        time_ = trade.get("time") or trade.get("timestamp") or 0
+                    elif isinstance(trade, list) and len(trade) > 0:
+                        time_ = trade[0]  # pentru format [timestamp_ms, price]
+                    else:
+                        time_ = 0
                     if time_ > last_times_per_sym[symbol]:
                         last_times_per_sym[symbol] = time_
             # Offset de siguranță (60 sec)
@@ -166,7 +172,11 @@ class CacheManagerInterface(ABC):
         count_new_items = len(new_items)
         print(f"[{self.cls_name}][Info] {symbol}:  new_items {new_items}") 
        
-        new_items = self.filter_new_items(self.cache[symbol], new_items)
+        #new_items = self.filter_new_items(self.cache[symbol], new_items)
+        with self.lock:
+            cache_copy = list(self.cache.get(symbol, []))
+        new_items = self.filter_new_items(cache_copy, new_items)
+
         print(f"[{self.cls_name}][Info] {symbol}:  Din {count_new_items} pastrez doar {len(new_items)}") 
         if not new_items:
             return
@@ -196,8 +206,11 @@ class CacheManagerInterface(ABC):
     def periodic_sync(self, sync_ts=None, save_state=True):
         if sync_ts is not None:
             self.sync_ts = sync_ts
-        self.save_state = save_state
-        
+        self.save_state = save_state  # actualizează save_state indiferent
+
+        if self.thread is not None and self.thread.is_alive():
+            return self.thread  # thread deja pornit, returnează-l
+
         def run():
             while True:
                 print(f"\n[{self.cls_name}] Sync started at {time.strftime('%Y-%m-%d %H:%M:%S')} for {self.symbols}")
@@ -206,12 +219,10 @@ class CacheManagerInterface(ABC):
                 if self.save_state:
                     self.save_state_to_file()
                 print(f"[{self.cls_name}] Sync completed for {self.symbols}")
-            
                 time.sleep(self.sync_ts)
 
-        if self.thread is None:
-            self.thread = threading.Thread(target=run, daemon=False)
-            self.thread.start()
+        self.thread = threading.Thread(target=run, daemon=False)
+        self.thread.start()
         return self.thread
     
     def enable_save_state_to_file(self):
@@ -245,6 +256,7 @@ class CacheTradeManager(CacheManagerInterface):
         #new_trades = apitrades.get_my_trades(order_type=None, symbol=symbol, backdays=backdays, limit=1000)
  
         existing_ids = set(str(t["id"]) for t in self.cache.get(symbol, []) if "id" in t)
+        
         print(f"[{self.cls_name}][info] Număr de trades noi: {len(new_trades)}")     
         unique_new_trades = []
         for t in new_trades:
@@ -268,10 +280,11 @@ class CacheOrderManager(CacheManagerInterface):
     def _is_valid_trade(self, trade):
        required_keys = ['orderId', 'price', 'quantity', 'timestamp', 'side']    
        return all(k in trade for k in required_keys)
- 
+     
     def get_all_symbols_from_cache(self):
-        return list(set(t.get("symbol") for t in self.cache if "symbol" in t))
-
+        with self.lock:
+            return list(self.cache.keys())
+            
     def rebuild_fetchtime_times(self):
         return None
         
@@ -286,7 +299,7 @@ class CacheOrderManager(CacheManagerInterface):
         #new_trades = apitrades.get_my_trades(order_type = None, symbol=symbol, backdays=backdays, limit=1000)
         new_orders = apiorders.get_filled_orders(order_type = None, symbol=symbol, startTime=startTime)
                
-        existing_ids = set(str(t["orderId"]) for t in self.cache if "orderId" in t)
+        existing_ids = set(str(t["orderId"]) for t in self.cache.get(symbol, []) if "orderId" in t)
 
         print(f"[{self.cls_name}][info] Număr de trades noi: {len(new_orders)}")
         unique_new_orders = []
@@ -310,10 +323,20 @@ class CachePriceManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api)
 
+    # def rebuild_fetchtime_times(self):
+        # if not self.cache:
+            # return {}
+        # last_times = {symbol: max(entry[0] for entry in self.cache if entry) for symbol in self.symbols}
+        # return last_times
+
     def rebuild_fetchtime_times(self):
         if not self.cache:
             return {}
-        last_times = {symbol: max(entry[0] for entry in self.cache if entry) for symbol in self.symbols}
+        last_times = {}
+        for symbol in self.symbols:
+            entries = self.cache.get(symbol, [])
+            if entries:
+                last_times[symbol] = max(entry[0] for entry in entries)
         return last_times
 
     def get_remote_items(self, symbol, startTime):
@@ -340,24 +363,39 @@ class CachePriceTrendManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename="price_trend_cache.json", api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=False)
 
+    #def get_all_symbols_from_cache(self):
+    #    return [t.get("symbol") for t in self.cache if "symbol" in t]
+
     def get_all_symbols_from_cache(self):
-        return [t.get("symbol") for t in self.cache if "symbol" in t]
+        with self.lock:
+            return list(self.cache.keys())
+        
+    # def rebuild_fetchtime_times(self):
+        # """
+        # Deducem timpul ultimei înregistrări per simbol din self.cache
+        # """
+        # last_times = defaultdict(int)
+        # for price_trend in self.cache:
+            # symbol = price_trend.get("symbol")
+            # ts = price_trend.get("timestamp", 0) * 1000
+            # if ts > last_times[symbol]:
+                # last_times[symbol] = ts
 
+        # # offset de siguranță (-60 secunde)
+        # for symbol in last_times:
+            # last_times[symbol] = max(0, last_times[symbol] - 60_000)
+
+        # return dict(last_times)
+        
     def rebuild_fetchtime_times(self):
-        """
-        Deducem timpul ultimei înregistrări per simbol din self.cache
-        """
         last_times = defaultdict(int)
-        for price_trend in self.cache:
-            symbol = price_trend.get("symbol")
-            ts = price_trend.get("timestamp", 0) * 1000
-            if ts > last_times[symbol]:
-                last_times[symbol] = ts
-
-        # offset de siguranță (-60 secunde)
+        for symbol, items in self.cache.items():
+            for item in items:
+                ts = item.get("timestamp", 0) * 1000
+                if ts > last_times[symbol]:
+                    last_times[symbol] = ts
         for symbol in last_times:
             last_times[symbol] = max(0, last_times[symbol] - 60_000)
-
         return dict(last_times)
         
     def get_remote_items(self, symbol, startTime):
