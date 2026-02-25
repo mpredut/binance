@@ -1,7 +1,6 @@
 import json
 import threading
 import time
-from websocket import WebSocketApp
 
 #my imports
 import log
@@ -21,15 +20,11 @@ trades_cache = []
 # FUNCȚII DE MANIPULARE MESAJ
 # ------------------------------
 def handle_execution_report(data):
-    """
-    Gestionează evenimentele de tip 'executionReport' (ordine și execuții).
-    """
     symbol = data["s"]
     order_id = data["i"]
     status = data["X"]
     event_type = data["x"]
 
-    # Actualizăm ordinele în cache
     orders_cache[order_id] = {
         "symbol": symbol,
         "side": data["S"],
@@ -41,7 +36,6 @@ def handle_execution_report(data):
         "updateTime": data["E"]
     }
 
-    # Dacă este o execuție efectivă ("TRADE"), adăugăm în cache-ul de tranzacții
     if event_type == "TRADE":
         trade = {
             "tradeId": data["t"],
@@ -57,114 +51,132 @@ def handle_execution_report(data):
     else:
         print(f"[ORDER UPDATE] {symbol} → {status}")
 
-def handle_balance_update(data):
-    """
-    Gestionează evenimentele de tip 'balanceUpdate'
-    """
-    asset = data["a"]
-    delta = float(data["d"])
-    timestamp = data["T"]
-
+def handle_balance_update(asset, delta, timestamp):
     balances_cache[asset] = balances_cache.get(asset, 0) + delta
     print(f"[BALANCE UPDATE] {asset}: {delta:+f} (la {timestamp})")
 
-def handle_account_position(data):
-    """
-    Gestionează evenimentele de tip 'outboundAccountPosition'
-    """
-    for bal in data["B"]:
-        asset = bal["a"]
-        free = float(bal["f"])
-        locked = float(bal["l"])
+def handle_account_position(balances):
+    for bal in balances:
+        asset = bal["a"] if "a" in bal else bal.get("asset", "")
+        free = float(bal.get("f", bal.get("free", 0)))
+        locked = float(bal.get("l", bal.get("locked", 0)))
         balances_cache[asset] = free + locked
-
-    print(f"[ACCOUNT UPDATE] {len(data['B'])} active actualizate")
-
-def handle_list_status(data):
-    """
-    Gestionează evenimentele de tip 'listStatus' (OCO)
-    """
-    print(f"[OCO] {data['s']} - status: {data['l']}")
-
-def handle_message(message, handler=None):
-    """
-    Router central pentru toate evenimentele WebSocket.
-    """
-    data = json.loads(message)
-    event_type = data.get("e")
-
-    if event_type == "executionReport":
-        handle_execution_report(data)
-    elif event_type == "balanceUpdate":
-        handle_balance_update(data)
-    elif event_type == "outboundAccountPosition":
-        handle_account_position(data)
-    elif event_type == "listStatus":
-        handle_list_status(data)
-    else:
-        print(f"[ALT EVENT] {event_type} → {data}")
-
-    if handler:
-        try:
-            handler(event_type, data)
-        except Exception as e:
-            print(f"⚠️ Eroare în handler-ul personal: {e}")
+    print(f"[ACCOUNT UPDATE] {len(balances)} active actualizate")
 
 # ------------------------------
-# CONECTARE WEBSOCKET
+# POLLING - înlocuiește WebSocket
 # ------------------------------
-def run_ws(listen_key, external_handler=None):
-    ws_url = f"wss://stream.binance.com:9443/ws/{listen_key}"
 
-    def on_message(ws, msg):
-        handle_message(msg, external_handler)
+_prev_orders = {}  # orderId -> status
+_prev_balances = {}  # asset -> total
 
-    def on_error(ws, error):
-        print("⚠️ Eroare WebSocket:", error)
+def _poll_loop(handler=None, interval_sec=2):
+    """
+    Polling la Binance API pentru ordere și balanțe.
+    Detectează schimbări și apelează handler-ul la fel ca înainte cu WebSocket.
+    """
+    global _prev_orders, _prev_balances
 
-    def on_close(ws):
-        print("🔌 Conexiune WebSocket închisă")
+    # Inițializare stare initiala
+    try:
+        account = api.client.get_account()
+        for bal in account["balances"]:
+            asset = bal["asset"]
+            total = float(bal["free"]) + float(bal["locked"])
+            _prev_balances[asset] = total
+        handle_account_position(account["balances"])
+    except Exception as e:
+        print(f"[POLLING] Eroare la init balanțe: {e}")
 
-    def on_open(ws):
-        print("✅ Conectat la Binance User Data Stream")
-
-    ws = WebSocketApp(ws_url, on_message=on_message, on_error=on_error, on_close=on_close)
-    ws.on_open = on_open
-    ws.run_forever()
-
-# ------------------------------
-# THREAD SEPARAT PENTRU WS + REÎNNOIRE LISTEN KEY
-# ------------------------------
-def keepalive_loop(listen_key):
     while True:
-        time.sleep(1 * 60)  # la fiecare 30 minute
         try:
-            #api.client.keepalive_listen_key(listen_key)
-            listen_key = api.client.stream_get_listen_key()
-            print("♻️ ListenKey reînnoit")
-            # pt debug
-            print(f"Orders: {len(orders_cache)}, Trades: {len(trades_cache)}, Balances: {len(balances_cache)}")
+            # --- Verifică ordere deschise pe toate simbolurile ---
+            open_orders = api.client.get_open_orders()
+            current_order_ids = set()
+
+            for order in open_orders:
+                oid = order["orderId"]
+                current_order_ids.add(oid)
+                prev_status = _prev_orders.get(oid, {}).get("status")
+                curr_status = order["status"]
+
+                if prev_status != curr_status:
+                    # Simulăm un eveniment executionReport
+                    fake_event = {
+                        "e": "executionReport",
+                        "s": order["symbol"],
+                        "i": oid,
+                        "X": curr_status,
+                        "x": "TRADE" if curr_status == "FILLED" else "NEW",
+                        "S": order["side"],
+                        "o": order["type"],
+                        "p": order["price"],
+                        "q": order["origQty"],
+                        "z": order["executedQty"],
+                        "E": order["updateTime"],
+                        "t": oid,
+                        "L": order["price"],
+                        "l": order["executedQty"],
+                        "T": order["updateTime"],
+                    }
+                    handle_execution_report(fake_event)
+                    if handler:
+                        try:
+                            handler("executionReport", fake_event)
+                        except Exception as e:
+                            print(f"⚠️ Eroare în handler: {e}")
+
+                _prev_orders[oid] = {"status": curr_status}
+
+            # --- Verifică balanțe ---
+            account = api.client.get_account()
+            changed_balances = []
+            for bal in account["balances"]:
+                asset = bal["asset"]
+                total = float(bal["free"]) + float(bal["locked"])
+                if abs(total - _prev_balances.get(asset, 0)) > 1e-8:
+                    delta = total - _prev_balances.get(asset, 0)
+                    handle_balance_update(asset, delta, int(time.time() * 1000))
+                    changed_balances.append(bal)
+                    _prev_balances[asset] = total
+
+                    if handler:
+                        fake_balance_event = {
+                            "e": "balanceUpdate",
+                            "a": asset,
+                            "d": delta,
+                            "T": int(time.time() * 1000)
+                        }
+                        try:
+                            handler("balanceUpdate", fake_balance_event)
+                        except Exception as e:
+                            print(f"⚠️ Eroare în handler balanceUpdate: {e}")
+
+            # pt debug periodic
+            # print(f"Orders: {len(orders_cache)}, Trades: {len(trades_cache)}, Balances: {len(balances_cache)}")
+
         except Exception as e:
-            print("❌ Eroare la reînnoirea listenKey:", e)
+            print(f"[POLLING] Eroare generală: {e}")
+
+        time.sleep(interval_sec)
 
 
+# ------------------------------
+# startWSevents - aceeași interfață ca înainte
+# ------------------------------
 _ws_started = False
-def startWSevents(handler=None):
+
+def startWSevents(handler=None, interval_sec=2):
     global _ws_started
     if _ws_started:
-        print("⚠️ WebSocket deja pornit! ignor apelul duplicat")
+        print("⚠️ Polling deja pornit! Ignor apelul duplicat.")
         return
     _ws_started = True
 
-    #listen_key = api.client.new_listen_key()
-    listen_key = api.client.stream_get_listen_key()
-
-    # Thread separat pentru WS
-    ws_thread = threading.Thread(target=run_ws, args=(listen_key, handler), daemon=True)
-    ws_thread.start()
-
-    # Thread pentru reîmprospătare listen key
-    keepalive_thread = threading.Thread(target=keepalive_loop, args=(listen_key,), daemon=True)
-    keepalive_thread.start()
-
-    print("🚀 Ascult evenimente Binance în timp real...\n")
+    poll_thread = threading.Thread(
+        target=_poll_loop,
+        args=(handler, interval_sec),
+        daemon=True
+    )
+    poll_thread.start()
+    print(f"🚀 Polling Binance pornit (interval {interval_sec}s) - înlocuiește WebSocket\n")
