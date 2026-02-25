@@ -166,7 +166,7 @@ def _poll_loop(handler=None, interval_sec=2):
 # ------------------------------
 _ws_started = False
 
-def startWSevents(handler=None, interval_sec=2):
+def startWSevents(handler=None, interval_sec=5):
     global _ws_started
     if _ws_started:
         print("⚠️ Polling deja pornit! Ignor apelul duplicat.")
