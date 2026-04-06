@@ -1,0 +1,14 @@
+[Unit]
+Description=PIA VPN + Dedicated IP + Port Forward Config
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash /home/predut/binance/pia_start.sh
+Restart=always
+RestartSec=600
+
+[Install]
+WantedBy=multi-user.target
+
