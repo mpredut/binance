@@ -7,9 +7,11 @@ SLEEP_BETWEEN=10  # pauză scurtă între kill și restart
 echo "🔐 Verific conexiunea VPN..."
 SECONDS_PASSED=0
 
+sleep 5
 while [ "$(piactl get connectionstate)" != "Connected" ]; do
     echo "⏳ VPN nu este conectat. Încerc să pornesc/reconectez pia.service..."
-    sudo systemctl restart pia.service
+    #sudo systemctl restart pia.service
+    piactl connect
     sleep 5
     SECONDS_PASSED=$((SECONDS_PASSED + 5))
 

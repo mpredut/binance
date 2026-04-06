@@ -1,0 +1,26 @@
+export DISPLAY=192.168.0.103:0
+export PATH=$PATH:/opt/piavpn/bin
+export DISPLAY=192.168.0.104:0
+
+alias python='python3'
+cd /home/predut/binance
+
+#PIA
+#piactl dedicatedip add ../token.txt
+#piactl set region dedicated-belgium-85.122.194.86
+#piactl set requestportforward true
+#piactl connect
+#
+
+printf "🔐 VPN State      : %s\n" "$(piactl get connectionstate)"
+printf "🔌 Port Forward   : %s\n" "$(piactl get portforward)"
+printf "🌍 Public IP      : %s\n" "$(piactl get pubip)"
+
+#source myenv/bin/activate && python demon.py && deactivate
+#nohup python3 demon.py &
+#
+#./binance_start.sh
+#
+ps -aux | grep binance
+ps -aux | grep python
+"~/.bashrc" 143L, 4414B         
