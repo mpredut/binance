@@ -39,7 +39,7 @@ def listen_to_binance(symbol):
     
     # Functie asincrona pentru WebSocket
     async def connect():
-        async with websockets.connect(socket) as websocket:
+        async with websockets.connect(socket, ping_interval=20, ping_timeout=10) as websocket:
             while not stop:
                 message = await websocket.recv()
                 message = json.loads(message)
@@ -398,6 +398,10 @@ def place_SELL_order(symbol, price, qty):
 
 def place_SELL_BUY_order(order_type, symbol, price, qty) :
  
+    if not cfg.is_trade_enabled():
+        print(f"Trade este dezactivat!")
+    return None
+    
     order = None
     if order_type == "BUY":
         order = client.order_limit_buy(
@@ -750,7 +754,7 @@ def cancel_expired_orders(order_type, symbol, expire_time):
                 print(f"Cancelled {order_type} order with ID: {order_id} due to expiration.")
             else:
                  print(f"Needs cancel because expiration!")
-            cancel +=1
+            count +=1
     print(f"Cancelled {count} orders")
         
 
