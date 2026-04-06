@@ -56,7 +56,7 @@ def process_message(symbol, message):
     symbol = message['s']  # Simbolul criptomonedei
     price = float(message['c'])  # Asigura-te ca price este un float
     cprice[symbol] = price
-    print(f"ASYNC {symbol} is {price:.2f}")
+    #print(f"ASYNC {symbol} is {price:.2f}")
 
 def start_websocket_thread(symbol):
     websocket_thread = threading.Thread(target=listen_to_binance, args=(symbol,))
@@ -130,7 +130,7 @@ def update_price(symbol):
         print(f"update_price: A aparut o eroare neasteptata: {e}")
         
     cprice_time[symbol] = time.time()
-    cprice_refresh_int[symbol] = 3
+    cprice_refresh_int[symbol] = 11
     return cprice[symbol]
     
     
