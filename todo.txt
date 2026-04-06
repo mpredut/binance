@@ -8,6 +8,9 @@ sudo nano /etc/systemd/journald.conf
 SystemMaxUse=200M
 SystemKeepFree=500M
 RuntimeMaxUse=100M
+RateLimitIntervalSec=5s
+RateLimitBurst=500
+
 
 sudo systemctl restart systemd-journald
 
