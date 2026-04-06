@@ -28,8 +28,8 @@ _THIS_FILE = os.path.normpath(os.path.abspath(__file__))
 
 # Prefixes that warrant showing caller file:line in the output
 _CALLER_PREFIXES = (
-    "WARNING", "ERROR", "CRITICAL", "DEBUG",
-    "EXCEPTION", "TRACEBACK", "Traceback",
+    "W", "ERR", "CRITICAL", "D",
+    "EXP", "TRACEBACK" , "F", "A",
 )
 
 # Keep references to the originals BEFORE we patch anything
