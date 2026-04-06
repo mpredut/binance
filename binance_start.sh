@@ -1,7 +1,7 @@
 #!/bin/bash
 
 VPN_TIMEOUT=60    # max 60 sec să se conecteze
-SLEEP_BETWEEN=10   # pauză scurtă între kill și restart
+SLEEP_BETWEEN=10  # pauză scurtă între kill și restart
 
 # ===== Verific și pornesc VPN dacă nu e conectat =====
 echo "🔐 Verific conexiunea VPN..."
@@ -63,4 +63,3 @@ done
 
 echo "🎯 Toate scripturile ruleaza!"
 wait
-
