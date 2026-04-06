@@ -1,6 +1,9 @@
 #!/bin/bash
 
 # Configurare PIA
+
+sleep 5
+
 piactl dedicatedip add /home/predut/piatoken.txt
 piactl set region dedicated-belgium-85.122.194.86
 piactl set requestportforward true
@@ -17,6 +20,7 @@ done
 echo "🔐 VPN conectat cu IP:"
 piactl get pubip
 
+sleep 2
 echo "Port Forward:...."
 piactl get portforward
 
