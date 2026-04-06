@@ -342,7 +342,7 @@ class _DailyFileHandler(logging.Handler):
 
 _handler = _DailyFileHandler(_app_name)
 _handler.setFormatter(
-    logging.Formatter("%(asctime)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+    logging.Formatter("%(asctime)s %(message)s", datefmt="%H:%M:%S")
 )
 _file_logger.addHandler(_handler)
 
