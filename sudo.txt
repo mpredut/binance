@@ -1,0 +1,5 @@
+sudo visudo -f /etc/sudoers.d/predut-pia
+
+predut ALL=(ALL) NOPASSWD: /bin/systemctl restart pia.service
+
+
