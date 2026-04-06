@@ -70,7 +70,7 @@ def handle_account_position(balances):
 _prev_orders = {}  # orderId -> status
 _prev_balances = {}  # asset -> total
 
-def _poll_loop(handler=None, interval_sec=17):
+def _poll_loop(handler=None, interval_sec=27):
     """
     Polling la Binance API pentru ordere și balanțe.
     Detectează schimbări și apelează handler-ul la fel ca înainte cu WebSocket.
