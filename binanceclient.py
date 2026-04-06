@@ -13,5 +13,5 @@ def getClient():
         from apikeys import api_key, api_secret
         client = Client(api_key, api_secret)
     return client
-   
-client = getClient()
+
+getClient()
