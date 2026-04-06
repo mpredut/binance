@@ -7,6 +7,7 @@ import sys
 #my imports
 import utils as u
 from binanceapi import client
+from binance.exceptions import BinanceAPIException
 
 import symbols as sym
   
@@ -86,7 +87,16 @@ def get_filled_orders(order_type, symbol, startTime, limit=1000):
         end_time = int(time.time() * 1000)  # ms
         #start_time = end_time - backdays * 24 * 60 * 60 * 1000
 
-        trades = client.get_my_trades(symbol=symbol, startTime=startTime, limit=limit) or []
+        try:
+            trades = client.get_my_trades(symbol=symbol, startTime=startTime, limit=limit) or []
+        except BinanceAPIException as api_err:
+            err_msg = str(api_err)
+            print(f"Unexpected Binance API error in get_filled_orders: {api_err}")
+            if api_err.code == -1003 or "Way too much request weight used" in err_msg:
+                print("Rate limit hit: backing off before next request.{err_msg}")
+                time.sleep(60)
+            return []
+
         filtered = [
             {
                 'orderId': trade.get('orderId'),
