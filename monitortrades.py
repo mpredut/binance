@@ -582,7 +582,13 @@ class StateTracker:
     def update_sell_recommendation(self, file_path):
         global sell_recommendation
         try:
+            if os.path.exists(file_path) and os.path.getsize(file_path) == 0:
+                raise pd.errors.EmptyDataError("Empty file")
+
             df = pd.read_csv(file_path)
+            if df.empty or 'symbol' not in df.columns:
+                raise pd.errors.EmptyDataError("Empty or invalid file")
+
             sell_recommendation = {
                 row['symbol']: {
                     'force_sell': eval(str(row['force_sell'])),
@@ -606,6 +612,12 @@ class StateTracker:
         except FileNotFoundError:
             print(f"Error: File {file_path} not found. Using default values.")
             sell_recommendation = default_values_sell_recommendation
+        except (pd.errors.EmptyDataError, pd.errors.ParserError):
+            print(f"Error: File {file_path} is empty or invalid. Recreating with default values.")
+            sell_recommendation = default_values_sell_recommendation
+            df = pd.DataFrame.from_dict(default_values_sell_recommendation, orient='index').reset_index()
+            df.rename(columns={'index': 'symbol'}, inplace=True)
+            df.to_csv(file_path, index=False)
         except Exception as e:
             print(f"Error reading file: {file_path}. Error : {e}. Using default values.")
             sell_recommendation = default_values_sell_recommendation
