@@ -21,15 +21,15 @@ echo "🔐 VPN conectat cu IP:"
 piactl get pubip
 
 sleep 2
-echo "Port Forward:...."
-piactl get portforward
+PORT=$(piactl get portforward)
+echo "Port Forward: $PORT"
 
 # ======= MENȚINE SERVICE-UL ACTIV =========
 while true; do
     sleep $((60*3)) # la 3 minute
-    echo " Checking PIA connection ..."
-    echo "Port Forward:"
-    piactl get portforward
+    echo "Checking PIA connection ..."
+    PORT=$(piactl get portforward)
+    echo "Port Forward: $PORT"
 
     state=$(piactl get connectionstate)
     if [ "$state" != "Connected" ]; then
