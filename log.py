@@ -28,9 +28,14 @@ _THIS_FILE = os.path.normpath(os.path.abspath(__file__))
 
 # Prefixes that warrant showing caller file:line in the output
 _CALLER_PREFIXES = (
-    "W", "ERR", "CRITICAL", "D",
-    "EXP", "TRACEBACK" , "F", "A",
+    "WARNING", "ERR", "CRITICAL", "DEBUG",
+    "EXCEP", "TRACEBACK" , "FAIL", "ALERT",
 )
+_CALLER_PREFIXES += tuple(prefix.lower() for prefix in _CALLER_PREFIXES)
+
+def _needs_caller_info(message: str) -> bool:
+    """Return True if the message starts with a severity keyword."""
+    return message.startswith(_CALLER_PREFIXES)
 
 # Keep references to the originals BEFORE we patch anything
 _original_print        = builtins.print
@@ -81,11 +86,6 @@ def _get_caller_info() -> str:
     except (ValueError, AttributeError):
         pass
     return "[unknown]"
-
-
-def _needs_caller_info(message: str) -> bool:
-    """Return True if the message starts with a severity keyword."""
-    return message.startswith(_CALLER_PREFIXES)
 
 
 # ── Configuration state ───────────────────────────────────────────────────────
