@@ -156,7 +156,7 @@ def _poll_loop(handler=None, interval_sec=47):
             # print(f"Orders: {len(orders_cache)}, Trades: {len(trades_cache)}, Balances: {len(balances_cache)}")
 
         except Exception as e:
-            print(f"[POLLING] Eroare generală: {e}")
+            print(f"[POLLING] Eroare generala: {e}")
 
         time.sleep(interval_sec)
 
@@ -166,7 +166,7 @@ def _poll_loop(handler=None, interval_sec=47):
 # ------------------------------
 _ws_started = False
 
-def startWSevents(handler=None, interval_sec=5):
+def startWSevents(handler=None, interval_sec=47):
     global _ws_started
     if _ws_started:
         print("⚠️ Polling deja pornit! Ignor apelul duplicat.")

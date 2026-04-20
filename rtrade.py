@@ -217,6 +217,10 @@ class TradingBot:
         while True:
             try:
                 current_price = api.get_current_price(self.symbol)
+                if current_price is None:
+                    print(f"[{self.symbol}] Failed to fetch current price. Retrying in {WAIT_FOR_ORDER} seconds...")
+                    time.sleep(WAIT_FOR_ORDER)
+                    continue
                 print(f"[{self.symbol}] Current price: {current_price:.2f}")
 
                 buy_result = [None]
@@ -237,7 +241,7 @@ class TradingBot:
                 t1.join()
                 t2.join()
 
-                if not buy_result[0] or sell_result[0]:
+                if not buy_result[0] or not sell_result[0]:
                     continue
                     
                 filled_buy_price = buy_result[0] + 0.0001  # avoid zero
