@@ -150,7 +150,7 @@ def get_current_price(symbol):
         _cprice  = cprice.get(symbol, None)
         if _cprice is None:
             print(f"get_current_price: Pretul pentru {symbol} nu este disponibil. Returning None.")
-        return_cprice
+        return  _cprice
     
     except BinanceAPIException as e:
         print(f"Eroare la obtinerea pretului curent de la Binance API: {e}")
@@ -158,6 +158,7 @@ def get_current_price(symbol):
         _cprice = cprice.get(symbol, None)  # Returnam None daca simbolul nu exista
         if _cprice is None:
             print(f"get_current_price: Pretul pentru {symbol} nu este disponibil prin WebSocket. Returning None.")
+        return _cprice
 #    except Exception as e:
 #        print(f"get_current_price: A aparut o eroare neasteptata: {e}")
 #        print(f"Folosesc pretul obtinut prin websocket, {symbol}: {cprice.get(symbol, 'N/A')}")
