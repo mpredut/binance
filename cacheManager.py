@@ -173,25 +173,26 @@ class CacheManagerInterface(ABC):
         print(f"[{self.cls_name}][Info] {symbol}:  new_items {new_items}") 
        
         #new_items = self.filter_new_items(self.cache[symbol], new_items)
-        with self.lock:
-            cache_copy = list(self.cache.get(symbol, []))
-        new_items = self.filter_new_items(cache_copy, new_items)
+        # with self.lock:
+        #     cache_copy = list(self.cache.get(symbol, []))
+        # new_items = self.filter_new_items(cache_copy, new_items)
 
-        print(f"[{self.cls_name}][Info] {symbol}:  Din {count_new_items} pastrez doar {len(new_items)}") 
-        new_items = [item for item in new_items if item is not None]
-        if not new_items:
-            return
-            
         with self.lock:  # 👈 scriere protejată
             if self.append_mode:    # history mode (trade-uri) - # Pentru PriceOrders / Price / (Price)Trade , păstrăm toată lista de elemente   
                 #if isinstance(new_items, dict):
                 #    new_items = [new_items]
                 #elif not isinstance(new_items, list):
                 #    new_items = [new_items]                    
+                cache_copy = list(self.cache.get(symbol, []))
+                new_items = self.filter_new_items(cache_copy, new_items)
+                print(f"[{self.cls_name}][Info] {symbol}:  Din {count_new_items} pastrez doar {len(new_items)}") 
+                new_items = [item for item in new_items if item is not None]
+                if not new_items:
+                    return
                 self.cache[symbol].extend(new_items)
             else: # snapshot mode (trenduri)  
                 self.cache[symbol] = new_items if isinstance(new_items, list) else [new_items]             #self.cache[symbol] = new_items[0]
-          
+              
             self.fetchtime_time_per_symbol[symbol] = current_time
 
         print(f"[{self.cls_name}][Info] {symbol}: Adăugate {len(new_items)} items noi.")
@@ -236,7 +237,7 @@ class CacheManagerInterface(ABC):
 # ###### 
 
 class CacheTradeManager(CacheManagerInterface):
-    def __init__(self, sync_ts, symbols=sym.symbols, filename="cache_trade.json", api_client=api):
+    def __init__(self, sync_ts, symbols=sym.symbols, filename, api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
 
     def _is_valid_trade(self, trade):
@@ -275,7 +276,7 @@ class CacheTradeManager(CacheManagerInterface):
         
 
 class CacheOrderManager(CacheManagerInterface):
-    def __init__(self, sync_ts, symbols=sym.symbols, filename="cache_orders.json", api_client=api):
+    def __init__(self, sync_ts, symbols=sym.symbols, filename, api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
         
     def _is_valid_trade(self, trade):
@@ -361,7 +362,7 @@ class CachePriceManager(CacheManagerInterface):
 
 
 class CachePriceTrendManager(CacheManagerInterface):
-    def __init__(self, sync_ts, symbols, filename="price_trend_cache.json", api_client=api):
+    def __init__(self, sync_ts, symbols, filename, api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=False)
 
     #def get_all_symbols_from_cache(self):
