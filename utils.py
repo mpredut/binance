@@ -246,6 +246,25 @@ def gaussian_weights(T, idx: int):
     w_full = w_full / w_full.sum()  # normalizare: suma = 1
     return t_full, w_full
 
+    
+def gaussian_weights_from_idx(T, idx: int):
+    """
+    Returnează:
+        t = axa pozițiilor [idx .. T-1]
+        w = ponderile gaussiene pentru fiecare poziție
+    """
+    if idx >= T:
+        return np.array([]), np.array([])
+
+    # gaussiana pe întreg spațiul T
+    t_full = np.linspace(0, T - 1, T)
+    mu = (T - 1) / 2
+    sigma = T / 4
+
+    w_full = np.exp(-0.5 * ((t_full - mu) / sigma) ** 2)
+    w_full = w_full / w_full.sum()  # normalizare: suma = 1
+    return t_full[idx:], w_full[idx:]
+
 
 
 ###remove -----
