@@ -356,7 +356,7 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=14
     
     print(f"Trend citit din manager cache pentru simbolul {symbol}: {trend}")
     timestamp = trend['timestamp']
-    if ltimestamp == last_timestamp.get(symbol):
+    if timestamp == last_timestamp.get(symbol):
         cached_w = last_w.get(symbol)
         if cached_w is not None and len(cached_w) > 0 and not np.isnan(cached_w[0]):
             print(f"not new timestamp, use weight from mem cache.")
