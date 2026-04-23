@@ -338,37 +338,6 @@ if __name__ == "__main__":
 
 ######################
 
-def get_weight_for_cash_permission(symbol, T=14*24):
-    import cacheManager as cm
-    global last_timestamp
-    """
-    Primește un simbol și returnează prima pondere gaussiană bazată pe trendul curent.
-    - T = 2 săptămâni în ore
-    # """
-    # data = shmu.shmRead(shm)
-    # if data is None:
-        # print(f"Nu există date în shared memory încă.")
-        # return None
-    data = cm.get_price_trend_cache_manager().cache
-    if symbol not in data:
-        print(f"Simbolul {symbol} nu există în trendurile citite.")
-        return None
-
-    trend = data[symbol]
-    
-    timestamp = trend['timestamp']
-    #if(timestamp == last_timestamp.get(symbol)):
-    if last_timestamp.get(symbol) is not None and timestamp == last_timestamp[symbol]:
-        print(f"timestamp wrong in fc")
-        return None
-    last_timestamp[symbol] = timestamp
-                
-    last_period = trend['duration_seconds']
-    direction = trend['direction']
-
-    _, w = u.gaussian_full_shifted(T=T, last_period=last_period, trend=direction)
-    return w[0]  # prima pondere
-
 
 # mylock = threading.Lock()  # lock global
 def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=14, quant_seconds=3600*24, draw=False):
@@ -397,42 +366,91 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=14
     #am mutat pt race condition    
     #last_timestamp[symbol] = timestamp
                 
-    # convertim last_period din secunde în număr de quanta
-    last_period_quanta = trend.get('duration_seconds', 0) / quant_seconds
-    if last_period_quanta <= 0:
+    # convertim trend_len din secunde în număr de quanta
+    trend_len_quanta = trend.get('duration_seconds', 0) / quant_seconds
+    if trend_len_quanta <= 0:
         print(f"[{symbol}] duration_seconds invalid ({trend.get('duration_seconds')}), return None")
         return None
-    
-    direction = trend['direction']
+    trend_len_quanta = int(trend_len_quanta)
 
-    # apelăm gaussian_full_shifted cu T și last_period în aceeași unitate (quanta)
-    t, w = u.gaussian_full_shifted(T=T_quanta, last_period=last_period_quanta, trend=direction)
-    if(order_type.upper() == "SELL"):
-        if(direction=="UP"):
-            w = w / 2
-        if(direction=="DOWN"):
-            w = 2 * (1 - w)
-              
+    direction = trend['direction']
+    
+    t, w = get_trade_weight(
+        T=T_quanta,
+        trend_len=trend_len_quanta,
+        trend=direction,
+        order_type=order_type
+    )
+    if len(w) == 0:
+        print(f"[{symbol}] w gol, return None")
+        return None
+    if np.isnan(w[0]) or w[0] <= 0:
+        print(f"[{symbol}] Pondere invalidă (nan sau <= 0), return None")
+        return None
+
     print(f"[{symbol}] primele 5 ponderi: {w[:5]}")
-    sum_first_24 = w[:24].sum()
-    print(f"Suma tuturor {len(w)} ponderi =", sum_first_24)
+    print(f"Suma tuturor {len(w)} ponderi =", w.sum())
 
     # dacă vrei să vizualizezi
     if draw:
         plt.plot(t, w, label=symbol)
         plt.legend()
         plt.show()
-    
-    # returnăm prima pondere pentru primul quanta
-    if len(w) == 0 or np.isnan(w[0]):
-        print(f"[{symbol}] Vectorul ponderilor este gol. w invalid (nan/gol), nu salvez în cache")
-        return None
-
-    last_w[symbol] = w
+   
+    last_w[symbol] = w[trend_len_quanta:]
     last_timestamp[symbol] = timestamp
-    return w[0]
+    return w[trend_len_quanta]  # prima pondere pentru tranzacția curentă
 
 
 #shm = shmu.shmConnectForRead(shmu.shmname)
 last_timestamp = {}
 last_w = {}
+
+def get_trade_weight(T, trend_len, trend, order_type,
+                     exceed_percent=0.2, max_against_trend=0.15):
+    """
+    T               = durata tipică a trendului (quante)
+    trend_len     = cât a durat deja trendull (quante)
+    trend           = "up" | "down"
+    order_type      = "BUY" | "SELL"
+    exceed_percent  = % din T acceptat ca trend persistent
+    max_against_trend = ponderea max când ești împotriva trendului
+
+    Returnează:
+        w_current = ponderea pentru tranzacția de acum (scalar)
+        w_seq     = vectorul de ponderi pentru secvențele următoare
+    """
+    aligned = (
+        (order_type.upper() == "BUY"  and trend == "up") or
+        (order_type.upper() == "SELL" and trend == "down")
+    )
+
+    T_extended = T * (1 + exceed_percent)
+
+    # ── ZONA 2: trend depășit dar persistent ──────────────────────
+    if T < trend_len <= T_extended:
+        if aligned:
+            w = 1.0   # semnal puternic, tranzacționezi maxim
+        else:
+            w = max_against_trend
+        return w, np.array([w])
+
+    # ── ZONA 3: trend foarte bătrân, nesigur ──────────────────────
+    if trend_len > T_extended:
+        return 0.05, np.array([0.05])
+
+    # ── ZONA 1: în interiorul T → folosim gaussiana ───────────────
+    t_seq, w_seq = gaussian_weights_from_idx(T=T, current_pos=trend_len)
+
+    if len(w_seq) == 0:
+        return 0.05, np.array([0.05])
+
+    if aligned:
+        # gaussian directă: maxim la mijloc, minim la capete
+        pass  # w_seq e deja corect
+    else:
+        # 1-gaussian scalată: maxim la capete dar limitat
+        w_normalized = w_seq / w_seq.max() if w_seq.max() > 0 else w_seq
+        w_seq = (1 - w_normalized) * max_against_trend
+
+    return float(w_seq[0]), w_seq

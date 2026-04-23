@@ -226,33 +226,29 @@ def decrese_value_by_increment_exp(increment_factor, value, coeficient=0.05):
     adjustment_v1 = value / (1 + coeficient * increment_factor**2)
     adjustment_v2 = value * math.exp(-coeficient * increment_factor)
     return adjustment_v1, adjustment_v2
-   
- 
- 
-def gaussian_full_shifted1(T, last_period, trend="down", steps=None):
-    remaining = max(T - last_period, 1)
 
-    if steps is None:
-        steps = remaining
 
-    t = np.linspace(0, remaining-1, steps)
+def gaussian_weights(T, idx: int):
+    """
+    Returnează:
+        t = axa pozițiilor [idx .. T-1]
+        w = ponderile gaussiene pentru fiecare poziție
+    """
+    if idx >= T:
+        return np.array([]), np.array([])
 
-    mu = (remaining - 1) / 2
-    sigma = remaining / 4
+    # gaussiana pe întreg spațiul T
+    t_full = np.linspace(0, T - 1, T)
+    mu = (T - 1) / 2
+    sigma = T / 4
 
-    w = np.exp(-0.5 * ((t - mu) / sigma) ** 2)
+    w_full = np.exp(-0.5 * ((t_full - mu) / sigma) ** 2)
+    w_full = w_full / w_full.sum()  # normalizare: suma = 1
+    return t_full, w_full
 
-    # if trend == "down":
-        # w_normalized = w / w.max()
-        # w = 1 - w_normalized
-        # w = w / w.sum()
-    # else:
-        # w = w / w.sum()
-    
-    w = w / w.sum()
-    
-    return t, w
 
+
+###remove -----
 def gaussian_full_shifted(T, last_period, trend="down", steps=None):
     remaining = T - last_period
     
