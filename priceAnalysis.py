@@ -19,8 +19,8 @@ import utils as u
 import symbols as sym
 
 ### SHM import + my SHM import
-from multiprocessing import shared_memory
-import shmutils as shmu
+#from multiprocessing import shared_memory
+#import shmutils as shmu
 
 price_cache_manager = None
 
@@ -306,7 +306,10 @@ def write_all_trends(symbols, filename="priceanalysis.json"):
     return all_trends
 
 
-REFRESH_TREND = 60*1 # un minut 
+UPDATE_AND_REFRESH_TREND = 60*1 # un minut 
+#UPDATE_AND_REFRESH_TREND = PRICETREND_SYNC_INTERVAL_SEC*2
+#
+#
 if __name__ == "__main__":
     #shm = shmu.shmConnectForWrite(shmu.shmname)
     build_price_cache_manager()
@@ -323,7 +326,7 @@ if __name__ == "__main__":
 
             print(f"write : {all_trends}")
             #shmu.shmWrite(shm, all_trends)
-            time.sleep(REFRESH_TREND)
+            time.sleep(UPDATE_AND_REFRESH_TREND)
     except KeyboardInterrupt:
         print(f"Închidere manuală...")
     #except Exception as e:
@@ -332,8 +335,6 @@ if __name__ == "__main__":
         #shm.close()
         #shm.unlink()
         
-    #shm.close()
-    #shm.unlink()
     
 
 ######################
@@ -344,23 +345,22 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=14
     global last_timestamp
     global last_w
 
-    data = cm.get_cache_manager("PriceTrend").cache
-    if symbol not in data:
+    all_trend_data = cm.get_cache_manager("PriceTrend").cache
+    if symbol not in all_trend_data:
         print(f"Simbolul {symbol} nu există în trendurile citite.")
         return None
-
-    trend = data[symbol][0]
+    trend = all_trend_data[symbol][0]
     if trend is None:
-        print(f"[{symbol}] trend is None în cache.")
+        print(f" No trend in cache for symbol {symbol}.")
         return None
-    print(f"Trend citit din cache pentru simbolul {symbol}: {trend}")
+    
+    print(f"Trend citit din manager cache pentru simbolul {symbol}: {trend}")
     timestamp = trend['timestamp']
-
-    if last_timestamp.get(symbol) is not None and timestamp == last_timestamp[symbol]:
-        cached = last_w.get(symbol)
-        if cached is not None and len(cached) > 0 and not np.isnan(cached[0]):
-            print(f"not new timestamp, use data from cache.")
-            return float(cached[0])
+    if ltimestamp == last_timestamp.get(symbol):
+        cached_w = last_w.get(symbol)
+        if cached_w is not None and len(cached_w) > 0 and not np.isnan(cached_w[0]):
+            print(f"not new timestamp, use weight from mem cache.")
+            return float(cached_w[0])
 
     trend_len_quanta = trend.get('duration_seconds', 0) / quant_seconds
     if trend_len_quanta <= 0:
@@ -398,8 +398,6 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=14
     last_timestamp[symbol] = timestamp
     return current_weight     # w[0] = ponderea pentru acum
 
-
-#shm = shmu.shmConnectForRead(shmu.shmname)
 last_timestamp = {}
 last_w = {}
 
@@ -423,7 +421,6 @@ def get_trade_weight(T, trend_len, trend, order_type,
         (order_type.upper() == "SELL" and trend == "down")
     )
 
-    print("XXXXXXXXXXXXXXX")
     T_extended = T * (1 + exceed_percent)
 
     # ZONA 2: trend depășit dar persistent
@@ -440,11 +437,11 @@ def get_trade_weight(T, trend_len, trend, order_type,
     # ZONA 1: gaussian pe T întreg, slice de la trend_len
     idx = int(trend_len)
     t_seq, w_seq = u.gaussian_weights_from_idx(T=T, idx=idx)  # returnează slice [idx..T-1]
-
-    print(f"[DEBUG] Zona 1: trend_len={trend_len:.2f}, idx={idx}, T={T}")
     if len(w_seq) == 0:
+        print(f"[DEBUG] Zona 1: trend_len={trend_len:.2f}, dar gaussian_weights_from_idx a returnat w_seq gol. return [0.05]")
         return np.array([0.0]), np.array([0.05])
-
+     print(f"[DEBUG] Zona 1: trend_len={trend_len:.2f}, gaussian slice de la idx={idx} până la T={T}. Aligned={aligned}, w[0]={w_seq[0]:.4f}")
+   
     if not aligned:
         print(f"[DEBUG] Order type {order_type} nu e aliniat cu trend {trend}, inversăm ponderea și aplicăm max_against_trend={max_against_trend}")
         w_max = w_seq.max()
