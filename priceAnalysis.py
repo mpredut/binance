@@ -275,9 +275,10 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
     
     if duration_seconds <= 0:
         print(f"[{symbol}] duration_seconds={duration_seconds}, insuficient date pentru trend.")
-    return None
+        return None
     
     if trend_ref_slope_h is None:
+        print(f"[{symbol}] trend_ref_slope_h este None, nu se poate determina direcția trendului.")
         return None        # Not enough data to calculate slope
     
     print(f"trend_block {trend_block} and trend_block_ups {trend_block_ups}")
