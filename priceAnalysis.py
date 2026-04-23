@@ -401,7 +401,7 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=14
     last_period_quanta = trend.get('duration_seconds', 0) / quant_seconds
     if last_period_quanta <= 0:
         print(f"[{symbol}] duration_seconds invalid ({trend.get('duration_seconds')}), return None")
-    return None
+        return None
     
     direction = trend['direction']
 
