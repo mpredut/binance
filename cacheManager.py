@@ -237,7 +237,7 @@ class CacheManagerInterface(ABC):
 # ###### 
 
 class CacheTradeManager(CacheManagerInterface):
-    def __init__(self, sync_ts, symbols=sym.symbols, filename, api_client=api):
+    def __init__(self, sync_ts, symbols, filename, api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
 
     def _is_valid_trade(self, trade):
@@ -276,7 +276,7 @@ class CacheTradeManager(CacheManagerInterface):
         
 
 class CacheOrderManager(CacheManagerInterface):
-    def __init__(self, sync_ts, symbols=sym.symbols, filename, api_client=api):
+    def __init__(self, sync_ts, symbols, filename, api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
         
     def _is_valid_trade(self, trade):
