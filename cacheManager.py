@@ -178,6 +178,7 @@ class CacheManagerInterface(ABC):
         new_items = self.filter_new_items(cache_copy, new_items)
 
         print(f"[{self.cls_name}][Info] {symbol}:  Din {count_new_items} pastrez doar {len(new_items)}") 
+        new_items = [item for item in new_items if item is not None]
         if not new_items:
             return
             
@@ -415,6 +416,8 @@ class CachePriceTrendManager(CacheManagerInterface):
         if symbol not in data:
             return []
 
+        trend = data.get(symbol) 
+        if trend is None: return []
         return [data[symbol]]
         
             

@@ -222,7 +222,7 @@ def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
     try:
         # weight din permisiuni
         weight = pa.get_weight_for_cash_permission_at_quant_time(symbol, order_type)
-        if weight is None:
+        if weight is None or math.isnan(weight):
             print("Weight is None, set it at default 0.03")
             weight = 0.03
 

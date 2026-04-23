@@ -238,6 +238,8 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
         continue_trend = True
                     
         if(trend_ref_slope_h * slope_h < 0): # semn trend diferit
+            if(len(trend_block_indices) == 0)
+                continue
             avg_slope = sum_slope / len(trend_block_indices)
             print(f"[DEBUG] trendul curent difera {slope_h}. Se compara cu trend_ref_slope_h={trend_ref_slope_h} si avg_slope={avg_slope}")
             if abs(slope_h - trend_ref_slope_h) >= relative_tolerance: # diferență semificativa fata de trend start
@@ -266,11 +268,14 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
             # trendul s-a rupt
             print(f"BREAK!")
             break
-           
-
+               
     duration_seconds = timestamps[-1] - trend_start_ts
     duration_hours = duration_seconds / 3600
     estimated_future_hours = duration_hours * persistence_factor
+    
+    if duration_seconds <= 0:
+        print(f"[{symbol}] duration_seconds={duration_seconds}, insuficient date pentru trend.")
+    return None
     
     if trend_ref_slope_h is None:
         return None        # Not enough data to calculate slope
@@ -392,7 +397,11 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=14
     #last_timestamp[symbol] = timestamp
                 
     # convertim last_period din secunde în număr de quanta
-    last_period_quanta = trend['duration_seconds']  / quant_seconds
+    last_period_quanta = trend.get('duration_seconds', 0) / quant_seconds
+    if last_period_quanta <= 0:
+        print(f"[{symbol}] duration_seconds invalid ({trend.get('duration_seconds')}), return None")
+    return None
+    
     direction = trend['direction']
 
     # apelăm gaussian_full_shifted cu T și last_period în aceeași unitate (quanta)
