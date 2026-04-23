@@ -428,16 +428,19 @@ def get_trade_weight(T, trend_len, trend, order_type,
     # ZONA 2: trend depășit dar persistent
     if T < trend_len <= T_extended:
         w_val = 1.0 if aligned else max_against_trend
+        print(f"[DEBUG] Zona 2: trend_len={trend_len:.2f} depășește T={T} dar e sub T_extended={T_extended}. Aligned={aligned}, return {w_val}  ")
         return np.array([0.0]), np.array([w_val])
 
     # ZONA 3: trend foarte bătrân
     if trend_len > T_extended:
+        print(f"[DEBUG] Zona 3: trend_len={trend_len:.2f} e peste T_extended={T_extended}. return [0.05] ")
         return np.array([0.0]), np.array([0.05])
 
     # ZONA 1: gaussian pe T întreg, slice de la trend_len
     idx = int(trend_len)
     t_seq, w_seq = u.gaussian_weights_from_idx(T=T, idx=idx)  # returnează slice [idx..T-1]
 
+    print(f"[DEBUG] Zona 1: trend_len={trend_len:.2f}, idx={idx}, T={T}")
     if len(w_seq) == 0:
         return np.array([0.0]), np.array([0.05])
 
