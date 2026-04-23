@@ -424,10 +424,10 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=14
         plt.show()
     
     # returnăm prima pondere pentru primul quanta
-    if len(w) == 0:
-        print("Vectorul ponderilor este gol.")
+    if len(w) == 0 or np.isnan(w[0]):
+        print(f"[{symbol}] Vectorul ponderilor este gol. w invalid (nan/gol), nu salvez în cache")
         return None
-   
+
     last_w[symbol] = w
     last_timestamp[symbol] = timestamp
     return w[0]

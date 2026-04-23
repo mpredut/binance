@@ -61,7 +61,7 @@ def handle_account_position(balances):
         free = float(bal.get("f", bal.get("free", 0)))
         locked = float(bal.get("l", bal.get("locked", 0)))
         balances_cache[asset] = free + locked
-        print(f"asset {asset}, {balances_cache[asset]}")
+        #print(f"asset {asset}, {balances_cache[asset]}")
     print(f"[ACCOUNT UPDATE] {len(balances)} active actualizate")
 
 # ------------------------------

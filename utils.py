@@ -253,17 +253,25 @@ def gaussian_full_shifted1(T, last_period, trend="down", steps=None):
     
     return t, w
 
-
 def gaussian_full_shifted(T, last_period, trend="down", steps=None):
-    remaining = int(max(T - last_period, 1))
+    remaining = T - last_period
+    
+    # trend depășit - caz special
+    if remaining <= 1:
+        if trend == "down":
+            # trend bearish persistent → vinde agresiv
+            return np.array([0.0]), np.array([1.0])
+        else:
+            # trend bullish epuizat → cumpără conservator
+            return np.array([0.0]), np.array([0.1])
 
+    remaining = int(remaining)
     if steps is None:
         steps = remaining
     else:
         steps = int(steps)
 
     t = np.linspace(0, remaining - 1, steps)
-
     mu = (remaining - 1) / 2
     sigma = remaining / 4
 
@@ -272,9 +280,13 @@ def gaussian_full_shifted(T, last_period, trend="down", steps=None):
     if trend == "down":
         w_normalized = w / w.max()
         w = 1 - w_normalized
-        w = w / w.sum()
+        w_sum = w.sum()
+        if w_sum == 0:  # remaining==2 poate da suma 0
+            return t, np.full(steps, 0.5)
+        w = w / w_sum
     else:
         w = w / w.sum()
 
     return t, w
+
 
