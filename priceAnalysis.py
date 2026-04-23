@@ -238,7 +238,7 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
         continue_trend = True
                     
         if(trend_ref_slope_h * slope_h < 0): # semn trend diferit
-            if(len(trend_block_indices) == 0)
+            if(len(trend_block_indices) == 0):
                 continue
             avg_slope = sum_slope / len(trend_block_indices)
             print(f"[DEBUG] trendul curent difera {slope_h}. Se compara cu trend_ref_slope_h={trend_ref_slope_h} si avg_slope={avg_slope}")
