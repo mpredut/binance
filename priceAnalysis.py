@@ -415,7 +415,7 @@ last_w = {}
 #mijloc → 0.95  (tranzacționezi maxim) ✅
 
 def get_trade_weight(T, trend_len, trend, order_type,
-                     exceed_percent=0.2, max_against_trend=0.15):
+                     exceed_percent=0.4, max_against_trend=0.15):
     aligned = (
         (order_type.upper() == "BUY"  and trend == "up") or
         (order_type.upper() == "SELL" and trend == "down")
@@ -425,14 +425,14 @@ def get_trade_weight(T, trend_len, trend, order_type,
 
     # ZONA 2: trend depășit dar persistent
     if T < trend_len <= T_extended:
-        w_val = 1.0 if aligned else max_against_trend
+        w_val = 0.86 if aligned else max_against_trend
         print(f"[DEBUG] Zona 2: trend_len={trend_len:.2f} depășește T={T} dar e sub T_extended={T_extended}. Aligned={aligned}, return {w_val}  ")
         return np.array([0.0]), np.array([w_val])
 
     # ZONA 3: trend foarte bătrân
     if trend_len > T_extended:
-        print(f"[DEBUG] Zona 3: trend_len={trend_len:.2f} e peste T_extended={T_extended}. return [0.05] ")
-        return np.array([0.0]), np.array([0.05])
+        print(f"[DEBUG] Zona 3: trend_len={trend_len:.2f} e peste T_extended={T_extended}. return [0.022] ")
+        return np.array([0.0]), np.array([0.022])
 
     # ZONA 1: gaussian pe T întreg, slice de la trend_len
     idx = int(trend_len)
