@@ -440,7 +440,7 @@ def get_trade_weight(T, trend_len, trend, order_type,
     if len(w_seq) == 0:
         print(f"[DEBUG] Zona 1: trend_len={trend_len:.2f}, dar gaussian_weights_from_idx a returnat w_seq gol. return [0.05]")
         return np.array([0.0]), np.array([0.05])
-     print(f"[DEBUG] Zona 1: trend_len={trend_len:.2f}, gaussian slice de la idx={idx} până la T={T}. Aligned={aligned}, w[0]={w_seq[0]:.4f}")
+    print(f"[DEBUG] Zona 1: trend_len={trend_len:.2f}, gaussian slice de la idx={idx} până la T={T}. Aligned={aligned}, w[0]={w_seq[0]:.4f}")
    
     if not aligned:
         print(f"[DEBUG] Order type {order_type} nu e aliniat cu trend {trend}, inversăm ponderea și aplicăm max_against_trend={max_against_trend}")
