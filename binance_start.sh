@@ -1,35 +1,46 @@
 #!/bin/bash
 
-VPN_TIMEOUT=60    # max 60 sec să se conecteze
-SLEEP_BETWEEN=10  # pauză scurtă între kill și restart
+VPN_TIMEOUT=60
+SLEEP_BETWEEN=10
+PYTHON_START_WAIT=3   # secunde să așteptăm după pornire înainte să verificăm
 
-# ===== Verific și pornesc VPN dacă nu e conectat =====
+# ===== Verific și pornesc VPN =====
 echo "🔐 Verific conexiunea VPN..."
 SECONDS_PASSED=0
-
 sleep 5
 while [ "$(piactl get connectionstate)" != "Connected" ]; do
-    echo "⏳ VPN nu este conectat. Încerc să pornesc/reconectez pia.service..."
-    #sudo systemctl restart pia.service
+    echo "⏳ VPN nu este conectat. Încerc reconectare..."
     piactl connect
     sleep 5
     SECONDS_PASSED=$((SECONDS_PASSED + 5))
-
     if [ "$SECONDS_PASSED" -ge "$VPN_TIMEOUT" ]; then
         echo "❌ VPN nu s-a conectat in $VPN_TIMEOUT sec!"
         exit 1
     fi
 done
-
-echo "✔ VPN activ (state = Connected)"
+echo "✔ VPN activ"
 echo "IP Public: $(piactl get pubip)"
 echo "Port Forward: $(piactl get portforward)"
 
 # ===== Activare mediu virtual =====
 echo "📦 Activez mediul Python..."
-source /home/predut/binance/myenv/bin/activate
+VENV_PATH="/home/predut/binance/myenv/bin/activate"
+if [ ! -f "$VENV_PATH" ]; then
+    echo "❌ Mediul virtual nu există la $VENV_PATH. Abort!"
+    exit 1
+fi
+source "$VENV_PATH"
 
-# ===== Lista scripturilor =====
+# Verifică că python e cel din venv
+PYTHON_BIN=$(which python)
+if [[ "$PYTHON_BIN" != *"myenv"* ]]; then
+    echo "❌ Python activ nu e din venv: $PYTHON_BIN. Abort!"
+    exit 1
+fi
+echo "✔ Python activ: $PYTHON_BIN"
+
+# ===== Verific că scripturile există =====
+SCRIPT_DIR="/home/predut/binance"
 scripts=(
     "cacheManager.py"
     "priceAnalysis.py"
@@ -38,16 +49,24 @@ scripts=(
     "rtrade.py"
 )
 
-# ===== Omoară scripturile existente corect — FAILSAFE =====
+echo "🔍 Verific existența scripturilor..."
+for script in "${scripts[@]}"; do
+    if [ ! -f "$SCRIPT_DIR/$script" ]; then
+        echo "❌ Script lipsă: $SCRIPT_DIR/$script. Abort!"
+        exit 1
+    fi
+done
+echo "✔ Toate scripturile există."
+
+# ===== Omoară procesele existente =====
 for script in "${scripts[@]}"; do
     pids=$(pgrep -f "$script")
-    if [ ! -z "$pids" ]; then
-        echo "🔪 Oprire sigura pentru: $script"
+    if [ -n "$pids" ]; then
+        echo "🔪 Oprire: $script (pids: $pids)"
         kill $pids
         sleep 1
-        # dacă încă există → kill -9
         if pgrep -f "$script" > /dev/null; then
-            echo "⚠ Procesul refuza, fortez kill -9"
+            echo "⚠ Forțez kill -9 pentru $script"
             kill -9 $pids
         fi
     fi
@@ -55,13 +74,33 @@ done
 
 sleep $SLEEP_BETWEEN
 
-# ===== Pornire scripturi Python =====
+# ===== Pornire scripturi Python cu verificare =====
 echo "🚀 Pornesc scripturile Python..."
+FAILED=()
+
 for script in "${scripts[@]}"; do
-    log="/home/predut/binance/${script%.py}.log"
+    log="$SCRIPT_DIR/${script%.py}.log"
+    cd "$SCRIPT_DIR"
     nohup python "$script" > "$log" 2>&1 &
-    echo "✔ Pornit $script → log: ${script%.py}.log"
+    PID=$!
+
+    # Așteptăm puțin și verificăm că procesul încă trăiește
+    sleep $PYTHON_START_WAIT
+    if kill -0 "$PID" 2>/dev/null; then
+        echo "✔ Pornit $script (PID=$PID) → $log"
+    else
+        echo "❌ $script a crăpat la pornire! Vezi log-ul:"
+        tail -20 "$log"
+        FAILED+=("$script")
+    fi
 done
 
-echo "🎯 Toate scripturile ruleaza!"
+# ===== Raport final =====
+if [ ${#FAILED[@]} -eq 0 ]; then
+    echo "🎯 Toate scripturile rulează!"
+else
+    echo "⚠ Scripturi eșuate: ${FAILED[*]}"
+    exit 1
+fi
+
 wait
