@@ -5,9 +5,9 @@ import cacheManager as cm
 import symbols as sym
 
 
-CHECK_INTERVAL_SECONDS = 5 * 60
+CHECK_INTERVAL_SECONDS = 1 * 60 # 5 minutes
 TARGET_GROWTH_PERCENT = 2.9
-HOURS_BACK_DEFAULT = 24
+ASSET_REFERENCE_MINUTES_BACK_DEFAULT = 24 * 60 # 24 hours
 
 # Evita vanzari repetate in acelasi run.
 _sell_triggered = False
@@ -30,20 +30,26 @@ def _read_cache_rows():
         return []
 
 
-def _get_value_24h_ago_from_cache(hours_back=HOURS_BACK_DEFAULT):
+def _get_value_minutes_ago_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT):
     rows = _read_cache_rows()
     if not rows:
         print("[asset-guardian][debug] no rows available in cache TOTAL.")
         return None
 
-    target_ts = int(time.time()) - int(hours_back * 3600)
-    print(f"[asset-guardian][debug] target timestamp for {hours_back}h back: {target_ts}")
-    older = [r for r in rows if int(r.get("timestamp", 0)) <= target_ts]
-    print(f"[asset-guardian][debug] candidate baseline rows: {len(older)}")
-    if not older:
+    now_ts = int(time.time())
+    target_ts = now_ts - int(minutes_back * 60)
+    print(f"[asset-guardian][debug] window start for last {minutes_back}m: {target_ts}")
+
+    # Folosim toate inregistrarile din ultimele `minutes_back` minute.
+    window_rows = [r for r in rows if target_ts <= int(r.get("timestamp", 0)) <= now_ts]
+    print(f"[asset-guardian][debug] candidate rows in window: {len(window_rows)}")
+    if not window_rows:
         return None
-    chosen = older[-1]
-    print(f"[asset-guardian][debug] chosen baseline row: {chosen}")
+
+    # Sortam cronologic, apoi alegem minimul dupa valoare.
+    window_rows = sorted(window_rows, key=lambda r: int(r.get("timestamp", 0)))
+    chosen = min(window_rows, key=lambda r: float(r.get("total_value_usdt", float("inf"))))
+    print(f"[asset-guardian][debug] chosen MIN baseline row from window: {chosen}")
     return chosen
 
 
@@ -105,28 +111,28 @@ def sell_all_assets():
     print(f"[asset-guardian] Finished sell_all_assets. Orders sent: {sell_count}")
 
 
-def evaluate_and_maybe_sell(threshold_percent=TARGET_GROWTH_PERCENT, hours_back=HOURS_BACK_DEFAULT):
+def evaluate_and_maybe_sell(threshold_percent=TARGET_GROWTH_PERCENT, minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT):
     global _sell_triggered
 
     print("[asset-guardian][debug] evaluate cycle started")
     current_value = api.get_total_assets_value_usdt(use_cache=False)
     print(f"[asset-guardian][debug] current assets value (USDT): {current_value}")
-    past_row = _get_value_24h_ago_from_cache(hours_back=hours_back)
+    past_row = _get_value_minutes_ago_from_cache(minutes_back=minutes_back)
 
     if not past_row:
-        print(f"[asset-guardian] No baseline in cache yet for last {hours_back}h.")
+        print(f"[asset-guardian] No baseline in cache yet for last {minutes_back}m.")
         return False
 
     past_value = float(past_row.get("total_value_usdt", 0.0))
     if past_value <= 0:
-        print("[asset-guardian] Invalid 24h baseline value.")
+        print("[asset-guardian] Invalid baseline value.")
         return False
 
     growth_percent = ((current_value - past_value) / past_value) * 100.0
     threshold_value = past_value * (1 + threshold_percent / 100.0)
     print(
         f"[asset-guardian] current={current_value:.4f} USDT, "
-        f"{hours_back}h={past_value:.4f} USDT, growth={growth_percent:.4f}%"
+        f"{minutes_back}m={past_value:.4f} USDT, growth={growth_percent:.4f}%"
     )
     print(
         f"[asset-guardian][debug] trigger when current >= {threshold_value:.4f} USDT "
@@ -152,11 +158,11 @@ def evaluate_and_maybe_sell(threshold_percent=TARGET_GROWTH_PERCENT, hours_back=
 def run_forever():
     print(
         f"[asset-guardian] Started. check_interval={CHECK_INTERVAL_SECONDS}s, "
-        f"threshold={TARGET_GROWTH_PERCENT}%, hours_back={HOURS_BACK_DEFAULT}h"
+        f"threshold={TARGET_GROWTH_PERCENT}%, minutes_back={ASSET_REFERENCE_MINUTES_BACK_DEFAULT}m"
     )
     while True:
         try:
-            evaluate_and_maybe_sell(hours_back=HOURS_BACK_DEFAULT)
+            evaluate_and_maybe_sell(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT)
         except Exception as e:
             print(f"[asset-guardian] Runtime error: {e}")
         print(f"[asset-guardian][debug] sleep {CHECK_INTERVAL_SECONDS}s before next cycle")
