@@ -2,7 +2,7 @@ import json
 import os
 import time
 import datetime
-from datetime import datetime
+from datetime import datetime, timedelta
 from abc import ABC, abstractmethod
 from collections import defaultdict
 import threading
@@ -446,7 +446,7 @@ class CacheAssetValueManager(CacheManagerInterface):
         now_sec = int(time.time())
         snapshot = {
             "timestamp": now_sec,
-            "datetime_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "datetime_local": datetime.now().isoformat(timespec="seconds"),
             "total_value_usdt": round(float(total_usdt), 8),
         }
         return [snapshot]
@@ -460,7 +460,7 @@ ORDER_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
 TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
 PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
 PRICETREND_SYNC_INTERVAL_SEC = 0.2 * 60   # 10 minute
-ASSETVALUE_SYNC_INTERVAL_SEC = 60 * 60  # 1 ora
+ASSETVALUE_SYNC_INTERVAL_SEC = 60 * 60  # 1 hour
 
 class CacheFactory:
     _instances = {}
