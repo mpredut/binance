@@ -531,14 +531,14 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
         if recent_opposite_trades:
             if order_type == "BUY":
                 last_sell_price = min(float(trade['price']) for trade in recent_opposite_trades)
-                diff_percent = u.value_diff_to_percent(last_sell_price, current_price)
+                diff_percent = u.value_diff_to_percent(last_sell_price, price)
                 print(f"[DEBUG] Last SELL Price: {last_sell_price}")
             else:  # pentru `sell`
                 last_buy_price = max(float(trade['price']) for trade in recent_opposite_trades)
-                diff_percent = u.value_diff_to_percent(current_price, last_buy_price)           
+                diff_percent = u.value_diff_to_percent(price, last_buy_price)           
                 print(f"[DEBUG] Last Buy Price: {last_buy_price}")                
                 
-            print(f"[DEBUG] Difference Percent: {diff_percent:.2f}%")
+            print(f"[DEBUG] Difference Percent: {diff_percent:.2f}%, price - {price}, current_price - {current_price}")
             print(f"[DEBUG] Required Percentage Diff: {profit_percentage}%")   
             
             if diff_percent < profit_percentage:
