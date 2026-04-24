@@ -306,39 +306,6 @@ def write_all_trends(symbols, filename="priceanalysis.json"):
     return all_trends
 
 
-UPDATE_AND_REFRESH_TREND = 60*1 # un minut 
-#UPDATE_AND_REFRESH_TREND = PRICETREND_SYNC_INTERVAL_SEC*2
-#
-#
-if __name__ == "__main__":
-    #shm = shmu.shmConnectForWrite(shmu.shmname)
-    build_price_cache_manager()
-    symbols = sym.symbols
-    try:
-        while True:
-            process = psutil.Process(os.getpid())
-            print("Memorie folosită (MB):", process.memory_info().rss / 1024**2)
-            
-            all_trends = {}
-            for symbol in symbols:
-                all_trends[symbol] = getTrendLongTerm(symbol, draw=False)
-            write_all_trends(all_trends);
-
-            print(f"write : {all_trends}")
-            #shmu.shmWrite(shm, all_trends)
-            time.sleep(UPDATE_AND_REFRESH_TREND)
-    except KeyboardInterrupt:
-        print(f"Închidere manuală...")
-    #except Exception as e:
-        #print(f"Oprire ? ...{e}")
-    #finally:
-        #shm.close()
-        #shm.unlink()
-        
-    
-
-######################
-
 
 def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=14, quant_seconds=3600*24, draw=False):
     import cacheManager as cm
@@ -449,3 +416,40 @@ def get_trade_weight(T, trend_len, trend, order_type,
         w_seq = (1 - w_normalized) * max_against_trend
 
     return t_seq, w_seq  # t_seq și w_seq sunt slice [idx..T-1]
+    
+    
+    
+    
+UPDATE_AND_REFRESH_TREND = 60*1 # un minut 
+#UPDATE_AND_REFRESH_TREND = PRICETREND_SYNC_INTERVAL_SEC*2
+#
+#
+if __name__ == "__main__":
+    #shm = shmu.shmConnectForWrite(shmu.shmname)
+    build_price_cache_manager()
+    symbols = sym.symbols
+    try:
+        while True:
+            process = psutil.Process(os.getpid())
+            print("Memorie folosită (MB):", process.memory_info().rss / 1024**2)
+            
+            all_trends = {}
+            for symbol in symbols:
+                all_trends[symbol] = getTrendLongTerm(symbol, draw=False)
+                #get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=275, order_type="BUY", draw=True)
+            write_all_trends(all_trends);
+
+            print(f"write : {all_trends}")
+            #shmu.shmWrite(shm, all_trends)
+            time.sleep(UPDATE_AND_REFRESH_TREND)
+    except KeyboardInterrupt:
+        print(f"Închidere manuală...")
+    #except Exception as e:
+        #print(f"Oprire ? ...{e}")
+    #finally:
+        #shm.close()
+        #shm.unlink()
+        
+    
+
+######################
