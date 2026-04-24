@@ -43,6 +43,7 @@ echo "✔ Python activ: $PYTHON_BIN"
 SCRIPT_DIR="/home/predut/binance"
 scripts=(
     "cacheManager.py"
+    "asset_guardian.py"
     "priceAnalysis.py"
     "tradeall.py"
     "monitortrades.py"
