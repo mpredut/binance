@@ -191,6 +191,31 @@ def get_free_balance(asset: str) -> float:
         return 0.0
 
 
+def get_account_assets_balances(include_zero=False):
+    try:
+        account = client.get_account()
+        balances = account.get("balances", [])
+        result = []
+        for balance in balances:
+            free_qty = float(balance.get("free", 0.0))
+            locked_qty = float(balance.get("locked", 0.0))
+            total_qty = free_qty + locked_qty
+            if not include_zero and total_qty <= 0:
+                continue
+            result.append(
+                {
+                    "asset": balance.get("asset"),
+                    "free": free_qty,
+                    "locked": locked_qty,
+                    "total": total_qty,
+                }
+            )
+        return result
+    except Exception as e:
+        print(f"get_account_assets_balances: Eroare la citirea balantelor: {e}")
+        return []
+
+
 def get_asset_info(order_type, symbol, price):
     """
     Returnează cantitatea disponibilă exprimată mereu în asset-ul de bază (qty).
@@ -827,3 +852,72 @@ def check_order_filled_by_time(order_type, symbol, time_back_in_seconds, pret_mi
 
     print(f"[DEBUG] Nicio tranzactie recenta pentru simbolul {symbol}. in ultimele {time_back_in_seconds} secunde ")
     return None
+
+
+# ---------------- Portfolio value query API ----------------
+ASSET_VALUE_CACHE_TTL_SECONDS = 120
+
+_asset_value_cache = {"value": None, "timestamp": 0.0}
+_asset_value_cache_lock = threading.Lock()
+
+
+def _get_symbol_price_safe(symbol):
+    try:
+        ticker = client.get_symbol_ticker(symbol=symbol)
+        return float(ticker["price"])
+    except Exception:
+        return None
+
+
+def _convert_to_usdt(asset, amount):
+    if amount <= 0:
+        return 0.0
+    if asset == "USDT":
+        return amount
+    if asset == "USDC":
+        usdcusdt = _get_symbol_price_safe("USDCUSDT")
+        return amount * usdcusdt if usdcusdt else amount
+
+    direct_pairs = [f"{asset}USDT", f"{asset}USDC", f"{asset}BUSD"]
+    for pair in direct_pairs:
+        price = _get_symbol_price_safe(pair)
+        if price:
+            if pair.endswith("USDT"):
+                return amount * price
+            if pair.endswith("USDC"):
+                usdcusdt = _get_symbol_price_safe("USDCUSDT") or 1.0
+                return amount * price * usdcusdt
+            if pair.endswith("BUSD"):
+                busdusdt = _get_symbol_price_safe("BUSDUSDT") or 1.0
+                return amount * price * busdusdt
+
+    return 0.0
+
+
+def get_total_assets_value_usdt(use_cache=True, cache_ttl_seconds=ASSET_VALUE_CACHE_TTL_SECONDS):
+    now = time.time()
+    if use_cache:
+        with _asset_value_cache_lock:
+            if (
+                _asset_value_cache["value"] is not None
+                and (now - _asset_value_cache["timestamp"]) < cache_ttl_seconds
+            ):
+                return _asset_value_cache["value"]
+
+    total_value = 0.0
+    try:
+        for balance in get_account_assets_balances(include_zero=False):
+            total_value += _convert_to_usdt(balance["asset"], balance["total"])
+    except Exception as e:
+        print(f"get_total_assets_value_usdt: Eroare la calculul portofoliului: {e}")
+        return 0.0
+
+    with _asset_value_cache_lock:
+        _asset_value_cache["value"] = total_value
+        _asset_value_cache["timestamp"] = now
+
+    return total_value
+
+def get_total_assets_value_usd(use_cache=True, cache_ttl_seconds=ASSET_VALUE_CACHE_TTL_SECONDS):
+    # On Binance spot, USDT is used as USD approximation.
+    return get_total_assets_value_usdt(use_cache=use_cache, cache_ttl_seconds=cache_ttl_seconds)

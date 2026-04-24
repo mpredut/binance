@@ -421,6 +421,36 @@ class CachePriceTrendManager(CacheManagerInterface):
         if trend is None: return []
         return [data[symbol]]
         
+
+class CacheAssetValueManager(CacheManagerInterface):
+    def __init__(self, sync_ts, symbols, filename, api_client=api):
+        super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
+
+    def rebuild_fetchtime_times(self):
+        last_times = {}
+        for symbol, items in self.cache.items():
+            if not items:
+                continue
+            max_ts_sec = max(int(item.get("timestamp", 0)) for item in items if isinstance(item, dict))
+            if max_ts_sec > 0:
+                last_times[symbol] = max(0, (max_ts_sec * 1000) - 60_000)
+        return last_times
+
+    def get_remote_items(self, symbol, startTime):
+        try:
+            total_usdt = self.api_client.get_total_assets_value_usdt(use_cache=False)
+        except Exception as e:
+            print(f"[{self.cls_name}][Eroare] Nu pot interoga valoarea totala: {e}")
+            return []
+
+        now_sec = int(time.time())
+        snapshot = {
+            "timestamp": now_sec,
+            "datetime_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+            "total_value_usdt": round(float(total_usdt), 8),
+        }
+        return [snapshot]
+
             
 # ###### 
 # ###### GLOBAL VARIABLE FOR CACHE ####### 
@@ -430,6 +460,7 @@ ORDER_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
 TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
 PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
 PRICETREND_SYNC_INTERVAL_SEC = 0.2 * 60   # 10 minute
+ASSETVALUE_SYNC_INTERVAL_SEC = 60 * 60  # 1 ora
 
 class CacheFactory:
     _instances = {}
@@ -455,6 +486,11 @@ class CacheFactory:
             "filename": "cache_price_trend.json",
             "sync_ts": lambda: PRICETREND_SYNC_INTERVAL_SEC,
         },
+        "AssetValue": {
+            "class": CacheAssetValueManager,
+            "filename": "cache_asset_value.json",
+            "sync_ts": lambda: ASSETVALUE_SYNC_INTERVAL_SEC,
+        },
     }
 
     @classmethod
@@ -467,7 +503,7 @@ class CacheFactory:
             manager_class = config["class"]
             sync_ts = config["sync_ts"]()
             if symbols is None:
-                symbols = sym.symbols
+                symbols = ["TOTAL"] if name == "AssetValue" else sym.symbols
 
             if name == "Price":
                 # dict per simbol
