@@ -180,7 +180,7 @@ def evaluate_and_maybe_sell(
     global _sell_triggered, _buy_triggered
 
     current_value = api.get_total_assets_value_usdt(use_cache=False)
-    print(f"[DEBUG] current assets value (USDT): {current_value}")
+    print(f"[DEBUG] Current ASSETS value (USDT): {current_value}")
     past_row = _get_value_minutes_ago_from_cache(minutes_back=minutes_back)
 
     if not past_row:
@@ -195,8 +195,8 @@ def evaluate_and_maybe_sell(
     growth_percent = ((current_value - past_value) / past_value) * 100.0
     threshold_value = past_value * (1 + threshold_percent / 100.0)
     print(
-        f"Current Assets value: {current_value:.4f} USDT, "
-        f"Past assets value: {past_value:.4f} USDT, min_back={minutes_back:.4f}, growth={growth_percent:.4f}%"
+        f"Current ASSETS value: {current_value:.4f} USDT, "
+        f"Past ASSETS value: {past_value:.4f} USDT, min_back={minutes_back:.4f}, growth={growth_percent:.4f}%"
     )
     print(
         f"[DEBUG] trigger when current >= {threshold_value:.4f} USDT "
