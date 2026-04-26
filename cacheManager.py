@@ -459,7 +459,7 @@ class CacheAssetValueManager(CacheManagerInterface):
 ORDER_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute     
 TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
 PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
-PRICETREND_SYNC_INTERVAL_SEC = 0.2 * 60   # 10 minute
+PRICETREND_SYNC_INTERVAL_SEC = 10 * 60   # 10 minute
 ASSETVALUE_SYNC_INTERVAL_SEC = 60 * 60  # 1 hour
 
 class CacheFactory:
