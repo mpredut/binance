@@ -195,11 +195,11 @@ def evaluate_and_maybe_sell(
     growth_percent = ((current_value - past_value) / past_value) * 100.0
     threshold_value = past_value * (1 + threshold_percent / 100.0)
     print(
-        f"Current ASSETS value: {current_value:.4f} USDT, "
-        f"Past ASSETS value: {past_value:.4f} USDT, min_back={minutes_back:.4f}, growth={growth_percent:.4f}%"
+        f"Current ASSETS value: {current_value:.1f} USDT, "
+        f"\nPast ASSETS value: {past_value:.1f} USDT, min_back={minutes_back:.4f}, growth={growth_percent:.4f}%"
     )
     print(
-        f"[DEBUG] trigger when current >= {threshold_value:.4f} USDT "
+        f"[DEBUG] Trigger when ASSETS >= {threshold_value:.4f} USDT "
         f"(threshold={threshold_percent}%)"
     )
 

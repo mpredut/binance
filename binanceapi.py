@@ -191,7 +191,7 @@ def get_free_balance(asset: str) -> float:
         return 0.0
 
 
-def get_account_assets_balances(include_zero=False):
+def get_account_assets_balances():
     try:
         account = client.get_account()
         balances = account.get("balances", [])
@@ -200,8 +200,10 @@ def get_account_assets_balances(include_zero=False):
             free_qty = float(balance.get("free", 0.0))
             locked_qty = float(balance.get("locked", 0.0))
             total_qty = free_qty + locked_qty
-            if not include_zero and total_qty <= 0:
-                continue
+            if total_qty <= 0:
+                if balance.get('asset') in sym.symbols:
+                    print(f"get_account_assets_balances: Skip {balance.get('asset')} because total_qty is 0")
+                    continue
             result.append(
                 {
                     "asset": balance.get("asset"),
@@ -906,17 +908,21 @@ def get_total_assets_value_usdt(use_cache=True, cache_ttl_seconds=ASSET_VALUE_CA
 
     total_value = 0.0
     try:
-        for balance in get_account_assets_balances(include_zero=False):
+        for balance in get_account_assets_balances():
             total_value += _convert_to_usdt(balance["asset"], balance["total"])
     except Exception as e:
         print(f"get_total_assets_value_usdt: Eroare la calculul portofoliului: {e}")
         return 0.0
 
     with _asset_value_cache_lock:
-        _asset_value_cache["value"] = total_value
-        _asset_value_cache["timestamp"] = now
+        if total_value > 0:
+            _asset_value_cache["value"] = total_value
+            _asset_value_cache["timestamp"] = now
+        else:
+            print(f"get_total_assets_value_usdt: Total value is 0.0")
+            return 0.0
 
-    return total_value
+    return _asset_value_cache["value"]
 
 def get_total_assets_value_usd(use_cache=True, cache_ttl_seconds=ASSET_VALUE_CACHE_TTL_SECONDS):
     # On Binance spot, USDT is used as USD approximation.
