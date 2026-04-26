@@ -53,7 +53,7 @@ def _get_value_minutes_ago_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_
     # Sortam cronologic, apoi alegem minimul dupa valoare.
     window_rows = sorted(window_rows, key=lambda r: int(r.get("timestamp", 0)))
     chosen = min(window_rows, key=lambda r: float(r.get("total_value_usdt", float("inf"))))
-    print(f"[DEBUG] chosen MIN baseline row from window: {chosen}")
+    print(f"[DEBUG] chosen MIN: {chosen}")
     return chosen
 
 
@@ -194,9 +194,9 @@ def evaluate_and_maybe_sell(
 
     growth_percent = ((current_value - past_value) / past_value) * 100.0
     threshold_value = past_value * (1 + threshold_percent / 100.0)
-    print(
-        f"Current ASSETS value: {current_value:.1f} USDT, "
-        f"\nPast ASSETS value: {past_value:.1f} USDT, min_back={minutes_back:.4f}, growth={growth_percent:.4f}%"
+    print(f"Current ASSETS value: {current_value:.1f} USDT ")
+    print(f"Past    ASSETS value: {past_value:.1f} USDT, min_back={minutes_back:.4f}, "
+            "growth={growth_percent:.4f}%"
     )
     print(
         f"[DEBUG] Trigger when ASSETS >= {threshold_value:.4f} USDT "
