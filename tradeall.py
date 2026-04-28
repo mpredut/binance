@@ -593,7 +593,7 @@ class TrendState:
     
     def is_trend_consistent_validated(self) :
          #14 de confirmari per minut * 3 minute ->defapt 6 confirmari per minut  
-        return self.confirm_count > 14 * 3 and self.is_trend_uniform_confirmed() # and  self.confirm_count < 100 * 3
+        return self.confirm_count > 8 * 3 and self.is_trend_uniform_confirmed() # and  self.confirm_count < 100 * 3
     
     def is_trend_uniform_confirmed(self):
         if not self.is_trend_a_minim_validated() :
@@ -605,7 +605,7 @@ class TrendState:
         rate = self.confirm_count * 2.5 * TIME_SLEEP_GET_PRICE / trend_duration
         print(f"uniform rate is {rate} <> 0.1")
         #10 confirmari per 1.5 minute
-        return rate > 0.1
+        return rate > 0.08 #0.1
 
     def is_started_trend_older_than(self, old_trend_time):
         return self.get_started_trend_time() > old_trend_time
@@ -829,7 +829,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
     #
     #new case
     #
-    if slope <= -5.4 and trend_state.is_trend_up():
+    if slope <= -5.1 and trend_state.is_trend_up():
         if (trend_state.is_trend_consistent_validated()
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 2: BUY ALL {win} .... ")
@@ -837,7 +837,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
                 api.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
                     force=True, cancelorders=True, hours=1)
     #18 de confirmari per minut * 3 minute
-    if slope >= 5.4 and trend_state.is_trend_down():
+    if slope >= 5.1 and trend_state.is_trend_down():
         if (trend_state.is_trend_consistent_validated()
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 2: SELL ALL {win} .... ")
@@ -848,7 +848,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
     #
     #new case
     #
-    if slope <= -5.4 and trend_state.is_trend_down():
+    if slope <= -5.1 and trend_state.is_trend_down():
         if (trend_state.is_trend_consistent_validated()
         and trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 3: BUY ALL {win} .... ")
@@ -856,7 +856,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
                 api.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
                     force=True, cancelorders=True, hours=1)
     #18 de confirmari per minut * 3 minute
-    if slope >= 5.4 and trend_state.is_trend_up():
+    if slope >= 5.1 and trend_state.is_trend_up():
         if (trend_state.is_trend_consistent_validated()
         and trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 3: SELL ALL {win} .... ")
@@ -919,7 +919,7 @@ def handle_symbol(symbol, current_price, price_window, price_window_big, trend_s
 #
 
 order_ids = []
-TREND_TO_BE_OLD_SECONDS = 60 * 60 * 1.5  # 1.5h -> 2.5h  
+TREND_TO_BE_OLD_SECONDS = 60 * 60 * 1.9  # 1.9h -> 2.5h  
 #todo put that threshold per PriceWindow
 PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 310)
 PRICE_CHANGE_THRESHOLD_BIG_EUR = u.calculate_difference_percent(97000, 95000 - 377)
@@ -933,8 +933,8 @@ for symbol in sym.symbols:
     #symbol = moneda["nume"]
     price_windows[symbol] = PriceWindow(symbol, window_size)
     price_windows_big[symbol] = PriceWindow(symbol, window_size_big)
-    trend_states[symbol] = TrendState(max_duration_seconds= 2.5 * 60 * 60, expiration_trend_time=1.7 * 60, fresh_trend_time = 2.7 * 60)  # Expira In 10 minute
-    trend_states_big[symbol] = TrendState(max_duration_seconds= 3 * 60 * 60, expiration_trend_time=1.7 * 60, fresh_trend_time = 2.7 * 60)  # Expira In 10 minute
+    trend_states[symbol] = TrendState(max_duration_seconds= 2.5 * 60 * 60, expiration_trend_time=2.7 * 60, fresh_trend_time = 3.7 * 60)  # Expira In 10 minute
+    trend_states_big[symbol] = TrendState(max_duration_seconds= 3 * 60 * 60, expiration_trend_time=2.7 * 60, fresh_trend_time = 3.7 * 60)  # Expira In 10 minute
 
 TIME_SLEEP_BETWEEN_SYMBOLS=0#TIME_SLEEP_GET_PRICE
 # Second loop: Call handle_symbol for each symbol indefinitely
