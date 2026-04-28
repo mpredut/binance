@@ -5,7 +5,7 @@ import cacheManager as cm
 import symbols as sym
 
 
-CHECK_INTERVAL_SECONDS = 1 * 60 # 5 minutes
+CHECK_INTERVAL_SECONDS = 9 * 60 # 9 minutes
 TARGET_GROWTH_PERCENT = 2.9
 TARGET_DROP_PERCENT = 7.0
 ASSET_REFERENCE_MINUTES_BACK_DEFAULT = 24 * 60 # 24 hours
@@ -171,7 +171,7 @@ def buy_with_all_cash(buy_symbol=BUY_SYMBOL_DEFAULT, cash_ratio=BUY_USE_CASH_RAT
         return False
 
 
-def evaluate_and_maybe_sell(
+def evaluate_and_maybe_sell_or_buy(
     threshold_percent=TARGET_GROWTH_PERCENT,
     drop_percent=TARGET_DROP_PERCENT,
     minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT,
@@ -196,7 +196,7 @@ def evaluate_and_maybe_sell(
     threshold_value = past_value * (1 + threshold_percent / 100.0)
     print(f"Current ASSETS value: {current_value:.1f} USDT ")
     print(f"Past    ASSETS value: {past_value:.1f} USDT, min_back={minutes_back:.4f}, "
-            "growth={growth_percent:.4f}%"
+          f"growth={growth_percent:.4f}%"
     )
     print(
         f"[DEBUG] Trigger when ASSETS >= {threshold_value:.4f} USDT "
@@ -238,7 +238,7 @@ def run_forever():
     )
     while True:
         try:
-            evaluate_and_maybe_sell(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT)
+            evaluate_and_maybe_sell_or_buy(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT)
         except Exception as e:
             print(f" Runtime ERROR: {e}")
         print(f"[DEBUG] sleep {CHECK_INTERVAL_SECONDS}s before next cycle")

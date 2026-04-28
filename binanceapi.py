@@ -432,7 +432,7 @@ def place_SELL_BUY_order(order_type, symbol, price, qty) :
  
     if not cfg.is_trade_enabled():
         print(f"Trade este dezactivat!")
-    return None
+        return None
     
     order = None
     if order_type == "BUY":
