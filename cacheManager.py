@@ -816,9 +816,12 @@ def _handle_binance_ws_event(event):
                 f"symbol={event.get('s')} orderId={event.get('i')} "
                 f"status={event.get('X')} execType={event.get('x')} side={event.get('S')}"
             )
-        _upsert_order_from_execution_report(event)
-        _append_trade_from_execution_report(event)
-        _persist_ws_updated_caches(event_type)
+       order_cache = get_cache_manager("Order")
+       order_cache.update_cache()
+       
+       # _upsert_order_from_execution_report(event)
+       # _append_trade_from_execution_report(event)
+       # _persist_ws_updated_caches(event_type)
         return
 
     if event_type in ("balanceUpdate", "outboundAccountPosition"):
@@ -826,8 +829,8 @@ def _handle_binance_ws_event(event):
             print(
                 f"[cacheManager][WS] {event_type} event received"
             )
-        _refresh_asset_value_from_ws_event()
-        _persist_ws_updated_caches(event_type)
+        #_refresh_asset_value_from_ws_event()
+        #_persist_ws_updated_caches(event_type)
         return
 
 def enable_real_ws_event_sync():
