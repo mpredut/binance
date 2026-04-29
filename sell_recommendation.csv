@@ -1,4 +1,0 @@
-symbol,force_sell,procent_desired_profit,expired_duration,min_procent,days_after_use_current_price,slope,pos,gradient,tick,min,max
-BTCUSDC,0,0.07,13320.0,0.0099,7,0.0,0,0.0,0,0.0,0.0
-TAOUSDC,0,0.07,13320.0,0.0099,7,0.0,0,0.0,0,0.0,0.0
-ETHUSDC,0,0.07,13320.0,0.0099,7,0.0,0,0.0,0,0.0,0.0
