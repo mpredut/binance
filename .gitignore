@@ -6,4 +6,5 @@ apikeys.py
 sell_recommendation.csv
 index.html
 __pycache__
+old*
 
