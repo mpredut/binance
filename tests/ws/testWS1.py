@@ -3,7 +3,7 @@ import asyncio
 import requests
 import websockets
 import json
-import binanceapi as api
+import bapi as api
 from binance import AsyncClient, BinanceSocketManager
 from apikeys import api_key, api_secret
 

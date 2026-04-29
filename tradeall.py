@@ -13,8 +13,8 @@ import symbols as sym
 import bapi as api
 import bapi_placeorder as po
 
-import binanceapi_trades as apitrades
-import binanceapi_allorders as apiorders
+import bapi_trades as apitrades
+import bapi_allorders as apiorders
 
 #import priceprediction as pp
 import pandas as pd

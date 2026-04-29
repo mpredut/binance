@@ -31,7 +31,7 @@ from binance.exceptions import BinanceAPIException
 from apikeys import api_key, api_secret
 
 # my imports
-import binanceapi as api
+import bapi as api
 import log
 
 

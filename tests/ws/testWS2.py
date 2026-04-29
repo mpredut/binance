@@ -2,7 +2,7 @@ import asyncio
 import requests
 import websockets
 import json
-import binanceapi as api
+import bapi as api
 from apikeys import api_key, api_secret
 
 def get_listen_key(api_key):

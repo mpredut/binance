@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 import log
 import utils as u
 import symbols as sym
-import binanceapi as api
+import bapi as api
 
 # 
 # Cache global pentru tranzactii

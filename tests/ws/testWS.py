@@ -1,4 +1,4 @@
-import binanceapi as api
+import bapi as api
 import websockets, asyncio, json
 
 async def test_ws():

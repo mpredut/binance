@@ -398,8 +398,8 @@ def check_order_filled(order_id, symbol):
 
 
 def check_order_filled_by_time(order_type, symbol, time_back_in_seconds, pret_min=None, pret_max=None):
-    #import binanceapi_trades as apitrades
-    import binanceapi_allorders as apiorders
+    #import bapi_trades as apitrades
+    import bapi_allorders as apiorders
 
     backdays = math.ceil(time_back_in_seconds / 86400)
     #trades = apitrades.get_my_trades(order_type, symbol, backdays=backdays, limit=1000)

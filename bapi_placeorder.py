@@ -27,7 +27,7 @@ from bapi_client import client
 
 
 def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
-    import binanceapi_allorders as apiorders
+    import bapi_allorders as apiorders
     try:
         # weight din permisiuni
         weight = pa.get_weight_for_cash_permission_at_quant_time(symbol, order_type)
@@ -221,8 +221,8 @@ def place_SELL_order_at_market(symbol, qty):
 
 
 def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, max_daily_trades=10, profit_percentage=0.01):
-    #import binanceapi_trades as apitrades
-    import binanceapi_allorders as apiorders
+    #import bapi_trades as apitrades
+    import bapi_allorders as apiorders
     
 
     order_type = order_type.upper()
