@@ -116,4 +116,10 @@ else
     exit 1
 fi
 
+# Afișăm toate procesele Python care rulează
+echo
+echo "Procese Python active:"
+ps aux | grep '[p]ython'
+
+echo "All good, wait command for service... <ctrl c> please!"
 wait
