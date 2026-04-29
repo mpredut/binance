@@ -22,6 +22,7 @@ import symbols as sym
 import config as cfg
 import priceAnalysis as pa
 
+import bapi as api
 from bapi_client import client
 
 
@@ -72,10 +73,10 @@ def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
 
 def manage_quantity(order_type, symbol, required_qty, price_to_be_traded, cancelorders=False, hours=5):
 
-    current_price = get_current_price(symbol)
+    current_price = api.get_current_price(symbol)
                 
     # 1. cat am efectiv disponibil
-    available_qty = get_asset_info(order_type, symbol, current_price)
+    available_qty = api.get_asset_info(order_type, symbol, current_price)
 
     # 2. aplicam limita de cash/weight
     required_qty = apply_weight_limit(symbol, order_type, current_price, required_qty, available_qty)
@@ -86,7 +87,7 @@ def manage_quantity(order_type, symbol, required_qty, price_to_be_traded, cancel
 
         freed_quantity = 0
         if cancelorders:
-            freed_quantity = cancel_orders_old_or_outlier(
+            freed_quantity = api.cancel_orders_old_or_outlier(
                 order_type, symbol, required_qty, hours=hours, price_difference_percentage=0.15
             ) or 0
 
@@ -105,7 +106,7 @@ def place_BUY_order(symbol, price, qty):
             print(f"Trade is desabled!")
             return None
             
-        price = round(min(price, get_current_price(symbol)), 2)
+        price = round(min(price, api.get_current_price(symbol)), 2)
         qty = round(qty, 4)    
         BUY_order = client.order_limit_buy(
             symbol=symbol,
@@ -129,7 +130,7 @@ def place_SELL_order(symbol, price, qty):
             print(f"Trade is disabled!")
             return None
             
-        price = round(max(price, get_current_price(symbol)), 2)
+        price = round(max(price, api.get_current_price(symbol)), 2)
         qty = round(qty, 4)    
         SELL_order = client.order_limit_sell(
             symbol=symbol,
@@ -232,7 +233,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
         
     try:
         
-        current_price = get_current_price(symbol)
+        current_price = api.get_current_price(symbol)
         
         if order_type == "BUY":
             price = round(min(price, current_price), 0)
@@ -350,7 +351,7 @@ def __place_order(order_type, symbol, price, qty, force=False, cancelorders=Fals
         qty = round(qty, 4)
         qty = float(Decimal(qty).quantize(Decimal('0.0001'), rounding=ROUND_DOWN))  # Rotunjit la 5 zecimale
 
-        current_price = get_current_price(symbol)
+        current_price = api.get_current_price(symbol)
         if qty * current_price < 100:
             print(f"Value {qty * current_price} of {symbol} is too small to make sense to be traded :-) .by by!")
             return None
@@ -402,7 +403,7 @@ def place_order_smart(order_type, symbol, price, qty, safeback_seconds=48*3600+6
     try:
         qty = round(qty, 5)
         cancel = False
-        current_price = get_current_price(symbol)
+        current_price = api.get_current_price(symbol)
         
         if order_type.upper() == 'BUY':
             open_SELL_orders = get_open_orders("SELL", symbol)
