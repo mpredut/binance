@@ -27,7 +27,7 @@ import bapi as api
 #log.disable_print()
 
 # WS-only mode: when True, polling for Order/Trade/AssetValue is paused while WS is healthy.
-WS_ONLY_MODE = True
+WS_ONLY_MODE = False
 WS_LOSS_TIMEOUT_SEC = 40 # 600  # 10 minute 
 WS_EVENT_LOG_ENABLED = True
 
@@ -803,6 +803,7 @@ def _persist_ws_updated_caches(event_type):
 
 
 def _handle_binance_ws_event(event):
+    print("cacheManager handler call from binance ....")
     event_type = event.get("e")
     if not event_type:
         return
@@ -816,9 +817,9 @@ def _handle_binance_ws_event(event):
                 f"symbol={event.get('s')} orderId={event.get('i')} "
                 f"status={event.get('X')} execType={event.get('x')} side={event.get('S')}"
             )
-       order_cache = get_cache_manager("Order")
-       order_cache.update_cache()
-       
+        order_cache = get_cache_manager("Order")
+        order_cache.update_cache()
+
        # _upsert_order_from_execution_report(event)
        # _append_trade_from_execution_report(event)
        # _persist_ws_updated_caches(event_type)
