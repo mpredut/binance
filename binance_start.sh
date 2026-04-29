@@ -1,6 +1,7 @@
 #!/bin/bash
 
-VPN_TIMEOUT=60
+VPN_RETRY_TIMEOUT=60
+SLEEP_AFTER_VPN_CONNECT=3
 SLEEP_AFTER_KILL=5
 PYTHON_START_WAIT=5   # secunde să așteptăm după pornire înainte să verificăm
 
@@ -11,10 +12,10 @@ sleep 5
 while [ "$(piactl get connectionstate)" != "Connected" ]; do
     echo "⏳ VPN nu este conectat. Încerc reconectare..."
     piactl connect
-    sleep 5
-    SECONDS_PASSED=$((SECONDS_PASSED + 5))
-    if [ "$SECONDS_PASSED" -ge "$VPN_TIMEOUT" ]; then
-        echo "❌ VPN nu s-a conectat in $VPN_TIMEOUT sec!"
+    sleep SLEEP_AFTER_VPN_CONNECT
+    SECONDS_PASSED=$((SECONDS_PASSED + SLEEP_AFTER_VPN_CONNECT))
+    if [ "$SECONDS_PASSED" -ge "$VPN_RETRY_TIMEOUT" ]; then
+        echo "❌ VPN nu s-a conectat in $VPN_RETRY_TIMEOUT sec!"
         exit 1
     fi
 done
