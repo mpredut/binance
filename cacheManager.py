@@ -2,6 +2,9 @@ import json
 import os
 import time
 import datetime
+import asyncio
+import importlib
+import builtins
 from datetime import datetime, timedelta
 from abc import ABC, abstractmethod
 from collections import defaultdict
@@ -11,18 +14,57 @@ import threading
 import log
 import utils as u
 import symbols as sym
-import binanceapi as api
-import binanceWSevents as ws
+import bapi as api
 
 #from log import PRINT_CONTEXT
 
 
 # disable logs by redefine with dummy
-def print(*args, **kwargs):
-   pass
-log.print = lambda *args, **kwargs: None
+#def print(*args, **kwargs):
+#   pass
+#log.print = lambda *args, **kwargs: None
 
 #log.disable_print()
+
+# WS-only mode: when True, polling for Order/Trade/AssetValue is paused while WS is healthy.
+WS_ONLY_MODE = True
+WS_LOSS_TIMEOUT_SEC = 40 # 600  # 10 minute 
+WS_EVENT_LOG_ENABLED = True
+
+_ws_health_lock = threading.Lock()
+_ws_available = False
+_ws_last_event_ts = 0.0
+_ws_is_healthy = False
+
+
+def _mark_ws_available(value):
+    global _ws_available
+    with _ws_health_lock:
+        _ws_available = value
+
+
+def _mark_ws_event_received():
+    global _ws_last_event_ts, _ws_is_healthy
+    with _ws_health_lock:
+        _ws_last_event_ts = time.time()
+        _ws_is_healthy = True
+
+
+def _mark_ws_unhealthy():
+    print("UNHAPPY -:( ) : _mark_ws_unhealthy ")
+    global _ws_is_healthy
+    with _ws_health_lock:
+        _ws_is_healthy = False
+
+
+def _should_poll_for_manager(cls_name):
+    if not WS_ONLY_MODE:
+        return True
+    ws_managed_classes = {"CacheOrderManager", "CacheTradeManager", "CacheAssetValueManager"}
+    if cls_name not in ws_managed_classes:
+        return True
+    with _ws_health_lock:
+        return (not _ws_available) or (not _ws_is_healthy)
 
 class CacheManagerInterface(ABC):
     def __init__(self, sync_ts, symbols, filename, append_mode = True, api_client=api):
@@ -51,7 +93,7 @@ class CacheManagerInterface(ABC):
       
         # function calls here after all inint vars
         self.load_state()
-        self.thread = self.periodic_sync(sync_ts, False)
+        self.periodic_sync(sync_ts, False)
     
 
     #def get_all_symbols_from_cache(self):
@@ -134,7 +176,7 @@ class CacheManagerInterface(ABC):
                         "fetchtime": self.fetchtime_time_per_symbol
                     }, f, indent=1)
                 os.replace(tmp_file, self.filename)
-                print(f"[{self.cls_name}][info] Save cache to {self.filename}")
+                print(f"[{self.cls_name}][info] Save cache to file {self.filename}")
         except Exception as e:
             print(f"[{self.cls_name}][Eroare] La salvarea fișierului cache {self.filename} / .tmp : {e}")
 
@@ -216,7 +258,10 @@ class CacheManagerInterface(ABC):
         def run():
             while True:
                 print(f"\n[{self.cls_name}] Sync started at {time.strftime('%Y-%m-%d %H:%M:%S')} for {self.symbols}")
-                self.update_cache()
+                if _should_poll_for_manager(self.cls_name):
+                    self.update_cache()
+                else:
+                    print(f"[{self.cls_name}] Skip polling (WS-only mode active, WS healthy).")
                 print(f"[{self.cls_name}] save state is {self.save_state}.")
                 if self.save_state:
                     self.save_state_to_file()
@@ -249,7 +294,7 @@ class CacheTradeManager(CacheManagerInterface):
         
     def get_remote_items(self, symbol, startTime):
         import importlib
-        apitrades = importlib.import_module("binanceapi_trades")
+        apitrades = importlib.import_module("bapi_trades")
         
         current_time = int(time.time() * 1000)
         backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
@@ -291,8 +336,8 @@ class CacheOrderManager(CacheManagerInterface):
         return None
         
     def get_remote_items(self, symbol, startTime):
-        #import binanceapi_trades as apitrades
-        import binanceapi_allorders as apiorders
+        #import bapi_trades as apitrades
+        import bapi_allorders as apiorders
         
         current_time = int(time.time() * 1000)
         #backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
@@ -530,17 +575,286 @@ def get_cache_manager(name, symbols=None):
     return CacheFactory.get(name, symbols)
 
 
-# ###### 
-# ###### FORCE CACHE TO BE UPDATEING ####### 
-# ###### 
+# ######
+# ###### Real-time Binance user stream -> cache actions
+# ######
+_ws_bridge = None
+_ws_bridge_lock = threading.Lock()
+_ws_event_stats = defaultdict(int)
+import asyncio, websockets
+from keys.apikeys import api_key_ws
 
-def handler(event_type, data):
-    print("cacheManager handler call from binance ....")
+class BinanceUserDataStreamBridge:
+    def __init__(self, event_handler, keepalive_sec=30 * 60):
+        self.event_handler = event_handler
+        self.keepalive_sec = keepalive_sec
+        self._started = False
+        self._watchdog_thread = None
+        self._signing_key = u._load_ed25519_signing_key()
+
+    def start(self):
+        if self._started:
+            return
+        self._started = True
+        self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
+        self._watchdog_thread.start()
+        thread = threading.Thread(target=self._run_loop, daemon=True)
+        thread.start()
+
+    def _run_loop(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop.run_until_complete(self._listen_forever())
+
+    async def _listen_forever(self):
+        if self._signing_key is None:
+            _mark_ws_available(False)
+            _mark_ws_unhealthy()
+            print("[cacheManager][WS] Cheia Ed25519 lipseste, fallback polling.")
+            return
+
+        try:
+            import websockets as ws_module
+        except ImportError:
+            _mark_ws_available(False)
+            _mark_ws_unhealthy()
+            print("[cacheManager][WS] ImportError!")
+            return
+
+        #_mark_ws_event_received()
+        _mark_ws_available(True)
+        last_keepalive = time.time()
+        reconnect_delay = 1
+        last_ping = time.time()
+
+        while True:
+            try:
+                url = "wss://ws-api.binance.com:443/ws-api/v3"
+                async with ws_module.connect(url, ping_interval=20, ping_timeout=20) as ws:
+                    # Login
+                    timestamp = int(time.time() * 1000)
+                    params_str = f"apiKey={api_key_ws}&timestamp={timestamp}"
+                    signature = u._sign_ed25519(self._signing_key, params_str)
+
+                    await ws.send(json.dumps({
+                        "id": "login",
+                        "method": "session.logon",
+                        "params": {
+                            "apiKey": api_key_ws,
+                            "timestamp": timestamp,
+                            "signature": signature
+                        }
+                    }))
+
+                    resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+                    if resp.get("status") != 200:
+                        print(f"[cacheManager][WS] Login failed: {resp}")
+                        await asyncio.sleep(reconnect_delay)
+                        reconnect_delay = min(60, reconnect_delay * 2)
+                        continue
+
+                    print("[cacheManager][WS] ✅ Login OK!")
+
+                    # Subscribe
+                    await ws.send(json.dumps({
+                        "id": "sub",
+                        "method": "userDataStream.subscribe"
+                    }))
+
+                    _mark_ws_event_received()
+                    reconnect_delay = 1
+                    last_keepalive = time.time()
+
+                    while True:
+                        # Keepalive
+                        if time.time() - last_keepalive >= self.keepalive_sec:
+                            timestamp = int(time.time() * 1000)
+                            params_str = f"apiKey={api_key_ws}&timestamp={timestamp}"
+                            signature = u._sign_ed25519(self._signing_key, params_str)
+                            await ws.send(json.dumps({
+                                "id": "keepalive",
+                                "method": "session.logon",
+                                "params": {
+                                    "apiKey": api_key_ws,
+                                    "timestamp": timestamp,
+                                    "signature": signature
+                                }
+                            }))
+                            last_keepalive = time.time()
+
+                        # Ping propriu la fiecare WS_LOSS_TIMEOUT_SEC/2 s ca să știm că conexiunea e vie
+                        if time.time() - last_ping >= WS_LOSS_TIMEOUT_SEC / 2:
+                            print("ping sending ...")
+                            await ws.send(json.dumps({"id": "ping", "method": "ping"}))
+                            last_ping = time.time()
+
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=30)
+                        except asyncio.TimeoutError:
+                            # Normal — nu au venit events, continuăm loop-ul
+                            print("[cacheManager][WS] Heartbeat (no events in 30s)")
+                            #_mark_ws_event_received()  # resetăm watchdog-ul
+                            continue
+
+                        event = json.loads(raw)
+                        print(f"[WS RAW] {json.dumps(event)[:200]}")
+                        # Skip răspuns la ping sau răspunsuri la comenzi (au "id") 
+                        if "id" in event:
+                            if event["id"]=="ping":
+                                print("ping received, reset watchdog!")
+                                _mark_ws_event_received()  # resetăm watchdog-ul
+                            else: 
+                                print(f"[WS] Răspuns comandă ignorat: id={event.get('id')} status={event.get('status')}")
+                                continue
+                        
+                        # ── Nou WS API învelește evenimentul în "event" ──
+                        if "event" in event:
+                            event = event["event"]
+                            
+                        _mark_ws_event_received()
+                        self.event_handler(event)
+
+            except Exception as e:
+                _mark_ws_unhealthy()
+                print(f"[cacheManager][WS] Eroare: {e}. Reconnect în {reconnect_delay}s...")
+                await asyncio.sleep(reconnect_delay)
+                reconnect_delay = min(60, reconnect_delay * 2)
+
+    def _watchdog_loop(self):
+        while True:
+            now = time.time()
+            with _ws_health_lock:
+                age = now - _ws_last_event_ts if _ws_last_event_ts else float("inf")
+                ws_available = _ws_available
+                ws_healthy = _ws_is_healthy
+            if ws_available and ws_healthy and age > WS_LOSS_TIMEOUT_SEC:
+                _mark_ws_unhealthy()
+                print(f"[cacheManager][WARNING] Fără evenimente WS de {int(age)}s. Fallback polling.")
+            time.sleep(5)
+
+
+def _upsert_order_from_execution_report(event):
+    symbol = event.get("s")
+    if not symbol:
+        return
+
+    order_cache = get_cache_manager("Order")
+    order_item = {
+        "orderId": event.get("i"),
+        "price": float(event.get("L") or event.get("p") or 0),
+        "quantity": float(event.get("l") or event.get("q") or 0),
+        "timestamp": int(event.get("T") or event.get("E") or int(time.time() * 1000)),
+        "side": event.get("S"),
+        "status": event.get("X"),
+        "symbol": symbol,
+        "eventType": event.get("x"),
+    }
+
+    with order_cache.lock:
+        bucket = order_cache.cache.setdefault(symbol, [])
+        existing_idx = next(
+            (idx for idx, item in enumerate(bucket) if str(item.get("orderId")) == str(order_item["orderId"])),
+            None
+        )
+        if existing_idx is not None:
+            bucket[existing_idx].update(order_item)
+        else:
+            bucket.append(order_item)
+        order_cache.fetchtime_time_per_symbol[symbol] = int(time.time() * 1000)
+
+
+def _append_trade_from_execution_report(event):
+    if event.get("x") != "TRADE":
+        return
+    symbol = event.get("s")
+    if not symbol:
+        return
+
+    trade_cache = get_cache_manager("Trade")
+    trade_id = str(event.get("t") or f"{event.get('i')}-{event.get('T')}")
+    trade_item = {
+        "symbol": symbol,
+        "id": trade_id,
+        "orderId": event.get("i"),
+        "price": event.get("L") or event.get("p"),
+        "qty": event.get("l") or event.get("q"),
+        "time": int(event.get("T") or event.get("E") or int(time.time() * 1000)),
+        "isBuyer": str(event.get("S", "")).upper() == "BUY",
+    }
+
+    with trade_cache.lock:
+        bucket = trade_cache.cache.setdefault(symbol, [])
+        if not any(str(item.get("id")) == trade_id for item in bucket):
+            bucket.append(trade_item)
+            trade_cache.fetchtime_time_per_symbol[symbol] = int(time.time() * 1000)
+
+
+def _refresh_asset_value_from_ws_event():
+    asset_cache = get_cache_manager("AssetValue", symbols=["TOTAL"])
+    asset_cache.update_cache_per_symbol("TOTAL")
+
+
+def _persist_ws_updated_caches(event_type):
     if event_type == "executionReport":
-        get_cache_manager("Order").update_cache()
+        get_cache_manager("Order").save_state_to_file()
+        get_cache_manager("Trade").save_state_to_file()
+    elif event_type in ("balanceUpdate", "outboundAccountPosition"):
+        get_cache_manager("AssetValue", symbols=["TOTAL"]).save_state_to_file()
 
-print("⚙️ cacheManager importat!")
-ws.startWSevents(handler)
+
+def _handle_binance_ws_event(event):
+    event_type = event.get("e")
+    if not event_type:
+        return
+
+    _ws_event_stats[event_type] += 1
+
+    if event_type == "executionReport":
+        if WS_EVENT_LOG_ENABLED:
+            print(
+                "[cacheManager][WS] executionReport "
+                f"symbol={event.get('s')} orderId={event.get('i')} "
+                f"status={event.get('X')} execType={event.get('x')} side={event.get('S')}"
+            )
+        _upsert_order_from_execution_report(event)
+        _append_trade_from_execution_report(event)
+        _persist_ws_updated_caches(event_type)
+        return
+
+    if event_type in ("balanceUpdate", "outboundAccountPosition"):
+        if WS_EVENT_LOG_ENABLED:
+            print(
+                f"[cacheManager][WS] {event_type} event received"
+            )
+        _refresh_asset_value_from_ws_event()
+        _persist_ws_updated_caches(event_type)
+        return
+
+def enable_real_ws_event_sync():
+    global _ws_bridge
+    import sys
+    if sys.modules.get("_cacheManager_initialized"):
+        # Deja pornit dintr-un import anterior
+        if _ws_bridge is not None:
+            return _ws_bridge
+    with _ws_bridge_lock:
+        if _ws_bridge is not None:
+            return _ws_bridge
+        _ws_bridge = BinanceUserDataStreamBridge(event_handler=_handle_binance_ws_event)
+        _ws_bridge.start()
+        return _ws_bridge
+        
+def _initialize_once():
+    import sys
+    if sys.modules.get("_cacheManager_initialized"):
+        print("[cacheManager] Already initialized, skip.")
+        return
+    sys.modules["_cacheManager_initialized"] = True
+    enable_real_ws_event_sync()
+    print("⚙️ cacheManager importat! (real WS events + API polling mode)")
+
+_initialize_once()
+
                
 if __name__ == "__main__":
     threads = []
