@@ -11,7 +11,8 @@ from binance.exceptions import BinanceAPIException
 import log
 import utils as u
 import symbols as sym
-import binanceapi as api
+import bapi as api
+import bapi_placeorder as po
 
 def calculate_commissions(amount, price):
     # Comisionul de 0.10%
@@ -191,7 +192,7 @@ while True:
                     proc = calculate_sell_proc(5/100, changed_proc, state.iteration, MAX_ITERATIONS)
                     proc = max(1.001, 1 + proc)
                     sell_price = state.buy_price * proc
-                    sell_order = api.place_order("SELL", sym.btcsymbol, sell_price, state.quantity)
+                    sell_order = po.place_order("SELL", sym.btcsymbol, sell_price, state.quantity)
                     if sell_order:
                         state.sell_order_id = sell_order['orderId']
                         state.iteration += 1
@@ -244,7 +245,7 @@ while True:
             
             btc_buy_quantity = budget / buy_price
             print(f"Plasez ordinul de cumparare la pretul: {buy_price}, cantitate: {btc_buy_quantity}")
-            buy_order = api.place_order("BUY", sym.btcsymbol, buy_price, btc_buy_quantity)
+            buy_order = po.place_order("BUY", sym.btcsymbol, buy_price, btc_buy_quantity)
             
             if buy_order:
                 last_state = State("Profit",

@@ -15,7 +15,8 @@ import log
 import alert
 import utils as u
 import symbols as sym
-import binanceapi as api
+import bapi as api
+import bapi_placeorder as po
 import binanceapi_trades as apitrades
 import binanceapi_allorders as apiorders
 
@@ -265,7 +266,7 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
             adjusted_buy_price = buy_price * (1 - i * price_step / 100)
             order_quantity = quantity / num_orders  # Divide quantity among orders
             print(f"Placing buy order at price: {adjusted_buy_price:.2f} USDT for {order_quantity:.6f} BTC")
-            order = api.place_order_smart("BUY", sym.btcsymbol, adjusted_buy_price, order_quantity)
+            order = po.place_order_smart("BUY", sym.btcsymbol, adjusted_buy_price, order_quantity)
             if order:
                 print(f"Buy order placed successfully with ID: {order['orderId']}")
                 order_placed = True
@@ -282,7 +283,7 @@ def track_and_place_order(action, proposed_price, current_price, slope, quantity
             adjusted_sell_price = sell_price * (1 + i * price_step / 100)
             order_quantity = quantity / num_orders  # Divide quantity among orders
             print(f"Placing sell order at price: {adjusted_sell_price:.2f} USDT for {order_quantity:.6f} BTC")
-            order = api.place_order_smart("SELL", sym.btcsymbol, adjusted_sell_price, order_quantity)
+            order = po.place_order_smart("SELL", sym.btcsymbol, adjusted_sell_price, order_quantity)
             if order:
                 print(f"Sell order placed successfully with ID: {order['orderId']}")
                 order_placed = True

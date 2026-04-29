@@ -104,7 +104,7 @@ def sell_all_assets():
 
         try:
             current_price = api.get_current_price(sell_symbol)
-            order = api.place_safe_order(
+            order = po.place_safe_order(
                 "SELL",
                 sell_symbol,
                 price=current_price,
@@ -154,7 +154,7 @@ def buy_with_all_cash(buy_symbol=BUY_SYMBOL_DEFAULT, cash_ratio=BUY_USE_CASH_RAT
         f"({cash_ratio*100:.2f}% of free cash), qty={qty:.8f}"
     )
     try:
-        order = api.place_safe_order(
+        order = po.place_safe_order(
             "BUY",
             buy_symbol,
             price=current_price,

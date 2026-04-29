@@ -4,11 +4,12 @@ import datetime
 import math
 import sys
 
-#my imports
-import utils as u
-from binanceapi import client
+#BINANCE
 from binance.exceptions import BinanceAPIException
 
+#my imports
+import utils as u
+from bapi_client import client
 import symbols as sym
   
 #######

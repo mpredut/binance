@@ -67,7 +67,7 @@ async def sell(request: TradeRequest):
     current_price = api.get_current_price(str(request.symbol))
     sell_price = current_price * (1 + 0.01 )
     print(f"Pret BTC {current_price} {sell_price}")
-    api.place_order_smart("SELL", str(request.symbol), sell_price, request.amount)
+    po.place_order_smart("SELL", str(request.symbol), sell_price, request.amount)
     # place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5, pair=True)
     return {"message": f"Vândut {request.amount} din {request.symbol}"}
 
@@ -79,7 +79,7 @@ async def buy(request: TradeRequest):
     current_price = api.get_current_price(str(request.symbol))
     sell_price = current_price * (1 - 0.01 )
     print(f"Pret BTC {current_price} {sell_price}")
-    api.place_order_smart("BUY", str(request.symbol), sell_price, request.amount)
+    po.place_order_smart("BUY", str(request.symbol), sell_price, request.amount)
     # place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5, pair=True)
     return {"message": f"Cumpărat {request.amount} din {request.symbol}"}
 

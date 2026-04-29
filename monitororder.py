@@ -9,7 +9,10 @@ from binance.exceptions import BinanceAPIException
 #my imports
 import utils as u
 import symbols as sym
-import binanceapi as api
+import bapi as api
+import bapi_placeorder as po
+
+
 
 # 
 MAX_PROC = 0.77
@@ -75,7 +78,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
             quantity = order['quantity']
             
             # incearca sa plaseze un nou ordin
-            new_order = api.place_safe_order(order_type, symbol, new_price, quantity)
+            new_order = po.place_safe_order(order_type, symbol, new_price, quantity)
             
             if new_order:
                 orders[new_order['orderId']] = {
@@ -98,7 +101,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
     for failed_order in failed_orders[:]:  # Iteram pe o copie a listei 
         print(f"retry order failed: {failed_order}")
         time.sleep(MONITOR_BETWEEN_ORDERS_INTERVAL)
-        retry_order = api.place_safe_order(
+        retry_order = po.place_safe_order(
             failed_order['order_type'],
             failed_order['symbol'],
             failed_order['price'],
