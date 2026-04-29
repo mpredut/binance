@@ -2,7 +2,7 @@
 
 VPN_TIMEOUT=60
 SLEEP_BETWEEN=10
-PYTHON_START_WAIT=3   # secunde să așteptăm după pornire înainte să verificăm
+PYTHON_START_WAIT=5   # secunde să așteptăm după pornire înainte să verificăm
 
 # ===== Verific și pornesc VPN =====
 echo "🔐 Verific conexiunea VPN..."
@@ -75,18 +75,29 @@ done
 
 sleep $SLEEP_BETWEEN
 
-# ===== Pornire scripturi Python cu verificare =====
-echo "🚀 Pornesc scripturile Python..."
+declare -a PIDS
+declare -a LOGS
 FAILED=()
 
+echo "🚀 Pornesc scripturile Python..."
+# Pornim scripturile
 for script in "${scripts[@]}"; do
     log="$SCRIPT_DIR/${script%.py}.log"
-    cd "$SCRIPT_DIR"
+    LOGS+=("$log")
+    cd "$SCRIPT_DIR" || exit 1
     nohup python "$script" > "$log" 2>&1 &
     PID=$!
+    PIDS+=("$PID")
+done
 
-    # Așteptăm puțin și verificăm că procesul încă trăiește
-    sleep $PYTHON_START_WAIT
+sleep "$PYTHON_START_WAIT"
+
+# Verificăm fiecare proces
+for i in "${!scripts[@]}"; do
+    script="${scripts[$i]}"
+    PID="${PIDS[$i]}"
+    log="${LOGS[$i]}"
+
     if kill -0 "$PID" 2>/dev/null; then
         echo "✔ Pornit $script (PID=$PID) → $log"
     else
@@ -95,6 +106,7 @@ for script in "${scripts[@]}"; do
         FAILED+=("$script")
     fi
 done
+
 
 # ===== Raport final =====
 if [ ${#FAILED[@]} -eq 0 ]; then
