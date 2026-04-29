@@ -4,6 +4,7 @@ After=network-online.target pia.service
 Requires=pia.service
 
 [Service]
+Type=simple
 User=predut
 WorkingDirectory=/home/predut/binance
 ExecStart=/bin/bash /home/predut/binance/binance_start.sh
