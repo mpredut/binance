@@ -315,13 +315,24 @@ def _load_ed25519_signing_key():
     try:
         with open("keys/ed25519_private.pem", "r") as f:
             pem_data = f.read()
-        b64 = _re.search(r"-----BEGIN PRIVATE KEY-----(.+?)-----END PRIVATE KEY-----", pem_data, _re.DOTALL)
-        der_bytes = base64.b64decode(b64.group(1).strip())
-        return nacl.signing.SigningKey(der_bytes[-32:])
-    except Exception as e:
-        print(f"[cacheManager][WS] Eroare la încărcarea cheii Ed25519: {e}")
-        return None
+        b64match = _re.search(
+            r"-----BEGIN PRIVATE KEY-----(.*?)-----END PRIVATE KEY-----",
+            pem_data,
+            _re.DOTALL
+        )
+        if not b64match:
+            raise ValueError("PEM invalid")
+        der_bytes = base64.b64decode(b64match.group(1).strip())
+        if len(der_bytes) < 32:
+            raise ValueError("DER prea scurt")
+        
+        seed = der_bytes[-32:]
+        return nacl.signing.SigningKey(seed)
 
+    except Exception as e:
+        print(f"Eroare la încărcarea cheii Ed25519: {e}")
+        return None
+    
 def _sign_ed25519(signing_key, payload: str) -> str:
     signed = signing_key.sign(payload.encode())
     return base64.b64encode(signed.signature).decode()
