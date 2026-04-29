@@ -1,6 +1,6 @@
 [Unit]
 Description=Binance Python MultiScript Runner
-After=pia.service
+After=network-online.target pia.service
 Requires=pia.service
 
 [Service]
@@ -9,7 +9,9 @@ User=predut
 WorkingDirectory=/home/predut/binance
 ExecStart=/bin/bash /home/predut/binance/binance_start.sh
 Restart=always
-RestartSec=901
+RestartSec=1200
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
