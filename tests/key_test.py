@@ -1,6 +1,6 @@
 
 from binance.client import Client
-from apikeys import api_key, api_secret
+from keys.apikeys import api_key, api_secret
 
 # key_test.py
 # Test direct cu requests
@@ -15,7 +15,7 @@ print(response.json())
 exit(0)
 
 from binance.client import Client
-from apikeys import api_key, api_secret
+from keys.apikeys import api_key, api_secret
 
 client = Client(api_key, api_secret)
 

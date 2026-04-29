@@ -1,6 +1,6 @@
 import nacl.signing
 import base64, time, json, asyncio, websockets
-from apikeys import api_key
+from keys.apikeys import api_key
 
 with open("ed25519_private.pem", "r") as f:
     pem_data = f.read()

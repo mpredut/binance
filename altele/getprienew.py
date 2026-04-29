@@ -1,6 +1,6 @@
 from binance.client import Client
 from binance.streams import BinanceSocketManager
-from apikeys import api_key, api_secret
+from keys.apikeys import api_key, api_secret
 
 # Initialize the client
 client = Client(api_key, api_secret, tld='us')

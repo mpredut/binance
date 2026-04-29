@@ -10,7 +10,7 @@ import requests
 import utils
 
 ####MYLIB
-from apikeys import PUSHBULLET_API_KEY, SMTP_USERNAME, SMTP_PASSWORD, TO_EMAIL
+from keys.apikeys import PUSHBULLET_API_KEY, SMTP_USERNAME, SMTP_PASSWORD, TO_EMAIL
 #pb = Pushbullet(PUSHBULLET_API_KEY)
 
 # Configurare SMTP

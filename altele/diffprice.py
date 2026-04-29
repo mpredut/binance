@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 from binance.client import Client
 from binance.exceptions import BinanceAPIException
-from apikeys import api_key, api_secret
+from keys.apikeys import api_key, api_secret
 
 
 # Initialize the client for Binance.com

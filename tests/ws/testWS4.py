@@ -2,7 +2,7 @@
 import asyncio
 import websockets
 import json
-from apikeys import api_key
+from keys.apikeys import api_key
 
 async def test_ws():
     url = "wss://ws-api.binance.com:443/ws-api/v3"

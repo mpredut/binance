@@ -1,7 +1,7 @@
 import asyncio
 import websockets
 import json
-from apikeys import api_key, api_secret
+from keys.apikeys import api_key, api_secret
 import time
 import hmac
 import hashlib

@@ -4,7 +4,7 @@ import json
 import time
 import hmac
 import hashlib
-from apikeys import api_key, api_secret
+from keys.apikeys import api_key, api_secret
 
 def sign(payload: str) -> str:
     return hmac.new(

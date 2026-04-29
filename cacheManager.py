@@ -581,28 +581,8 @@ def get_cache_manager(name, symbols=None):
 _ws_bridge = None
 _ws_bridge_lock = threading.Lock()
 _ws_event_stats = defaultdict(int)
-
-from apikeys import api_key_ws
-import base64, time, json, asyncio, websockets
-import nacl.signing
-import re as _re
-
-# ── Ed25519 signing ──
-def _load_ed25519_signing_key():
-    try:
-        with open("ed25519_private.pem", "r") as f:
-            pem_data = f.read()
-        b64 = _re.search(r"-----BEGIN PRIVATE KEY-----(.+?)-----END PRIVATE KEY-----", pem_data, _re.DOTALL)
-        der_bytes = base64.b64decode(b64.group(1).strip())
-        return nacl.signing.SigningKey(der_bytes[-32:])
-    except Exception as e:
-        print(f"[cacheManager][WS] Eroare la încărcarea cheii Ed25519: {e}")
-        return None
-
-def _sign_ed25519(signing_key, payload: str) -> str:
-    signed = signing_key.sign(payload.encode())
-    return base64.b64encode(signed.signature).decode()
-
+import asyncio, websockets
+from keys.apikeys import api_key_ws
 
 class BinanceUserDataStreamBridge:
     def __init__(self, event_handler, keepalive_sec=30 * 60):
@@ -610,7 +590,7 @@ class BinanceUserDataStreamBridge:
         self.keepalive_sec = keepalive_sec
         self._started = False
         self._watchdog_thread = None
-        self._signing_key = _load_ed25519_signing_key()
+        self._signing_key = u._load_ed25519_signing_key()
 
     def start(self):
         if self._started:
@@ -654,7 +634,7 @@ class BinanceUserDataStreamBridge:
                     # Login
                     timestamp = int(time.time() * 1000)
                     params_str = f"apiKey={api_key_ws}&timestamp={timestamp}"
-                    signature = _sign_ed25519(self._signing_key, params_str)
+                    signature = u._sign_ed25519(self._signing_key, params_str)
 
                     await ws.send(json.dumps({
                         "id": "login",
@@ -690,7 +670,7 @@ class BinanceUserDataStreamBridge:
                         if time.time() - last_keepalive >= self.keepalive_sec:
                             timestamp = int(time.time() * 1000)
                             params_str = f"apiKey={api_key_ws}&timestamp={timestamp}"
-                            signature = _sign_ed25519(self._signing_key, params_str)
+                            signature = u._sign_ed25519(self._signing_key, params_str)
                             await ws.send(json.dumps({
                                 "id": "keepalive",
                                 "method": "session.logon",
