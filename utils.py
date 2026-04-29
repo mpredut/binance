@@ -336,3 +336,30 @@ def _load_ed25519_signing_key():
 def _sign_ed25519(signing_key, payload: str) -> str:
     signed = signing_key.sign(payload.encode())
     return base64.b64encode(signed.signature).decode()
+
+
+#from cryptography.hazmat.primitives import serialization
+#from cryptography.hazmat.primitives.asymmetric import ed25519
+#import base64
+
+#def _load_ed25519_signing_key():
+#    try:
+#        with open("keys/ed25519_private.pem", "rb") as f:
+#            private_key = serialization.load_pem_private_key(
+#                f.read(),
+#                password=None
+#            )
+#
+#        if not isinstance(private_key, ed25519.Ed25519PrivateKey):
+#            raise ValueError("Cheia nu este Ed25519")
+#
+#        return private_key
+#
+#    except Exception as e:
+#        print(f"[cacheManager][WS] Eroare la încărcarea cheii Ed25519: {e}")
+#        return None
+
+
+#def _sign_ed25519(signing_key, payload: str) -> str:
+#    signature = signing_key.sign(payload.encode())
+#    return base64.b64encode(signature).decode()
