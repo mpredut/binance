@@ -1,7 +1,7 @@
 #!/bin/bash
 
 VPN_TIMEOUT=60
-SLEEP_BETWEEN=10
+SLEEP_AFTER_KILL=5
 PYTHON_START_WAIT=5   # secunde să așteptăm după pornire înainte să verificăm
 
 # ===== Verific și pornesc VPN =====
@@ -73,7 +73,7 @@ for script in "${scripts[@]}"; do
     fi
 done
 
-sleep $SLEEP_BETWEEN
+sleep $SLEEP_AFTER_KILL
 
 declare -a PIDS
 declare -a LOGS

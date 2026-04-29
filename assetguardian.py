@@ -223,6 +223,8 @@ def evaluate_and_maybe_sell_or_buy(
             f" Drop threshold reached ({growth_percent:.4f}% <= -{abs(drop_percent):.4f}%). "
             "Buying with all available cash..."
         )
+        #trimite alerta pe telefon - popup ca ceva este in neregula
+        #daca este sub un prag
         if buy_with_all_cash(buy_symbol=buy_symbol):
             _buy_triggered = True
             return True
