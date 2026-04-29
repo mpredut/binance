@@ -305,3 +305,23 @@ def gaussian_full_shifted(T, last_period, trend="down", steps=None):
     return t, w
 
 
+
+import base64
+import nacl.signing
+import re as _re
+
+# ── Ed25519 signing ──
+def _load_ed25519_signing_key():
+    try:
+        with open("keys/ed25519_private.pem", "r") as f:
+            pem_data = f.read()
+        b64 = _re.search(r"-----BEGIN PRIVATE KEY-----(.+?)-----END PRIVATE KEY-----", pem_data, _re.DOTALL)
+        der_bytes = base64.b64decode(b64.group(1).strip())
+        return nacl.signing.SigningKey(der_bytes[-32:])
+    except Exception as e:
+        print(f"[cacheManager][WS] Eroare la încărcarea cheii Ed25519: {e}")
+        return None
+
+def _sign_ed25519(signing_key, payload: str) -> str:
+    signed = signing_key.sign(payload.encode())
+    return base64.b64encode(signed.signature).decode()
