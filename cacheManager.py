@@ -159,14 +159,16 @@ class CacheManagerInterface(ABC):
             except Exception as e:
                 print(f"[{self.cls_name}][Eroare] La citirea fișierului cache {self.filename} : {e}")
                 self.update_cache()
-                self.save_state_to_file()
+                self.save_state_to_file_if_enabled()
         else :
             print(f"[{self.cls_name}][Info] File is missing, may be is it first time run. Creating it ....")
             self.update_cache()
-            self.save_state_to_file()
+            self.save_state_to_file_if_enabled()
 
 
-    def save_state_to_file(self):
+    def save_state_to_file_if_enabled(self):
+        if not self.save_state:
+            return
         try:
             with self.lock:
                 tmp_file = self.filename + ".tmp"
@@ -263,8 +265,7 @@ class CacheManagerInterface(ABC):
                 else:
                     print(f"[{self.cls_name}] Skip polling (WS-only mode active, WS healthy).")
                 print(f"[{self.cls_name}] save state is {self.save_state}.")
-                if self.save_state:
-                    self.save_state_to_file()
+                self.save_state_to_file_if_enabled()
                 print(f"[{self.cls_name}] Sync completed for {self.symbols}")
                 time.sleep(self.sync_ts)
 
@@ -272,7 +273,7 @@ class CacheManagerInterface(ABC):
         self.thread.start()
         return self.thread
     
-    def enable_save_state_to_file(self):
+    def enable_save_state_to_file_if_enabled(self):
         self.save_state = True
 
 
@@ -796,10 +797,10 @@ def _refresh_asset_value_from_ws_event():
 
 def _persist_ws_updated_caches(event_type):
     if event_type == "executionReport":
-        get_cache_manager("Order").save_state_to_file()
-        get_cache_manager("Trade").save_state_to_file()
+        get_cache_manager("Order").save_state_to_file_if_enabled()
+        get_cache_manager("Trade").save_state_to_file_if_enabled()
     elif event_type in ("balanceUpdate", "outboundAccountPosition"):
-        get_cache_manager("AssetValue", symbols=["TOTAL"]).save_state_to_file()
+        get_cache_manager("AssetValue", symbols=["TOTAL"]).save_state_to_file_if_enabled()
 
 
 def _handle_binance_ws_event(event):
