@@ -291,12 +291,18 @@ class _DailyFileHandler(logging.Handler):
 
     Thread-safe: the date check and file-handle swap are both inside the lock
     so midnight rotation is fully atomic.
+
+    Also handles external deletion of the log folder or log file: before each
+    write the handler checks whether the open fd still points to the same inode
+    as the file on disk.  If the file (or folder) was deleted by another
+    process the handler transparently recreates both and resumes logging.
     """
 
     def __init__(self, app_name: str) -> None:
         super().__init__()
         self._app_name      = app_name
         self._current_date: str | None = None
+        self._current_path  = ""          # absolute path of the open log file
         self._stream        = None
         self._lock          = threading.Lock()
 
@@ -311,13 +317,26 @@ class _DailyFileHandler(logging.Handler):
 
         os.makedirs(folder, exist_ok=True)
         path = os.path.join(folder, f"{self._app_name}_{date_str}.log")
-        try:
-            self._stream = open(path, "a", encoding="utf-8")
-        except FileNotFoundError:
-            # Folderul nu există → îl creăm și reîncercăm
-            os.makedirs(folder, exist_ok=True)
-        self._stream = open(path, "a", encoding="utf-8")
+        self._stream       = open(path, "a", encoding="utf-8")
+        self._current_path = path
         self._current_date = date_str
+
+    def _file_deleted(self) -> bool:
+        """Return True if the log file or its folder was removed externally.
+
+        Compares the inode/device of the open fd against the file on disk.
+        Any OSError (file gone, folder gone, permission error) also returns True
+        so the caller always reopens in that case.
+        """
+        if self._stream is None:
+            return True
+        try:
+            fd_stat   = os.fstat(self._stream.fileno())
+            disk_stat = os.stat(self._current_path)
+            return (fd_stat.st_ino != disk_stat.st_ino or
+                    fd_stat.st_dev != disk_stat.st_dev)
+        except OSError:
+            return True
 
     def emit(self, record: logging.LogRecord) -> None:
         try:
@@ -327,13 +346,16 @@ class _DailyFileHandler(logging.Handler):
                 today = datetime.datetime.now().strftime("%Y-%m-%d")
                 with _config_lock:
                     folder = _log_folder
-                if today != self._current_date or self._stream is None:
+
+                # Reopen if: new day, no stream, or file/folder deleted externally
+                if today != self._current_date or self._stream is None or self._file_deleted():
                     self._open_for_date(folder, today)
+
                 try:
                     self._stream.write(self.format(record) + "\n")
                     self._stream.flush()
                 except (FileNotFoundError, OSError, ValueError):
-                    # Folderul sau fișierul a fost șters între timp → recreăm
+                    # Fișierul a dispărut chiar între _file_deleted() și write()
                     self._open_for_date(folder, today)
                     self._stream.write(self.format(record) + "\n")
                     self._stream.flush()
