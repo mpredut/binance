@@ -6,14 +6,16 @@ import re
 import atexit
 import datetime
 import logging
+import shutil
 import threading
 
 
 # ── Defaults (overridable via configure()) ────────────────────────────────────
 
-_DEFAULT_LOG_FOLDER = "logger"
-_DEFAULT_MAX_SIZE   = 10 * 1024 ** 3  # 10 GB
-_DEFAULT_CHECK_EVERY = 100            # signal cleanup thread every N writes
+_DEFAULT_LOG_FOLDER       = "logger"
+_DEFAULT_MAX_SIZE         = 10 * 1024 ** 3  # 10 GB
+_DEFAULT_CHECK_EVERY      = 100             # signal cleanup thread every N writes
+_DEFAULT_MIN_FREE_PERCENT = 5.0            # delete oldest log if disk free < 5%
 
 
 # ── ANSI ──────────────────────────────────────────────────────────────────────
@@ -23,45 +25,30 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 # ── Module identity ───────────────────────────────────────────────────────────
 
-# Absolute path of this file — used to skip our own frames when walking the stack
 _THIS_FILE = os.path.normpath(os.path.abspath(__file__))
 
-# Prefixes that warrant showing caller file:line in the output
 _CALLER_PREFIXES = (
     "WARNING", "ERR", "CRITICAL", "DEBUG",
-    "EXCEP", "TRACEBACK" , "FAIL", "ALERT",
+    "EXCEP", "TRACEBACK", "FAIL", "ALERT",
 )
 _CALLER_PREFIXES += tuple(prefix.lower() for prefix in _CALLER_PREFIXES)
 
 def _needs_caller_info(message: str) -> bool:
-    """Return True if the message starts with a severity keyword."""
     return message.startswith(_CALLER_PREFIXES)
 
-# Keep references to the originals BEFORE we patch anything
 _original_print        = builtins.print
 _original_stderr_write = sys.stderr.write
 
 
 # ── Filename cache ────────────────────────────────────────────────────────────
-#
-# Maps raw co_filename -> (normalized_abs_path, basename).
-# Avoids repeated normpath+abspath+basename on every stack frame per call.
-# Bounded to _FILENAME_CACHE_MAX entries to prevent unbounded growth in
-# long-running apps with hot-reloaded or dynamically-imported modules.
 
 _FILENAME_CACHE_MAX = 512
-
-# (Python 3.9+)
 _filename_cache: dict[str, tuple[str, str]] = {}
-# (compatibil 3.8)
-#_filename_cache = {}  # type: dict
 
 def _resolve_filename(raw: str) -> tuple[str, str]:
-    """Return (normalized_abs_path, basename) for a raw co_filename, cached."""
     entry = _filename_cache.get(raw)
     if entry is None:
         if len(_filename_cache) >= _FILENAME_CACHE_MAX:
-            # Evict an arbitrary entry rather than letting the dict grow forever
             _filename_cache.pop(next(iter(_filename_cache)))
         norm  = os.path.normpath(os.path.abspath(raw))
         base  = os.path.basename(raw)
@@ -71,11 +58,6 @@ def _resolve_filename(raw: str) -> tuple[str, str]:
 
 
 def _get_caller_info() -> str:
-    """Walk the call stack to find the first frame outside this module.
-
-    Filename normalization results are cached to avoid repeated os calls.
-    Returns '[filename:line]' or '[unknown]'.
-    """
     try:
         frame = sys._getframe(0)
         while frame is not None:
@@ -89,32 +71,37 @@ def _get_caller_info() -> str:
 
 
 # ── Configuration state ───────────────────────────────────────────────────────
-#
-# All mutable config lives here so configure() can update it atomically.
-# _log_folder is resolved to an absolute path immediately so os.chdir() calls
-# after import cannot silently redirect log files to a different directory.
 
-_config_lock = threading.Lock()
-_log_folder  = os.path.normpath(os.path.abspath(_DEFAULT_LOG_FOLDER))
-_max_size    = _DEFAULT_MAX_SIZE
-_check_every = _DEFAULT_CHECK_EVERY
+_config_lock      = threading.Lock()
+_log_folder       = os.path.normpath(os.path.abspath(_DEFAULT_LOG_FOLDER))
+_max_size         = _DEFAULT_MAX_SIZE
+_check_every      = _DEFAULT_CHECK_EVERY
+_min_free_percent = _DEFAULT_MIN_FREE_PERCENT
 
 
 def configure(
     *,
-    log_folder:  str | None = None,
-    max_size:    int | None = None,
-    check_every: int | None = None,
+    log_folder:       str   | None = None,
+    max_size:         int   | None = None,
+    check_every:      int   | None = None,
+    min_free_percent: float | None = None,
 ) -> None:
     """Reconfigure the logger at runtime (all parameters are optional).
 
     Args:
-        log_folder:   Directory for log files.  Resolved to an absolute path
-                      immediately so later os.chdir() calls have no effect.
-        max_size:     Maximum total size in bytes before oldest log is deleted.
-        check_every:  Number of log writes between folder-size checks.
+        log_folder:        Directory for log files.  Resolved to an absolute
+                           path immediately so later os.chdir() calls have no
+                           effect.
+        max_size:          Maximum total size in bytes of the log folder before
+                           the oldest log is deleted.
+        check_every:       Number of log writes between folder-size / disk
+                           free-space checks.
+        min_free_percent:  Minimum free disk space as a percentage of the
+                           partition total (0-100).  When free space drops
+                           below this threshold the oldest log file is deleted.
+                           Set to 0.0 to disable the check.
     """
-    global _log_folder, _max_size, _check_every
+    global _log_folder, _max_size, _check_every, _min_free_percent
 
     with _config_lock:
         if log_folder is not None:
@@ -129,24 +116,22 @@ def configure(
             if check_every <= 0:
                 raise ValueError("check_every must be > 0")
             _check_every = check_every
+        if min_free_percent is not None:
+            if not (0.0 <= min_free_percent <= 100.0):
+                raise ValueError("min_free_percent must be between 0 and 100")
+            _min_free_percent = min_free_percent
 
 
 # ── Background cleanup thread ─────────────────────────────────────────────────
-#
-# The hot path (print / stderr) only increments a counter and, when the
-# threshold is reached, sets _cleanup_event.  All I/O-heavy work (scandir,
-# remove) happens exclusively on this background thread so that printing
-# threads never pay the cost of a folder scan.
 
 _cleanup_event = threading.Event()
-_cleanup_stop  = threading.Event()  # set by atexit to shut the thread down
+_cleanup_stop  = threading.Event()
 
 
 def _get_folder_size(folder: str) -> int:
-    """Return total size in bytes of all files directly inside folder."""
     total = 0
     try:
-        for entry in os.scandir(folder):  # scandir is faster than listdir+stat
+        for entry in os.scandir(folder):
             if entry.is_file(follow_symlinks=False):
                 total += entry.stat().st_size
     except OSError:
@@ -154,8 +139,18 @@ def _get_folder_size(folder: str) -> int:
     return total
 
 
+def _get_disk_free_percent(folder: str) -> float | None:
+    """Return free disk space as a percentage of partition total, or None on error."""
+    try:
+        usage = shutil.disk_usage(folder)
+        if usage.total == 0:
+            return None
+        return usage.free / usage.total * 100.0
+    except OSError:
+        return None
+
+
 def _delete_oldest_log(folder: str) -> None:
-    """Delete the oldest file (by mtime) in folder."""
     oldest_path  = None
     oldest_mtime = float("inf")
     try:
@@ -179,26 +174,20 @@ def _delete_oldest_log(folder: str) -> None:
 
 
 def _cleanup_loop() -> None:
-    """Background thread: wait for the cleanup event, then enforce folder size.
-
-    Runs until _cleanup_stop is set (via atexit).  The wait() timeout lets the
-    thread notice _cleanup_stop even if no more writes ever arrive.
-    """
     while not _cleanup_stop.is_set():
-        # Block until a printing thread signals that the write threshold was
-        # reached, or until the timeout lets us re-check _cleanup_stop.
         _cleanup_event.wait(timeout=5.0)
         _cleanup_event.clear()
 
         if _cleanup_stop.is_set():
             break
 
-        # Snapshot config atomically so configure() changes are seen consistently
         with _config_lock:
-            folder   = _log_folder
-            max_size = _max_size
+            folder           = _log_folder
+            max_size         = _max_size
+            min_free_percent = _min_free_percent
 
         try:
+            # ── Check 1: log folder total size ───────────────────────────────
             total = _get_folder_size(folder)
             while total >= max_size:
                 mb     = total    / (1024 * 1024)
@@ -211,11 +200,29 @@ def _cleanup_loop() -> None:
                 _delete_oldest_log(folder)
                 total  = _get_folder_size(folder)
                 if total >= before:
-                    # Nothing was deleted (empty folder or permission error)
                     _original_print(
                         "[LOGGER] WARNING: could not reduce log folder size, aborting cleanup"
                     )
                     break
+
+            # ── Check 2: free disk space on partition ─────────────────────────
+            if min_free_percent > 0.0:
+                free_pct = _get_disk_free_percent(folder)
+                while free_pct is not None and free_pct < min_free_percent:
+                    _original_print(
+                        f"[LOGGER] WARNING: disk free space {free_pct:.1f}% "
+                        f"< threshold {min_free_percent:.1f}% → deleting oldest log"
+                    )
+                    before_pct = free_pct
+                    _delete_oldest_log(folder)
+                    free_pct = _get_disk_free_percent(folder)
+                    if free_pct is None or free_pct <= before_pct:
+                        # Nimic nu s-a eliberat sau nu putem măsura — oprim
+                        _original_print(
+                            "[LOGGER] WARNING: could not recover disk space, aborting cleanup"
+                        )
+                        break
+
         except Exception as exc:
             _original_print(f"[LOGGER] cleanup error: {exc}")
 
@@ -223,15 +230,14 @@ def _cleanup_loop() -> None:
 _cleanup_thread = threading.Thread(
     target=_cleanup_loop,
     name="logger-cleanup",
-    daemon=True,  # will not prevent the process from exiting on its own
+    daemon=True,
 )
 _cleanup_thread.start()
 
 
 def _stop_cleanup_thread() -> None:
-    """Signal the cleanup thread to exit and wait for it (called by atexit)."""
     _cleanup_stop.set()
-    _cleanup_event.set()         # unblock wait() immediately
+    _cleanup_event.set()
     _cleanup_thread.join(timeout=5.0)
 
 
@@ -239,21 +245,12 @@ atexit.register(_stop_cleanup_thread)
 
 
 # ── Write counter ─────────────────────────────────────────────────────────────
-#
-# Shared by both the print and stderr paths.  Every log write (regardless of
-# source) counts toward the cleanup threshold.
 
 _write_counter = 0
 _counter_lock  = threading.Lock()
 
 
 def _bump_counter() -> bool:
-    """Increment the shared write counter.
-
-    Returns True and resets the counter every _check_every calls, indicating
-    that the cleanup thread should be woken up.  The threshold is read inside
-    the lock so configure(check_every=…) takes effect on the next cycle.
-    """
     global _write_counter
     with _counter_lock:
         _write_counter += 1
@@ -268,8 +265,6 @@ def _bump_counter() -> bool:
 # ── Application name ──────────────────────────────────────────────────────────
 
 def _resolve_app_name() -> str:
-    """Use the entry-point script name so log files are named after the
-    application, not after this module."""
     entry = sys.argv[0] if sys.argv and sys.argv[0] else __file__
     name  = os.path.splitext(os.path.basename(entry))[0]
     return name or "app"
@@ -302,12 +297,11 @@ class _DailyFileHandler(logging.Handler):
         super().__init__()
         self._app_name      = app_name
         self._current_date: str | None = None
-        self._current_path  = ""          # absolute path of the open log file
+        self._current_path  = ""
         self._stream        = None
         self._lock          = threading.Lock()
 
     def _open_for_date(self, folder: str, date_str: str) -> None:
-        """Close the current stream and open a new one for date_str."""
         if self._stream is not None:
             try:
                 self._stream.close()
@@ -322,12 +316,7 @@ class _DailyFileHandler(logging.Handler):
         self._current_date = date_str
 
     def _file_deleted(self) -> bool:
-        """Return True if the log file or its folder was removed externally.
-
-        Compares the inode/device of the open fd against the file on disk.
-        Any OSError (file gone, folder gone, permission error) also returns True
-        so the caller always reopens in that case.
-        """
+        """Return True if the log file or its folder was removed externally."""
         if self._stream is None:
             return True
         try:
@@ -341,13 +330,10 @@ class _DailyFileHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:
         try:
             with self._lock:
-                # strftime is INSIDE the lock so the date check and handle swap
-                # are atomic — prevents a midnight race condition.
                 today = datetime.datetime.now().strftime("%Y-%m-%d")
                 with _config_lock:
                     folder = _log_folder
 
-                # Reopen if: new day, no stream, or file/folder deleted externally
                 if today != self._current_date or self._stream is None or self._file_deleted():
                     self._open_for_date(folder, today)
 
@@ -355,7 +341,6 @@ class _DailyFileHandler(logging.Handler):
                     self._stream.write(self.format(record) + "\n")
                     self._stream.flush()
                 except (FileNotFoundError, OSError, ValueError):
-                    # Fișierul a dispărut chiar între _file_deleted() și write()
                     self._open_for_date(folder, today)
                     self._stream.write(self.format(record) + "\n")
                     self._stream.flush()
@@ -393,35 +378,17 @@ def _patched_print(*args, **kwargs) -> None:
 
     Per-thread suppression : set PRINT_CONTEXT.enable_print = False
     Global suppression     : call disable_print()
-
-    Hot-path order (cheapest checks first):
-      1. Thread-local suppression flag  — one attribute lookup, free exit
-      2. Counter bump                   — one lock + int compare, then return
-      3. Message build                  — join only when we will actually log
-      4. strftime                       — one call, reused for console + file
-      5. Caller info                    — only for WARNING/ERROR/… prefixes
-      6. Cleanup signal                 — set Event only; zero I/O on this thread
     """
-    # 1. Per-thread suppression — cheapest possible early exit
     if getattr(PRINT_CONTEXT, "enable_print", True) is False:
         return
 
-    # 2. Counter — wake cleanup thread if threshold reached
     if _bump_counter():
         _cleanup_event.set()
 
-    # 3. Build message
-    message = " ".join(map(str, args))
-
-    # 4. Timestamp — single call reused for both outputs
+    message      = " ".join(map(str, args))
     current_time = datetime.datetime.now().strftime("%H:%M:%S")
+    clean        = (_ANSI_RE.sub("", message) if "\x1b" in message else message)
 
-    # 5. Strip ANSI codes for the file — keep original for the console
-    #    which can render colours natively.
-    clean = (_ANSI_RE.sub("", message) if "\x1b" in message else message)
-
-    # 6. Caller info only for severity prefixes (checked on clean string,
-    #    so ANSI codes don't interfere with the prefix match)
     if _needs_caller_info(clean):
         caller = _get_caller_info()
         _original_print(f"{current_time} {caller} {message}", **kwargs)
@@ -432,7 +399,6 @@ def _patched_print(*args, **kwargs) -> None:
 
 
 def _dummy_print(*args, **kwargs) -> None:
-    """No-op replacement used by disable_print()."""
     pass
 
 
@@ -442,30 +408,19 @@ def disable_print() -> None:
 
 
 def _patched_stderr_write(message: str) -> None:
-    """Mirror stderr writes to the log file, stripping ANSI codes.
-
-    Hot-path order:
-      1. Whitespace-only guard — cheap strip(), free exit
-      2. Counter bump          — same as _patched_print
-      3. ANSI fast-path        — char search before running regex
-      4. Caller info           — always shown for stderr entries
-    """
+    """Mirror stderr writes to the log file, stripping ANSI codes."""
     _original_stderr_write(message)
 
-    # 1. Skip blank / whitespace-only writes immediately
     if not message.strip():
         return
 
-    # 2. Counter — wake cleanup thread if threshold reached
     if _bump_counter():
         _cleanup_event.set()
 
-    # 3. Strip ANSI only when escape sequences are actually present
     clean = (_ANSI_RE.sub("", message) if "\x1b" in message else message).rstrip("\n")
     if not clean.strip():
         return
 
-    # 4. Caller info always included for stderr
     caller = _get_caller_info()
     _file_logger.info(f"{caller} [STDERR] {clean}")
 
@@ -477,10 +432,6 @@ def _patched_stderr_writelines(lines) -> None:
 
 
 # ── One-time patch (double-import safe) ───────────────────────────────────────
-#
-# A module-level lock guarantees that even if two threads import this module
-# simultaneously, the patch is applied exactly once and atomically — there is
-# no window where print is patched but stderr is not (or vice-versa).
 
 _patch_lock = threading.Lock()
 
