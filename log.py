@@ -311,7 +311,12 @@ class _DailyFileHandler(logging.Handler):
 
         os.makedirs(folder, exist_ok=True)
         path = os.path.join(folder, f"{self._app_name}_{date_str}.log")
-        self._stream       = open(path, "a", encoding="utf-8")
+        try:
+            self._stream = open(path, "a", encoding="utf-8")
+        except FileNotFoundError:
+            # Folderul nu există → îl creăm și reîncercăm
+            os.makedirs(folder, exist_ok=True)
+        self._stream = open(path, "a", encoding="utf-8")
         self._current_date = date_str
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -322,10 +327,17 @@ class _DailyFileHandler(logging.Handler):
                 today = datetime.datetime.now().strftime("%Y-%m-%d")
                 with _config_lock:
                     folder = _log_folder
-                if today != self._current_date:
+                if today != self._current_date or self._stream is None:
                     self._open_for_date(folder, today)
-                self._stream.write(self.format(record) + "\n")
-                self._stream.flush()
+                try:
+                    self._stream.write(self.format(record) + "\n")
+                    self._stream.flush()
+                except (FileNotFoundError, OSError, ValueError):
+                    # Folderul sau fișierul a fost șters între timp → recreăm
+                    self._open_for_date(folder, today)
+                    self._stream.write(self.format(record) + "\n")
+                    self._stream.flush()
+
         except Exception:
             self.handleError(record)
 
