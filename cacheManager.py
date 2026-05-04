@@ -273,7 +273,7 @@ class CacheManagerInterface(ABC):
         self.thread.start()
         return self.thread
     
-    def enable_save_state_to_file_if_enabled(self):
+    def enable_save_state_to_file(self):
         self.save_state = True
 
 
