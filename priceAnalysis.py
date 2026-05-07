@@ -398,8 +398,8 @@ def get_trade_weight(T, trend_len, trend, order_type,
 
     # ZONA 3: trend foarte bătrân
     if trend_len > T_extended:
-        print(f"[DEBUG] Zona 3: trend_len={trend_len:.2f} e peste T_extended={T_extended}. return [0.022] ")
-        return np.array([0.0]), np.array([0.022])
+        print(f"[DEBUG] Zona 3: trend_len={trend_len:.2f} e peste T_extended={T_extended}. return [0.22] ")
+        return np.array([0.0]), np.array([0.22])
 
     # ZONA 1: gaussian pe T întreg, slice de la trend_len
     idx = int(trend_len)

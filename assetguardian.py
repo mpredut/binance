@@ -14,11 +14,6 @@ ASSET_REFERENCE_MINUTES_BACK_DEFAULT = 24 * 60 # 24 hours
 BUY_SYMBOL_DEFAULT = sym.symbols[0] if sym.symbols else "BTCUSDC"
 BUY_USE_CASH_RATIO = 0.995
 
-# Evita vanzari repetate in acelasi run.
-_sell_triggered = False
-_buy_triggered = False
-
-
 def _read_cache_rows():
     try:
         manager = cm.get_cache_manager("AssetValue")
@@ -185,7 +180,6 @@ def evaluate_and_maybe_sell_or_buy(
     minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT,
     buy_symbol=BUY_SYMBOL_DEFAULT,
 ):
-    global _sell_triggered, _buy_triggered
 
     current_value = api.get_total_assets_value_usdt(use_cache=False)
     print(f"[DEBUG] Current ASSETS value (USDT): {current_value}")
@@ -211,20 +205,13 @@ def evaluate_and_maybe_sell_or_buy(
         f"(threshold={threshold_percent}%)"
     )
 
-    if _sell_triggered:
-        print(" Sell already triggered in this process.")
-    elif growth_percent >= threshold_percent:
+    if growth_percent >= threshold_percent:
         print(
             f" Threshold reached ({growth_percent:.4f}% >= {threshold_percent}%). "
             "Selling all assets..."
         )
         sell_all_assets()
-        _sell_triggered = True
         return True
-
-    if _buy_triggered:
-        print(" Buy already triggered in this process.")
-        return False
 
     if growth_percent <= -abs(drop_percent):
         print(
@@ -234,7 +221,6 @@ def evaluate_and_maybe_sell_or_buy(
         #trimite alerta pe telefon - popup ca ceva este in neregula
         #daca este sub un prag
         if buy_with_all_cash(buy_symbol=buy_symbol):
-            _buy_triggered = True
             return True
 
     return False
