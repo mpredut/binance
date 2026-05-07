@@ -67,7 +67,7 @@ def _get_sell_symbol_for_asset(asset):
 
 
 def sell_all_assets():
-    balances = api.get_account_assets_balances(include_zero=False)
+    balances = api.get_account_assets_balances()
     print(f"[DEBUG] balances fetched: {len(balances)}")
     for bal in balances:
         print(f"[DEBUG] balance row: {bal}")
