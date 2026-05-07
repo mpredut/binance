@@ -74,7 +74,7 @@ def signal_handler(sig, frame):
     #if websocket_thread and websocket_thread.is_alive():
     #    websocket_thread.join()
     # Apelare handler implicit pentru SIGINT
-    signal.default_int_handler(sig, frame)
+    #signal.default_int_handler(sig, frame)
     
 signal.signal(signal.SIGINT, signal_handler)
 
