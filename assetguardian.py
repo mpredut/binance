@@ -6,7 +6,7 @@ import cacheManager as cm
 import symbols as sym
 
 
-CHECK_INTERVAL_SECONDS = 9 * 60 # 9 minutes
+CHECK_INTERVAL_SECONDS = 0.9 * 60 # 9 minutes
 TARGET_GROWTH_PERCENT = 2.9
 TARGET_DROP_PERCENT = 7.0
 ASSET_REFERENCE_MINUTES_BACK_DEFAULT = 24 * 60 # 24 hours
@@ -81,7 +81,7 @@ def sell_all_assets():
         asset = bal.get("asset")        
         if asset not in tracked_assets:
             #print(f"[DEBUG] skip {asset}: not in sym.symbols")
-        continue
+            continue
 
         qty = float(bal.get("free", 0.0))
         total_qty = float(bal.get("total", 0.0))
