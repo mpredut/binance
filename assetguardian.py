@@ -1,6 +1,7 @@
 import time
 
 import bapi as api
+import bapi_placeorder as po
 import cacheManager as cm
 import symbols as sym
 
@@ -9,6 +10,7 @@ CHECK_INTERVAL_SECONDS = 9 * 60 # 9 minutes
 TARGET_GROWTH_PERCENT = 2.9
 TARGET_DROP_PERCENT = 7.0
 ASSET_REFERENCE_MINUTES_BACK_DEFAULT = 24 * 60 # 24 hours
+
 BUY_SYMBOL_DEFAULT = sym.symbols[0] if sym.symbols else "BTCUSDC"
 BUY_USE_CASH_RATIO = 0.995
 
@@ -68,18 +70,25 @@ def _get_sell_symbol_for_asset(asset):
 
 def sell_all_assets():
     balances = api.get_account_assets_balances()
+    if not balances:
+       print("No balances available for selling.")
+       return
+        
     print(f"[DEBUG] balances fetched: {len(balances)}")
     for bal in balances:
         print(f"[DEBUG] balance row: {bal}")
 
-    if not balances:
-        print(" No balances available for selling.")
-        return
-
+    # Extragem doar asset-urile de baza din sym.symbols (ex: BTCUSDC -> BTC)
+    tracked_assets = {api.split_symbol(s)[0] for s in sym.symbols}
+    
     excluded_assets = {"USDT", "USDC", "BUSD"}
     sell_count = 0
 
     for bal in balances:
+        if asset not in tracked_assets:
+            #print(f"[DEBUG] skip {asset}: not in sym.symbols")
+        continue
+
         asset = bal.get("asset")
         qty = float(bal.get("free", 0.0))
         total_qty = float(bal.get("total", 0.0))
