@@ -480,19 +480,15 @@ def get_total_assets_value_usdt(use_cache=True, cache_ttl_seconds=ASSET_VALUE_CA
         for balance in get_account_assets_balances():
             total_value += _convert_to_usdt(balance["asset"], balance["total"])
     except Exception as e:
-        print(f"get_total_assets_value_usdt: Eroare la calculul portofoliului: {e}")
-        return 0.0
+        print(f"Error: get_total_assets_value_usdt: Error calculating portfolio value: {e}")
+        return None
 
     with _asset_value_cache_lock:
         if total_value > 0:
             _asset_value_cache["value"] = total_value
             _asset_value_cache["timestamp"] = now
         else:
-            print(f"get_total_assets_value_usdt: Total value is 0.0")
-            return 0.0
+            print(f"Error: get_total_assets_value_usdt: Total value can't be calculated")
+            return None
 
     return _asset_value_cache["value"]
-
-def get_total_assets_value_usd(use_cache=True, cache_ttl_seconds=ASSET_VALUE_CACHE_TTL_SECONDS):
-    # On Binance spot, USDT is used as USD approximation.
-    return get_total_assets_value_usdt(use_cache=use_cache, cache_ttl_seconds=cache_ttl_seconds)

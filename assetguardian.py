@@ -21,10 +21,10 @@ def _read_cache_rows():
         # Citim direct din memoria managerului; fisierul poate fi in urma.
         rows = manager.cache.get("TOTAL", [])
         print(f"[DEBUG] cache rows loaded: {len(rows)}")
-        if rows:
-            print("[DEBUG] dump cache TOTAL rows:")
-            for idx, row in enumerate(rows, start=1):
-                print(f"  [{idx}] {row}")
+        #if rows:
+            #print("[DEBUG] dump cache TOTAL rows:")
+            #for idx, row in enumerate(rows, start=1):
+            #    print(f"  [{idx}] {row}")
         return rows
     except Exception as e:
         print(f"ERROR reading AssetValue cache via cacheManager: {e}")
@@ -46,6 +46,26 @@ def _get_value_minutes_ago_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_
     print(f"[DEBUG] candidate rows in window: {len(window_rows)}")
     if not window_rows:
         return None
+
+    #printam doar un row per ora pentru a nu fi prea multe linii in output
+    if window_rows:
+        print("[DEBUG] dump cache TOTAL rows:")
+
+    last_printed_ts = None
+    for idx, row in enumerate(window_rows, start=1):
+        current_ts = row["timestamp"]
+
+        # primul row se afiseaza mereu
+        if last_printed_ts is None:
+            print(f"  [{idx}] {row}")
+            last_printed_ts = current_ts
+            continue
+
+        # afiseaza doar daca a trecut minim 1 ora
+        if current_ts - last_printed_ts >= 3600:
+            print(f"  [{idx}] {row}")
+            last_printed_ts = current_ts
+
 
     # Sortam cronologic, apoi alegem minimul dupa valoare.
     window_rows = sorted(window_rows, key=lambda r: int(r.get("timestamp", 0)))
@@ -182,6 +202,10 @@ def evaluate_and_maybe_sell_or_buy(
 ):
 
     current_value = api.get_total_assets_value_usdt(use_cache=False)
+    if current_value is None or current_value <= 0:
+        print(f"Error: evaluate_and_maybe_sell_or_buy: Current assets value can't be calculated")
+        return False
+
     print(f"[DEBUG] Current ASSETS value (USDT): {current_value}")
     past_row = _get_value_minutes_ago_from_cache(minutes_back=minutes_back)
 
