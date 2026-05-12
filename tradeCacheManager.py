@@ -143,7 +143,9 @@ def periodic_sync():
     print(f"--- Sync completed ---")
     
     # Planifică următoarea rulare
-    threading.Timer(SYNC_INTERVAL_SEC, periodic_sync, args=()).start()
+    t = threading.Timer(SYNC_INTERVAL_SEC, periodic_sync, args=())
+    t.daemon = True  # Asigură că acest thread nu blochează închiderea procesului
+    t.start()
 
 
 cache_manager = TradeCacheManager("cache.json")
