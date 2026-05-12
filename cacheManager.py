@@ -269,7 +269,8 @@ class CacheManagerInterface(ABC):
                 print(f"[{self.cls_name}] Sync completed for {self.symbols}")
                 time.sleep(self.sync_ts)
 
-        self.thread = threading.Thread(target=run, daemon=False)
+        self.thread = threading.Thread(target=run, daemon=True)
+        self.thread.daemon = True  # Asigură că acest thread nu blochează închiderea procesului
         self.thread.start()
         return self.thread
     
@@ -489,6 +490,10 @@ class CacheAssetValueManager(CacheManagerInterface):
             print(f"[{self.cls_name}][Eroare] Nu pot interoga valoarea totala: {e}")
             return []
 
+        if total_usdt is None or total_usdt <= 0:
+            print(f"[{self.cls_name}][Eroare] Valoarea totala este None sau <= 0: {total_usdt}")
+            return []
+            
         now_sec = int(time.time())
         snapshot = {
             "timestamp": now_sec,
@@ -506,7 +511,8 @@ ORDER_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
 TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
 PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
 PRICETREND_SYNC_INTERVAL_SEC = 10 * 60   # 10 minute
-ASSETVALUE_SYNC_INTERVAL_SEC = 10 * 60  # 10 minute
+ASSETVALUE_SYNC_INTERVAL_SEC = 10 * 60  # 10 minutes 
+# TODO: set this to 60 * 60  # 1 hour
 
 class CacheFactory:
     _instances = {}
@@ -598,6 +604,7 @@ class BinanceUserDataStreamBridge:
             return
         self._started = True
         self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
+        self._watchdog_thread.daemon = True  # Asigură că acest thread nu blochează închiderea procesului
         self._watchdog_thread.start()
         thread = threading.Thread(target=self._run_loop, daemon=True)
         thread.start()
@@ -732,7 +739,7 @@ class BinanceUserDataStreamBridge:
                 _mark_ws_unhealthy()
                 print(f"[cacheManager][WARNING] Fără evenimente WS de {int(age)}s. Fallback polling.")
             time.sleep(5)
-
+#end of BinanceUserDataStreamBridge class
 
 def _upsert_order_from_execution_report(event):
     symbol = event.get("s")
