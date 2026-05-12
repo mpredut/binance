@@ -47,12 +47,33 @@ def is_trade_enabled():
     """
     return config_cache.get("trade_enabled", False)
 
-# Pornim un thread pentru monitorizarea configurației
-watcher_thread = threading.Thread(target=config_watcher, daemon=True)
-watcher_thread.start()
+
+watcher_thread = None
+
+def start_config_watcher():
+    global watcher_thread
+
+    if watcher_thread and watcher_thread.is_alive():
+        return
+
+    watcher_thread = threading.Thread(
+        target=config_watcher,
+        daemon=True
+    )
+    watcher_thread.start()
+    print("Config watcher started.")
+
+
+def stop_config_watcher():
+    global watcher_thread
+    if watcher_thread:
+        watcher_thread.join()
+        watcher_thread = None
+        print("Config watcher stopped.")
 
 # Exemplu de utilizare
 if __name__ == "__main__":
+    start_config_watcher()
     print("Monitorizarea fișierului de configurare...")
     try:
         while True:
@@ -61,3 +82,5 @@ if __name__ == "__main__":
             time.sleep(10)
     except KeyboardInterrupt:
         print("Monitorizare oprită.")
+        stop_config_watcher()
+        
