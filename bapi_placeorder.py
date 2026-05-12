@@ -19,7 +19,7 @@ from binance.exceptions import BinanceAPIException
 ####MYLIB
 import utils as u
 import symbols as sym
-import config as cfg
+#import config as cfg
 import priceAnalysis as pa
 
 import bapi as api
@@ -406,11 +406,11 @@ def place_order_smart(order_type, symbol, price, qty, safeback_seconds=48*3600+6
         current_price = api.get_current_price(symbol)
         
         if order_type.upper() == 'BUY':
-            open_SELL_orders = get_open_orders("SELL", symbol)
+            open_SELL_orders = api.get_open_orders("SELL", symbol)
             # Anuleaza ordinele de vanzare existente la un pret mai mic decat pretul de cumparare dorit
             for order_id, order_details in open_SELL_orders.items():
                 if order_details['price'] < price:
-                    cancel = cancel_order(symbol, order_id)
+                    cancel = api.cancel_order(symbol, order_id)
                     if not cancel:
                         print(f"Fail cancel order {order_id} prep. for BUY order. We wanted becuse low price for SELL.")
             
@@ -426,11 +426,11 @@ def place_order_smart(order_type, symbol, price, qty, safeback_seconds=48*3600+6
                     safeback_seconds=safeback_seconds, force=force, cancelorders=cancelorders, hours=hours)
                 
         elif order_type.upper() == 'SELL':
-            open_BUY_orders = get_open_orders("BUY", symbol)
+            open_BUY_orders = api.get_open;_orders("BUY", symbol)
             # Anuleaza ordinele de cumparare existente la un pret mai mare decat pretul de vanzare dorit
             for order_id, order_details in open_BUY_orders.items():
                 if order_details['price'] > price:
-                    cancel = cancel_order(symbol, order_id)
+                    cancel = api.cancel_order(symbol, order_id)
                     if not cancel:
                         print(f"Fail cancel order {order_id} prep. for SELL order. We wanted becuse high price for BUY")
                    

@@ -23,7 +23,7 @@ from binance.exceptions import BinanceAPIException
 ####MYLIB
 import utils as u
 import symbols as sym
-import config as cfg
+#import config as cfg
 
 from bapi_client import client
 
