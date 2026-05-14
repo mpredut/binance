@@ -187,7 +187,9 @@ def monitor_close_orders_by_age1(maxage_trade_s):
             print(f"Pretul curent ({current_price}) este cu 4% mai mare decat pretul de cumparare ({filled_price}). Initiem vanzarea.cantitate{quantity}")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=po.place_safe_order, args=("SELL", symbol, current_price + 200, quantity))
+            thread = threading.Thread(target=po.place_safe_order,
+                name="sell_monitor_close_orders_by_age1",
+                args=("SELL", symbol, current_price + 200, quantity))
             #sell_order_gradually, args=(order, current_time, end_time))
             thread.start()
             #return
@@ -210,7 +212,9 @@ def monitor_close_orders_by_age1(maxage_trade_s):
             print(f"Pretul curent ({current_price}) este cu 4% mai mic decat pretul de vanzare ({filled_price}). Initiem cumpararea.cantitate{quantity}.")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=po.place_safe_order, args=("BUY", symbol, current_price - 200, quantity))
+            thread = threading.Thread(target=po.place_safe_order,
+                name="buy_monitor_close_orders_by_age1",
+                args=("BUY", symbol, current_price - 200, quantity))
             #sell_order_gradually, args=(order, current_time, end_time))
             thread.start()
             #return
@@ -261,7 +265,9 @@ def monitor_close_orders_by_age2(maxage_trade_s):
             print(f"Pretul curent ({current_price}) este cu {procent_scazut:.2f}% mai mare decat pretul de cumparare ({filled_price}). Initiem vanzarea. Cantitate: {quantity}")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=po.place_safe_order, args=("SELL", symbol, current_price + 200, quantity))
+            thread = threading.Thread(target=po.place_safe_order,
+                name="monitor_close_orders_by_age2",
+                args=("SELL", symbol, current_price + 200, quantity))
             thread.start()
             
             # Resetam timpul global pentru a reporni procesul
@@ -286,7 +292,9 @@ def monitor_close_orders_by_age2(maxage_trade_s):
             print(f"Pretul curent ({current_price}) este cu {procent_scazut:.2f}% mai mic decat pretul de vanzare ({filled_price}). Initiem cumpararea. Cantitate: {quantity}")
             
             # Pornim un fir nou pentru a cumpara BTC-ul
-            thread = threading.Thread(target=po.place_safe_order, args=("BUY", symbol, current_price - 200, quantity))
+            thread = threading.Thread(target=po.place_safe_order, 
+            name="monitor_close_orders_by_age2",
+            args=("BUY", symbol, current_price - 200, quantity))
             thread.start()
 
             # Resetam timpul global pentru a reporni procesul
@@ -574,11 +582,22 @@ default_values_sell_recommendation = {
         'max': 0.0         # Valoare default pentru max
     }
 }
+
 sell_recommendation = {}
+sell_lock = threading.Lock()
 
 class StateTracker:
     def __init__(self):
+        self.running = True
         self.states = {}  # To hold states for each symbol
+    
+    def background_updater(self, file_path):
+        while self.running:
+            try:
+                self.update_sell_recommendation(file_path)
+            except Exception as e:
+                print(e)
+            time.sleep(50)
 
     def update_sell_recommendation(self, file_path):
         global sell_recommendation
@@ -590,21 +609,41 @@ class StateTracker:
             if df.empty or 'symbol' not in df.columns:
                 raise pd.errors.EmptyDataError("Empty or invalid file")
 
-            sell_recommendation = {
-                row['symbol']: {
-                    'force_sell': eval(str(row['force_sell'])),
-                    'procent_desired_profit': eval(str(row['procent_desired_profit'])),
-                    'expired_duration': eval(str(row['expired_duration'])),  # Evaluam expresiile matematice
-                    'min_procent': eval(str(row['min_procent'])),
-                    'days_after_use_current_price': eval(str(row['days_after_use_current_price'])),
-                    'slope': eval(str(row.get('slope', 0.0))),         # Citire cu valoare default daca nu exista
-                    'pos': eval(str(row.get('pos', 0))),               # Citire cu valoare default daca nu exista
-                    'gradient': eval(str(row.get('gradient', 0.0))),   # Citire cu valoare default daca nu exista
-                    'tick': eval(str(row.get('tick', 0))),             # Citire cu valoare default pentru tick daca nu exista
-                    'min': eval(str(row.get('min', 0.0))),             # Citire cu valoare default pentru min daca nu exista
-                    'max': eval(str(row.get('max', 0.0)))              # Citire cu valoare default pentru max daca nu exista
-                } for index, row in df.iterrows()
-            }
+            # Citește și completează NaN-urile cu defaults
+            df = pd.read_csv('sell_recommendation.csv').fillna({
+                'force_sell': 0,
+                'procent_desired_profit': 0.0,
+                'expired_duration': 0,
+                'min_procent': 0.0,
+                'days_after_use_current_price': 0,
+                'slope': 0.0,
+                'pos': 0,
+                'gradient': 0.0,
+                'tick': 0,
+                'min': 0.0,
+                'max': 0.0
+            })
+
+            with sell_lock:
+                sell_recommendation = {
+                    row['symbol']: {
+                        'force_sell': bool(row['force_sell']),
+                        'procent_desired_profit': float(row['procent_desired_profit']),
+                        'expired_duration': int(row['expired_duration']),
+                        'min_procent': float(row['min_procent']),
+                        'days_after_use_current_price': int(row['days_after_use_current_price']),
+                        'slope': float(row['slope']),
+                        'pos': int(row['pos']),
+                        'gradient': float(row['gradient']),
+                        'tick': int(row['tick']),
+                        'min': float(row['min']),
+                        'max': float(row['max'])
+                    } for _, row in df.iterrows()
+                }
+
+            print(f"Thread count: {len(threading.enumerate())}")
+            for t in threading.enumerate():
+                 print(f"{t.name} daemon={t.daemon}")
             print(f"sell_recommendation updated from file!")
             #self.display_sell_recommendation()
                 
@@ -625,10 +664,7 @@ class StateTracker:
 
         # Reprogram the update for every 2 minutes
         #Timer(120, self.update_sell_recommendation, [file_path]).start()
-        
-        t = Timer(50, self.update_sell_recommendation, [file_path])
-        t.daemon = True  # Asigură că acest thread nu blochează închiderea procesului
-        t.start()
+
 
 
 
@@ -650,6 +686,7 @@ class StateTracker:
             self.process_state(symbol, slope, tick, min_val, max_val, last_state)
 
     def process_state(self, symbol, slope, tick, min_val, max_val, last_state):
+        MAX_STATES = 1000
         # If there is no previous state, create a new one
         if last_state is None:
             new_state = {
@@ -659,10 +696,12 @@ class StateTracker:
                 'max': max_val
             }
             self.states[symbol].append(new_state)
+            if len(self.states[symbol]) > MAX_STATES:
+                self.states[symbol].pop(0)
             return
 
         # If slope is the same as the last state, update the current state's tick and min/max
-        if slope * last_state['slope'] > 0 or (slope == last_state['slope']):  # Au acelasi semn:
+        if slope * last_state['slope'] > 0 or (abs(slope - last_state['slope']) < 1e-9):  # Au acelasi semn:
             last_state['tick'] = tick
             last_state['min'] = min(last_state['min'], min_val)
             last_state['max'] = max(last_state['max'], max_val)
@@ -675,6 +714,8 @@ class StateTracker:
                 'max': max_val
             }
             self.states[symbol].append(new_state)
+            if len(self.states[symbol]) > MAX_STATES:
+                self.states[symbol].pop(0)
 
     def display_states(self):
         print("Current states:")
@@ -730,7 +771,7 @@ def get_relevant_trade(trade_orders, trade_type, threshold_s, symbol):
 def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lost_threshold=0.033):
     #try:
     
-    qty = 1    
+    qty = 1 #qty = calculate_position_size(...)    
     threshold_s = 3 * 60 * 60 # 3 h
     current_time_s = int(time.time())
     
@@ -797,7 +838,7 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
     if trade_orders_sell:     
         if not sell_price:
             print(f"No sell_price !!!!!")
-        return
+            return
         price_decrease_versus_sell = (sell_price - current_price) / sell_price
         print(f"(price_decrease_versus_sell: {price_decrease_versus_sell * 100}%)")
         if price_decrease_versus_sell > gain_threshold or u.are_close(price_decrease_versus_sell, gain_threshold, target_tolerance_percent=1.0):
@@ -835,7 +876,14 @@ def main():
 
     # Pornim monitorizarea periodica a tranzactiilor
     #start_monitoring(filename, interval=interval, limit=1000, years_to_keep=0.09)
-    time.sleep(5)
+    
+    thread = threading.Thread(
+        target=state_tracker.background_updater,
+        args=(file_path,),
+        name="SellRecommendationUpdater",
+        daemon=True
+    )
+    thread.start()
 
     #for i in range(0, 5):
     #close_sell_orders = apitrades.get_trade_orders("SELL", sym.taosymbol, maxage_trade_s)
@@ -866,7 +914,8 @@ def main():
         monitor_price_and_trade(sym.taosymbol,sbs=d*24*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
         print("--------------")
   
-        data = sell_recommendation[sym.btcsymbol]
+        with sell_lock:
+            data = sell_recommendation[sym.btcsymbol]
         procent_desired_profit = data['procent_desired_profit']
         expired_duration = data['expired_duration']
         min_procent = data['min_procent']
@@ -907,5 +956,40 @@ if __name__ == "__main__":
         # print(f"Eroare capturata: {e}")
     # finally:
         # print("Fortare inchidere...")
+        # state_tracker.running = False
         # sys.exit(1)  # opreste toate daemon threads
     
+
+    #confirmation candles
+
+#Acum trend-ul se bazează pe:
+
+#slope
+#gradient
+
+#Aș adăuga:
+
+#confirmation periods
+#multiple timeframe agreement
+""" 
+14. Cea mai mare problemă conceptuală
+
+Ai:
+
+if not is_trend_up(symbol):
+    SELL
+
+dar:
+
+trend-ul poate fi lagging
+piața crypto face fake reversals
+
+Poți ajunge:
+
+să vinzi bottom
+să ratezi breakout
+
+Ar trebui:
+
+confidence score
+multi indicator confirmation """
