@@ -57,7 +57,8 @@ def process_message(symbol, message):
     #print(f"ASYNC {symbol} is {price:.2f}")
 
 def start_websocket_thread(symbol):
-    websocket_thread = threading.Thread(target=listen_to_binance, args=(symbol,))
+    websocket_thread = threading.Thread(target=listen_to_binance, 
+        name="start_websocket_thread", args=(symbol,))
     websocket_thread.daemon = True
     websocket_thread.start()
     return websocket_thread
@@ -135,7 +136,7 @@ def update_price(symbol):
 for symbol in sym.symbols:
     update_price(symbol)
     # Start the WebSocket thread
-    websocket_thread = start_websocket_thread(symbol)
+    #websocket_thread = start_websocket_thread(symbol)
     
 quantities = {symbol: 1000 / cprice[symbol] for symbol in sym.symbols}
 

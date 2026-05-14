@@ -58,6 +58,7 @@ def start_config_watcher():
 
     watcher_thread = threading.Thread(
         target=config_watcher,
+        name="start_config_watcher",
         daemon=True
     )
     watcher_thread.start()

@@ -230,7 +230,7 @@ def _cleanup_loop() -> None:
 _cleanup_thread = threading.Thread(
     target=_cleanup_loop,
     name="logger-cleanup",
-    daemon=False,
+    daemon=True,
 )
 _cleanup_thread.start()
 

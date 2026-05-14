@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 
 import signal
 import asyncio
-import threading
-from threading import Thread
+#import threading
+#from threading import Thread
 import json
 
 ####Binance
@@ -426,7 +426,7 @@ def place_order_smart(order_type, symbol, price, qty, safeback_seconds=48*3600+6
                     safeback_seconds=safeback_seconds, force=force, cancelorders=cancelorders, hours=hours)
                 
         elif order_type.upper() == 'SELL':
-            open_BUY_orders = api.get_open;_orders("BUY", symbol)
+            open_BUY_orders = api.get_open_orders("BUY", symbol)
             # Anuleaza ordinele de cumparare existente la un pret mai mare decat pretul de vanzare dorit
             for order_id, order_details in open_BUY_orders.items():
                 if order_details['price'] > price:

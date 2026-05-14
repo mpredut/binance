@@ -269,7 +269,7 @@ class CacheManagerInterface(ABC):
                 print(f"[{self.cls_name}] Sync completed for {self.symbols}")
                 time.sleep(self.sync_ts)
 
-        self.thread = threading.Thread(target=run, daemon=True)
+        self.thread = threading.Thread(target=run, name=self.cls_name, daemon=True)
         self.thread.daemon = True  # Asigură că acest thread nu blochează închiderea procesului
         self.thread.start()
         return self.thread
