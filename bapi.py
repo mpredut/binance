@@ -6,10 +6,7 @@ import sys
 from datetime import datetime, timedelta
 
 import signal
-import asyncio
-import threading
-import websockets
-from threading import Thread
+
 import json
 #from twisted.internet import reactor
 
@@ -27,55 +24,21 @@ import symbols as sym
 
 from bapi_client import client
 
-stop = False
-
 import binance
 print(binance.__version__)
 
-def listen_to_binance(symbol):
-    socket = f"wss://stream.binance.com:9443/ws/{symbol.lower()}@ticker"
-    
-    # Functie asincrona pentru WebSocket
-    async def connect():
-        async with websockets.connect(socket, ping_interval=20, ping_timeout=10) as websocket:
-            while not stop:
-                message = await websocket.recv()
-                message = json.loads(message)
-                process_message(symbol, message)
-
-    # Rulam WebSocket-ul intr-un event loop propriu in acest thread
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    loop.run_until_complete(connect())
-
-# Functie de gestionare a mesajului primit de la WebSocket
-def process_message(symbol, message):
-    global cprice
-    symbol = message['s']  # Simbolul criptomonedei
-    price = float(message['c'])  # Asigura-te ca price este un float
-    cprice[symbol] = price
-    #print(f"ASYNC {symbol} is {price:.2f}")
-
-def start_websocket_thread(symbol):
-    websocket_thread = threading.Thread(target=listen_to_binance, 
-        name="start_websocket_thread", args=(symbol,))
-    websocket_thread.daemon = True
-    websocket_thread.start()
-    return websocket_thread
-
+import bapi_ws
 
 # Function to handle Ctrl+C and shut down the WebSocket properly
 def signal_handler(sig, frame):
     global websocket_thread, stop
     print("Shutting down...")
-    stop = True
-    loop = asyncio.get_event_loop()
-    loop.stop()  # Stop the asyncio event loop
-    #websocket_thread.join()  # This makes the main thread wait for the websocket thread to finish
-    #if websocket_thread and websocket_thread.is_alive():
-    #    websocket_thread.join()
+    bapi_ws_manager.stop_all()
+    
     # Apelare handler implicit pentru SIGINT
     signal.default_int_handler(sig, frame)
+    sys.exit(0)
+
     
 signal.signal(signal.SIGINT, signal_handler)
 
@@ -132,11 +95,8 @@ def update_price(symbol):
     cprice_refresh_int[symbol] = 11
     return cprice[symbol]
     
-    
 for symbol in sym.symbols:
     update_price(symbol)
-    # Start the WebSocket thread
-    #websocket_thread = start_websocket_thread(symbol)
     
 quantities = {symbol: 1000 / cprice[symbol] for symbol in sym.symbols}
 
@@ -427,6 +387,8 @@ def check_order_filled_by_time(order_type, symbol, time_back_in_seconds, pret_mi
 
 
 # ---------------- Portfolio value query API ----------------
+import threading
+
 ASSET_VALUE_CACHE_TTL_SECONDS = 120
 
 _asset_value_cache = {"value": None, "timestamp": 0.0}
