@@ -72,6 +72,9 @@ def stop_config_watcher():
         watcher_thread = None
         print("Config watcher stopped.")
 
+
+load_config()
+
 # Exemplu de utilizare
 if __name__ == "__main__":
     start_config_watcher()
