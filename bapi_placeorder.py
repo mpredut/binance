@@ -19,7 +19,7 @@ from binance.exceptions import BinanceAPIException
 ####MYLIB
 import utils as u
 import symbols as sym
-#import config as cfg
+import config as cfg
 import priceAnalysis as pa
 
 import bapi as api
