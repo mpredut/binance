@@ -297,6 +297,26 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
 
             
 
+def format_duration(seconds):
+    """Convertește secunde în format citibil: Xd Yh Zm"""
+    days = int(seconds // 86400)
+    hours = int((seconds % 86400) // 3600)
+    minutes = int((seconds % 3600) // 60)
+    
+    parts = []
+    if days > 0:
+        parts.append(f"{days}d")
+    if hours > 0:
+        parts.append(f"{hours}h")
+    if minutes > 0:
+        parts.append(f"{minutes}m")
+    
+    return " ".join(parts) if parts else "0m"
+
+
+def format_timestamp(ts):
+    """Convertește timestamp în format citibil"""
+    return datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
 
 
 def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int = 8,
@@ -318,7 +338,12 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
     window = min(points_per_hour * window_hours, len(prices))
     step = points_per_hour * step_hours
     
-    print(f"[DEBUG] {symbol}: puncte={len(prices)}, window={window}, step={step}")
+    print(f"\n{'='*60}")
+    print(f"[{symbol}] Analiză trend")
+    print(f"{'='*60}")
+    print(f"Puncte totale:  {len(prices)}")
+    print(f"Fereastră:      {window} puncte ({window_hours}h)")
+    print(f"Pas:            {step} puncte ({step_hours}h)")
     
     # Detectăm semnul trendului curent (ultimul bloc)
     last_start = len(prices) - window
@@ -328,7 +353,9 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
     current_slope_h = current_slope_s * 3600
     current_sign = np.sign(current_slope_h)
     
-    print(f"[DEBUG] {symbol}: current_slope_h={current_slope_h:.6f}, sign={current_sign}")
+    trend_emoji = "📈" if current_sign > 0 else "📉"
+    print(f"\nTrend curent:   {trend_emoji} {'UP' if current_sign > 0 else 'DOWN'}")
+    print(f"Slope/h:        {current_slope_h:.6f}")
     
     # Mergem backwards și căutăm când s-a schimbat semnul
     trend_blocks = [(last_start, len(prices))]
@@ -349,24 +376,30 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
             consecutive_same_sign += 1
         elif consecutive_same_sign >= min_consecutive_blocks:
             # Am avut suficiente blocuri cu același semn, acum s-a schimbat → STOP
-            print(f"[DEBUG] Schimbare semn la timestamp {datetime.fromtimestamp(timestamps[start])}")
+            print(f"\n⚠️  Schimbare semn detectată la: {format_timestamp(timestamps[start])}")
             break
         else:
             # Zgomot - continuăm
             trend_blocks.append((start, end))
     
     if len(trend_blocks) < min_consecutive_blocks:
-        print(f"[DEBUG] Nu s-au găsit suficiente blocuri consecutive ({len(trend_blocks)} < {min_consecutive_blocks})")
+        print(f"\n❌ Insuficiente blocuri consecutive: {len(trend_blocks)} < {min_consecutive_blocks}")
         return None
     
     # Calculăm durata trendului
     trend_start_ts = timestamps[trend_blocks[-1][0]]
     duration_seconds = timestamps[-1] - trend_start_ts
     duration_hours = duration_seconds / 3600
+    duration_days = duration_seconds / 86400
     
     trend_direction = 'up' if current_sign > 0 else 'down'
     
-    print(f"[RESULT] {symbol}: trend {trend_direction}, start={datetime.fromtimestamp(trend_start_ts)}, durata={duration_hours:.1f}h")
+    print(f"\n✅ REZULTAT:")
+    print(f"   Direcție:        {trend_emoji} {trend_direction.upper()}")
+    print(f"   Start trend:     {format_timestamp(trend_start_ts)}")
+    print(f"   Durată:          {format_duration(duration_seconds)} ({duration_days:.1f} zile)")
+    print(f"   Blocuri trend:   {len(trend_blocks)}")
+    print(f"{'='*60}\n")
     
     if draw:
         drawPriceLst(timestamps, prices, trend_blocks, symbol, trend_direction, duration_hours)
@@ -378,9 +411,51 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
         'duration_seconds': duration_seconds,
         'estimated_future_hours': duration_hours * 0.5  # estimare conservatoare
     }
+
+
+# Și pentru write_all_trends, adaugă formatare:
+def write_all_trends(all_trends, filename="priceanalysis.json"):
+    """Scrie rezultatele în JSON + afișare human-readable"""
+    
+    print("\n" + "="*80)
+    print("SUMAR TRENDURI".center(80))
+    print("="*80)
+    
+    for symbol, trend_data in all_trends.items():
+        if trend_data is None:
+            print(f"\n{symbol}: ❌ Fără date suficiente")
+            continue
+            
+        direction = trend_data['direction']
+        emoji = "📈" if direction == 'up' else "📉"
+        
+        start_str = format_timestamp(trend_data['start_timestamp'])
+        duration_str = format_duration(trend_data['duration_seconds'])
+        duration_days = trend_data['duration_seconds'] / 86400
+        
+        future_hours = trend_data['estimated_future_hours']
+        future_str = format_duration(future_hours * 3600)
+        future_days = future_hours / 24
+        
+        print(f"\n{symbol}")
+        print(f"  {emoji} {direction.upper()}")
+        print(f"  Start:    {start_str}")
+        print(f"  Durată:   {duration_str} ({duration_days:.1f} zile)")
+        print(f"  Estimat:  ~{future_str} ({future_days:.1f} zile)")
+    
+    print("\n" + "="*80 + "\n")
+    
+    try:
+        with open(filename, "w") as f:
+            json.dump(all_trends, f, indent=2)
+        print(f"✅ Rezultatele au fost scrise în {filename}")
+    except Exception as e:
+        print(f"❌ Eroare scriere {filename}: {e}")
+    
+    return all_trends
     
     
-def write_all_trends(symbols, filename="priceanalysis.json"):      
+def write_all_trends_old(symbols, filename="priceanalysis.json"):      
     try:
         with open(filename, "w") as f:
             json.dump(all_trends, f, indent=2)
