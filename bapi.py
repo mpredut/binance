@@ -20,7 +20,6 @@ from binance.exceptions import BinanceAPIException
 ####MYLIB
 import utils as u
 import symbols as sym
-#import config as cfg
 
 from bapi_client import client
 
@@ -33,10 +32,10 @@ import bapi_ws
 def signal_handler(sig, frame):
     global websocket_thread, stop
     print("Shutting down...")
-    bapi_ws_manager.stop_all()
+    bapi_ws.bapi_ws_manager.stop_all()
     
     # Apelare handler implicit pentru SIGINT
-    signal.default_int_handler(sig, frame)
+    #signal.default_int_handler(sig, frame)
     sys.exit(0)
 
     

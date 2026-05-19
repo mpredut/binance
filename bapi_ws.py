@@ -108,6 +108,8 @@ class BinanceWebSocketManager:
         """Oprește toate conexiunile WebSocket cu cleanup corect"""
         logger.info("Stopping all WebSocket connections...")
         self.stop_event.set()
+        #for loop in self.loops:
+        #   loop.call_soon_threadsafe(loop.stop)
         
         # Așteaptă ca thread-urile să se termine
         for thread in self.threads:
@@ -136,3 +138,4 @@ for symbol in symbols:
 
 #
 # price = bapi_ws_manager.get_price(symbol)
+
