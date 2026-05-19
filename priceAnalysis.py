@@ -613,7 +613,7 @@ if __name__ == "__main__":
             for symbol in symbols:
                 #all_trends[symbol] = getTrendLongTerm_fixed(symbol, draw=False)
                 all_trends[symbol] = getTrendLongTerm_fixed(symbol, 
-                                            window_hours=24,
+                                            window_hours=18,
                                             step_hours=8,
                                             min_consecutive_blocks=3,
                                             noise_tolerance=2,  # ← permite 2 blocuri UP în trendul DOWN
