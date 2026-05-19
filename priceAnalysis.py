@@ -406,6 +406,7 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
     
     # Calculăm durata trendului
     trend_start_ts = timestamps[trend_blocks[-1][0]]
+    trend_start_ts -= noise_tolerance * window_hours * 60 # totdeauna in realitate a inceput mai devreme! 
     duration_seconds = timestamps[-1] - trend_start_ts
     duration_hours = duration_seconds / 3600
     duration_days = duration_seconds / 86400
