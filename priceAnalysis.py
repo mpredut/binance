@@ -174,8 +174,8 @@ def slope_tolerance_per_(symbol, price,
 
 
 def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
-                                slope_tolerance: float = 0.0028, persistence_factor: float = 1.5
-                               , draw: bool = True) -> Optional[dict]:
+                                slope_tolerance: float = 0.0028, persistence_factor: float = 1.5,
+                                lookback_days=30, draw: bool = True) -> Optional[dict]:
    
     data: List[Tuple[int, float]] = priceLstFor(symbol)
     if len(data) < 2:
@@ -617,7 +617,7 @@ if __name__ == "__main__":
             
             all_trends = {}
             for symbol in symbols:
-                all_trends[symbol] = getTrendLongTerm(symbol, draw=True)
+                all_trends[symbol] = getTrendLongTerm(symbol,,lookback_days=30, draw=True)
                 #all_trends[symbol] = getTrendLongTerm_fixed(symbol, 
                 #                            window_hours=16,
                 #                            step_hours=8,
