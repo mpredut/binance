@@ -617,14 +617,14 @@ if __name__ == "__main__":
             
             all_trends = {}
             for symbol in symbols:
-                all_trends[symbol] = getTrendLongTerm(symbol,lookback_days=30, draw=True)
-                #all_trends[symbol] = getTrendLongTerm_fixed(symbol, 
-                #                            window_hours=16,
-                #                            step_hours=8,
-                #                            min_consecutive_blocks=3,
-                #                            noise_tolerance=2,  # ← permite 2 blocuri UP în trendul DOWN
-                #                            lookback_days=30,
-                #                            draw=True)
+                #all_trends[symbol] = getTrendLongTerm(symbol,lookback_days=30, draw=True)
+                all_trends[symbol] = getTrendLongTerm_fixed(symbol, 
+                                            window_hours=16,
+                                            step_hours=8,
+                                            min_consecutive_blocks=3,
+                                            noise_tolerance=2,  # ← permite 2 blocuri UP în trendul DOWN
+                                            lookback_days=30,
+                                            draw=True)
                 #get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=275, order_type="BUY", draw=True)
             write_all_trends(all_trends);
 
