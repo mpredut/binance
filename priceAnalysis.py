@@ -617,7 +617,7 @@ if __name__ == "__main__":
             
             all_trends = {}
             for symbol in symbols:
-                all_trends[symbol] = getTrendLongTerm_fixed(symbol, draw=False)
+                all_trends[symbol] = getTrendLongTerm(symbol, draw=True)
                 #all_trends[symbol] = getTrendLongTerm_fixed(symbol, 
                 #                            window_hours=16,
                 #                            step_hours=8,
