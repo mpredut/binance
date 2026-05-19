@@ -180,8 +180,13 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
     data: List[Tuple[int, float]] = priceLstFor(symbol)
     if len(data) < 2:
         return None
-
-    data = sorted(data, key=lambda x: x[0]) 
+    data = sorted(data, key=lambda x: x[0])
+    
+    # Filtrează ultimele N zile
+    cutoff_timestamp = time.time() - (lookback_days * 86400)
+    data = [(ts, p) for ts, p in data if ts/1000 > cutoff_timestamp]
+    
+    
     timestamps, prices = zip(*data)
     timestamps = np.array(timestamps) / 1000  # conversie din ms în secunde
     prices = np.array(prices)
@@ -612,14 +617,14 @@ if __name__ == "__main__":
             
             all_trends = {}
             for symbol in symbols:
-                #all_trends[symbol] = getTrendLongTerm_fixed(symbol, draw=False)
-                all_trends[symbol] = getTrendLongTerm_fixed(symbol, 
-                                            window_hours=16,
-                                            step_hours=8,
-                                            min_consecutive_blocks=3,
-                                            noise_tolerance=2,  # ← permite 2 blocuri UP în trendul DOWN
-                                            lookback_days=30,
-                                            draw=True)
+                all_trends[symbol] = getTrendLongTerm_fixed(symbol, draw=False)
+                #all_trends[symbol] = getTrendLongTerm_fixed(symbol, 
+                #                            window_hours=16,
+                #                            step_hours=8,
+                #                            min_consecutive_blocks=3,
+                #                            noise_tolerance=2,  # ← permite 2 blocuri UP în trendul DOWN
+                #                            lookback_days=30,
+                #                            draw=True)
                 #get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=275, order_type="BUY", draw=True)
             write_all_trends(all_trends);
 
