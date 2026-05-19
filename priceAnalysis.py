@@ -595,7 +595,7 @@ def get_trade_weight(T, trend_len, trend, order_type,
         print(f"[DEBUG] Order type {order_type} nu e aliniat cu trend {trend}, inversăm ponderea și aplicăm max_against_trend={max_against_trend}")
         w_max = w_seq.max()
         w_normalized = w_seq / w_max if w_max > 0 else w_seq
-        min_weight = 0.015
+        min_weight = 0.02
         w_seq = min_weight + (1 - w_normalized) * (max_against_trend - min_weight)
 
     return t_seq, w_seq  # t_seq și w_seq sunt slice [idx..T-1]
