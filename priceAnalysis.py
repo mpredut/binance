@@ -319,10 +319,10 @@ def format_timestamp(ts):
     return datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
 
 
-
 def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int = 8,
-                           min_consecutive_blocks: int = 3, 
-                           lookback_days: int = 30,  # ← NOU: analizează doar ultimele 30 zile
+                           min_consecutive_blocks: int = 3,
+                           noise_tolerance: int = 2,  # ← NOU: permite 2 blocuri zgomot
+                           lookback_days: int = 30,
                            draw: bool = True) -> Optional[dict]:
     data: List[Tuple[int, float]] = priceLstFor(symbol)
     if len(data) < 2:
@@ -330,7 +330,7 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
 
     data = sorted(data, key=lambda x: x[0])
     
-    # ← NOU: Filtrează doar ultimele lookback_days zile
+    # Filtrează ultimele N zile
     cutoff_timestamp = time.time() - (lookback_days * 86400)
     data = [(ts, p) for ts, p in data if ts/1000 > cutoff_timestamp]
     
@@ -341,6 +341,7 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
     timestamps, prices = zip(*data)
     timestamps = np.array(timestamps) / 1000
     prices = np.array(prices)
+    
     delta = np.median(np.diff(timestamps))
     points_per_hour = int(3600 / delta)
     window = min(points_per_hour * window_hours, len(prices))
@@ -352,6 +353,7 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
     print(f"Puncte totale:  {len(prices)}")
     print(f"Fereastră:      {window} puncte ({window_hours}h)")
     print(f"Pas:            {step} puncte ({step_hours}h)")
+    print(f"Toleranță zgomot: {noise_tolerance} blocuri")
     
     # Detectăm semnul trendului curent (ultimul bloc)
     last_start = len(prices) - window
@@ -368,6 +370,7 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
     # Mergem backwards și căutăm când s-a schimbat semnul
     trend_blocks = [(last_start, len(prices))]
     consecutive_same_sign = 1
+    noise_counter = 0  # ← NOU: contorizează blocurile cu semn opus
     
     for start in range(len(prices) - window - step, -1, -step):
         end = start + window
@@ -379,15 +382,22 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
         block_sign = np.sign(slope_h)
         
         if block_sign == current_sign:
-            # Același semn - continuăm trendul
+            # Același semn - continuăm trendul și resetăm noise
             trend_blocks.append((start, end))
             consecutive_same_sign += 1
+            noise_counter = 0  # ← resetăm zgomotul
+        elif noise_counter < noise_tolerance:
+            # Semn diferit dar încă în zona de toleranță
+            noise_counter += 1
+            trend_blocks.append((start, end))  # ← includem și zgomotul
+            print(f"   Zgomot detectat ({noise_counter}/{noise_tolerance}) la {format_timestamp(timestamps[start])}")
         elif consecutive_same_sign >= min_consecutive_blocks:
-            # Am avut suficiente blocuri cu același semn, acum s-a schimbat → STOP
-            print(f"\n⚠️  Schimbare semn detectată la: {format_timestamp(timestamps[start])}")
+            # Am avut suficiente blocuri + zgomotul a fost depășit → STOP
+            print(f"\n⚠️  Schimbare trend reală la: {format_timestamp(timestamps[start])}")
+            print(f"   (după {consecutive_same_sign} blocuri + {noise_counter} zgomot)")
             break
         else:
-            # Zgomot - continuăm
+            # Nu avem suficiente blocuri consecutive → continuăm
             trend_blocks.append((start, end))
     
     if len(trend_blocks) < min_consecutive_blocks:
@@ -417,9 +427,8 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
         'direction': trend_direction,
         'start_timestamp': trend_start_ts,
         'duration_seconds': duration_seconds,
-        'estimated_future_hours': duration_hours * 0.5  # estimare conservatoare
+        'estimated_future_hours': duration_hours * 0.5
     }
-
 
 # Și pentru write_all_trends, adaugă formatare:
 def write_all_trends(all_trends, filename="priceanalysis.json"):
@@ -602,7 +611,14 @@ if __name__ == "__main__":
             
             all_trends = {}
             for symbol in symbols:
-                all_trends[symbol] = getTrendLongTerm_fixed(symbol, draw=False)
+                #all_trends[symbol] = getTrendLongTerm_fixed(symbol, draw=False)
+                all_trends[symbol] = getTrendLongTerm_fixed(symbol, 
+                                            window_hours=24,
+                                            step_hours=8,
+                                            min_consecutive_blocks=3,
+                                            noise_tolerance=2,  # ← permite 2 blocuri UP în trendul DOWN
+                                            lookback_days=30,
+                                            draw=True)
                 #get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=275, order_type="BUY", draw=True)
             write_all_trends(all_trends);
 
