@@ -319,20 +319,28 @@ def format_timestamp(ts):
     return datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
 
 
+
 def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int = 8,
-                           min_consecutive_blocks: int = 3, draw: bool = True) -> Optional[dict]:
-    """
-    Detectează trendul curent mergând backwards și oprind la prima schimbare majoră de semn.
-    """
+                           min_consecutive_blocks: int = 3, 
+                           lookback_days: int = 30,  # ← NOU: analizează doar ultimele 30 zile
+                           draw: bool = True) -> Optional[dict]:
     data: List[Tuple[int, float]] = priceLstFor(symbol)
     if len(data) < 2:
         return None
 
     data = sorted(data, key=lambda x: x[0])
+    
+    # ← NOU: Filtrează doar ultimele lookback_days zile
+    cutoff_timestamp = time.time() - (lookback_days * 86400)
+    data = [(ts, p) for ts, p in data if ts/1000 > cutoff_timestamp]
+    
+    if len(data) < 2:
+        print(f"[{symbol}] Insuficiente date în ultimele {lookback_days} zile")
+        return None
+    
     timestamps, prices = zip(*data)
     timestamps = np.array(timestamps) / 1000
     prices = np.array(prices)
-    
     delta = np.median(np.diff(timestamps))
     points_per_hour = int(3600 / delta)
     window = min(points_per_hour * window_hours, len(prices))
