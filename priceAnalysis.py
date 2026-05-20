@@ -503,7 +503,10 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=14
         print(f" No trend in cache for symbol {symbol}.")
         return None
     
+    duration_days = trend["duration_seconds"] / 86400
     print(f"Trend citit din manager cache pentru simbolul {symbol}: {trend}")
+    print(f"   Start trend:     {format_timestamp(trend["start_timestamp"])}")
+    print(f"   Durată:          {format_duration(trend["duration_seconds"])} ({duration_days:.1f} zile)")
     timestamp = trend['timestamp']
     if timestamp == last_timestamp.get(symbol):
         cached_w = last_w.get(symbol)
