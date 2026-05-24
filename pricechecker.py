@@ -169,6 +169,7 @@ class PriceChecker:
 
         if not stats.get("has_data", False):
             print(f"[Checker][{symbol}] {stats.get('error', 'Unknown error')}")
+            return alerts
 
         current_price = stats["current_price"]
         up_percent = stats["up_from_min"]
