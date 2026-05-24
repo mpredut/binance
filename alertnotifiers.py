@@ -30,14 +30,14 @@ class AlertNotifier:
                 f"| price ${alert.current_price:.8f} | reference ${alert.reference_price:.8f}"
             )
         return "\n".join(lines)
-    
+
     @staticmethod
     def print_to_console(alert):
         """Print the alert to the console."""
         print("\n" + "=" * 70)
         print(str(alert))
         print("=" * 70)
-    
+
     @staticmethod
     def save_to_file(alert, filename="alerts.log"):
         """Save the alert to a file."""
@@ -47,34 +47,34 @@ class AlertNotifier:
         try:
             with alert_file.open("a", encoding="utf-8") as f:
                 f.write(f"[{datetime.now().isoformat()}] {alert.symbol} - {alert.alert_type} - {alert.percent_change:+.2f}%\n")
-                f.write(f"  Preț: ${alert.current_price:.4f}\n")
-                f.write(f"  Referință: ${alert.reference_price:.4f}\n")
+                f.write(f"  Price: ${alert.current_price:.4f}\n")
+                f.write(f"  Reference: ${alert.reference_price:.4f}\n")
                 f.write("-" * 50 + "\n")
             return True
         except Exception as e:
-            print(f"[Notifier] File excepție: {e}")
+            print(f"[Notifier] File exception: {e}")
             return False
-    
+
     @staticmethod
     def send_telegram(alert, bot_token: Optional[str] = None, chat_id: Optional[str] = None):
-        """Trimite alertă prin Telegram"""
+        """Send an alert through Telegram."""
         bot_token = bot_token or os.environ.get("TELEGRAM_BOT_TOKEN")
         chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID")
-        
+
         if not bot_token or not chat_id:
-            print("[Notifier] Telegram: token sau chat_id lipsă")
+            print("[Notifier] Telegram: bot token or chat_id is missing")
             return
-        
+
         message = (
-            f"🚨 *Alertă Crypto* 🚨\n\n"
+            f"🚨 *Crypto Alert* 🚨\n\n"
             f"*{alert.symbol}*\n"
-            f"{'🟢 CREȘTERE' if alert.alert_type == 'up' else '🔴 SCĂDERE'}\n\n"
-            f"Preț curent: `${alert.current_price:.4f}`\n"
-            f"Referință: `${alert.reference_price:.4f}`\n"
-            f"Variație: `{alert.percent_change:+.2f}%`\n"
-            f"Prag: `{alert.threshold}%`"
+            f"{'🟢 RISE' if alert.alert_type == 'up' else '🔴 DROP'}\n\n"
+            f"Current price: `${alert.current_price:.4f}`\n"
+            f"Reference: `${alert.reference_price:.4f}`\n"
+            f"Change: `{alert.percent_change:+.2f}%`\n"
+            f"Threshold: `{alert.threshold}%`"
         )
-        
+
         try:
             url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
             payload = {
@@ -84,10 +84,10 @@ class AlertNotifier:
             }
             response = requests.post(url, json=payload, timeout=10)
             if response.status_code != 200:
-                print(f"[Notifier] Telegram eroare: {response.text}")
+                print(f"[Notifier] Telegram error: {response.text}")
         except Exception as e:
-            print(f"[Notifier] Telegram excepție: {e}")
-    
+            print(f"[Notifier] Telegram exception: {e}")
+
     @staticmethod
     def send_email_batch(alerts, email_config: Optional[dict] = None):
         email_config = email_config or {}
@@ -168,7 +168,7 @@ class AlertNotifier:
         except Exception as e:
             print(f"[Notifier] Phone webhook batch exception: {e}")
             return False
-    
+
     @staticmethod
     def combined_handler(alert, enable_console=True, enable_file=True, enable_telegram=False, enable_email=False, enable_phone_webhook=False):
         """Combined handler that sends alerts through multiple channels."""

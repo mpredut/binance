@@ -1,46 +1,48 @@
 # pricechecker.py
 import time
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Callable
 from collections import defaultdict
 
-# Importă modulele tale existente
+# Import your existing modules
 import log
 import utils as u
 
-# Constante pentru praguri (poți modifica oricând)
+# Threshold configuration (can be adjusted at any time)
 PRICE_ALERT_CONFIG = {
-    "up_percent": 5.1,      # Alertă când prețul crește cu 5% față de minimul 24h
-    "down_percent": 7.5,    # Alertă când prețul scade cu 7.5% față de maximul 24h
-    "lookback_hours": 24,   # Intervalul de analiză (24 ore)
-    "cooldown_minutes": 15,  # Nu trimite aceeași alertă mai des de 15 minute
+    "up_percent": 5.1,      # Trigger an alert when the price rises by 5% from the 24h low
+    "down_percent": 7.5,    # Trigger an alert when the price drops by 7.5% from the 24h high
+    "lookback_hours": 24,   # Analysis interval (24 hours)
+    "cooldown_minutes": 15,  # Do not send the same alert more often than every 15 minutes
 }
 
 
 class PriceAlert:
-    """Structură pentru o alertă de preț"""
-    
-    def __init__(self, symbol: str, alert_type: str, current_price: float, 
+    """Structure for a price alert."""
+
+    def __init__(self, symbol: str, alert_type: str, current_price: float,
                  reference_price: float, percent_change: float, threshold: float):
         self.symbol = symbol
-        self.alert_type = alert_type  # "up" sau "down"
+        self.alert_type = alert_type  # "up" or "down"
         self.current_price = current_price
         self.reference_price = reference_price
         self.percent_change = percent_change
         self.threshold = threshold
         self.timestamp = time.time()
-    
+
     def __str__(self) -> str:
         direction = "🚀 RISE" if self.alert_type == "up" else "📉 DROP"
         emoji = "🟢" if self.alert_type == "up" else "🔴"
-        return (f"\n{emoji} {direction} {emoji}\n"
-                f"📊 {self.symbol}\n"
-                f"💰 Current price: ${self.current_price:.4f}\n"
-                f"📈 Reference: ${self.reference_price:.4f} ({'24h low' if self.alert_type == 'up' else '24h high'})\n"
-                f"📊 Change: {self.percent_change:+.2f}% (threshold: {self.threshold}%)\n"
-                f"⏰ Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
+        return (
+            f"\n{emoji} {direction} {emoji}\n"
+            f"📊 {self.symbol}\n"
+            f"💰 Current price: ${self.current_price:.4f}\n"
+            f"📈 Reference: ${self.reference_price:.4f} ({'24h low' if self.alert_type == 'up' else '24h high'})\n"
+            f"📊 Change: {self.percent_change:+.2f}% (threshold: {self.threshold}%)\n"
+            f"⏰ Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+
     def to_dict(self) -> dict:
         return {
             "symbol": self.symbol,
@@ -56,65 +58,62 @@ class PriceAlert:
 
 class PriceChecker:
     """
-    Analizează prețurile din cache și generează alerte când sunt depășite pragurile.
-    Rulează într-un thread separat.
+    Analyze cached prices and generate alerts when thresholds are exceeded.
+    Runs in a separate thread.
     """
-    
+
     def __init__(self, price_manager, alert_callback: Optional[Callable] = None):
         """
         Args:
-            price_manager: Instanța de EnhancedCachePriceManager
-            alert_callback: Funcție apelată când apare o alertă (ex: print, trimitere email/telegram)
+            price_manager: The EnhancedCachePriceManager instance.
+            alert_callback: Function called when an alert is generated (for example print, email, or telegram delivery).
         """
         self.price_manager = price_manager
         self.alert_callback = alert_callback or self._default_alert_handler
         self.config = PRICE_ALERT_CONFIG.copy()
-        
-        # Previn spam-ul: ține minte ultima alertă per simbol și tip
+
+        # Prevent spam: remember the last alert per symbol and alert type
         self._last_alert_time = defaultdict(float)
-        
-        # Thread pentru analiză continuă
+
+        # Thread for continuous analysis
         self._thread = None
         self._running = False
-    
+
     def _default_alert_handler(self, alert: PriceAlert):
-        """Handler default care afișează alerta în consolă"""
+        """Default handler that prints the alert to the console."""
         print("\n" + "=" * 60)
         print(str(alert))
         print("=" * 60)
-    # pricechecker.py - versiunea corectată
 
     def _get_price_history_last_hours(self, symbol: str, hours: int) -> List[Dict]:
-        """
-        Obține istoricul prețurilor din ultimele 'hours' ore.
-        """
+        """Retrieve the price history from the last 'hours' hours."""
         history = self.price_manager.get_price_history(symbol, limit=1000)
-        
+
         if not history:
             return []
-        
-        cutoff_time = (time.time() - hours * 3600) * 1000  # milisecunde
-        
-        # Filtrează doar intrările din ultimele X ore
+
+        cutoff_time = (time.time() - hours * 3600) * 1000  # milliseconds
+
+        # Filter only entries from the last X hours
         recent_history = [
-            entry for entry in history 
+            entry for entry in history
             if entry["timestamp"] >= cutoff_time
         ]
-        
+
         return recent_history
-    
+
     def _calculate_24h_stats(self, symbol: str) -> Dict:
         """
-        Calculează minimul, maximul și variațiile pentru ultimele 24 de ore.
-        
+        Calculate the minimum, maximum, and changes for the last 24 hours.
+
         Returns:
-            Dict cu:
-            - min_price: prețul minim în ultimele 24h
-            - max_price: prețul maxim în ultimele 24h
-            - current_price: prețul curent
-            - up_from_min: creșterea procentuală față de minim
-            - down_from_max: scăderea procentuală față de maxim
-            - has_data: True dacă există suficiente date
+            Dict with:
+            - min_price: minimum price in the last 24h
+            - max_price: maximum price in the last 24h
+            - current_price: current price
+            - up_from_min: percentage increase from the minimum
+            - down_from_max: percentage decrease from the maximum
+            - has_data: True if enough data exists
         """
         current_price = self.price_manager.get_latest_price(symbol)
         if current_price is None:
@@ -127,17 +126,17 @@ class PriceChecker:
                 "has_data": False,
                 "error": f"Insufficient data: only {len(history)} records in the last {self.config['lookback_hours']}h"
             }
-        
-        # Extrage prețurile din istoric
+
+        # Extract prices from history
         prices = [entry["price"] for entry in history]
-        
+
         min_price = min(prices)
         max_price = max(prices)
-        
-        # Calculează variațiile procentuale
+
+        # Calculate percentage changes
         up_from_min = ((current_price - min_price) / min_price) * 100 if min_price > 0 else 0
         down_from_max = ((current_price - max_price) / max_price) * 100 if max_price > 0 else 0
-        
+
         return {
             "has_data": True,
             "current_price": current_price,
@@ -149,37 +148,33 @@ class PriceChecker:
             "oldest_time": history[0]["timestamp_readable"] if history else None,
             "newest_time": history[-1]["timestamp_readable"] if history else None
         }
-    
+
     def _should_send_alert(self, symbol: str, alert_type: str) -> bool:
-        """
-        Verifică dacă putem trimite o nouă alertă (prevenim spam-ul)
-        """
+        """Check whether we can send a new alert (spam prevention)."""
         key = f"{symbol}_{alert_type}"
         last_time = self._last_alert_time.get(key, 0)
         cooldown_seconds = self.config["cooldown_minutes"] * 60
-        
+
         return (time.time() - last_time) >= cooldown_seconds
-    
+
     def _record_alert_sent(self, symbol: str, alert_type: str):
-        """Înregistrează că am trimis o alertă"""
+        """Record that an alert was sent."""
         key = f"{symbol}_{alert_type}"
         self._last_alert_time[key] = time.time()
-    
+
     def check_symbol(self, symbol: str) -> List[PriceAlert]:
-        """
-        Verifică un simbol și returnează lista de alerte (poate fi 0, 1 sau 2)
-        """
+        """Check a symbol and return a list of alerts (0, 1, or 2)."""
         alerts = []
         stats = self._calculate_24h_stats(symbol)
-        
+
         if not stats.get("has_data", False):
             print(f"[Checker][{symbol}] {stats.get('error', 'Unknown error')}")
-        
+
         current_price = stats["current_price"]
         up_percent = stats["up_from_min"]
         down_percent = stats["down_from_max"]
-        
-        # Verifică creșterea (prag sus)
+
+        # Check for price increase (upper threshold)
         if up_percent >= self.config["up_percent"]:
             if self._should_send_alert(symbol, "up"):
                 alert = PriceAlert(
@@ -192,8 +187,8 @@ class PriceChecker:
                 )
                 alerts.append(alert)
                 self._record_alert_sent(symbol, "up")
-        
-        # Verifică scăderea (prag jos)
+
+        # Check for price decrease (lower threshold)
         if down_percent <= -self.config["down_percent"]:
             if self._should_send_alert(symbol, "down"):
                 alert = PriceAlert(
@@ -206,18 +201,18 @@ class PriceChecker:
                 )
                 alerts.append(alert)
                 self._record_alert_sent(symbol, "down")
-        
-        print(f"[Checker][{symbol}] Price: ${current_price:.4f} | "
-                  f"↑ {up_percent:+.2f}% (threshold +{self.config['up_percent']}%) | "
-                  f"↓ {down_percent:+.2f}% (threshold -{self.config['down_percent']}%) | "
-                  f"Min: ${stats['min_price']:.4f} | Max: ${stats['max_price']:.4f}")
-        
+
+        print(
+            f"[Checker][{symbol}] Price: ${current_price:.4f} | "
+            f"↑ {up_percent:+.2f}% (threshold +{self.config['up_percent']}%) | "
+            f"↓ {down_percent:+.2f}% (threshold -{self.config['down_percent']}%) | "
+            f"Min: ${stats['min_price']:.4f} | Max: ${stats['max_price']:.4f}"
+        )
+
         return alerts
-    
+
     def check_all_symbols(self) -> List[PriceAlert]:
-        """
-        Verifică toate simbolurile din watchlist
-        """
+        """Check all symbols in the watchlist."""
         all_alerts = []
         if hasattr(self.price_manager, 'original_symbols'):
             symbols = list(self.price_manager.original_symbols)
@@ -232,13 +227,13 @@ class PriceChecker:
                 print(f"[Analyzer][{symbol}] Error: {e}")
 
         return all_alerts
-    
+
     def start_monitoring(self, interval_seconds: int = 60):
         """
-        Pornește monitorizarea continuă într-un thread separat.
-        
+        Start continuous monitoring in a separate thread.
+
         Args:
-            interval_seconds: Cât de des să verifice (ex: 60 secunde)
+            interval_seconds: How often to check (for example 60 seconds).
         """
         if self._running:
             print("[Checker] Already running!")
@@ -265,19 +260,19 @@ class PriceChecker:
                     if not self._running:
                         break
                     time.sleep(1)
-        
+
         self._thread = threading.Thread(target=run, name="PriceChecker", daemon=True)
         self._thread.start()
-    
+
     def stop_monitoring(self):
         """Stop monitoring."""
         self._running = False
         if self._thread:
             self._thread.join(timeout=5)
         print("[Checker] Monitoring stopped")
-    
+
     def get_status(self) -> dict:
-        """Returnează statusul curent al analizorului"""
+        """Return the current analyzer status."""
         return {
             "running": self._running,
             "config": self.config,
@@ -287,20 +282,21 @@ class PriceChecker:
 
 
 # ============================================
-# Funcție de conveniență pentru integrare rapidă
+# Convenience function for quick integration
 # ============================================
+
 
 def start_price_alert_system(price_monitor, alert_callback=None, check_interval_seconds=60):
     """
-    Pornește sistemul complet de alertă.
-    
+    Start the complete price alert system.
+
     Args:
-        price_monitor: Instanța EnhancedCachePriceManager
-        alert_callback: Funcție apelată la alertă (opțional)
-        check_interval_seconds: Intervalul dintre verificări
-        
+        price_monitor: The EnhancedCachePriceManager instance.
+        alert_callback: Function called when an alert is generated (optional).
+        check_interval_seconds: Interval between checks.
+
     Returns:
-        Instanța PriceChecker
+        The PriceChecker instance.
     """
     Checker = PriceChecker(price_monitor, alert_callback=alert_callback)
     Checker.start_monitoring(check_interval_seconds)
