@@ -10,7 +10,6 @@ from typing import Optional
 # Importă modulele tale
 import log
 
-DEFAULT_TO_EMAIL = "tuderp@gmail.com"
 BASE_DIR = Path(__file__).resolve().parent
 
 
@@ -110,7 +109,7 @@ class AlertNotifier:
         smtp_port = int(email_config.get("smtp_port") or os.environ.get("SMTP_PORT", "587"))
         smtp_username = email_config.get("smtp_username") or os.environ.get("SMTP_USERNAME")
         smtp_password = email_config.get("smtp_password") or os.environ.get("SMTP_PASSWORD")
-        to_email = email_config.get("to_email") or os.environ.get("ALERT_TO_EMAIL", DEFAULT_TO_EMAIL)
+        to_email = email_config.get("to_email") or os.environ.get("ALERT_TO_EMAIL")
 
         if not smtp_username or not smtp_password:
             print("[Notifier] Email: SMTP_USERNAME sau SMTP_PASSWORD lipsă")
@@ -140,10 +139,10 @@ class AlertNotifier:
         smtp_port = int(email_config.get("smtp_port") or os.environ.get("SMTP_PORT", "587"))
         smtp_username = email_config.get("smtp_username") or os.environ.get("SMTP_USERNAME")
         smtp_password = email_config.get("smtp_password") or os.environ.get("SMTP_PASSWORD")
-        to_email = email_config.get("to_email") or os.environ.get("ALERT_TO_EMAIL", DEFAULT_TO_EMAIL)
+        to_email = email_config.get("to_email") or os.environ.get("ALERT_TO_EMAIL")
 
-        if not smtp_username or not smtp_password:
-            print("[Notifier] Email: SMTP_USERNAME sau SMTP_PASSWORD lipsă")
+        if not smtp_username or not smtp_password or not to_email:
+            print("[Notifier] Email: SMTP_USERNAME, SMTP_PASSWORD, and ALERT_TO_EMAIL are required")
             return False
 
         subject = f"Crypto alerts: {len(alerts)} simboluri"

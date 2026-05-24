@@ -14,12 +14,18 @@ from pricechecker import start_price_alert_system, PRICE_ALERT_CONFIG
 from new_coins_discovery import create_new_coins_monitor, NewCoinsMonitor, NewCoinsFactory, MAX_NEW_COINS_TO_TRACK
 
 
+REQUIRED_ENV_VARS = ("CMC_API_KEY", "PHONE_ALERT_URL")
+
+
 def load_env_file(filename=".env"):
     env_path = Path(__file__).resolve().parent / filename
     if not env_path.exists():
-        print(f"[Debug] Env file {env_path} does not exist!")
-        return
-    print(f"[Debug] Loading env file from {env_path}")
+        if any(os.environ.get(key) for key in REQUIRED_ENV_VARS):
+            return
+        raise FileNotFoundError(
+            f"Missing required environment file: {env_path}. Please create .env with required variables."
+        )
+
     try:
         with env_path.open("r", encoding="utf-8") as f:
             for raw_line in f:
@@ -31,64 +37,113 @@ def load_env_file(filename=".env"):
                 value = value.strip().strip('"').strip("'")
                 if key and (key not in os.environ or not os.environ[key].strip()):
                     os.environ[key] = value
-                    print(f"[Debug] Loaded env: {key}={value[:15]}...")
-                elif key in os.environ:
-                    print(f"[Debug] Key {key} already in os.environ (value: {os.environ[key][:15]}...)")
     except Exception as e:
-        print(f"[Warning] Nu pot încărca {env_path}: {e}")
+        raise RuntimeError(f"Unable to load environment file {env_path}: {e}") from e
+
+
+def validate_required_env():
+    missing = []
+    for key in REQUIRED_ENV_VARS:
+        if not os.environ.get(key):
+            missing.append(key)
+
+    if not os.environ.get("PHONE_ALERT_URL") and not os.environ.get("NTFY_TOPIC"):
+        missing.append("PHONE_ALERT_URL or NTFY_TOPIC")
+
+    if missing:
+        raise RuntimeError(
+            "Missing required environment variables: " + ", ".join(sorted(set(missing)))
+        )
 
 
 load_env_file()
+validate_required_env()
 
-# Încearcă să importe AlertNotifier, dar nu e critic
+# Try to import AlertNotifier, but do not continue without it
 try:
     from alertnotifiers import AlertNotifier
     ALERT_NOTIFIER_AVAILABLE = True
-except ImportError:
-    print("[Warning] AlertNotifier not available, using basic alerts")
-    ALERT_NOTIFIER_AVAILABLE = False
-    
-    # Clasa dummy dacă nu există
-    class AlertNotifier:
-        @staticmethod
-        def print_to_console(alert):
-            print(str(alert))
-        
-        @staticmethod
-        def save_to_file(alert, filename="crypto_alerts.log"):
-            with open(filename, "w") as f:
-                f.write(f"{datetime.now()}: {alert.symbol} - {alert.percent_change:+.2f}%\n")
+except ImportError as exc:
+    raise RuntimeError("AlertNotifier is required but could not be imported") from exc
+
+
+def print_notification_channels_status():
+    print("\n" + "=" * 70)
+    print("NOTIFICATION CHANNEL CONFIGURATION CHECK")
+    print("=" * 70)
+
+    phone_url = os.environ.get("PHONE_ALERT_URL")
+    ntfy_topic = os.environ.get("NTFY_TOPIC")
+    if phone_url or ntfy_topic:
+        target = phone_url if phone_url else f"ntfy topic '{ntfy_topic}'"
+        print(f"   ✅ Phone webhook: ENABLED -> {target[:40]}...")
+    else:
+        print("   ❌ Phone webhook: DISABLED (PHONE_ALERT_URL or NTFY_TOPIC is missing)")
+
+    tg_token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    tg_chat = os.environ.get("TELEGRAM_CHAT_ID")
+    if tg_token and tg_chat:
+        print(f"   ✅ Telegram: ENABLED -> Chat ID: {tg_chat}")
+    else:
+        missing = []
+        if not tg_token:
+            missing.append("TELEGRAM_BOT_TOKEN")
+        if not tg_chat:
+            missing.append("TELEGRAM_CHAT_ID")
+        print(f"   ❌ Telegram: DISABLED (missing: {', '.join(missing)})")
+
+    email_user = os.environ.get("SMTP_USERNAME")
+    email_pass = os.environ.get("SMTP_PASSWORD")
+    alert_to_email = os.environ.get("ALERT_TO_EMAIL")
+    if email_user and email_pass and alert_to_email:
+        print(f"   ✅ Email: ENABLED -> Sender: {email_user}")
+    else:
+        missing = []
+        if not email_user:
+            missing.append("SMTP_USERNAME")
+        if not email_pass:
+            missing.append("SMTP_PASSWORD")
+        if not alert_to_email:
+            missing.append("ALERT_TO_EMAIL")
+        print(f"   ❌ Email: DISABLED (missing: {', '.join(missing)})")
+
+    print("=" * 70 + "\n")
+
+
+print_notification_channels_status()
 
 
 def custom_alert_handler(alert):
-    """Handler personalizat pentru alerte de preț"""
+    """Handler for price alerts."""
     alerts = alert if isinstance(alert, list) else [alert]
-    print(f"[Debug] custom_alert_handler called with {len(alerts)} alerts.")
-    print(f"[Debug] PHONE_ALERT_URL = {os.environ.get('PHONE_ALERT_URL')}")
-    print(f"[Debug] NTFY_TOPIC = {os.environ.get('NTFY_TOPIC')}")
     if ALERT_NOTIFIER_AVAILABLE:
         for item in alerts:
             AlertNotifier.print_to_console(item)
             AlertNotifier.save_to_file(item, filename="crypto_alerts.log")
+
         if os.environ.get("PHONE_ALERT_URL") or os.environ.get("NTFY_TOPIC"):
             if len(alerts) == 1:
-                print("[Debug] Calling AlertNotifier.send_phone_webhook (single)")
                 AlertNotifier.send_phone_webhook(alerts[0])
             else:
-                print("[Debug] Calling AlertNotifier.send_phone_webhook_batch (batch)")
                 AlertNotifier.send_phone_webhook_batch(alerts)
         else:
-            print("[Debug] Webhook not called: environment variables are missing/empty.")
+            print("[Warning] Phone alert was not sent because PHONE_ALERT_URL or NTFY_TOPIC is missing.")
+
         if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"):
             for item in alerts:
                 AlertNotifier.send_telegram(item)
-        if os.environ.get("SMTP_USERNAME") and os.environ.get("SMTP_PASSWORD"):
+        else:
+            print("[Warning] Telegram alert was not sent because TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing.")
+
+        if os.environ.get("SMTP_USERNAME") and os.environ.get("SMTP_PASSWORD") and os.environ.get("ALERT_TO_EMAIL"):
             if len(alerts) == 1:
                 AlertNotifier.send_email(alerts[0])
             else:
                 AlertNotifier.send_email_batch(alerts)
+        else:
+            print("[Warning] Email alert was not sent because SMTP_USERNAME, SMTP_PASSWORD, or ALERT_TO_EMAIL is missing.")
     else:
-        print("[Debug] ALERT_NOTIFIER_AVAILABLE is False, using basic print fallback.")
+        print("[Warning] AlertNotifier is not available, falling back to console output.")
         for item in alerts:
             print("\n" + "=" * 60)
             print(str(item))
@@ -96,210 +151,166 @@ def custom_alert_handler(alert):
 
 
 def new_coin_alert_handler(coin_info):
-    """Handler pentru monede nou descoperite"""
+    """Handler for newly discovered coins."""
     source = coin_info.get('source', 'unknown')
     has_price = coin_info.get('has_price', False)
     auto_added = coin_info.get('auto_added', False)
-    
+
     print("\n" + "=" * 70)
-    print(f"🆕 MONEDĂ NOUĂ: {coin_info['symbol']} - {coin_info.get('name', 'N/A')}")
-    print(f"   📡 Sursă: {source}")
-    
+    print(f"🆕 NEW COIN: {coin_info['symbol']} - {coin_info.get('name', 'N/A')}")
+    print(f"   📡 Source: {source}")
+
     if has_price:
-        print(f"   💰 Preț: ${coin_info.get('price', 0):.8f}")
-        print(f"   ✅ Adăugată automat în watchlist: {auto_added}")
+        print(f"   💰 Price: ${coin_info.get('price', 0):.8f}")
+        print(f"   ✅ Auto-added to watchlist: {auto_added}")
     else:
-        print(f"   ⚠️ Sursa {source} nu oferă preț - doar informațional")
-        print(f"   💡 Moneda va fi monitorizată doar dacă apare ulterior pe CoinMarketCap")
-    
+        print(f"   ⚠️ Source {source} does not provide price - informational only")
+        print(f"   💡 The coin will only be monitored after a price becomes available from CoinMarketCap")
+
     if coin_info.get('url'):
         print(f"   🔗 {coin_info['url']}")
     print("=" * 70)
 
 
 def print_status_report(price_monitor, new_coins_monitor):
-    """Afișează un raport de status"""
+    """Print a status report."""
     print("\n" + "=" * 70)
-    print("📊 RAPORT STATUS")
+    print("📊 STATUS REPORT")
     print("=" * 70)
-    
-    # Simboluri monitorizate pentru prețuri
+
     if hasattr(price_monitor, 'original_symbols'):
         symbols_count = len(price_monitor.original_symbols)
-        print(f"\n💰 Simboluri monitorizate prețuri: {symbols_count}")
-        print(f"   Primele 10: {price_monitor.original_symbols[:10]}")
-    
-    # Monede noi descoperite
+        print(f"\n💰 Tracked price symbols: {symbols_count}")
+        print(f"   First 10: {price_monitor.original_symbols[:10]}")
+
     if new_coins_monitor:
         summary = new_coins_monitor.get_summary()
-        print(f"\n🆕 Monede noi descoperite total: {summary['total_new_coins']}")
+        print(f"\n🆕 New coins discovered total: {summary['total_new_coins']}")
         for source, data in summary['sources'].items():
-            print(f"   {source}: {data['count']} monede")
+            print(f"   {source}: {data['count']} coins")
         if summary['all_symbols']:
-            print(f"   Simboluri noi: {summary['all_symbols'][:10]}")
-    
-    # Configurație alerte
-    print(f"\n⚙️ Configurație alerte preț:")
-    print(f"   Prag creștere: +{PRICE_ALERT_CONFIG['up_percent']}% față de minim 24h")
-    print(f"   Prag scădere: -{PRICE_ALERT_CONFIG['down_percent']}% față de maxim 24h")
-    print(f"   Cooldown: {PRICE_ALERT_CONFIG['cooldown_minutes']} minute")
-    
+            print(f"   New symbols: {summary['all_symbols'][:10]}")
+
+    print(f"\n⚙️ Price alert configuration:")
+    print(f"   Up threshold: +{PRICE_ALERT_CONFIG['up_percent']}% from 24h low")
+    print(f"   Down threshold: -{PRICE_ALERT_CONFIG['down_percent']}% from 24h high")
+    print(f"   Cooldown: {PRICE_ALERT_CONFIG['cooldown_minutes']} minutes")
+
     print("=" * 70)
 
 
 def periodic_cleanup(price_monitor, new_coins_monitor):
-    """Rulează cleanup la fiecare 6 ore"""
+    """Run cleanup every 6 hours."""
     while True:
-        time.sleep(6 * 3600)  # 6 ore
-        print("[Periodic] Rulez cleanup prețuri vechi...")
-        
-        # Curăță prețurile vechi
+        time.sleep(6 * 3600)
+        print("[Periodic] Running cleanup for stale prices...")
+
         if hasattr(price_monitor, 'cleanup_old_prices'):
             price_monitor.cleanup_old_prices()
         else:
-            print("[Periodic] price_monitor.cleanup_old_prices() nu există")
-        
-        # Curăță simbolurile vechi
+            print("[Periodic] price_monitor.cleanup_old_prices() does not exist")
+
         if hasattr(price_monitor, 'cleanup_old_symbols'):
             price_monitor.cleanup_old_symbols(max_age_days=7)
         else:
-            print("[Periodic] price_monitor.cleanup_old_symbols() nu există")
-        
-        # Curăță monedele vechi din watchlist
+            print("[Periodic] price_monitor.cleanup_old_symbols() does not exist")
+
         if new_coins_monitor and hasattr(new_coins_monitor, 'cleanup_old_new_coins'):
             new_coins_monitor.cleanup_old_new_coins()
         else:
-            print("[Periodic] new_coins_monitor.cleanup_old_new_coins() nu există")
+            print("[Periodic] new_coins_monitor.cleanup_old_new_coins() does not exist")
 
 
 def main():
-    """Funcția principală"""
-    
+    """Main entry point."""
+
     print("=" * 70)
-    print("🚀 SISTEM COMPLET MONITORIZARE CRYPTO")
+    print("🚀 CRYPTO PRICE MONITORING SYSTEM")
     print("=" * 70)
-    print(f"📅 Pornire: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # Configurație
-    CMC_API_KEY = os.environ.get('CMC_API_KEY', "4d587781-722b-40a3-83f0-2436d45942f7")
-    
-    # Surse pentru monede noi (poți alege care să fie active)
+    print(f"📅 Startup time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+    CMC_API_KEY = os.environ.get('CMC_API_KEY')
     ENABLED_SOURCES = ["coinmarketcap", "coingecko", "binance", "dexscreener"]
-    
-    # =========================================================
-    # PASUL 1: Pornește monitorul de prețuri
-    # =========================================================
-    print("\n⏳ Inițializare monitor prețuri...")
+
+    print("\n⏳ Initializing price monitor...")
     price_monitor = create_price_monitor(cmc_api_key=CMC_API_KEY)
-    print("✅ Monitor prețuri pornit!")
-    
-    # =========================================================
-    # PASUL 2: Așteaptă prima colectare
-    # =========================================================
-    print("\n⏳ Așteptăm prima colectare de prețuri (30 sec)...")
+    print("✅ Price monitor started!")
+
+    print("\n⏳ Waiting for first price sync (30 seconds)...")
     time.sleep(30)
-    
-    # =========================================================
-    # PASUL 3: Pornește sistemul de alerte pentru prețuri
-    # =========================================================
-    print("\n⏳ Pornire sistem alertă prețuri...")
+
+    print("\n⏳ Starting price alert system...")
     analyzer = start_price_alert_system(
         price_monitor=price_monitor,
         alert_callback=custom_alert_handler,
         check_interval_seconds=60
     )
-    print("✅ Sistem alertă prețuri pornit!")
-    
-    # =========================================================
-    # PASUL 4: Pornește monitorul pentru monede noi
-    # =========================================================
-    print("\n⏳ Inițializare monitor monede noi...")
-    
-    # Creează factory-ul cu sursele dorite
+    print("✅ Price alert system started!")
+
+    print("\n⏳ Initializing new coin monitor...")
     factory = NewCoinsFactory(enabled_sources=ENABLED_SOURCES, cmc_api_key=CMC_API_KEY)
-    
-    # Creează monitorul și conectează-l la price_monitor
     new_coins_monitor = NewCoinsMonitor(price_monitor=price_monitor, factory=factory)
     new_coins_monitor.register_alert_callback(new_coin_alert_handler)
-    
-    # Pornește monitorizarea (refresh la fiecare oră)
     new_coins_monitor.start_monitoring(interval_seconds=3600)
-    print(f"✅ Monitor monede noi pornit! Surse active: {factory.get_available_sources()}")
-    
+    print(f"✅ New coin monitor started! Active sources: {factory.get_available_sources()}")
+
     print("\n" + "=" * 70)
-    print("📋 CONFIGURAȚIE MONITOR MONEDE NOI")
+    print("📋 NEW COIN MONITOR CONFIGURATION")
     print("=" * 70)
-    print(f"   ✅ CoinMarketCap - descoperă + preț → adaugă în watchlist")
-    print(f"   ℹ️ CoinGecko - doar descoperă (fără preț) → informațional")
-    print(f"   ℹ️ Binance - doar listări noi → informațional")
-    print(f"   ℹ️ DexScreener - doar token-uri noi DEX → informațional")
+    print("   ✅ CoinMarketCap - discover + price -> auto-add to watchlist")
+    print("   ℹ️ CoinGecko - discovery only -> informational")
+    print("   ℹ️ Binance - new listings only -> informational")
+    print("   ℹ️ DexScreener - new DEX tokens only -> informational")
     print("=" * 70)
 
-    # =========================================================
-    # PASUL 5: Descoperire inițială monede noi
-    # =========================================================
-    # Secțiunea de startup - versiunea corectată
-    print("\n⏳ Descoperire inițială monede noi...")
+    print("\n⏳ Performing initial new coin discovery...")
     new_coins_monitor.refresh()
 
-    # Adaugă doar monedele de pe CoinMarketCap (singurele cu preț)
     auto_added_count = 0
     for source_name, coins in new_coins_monitor.all_new_coins.items():
-        if source_name.lower() == "coinmarketcap":  # ← ignora litere mari/mici
+        if source_name.lower() == "coinmarketcap":
             for coin in coins[:MAX_NEW_COINS_TO_TRACK]:
                 if new_coins_monitor.add_new_coin_to_watchlist(coin):
                     auto_added_count += 1
         else:
-            # Celelalte surse - doar loghează (DAR COMPRESAT)
             if coins:
                 symbols_list = ', '.join([c['symbol'] for c in coins[:10]])
                 if len(coins) > 10:
-                    symbols_list += f" și {len(coins)-10} altele"
-                print(f"[Startup] ℹ️ Sursa {source_name}: {len(coins)} monede noi: {symbols_list}")
+                    symbols_list += f" and {len(coins) - 10} more"
+                print(f"[Startup] ℹ️ Source {source_name}: {len(coins)} new coins: {symbols_list}")
 
     if auto_added_count > 0:
-        print(f"✅ {auto_added_count} monede noi adăugate automat în watchlist (de pe CoinMarketCap)")
+        print(f"✅ {auto_added_count} new coins auto-added to watchlist from CoinMarketCap")
     else:
-        print(f"ℹ️ Nu s-au găsit monede noi cu preț pe CoinMarketCap")
-    
-    # =========================================================
-    # PASUL 6: Pornește cleanup-ul periodic
-    # =========================================================
+        print("ℹ️ No new coins with price were found on CoinMarketCap")
+
     cleanup_thread = threading.Thread(
-        target=periodic_cleanup, 
+        target=periodic_cleanup,
         args=(price_monitor, new_coins_monitor),
         daemon=True
     )
     cleanup_thread.start()
-    print("✅ Cleanup periodic pornit (la 6 ore)")
+    print("✅ Periodic cleanup started (every 6 hours)")
 
-    # =========================================================
-    # PASUL 7: Afișează raportul de status
-    # =========================================================
     print_status_report(price_monitor, new_coins_monitor)
-    
-    # =========================================================
-    # PASUL 8: Afișează raportul detaliat cu monede noi
-    # =========================================================
     print(new_coins_monitor.get_report())
-    
+
     print("\n" + "=" * 70)
-    print("✅ SISTEM COMPLET ACTIVAT!")
-    print("   📊 Monedele noi sunt adăugate AUTOMAT în watchlist")
-    print("   📈 PriceChecker le va monitoriza prețurile")
-    print("   🔔 Vei primi alerte când ating pragurile")
+    print("✅ SYSTEM FULLY ACTIVE!")
+    print("   📊 New coins are auto-added to the watchlist")
+    print("   📈 PriceChecker will monitor their price")
+    print("   🔔 Alerts will be sent when thresholds are reached")
     print("=" * 70)
-    print("\n👉 Așteaptă alerte... (Ctrl+C pentru oprire)\n")
-    
-    # Menține programul în funcțiune
+    print("\n👉 Waiting for alerts... (Ctrl+C to stop)\n")
+
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n\n🛑 Oprire sistem...")
+        print("\n\n🛑 Stopping system...")
         new_coins_monitor.stop_monitoring()
         analyzer.stop_monitoring()
-        print("👋 La revedere!")
+        print("👋 Goodbye!")
 
 
 if __name__ == "__main__":

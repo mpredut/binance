@@ -32,14 +32,14 @@ class PriceAlert:
         self.timestamp = time.time()
     
     def __str__(self) -> str:
-        direction = "🚀 CREȘTERE" if self.alert_type == "up" else "📉 SCĂDERE"
+        direction = "🚀 RISE" if self.alert_type == "up" else "📉 DROP"
         emoji = "🟢" if self.alert_type == "up" else "🔴"
         return (f"\n{emoji} {direction} {emoji}\n"
                 f"📊 {self.symbol}\n"
-                f"💰 Preț curent: ${self.current_price:.4f}\n"
-                f"📈 Referință: ${self.reference_price:.4f} ({'min 24h' if self.alert_type == 'up' else 'max 24h'})\n"
-                f"📊 Variație: {self.percent_change:+.2f}% (prag: {self.threshold}%)\n"
-                f"⏰ Timp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                f"💰 Current price: ${self.current_price:.4f}\n"
+                f"📈 Reference: ${self.reference_price:.4f} ({'24h low' if self.alert_type == 'up' else '24h high'})\n"
+                f"📊 Change: {self.percent_change:+.2f}% (threshold: {self.threshold}%)\n"
+                f"⏰ Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     
     def to_dict(self) -> dict:
         return {
@@ -116,18 +116,16 @@ class PriceChecker:
             - down_from_max: scăderea procentuală față de maxim
             - has_data: True dacă există suficiente date
         """
-        # Obține prețul curent
         current_price = self.price_manager.get_latest_price(symbol)
         if current_price is None:
-            return {"has_data": False, "error": "Nu există preț curent"}
-        
-        # Obține istoricul ultimelor 24h
+            return {"has_data": False, "error": "No current price available"}
+
         history = self._get_price_history_last_hours(symbol, self.config["lookback_hours"])
-        
+
         if len(history) < 2:
             return {
-                "has_data": False, 
-                "error": f"Date insuficiente: doar {len(history)} înregistrări în ultimele {self.config['lookback_hours']}h"
+                "has_data": False,
+                "error": f"Insufficient data: only {len(history)} records in the last {self.config['lookback_hours']}h"
             }
         
         # Extrage prețurile din istoric
@@ -175,8 +173,7 @@ class PriceChecker:
         stats = self._calculate_24h_stats(symbol)
         
         if not stats.get("has_data", False):
-            print(f"[Checker][{symbol}] {stats.get('error', 'Eroare necunoscută')}")
-            return alerts
+            print(f"[Checker][{symbol}] {stats.get('error', 'Unknown error')}")
         
         current_price = stats["current_price"]
         up_percent = stats["up_from_min"]
@@ -210,10 +207,9 @@ class PriceChecker:
                 alerts.append(alert)
                 self._record_alert_sent(symbol, "down")
         
-        # Logging informativ (nu alertă)
-        print(f"[Checker][{symbol}] Preț: ${current_price:.4f} | "
-                  f"↑ {up_percent:+.2f}% (prag +{self.config['up_percent']}%) | "
-                  f"↓ {down_percent:+.2f}% (prag -{self.config['down_percent']}%) | "
+        print(f"[Checker][{symbol}] Price: ${current_price:.4f} | "
+                  f"↑ {up_percent:+.2f}% (threshold +{self.config['up_percent']}%) | "
+                  f"↓ {down_percent:+.2f}% (threshold -{self.config['down_percent']}%) | "
                   f"Min: ${stats['min_price']:.4f} | Max: ${stats['max_price']:.4f}")
         
         return alerts
@@ -223,19 +219,18 @@ class PriceChecker:
         Verifică toate simbolurile din watchlist
         """
         all_alerts = []
-        # 🔧 Reîmprospătează lista de simboluri de la price_monitor (inclusiv cele nou adăugate)
         if hasattr(self.price_manager, 'original_symbols'):
             symbols = list(self.price_manager.original_symbols)
         else:
             symbols = list(self.price_manager.symbols)
-        
+
         for symbol in symbols:
             try:
                 alerts = self.check_symbol(symbol)
                 all_alerts.extend(alerts)
             except Exception as e:
-                print(f"[Analyzer][{symbol}] Eroare: {e}")
-        
+                print(f"[Analyzer][{symbol}] Error: {e}")
+
         return all_alerts
     
     def start_monitoring(self, interval_seconds: int = 60):
@@ -246,27 +241,26 @@ class PriceChecker:
             interval_seconds: Cât de des să verifice (ex: 60 secunde)
         """
         if self._running:
-            print("[Checker] Deja rulează!")
+            print("[Checker] Already running!")
             return
-        
+
         self._running = True
-        
+
         def run():
-            print(f"[Checker] Monitorizare pornită - verifică la fiecare {interval_seconds}s")
-            print(f"[Checker] Praguri: ↑ +{self.config['up_percent']}% | ↓ -{self.config['down_percent']}%")
-            
+            print(f"[Checker] Monitoring started - checking every {interval_seconds}s")
+            print(f"[Checker] Thresholds: ↑ +{self.config['up_percent']}% | ↓ -{self.config['down_percent']}%")
+
             while self._running:
                 try:
                     alerts = self.check_all_symbols()
-                    
+
                     if alerts:
                         self.alert_callback(alerts)
-                    
-                except Exception as e:
-                    print(f"[Checker] Eroare în ciclul principal: {e}")
 
-                print(f"[Checker] Aștept {interval_seconds} secunde până la următoarea verificare...")               
-                # Pauză până la următoarea verificare
+                except Exception as e:
+                    print(f"[Checker] Error in main loop: {e}")
+
+                print(f"[Checker] Waiting {interval_seconds} seconds until next check...")
                 for _ in range(interval_seconds):
                     if not self._running:
                         break
@@ -276,11 +270,11 @@ class PriceChecker:
         self._thread.start()
     
     def stop_monitoring(self):
-        """Oprește monitorizarea"""
+        """Stop monitoring."""
         self._running = False
         if self._thread:
             self._thread.join(timeout=5)
-        print("[Checker] Monitorizare oprită")
+        print("[Checker] Monitoring stopped")
     
     def get_status(self) -> dict:
         """Returnează statusul curent al analizorului"""
