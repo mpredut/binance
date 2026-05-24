@@ -54,7 +54,7 @@ class PriceAlert:
         }
 
 
-class PriceAnalyzer:
+class PriceChecker:
     """
     Analizează prețurile din cache și generează alerte când sunt depășite pragurile.
     Rulează într-un thread separat.
@@ -82,7 +82,8 @@ class PriceAnalyzer:
         print("\n" + "=" * 60)
         print(str(alert))
         print("=" * 60)
-    
+    # pricechecker.py - versiunea corectată
+
     def _get_price_history_last_hours(self, symbol: str, hours: int) -> List[Dict]:
         """
         Obține istoricul prețurilor din ultimele 'hours' ore.
@@ -92,8 +93,7 @@ class PriceAnalyzer:
         if not history:
             return []
         
-        # Calculează timestamp-ul de acum 'hours' ore
-        cutoff_time = (time.time() - hours * 3600) * 1000  # convertim la ms
+        cutoff_time = (time.time() - hours * 3600) * 1000  # milisecunde
         
         # Filtrează doar intrările din ultimele X ore
         recent_history = [
@@ -267,7 +267,7 @@ class PriceAnalyzer:
                         break
                     time.sleep(1)
         
-        self._thread = threading.Thread(target=run, name="PriceAnalyzer", daemon=True)
+        self._thread = threading.Thread(target=run, name="PriceChecker", daemon=True)
         self._thread.start()
     
     def stop_monitoring(self):
@@ -301,8 +301,8 @@ def start_price_alert_system(price_monitor, alert_callback=None, check_interval_
         check_interval_seconds: Intervalul dintre verificări
         
     Returns:
-        Instanța PriceAnalyzer
+        Instanța PriceChecker
     """
-    analyzer = PriceAnalyzer(price_monitor, alert_callback=alert_callback)
+    analyzer = PriceChecker(price_monitor, alert_callback=alert_callback)
     analyzer.start_monitoring(check_interval_seconds)
     return analyzer

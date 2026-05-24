@@ -4,26 +4,43 @@ import os
 import threading
 from datetime import datetime
 
-
-# Importă modulele tale existente și noile module
+# Importă modulele tale existente
 import log
-import utils as u
 
-# Importă noile module
+# Importă modulele principale
 from pricefetcher import create_price_monitor
 from pricechecker import start_price_alert_system, PRICE_ALERT_CONFIG
-from alertnotifiers import AlertNotifier
-# run_price_monitor.py (versiune completă cu auto-add)
-import time
-import os
-from datetime import datetime
-
 from new_coins_discovery import create_new_coins_monitor, NewCoinsMonitor, NewCoinsFactory
+
+# Încearcă să importe AlertNotifier, dar nu e critic
+try:
+    from alertnotifiers import AlertNotifier
+    ALERT_NOTIFIER_AVAILABLE = True
+except ImportError:
+    print("[Warning] AlertNotifier not available, using basic alerts")
+    ALERT_NOTIFIER_AVAILABLE = False
+    
+    # Clasa dummy dacă nu există
+    class AlertNotifier:
+        @staticmethod
+        def print_to_console(alert):
+            print(str(alert))
+        
+        @staticmethod
+        def save_to_file(alert, filename="crypto_alerts.log"):
+            with open(filename, "a") as f:
+                f.write(f"{datetime.now()}: {alert.symbol} - {alert.percent_change:+.2f}%\n")
+
 
 def custom_alert_handler(alert):
     """Handler personalizat pentru alerte de preț"""
-    AlertNotifier.print_to_console(alert)
-    AlertNotifier.save_to_file(alert, filename="crypto_alerts.log")
+    if ALERT_NOTIFIER_AVAILABLE:
+        AlertNotifier.print_to_console(alert)
+        AlertNotifier.save_to_file(alert, filename="crypto_alerts.log")
+    else:
+        print("\n" + "=" * 60)
+        print(str(alert))
+        print("=" * 60)
 
 
 def new_coin_alert_handler(coin_info):
@@ -48,7 +65,7 @@ def new_coin_alert_handler(coin_info):
     print("=" * 70)
 
 
-def print_status_report(price_monitor, new_coins_monitor, analyzer):
+def print_status_report(price_monitor, new_coins_monitor):
     """Afișează un raport de status"""
     print("\n" + "=" * 70)
     print("📊 RAPORT STATUS")
@@ -84,17 +101,23 @@ def periodic_cleanup(price_monitor, new_coins_monitor):
         time.sleep(6 * 3600)  # 6 ore
         print("[Periodic] Rulez cleanup prețuri vechi...")
         
-        # Curăță prețurile vechi (dacă metoda există)
+        # Curăță prețurile vechi
         if hasattr(price_monitor, 'cleanup_old_prices'):
             price_monitor.cleanup_old_prices()
+        else:
+            print("[Periodic] price_monitor.cleanup_old_prices() nu există")
         
-        # Curăță simbolurile vechi (dacă metoda există)
+        # Curăță simbolurile vechi
         if hasattr(price_monitor, 'cleanup_old_symbols'):
             price_monitor.cleanup_old_symbols(max_age_days=7)
+        else:
+            print("[Periodic] price_monitor.cleanup_old_symbols() nu există")
         
-        # Curăță monedele vechi din watchlist (dacă metoda există)
+        # Curăță monedele vechi din watchlist
         if new_coins_monitor and hasattr(new_coins_monitor, 'cleanup_old_new_coins'):
             new_coins_monitor.cleanup_old_new_coins()
+        else:
+            print("[Periodic] new_coins_monitor.cleanup_old_new_coins() nu există")
 
 
 def main():
@@ -112,7 +135,7 @@ def main():
     ENABLED_SOURCES = ["coinmarketcap", "coingecko", "binance", "dexscreener"]
     
     # =========================================================
-    # PASUL 1: Pornește monitorul de prețuri pentru simbolurile existente
+    # PASUL 1: Pornește monitorul de prețuri
     # =========================================================
     print("\n⏳ Inițializare monitor prețuri...")
     price_monitor = create_price_monitor(cmc_api_key=CMC_API_KEY)
@@ -136,7 +159,7 @@ def main():
     print("✅ Sistem alertă prețuri pornit!")
     
     # =========================================================
-    # PASUL 4: Pornește monitorul pentru monede noi (cu auto-add)
+    # PASUL 4: Pornește monitorul pentru monede noi
     # =========================================================
     print("\n⏳ Inițializare monitor monede noi...")
     
@@ -161,7 +184,7 @@ def main():
     print("=" * 70)
 
     # =========================================================
-    # PASUL 5: Forțează o descoperire inițială și adaugă monedele noi
+    # PASUL 5: Descoperire inițială monede noi
     # =========================================================
     print("\n⏳ Descoperire inițială monede noi...")
     new_coins_monitor.refresh()
@@ -169,12 +192,11 @@ def main():
     # Adaugă doar monedele de pe CoinMarketCap (singurele cu preț)
     auto_added_count = 0
     for source_name, coins in new_coins_monitor.all_new_coins.items():
-        if source_name == "CoinMarketCap":  # Doar CMC are preț
+        if source_name == "CoinMarketCap":
             for coin in coins:
                 if new_coins_monitor.add_new_coin_to_watchlist(coin):
                     auto_added_count += 1
         else:
-            # Celelalte surse - doar loghează
             for coin in coins:
                 print(f"[Startup] ℹ️ {coin['symbol']} descoperit pe {source_name} - doar informațional")
 
@@ -188,15 +210,16 @@ def main():
     # =========================================================
     cleanup_thread = threading.Thread(
         target=periodic_cleanup, 
-        args=(price_monitor, new_coins_monitor),  # ← trece argumentele corect
+        args=(price_monitor, new_coins_monitor),
         daemon=True
     )
     cleanup_thread.start()
+    print("✅ Cleanup periodic pornit (la 6 ore)")
 
     # =========================================================
     # PASUL 7: Afișează raportul de status
     # =========================================================
-    print_status_report(price_monitor, new_coins_monitor, analyzer)
+    print_status_report(price_monitor, new_coins_monitor)
     
     # =========================================================
     # PASUL 8: Afișează raportul detaliat cu monede noi
@@ -206,7 +229,7 @@ def main():
     print("\n" + "=" * 70)
     print("✅ SISTEM COMPLET ACTIVAT!")
     print("   📊 Monedele noi sunt adăugate AUTOMAT în watchlist")
-    print("   📈 PriceAnalyzer le va monitoriza prețurile")
+    print("   📈 PriceChecker le va monitoriza prețurile")
     print("   🔔 Vei primi alerte când ating pragurile")
     print("=" * 70)
     print("\n👉 Așteaptă alerte... (Ctrl+C pentru oprire)\n")

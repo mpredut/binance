@@ -470,7 +470,20 @@ class EnhancedCachePriceManager(CacheManagerInterface):
             if entries:
                 return entries[-1][1]
         return None
-    
+    # În pricefetcher.py, în clasa EnhancedCachePriceManager, adaugă:
+
+    def get_price_history(self, symbol: str, limit: int = 100) -> List[Dict]:
+        with self.lock:
+            entries = self.cache.get(symbol, [])[-limit:]
+            return [
+                {
+                    "timestamp": entry[0],  # ← MILISECUNDE (fără //1000)
+                    "timestamp_readable": datetime.fromtimestamp(entry[0] // 1000).strftime('%Y-%m-%d %H:%M:%S'),
+                    "price": entry[1]
+                }
+                for entry in entries
+            ]
+        
     def cleanup_old_prices(self, retention_days: int = PRICE_HISTORY_RETENTION_DAYS):
         cutoff_timestamp = (time.time() - retention_days * 24 * 3600) * 1000
         with self.lock:
