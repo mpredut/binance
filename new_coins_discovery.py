@@ -723,7 +723,7 @@ class NewCoinsMonitor:
             return False
         
         return True
-`
+
     def refresh(self):
         """Reîmprospătează toate sursele"""
         self.all_new_coins = self.factory.get_all_new_coins(NEW_COINS_AGE_DAYS)
