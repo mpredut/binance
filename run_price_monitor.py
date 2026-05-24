@@ -71,7 +71,7 @@ def main():
     # Pasul 1: Pornește monitorul de prețuri (salvează la 5 minute)
     print("\n⏳ Inițializare monitor prețuri...")
     price_monitor = create_price_monitor(
-        symbols=WATCHLIST,
+        #symbols=WATCHLIST,
         cmc_api_key=CMC_API_KEY
     )
     print("✅ Monitor prețuri pornit!")
