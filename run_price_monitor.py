@@ -186,19 +186,24 @@ def main():
     # =========================================================
     # PASUL 5: Descoperire inițială monede noi
     # =========================================================
+    # Secțiunea de startup - versiunea corectată
     print("\n⏳ Descoperire inițială monede noi...")
     new_coins_monitor.refresh()
-    
+
     # Adaugă doar monedele de pe CoinMarketCap (singurele cu preț)
     auto_added_count = 0
     for source_name, coins in new_coins_monitor.all_new_coins.items():
-        if source_name == "CoinMarketCap":
+        if source_name.lower() == "coinmarketcap":  # ← ignora litere mari/mici
             for coin in coins:
                 if new_coins_monitor.add_new_coin_to_watchlist(coin):
                     auto_added_count += 1
         else:
-            for coin in coins:
-                print(f"[Startup] ℹ️ {coin['symbol']} descoperit pe {source_name} - doar informațional")
+            # Celelalte surse - doar loghează (DAR COMPRESAT)
+            if coins:
+                symbols_list = ', '.join([c['symbol'] for c in coins[:10]])
+                if len(coins) > 10:
+                    symbols_list += f" și {len(coins)-10} altele"
+                print(f"[Startup] ℹ️ Sursa {source_name}: {len(coins)} monede noi: {symbols_list}")
 
     if auto_added_count > 0:
         print(f"✅ {auto_added_count} monede noi adăugate automat în watchlist (de pe CoinMarketCap)")
