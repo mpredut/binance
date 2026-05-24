@@ -60,12 +60,12 @@ def custom_alert_handler(alert):
     if ALERT_NOTIFIER_AVAILABLE:
         AlertNotifier.print_to_console(alert)
         AlertNotifier.save_to_file(alert, filename="crypto_alerts.log")
-        if os.environ.get("SMTP_USERNAME") and os.environ.get("SMTP_PASSWORD"):
-            AlertNotifier.send_email(alert)
-        if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"):
-            AlertNotifier.send_telegram(alert)
         if os.environ.get("PHONE_ALERT_URL") or os.environ.get("NTFY_TOPIC"):
             AlertNotifier.send_phone_webhook(alert)
+        if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"):
+            AlertNotifier.send_telegram(alert)
+        if os.environ.get("SMTP_USERNAME") and os.environ.get("SMTP_PASSWORD"):
+            AlertNotifier.send_email(alert)
     else:
         print("\n" + "=" * 60)
         print(str(alert))

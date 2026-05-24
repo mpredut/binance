@@ -11,6 +11,7 @@ import log
 
 DEFAULT_TO_EMAIL = "tuderp@gmail.com"
 
+
 class AlertNotifier:
     """Clasă pentru trimiterea alertelor prin diverse canale"""
 
@@ -50,7 +51,7 @@ class AlertNotifier:
         chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID")
         
         if not bot_token or not chat_id:
-            log.print("[Notifier] Telegram: token sau chat_id lipsă")
+            print("[Notifier] Telegram: token sau chat_id lipsă")
             return
         
         message = (
@@ -72,9 +73,9 @@ class AlertNotifier:
             }
             response = requests.post(url, json=payload, timeout=10)
             if response.status_code != 200:
-                log.print(f"[Notifier] Telegram eroare: {response.text}")
+                print(f"[Notifier] Telegram eroare: {response.text}")
         except Exception as e:
-            log.print(f"[Notifier] Telegram excepție: {e}")
+            print(f"[Notifier] Telegram excepție: {e}")
     
     @staticmethod
     def send_email(alert, email_config: Optional[dict] = None):
@@ -87,7 +88,7 @@ class AlertNotifier:
         to_email = email_config.get("to_email") or os.environ.get("ALERT_TO_EMAIL", DEFAULT_TO_EMAIL)
 
         if not smtp_username or not smtp_password:
-            log.print("[Notifier] Email: SMTP_USERNAME sau SMTP_PASSWORD lipsă")
+            print("[Notifier] Email: SMTP_USERNAME sau SMTP_PASSWORD lipsă")
             return False
 
         subject = f"Crypto alert: {alert.symbol} {alert.percent_change:+.2f}%"
@@ -104,7 +105,7 @@ class AlertNotifier:
                 server.sendmail(smtp_username, [to_email], msg.as_string())
             return True
         except Exception as e:
-            log.print(f"[Notifier] Email excepție: {e}")
+            print(f"[Notifier] Email excepție: {e}")
             return False
 
     @staticmethod
@@ -114,7 +115,7 @@ class AlertNotifier:
         if not webhook_url and os.environ.get("NTFY_TOPIC"):
             webhook_url = f"https://ntfy.sh/{os.environ['NTFY_TOPIC']}"
         if not webhook_url:
-            log.print("[Notifier] Phone webhook: PHONE_ALERT_URL sau NTFY_TOPIC lipsă")
+            print("[Notifier] Phone webhook: PHONE_ALERT_URL sau NTFY_TOPIC lipsă")
             return False
 
         try:
@@ -130,7 +131,7 @@ class AlertNotifier:
                     timeout=10,
                 )
                 if response.status_code >= 400:
-                    log.print(f"[Notifier] ntfy eroare: {response.status_code} {response.text}")
+                    print(f"[Notifier] ntfy eroare: {response.status_code} {response.text}")
                     return False
                 return True
 
@@ -147,11 +148,11 @@ class AlertNotifier:
                 timeout=10,
             )
             if response.status_code >= 400:
-                log.print(f"[Notifier] Phone webhook eroare: {response.status_code} {response.text}")
+                print(f"[Notifier] Phone webhook eroare: {response.status_code} {response.text}")
                 return False
             return True
         except Exception as e:
-            log.print(f"[Notifier] Phone webhook excepție: {e}")
+            print(f"[Notifier] Phone webhook excepție: {e}")
             return False
     
     @staticmethod
