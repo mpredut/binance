@@ -362,10 +362,10 @@ class PricePlatformFactory:
 
 
 # ============================================
-# EnhancedCachePriceManager
+# CacheAllPriceFetcherManager
 # ============================================
 
-class EnhancedCachePriceManager(CacheManagerInterface):
+class CacheAllPriceFetcherManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api, cmc_api_key: Optional[str] = None):
         self.price_factory = PricePlatformFactory(cmc_api_key=cmc_api_key)
         self.original_symbols = symbols
@@ -387,7 +387,7 @@ class EnhancedCachePriceManager(CacheManagerInterface):
                 pass
     
     def _log_symbol_support(self):
-        print(f"[EnhancedPrice] Verificare suport simboluri:")
+        print(f"[Pricefetcher] Verificare suport simboluri:")
         for symbol in self.original_symbols:
             support = self.price_factory.check_symbol_support(symbol)
             supported_platforms = [p for p, s in support.items() if s]
@@ -420,39 +420,39 @@ class EnhancedCachePriceManager(CacheManagerInterface):
                         if price is not None:
                             timestamp = int(time.time())
                             timestamp_ms = timestamp * 1000
-                            print(f"[EnhancedPrice][{symbol}] ${price:.4f} (sursa: {preferred_source} - preferată)")
+                            print(f"[Pricefetcher][{symbol}] ${price:.4f} (sursa: {preferred_source} - preferată)")
                             return [[timestamp_ms, price]]
                         else:
-                            print(f"[EnhancedPrice][{symbol}] Eroare: sursa preferată {preferred_source} nu poate da prețul")
+                            print(f"[Pricefetcher][{symbol}] Eroare: sursa preferată {preferred_source} nu poate da prețul")
                             return []
             result = self.price_factory.get_price(symbol)
             price = result["price"]
             platform_used = result["platform"]
             timestamp = int(time.time())
             timestamp_ms = timestamp * 1000
-            print(f"[EnhancedPrice][{symbol}] ${price:.4f} (sursa: {platform_used})")
+            print(f"[Pricefetcher][{symbol}] ${price:.4f} (sursa: {platform_used})")
             return [[timestamp_ms, price]]
         except Exception as e:
-            print(f"[EnhancedPrice][Eroare] {symbol}: {e}")
+            print(f"[Pricefetcher][Eroare] {symbol}: {e}")
             return []
     
     def add_symbol(self, symbol: str, preferred_source: Optional[str] = None):
         with self.lock:
             if symbol in self.active_symbols:
-                print(f"[EnhancedPrice] {symbol} deja în watchlist")
+                print(f"[Pricefetcher] {symbol} deja în watchlist")
                 return False
             self.symbols.append(symbol)
             self.original_symbols.append(symbol)
             self.active_symbols.add(symbol)
             if preferred_source:
                 self.symbol_preferred_source[symbol] = preferred_source
-                print(f"[EnhancedPrice] {symbol} - sursă preferată: {preferred_source}")
+                print(f"[Pricefetcher] {symbol} - sursă preferată: {preferred_source}")
             self.symbol_added_time[symbol] = time.time()
             if symbol not in self.cache:
                 self.cache[symbol] = []
             if symbol not in self.fetchtime_time_per_symbol:
                 self.fetchtime_time_per_symbol[symbol] = self.fallback_time_default
-            print(f"[EnhancedPrice] ✅ Simbol adăugat: {symbol}")
+            print(f"[Pricefetcher] ✅ Simbol adăugat: {symbol}")
             self.update_cache_per_symbol(symbol)
             return True
     
@@ -465,7 +465,7 @@ class EnhancedCachePriceManager(CacheManagerInterface):
             if symbol in self.original_symbols:
                 self.original_symbols.remove(symbol)
             self.active_symbols.discard(symbol)
-            print(f"[EnhancedPrice] ❌ Simbol eliminat: {symbol} {reason}")
+            print(f"[Pricefetcher] ❌ Simbol eliminat: {symbol} {reason}")
             return True
     
     def get_latest_price(self, symbol: str) -> Optional[float]:
@@ -475,7 +475,6 @@ class EnhancedCachePriceManager(CacheManagerInterface):
             if entries:
                 return entries[-1][1]
         return None
-    # În pricefetcher.py, în clasa EnhancedCachePriceManager, adaugă:
 
     def get_price_history(self, symbol: str, limit: int = 100) -> List[Dict]:
         with self.lock:
@@ -557,12 +556,12 @@ def register_enhanced_price_manager(cmc_api_key: Optional[str] = None):
     if not hasattr(CacheFactory, '_CONFIG'):
         CacheFactory._CONFIG = {}
     CacheFactory._CONFIG["PriceMulti"] = {
-        "class": EnhancedCachePriceManager,
+        "class": CacheAllPriceFetcherManager,
         "filename": "cache_prices_multi.json",
         "sync_ts": lambda: PRICE_MULTI_SYNC_INTERVAL_SEC,
         "cmc_api_key": cmc_api_key
     }
-    print("[EnhancedPrice] Manager înregistrat în CacheFactory ca 'PriceMulti'")
+    print("[Pricefetcher] Manager înregistrat în CacheFactory ca 'PriceMulti'")
 
 
 def is_valid_symbol_for_monitoring(symbol: str) -> bool:

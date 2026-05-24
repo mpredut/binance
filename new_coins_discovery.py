@@ -388,7 +388,7 @@ class NewCoinsMonitor:
     def is_valid_symbol(self, symbol: str) -> bool:
         if not symbol:
             return False
-        if len(symbol) < 1 or len(symbol) > 10:
+        if len(symbol) < 1 or len(symbol) > 100:
             return False
         if not symbol.isalnum():
             return False
