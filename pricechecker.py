@@ -224,7 +224,7 @@ class PriceChecker:
                 alerts = self.check_symbol(symbol)
                 all_alerts.extend(alerts)
             except Exception as e:
-                print(f"[Analyzer][{symbol}] Error: {e}")
+                print(f"[Checker][{symbol}] Error: {e}")
 
         return all_alerts
 
