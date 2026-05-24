@@ -51,25 +51,35 @@ except ImportError:
         
         @staticmethod
         def save_to_file(alert, filename="crypto_alerts.log"):
-            with open(filename, "a") as f:
+            with open(filename, "w") as f:
                 f.write(f"{datetime.now()}: {alert.symbol} - {alert.percent_change:+.2f}%\n")
 
 
 def custom_alert_handler(alert):
     """Handler personalizat pentru alerte de preț"""
+    alerts = alert if isinstance(alert, list) else [alert]
     if ALERT_NOTIFIER_AVAILABLE:
-        AlertNotifier.print_to_console(alert)
-        AlertNotifier.save_to_file(alert, filename="crypto_alerts.log")
+        for item in alerts:
+            AlertNotifier.print_to_console(item)
+            AlertNotifier.save_to_file(item, filename="crypto_alerts.log")
         if os.environ.get("PHONE_ALERT_URL") or os.environ.get("NTFY_TOPIC"):
-            AlertNotifier.send_phone_webhook(alert)
+            if len(alerts) == 1:
+                AlertNotifier.send_phone_webhook(alerts[0])
+            else:
+                AlertNotifier.send_phone_webhook_batch(alerts)
         if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"):
-            AlertNotifier.send_telegram(alert)
+            for item in alerts:
+                AlertNotifier.send_telegram(item)
         if os.environ.get("SMTP_USERNAME") and os.environ.get("SMTP_PASSWORD"):
-            AlertNotifier.send_email(alert)
+            if len(alerts) == 1:
+                AlertNotifier.send_email(alerts[0])
+            else:
+                AlertNotifier.send_email_batch(alerts)
     else:
-        print("\n" + "=" * 60)
-        print(str(alert))
-        print("=" * 60)
+        for item in alerts:
+            print("\n" + "=" * 60)
+            print(str(item))
+            print("=" * 60)
 
 
 def new_coin_alert_handler(coin_info):

@@ -259,8 +259,8 @@ class PriceChecker:
                 try:
                     alerts = self.check_all_symbols()
                     
-                    for alert in alerts:
-                        self.alert_callback(alert)
+                    if alerts:
+                        self.alert_callback(alerts)
                     
                 except Exception as e:
                     print(f"[Checker] Eroare în ciclul principal: {e}")
