@@ -143,7 +143,7 @@ def main():
         """Rulează cleanup la fiecare 6 ore"""
         while True:
             time.sleep(6 * 3600)  # 6 ore
-            log.print("[Periodic] Rulez cleanup prețuri vechi...")
+            print("[Periodic] Rulez cleanup prețuri vechi...")
             price_monitor.cleanup_old_prices()
             price_monitor.cleanup_old_symbols(max_age_days=7)
             
