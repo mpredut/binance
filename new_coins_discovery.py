@@ -22,9 +22,10 @@ CMC_API_KEY = "4d587781-722b-40a3-83f0-2436d45942f7"
 
 # Configurare descoperire
 NEW_COINS_AGE_DAYS = 3
-MAX_NEW_COINS_TO_TRACK = 10
+MAX_NEW_COINS_TO_TRACK = 15
 REFRESH_INTERVAL_SECONDS = 3600
-NEW_COIN_MAX_AGE_DAYS = 3
+NEW_COIN_CLEANUP_MAX_AGE_DAYS = MAX_NEW_COINS_TO_TRACK * 2  # Dublul perioadei de monitorizare pentru curățare
+
 
 # Simboluri excluse automat
 EXCLUDED_SYMBOLS = {
@@ -587,7 +588,7 @@ class NewCoinsMonitor:
         if not added_time:
             return True
         age_days = (time.time() - added_time) / (24 * 3600)
-        if age_days > NEW_COIN_MAX_AGE_DAYS:
+        if age_days > NEW_COIN_CLEANUP_MAX_AGE_DAYS:
             return False
         return True
 
