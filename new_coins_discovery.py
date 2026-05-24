@@ -34,6 +34,21 @@ EXCLUDED_SYMBOLS = {
     "BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "MATIC", "DOT"
 }
 
+EXCLUDED_ASSET_NAME_KEYWORDS = {
+    "derivative", "derivatives", "xstock", "stock", "etf", "futures"
+}
+
+
+def is_trackable_symbol(symbol: str, name: str = "", slug: str = "") -> bool:
+    if not symbol:
+        return False
+    if not symbol.isalnum():
+        return False
+    if symbol in EXCLUDED_SYMBOLS:
+        return False
+    searchable_name = f"{name} {slug}".lower()
+    return not any(keyword in searchable_name for keyword in EXCLUDED_ASSET_NAME_KEYWORDS)
+
 # ============================================
 # Interfața abstractă pentru surse de monede noi
 # ============================================
@@ -100,11 +115,13 @@ class CoinMarketCapSource(NewCoinsSource):
                 self._supported_symbols.clear()
                 for coin in data['data']:
                     symbol = coin['symbol']
-                    if symbol not in EXCLUDED_SYMBOLS:
+                    name = coin.get('name', symbol)
+                    slug = coin.get('slug', '')
+                    if is_trackable_symbol(symbol, name=name, slug=slug):
                         self._supported_symbols.add(symbol)
                         self._cache.append({
                             "symbol": symbol,
-                            "name": coin['name'],
+                            "name": name,
                             "added_at": pd.to_datetime(coin['date_added']),
                             "source": self.get_name(),
                             "price": coin['quote']['USD'].get('price', 0),
@@ -112,6 +129,7 @@ class CoinMarketCapSource(NewCoinsSource):
                             "market_cap": coin['quote']['USD'].get('market_cap', 0),
                             "change_24h": coin['quote']['USD'].get('percent_change_24h', 0),
                             "change_7d": coin['quote']['USD'].get('percent_change_7d', 0),
+                            "slug": slug,
                             "url": f"https://coinmarketcap.com/currencies/{coin['slug']}/"
                         })
                 print(f"[CMC Source] Încărcate {len(self._cache)} monede")
@@ -386,20 +404,8 @@ class NewCoinsMonitor:
         self._thread = None
         self.refresh()
 
-    def is_valid_symbol(self, symbol: str) -> bool:
-        if not symbol:
-            return False
-        if len(symbol) < 1 or len(symbol) > 100:
-            return False
-        #if not symbol.isalnum():
-        #    return False
-        #if symbol.isdigit():
-        #    return False
-        if symbol == '0' * len(symbol):
-            return False
-        excluded = {'USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'WBTC', 'WETH', 
-                    'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'DOT', 'MATIC'}
-        return symbol not in excluded
+    def is_valid_symbol(self, symbol: str, name: str = "", slug: str = "") -> bool:
+        return is_trackable_symbol(symbol, name=name, slug=slug)
 
     def refresh(self):
         self.all_new_coins = self.factory.get_all_new_coins(NEW_COINS_AGE_DAYS)
@@ -407,7 +413,7 @@ class NewCoinsMonitor:
         for source_name, coins in self.all_new_coins.items():
             for coin in coins:
                 symbol = coin.get('symbol')
-                if symbol and self.is_valid_symbol(symbol):
+                if symbol and self.is_valid_symbol(symbol, coin.get('name', ''), coin.get('slug', '')):
                     self.all_symbols.add(symbol)
                 else:       
                     print(f"[NewCoinsMonitor] Simbol invalid ignorat: {symbol} (din {source_name})")
@@ -519,15 +525,16 @@ class NewCoinsMonitor:
         symbol = coin_info['symbol']
         source = coin_info.get('source', 'unknown')
         
-        if not self.is_valid_symbol(symbol):
+        if not self.is_valid_symbol(symbol, coin_info.get('name', ''), coin_info.get('slug', '')):
             print(f"[NewCoinsMonitor] ❌ Simbol invalid: {symbol}")
             return False
         
         if hasattr(self.price_monitor, 'original_symbols') and symbol in self.price_monitor.original_symbols:
             print(f"[NewCoinsMonitor] {symbol} deja în watchlist")
             return False
-        if hasattr(self.price_monitor, 'active_symbols') and len(self.price_monitor.active_symbols) >= MAX_NEW_COINS_TO_TRACK:
-            print(f"[NewCoinsMonitor] Limită atinsă: maxim {MAX_NEW_COINS_TO_TRACK} monede în watchlist")
+        max_watchlist_symbols = getattr(self.price_monitor, 'max_monitored_symbols', MAX_NEW_COINS_TO_TRACK)
+        if hasattr(self.price_monitor, 'active_symbols') and len(self.price_monitor.active_symbols) >= max_watchlist_symbols:
+            print(f"[NewCoinsMonitor] Limită atinsă: maxim {max_watchlist_symbols} monede în watchlist")
             return False
         
         # Praguri pentru verificări INFORMATIVE (nu blochează)

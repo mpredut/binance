@@ -28,6 +28,7 @@ MAX_PRICE_HISTORY_PER_SYMBOL = 2000
 MAX_MONITORED_SYMBOLS = 20
 QUOTE_CURRENCY = "USDC"
 FALLBACK_QUOTE = "USDT"
+QUOTE_SUFFIXES = ("USDC", "USDT", "FDUSD", "BUSD", "TUSD", "EUR")
 #DEFAULT_SYMBOLS = ["BTC", "ETH", "HYPE", "SOL", "BNB", "ADA", "DOGE", "XRP"]
 DEFAULT_SYMBOLS = ["BTC", "TAO", "HYPE"]
 
@@ -416,7 +417,16 @@ class PricePlatformFactory:
 class CacheAllPriceFetcherManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api, cmc_api_key: Optional[str] = None):
         self.price_factory = PricePlatformFactory(cmc_api_key=cmc_api_key)
-        initial_symbols = list(dict.fromkeys(symbols))[:MAX_MONITORED_SYMBOLS]
+        self.max_monitored_symbols = MAX_MONITORED_SYMBOLS
+        initial_symbols = []
+        seen_bases = set()
+        for symbol in symbols:
+            base_symbol = get_base_symbol(symbol)
+            if base_symbol not in seen_bases and is_valid_symbol_for_monitoring(symbol):
+                seen_bases.add(base_symbol)
+                initial_symbols.append(symbol)
+            if len(initial_symbols) >= MAX_MONITORED_SYMBOLS:
+                break
         self.original_symbols = list(initial_symbols)
         super().__init__(sync_ts, initial_symbols, filename, append_mode=True, api_client=api_client)
         self.active_symbols = set(initial_symbols)
@@ -432,11 +442,19 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
                     data = json.load(f)
                     if "symbol_metadata" in data:
                         self.symbol_added_time = data["symbol_metadata"].get("added_time", {})
+                        seen_bases = {get_base_symbol(symbol) for symbol in self.active_symbols}
                         for symbol in data["symbol_metadata"].get("active_symbols", []):
                             if len(self.active_symbols) >= MAX_MONITORED_SYMBOLS:
                                 print(f"[Pricefetcher] Limită atinsă la încărcare: maxim {MAX_MONITORED_SYMBOLS} monede monitorizate, restul vor fi ignorate")
                                 break
-                            if symbol not in self.active_symbols:
+                            base_symbol = get_base_symbol(symbol)
+                            if (
+                                symbol not in self.active_symbols
+                                and base_symbol not in seen_bases
+                                and is_valid_symbol_for_monitoring(symbol)
+                                and any(self.price_factory.check_symbol_support(symbol).values())
+                            ):
+                                seen_bases.add(base_symbol)
                                 self.active_symbols.add(symbol)
                                 self.symbols.append(symbol)
                                 self.original_symbols.append(symbol)
@@ -495,8 +513,12 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
     
     def add_symbol(self, symbol: str, preferred_source: Optional[str] = None):
         with self.lock:
+            base_symbol = get_base_symbol(symbol)
             if symbol in self.active_symbols:
                 print(f"[Pricefetcher] {symbol} deja în watchlist")
+                return False
+            if any(get_base_symbol(active_symbol) == base_symbol for active_symbol in self.active_symbols):
+                print(f"[Pricefetcher] {symbol} ignorat: asset-ul {base_symbol} este deja monitorizat")
                 return False
             if len(self.active_symbols) >= MAX_MONITORED_SYMBOLS:
                 print(f"[Pricefetcher] Limită atinsă: maxim {MAX_MONITORED_SYMBOLS} monede monitorizate")
@@ -647,16 +669,31 @@ def is_valid_symbol_for_monitoring(symbol: str) -> bool:
     return True
 
 
+def get_base_symbol(symbol: str) -> str:
+    for quote in QUOTE_SUFFIXES:
+        if symbol.endswith(quote) and len(symbol) > len(quote):
+            return symbol[:-len(quote)]
+    return symbol
+
+
 def create_price_monitor(cmc_api_key: Optional[str] = None):
     all_symbols = []
+    seen_bases = set()
     
     if hasattr(sym, 'symbols'):
         for s in sym.symbols:
             if is_valid_symbol_for_monitoring(s):
+                seen_bases.add(get_base_symbol(s))
                 all_symbols.append(s)
     
     for sym_default in DEFAULT_SYMBOLS:
-        if sym_default not in all_symbols and is_valid_symbol_for_monitoring(sym_default):
+        base_symbol = get_base_symbol(sym_default)
+        if (
+            base_symbol not in seen_bases
+            and sym_default not in all_symbols
+            and is_valid_symbol_for_monitoring(sym_default)
+        ):
+            seen_bases.add(base_symbol)
             all_symbols.append(sym_default)
     
     all_symbols = list(dict.fromkeys(all_symbols))
