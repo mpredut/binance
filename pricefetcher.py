@@ -672,6 +672,38 @@ class EnhancedCachePriceManager(CacheManagerInterface):
             print(f"[EnhancedPrice] ❌ Simbol eliminat: {symbol} {reason}")
             return True
         
+    def cleanup_old_prices(self, retention_days: int = PRICE_HISTORY_RETENTION_DAYS):
+        """
+        Șterge prețurile mai vechi de 'retention_days' zile.
+        Rulează automat la fiecare salvare.
+        """
+        cutoff_timestamp = (time.time() - retention_days * 24 * 3600) * 1000  # convertim la ms
+        
+        with self.lock:
+            removed_count = 0
+            for symbol in list(self.cache.keys()):
+                original_count = len(self.cache[symbol])
+                
+                # Păstrează doar intrările mai noi decât cutoff
+                self.cache[symbol] = [
+                    entry for entry in self.cache[symbol]
+                    if entry[0] >= cutoff_timestamp  # entry[0] este timestamp_ms
+                ]
+                
+                removed = original_count - len(self.cache[symbol])
+                if removed > 0:
+                    removed_count += removed
+                    print(f"[Cleanup] {symbol}: șterse {removed} intrări vechi (păstrate {len(self.cache[symbol])})")
+                
+                # Dacă simbolul nu mai are date și nu mai e în watchlist, îl putem șterge
+                if not self.cache[symbol] and symbol not in self.active_symbols:
+                    del self.cache[symbol]
+                    print(f"[Cleanup] {symbol}: șters complet (fără date)")
+            
+            if removed_count > 0:
+                print(f"[Cleanup] Total: {removed_count} intrări șterse")
+
+
     def save_state_to_file_if_enabled(self):
         """Suprascrie metoda părintelui pentru a adăuga cleanup și metadata"""
         if not self.save_state:
