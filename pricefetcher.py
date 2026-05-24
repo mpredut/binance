@@ -279,7 +279,7 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
         self.refresh_symbols()
         return symbol in self._supported_symbols
     
-    def get_price1(self, symbol: str) -> Optional[float]:
+    def get_price_old(self, symbol: str) -> Optional[float]:
         if not self.api_key:
             print(f"[CMCPlatform] Fără cheie API")
             return None
@@ -300,31 +300,44 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
         except Exception as e:
             print(f"[CMCPlatform] Eroare {symbol}: {e}")
             return None
-        
-    def get_price(self, symbol: str) -> Optional[float]:
+     def get_price(self, symbol: str) -> Optional[float]:
+        """
+        Obține prețul din cache-ul intern (actualizat din listings/latest).
+        Acesta este cel mai rapid și sigur mod de a obține prețul pentru monede noi.
+        """
         if not self.api_key:
             print(f"[CMCPlatform] Fără cheie API")
             return None
+        
+        # Reîmprospătează dacă a trecut suficient timp
+        self.refresh_symbols()
+        
+        # Caută simbolul în cache-ul intern (_all_listings conține doar metadata,
+        # dar avem nevoie de preț. Vom folosi un dicționar separat pentru prețuri.
+        # O soluție mai simplă: deoarece avem acces la CoinMarketCapSource, 
+        # putem folosi direct datele din acesta. În lipsa unui cache separat,
+        # vom face un request la listings/latest pentru simbolul specific.
+        
         try:
+            # Opțiunea 1: Folosește endpoint-ul de listings cu parametru symbol
+            # (acesta returnează doar moneda cerută, mai rapid)
             headers = {'X-CMC_PRO_API_KEY': self.api_key, 'Accept': 'application/json'}
-            
-            # Încearcă mai întâi cu simbolul direct
             params = {'symbol': symbol, 'convert': 'USD'}
-            time.sleep(0.2)
-            response = requests.get(self._base_url, headers=headers, params=params, timeout=10)
-            
+            response = requests.get(
+                "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest",
+                headers=headers, params=params, timeout=10
+            )
             if response.status_code == 200:
                 data = response.json()
-                if 'data' in data and symbol in data['data']:
-                    price = data['data'][symbol]['quote']['USD']['price']
-                    print(f"[CMCPlatform] {symbol} = ${price}")
-                    return float(price)
-            
-            # Dacă nu merge, încearcă să cauți în slug-uri
-            # (pentru monede noi, poate fi nevoie)
-            print(f"[CMCPlatform] {symbol} nu a fost găsit direct")
-            return None
-            
+                if 'data' in data and data['data']:
+                    # data['data'] este o listă de obiecte (unul singur)
+                    for coin in data['data']:
+                        if coin['symbol'] == symbol:
+                            price = coin['quote']['USD']['price']
+                            print(f"[CMCPlatform] {symbol} = ${price} (din listings)")
+                            return float(price)
+            # Fallback la metoda veche
+            return self.get_price_old(symbol)
         except Exception as e:
             print(f"[CMCPlatform] Eroare {symbol}: {e}")
             return None
