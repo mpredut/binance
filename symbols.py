@@ -1,5 +1,4 @@
 
-import sys
 import math
 
 
@@ -65,14 +64,18 @@ def get_quantity_precision(symbol):
         print(f"Eroare la obtinerea preciziei cantitatii: {e}")
     return 8  # Valoare implicita
 
-try:
-    # Cerere pentru a obtine informatii despre cont
-    account_info = client.get_account()
-    print("Cheile API sunt valide!")
-except Exception as e:
-    print(f"Eroare la verificarea cheilor API: {e}")
-    sys.exit()
+
+def validate_binance_api_keys():
+    try:
+        client.get_account()
+        print("Cheile API sunt valide!")
+        return True
+    except Exception as e:
+        print(f"Eroare la verificarea cheilor API: {e}")
+        return False
 
 
-precision = get_quantity_precision(btcsymbol)
-print(f"Precision is '{precision}'")
+if __name__ == "__main__":
+    if validate_binance_api_keys():
+        precision = get_quantity_precision(btcsymbol)
+        print(f"Precision is '{precision}'")

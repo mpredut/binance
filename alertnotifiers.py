@@ -166,6 +166,7 @@ class AlertNotifier:
     @staticmethod
     def send_phone_webhook(alert, webhook_url: Optional[str] = None):
         """Trimite alertă către un webhook de telefon (ex: Tasker/ntfy/IFTTT)."""
+        print(f"[Notifier] Phone webhook single for {alert.symbol}")
         webhook_url = webhook_url or os.environ.get("PHONE_ALERT_URL")
         if not webhook_url and os.environ.get("NTFY_TOPIC"):
             webhook_url = f"https://ntfy.sh/{os.environ['NTFY_TOPIC']}"
@@ -188,6 +189,7 @@ class AlertNotifier:
                 if response.status_code >= 400:
                     print(f"[Notifier] ntfy eroare: {response.status_code} {response.text}")
                     return False
+                print(f"[Notifier] ntfy trimis cu succes pentru {alert.symbol}")
                 return True
 
             response = requests.post(
@@ -205,6 +207,7 @@ class AlertNotifier:
             if response.status_code >= 400:
                 print(f"[Notifier] Phone webhook eroare: {response.status_code} {response.text}")
                 return False
+            print(f"[Notifier] Phone webhook trimis cu succes pentru {alert.symbol}")
             return True
         except Exception as e:
             print(f"[Notifier] Phone webhook excepție: {e}")
@@ -236,6 +239,7 @@ class AlertNotifier:
                 if response.status_code >= 400:
                     print(f"[Notifier] ntfy batch eroare: {response.status_code} {response.text}")
                     return False
+                print(f"[Notifier] ntfy batch trimis cu succes pentru {len(alerts)} simboluri")
                 return True
 
             response = requests.post(
@@ -246,6 +250,7 @@ class AlertNotifier:
             if response.status_code >= 400:
                 print(f"[Notifier] Phone webhook batch eroare: {response.status_code} {response.text}")
                 return False
+            print(f"[Notifier] Phone webhook batch trimis cu succes pentru {len(alerts)} simboluri")
             return True
         except Exception as e:
             print(f"[Notifier] Phone webhook batch excepție: {e}")
