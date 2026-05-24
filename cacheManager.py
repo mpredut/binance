@@ -87,7 +87,7 @@ class CacheManagerInterface(ABC):
         
         self.thread = None
         self.save_state = False
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
       
         self.fallback_time_default = int(time.time() * 1000) - self.days_back*24*60*60*1000
       
@@ -245,7 +245,7 @@ class CacheManagerInterface(ABC):
         if not self.fetchtime_time_per_symbol:
             self.fetchtime_time_per_symbol = self.__rebuild_fetchtime_times()
         
-        for symbol in self.symbols:
+        for symbol in list(self.symbols):
             self.update_cache_per_symbol(symbol)
 
 
@@ -554,6 +554,10 @@ class CacheFactory:
             config = cls._CONFIG[name]
             manager_class = config["class"]
             sync_ts = config["sync_ts"]()
+            extra_kwargs = {
+                key: value for key, value in config.items()
+                if key not in {"class", "filename", "sync_ts"}
+            }
             if symbols is None:
                 symbols = ["TOTAL"] if name == "AssetValue" else sym.symbols
 
@@ -565,6 +569,7 @@ class CacheFactory:
                         filename=f"cache_price_{s}.json",
                         symbols=[s],
                         api_client=api,
+                        **extra_kwargs,
                     )
                     for s in symbols
                 }
@@ -574,6 +579,7 @@ class CacheFactory:
                     filename=config["filename"],
                     symbols=symbols,
                     api_client=api,
+                    **extra_kwargs,
                 )
 
         return cls._instances[name]

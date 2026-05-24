@@ -416,13 +416,13 @@ class NewCoinsMonitor:
 
     def _trigger_alerts(self, new_coins: List[Dict], source_name: str, auto_add: bool = True):
         for coin in new_coins:
-            source_has_price = (source_name == "CoinMarketCap")
+            source_has_price = (source_name.lower() == "coinmarketcap")
             if auto_add and source_has_price:
                 added = self.add_new_coin_to_watchlist(coin)
                 auto_added_status = added
             else:
                 auto_added_status = False
-                if source_name != "CoinMarketCap":
+                if source_name.lower() != "coinmarketcap":
                     print(f"[NewCoinsMonitor] ℹ️ {coin['symbol']} descoperit pe {source_name} - doar informațional (nu are preț în sistem)")
             for callback in self.alert_callbacks:
                 try:

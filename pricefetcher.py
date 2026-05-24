@@ -410,9 +410,10 @@ class PricePlatformFactory:
 class CacheAllPriceFetcherManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api, cmc_api_key: Optional[str] = None):
         self.price_factory = PricePlatformFactory(cmc_api_key=cmc_api_key)
-        self.original_symbols = symbols
-        super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
-        self.active_symbols = set(symbols)
+        initial_symbols = list(dict.fromkeys(symbols))
+        self.original_symbols = list(initial_symbols)
+        super().__init__(sync_ts, initial_symbols, filename, append_mode=True, api_client=api_client)
+        self.active_symbols = set(initial_symbols)
         self.symbol_added_time: Dict[str, float] = {}
         self.symbol_preferred_source: Dict[str, str] = {}  # ← TREBUIE SĂ EXISTE
         self._load_symbol_metadata()
@@ -425,6 +426,11 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
                     data = json.load(f)
                     if "symbol_metadata" in data:
                         self.symbol_added_time = data["symbol_metadata"].get("added_time", {})
+                        for symbol in data["symbol_metadata"].get("active_symbols", []):
+                            if symbol not in self.active_symbols:
+                                self.active_symbols.add(symbol)
+                                self.symbols.append(symbol)
+                                self.original_symbols.append(symbol)
             except:
                 pass
     
@@ -495,8 +501,8 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
             if symbol not in self.fetchtime_time_per_symbol:
                 self.fetchtime_time_per_symbol[symbol] = self.fallback_time_default
             print(f"[Pricefetcher] ✅ Simbol adăugat: {symbol}")
-            self.update_cache_per_symbol(symbol)
-            return True
+        self.update_cache_per_symbol(symbol)
+        return True
     
     def remove_symbol(self, symbol: str, reason: str = ""):
         with self.lock:
@@ -554,9 +560,10 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
             for symbol, added_time in list(self.symbol_added_time.items()):
                 if added_time < cutoff_time:
                     removed_symbols.append(symbol)
-                    self.remove_symbol(symbol, reason=f"(mai vechi de {max_age_days} zile)")
-            if removed_symbols:
-                print(f"[Cleanup] Eliminate {len(removed_symbols)} simboluri vechi: {removed_symbols}")
+        for symbol in removed_symbols:
+            self.remove_symbol(symbol, reason=f"(mai vechi de {max_age_days} zile)")
+        if removed_symbols:
+            print(f"[Cleanup] Eliminate {len(removed_symbols)} simboluri vechi: {removed_symbols}")
         return removed_symbols
     
     def save_state_to_file_if_enabled(self):

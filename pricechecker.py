@@ -225,9 +225,9 @@ class PriceChecker:
         all_alerts = []
         # 🔧 Reîmprospătează lista de simboluri de la price_monitor (inclusiv cele nou adăugate)
         if hasattr(self.price_manager, 'original_symbols'):
-            symbols = self.price_manager.original_symbols
+            symbols = list(self.price_manager.original_symbols)
         else:
-            symbols = self.price_manager.symbols
+            symbols = list(self.price_manager.symbols)
         
         for symbol in symbols:
             try:

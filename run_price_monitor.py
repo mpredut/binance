@@ -10,7 +10,7 @@ import log
 # Importă modulele principale
 from pricefetcher import create_price_monitor
 from pricechecker import start_price_alert_system, PRICE_ALERT_CONFIG
-from new_coins_discovery import create_new_coins_monitor, NewCoinsMonitor, NewCoinsFactory
+from new_coins_discovery import create_new_coins_monitor, NewCoinsMonitor, NewCoinsFactory, MAX_NEW_COINS_TO_TRACK
 
 # Încearcă să importe AlertNotifier, dar nu e critic
 try:
@@ -194,11 +194,10 @@ def main():
     auto_added_count = 0
     for source_name, coins in new_coins_monitor.all_new_coins.items():
         if source_name.lower() == "coinmarketcap":  # ← ignora litere mari/mici
-            for coin in coins:
+            for coin in coins[:MAX_NEW_COINS_TO_TRACK]:
                 if new_coins_monitor.add_new_coin_to_watchlist(coin):
                     auto_added_count += 1
         else:
-            print("test")
             # Celelalte surse - doar loghează (DAR COMPRESAT)
             if coins:
                 symbols_list = ', '.join([c['symbol'] for c in coins[:10]])
