@@ -469,15 +469,15 @@ class DexScreenerSource(NewCoinsSource):
                             "url": f"https://dexscreener.com/{chain}/{token_address}" if token_address else None
                         })
                 
-                log.print(f"[DexScreener Source] Găsite {len(self._cache)} token-uri")
+                print(f"[DexScreener Source] Găsite {len(self._cache)} token-uri")
             else:
-                log.print(f"[DexScreener Source] Endpoint indisponibil (status {response.status_code})")
+                print(f"[DexScreener Source] Endpoint indisponibil (status {response.status_code})")
                 self._cache = []
             
             self._last_refresh = time.time()
             
         except Exception as e:
-            log.print(f"[DexScreener Source] Eroare: {e}")
+            print(f"[DexScreener Source] Eroare: {e}")
             self._cache = []
     
     def get_new_coins(self, days_back: int = NEW_COINS_AGE_DAYS) -> List[Dict]:
@@ -847,82 +847,83 @@ class NewCoinsMonitor:
         
         return summary
 
+    # În new_coins_discovery.py, clasa NewCoinsMonitor
+
     def add_new_coin_to_watchlist(self, coin_info: Dict, auto_add_thresholds: Optional[Dict] = None):
-       
         """
         Adaugă o monedă nou descoperită în watchlist-ul de prețuri.
+        Prețul va fi cerut de pe SURSORIGINE (CoinMarketCap, nu Binance).
         """
         if not self.price_monitor:
+            print(f"[NewCoinsMonitor] Nu există price_monitor")
             return False
         
         symbol = coin_info['symbol']
+        source = coin_info.get('source', 'unknown')
         
         # VALIDARE SIMBOL
         if not self.is_valid_symbol(symbol):
-            log.print(f"[NewCoinsMonitor] ❌ Simbol invalid: {symbol} - nu a fost adăugat")
+            print(f"[NewCoinsMonitor] ❌ Simbol invalid: {symbol}")
             return False
-        
-        # Verifică dacă platformele suportă acest simbol
-        if hasattr(self.price_monitor, 'price_factory'):
-            try:
-                # Testează dacă simbolul poate fi obținut
-                self.price_monitor.price_factory.get_price(symbol)
-            except Exception as e:
-                log.print(f"[NewCoinsMonitor] ❌ {symbol} - nu e suportat de nici o platformă: {e}")
-                return False
         
         # Verifică dacă e deja monitorizată
         if hasattr(self.price_monitor, 'original_symbols'):
             if symbol in self.price_monitor.original_symbols:
-                log.print(f"[NewCoinsMonitor] {symbol} deja în watchlist")
+                print(f"[NewCoinsMonitor] {symbol} deja în watchlist")
                 return False
-            
-        # Praguri implicite pentru adăugare automată
+        
+        # 🔑 CHEIA: Verifică doar dacă sursa originală (CoinMarketCap) poate da prețul
+        # NU încerca pe Binance sau Hyperliquid pentru monede noi!
+        
+        if source == "CoinMarketCap":
+            # Pentru monede noi de pe CMC, prețul vine tot de la CMC
+            if hasattr(self.price_monitor, 'price_factory'):
+                cmc_source = None
+                for platform in self.price_monitor.price_factory._platforms:
+                    if platform.platform_name == "CoinMarketCap":
+                        cmc_source = platform
+                        break
+                
+                if cmc_source and cmc_source.is_available():
+                    # Verifică dacă CMC suportă simbolul
+                    if cmc_source.supports_symbol(symbol):
+                        print(f"[NewCoinsMonitor] ✅ {symbol} suportat de {source} (sursa originală)")
+                    else:
+                        print(f"[NewCoinsMonitor] ⚠️ {symbol} nu e suportat nici de {source}")
+                        # Poți decide să-l adaugi oricum, sau să sari
+                        # return False
+                else:
+                    print(f"[NewCoinsMonitor] ⚠️ CoinMarketCap nu e disponibil")
+        
+        # Praguri pentru adăugare automată
         if auto_add_thresholds is None:
             auto_add_thresholds = {
                 "min_volume_24h": 100000,      # Volum minim $100k
-                "min_price_usd": 0.0001,       # Preț minim $0.0001
-                "max_price_usd": 1000,         # Preț maxim $1000
-                "min_change_24h": -50,         # Nu adăuga dacă a scăzut mai mult de 50%
-                "max_change_24h": 500,         # Nu adăuga dacă a crescut mai mult de 500%
+                "min_price_usd": 0.000001,     # Preț minim (foarte mic acceptat)
+                "max_price_usd": 100000,       # Preț maxim
+                "min_change_24h": -90,         # Poate scădea mult la început
+                "max_change_24h": 1000,        # Poate crește mult la început
             }
         
-        # Verifică pragurile (dacă avem date)
+        # Verifică pragurile (dacă avem date din coin_info)
         volume = coin_info.get('volume_24h', 0)
         price = coin_info.get('price', 0)
         change = coin_info.get('change_24h', 0)
         
         if volume and volume < auto_add_thresholds["min_volume_24h"]:
-            print(f"[NewCoinsMonitor] {symbol} - volum prea mic (${volume:,.0f})")
+            print(f"[NewCoinsMonitor] {symbol} - volum prea mic (${volume:,.0f}) - nu adăugăm")
             return False
         
-        if price and price < auto_add_thresholds["min_price_usd"]:
-            print(f"[NewCoinsMonitor] {symbol} - preț prea mic (${price})")
-            return False
-        
-        if price and price > auto_add_thresholds["max_price_usd"]:
-            print(f"[NewCoinsMonitor] {symbol} - preț prea mare (${price})")
-            return False
-        
-        if change and change < auto_add_thresholds["min_change_24h"]:
-            print(f"[NewCoinsMonitor] {symbol} - scădere prea mare ({change}%)")
-            return False
-        
-        if change and change > auto_add_thresholds["max_change_24h"]:
-            print(f"[NewCoinsMonitor] {symbol} - creștere suspectă ({change}%)")
-            return False
-        
-        # Adaugă simbolul în watchlist-ul price_monitor
-        # Notă: EnhancedCachePriceManager are nevoie de o metodă add_symbol()
-        # Vom adăuga această metodă mai jos în price_fetcher_managers.py
+        # Adaugă simbolul în watchlist
         try:
             if hasattr(self.price_monitor, 'add_symbol'):
-                self.price_monitor.add_symbol(symbol)
-                print(f"[NewCoinsMonitor] ✅ {symbol} adăugat în watchlist!")
+                # Important: Specifică sursa preferată pentru această monedă
+                # Putem modifica add_symbol să accepte o sursă preferată
+                self.price_monitor.add_symbol(symbol, preferred_source=source)
+                print(f"[NewCoinsMonitor] ✅ {symbol} adăugat în watchlist (preț de pe {source})")
                 return True
             else:
-                # Fallback: loghează și returnează False
-                print(f"[NewCoinsMonitor] ⚠️ price_monitor nu are add_symbol() - {symbol} nu a fost adăugat")
+                print(f"[NewCoinsMonitor] ⚠️ price_monitor nu are add_symbol()")
                 return False
         except Exception as e:
             print(f"[NewCoinsMonitor] Eroare la adăugarea {symbol}: {e}")

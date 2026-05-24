@@ -268,12 +268,15 @@ class HyperliquidPricePlatform(PricePlatformInterface):
 class CoinMarketCapPricePlatform(PricePlatformInterface):
     """Platformă pentru prețuri CoinMarketCap (necesită API Key)"""
     
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None):        
+        if self.api_key:
+            self._load_symbols()
         self.api_key = api_key or os.environ.get('CMC_API_KEY')
-        self._base_url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
+        self._base_url = "https://pro-api.coinmarketcap.com/v2/cryptocurrency/quotes/latest"
         self._supported_symbols: Set[str] = set()
         self._all_listings: Dict[str, Dict] = {}
         self._last_refresh = 0
+
         self._refresh_interval = 3600  # 1 oră (respectă rate limits)
         
         if self.api_key:
@@ -341,12 +344,12 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
         return symbol in self._supported_symbols
     
     def get_price(self, symbol: str) -> Optional[float]:
+        """Obține prețul direct de la CoinMarketCap API"""
         if not self.api_key:
+            print(f"[CMCPlatform] Fără cheie API")
             return None
         
         try:
-            self.refresh_symbols()
-            
             headers = {
                 'X-CMC_PRO_API_KEY': self.api_key,
                 'Accept': 'application/json'
@@ -356,16 +359,21 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
                 'convert': 'USD'
             }
             
+            # Respectă rate limit
+            time.sleep(0.2)
+            
             response = requests.get(self._base_url, headers=headers, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
             
-            if 'data' not in data or symbol not in data['data']:
+            if 'data' in data and symbol in data['data']:
+                price = data['data'][symbol]['quote']['USD']['price']
+                print(f"[CMCPlatform] {symbol} = ${price}")
+                return float(price)
+            else:
+                print(f"[CMCPlatform] {symbol} nu a fost găsit în răspuns")
                 return None
-            
-            price = data['data'][symbol]['quote']['USD']['price']
-            return float(price)
-            
+                
         except Exception as e:
             print(f"[CMCPlatform] Eroare {symbol}: {e}")
             return None
@@ -544,76 +552,77 @@ class EnhancedCachePriceManager(CacheManagerInterface):
                 last_times[symbol] = max(entry[0] for entry in entries)
         return last_times
     
+    # În price_fetcher_managers.py, clasa EnhancedCachePriceManager
+
     def get_remote_items(self, symbol, startTime):
         """
-        Obține prețul curent folosind platforma potrivită.
-        Returnează o listă cu un singur element [timestamp_ms, price]
+        Obține prețul curent.
+        Dacă simbolul are o sursă preferată, folosește DOAR acea sursă.
         """
         try:
-            # Obține prețul folosind factory-ul
+            # Verifică dacă există sursă preferată pentru acest simbol
+            preferred_source = getattr(self, 'symbol_preferred_source', {}).get(symbol)
+            
+            if preferred_source:
+                # Caută platforma preferată
+                for platform in self.price_factory._platforms:
+                    if platform.platform_name == preferred_source:
+                        price = platform.get_price(symbol)
+                        if price is not None:
+                            timestamp = int(time.time())
+                            timestamp_ms = timestamp * 1000
+                            print(f"[EnhancedPrice][{symbol}] ${price:.4f} (sursa: {preferred_source} - preferată)")
+                            return [[timestamp_ms, price]]
+                        else:
+                            print(f"[EnhancedPrice][{symbol}] Eroare: sursa preferată {preferred_source} nu poate da prețul")
+                            # Dacă sursa preferată eșuează, încearcă și altele? 
+                            # Pentru monede noi, mai bine nu - returnăm []
+                            return []
+            
+            # Dacă nu are sursă preferată, folosește logica normală (Binance -> Hyperliquid -> CMC)
             result = self.price_factory.get_price(symbol)
             price = result["price"]
             platform_used = result["platform"]
             
-            timestamp = int(time.time())  # secunde
+            timestamp = int(time.time())
             timestamp_ms = timestamp * 1000
             
-            # Folosește print (care e deja configurat în sistemul tău)
             print(f"[EnhancedPrice][{symbol}] ${price:.4f} (sursa: {platform_used})")
-            
-            # Returnează în formatul așteptat de CacheManagerInterface
             return [[timestamp_ms, price]]
             
         except Exception as e:
             print(f"[EnhancedPrice][Eroare] {symbol}: {e}")
             return []
-    
-    def get_all_symbols_from_cache(self):
-        """Returnează toate simbolurile din cache"""
-        with self.lock:
-            return list(self.cache.keys())
-    
-    def get_latest_price(self, symbol: str) -> Optional[float]:
-        """Obține ultimul preț salvat în cache pentru un simbol"""
-        with self.lock:
-            entries = self.cache.get(symbol, [])
-            if entries:
-                return entries[-1][1]  # [timestamp_ms, price]
-        return None
-    
-    def get_price_history(self, symbol: str, limit: int = 100) -> List[Dict]:
-        """Obține istoricul prețurilor pentru un simbol"""
-        with self.lock:
-            entries = self.cache.get(symbol, [])[-limit:]
-            return [
-                {
-                    "timestamp": entry[0],
-                    "timestamp_readable": u.timestampToTime(entry[0] // 1000) if hasattr(u, 'timestampToTime') else datetime.fromtimestamp(entry[0]//1000).isoformat(),
-                    "price": entry[1]
-                }
-                for entry in entries
-            ]
         
-
-    def add_symbol(self, symbol: str):
+    def add_symbol(self, symbol: str, preferred_source: Optional[str] = None):
         """
         Adaugă un simbol nou în watchlist pentru monitorizare.
+        
+        Args:
+            symbol: Simbolul de adăugat
+            preferred_source: Sursa preferată pentru preț (ex: "CoinMarketCap")
         """
         with self.lock:
-            # Verifică dacă există deja
             if symbol in self.active_symbols:
                 print(f"[EnhancedPrice] {symbol} deja în watchlist")
                 return False
             
-            # Adaugă în lista de simboluri
+            # Adaugă în liste
             self.symbols.append(symbol)
             self.original_symbols.append(symbol)
             self.active_symbols.add(symbol)
             
+            # Înregistrează sursa preferată pentru acest simbol
+            if not hasattr(self, 'symbol_preferred_source'):
+                self.symbol_preferred_source = {}
+            if preferred_source:
+                self.symbol_preferred_source[symbol] = preferred_source
+                print(f"[EnhancedPrice] {symbol} - sursă preferată: {preferred_source}")
+            
             # Înregistrează timpul adăugării
             self.symbol_added_time[symbol] = time.time()
             
-            # Inițializează cache-ul pentru noul simbol
+            # Inițializează cache-ul
             if symbol not in self.cache:
                 self.cache[symbol] = []
             
@@ -621,9 +630,9 @@ class EnhancedCachePriceManager(CacheManagerInterface):
             if symbol not in self.fetchtime_time_per_symbol:
                 self.fetchtime_time_per_symbol[symbol] = self.fallback_time_default
             
-            print(f"[EnhancedPrice] ✅ Simbol adăugat: {symbol} (la {datetime.fromtimestamp(self.symbol_added_time[symbol]).strftime('%Y-%m-%d %H:%M:%S')})")
+            print(f"[EnhancedPrice] ✅ Simbol adăugat: {symbol}")
             
-            # Forțează o actualizare imediată pentru noul simbol
+            # Forțează o actualizare imediată
             self.update_cache_per_symbol(symbol)
             
             return True
