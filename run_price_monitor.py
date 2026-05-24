@@ -146,7 +146,7 @@ def main():
             print("[Periodic] Rulez cleanup prețuri vechi...")
             price_monitor.cleanup_old_prices()
             price_monitor.cleanup_old_symbols(max_age_days=7)
-            
+            7
             if new_coins_monitor:
                 new_coins_monitor.cleanup_old_new_coins()
 
