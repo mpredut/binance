@@ -3,31 +3,31 @@ import time
 import threading
 import requests
 import pandas as pd
-import os  # ← ADĂUGAT
+import os
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Set, Callable
 from abc import ABC, abstractmethod
 from collections import defaultdict
 
-# Importă modulele tale existente
+# Import your existing modules
 import log
 import utils as u
 
 # ============================================
-# Configurare globală
+# Global configuration
 # ============================================
 
-# Cheia API CoinMarketCap (înlocuiește cu a ta)
+# CoinMarketCap API key
 CMC_API_KEY = "4d587781-722b-40a3-83f0-2436d45942f7"
 
-# Configurare descoperire
+# Discovery configuration
 NEW_COINS_AGE_DAYS = 3
 MAX_NEW_COINS_TO_TRACK = 15
 REFRESH_INTERVAL_SECONDS = 3600
-NEW_COIN_CLEANUP_MAX_AGE_DAYS = MAX_NEW_COINS_TO_TRACK * 2  # Dublul perioadei de monitorizare pentru curățare
+NEW_COIN_CLEANUP_MAX_AGE_DAYS = MAX_NEW_COINS_TO_TRACK * 2  # Double the monitoring window for cleanup
 
 
-# Simboluri excluse automat
+# Symbols excluded automatically
 EXCLUDED_SYMBOLS = {
     "USDT", "USDC", "BUSD", "DAI", "TUSD", "USDP", "GUSD", "FDUSD",
     "WBTC", "WETH", "stETH", "rETH", "LIDO", "STETH",
@@ -50,33 +50,33 @@ def is_trackable_symbol(symbol: str, name: str = "", slug: str = "") -> bool:
     return not any(keyword in searchable_name for keyword in EXCLUDED_ASSET_NAME_KEYWORDS)
 
 # ============================================
-# Interfața abstractă pentru surse de monede noi
+# Abstract interface for new coin sources
 # ============================================
 
 class NewCoinsSource(ABC):
     @abstractmethod
     def get_name(self) -> str:
         pass
-    
+
     @abstractmethod
     def get_new_coins(self, days_back: int = 30) -> List[Dict]:
         pass
-    
+
     @abstractmethod
     def get_supported_symbols(self) -> Set[str]:
         pass
-    
+
     def refresh(self):
         pass
-    
+
     def requires_api_key(self) -> bool:
         return False
-    
+
     def is_available(self) -> bool:
         return True
 
 # ============================================
-# Sursa 1: CoinMarketCap
+# Source 1: CoinMarketCap
 # ============================================
 
 class CoinMarketCapSource(NewCoinsSource):
@@ -103,7 +103,7 @@ class CoinMarketCapSource(NewCoinsSource):
     
     def refresh(self):
         if not self.is_available():
-            print("[CMC Source] Cheie API lipsă!")
+            print("[CMC Source] Missing API key!")
             return
         try:
             params = {'start': '1', 'limit': '2000', 'convert': 'USD', 'sort': 'date_added', 'sort_dir': 'desc'}
@@ -132,10 +132,10 @@ class CoinMarketCapSource(NewCoinsSource):
                             "slug": slug,
                             "url": f"https://coinmarketcap.com/currencies/{coin['slug']}/"
                         })
-                print(f"[CMC Source] Încărcate {len(self._cache)} monede")
+                print(f"[CMC Source] Loaded {len(self._cache)} coins")
                 self._last_refresh = time.time()
         except Exception as e:
-            print(f"[CMC Source] Eroare: {e}")
+            print(f"[CMC Source] Error: {e}")
 
     def get_new_coins(self, days_back: int = NEW_COINS_AGE_DAYS) -> List[Dict]:
         if not self._cache:
@@ -196,11 +196,11 @@ class CoinGeckoSource(NewCoinsSource):
                         "change_24h": None, "change_7d": None,
                         "url": f"https://www.coingecko.com/en/coins/{coin.get('id', '')}"
                     })
-            print(f"[CoinGecko Source] Încărcate {len(self._cache)} monede")
+            print(f"[CoinGecko Source] Loaded {len(self._cache)} coins")
             self._last_refresh = time.time()
         except Exception as e:
-            print(f"[CoinGecko Source] Eroare: {e}")
-    
+            print(f"[CoinGecko Source] Error: {e}")
+
     def get_new_coins(self, days_back: int = NEW_COINS_AGE_DAYS) -> List[Dict]:
         if not self._cache:
             self.refresh()
@@ -249,7 +249,7 @@ class BinanceNewListingsSource(NewCoinsSource):
             if self._historical_symbols:
                 new_symbols = current_symbols - self._historical_symbols
                 if new_symbols:
-                    print(f"[Binance Source] 🆕 Monede nou listate: {new_symbols}")
+                    print(f"[Binance Source] 🆕 Newly listed coins: {new_symbols}")
                     for sym in new_symbols:
                         if sym in symbol_details:
                             self._new_listings.append({
@@ -265,10 +265,10 @@ class BinanceNewListingsSource(NewCoinsSource):
             self._historical_symbols = current_symbols.copy()
             self._supported_symbols = current_symbols
             self._last_refresh = time.time()
-            print(f"[Binance Source] {len(current_symbols)} perechi active")
+            print(f"[Binance Source] {len(current_symbols)} active pairs")
         except Exception as e:
-            print(f"[Binance Source] Eroare: {e}")
-    
+            print(f"[Binance Source] Error: {e}")
+
     def get_new_coins(self, days_back: int = NEW_COINS_AGE_DAYS) -> List[Dict]:
         if not self._new_listings:
             return []
@@ -325,12 +325,12 @@ class DexScreenerSource(NewCoinsSource):
                             "change_24h": None, "change_7d": None,
                             "url": f"https://dexscreener.com/{chain}/{token_address}" if token_address else None
                         })
-                print(f"[DexScreener Source] Găsite {len(self._cache)} token-uri")
+                print(f"[DexScreener Source] Found {len(self._cache)} tokens")
             else:
                 self._cache = []
             self._last_refresh = time.time()
         except Exception as e:
-            print(f"[DexScreener Source] Eroare: {e}")
+            print(f"[DexScreener Source] Error: {e}")
             self._cache = []
     
     def get_new_coins(self, days_back: int = NEW_COINS_AGE_DAYS) -> List[Dict]:
@@ -356,15 +356,15 @@ class NewCoinsFactory:
         else:
             self.sources = self._all_sources
         self.sources = {name: src for name, src in self.sources.items() if src.is_available()}
-        print(f"[NewCoinsFactory] 🔧 Surse activate: {list(self.sources.keys())}")
-    
+        print(f"[NewCoinsFactory] 🔧 Enabled sources: {list(self.sources.keys())}")
+
     def get_all_new_coins(self, days_back: int = NEW_COINS_AGE_DAYS) -> Dict[str, List[Dict]]:
         results = {}
         for name, source in self.sources.items():
             try:
                 results[name] = source.get_new_coins(days_back)
             except Exception as e:
-                print(f"[NewCoinsFactory] Eroare la {name}: {e}")
+                print(f"[NewCoinsFactory] Error for {name}: {e}")
                 results[name] = []
         return results
     
@@ -415,8 +415,8 @@ class NewCoinsMonitor:
                 symbol = coin.get('symbol')
                 if symbol and self.is_valid_symbol(symbol, coin.get('name', ''), coin.get('slug', '')):
                     self.all_symbols.add(symbol)
-                else:       
-                    print(f"[NewCoinsMonitor] Simbol invalid ignorat: {symbol} (din {source_name})")
+                else:
+                    print(f"[NewCoinsMonitor] Ignored invalid symbol: {symbol} (from {source_name})")
                     continue
 
     def register_alert_callback(self, callback: Callable):
@@ -431,7 +431,7 @@ class NewCoinsMonitor:
             else:
                 auto_added_status = False
                 if source_name.lower() != "coinmarketcap":
-                    print(f"[NewCoinsMonitor] ℹ️ {coin['symbol']} descoperit pe {source_name} - doar informațional (nu are preț în sistem)")
+                    print(f"[NewCoinsMonitor] ℹ️ {coin['symbol']} discovered from {source_name} - informational only (no price in the system)")
             for callback in self.alert_callbacks:
                 try:
                     callback({
@@ -446,31 +446,31 @@ class NewCoinsMonitor:
                         "url": coin.get('url', '')
                     })
                 except Exception as e:
-                    print(f"[NewCoinsMonitor] Eroare callback: {e}")
+                    print(f"[NewCoinsMonitor] Callback error: {e}")
 
     def start_monitoring(self, interval_seconds: int = REFRESH_INTERVAL_SECONDS):
         if self._running:
             return
         self._running = True
         def run():
-            print(f"[NewCoinsMonitor] 🔄 Monitorizare pornită (refresh la {interval_seconds}s)")
-            print(f"[NewCoinsMonitor] 📡 Surse active: {self.factory.get_available_sources()}")
-            print(f"[NewCoinsMonitor] ⚠️ DOAR monedele de pe CoinMarketCap vor fi adăugate automat (au preț)")
+            print(f"[NewCoinsMonitor] 🔄 Monitoring started (refresh every {interval_seconds}s)")
+            print(f"[NewCoinsMonitor] 📡 Active sources: {self.factory.get_available_sources()}")
+            print(f"[NewCoinsMonitor] ⚠️ Only CoinMarketCap coins will be auto-added (they include price data)")
             while self._running:
                 try:
                     old_symbols = self.all_symbols.copy()
                     self.refresh()
                     new_symbols = self.all_symbols - old_symbols
                     if new_symbols:
-                        print(f"[NewCoinsMonitor] 🆕 Simboluri noi detectate: {new_symbols}")
+                        print(f"[NewCoinsMonitor] 🆕 New symbols detected: {new_symbols}")
                         for source_name, coins in self.all_new_coins.items():
                             new_from_source = [c for c in coins if c['symbol'] in new_symbols]
                             if new_from_source:
                                 auto_add = (source_name == "CoinMarketCap")
                                 self._trigger_alerts(new_from_source, source_name, auto_add=auto_add)
                 except Exception as e:
-                    print(f"[NewCoinsMonitor] Eroare: {e}")
-                print(f"[NewCoinsMonitor] ⏳ Aștept {interval_seconds} secunde până la următoarea verificare...")   
+                    print(f"[NewCoinsMonitor] Error: {e}")
+                print(f"[NewCoinsMonitor] ⏳ Waiting {interval_seconds} seconds until the next check...")
                 time.sleep(interval_seconds)
         self._thread = threading.Thread(target=run, name="NewCoinsMonitor", daemon=True)
         self._thread.start()
@@ -479,21 +479,21 @@ class NewCoinsMonitor:
         self._running = False
         if self._thread:
             self._thread.join(timeout=5)
-        print("[NewCoinsMonitor] Monitorizare oprită")
+        print("[NewCoinsMonitor] Monitoring stopped")
 
     def get_report(self) -> str:
         report = "\n" + "=" * 80 + "\n"
-        report += f"🆕 RAPORT MONEDE NOI ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})\n"
+        report += f"🆕 NEW COINS REPORT ({datetime.now().strftime('%Y-%m-%d %H:%M:%S')})\n"
         report += "=" * 80 + "\n"
         for source_name, coins in self.all_new_coins.items():
             if coins:
-                report += f"\n📡 SURSĂ: {source_name.upper()} ({len(coins)} monede)\n"
+                report += f"\n📡 SOURCE: {source_name.upper()} ({len(coins)} coins)\n"
                 report += "-" * 40 + "\n"
                 for coin in coins[:15]:
                     added_str = coin['added_at'].strftime('%Y-%m-%d') if coin['added_at'] else 'N/A'
                     price_str = f"${coin['price']:.6f}" if coin.get('price') else 'N/A'
                     report += f"   🆕 {coin['symbol']} - {coin.get('name', coin['symbol'])}\n"
-                    report += f"      📅 Adăugată: {added_str} | 💰 Preț: {price_str}\n"
+                    report += f"      📅 Added: {added_str} | 💰 Price: {price_str}\n"
                     if coin.get('url'):
                         report += f"      🔗 {coin['url']}\n"
         report += "\n" + "=" * 80 + "\n"
@@ -515,77 +515,77 @@ class NewCoinsMonitor:
 
     def add_new_coin_to_watchlist(self, coin_info: Dict, auto_add_thresholds: Optional[Dict] = None):
         """
-        Adaugă o monedă nou descoperită în watchlist-ul de prețuri.
-        Filtrele sunt DOAR INFORMATIVE - moneda se adaugă ORICUM.
+        Add a newly discovered coin to the price watchlist.
+        The filters are informational only - the coin is added regardless.
         """
         if not self.price_monitor:
-            print(f"[NewCoinsMonitor] Nu există price_monitor")
+            print(f"[NewCoinsMonitor] No price_monitor available")
             return False
-        
+
         symbol = coin_info['symbol']
         source = coin_info.get('source', 'unknown')
-        
+
         if not self.is_valid_symbol(symbol, coin_info.get('name', ''), coin_info.get('slug', '')):
-            print(f"[NewCoinsMonitor] ❌ Simbol invalid: {symbol}")
+            print(f"[NewCoinsMonitor] ❌ Invalid symbol: {symbol}")
             return False
-        
+
         if hasattr(self.price_monitor, 'original_symbols') and symbol in self.price_monitor.original_symbols:
-            print(f"[NewCoinsMonitor] {symbol} deja în watchlist")
+            print(f"[NewCoinsMonitor] {symbol} is already in the watchlist")
             return False
         max_watchlist_symbols = getattr(self.price_monitor, 'max_monitored_symbols', MAX_NEW_COINS_TO_TRACK)
         if hasattr(self.price_monitor, 'active_symbols') and len(self.price_monitor.active_symbols) >= max_watchlist_symbols:
-            print(f"[NewCoinsMonitor] Limită atinsă: maxim {max_watchlist_symbols} monede în watchlist")
+            print(f"[NewCoinsMonitor] Watchlist limit reached: maximum {max_watchlist_symbols} coins")
             return False
-        
-        # Praguri pentru verificări INFORMATIVE (nu blochează)
+
+        # Informational thresholds only; they do not block the add operation
         if auto_add_thresholds is None:
             auto_add_thresholds = {
-                "min_volume_24h": 100000,      # Volum minim $100k
-                "min_price_usd": 0.000001,     # Preț minim
-                "max_price_usd": 100000,       # Preț maxim
-                "min_change_24h": -90,         # Scădere minimă acceptată
-                "max_change_24h": 1000,        # Creștere maximă acceptată
+                "min_volume_24h": 100000,      # Minimum volume $100k
+                "min_price_usd": 0.000001,     # Minimum price
+                "max_price_usd": 100000,       # Maximum price
+                "min_change_24h": -90,         # Minimum accepted decline
+                "max_change_24h": 1000,        # Maximum accepted increase
             }
-        
-        # Verifică pragurile DOAR PENTRU AFIȘARE (nu blochează)
+
+        # Check thresholds for informational display only
         volume = coin_info.get('volume_24h', 0)
         price = coin_info.get('price', 0)
         change = coin_info.get('change_24h', 0)
-        
+
         issues = []
-        
+
         if volume and volume < auto_add_thresholds["min_volume_24h"]:
-            issues.append(f"⚠️ volum sub prag (${volume:,.0f} < ${auto_add_thresholds['min_volume_24h']:,.0f})")
-        
+            issues.append(f"⚠️ volume below threshold (${volume:,.0f} < ${auto_add_thresholds['min_volume_24h']:,.0f})")
+
         if price and price < auto_add_thresholds["min_price_usd"]:
-            issues.append(f"⚠️ preț sub prag (${price:.8f} < ${auto_add_thresholds['min_price_usd']})")
-        
+            issues.append(f"⚠️ price below threshold (${price:.8f} < ${auto_add_thresholds['min_price_usd']})")
+
         if price and price > auto_add_thresholds["max_price_usd"]:
-            issues.append(f"⚠️ preț peste prag (${price:.2f} > ${auto_add_thresholds['max_price_usd']})")
-        
+            issues.append(f"⚠️ price above threshold (${price:.2f} > ${auto_add_thresholds['max_price_usd']})")
+
         if change and change < auto_add_thresholds["min_change_24h"]:
-            issues.append(f"⚠️ scădere sub prag ({change:.1f}% < {auto_add_thresholds['min_change_24h']}%)")
-        
+            issues.append(f"⚠️ decline below threshold ({change:.1f}% < {auto_add_thresholds['min_change_24h']}%)")
+
         if change and change > auto_add_thresholds["max_change_24h"]:
-            issues.append(f"⚠️ creștere peste prag ({change:.1f}% > {auto_add_thresholds['max_change_24h']}%)")
-        
-        # Afișează avertismentele (DAR NU BLOCHEAZĂ)
+            issues.append(f"⚠️ increase above threshold ({change:.1f}% > {auto_add_thresholds['max_change_24h']}%)")
+
+        # Display warnings, but do not block
         if issues:
             print(f"[NewCoinsMonitor] 📊 {symbol}: {', '.join(issues)}")
         else:
-            print(f"[NewCoinsMonitor] 📊 {symbol} - TOATE PRAGURILE ÎNDEPLINITE ✅")
-        
-        # Adaugă simbolul în watchlist (ÎNTOTDEAUNA, indiferent de filtre)
+            print(f"[NewCoinsMonitor] 📊 {symbol} - ALL THRESHOLDS MET ✅")
+
+        # Add the symbol to the watchlist regardless of filters
         try:
             if hasattr(self.price_monitor, 'add_symbol'):
                 self.price_monitor.add_symbol(symbol, preferred_source=source)
-                print(f"[NewCoinsMonitor] ✅ {symbol} adăugat în watchlist (preț de pe {source})")
+                print(f"[NewCoinsMonitor] ✅ {symbol} added to the watchlist (price from {source})")
                 return True
             else:
-                print(f"[NewCoinsMonitor] ⚠️ price_monitor nu are add_symbol()")
+                print(f"[NewCoinsMonitor] ⚠️ price_monitor does not have add_symbol()")
                 return False
         except Exception as e:
-            print(f"[NewCoinsMonitor] Eroare la adăugarea {symbol}: {e}")
+            print(f"[NewCoinsMonitor] Error while adding {symbol}: {e}")
             return False
 
     def should_keep_monitoring(self, symbol: str) -> bool:
@@ -606,21 +606,21 @@ class NewCoinsMonitor:
         for symbol in list(self.all_symbols):
             if not self.should_keep_monitoring(symbol):
                 if hasattr(self.price_monitor, 'remove_symbol'):
-                    self.price_monitor.remove_symbol(symbol, reason="monedă nouă prea veche")
+                    self.price_monitor.remove_symbol(symbol, reason="old new coin")
                 self.all_symbols.discard(symbol)
                 removed.append(symbol)
         if removed:
-            print(f"[NewCoinsMonitor] Curățate {len(removed)} monede vechi din watchlist")
+            print(f"[NewCoinsMonitor] Cleaned up {len(removed)} old coins from the watchlist")
 
 # ============================================
-# Funcții de conveniență
+# Convenience functions
 # ============================================
 
 def create_new_coins_monitor(price_monitor=None, enabled_sources=None, cmc_api_key=CMC_API_KEY):
     factory = NewCoinsFactory(enabled_sources=enabled_sources, cmc_api_key=cmc_api_key)
     monitor = NewCoinsMonitor(price_monitor, factory)
-    print("[NewCoins] ✅ Monitor monede noi inițializat")
-    print(f"[NewCoins] 📡 Surse active: {factory.get_available_sources()}")
+    print("[NewCoins] ✅ New coin monitor initialized")
+    print(f"[NewCoins] 📡 Active sources: {factory.get_available_sources()}")
     return monitor, factory
 
 # ============================================
@@ -629,13 +629,13 @@ def create_new_coins_monitor(price_monitor=None, enabled_sources=None, cmc_api_k
 
 if __name__ == "__main__":
     print("=" * 80)
-    print("🆕 TEST MODUL DESCOPERIRE MONEDE NOI")
+    print("🆕 NEW COIN DISCOVERY MODULE TEST")
     print("=" * 80)
     monitor, factory = create_new_coins_monitor()
-    print(f"\n📡 Surse active: {factory.get_available_sources()}")
+    print(f"\n📡 Active sources: {factory.get_available_sources()}")
     print(monitor.get_report())
     summary = monitor.get_summary()
-    print(f"\n📊 SUMAR: Total simboluri noi: {summary['total_new_coins']}")
+    print(f"\n📊 SUMMARY: Total new symbols: {summary['total_new_coins']}")
     for source, data in summary['sources'].items():
-        print(f"   {source}: {data['count']} monede")
-    print("\n✅ Test complet")
+        print(f"   {source}: {data['count']} coins")
+    print("\n✅ Test complete")
