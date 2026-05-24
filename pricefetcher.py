@@ -552,6 +552,7 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
         cutoff_timestamp = (time.time() - retention_days * 24 * 3600) * 1000
         with self.lock:
             removed_count = 0
+            trimmed_count = 0
             for symbol in list(self.cache.keys()):
                 original_count = len(self.cache[symbol])
                 self.cache[symbol] = [entry for entry in self.cache[symbol] if entry[0] >= cutoff_timestamp]
@@ -559,11 +560,18 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
                 if removed > 0:
                     removed_count += removed
                     print(f"[Cleanup] {symbol}: șterse {removed} intrări vechi")
+                if len(self.cache[symbol]) > MAX_PRICE_HISTORY_PER_SYMBOL:
+                    over_limit = len(self.cache[symbol]) - MAX_PRICE_HISTORY_PER_SYMBOL
+                    self.cache[symbol] = self.cache[symbol][-MAX_PRICE_HISTORY_PER_SYMBOL:]
+                    trimmed_count += over_limit
+                    print(f"[Cleanup] {symbol}: limitate la ultimele {MAX_PRICE_HISTORY_PER_SYMBOL} intrări")
                 if not self.cache[symbol] and symbol not in self.active_symbols:
                     del self.cache[symbol]
                     print(f"[Cleanup] {symbol}: șters complet")
             if removed_count > 0:
                 print(f"[Cleanup] Total: {removed_count} intrări șterse")
+            if trimmed_count > 0:
+                print(f"[Cleanup] Total: {trimmed_count} intrări eliminate peste limita per simbol")
     
     def cleanup_old_symbols(self, max_age_days: int = 7):
         cutoff_time = time.time() - max_age_days * 24 * 3600

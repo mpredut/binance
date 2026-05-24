@@ -11,7 +11,7 @@ import utils as u
 
 # Constante pentru praguri (poți modifica oricând)
 PRICE_ALERT_CONFIG = {
-    "up_percent": 5.0,      # Alertă când prețul crește cu 5% față de minimul 24h
+    "up_percent": 0.1,      # Alertă când prețul crește cu 5% față de minimul 24h
     "down_percent": 7.5,    # Alertă când prețul scade cu 7.5% față de maximul 24h
     "lookback_hours": 24,   # Intervalul de analiză (24 ore)
     "cooldown_minutes": 15,  # Nu trimite aceeași alertă mai des de 15 minute
@@ -264,7 +264,8 @@ class PriceChecker:
                     
                 except Exception as e:
                     print(f"[Checker] Eroare în ciclul principal: {e}")
-                
+
+                print(f"[Checker] Aștept {interval_seconds} secunde până la următoarea verificare...")               
                 # Pauză până la următoarea verificare
                 for _ in range(interval_seconds):
                     if not self._running:
