@@ -279,7 +279,7 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
         self.refresh_symbols()
         return symbol in self._supported_symbols
     
-    def get_price(self, symbol: str) -> Optional[float]:
+    def get_price1(self, symbol: str) -> Optional[float]:
         if not self.api_key:
             print(f"[CMCPlatform] Fără cheie API")
             return None
@@ -297,6 +297,34 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
             else:
                 print(f"[CMCPlatform] {symbol} nu a fost găsit")
                 return None
+        except Exception as e:
+            print(f"[CMCPlatform] Eroare {symbol}: {e}")
+            return None
+        
+    def get_price(self, symbol: str) -> Optional[float]:
+        if not self.api_key:
+            print(f"[CMCPlatform] Fără cheie API")
+            return None
+        try:
+            headers = {'X-CMC_PRO_API_KEY': self.api_key, 'Accept': 'application/json'}
+            
+            # Încearcă mai întâi cu simbolul direct
+            params = {'symbol': symbol, 'convert': 'USD'}
+            time.sleep(0.2)
+            response = requests.get(self._base_url, headers=headers, params=params, timeout=10)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if 'data' in data and symbol in data['data']:
+                    price = data['data'][symbol]['quote']['USD']['price']
+                    print(f"[CMCPlatform] {symbol} = ${price}")
+                    return float(price)
+            
+            # Dacă nu merge, încearcă să cauți în slug-uri
+            # (pentru monede noi, poate fi nevoie)
+            print(f"[CMCPlatform] {symbol} nu a fost găsit direct")
+            return None
+            
         except Exception as e:
             print(f"[CMCPlatform] Eroare {symbol}: {e}")
             return None
