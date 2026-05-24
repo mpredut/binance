@@ -68,12 +68,14 @@ class PricePlatformInterface(ABC):
 
 
 class BinancePricePlatform(PricePlatformInterface):
-    """Platformă pentru prețuri Binance (folosește USDC în Europa)"""
+    """Platformă pentru prețuri Binance (prioritate USDC, fallback USDT)"""
     
     def __init__(self, api_client=None):
         self.api_client = api_client or api
         self._supported_symbols: Set[str] = set()
-        self._symbol_mapping: Dict[str, str] = {}  # mapare "BTC" -> "BTCUSDC"
+        self._usdc_pairs: Set[str] = set()   # Perechi USDC
+        self._usdt_pairs: Set[str] = set()   # Perechi USDT (fallback)
+        self._symbol_mapping: Dict[str, str] = {}  # mapare "BTC" -> "BTCUSDC" sau "BTCUSDT"
         self._last_refresh = 0
         self._refresh_interval = 3600  # 1 oră
         self._load_symbols()
@@ -83,16 +85,17 @@ class BinancePricePlatform(PricePlatformInterface):
         return "Binance"
     
     def _load_symbols(self):
-        """Încarcă toate perechile disponibile pe Binance, prioritizând USDC"""
+        """Încarcă toate perechile disponibile pe Binance"""
         try:
             response = requests.get("https://api.binance.com/api/v3/exchangeInfo", timeout=10)
             response.raise_for_status()
             data = response.json()
             
+            self._usdc_pairs.clear()
+            self._usdt_pairs.clear()
             self._supported_symbols.clear()
             self._symbol_mapping.clear()
             
-            # Caută perechi cu USDC (prioritar) și USDT (fallback)
             for symbol_info in data.get("symbols", []):
                 symbol = symbol_info.get("symbol")
                 base_asset = symbol_info.get("baseAsset")
@@ -102,32 +105,39 @@ class BinancePricePlatform(PricePlatformInterface):
                 if status != "TRADING":
                     continue
                 
-                # Prioritizează USDC (piața europeană)
-                if quote_asset == QUOTE_CURRENCY:
-                    self._supported_symbols.add(symbol)
-                    self._symbol_mapping[base_asset] = symbol
+                self._supported_symbols.add(symbol)
+                
+                # Înregistrează perechile USDC și USDT separat
+                if quote_asset == "USDC":
+                    self._usdc_pairs.add(symbol)
+                    # Prioritizează USDC pentru mapping
+                    if base_asset not in self._symbol_mapping:
+                        self._symbol_mapping[base_asset] = symbol
                     self._symbol_mapping[symbol] = symbol
                 
-                # Fallback la USDT dacă nu există USDC
-                elif quote_asset == FALLBACK_QUOTE and base_asset not in self._symbol_mapping:
-                    self._supported_symbols.add(symbol)
+                elif quote_asset == "USDT":
+                    self._usdt_pairs.add(symbol)
+                    # USDT e fallback (doar dacă nu există deja USDC)
                     if base_asset not in self._symbol_mapping:
                         self._symbol_mapping[base_asset] = symbol
                     self._symbol_mapping[symbol] = symbol
             
-            print(f"[BinancePlatform] Încărcate {len(self._supported_symbols)} perechi (prioritate {QUOTE_CURRENCY})")
+            log.print(f"[BinancePlatform] USDC: {len(self._usdc_pairs)} perechi, USDT: {len(self._usdt_pairs)} perechi")
             self._last_refresh = time.time()
             
-            # Afișează primele 10 mapping-uri pentru debugging
-            sample = list(self._symbol_mapping.items())[:10]
-            print(f"[BinancePlatform] Sample mapping: {sample}")
-            
         except Exception as e:
-            print(f"[BinancePlatform] Eroare la încărcare: {e}")
-            # Fallback la simboluri comune cu USDC
-            self._supported_symbols = {f"{sym}{QUOTE_CURRENCY}" for sym in ["BTC", "ETH", "BNB", "SOL", "ADA", "DOGE", "XRP"]}
-            for sym in ["BTC", "ETH", "BNB", "SOL", "ADA", "DOGE", "XRP"]:
-                self._symbol_mapping[sym] = f"{sym}{QUOTE_CURRENCY}"
+            log.print(f"[BinancePlatform] Eroare la încărcare: {e}")
+            self._fallback_symbols()
+    
+    def _fallback_symbols(self):
+        """Fallback la simboluri comune în caz de eroare"""
+        self._usdc_pairs = {"BTCUSDC", "ETHUSDC", "BNBUSDC"}
+        self._usdt_pairs = {"BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "ADAUSDT", "DOGEUSDT", "XRPUSDT"}
+        self._supported_symbols = self._usdc_pairs | self._usdt_pairs
+        self._symbol_mapping = {
+            "BTC": "BTCUSDC", "ETH": "ETHUSDC", "BNB": "BNBUSDC",
+            "SOL": "SOLUSDT", "ADA": "ADAUSDT", "DOGE": "DOGEUSDT", "XRP": "XRPUSDT"
+        }
     
     def refresh_symbols(self):
         if time.time() - self._last_refresh > self._refresh_interval:
@@ -140,42 +150,54 @@ class BinancePricePlatform(PricePlatformInterface):
     def supports_symbol(self, symbol: str) -> bool:
         self.refresh_symbols()
         
-        # Verifică dacă simbolul e direct în suportate (ex: BTCUSDC)
+        # Verificare directă
         if symbol in self._supported_symbols:
             return True
         
-        # Verifică dacă e un simbol de bază (ex: BTC) care are mapping
+        # Verificare în mapping
         if symbol in self._symbol_mapping:
             return True
         
-        # Încearcă să construiască perechea cu USDC
-        usdc_pair = f"{symbol}{QUOTE_CURRENCY}"
-        if usdc_pair in self._supported_symbols:
-            return True
+        # Încearcă să construiască perechea
+        for quote in ["USDC", "USDT"]:
+            pair = f"{symbol}{quote}"
+            if pair in self._supported_symbols:
+                return True
         
         return False
     
     def get_price(self, symbol: str) -> Optional[float]:
         try:
-            # Găsește perechea corectă de tranzacționare
+            # Găsește perechea corectă
             trading_pair = None
             
+            # 1. Verifică mapping-ul direct
             if symbol in self._symbol_mapping:
                 trading_pair = self._symbol_mapping[symbol]
-            elif f"{symbol}{QUOTE_CURRENCY}" in self._supported_symbols:
-                trading_pair = f"{symbol}{QUOTE_CURRENCY}"
+            
+            # 2. Încearcă mai întâi USDC (pentru Europa)
+            elif f"{symbol}USDC" in self._supported_symbols:
+                trading_pair = f"{symbol}USDC"
+            
+            # 3. Fallback la USDT
+            elif f"{symbol}USDT" in self._supported_symbols:
+                trading_pair = f"{symbol}USDT"
+            
+            # 4. Verifică dacă simbolul e deja o pereche validă
             elif symbol in self._supported_symbols:
                 trading_pair = symbol
-            else:
-                print(f"[BinancePlatform] Simbol {symbol} negăsit în mapping")
+            
+            if not trading_pair:
+                log.print(f"[BinancePlatform] Nu am găsit pereche pentru {symbol}")
                 return None
             
             # Folosește API-ul client existent
             price = self.api_client.get_current_price(symbol=trading_pair)
+            log.print(f"[BinancePlatform] {symbol} -> {trading_pair} = ${price}")
             return float(price)
             
         except Exception as e:
-            print(f"[BinancePlatform] Eroare {symbol}: {e}")
+            log.print(f"[BinancePlatform] Eroare {symbol}: {e}")
             return None
 
 
@@ -706,36 +728,33 @@ def register_enhanced_price_manager(cmc_api_key: Optional[str] = None):
     
     print("[EnhancedPrice] Manager înregistrat în CacheFactory ca 'PriceMulti'")
 
-
 def create_price_monitor(cmc_api_key: Optional[str] = None):
     """
     Creează și pornește monitorul de prețuri multi-platformă.
-    Folosește simbolurile din sym.symbols + cele default.
-    
-    Args:
-        cmc_api_key: Cheia API CoinMarketCap
-    
-    Returns:
-        Instanța EnhancedCachePriceManager cu thread-ul de sincronizare pornit
     """
     # Construiește lista completă de simboluri
     all_symbols = []
     
     # Adaugă simbolurile din sym.symbols (dacă există)
     if hasattr(sym, 'symbols'):
-        all_symbols.extend(sym.symbols)
-        print(f"[PriceMonitor] Adăugate {len(sym.symbols)} simboluri din sym.symbols")
+        for s in sym.symbols:
+            # Dacă simbolul e deja în format USDC, păstrează-l
+            if s.endswith('USDC') or s.endswith('USDT'):
+                all_symbols.append(s)
+            else:
+                # Adaugă și versiunea simplă (ex: BTC), platformele vor ști ce să facă
+                all_symbols.append(s)
     
     # Adaugă simbolurile default (dacă nu sunt deja)
     for sym_default in DEFAULT_SYMBOLS:
-        if sym_default not in all_symbols:
+        if sym_default not in all_symbols and f"{sym_default}USDC" not in all_symbols:
             all_symbols.append(sym_default)
     
     # Elimină duplicatele
     all_symbols = list(dict.fromkeys(all_symbols))
     
-    print(f"[PriceMonitor] Total simboluri de monitorizat: {len(all_symbols)}")
-    print(f"[PriceMonitor] Lista: {all_symbols}")
+    log.print(f"[PriceMonitor] Total simboluri de monitorizat: {len(all_symbols)}")
+    log.print(f"[PriceMonitor] Lista: {all_symbols}")
     
     # Înregistrează managerul în factory
     register_enhanced_price_manager(cmc_api_key)
@@ -745,8 +764,6 @@ def create_price_monitor(cmc_api_key: Optional[str] = None):
     
     # Pornește sincronizarea periodică
     thread = price_manager.periodic_sync(sync_ts=PRICE_MULTI_SYNC_INTERVAL_SEC, save_state=True)
-    
-    print(f"[PriceMonitor] Pornit pentru {len(all_symbols)} simboluri, sync la {PRICE_MULTI_SYNC_INTERVAL_SEC}s")
     
     return price_manager
 

@@ -712,7 +712,7 @@ class NewCoinsMonitor:
                         "url": coin.get('url', '')
                     })
                 except Exception as e:
-                    log.print(f"[NewCoinsMonitor] Eroare callback: {e}")
+                    print(f"[NewCoinsMonitor] Eroare callback: {e}")
     
     def start_monitoring(self, interval_seconds: int = REFRESH_INTERVAL_SECONDS):
         """Pornește monitorizarea continuă"""
@@ -887,7 +887,7 @@ class NewCoinsMonitor:
         age_days = (time.time() - added_time) / (24 * 3600)
         
         if age_days > NEW_COIN_MAX_AGE_DAYS:
-            log.print(f"[NewCoinsMonitor] {symbol} - monitorizat de {age_days:.1f} zile, scoatem din watchlist")
+            print(f"[NewCoinsMonitor] {symbol} - monitorizat de {age_days:.1f} zile, scoatem din watchlist")
             return False
         
         return True
@@ -908,7 +908,7 @@ class NewCoinsMonitor:
                 removed.append(symbol)
         
         if removed:
-            log.print(f"[NewCoinsMonitor] Curățate {len(removed)} monede vechi din watchlist")
+            print(f"[NewCoinsMonitor] Curățate {len(removed)} monede vechi din watchlist")
             
 # ============================================
 # Funcții de conveniență
