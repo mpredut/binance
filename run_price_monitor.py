@@ -17,7 +17,9 @@ from new_coins_discovery import create_new_coins_monitor, NewCoinsMonitor, NewCo
 def load_env_file(filename=".env"):
     env_path = Path(__file__).resolve().parent / filename
     if not env_path.exists():
+        print(f"[Debug] Env file {env_path} does not exist!")
         return
+    print(f"[Debug] Loading env file from {env_path}")
     try:
         with env_path.open("r", encoding="utf-8") as f:
             for raw_line in f:
@@ -29,6 +31,9 @@ def load_env_file(filename=".env"):
                 value = value.strip().strip('"').strip("'")
                 if key and key not in os.environ:
                     os.environ[key] = value
+                    print(f"[Debug] Loaded env: {key}={value[:15]}...")
+                elif key in os.environ:
+                    print(f"[Debug] Key {key} already in os.environ (value: {os.environ[key][:15]}...)")
     except Exception as e:
         print(f"[Warning] Nu pot încărca {env_path}: {e}")
 
@@ -58,15 +63,22 @@ except ImportError:
 def custom_alert_handler(alert):
     """Handler personalizat pentru alerte de preț"""
     alerts = alert if isinstance(alert, list) else [alert]
+    print(f"[Debug] custom_alert_handler called with {len(alerts)} alerts.")
+    print(f"[Debug] PHONE_ALERT_URL = {os.environ.get('PHONE_ALERT_URL')}")
+    print(f"[Debug] NTFY_TOPIC = {os.environ.get('NTFY_TOPIC')}")
     if ALERT_NOTIFIER_AVAILABLE:
         for item in alerts:
             AlertNotifier.print_to_console(item)
             AlertNotifier.save_to_file(item, filename="crypto_alerts.log")
         if os.environ.get("PHONE_ALERT_URL") or os.environ.get("NTFY_TOPIC"):
             if len(alerts) == 1:
+                print("[Debug] Calling AlertNotifier.send_phone_webhook (single)")
                 AlertNotifier.send_phone_webhook(alerts[0])
             else:
+                print("[Debug] Calling AlertNotifier.send_phone_webhook_batch (batch)")
                 AlertNotifier.send_phone_webhook_batch(alerts)
+        else:
+            print("[Debug] Webhook not called: environment variables are missing/empty.")
         if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"):
             for item in alerts:
                 AlertNotifier.send_telegram(item)
@@ -76,6 +88,7 @@ def custom_alert_handler(alert):
             else:
                 AlertNotifier.send_email_batch(alerts)
     else:
+        print("[Debug] ALERT_NOTIFIER_AVAILABLE is False, using basic print fallback.")
         for item in alerts:
             print("\n" + "=" * 60)
             print(str(item))
