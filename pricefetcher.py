@@ -315,22 +315,20 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
         
     def get_price(self, symbol: str) -> Optional[float]:
         """
-        Obține prețul din cache-ul intern (actualizat din listings/latest).
-        Acesta este cel mai rapid și sigur mod de a obține prețul pentru monede noi.
+        Get the price from the internal cache (updated from listings/latest).
+        This is the fastest and safest way to get prices for new coins.
         """
         if not self.api_key:
-            print(f"[CMCPlatform] Fără cheie API")
+            print(f"[CMCPlatform] Missing API key")
             return None
-        
-        # Reîmprospătează dacă a trecut suficient timp
+
+        # Refresh if enough time has passed
         self.refresh_symbols()
-        
-        # Caută simbolul în cache-ul intern (_all_listings conține doar metadata,
-        # dar avem nevoie de preț. Vom folosi un dicționar separat pentru prețuri.
-        # O soluție mai simplă: deoarece avem acces la CoinMarketCapSource, 
-        # putem folosi direct datele din acesta. În lipsa unui cache separat,
-        # vom face un request la listings/latest pentru simbolul specific.
-        
+
+        # Search the symbol in the internal cache (_all_listings only contains metadata,
+        # but we also need the price. We will use a separate dictionary for prices.
+        # A simpler solution is to use CoinMarketCapSource directly. If there is no dedicated cache,
+        # we will make a request to listings/latest for the specific symbol.
         try:
             headers = {'X-CMC_PRO_API_KEY': self.api_key, 'Accept': 'application/json'}
             params = {'symbol': symbol, 'convert': 'USD'}
@@ -344,10 +342,10 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
             if price is not None:
                 print(f"[CMCPlatform] {symbol} = ${price}")
                 return price
-            print(f"[CMCPlatform] {symbol} nu a fost găsit")
+            print(f"[CMCPlatform] {symbol} not found")
             return None
         except Exception as e:
-            print(f"[CMCPlatform] Eroare {symbol}: {e}")
+            print(f"[CMCPlatform] Error for {symbol}: {e}")
             return None
 
 
@@ -581,20 +579,20 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
                 removed = original_count - len(self.cache[symbol])
                 if removed > 0:
                     removed_count += removed
-                    print(f"[Cleanup] {symbol}: șterse {removed} intrări vechi")
+                    print(f"[Cleanup] {symbol}: removed {removed} old entries")
                 if len(self.cache[symbol]) > MAX_PRICE_HISTORY_PER_SYMBOL:
                     over_limit = len(self.cache[symbol]) - MAX_PRICE_HISTORY_PER_SYMBOL
                     self.cache[symbol] = self.cache[symbol][-MAX_PRICE_HISTORY_PER_SYMBOL:]
                     trimmed_count += over_limit
-                    print(f"[Cleanup] {symbol}: limitate la ultimele {MAX_PRICE_HISTORY_PER_SYMBOL} intrări")
+                    print(f"[Cleanup] {symbol}: trimmed to the latest {MAX_PRICE_HISTORY_PER_SYMBOL} entries")
                 if not self.cache[symbol] and symbol not in self.active_symbols:
                     del self.cache[symbol]
-                    print(f"[Cleanup] {symbol}: șters complet")
+                    print(f"[Cleanup] {symbol}: fully removed")
             if removed_count > 0:
-                print(f"[Cleanup] Total: {removed_count} intrări șterse")
+                print(f"[Cleanup] Total: {removed_count} old entries removed")
             if trimmed_count > 0:
-                print(f"[Cleanup] Total: {trimmed_count} intrări eliminate peste limita per simbol")
-    
+                print(f"[Cleanup] Total: {trimmed_count} entries trimmed beyond the per-symbol limit")
+
     def cleanup_old_symbols(self, max_age_days: int = 7):
         cutoff_time = time.time() - max_age_days * 24 * 3600
         removed_symbols = []
@@ -603,11 +601,11 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
                 if added_time < cutoff_time:
                     removed_symbols.append(symbol)
         for symbol in removed_symbols:
-            self.remove_symbol(symbol, reason=f"(mai vechi de {max_age_days} zile)")
+            self.remove_symbol(symbol, reason=f"(older than {max_age_days} days)")
         if removed_symbols:
-            print(f"[Cleanup] Eliminate {len(removed_symbols)} simboluri vechi: {removed_symbols}")
+            print(f"[Cleanup] Removed {len(removed_symbols)} old symbols: {removed_symbols}")
         return removed_symbols
-    
+
     def save_state_to_file_if_enabled(self):
         if not self.save_state:
             return
@@ -634,11 +632,11 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
                 os.replace(tmp_file, self.filename)
                 print(f"[{self.cls_name}][info] Save cache to file {self.filename}")
         except Exception as e:
-            print(f"[{self.cls_name}][Eroare] La salvarea fișierului cache: {e}")
+            print(f"[{self.cls_name}][Error] Saving cache file {self.filename}: {e}")
 
 
 # ============================================
-# Funcții principale
+# Main functions
 # ============================================
 
 PRICE_MULTI_SYNC_INTERVAL_SEC = 5 * 60
@@ -652,7 +650,7 @@ def register_enhanced_price_manager(cmc_api_key: Optional[str] = None):
         "sync_ts": lambda: PRICE_MULTI_SYNC_INTERVAL_SEC,
         "cmc_api_key": cmc_api_key
     }
-    print("[Pricefetcher] Manager înregistrat în CacheFactory ca 'PriceMulti'")
+    print("[Pricefetcher] Manager registered in CacheFactory as 'PriceMulti'")
 
 
 def is_valid_symbol_for_monitoring(symbol: str) -> bool:
@@ -699,39 +697,39 @@ def create_price_monitor(cmc_api_key: Optional[str] = None):
     all_symbols = list(dict.fromkeys(all_symbols))
     all_symbols = [s for s in all_symbols if is_valid_symbol_for_monitoring(s)]
     all_symbols = all_symbols[:MAX_MONITORED_SYMBOLS]
-    
-    print(f"[PriceMonitor] Simboluri valide de monitorizat: {len(all_symbols)}")
-    print(f"[PriceMonitor] Lista: {all_symbols}")
-    
+
+    print(f"[PriceMonitor] Valid symbols to monitor: {len(all_symbols)}")
+    print(f"[PriceMonitor] List: {all_symbols}")
+
     register_enhanced_price_manager(cmc_api_key)
     price_manager = CacheFactory.get("PriceMulti", symbols=all_symbols)
     thread = price_manager.periodic_sync(sync_ts=PRICE_MULTI_SYNC_INTERVAL_SEC, save_state=True)
-    
+
     return price_manager
 
 
 if __name__ == "__main__":
     CMC_API_KEY = os.environ.get('CMC_API_KEY', None)
     print("=" * 60)
-    print("🚀 Pornire monitor prețuri crypto (multi-platformă)")
-    print(f"💰 Monedă de bază pentru Europa: {QUOTE_CURRENCY}")
+    print("🚀 Starting crypto price monitor (multi-platform)")
+    print(f"💰 Base quote currency: {QUOTE_CURRENCY}")
     print("=" * 60)
-    
+
     monitor = create_price_monitor(cmc_api_key=CMC_API_KEY)
-    print("\n⏳ Așteptăm prima colectare de prețuri...")
+    print("\n⏳ Waiting for the first price collection...")
     time.sleep(35)
-    
-    print("\n📊 Prețuri curente:")
+
+    print("\n📊 Current prices:")
     for symbol in monitor.original_symbols:
         price = monitor.get_latest_price(symbol)
         if price:
             print(f"  {symbol}: ${price:.4f}")
         else:
-            print(f"  {symbol}: în așteptare...")
-    
-    print("\n✅ Monitor activ. Rulează în fundal (Ctrl+C pentru oprire)")
+            print(f"  {symbol}: waiting...")
+
+    print("\n✅ Monitor active. Running in background (Ctrl+C to stop)")
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
-        print("\n🛑 Oprire...")
+        print("\n🛑 Stopping...")
