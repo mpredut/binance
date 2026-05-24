@@ -1,4 +1,4 @@
-# price_fetcher_managers.py
+# pricefetcher.py
 import json
 import time
 import threading
@@ -43,7 +43,7 @@ class BinancePricePlatform(PricePlatformInterface):
     
     def __init__(self, api_client=None):
         self.api_client = api_client or api
-        self._supported_symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "ADAUSDT", "DOGEUSDT"]
+        self._supported_symbols = ["BTCUSDC", "ETHUSDC", "BNBUSDC", "SOLUSDC", "ADAUSDC", "DOGEUSDC"]
     
     @property
     def platform_name(self) -> str:
@@ -388,7 +388,7 @@ if __name__ == "__main__":
         "ETH",      # Ethereum  
         "HYPE",     # Hyperliquid (nu e pe Binance)
         "SOL",      # Solana
-        "BTCUSDC",  # Varianta cu USDT pentru Binance
+        "BTCUSDT",  # Varianta cu USDT pentru Binance
     ]
     
     print("=" * 60)

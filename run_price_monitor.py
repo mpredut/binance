@@ -8,8 +8,8 @@ import log
 import utils as u
 
 # Importă noile module
-from price_fetcher_managers import create_price_monitor
-from price_analyzer import start_price_alert_system, PRICE_ALERT_CONFIG
+from pricefetcher import create_price_monitor
+from pricechecker import start_price_alert_system, PRICE_ALERT_CONFIG
 from alertnotifiers import AlertNotifier
 
 

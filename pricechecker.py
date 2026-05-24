@@ -175,7 +175,7 @@ class PriceAnalyzer:
         stats = self._calculate_24h_stats(symbol)
         
         if not stats.get("has_data", False):
-            log.print(f"[Analyzer][{symbol}] {stats.get('error', 'Eroare necunoscută')}")
+            print(f"[Analyzer][{symbol}] {stats.get('error', 'Eroare necunoscută')}")
             return alerts
         
         current_price = stats["current_price"]
@@ -211,7 +211,7 @@ class PriceAnalyzer:
                 self._record_alert_sent(symbol, "down")
         
         # Logging informativ (nu alertă)
-        log.print(f"[Analyzer][{symbol}] Preț: ${current_price:.4f} | "
+        print(f"[Analyzer][{symbol}] Preț: ${current_price:.4f} | "
                   f"↑ {up_percent:+.2f}% (prag +{self.config['up_percent']}%) | "
                   f"↓ {down_percent:+.2f}% (prag -{self.config['down_percent']}%) | "
                   f"Min: ${stats['min_price']:.4f} | Max: ${stats['max_price']:.4f}")
@@ -230,7 +230,7 @@ class PriceAnalyzer:
                 alerts = self.check_symbol(symbol)
                 all_alerts.extend(alerts)
             except Exception as e:
-                log.print(f"[Analyzer][{symbol}] Eroare: {e}")
+                print(f"[Analyzer][{symbol}] Eroare: {e}")
         
         return all_alerts
     
@@ -242,14 +242,14 @@ class PriceAnalyzer:
             interval_seconds: Cât de des să verifice (ex: 60 secunde)
         """
         if self._running:
-            log.print("[Analyzer] Deja rulează!")
+            print("[Analyzer] Deja rulează!")
             return
         
         self._running = True
         
         def run():
-            log.print(f"[Analyzer] Monitorizare pornită - verifică la fiecare {interval_seconds}s")
-            log.print(f"[Analyzer] Praguri: ↑ +{self.config['up_percent']}% | ↓ -{self.config['down_percent']}%")
+            print(f"[Analyzer] Monitorizare pornită - verifică la fiecare {interval_seconds}s")
+            print(f"[Analyzer] Praguri: ↑ +{self.config['up_percent']}% | ↓ -{self.config['down_percent']}%")
             
             while self._running:
                 try:
@@ -259,7 +259,7 @@ class PriceAnalyzer:
                         self.alert_callback(alert)
                     
                 except Exception as e:
-                    log.print(f"[Analyzer] Eroare în ciclul principal: {e}")
+                    print(f"[Analyzer] Eroare în ciclul principal: {e}")
                 
                 # Pauză până la următoarea verificare
                 for _ in range(interval_seconds):
@@ -275,7 +275,7 @@ class PriceAnalyzer:
         self._running = False
         if self._thread:
             self._thread.join(timeout=5)
-        log.print("[Analyzer] Monitorizare oprită")
+        print("[Analyzer] Monitorizare oprită")
     
     def get_status(self) -> dict:
         """Returnează statusul curent al analizorului"""
