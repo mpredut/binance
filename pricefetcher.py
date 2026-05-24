@@ -111,15 +111,15 @@ class BinancePricePlatform(PricePlatformInterface):
                         self._symbol_mapping[base_asset] = symbol
                     self._symbol_mapping[symbol] = symbol
             
-            log.print(f"[BinancePlatform] Încărcate {len(self._supported_symbols)} perechi (prioritate {QUOTE_CURRENCY})")
+            print(f"[BinancePlatform] Încărcate {len(self._supported_symbols)} perechi (prioritate {QUOTE_CURRENCY})")
             self._last_refresh = time.time()
             
             # Afișează primele 10 mapping-uri pentru debugging
             sample = list(self._symbol_mapping.items())[:10]
-            log.print(f"[BinancePlatform] Sample mapping: {sample}")
+            print(f"[BinancePlatform] Sample mapping: {sample}")
             
         except Exception as e:
-            log.print(f"[BinancePlatform] Eroare la încărcare: {e}")
+            print(f"[BinancePlatform] Eroare la încărcare: {e}")
             # Fallback la simboluri comune cu USDC
             self._supported_symbols = {f"{sym}{QUOTE_CURRENCY}" for sym in ["BTC", "ETH", "BNB", "SOL", "ADA", "DOGE", "XRP"]}
             for sym in ["BTC", "ETH", "BNB", "SOL", "ADA", "DOGE", "XRP"]:
@@ -163,7 +163,7 @@ class BinancePricePlatform(PricePlatformInterface):
             elif symbol in self._supported_symbols:
                 trading_pair = symbol
             else:
-                log.print(f"[BinancePlatform] Simbol {symbol} negăsit în mapping")
+                print(f"[BinancePlatform] Simbol {symbol} negăsit în mapping")
                 return None
             
             # Folosește API-ul client existent
@@ -171,7 +171,7 @@ class BinancePricePlatform(PricePlatformInterface):
             return float(price)
             
         except Exception as e:
-            log.print(f"[BinancePlatform] Eroare {symbol}: {e}")
+            print(f"[BinancePlatform] Eroare {symbol}: {e}")
             return None
 
 
@@ -202,11 +202,11 @@ class HyperliquidPricePlatform(PricePlatformInterface):
             self._all_mids = response.json()
             self._supported_symbols = set(self._all_mids.keys())
             
-            log.print(f"[HyperliquidPlatform] Încărcate {len(self._supported_symbols)} simboluri")
+            print(f"[HyperliquidPlatform] Încărcate {len(self._supported_symbols)} simboluri")
             self._last_refresh = time.time()
             
         except Exception as e:
-            log.print(f"[HyperliquidPlatform] Eroare la încărcare: {e}")
+            print(f"[HyperliquidPlatform] Eroare la încărcare: {e}")
             # Fallback la simboluri cunoscute
             self._supported_symbols = {"HYPE", "PURR", "BTC", "ETH", "SOL", "USDC"}
     
@@ -229,13 +229,13 @@ class HyperliquidPricePlatform(PricePlatformInterface):
             self.refresh_symbols()
             
             if symbol not in self._all_mids:
-                log.print(f"[HyperliquidPlatform] Simbol {symbol} negăsit")
+                print(f"[HyperliquidPlatform] Simbol {symbol} negăsit")
                 return None
             
             return float(self._all_mids[symbol])
             
         except Exception as e:
-            log.print(f"[HyperliquidPlatform] Eroare {symbol}: {e}")
+            print(f"[HyperliquidPlatform] Eroare {symbol}: {e}")
             return None
 
 
@@ -253,7 +253,7 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
         if self.api_key:
             self._load_symbols()
         else:
-            log.print("[CMCPlatform] Fără API Key - platformă dezactivată")
+            print("[CMCPlatform] Fără API Key - platformă dezactivată")
     
     @property
     def platform_name(self) -> str:
@@ -294,11 +294,11 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
                         'slug': crypto.get('slug')
                     }
             
-            log.print(f"[CMCPlatform] Încărcate {len(self._supported_symbols)} simboluri")
+            print(f"[CMCPlatform] Încărcate {len(self._supported_symbols)} simboluri")
             self._last_refresh = time.time()
             
         except Exception as e:
-            log.print(f"[CMCPlatform] Eroare la încărcare: {e}")
+            print(f"[CMCPlatform] Eroare la încărcare: {e}")
     
     def refresh_symbols(self):
         if self.api_key and time.time() - self._last_refresh > self._refresh_interval:
@@ -341,7 +341,7 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
             return float(price)
             
         except Exception as e:
-            log.print(f"[CMCPlatform] Eroare {symbol}: {e}")
+            print(f"[CMCPlatform] Eroare {symbol}: {e}")
             return None
 
 
@@ -370,7 +370,7 @@ class PricePlatformFactory:
     
     def _discover_all_symbols(self):
         """Descoperă toate simbolurile disponibile pe toate platformele"""
-        log.print("[PriceFactory] 🔍 Descoperire simboluri disponibile...")
+        print("[PriceFactory] 🔍 Descoperire simboluri disponibile...")
         
         all_symbols = {}
         for platform in self._platforms:
@@ -380,9 +380,9 @@ class PricePlatformFactory:
                     "count": len(symbols),
                     "sample": list(symbols)[:10]  # primele 10 ca exemplu
                 }
-                log.print(f"[PriceFactory]   {platform.platform_name}: {len(symbols)} simboluri")
+                print(f"[PriceFactory]   {platform.platform_name}: {len(symbols)} simboluri")
             except Exception as e:
-                log.print(f"[PriceFactory]   {platform.platform_name}: eroare - {e}")
+                print(f"[PriceFactory]   {platform.platform_name}: eroare - {e}")
         
         self._capabilities = all_symbols
     
@@ -430,7 +430,7 @@ class PricePlatformFactory:
             try:
                 results.append(self.get_price(symbol))
             except Exception as e:
-                log.print(f"[PriceFactory] Eroare la {symbol}: {e}")
+                print(f"[PriceFactory] Eroare la {symbol}: {e}")
         return results
     
     def get_supported_symbols(self) -> Set[str]:
@@ -477,14 +477,14 @@ class EnhancedCachePriceManager(CacheManagerInterface):
     
     def _log_symbol_support(self):
         """Afișează pe ce platformă e suportat fiecare simbol"""
-        log.print(f"[EnhancedPrice] Verificare suport simboluri:")
+        print(f"[EnhancedPrice] Verificare suport simboluri:")
         for symbol in self.original_symbols:
             support = self.price_factory.check_symbol_support(symbol)
             supported_platforms = [p for p, s in support.items() if s]
             if supported_platforms:
-                log.print(f"  ✅ {symbol} -> {', '.join(supported_platforms)}")
+                print(f"  ✅ {symbol} -> {', '.join(supported_platforms)}")
             else:
-                log.print(f"  ❌ {symbol} -> NICI O PLATFORMĂ!")
+                print(f"  ❌ {symbol} -> NICI O PLATFORMĂ!")
     
     def rebuild_fetchtime_times(self):
         """Reconstruiește timestamp-urile ultimelor prețuri salvate"""
@@ -511,14 +511,14 @@ class EnhancedCachePriceManager(CacheManagerInterface):
             timestamp = int(time.time())  # secunde
             timestamp_ms = timestamp * 1000
             
-            # Folosește log.print (care e deja configurat în sistemul tău)
-            log.print(f"[EnhancedPrice][{symbol}] ${price:.4f} (sursa: {platform_used})")
+            # Folosește print (care e deja configurat în sistemul tău)
+            print(f"[EnhancedPrice][{symbol}] ${price:.4f} (sursa: {platform_used})")
             
             # Returnează în formatul așteptat de CacheManagerInterface
             return [[timestamp_ms, price]]
             
         except Exception as e:
-            log.print(f"[EnhancedPrice][Eroare] {symbol}: {e}")
+            print(f"[EnhancedPrice][Eroare] {symbol}: {e}")
             return []
     
     def get_all_symbols_from_cache(self):
@@ -568,7 +568,7 @@ def register_enhanced_price_manager(cmc_api_key: Optional[str] = None):
         "cmc_api_key": cmc_api_key
     }
     
-    log.print("[EnhancedPrice] Manager înregistrat în CacheFactory ca 'PriceMulti'")
+    print("[EnhancedPrice] Manager înregistrat în CacheFactory ca 'PriceMulti'")
 
 
 def create_price_monitor(cmc_api_key: Optional[str] = None):
@@ -588,7 +588,7 @@ def create_price_monitor(cmc_api_key: Optional[str] = None):
     # Adaugă simbolurile din sym.symbols (dacă există)
     if hasattr(sym, 'symbols'):
         all_symbols.extend(sym.symbols)
-        log.print(f"[PriceMonitor] Adăugate {len(sym.symbols)} simboluri din sym.symbols")
+        print(f"[PriceMonitor] Adăugate {len(sym.symbols)} simboluri din sym.symbols")
     
     # Adaugă simbolurile default (dacă nu sunt deja)
     for sym_default in DEFAULT_SYMBOLS:
@@ -598,8 +598,8 @@ def create_price_monitor(cmc_api_key: Optional[str] = None):
     # Elimină duplicatele
     all_symbols = list(dict.fromkeys(all_symbols))
     
-    log.print(f"[PriceMonitor] Total simboluri de monitorizat: {len(all_symbols)}")
-    log.print(f"[PriceMonitor] Lista: {all_symbols}")
+    print(f"[PriceMonitor] Total simboluri de monitorizat: {len(all_symbols)}")
+    print(f"[PriceMonitor] Lista: {all_symbols}")
     
     # Înregistrează managerul în factory
     register_enhanced_price_manager(cmc_api_key)
@@ -610,7 +610,7 @@ def create_price_monitor(cmc_api_key: Optional[str] = None):
     # Pornește sincronizarea periodică
     thread = price_manager.periodic_sync(sync_ts=PRICE_MULTI_SYNC_INTERVAL_SEC, save_state=True)
     
-    log.print(f"[PriceMonitor] Pornit pentru {len(all_symbols)} simboluri, sync la {PRICE_MULTI_SYNC_INTERVAL_SEC}s")
+    print(f"[PriceMonitor] Pornit pentru {len(all_symbols)} simboluri, sync la {PRICE_MULTI_SYNC_INTERVAL_SEC}s")
     
     return price_manager
 
