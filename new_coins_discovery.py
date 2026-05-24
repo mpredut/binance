@@ -390,10 +390,10 @@ class NewCoinsMonitor:
             return False
         if len(symbol) < 1 or len(symbol) > 100:
             return False
-        if not symbol.isalnum():
-            return False
-        if symbol.isdigit():
-            return False
+        #if not symbol.isalnum():
+        #    return False
+        #if symbol.isdigit():
+        #    return False
         if symbol == '0' * len(symbol):
             return False
         excluded = {'USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'WBTC', 'WETH', 
@@ -462,6 +462,7 @@ class NewCoinsMonitor:
                                 self._trigger_alerts(new_from_source, source_name, auto_add=auto_add)
                 except Exception as e:
                     print(f"[NewCoinsMonitor] Eroare: {e}")
+                print(f"[NewCoinsMonitor] ⏳ Aștept {interval_seconds} secunde până la următoarea verificare...")   
                 time.sleep(interval_seconds)
         self._thread = threading.Thread(target=run, name="NewCoinsMonitor", daemon=True)
         self._thread.start()

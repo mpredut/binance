@@ -198,6 +198,7 @@ def main():
                 if new_coins_monitor.add_new_coin_to_watchlist(coin):
                     auto_added_count += 1
         else:
+            print("test")
             # Celelalte surse - doar loghează (DAR COMPRESAT)
             if coins:
                 symbols_list = ', '.join([c['symbol'] for c in coins[:10]])
