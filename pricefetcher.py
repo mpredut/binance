@@ -300,7 +300,8 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
         except Exception as e:
             print(f"[CMCPlatform] Eroare {symbol}: {e}")
             return None
-     def get_price(self, symbol: str) -> Optional[float]:
+        
+    def get_price(self, symbol: str) -> Optional[float]:
         """
         Obține prețul din cache-ul intern (actualizat din listings/latest).
         Acesta este cel mai rapid și sigur mod de a obține prețul pentru monede noi.
