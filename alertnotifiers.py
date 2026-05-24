@@ -166,7 +166,6 @@ class AlertNotifier:
     @staticmethod
     def send_phone_webhook(alert, webhook_url: Optional[str] = None):
         """Trimite alertă către un webhook de telefon (ex: Tasker/ntfy/IFTTT)."""
-        print("[Notifier] Phone webhook")
         webhook_url = webhook_url or os.environ.get("PHONE_ALERT_URL")
         if not webhook_url and os.environ.get("NTFY_TOPIC"):
             webhook_url = f"https://ntfy.sh/{os.environ['NTFY_TOPIC']}"
@@ -213,6 +212,7 @@ class AlertNotifier:
 
     @staticmethod
     def send_phone_webhook_batch(alerts, webhook_url: Optional[str] = None):
+        print("[Notifier] Phone webhook batch")
         webhook_url = webhook_url or os.environ.get("PHONE_ALERT_URL")
         if not webhook_url and os.environ.get("NTFY_TOPIC"):
             webhook_url = f"https://ntfy.sh/{os.environ['NTFY_TOPIC']}"
