@@ -122,11 +122,11 @@ class BinancePricePlatform(PricePlatformInterface):
                         self._symbol_mapping[base_asset] = symbol
                     self._symbol_mapping[symbol] = symbol
             
-            log.print(f"[BinancePlatform] USDC: {len(self._usdc_pairs)} perechi, USDT: {len(self._usdt_pairs)} perechi")
+            print(f"[BinancePlatform] USDC: {len(self._usdc_pairs)} perechi, USDT: {len(self._usdt_pairs)} perechi")
             self._last_refresh = time.time()
             
         except Exception as e:
-            log.print(f"[BinancePlatform] Eroare la încărcare: {e}")
+            print(f"[BinancePlatform] Eroare la încărcare: {e}")
             self._fallback_symbols()
     
     def _fallback_symbols(self):
@@ -188,16 +188,16 @@ class BinancePricePlatform(PricePlatformInterface):
                 trading_pair = symbol
             
             if not trading_pair:
-                log.print(f"[BinancePlatform] Nu am găsit pereche pentru {symbol}")
+                print(f"[BinancePlatform] Nu am găsit pereche pentru {symbol}")
                 return None
             
             # Folosește API-ul client existent
             price = self.api_client.get_current_price(symbol=trading_pair)
-            log.print(f"[BinancePlatform] {symbol} -> {trading_pair} = ${price}")
+            print(f"[BinancePlatform] {symbol} -> {trading_pair} = ${price}")
             return float(price)
             
         except Exception as e:
-            log.print(f"[BinancePlatform] Eroare {symbol}: {e}")
+            print(f"[BinancePlatform] Eroare {symbol}: {e}")
             return None
 
 
@@ -602,7 +602,7 @@ class EnhancedCachePriceManager(CacheManagerInterface):
         with self.lock:
             # Verifică dacă există deja
             if symbol in self.active_symbols:
-                log.print(f"[EnhancedPrice] {symbol} deja în watchlist")
+                print(f"[EnhancedPrice] {symbol} deja în watchlist")
                 return False
             
             # Adaugă în lista de simboluri
@@ -621,7 +621,7 @@ class EnhancedCachePriceManager(CacheManagerInterface):
             if symbol not in self.fetchtime_time_per_symbol:
                 self.fetchtime_time_per_symbol[symbol] = self.fallback_time_default
             
-            log.print(f"[EnhancedPrice] ✅ Simbol adăugat: {symbol} (la {datetime.fromtimestamp(self.symbol_added_time[symbol]).strftime('%Y-%m-%d %H:%M:%S')})")
+            print(f"[EnhancedPrice] ✅ Simbol adăugat: {symbol} (la {datetime.fromtimestamp(self.symbol_added_time[symbol]).strftime('%Y-%m-%d %H:%M:%S')})")
             
             # Forțează o actualizare imediată pentru noul simbol
             self.update_cache_per_symbol(symbol)
@@ -644,7 +644,7 @@ class EnhancedCachePriceManager(CacheManagerInterface):
                     self.remove_symbol(symbol, reason=f"(mai vechi de {max_age_days} zile)")
             
             if removed_symbols:
-                log.print(f"[Cleanup] Eliminate {len(removed_symbols)} simboluri vechi: {removed_symbols}")
+                print(f"[Cleanup] Eliminate {len(removed_symbols)} simboluri vechi: {removed_symbols}")
         
         return removed_symbols
 
@@ -669,7 +669,7 @@ class EnhancedCachePriceManager(CacheManagerInterface):
             # self.cache.pop(symbol, None)
             # self.fetchtime_time_per_symbol.pop(symbol, None)
             
-            log.print(f"[EnhancedPrice] ❌ Simbol eliminat: {symbol} {reason}")
+            print(f"[EnhancedPrice] ❌ Simbol eliminat: {symbol} {reason}")
             return True
         
     def save_state_to_file_if_enabled(self):
@@ -702,9 +702,9 @@ class EnhancedCachePriceManager(CacheManagerInterface):
                         }
                     }, f, indent=1)
                 os.replace(tmp_file, self.filename)
-                log.print(f"[{self.cls_name}][info] Save cache to file {self.filename}")
+                print(f"[{self.cls_name}][info] Save cache to file {self.filename}")
         except Exception as e:
-            log.print(f"[{self.cls_name}][Eroare] La salvarea fișierului cache: {e}")
+            print(f"[{self.cls_name}][Eroare] La salvarea fișierului cache: {e}")
 
 # ============================================
 # Integrare în CacheFactory existent
@@ -753,8 +753,8 @@ def create_price_monitor(cmc_api_key: Optional[str] = None):
     # Elimină duplicatele
     all_symbols = list(dict.fromkeys(all_symbols))
     
-    log.print(f"[PriceMonitor] Total simboluri de monitorizat: {len(all_symbols)}")
-    log.print(f"[PriceMonitor] Lista: {all_symbols}")
+    print(f"[PriceMonitor] Total simboluri de monitorizat: {len(all_symbols)}")
+    print(f"[PriceMonitor] Lista: {all_symbols}")
     
     # Înregistrează managerul în factory
     register_enhanced_price_manager(cmc_api_key)
