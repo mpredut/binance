@@ -388,7 +388,7 @@ if __name__ == "__main__":
         "ETH",      # Ethereum  
         "HYPE",     # Hyperliquid (nu e pe Binance)
         "SOL",      # Solana
-        "BTCUSDT",  # Varianta cu USDT pentru Binance
+        "BTCUSDC",  # Varianta cu USDT pentru Binance
     ]
     
     print("=" * 60)
