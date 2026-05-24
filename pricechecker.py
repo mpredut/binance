@@ -36,7 +36,7 @@ class PriceAlert:
         emoji = "🟢" if self.alert_type == "up" else "🔴"
         return (
             f"\n{emoji} {direction} {emoji}\n"
-            f"📊 {self.symbol}\n"
+            f"📊 Coin: {self.symbol}\n"
             f"💰 Current price: ${self.current_price:.4f}\n"
             f"📈 Reference: ${self.reference_price:.4f} ({'24h low' if self.alert_type == 'up' else '24h high'})\n"
             f"📊 Change: {self.percent_change:+.2f}% (threshold: {self.threshold}%)\n"

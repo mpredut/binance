@@ -9,13 +9,13 @@ from typing import Dict, Optional, List, Set, Tuple
 from abc import ABC, abstractmethod
 from collections import defaultdict
 
-# Importă modulele tale existente
+# Import your existing modules
 import log
 import utils as u
 import symbols as sym
 import bapi as api
 
-# Importă clasele de bază din cacheManager
+# Import the base classes from cacheManager
 from cacheManager import CacheManagerInterface, CacheFactory, _should_poll_for_manager
 
 
@@ -108,11 +108,11 @@ class BinancePricePlatform(PricePlatformInterface):
                         self._symbol_mapping[base_asset] = symbol
                     self._symbol_mapping[symbol] = symbol
             
-            print(f"[BinancePlatform] USDC: {len(self._usdc_pairs)} perechi, USDT: {len(self._usdt_pairs)} perechi")
+            print(f"[BinancePlatform] USDC: {len(self._usdc_pairs)} pairs, USDT: {len(self._usdt_pairs)} pairs")
             self._last_refresh = time.time()
-            
+
         except Exception as e:
-            print(f"[BinancePlatform] Eroare la încărcare: {e}")
+            print(f"[BinancePlatform] Error loading symbols: {e}")
             self._fallback_symbols()
     
     def _fallback_symbols(self):
@@ -158,15 +158,15 @@ class BinancePricePlatform(PricePlatformInterface):
                 trading_pair = symbol
             
             if not trading_pair:
-                print(f"[BinancePlatform] Nu am găsit pereche pentru {symbol}")
+                print(f"[BinancePlatform] No trading pair found for {symbol}")
                 return None
-            
+
             price = self.api_client.get_current_price(symbol=trading_pair)
             print(f"[BinancePlatform] {symbol} -> {trading_pair} = ${price}")
             return float(price)
-            
+
         except Exception as e:
-            print(f"[BinancePlatform] Eroare {symbol}: {e}")
+            print(f"[BinancePlatform] Error for {symbol}: {e}")
             return None
 
 
@@ -191,10 +191,10 @@ class HyperliquidPricePlatform(PricePlatformInterface):
             response.raise_for_status()
             self._all_mids = response.json()
             self._supported_symbols = set(self._all_mids.keys())
-            print(f"[HyperliquidPlatform] Încărcate {len(self._supported_symbols)} simboluri")
+            print(f"[HyperliquidPlatform] Loaded {len(self._supported_symbols)} symbols")
             self._last_refresh = time.time()
         except Exception as e:
-            print(f"[HyperliquidPlatform] Eroare la încărcare: {e}")
+            print(f"[HyperliquidPlatform] Error loading symbols: {e}")
             self._supported_symbols = {"HYPE", "PURR", "BTC", "ETH", "SOL", "USDC"}
     
     def refresh_symbols(self):
@@ -213,11 +213,11 @@ class HyperliquidPricePlatform(PricePlatformInterface):
         try:
             self.refresh_symbols()
             if symbol not in self._all_mids:
-                print(f"[HyperliquidPlatform] Simbol {symbol} negăsit")
+                print(f"[HyperliquidPlatform] Symbol {symbol} not found")
                 return None
             return float(self._all_mids[symbol])
         except Exception as e:
-            print(f"[HyperliquidPlatform] Eroare {symbol}: {e}")
+            print(f"[HyperliquidPlatform] Error for {symbol}: {e}")
             return None
 
 
@@ -234,8 +234,8 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
         if self.api_key:
             self._load_symbols()
         else:
-            print("[CMCPlatform] Fără API Key - platformă dezactivată")
-    
+            print("[CMCPlatform] No API key - platform disabled")
+
     @property
     def platform_name(self) -> str:
         return "CoinMarketCap"
@@ -262,10 +262,10 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
                         'name': crypto.get('name'),
                         'slug': crypto.get('slug')
                     }
-            print(f"[CMCPlatform] Încărcate {len(self._supported_symbols)} simboluri")
+            print(f"[CMCPlatform] Loaded {len(self._supported_symbols)} symbols")
             self._last_refresh = time.time()
         except Exception as e:
-            print(f"[CMCPlatform] Eroare la încărcare: {e}")
+            print(f"[CMCPlatform] Error loading symbols: {e}")
     
     def refresh_symbols(self):
         if self.api_key and time.time() - self._last_refresh > self._refresh_interval:
@@ -293,7 +293,7 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
     
     def get_price_old(self, symbol: str) -> Optional[float]:
         if not self.api_key:
-            print(f"[CMCPlatform] Fără cheie API")
+            print(f"[CMCPlatform] Missing API key")
             return None
         try:
             headers = {'X-CMC_PRO_API_KEY': self.api_key, 'Accept': 'application/json'}
@@ -307,10 +307,10 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
                 print(f"[CMCPlatform] {symbol} = ${price}")
                 return price
             else:
-                print(f"[CMCPlatform] {symbol} nu a fost găsit")
+                print(f"[CMCPlatform] {symbol} not found")
                 return None
         except Exception as e:
-            print(f"[CMCPlatform] Eroare {symbol}: {e}")
+            print(f"[CMCPlatform] Error for {symbol}: {e}")
             return None
         
     def get_price(self, symbol: str) -> Optional[float]:
@@ -367,7 +367,7 @@ class PricePlatformFactory:
         self._discover_all_symbols()
     
     def _discover_all_symbols(self):
-        print("[PriceFactory] 🔍 Descoperire simboluri disponibile...")
+        print("[PriceFactory] 🔍 Discovering available symbols...")
         all_symbols = {}
         for platform in self._platforms:
             try:
@@ -376,11 +376,11 @@ class PricePlatformFactory:
                     "count": len(symbols),
                     "sample": list(symbols)[:10]
                 }
-                print(f"[PriceFactory]   {platform.platform_name}: {len(symbols)} simboluri")
+                print(f"[PriceFactory]   {platform.platform_name}: {len(symbols)} symbols")
             except Exception as e:
-                print(f"[PriceFactory]   {platform.platform_name}: eroare - {e}")
+                print(f"[PriceFactory]   {platform.platform_name}: error - {e}")
         self._capabilities = all_symbols
-    
+
     def get_price(self, symbol: str) -> Dict:
         if symbol in self._symbol_platform_cache:
             platform_name = self._symbol_platform_cache[symbol]
@@ -401,8 +401,8 @@ class PricePlatformFactory:
                         "symbol": symbol, "price": price,
                         "platform": platform.platform_name, "timestamp": int(time.time())
                     }
-        raise Exception(f"Symbol '{symbol}' nu e suportat de nici o platformă")
-    
+        raise Exception(f"Symbol '{symbol}' is not supported by any platform")
+
     def check_symbol_support(self, symbol: str) -> Dict:
         support = {}
         for platform in self._platforms:
@@ -445,7 +445,7 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
                         seen_bases = {get_base_symbol(symbol) for symbol in self.active_symbols}
                         for symbol in data["symbol_metadata"].get("active_symbols", []):
                             if len(self.active_symbols) >= MAX_MONITORED_SYMBOLS:
-                                print(f"[Pricefetcher] Limită atinsă la încărcare: maxim {MAX_MONITORED_SYMBOLS} monede monitorizate, restul vor fi ignorate")
+                                print(f"[Pricefetcher] Limit reached while loading: maximum {MAX_MONITORED_SYMBOLS} monitored coins, the rest will be ignored")
                                 break
                             base_symbol = get_base_symbol(symbol)
                             if (
@@ -462,15 +462,15 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
                 pass
     
     def _log_symbol_support(self):
-        print(f"[Pricefetcher] Verificare suport simboluri:")
+        print(f"[Pricefetcher] Checking symbol support:")
         for symbol in self.original_symbols:
             support = self.price_factory.check_symbol_support(symbol)
             supported_platforms = [p for p, s in support.items() if s]
             if supported_platforms:
                 print(f"  ✅ {symbol} -> {', '.join(supported_platforms)}")
             else:
-                print(f"  ❌ {symbol} -> NICI O PLATFORMĂ!")
-    
+                print(f"  ❌ {symbol} -> NO PLATFORM SUPPORT!")
+
     def rebuild_fetchtime_times(self):
         if not self.cache:
             return {}
@@ -483,10 +483,10 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
     
     def get_remote_items(self, symbol, startTime):
         try:
-            # Asigură-te că atributul există
+            # Ensure the attribute exists
             if not hasattr(self, 'symbol_preferred_source'):
                 self.symbol_preferred_source = {}
-            
+
             preferred_source = self.symbol_preferred_source.get(symbol)
             if preferred_source:
                 for platform in self.price_factory._platforms:
@@ -495,46 +495,46 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
                         if price is not None:
                             timestamp = int(time.time())
                             timestamp_ms = timestamp * 1000
-                            print(f"[Pricefetcher][{symbol}] ${price:.4f} (sursa: {preferred_source} - preferată)")
+                            print(f"[Pricefetcher][{symbol}] ${price:.4f} (source: {preferred_source} - preferred)")
                             return [[timestamp_ms, price]]
                         else:
-                            print(f"[Pricefetcher][{symbol}] Eroare: sursa preferată {preferred_source} nu poate da prețul")
+                            print(f"[Pricefetcher][{symbol}] Error: preferred source {preferred_source} could not provide the price")
                             return []
             result = self.price_factory.get_price(symbol)
             price = result["price"]
             platform_used = result["platform"]
             timestamp = int(time.time())
             timestamp_ms = timestamp * 1000
-            print(f"[Pricefetcher][{symbol}] ${price:.4f} (sursa: {platform_used})")
+            print(f"[Pricefetcher][{symbol}] ${price:.4f} (source: {platform_used})")
             return [[timestamp_ms, price]]
         except Exception as e:
-            print(f"[Pricefetcher][Eroare] {symbol}: {e}")
+            print(f"[Pricefetcher][Error] {symbol}: {e}")
             return []
     
     def add_symbol(self, symbol: str, preferred_source: Optional[str] = None):
         with self.lock:
             base_symbol = get_base_symbol(symbol)
             if symbol in self.active_symbols:
-                print(f"[Pricefetcher] {symbol} deja în watchlist")
+                print(f"[Pricefetcher] {symbol} is already in the watchlist")
                 return False
             if any(get_base_symbol(active_symbol) == base_symbol for active_symbol in self.active_symbols):
-                print(f"[Pricefetcher] {symbol} ignorat: asset-ul {base_symbol} este deja monitorizat")
+                print(f"[Pricefetcher] {symbol} ignored: asset {base_symbol} is already being monitored")
                 return False
             if len(self.active_symbols) >= MAX_MONITORED_SYMBOLS:
-                print(f"[Pricefetcher] Limită atinsă: maxim {MAX_MONITORED_SYMBOLS} monede monitorizate")
+                print(f"[Pricefetcher] Limit reached: maximum {MAX_MONITORED_SYMBOLS} monitored coins")
                 return False
             self.symbols.append(symbol)
             self.original_symbols.append(symbol)
             self.active_symbols.add(symbol)
             if preferred_source:
                 self.symbol_preferred_source[symbol] = preferred_source
-                print(f"[Pricefetcher] {symbol} - sursă preferată: {preferred_source}")
+                print(f"[Pricefetcher] {symbol} - preferred source: {preferred_source}")
             self.symbol_added_time[symbol] = time.time()
             if symbol not in self.cache:
                 self.cache[symbol] = []
             if symbol not in self.fetchtime_time_per_symbol:
                 self.fetchtime_time_per_symbol[symbol] = self.fallback_time_default
-            print(f"[Pricefetcher] ✅ Simbol adăugat: {symbol}")
+            print(f"[Pricefetcher] ✅ Symbol added: {symbol}")
         self.update_cache_per_symbol(symbol)
         return True
     
@@ -547,11 +547,11 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
             if symbol in self.original_symbols:
                 self.original_symbols.remove(symbol)
             self.active_symbols.discard(symbol)
-            print(f"[Pricefetcher] ❌ Simbol eliminat: {symbol} {reason}")
+            print(f"[Pricefetcher] ❌ Symbol removed: {symbol} {reason}")
             return True
-    
+
     def get_latest_price(self, symbol: str) -> Optional[float]:
-        """🔧 ADĂUGAT: Obține ultimul preț salvat pentru un simbol"""
+        """Get the latest saved price for a symbol."""
         with self.lock:
             entries = self.cache.get(symbol, [])
             if entries:
