@@ -1,4 +1,4 @@
-# price_analyzer.py
+# pricechecker.py
 import time
 import threading
 from datetime import datetime, timedelta
@@ -175,7 +175,7 @@ class PriceChecker:
         stats = self._calculate_24h_stats(symbol)
         
         if not stats.get("has_data", False):
-            print(f"[Analyzer][{symbol}] {stats.get('error', 'Eroare necunoscută')}")
+            print(f"[Checker][{symbol}] {stats.get('error', 'Eroare necunoscută')}")
             return alerts
         
         current_price = stats["current_price"]
@@ -211,7 +211,7 @@ class PriceChecker:
                 self._record_alert_sent(symbol, "down")
         
         # Logging informativ (nu alertă)
-        print(f"[Analyzer][{symbol}] Preț: ${current_price:.4f} | "
+        print(f"[Checker][{symbol}] Preț: ${current_price:.4f} | "
                   f"↑ {up_percent:+.2f}% (prag +{self.config['up_percent']}%) | "
                   f"↓ {down_percent:+.2f}% (prag -{self.config['down_percent']}%) | "
                   f"Min: ${stats['min_price']:.4f} | Max: ${stats['max_price']:.4f}")
@@ -223,7 +223,11 @@ class PriceChecker:
         Verifică toate simbolurile din watchlist
         """
         all_alerts = []
-        symbols = self.price_manager.original_symbols if hasattr(self.price_manager, 'original_symbols') else self.price_manager.symbols
+        # 🔧 Reîmprospătează lista de simboluri de la price_monitor (inclusiv cele nou adăugate)
+        if hasattr(self.price_manager, 'original_symbols'):
+            symbols = self.price_manager.original_symbols
+        else:
+            symbols = self.price_manager.symbols
         
         for symbol in symbols:
             try:
@@ -242,14 +246,14 @@ class PriceChecker:
             interval_seconds: Cât de des să verifice (ex: 60 secunde)
         """
         if self._running:
-            print("[Analyzer] Deja rulează!")
+            print("[Checker] Deja rulează!")
             return
         
         self._running = True
         
         def run():
-            print(f"[Analyzer] Monitorizare pornită - verifică la fiecare {interval_seconds}s")
-            print(f"[Analyzer] Praguri: ↑ +{self.config['up_percent']}% | ↓ -{self.config['down_percent']}%")
+            print(f"[Checker] Monitorizare pornită - verifică la fiecare {interval_seconds}s")
+            print(f"[Checker] Praguri: ↑ +{self.config['up_percent']}% | ↓ -{self.config['down_percent']}%")
             
             while self._running:
                 try:
@@ -259,7 +263,7 @@ class PriceChecker:
                         self.alert_callback(alert)
                     
                 except Exception as e:
-                    print(f"[Analyzer] Eroare în ciclul principal: {e}")
+                    print(f"[Checker] Eroare în ciclul principal: {e}")
                 
                 # Pauză până la următoarea verificare
                 for _ in range(interval_seconds):
@@ -275,7 +279,7 @@ class PriceChecker:
         self._running = False
         if self._thread:
             self._thread.join(timeout=5)
-        print("[Analyzer] Monitorizare oprită")
+        print("[Checker] Monitorizare oprită")
     
     def get_status(self) -> dict:
         """Returnează statusul curent al analizorului"""
@@ -303,6 +307,6 @@ def start_price_alert_system(price_monitor, alert_callback=None, check_interval_
     Returns:
         Instanța PriceChecker
     """
-    analyzer = PriceChecker(price_monitor, alert_callback=alert_callback)
-    analyzer.start_monitoring(check_interval_seconds)
-    return analyzer
+    Checker = PriceChecker(price_monitor, alert_callback=alert_callback)
+    Checker.start_monitoring(check_interval_seconds)
+    return Checker
