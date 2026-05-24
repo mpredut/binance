@@ -371,7 +371,7 @@ class EnhancedCachePriceManager(CacheManagerInterface):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
         self.active_symbols = set(symbols)
         self.symbol_added_time: Dict[str, float] = {}
-        self.symbol_preferred_source: Dict[str, str] = {}
+        self.symbol_preferred_source: Dict[str, str] = {}  # ← TREBUIE SĂ EXISTE
         self._load_symbol_metadata()
         self._log_symbol_support()
     
@@ -407,6 +407,9 @@ class EnhancedCachePriceManager(CacheManagerInterface):
     
     def get_remote_items(self, symbol, startTime):
         try:
+            if not hasattr(self, 'symbol_preferred_source'):
+                self.symbol_preferred_source = {}
+                
             preferred_source = self.symbol_preferred_source.get(symbol)
             if preferred_source:
                 for platform in self.price_factory._platforms:
