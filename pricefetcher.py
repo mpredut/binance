@@ -23,11 +23,15 @@ from cacheManager import CacheManagerInterface, CacheFactory, _should_poll_for_m
 # Configurare globală
 # ============================================
 
+PRICE_HISTORY_RETENTION_DAYS = 7  # Păstrează prețuri doar pentru ultimele 7 zile
+MAX_PRICE_HISTORY_PER_SYMBOL = 2000  # Maxim 2000 de intrări per simbol (siguranță)
+
 # Folosește USDC pentru piața europeană (nu USDT)
 QUOTE_CURRENCY = "USDC"
 FALLBACK_QUOTE = "USDT"  # fallback dacă USDC nu e disponibil
 
 # Simboluri default de monitorizat (se vor adăuga la cele din sym.symbols)
+# WATCHLIST
 DEFAULT_SYMBOLS = ["BTC", "ETH", "HYPE", "SOL", "BNB", "ADA", "DOGE", "XRP"]
 
 
@@ -471,10 +475,31 @@ class EnhancedCachePriceManager(CacheManagerInterface):
         
         # Apelează constructorul părinte
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
-        
+                
+        self.active_symbols = set(symbols)  # Simboluri active curente
+        self.symbol_added_time: Dict[str, float] = {}  # Timpul când a fost adăugat fiecare simbol
+
+        self._load_symbol_metadata()
+    
         # Afișează statusul suportului pentru fiecare simbol
         self._log_symbol_support()
-    
+
+    def _load_symbol_metadata(self):
+        """Încarcă metadata despre simboluri din fișierul de cache"""
+        if os.path.exists(self.filename):
+            try:
+                with open(self.filename, "r") as f:
+                    data = json.load(f)
+                    if "symbol_metadata" in data:
+                        self.symbol_added_time = data["symbol_metadata"].get("added_time", {})
+            except:
+                pass
+
+    def _save_symbol_metadata(self):
+        """Salvează metadata despre simboluri împreună cu cache-ul"""
+        # Această metodă va fi apelată din save_state_to_file_if_enabled
+        pass
+
     def _log_symbol_support(self):
         """Afișează pe ce platformă e suportat fiecare simbol"""
         print(f"[EnhancedPrice] Verificare suport simboluri:")
@@ -546,7 +571,118 @@ class EnhancedCachePriceManager(CacheManagerInterface):
                 }
                 for entry in entries
             ]
+        
 
+    def add_symbol(self, symbol: str):
+        """
+        Adaugă un simbol nou în watchlist pentru monitorizare.
+        """
+        with self.lock:
+            # Verifică dacă există deja
+            if symbol in self.active_symbols:
+                log.print(f"[EnhancedPrice] {symbol} deja în watchlist")
+                return False
+            
+            # Adaugă în lista de simboluri
+            self.symbols.append(symbol)
+            self.original_symbols.append(symbol)
+            self.active_symbols.add(symbol)
+            
+            # Înregistrează timpul adăugării
+            self.symbol_added_time[symbol] = time.time()
+            
+            # Inițializează cache-ul pentru noul simbol
+            if symbol not in self.cache:
+                self.cache[symbol] = []
+            
+            # Actualizează fetchtime
+            if symbol not in self.fetchtime_time_per_symbol:
+                self.fetchtime_time_per_symbol[symbol] = self.fallback_time_default
+            
+            log.print(f"[EnhancedPrice] ✅ Simbol adăugat: {symbol} (la {datetime.fromtimestamp(self.symbol_added_time[symbol]).strftime('%Y-%m-%d %H:%M:%S')})")
+            
+            # Forțează o actualizare imediată pentru noul simbol
+            self.update_cache_per_symbol(symbol)
+            
+            return True
+
+    def cleanup_old_symbols(self, max_age_days: int = 7):
+        """
+        Elimină simbolurile care au fost adăugate de mai mult de 'max_age_days' zile.
+        Rulează automat la cleanup.
+        """
+        cutoff_time = time.time() - max_age_days * 24 * 3600
+        removed_symbols = []
+        
+        with self.lock:
+            for symbol, added_time in list(self.symbol_added_time.items()):
+                if added_time < cutoff_time:
+                    # Simbolul este mai vechi de 7 zile
+                    removed_symbols.append(symbol)
+                    self.remove_symbol(symbol, reason=f"(mai vechi de {max_age_days} zile)")
+            
+            if removed_symbols:
+                log.print(f"[Cleanup] Eliminate {len(removed_symbols)} simboluri vechi: {removed_symbols}")
+        
+        return removed_symbols
+
+
+    def remove_symbol(self, symbol: str, reason: str = ""):
+        """
+        Elimină un simbol din watchlist.
+        """
+        with self.lock:
+            if symbol not in self.active_symbols:
+                return False
+            
+            # Elimină din liste
+            if symbol in self.symbols:
+                self.symbols.remove(symbol)
+            if symbol in self.original_symbols:
+                self.original_symbols.remove(symbol)
+            
+            self.active_symbols.discard(symbol)
+            
+            # Opțional: păstrează cache-ul sau îl ștergi
+            # self.cache.pop(symbol, None)
+            # self.fetchtime_time_per_symbol.pop(symbol, None)
+            
+            log.print(f"[EnhancedPrice] ❌ Simbol eliminat: {symbol} {reason}")
+            return True
+        
+    def save_state_to_file_if_enabled(self):
+        """Suprascrie metoda părintelui pentru a adăuga cleanup și metadata"""
+        if not self.save_state:
+            return
+        
+        # Curăță prețurile vechi
+        self.cleanup_old_prices()
+        
+        # Curăță simbolurile vechi (mai vechi de 7 zile)
+        self.cleanup_old_symbols(max_age_days=PRICE_HISTORY_RETENTION_DAYS)
+        
+        try:
+            with self.lock:
+                tmp_file = self.filename + ".tmp"
+                with open(tmp_file, "w") as f:
+                    json.dump({
+                        "items": self.cache,
+                        "fetchtime": self.fetchtime_time_per_symbol,
+                        "metadata": {
+                            "last_cleanup": time.time(),
+                            "retention_days": PRICE_HISTORY_RETENTION_DAYS,
+                            "symbols_count": len(self.cache),
+                            "total_entries": sum(len(v) for v in self.cache.values())
+                        },
+                        "symbol_metadata": {
+                            "added_time": self.symbol_added_time,
+                            "active_symbols": list(self.active_symbols)
+                        }
+                    }, f, indent=1)
+                os.replace(tmp_file, self.filename)
+                log.print(f"[{self.cls_name}][info] Save cache to file {self.filename}")
+        except Exception as e:
+            log.print(f"[{self.cls_name}][Eroare] La salvarea fișierului cache: {e}")
 
 # ============================================
 # Integrare în CacheFactory existent
