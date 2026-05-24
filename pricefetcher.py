@@ -58,7 +58,7 @@ class BinancePricePlatform(PricePlatformInterface):
             price = self.api_client.get_current_price(symbol=symbol)
             return float(price)
         except Exception as e:
-            log.print(f"[BinancePlatform] Eroare {symbol}: {e}")
+            print(f"[BinancePlatform] Eroare {symbol}: {e}")
             return None
 
 
@@ -88,12 +88,12 @@ class HyperliquidPricePlatform(PricePlatformInterface):
             
             # data e dict: {"BTC": "116845.5", "HYPE": "40.7915"}
             if symbol not in data:
-                log.print(f"[HyperliquidPlatform] Simbol {symbol} negăsit")
+                print(f"[HyperliquidPlatform] Simbol {symbol} negăsit")
                 return None
             
             return float(data[symbol])
         except Exception as e:
-            log.print(f"[HyperliquidPlatform] Eroare {symbol}: {e}")
+            print(f"[HyperliquidPlatform] Eroare {symbol}: {e}")
             return None
 
 
@@ -143,7 +143,7 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
             price = data['data'][symbol]['quote']['USD']['price']
             return float(price)
         except Exception as e:
-            log.print(f"[CMCPlatform] Eroare {symbol}: {e}")
+            print(f"[CMCPlatform] Eroare {symbol}: {e}")
             return None
 
 
@@ -191,7 +191,7 @@ class PricePlatformFactory:
             try:
                 results.append(self.get_price(symbol))
             except Exception as e:
-                log.print(f"[PriceFactory] Eroare la {symbol}: {e}")
+                print(f"[PriceFactory] Eroare la {symbol}: {e}")
         return results
     
     def discover_capabilities(self) -> Dict:
@@ -279,13 +279,13 @@ class EnhancedCachePriceManager(CacheManagerInterface):
             timestamp = int(time.time())  # secunde
             timestamp_ms = timestamp * 1000
             
-            log.print(f"[EnhancedPrice][{symbol}] ${price:.4f} (sursa: {platform_used})")
+            print(f"[EnhancedPrice][{symbol}] ${price:.4f} (sursa: {platform_used})")
             
             # Returnează în formatul așteptat de CacheManagerInterface
             return [[timestamp_ms, price]]
             
         except Exception as e:
-            log.print(f"[EnhancedPrice][Eroare] {symbol}: {e}")
+            print(f"[EnhancedPrice][Eroare] {symbol}: {e}")
             return []
     
     def get_all_symbols_from_cache(self):
@@ -342,7 +342,7 @@ def register_enhanced_price_manager(cmc_api_key: Optional[str] = None):
         "cmc_api_key": cmc_api_key  # Parametru opțional
     }
     
-    log.print("[EnhancedPrice] Manager înregistrat în CacheFactory ca 'PriceMulti'")
+    print("[EnhancedPrice] Manager înregistrat în CacheFactory ca 'PriceMulti'")
 
 
 # ============================================
@@ -369,7 +369,7 @@ def create_price_monitor(symbols: List[str], cmc_api_key: Optional[str] = None):
     # Pornește sincronizarea periodică
     thread = price_manager.periodic_sync(sync_ts=PRICE_MULTI_SYNC_INTERVAL_SEC, save_state=True)
     
-    log.print(f"[PriceMonitor] Pornit pentru {len(symbols)} simboluri, sync la {PRICE_MULTI_SYNC_INTERVAL_SEC}s")
+    print(f"[PriceMonitor] Pornit pentru {len(symbols)} simboluri, sync la {PRICE_MULTI_SYNC_INTERVAL_SEC}s")
     
     return price_manager
 
