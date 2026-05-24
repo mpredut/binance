@@ -505,27 +505,64 @@ class NewCoinsMonitor:
         return summary
 
     def add_new_coin_to_watchlist(self, coin_info: Dict, auto_add_thresholds: Optional[Dict] = None):
+        """
+        Adaugă o monedă nou descoperită în watchlist-ul de prețuri.
+        Filtrele sunt DOAR INFORMATIVE - moneda se adaugă ORICUM.
+        """
         if not self.price_monitor:
             print(f"[NewCoinsMonitor] Nu există price_monitor")
             return False
+        
         symbol = coin_info['symbol']
         source = coin_info.get('source', 'unknown')
+        
         if not self.is_valid_symbol(symbol):
             print(f"[NewCoinsMonitor] ❌ Simbol invalid: {symbol}")
             return False
+        
         if hasattr(self.price_monitor, 'original_symbols') and symbol in self.price_monitor.original_symbols:
             print(f"[NewCoinsMonitor] {symbol} deja în watchlist")
             return False
+        
+        # Praguri pentru verificări INFORMATIVE (nu blochează)
         if auto_add_thresholds is None:
             auto_add_thresholds = {
-                "min_volume_24h": 100000, "min_price_usd": 0.000001,
-                "max_price_usd": 100000, "min_change_24h": -90, "max_change_24h": 1000,
+                "min_volume_24h": 100000,      # Volum minim $100k
+                "min_price_usd": 0.000001,     # Preț minim
+                "max_price_usd": 100000,       # Preț maxim
+                "min_change_24h": -90,         # Scădere minimă acceptată
+                "max_change_24h": 1000,        # Creștere maximă acceptată
             }
+        
+        # Verifică pragurile DOAR PENTRU AFIȘARE (nu blochează)
         volume = coin_info.get('volume_24h', 0)
         price = coin_info.get('price', 0)
+        change = coin_info.get('change_24h', 0)
+        
+        issues = []
+        
         if volume and volume < auto_add_thresholds["min_volume_24h"]:
-            print(f"[NewCoinsMonitor] {symbol} - volum prea mic (${volume:,.0f}) - nu adăugăm")
-            return False
+            issues.append(f"⚠️ volum sub prag (${volume:,.0f} < ${auto_add_thresholds['min_volume_24h']:,.0f})")
+        
+        if price and price < auto_add_thresholds["min_price_usd"]:
+            issues.append(f"⚠️ preț sub prag (${price:.8f} < ${auto_add_thresholds['min_price_usd']})")
+        
+        if price and price > auto_add_thresholds["max_price_usd"]:
+            issues.append(f"⚠️ preț peste prag (${price:.2f} > ${auto_add_thresholds['max_price_usd']})")
+        
+        if change and change < auto_add_thresholds["min_change_24h"]:
+            issues.append(f"⚠️ scădere sub prag ({change:.1f}% < {auto_add_thresholds['min_change_24h']}%)")
+        
+        if change and change > auto_add_thresholds["max_change_24h"]:
+            issues.append(f"⚠️ creștere peste prag ({change:.1f}% > {auto_add_thresholds['max_change_24h']}%)")
+        
+        # Afișează avertismentele (DAR NU BLOCHEAZĂ)
+        if issues:
+            print(f"[NewCoinsMonitor] 📊 {symbol}: {', '.join(issues)}")
+        else:
+            print(f"[NewCoinsMonitor] 📊 {symbol} - TOATE PRAGURILE ÎNDEPLINITE ✅")
+        
+        # Adaugă simbolul în watchlist (ÎNTOTDEAUNA, indiferent de filtre)
         try:
             if hasattr(self.price_monitor, 'add_symbol'):
                 self.price_monitor.add_symbol(symbol, preferred_source=source)
