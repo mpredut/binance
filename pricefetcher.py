@@ -25,6 +25,7 @@ from cacheManager import CacheManagerInterface, CacheFactory, _should_poll_for_m
 
 PRICE_HISTORY_RETENTION_DAYS = 7
 MAX_PRICE_HISTORY_PER_SYMBOL = 2000
+MAX_MONITORED_SYMBOLS = 10
 QUOTE_CURRENCY = "USDC"
 FALLBACK_QUOTE = "USDT"
 #DEFAULT_SYMBOLS = ["BTC", "ETH", "HYPE", "SOL", "BNB", "ADA", "DOGE", "XRP"]
@@ -278,6 +279,16 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
             return False
         self.refresh_symbols()
         return symbol in self._supported_symbols
+
+    def _extract_usd_price(self, symbol: str, data: Dict) -> Optional[float]:
+        coin_data = data.get('data', {}).get(symbol)
+        if isinstance(coin_data, list):
+            coin_data = coin_data[0] if coin_data else None
+        if isinstance(coin_data, dict):
+            price = coin_data.get('quote', {}).get('USD', {}).get('price')
+            if price is not None:
+                return float(price)
+        return None
     
     def get_price_old(self, symbol: str) -> Optional[float]:
         if not self.api_key:
@@ -290,10 +301,10 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
             response = requests.get(self._base_url, headers=headers, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
-            if 'data' in data and symbol in data['data']:
-                price = data['data'][symbol]['quote']['USD']['price']
+            price = self._extract_usd_price(symbol, data)
+            if price is not None:
                 print(f"[CMCPlatform] {symbol} = ${price}")
-                return float(price)
+                return price
             else:
                 print(f"[CMCPlatform] {symbol} nu a fost găsit")
                 return None
@@ -320,25 +331,20 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
         # vom face un request la listings/latest pentru simbolul specific.
         
         try:
-            # Opțiunea 1: Folosește endpoint-ul de listings cu parametru symbol
-            # (acesta returnează doar moneda cerută, mai rapid)
             headers = {'X-CMC_PRO_API_KEY': self.api_key, 'Accept': 'application/json'}
             params = {'symbol': symbol, 'convert': 'USD'}
             response = requests.get(
-                "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest",
+                self._base_url,
                 headers=headers, params=params, timeout=10
             )
-            if response.status_code == 200:
-                data = response.json()
-                if 'data' in data and data['data']:
-                    # data['data'] este o listă de obiecte (unul singur)
-                    for coin in data['data']:
-                        if coin['symbol'] == symbol:
-                            price = coin['quote']['USD']['price']
-                            print(f"[CMCPlatform] {symbol} = ${price} (din listings)")
-                            return float(price)
-            # Fallback la metoda veche
-            return self.get_price_old(symbol)
+            response.raise_for_status()
+            data = response.json()
+            price = self._extract_usd_price(symbol, data)
+            if price is not None:
+                print(f"[CMCPlatform] {symbol} = ${price}")
+                return price
+            print(f"[CMCPlatform] {symbol} nu a fost găsit")
+            return None
         except Exception as e:
             print(f"[CMCPlatform] Eroare {symbol}: {e}")
             return None
@@ -410,7 +416,7 @@ class PricePlatformFactory:
 class CacheAllPriceFetcherManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api, cmc_api_key: Optional[str] = None):
         self.price_factory = PricePlatformFactory(cmc_api_key=cmc_api_key)
-        initial_symbols = list(dict.fromkeys(symbols))
+        initial_symbols = list(dict.fromkeys(symbols))[:MAX_MONITORED_SYMBOLS]
         self.original_symbols = list(initial_symbols)
         super().__init__(sync_ts, initial_symbols, filename, append_mode=True, api_client=api_client)
         self.active_symbols = set(initial_symbols)
@@ -427,6 +433,9 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
                     if "symbol_metadata" in data:
                         self.symbol_added_time = data["symbol_metadata"].get("added_time", {})
                         for symbol in data["symbol_metadata"].get("active_symbols", []):
+                            if len(self.active_symbols) >= MAX_MONITORED_SYMBOLS:
+                                print(f"[Pricefetcher] Limită atinsă la încărcare: maxim {MAX_MONITORED_SYMBOLS} monede monitorizate, restul vor fi ignorate")
+                                break
                             if symbol not in self.active_symbols:
                                 self.active_symbols.add(symbol)
                                 self.symbols.append(symbol)
@@ -488,6 +497,9 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
         with self.lock:
             if symbol in self.active_symbols:
                 print(f"[Pricefetcher] {symbol} deja în watchlist")
+                return False
+            if len(self.active_symbols) >= MAX_MONITORED_SYMBOLS:
+                print(f"[Pricefetcher] Limită atinsă: maxim {MAX_MONITORED_SYMBOLS} monede monitorizate")
                 return False
             self.symbols.append(symbol)
             self.original_symbols.append(symbol)
@@ -641,6 +653,7 @@ def create_price_monitor(cmc_api_key: Optional[str] = None):
     
     all_symbols = list(dict.fromkeys(all_symbols))
     all_symbols = [s for s in all_symbols if is_valid_symbol_for_monitoring(s)]
+    all_symbols = all_symbols[:MAX_MONITORED_SYMBOLS]
     
     print(f"[PriceMonitor] Simboluri valide de monitorizat: {len(all_symbols)}")
     print(f"[PriceMonitor] Lista: {all_symbols}")

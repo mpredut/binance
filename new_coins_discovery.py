@@ -21,10 +21,10 @@ import utils as u
 CMC_API_KEY = "4d587781-722b-40a3-83f0-2436d45942f7"
 
 # Configurare descoperire
-NEW_COINS_AGE_DAYS = 30
-MAX_NEW_COINS_TO_TRACK = 50
+NEW_COINS_AGE_DAYS = 3
+MAX_NEW_COINS_TO_TRACK = 10
 REFRESH_INTERVAL_SECONDS = 3600
-NEW_COIN_MAX_AGE_DAYS = 7
+NEW_COIN_MAX_AGE_DAYS = 3
 
 # Simboluri excluse automat
 EXCLUDED_SYMBOLS = {
@@ -185,7 +185,7 @@ class CoinGeckoSource(NewCoinsSource):
     def get_new_coins(self, days_back: int = NEW_COINS_AGE_DAYS) -> List[Dict]:
         if not self._cache:
             self.refresh()
-        return self._cache[:50]
+        return []
 
 # ============================================
 # Sursa 3: Binance
@@ -408,8 +408,9 @@ class NewCoinsMonitor:
                 symbol = coin.get('symbol')
                 if symbol and self.is_valid_symbol(symbol):
                     self.all_symbols.add(symbol)
-                elif symbol:
-                    print(f"[NewCoinsMonitor] 🚫 Simbol invalid ignorat: {symbol} (sursa: {source_name})")
+                else:       
+                    print(f"[NewCoinsMonitor] Simbol invalid ignorat: {symbol} (din {source_name})")
+                    continue
 
     def register_alert_callback(self, callback: Callable):
         self.alert_callbacks.append(callback)
@@ -523,6 +524,9 @@ class NewCoinsMonitor:
         
         if hasattr(self.price_monitor, 'original_symbols') and symbol in self.price_monitor.original_symbols:
             print(f"[NewCoinsMonitor] {symbol} deja în watchlist")
+            return False
+        if hasattr(self.price_monitor, 'active_symbols') and len(self.price_monitor.active_symbols) >= MAX_NEW_COINS_TO_TRACK:
+            print(f"[NewCoinsMonitor] Limită atinsă: maxim {MAX_NEW_COINS_TO_TRACK} monede în watchlist")
             return False
         
         # Praguri pentru verificări INFORMATIVE (nu blochează)
