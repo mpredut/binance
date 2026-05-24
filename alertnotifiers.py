@@ -1,14 +1,31 @@
 # alert_notifiers.py
 import requests
 import os
+import smtplib
 from datetime import datetime
+from email.mime.text import MIMEText
 from typing import Optional
 
 # Importă modulele tale
 import log
 
+DEFAULT_TO_EMAIL = "tuderp@gmail.com"
+
 class AlertNotifier:
     """Clasă pentru trimiterea alertelor prin diverse canale"""
+
+    @staticmethod
+    def format_plain_message(alert) -> str:
+        direction = "CRESTERE" if alert.alert_type == "up" else "SCADERE"
+        return (
+            f"Alerta Crypto: {direction}\n"
+            f"Simbol: {alert.symbol}\n"
+            f"Pret curent: ${alert.current_price:.8f}\n"
+            f"Referinta: ${alert.reference_price:.8f}\n"
+            f"Variatie: {alert.percent_change:+.2f}%\n"
+            f"Prag: {alert.threshold}%\n"
+            f"Timp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
     
     @staticmethod
     def print_to_console(alert):
@@ -62,11 +79,83 @@ class AlertNotifier:
     @staticmethod
     def send_email(alert, email_config: Optional[dict] = None):
         """Trimite alertă prin email (necesită configurare SMTP)"""
-        # Implementare opțională - poți adăuga dacă ai nevoie
-        pass
+        email_config = email_config or {}
+        smtp_server = email_config.get("smtp_server") or os.environ.get("SMTP_SERVER", "smtp.gmail.com")
+        smtp_port = int(email_config.get("smtp_port") or os.environ.get("SMTP_PORT", "587"))
+        smtp_username = email_config.get("smtp_username") or os.environ.get("SMTP_USERNAME")
+        smtp_password = email_config.get("smtp_password") or os.environ.get("SMTP_PASSWORD")
+        to_email = email_config.get("to_email") or os.environ.get("ALERT_TO_EMAIL", DEFAULT_TO_EMAIL)
+
+        if not smtp_username or not smtp_password:
+            log.print("[Notifier] Email: SMTP_USERNAME sau SMTP_PASSWORD lipsă")
+            return False
+
+        subject = f"Crypto alert: {alert.symbol} {alert.percent_change:+.2f}%"
+        body = AlertNotifier.format_plain_message(alert)
+        msg = MIMEText(body, "plain", "utf-8")
+        msg["From"] = smtp_username
+        msg["To"] = to_email
+        msg["Subject"] = subject
+
+        try:
+            with smtplib.SMTP(smtp_server, smtp_port, timeout=15) as server:
+                server.starttls()
+                server.login(smtp_username, smtp_password)
+                server.sendmail(smtp_username, [to_email], msg.as_string())
+            return True
+        except Exception as e:
+            log.print(f"[Notifier] Email excepție: {e}")
+            return False
+
+    @staticmethod
+    def send_phone_webhook(alert, webhook_url: Optional[str] = None):
+        """Trimite alertă către un webhook de telefon (ex: Tasker/ntfy/IFTTT)."""
+        webhook_url = webhook_url or os.environ.get("PHONE_ALERT_URL")
+        if not webhook_url and os.environ.get("NTFY_TOPIC"):
+            webhook_url = f"https://ntfy.sh/{os.environ['NTFY_TOPIC']}"
+        if not webhook_url:
+            log.print("[Notifier] Phone webhook: PHONE_ALERT_URL sau NTFY_TOPIC lipsă")
+            return False
+
+        try:
+            if "ntfy.sh/" in webhook_url:
+                response = requests.post(
+                    webhook_url,
+                    data=AlertNotifier.format_plain_message(alert).encode("utf-8"),
+                    headers={
+                        "Title": f"Crypto alert: {alert.symbol}",
+                        "Priority": os.environ.get("NTFY_PRIORITY", "high"),
+                        "Tags": "chart_with_upwards_trend" if alert.alert_type == "up" else "chart_with_downwards_trend",
+                    },
+                    timeout=10,
+                )
+                if response.status_code >= 400:
+                    log.print(f"[Notifier] ntfy eroare: {response.status_code} {response.text}")
+                    return False
+                return True
+
+            response = requests.post(
+                webhook_url,
+                json={
+                    "title": f"Crypto alert: {alert.symbol}",
+                    "message": AlertNotifier.format_plain_message(alert),
+                    "symbol": alert.symbol,
+                    "alert_type": alert.alert_type,
+                    "current_price": alert.current_price,
+                    "percent_change": alert.percent_change,
+                },
+                timeout=10,
+            )
+            if response.status_code >= 400:
+                log.print(f"[Notifier] Phone webhook eroare: {response.status_code} {response.text}")
+                return False
+            return True
+        except Exception as e:
+            log.print(f"[Notifier] Phone webhook excepție: {e}")
+            return False
     
     @staticmethod
-    def combined_handler(alert, enable_console=True, enable_file=True, enable_telegram=False):
+    def combined_handler(alert, enable_console=True, enable_file=True, enable_telegram=False, enable_email=False, enable_phone_webhook=False):
         """Handler combinat care trimite pe mai multe canale"""
         if enable_console:
             AlertNotifier.print_to_console(alert)
@@ -74,3 +163,7 @@ class AlertNotifier:
             AlertNotifier.save_to_file(alert)
         if enable_telegram:
             AlertNotifier.send_telegram(alert)
+        if enable_email:
+            AlertNotifier.send_email(alert)
+        if enable_phone_webhook:
+            AlertNotifier.send_phone_webhook(alert)

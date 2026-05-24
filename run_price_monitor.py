@@ -3,6 +3,7 @@ import time
 import os
 import threading
 from datetime import datetime
+from pathlib import Path
 
 # Importă modulele tale existente
 import log
@@ -11,6 +12,28 @@ import log
 from pricefetcher import create_price_monitor
 from pricechecker import start_price_alert_system, PRICE_ALERT_CONFIG
 from new_coins_discovery import create_new_coins_monitor, NewCoinsMonitor, NewCoinsFactory, MAX_NEW_COINS_TO_TRACK
+
+
+def load_env_file(filename=".env"):
+    env_path = Path(__file__).resolve().parent / filename
+    if not env_path.exists():
+        return
+    try:
+        with env_path.open("r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except Exception as e:
+        print(f"[Warning] Nu pot încărca {env_path}: {e}")
+
+
+load_env_file()
 
 # Încearcă să importe AlertNotifier, dar nu e critic
 try:
@@ -37,6 +60,12 @@ def custom_alert_handler(alert):
     if ALERT_NOTIFIER_AVAILABLE:
         AlertNotifier.print_to_console(alert)
         AlertNotifier.save_to_file(alert, filename="crypto_alerts.log")
+        if os.environ.get("SMTP_USERNAME") and os.environ.get("SMTP_PASSWORD"):
+            AlertNotifier.send_email(alert)
+        if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"):
+            AlertNotifier.send_telegram(alert)
+        if os.environ.get("PHONE_ALERT_URL") or os.environ.get("NTFY_TOPIC"):
+            AlertNotifier.send_phone_webhook(alert)
     else:
         print("\n" + "=" * 60)
         print(str(alert))
