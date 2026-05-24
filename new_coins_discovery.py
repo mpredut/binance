@@ -170,23 +170,27 @@ class CoinMarketCapSource(NewCoinsSource):
             
         except Exception as e:
             print(f"[CMC Source] Eroare: {e}")
-    
+
     def get_new_coins(self, days_back: int = NEW_COINS_AGE_DAYS) -> List[Dict]:
         """Returnează monedele noi din ultimele 'days_back' zile"""
         if not self._cache:
             self.refresh()
         
-        cutoff_date = datetime.now() - timedelta(days=days_back)
+        # Folosește datetime UTC cu timezone pentru a evita erorile
+        from datetime import timezone
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_back)
         
-        new_coins = [
-            coin for coin in self._cache
-            if coin['added_at'] >= cutoff_date
-        ]
+        new_coins = []
+        for coin in self._cache:
+            added_at = coin['added_at']
+            # Dacă added_at e naive (fără timezone), adaugă UTC
+            if added_at and added_at.tzinfo is None:
+                added_at = added_at.replace(tzinfo=timezone.utc)
+            if added_at and added_at >= cutoff_date:
+                new_coins.append(coin)
         
         print(f"[CMC Source] Găsite {len(new_coins)} monede noi (ultimele {days_back} zile)")
         return new_coins
-
-
 # ============================================
 # Sursa 2: CoinGecko (GRATUIT, fără cheie API)
 # ============================================
@@ -386,12 +390,10 @@ class BinanceNewListingsSource(NewCoinsSource):
 # ============================================
 # Sursa 4: DexScreener (monede noi pe DEX-uri, GRATUIT)
 # ============================================
+# În new_coins_discovery.py, modifică DexScreenerSource
 
 class DexScreenerSource(NewCoinsSource):
-    """
-    Sursă pentru monede noi apărute pe DEX-uri (Uniswap, PancakeSwap, etc.)
-    **NU necesită cheie API** - complet gratuit
-    """
+    """Sursă pentru monede noi apărute pe DEX-uri"""
     
     def __init__(self):
         self.base_url = "https://api.dexscreener.com/latest/dex"
@@ -413,28 +415,39 @@ class DexScreenerSource(NewCoinsSource):
         return self._supported_symbols.copy()
     
     def refresh(self):
-        """Obține cele mai noi token-profiles de pe DexScreener"""
+        """Obține cele mai noi token-uri de pe DexScreener"""
         try:
-            # Endpoint pentru token-uri nou adăugate
+            # Endpoint corect pentru token-profiles (fără /latest/v1)
             response = requests.get(
-                f"{self.base_url}/token-profiles/latest/v1",
+                f"{self.base_url}/token-profiles",
                 timeout=15
             )
-            response.raise_for_status()
-            data = response.json()
             
-            self._cache = []
-            self._supported_symbols.clear()
+            if response.status_code == 404:
+                # Fallback: încearcă alt endpoint
+                response = requests.get(
+                    "https://api.dexscreener.com/token-profiles/latest",
+                    timeout=15
+                )
             
-            if 'profiles' in data:
-                for profile in data['profiles']:
+            if response.status_code == 200:
+                data = response.json()
+                
+                self._cache = []
+                self._supported_symbols.clear()
+                
+                # Verifică structura răspunsului
+                profiles = data.get('profiles', []) if isinstance(data, dict) else []
+                
+                for profile in profiles[:100]:  # limităm la 100
                     symbol = profile.get('symbol', '').upper()
                     name = profile.get('name', symbol)
                     chain = profile.get('chainId', 'unknown')
                     token_address = profile.get('tokenAddress', '')
                     listed_at = profile.get('listedAt', None)
                     
-                    if symbol and symbol not in EXCLUDED_SYMBOLS:
+                    # Filtrare simboluri valide
+                    if symbol and len(symbol) <= 10 and symbol.isalnum() and symbol not in EXCLUDED_SYMBOLS:
                         self._supported_symbols.add(symbol)
                         
                         added_time = None
@@ -448,22 +461,27 @@ class DexScreenerSource(NewCoinsSource):
                             "source": self.get_name(),
                             "chain": chain,
                             "token_address": token_address,
-                            "price": None,  # DexScreener are preț separat
+                            "price": None,
                             "volume_24h": None,
                             "market_cap": None,
                             "change_24h": None,
                             "change_7d": None,
-                            "url": f"https://dexscreener.com/{chain}/{token_address}"
+                            "url": f"https://dexscreener.com/{chain}/{token_address}" if token_address else None
                         })
+                
+                log.print(f"[DexScreener Source] Găsite {len(self._cache)} token-uri")
+            else:
+                log.print(f"[DexScreener Source] Endpoint indisponibil (status {response.status_code})")
+                self._cache = []
             
-            print(f"[DexScreener Source] Găsite {len(self._cache)} token-uri noi")
             self._last_refresh = time.time()
             
         except Exception as e:
-            print(f"[DexScreener Source] Eroare: {e}")
+            log.print(f"[DexScreener Source] Eroare: {e}")
+            self._cache = []
     
     def get_new_coins(self, days_back: int = NEW_COINS_AGE_DAYS) -> List[Dict]:
-        """Returnează token-urile noi apărute pe DEX-uri"""
+        """Returnează token-urile noi"""
         if not self._cache:
             return []
         
@@ -474,13 +492,7 @@ class DexScreenerSource(NewCoinsSource):
             if token['added_at'] and token['added_at'] >= cutoff_date
         ]
         
-        # Dacă nu avem date de lansare, returnăm ultimele 20
-        if not new_tokens and self._cache:
-            print(f"[DexScreener Source] Fără date de lansare, returnăm ultimele 20")
-            return self._cache[:20]
-        
-        return new_tokens
-
+        return new_tokens[:50]  # limităm la 50
 
 # ============================================
 # Sursa 5: LunarCrush (monede trending, necesită cheie - opțional)
@@ -676,6 +688,42 @@ class NewCoinsMonitor:
         # Primul refresh
         self.refresh()
     
+    # În new_coins_discovery.py, în clasa NewCoinsMonitor, adaugă:
+
+    def is_valid_symbol(self, symbol: str) -> bool:
+        """
+        Verifică dacă un simbol este valid pentru monitorizare.
+        """
+        if not symbol:
+            return False
+        
+        # Lungime rezonabilă (1-10 caractere)
+        if len(symbol) < 1 or len(symbol) > 10:
+            return False
+        
+        # Doar litere și cifre (nu caractere speciale)
+        if not symbol.isalnum():
+            return False
+        
+        # Evită simboluri care sunt doar cifre
+        if symbol.isdigit():
+            return False
+        
+        # Evită simboluri prea lungi (ex: 01111010011110000110001001110100)
+        if len(symbol) > 10:
+            return False
+        
+        # Evită simboluri care conțin doar zerouri
+        if symbol == '0' * len(symbol):
+            return False
+        
+        # Simboluri excluse permanent
+        excluded = {'USDT', 'USDC', 'BUSD', 'DAI', 'TUSD', 'WBTC', 'WETH', 'BTC', 'ETH', 'BNB', 'SOL', 'XRP', 'ADA', 'DOGE', 'DOT', 'MATIC'}
+        if symbol in excluded:
+            return False
+        
+        return True
+`
     def refresh(self):
         """Reîmprospătează toate sursele"""
         self.all_new_coins = self.factory.get_all_new_coins(NEW_COINS_AGE_DAYS)
@@ -799,28 +847,36 @@ class NewCoinsMonitor:
         
         return summary
 
-    # Adaugă această metodă în clasa NewCoinsMonitor din new_coins_discovery.py
-
     def add_new_coin_to_watchlist(self, coin_info: Dict, auto_add_thresholds: Optional[Dict] = None):
+       
         """
         Adaugă o monedă nou descoperită în watchlist-ul de prețuri.
-        
-        Args:
-            coin_info: Dicționarul cu informațiile monedei
-            auto_add_thresholds: Praguri pentru adăugare automată (opțional)
         """
         if not self.price_monitor:
-            print(f"[NewCoinsMonitor] Nu există price_monitor - nu pot adăuga {coin_info['symbol']}")
             return False
         
         symbol = coin_info['symbol']
         
+        # VALIDARE SIMBOL
+        if not self.is_valid_symbol(symbol):
+            log.print(f"[NewCoinsMonitor] ❌ Simbol invalid: {symbol} - nu a fost adăugat")
+            return False
+        
+        # Verifică dacă platformele suportă acest simbol
+        if hasattr(self.price_monitor, 'price_factory'):
+            try:
+                # Testează dacă simbolul poate fi obținut
+                self.price_monitor.price_factory.get_price(symbol)
+            except Exception as e:
+                log.print(f"[NewCoinsMonitor] ❌ {symbol} - nu e suportat de nici o platformă: {e}")
+                return False
+        
         # Verifică dacă e deja monitorizată
         if hasattr(self.price_monitor, 'original_symbols'):
             if symbol in self.price_monitor.original_symbols:
-                print(f"[NewCoinsMonitor] {symbol} deja în watchlist")
+                log.print(f"[NewCoinsMonitor] {symbol} deja în watchlist")
                 return False
-        
+            
         # Praguri implicite pentru adăugare automată
         if auto_add_thresholds is None:
             auto_add_thresholds = {

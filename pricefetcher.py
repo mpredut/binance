@@ -760,32 +760,46 @@ def register_enhanced_price_manager(cmc_api_key: Optional[str] = None):
     
     print("[EnhancedPrice] Manager înregistrat în CacheFactory ca 'PriceMulti'")
 
+# În price_fetcher_managers.py, în create_price_monitor:
+
+def is_valid_symbol_for_monitoring(symbol: str) -> bool:
+    """Verifică dacă un simbol merită monitorizat"""
+    if not symbol:
+        return False
+    if len(symbol) < 1 or len(symbol) > 10:
+        return False
+    if not symbol.isalnum():
+        return False
+    if symbol.isdigit():
+        return False
+    # Exclude simboluri prea lungi sau ciudate
+    if len(symbol) > 8 and symbol.startswith('0'):
+        return False
+    return True
+
 def create_price_monitor(cmc_api_key: Optional[str] = None):
-    """
-    Creează și pornește monitorul de prețuri multi-platformă.
-    """
-    # Construiește lista completă de simboluri
+    """Creează și pornește monitorul de prețuri"""
+    
     all_symbols = []
     
-    # Adaugă simbolurile din sym.symbols (dacă există)
+    # Adaugă simbolurile din sym.symbols
     if hasattr(sym, 'symbols'):
         for s in sym.symbols:
-            # Dacă simbolul e deja în format USDC, păstrează-l
-            if s.endswith('USDC') or s.endswith('USDT'):
-                all_symbols.append(s)
-            else:
-                # Adaugă și versiunea simplă (ex: BTC), platformele vor ști ce să facă
+            if is_valid_symbol_for_monitoring(s):
                 all_symbols.append(s)
     
-    # Adaugă simbolurile default (dacă nu sunt deja)
+    # Adaugă simbolurile default
     for sym_default in DEFAULT_SYMBOLS:
-        if sym_default not in all_symbols and f"{sym_default}USDC" not in all_symbols:
+        if sym_default not in all_symbols and is_valid_symbol_for_monitoring(sym_default):
             all_symbols.append(sym_default)
     
     # Elimină duplicatele
     all_symbols = list(dict.fromkeys(all_symbols))
     
-    print(f"[PriceMonitor] Total simboluri de monitorizat: {len(all_symbols)}")
+    # Filtrează simbolurile valide
+    all_symbols = [s for s in all_symbols if is_valid_symbol_for_monitoring(s)]
+    
+    print(f"[PriceMonitor] Simboluri valide de monitorizat: {len(all_symbols)}")
     print(f"[PriceMonitor] Lista: {all_symbols}")
     
     # Înregistrează managerul în factory
