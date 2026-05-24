@@ -7,40 +7,40 @@ from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Optional
 
-# Importă modulele tale
+# Import your modules
 import log
 
 BASE_DIR = Path(__file__).resolve().parent
 
 
 class AlertNotifier:
-    """Clasă pentru trimiterea alertelor prin diverse canale"""
+    """Class for sending alerts through multiple channels."""
 
     @staticmethod
     def format_batch_message(alerts) -> str:
         lines = [
-            f"Alerte Crypto: {len(alerts)} simboluri",
-            f"Timp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"Crypto alerts: {len(alerts)} symbols",
+            f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
             "",
         ]
         for alert in alerts:
-            direction = "CRESTERE" if alert.alert_type == "up" else "SCADERE"
+            direction = "RISE" if alert.alert_type == "up" else "DROP"
             lines.append(
                 f"{alert.symbol}: {direction} {alert.percent_change:+.2f}% "
-                f"| pret ${alert.current_price:.8f} | ref ${alert.reference_price:.8f}"
+                f"| price ${alert.current_price:.8f} | reference ${alert.reference_price:.8f}"
             )
         return "\n".join(lines)
     
     @staticmethod
     def print_to_console(alert):
-        """Afișează alerta în consolă"""
+        """Print the alert to the console."""
         print("\n" + "=" * 70)
         print(str(alert))
         print("=" * 70)
     
     @staticmethod
     def save_to_file(alert, filename="alerts.log"):
-        """Salvează alerta într-un fișier"""
+        """Save the alert to a file."""
         alert_file = Path(filename)
         if not alert_file.is_absolute():
             alert_file = BASE_DIR / alert_file
@@ -105,7 +105,7 @@ class AlertNotifier:
             print("[Notifier] Email: SMTP_USERNAME, SMTP_PASSWORD, and ALERT_TO_EMAIL are required")
             return False
 
-        subject = f"Crypto alerts: {len(alerts)} simboluri"
+        subject = f"Crypto alerts: {len(alerts)} symbols"
         body = AlertNotifier.format_batch_message(alerts)
         msg = MIMEText(body, "plain", "utf-8")
         msg["From"] = smtp_username
@@ -119,7 +119,7 @@ class AlertNotifier:
                 server.sendmail(smtp_username, [to_email], msg.as_string())
             return True
         except Exception as e:
-            print(f"[Notifier] Email batch excepție: {e}")
+            print(f"[Notifier] Email batch exception: {e}")
             return False
 
     @staticmethod
@@ -133,10 +133,10 @@ class AlertNotifier:
         if not webhook_url and os.environ.get("NTFY_TOPIC"):
             webhook_url = f"https://ntfy.sh/{os.environ['NTFY_TOPIC']}"
         if not webhook_url:
-            print("[Notifier] Phone webhook: PHONE_ALERT_URL sau NTFY_TOPIC lipsă")
+            print("[Notifier] Phone webhook: PHONE_ALERT_URL or NTFY_TOPIC is missing")
             return False
 
-        title = f"Crypto alerts: {len(alerts)} simboluri"
+        title = f"Crypto alerts: {len(alerts)} symbols"
         message = AlertNotifier.format_batch_message(alerts)
         tags = "chart_with_upwards_trend"
         payload = {"title": title, "message": message}
@@ -154,24 +154,24 @@ class AlertNotifier:
                     timeout=10,
                 )
                 if response.status_code >= 400:
-                    print(f"[Notifier] ntfy batch eroare: {response.status_code} {response.text}")
+                    print(f"[Notifier] ntfy batch error: {response.status_code} {response.text}")
                     return False
-                print(f"[Notifier] ntfy batch trimis cu succes pentru {len(alerts)} simboluri")
+                print(f"[Notifier] ntfy batch sent successfully for {len(alerts)} symbols")
                 return True
 
             response = requests.post(webhook_url, json=payload, timeout=10)
             if response.status_code >= 400:
-                print(f"[Notifier] Phone webhook batch eroare: {response.status_code} {response.text}")
+                print(f"[Notifier] Phone webhook batch error: {response.status_code} {response.text}")
                 return False
-            print(f"[Notifier] Phone webhook batch trimis cu succes pentru {len(alerts)} simboluri")
+            print(f"[Notifier] Phone webhook batch sent successfully for {len(alerts)} symbols")
             return True
         except Exception as e:
-            print(f"[Notifier] Phone webhook batch excepție: {e}")
+            print(f"[Notifier] Phone webhook batch exception: {e}")
             return False
     
     @staticmethod
     def combined_handler(alert, enable_console=True, enable_file=True, enable_telegram=False, enable_email=False, enable_phone_webhook=False):
-        """Handler combinat care trimite pe mai multe canale"""
+        """Combined handler that sends alerts through multiple channels."""
         alerts = [alert] if not isinstance(alert, list) else alert
         if enable_console:
             for item in alerts:
