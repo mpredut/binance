@@ -1,7 +1,9 @@
 # run_price_monitor.py
 import time
 import os
+import threading
 from datetime import datetime
+
 
 # Importă modulele tale existente și noile module
 import log
@@ -18,7 +20,6 @@ from datetime import datetime
 
 from new_coins_discovery import create_new_coins_monitor, NewCoinsMonitor, NewCoinsFactory
 
-
 def custom_alert_handler(alert):
     """Handler personalizat pentru alerte de preț"""
     AlertNotifier.print_to_console(alert)
@@ -27,11 +28,21 @@ def custom_alert_handler(alert):
 
 def new_coin_alert_handler(coin_info):
     """Handler pentru monede nou descoperite"""
+    source = coin_info.get('source', 'unknown')
+    has_price = coin_info.get('has_price', False)
+    auto_added = coin_info.get('auto_added', False)
+    
     print("\n" + "=" * 70)
     print(f"🆕 MONEDĂ NOUĂ: {coin_info['symbol']} - {coin_info.get('name', 'N/A')}")
-    print(f"   📡 Sursă: {coin_info.get('source', 'unknown')}")
-    print(f"   💰 Preț: ${coin_info.get('price', 0):.8f}")
-    print(f"   ✅ Adăugată automat în watchlist: {coin_info.get('auto_added', False)}")
+    print(f"   📡 Sursă: {source}")
+    
+    if has_price:
+        print(f"   💰 Preț: ${coin_info.get('price', 0):.8f}")
+        print(f"   ✅ Adăugată automat în watchlist: {auto_added}")
+    else:
+        print(f"   ⚠️ Sursa {source} nu oferă preț - doar informațional")
+        print(f"   💡 Moneda va fi monitorizată doar dacă apare ulterior pe CoinMarketCap")
+    
     if coin_info.get('url'):
         print(f"   🔗 {coin_info['url']}")
     print("=" * 70)
@@ -65,6 +76,25 @@ def print_status_report(price_monitor, new_coins_monitor, analyzer):
     print(f"   Cooldown: {PRICE_ALERT_CONFIG['cooldown_minutes']} minute")
     
     print("=" * 70)
+
+
+def periodic_cleanup(price_monitor, new_coins_monitor):
+    """Rulează cleanup la fiecare 6 ore"""
+    while True:
+        time.sleep(6 * 3600)  # 6 ore
+        print("[Periodic] Rulez cleanup prețuri vechi...")
+        
+        # Curăță prețurile vechi (dacă metoda există)
+        if hasattr(price_monitor, 'cleanup_old_prices'):
+            price_monitor.cleanup_old_prices()
+        
+        # Curăță simbolurile vechi (dacă metoda există)
+        if hasattr(price_monitor, 'cleanup_old_symbols'):
+            price_monitor.cleanup_old_symbols(max_age_days=7)
+        
+        # Curăță monedele vechi din watchlist (dacă metoda există)
+        if new_coins_monitor and hasattr(new_coins_monitor, 'cleanup_old_new_coins'):
+            new_coins_monitor.cleanup_old_new_coins()
 
 
 def main():
@@ -111,7 +141,6 @@ def main():
     print("\n⏳ Inițializare monitor monede noi...")
     
     # Creează factory-ul cu sursele dorite
-    from new_coins_discovery import NewCoinsFactory, NewCoinsMonitor
     factory = NewCoinsFactory(enabled_sources=ENABLED_SOURCES, cmc_api_key=CMC_API_KEY)
     
     # Creează monitorul și conectează-l la price_monitor
@@ -122,45 +151,55 @@ def main():
     new_coins_monitor.start_monitoring(interval_seconds=3600)
     print(f"✅ Monitor monede noi pornit! Surse active: {factory.get_available_sources()}")
     
+    print("\n" + "=" * 70)
+    print("📋 CONFIGURAȚIE MONITOR MONEDE NOI")
+    print("=" * 70)
+    print(f"   ✅ CoinMarketCap - descoperă + preț → adaugă în watchlist")
+    print(f"   ℹ️ CoinGecko - doar descoperă (fără preț) → informațional")
+    print(f"   ℹ️ Binance - doar listări noi → informațional")
+    print(f"   ℹ️ DexScreener - doar token-uri noi DEX → informațional")
+    print("=" * 70)
+
     # =========================================================
     # PASUL 5: Forțează o descoperire inițială și adaugă monedele noi
     # =========================================================
     print("\n⏳ Descoperire inițială monede noi...")
     new_coins_monitor.refresh()
     
-    # Adaugă automat monedele noi în watchlist
+    # Adaugă doar monedele de pe CoinMarketCap (singurele cu preț)
     auto_added_count = 0
     for source_name, coins in new_coins_monitor.all_new_coins.items():
-        for coin in coins:
-            if new_coins_monitor.add_new_coin_to_watchlist(coin):
-                auto_added_count += 1
-    
+        if source_name == "CoinMarketCap":  # Doar CMC are preț
+            for coin in coins:
+                if new_coins_monitor.add_new_coin_to_watchlist(coin):
+                    auto_added_count += 1
+        else:
+            # Celelalte surse - doar loghează
+            for coin in coins:
+                print(f"[Startup] ℹ️ {coin['symbol']} descoperit pe {source_name} - doar informațional")
+
     if auto_added_count > 0:
-        print(f"✅ {auto_added_count} monede noi adăugate automat în watchlist!")
+        print(f"✅ {auto_added_count} monede noi adăugate automat în watchlist (de pe CoinMarketCap)")
+    else:
+        print(f"ℹ️ Nu s-au găsit monede noi cu preț pe CoinMarketCap")
     
-
-    def periodic_cleanup():
-        """Rulează cleanup la fiecare 6 ore"""
-        while True:
-            time.sleep(6 * 3600)  # 6 ore
-            print("[Periodic] Rulez cleanup prețuri vechi...")
-            price_monitor.cleanup_old_prices()
-            price_monitor.cleanup_old_symbols(max_age_days=7)
-            7
-            if new_coins_monitor:
-                new_coins_monitor.cleanup_old_new_coins()
-
-    # Pornește cleanup-ul într-un thread separat
-    cleanup_thread = threading.Thread(target=periodic_cleanup, daemon=True)
+    # =========================================================
+    # PASUL 6: Pornește cleanup-ul periodic
+    # =========================================================
+    cleanup_thread = threading.Thread(
+        target=periodic_cleanup, 
+        args=(price_monitor, new_coins_monitor),  # ← trece argumentele corect
+        daemon=True
+    )
     cleanup_thread.start()
 
     # =========================================================
-    # PASUL 6: Afișează raportul de status
+    # PASUL 7: Afișează raportul de status
     # =========================================================
     print_status_report(price_monitor, new_coins_monitor, analyzer)
     
     # =========================================================
-    # PASUL 7: Afișează raportul detaliat cu monede noi
+    # PASUL 8: Afișează raportul detaliat cu monede noi
     # =========================================================
     print(new_coins_monitor.get_report())
     
