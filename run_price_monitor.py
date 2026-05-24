@@ -29,7 +29,7 @@ def load_env_file(filename=".env"):
                 key, value = line.split("=", 1)
                 key = key.strip()
                 value = value.strip().strip('"').strip("'")
-                if key and key not in os.environ:
+                if key and (key not in os.environ or not os.environ[key].strip()):
                     os.environ[key] = value
                     print(f"[Debug] Loaded env: {key}={value[:15]}...")
                 elif key in os.environ:
