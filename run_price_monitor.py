@@ -122,10 +122,7 @@ def custom_alert_handler(alert):
             AlertNotifier.save_to_file(item, filename="crypto_alerts.log")
 
         if os.environ.get("PHONE_ALERT_URL") or os.environ.get("NTFY_TOPIC"):
-            if len(alerts) == 1:
-                AlertNotifier.send_phone_webhook(alerts[0])
-            else:
-                AlertNotifier.send_phone_webhook_batch(alerts)
+            AlertNotifier.send_phone_webhook_batch(alerts)
         else:
             print("[Warning] Phone alert was not sent because PHONE_ALERT_URL or NTFY_TOPIC is missing.")
 
@@ -136,10 +133,7 @@ def custom_alert_handler(alert):
             print("[Warning] Telegram alert was not sent because TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing.")
 
         if os.environ.get("SMTP_USERNAME") and os.environ.get("SMTP_PASSWORD") and os.environ.get("ALERT_TO_EMAIL"):
-            if len(alerts) == 1:
-                AlertNotifier.send_email(alerts[0])
-            else:
-                AlertNotifier.send_email_batch(alerts)
+            AlertNotifier.send_email_batch(alerts)
         else:
             print("[Warning] Email alert was not sent because SMTP_USERNAME, SMTP_PASSWORD, or ALERT_TO_EMAIL is missing.")
     else:
