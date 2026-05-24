@@ -103,34 +103,8 @@ class AlertNotifier:
     
     @staticmethod
     def send_email(alert, email_config: Optional[dict] = None):
-        """Trimite alertă prin email (necesită configurare SMTP)"""
-        email_config = email_config or {}
-        smtp_server = email_config.get("smtp_server") or os.environ.get("SMTP_SERVER", "smtp.gmail.com")
-        smtp_port = int(email_config.get("smtp_port") or os.environ.get("SMTP_PORT", "587"))
-        smtp_username = email_config.get("smtp_username") or os.environ.get("SMTP_USERNAME")
-        smtp_password = email_config.get("smtp_password") or os.environ.get("SMTP_PASSWORD")
-        to_email = email_config.get("to_email") or os.environ.get("ALERT_TO_EMAIL")
-
-        if not smtp_username or not smtp_password:
-            print("[Notifier] Email: SMTP_USERNAME sau SMTP_PASSWORD lipsă")
-            return False
-
-        subject = f"Crypto alert: {alert.symbol} {alert.percent_change:+.2f}%"
-        body = AlertNotifier.format_plain_message(alert)
-        msg = MIMEText(body, "plain", "utf-8")
-        msg["From"] = smtp_username
-        msg["To"] = to_email
-        msg["Subject"] = subject
-
-        try:
-            with smtplib.SMTP(smtp_server, smtp_port, timeout=15) as server:
-                server.starttls()
-                server.login(smtp_username, smtp_password)
-                server.sendmail(smtp_username, [to_email], msg.as_string())
-            return True
-        except Exception as e:
-            print(f"[Notifier] Email excepție: {e}")
-            return False
+        """Trimite alertă prin email folosind logica unificată de batch."""
+        return AlertNotifier.send_email_batch([alert], email_config=email_config)
 
     @staticmethod
     def send_email_batch(alerts, email_config: Optional[dict] = None):
@@ -145,8 +119,8 @@ class AlertNotifier:
             print("[Notifier] Email: SMTP_USERNAME, SMTP_PASSWORD, and ALERT_TO_EMAIL are required")
             return False
 
-        subject = f"Crypto alerts: {len(alerts)} simboluri"
-        body = AlertNotifier.format_batch_message(alerts)
+        subject = f"Crypto alerts: {len(alerts)} simboluri" if len(alerts) > 1 else f"Crypto alert: {alerts[0].symbol} {alerts[0].percent_change:+.2f}%"
+        body = AlertNotifier.format_batch_message(alerts) if len(alerts) > 1 else AlertNotifier.format_plain_message(alerts[0])
         msg = MIMEText(body, "plain", "utf-8")
         msg["From"] = smtp_username
         msg["To"] = to_email
@@ -164,57 +138,12 @@ class AlertNotifier:
 
     @staticmethod
     def send_phone_webhook(alert, webhook_url: Optional[str] = None):
-        """Trimite alertă către un webhook de telefon (ex: Tasker/ntfy/IFTTT)."""
-        print(f"[Notifier] Phone webhook single for {alert.symbol}")
-        webhook_url = webhook_url or os.environ.get("PHONE_ALERT_URL")
-        if not webhook_url and os.environ.get("NTFY_TOPIC"):
-            webhook_url = f"https://ntfy.sh/{os.environ['NTFY_TOPIC']}"
-        if not webhook_url:
-            print("[Notifier] Phone webhook: PHONE_ALERT_URL sau NTFY_TOPIC lipsă")
-            return False
-
-        try:
-            if "ntfy.sh/" in webhook_url:
-                response = requests.post(
-                    webhook_url,
-                    data=AlertNotifier.format_plain_message(alert).encode("utf-8"),
-                    headers={
-                        "Title": f"Crypto alert: {alert.symbol}",
-                        "Priority": os.environ.get("NTFY_PRIORITY", "high"),
-                        "Tags": "chart_with_upwards_trend" if alert.alert_type == "up" else "chart_with_downwards_trend",
-                    },
-                    timeout=10,
-                )
-                if response.status_code >= 400:
-                    print(f"[Notifier] ntfy eroare: {response.status_code} {response.text}")
-                    return False
-                print(f"[Notifier] ntfy trimis cu succes pentru {alert.symbol}")
-                return True
-
-            response = requests.post(
-                webhook_url,
-                json={
-                    "title": f"Crypto alert: {alert.symbol}",
-                    "message": AlertNotifier.format_plain_message(alert),
-                    "symbol": alert.symbol,
-                    "alert_type": alert.alert_type,
-                    "current_price": alert.current_price,
-                    "percent_change": alert.percent_change,
-                },
-                timeout=10,
-            )
-            if response.status_code >= 400:
-                print(f"[Notifier] Phone webhook eroare: {response.status_code} {response.text}")
-                return False
-            print(f"[Notifier] Phone webhook trimis cu succes pentru {alert.symbol}")
-            return True
-        except Exception as e:
-            print(f"[Notifier] Phone webhook excepție: {e}")
-            return False
+        """Trimite alertă către un webhook de telefon folosind logica unificată de batch."""
+        return AlertNotifier.send_phone_webhook_batch([alert], webhook_url=webhook_url)
 
     @staticmethod
     def send_phone_webhook_batch(alerts, webhook_url: Optional[str] = None):
-        print("[Notifier] Phone webhook batch")
+        print(f"[Notifier] Phone webhook batch for {len(alerts)} alert(s)")
         webhook_url = webhook_url or os.environ.get("PHONE_ALERT_URL")
         if not webhook_url and os.environ.get("NTFY_TOPIC"):
             webhook_url = f"https://ntfy.sh/{os.environ['NTFY_TOPIC']}"
@@ -222,16 +151,19 @@ class AlertNotifier:
             print("[Notifier] Phone webhook: PHONE_ALERT_URL sau NTFY_TOPIC lipsă")
             return False
 
-        message = AlertNotifier.format_batch_message(alerts)
+        message = AlertNotifier.format_plain_message(alerts[0]) if len(alerts) == 1 else AlertNotifier.format_batch_message(alerts)
+        title = f"Crypto alert: {alerts[0].symbol}" if len(alerts) == 1 else f"Crypto alerts: {len(alerts)} simboluri"
+        tags = "chart_with_upwards_trend" if len(alerts) == 1 and alerts[0].alert_type == "up" else "chart_with_downwards_trend" if len(alerts) == 1 else "chart_with_upwards_trend"
+
         try:
             if "ntfy.sh/" in webhook_url:
                 response = requests.post(
                     webhook_url,
                     data=message.encode("utf-8"),
                     headers={
-                        "Title": f"Crypto alerts: {len(alerts)} simboluri",
+                        "Title": title,
                         "Priority": os.environ.get("NTFY_PRIORITY", "high"),
-                        "Tags": "chart_with_upwards_trend",
+                        "Tags": tags,
                     },
                     timeout=10,
                 )
@@ -241,11 +173,19 @@ class AlertNotifier:
                 print(f"[Notifier] ntfy batch trimis cu succes pentru {len(alerts)} simboluri")
                 return True
 
-            response = requests.post(
-                webhook_url,
-                json={"title": f"Crypto alerts: {len(alerts)} simboluri", "message": message},
-                timeout=10,
-            )
+            if len(alerts) == 1:
+                payload = {
+                    "title": title,
+                    "message": message,
+                    "symbol": alerts[0].symbol,
+                    "alert_type": alerts[0].alert_type,
+                    "current_price": alerts[0].current_price,
+                    "percent_change": alerts[0].percent_change,
+                }
+            else:
+                payload = {"title": title, "message": message}
+
+            response = requests.post(webhook_url, json=payload, timeout=10)
             if response.status_code >= 400:
                 print(f"[Notifier] Phone webhook batch eroare: {response.status_code} {response.text}")
                 return False
