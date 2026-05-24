@@ -407,9 +407,10 @@ class EnhancedCachePriceManager(CacheManagerInterface):
     
     def get_remote_items(self, symbol, startTime):
         try:
+            # Asigură-te că atributul există
             if not hasattr(self, 'symbol_preferred_source'):
                 self.symbol_preferred_source = {}
-                
+            
             preferred_source = self.symbol_preferred_source.get(symbol)
             if preferred_source:
                 for platform in self.price_factory._platforms:
