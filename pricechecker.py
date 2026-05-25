@@ -19,7 +19,7 @@ PRICE_ALERT_CONFIG = {
     },
     "dynamic": {
         "up_percent": 12.0,    # Stricter threshold for dynamically added coins
-        "down_percent": 12.0,  # Stricter threshold for dynamically added coins
+        "down_percent": 25.0,  # Stricter threshold for dynamically added coins
     },
     "lookback_hours": 24,    # Analysis interval (24 hours)
     "cooldown_minutes": 15,  # Do not send the same alert more often than every 15 minutes
