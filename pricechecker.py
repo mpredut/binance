@@ -71,13 +71,13 @@ class PriceChecker:
     Runs in a separate thread.
     """
 
-    def __init__(self, price_manager, alert_callback: Optional[Callable] = None):
+    def __init__(self, cachePriceAll, alert_callback: Optional[Callable] = None):
         """
         Args:
-            price_manager: The EnhancedCachePriceManager instance.
+            cachePriceAll: The EnhancedCachePriceManager instance.
             alert_callback: Function called when an alert is generated (for example print, email, or telegram delivery).
         """
-        self.price_manager = price_manager
+        self.cachePriceAll = cachePriceAll
         self.alert_callback = alert_callback or self._default_alert_handler
         self.config = PRICE_ALERT_CONFIG.copy()
 
@@ -100,7 +100,7 @@ class PriceChecker:
             for candidate in candidate_symbols:
                 if not candidate:
                     continue
-                for platform in getattr(getattr(self.price_manager, "price_factory", None), "_platforms", []):
+                for platform in getattr(getattr(self.cachePriceAll, "price_factory", None), "_platforms", []):
                     if getattr(platform, "platform_name", "") != "CoinMarketCap":
                         continue
                     listings = getattr(platform, "_all_listings", {})
@@ -113,7 +113,7 @@ class PriceChecker:
 
     def _get_price_history_last_hours(self, symbol: str, hours: int) -> List[Dict]:
         """Retrieve the price history from the last 'hours' hours."""
-        history = self.price_manager.get_price_history(symbol, limit=1000)
+        history = self.cachePriceAll.get_price_history(symbol, limit=1000)
 
         if not history:
             return []
@@ -141,7 +141,7 @@ class PriceChecker:
             - down_from_max: percentage decrease from the maximum
             - has_data: True if enough data exists
         """
-        current_price = self.price_manager.get_latest_price(symbol)
+        current_price = self.cachePriceAll.get_latest_price(symbol)
         if current_price is None:
             return {"has_data": False, "error": "No current price available"}
 
@@ -248,10 +248,10 @@ class PriceChecker:
     def check_all_symbols(self) -> List[PriceAlert]:
         """Check all symbols in the watchlist."""
         all_alerts = []
-        if hasattr(self.price_manager, 'original_symbols'):
-            symbols = list(self.price_manager.original_symbols)
+        if hasattr(self.cachePriceAll, 'original_symbols'):
+            symbols = list(self.cachePriceAll.original_symbols)
         else:
-            symbols = list(self.price_manager.symbols)
+            symbols = list(self.cachePriceAll.symbols)
 
         for symbol in symbols:
             try:
@@ -310,7 +310,7 @@ class PriceChecker:
         return {
             "running": self._running,
             "config": self.config,
-            "symbols_count": len(self.price_manager.original_symbols if hasattr(self.price_manager, 'original_symbols') else self.price_manager.symbols),
+            "symbols_count": len(self.cachePriceAll.original_symbols if hasattr(self.cachePriceAll, 'original_symbols') else self.cachePriceAll.symbols),
             "last_alerts": dict(self._last_alert_time)
         }
 
@@ -320,18 +320,18 @@ class PriceChecker:
 # ============================================
 
 
-def start_price_alert_system(price_monitor, alert_callback=None, check_interval_seconds=60):
+def start_price_alert_system(cachePriceAll, alert_callback=None, check_interval_seconds=60):
     """
     Start the complete price alert system.
 
     Args:
-        price_monitor: The EnhancedCachePriceManager instance.
+        cachePriceAll: The EnhancedCachePriceManager instance.
         alert_callback: Function called when an alert is generated (optional).
         check_interval_seconds: Interval between checks.
 
     Returns:
         The PriceChecker instance.
     """
-    Checker = PriceChecker(price_monitor, alert_callback=alert_callback)
+    Checker = PriceChecker(cachePriceAll, alert_callback=alert_callback)
     Checker.start_monitoring(check_interval_seconds)
     return Checker

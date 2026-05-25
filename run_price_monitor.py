@@ -1,4 +1,4 @@
-# run_price_monitor.py
+# run_cachePriceAll.py
 import time
 import os
 import threading
@@ -9,7 +9,7 @@ from pathlib import Path
 import log
 
 # Importă modulele principale
-from pricefetcher import create_price_monitor
+from pricefetcher import create_cachePriceAll
 from pricechecker import start_price_alert_system, PRICE_ALERT_CONFIG
 from new_coins_discovery import create_new_coins_monitor, NewCoinsMonitor, NewCoinsFactory, MAX_NEW_COINS_TO_TRACK
 
@@ -180,16 +180,16 @@ def new_coin_alert_handler(coin_info):
         AlertNotifier.send_email_batch([coin_info])
 
 
-def print_status_report(price_monitor, new_coins_monitor):
+def print_status_report(cachePriceAll, new_coins_monitor):
     """Print a status report."""
     print("\n" + "=" * 70)
     print("📊 STATUS REPORT")
     print("=" * 70)
 
-    if hasattr(price_monitor, 'original_symbols'):
-        symbols_count = len(price_monitor.original_symbols)
+    if hasattr(cachePriceAll, 'original_symbols'):
+        symbols_count = len(cachePriceAll.original_symbols)
         print(f"\n💰 Tracked price symbols: {symbols_count}")
-        print(f"   First 10: {price_monitor.original_symbols[:10]}")
+        print(f"   First 10: {cachePriceAll.original_symbols[:10]}")
 
     if new_coins_monitor:
         summary = new_coins_monitor.get_summary()
@@ -207,22 +207,22 @@ def print_status_report(price_monitor, new_coins_monitor):
     print("=" * 70)
 
 
-def periodic_cleanup(price_monitor, new_coins_monitor):
+def periodic_cleanup(cachePriceAll, new_coins_monitor):
     """Run cleanup every 6 hours."""
     while True:
         print(f"sleeping for {TIME_INTERVAL_CLEANUP} hours before next cleanup...")
         time.sleep(TIME_INTERVAL_CLEANUP )
         print("[Periodic] Running cleanup for stale prices...")
 
-        if hasattr(price_monitor, 'cleanup_old_prices'):
-            price_monitor.cleanup_old_prices()
+        if hasattr(cachePriceAll, 'cleanup_old_prices'):
+            cachePriceAll.cleanup_old_prices()
         else:
-            print("[Periodic] price_monitor.cleanup_old_prices() does not exist")
+            print("[Periodic] cachePriceAll.cleanup_old_prices() does not exist")
 
-        if hasattr(price_monitor, 'cleanup_old_symbols'):
-            price_monitor.cleanup_old_symbols(max_age_days=7)
+        if hasattr(cachePriceAll, 'cleanup_old_symbols'):
+            cachePriceAll.cleanup_old_symbols(max_age_days=7)
         else:
-            print("[Periodic] price_monitor.cleanup_old_symbols() does not exist")
+            print("[Periodic] cachePriceAll.cleanup_old_symbols() does not exist")
 
         if new_coins_monitor and hasattr(new_coins_monitor, 'cleanup_old_new_coins'):
             new_coins_monitor.cleanup_old_new_coins()
@@ -242,7 +242,7 @@ def main():
     ENABLED_SOURCES = ["coinmarketcap", "coingecko", "binance", "dexscreener"]
 
     print("\n⏳ Initializing price monitor...")
-    price_monitor = create_price_monitor(cmc_api_key=CMC_API_KEY)
+    cachePriceAll = create_cachePriceAll(cmc_api_key=CMC_API_KEY)
     print("Price monitor started!")
 
     print("\n⏳ Waiting for first price sync (30 seconds)...")
@@ -250,7 +250,7 @@ def main():
 
     print("\n⏳ Starting price alert system...")
     analyzer = start_price_alert_system(
-        price_monitor=price_monitor,
+        cachePriceAll=cachePriceAll,
         alert_callback=custom_alert_handler,
         check_interval_seconds=60
     )
@@ -258,7 +258,7 @@ def main():
 
     print("\n⏳ Initializing new coin monitor...")
     factory = NewCoinsFactory(enabled_sources=ENABLED_SOURCES, cmc_api_key=CMC_API_KEY)
-    new_coins_monitor = NewCoinsMonitor(price_monitor=price_monitor, factory=factory)
+    new_coins_monitor = NewCoinsMonitor(cachePriceAll, factory=factory)
     new_coins_monitor.register_alert_callback(new_coin_alert_handler)
     new_coins_monitor.start_monitoring(interval_seconds=3600)
     print(f"New coin monitor started! Active sources: {factory.get_available_sources()}")
@@ -295,13 +295,13 @@ def main():
 
     cleanup_thread = threading.Thread(
         target=periodic_cleanup,
-        args=(price_monitor, new_coins_monitor),
+        args=(cachePriceAll, new_coins_monitor),
         daemon=True
     )
     cleanup_thread.start()
     print("Periodic cleanup started (every 6 hours)")
 
-    print_status_report(price_monitor, new_coins_monitor)
+    print_status_report(cachePriceAll, new_coins_monitor)
     print(new_coins_monitor.get_report())
 
     print("\n" + "=" * 70)
@@ -315,7 +315,7 @@ def main():
     try:
         while True:
             time.sleep(60)
-            print_status_report(price_monitor, new_coins_monitor)
+            print_status_report(cachePriceAll, new_coins_monitor)
     except KeyboardInterrupt:
         print("\n\n🛑 Stopping system...")
         new_coins_monitor.stop_monitoring()
