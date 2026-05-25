@@ -13,9 +13,15 @@ from pricefetcher import get_base_symbol
 
 # Threshold configuration (can be adjusted at any time)
 PRICE_ALERT_CONFIG = {
-    "up_percent": 4.1,      # Trigger an alert when the price rises by 5% from the 24h low
-    "down_percent": 7.5,    # Trigger an alert when the price drops by 7.5% from the 24h high
-    "lookback_hours": 24,   # Analysis interval (24 hours)
+    "default": {
+        "up_percent": 4.1,    # Trigger an alert when the price rises by 5% from the 24h low
+        "down_percent": 7.5,  # Trigger an alert when the price drops by 7.5% from the 24h high
+    },
+    "dynamic": {
+        "up_percent": 12.0,    # Stricter threshold for dynamically added coins
+        "down_percent": 12.0,  # Stricter threshold for dynamically added coins
+    },
+    "lookback_hours": 24,    # Analysis interval (24 hours)
     "cooldown_minutes": 15,  # Do not send the same alert more often than every 15 minutes
 }
 
@@ -186,6 +192,15 @@ class PriceChecker:
 
         return (time.time() - last_time) >= cooldown_seconds
 
+    def _is_dynamic_symbol(self, symbol: str) -> bool:
+        symbol_added_time = getattr(self.cachePriceAll, "symbol_added_time", {})
+        return bool(symbol_added_time.get(symbol))
+
+    def _get_thresholds_for_symbol(self, symbol: str) -> Dict:
+        if self._is_dynamic_symbol(symbol):
+            return self.config["dynamic"]
+        return self.config["default"]
+
     def _record_alert_sent(self, symbol: str, alert_type: str):
         """Record that an alert was sent."""
         key = f"{symbol}_{alert_type}"
@@ -203,9 +218,12 @@ class PriceChecker:
         current_price = stats["current_price"]
         up_percent = stats["up_from_min"]
         down_percent = stats["down_from_max"]
+        thresholds = self._get_thresholds_for_symbol(symbol)
+        up_threshold = thresholds["up_percent"]
+        down_threshold = thresholds["down_percent"]
 
         # Check for price increase (upper threshold)
-        if up_percent >= self.config["up_percent"]:
+        if up_percent >= up_threshold:
             if self._should_send_alert(symbol, "up"):
                 alert = PriceAlert(
                     symbol=symbol,
@@ -214,14 +232,14 @@ class PriceChecker:
                     reference_price=stats["min_price"],
                     reference_time=stats.get("min_price_timestamp_readable"),
                     percent_change=up_percent,
-                    threshold=self.config["up_percent"],
+                    threshold=up_threshold,
                     url=self._build_cmc_url(symbol)
                 )
                 alerts.append(alert)
                 self._record_alert_sent(symbol, "up")
 
         # Check for price decrease (lower threshold)
-        if down_percent <= -self.config["down_percent"]:
+        if down_percent <= -down_threshold:
             if self._should_send_alert(symbol, "down"):
                 alert = PriceAlert(
                     symbol=symbol,
@@ -230,7 +248,7 @@ class PriceChecker:
                     reference_price=stats["max_price"],
                     reference_time=stats.get("max_price_timestamp_readable"),
                     percent_change=down_percent,
-                    threshold=self.config["down_percent"],
+                    threshold=down_threshold,
                     url=self._build_cmc_url(symbol)
                 )
                 alerts.append(alert)
@@ -238,8 +256,8 @@ class PriceChecker:
 
         print(
             f"[Checker][{symbol}] Price: ${current_price:.4f} | "
-            f"↑ {up_percent:+.2f}% (threshold +{self.config['up_percent']}%) | "
-            f"↓ {down_percent:+.2f}% (threshold -{self.config['down_percent']}%) | "
+            f"↑ {up_percent:+.2f}% (threshold +{up_threshold}%) | "
+            f"↓ {down_percent:+.2f}% (threshold -{down_threshold}%) | "
             f"Min: ${stats['min_price']:.4f} | Max: ${stats['max_price']:.4f}"
         )
 
@@ -277,7 +295,10 @@ class PriceChecker:
 
         def run():
             print(f"[Checker] Monitoring started - checking every {interval_seconds}s")
-            print(f"[Checker] Thresholds: ↑ +{self.config['up_percent']}% | ↓ -{self.config['down_percent']}%")
+            print(
+                f"[Checker] Thresholds: default ↑ +{self.config['default']['up_percent']}% | ↓ -{self.config['default']['down_percent']}% | "
+                f"dynamic ↑ +{self.config['dynamic']['up_percent']}% | ↓ -{self.config['dynamic']['down_percent']}%"
+            )
 
             while self._running:
                 try:

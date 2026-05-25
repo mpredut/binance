@@ -200,8 +200,8 @@ def print_status_report(cachePriceAll, new_coins_monitor):
             print(f"   New symbols: {summary['all_symbols'][:10]}")
 
     print(f"\n⚙️ Price alert configuration:")
-    print(f"   Up threshold: +{PRICE_ALERT_CONFIG['up_percent']}% from 24h low")
-    print(f"   Down threshold: -{PRICE_ALERT_CONFIG['down_percent']}% from 24h high")
+    print(f"   Default list: up +{PRICE_ALERT_CONFIG['default']['up_percent']}% / down -{PRICE_ALERT_CONFIG['default']['down_percent']}%")
+    print(f"   Dynamic list: up +{PRICE_ALERT_CONFIG['dynamic']['up_percent']}% / down -{PRICE_ALERT_CONFIG['dynamic']['down_percent']}%")
     print(f"   Cooldown: {PRICE_ALERT_CONFIG['cooldown_minutes']} minutes")
 
     print("=" * 70)

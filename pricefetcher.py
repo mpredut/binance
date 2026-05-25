@@ -698,8 +698,8 @@ def create_cachePriceAll(cmc_api_key: Optional[str] = None):
     all_symbols = [s for s in all_symbols if is_valid_symbol_for_monitoring(s)]
     all_symbols = all_symbols[:MAX_MONITORED_SYMBOLS]
 
-    print(f"[PriceMonitor] Valid symbols to monitor: {len(all_symbols)}")
-    print(f"[PriceMonitor] List: {all_symbols}")
+    print(f"[pricefetcher] Valid symbols to monitor: {len(all_symbols)}")
+    print(f"[pricefetcher] List: {all_symbols}")
 
     register_enhanced_cachePriceAll(cmc_api_key)
     cachePriceAll = CacheFactory.get("PriceMulti", symbols=all_symbols)
