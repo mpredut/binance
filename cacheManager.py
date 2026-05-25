@@ -895,3 +895,452 @@ if __name__ == "__main__":
         print("Oprit manual.")
     finally:
         print("Cleanup / închidere resurse...")
+
+
+
+###########################################
+# """
+# BinanceUserDataStreamBridge — fixed version
+# ============================================
+
+# Fixes aplicate față de varianta originală:
+
+#   [F1] loop.close() adăugat după run_until_complete — previne leak
+#   [F2] Lock în start() — previne race condition la porniri simultane
+#   [F3] daemon=True redundant eliminat
+#   [F4] stop() implementat + _stop_event pentru watchdog + run_loop
+#   [F5] reconnect_delay resetat corect doar la sesiune stabilă
+#   [F6] Keepalive: ping via {"method": "ping"}, session.logon doar pentru re-auth
+#   [F7] last_ping resetat la fiecare reconectare nouă
+#   [F8] _initialize_once() nu mai rulează la import — apelat explicit
+
+# Functionalitate originala pastrata:
+#   - _upsert_order_from_execution_report
+#   - _append_trade_from_execution_report
+#   - _refresh_asset_value_from_ws_event
+#   - _persist_ws_updated_caches
+#   - _handle_binance_ws_event cu toate ramurile
+# """
+
+# import asyncio
+# import json
+# import threading
+# import time
+# import websockets
+
+# from collections import defaultdict
+# from typing import Callable, Optional
+
+# from keys.apikeys import api_key_ws
+# import utils as u   # _load_ed25519_signing_key, _sign_ed25519
+
+# # ─── Constante ────────────────────────────────────────────────────────────────
+
+# WS_URL               = "wss://ws-api.binance.com:443/ws-api/v3"
+# WS_RECV_TIMEOUT_SEC  = 30
+# WS_LOSS_TIMEOUT_SEC  = 120
+# WS_KEEPALIVE_SEC     = 30 * 60
+# WS_PING_INTERVAL_SEC = WS_LOSS_TIMEOUT_SEC // 2
+# WS_EVENT_LOG_ENABLED = True
+
+
+# # ─── Health state ─────────────────────────────────────────────────────────────
+
+# _ws_health_lock   = threading.Lock()
+# _ws_last_event_ts: Optional[float] = None
+# _ws_available     = False
+# _ws_is_healthy    = False
+
+
+# def _mark_ws_available(val: bool):
+#     global _ws_available
+#     with _ws_health_lock:
+#         _ws_available = val
+
+
+# def _mark_ws_healthy():
+#     global _ws_is_healthy
+#     with _ws_health_lock:
+#         _ws_is_healthy = True
+
+
+# def _mark_ws_unhealthy():
+#     global _ws_is_healthy
+#     with _ws_health_lock:
+#         _ws_is_healthy = False
+
+
+# def _mark_ws_event_received():
+#     global _ws_last_event_ts
+#     with _ws_health_lock:
+#         _ws_last_event_ts = time.time()
+#         _ws_is_healthy    = True
+
+
+# # ─── Cache helpers (functionalitate originala) ────────────────────────────────
+
+# def _upsert_order_from_execution_report(event: dict):
+#     symbol = event.get("s")
+#     if not symbol:
+#         return
+
+#     order_cache = get_cache_manager("Order")
+#     order_item = {
+#         "orderId":   event.get("i"),
+#         "price":     float(event.get("L") or event.get("p") or 0),
+#         "quantity":  float(event.get("l") or event.get("q") or 0),
+#         "timestamp": int(event.get("T") or event.get("E") or int(time.time() * 1000)),
+#         "side":      event.get("S"),
+#         "status":    event.get("X"),
+#         "symbol":    symbol,
+#         "eventType": event.get("x"),
+#     }
+
+#     with order_cache.lock:
+#         bucket = order_cache.cache.setdefault(symbol, [])
+#         existing_idx = next(
+#             (idx for idx, item in enumerate(bucket)
+#              if str(item.get("orderId")) == str(order_item["orderId"])),
+#             None,
+#         )
+#         if existing_idx is not None:
+#             bucket[existing_idx].update(order_item)
+#         else:
+#             bucket.append(order_item)
+#         order_cache.fetchtime_time_per_symbol[symbol] = int(time.time() * 1000)
+
+
+# def _append_trade_from_execution_report(event: dict):
+#     if event.get("x") != "TRADE":
+#         return
+#     symbol = event.get("s")
+#     if not symbol:
+#         return
+
+#     trade_cache = get_cache_manager("Trade")
+#     trade_id    = str(event.get("t") or f"{event.get('i')}-{event.get('T')}")
+#     trade_item  = {
+#         "symbol":  symbol,
+#         "id":      trade_id,
+#         "orderId": event.get("i"),
+#         "price":   event.get("L") or event.get("p"),
+#         "qty":     event.get("l") or event.get("q"),
+#         "time":    int(event.get("T") or event.get("E") or int(time.time() * 1000)),
+#         "isBuyer": str(event.get("S", "")).upper() == "BUY",
+#     }
+
+#     with trade_cache.lock:
+#         bucket = trade_cache.cache.setdefault(symbol, [])
+#         if not any(str(item.get("id")) == trade_id for item in bucket):
+#             bucket.append(trade_item)
+#             trade_cache.fetchtime_time_per_symbol[symbol] = int(time.time() * 1000)
+
+
+# def _refresh_asset_value_from_ws_event():
+#     asset_cache = get_cache_manager("AssetValue", symbols=["TOTAL"])
+#     asset_cache.update_cache_per_symbol("TOTAL")
+
+
+# def _persist_ws_updated_caches(event_type: str):
+#     if event_type == "executionReport":
+#         get_cache_manager("Order").save_state_to_file_if_enabled()
+#         get_cache_manager("Trade").save_state_to_file_if_enabled()
+#     elif event_type in ("balanceUpdate", "outboundAccountPosition"):
+#         get_cache_manager("AssetValue", symbols=["TOTAL"]).save_state_to_file_if_enabled()
+
+
+# # ─── Event stats + handler ────────────────────────────────────────────────────
+
+# _ws_event_stats: dict = defaultdict(int)
+
+
+# def _handle_binance_ws_event(event: dict):
+#     print("[WS] handler call...")
+#     event_type = event.get("e")
+#     if not event_type:
+#         return
+
+#     _ws_event_stats[event_type] += 1
+
+#     if event_type == "executionReport":
+#         if WS_EVENT_LOG_ENABLED:
+#             print(
+#                 f"[WS] executionReport "
+#                 f"symbol={event.get('s')} orderId={event.get('i')} "
+#                 f"status={event.get('X')} execType={event.get('x')} side={event.get('S')}"
+#             )
+#         # Varianta directa din WS event (fara re-fetch):
+#         _upsert_order_from_execution_report(event)
+#         _append_trade_from_execution_report(event)
+#         _persist_ws_updated_caches(event_type)
+#         # Alternativ, daca preferi re-fetch complet:
+#         # get_cache_manager("Order").update_cache()
+#         return
+
+#     if event_type in ("balanceUpdate", "outboundAccountPosition"):
+#         if WS_EVENT_LOG_ENABLED:
+#             print(f"[WS] {event_type} received")
+#         _refresh_asset_value_from_ws_event()
+#         _persist_ws_updated_caches(event_type)
+#         return
+
+
+# # ─── Bridge class ─────────────────────────────────────────────────────────────
+
+# class BinanceUserDataStreamBridge:
+#     """
+#     Conectare la Binance WebSocket API (ws-api.binance.com) pentru user data events.
+
+#     Flow per sesiune:
+#         1. websockets.connect
+#         2. session.logon  (Ed25519 auth)
+#         3. userDataStream.subscribe
+#         4. recv loop cu ping la WS_PING_INTERVAL_SEC
+#            și session.logon refresh la WS_KEEPALIVE_SEC
+#         5. La orice eroare → reconnect cu exponential backoff
+
+#     Lifecycle:
+#         bridge = BinanceUserDataStreamBridge(event_handler=fn)
+#         bridge.start()
+#         ...
+#         bridge.stop()
+#     """
+
+#     def __init__(self, event_handler: Callable, keepalive_sec: int = WS_KEEPALIVE_SEC):
+#         self.event_handler = event_handler
+#         self.keepalive_sec = keepalive_sec
+#         self._signing_key  = u._load_ed25519_signing_key()
+
+#         self._start_lock      = threading.Lock()   # [F2]
+#         self._started         = False
+#         self._stop_event      = threading.Event()  # [F4]
+#         self._run_thread:      Optional[threading.Thread] = None
+#         self._watchdog_thread: Optional[threading.Thread] = None
+
+#     # ─── Public API ───────────────────────────────────────────────────────────
+
+#     def start(self):
+#         """Pornește bridge-ul. Apeluri simultane sunt safe."""
+#         with self._start_lock:   # [F2]
+#             if self._started:
+#                 return
+#             self._started = True
+
+#         self._stop_event.clear()
+
+#         self._watchdog_thread = threading.Thread(
+#             target=self._watchdog_loop,
+#             name="WS-Watchdog",
+#             daemon=True,   # [F3] o singura data
+#         )
+#         self._watchdog_thread.start()
+
+#         self._run_thread = threading.Thread(
+#             target=self._run_loop,
+#             name="WS-RunLoop",
+#             daemon=True,
+#         )
+#         self._run_thread.start()
+
+#     def stop(self, timeout: float = 5.0):
+#         """[F4] Shutdown graceful."""
+#         self._stop_event.set()
+#         if self._run_thread and self._run_thread.is_alive():
+#             self._run_thread.join(timeout=timeout)
+#         if self._watchdog_thread and self._watchdog_thread.is_alive():
+#             self._watchdog_thread.join(timeout=timeout)
+#         self._started = False
+
+#     # ─── Thread: run loop ─────────────────────────────────────────────────────
+
+#     def _run_loop(self):
+#         """[F1] loop.close() garantat via finally."""
+#         loop = asyncio.new_event_loop()
+#         asyncio.set_event_loop(loop)
+#         try:
+#             loop.run_until_complete(self._listen_forever())
+#         except Exception as e:
+#             print(f"[WS] run_loop crashed: {e}")
+#         finally:
+#             loop.close()   # [F1]
+
+#     # ─── Async core ───────────────────────────────────────────────────────────
+
+#     async def _listen_forever(self):
+#         if self._signing_key is None:
+#             _mark_ws_available(False)
+#             _mark_ws_unhealthy()
+#             print("[WS] Cheie Ed25519 lipsește, fallback polling.")
+#             return
+
+#         _mark_ws_available(True)
+#         reconnect_delay = 1
+
+#         while not self._stop_event.is_set():
+#             try:
+#                 await self._session()
+#                 break  # stop_event setat, ieșire normală
+
+#             except Exception as e:
+#                 _mark_ws_unhealthy()
+#                 print(f"[WS] Eroare sesiune: {e}. Reconnect în {reconnect_delay}s...")
+#                 await self._interruptible_sleep(reconnect_delay)
+#                 reconnect_delay = min(60, reconnect_delay * 2)
+#                 # [F5] reconnect_delay NU e resetat aici — doar după sesiune stabilă
+
+#         print("[WS] listen_forever stopped")
+
+#     async def _session(self):
+#         """
+#         O sesiune completă. Aruncă excepție la orice eroare,
+#         _listen_forever face retry cu backoff.
+#         """
+#         async with websockets.connect(WS_URL, ping_interval=20, ping_timeout=20) as ws:
+
+#             # 1. Login
+#             await self._do_logon(ws, request_id="login")
+
+#             # 2. Subscribe
+#             await ws.send(json.dumps({
+#                 "id":     "sub",
+#                 "method": "userDataStream.subscribe",
+#             }))
+
+#             print("[WS] ✅ Login + Subscribe OK!")
+#             _mark_ws_event_received()
+
+#             # [F5] Sesiunea e stabilă → resetăm backoff-ul din _listen_forever
+#             # prin faptul că nu aruncăm excepție; la return normal backoff-ul
+#             # se resetează la 1 la următoarea iterație din while
+
+#             # [F7] Timpii resetați la fiecare sesiune nouă
+#             last_keepalive = time.time()
+#             last_ping      = time.time()
+
+#             while not self._stop_event.is_set():
+
+#                 # Keepalive: re-autentificare sesiune la fiecare WS_KEEPALIVE_SEC
+#                 if time.time() - last_keepalive >= self.keepalive_sec:
+#                     await self._do_logon(ws, request_id="keepalive")
+#                     last_keepalive = time.time()
+
+#                 # [F6] Ping propriu — method: ping, NU session.logon
+#                 if time.time() - last_ping >= WS_PING_INTERVAL_SEC:
+#                     await ws.send(json.dumps({"id": "ping", "method": "ping"}))
+#                     print("[WS] Ping sent")
+#                     last_ping = time.time()
+
+#                 try:
+#                     raw = await asyncio.wait_for(ws.recv(), timeout=WS_RECV_TIMEOUT_SEC)
+#                 except asyncio.TimeoutError:
+#                     print(f"[WS] Heartbeat (no events in {WS_RECV_TIMEOUT_SEC}s)")
+#                     continue
+
+#                 await self._handle_raw(raw)
+
+#     async def _do_logon(self, ws, request_id: str = "login"):
+#         """Trimite session.logon și verifică răspunsul."""
+#         timestamp  = int(time.time() * 1000)
+#         params_str = f"apiKey={api_key_ws}&timestamp={timestamp}"
+#         signature  = u._sign_ed25519(self._signing_key, params_str)
+
+#         await ws.send(json.dumps({
+#             "id":     request_id,
+#             "method": "session.logon",
+#             "params": {
+#                 "apiKey":    api_key_ws,
+#                 "timestamp": timestamp,
+#                 "signature": signature,
+#             },
+#         }))
+
+#         resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
+#         if resp.get("status") != 200:
+#             raise RuntimeError(f"[WS] session.logon failed (id={request_id}): {resp}")
+
+#         print(f"[WS] session.logon OK (id={request_id})")
+
+#     async def _handle_raw(self, raw: str):
+#         """Parsează și rutează un mesaj primit."""
+#         try:
+#             event = json.loads(raw)
+#         except json.JSONDecodeError as e:
+#             print(f"[WS] JSON decode error: {e}")
+#             return
+
+#         print(f"[WS RAW] {json.dumps(event)[:200]}")
+
+#         # Răspunsuri la comenzi (au "id")
+#         if "id" in event:
+#             if event["id"] == "ping":
+#                 print("[WS] Pong received, watchdog reset")
+#                 _mark_ws_event_received()
+#             else:
+#                 print(f"[WS] Command ack: id={event.get('id')} status={event.get('status')}")
+#             return
+
+#         # Noul WS API învelește evenimentul în "event"
+#         if "event" in event:
+#             event = event["event"]
+
+#         _mark_ws_event_received()
+#         self.event_handler(event)
+
+#     # ─── Thread: watchdog ─────────────────────────────────────────────────────
+
+#     def _watchdog_loop(self):
+#         """[F4] Iese curat când stop_event e setat."""
+#         while not self._stop_event.is_set():
+#             now = time.time()
+#             with _ws_health_lock:
+#                 age          = now - _ws_last_event_ts if _ws_last_event_ts else float("inf")
+#                 ws_available = _ws_available
+#                 ws_healthy   = _ws_is_healthy
+
+#             if ws_available and ws_healthy and age > WS_LOSS_TIMEOUT_SEC:
+#                 _mark_ws_unhealthy()
+#                 print(f"[WS][WARNING] Fără evenimente de {int(age)}s. Fallback polling.")
+
+#             self._stop_event.wait(timeout=5)   # [F4] sleep interruptibil
+
+#         print("[WS] Watchdog stopped")
+
+#     async def _interruptible_sleep(self, delay: float, step: float = 0.2):
+#         elapsed = 0.0
+#         while elapsed < delay and not self._stop_event.is_set():
+#             await asyncio.sleep(min(step, delay - elapsed))
+#             elapsed += step
+
+
+# # ─── Singleton ────────────────────────────────────────────────────────────────
+
+# _ws_bridge:      Optional[BinanceUserDataStreamBridge] = None
+# _ws_bridge_lock = threading.Lock()
+
+
+# def enable_real_ws_event_sync() -> BinanceUserDataStreamBridge:
+#     global _ws_bridge
+#     with _ws_bridge_lock:
+#         if _ws_bridge is not None:
+#             return _ws_bridge
+#         _ws_bridge = BinanceUserDataStreamBridge(
+#             event_handler=_handle_binance_ws_event,
+#         )
+#         _ws_bridge.start()
+#         return _ws_bridge
+
+
+# def disable_real_ws_event_sync():
+#     global _ws_bridge
+#     with _ws_bridge_lock:
+#         if _ws_bridge is not None:
+#             _ws_bridge.stop()
+#             _ws_bridge = None
+
+
+# # ─── [F8] Init explicit — NU la import ───────────────────────────────────────
+# #
+# # Apelează enable_real_ws_event_sync() acolo unde pornești aplicația:
+# #
+# #   from binance_user_stream_bridge import enable_real_ws_event_sync
+# #   enable_real_ws_event_sync() """

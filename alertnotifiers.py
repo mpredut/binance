@@ -5,7 +5,7 @@ import smtplib
 from datetime import datetime
 from email.mime.text import MIMEText
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 # Import your modules
 import log
@@ -17,18 +17,61 @@ class AlertNotifier:
     """Class for sending alerts through multiple channels."""
 
     @staticmethod
+    def format_human_readable_time(value) -> str:
+        if value is None:
+            return "N/A"
+        if isinstance(value, (int, float)):
+            try:
+                return datetime.fromtimestamp(value).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                return str(value)
+        if hasattr(value, "strftime"):
+            try:
+                return value.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                return str(value)
+        return str(value)
+
+    @staticmethod
+    def is_new_coin_alert(alert: Any) -> bool:
+        return isinstance(alert, dict) and alert.get("type") == "new_coin_discovered"
+
+    @staticmethod
+    def format_new_coin_message(alert: dict) -> str:
+        lines = [
+            f"🆕 NEW COIN: {alert.get('symbol', 'N/A')} - {alert.get('name', alert.get('symbol', 'N/A'))}",
+            f"Source: {alert.get('source', 'unknown')}",
+            f"Added: {AlertNotifier.format_human_readable_time(alert.get('added_at'))}",
+            f"Price: ${alert.get('price', 0):.6f}" if alert.get('price') is not None else "Price: N/A",
+        ]
+        url = alert.get("url")
+        if url:
+            lines.append(f"Link: {url}")
+        return "\n".join(lines)
+
+    @staticmethod
     def format_batch_message(alerts) -> str:
         lines = [
-            f"Crypto alerts: {len(alerts)} symbols",
-            f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+            f"Crypto alerts: {len(alerts)} items",
             "",
         ]
         for alert in alerts:
+            if AlertNotifier.is_new_coin_alert(alert):
+                lines.append(AlertNotifier.format_new_coin_message(alert))
+                continue
+
             direction = "RISE" if alert.alert_type == "up" else "DROP"
+            reference_time = AlertNotifier.format_human_readable_time(
+                getattr(alert, "reference_time", None) or getattr(alert, "timestamp", None)
+            )
             lines.append(
                 f"{alert.symbol}: {direction} {alert.percent_change:+.2f}% "
-                f"| price ${alert.current_price:.8f} | reference ${alert.reference_price:.8f}"
+                f"| price ${alert.current_price:.8f} | reference ${alert.reference_price:.8f} "
+                f"(at {reference_time})"
             )
+            url = getattr(alert, "url", None)
+            if url:
+                lines.append(f"Link: {url}")
         return "\n".join(lines)
 
     @staticmethod
@@ -45,10 +88,16 @@ class AlertNotifier:
         if not alert_file.is_absolute():
             alert_file = BASE_DIR / alert_file
         try:
+            reference_time = AlertNotifier.format_human_readable_time(
+                getattr(alert, "reference_time", None) or getattr(alert, "timestamp", None)
+            )
             with alert_file.open("a", encoding="utf-8") as f:
                 f.write(f"[{datetime.now().isoformat()}] {alert.symbol} - {alert.alert_type} - {alert.percent_change:+.2f}%\n")
                 f.write(f"  Price: ${alert.current_price:.4f}\n")
-                f.write(f"  Reference: ${alert.reference_price:.4f}\n")
+                f.write(f"  Reference: ${alert.reference_price:.4f} (at {reference_time})\n")
+                url = getattr(alert, "url", None)
+                if url:
+                    f.write(f"  Link: {url}\n")
                 f.write("-" * 50 + "\n")
             return True
         except Exception as e:
@@ -65,15 +114,31 @@ class AlertNotifier:
             print("[Notifier] Telegram: bot token or chat_id is missing")
             return
 
-        message = (
-            f"🚨 *Crypto Alert* 🚨\n\n"
-            f"*{alert.symbol}*\n"
-            f"{'🟢 RISE' if alert.alert_type == 'up' else '🔴 DROP'}\n\n"
-            f"Current price: `${alert.current_price:.4f}`\n"
-            f"Reference: `${alert.reference_price:.4f}`\n"
-            f"Change: `{alert.percent_change:+.2f}%`\n"
-            f"Threshold: `{alert.threshold}%`"
-        )
+        if AlertNotifier.is_new_coin_alert(alert):
+            message = (
+                "🆕 *New Coin Alert* 🆕\n\n"
+                f"*{alert.get('symbol', 'N/A')}* - {alert.get('name', alert.get('symbol', 'N/A'))}\n"
+                f"Source: {alert.get('source', 'unknown')}\n"
+                f"Added: {AlertNotifier.format_human_readable_time(alert.get('added_at'))}\n"
+                f"Price: `{alert.get('price', 0):.6f}`\n"
+                f"Link: {alert.get('url', 'N/A')}"
+            )
+        else:
+            reference_time = AlertNotifier.format_human_readable_time(
+                getattr(alert, "reference_time", None) or getattr(alert, "timestamp", None)
+            )
+            message = (
+                f"🚨 *Crypto Alert* 🚨\n\n"
+                f"*{alert.symbol}*\n"
+                f"{'🟢 RISE' if alert.alert_type == 'up' else '🔴 DROP'}\n\n"
+                f"Current price: `${alert.current_price:.4f}`\n"
+                f"Reference: `${alert.reference_price:.4f}` (at {reference_time})\n"
+                f"Change: `{alert.percent_change:+.2f}%`\n"
+                f"Threshold: `{alert.threshold}%`"
+            )
+            url = getattr(alert, "url", None)
+            if url:
+                message += f"\nLink: {url}"
 
         try:
             url = f"https://api.telegram.org/bot{bot_token}/sendMessage"

@@ -410,6 +410,7 @@ class NewCoinsMonitor:
     def refresh(self):
         self.all_new_coins = self.factory.get_all_new_coins(NEW_COINS_AGE_DAYS)
         self.all_symbols = set()
+        print(f"[NewCoinsMonitor] Refreshed new coins from sources: {', '.join(self.all_new_coins.keys())}")
         for source_name, coins in self.all_new_coins.items():
             for coin in coins:
                 symbol = coin.get('symbol')

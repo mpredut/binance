@@ -641,7 +641,7 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
 
 PRICE_MULTI_SYNC_INTERVAL_SEC = 5 * 60
 
-def register_enhanced_price_manager(cmc_api_key: Optional[str] = None):
+def register_enhanced_cachePriceAll(cmc_api_key: Optional[str] = None):
     if not hasattr(CacheFactory, '_CONFIG'):
         CacheFactory._CONFIG = {}
     CacheFactory._CONFIG["PriceMulti"] = {
@@ -674,7 +674,7 @@ def get_base_symbol(symbol: str) -> str:
     return symbol
 
 
-def create_price_monitor(cmc_api_key: Optional[str] = None):
+def create_cachePriceAll(cmc_api_key: Optional[str] = None):
     all_symbols = []
     seen_bases = set()
     
@@ -701,11 +701,11 @@ def create_price_monitor(cmc_api_key: Optional[str] = None):
     print(f"[PriceMonitor] Valid symbols to monitor: {len(all_symbols)}")
     print(f"[PriceMonitor] List: {all_symbols}")
 
-    register_enhanced_price_manager(cmc_api_key)
-    price_manager = CacheFactory.get("PriceMulti", symbols=all_symbols)
-    thread = price_manager.periodic_sync(sync_ts=PRICE_MULTI_SYNC_INTERVAL_SEC, save_state=True)
+    register_enhanced_cachePriceAll(cmc_api_key)
+    cachePriceAll = CacheFactory.get("PriceMulti", symbols=all_symbols)
+    thread = cachePriceAll.periodic_sync(sync_ts=PRICE_MULTI_SYNC_INTERVAL_SEC, save_state=True)
 
-    return price_manager
+    return cachePriceAll
 
 
 if __name__ == "__main__":
@@ -715,7 +715,7 @@ if __name__ == "__main__":
     print(f"💰 Base quote currency: {QUOTE_CURRENCY}")
     print("=" * 60)
 
-    monitor = create_price_monitor(cmc_api_key=CMC_API_KEY)
+    monitor = create_cachePriceAll(cmc_api_key=CMC_API_KEY)
     print("\n⏳ Waiting for the first price collection...")
     time.sleep(35)
 

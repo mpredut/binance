@@ -13,7 +13,7 @@ from pricefetcher import create_price_monitor
 from pricechecker import start_price_alert_system, PRICE_ALERT_CONFIG
 from new_coins_discovery import create_new_coins_monitor, NewCoinsMonitor, NewCoinsFactory, MAX_NEW_COINS_TO_TRACK
 
-
+TIME_INTERVAL_CLEANUP = 6 * 60 # * 60  # 6 hours in seconds
 REQUIRED_ENV_VARS = ("CMC_API_KEY", "PHONE_ALERT_URL")
 
 
@@ -149,10 +149,12 @@ def new_coin_alert_handler(coin_info):
     source = coin_info.get('source', 'unknown')
     has_price = coin_info.get('has_price', False)
     auto_added = coin_info.get('auto_added', False)
+    added_at = AlertNotifier.format_human_readable_time(coin_info.get('added_at'))
 
     print("\n" + "=" * 70)
     print(f"🆕 NEW COIN: {coin_info['symbol']} - {coin_info.get('name', 'N/A')}")
     print(f"   📡 Source: {source}")
+    print(f"   📅 Added: {added_at}")
 
     if has_price:
         print(f"   💰 Price: ${coin_info.get('price', 0):.8f}")
@@ -164,6 +166,18 @@ def new_coin_alert_handler(coin_info):
     if coin_info.get('url'):
         print(f"   🔗 {coin_info['url']}")
     print("=" * 70)
+
+    if not ALERT_NOTIFIER_AVAILABLE:
+        return
+
+    if os.environ.get("PHONE_ALERT_URL") or os.environ.get("NTFY_TOPIC"):
+        AlertNotifier.send_phone_webhook_batch([coin_info])
+
+    if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"):
+        AlertNotifier.send_telegram(coin_info)
+
+    if os.environ.get("SMTP_USERNAME") and os.environ.get("SMTP_PASSWORD") and os.environ.get("ALERT_TO_EMAIL"):
+        AlertNotifier.send_email_batch([coin_info])
 
 
 def print_status_report(price_monitor, new_coins_monitor):
@@ -196,7 +210,8 @@ def print_status_report(price_monitor, new_coins_monitor):
 def periodic_cleanup(price_monitor, new_coins_monitor):
     """Run cleanup every 6 hours."""
     while True:
-        time.sleep(6 * 3600)
+        print(f"sleeping for {TIME_INTERVAL_CLEANUP} hours before next cleanup...")
+        time.sleep(TIME_INTERVAL_CLEANUP )
         print("[Periodic] Running cleanup for stale prices...")
 
         if hasattr(price_monitor, 'cleanup_old_prices'):
@@ -228,7 +243,7 @@ def main():
 
     print("\n⏳ Initializing price monitor...")
     price_monitor = create_price_monitor(cmc_api_key=CMC_API_KEY)
-    print("✅ Price monitor started!")
+    print("Price monitor started!")
 
     print("\n⏳ Waiting for first price sync (30 seconds)...")
     time.sleep(30)
@@ -239,14 +254,14 @@ def main():
         alert_callback=custom_alert_handler,
         check_interval_seconds=60
     )
-    print("✅ Price alert system started!")
+    print("Price alert system started!")
 
     print("\n⏳ Initializing new coin monitor...")
     factory = NewCoinsFactory(enabled_sources=ENABLED_SOURCES, cmc_api_key=CMC_API_KEY)
     new_coins_monitor = NewCoinsMonitor(price_monitor=price_monitor, factory=factory)
     new_coins_monitor.register_alert_callback(new_coin_alert_handler)
     new_coins_monitor.start_monitoring(interval_seconds=3600)
-    print(f"✅ New coin monitor started! Active sources: {factory.get_available_sources()}")
+    print(f"New coin monitor started! Active sources: {factory.get_available_sources()}")
 
     print("\n" + "=" * 70)
     print("📋 NEW COIN MONITOR CONFIGURATION")
@@ -284,13 +299,13 @@ def main():
         daemon=True
     )
     cleanup_thread.start()
-    print("✅ Periodic cleanup started (every 6 hours)")
+    print("Periodic cleanup started (every 6 hours)")
 
     print_status_report(price_monitor, new_coins_monitor)
     print(new_coins_monitor.get_report())
 
     print("\n" + "=" * 70)
-    print("✅ SYSTEM FULLY ACTIVE!")
+    print("SYSTEM FULLY ACTIVE!")
     print("   📊 New coins are auto-added to the watchlist")
     print("   📈 PriceChecker will monitor their price")
     print("   🔔 Alerts will be sent when thresholds are reached")
@@ -299,7 +314,8 @@ def main():
 
     try:
         while True:
-            time.sleep(1)
+            time.sleep(60)
+            print_status_report(price_monitor, new_coins_monitor)
     except KeyboardInterrupt:
         print("\n\n🛑 Stopping system...")
         new_coins_monitor.stop_monitoring()

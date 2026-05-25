@@ -4,14 +4,16 @@ import threading
 from datetime import datetime
 from typing import Dict, List, Optional, Callable
 from collections import defaultdict
+from urllib.parse import quote
 
 # Import your existing modules
 import log
 import utils as u
+from pricefetcher import get_base_symbol
 
 # Threshold configuration (can be adjusted at any time)
 PRICE_ALERT_CONFIG = {
-    "up_percent": 5.1,      # Trigger an alert when the price rises by 5% from the 24h low
+    "up_percent": 4.1,      # Trigger an alert when the price rises by 5% from the 24h low
     "down_percent": 7.5,    # Trigger an alert when the price drops by 7.5% from the 24h high
     "lookback_hours": 24,   # Analysis interval (24 hours)
     "cooldown_minutes": 15,  # Do not send the same alert more often than every 15 minutes
@@ -22,7 +24,8 @@ class PriceAlert:
     """Structure for a price alert."""
 
     def __init__(self, symbol: str, alert_type: str, current_price: float,
-                 reference_price: float, percent_change: float, threshold: float):
+                 reference_price: float, percent_change: float, threshold: float,
+                 url: Optional[str] = None, reference_time: Optional[str] = None):
         self.symbol = symbol
         self.alert_type = alert_type  # "up" or "down"
         self.current_price = current_price
@@ -30,17 +33,21 @@ class PriceAlert:
         self.percent_change = percent_change
         self.threshold = threshold
         self.timestamp = time.time()
+        self.url = url or ""
+        self.reference_time = reference_time
 
     def __str__(self) -> str:
         direction = "🚀 RISE" if self.alert_type == "up" else "📉 DROP"
         emoji = "🟢" if self.alert_type == "up" else "🔴"
+        reference_time = self.reference_time or datetime.fromtimestamp(self.timestamp).strftime("%Y-%m-%d %H:%M:%S")
+        url_line = f"🔗 CoinMarketCap: {self.url}\n" if self.url else ""
         return (
             f"\n{emoji} {direction} {emoji}\n"
             f"📊 Coin: {self.symbol}\n"
             f"💰 Current price: ${self.current_price:.4f}\n"
-            f"📈 Reference: ${self.reference_price:.4f} ({'24h low' if self.alert_type == 'up' else '24h high'})\n"
-            f"📊 Change: {self.percent_change:+.2f}% (threshold: {self.threshold}%)\n"
-            f"⏰ Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            f"📈 Reference: ${self.reference_price:.4f} ({'24h low' if self.alert_type == 'up' else '24h high'}, at {reference_time})\n"
+            f"{url_line}"
+            f"📊 Change: {self.percent_change:+.2f}% (threshold: {self.threshold}%)"
         )
 
     def to_dict(self) -> dict:
@@ -52,7 +59,9 @@ class PriceAlert:
             "percent_change": self.percent_change,
             "threshold": self.threshold,
             "timestamp": self.timestamp,
-            "timestamp_readable": datetime.now().isoformat()
+            "timestamp_readable": datetime.now().isoformat(),
+            "reference_time": self.reference_time,
+            "url": self.url,
         }
 
 
@@ -84,6 +93,23 @@ class PriceChecker:
         print("\n" + "=" * 60)
         print(str(alert))
         print("=" * 60)
+
+    def _build_cmc_url(self, symbol: str) -> str:
+        try:
+            candidate_symbols = [symbol, get_base_symbol(symbol)]
+            for candidate in candidate_symbols:
+                if not candidate:
+                    continue
+                for platform in getattr(getattr(self.price_manager, "price_factory", None), "_platforms", []):
+                    if getattr(platform, "platform_name", "") != "CoinMarketCap":
+                        continue
+                    listings = getattr(platform, "_all_listings", {})
+                    metadata = listings.get(candidate) or listings.get(candidate.upper())
+                    if metadata and metadata.get("slug"):
+                        return f"https://coinmarketcap.com/currencies/{metadata['slug']}/"
+            return f"https://coinmarketcap.com/search/?q={quote(symbol)}"
+        except Exception:
+            return f"https://coinmarketcap.com/search/?q={quote(symbol)}"
 
     def _get_price_history_last_hours(self, symbol: str, hours: int) -> List[Dict]:
         """Retrieve the price history from the last 'hours' hours."""
@@ -128,10 +154,11 @@ class PriceChecker:
             }
 
         # Extract prices from history
-        prices = [entry["price"] for entry in history]
+        min_entry = min(history, key=lambda entry: entry["price"])
+        max_entry = max(history, key=lambda entry: entry["price"])
 
-        min_price = min(prices)
-        max_price = max(prices)
+        min_price = min_entry["price"]
+        max_price = max_entry["price"]
 
         # Calculate percentage changes
         up_from_min = ((current_price - min_price) / min_price) * 100 if min_price > 0 else 0
@@ -141,7 +168,9 @@ class PriceChecker:
             "has_data": True,
             "current_price": current_price,
             "min_price": min_price,
+            "min_price_timestamp_readable": min_entry.get("timestamp_readable"),
             "max_price": max_price,
+            "max_price_timestamp_readable": max_entry.get("timestamp_readable"),
             "up_from_min": up_from_min,
             "down_from_max": down_from_max,
             "history_count": len(history),
@@ -183,8 +212,10 @@ class PriceChecker:
                     alert_type="up",
                     current_price=current_price,
                     reference_price=stats["min_price"],
+                    reference_time=stats.get("min_price_timestamp_readable"),
                     percent_change=up_percent,
-                    threshold=self.config["up_percent"]
+                    threshold=self.config["up_percent"],
+                    url=self._build_cmc_url(symbol)
                 )
                 alerts.append(alert)
                 self._record_alert_sent(symbol, "up")
@@ -197,8 +228,10 @@ class PriceChecker:
                     alert_type="down",
                     current_price=current_price,
                     reference_price=stats["max_price"],
+                    reference_time=stats.get("max_price_timestamp_readable"),
                     percent_change=down_percent,
-                    threshold=self.config["down_percent"]
+                    threshold=self.config["down_percent"],
+                    url=self._build_cmc_url(symbol)
                 )
                 alerts.append(alert)
                 self._record_alert_sent(symbol, "down")
