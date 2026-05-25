@@ -22,7 +22,6 @@ import bapi_allorders as apiorders
 
 import utils as u
 import log
-#import alert
 
 
 def adjust_monitor_interval(initial_interval, min_interval, total_duration, elapsed_time):

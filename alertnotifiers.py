@@ -16,6 +16,9 @@ BASE_DIR = Path(__file__).resolve().parent
 class AlertNotifier:
     """Class for sending alerts through multiple channels."""
 
+    def check_alert(condition, message, alert_interval=60):
+        pass  # Placeholder for alert checking logic, can be implemented as needed
+    
     @staticmethod
     def format_human_readable_time(value) -> str:
         if value is None:

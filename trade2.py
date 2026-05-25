@@ -12,7 +12,7 @@ from keys.apikeys import api_key, api_secret
 
 #my imports
 import log
-import alert
+import alertnotifiers as alert
 import utils as u
 import symbols as sym
 import bapi as api

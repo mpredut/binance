@@ -7,7 +7,7 @@ from collections import deque
 
 #my imports
 import log
-import alert
+import alertnotifiers as alert
 import utils as u
 import symbols as sym
 import bapi as api
