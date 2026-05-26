@@ -442,7 +442,12 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
                     if "symbol_metadata" in data:
                         self.symbol_added_time = data["symbol_metadata"].get("added_time", {})
                         seen_bases = {get_base_symbol(symbol) for symbol in self.active_symbols}
-                        for symbol in data["symbol_metadata"].get("active_symbols", []):
+                        active_symbols = data["symbol_metadata"].get("active_symbols", [])
+                        recovered_symbols = [
+                            symbol for symbol, added_time in self.symbol_added_time.items()
+                            if symbol in data.get("items", {}) and time.time() - added_time <= PRICE_HISTORY_RETENTION_DAYS * 24 * 3600
+                        ]
+                        for symbol in list(dict.fromkeys(active_symbols + recovered_symbols)):
                             if len(self.active_symbols) >= MAX_MONITORED_SYMBOLS:
                                 print(f"[Pricefetcher] Limit reached while loading: maximum {MAX_MONITORED_SYMBOLS} monitored coins, the rest will be ignored")
                                 break

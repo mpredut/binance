@@ -61,6 +61,7 @@ def validate_required_env():
 
 load_env_file()
 validate_required_env()
+CMC_API_KEY = os.environ.get('CMC_API_KEY')
 
 def print_notification_channels_status():
     print("ENV CONFIGURATION:")

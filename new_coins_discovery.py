@@ -467,7 +467,7 @@ class NewCoinsMonitor:
                         for source_name, coins in self.all_new_coins.items():
                             new_from_source = [c for c in coins if c['symbol'] in new_symbols]
                             if new_from_source:
-                                auto_add = (source_name == "CoinMarketCap")
+                                auto_add = (source_name.lower() == "coinmarketcap")
                                 self._trigger_alerts(new_from_source, source_name, auto_add=auto_add)
                 except Exception as e:
                     print(f"[NewCoinsMonitor] Error: {e}")
