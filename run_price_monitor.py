@@ -10,11 +10,14 @@ import log
 
 # Importă modulele principale
 from pricefetcher import create_cachePriceAll
-from pricechecker import start_price_alert_system, PRICE_ALERT_CONFIG
-from new_coins_discovery import create_new_coins_monitor, NewCoinsMonitor, NewCoinsFactory, MAX_NEW_COINS_TO_TRACK
+from pricechecker import start_price_alert_checker, PRICE_ALERT_CONFIG
+from new_coins_discovery import create_new_coins_checker, NewCoinsMonitor, NewCoinsFactory, MAX_NEW_COINS_TO_TRACK
+from alertnotifiers import AlertNotifier
 
+CMC_API_KEY = os.environ.get('CMC_API_KEY')
 TIME_INTERVAL_CLEANUP = 6 * 60 # * 60  # 6 hours in seconds
 REQUIRED_ENV_VARS = ("CMC_API_KEY", "PHONE_ALERT_URL")
+ENABLED_SOURCES = ["coinmarketcap", "coingecko", "binance", "dexscreener"]
 
 
 def load_env_file(filename=".env"):
@@ -59,16 +62,8 @@ def validate_required_env():
 load_env_file()
 validate_required_env()
 
-# Try to import AlertNotifier, but do not continue without it
-try:
-    from alertnotifiers import AlertNotifier
-    ALERT_NOTIFIER_AVAILABLE = True
-except ImportError as exc:
-    raise RuntimeError("AlertNotifier is required but could not be imported") from exc
-
-
 def print_notification_channels_status():
-    print("CONFIGURATION CHECK")
+    print("ENV CONFIGURATION:")
     phone_url = os.environ.get("PHONE_ALERT_URL")
     ntfy_topic = os.environ.get("NTFY_TOPIC")
     if phone_url or ntfy_topic:
@@ -109,39 +104,10 @@ def print_notification_channels_status():
 print_notification_channels_status()
 
 
-def custom_alert_handler(alert):
-    """Handler for price alerts."""
-    alerts = alert if isinstance(alert, list) else [alert]
-    if ALERT_NOTIFIER_AVAILABLE:
-        for item in alerts:
-            AlertNotifier.print_to_console(item)
-            AlertNotifier.save_to_file(item, filename="crypto_alerts.log")
-
-        if os.environ.get("PHONE_ALERT_URL") or os.environ.get("NTFY_TOPIC"):
-            AlertNotifier.send_phone_webhook_batch(alerts)
-        else:
-            print("[Warning] Phone alert was not sent because PHONE_ALERT_URL or NTFY_TOPIC is missing.")
-
-        if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"):
-            for item in alerts:
-                AlertNotifier.send_telegram(item)
-        else:
-            print("[Warning] Telegram alert was not sent because TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID is missing.")
-
-        if os.environ.get("SMTP_USERNAME") and os.environ.get("SMTP_PASSWORD") and os.environ.get("ALERT_TO_EMAIL"):
-            AlertNotifier.send_email_batch(alerts)
-        else:
-            print("[Warning] Email alert was not sent because SMTP_USERNAME, SMTP_PASSWORD, or ALERT_TO_EMAIL is missing.")
-    else:
-        print("[Warning] AlertNotifier is not available, falling back to console output.")
-        for item in alerts:
-            print("\n" + "=" * 60)
-            print(str(item))
-            print("=" * 60)
-
-
+def alert_handler(alert):
+    AlertNotifier.send(alert)
+ 
 def new_coin_alert_handler(coin_info):
-    """Handler for newly discovered coins."""
     source = coin_info.get('source', 'unknown')
     has_price = coin_info.get('has_price', False)
     auto_added = coin_info.get('auto_added', False)
@@ -163,14 +129,9 @@ def new_coin_alert_handler(coin_info):
         print(f"   🔗 {coin_info['url']}")
     print("=" * 70)
 
-    if not ALERT_NOTIFIER_AVAILABLE:
-        return
+    AlertNotifier.send([coin_info])
 
-    if os.environ.get("ALERT_NEW_COIN", "").upper() == "TRUE":
-        AlertNotifier.send([coin_info])
-
-def print_status_report(cachePriceAll, new_coins_monitor):
-    """Print a status report."""
+def print_new_coin_status(cachePriceAll, new_coins_checker):
     print("\n" + "=" * 70)
     print("📊 STATUS REPORT")
     print("=" * 70)
@@ -180,23 +141,16 @@ def print_status_report(cachePriceAll, new_coins_monitor):
         print(f"\n💰 Tracked price symbols: {symbols_count}")
         print(f"   First 10: {cachePriceAll.original_symbols[:10]}")
 
-    if new_coins_monitor:
-        summary = new_coins_monitor.get_summary()
+    if new_coins_checker:
+        summary = new_coins_checker.get_summary()
         print(f"\n🆕 New coins discovered total: {summary['total_new_coins']}")
         for source, data in summary['sources'].items():
             print(f"   {source}: {data['count']} coins")
         if summary['all_symbols']:
             print(f"   New symbols: {summary['all_symbols'][:10]}")
 
-    print(f"\n⚙️ Price alert configuration:")
-    print(f"   Default list: up +{PRICE_ALERT_CONFIG['default']['up_percent']}% / down -{PRICE_ALERT_CONFIG['default']['down_percent']}%")
-    print(f"   Dynamic list: up +{PRICE_ALERT_CONFIG['dynamic']['up_percent']}% / down -{PRICE_ALERT_CONFIG['dynamic']['down_percent']}%")
-    print(f"   Cooldown: {PRICE_ALERT_CONFIG['cooldown_minutes']} minutes")
 
-    print("=" * 70)
-
-
-def periodic_cleanup(cachePriceAll, new_coins_monitor):
+def periodic_cleanup(cachePriceAll, new_coins_checker):
     """Run cleanup every 6 hours."""
     while True:
         print(f"sleeping for {TIME_INTERVAL_CLEANUP} hours before next cleanup...")
@@ -213,58 +167,28 @@ def periodic_cleanup(cachePriceAll, new_coins_monitor):
         else:
             print("[Periodic] cachePriceAll.cleanup_old_symbols() does not exist")
 
-        if new_coins_monitor and hasattr(new_coins_monitor, 'cleanup_old_new_coins'):
-            new_coins_monitor.cleanup_old_new_coins()
+        if new_coins_checker and hasattr(new_coins_checker, 'cleanup_old_new_coins'):
+            new_coins_checker.cleanup_old_new_coins()
         else:
-            print("[Periodic] new_coins_monitor.cleanup_old_new_coins() does not exist")
+            print("[Periodic] new_coins_checker.cleanup_old_new_coins() does not exist")
 
+def start_new_coin_checker(cachePriceAll):
+    print("\n⏳ Initializing new coin checker...")
 
-def main():
-    """Main entry point."""
-
-    CMC_API_KEY = os.environ.get('CMC_API_KEY')
-    ENABLED_SOURCES = ["coinmarketcap", "coingecko", "binance", "dexscreener"]
-
-    print("\n⏳ Initializing cache price colection...")
-    cachePriceAll = create_cachePriceAll(cmc_api_key=CMC_API_KEY)
-    print("Price monitor started!")
-
-    print("\n⏳ Waiting for first price sync (30 seconds)...")
-    time.sleep(30)
-
-    print("\n⏳ Starting price alert system...")
-    analyzer = start_price_alert_system(
-        cachePriceAll=cachePriceAll,
-        alert_callback=custom_alert_handler,
-        check_interval_seconds=60
-    )
-    print("Price alert system started!")
-
-    print("\n⏳ Initializing new coin monitor...")
     factory = NewCoinsFactory(enabled_sources=ENABLED_SOURCES, cmc_api_key=CMC_API_KEY)
-    new_coins_monitor = NewCoinsMonitor(cachePriceAll, factory=factory)
-    new_coins_monitor.register_alert_callback(new_coin_alert_handler)
-    new_coins_monitor.start_monitoring(interval_seconds=3600)
-    print(f"New coin monitor started! Active sources: {factory.get_available_sources()}")
-
-    print("\n" + "=" * 70)
-    print("")
-    print("📋 NEW COIN MONITOR CONFIGURATION")
-    print("=" * 70)
-    print("   ✅ CoinMarketCap - discover + price -> auto-add to watchlist")
-    print("   ℹ️ CoinGecko - discovery only -> informational")
-    print("   ℹ️ Binance - new listings only -> informational")
-    print("   ℹ️ DexScreener - new DEX tokens only -> informational")
-    print("=" * 70)
+    new_coins_checker = NewCoinsMonitor(cachePriceAll, factory=factory)
+    new_coins_checker.register_alert_callback(new_coin_alert_handler)
+    new_coins_checker.start_monitoring(interval_seconds=3600)
+    print(f"New coin checker started! Active sources: {factory.get_available_sources()}")
 
     print("\n⏳ Performing initial new coin discovery...")
-    new_coins_monitor.refresh()
+    new_coins_checker.refresh()
 
     auto_added_count = 0
-    for source_name, coins in new_coins_monitor.all_new_coins.items():
+    for source_name, coins in new_coins_checker.all_new_coins.items():
         if source_name.lower() == "coinmarketcap":
             for coin in coins[:MAX_NEW_COINS_TO_TRACK]:
-                if new_coins_monitor.add_new_coin_to_watchlist(coin):
+                if new_coins_checker.add_new_coin_to_watchlist(coin):
                     auto_added_count += 1
         else:
             if coins:
@@ -280,31 +204,55 @@ def main():
 
     cleanup_thread = threading.Thread(
         target=periodic_cleanup,
-        args=(cachePriceAll, new_coins_monitor),
+        args=(cachePriceAll, new_coins_checker),
         daemon=True
     )
     cleanup_thread.start()
     print("Periodic cleanup started (every 6 hours)")
 
-    print_status_report(cachePriceAll, new_coins_monitor)
-    print(new_coins_monitor.get_report())
+    print_new_coin_status(cachePriceAll, new_coins_checker)
+    print(new_coins_checker.get_report())
 
-    print("\n" + "=" * 70)
-    print("SYSTEM FULLY ACTIVE!")
-    print("   📊 New coins are auto-added to the watchlist")
-    print("   📈 PriceChecker will monitor their price")
-    print("   🔔 Alerts will be sent when thresholds are reached")
+    return new_coins_checker
+
+
+def main():
+
+    print("\n⏳ Initializing cache price colection...")
+    cachePriceAll = create_cachePriceAll(cmc_api_key=CMC_API_KEY)
+    print("Price fetcher started!")
+
+    print("\n⏳ Waiting for first price sync (5 seconds)...")
+    time.sleep(5)
+
     print("=" * 70)
-    print("\n👉 Waiting for alerts... (Ctrl+C to stop)\n")
+    print(f"⚙️ Price alert configuration:")
+    print(f"   Default list: up +{PRICE_ALERT_CONFIG['default']['up_percent']}% / down -{PRICE_ALERT_CONFIG['default']['down_percent']}%")
+    print(f"   Dynamic list: up +{PRICE_ALERT_CONFIG['dynamic']['up_percent']}% / down -{PRICE_ALERT_CONFIG['dynamic']['down_percent']}%")
+    print(f"   Cooldown: {PRICE_ALERT_CONFIG['cooldown_minutes']} minutes")
+
+    print("⏳ Starting price alert checker...")
+    price_checker = start_price_alert_checker(
+        cachePriceAll=cachePriceAll,
+        alert_callback=alert_handler,
+        check_interval_seconds=60
+    )
+   
+    if os.environ.get("ALERT_NEW_COIN", "").upper() == "TRUE":
+        print("=" * 70)
+        print("⏳ Starting start new coin checker...")
+        new_coins_checker = start_new_coin_checker(cachePriceAll)
+    else:
+        print("NEW COIN ALERT DISABLED!")
 
     try:
         while True:
-            time.sleep(60)
-            print_status_report(cachePriceAll, new_coins_monitor)
+            time.sleep(160)
+            print("\n👉 Waiting for alerts... (Ctrl+C to stop)\n")
     except KeyboardInterrupt:
         print("\n\n🛑 Stopping system...")
-        new_coins_monitor.stop_monitoring()
-        analyzer.stop_monitoring()
+        new_coins_checker.stop_monitoring()
+        price_checker.stop_monitoring()
         print("👋 Goodbye!")
 
 

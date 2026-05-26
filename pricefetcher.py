@@ -34,7 +34,7 @@ DEFAULT_SYMBOLS = ["BTC", "TAO", "HYPE"]
 
 
 # ============================================
-# Platforme de preț
+# Platforme specializate de pret
 # ============================================
 
 class PricePlatformInterface(ABC):
@@ -419,6 +419,7 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
         initial_symbols = []
         seen_bases = set()
         for symbol in symbols:
+            print(f"SSSS{symbol}")
             base_symbol = get_base_symbol(symbol)
             if base_symbol not in seen_bases and is_valid_symbol_for_monitoring(symbol):
                 seen_bases.add(base_symbol)

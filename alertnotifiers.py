@@ -14,7 +14,6 @@ BASE_DIR = Path(__file__).resolve().parent
 
 
 class AlertNotifier:
-    """Class for sending alerts through multiple channels."""
 
     def check_alert(condition, message, alert_interval=60):
         pass  # Placeholder for alert checking logic, can be implemented as needed
@@ -70,8 +69,8 @@ class AlertNotifier:
 
             lines.append(
                 f"{alert.symbol}: {direction} {alert.percent_change:+.2f}% "
-                f"| P ${alert.current_price:.8f} | REF ${alert.reference_price:.8f} "
-                f"(at {reference_time})"
+                f"| C ${alert.current_price:.8f} | R ${alert.reference_price:.8f} "
+                f"({reference_time})"
             )
 
             url = getattr(alert, "url", None)
@@ -82,14 +81,12 @@ class AlertNotifier:
 
     @staticmethod
     def print_to_console(alert):
-        """Print the alert to the console."""
         print("\n" + "=" * 70)
         print(str(alert))
         print("=" * 70)
 
     @staticmethod
     def save_to_file(alert, filename="alerts.log"):
-        """Save the alert to a file."""
         alert_file = Path(filename)
         if not alert_file.is_absolute():
             alert_file = BASE_DIR / alert_file
@@ -112,7 +109,6 @@ class AlertNotifier:
 
     @staticmethod
     def send_telegram(alert, bot_token: Optional[str] = None, chat_id: Optional[str] = None):
-        """Send an alert through Telegram."""
         bot_token = bot_token or os.environ.get("TELEGRAM_BOT_TOKEN")
         chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID")
 
@@ -243,9 +239,10 @@ class AlertNotifier:
             print(f"[Notifier] Phone webhook batch exception: {e}")
             return False
 
+
+    #Combined handler that sends alerts through multiple channels.    
     @staticmethod
     def send(alert, enable_console=True, enable_file=True, enable_telegram=False, enable_email=False, enable_phone_webhook=False):
-        """Combined handler that sends alerts through multiple channels."""
         alerts = [alert] if not isinstance(alert, list) else alert
         if enable_console:
             for item in alerts:

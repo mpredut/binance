@@ -27,7 +27,6 @@ PRICE_ALERT_CONFIG = {
 
 
 class PriceAlert:
-    """Structure for a price alert."""
 
     def __init__(self, symbol: str, alert_type: str, current_price: float,
                  reference_price: float, percent_change: float, threshold: float,
@@ -78,11 +77,6 @@ class PriceChecker:
     """
 
     def __init__(self, cachePriceAll, alert_callback: Optional[Callable] = None):
-        """
-        Args:
-            cachePriceAll: The EnhancedCachePriceManager instance.
-            alert_callback: Function called when an alert is generated (for example print, email, or telegram delivery).
-        """
         self.cachePriceAll = cachePriceAll
         self.alert_callback = alert_callback or self._default_alert_handler
         self.config = PRICE_ALERT_CONFIG.copy()
@@ -294,7 +288,7 @@ class PriceChecker:
         self._running = True
 
         def run():
-            print(f"[Checker] Monitoring started - checking every {interval_seconds}s")
+            print(f"[Checker] price checker started - checking every {interval_seconds}s")
             print(
                 f"[Checker] Thresholds: default ↑ +{self.config['default']['up_percent']}% | ↓ -{self.config['default']['down_percent']}% | "
                 f"dynamic ↑ +{self.config['dynamic']['up_percent']}% | ↓ -{self.config['dynamic']['down_percent']}%"
@@ -320,14 +314,12 @@ class PriceChecker:
         self._thread.start()
 
     def stop_monitoring(self):
-        """Stop monitoring."""
         self._running = False
         if self._thread:
             self._thread.join(timeout=5)
         print("[Checker] Monitoring stopped")
 
     def get_status(self) -> dict:
-        """Return the current analyzer status."""
         return {
             "running": self._running,
             "config": self.config,
@@ -336,23 +328,7 @@ class PriceChecker:
         }
 
 
-# ============================================
-# Convenience function for quick integration
-# ============================================
-
-
-def start_price_alert_system(cachePriceAll, alert_callback=None, check_interval_seconds=60):
-    """
-    Start the complete price alert system.
-
-    Args:
-        cachePriceAll: The EnhancedCachePriceManager instance.
-        alert_callback: Function called when an alert is generated (optional).
-        check_interval_seconds: Interval between checks.
-
-    Returns:
-        The PriceChecker instance.
-    """
+def start_price_alert_checker(cachePriceAll, alert_callback=None, check_interval_seconds=60):
     Checker = PriceChecker(cachePriceAll, alert_callback=alert_callback)
     Checker.start_monitoring(check_interval_seconds)
     return Checker
