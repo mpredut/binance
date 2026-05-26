@@ -25,12 +25,12 @@ class AlertNotifier:
             return "N/A"
         if isinstance(value, (int, float)):
             try:
-                return datetime.fromtimestamp(value).strftime("%Y-%m-%d %H:%M:%S")
+                return datetime.fromtimestamp(value).strftime("%m-%d %H:%M:%S")
             except Exception:
                 return str(value)
         if hasattr(value, "strftime"):
             try:
-                return value.strftime("%Y-%m-%d %H:%M:%S")
+                return value.strftime("%m-%d %H:%M:%S")
             except Exception:
                 return str(value)
         return str(value)
@@ -54,6 +54,37 @@ class AlertNotifier:
 
     @staticmethod
     def format_batch_message(alerts) -> str:
+        # listează simbolurile separate prin virgulă pe prima linie
+        symbols = ", ".join(alert.symbol for alert in alerts)
+
+        lines = [
+            f"Crypto alerts ({len(alerts)}): {symbols}",
+            "",
+        ]
+
+        for alert in alerts:
+            if AlertNotifier.is_new_coin_alert(alert):
+                lines.append(AlertNotifier.format_new_coin_message(alert))
+                continue
+
+            direction = "RISE" if alert.alert_type == "up" else "DROP"
+            reference_time = AlertNotifier.format_human_readable_time(
+                getattr(alert, "reference_time", None) or getattr(alert, "timestamp", None)
+            )
+
+            lines.append(
+                f"{alert.symbol}: {direction} {alert.percent_change:+.2f}% "
+                f"| price ${alert.current_price:.8f} | reference ${alert.reference_price:.8f} "
+                f"(at {reference_time})"
+            )
+
+            url = getattr(alert, "url", None)
+            if url:
+                lines.append(f"Link: {url}")
+
+        return "\n".join(lines)
+
+    def sterge_format_batch_message(alerts) -> str:
         lines = [
             f"Crypto alerts: {len(alerts)} items",
             "",
