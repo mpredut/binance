@@ -68,10 +68,7 @@ except ImportError as exc:
 
 
 def print_notification_channels_status():
-    print("\n" + "=" * 70)
-    print("NOTIFICATION CHANNEL CONFIGURATION CHECK")
-    print("=" * 70)
-
+    print("CONFIGURATION CHECK")
     phone_url = os.environ.get("PHONE_ALERT_URL")
     ntfy_topic = os.environ.get("NTFY_TOPIC")
     if phone_url or ntfy_topic:
@@ -107,7 +104,6 @@ def print_notification_channels_status():
             missing.append("ALERT_TO_EMAIL")
         print(f"   ❌ Email: DISABLED (missing: {', '.join(missing)})")
 
-    print("=" * 70 + "\n")
 
 
 print_notification_channels_status()
@@ -170,15 +166,8 @@ def new_coin_alert_handler(coin_info):
     if not ALERT_NOTIFIER_AVAILABLE:
         return
 
-    if os.environ.get("PHONE_ALERT_URL") or os.environ.get("NTFY_TOPIC"):
-        AlertNotifier.send_phone_webhook_batch([coin_info])
-
-    if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"):
-        AlertNotifier.send_telegram(coin_info)
-
-    if os.environ.get("SMTP_USERNAME") and os.environ.get("SMTP_PASSWORD") and os.environ.get("ALERT_TO_EMAIL"):
-        AlertNotifier.send_email_batch([coin_info])
-
+    if os.environ.get("ALERT_NEW_COIN", "").upper() == "TRUE":
+        AlertNotifier.send([coin_info])
 
 def print_status_report(cachePriceAll, new_coins_monitor):
     """Print a status report."""
@@ -233,15 +222,10 @@ def periodic_cleanup(cachePriceAll, new_coins_monitor):
 def main():
     """Main entry point."""
 
-    print("=" * 70)
-    print("🚀 CRYPTO PRICE MONITORING SYSTEM")
-    print("=" * 70)
-    print(f"📅 Startup time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
     CMC_API_KEY = os.environ.get('CMC_API_KEY')
     ENABLED_SOURCES = ["coinmarketcap", "coingecko", "binance", "dexscreener"]
 
-    print("\n⏳ Initializing price monitor...")
+    print("\n⏳ Initializing cache price colection...")
     cachePriceAll = create_cachePriceAll(cmc_api_key=CMC_API_KEY)
     print("Price monitor started!")
 
@@ -264,6 +248,7 @@ def main():
     print(f"New coin monitor started! Active sources: {factory.get_available_sources()}")
 
     print("\n" + "=" * 70)
+    print("")
     print("📋 NEW COIN MONITOR CONFIGURATION")
     print("=" * 70)
     print("   ✅ CoinMarketCap - discover + price -> auto-add to watchlist")

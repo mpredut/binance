@@ -55,26 +55,22 @@ class AlertNotifier:
     @staticmethod
     def format_batch_message(alerts) -> str:
         # listează simbolurile separate prin virgulă pe prima linie
-        symbols = ", ".join(alert.symbol for alert in alerts)
-
-        lines = [
-            f"Crypto alerts ({len(alerts)}): {symbols}",
-            "",
-        ]
-
+        #symbols = ", ".join(alert.symbol for alert in alerts)
+        #lines = [f"({len(alerts)}): {symbols}",    "",]
+        lines = []
         for alert in alerts:
             if AlertNotifier.is_new_coin_alert(alert):
                 lines.append(AlertNotifier.format_new_coin_message(alert))
                 continue
 
-            direction = "RISE" if alert.alert_type == "up" else "DROP"
+            direction = "U" if alert.alert_type == "up" else "D"
             reference_time = AlertNotifier.format_human_readable_time(
                 getattr(alert, "reference_time", None) or getattr(alert, "timestamp", None)
             )
 
             lines.append(
                 f"{alert.symbol}: {direction} {alert.percent_change:+.2f}% "
-                f"| price ${alert.current_price:.8f} | reference ${alert.reference_price:.8f} "
+                f"| P ${alert.current_price:.8f} | REF ${alert.reference_price:.8f} "
                 f"(at {reference_time})"
             )
 
@@ -82,30 +78,6 @@ class AlertNotifier:
             if url:
                 lines.append(f"Link: {url}")
 
-        return "\n".join(lines)
-
-    def sterge_format_batch_message(alerts) -> str:
-        lines = [
-            f"Crypto alerts: {len(alerts)} items",
-            "",
-        ]
-        for alert in alerts:
-            if AlertNotifier.is_new_coin_alert(alert):
-                lines.append(AlertNotifier.format_new_coin_message(alert))
-                continue
-
-            direction = "RISE" if alert.alert_type == "up" else "DROP"
-            reference_time = AlertNotifier.format_human_readable_time(
-                getattr(alert, "reference_time", None) or getattr(alert, "timestamp", None)
-            )
-            lines.append(
-                f"{alert.symbol}: {direction} {alert.percent_change:+.2f}% "
-                f"| price ${alert.current_price:.8f} | reference ${alert.reference_price:.8f} "
-                f"(at {reference_time})"
-            )
-            url = getattr(alert, "url", None)
-            if url:
-                lines.append(f"Link: {url}")
         return "\n".join(lines)
 
     @staticmethod
@@ -204,7 +176,8 @@ class AlertNotifier:
             print("[Notifier] Email: SMTP_USERNAME, SMTP_PASSWORD, and ALERT_TO_EMAIL are required")
             return False
 
-        subject = f"Crypto alerts: {len(alerts)} symbols"
+        symbols = ", ".join(alert.symbol for alert in alerts)
+        subject = f"CryptoAlerts: {len(alerts)} symbols ({symbols})"
         body = AlertNotifier.format_batch_message(alerts)
         msg = MIMEText(body, "plain", "utf-8")
         msg["From"] = smtp_username
@@ -235,7 +208,9 @@ class AlertNotifier:
             print("[Notifier] Phone webhook: PHONE_ALERT_URL or NTFY_TOPIC is missing")
             return False
 
-        title = f"Crypto alerts: {len(alerts)} symbols"
+        symbols = ", ".join(alert.symbol for alert in alerts)
+        title = f"({len(alerts)}): {symbols}"
+
         message = AlertNotifier.format_batch_message(alerts)
         tags = "chart_with_upwards_trend"
         payload = {"title": title, "message": message}
@@ -269,7 +244,7 @@ class AlertNotifier:
             return False
 
     @staticmethod
-    def combined_handler(alert, enable_console=True, enable_file=True, enable_telegram=False, enable_email=False, enable_phone_webhook=False):
+    def send(alert, enable_console=True, enable_file=True, enable_telegram=False, enable_email=False, enable_phone_webhook=False):
         """Combined handler that sends alerts through multiple channels."""
         alerts = [alert] if not isinstance(alert, list) else alert
         if enable_console:
