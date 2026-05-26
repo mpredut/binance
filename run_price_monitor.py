@@ -1,9 +1,10 @@
-# run_cachePriceAll.py
+## run_cachePriceAll.py
 import time
 import os
 import threading
 from datetime import datetime
 from pathlib import Path
+from dotenv import load_dotenv  # Adaugă această linie
 
 # Importă modulele tale existente
 import log
@@ -14,35 +15,12 @@ from pricechecker import start_price_alert_checker, PRICE_ALERT_CONFIG
 from new_coins_discovery import create_new_coins_checker, NewCoinsMonitor, NewCoinsFactory, MAX_NEW_COINS_TO_TRACK
 from alertnotifiers import AlertNotifier
 
+load_dotenv()
+
 CMC_API_KEY = os.environ.get('CMC_API_KEY')
-TIME_INTERVAL_CLEANUP = 6 * 60 # * 60  # 6 hours in seconds
+TIME_INTERVAL_CLEANUP = 6 * 60 * 60  # 6 hours in seconds
 REQUIRED_ENV_VARS = ("CMC_API_KEY", "PHONE_ALERT_URL")
 ENABLED_SOURCES = ["coinmarketcap", "coingecko", "binance", "dexscreener"]
-
-
-def load_env_file(filename=".env"):
-    env_path = Path(__file__).resolve().parent / filename
-    if not env_path.exists():
-        if any(os.environ.get(key) for key in REQUIRED_ENV_VARS):
-            return
-        raise FileNotFoundError(
-            f"Missing required environment file: {env_path}. Please create .env with required variables."
-        )
-
-    try:
-        with env_path.open("r", encoding="utf-8") as f:
-            for raw_line in f:
-                line = raw_line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                key = key.strip()
-                value = value.strip().strip('"').strip("'")
-                if key and (key not in os.environ or not os.environ[key].strip()):
-                    os.environ[key] = value
-    except Exception as e:
-        raise RuntimeError(f"Unable to load environment file {env_path}: {e}") from e
-
 
 def validate_required_env():
     missing = []
@@ -58,8 +36,6 @@ def validate_required_env():
             "Missing required environment variables: " + ", ".join(sorted(set(missing)))
         )
 
-
-load_env_file()
 validate_required_env()
 CMC_API_KEY = os.environ.get('CMC_API_KEY')
 
