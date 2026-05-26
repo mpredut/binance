@@ -306,136 +306,128 @@ def monitor_close_orders_by_age2(maxage_trade_s):
 
 import time
 trades = []
-  
+
 class ProcentDistributor:
-    def __init__(self, t1, expired_duration, max_procent=None, min_procent=0.008, unitate_timp=60, init_pt=None, min_pt=None):
-        if init_pt is not None:
-            max_procent = init_pt
-        if min_pt is not None:
-            min_procent = min_pt
-        if max_procent is None:
-            max_procent = 0.1
-        if max_procent < min_procent:
-            raise ValueError(f"max_procent ({max_procent}) cannot be smaller than min_procent ({min_procent})")
-        self.procent = max_procent #TOTO remove self.
+
+    def __init__(self, start_time, expired_duration, max_procent, min_procent=0.008, unitate_timp=60, momentum_weight=0.5):
+        if min_procent < 0 or max_procent < min_procent:
+            raise ValueError("Invalid procent values")
+
+        self.start_time = start_time
+        self.expired_duration = max(1, expired_duration)
+        self.unitate_timp = max(1, unitate_timp)
+
+        self.initial_max_procent = max_procent
         self.max_procent = max_procent
-        self.init_pt = max_procent
         self.min_procent = min_procent
-        self.min_pt = min_procent
-        self.t1 = t1
-        self.unitate_timp = unitate_timp
-        self.expired_duration = expired_duration
-        self.update_period_time(t1, self.expired_duration)
-        self.update_max_procent(max(max_procent, min_procent))
-        
-    def get_procent(self, current_time):
-        if current_time < self.t1:
-            print(f"get max procent {self.max_procent} because before start time {u.timestampToTime(self.t1)}")
+        self.momentum_weight = momentum_weight
+
+        self.total_units = max(1, self.expired_duration / self.unitate_timp)
+        self.update_decay()
+
+    def update_decay(self):
+        self.procent_per_unit = (self.max_procent - self.min_procent) / self.total_units
+
+    def get_time_based_procent(self, current_time):
+
+        if current_time <= self.start_time:
             return self.max_procent
-        if current_time > self.t2:
-            print(f"get min procent {self.min_procent} because expiration {self.expired_duration}")
-            return max(0, self.min_procent)
-        units_passed = (current_time - self.t1) / self.unitate_timp
-        #print(f"units_passed: {units_passed} procent_per_unit: {self.procent_per_unit:.2f}")
-        return max(self.max_procent - (units_passed * self.procent_per_unit), self.min_procent)
-    
-    def get_procent_by(self, current_time, current_price, buy_price):
-        self.procent = self.calculate_procent_by(current_price, buy_price) #TOTO remove self.
-        if current_time < self.t1:
-            return self.procent
-        if current_time > self.t2:
-            return max(0, self.min_procent)
-        units_passed = (current_time - self.t1) / self.unitate_timp
-        procent_per_unit = self.procent / self.total_units
-        return max(self.procent - (units_passed * procent_per_unit), self.min_procent)
-    
-    def update_period_time(self, t1, expired_duration):
-        self.t1 = t1
-        self.expired_duration = max(expired_duration, 1)
-        self.t2 = self.t1 + self.expired_duration
-        self.total_units = self.expired_duration / self.unitate_timp
-        self.procent_per_unit = self.max_procent / self.total_units
-        self.procent = self.max_procent
-    
-    def update_init_time(self, t1, expired_duration):
-        self.update_period_time(t1, expired_duration)
-        self.procent_per_unit = self.max_procent / self.total_units
 
-    def update_init_procent(self, procent):
-        self.init_pt = procent
-        self.max_procent = procent
-        self.procent = procent
-        self.procent_per_unit = procent / self.total_units
+        elapsed = current_time - self.start_time
 
-   #don't call from outside class!!
-    def update_max_procent(self, procent):
-        if procent is not None:
-            self.max_procent = procent
-            self.init_pt = procent
-            self.procent = procent
-            self.procent_per_unit = self.max_procent / self.total_units
-            #print(f"aici max_procent{self.max_procent} procent_per_unit{self.procent_per_unit:.8f} , total_units{ self.total_units}")
-      
-    def calculate_procent_by(self, current_price, buy_price):
-        price_difference_percentage = ((current_price - buy_price) / buy_price)
-        procent_desired_profit = self.max_procent
-        procent_desired_profit += price_difference_percentage
-        procent_desired_profit = max(procent_desired_profit, self.min_procent) #TODO: review if max
-        #print(f"adjusted_init_procent_by: {procent_desired_profit}")
-        return procent_desired_profit
+        if elapsed >= self.expired_duration:
+            return self.min_procent
 
-    def adjust_init_procent_by(self, current_price, buy_price):
-        self.update_init_procent(self.calculate_procent_by(current_price, buy_price))
-        
-    def update_tick(self, passs = 0,  half_life_duration=24*60*60) :
-        #todo cheama update_period_time inaite
-        max_procent = u.asymptotic_decrease(self.max_procent, self.expired_duration, passs, half_life_duration)
-        print(f"max procent from : {self.max_procent:.2f} to {max_procent}")
-        self.update_max_procent(max_procent)
-        
-        
+        units_passed = elapsed / self.unitate_timp
+        decayed = self.max_procent - units_passed * self.procent_per_unit
+
+        return max(decayed, self.min_procent)
+
+    def get_market_adjustment(self, current_price, buy_price):
+
+        if buy_price <= 0:
+            return 0
+
+        price_change = (current_price - buy_price) / buy_price
+        return -price_change * self.momentum_weight
+
+    def get_final_procent(self, current_time, current_price, buy_price):
+
+        base = self.get_time_based_procent(current_time)
+        adjustment = self.get_market_adjustment(current_price, buy_price)
+
+        return max(base + adjustment, self.min_procent)
+
+    def update_tick(self, passed=0, half_life_duration=24*60*60):
+
+        if passed <= 0:
+            return
+
+        decay_factor = 0.5 ** (passed * self.expired_duration / half_life_duration)
+
+        self.max_procent = max(
+            self.initial_max_procent * decay_factor,
+            self.min_procent
+        )
+
+        self.update_decay()
+
+
 class BuyTransaction:
+
     def __init__(self, trade_id, qty, buy_price, procent_desired_profit, min_procent, expired_duration, time_trade):
+
         self.trade_id = trade_id
-        self.buy_price = buy_price
-        self.t1 = time_trade 
-        self.time_trade = time_trade  # Timpul tranzactiei de cumparare sau time.time()
-        self.expired_duration = expired_duration
-        self.distributor = ProcentDistributor(self.t1, expired_duration, procent_desired_profit, min_procent)
-        self.sell_order_id = None
-        self.current_time = time.time()
-        self.passed = (self.current_time - self.t1) // self.expired_duration
         self.qty = qty
+        self.buy_price = buy_price
+        self.time_trade = time_trade
+        self.expired_duration = expired_duration
+        self.sell_order_id = None
+
+        self.distributor = ProcentDistributor(
+            start_time=time_trade,
+            expired_duration=expired_duration,
+            max_procent=procent_desired_profit,
+            min_procent=min_procent,
+        )
+
+    def get_passed_cycles(self, current_time):
+        return int((current_time - self.time_trade) // self.expired_duration)
+
+    def get_reference_price(self, current_price, current_time, days=7):
+
+        elapsed = current_time - self.time_trade
+        passed_cycles = self.get_passed_cycles(current_time)
+
+        if passed_cycles == 0:
+            return max(self.buy_price, current_price)
+
+        if elapsed < days * 24 * 60 * 60:
+            return self.buy_price
+
+        return current_price
 
     def get_proposed_sell_price(self, current_price, current_time, days=7):
-        print(f"Time away {u.secondsToHours(current_time - self.time_trade):.2f} h. We are at pass {self.passed}")
-         
-        if current_time - self.t1 >= self.expired_duration:
-            self.passed +=1
-            print(f" Updating distrib with new duration {u.secondsToHours(2 * self.expired_duration):.2f} h.")
-            self.t1 = current_time
-            self.distributor.update_period_time(current_time, 2 * self.expired_duration)
-            self.distributor.update_tick(self.passed, half_life_duration=24*60*60)
-            
-        if self.passed == 0 :
-            price = max(self.buy_price, current_price)
-        elif self.passed * self.expired_duration < days * 24 * 60 * 60 : #on profit for x days * 24h
-            print(f"Still less than 24h. Use buy price {self.buy_price} as reference")
-            price = self.buy_price
-        else :
-            print(f"Use current price {current_price} as reference")
-            price = current_price                   #escape sell no profit after x days * 24h
-        
-        procent_time_based = self.distributor.get_procent(current_time)
-        procent_price_based = self.distributor.get_procent_by(current_time, current_price, self.buy_price)
-        print(f"Current Price: {current_price}, Buy Price: {self.buy_price}")
-        print(f"Using Time-based Procent versus Price-based Procent: {procent_time_based:.5f}<->{procent_price_based:.5f}")
-  
-        procent = procent_price_based
-        proposed_sell_price = max(price * (1 + procent), current_price * 1.001)
-        print(f"Proposed Sell Price Calculation: {proposed_sell_price:.2f} , procent used {procent}")
-        
-        return proposed_sell_price
+
+        passed_cycles = self.get_passed_cycles(current_time)
+
+        self.distributor.update_tick(
+            passed=passed_cycles,
+            half_life_duration=24*60*60
+        )
+
+        reference_price = self.get_reference_price(current_price, current_time, days)
+
+        procent = self.distributor.get_final_procent(
+            current_time,
+            current_price,
+            self.buy_price
+        )
+
+        return max(
+            reference_price * (1 + procent),
+            current_price * 1.001
+        )
 
 
 def update_trades(trades, symbol, maxage_trade_s, procent_desired_profit, expired_duration, min_procent):
@@ -790,6 +782,39 @@ def get_relevant_trade(trade_orders, trade_type, threshold_s, symbol):
     return trade_price, trade_time, can_trade
 
 
+def get_position_stats(symbol, maxage_trade_s):
+
+    buy_orders = apiorders.get_trade_orders("BUY", symbol, maxage_trade_s)
+    sell_orders = apiorders.get_trade_orders("SELL", symbol, maxage_trade_s)
+
+    total_buy_qty = sum(float(o['qty']) for o in buy_orders)
+    total_sell_qty = sum(float(o['qty']) for o in sell_orders)
+
+    total_buy_value = sum(float(o['price']) * float(o['qty']) for o in buy_orders)
+    total_sell_value = sum(float(o['price']) * float(o['qty']) for o in sell_orders)
+
+    average_buy_price = (
+        total_buy_value / total_buy_qty
+        if total_buy_qty > 0 else 0
+    )
+
+    average_sell_price = (
+        total_sell_value / total_sell_qty
+        if total_sell_qty > 0 else 0
+    )
+
+    net_qty = total_buy_qty - total_sell_qty
+
+    return {
+        "buy_qty": total_buy_qty,
+        "sell_qty": total_sell_qty,
+        "net_qty": net_qty,
+        "average_buy_price": average_buy_price,
+        "average_sell_price": average_sell_price,
+        "buy_count": len(buy_orders),
+        "sell_count": len(sell_orders),
+    }
+
 #//todo: review 0.5
 def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lost_threshold=0.033):
     #try:
@@ -808,6 +833,14 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
         return 
     buy_price, buy_time, can_buy = get_relevant_trade(trade_orders_buy, "BUY", threshold_s, symbol)
     sell_price, sell_time, can_sell = get_relevant_trade(trade_orders_sell, "SELL", threshold_s, symbol)
+
+    position = get_position_stats(symbol, maxage_trade_s)
+    if position["average_buy_price"] > 0:
+        buy_price = position["average_buy_price"]
+        print(f"POSITION for {symbol} : {position}")
+    if position["average_sell_price"] > 0:
+        sell_price = position["average_sell_price"]
+        print(f"POSITION for {symbol} : {position}")
 
     threshold_all_s = 1 * 60 * 60 # 1 h
     if current_time_s - max(buy_time, sell_time)  < threshold_all_s:
