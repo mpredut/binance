@@ -414,6 +414,88 @@ class CachePriceManager(CacheManagerInterface):
         return self.symbols
 
 
+class Cache24PriceManager(CacheManagerInterface):
+    """Colectează prețuri la granularitate maximă via WebSocket.
+    Fallback pe polling HTTP dacă WS-ul e inactiv mai mult de WS_TIMEOUT_SEC.
+    Păstrează doar ultimele KEEP_HOURS ore de date în memorie/fișier.
+    """
+    WS_TIMEOUT_SEC = 15
+    KEEP_HOURS = 24
+
+    def __init__(self, sync_ts, symbols, filename, ws_manager=None, api_client=api):
+        self._ws_manager = ws_manager
+        self._ws_last_event_ts = 0.0
+        super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
+        if ws_manager is not None:
+            ws_manager.subscribe(self)
+
+    def _ws_is_healthy(self):
+        return (time.time() - self._ws_last_event_ts) < self.WS_TIMEOUT_SEC
+
+    def on_items_update(self, symbol: str, items):
+        self._ws_last_event_ts = time.time()
+        price = items[0] if items else None
+        if price is None:
+            return
+        timestamp_ms = int(time.time() * 1000)
+        if not self.fetchtime_time_per_symbol:
+            self.fetchtime_time_per_symbol = self._CacheManagerInterface__rebuild_fetchtime_times()
+        self.update_cache_per_symbol(symbol, [[timestamp_ms, price]])
+        self._trim_old_data(symbol)
+
+    def _trim_old_data(self, symbol):
+        cutoff_ms = int((time.time() - self.KEEP_HOURS * 3600) * 1000)
+        with self.lock:
+            entries = self.cache.get(symbol)
+            if entries:
+                self.cache[symbol] = [e for e in entries if e[0] >= cutoff_ms]
+
+    def rebuild_fetchtime_times(self):
+        if not self.cache:
+            return {}
+        last_times = {}
+        for symbol in self.symbols:
+            entries = self.cache.get(symbol, [])
+            if entries:
+                last_times[symbol] = max(entry[0] for entry in entries)
+        return last_times
+
+    def get_remote_items(self, symbol, startTime):
+        try:
+            price = self.api_client.get_current_price(symbol=symbol)
+        except Exception as e:
+            print(f"[{self.cls_name}][Eroare] Binance API pentru {symbol}: {e}")
+            return []
+        timestamp_ms = int(time.time() * 1000)
+        return [[timestamp_ms, price]]
+
+    def get_all_symbols_from_cache(self):
+        return self.symbols
+
+    def periodic_sync(self, sync_ts=None, save_state=True):
+        if sync_ts is not None:
+            self.sync_ts = sync_ts
+        self.save_state = save_state
+
+        if self.thread is not None and self.thread.is_alive():
+            return self.thread
+
+        def run():
+            while True:
+                if not self._ws_is_healthy():
+                    print(f"[{self.cls_name}] WS inactiv – fallback polling {self.symbols}")
+                    self.query_remote_and_update_cache()
+                else:
+                    print(f"[{self.cls_name}] WS activ – skip polling {self.symbols}")
+                self.save_state_to_file_if_enabled()
+                time.sleep(self.sync_ts)
+
+        self.thread = threading.Thread(target=run, name=self.cls_name, daemon=True)
+        self.thread.daemon = True
+        self.thread.start()
+        return self.thread
+
+
 class CachePriceTrendManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=False)
@@ -516,6 +598,7 @@ class CacheAssetValueManager(CacheManagerInterface):
 ORDER_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute     
 TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
 PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
+PRICE24_SYNC_INTERVAL_SEC = 30     # fallback polling cand WS e inactiv
 PRICETREND_SYNC_INTERVAL_SEC = 10 * 60   # 10 minute
 ASSETVALUE_SYNC_INTERVAL_SEC = 10 * 60  # 10 minutes 
 # TODO: set this to 60 * 60  # 1 hour
@@ -538,6 +621,11 @@ class CacheFactory:
             "class": CachePriceManager,
             "filename": None,  # dict per simbol
             "sync_ts": lambda: PRICE_SYNC_INTERVAL_SEC,
+        },
+        "Price24": {
+            "class": Cache24PriceManager,
+            "filename": None,  # dict per simbol
+            "sync_ts": lambda: PRICE24_SYNC_INTERVAL_SEC,
         },
         "PriceTrend": {
             "class": CachePriceTrendManager,
@@ -567,12 +655,12 @@ class CacheFactory:
             if symbols is None:
                 symbols = ["TOTAL"] if name == "AssetValue" else sym.symbols
 
-            if name == "Price":
-                # dict per simbol
+            if name in ("Price", "Price24"):
+                prefix = "cache_price_" if name == "Price" else "cache_24price_"
                 cls._instances[name] = {
                     s: manager_class(
                         sync_ts=sync_ts,
-                        filename=f"cache_price_{s}.json",
+                        filename=f"{prefix}{s}.json",
                         symbols=[s],
                         api_client=api,
                         **extra_kwargs,
