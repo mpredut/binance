@@ -396,9 +396,9 @@ class CachePriceManager(CacheManagerInterface):
 
     def get_remote_items(self, symbol, startTime):
         try:
-            price = self.api_client.get_current_price(symbol=symbol)
+            price = get_current_price_manager().get_price_value(symbol)
         except Exception as e:
-            print(f"[{self.cls_name}][Eroare] Binance API pentru {symbol}: {e}")
+            print(f"[{self.cls_name}][Eroare] get_price_value {symbol}: {e}")
             return []
 
         timestamp = int(time.time())  # timestamp UTC în secunde
@@ -415,32 +415,25 @@ class CachePriceManager(CacheManagerInterface):
 
 
 class Cache24PriceManager(CacheManagerInterface):
-    """Colectează prețuri la granularitate maximă via WebSocket.
-    Fallback pe polling HTTP dacă WS-ul e inactiv mai mult de WS_TIMEOUT_SEC.
-    Păstrează doar ultimele KEEP_HOURS ore de date în memorie/fișier.
+    """Colectează prețuri la granularitate maximă pe ultimele KEEP_HOURS ore.
+
+    Nu face polling și nu se abonează direct la WS.
+    Primește fiecare update de preț prin on_price_update() de la
+    CacheCurrentPriceManager (subscribe_price).
+    get_remote_items e folosit doar la init (load inițial din fișier lipsă).
     """
-    WS_TIMEOUT_SEC = 15
-    KEEP_HOURS = 24
+    KEEP_HOURS = 24   # configurabil per instanță dacă e nevoie
 
-    def __init__(self, sync_ts, symbols, filename, ws_manager=None, api_client=api):
-        self._ws_manager = ws_manager
-        self._ws_last_event_ts = 0.0
+    def __init__(self, sync_ts, symbols, filename, api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
-        if ws_manager is not None:
-            ws_manager.subscribe(self)
 
-    def _ws_is_healthy(self):
-        return (time.time() - self._ws_last_event_ts) < self.WS_TIMEOUT_SEC
+    # ── Callback de la CacheCurrentPriceManager ───────────────────────────────
 
-    def on_items_update(self, symbol: str, items):
-        self._ws_last_event_ts = time.time()
-        price = items[0] if items else None
-        if price is None:
-            return
-        timestamp_ms = int(time.time() * 1000)
+    def on_price_update(self, symbol: str, ts_ms: int, price: float):
+        """Apelat de CacheCurrentPriceManager la fiecare preț nou (WS sau HTTP)."""
         if not self.fetchtime_time_per_symbol:
             self.fetchtime_time_per_symbol = self._CacheManagerInterface__rebuild_fetchtime_times()
-        self.update_cache_per_symbol(symbol, [[timestamp_ms, price]])
+        self.update_cache_per_symbol(symbol, [[ts_ms, price]])
         self._trim_old_data(symbol)
 
     def _trim_old_data(self, symbol):
@@ -449,6 +442,8 @@ class Cache24PriceManager(CacheManagerInterface):
             entries = self.cache.get(symbol)
             if entries:
                 self.cache[symbol] = [e for e in entries if e[0] >= cutoff_ms]
+
+    # ── CacheManagerInterface ─────────────────────────────────────────────────
 
     def rebuild_fetchtime_times(self):
         if not self.cache:
@@ -461,20 +456,21 @@ class Cache24PriceManager(CacheManagerInterface):
         return last_times
 
     def get_remote_items(self, symbol, startTime):
+        """Folosit doar la init când fișierul lipsește."""
         try:
-            price = self.api_client.get_current_price(symbol=symbol)
+            price = get_current_price_manager().get_price_value(symbol)
             if price is None:
                 return []
+            return [[int(time.time() * 1000), price]]
         except Exception as e:
-            print(f"[{self.cls_name}][Eroare] get_current_price {symbol}: {e}")
+            print(f"[{self.cls_name}][Eroare] get_price_value {symbol}: {e}")
             return []
-        timestamp_ms = int(time.time() * 1000)
-        return [[timestamp_ms, price]]
 
     def get_all_symbols_from_cache(self):
         return self.symbols
 
     def periodic_sync(self, sync_ts=None, save_state=True):
+        """Doar salvează starea periodic. Prețurile vin exclusiv prin on_price_update."""
         if sync_ts is not None:
             self.sync_ts = sync_ts
         self.save_state = save_state
@@ -484,11 +480,6 @@ class Cache24PriceManager(CacheManagerInterface):
 
         def run():
             while True:
-                if not self._ws_is_healthy():
-                    print(f"[{self.cls_name}] WS inactiv – fallback polling {self.symbols}")
-                    self.query_remote_and_update_cache()
-                else:
-                    print(f"[{self.cls_name}] WS activ – skip polling {self.symbols}")
                 self.save_state_to_file_if_enabled()
                 time.sleep(self.sync_ts)
 
@@ -619,6 +610,7 @@ class CacheCurrentPriceManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, ws_manager=None, api_client=api):
         self._ws_manager        = ws_manager
         self._ws_last_event_ts  = 0.0      # setat înainte de super() !
+        self._price_subscribers = []       # idem
         super().__init__(sync_ts, symbols, filename, append_mode=False, api_client=api_client)
         if ws_manager is not None:
             ws_manager.subscribe(self)
@@ -627,6 +619,28 @@ class CacheCurrentPriceManager(CacheManagerInterface):
 
     def _ws_is_healthy(self):
         return (time.time() - self._ws_last_event_ts) < self.WS_TIMEOUT_SEC
+
+    # ── Price subscriber pattern ──────────────────────────────────────────────
+
+    def subscribe_price(self, subscriber) -> None:
+        """Abonează un obiect care implementează on_price_update(symbol, ts_ms, price)."""
+        with self.lock:
+            if subscriber not in self._price_subscribers:
+                self._price_subscribers.append(subscriber)
+
+    def unsubscribe_price(self, subscriber) -> None:
+        with self.lock:
+            if subscriber in self._price_subscribers:
+                self._price_subscribers.remove(subscriber)
+
+    def _notify_price_subscribers(self, symbol: str, ts_ms: int, price: float) -> None:
+        with self.lock:
+            subs = list(self._price_subscribers)
+        for sub in subs:
+            try:
+                sub.on_price_update(symbol, ts_ms, price)
+            except Exception as e:
+                print(f"[{self.cls_name}] Eroare notificare subscriber: {e}")
 
     # ── WS callback (suprascrie metoda din interfață) ─────────────────────────
 
@@ -639,6 +653,7 @@ class CacheCurrentPriceManager(CacheManagerInterface):
         if not self.fetchtime_time_per_symbol:
             self.fetchtime_time_per_symbol = self._CacheManagerInterface__rebuild_fetchtime_times()
         self.update_cache_per_symbol(symbol, [[ts_ms, price]])
+        self._notify_price_subscribers(symbol, ts_ms, price)
 
     # ── CacheManagerInterface — metode abstracte ──────────────────────────────
 
@@ -707,6 +722,7 @@ class CacheCurrentPriceManager(CacheManagerInterface):
             new = self.get_remote_items(symbol, None)
             if new:
                 self.update_cache_per_symbol(symbol, new)
+                self._notify_price_subscribers(symbol, new[0][0], new[0][1])
                 self.save_state_to_file_if_enabled()
             with self.lock:
                 entries = self.cache.get(symbol)
