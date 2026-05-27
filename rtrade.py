@@ -36,6 +36,16 @@ class TradingBot:
         self.sell_filled = False
         self.DEFAULT_ADJUSTMENT_PERCENT = DEFAULT_ADJUSTMENT_PERCENT
         self.lock = threading.Lock()  # Lock pentru sincronizare
+
+    @property
+    def is_buy_filled(self):
+        with self.lock:
+            return self.buy_filled
+
+    @property
+    def is_sell_filled(self):
+        with self.lock:
+            return self.sell_filled
         
     def mark_buy_filled(self, filled_buy_price=None):
         with self.lock:
@@ -59,23 +69,26 @@ class TradingBot:
         max_failures = 10  # Definim numărul maxim de eșecuri acceptabile
 
         while True:
-            if self.sell_filled:
+
+            current_price = api.get_current_price(self.symbol)
+
+            if self.is_sell_filled:
                 adjustment_percent = max(MIN_adjustment_percent, adjustment_percent - adjustment_percent * 0.005)
             
             target_buy_price = round(current_price * (1 - adjustment_percent), 4)
             print(f"[{self.symbol}] Order BUY initiated at {target_buy_price:.2f} procent {adjustment_percent}%")
             
-            if self.buy_filled:
+            if self.is_buy_filled:
                 print(f"[{self.symbol}] Ignore BUY order. It was previously filled at {self.filled_buy_price:.2f}")
                 return self.mark_buy_filled(self.filled_buy_price)
             
             buy_order = None
             h = 0.3/failure_count
-            if self.sell_filled: # sunt disperat
+            if self.is_sell_filled: # sunt disperat
                 if adjustment_percent == MIN_adjustment_percent:
                     print(f"[{self.symbol}] sunt disperat!")
-                    #buy_order = po.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, 
-                    #    safeback_seconds=1*3600+60, force=True, cancelorders=True, hours=h)
+                    buy_order = po.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, 
+                        safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
                 else:
                     buy_order = po.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, 
                         safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
@@ -94,6 +107,8 @@ class TradingBot:
                     return None
                 continue
 
+            failure_count = 1 # reset failure count after a successful order placement
+            
             time.sleep(WAIT_FOR_ORDER)
             order_id = buy_order['orderId']
             self.filled_buy_price = round(float(buy_order['price']), 4)
@@ -141,23 +156,25 @@ class TradingBot:
 
         while True:
 
-            if self.buy_filled:
+            current_price = api.get_current_price(self.symbol)
+
+            if self.is_buy_filled:
                 adjustment_percent = max(MIN_adjustment_percent, adjustment_percent - adjustment_percent * 0.01)
                 
             target_sell_price = round(current_price * (1 + adjustment_percent), 4)
             print(f"[{self.symbol}] Order SELL initiated at {target_sell_price:.2f} procent {adjustment_percent}%")
 
-            if self.sell_filled:
+            if self.is_sell_filled:
                 print(f"[{self.symbol}] Ignore SELL order. It was previously filled at {self.filled_sell_price:.2f}")
                 return self.mark_sell_filled(self.filled_sell_price)
 
             sell_order = None
             h = 0.23/failure_count
-            if self.buy_filled: # sunt disperat
+            if self.is_buy_filled: # sunt disperat
                 if adjustment_percent == MIN_adjustment_percent:
                     print(f"[{self.symbol}] sunt disperat!")
-                    #sell_order = po.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, 
-                    #    safeback_seconds=1*3600+60, force=True, cancelorders=True, hours=h)
+                    sell_order = po.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, 
+                        safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
                 else:
                     sell_order = po.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, 
                         safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
@@ -175,6 +192,8 @@ class TradingBot:
                     #return round(api.get_current_price(self.symbol) * (1 + 0.1), 4)
                     return None
                 continue
+            
+            failure_count = 1 # reset failure count after a successful order placement
 
             time.sleep(WAIT_FOR_ORDER)
             order_id = sell_order['orderId']
@@ -200,8 +219,8 @@ class TradingBot:
             if current_price < filled_buy_price and not u.are_close(current_price, filled_buy_price, 0.1):
                 print(f"[{self.symbol}] Bed day :-(. Trying SELL at current price + x2 {current_price:.2f}")
                 adjustment_percent = 1.7 * self.DEFAULT_ADJUSTMENT_PERCENT
-            else:
-                adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
+            #else:
+                #adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
            
             # if arrived here it means 
             # current order was not filled , so try cancel and retry in the loop
@@ -258,7 +277,8 @@ class TradingBot:
                 time.sleep(1)
 
                 # Reset pentru următoarea rundă
-                self.buy_filled = self.sell_filled = False
+                with self.lock:
+                    self.buy_filled = self.sell_filled = False
                 #if self.buy_filled == self.sell_filled:
                     #self.buy_filled = not self.sell_filled
             except Exception as e:
