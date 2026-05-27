@@ -158,11 +158,11 @@ class CacheManagerInterface(ABC):
                     
             except Exception as e:
                 print(f"[{self.cls_name}][Eroare] La citirea fișierului cache {self.filename} : {e}")
-                self.update_cache()
+                self.query_remote_and_update_cache()
                 self.save_state_to_file_if_enabled()
         else :
             print(f"[{self.cls_name}][Info] File is missing, may be is it first time run. Creating it ....")
-            self.update_cache()
+            self.query_remote_and_update_cache()
             self.save_state_to_file_if_enabled()
 
 
@@ -200,16 +200,10 @@ class CacheManagerInterface(ABC):
         return unique_new
         
     
-    def update_cache_per_symbol(self, symbol):
+    def update_cache_per_symbol(self, symbol, new_items):
         
         current_time = int(time.time() * 1000)
-        startTime = self.fetchtime_time_per_symbol.get(symbol, self.fallback_time_default)
-
-        new_items = self.get_remote_items(symbol=symbol, startTime=startTime)
-        if not new_items:
-             print(f"[{self.cls_name}][Info] {symbol}:  No remote items starting with {u.timestampToTime(startTime)} ")
-             return
-        
+      
         if symbol not in self.cache:
             self.cache[symbol] = [] #self.cache.setdefault(symbol, []).extend(new_items)
             
@@ -241,14 +235,26 @@ class CacheManagerInterface(ABC):
 
         print(f"[{self.cls_name}][Info] {symbol}: Adăugate {len(new_items)} items noi.")
 
-    def update_cache(self):
+    def query_remote_and_update_cache(self):
         if not self.fetchtime_time_per_symbol:
             self.fetchtime_time_per_symbol = self.__rebuild_fetchtime_times()
         
         for symbol in list(self.symbols):
-            self.update_cache_per_symbol(symbol)
 
+            startTime = self.fetchtime_time_per_symbol.get(symbol, self.fallback_time_default)
+            new_items = self.get_remote_items(symbol=symbol, startTime=startTime)
+            if not new_items:
+                print(f"[{self.cls_name}][Info] {symbol}:  No remote items starting with {u.timestampToTime(startTime)} ")
+                continue
+            
+            self.update_cache_per_symbol(symbol, new_items)
 
+    def on_items_update(self, symbol, items):
+        print(f"[{self.cls_name}][Info] {symbol}: WS Items updated to {items}")
+        if not self.fetchtime_time_per_symbol:
+            self.fetchtime_time_per_symbol = self.__rebuild_fetchtime_times()
+        self.update_cache_per_symbol(symbol, items)
+        
     def periodic_sync(self, sync_ts=None, save_state=True):
         if sync_ts is not None:
             self.sync_ts = sync_ts
@@ -261,7 +267,7 @@ class CacheManagerInterface(ABC):
             while True:
                 print(f"\n[{self.cls_name}] Sync started at {time.strftime('%Y-%m-%d %H:%M:%S')} for {self.symbols}")
                 if _should_poll_for_manager(self.cls_name):
-                    self.update_cache()
+                    self.query_remote_and_update_cache()
                 else:
                     print(f"[{self.cls_name}] Skip polling (WS-only mode active, WS healthy).")
                 print(f"[{self.cls_name}] save state is {self.save_state}.")
@@ -832,7 +838,7 @@ def _handle_binance_ws_event(event):
                 f"status={event.get('X')} execType={event.get('x')} side={event.get('S')}"
             )
         order_cache = get_cache_manager("Order")
-        order_cache.update_cache()
+        order_cache.query_remote_and_update_cache()
 
        # _upsert_order_from_execution_report(event)
        # _append_trade_from_execution_report(event)
@@ -1074,7 +1080,7 @@ if __name__ == "__main__":
 #         _append_trade_from_execution_report(event)
 #         _persist_ws_updated_caches(event_type)
 #         # Alternativ, daca preferi re-fetch complet:
-#         # get_cache_manager("Order").update_cache()
+#         # get_cache_manager("Order").query_remote_and_update_cache()
 #         return
 
 #     if event_type in ("balanceUpdate", "outboundAccountPosition"):

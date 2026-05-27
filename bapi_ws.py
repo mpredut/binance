@@ -22,7 +22,6 @@ import time
 import websockets
 
 from typing import Dict, Optional, Set
-
 #ogger = logging.getLogger(__name__)
 
 import symbols as sym
@@ -75,10 +74,33 @@ class BinanceWebSocketManager:
         self._thread: Optional[threading.Thread] = None
         self._req_id = 0
 
+        self._subscribers = []
+
         if symbols:
             for s in symbols:
                 self._subscribed.add(s.upper())
 
+    #-─ Subscription management ─────────────────────────────────────────────────
+    def subscribe(self, subscriber) -> None:
+        with self._lock:
+            if subscriber not in self._subscribers:
+                self._subscribers.append(subscriber)
+
+    def unsubscribe(self, subscriber) -> None:
+        with self._lock:
+            if subscriber in self._subscribers:
+                self._subscribers.remove(subscriber)
+
+    def _notify_subscribers(self, symbol: str, items) -> None:
+        with self._lock:
+            subscribers = list(self._subscribers)
+
+        for sub in subscribers:
+            try:
+                sub.on_items_update(symbol, items)
+            except Exception as e:
+                print(f"Subscriber notify error: {e}")
+                    
     # ─── Helpers ──────────────────────────────────────────────────────────────
 
     def _next_id(self) -> int:
@@ -257,7 +279,7 @@ class BinanceWebSocketManager:
 
             # Raspunsuri la subscribe/unsubscribe ({"result": null, "id": N})
             if "result" in envelope:
-                logger.debug(f"WS ack: {envelope}")
+                print(f"WS ack: {envelope}")
                 return
 
             data   = envelope.get("data", envelope)
@@ -266,6 +288,8 @@ class BinanceWebSocketManager:
 
             with self._lock:
                 self._prices[symbol] = price
+            
+            self._notify_subscribers(symbol, [price])
 
         except (KeyError, ValueError, json.JSONDecodeError) as e:
             print(f"process_message error: {e} | raw: {raw[:120]}")
@@ -336,7 +360,7 @@ class BinanceWebSocketManager:
 
         with self._lock:
             if symbol in self._subscribed:
-                logger.debug(f"[{symbol}] Already subscribed")
+                print(f"[{symbol}] Already subscribed")
                 return False
             if len(self._subscribed) >= WS_MAX_STREAMS:
                 print(f"Max streams ({WS_MAX_STREAMS}) reached, cannot add {symbol}")
@@ -355,7 +379,7 @@ class BinanceWebSocketManager:
 
         with self._lock:
             if symbol not in self._subscribed:
-                logger.debug(f"[{symbol}] Not subscribed")
+                print(f"[{symbol}] Not subscribed")
                 return False
             self._subscribed.discard(symbol)
             self._prices.pop(symbol, None)
