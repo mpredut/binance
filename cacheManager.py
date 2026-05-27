@@ -463,8 +463,10 @@ class Cache24PriceManager(CacheManagerInterface):
     def get_remote_items(self, symbol, startTime):
         try:
             price = self.api_client.get_current_price(symbol=symbol)
+            if price is None:
+                return []
         except Exception as e:
-            print(f"[{self.cls_name}][Eroare] Binance API pentru {symbol}: {e}")
+            print(f"[{self.cls_name}][Eroare] get_current_price {symbol}: {e}")
             return []
         timestamp_ms = int(time.time() * 1000)
         return [[timestamp_ms, price]]
@@ -590,15 +592,165 @@ class CacheAssetValueManager(CacheManagerInterface):
         }
         return [snapshot]
 
-            
-# ###### 
-# ###### GLOBAL VARIABLE FOR CACHE ####### 
-# ###### 
+
+# ######
+# ###### CacheCurrentPriceManager — preț curent per simbol, WS-primary + HTTP fallback
+# ######
+
+class CacheCurrentPriceManager(CacheManagerInterface):
+    """
+    Menține CEL MAI RECENT preț per simbol, cu timestamp în ms.
+    Drop-in replacement pentru bapi.get_current_price().
+
+    Sursa primară   : WebSocket (BinanceWebSocketManager) via subscribe().
+    Fallback timer  : polling HTTP la fiecare SYNC_TS secunde, DOAR când WS
+                      e tăcut mai mult de WS_TIMEOUT_SEC.
+    Staleness check : get_price() forțează HTTP imediat dacă prețul e mai
+                      vechi de STALE_THRESHOLD_MS (indiferent de WS).
+
+    Cache semantics : append_mode=False — se păstrează doar ultima intrare
+                      per simbol: cache[symbol] = [[timestamp_ms, price]]
+    Fișier          : cache_currentprice.json  (un singur fișier, toți simbolii)
+    """
+
+    WS_TIMEOUT_SEC    = 15      # WS considerat mort după 15s fără niciun event
+    STALE_THRESHOLD_MS = 5_000  # get_price() forțează HTTP dacă prețul e > 5s vechi
+
+    def __init__(self, sync_ts, symbols, filename, ws_manager=None, api_client=api):
+        self._ws_manager        = ws_manager
+        self._ws_last_event_ts  = 0.0      # setat înainte de super() !
+        super().__init__(sync_ts, symbols, filename, append_mode=False, api_client=api_client)
+        if ws_manager is not None:
+            ws_manager.subscribe(self)
+
+    # ── WS health ────────────────────────────────────────────────────────────
+
+    def _ws_is_healthy(self):
+        return (time.time() - self._ws_last_event_ts) < self.WS_TIMEOUT_SEC
+
+    # ── WS callback (suprascrie metoda din interfață) ─────────────────────────
+
+    def on_items_update(self, symbol: str, items):
+        self._ws_last_event_ts = time.time()
+        price = items[0] if items else None
+        if price is None:
+            return
+        ts_ms = int(time.time() * 1000)
+        if not self.fetchtime_time_per_symbol:
+            self.fetchtime_time_per_symbol = self._CacheManagerInterface__rebuild_fetchtime_times()
+        self.update_cache_per_symbol(symbol, [[ts_ms, price]])
+
+    # ── CacheManagerInterface — metode abstracte ──────────────────────────────
+
+    def get_remote_items(self, symbol, startTime):
+        """Fetch preț curent via bapi.get_current_price."""
+        try:
+            price = self.api_client.get_current_price(symbol=symbol)
+            if price is None:
+                return []
+            ts_ms = int(time.time() * 1000)
+            return [[ts_ms, price]]
+        except Exception as e:
+            print(f"[{self.cls_name}][Eroare] HTTP fetch {symbol}: {e}")
+            return []
+
+    def rebuild_fetchtime_times(self):
+        last_times = {}
+        for symbol in self.symbols:
+            entries = self.cache.get(symbol, [])
+            if entries:
+                last_times[symbol] = entries[0][0]   # snapshot: un singur entry
+        return last_times
+
+    def get_all_symbols_from_cache(self):
+        return self.symbols
+
+    # ── Periodic sync — polling numai când WS e mort ──────────────────────────
+
+    def periodic_sync(self, sync_ts=None, save_state=True):
+        if sync_ts is not None:
+            self.sync_ts = sync_ts
+        self.save_state = save_state
+
+        if self.thread is not None and self.thread.is_alive():
+            return self.thread
+
+        def run():
+            while True:
+                if not self._ws_is_healthy():
+                    print(f"[{self.cls_name}] WS inactiv – fallback polling {self.symbols}")
+                    self.query_remote_and_update_cache()
+                else:
+                    print(f"[{self.cls_name}] WS activ – skip polling {self.symbols}")
+                self.save_state_to_file_if_enabled()
+                time.sleep(self.sync_ts)
+
+        self.thread = threading.Thread(target=run, name=self.cls_name, daemon=True)
+        self.thread.daemon = True
+        self.thread.start()
+        return self.thread
+
+    # ── Public API ────────────────────────────────────────────────────────────
+
+    def get_price(self, symbol: str):
+        """
+        Returnează [timestamp_ms, price].
+        Forțează HTTP fetch dacă intrarea lipsește sau e mai veche de STALE_THRESHOLD_MS.
+        """
+        with self.lock:
+            entries = self.cache.get(symbol)
+        last_ts = entries[0][0] if entries else 0
+        now_ms  = int(time.time() * 1000)
+        if not entries or (now_ms - last_ts) > self.STALE_THRESHOLD_MS:
+            age = now_ms - last_ts if entries else -1
+            print(f"[{self.cls_name}] {symbol} stale ({age}ms) – HTTP fetch forțat")
+            new = self.get_remote_items(symbol, None)
+            if new:
+                self.update_cache_per_symbol(symbol, new)
+                self.save_state_to_file_if_enabled()
+            with self.lock:
+                entries = self.cache.get(symbol)
+        return entries[0] if entries else None
+
+    def get_price_value(self, symbol: str) -> float:
+        """Returnează doar prețul ca float. Drop-in pentru bapi.get_current_price()."""
+        entry = self.get_price(symbol)
+        return entry[1] if entry else None
+
+
+# ── Singleton ─────────────────────────────────────────────────────────────────
+
+_current_price_instance: Optional[CacheCurrentPriceManager] = None
+_current_price_lock = threading.Lock()
+
+def get_current_price_manager(ws_manager=None, symbols=None) -> CacheCurrentPriceManager:
+    """Returnează (și creează dacă e nevoie) singleton-ul CacheCurrentPriceManager."""
+    global _current_price_instance
+    if _current_price_instance is not None:
+        return _current_price_instance
+    with _current_price_lock:
+        if _current_price_instance is not None:
+            return _current_price_instance
+        _syms = symbols if symbols is not None else sym.symbols
+        _current_price_instance = CacheCurrentPriceManager(
+            sync_ts  = 30,
+            symbols  = _syms,
+            filename = "cache_currentprice.json",
+            ws_manager  = ws_manager,
+            api_client  = api,
+        )
+    return _current_price_instance
+
+
+# ######
+# ###### GLOBAL VARIABLE FOR CACHE #######
+# ######
      
 ORDER_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute     
 TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
 PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
-PRICE24_SYNC_INTERVAL_SEC = 30     # fallback polling cand WS e inactiv
+PRICE24_SYNC_INTERVAL_SEC = 30         # fallback polling cand WS e inactiv
+CURRENTPRICE_SYNC_INTERVAL_SEC = 30   # idem pentru CacheCurrentPriceManager
 PRICETREND_SYNC_INTERVAL_SEC = 10 * 60   # 10 minute
 ASSETVALUE_SYNC_INTERVAL_SEC = 10 * 60  # 10 minutes 
 # TODO: set this to 60 * 60  # 1 hour
@@ -626,6 +778,11 @@ class CacheFactory:
             "class": Cache24PriceManager,
             "filename": None,  # dict per simbol
             "sync_ts": lambda: PRICE24_SYNC_INTERVAL_SEC,
+        },
+        "CurrentPrice": {
+            "class": CacheCurrentPriceManager,
+            "filename": "cache_currentprice.json",  # un singur fișier, toți simbolii
+            "sync_ts": lambda: CURRENTPRICE_SYNC_INTERVAL_SEC,
         },
         "PriceTrend": {
             "class": CachePriceTrendManager,
