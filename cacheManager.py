@@ -3,12 +3,13 @@ import os
 import time
 import datetime
 import asyncio
+import threading
 import importlib
 import builtins
 from datetime import datetime, timedelta
 from abc import ABC, abstractmethod
 from collections import defaultdict
-import threading
+from typing import Optional
 
 #my imports
 import log
