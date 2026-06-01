@@ -214,7 +214,6 @@ def main():
         daemon=True
     )
     cleanup_thread.start()
-    print("Periodic cleanup started!")
 
     new_coins_checker = None
     if os.environ.get("ALERT_NEW_COIN", "").upper() == "TRUE":
