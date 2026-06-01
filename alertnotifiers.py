@@ -108,54 +108,6 @@ class AlertNotifier:
             return False
 
     @staticmethod
-    def send_telegram(alert, bot_token: Optional[str] = None, chat_id: Optional[str] = None):
-        bot_token = bot_token or os.environ.get("TELEGRAM_BOT_TOKEN")
-        chat_id = chat_id or os.environ.get("TELEGRAM_CHAT_ID")
-
-        if not bot_token or not chat_id:
-            print("[Notifier] Telegram: bot token or chat_id is missing")
-            return
-
-        if AlertNotifier.is_new_coin_alert(alert):
-            message = (
-                "🆕 *New Coin Alert* 🆕\n\n"
-                f"*{alert.get('symbol', 'N/A')}* - {alert.get('name', alert.get('symbol', 'N/A'))}\n"
-                f"Source: {alert.get('source', 'unknown')}\n"
-                f"Added: {AlertNotifier.format_human_readable_time(alert.get('added_at'))}\n"
-                f"Price: `{alert.get('price', 0):.6f}`\n"
-                f"Link: {alert.get('url', 'N/A')}"
-            )
-        else:
-            reference_time = AlertNotifier.format_human_readable_time(
-                getattr(alert, "reference_time", None) or getattr(alert, "timestamp", None)
-            )
-            message = (
-                f"🚨 *Crypto Alert* 🚨\n\n"
-                f"*{alert.symbol}*\n"
-                f"{'🟢 RISE' if alert.alert_type == 'up' else '🔴 DROP'}\n\n"
-                f"Current price: `${alert.current_price:.4f}`\n"
-                f"Reference: `${alert.reference_price:.4f}` (at {reference_time})\n"
-                f"Change: `{alert.percent_change:+.2f}%`\n"
-                f"Threshold: `{alert.threshold}%`"
-            )
-            url = getattr(alert, "url", None)
-            if url:
-                message += f"\nLink: {url}"
-
-        try:
-            url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-            payload = {
-                "chat_id": chat_id,
-                "text": message,
-                "parse_mode": "Markdown"
-            }
-            response = requests.post(url, json=payload, timeout=10)
-            if response.status_code != 200:
-                print(f"[Notifier] Telegram error: {response.text}")
-        except Exception as e:
-            print(f"[Notifier] Telegram exception: {e}")
-
-    @staticmethod
     def send_email_batch(alerts, email_config: Optional[dict] = None):
         email_config = email_config or {}
         smtp_server = email_config.get("smtp_server") or os.environ.get("SMTP_SERVER", "smtp.gmail.com")
@@ -242,7 +194,8 @@ class AlertNotifier:
 
     #Combined handler that sends alerts through multiple channels.    
     @staticmethod
-    def send(alert, enable_console=True, enable_file=True, enable_telegram=False, enable_email=False, enable_phone_webhook=False):
+    def send(alert, enable_console=True, enable_file=True, 
+             enable_email=False, enable_phone_webhook=False):
         alerts = [alert] if not isinstance(alert, list) else alert
         if enable_console:
             for item in alerts:
@@ -250,9 +203,6 @@ class AlertNotifier:
         if enable_file:
             for item in alerts:
                 AlertNotifier.save_to_file(item)
-        if enable_telegram:
-            for item in alerts:
-                AlertNotifier.send_telegram(item)
         if enable_email:
             AlertNotifier.send_email_batch(alerts)
         if enable_phone_webhook:

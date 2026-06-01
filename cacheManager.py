@@ -401,6 +401,9 @@ class CachePriceManager(CacheManagerInterface):
             print(f"[{self.cls_name}][Eroare] get_price_value {symbol}: {e}")
             return []
 
+        if price is None:
+            return []
+
         timestamp = int(time.time())  # timestamp UTC în secunde
         # Conversie în local
         local_dt = datetime.fromtimestamp(timestamp)  # local time
@@ -691,6 +694,7 @@ class CacheCurrentPriceManager(CacheManagerInterface):
             return self.thread
 
         def run():
+            time.sleep(self.sync_ts)   # prima iterație după un interval, nu imediat
             while True:
                 if not self._ws_is_healthy():
                     print(f"[{self.cls_name}] WS inactiv – fallback polling {self.symbols}")

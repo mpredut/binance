@@ -82,7 +82,7 @@ print_notification_channels_status()
 
 
 def alert_handler(alert):
-    AlertNotifier.send(alert)
+    AlertNotifier.send(alert, enable_phone_webhook=True)
  
 def new_coin_alert_handler(coin_info):
     source = coin_info.get('source', 'unknown')
@@ -106,7 +106,7 @@ def new_coin_alert_handler(coin_info):
         print(f"   🔗 {coin_info['url']}")
     print("=" * 70)
 
-    AlertNotifier.send([coin_info])
+    AlertNotifier.send([coin_info], enable_phone_webhook=True)
 
 def print_new_coin_status(cachePriceAll, new_coins_checker):
     print("\n" + "=" * 70)
@@ -214,7 +214,8 @@ def main():
         alert_callback=alert_handler,
         check_interval_seconds=60
     )
-   
+
+    new_coins_checker = None
     if os.environ.get("ALERT_NEW_COIN", "").upper() == "TRUE":
         print("=" * 70)
         print("⏳ Starting start new coin checker...")
@@ -228,7 +229,8 @@ def main():
             print("\n👉 Waiting for alerts... (Ctrl+C to stop)\n")
     except KeyboardInterrupt:
         print("\n\n🛑 Stopping system...")
-        new_coins_checker.stop_monitoring()
+        if new_coins_checker is not None:
+            new_coins_checker.stop_monitoring()
         price_checker.stop_monitoring()
         print("👋 Goodbye!")
 
