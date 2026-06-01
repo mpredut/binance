@@ -179,14 +179,6 @@ def start_new_coin_checker(cachePriceAll):
     else:
         print("ℹ️ No new coins with price were found on CoinMarketCap")
 
-    cleanup_thread = threading.Thread(
-        target=periodic_cleanup,
-        args=(cachePriceAll, new_coins_checker),
-        daemon=True
-    )
-    cleanup_thread.start()
-    print("Periodic cleanup started (every 6 hours)")
-
     print_new_coin_status(cachePriceAll, new_coins_checker)
     print(new_coins_checker.get_report())
 
@@ -214,6 +206,15 @@ def main():
         alert_callback=alert_handler,
         check_interval_seconds=60
     )
+
+    print("⏳ Starting periodic cleanup (every 6 hours)...")
+    cleanup_thread = threading.Thread(
+        target=periodic_cleanup,
+        args=(cachePriceAll, None),
+        daemon=True
+    )
+    cleanup_thread.start()
+    print("Periodic cleanup started!")
 
     new_coins_checker = None
     if os.environ.get("ALERT_NEW_COIN", "").upper() == "TRUE":
