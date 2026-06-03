@@ -877,6 +877,7 @@ class CacheInstantTrendManager:
     PRICE_CHANGE_THRESHOLD_SMALL = u.calculate_difference_percent(60000, 60000 - 310)
     PRICE_CHANGE_THRESHOLD_BIG   = u.calculate_difference_percent(97000, 95000 - 377)
     FULL_EVAL_INTERVAL_SEC = 1.5   # cadența calculului complet (metrici)
+    FLUSH_INTERVAL_SEC     = 0.5   # cadența scrierii pe fișier (I/O decuplat)
 
     def __init__(self, symbols, filename="cache_instant_trend.json"):
         self.symbols = list(symbols)
@@ -893,6 +894,7 @@ class CacheInstantTrendManager:
         self.current_price_mgr = None
         self._computing = False
         self._full_eval_thread = None
+        self._flush_thread = None
 
     # ── Writer: construiește ferestre + abonare la Cache24 ────────────────────
     def start_computation(self, cache24_managers=None, current_price_mgr=None, run_full_eval=False):
@@ -923,6 +925,7 @@ class CacheInstantTrendManager:
             print(f"[InstantTrend][{s}] window small: {len(w.prices)} (rate={w.sample_rate_sec:.2f}s) "
                   f"big: {len(wb.prices)} (rate={wb.sample_rate_sec:.2f}s)")
         self._computing = True
+        self._start_flush_loop()        # I/O decuplat (scrie fișierul în fundal)
         if run_full_eval:
             self._start_full_eval_loop()
 
@@ -946,7 +949,8 @@ class CacheInstantTrendManager:
             slope_big, _ = anb.check_price_change(self.PRICE_CHANGE_THRESHOLD_BIG)
         eps = win.get_noise_epsilon(self.EPSILON_K)
 
-        self.update_snapshot(
+        # DOAR memorie (fără I/O); _flush_loop scrie fișierul în fundal.
+        self._set_mem(
             symbol,
             final_trend=gradient, growth_coefficient=gc,
             slope_full=slope_full, gradient_recent=gradient_recent,
@@ -976,11 +980,12 @@ class CacheInstantTrendManager:
         if win is None:
             return
         try:
+            # Calea RAPIDĂ: doar gradient ieftin + memorie (zero I/O, zero calcul greu).
             g = win.get_recent_gradient()
             eps = win.get_noise_epsilon(self.EPSILON_K)
-            self.update_snapshot(symbol, gradient_recent=g, epsilon=eps,
-                                 final_trend=(1 if g > 0 else -1 if g < 0 else 0),
-                                 current_price=price, ts=time.time())
+            self._set_mem(symbol, gradient_recent=g, epsilon=eps,
+                          final_trend=(1 if g > 0 else -1 if g < 0 else 0),
+                          current_price=price, ts=time.time())
         except Exception as e:
             print(f"[CacheInstantTrendManager] on_price_update {symbol}: {e}")
 
@@ -1013,14 +1018,35 @@ class CacheInstantTrendManager:
         except Exception:
             return {}
 
-    def update_snapshot(self, symbol, **fields):
-        """Merge câmpuri în snapshot + persistă (canal rapid și eval completă)."""
+    def _set_mem(self, symbol, **fields):
+        """Merge câmpuri DOAR în memorie (fără I/O). Folosit de căile rapide
+        (on_price_update, evaluate_full); fișierul e scris de _flush_loop."""
         with self._lock:
             snap = dict(self._mem.get(symbol) or self._read_file().get(symbol) or {})
             snap.update(fields)
             snap["symbol"] = symbol
             self._mem[symbol] = snap
+
+    def update_snapshot(self, symbol, **fields):
+        """Memorie + flush IMEDIAT pe fișier. Pentru apelanți externi (tradeall,
+        teste) care vor persistență sincronă."""
+        self._set_mem(symbol, **fields)
+        with self._lock:
             self._write_file()
+
+    def _start_flush_loop(self):
+        """Thread SEPARAT care scrie memoria pe fișier la FLUSH_INTERVAL_SEC.
+        Decuplează I/O-ul de căile de calcul (rapid + greu)."""
+        if self._flush_thread is not None and self._flush_thread.is_alive():
+            return
+        def run():
+            while True:
+                time.sleep(self.FLUSH_INTERVAL_SEC)
+                with self._lock:
+                    if self._mem:
+                        self._write_file()
+        self._flush_thread = threading.Thread(target=run, name="InstantTrendFlush", daemon=True)
+        self._flush_thread.start()
 
     def get_snapshot(self, symbol):
         """Writer: _mem autoritar. Reader (alt proces): fișier."""
