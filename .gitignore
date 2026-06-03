@@ -1,11 +1,15 @@
-*.log
-logger
-plots
-keys
-apikeys.py
-sell_recommendation.csv
-index.html
-__pycache__
-old*
-myenv
+# Secrets / config local
+.env
+.claude/settings.local.json
 
+# Cache files (runtime, per-proces)
+cache_*.json
+last_watch_config.json
+priceanalysis.json
+
+# Build
+*.egg-info/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
