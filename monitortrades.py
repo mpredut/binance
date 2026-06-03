@@ -606,15 +606,15 @@ class StateTracker:
         self.running = True
         self.states = {}  # To hold states for each symbol
     
-    def background_updater(self, file_path):
+    def background_updater(self):
         while self.running:
             try:
-                self.update_sell_recommendation(file_path)
+                self.update_sell_recommendation()
             except Exception as e:
                 print(e)
             time.sleep(50)
 
-    def update_sell_recommendation(self, file_path=None):
+    def update_sell_recommendation(self):
         """Construiește sell_recommendation din:
           - CONFIG static (force_sell, procent_desired_profit, etc.) = defaults din cod
           - SEMNALE de trend (slope/pos/gradient/tick/min/max) = snapshot-ul din
@@ -892,17 +892,12 @@ def main():
 
     #api.get_binance_symbols(sym.taosymbol)
 
-    file_path = "sell_recommendation.csv"
-    state_tracker.update_sell_recommendation(file_path)
+    # sell_recommendation vine din CacheInstantTrendManager (cross-process), nu din CSV.
+    state_tracker.update_sell_recommendation()
     state_tracker.display_sell_recommendation()
-    #monitor_trades(order_type, sym.symbol, filename, interval=3600, limit=1000, years_to_keep=01)
 
-    # Pornim monitorizarea periodica a tranzactiilor
-    #start_monitoring(filename, interval=interval, limit=1000, years_to_keep=0.09)
-    
     thread = threading.Thread(
         target=state_tracker.background_updater,
-        args=(file_path,),
         name="SellRecommendationUpdater",
         daemon=True
     )
