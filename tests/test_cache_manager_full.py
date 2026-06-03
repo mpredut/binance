@@ -887,5 +887,54 @@ class TestGetCurrentPriceManagerSingleton(unittest.TestCase):
         ws.subscribe.assert_called_once_with(mgr)
 
 
+class TestRefreshSymbolInCache(unittest.TestCase):
+    """Helper folosit de handler-ul WS pentru a reîmprospăta un singur simbol."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def test_refresh_single_symbol(self):
+        fname = _tmp_file(self.tmp)
+        remote = {"SYM": [[int(time.time()*1000), 42.0]]}
+        mgr = ConcreteTestManager(9999, ["SYM"], fname, remote_items=remote)
+        with mgr.lock:
+            mgr.cache["SYM"] = []
+        cm._refresh_symbol_in_cache(mgr, "SYM")
+        with mgr.lock:
+            self.assertIn(42.0, [e[1] for e in mgr.cache.get("SYM", [])])
+
+    def test_refresh_missing_symbol_no_crash(self):
+        fname = _tmp_file(self.tmp, "x.json")
+        mgr = ConcreteTestManager(9999, ["SYM"], fname, remote_items={})
+        cm._refresh_symbol_in_cache(mgr, "NOPE")   # nu trebuie să arunce
+
+
+class TestFactorySingletonWarning(unittest.TestCase):
+    """Singleton pe nume: simbolurile diferite la apeluri ulterioare sunt ignorate."""
+
+    def setUp(self):
+        cm.CacheFactory._instances.pop("AssetValue", None)
+
+    def tearDown(self):
+        cm.CacheFactory._instances.pop("AssetValue", None)
+
+    def test_same_instance_returned_and_warns(self):
+        m1 = cm.get_cache_manager("AssetValue", symbols=["TOTAL"])
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            m2 = cm.get_cache_manager("AssetValue", symbols=["OTHER"])
+        self.assertIs(m1, m2)                       # aceeași instanță
+        self.assertIn("IGNORAT", buf.getvalue())    # a avertizat
+
+    def test_no_warning_same_symbols(self):
+        cm.get_cache_manager("AssetValue", symbols=["TOTAL"])
+        import io, contextlib
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            cm.get_cache_manager("AssetValue", symbols=["TOTAL"])
+        self.assertNotIn("IGNORAT", buf.getvalue())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

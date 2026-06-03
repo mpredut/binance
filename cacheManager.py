@@ -1108,6 +1108,22 @@ class CacheFactory:
         if name not in cls._CONFIG:
             raise ValueError(f"Unknown cache type: {name}")
 
+        # Singleton pe NUME: prima creare fixează simbolurile. Dacă un apel
+        # ulterior cere alte simboluri, ele sunt IGNORATE → avertizăm explicit.
+        if name in cls._instances and symbols is not None:
+            inst = cls._instances[name]
+            existing = set(inst.keys()) if isinstance(inst, dict) else set(getattr(inst, "symbols", []))
+            requested = set(symbols)
+            if requested != existing:
+                missing = requested - existing
+                # builtins.print: modulul redefinește print ca no-op (loguri dezactivate),
+                # dar avertizarea asta trebuie să fie vizibilă.
+                builtins.print(
+                    f"[CacheFactory][WARN] '{name}' există deja cu simbolurile {sorted(existing)}; "
+                    f"cererea pentru {sorted(requested)} e IGNORATĂ"
+                    + (f" (lipsesc: {sorted(missing)})" if missing else "")
+                    + ". Singleton pe nume — folosește prima instanță.")
+
         if name not in cls._instances:
             config = cls._CONFIG[name]
             manager_class = config["class"]
@@ -1376,6 +1392,17 @@ def _persist_ws_updated_caches(event_type):
         get_cache_manager("AssetValue", symbols=["TOTAL"]).save_state_to_file_if_enabled()
 
 
+def _refresh_symbol_in_cache(manager, symbol):
+    """Reîmprospătează DOAR un simbol într-un manager (eficient pe event WS)."""
+    try:
+        start_time = manager.fetchtime_time_per_symbol.get(symbol, manager.fallback_time_default)
+        items = manager.get_remote_items(symbol, start_time)
+        if items:
+            manager.update_cache_per_symbol(symbol, items)
+    except Exception as e:
+        print(f"[cacheManager] _refresh_symbol_in_cache {manager.cls_name}/{symbol}: {e}")
+
+
 def _handle_binance_ws_event(event):
     print("cacheManager handler call from binance ....")
     event_type = event.get("e")
@@ -1385,18 +1412,22 @@ def _handle_binance_ws_event(event):
     _ws_event_stats[event_type] += 1
 
     if event_type == "executionReport":
+        symbol = event.get("s")
         if WS_EVENT_LOG_ENABLED:
             print(
                 "[cacheManager][WS] executionReport "
-                f"symbol={event.get('s')} orderId={event.get('i')} "
+                f"symbol={symbol} orderId={event.get('i')} "
                 f"status={event.get('X')} execType={event.get('x')} side={event.get('S')}"
             )
-        order_cache = get_cache_manager("Order")
-        order_cache.query_remote_and_update_cache()
-
-       # _upsert_order_from_execution_report(event)
-       # _append_trade_from_execution_report(event)
-       # _persist_ws_updated_caches(event_type)
+        # Reîmprospătăm ATÂT Order CÂT ȘI Trade (ambele derivă din trade-uri).
+        # Targetat pe simbolul din event dacă există (eficient), altfel toate.
+        for cache_name in ("Order", "Trade"):
+            mgr = get_cache_manager(cache_name)
+            if symbol:
+                _refresh_symbol_in_cache(mgr, symbol)
+            else:
+                mgr.query_remote_and_update_cache()
+            mgr.save_state_to_file_if_enabled()
         return
 
     if event_type in ("balanceUpdate", "outboundAccountPosition"):
