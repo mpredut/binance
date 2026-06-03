@@ -133,23 +133,61 @@ class PriceTrendAnalyzer:
 from collections import deque
 from bisect import insort, bisect_left
 class PriceWindow:
-    def __init__(self, symbol, window_size, initial_prices=None):
+    def __init__(self, symbol, window_size, sample_rate_sec=None, initial_prices=None):
         self.symbol = symbol
         self.window_size = int(window_size)
+        self.sample_rate_sec = sample_rate_sec if sample_rate_sec is not None else TIME_SLEEP_GET_PRICE
         self.prices = deque(maxlen=self.window_size)
         self.sorted_prices = []
-        
+
         if initial_prices:
             for price in initial_prices[-self.window_size:]:  # Doar ultimele `window_size` elemente
                 self.process_price(price)
+
+    @property
+    def recent_n(self) -> int:
+        """Numărul de sample-uri recente corespunzând RECENT_GRADIENT_SECONDS."""
+        return max(2, int(RECENT_GRADIENT_SECONDS / self.sample_rate_sec))
 
     @classmethod
     def from_existing_window(cls, existing_prices, window_size):
         """ Creează o instanță nouă de PriceWindow cu ultimele `window_size` elemente din `existing_prices`. """
         return cls(window_size, initial_prices=existing_prices)
 
+    @staticmethod
+    def _sample_rate_from_entries(entries) -> float:
+        """Calculează rata de sampling în secunde din lista de [ts_ms, price].
+        Returnează TIME_SLEEP_GET_PRICE dacă nu sunt suficiente date."""
+        if len(entries) < 2:
+            return TIME_SLEEP_GET_PRICE
+        timestamps_sec = [e[0] / 1000.0 for e in entries]
+        gaps = [timestamps_sec[i+1] - timestamps_sec[i]
+                for i in range(len(timestamps_sec) - 1)
+                if timestamps_sec[i+1] > timestamps_sec[i]]
+        if not gaps:
+            return TIME_SLEEP_GET_PRICE
+        return float(np.median(gaps))
+
+    @classmethod
+    def from_cache24(cls, symbol: str, window_seconds: float, cache24) -> "PriceWindow":
+        """Construiește un PriceWindow din ultimele `window_seconds` secunde din Cache24PriceManager.
+
+        window_seconds trebuie să fie <= Cache24PriceManager.KEEP_HOURS * 3600 (24h).
+        sample_rate_sec și window_size sunt calculate automat din datele reale.
+        """
+        entries = cache24.get_recent_entries(symbol, last_seconds=window_seconds)
+
+        sample_rate = cls._sample_rate_from_entries(entries)
+        window_size = max(10, int(window_seconds / sample_rate))
+
+        prices = [e[1] for e in entries]
+        pw = cls(symbol, window_size, sample_rate_sec=sample_rate)
+        for p in prices:
+            pw.process_price(p)
+        return pw
+
     def process_price(self, price):
-        print(f"{symbol}: {price}")
+        print(f"{self.symbol}: {price}")
         if len(self.prices) == self.window_size:
             oldest_price = self.prices.popleft()
             index = bisect_left(self.sorted_prices, oldest_price)
@@ -393,69 +431,49 @@ class PriceWindow:
         return len(self.prices)
 
     def get_trend(self):
+        """Returnează (final_trend, growth_coefficient, slope_full, gradient_recent).
+
+        slope_full      : panta regresiei liniare pe toată fereastra (tendință stabilă)
+        gradient_recent : media np.gradient pe ultimele recent_n sample-uri (momentum)
+        growth_coefficient : medie aritmetică slope_full + gradient_recent
+        final_trend     : semn al growth_coefficient (-1 / 0 / 1)
+        """
         analyzer = PriceTrendAnalyzer(self.prices)
-        
-        lin_trend = 0
-        poly_trend = 0
-        '''
-        trend_line, slope, r_value = analyzer.linear_regression_trend()
-        lin_trend = slope if slope is not None else 0
-        print(f"Regresie Liniară: Slope = {slope:.2f} -> {'creștere' if slope > 0 else 'descreștere' if slope < 0 else 'nedefinit'}")
-        
-        poly_degree = 2
-        trend_poly, poly_coef = analyzer.polynomial_regression_trend(degree=poly_degree)
-        poly_trend = poly_coef[-1]
-        print(f"Regresie Polinomială (grad {poly_degree}): Coeficient final = {poly_trend:.2f} -> {'creștere' if poly_trend > 0 else 'descreștere'}")
-        '''
-        
-        # Media Mobilă Exponențială
-        #ema_span = 5
-        #ema = analyzer.exponential_moving_average(span=ema_span)
-        ema_diff = 0
-        #if len(ema) > 1:
-        #    ema_diff = ema[-1] - ema[-2] 
-        #print(f"Media Mobilă Exponențială: Ultima valoare EMA = {ema[-1]:.2f} -> {'creștere' if ema_diff > 0 else 'descreștere'}")
 
-        # Gradientul
-        gradient_lst, avg_gradient = analyzer.calculate_gradient()
-        print(f"Gradient Mediu: {avg_gradient:.2f} -> {'creștere' if avg_gradient > 0 else 'descreștere'}")
-        gradient = 0
-        if len(gradient_lst) >= 3:
-            gradient = np.mean(gradient_lst[:3])
+        # Tendință stabilă — regresia liniară pe toată fereastra
+        _, slope_full, _ = analyzer.linear_regression_trend()
+        if slope_full is None:
+            slope_full = 0.0
+
+        # Momentum recent — np.gradient pe ultimele recent_n sample-uri
+        gradient_lst, _ = analyzer.calculate_gradient()
+        n = self.recent_n
+        if len(gradient_lst) >= n:
+            gradient_recent = float(np.mean(gradient_lst[-n:]))
         else:
-            gradient = np.mean(gradient_lst)
-        #print(f"Gradient local: {gradient:.2f} -> {'creștere' if gradient > 0 else 'descreștere'}")
+            gradient_recent = float(np.mean(gradient_lst)) if len(gradient_lst) else 0.0
 
+        print(
+            f"[{self.symbol}] slope_full={slope_full:.4f} "
+            f"gradient_recent={gradient_recent:.4f} (recent_n={n}, rate={self.sample_rate_sec:.2f}s)"
+        )
 
+        growth_coefficient = (slope_full + gradient_recent) / 2.0
 
-        # Calculare vot final și coeficient de creștere
-        trends = [#1 if slope > 0 else -1 if slope < 0 else 0,
-                  #1 if poly_trend > 0 else -1,
-                  1 if ema_diff > 0 else -1,
-                  1 if gradient > 0 else -1,
-                  1 if avg_gradient > 0 else -1]
-        final_trend = sum(trends)
-        final_trend = avg_gradient
-        
-        growth_coefficient = (lin_trend + poly_trend + ema_diff + gradient + avg_gradient) / len(trends)
-        growth_coefficient = avg_gradient
-        
-        if final_trend > 0:
+        if growth_coefficient > 0:
             final_trend = 1
-        elif final_trend < 0:
+        elif growth_coefficient < 0:
             final_trend = -1
         else:
             final_trend = 0
 
-        print(f"Tendință de {'creștere' if final_trend == 1 else 'descreștere' if final_trend == -1 else 'nedefinit'}")
-        print(f"Coeficient : {growth_coefficient:.2f}")
-
-        return final_trend, growth_coefficient
+        return final_trend, growth_coefficient, slope_full, gradient_recent
 
         
     
 
-TIME_SLEEP_GET_PRICE = 0.8  # seconds to sleep for price collection
+TIME_SLEEP_GET_PRICE = 0.8       # seconds to sleep for price collection — valoare nominală
+RECENT_GRADIENT_SECONDS = 5.0   # fereastra de momentum recent (în secunde)
 EXP_TIME_BUY_ORDER = (2.6 * 60) * 60 # dupa 1.6 ore
 EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
 TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
@@ -466,6 +484,10 @@ window_size = WINDOWS_SIZE_MIN / TIME_SLEEP_GET_PRICE / 2
 
 window_size_big = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE / 3  # in realitate 2.5 ore
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
+
+TREND_TO_BE_OLD_SECONDS = 60 * 60 * 1.9
+PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 310)
+PRICE_CHANGE_THRESHOLD_BIG_EUR = u.calculate_difference_percent(97000, 95000 - 377)
 
 def track_and_place_order(action, symbol, count, proposed_price, current_price, order_ids=None):
     quantity = api.quantities[symbol]
@@ -726,12 +748,7 @@ def update_csv_file(file_path, symbol, slope, tick, min_val, max_val, pos, gradi
     except Exception as e:
         print(f"Error updating CSV file: {e}")
     
-filename = "sell_recommendation.csv"    
-initialize_csv_file(filename)
-
-trades = apitrades.get_my_trades_24(order_type=None, symbol=sym.btcsymbol, days_ago=0, limit=1000)
-print (f" --------- {len(trades)}");
-print (f" my trades of today : {(trades)}");
+filename = "sell_recommendation.csv"
 
 
 
@@ -878,9 +895,17 @@ def handle_symbol(symbol, current_price, price_window, price_window_big,
     price_window.process_price(current_price)
     price_window_big.process_price(current_price)
 
+    # Actualizare rata reală de sampling din manager (dacă e disponibil)
+    try:
+        import cacheManager as cm
+        actual_rate = cm.get_current_price_manager().get_sample_rate(symbol, fallback=TIME_SLEEP_GET_PRICE)
+        price_window.sample_rate_sec = actual_rate
+    except Exception:
+        pass
+
     slope, pos = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
     print(f"small slope {slope}")
-    gradient, gradient_coff = price_window.get_trend()
+    gradient, gradient_coff, slope_full, gradient_recent = price_window.get_trend()
 
     if(slope * gradient < 0):
         print(f"ALERT slope1 = {slope} gradient = {gradient}")
@@ -917,67 +942,47 @@ def handle_symbol(symbol, current_price, price_window, price_window_big,
 
     # web.monede[0]["watch"] = True # for debug
 
-#
-#       MAIN 
-#
+if __name__ == "__main__":
+    initialize_csv_file(filename)
 
-order_ids = []
-TREND_TO_BE_OLD_SECONDS = 60 * 60 * 1.9  # 1.9h -> 2.5h  
-#todo put that threshold per PriceWindow
-PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 310)
-PRICE_CHANGE_THRESHOLD_BIG_EUR = u.calculate_difference_percent(97000, 95000 - 377)
+    trades = apitrades.get_my_trades_24(order_type=None, symbol=sym.btcsymbol, days_ago=0, limit=1000)
+    print(f" --------- {len(trades)}")
+    print(f" my trades of today : {trades}")
 
-price_windows = {}
-price_windows_big = {}
-trend_states = {}
-trend_states_big = {}
-# First loop: Create instances for each symbol
-for symbol in sym.symbols:
-    #symbol = moneda["nume"]
-    price_windows[symbol] = PriceWindow(symbol, window_size)
-    price_windows_big[symbol] = PriceWindow(symbol, window_size_big)
-    trend_states[symbol] = TrendState(max_duration_seconds= 2.5 * 60 * 60, expiration_trend_time=2.7 * 60, fresh_trend_time = 3.7 * 60)  # Expira In 10 minute
-    trend_states_big[symbol] = TrendState(max_duration_seconds= 3 * 60 * 60, expiration_trend_time=2.7 * 60, fresh_trend_time = 3.7 * 60)  # Expira In 10 minute
+    order_ids = []
+    price_windows = {}
+    price_windows_big = {}
+    trend_states = {}
+    trend_states_big = {}
 
-TIME_SLEEP_BETWEEN_SYMBOLS=0#TIME_SLEEP_GET_PRICE
-# Second loop: Call handle_symbol for each symbol indefinitely
-
-print(f"Quantities: {api.quantities}")
-
-while True:
-    
-    time.sleep(TIME_SLEEP_GET_PRICE)
-    time.sleep(TIME_SLEEP_GET_PRICE)    
-    print(f"----------------------------------")
     for symbol in sym.symbols:
-        #symbol = moneda["nume"]
-        print(f"")
-        # Get the appropriate price window and trend state for the symbol
-        price_window = price_windows[symbol]
-        price_window_big = price_windows_big[symbol]
-        trend_state = trend_states[symbol]
-        trend_state_big = trend_states_big[symbol]
-    
-         # get the price for the current symbol
-        time.sleep(TIME_SLEEP_BETWEEN_SYMBOLS)
-        current_price = api.get_current_price(symbol) #current_time = time.time()
-        if current_price is None:
-            time.sleep(TIME_SLEEP_GET_PRICE)
-            continue
-        
-        # Call handle_symbol for the current symbol    
-        handle_symbol(symbol, current_price, price_window, price_window_big, trend_state, trend_state_big)
-    
-    # Generare și salvare
-    html_content = web.genereaza_html(web.monede)
-    web.salveaza_html(html_content, "index.html")
-                    
+        price_windows[symbol] = PriceWindow(symbol, window_size)
+        price_windows_big[symbol] = PriceWindow(symbol, window_size_big)
+        trend_states[symbol] = TrendState(max_duration_seconds=2.5 * 60 * 60, expiration_trend_time=2.7 * 60, fresh_trend_time=3.7 * 60)
+        trend_states_big[symbol] = TrendState(max_duration_seconds=3 * 60 * 60, expiration_trend_time=2.7 * 60, fresh_trend_time=3.7 * 60)
 
-#try
-#except BinanceAPIException as e:
-    #print(f"Binance API Error: {e}")
-    #time.sleep(TIME_SLEEP_GET_PRICE)
-#except Exception as e:
-    #print(f"Error: {e}")
-    #time.sleep(TIME_SLEEP_GET_PRICE)
+    TIME_SLEEP_BETWEEN_SYMBOLS = 0
+    print(f"Quantities: {api.quantities}")
+
+    while True:
+        time.sleep(TIME_SLEEP_GET_PRICE)
+        time.sleep(TIME_SLEEP_GET_PRICE)
+        print(f"----------------------------------")
+        for symbol in sym.symbols:
+            print(f"")
+            price_window = price_windows[symbol]
+            price_window_big = price_windows_big[symbol]
+            trend_state = trend_states[symbol]
+            trend_state_big = trend_states_big[symbol]
+
+            time.sleep(TIME_SLEEP_BETWEEN_SYMBOLS)
+            current_price = api.get_current_price(symbol)
+            if current_price is None:
+                time.sleep(TIME_SLEEP_GET_PRICE)
+                continue
+
+            handle_symbol(symbol, current_price, price_window, price_window_big, trend_state, trend_state_big)
+
+        html_content = web.genereaza_html(web.monede)
+        web.salveaza_html(html_content, "index.html")
 

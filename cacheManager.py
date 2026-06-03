@@ -8,7 +8,7 @@ import importlib
 import builtins
 from datetime import datetime, timedelta
 from abc import ABC, abstractmethod
-from collections import defaultdict
+from collections import defaultdict, deque
 from typing import Optional
 
 #my imports
@@ -447,6 +447,13 @@ class Cache24PriceManager(CacheManagerInterface):
             if entries:
                 self.cache[symbol] = [e for e in entries if e[0] >= cutoff_ms]
 
+    def get_recent_entries(self, symbol: str, last_seconds: float) -> list:
+        """Returnează intrările [ts_ms, price] din ultimele `last_seconds` secunde."""
+        cutoff_ms = int((time.time() - last_seconds) * 1000)
+        with self.lock:
+            entries = self.cache.get(symbol, [])
+            return [e for e in entries if e[0] >= cutoff_ms]
+
     # ── CacheManagerInterface ─────────────────────────────────────────────────
 
     def rebuild_fetchtime_times(self):
@@ -608,13 +615,15 @@ class CacheCurrentPriceManager(CacheManagerInterface):
     Fișier          : cache_currentprice.json  (un singur fișier, toți simbolii)
     """
 
-    WS_TIMEOUT_SEC    = 15      # WS considerat mort după 15s fără niciun event
+    WS_TIMEOUT_SEC     = 15      # WS considerat mort după 15s fără niciun event
     STALE_THRESHOLD_MS = 5_000  # get_price() forțează HTTP dacă prețul e > 5s vechi
+    FREQ_WINDOW_SEC    = 60     # fereastra de măsurare a frecvenței update-urilor
 
     def __init__(self, sync_ts, symbols, filename, ws_manager=None, api_client=api):
         self._ws_manager        = ws_manager
         self._ws_last_event_ts  = 0.0      # setat înainte de super() !
         self._price_subscribers = []       # idem
+        self._update_timestamps: dict = defaultdict(deque)  # idem — înainte de super()
         super().__init__(sync_ts, symbols, filename, append_mode=False, api_client=api_client)
         if ws_manager is not None:
             ws_manager.subscribe(self)
@@ -648,6 +657,14 @@ class CacheCurrentPriceManager(CacheManagerInterface):
 
     # ── WS callback (suprascrie metoda din interfață) ─────────────────────────
 
+    def _record_price_timestamp(self, symbol: str) -> None:
+        now = time.time()
+        dq = self._update_timestamps[symbol]
+        dq.append(now)
+        cutoff = now - self.FREQ_WINDOW_SEC
+        while dq and dq[0] < cutoff:
+            dq.popleft()
+
     def on_items_update(self, symbol: str, items):
         self._ws_last_event_ts = time.time()
         price = items[0] if items else None
@@ -656,6 +673,7 @@ class CacheCurrentPriceManager(CacheManagerInterface):
         ts_ms = int(time.time() * 1000)
         if not self.fetchtime_time_per_symbol:
             self.fetchtime_time_per_symbol = self._CacheManagerInterface__rebuild_fetchtime_times()
+        self._record_price_timestamp(symbol)
         self.update_cache_per_symbol(symbol, [[ts_ms, price]])
         self._notify_price_subscribers(symbol, ts_ms, price)
 
@@ -711,6 +729,21 @@ class CacheCurrentPriceManager(CacheManagerInterface):
         return self.thread
 
     # ── Public API ────────────────────────────────────────────────────────────
+
+    def get_sample_rate(self, symbol: str, fallback: float = 1.0) -> float:
+        """Intervalul mediu în secunde între update-uri în ultimele FREQ_WINDOW_SEC secunde.
+        Returnează `fallback` dacă nu există suficiente măsurători."""
+        dq = self._update_timestamps.get(symbol)
+        if not dq or len(dq) < 2:
+            return fallback
+        return (dq[-1] - dq[0]) / (len(dq) - 1)
+
+    def get_update_frequency(self, symbol: str) -> float:
+        """Update-uri/secundă în ultimele FREQ_WINDOW_SEC secunde."""
+        dq = self._update_timestamps.get(symbol)
+        if not dq or len(dq) < 2:
+            return 0.0
+        return len(dq) / self.FREQ_WINDOW_SEC
 
     def get_price(self, symbol: str):
         """
