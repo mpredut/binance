@@ -1090,6 +1090,26 @@ class CacheInstantTrendManager:
         self.writer = True
         self._start_flush_loop()
 
+    def get_snapshot_resilient(self, symbol, max_age_sec=None,
+                               cache24_managers=None, current_price_mgr=None):
+        """Reader REZILIENT cu failover LAZY:
+          • dacă deja calculez → _mem (autoritar)
+          • altfel, dacă fișierul e PROASPĂT → îl folosesc (eficient, FĂRĂ recalcul)
+          • dacă fișierul e STALE (writer mort) → pornesc calcul propriu O SINGURĂ
+            DATĂ (lazy) + devin writer, apoi folosesc _mem.
+        Așa rulez autonom DOAR când nu mă pot baza pe fișier."""
+        if self._computing:
+            return self.get_snapshot(symbol)
+        if self.is_snapshot_fresh(symbol, max_age_sec):
+            return self._read_file().get(symbol)
+        # Fișier prea vechi → failover: preiau calculul (autonom de aici încolo).
+        builtins.print(f"[CacheInstantTrendManager][WARN] fișier stale → "
+                       f"failover la calcul propriu ({symbol})")
+        self.prime_from_file()
+        self.start_computation(cache24_managers, current_price_mgr)
+        self.become_writer()
+        return self.get_snapshot(symbol)
+
     def get_all_snapshots(self):
         with self._lock:
             if self._mem:

@@ -94,6 +94,36 @@ class TestStore(unittest.TestCase):
         m.update_snapshot("BTCUSDT", gradient_recent=0.6)
         self.assertTrue(os.path.exists(fname))     # acum scrie
 
+    def test_resilient_uses_file_when_fresh(self):
+        fname = os.path.join(self.tmp, "res1.json")
+        writer = cm.CacheInstantTrendManager(["BTCUSDT"], fname, writer=True)
+        writer.update_snapshot("BTCUSDT", gradient_recent=-0.4, ts=time.time())
+        reader = cm.CacheInstantTrendManager(["BTCUSDT"], fname)
+        snap = reader.get_snapshot_resilient("BTCUSDT", max_age_sec=10)
+        self.assertEqual(snap["gradient_recent"], -0.4)
+        self.assertFalse(reader._computing)   # NU a pornit calcul (fișier proaspăt)
+
+    def test_resilient_failover_when_stale(self):
+        fname = os.path.join(self.tmp, "res2.json")
+        writer = cm.CacheInstantTrendManager(["BTCUSDT"], fname, writer=True)
+        writer.update_snapshot("BTCUSDT", gradient_recent=-0.4, ts=time.time() - 100)  # vechi
+        reader = cm.CacheInstantTrendManager(["BTCUSDT"], fname)
+        reader.get_snapshot_resilient(
+            "BTCUSDT", max_age_sec=10,
+            cache24_managers={"BTCUSDT": self._cache24()}, current_price_mgr=self._cpm())
+        self.assertTrue(reader._computing)   # a pornit calcul propriu (failover)
+        self.assertTrue(reader.writer)       # a devenit writer
+
+    def _cache24(self):
+        return _make_cache24("BTCUSDT", _entries_now(60), self.tmp)
+
+    def _cpm(self):
+        fname = os.path.join(self.tmp, "cp_res.json")
+        c = cm.CacheCurrentPriceManager(sync_ts=9999, symbols=["BTCUSDT"],
+                                        filename=fname, ws_manager=None, api_client=mock_api)
+        c.on_items_update("BTCUSDT", [60000.0])
+        return c
+
     def test_prime_from_file_loads_initial(self):
         fname = os.path.join(self.tmp, "shared2.json")
         writer = cm.CacheInstantTrendManager(["BTCUSDT"], fname, writer=True)
