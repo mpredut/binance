@@ -887,5 +887,36 @@ class TestGetCurrentPriceManagerSingleton(unittest.TestCase):
         ws.subscribe.assert_called_once_with(mgr)
 
 
+class TestFollowFileMode(unittest.TestCase):
+    """Mod reader: recitește fișierul scris de procesul cu WS, fără polling."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def test_reload_from_file_picks_up_changes(self):
+        fname = _tmp_file(self.tmp)
+        _write_cache_file(fname, {"SYM": [[1, 10.0]]}, {"SYM": 1})
+        mgr = ConcreteTestManager(9999, ["SYM"], fname)
+        # Alt proces (writer cu WS) rescrie fișierul
+        _write_cache_file(fname, {"SYM": [[2, 20.0]]}, {"SYM": 2})
+        mgr.reload_from_file()
+        with mgr.lock:
+            self.assertEqual(mgr.cache["SYM"], [[2, 20.0]])
+
+    def test_follow_file_no_poll_on_missing(self):
+        fname = _tmp_file(self.tmp, "missing.json")
+        remote = {"SYM": [[1, 99.0]]}
+        old = cm.FOLLOW_FILE_DEFAULT
+        cm.FOLLOW_FILE_DEFAULT = True   # mod reader la construcție
+        try:
+            mgr = ConcreteTestManager(9999, ["SYM"], fname, remote_items=remote)
+        finally:
+            cm.FOLLOW_FILE_DEFAULT = old
+        self.assertTrue(mgr.follow_file)
+        # fișier lipsă + follow → cache gol, fără fetch din remote
+        with mgr.lock:
+            self.assertNotIn(99.0, [e[1] for e in mgr.cache.get("SYM", [])])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

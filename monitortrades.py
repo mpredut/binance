@@ -1,4 +1,9 @@
 import os
+# Mod READER: managerele de cache (Trade/Order) recitesc fișierul scris de
+# procesul dedicat cacheManager.py (cel cu WS), în loc de polling propriu.
+# Trebuie setat ÎNAINTE de importul bapi_trades (care creează managerul la import).
+os.environ.setdefault("CACHE_FOLLOW_FILE", "1")
+
 import sys
 import time
 import datetime
