@@ -873,6 +873,10 @@ class CacheInstantTrendManager:
     EPSILON_K         = 1.0     # k * stddev(gradient) — prag de zgomot informat
     FAVORABLE_REL_EPS = 1e-5    # fallback relativ la preț dacă lipsește epsilon
     TREND_STALE_SEC   = 15.0    # snapshot mai vechi → nu mai întârziem
+    # Praguri pentru check_price_change (small/big) — aceleași ca în tradeall.
+    PRICE_CHANGE_THRESHOLD_SMALL = u.calculate_difference_percent(60000, 60000 - 310)
+    PRICE_CHANGE_THRESHOLD_BIG   = u.calculate_difference_percent(97000, 95000 - 377)
+    FULL_EVAL_INTERVAL_SEC = 1.5   # cadența calculului complet (metrici)
 
     def __init__(self, symbols, filename="cache_instant_trend.json"):
         self.symbols = list(symbols)
@@ -886,17 +890,26 @@ class CacheInstantTrendManager:
         self.windows_big = {}
         self.analyzers = {}
         self.analyzers_big = {}
+        self.current_price_mgr = None
         self._computing = False
+        self._full_eval_thread = None
 
     # ── Writer: construiește ferestre + abonare la Cache24 ────────────────────
-    def start_computation(self, cache24_managers=None, current_price_mgr=None):
+    def start_computation(self, cache24_managers=None, current_price_mgr=None, run_full_eval=False):
+        """Construiește ferestrele + canalul rapid. Dacă run_full_eval=True,
+        pornește și bucla de calcul COMPLET (slope_small/big, pos, etc.) care
+        scrie snapshot-ul complet — folosit de procesul cacheManager.py ca
+        fișierul să fie menținut independent de tradeall."""
         if self._computing:
+            if run_full_eval:
+                self._start_full_eval_loop()
             return
         import pricewindow as pw
         if cache24_managers is None:
             cache24_managers = get_cache_manager("Price24")
         if current_price_mgr is None:
             current_price_mgr = get_current_price_manager()
+        self.current_price_mgr = current_price_mgr
         for s in self.symbols:
             c24 = cache24_managers[s]
             current_price_mgr.subscribe_price(c24)          # CurrentPrice → Cache24
@@ -910,6 +923,52 @@ class CacheInstantTrendManager:
             print(f"[InstantTrend][{s}] window small: {len(w.prices)} (rate={w.sample_rate_sec:.2f}s) "
                   f"big: {len(wb.prices)} (rate={wb.sample_rate_sec:.2f}s)")
         self._computing = True
+        if run_full_eval:
+            self._start_full_eval_loop()
+
+    # ── Calcul COMPLET (metrici) — scrie snapshot complet, FĂRĂ logică de trading ──
+    def evaluate_full(self, symbol):
+        win = self.windows.get(symbol)
+        wb  = self.windows_big.get(symbol)
+        an  = self.analyzers.get(symbol)
+        anb = self.analyzers_big.get(symbol)
+        if win is None or an is None:
+            return None
+        current_price = None
+        if self.current_price_mgr is not None:
+            current_price = self.current_price_mgr.get_price_value(symbol)
+
+        slope, pos = an.check_price_change(self.PRICE_CHANGE_THRESHOLD_SMALL)
+        gradient, gc, slope_full, gradient_recent = win.get_instant_trend()
+        slope_max_min = an.calculate_slope_max_min()
+        slope_big = 0
+        if anb is not None:
+            slope_big, _ = anb.check_price_change(self.PRICE_CHANGE_THRESHOLD_BIG)
+        eps = win.get_noise_epsilon(self.EPSILON_K)
+
+        self.update_snapshot(
+            symbol,
+            final_trend=gradient, growth_coefficient=gc,
+            slope_full=slope_full, gradient_recent=gradient_recent,
+            slope_small=slope, slope_big=slope_big, slope_max_min=slope_max_min,
+            pos=pos, epsilon=eps,
+            current_price=(current_price if current_price is not None else 0.0),
+            ts=time.time(),
+        )
+
+    def _start_full_eval_loop(self):
+        if self._full_eval_thread is not None and self._full_eval_thread.is_alive():
+            return
+        def run():
+            while True:
+                for s in list(self.symbols):
+                    try:
+                        self.evaluate_full(s)
+                    except Exception as e:
+                        print(f"[CacheInstantTrendManager] evaluate_full {s}: {e}")
+                time.sleep(self.FULL_EVAL_INTERVAL_SEC)
+        self._full_eval_thread = threading.Thread(target=run, name="InstantTrendFullEval", daemon=True)
+        self._full_eval_thread.start()
 
     # ── Subscriber Cache24 — canal RAPID (gradient + epsilon la fiecare tick) ──
     def on_price_update(self, symbol, ts_ms, price):
@@ -1485,6 +1544,20 @@ if __name__ == "__main__":
                 threads.append(manager.periodic_sync(interval))
         else:
             threads.append(cache.periodic_sync(interval))
+
+    # Lanț de trend: market-data WS → CurrentPrice → Cache24 → InstantTrend.
+    # Rulăm CALCULUL COMPLET aici → cache_instant_trend.json e menținut continuu,
+    # independent de tradeall (monitortrades/rtrade citesc de aici).
+    try:
+        import bapi_ws
+        _trend_cpm = get_current_price_manager(
+            ws_manager=bapi_ws.bapi_ws_manager, sync_ts=0.8)
+        _trend_cache24 = CacheFactory.get("Price24")
+        _trend_mgr = get_instant_trend_manager()
+        _trend_mgr.start_computation(_trend_cache24, _trend_cpm, run_full_eval=True)
+        print("⚙️ cacheManager: calcul trend complet pornit (cache_instant_trend.json).")
+    except Exception as e:
+        print(f"[cacheManager] Nu pot porni calculul de trend: {e}")
 
     try:
         for t in threads:

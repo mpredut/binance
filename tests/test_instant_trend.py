@@ -185,6 +185,21 @@ class TestComputation(unittest.TestCase):
         self.m.start_computation({"BTCUSDT": self.cache24}, self.cpm)
         self.assertIs(self.m.get_window("BTCUSDT"), w1)
 
+    def test_evaluate_full_writes_complete_snapshot(self):
+        # calculul complet (fără logică de trading) → snapshot cu toate metricile
+        self.m.evaluate_full("BTCUSDT")
+        snap = self.m.get_snapshot("BTCUSDT")
+        self.assertIsNotNone(snap)
+        for key in ("final_trend", "slope_full", "gradient_recent",
+                    "slope_small", "slope_big", "slope_max_min", "pos", "epsilon"):
+            self.assertIn(key, snap)
+
+    def test_full_eval_loop_thread_started(self):
+        m2 = cm.CacheInstantTrendManager(["BTCUSDT"], os.path.join(self.tmp, "t2.json"))
+        m2.start_computation({"BTCUSDT": self.cache24}, self.cpm, run_full_eval=True)
+        self.assertIsNotNone(m2._full_eval_thread)
+        self.assertTrue(m2._full_eval_thread.is_alive())
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
