@@ -32,12 +32,6 @@ WS_ONLY_MODE = False
 WS_LOSS_TIMEOUT_SEC = 40 # 600  # 10 minute
 WS_EVENT_LOG_ENABLED = True
 
-# FILE-FOLLOW mode: procesele reader (ex. monitortrades) NU fac polling, ci
-# RECITESC periodic fișierul scris de procesul dedicat cacheManager.py (cel cu WS).
-# Activare per-proces: env CACHE_FOLLOW_FILE=1 (înainte de import).
-FOLLOW_FILE_DEFAULT = os.environ.get("CACHE_FOLLOW_FILE", "0") == "1"
-FOLLOW_FILE_INTERVAL_SEC = int(os.environ.get("CACHE_FOLLOW_INTERVAL_SEC", "15"))
-
 _ws_health_lock = threading.Lock()
 _ws_available = False
 _ws_last_event_ts = 0.0
@@ -94,7 +88,6 @@ class CacheManagerInterface(ABC):
         
         self.thread = None
         self.save_state = False
-        self.follow_file = FOLLOW_FILE_DEFAULT   # reader: recitește fișierul, nu face polling
         self.lock = threading.RLock()
 
         # Subscriber pattern comun — clasele derivate forward prețuri către
@@ -194,31 +187,13 @@ class CacheManagerInterface(ABC):
                     
             except Exception as e:
                 print(f"[{self.cls_name}][Eroare] La citirea fișierului cache {self.filename} : {e}")
-                if not self.follow_file:
-                    self.query_remote_and_update_cache()
-                    self.save_state_to_file_if_enabled()
-        else :
-            print(f"[{self.cls_name}][Info] File is missing, may be is it first time run. Creating it ....")
-            if not self.follow_file:
                 self.query_remote_and_update_cache()
                 self.save_state_to_file_if_enabled()
+        else :
+            print(f"[{self.cls_name}][Info] File is missing, may be is it first time run. Creating it ....")
+            self.query_remote_and_update_cache()
+            self.save_state_to_file_if_enabled()
 
-
-    def reload_from_file(self):
-        """Mod reader: recitește DOAR fișierul (scris de procesul cu WS), fără
-        fallback la API. Așa readerii moștenesc freshness-ul WS prin fișier."""
-        if not os.path.exists(self.filename):
-            return
-        try:
-            with open(self.filename, "r") as f:
-                data = json.load(f)
-            with self.lock:
-                items = data.get("items", {})
-                if isinstance(items, dict):
-                    self.cache = items
-                self.fetchtime_time_per_symbol = data.get("fetchtime", {})
-        except Exception as e:
-            print(f"[{self.cls_name}][Eroare] reload_from_file {self.filename}: {e}")
 
     def save_state_to_file_if_enabled(self):
         if not self.save_state:
@@ -324,11 +299,6 @@ class CacheManagerInterface(ABC):
 
         def run():
             while True:
-                if self.follow_file:
-                    # Mod reader: recitește fișierul scris de procesul cu WS.
-                    self.reload_from_file()
-                    time.sleep(FOLLOW_FILE_INTERVAL_SEC)
-                    continue
                 print(f"\n[{self.cls_name}] Sync started at {time.strftime('%Y-%m-%d %H:%M:%S')} for {self.symbols}")
                 if _should_poll_for_manager(self.cls_name):
                     self.query_remote_and_update_cache()

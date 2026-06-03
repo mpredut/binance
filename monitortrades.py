@@ -1,9 +1,4 @@
 import os
-# Mod READER: managerele de cache (Trade/Order) recitesc fișierul scris de
-# procesul dedicat cacheManager.py (cel cu WS), în loc de polling propriu.
-# Trebuie setat ÎNAINTE de importul bapi_trades (care creează managerul la import).
-os.environ.setdefault("CACHE_FOLLOW_FILE", "1")
-
 import sys
 import time
 import datetime
@@ -884,11 +879,13 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
     #except Exception as e:
     #    print(f"An error occurred while monitoring the price: {e}")
 
-def main():             
-    #po.place_SELL_order_at_market("BTCUSDT", 0.017)
-    #return
-  
-    filename = "trades.json" 
+def main():
+    # WS user-data bridge explicit (designul: fiecare proces își actualizează
+    # memoria Order/Trade prin WS propriu + polling, fără re-citire de fișiere).
+    import cacheManager as cm
+    cm.enable_real_ws_event_sync()
+
+    filename = "trades.json"
     
     maxage_trade_s =  4 * 24 * 3600  # Timpul maxim in care ordinele executate/filled sunt considerate recente (3 zile)
     interval = 60 * 4 #4 minute
