@@ -276,180 +276,10 @@ class PriceWindow:
         #print(f"Max price: {max_price}, Centroid index for max: {centroid_index}")  # Debug
         return max_price, centroid_index
 
-    def calculate_slope_max_min(self):
-        if len(self.sorted_prices) < 2:
-            return 0
-
-        min_price, min_index = self.get_min_and_index()
-        max_price, max_index = self.get_max_and_index()
-
-        if min_price is None or max_price is None or max_index == min_index:
-            #print(f"BED3 - Min index: {min_index}, Max index: {max_index}")  # Debug
-            return 0
-
-        slope = (max_price - min_price) / (max_index - min_index)
-        #print(f"Slope: {slope}, Min price: {min_price}, Max price: {max_price}, Min index: {min_index}, Max index: {max_index}")  # Debug
-        return slope
-
-
-    def calculate_proximities(self, current_price):
-        min_price, _ = self.get_min_and_index()
-        max_price, _ = self.get_max_and_index()
-
-        if min_price is None or max_price is None or max_price == min_price:
-            return 0, 0
-        min_proximity = (current_price - min_price) / (max_price - min_price)
-        max_proximity = (max_price - current_price) / (max_price - min_price)
-        
-        # Asigurăm că valorile de proximitate sunt pozitive
-        return max(min_proximity, 0), max(max_proximity, 0)
-
-    def calculate_positions(self):
-        min_price, min_index = self.get_min_and_index()
-        max_price, max_index = self.get_max_and_index()
-        
-        min_position = min_index / self.window_size if min_index is not None else None
-        max_position = max_index / self.window_size if max_index is not None else None
-        return min_position, max_position
-        
-        
-    def evaluate_buy_sell_opportunity(self, current_price, threshold_percent=1, decrease_percent=3.7):
-        slope = self.calculate_slope_max_min()
-     
-        min_price, min_index = self.get_min_and_index()
-        max_price, max_index = self.get_max_and_index()
-        
-        print(
-            f"Min price: {min_price} at index: {min_index} "
-            f"Max price: {max_price} at index: {max_index}"
-        )
-
-        min_proximity, max_proximity = self.calculate_proximities(current_price)
-   
-        price_change_percent = (max_price - min_price) / min_price * 100 if min_price and max_price else 0
-        print(
-            f"Price change percent: {price_change_percent:.2f} "
-            f"slope: {slope:.4f} "
-            f"Market trending: {'upwards' if slope > 0 else 'downwards'}"
-        )
-
-        if price_change_percent < threshold_percent and not u.are_close(price_change_percent, threshold_percent):
-            action = 'HOLD'
-            return action, current_price, price_change_percent, slope
-            
-        min_position, max_position = self.calculate_positions()
-        if slope > 0: #slope > slope_normalized=0.0000833
-            print("Market trending upwards")
-            if max_position > 0.8 or u.are_close(max_position, 0.8, target_tolerance_percent=1.0):
-                action = 'BUY'
-                print(f"Near recent high. Action: {action}")
-                proposed_price = current_price * 0.995
-                print(f"Proposed price updated to {proposed_price} to be close to current price {current_price}")
-                return action, proposed_price, price_change_percent, slope 
-        else:
-            print("Market trending downwards")
-            if min_position < 0.2 or u.are_close(min_position, 0.2, target_tolerance_percent=1.0):
-                action = 'SELL'
-                print(f"Near recent low. Action: {action}")
-                proposed_price = current_price * 1.005
-                print(f"Proposed price updated  to {proposed_price} to be close to current price {current_price}")
-                return action, proposed_price, price_change_percent, slope
-
-        action = 'BUY'
-        remaining_decrease_percent = max(0, decrease_percent - price_change_percent)
-        print(f"Remaining decrease percent: {remaining_decrease_percent:.2f}")
-        proposed_price = current_price * (1 - remaining_decrease_percent / 100)
-        print(f"Trending not well defined propose price: {proposed_price:.2f} Action: {action}")
-        return action, proposed_price, price_change_percent, slope
-
-    def check_price_change(self, threshold):
-        if len(self.prices) < 2:
-            return 0, 1
-
-        min_price, min_index = self.get_min_and_index()
-        max_price, max_index = self.get_max_and_index()
-        newest_price = self.prices[-1]
-        newest_index = self.get_newest_index()
-
-        price_diff_min = u.calculate_difference_percent(min_price, newest_price)
-        price_diff_max = u.calculate_difference_percent(max_price, newest_price)
-
-        grow = price_diff_max < price_diff_min  
-        price_diff_newest = max(price_diff_min, price_diff_max)  #price_diff = max_price - min_price
-
-        if abs(price_diff_newest) >= threshold or u.are_close(price_diff_newest, threshold):
-            #todo use grow
-            print(f'price_diff_minmax_versus_newest(slope)={price_diff_newest}(threshold={threshold}) are_close={u.are_close(price_diff_newest, threshold)}')
-            print(f'min price ={min_price}, max_price = {max_price}, newest_price={newest_price}, min_index={min_index}, max_index={max_index}')
-               
-            return -price_diff_newest if price_diff_max > price_diff_min else price_diff_newest, 0
-            #return self._analyze_price_movement(min_price, min_index, max_price, max_index, 
-            #    newest_price, newest_index, price_diff_newest)
-        
-        return 0, 0
-    
-    def _analyze_price_movement(self, min_price, min_index, max_price, max_index, newest_price, newest_index, price_diff):
-        
-     
-        price_diff_min = u.calculate_difference_percent(min_price, newest_price)
-        price_diff_max = u.calculate_difference_percent(max_price, newest_price)
-        grow = price_diff_max < price_diff_min 
-        
-        slope_min = u.slope(min_price, min_index, newest_price, newest_index)
-        slope_max = u.slope(max_price, max_index, newest_price, newest_index)
-        #todo slope_min = pozitiv 
-        # slope_max = negativ
-        slope_max_min = slope_max if abs(slope_max) > abs(slope_min) else slope_min  #slope_max_min = u.slope(min_price, min_index, max_price, max_index)
-        print(f"retun1 {slope_max_min}, {price_diff}")
-        return slope_max_min, price_diff
-
-        diff_min_max_close = u.are_close(price_diff_max, price_diff_min, 1.0)
-        if diff_min_max_close:
-            if min_index < max_index:
-                grow = 1
-                print(f"retun2 {-slope_max}, {price_diff}")
-                return -slope_max, price_diff
-            else:
-                grow = 0
-                print(f"retun3 {slope_min}, {price_diff}")
-                return slope_min, price_diff
-
-        min_position, max_position = self.calculate_positions()
-        min_loc = 1  
-        if min_position < 0.3 or u.are_close(min_position, 0.3):
-            min_loc = 0  
-        if min_position > 0.7 or u.are_close(min_position, 0.7):
-            min_loc = 2  
-
-        max_loc = 1  
-        if max_position > 0.7 or u.are_close(max_position, 0.7):
-            max_loc = 2  
-        if max_position < 0.3 or u.are_close(max_position, 0.3):
-            max_loc = 0  
-
-        if grow:
-            if min_loc == 0:  
-                return slope_min, price_diff
-            if min_loc == 1 and max_loc == 2:  
-                return slope_max_min, price_diff
-            else:
-                print("OUTLIER!! but can indicate something will come!!!")
-        else: #if not grow:
-            if min_loc == 2:  
-                return slope_max, price_diff
-            if min_loc == 1 and max_loc == 0:  
-                return slope_max_min, price_diff
-            else:
-                print("OUTLIER!! but can indicate something will come!!!")
-
-        return 0, 1
-    
-            
-            
     def current_window_size(self):
         return len(self.prices)
 
-    def get_trend(self):
+    def get_instant_trend(self):
         """Returnează (final_trend, growth_coefficient, slope_full, gradient_recent).
 
         slope_full      : panta regresiei liniare pe toată fereastra (tendință stabilă)
@@ -488,8 +318,154 @@ class PriceWindow:
 
         return final_trend, growth_coefficient, slope_full, gradient_recent
 
-        
-    
+    # Alias retrocompatibil (vechiul nume).
+    def get_trend(self):
+        return self.get_instant_trend()
+
+
+# ════════════════════════════════════════════════════════════════════════════
+# WindowAnalyzer — metrici de trading derivate dintr-un PriceWindow.
+# Mutate din PriceWindow ca acesta să rămână lean (doar fereastră + range + trend).
+# ════════════════════════════════════════════════════════════════════════════
+class WindowAnalyzer:
+    def __init__(self, window: "PriceWindow"):
+        self.window = window
+
+    def calculate_slope_max_min(self):
+        w = self.window
+        if len(w.sorted_prices) < 2:
+            return 0
+        min_price, min_index = w.get_min_and_index()
+        max_price, max_index = w.get_max_and_index()
+        if min_price is None or max_price is None or max_index == min_index:
+            return 0
+        return (max_price - min_price) / (max_index - min_index)
+
+    def calculate_proximities(self, current_price):
+        w = self.window
+        min_price, _ = w.get_min_and_index()
+        max_price, _ = w.get_max_and_index()
+        if min_price is None or max_price is None or max_price == min_price:
+            return 0, 0
+        min_proximity = (current_price - min_price) / (max_price - min_price)
+        max_proximity = (max_price - current_price) / (max_price - min_price)
+        return max(min_proximity, 0), max(max_proximity, 0)
+
+    def calculate_positions(self):
+        w = self.window
+        min_price, min_index = w.get_min_and_index()
+        max_price, max_index = w.get_max_and_index()
+        min_position = min_index / w.window_size if min_index is not None else None
+        max_position = max_index / w.window_size if max_index is not None else None
+        return min_position, max_position
+
+    def check_price_change(self, threshold):
+        w = self.window
+        if len(w.prices) < 2:
+            return 0, 1
+        min_price, min_index = w.get_min_and_index()
+        max_price, max_index = w.get_max_and_index()
+        newest_price = w.prices[-1]
+        newest_index = w.get_newest_index()
+
+        price_diff_min = u.calculate_difference_percent(min_price, newest_price)
+        price_diff_max = u.calculate_difference_percent(max_price, newest_price)
+        price_diff_newest = max(price_diff_min, price_diff_max)
+
+        if abs(price_diff_newest) >= threshold or u.are_close(price_diff_newest, threshold):
+            print(f'price_diff_minmax_versus_newest(slope)={price_diff_newest}(threshold={threshold}) '
+                  f'are_close={u.are_close(price_diff_newest, threshold)}')
+            print(f'min price ={min_price}, max_price = {max_price}, newest_price={newest_price}, '
+                  f'min_index={min_index}, max_index={max_index}')
+            return -price_diff_newest if price_diff_max > price_diff_min else price_diff_newest, 0
+            #return self._analyze_price_movement(min_price, min_index, max_price, max_index,
+            #    newest_price, newest_index, price_diff_newest)
+        return 0, 0
+
+    def _analyze_price_movement(self, min_price, min_index, max_price, max_index,
+                                newest_price, newest_index, price_diff):
+        # Logica complicată veche — păstrată pentru evoluții viitoare.
+        price_diff_min = u.calculate_difference_percent(min_price, newest_price)
+        price_diff_max = u.calculate_difference_percent(max_price, newest_price)
+        grow = price_diff_max < price_diff_min
+
+        slope_min = u.slope(min_price, min_index, newest_price, newest_index)
+        slope_max = u.slope(max_price, max_index, newest_price, newest_index)
+        #todo slope_min = pozitiv ; slope_max = negativ
+        slope_max_min = slope_max if abs(slope_max) > abs(slope_min) else slope_min
+        print(f"retun1 {slope_max_min}, {price_diff}")
+        return slope_max_min, price_diff
+
+        # ── cod neatins (păstrat intenționat din varianta veche) ──
+        diff_min_max_close = u.are_close(price_diff_max, price_diff_min, 1.0)
+        if diff_min_max_close:
+            if min_index < max_index:
+                grow = 1
+                print(f"retun2 {-slope_max}, {price_diff}")
+                return -slope_max, price_diff
+            else:
+                grow = 0
+                print(f"retun3 {slope_min}, {price_diff}")
+                return slope_min, price_diff
+
+        min_position, max_position = self.calculate_positions()
+        min_loc = 1
+        if min_position < 0.3 or u.are_close(min_position, 0.3):
+            min_loc = 0
+        if min_position > 0.7 or u.are_close(min_position, 0.7):
+            min_loc = 2
+
+        max_loc = 1
+        if max_position > 0.7 or u.are_close(max_position, 0.7):
+            max_loc = 2
+        if max_position < 0.3 or u.are_close(max_position, 0.3):
+            max_loc = 0
+
+        if grow:
+            if min_loc == 0:
+                return slope_min, price_diff
+            if min_loc == 1 and max_loc == 2:
+                return slope_max_min, price_diff
+            else:
+                print("OUTLIER!! but can indicate something will come!!!")
+        else:
+            if min_loc == 2:
+                return slope_max, price_diff
+            if min_loc == 1 and max_loc == 0:
+                return slope_max_min, price_diff
+            else:
+                print("OUTLIER!! but can indicate something will come!!!")
+
+        return 0, 1
+
+    def evaluate_buy_sell_opportunity(self, current_price, threshold_percent=1, decrease_percent=3.7):
+        w = self.window
+        slope = self.calculate_slope_max_min()
+        min_price, min_index = w.get_min_and_index()
+        max_price, max_index = w.get_max_and_index()
+        print(f"Min price: {min_price} at index: {min_index} Max price: {max_price} at index: {max_index}")
+
+        price_change_percent = (max_price - min_price) / min_price * 100 if min_price and max_price else 0
+        print(f"Price change percent: {price_change_percent:.2f} slope: {slope:.4f} "
+              f"Market trending: {'upwards' if slope > 0 else 'downwards'}")
+
+        if price_change_percent < threshold_percent and not u.are_close(price_change_percent, threshold_percent):
+            return 'HOLD', current_price, price_change_percent, slope
+
+        min_position, max_position = self.calculate_positions()
+        if slope > 0:
+            if max_position > 0.8 or u.are_close(max_position, 0.8, target_tolerance_percent=1.0):
+                proposed_price = current_price * 0.995
+                return 'BUY', proposed_price, price_change_percent, slope
+        else:
+            if min_position < 0.2 or u.are_close(min_position, 0.2, target_tolerance_percent=1.0):
+                proposed_price = current_price * 1.005
+                return 'SELL', proposed_price, price_change_percent, slope
+
+        remaining_decrease_percent = max(0, decrease_percent - price_change_percent)
+        proposed_price = current_price * (1 - remaining_decrease_percent / 100)
+        return 'BUY', proposed_price, price_change_percent, slope
+
 
 TIME_SLEEP_GET_PRICE = 0.8       # seconds to sleep for price collection — valoare nominală
 RECENT_GRADIENT_SECONDS = 5.0   # fereastra de momentum recent (în secunde)
@@ -905,18 +881,13 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
 #todo ia acceleratiea pe timp scurt get minute 1-3 si daca e mare cumpara!   
 
 
-# Function to handle the price logic for a specific currency
+# Function to handle the price logic for a specific currency.
+# Ferestrele se actualizează autonom (abonate la Cache24); aici doar evaluăm.
+# Returnează un snapshot al trendului care va fi pus în cache de TrendCoordinator.
 def handle_symbol(symbol, current_price, price_window, price_window_big,
-                  trend_state, trend_state_big):
+                  analyzer, analyzer_big, trend_state, trend_state_big):
 
     count = 0
-
-    # process_price e apelat manual doar dacă fereastra NU e abonată la Cache24
-    # (fallback pentru rulare fără CacheManager)
-    if not price_window._subscribed_to_cache24:
-        price_window.process_price(current_price)
-    if not price_window_big._subscribed_to_cache24:
-        price_window_big.process_price(current_price)
 
     # Actualizare rata reală de sampling din CacheCurrentPriceManager
     try:
@@ -928,44 +899,168 @@ def handle_symbol(symbol, current_price, price_window, price_window_big,
     except Exception:
         pass
 
-    slope, pos = price_window.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
+    slope, pos = analyzer.check_price_change(PRICE_CHANGE_THRESHOLD_EUR)
     print(f"small slope {slope}")
-    gradient, gradient_coff, slope_full, gradient_recent = price_window.get_trend()
+    gradient, gradient_coff, slope_full, gradient_recent = price_window.get_instant_trend()
 
-    if(slope * gradient < 0):
+    slope_max_min = analyzer.calculate_slope_max_min()
+    if slope * gradient < 0:
         print(f"ALERT slope1 = {slope} gradient = {gradient}")
-    if(slope * price_window.calculate_slope_max_min() < 0):
-        print(f"ALERT slope2 = {slope} calculate_slope_max_min() = {price_window.calculate_slope_max_min()}")
-    if(gradient * price_window.calculate_slope_max_min() < 0):
-        print(f"ALERT gradient = {gradient} calculate_slope_max_min() = {price_window.calculate_slope_max_min()}")
+    if slope * slope_max_min < 0:
+        print(f"ALERT slope2 = {slope} calculate_slope_max_min() = {slope_max_min}")
+    if gradient * slope_max_min < 0:
+        print(f"ALERT gradient = {gradient} calculate_slope_max_min() = {slope_max_min}")
     if slope == 0:
         count = count + 1
     else:
         count = 0
-    #gradient = price_window.calculate_slope_max_min()
-    
+
     # SMALL ONE!!
-    #logic("SMALL" ,True, symbol, gradient, slope, trend_state)
-    logic_small("SMALL" ,True, symbol, gradient, slope, trend_state)
-    #
-    
-    #
+    logic_small("SMALL", True, symbol, gradient, slope, trend_state)
+
     # BIG ONE!!!
-    #
-    slope_big, price_diff = price_window_big.check_price_change(PRICE_CHANGE_THRESHOLD_BIG_EUR)
-    
-    #if symbol in sym.symbols:
+    slope_big, price_diff = analyzer_big.check_price_change(PRICE_CHANGE_THRESHOLD_BIG_EUR)
     logic("BIG", True, symbol, gradient, slope_big, trend_state_big)
-    
-    
+
     update_csv_file(filename, symbol, slope, count, 0, 0, pos, gradient)
-        
+
     for moneda in web.monede:
         if moneda["nume"] == symbol:
             moneda["watch"] = True if slope_big != 0 else False
 
+    # Snapshot pentru cache (citibil rapid din API buy/sell)
+    return {
+        "symbol": symbol,
+        "final_trend": gradient,
+        "growth_coefficient": gradient_coff,
+        "slope_full": slope_full,
+        "gradient_recent": gradient_recent,
+        "slope_small": slope,
+        "slope_big": slope_big,
+        "slope_max_min": slope_max_min,
+        "pos": pos,
+        "current_price": current_price,
+        "ts": time.time(),
+    }
 
-    # web.monede[0]["watch"] = True # for debug
+
+# ════════════════════════════════════════════════════════════════════════════
+# TrendCoordinator — event-driven + heartbeat.
+#
+# Sursa de preț (WS → Cache24) actualizează ferestrele autonom. Coordinatorul:
+#   • primește semnal la fiecare tick (on_price_update → dirty + event)
+#   • evaluează un simbol DOAR când e "due":
+#       - dirty ȘI a trecut ≥ MIN_EVAL_INTERVAL_SEC  (floor: nu prea des)
+#       - SAU a trecut ≥ MAX_EVAL_INTERVAL_SEC        (heartbeat: nu prea rar)
+#   • cache-uiește rezultatul → get_cached_trend(symbol) e O(1) pentru API buy/sell
+# Single-threaded loop → fără reentranță pe plasarea ordinelor.
+# ════════════════════════════════════════════════════════════════════════════
+import threading
+
+MIN_EVAL_INTERVAL_SEC = 1.5    # floor: cel mult o evaluare la 1.5s per simbol
+MAX_EVAL_INTERVAL_SEC = 30.0   # ceiling/heartbeat: cel puțin o evaluare la 30s
+
+
+class TrendCoordinator:
+    def __init__(self, symbols, cache24_managers, current_price_mgr,
+                 min_interval=MIN_EVAL_INTERVAL_SEC, max_interval=MAX_EVAL_INTERVAL_SEC):
+        self.symbols = list(symbols)
+        self.current_price_mgr = current_price_mgr
+        self.min_interval = min_interval
+        self.max_interval = max_interval
+
+        self._event = threading.Event()
+        self._lock = threading.Lock()
+        self._dirty = {s: True for s in self.symbols}      # forțăm o primă evaluare
+        self._last_eval = {s: 0.0 for s in self.symbols}
+        self._trend_cache = {}                              # {symbol: snapshot dict}
+
+        self.windows = {}
+        self.windows_big = {}
+        self.analyzers = {}
+        self.analyzers_big = {}
+        self.trend_states = {}
+        self.trend_states_big = {}
+
+        for symbol in self.symbols:
+            cache24 = cache24_managers[symbol]
+            current_price_mgr.subscribe_price(cache24)   # CurrentPrice → Cache24
+
+            w = PriceWindow.from_cache24(symbol, window_seconds=WINDOWS_SIZE_MIN, cache24=cache24)
+            wb = PriceWindow.from_cache24(symbol,
+                                          window_seconds=window_size_big * TIME_SLEEP_GET_PRICE,
+                                          cache24=cache24)
+            self.windows[symbol] = w
+            self.windows_big[symbol] = wb
+            self.analyzers[symbol] = WindowAnalyzer(w)
+            self.analyzers_big[symbol] = WindowAnalyzer(wb)
+            self.trend_states[symbol] = TrendState(max_duration_seconds=2.5 * 60 * 60,
+                                                   expiration_trend_time=2.7 * 60, fresh_trend_time=3.7 * 60)
+            self.trend_states_big[symbol] = TrendState(max_duration_seconds=3 * 60 * 60,
+                                                       expiration_trend_time=2.7 * 60, fresh_trend_time=3.7 * 60)
+
+            cache24.subscribe_price(self)   # primim semnal de tick
+
+            print(f"[{symbol}] window small: {len(w.prices)} sample-uri (rate={w.sample_rate_sec:.2f}s)")
+            print(f"[{symbol}] window big:   {len(wb.prices)} sample-uri (rate={wb.sample_rate_sec:.2f}s)")
+
+    # ── Semnal de la Cache24 (subscriber) ─────────────────────────────────────
+    def on_price_update(self, symbol: str, ts_ms: int, price: float) -> None:
+        with self._lock:
+            if symbol in self._dirty:
+                self._dirty[symbol] = True
+        self._event.set()   # trezește bucla de evaluare
+
+    # ── Decizie: simbolul trebuie evaluat acum? ───────────────────────────────
+    def _is_due(self, symbol, now):
+        elapsed = now - self._last_eval[symbol]
+        if elapsed >= self.max_interval:          # heartbeat
+            return True
+        with self._lock:
+            dirty = self._dirty.get(symbol, False)
+        return dirty and elapsed >= self.min_interval   # floor
+
+    def evaluate(self, symbol):
+        current_price = self.current_price_mgr.get_price_value(symbol)
+        if current_price is None:
+            return None
+        snapshot = handle_symbol(
+            symbol, current_price,
+            self.windows[symbol], self.windows_big[symbol],
+            self.analyzers[symbol], self.analyzers_big[symbol],
+            self.trend_states[symbol], self.trend_states_big[symbol],
+        )
+        with self._lock:
+            self._trend_cache[symbol] = snapshot
+            self._dirty[symbol] = False
+            self._last_eval[symbol] = time.time()
+        return snapshot
+
+    # ── API rapid pentru buy/sell ─────────────────────────────────────────────
+    def get_cached_trend(self, symbol):
+        """O(1) — ultimul snapshot de trend pentru decizii buy/sell."""
+        with self._lock:
+            return self._trend_cache.get(symbol)
+
+    def get_all_cached_trends(self):
+        with self._lock:
+            return dict(self._trend_cache)
+
+    # ── Bucla principală event-driven + heartbeat ─────────────────────────────
+    def run(self):
+        while True:
+            self._event.wait(timeout=self.max_interval)
+            self._event.clear()
+            now = time.time()
+            due = [s for s in self.symbols if self._is_due(s, now)]
+            if not due:
+                continue
+            print(f"----------------------------------")
+            for symbol in due:
+                self.evaluate(symbol)
+            html_content = web.genereaza_html(web.monede)
+            web.salveaza_html(html_content, "index.html")
+
 
 if __name__ == "__main__":
     initialize_csv_file(filename)
@@ -975,21 +1070,11 @@ if __name__ == "__main__":
     print(f" my trades of today : {trades}")
 
     order_ids = []
-    price_windows = {}
-    price_windows_big = {}
-    trend_states = {}
-    trend_states_big = {}
 
-    # Conectăm chain-ul complet:
-    # CacheCurrentPriceManager → Cache24PriceManager → PriceWindow
+    # Chain de pret: WebSocket market-data → CacheCurrentPrice → Cache24 → PriceWindow.
+    # IMPORTANT: creem singleton-ul CacheCurrentPrice INAINTE de Cache24 cu sync_ts
+    # corect (altfel Cache24.get_remote_items l-ar crea intern cu sync_ts=30).
     import cacheManager as cm
-    # IMPORTANT: creem singleton-ul INAINTE de Cache24 cu sync_ts corect.
-    # Cache24PriceManager.get_remote_items() apeleaza get_current_price_manager()
-    # intern -- daca l-am crea acolo, ar porni cu sync_ts=30 hardcodat.
-    #
-    # Sursa primara de pret = WebSocket market-data (bapi_ws.bapi_ws_manager):
-    # ticker stream -> on_items_update -> chain. HTTP polling ramane fallback
-    # (doar cand WS e tacut > WS_TIMEOUT_SEC).
     import bapi_ws
     current_price_mgr = cm.get_current_price_manager(
         ws_manager=bapi_ws.bapi_ws_manager,
@@ -997,58 +1082,12 @@ if __name__ == "__main__":
     )
     cache24_managers = cm.CacheFactory.get("Price24")   # dict {symbol: Cache24PriceManager}
 
-    for symbol in sym.symbols:
-        cache24 = cache24_managers[symbol]
-
-        # 1. CurrentPrice → Cache24 (dacă nu e deja abonat)
-        current_price_mgr.subscribe_price(cache24)
-
-        # 2. PriceWindow mică — din ultimele WINDOWS_SIZE_MIN secunde
-        price_windows[symbol] = PriceWindow.from_cache24(
-            symbol,
-            window_seconds=WINDOWS_SIZE_MIN,
-            cache24=cache24,
-        )
-
-        # 3. PriceWindow mare — din ultimele window_size_big * TIME_SLEEP_GET_PRICE secunde
-        price_windows_big[symbol] = PriceWindow.from_cache24(
-            symbol,
-            window_seconds=window_size_big * TIME_SLEEP_GET_PRICE,
-            cache24=cache24,
-        )
-
-        trend_states[symbol] = TrendState(max_duration_seconds=2.5 * 60 * 60, expiration_trend_time=2.7 * 60, fresh_trend_time=3.7 * 60)
-        trend_states_big[symbol] = TrendState(max_duration_seconds=3 * 60 * 60, expiration_trend_time=2.7 * 60, fresh_trend_time=3.7 * 60)
-
-        print(f"[{symbol}] PriceWindow small: {len(price_windows[symbol].prices)} sample-uri "
-              f"(rate={price_windows[symbol].sample_rate_sec:.2f}s)")
-        print(f"[{symbol}] PriceWindow big:   {len(price_windows_big[symbol].prices)} sample-uri "
-              f"(rate={price_windows_big[symbol].sample_rate_sec:.2f}s)")
-
-    TIME_SLEEP_BETWEEN_SYMBOLS = 0
     print(f"Quantities: {api.quantities}")
 
-    while True:
-        time.sleep(TIME_SLEEP_GET_PRICE)
-        time.sleep(TIME_SLEEP_GET_PRICE)
-        print(f"----------------------------------")
-        for symbol in sym.symbols:
-            print(f"")
-            price_window = price_windows[symbol]
-            price_window_big = price_windows_big[symbol]
-            trend_state = trend_states[symbol]
-            trend_state_big = trend_states_big[symbol]
-
-            time.sleep(TIME_SLEEP_BETWEEN_SYMBOLS)
-            # Citim din cache — CacheCurrentPriceManager se actualizează singur
-            # prin polling thread (sync_ts = TIME_SLEEP_GET_PRICE)
-            current_price = current_price_mgr.get_price_value(symbol)
-            if current_price is None:
-                time.sleep(TIME_SLEEP_GET_PRICE)
-                continue
-
-            handle_symbol(symbol, current_price, price_window, price_window_big, trend_state, trend_state_big)
-
-        html_content = web.genereaza_html(web.monede)
-        web.salveaza_html(html_content, "index.html")
+    coordinator = TrendCoordinator(
+        symbols=sym.symbols,
+        cache24_managers=cache24_managers,
+        current_price_mgr=current_price_mgr,
+    )
+    coordinator.run()
 

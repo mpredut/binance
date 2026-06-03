@@ -415,13 +415,15 @@ class TestPriceWindowMinMax(unittest.TestCase):
 
     def test_proximities_midpoint(self):
         pw = _window([100, 200])
-        min_p, max_p = pw.calculate_proximities(150)
+        an = ta.WindowAnalyzer(pw)
+        min_p, max_p = an.calculate_proximities(150)
         self.assertAlmostEqual(min_p, 0.5, places=5)
         self.assertAlmostEqual(max_p, 0.5, places=5)
 
     def test_proximities_at_min(self):
         pw = _window([100, 200])
-        min_p, max_p = pw.calculate_proximities(100)
+        an = ta.WindowAnalyzer(pw)
+        min_p, max_p = an.calculate_proximities(100)
         self.assertAlmostEqual(min_p, 0.0, places=5)
         self.assertAlmostEqual(max_p, 1.0, places=5)
 
@@ -708,6 +710,218 @@ class TestPriceWindowCache24Wiring(unittest.TestCase):
         self.assertTrue(pw._subscribed_to_cache24)
         mgr.on_price_update("BTCUSDT", int(time.time() * 1000), 88888.0)
         self.assertIn(88888.0, pw.prices)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# WindowAnalyzer — metrici mutate din PriceWindow
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestWindowAnalyzer(unittest.TestCase):
+
+    def test_pricewindow_has_no_analysis_methods(self):
+        # PriceWindow trebuie să fie lean — fără metodele de trading
+        pw = _window([100, 110, 105])
+        self.assertFalse(hasattr(pw, "calculate_proximities"))
+        self.assertFalse(hasattr(pw, "calculate_slope_max_min"))
+        self.assertFalse(hasattr(pw, "check_price_change"))
+        self.assertFalse(hasattr(pw, "evaluate_buy_sell_opportunity"))
+
+    def test_pricewindow_keeps_range_and_trend(self):
+        pw = _window([100, 110, 105])
+        self.assertTrue(hasattr(pw, "get_min"))
+        self.assertTrue(hasattr(pw, "get_max"))
+        self.assertTrue(hasattr(pw, "get_instant_trend"))
+
+    def test_get_trend_alias(self):
+        pw = _window([100 + i for i in range(20)])
+        self.assertEqual(pw.get_trend(), pw.get_instant_trend())
+
+    def test_slope_max_min_uptrend(self):
+        pw = _window([100 + i for i in range(20)])
+        an = ta.WindowAnalyzer(pw)
+        self.assertGreater(an.calculate_slope_max_min(), 0)
+
+    def test_check_price_change_below_threshold(self):
+        pw = _window([100.0, 100.05, 100.02])
+        an = ta.WindowAnalyzer(pw)
+        slope, pos = an.check_price_change(threshold=5.0)
+        self.assertEqual(slope, 0)
+
+    def test_check_price_change_above_threshold(self):
+        pw = _window([100.0, 100.0, 110.0])
+        an = ta.WindowAnalyzer(pw)
+        slope, pos = an.check_price_change(threshold=1.0)
+        self.assertNotEqual(slope, 0)
+
+    def test_evaluate_buy_sell_returns_action(self):
+        pw = _window([100 + i for i in range(20)])
+        an = ta.WindowAnalyzer(pw)
+        action, price, pct, slope = an.evaluate_buy_sell_opportunity(120.0)
+        self.assertIn(action, ("BUY", "SELL", "HOLD"))
+
+    def test_evaluate_buy_sell_hold_below_threshold(self):
+        # variație minusculă → sub threshold_percent → HOLD
+        pw = _window([100.0, 100.01, 100.02])
+        an = ta.WindowAnalyzer(pw)
+        action, price, pct, slope = an.evaluate_buy_sell_opportunity(
+            100.02, threshold_percent=5.0)
+        self.assertEqual(action, "HOLD")
+
+    def test_calculate_positions_returns_fractions(self):
+        pw = _window([100 + i for i in range(10)])
+        an = ta.WindowAnalyzer(pw)
+        min_pos, max_pos = an.calculate_positions()
+        self.assertIsNotNone(min_pos)
+        self.assertIsNotNone(max_pos)
+
+    def test_slope_max_min_zero_when_constant(self):
+        pw = _window([100.0] * 10)
+        an = ta.WindowAnalyzer(pw)
+        self.assertEqual(an.calculate_slope_max_min(), 0)
+
+    def test_check_price_change_insufficient_data(self):
+        pw = ta.PriceWindow("BTCUSDT", 10)
+        pw.process_price(100.0)
+        an = ta.WindowAnalyzer(pw)
+        slope, pos = an.check_price_change(threshold=1.0)
+        self.assertEqual((slope, pos), (0, 1))
+
+    def test_analyze_price_movement_returns_tuple(self):
+        # logica complicată restaurată — trebuie să întoarcă (slope, price_diff)
+        pw = _window([100 + i for i in range(20)])
+        an = ta.WindowAnalyzer(pw)
+        result = an._analyze_price_movement(100, 0, 119, 19, 119, 19, 19.0)
+        self.assertEqual(len(result), 2)
+
+    def test_analyzer_shares_window_mutation(self):
+        # compoziție: analyzer vede modificările ferestrei (același obiect)
+        pw = _window([100, 101, 102])
+        an = ta.WindowAnalyzer(pw)
+        before = pw.get_max()
+        pw.process_price(200.0)
+        self.assertGreater(pw.get_max(), before)
+        self.assertIs(an.window, pw)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TrendCoordinator — event-driven + heartbeat + cache
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestTrendCoordinator(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        entries = _synthetic_entries(60, interval_ms=800)
+        # Shift la now ca get_recent_entries să le vadă
+        base = entries[0][0]
+        now_ms = int(time.time() * 1000)
+        entries = [[now_ms + (e[0] - base), e[1]] for e in entries]
+        self.cache24 = _make_cache24_manager("BTCUSDT", entries, self.tmp)
+
+        # CurrentPrice manager fake-ish (folosim unul real cu mock api)
+        fname = os.path.join(self.tmp, "cp.json")
+        self.cpm = cm.CacheCurrentPriceManager(
+            sync_ts=9999, symbols=["BTCUSDT"],
+            filename=fname, ws_manager=None, api_client=mock_bapi,
+        )
+        self.cpm.on_items_update("BTCUSDT", [60000.0])
+
+    def _make_coord(self):
+        return ta.TrendCoordinator(
+            symbols=["BTCUSDT"],
+            cache24_managers={"BTCUSDT": self.cache24},
+            current_price_mgr=self.cpm,
+            min_interval=2.0, max_interval=30.0,
+        )
+
+    def test_builds_windows_and_analyzers(self):
+        coord = self._make_coord()
+        self.assertIn("BTCUSDT", coord.windows)
+        self.assertIn("BTCUSDT", coord.analyzers)
+        self.assertGreater(len(coord.windows["BTCUSDT"].prices), 0)
+
+    def test_dirty_set_on_price_update(self):
+        coord = self._make_coord()
+        coord._dirty["BTCUSDT"] = False
+        coord.on_price_update("BTCUSDT", int(time.time() * 1000), 60001.0)
+        self.assertTrue(coord._dirty["BTCUSDT"])
+        self.assertTrue(coord._event.is_set())
+
+    def test_is_due_floor(self):
+        coord = self._make_coord()
+        now = time.time()
+        coord._last_eval["BTCUSDT"] = now          # tocmai evaluat
+        coord._dirty["BTCUSDT"] = True
+        # dirty dar sub min_interval → nu e due
+        self.assertFalse(coord._is_due("BTCUSDT", now + 0.5))
+        # peste min_interval → due
+        self.assertTrue(coord._is_due("BTCUSDT", now + 2.5))
+
+    def test_is_due_heartbeat(self):
+        coord = self._make_coord()
+        now = time.time()
+        coord._last_eval["BTCUSDT"] = now
+        coord._dirty["BTCUSDT"] = False            # NU e dirty
+        # dar peste max_interval → heartbeat forțează evaluarea
+        self.assertTrue(coord._is_due("BTCUSDT", now + 31.0))
+        self.assertFalse(coord._is_due("BTCUSDT", now + 5.0))
+
+    def test_evaluate_populates_cache(self):
+        coord = self._make_coord()
+        snap = coord.evaluate("BTCUSDT")
+        self.assertIsNotNone(snap)
+        cached = coord.get_cached_trend("BTCUSDT")
+        self.assertEqual(cached, snap)
+        self.assertIn("final_trend", cached)
+        self.assertIn("slope_full", cached)
+        self.assertFalse(coord._dirty["BTCUSDT"])   # curățat după evaluare
+
+    def test_get_cached_trend_none_before_eval(self):
+        coord = self._make_coord()
+        self.assertIsNone(coord.get_cached_trend("BTCUSDT"))
+
+    def test_cache_query_is_fast_dict_read(self):
+        coord = self._make_coord()
+        coord.evaluate("BTCUSDT")
+        # Două query-uri consecutive returnează același obiect cache-uit
+        a = coord.get_cached_trend("BTCUSDT")
+        b = coord.get_cached_trend("BTCUSDT")
+        self.assertEqual(a, b)
+
+    def test_get_all_cached_trends(self):
+        coord = self._make_coord()
+        self.assertEqual(coord.get_all_cached_trends(), {})
+        coord.evaluate("BTCUSDT")
+        allt = coord.get_all_cached_trends()
+        self.assertIn("BTCUSDT", allt)
+
+    def test_coordinator_subscribed_to_cache24(self):
+        # coordinatorul primește semnal de tick de la Cache24
+        coord = self._make_coord()
+        self.assertIn(coord, self.cache24._price_subscribers)
+
+    def test_windows_subscribed_to_cache24(self):
+        # ferestrele se actualizează autonom (abonate la Cache24)
+        coord = self._make_coord()
+        self.assertTrue(coord.windows["BTCUSDT"]._subscribed_to_cache24)
+        self.assertTrue(coord.windows_big["BTCUSDT"]._subscribed_to_cache24)
+
+    def test_tick_updates_window_and_marks_dirty(self):
+        coord = self._make_coord()
+        coord._dirty["BTCUSDT"] = False
+        n_before = len(coord.windows["BTCUSDT"].prices)
+        # un tick prin Cache24 → fereastra crește ȘI coordinatorul devine dirty
+        self.cache24.on_price_update("BTCUSDT", int(time.time() * 1000), 61234.0)
+        self.assertTrue(coord._dirty["BTCUSDT"])
+        self.assertIn(61234.0, coord.windows["BTCUSDT"].prices)
+
+    def test_snapshot_has_all_fields(self):
+        coord = self._make_coord()
+        snap = coord.evaluate("BTCUSDT")
+        for key in ("final_trend", "growth_coefficient", "slope_full",
+                    "gradient_recent", "slope_small", "slope_big",
+                    "slope_max_min", "pos", "current_price", "ts"):
+            self.assertIn(key, snap)
 
 
 if __name__ == "__main__":
