@@ -264,19 +264,24 @@ class CacheManagerInterface(ABC):
 
         print(f"[{self.cls_name}][Info] {symbol}: Adăugate {len(new_items)} items noi.")
 
+    def _persist_items(self, symbol, new_items):
+        """Pasul de persistare per simbol. Default: scrie în cache.
+        Subclasele pot suprascrie (ex. CacheCurrentPriceManager → _push_price
+        ca să înregistreze timestamp-ul și să notifice subscriberii)."""
+        self.update_cache_per_symbol(symbol, new_items)
+
     def query_remote_and_update_cache(self):
         if not self.fetchtime_time_per_symbol:
             self.fetchtime_time_per_symbol = self.__rebuild_fetchtime_times()
-        
-        for symbol in list(self.symbols):
 
+        for symbol in list(self.symbols):
             startTime = self.fetchtime_time_per_symbol.get(symbol, self.fallback_time_default)
             new_items = self.get_remote_items(symbol=symbol, startTime=startTime)
             if not new_items:
                 print(f"[{self.cls_name}][Info] {symbol}:  No remote items starting with {u.timestampToTime(startTime)} ")
                 continue
-            
-            self.update_cache_per_symbol(symbol, new_items)
+
+            self._persist_items(symbol, new_items)
 
     def on_items_update(self, symbol, items):
         print(f"[{self.cls_name}][Info] {symbol}: WS Items updated to {items}")
@@ -711,6 +716,12 @@ class CacheCurrentPriceManager(CacheManagerInterface):
             print(f"[{self.cls_name}][Eroare] HTTP fetch {symbol}: {e}")
             return []
 
+    def _persist_items(self, symbol, new_items):
+        """Override: în loc de scriere simplă în cache, folosim _push_price ca
+        să înregistrăm timestamp-ul (pt sample_rate) și să notificăm subscriberii.
+        new_items = [[ts_ms, price]]."""
+        self._push_price(symbol, new_items[0][1])
+
     def rebuild_fetchtime_times(self):
         last_times = {}
         for symbol in self.symbols:
@@ -737,14 +748,9 @@ class CacheCurrentPriceManager(CacheManagerInterface):
             time.sleep(self.sync_ts)   # prima iterație după un interval, nu imediat
             while True:
                 if not self._ws_is_healthy():
-                    # Fetch HTTP și propagă prin chain fără a marca WS ca activ
-                    for symbol in list(self.symbols):
-                        try:
-                            items = self.get_remote_items(symbol, None)
-                            if items:
-                                self._push_price(symbol, items[0][1])
-                        except Exception as e:
-                            print(f"[{self.cls_name}] Eroare polling {symbol}: {e}")
+                    # Fetch HTTP fallback — reutilizează query_remote_and_update_cache;
+                    # _persist_items (override) propagă prin chain via _push_price.
+                    self.query_remote_and_update_cache()
                 else:
                     print(f"[{self.cls_name}] WS activ – skip polling {self.symbols}")
                 self.save_state_to_file_if_enabled()

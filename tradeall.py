@@ -767,12 +767,12 @@ filename = "sell_recommendation.csv"
 
 
 
-def logic_small(win, enable, symbol, gradient, slope, trend_state) :
+def logic_small(win, enable, symbol, gradient, slope, trend_state, current_price) :
 
     d = 0
     h = 1
-    proposed_price = current_price = api.get_current_price(symbol)
-    
+    proposed_price = current_price
+
     print(f" SE ACTIVEAZA DUPA 3.5 la slope: gradient={gradient}, slope={slope}")
     if gradient < 0 and slope < -3.5:
         if enable:
@@ -787,12 +787,12 @@ def logic_small(win, enable, symbol, gradient, slope, trend_state) :
 
 
 
-def logic(win, enable, symbol, gradient, slope, trend_state) :
+def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
 
     d = 14
     h = 24
-    proposed_price = current_price = api.get_current_price(symbol)
-    
+    proposed_price = current_price
+
     print(f"LOGIC gradient={gradient}, slope={slope}")
     # if gradient < 0 and slope < 0 :
         # if enable:
@@ -936,11 +936,11 @@ def handle_symbol(symbol, current_price, price_window, price_window_big,
         count = 0
 
     # SMALL ONE!!
-    logic_small("SMALL", True, symbol, gradient, slope, trend_state)
+    logic_small("SMALL", True, symbol, gradient, slope, trend_state, current_price)
 
     # BIG ONE!!!
     slope_big, price_diff = analyzer_big.check_price_change(PRICE_CHANGE_THRESHOLD_BIG_EUR)
-    logic("BIG", True, symbol, gradient, slope_big, trend_state_big)
+    logic("BIG", True, symbol, gradient, slope_big, trend_state_big, current_price)
 
     update_csv_file(filename, symbol, slope, count, 0, 0, pos, gradient)
 

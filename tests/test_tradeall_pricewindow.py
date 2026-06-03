@@ -543,6 +543,9 @@ class TestCacheCurrentPriceFrequency(unittest.TestCase):
             sync_ts=9999, symbols=["BTCUSDT"],
             filename=fname, ws_manager=None, api_client=mock_bapi,
         )
+        # Construcția (fișier lipsă → fetch init) poate înregistra un timestamp.
+        # Pornim măsurătoarea frecvenței curată pentru a testa mecanismul izolat.
+        self.mgr._update_timestamps.clear()
 
     def test_fallback_no_data(self):
         self.assertAlmostEqual(self.mgr.get_sample_rate("BTCUSDT", fallback=0.8), 0.8)
