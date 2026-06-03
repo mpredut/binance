@@ -1052,8 +1052,19 @@ class CacheInstantTrendManager:
         self._flush_thread = threading.Thread(target=run, name="InstantTrendFlush", daemon=True)
         self._flush_thread.start()
 
+    def prime_from_file(self):
+        """Încarcă fișierul în memorie (date INIȚIALE la startup). Un reader poate
+        apoi apela start_computation() ca să-și calculeze singur trendul instant
+        (on_price_update → _mem) și să țină gradientul proaspăt, fără să scrie fișierul."""
+        data = self._read_file()
+        with self._lock:
+            for symbol, snap in data.items():
+                if isinstance(snap, dict):
+                    self._mem[symbol] = dict(snap)
+        return len(self._mem)
+
     def get_snapshot(self, symbol):
-        """Writer: _mem autoritar. Reader (alt proces): fișier."""
+        """_mem dacă procesul calculează/amorsat; altfel fișierul (reader pur)."""
         with self._lock:
             if symbol in self._mem:
                 return dict(self._mem[symbol])

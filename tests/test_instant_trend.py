@@ -74,6 +74,22 @@ class TestStore(unittest.TestCase):
         m.update_snapshot("BTCUSDT", gradient_recent=0.5)
         self.assertTrue(os.path.exists(fname))      # writer scrie
 
+    def test_prime_from_file_loads_initial(self):
+        fname = os.path.join(self.tmp, "shared2.json")
+        writer = cm.CacheInstantTrendManager(["BTCUSDT"], fname, writer=True)
+        writer.update_snapshot("BTCUSDT", gradient_recent=-0.3, slope_small=2.0)
+        # Reader nou se amorsează din fișier la startup
+        reader = cm.CacheInstantTrendManager(["BTCUSDT"], fname)   # writer=False
+        n = reader.prime_from_file()
+        self.assertEqual(n, 1)
+        snap = reader.get_snapshot("BTCUSDT")
+        self.assertEqual(snap["gradient_recent"], -0.3)
+        self.assertEqual(snap["slope_small"], 2.0)
+        # După amorsare, reader-ul are datele în _mem (poate calcula singur ulterior)
+        reader.update_snapshot("BTCUSDT", gradient_recent=0.9)  # writer=False → doar _mem
+        self.assertEqual(reader.get_snapshot("BTCUSDT")["gradient_recent"], 0.9)
+        self.assertFalse(os.path.exists(fname + ".reader"))     # nu a scris alt fișier
+
     def test_cross_process_reader_sees_writer(self):
         fname = os.path.join(self.tmp, "shared.json")
         writer = cm.CacheInstantTrendManager(["BTCUSDT"], fname, writer=True)
