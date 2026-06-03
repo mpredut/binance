@@ -89,12 +89,40 @@ class CacheManagerInterface(ABC):
         self.thread = None
         self.save_state = False
         self.lock = threading.RLock()
-      
+
+        # Subscriber pattern comun — clasele derivate forward prețuri către
+        # alți manageri / PriceWindow prin _notify_price_subscribers().
+        # Init înainte de periodic_sync (thread-ul poate notifica imediat).
+        if not hasattr(self, "_price_subscribers"):
+            self._price_subscribers = []
+
         self.fallback_time_default = int(time.time() * 1000) - self.days_back*24*60*60*1000
-      
+
         # function calls here after all inint vars
         self.load_state()
         self.periodic_sync(sync_ts, False)
+
+    # ── Subscriber pattern (forward prețuri) ──────────────────────────────────
+
+    def subscribe_price(self, subscriber) -> None:
+        """Abonează un obiect care implementează on_price_update(symbol, ts_ms, price)."""
+        with self.lock:
+            if subscriber not in self._price_subscribers:
+                self._price_subscribers.append(subscriber)
+
+    def unsubscribe_price(self, subscriber) -> None:
+        with self.lock:
+            if subscriber in self._price_subscribers:
+                self._price_subscribers.remove(subscriber)
+
+    def _notify_price_subscribers(self, symbol: str, ts_ms: int, price: float) -> None:
+        with self.lock:
+            subs = list(self._price_subscribers)
+        for sub in subs:
+            try:
+                sub.on_price_update(symbol, ts_ms, price)
+            except Exception as e:
+                print(f"[{self.cls_name}] Eroare notificare subscriber {sub}: {e}")
     
 
     #def get_all_symbols_from_cache(self):
@@ -429,30 +457,10 @@ class Cache24PriceManager(CacheManagerInterface):
     KEEP_HOURS = 24   # configurabil per instanță dacă e nevoie
 
     def __init__(self, sync_ts, symbols, filename, api_client=api):
-        self._price_subscribers = []   # înainte de super()
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
 
-    # ── Subscriber pattern (forward către PriceWindow etc.) ───────────────────
-
-    def subscribe_price(self, subscriber) -> None:
-        """Abonează un obiect care implementează on_price_update(symbol, ts_ms, price)."""
-        with self.lock:
-            if subscriber not in self._price_subscribers:
-                self._price_subscribers.append(subscriber)
-
-    def unsubscribe_price(self, subscriber) -> None:
-        with self.lock:
-            if subscriber in self._price_subscribers:
-                self._price_subscribers.remove(subscriber)
-
-    def _notify_price_subscribers(self, symbol: str, ts_ms: int, price: float) -> None:
-        with self.lock:
-            subs = list(self._price_subscribers)
-        for sub in subs:
-            try:
-                sub.on_price_update(symbol, ts_ms, price)
-            except Exception as e:
-                print(f"[{self.cls_name}] Eroare notificare subscriber {sub}: {e}")
+    # subscribe_price / unsubscribe_price / _notify_price_subscribers — moștenite
+    # din CacheManagerInterface.
 
     # ── Callback de la CacheCurrentPriceManager ───────────────────────────────
 
@@ -646,7 +654,7 @@ class CacheCurrentPriceManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, ws_manager=None, api_client=api):
         self._ws_manager        = ws_manager
         self._ws_last_event_ts  = 0.0      # setat înainte de super() !
-        self._price_subscribers = []       # idem
+        self._price_subscribers = []       # idem (base __init__ respectă hasattr)
         self._update_timestamps: dict = defaultdict(deque)  # idem — înainte de super()
         super().__init__(sync_ts, symbols, filename, append_mode=False, api_client=api_client)
         if ws_manager is not None:
@@ -657,27 +665,8 @@ class CacheCurrentPriceManager(CacheManagerInterface):
     def _ws_is_healthy(self):
         return (time.time() - self._ws_last_event_ts) < self.WS_TIMEOUT_SEC
 
-    # ── Price subscriber pattern ──────────────────────────────────────────────
-
-    def subscribe_price(self, subscriber) -> None:
-        """Abonează un obiect care implementează on_price_update(symbol, ts_ms, price)."""
-        with self.lock:
-            if subscriber not in self._price_subscribers:
-                self._price_subscribers.append(subscriber)
-
-    def unsubscribe_price(self, subscriber) -> None:
-        with self.lock:
-            if subscriber in self._price_subscribers:
-                self._price_subscribers.remove(subscriber)
-
-    def _notify_price_subscribers(self, symbol: str, ts_ms: int, price: float) -> None:
-        with self.lock:
-            subs = list(self._price_subscribers)
-        for sub in subs:
-            try:
-                sub.on_price_update(symbol, ts_ms, price)
-            except Exception as e:
-                print(f"[{self.cls_name}] Eroare notificare subscriber: {e}")
+    # subscribe_price / unsubscribe_price / _notify_price_subscribers — moștenite
+    # din CacheManagerInterface.
 
     # ── WS callback (suprascrie metoda din interfață) ─────────────────────────
 
@@ -808,6 +797,15 @@ class CacheCurrentPriceManager(CacheManagerInterface):
         entry = self.get_price(symbol)
         return entry[1] if entry else None
 
+    def attach_ws_manager(self, ws_manager) -> None:
+        """Conectează un BinanceWebSocketManager ca sursă primară de preț.
+        ws_manager.subscribe(self) → on_items_update(symbol, [price]) la fiecare tick.
+        Idempotent (ws_manager.subscribe deduplichează)."""
+        if ws_manager is None:
+            return
+        self._ws_manager = ws_manager
+        ws_manager.subscribe(self)
+
 
 # ── Singleton ─────────────────────────────────────────────────────────────────
 
@@ -829,11 +827,15 @@ def get_current_price_manager(ws_manager=None, symbols=None, sync_ts=None) -> Ca
     if _current_price_instance is not None:
         if sync_ts is not None:
             _current_price_instance.sync_ts = sync_ts   # actualizare live
+        if ws_manager is not None:
+            _current_price_instance.attach_ws_manager(ws_manager)
         return _current_price_instance
     with _current_price_lock:
         if _current_price_instance is not None:
             if sync_ts is not None:
                 _current_price_instance.sync_ts = sync_ts
+            if ws_manager is not None:
+                _current_price_instance.attach_ws_manager(ws_manager)
             return _current_price_instance
         _syms = symbols if symbols is not None else sym.symbols
         _current_price_instance = CacheCurrentPriceManager(

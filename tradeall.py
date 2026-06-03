@@ -986,7 +986,15 @@ if __name__ == "__main__":
     # IMPORTANT: creem singleton-ul INAINTE de Cache24 cu sync_ts corect.
     # Cache24PriceManager.get_remote_items() apeleaza get_current_price_manager()
     # intern -- daca l-am crea acolo, ar porni cu sync_ts=30 hardcodat.
-    current_price_mgr = cm.get_current_price_manager(sync_ts=TIME_SLEEP_GET_PRICE)
+    #
+    # Sursa primara de pret = WebSocket market-data (bapi_ws.bapi_ws_manager):
+    # ticker stream -> on_items_update -> chain. HTTP polling ramane fallback
+    # (doar cand WS e tacut > WS_TIMEOUT_SEC).
+    import bapi_ws
+    current_price_mgr = cm.get_current_price_manager(
+        ws_manager=bapi_ws.bapi_ws_manager,
+        sync_ts=TIME_SLEEP_GET_PRICE,
+    )
     cache24_managers = cm.CacheFactory.get("Price24")   # dict {symbol: Cache24PriceManager}
 
     for symbol in sym.symbols:

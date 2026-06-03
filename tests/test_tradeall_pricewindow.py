@@ -539,6 +539,95 @@ class TestCacheCurrentPriceFrequency(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Subscriber pattern moștenit din CacheManagerInterface + atașare WS
+# ═══════════════════════════════════════════════════════════════════════════
+
+class _FakeWSManager:
+    """Mimează BinanceWebSocketManager: subscribe(sub) + push() → on_items_update."""
+    def __init__(self):
+        self._subs = []
+    def subscribe(self, sub):
+        if sub not in self._subs:
+            self._subs.append(sub)
+    def push(self, symbol, price):
+        for s in list(self._subs):
+            s.on_items_update(symbol, [price])
+
+
+class _RecordingSubscriber:
+    def __init__(self):
+        self.events = []
+    def on_price_update(self, symbol, ts_ms, price):
+        self.events.append((symbol, price))
+
+
+class TestSubscriberPatternInheritance(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def _cache24(self, symbol="BTCUSDT"):
+        return _make_cache24_manager(symbol, _synthetic_entries(5), self.tmp)
+
+    def test_cache24_inherits_subscribe_price(self):
+        # subscribe_price nu mai e definit în Cache24PriceManager — vine din base
+        self.assertIs(
+            type(self._cache24()).subscribe_price,
+            cm.CacheManagerInterface.subscribe_price,
+        )
+
+    def test_currentprice_inherits_subscribe_price(self):
+        self.assertIs(
+            cm.CacheCurrentPriceManager.subscribe_price,
+            cm.CacheManagerInterface.subscribe_price,
+        )
+
+    def test_inherited_notify_reaches_subscriber(self):
+        mgr = self._cache24("BTCUSDT")
+        rec = _RecordingSubscriber()
+        mgr.subscribe_price(rec)
+        mgr.on_price_update("BTCUSDT", int(time.time() * 1000), 123.0)
+        self.assertIn(("BTCUSDT", 123.0), rec.events)
+
+    def test_attach_ws_manager_wires_chain(self):
+        """WS tick → CacheCurrentPrice.on_items_update → subscriber.on_price_update."""
+        fname = os.path.join(self.tmp, "cp_ws.json")
+        mgr = cm.CacheCurrentPriceManager(
+            sync_ts=9999, symbols=["BTCUSDT"],
+            filename=fname, ws_manager=None, api_client=mock_bapi,
+        )
+        ws = _FakeWSManager()
+        mgr.attach_ws_manager(ws)
+
+        rec = _RecordingSubscriber()
+        mgr.subscribe_price(rec)
+
+        ws.push("BTCUSDT", 67000.0)   # simulează un tick WS
+        self.assertIn(("BTCUSDT", 67000.0), rec.events)
+
+    def test_attach_ws_manager_idempotent(self):
+        fname = os.path.join(self.tmp, "cp_ws2.json")
+        mgr = cm.CacheCurrentPriceManager(
+            sync_ts=9999, symbols=["BTCUSDT"],
+            filename=fname, ws_manager=None, api_client=mock_bapi,
+        )
+        ws = _FakeWSManager()
+        mgr.attach_ws_manager(ws)
+        mgr.attach_ws_manager(ws)
+        self.assertEqual(ws._subs.count(mgr), 1)
+
+    def test_ws_tick_marks_ws_healthy(self):
+        fname = os.path.join(self.tmp, "cp_ws3.json")
+        mgr = cm.CacheCurrentPriceManager(
+            sync_ts=9999, symbols=["BTCUSDT"],
+            filename=fname, ws_manager=None, api_client=mock_bapi,
+        )
+        self.assertFalse(mgr._ws_is_healthy())   # niciun event încă
+        mgr.on_items_update("BTCUSDT", [50000.0])
+        self.assertTrue(mgr._ws_is_healthy())    # WS marcat activ
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # PriceWindow — wiring complet Cache24PriceManager → PriceWindow
 # ═══════════════════════════════════════════════════════════════════════════
 
