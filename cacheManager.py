@@ -400,9 +400,8 @@ class CacheManagerInterface(ABC):
 
 class CacheTradeManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
-        # pur-append → persistăm prin append JSONL (nu rescriem tot fișierul)
-        super().__init__(sync_ts, symbols, filename, append_mode=True,
-                         api_client=api_client, append_persist=True)
+        # creștere LENTĂ (doar la trade real) → full-rewrite e ok
+        super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
 
     def _is_valid_trade(self, trade):
         required_keys = ['symbol', 'id', 'orderId', 'price', 'qty', 'time', 'isBuyer']
@@ -487,7 +486,9 @@ class CacheOrderManager(CacheManagerInterface):
 
 class CachePriceManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
-        super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api)
+        # pur-append, creștere CONTINUĂ (istoric preț la 7 min) → append JSONL
+        super().__init__(sync_ts, symbols, filename, append_mode=True,
+                         api_client=api, append_persist=True)
 
     # def rebuild_fetchtime_times(self):
         # if not self.cache:
@@ -677,9 +678,8 @@ class CachePriceTrendManager(CacheManagerInterface):
 
 class CacheAssetValueManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
-        # pur-append → persistăm prin append JSONL
-        super().__init__(sync_ts, symbols, filename, append_mode=True,
-                         api_client=api_client, append_persist=True)
+        # creștere lentă (1 / 10 min) → full-rewrite e ok
+        super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
 
     def rebuild_fetchtime_times(self):
         last_times = {}
@@ -1293,7 +1293,7 @@ class CacheFactory:
     _CONFIG = {
         "Trade": {
             "class": CacheTradeManager,
-            "filename": "cache_trade.jsonl",
+            "filename": "cache_trade.json",
             "sync_ts": lambda: TRADE_SYNC_INTERVAL_SEC,
         },
         "Order": {
@@ -1323,7 +1323,7 @@ class CacheFactory:
         },
         "AssetValue": {
             "class": CacheAssetValueManager,
-            "filename": "cache_asset_value.jsonl",
+            "filename": "cache_asset_value.json",
             "sync_ts": lambda: ASSETVALUE_SYNC_INTERVAL_SEC,
         },
     }
@@ -1361,11 +1361,12 @@ class CacheFactory:
                 symbols = ["TOTAL"] if name == "AssetValue" else sym.symbols
 
             if name in ("Price", "Price24"):
-                prefix = "cache_price_" if name == "Price" else "cache_24price_"
+                # Price = istoric (append JSONL); Price24 = bounded 24h (full-rewrite)
+                prefix, ext = ("cache_price_", "jsonl") if name == "Price" else ("cache_24price_", "json")
                 cls._instances[name] = {
                     s: manager_class(
                         sync_ts=sync_ts,
-                        filename=f"{prefix}{s}.json",
+                        filename=f"{prefix}{s}.{ext}",
                         symbols=[s],
                         api_client=api,
                         **extra_kwargs,
