@@ -74,6 +74,26 @@ class TestStore(unittest.TestCase):
         m.update_snapshot("BTCUSDT", gradient_recent=0.5)
         self.assertTrue(os.path.exists(fname))      # writer scrie
 
+    def test_is_snapshot_fresh(self):
+        m = cm.CacheInstantTrendManager(["BTCUSDT"], os.path.join(self.tmp, "f.json"), writer=True)
+        m.update_snapshot("BTCUSDT", gradient_recent=0.1, ts=time.time())
+        self.assertTrue(m.is_snapshot_fresh("BTCUSDT", max_age_sec=10))
+        m.update_snapshot("BTCUSDT", gradient_recent=0.1, ts=time.time() - 100)
+        self.assertFalse(m.is_snapshot_fresh("BTCUSDT", max_age_sec=10))
+
+    def test_is_snapshot_fresh_no_data(self):
+        m = cm.CacheInstantTrendManager(["BTCUSDT"], os.path.join(self.tmp, "g.json"))
+        self.assertFalse(m.is_snapshot_fresh("BTCUSDT", max_age_sec=10))
+
+    def test_become_writer_failover(self):
+        fname = os.path.join(self.tmp, "fail.json")
+        m = cm.CacheInstantTrendManager(["BTCUSDT"], fname, writer=False)
+        m.update_snapshot("BTCUSDT", gradient_recent=0.5)
+        self.assertFalse(os.path.exists(fname))   # non-writer nu scrie
+        m.become_writer()                          # preia scrierea
+        m.update_snapshot("BTCUSDT", gradient_recent=0.6)
+        self.assertTrue(os.path.exists(fname))     # acum scrie
+
     def test_prime_from_file_loads_initial(self):
         fname = os.path.join(self.tmp, "shared2.json")
         writer = cm.CacheInstantTrendManager(["BTCUSDT"], fname, writer=True)

@@ -1070,6 +1070,26 @@ class CacheInstantTrendManager:
                 return dict(self._mem[symbol])
         return self._read_file().get(symbol)
 
+    def is_snapshot_fresh(self, symbol=None, max_age_sec=None):
+        """True dacă snapshot-ul (din _mem sau fișier) e mai nou de max_age_sec.
+        Permite unui reader să detecteze un writer MORT și să comute pe calcul propriu."""
+        max_age_sec = max_age_sec if max_age_sec is not None else self.TREND_STALE_SEC
+        now = time.time()
+        if symbol is not None:
+            snap = self.get_snapshot(symbol)
+            return bool(snap) and (now - snap.get("ts", 0)) <= max_age_sec
+        allt = self.get_all_snapshots()
+        if not allt:
+            return False
+        latest = max((s.get("ts", 0) for s in allt.values()), default=0)
+        return (now - latest) <= max_age_sec
+
+    def become_writer(self):
+        """Promovează managerul la WRITER (failover: când fișierul e stale fiindcă
+        writer-ul a murit, un reader care deja calculează preia scrierea fișierului)."""
+        self.writer = True
+        self._start_flush_loop()
+
     def get_all_snapshots(self):
         with self._lock:
             if self._mem:
