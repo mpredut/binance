@@ -539,7 +539,12 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
             if symbol not in self.fetchtime_time_per_symbol:
                 self.fetchtime_time_per_symbol[symbol] = self.fallback_time_default
             print(f"[Pricefetcher] ✅ Symbol added: {symbol}")
-        self.update_cache_per_symbol(symbol)
+        # Preia prețul inițial al noului simbol și îl stochează (în afara lock-ului;
+        # update_cache_per_symbol își ia lock-ul intern).
+        items = self.get_remote_items(
+            symbol, self.fetchtime_time_per_symbol.get(symbol, self.fallback_time_default))
+        if items:
+            self.update_cache_per_symbol(symbol, items)
         return True
     
     def remove_symbol(self, symbol: str, reason: str = ""):
