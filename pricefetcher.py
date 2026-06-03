@@ -556,6 +556,11 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
             if symbol in self.original_symbols:
                 self.original_symbols.remove(symbol)
             self.active_symbols.discard(symbol)
+            # Curățăm și starea auxiliară, altfel cleanup_old_symbols (care
+            # iterează symbol_added_time) ar reîncerca la nesfârșit același simbol.
+            self.symbol_added_time.pop(symbol, None)
+            if hasattr(self, "symbol_preferred_source"):
+                self.symbol_preferred_source.pop(symbol, None)
             print(f"[Pricefetcher] ❌ Symbol removed: {symbol} {reason}")
             return True
 
