@@ -198,6 +198,7 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
             'orderId': order.get('orderId'),
             'price': float(order.get('price', 0)),
             'quantity': float(order.get('quantity', 0)),  # atenție: aici e 'quantity', nu 'origQty'
+            'qty': float(order.get('quantity', 0)),       # alias: consumatorii folosesc și 'qty' (ca la trades)
             'timestamp': order.get('timestamp'),  # deja în ms în cache
             'side': order.get('side', '').upper()
         }
