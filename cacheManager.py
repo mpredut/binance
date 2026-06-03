@@ -1446,8 +1446,8 @@ if __name__ == "__main__":
         cache = get_cache_manager(name)
         interval = config["sync_ts"]()  # obținem intervalul de sincronizare
 
-        if name == "Price":
-            # dict per simbol
+        if isinstance(cache, dict):
+            # Price / Price24 → dict per simbol
             for manager in cache.values():
                 threads.append(manager.periodic_sync(interval))
         else:
