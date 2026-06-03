@@ -68,24 +68,29 @@ def _should_poll_for_manager(cls_name):
         return (not _ws_available) or (not _ws_is_healthy)
 
 class CacheManagerInterface(ABC):
-    def __init__(self, sync_ts, symbols, filename, append_mode = True, api_client=api):
+    def __init__(self, sync_ts, symbols, filename, append_mode = True, api_client=api,
+                 append_persist=False):
         self.cls_name = self.__class__.__name__
-        
+
         #self.enable_print = True
         #global PRINT_CONTEXT
         #log.PRINT_CONTEXT = self
-        
+
         self.sync_ts = sync_ts
         self.symbols = symbols
         self.filename = filename
         self.append_mode = append_mode
         self.api_client = api_client
+        # Persistență prin APPEND (JSONL) — pentru cache-uri pur-append (Trade,
+        # AssetValue): scriem doar liniile NOI, nu rescriem tot fișierul.
+        self.append_persist = append_persist
+        self._persisted_counts = {}   # symbol → câte items sunt deja pe disc
 
         self.days_back = 30
-        
+
         self.cache = {}
         self.fetchtime_time_per_symbol = {}
-        
+
         self.thread = None
         self.save_state = False
         self.lock = threading.RLock()
@@ -168,6 +173,12 @@ class CacheManagerInterface(ABC):
         
     def load_state(self):
         print(f"[{self.cls_name}][Info] Load state from {self.filename} ...")
+        if self.append_persist:
+            self._load_jsonl()
+            if not self.cache:
+                self.query_remote_and_update_cache()
+                self.save_state_to_file_if_enabled()
+            return
         if os.path.exists(self.filename):
             try:
                 with open(self.filename, "r") as f:
@@ -198,6 +209,9 @@ class CacheManagerInterface(ABC):
     def save_state_to_file_if_enabled(self):
         if not self.save_state:
             return
+        if self.append_persist:
+            self._save_jsonl_append()
+            return
         try:
             with self.lock:
                 tmp_file = self.filename + ".tmp"
@@ -210,6 +224,67 @@ class CacheManagerInterface(ABC):
                 print(f"[{self.cls_name}][info] Save cache to file {self.filename}")
         except Exception as e:
             print(f"[{self.cls_name}][Eroare] La salvarea fișierului cache {self.filename} / .tmp : {e}")
+
+    # ── Persistență APPEND (JSONL) pentru cache-uri pur-append ────────────────
+    def _save_jsonl_append(self):
+        """Scrie DOAR items-urile noi (delta de la ultimul flush), prin append.
+        Nu rescrie tot fișierul. fetchtime + counts într-un sidecar mic."""
+        try:
+            with self.lock:
+                with open(self.filename, "a") as f:
+                    for symbol, items in self.cache.items():
+                        start = self._persisted_counts.get(symbol, 0)
+                        if start > len(items):   # cache a fost golit/scurtat → resync
+                            start = 0
+                        for item in items[start:]:
+                            f.write(json.dumps({"s": symbol, "i": item}) + "\n")
+                        self._persisted_counts[symbol] = len(items)
+                with open(self.filename + ".meta", "w") as mf:
+                    json.dump({"fetchtime": self.fetchtime_time_per_symbol,
+                               "counts": self._persisted_counts}, mf)
+        except Exception as e:
+            print(f"[{self.cls_name}][Eroare] append JSONL {self.filename}: {e}")
+
+    def _load_jsonl(self):
+        """Încarcă fișierul JSONL (toate liniile) → cache. fetchtime din sidecar."""
+        with self.lock:
+            self.cache = {}
+            if os.path.exists(self.filename):
+                with open(self.filename, "r") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            rec = json.loads(line)
+                            self.cache.setdefault(rec["s"], []).append(rec["i"])
+                        except Exception:
+                            continue   # linie parțială/coruptă (crash la append) — o sărim
+            self._persisted_counts = {s: len(v) for s, v in self.cache.items()}
+            metaf = self.filename + ".meta"
+            if os.path.exists(metaf):
+                try:
+                    with open(metaf) as mf:
+                        self.fetchtime_time_per_symbol = json.load(mf).get("fetchtime", {})
+                except Exception:
+                    pass
+
+    def compact_jsonl(self):
+        """Rescrie fișierul JSONL din memorie (compactare — elimină eventuale
+        linii vechi/duplicate). De rulat ocazional, nu la fiecare flush."""
+        if not self.append_persist:
+            return
+        try:
+            with self.lock:
+                tmp = self.filename + ".tmp"
+                with open(tmp, "w") as f:
+                    for symbol, items in self.cache.items():
+                        for item in items:
+                            f.write(json.dumps({"s": symbol, "i": item}) + "\n")
+                os.replace(tmp, self.filename)
+                self._persisted_counts = {s: len(v) for s, v in self.cache.items()}
+        except Exception as e:
+            print(f"[{self.cls_name}][Eroare] compact JSONL {self.filename}: {e}")
 
 
     @abstractmethod
@@ -325,7 +400,9 @@ class CacheManagerInterface(ABC):
 
 class CacheTradeManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
-        super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
+        # pur-append → persistăm prin append JSONL (nu rescriem tot fișierul)
+        super().__init__(sync_ts, symbols, filename, append_mode=True,
+                         api_client=api_client, append_persist=True)
 
     def _is_valid_trade(self, trade):
         required_keys = ['symbol', 'id', 'orderId', 'price', 'qty', 'time', 'isBuyer']
@@ -600,7 +677,9 @@ class CachePriceTrendManager(CacheManagerInterface):
 
 class CacheAssetValueManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
-        super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
+        # pur-append → persistăm prin append JSONL
+        super().__init__(sync_ts, symbols, filename, append_mode=True,
+                         api_client=api_client, append_persist=True)
 
     def rebuild_fetchtime_times(self):
         last_times = {}
@@ -619,8 +698,8 @@ class CacheAssetValueManager(CacheManagerInterface):
             print(f"[{self.cls_name}][Eroare] Nu pot interoga valoarea totala: {e}")
             return []
 
-        if total_usdt is None or total_usdt <= 0:
-            print(f"[{self.cls_name}][Eroare] Valoarea totala este None sau <= 0: {total_usdt}")
+        if not isinstance(total_usdt, (int, float)) or total_usdt <= 0:
+            print(f"[{self.cls_name}][Eroare] Valoarea totala invalidă: {total_usdt}")
             return []
             
         now_sec = int(time.time())
@@ -1214,7 +1293,7 @@ class CacheFactory:
     _CONFIG = {
         "Trade": {
             "class": CacheTradeManager,
-            "filename": "cache_trade.json",
+            "filename": "cache_trade.jsonl",
             "sync_ts": lambda: TRADE_SYNC_INTERVAL_SEC,
         },
         "Order": {
@@ -1244,7 +1323,7 @@ class CacheFactory:
         },
         "AssetValue": {
             "class": CacheAssetValueManager,
-            "filename": "cache_asset_value.json",
+            "filename": "cache_asset_value.jsonl",
             "sync_ts": lambda: ASSETVALUE_SYNC_INTERVAL_SEC,
         },
     }

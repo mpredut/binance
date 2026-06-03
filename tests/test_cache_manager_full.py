@@ -38,10 +38,10 @@ import cacheManager as cm
 class ConcreteTestManager(cm.CacheManagerInterface):
     """Implementare minimă pentru testarea CacheManagerInterface."""
     def __init__(self, sync_ts, symbols, filename, append_mode=True, api_client=None,
-                 remote_items=None):
+                 remote_items=None, append_persist=False):
         self._remote_items = remote_items or {}   # {symbol: [items]}
         super().__init__(sync_ts, symbols, filename, append_mode=append_mode,
-                         api_client=api_client or MagicMock())
+                         api_client=api_client or MagicMock(), append_persist=append_persist)
 
     def rebuild_fetchtime_times(self):
         return {}
@@ -934,6 +934,62 @@ class TestFactorySingletonWarning(unittest.TestCase):
         with contextlib.redirect_stdout(buf):
             cm.get_cache_manager("AssetValue", symbols=["TOTAL"])
         self.assertNotIn("IGNORAT", buf.getvalue())
+
+
+class TestAppendJsonlPersist(unittest.TestCase):
+    """Persistență prin append JSONL pentru cache-uri pur-append (Trade/AssetValue)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def test_append_writes_only_delta(self):
+        fname = os.path.join(self.tmp, "t.jsonl")
+        m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
+        m.save_state = True
+        with m.lock:
+            m.cache["SYM"] = [{"id": 1}, {"id": 2}]
+        m.save_state_to_file_if_enabled()
+        n1 = sum(1 for _ in open(fname))
+        self.assertEqual(n1, 2)
+        # adăugăm încă unul → se scrie DOAR delta (1 linie nouă)
+        with m.lock:
+            m.cache["SYM"].append({"id": 3})
+        m.save_state_to_file_if_enabled()
+        n2 = sum(1 for _ in open(fname))
+        self.assertEqual(n2, 3)   # 2 + 1, nu rescris
+
+    def test_load_jsonl_rebuilds_cache(self):
+        fname = os.path.join(self.tmp, "t2.jsonl")
+        w = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
+        w.save_state = True
+        with w.lock:
+            w.cache["SYM"] = [{"id": 1}, {"id": 2}]
+        w.save_state_to_file_if_enabled()
+        # alt manager încarcă din JSONL la startup
+        r = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
+        self.assertEqual(r.cache.get("SYM"), [{"id": 1}, {"id": 2}])
+
+    def test_compact_rewrites(self):
+        fname = os.path.join(self.tmp, "t3.jsonl")
+        m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
+        m.save_state = True
+        with m.lock:
+            m.cache["SYM"] = [{"id": i} for i in range(5)]
+        m.save_state_to_file_if_enabled()
+        m.compact_jsonl()
+        n = sum(1 for _ in open(fname))
+        self.assertEqual(n, 5)
+        r = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
+        self.assertEqual(len(r.cache.get("SYM")), 5)
+
+    def test_skips_corrupt_lines(self):
+        fname = os.path.join(self.tmp, "t4.jsonl")
+        with open(fname, "w") as f:
+            f.write(json.dumps({"s": "SYM", "i": {"id": 1}}) + "\n")
+            f.write("{partial broken line\n")   # linie coruptă (crash la append)
+            f.write(json.dumps({"s": "SYM", "i": {"id": 2}}) + "\n")
+        r = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
+        self.assertEqual(r.cache.get("SYM"), [{"id": 1}, {"id": 2}])   # sare linia coruptă
 
 
 if __name__ == "__main__":
