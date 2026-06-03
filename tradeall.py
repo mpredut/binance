@@ -870,7 +870,8 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
 
 
 # Function to handle the price logic for a specific currency
-def handle_symbol(symbol, current_price, price_window, price_window_big, trend_state, trend_state_big):
+def handle_symbol(symbol, current_price, price_window, price_window_big, 
+                  trend_state, trend_state_big):
   
     count = 0
 
