@@ -429,7 +429,30 @@ class Cache24PriceManager(CacheManagerInterface):
     KEEP_HOURS = 24   # configurabil per instanță dacă e nevoie
 
     def __init__(self, sync_ts, symbols, filename, api_client=api):
+        self._price_subscribers = []   # înainte de super()
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
+
+    # ── Subscriber pattern (forward către PriceWindow etc.) ───────────────────
+
+    def subscribe_price(self, subscriber) -> None:
+        """Abonează un obiect care implementează on_price_update(symbol, ts_ms, price)."""
+        with self.lock:
+            if subscriber not in self._price_subscribers:
+                self._price_subscribers.append(subscriber)
+
+    def unsubscribe_price(self, subscriber) -> None:
+        with self.lock:
+            if subscriber in self._price_subscribers:
+                self._price_subscribers.remove(subscriber)
+
+    def _notify_price_subscribers(self, symbol: str, ts_ms: int, price: float) -> None:
+        with self.lock:
+            subs = list(self._price_subscribers)
+        for sub in subs:
+            try:
+                sub.on_price_update(symbol, ts_ms, price)
+            except Exception as e:
+                print(f"[{self.cls_name}] Eroare notificare subscriber {sub}: {e}")
 
     # ── Callback de la CacheCurrentPriceManager ───────────────────────────────
 
@@ -439,6 +462,7 @@ class Cache24PriceManager(CacheManagerInterface):
             self.fetchtime_time_per_symbol = self._CacheManagerInterface__rebuild_fetchtime_times()
         self.update_cache_per_symbol(symbol, [[ts_ms, price]])
         self._trim_old_data(symbol)
+        self._notify_price_subscribers(symbol, ts_ms, price)
 
     def _trim_old_data(self, symbol):
         cutoff_ms = int((time.time() - self.KEEP_HOURS * 3600) * 1000)

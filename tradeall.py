@@ -137,6 +137,7 @@ class PriceWindow:
         self.symbol = symbol
         self.window_size = int(window_size)
         self.sample_rate_sec = sample_rate_sec if sample_rate_sec is not None else TIME_SLEEP_GET_PRICE
+        self._subscribed_to_cache24 = False
         self.prices = deque(maxlen=self.window_size)
         self.sorted_prices = []
 
@@ -148,6 +149,12 @@ class PriceWindow:
     def recent_n(self) -> int:
         """Numărul de sample-uri recente corespunzând RECENT_GRADIENT_SECONDS."""
         return max(2, int(RECENT_GRADIENT_SECONDS / self.sample_rate_sec))
+
+    def on_price_update(self, symbol: str, ts_ms: int, price: float) -> None:
+        """Callback de la Cache24PriceManager — actualizează fereastra automat."""
+        if symbol != self.symbol:
+            return
+        self.process_price(price)
 
     @classmethod
     def from_existing_window(cls, existing_prices, window_size):
@@ -170,7 +177,8 @@ class PriceWindow:
 
     @classmethod
     def from_cache24(cls, symbol: str, window_seconds: float, cache24) -> "PriceWindow":
-        """Construiește un PriceWindow din ultimele `window_seconds` secunde din Cache24PriceManager.
+        """Construiește un PriceWindow din ultimele `window_seconds` secunde din Cache24PriceManager
+        și se abonează la update-uri viitoare automat.
 
         window_seconds trebuie să fie <= Cache24PriceManager.KEEP_HOURS * 3600 (24h).
         sample_rate_sec și window_size sunt calculate automat din datele reale.
@@ -184,7 +192,18 @@ class PriceWindow:
         pw = cls(symbol, window_size, sample_rate_sec=sample_rate)
         for p in prices:
             pw.process_price(p)
+
+        pw.subscribe_to_cache24(cache24)
         return pw
+
+    def subscribe_to_cache24(self, cache24) -> None:
+        """Abonează fereastra la update-uri viitoare din Cache24PriceManager."""
+        cache24.subscribe_price(self)
+        self._subscribed_to_cache24 = True
+
+    def unsubscribe_from_cache24(self, cache24) -> None:
+        cache24.unsubscribe_price(self)
+        self._subscribed_to_cache24 = False
 
     def process_price(self, price):
         print(f"{self.symbol}: {price}")
@@ -887,19 +906,25 @@ def logic(win, enable, symbol, gradient, slope, trend_state) :
 
 
 # Function to handle the price logic for a specific currency
-def handle_symbol(symbol, current_price, price_window, price_window_big, 
+def handle_symbol(symbol, current_price, price_window, price_window_big,
                   trend_state, trend_state_big):
-  
+
     count = 0
 
-    price_window.process_price(current_price)
-    price_window_big.process_price(current_price)
+    # process_price e apelat manual doar dacă fereastra NU e abonată la Cache24
+    # (fallback pentru rulare fără CacheManager)
+    if not price_window._subscribed_to_cache24:
+        price_window.process_price(current_price)
+    if not price_window_big._subscribed_to_cache24:
+        price_window_big.process_price(current_price)
 
-    # Actualizare rata reală de sampling din manager (dacă e disponibil)
+    # Actualizare rata reală de sampling din CacheCurrentPriceManager
     try:
         import cacheManager as cm
-        actual_rate = cm.get_current_price_manager().get_sample_rate(symbol, fallback=TIME_SLEEP_GET_PRICE)
+        actual_rate = cm.get_current_price_manager().get_sample_rate(
+            symbol, fallback=TIME_SLEEP_GET_PRICE)
         price_window.sample_rate_sec = actual_rate
+        price_window_big.sample_rate_sec = actual_rate
     except Exception:
         pass
 
@@ -955,11 +980,39 @@ if __name__ == "__main__":
     trend_states = {}
     trend_states_big = {}
 
+    # Conectăm chain-ul complet:
+    # CacheCurrentPriceManager → Cache24PriceManager → PriceWindow
+    import cacheManager as cm
+    current_price_mgr = cm.get_current_price_manager()
+    cache24_managers = cm.CacheFactory.get("Price24")   # dict {symbol: Cache24PriceManager}
+
     for symbol in sym.symbols:
-        price_windows[symbol] = PriceWindow(symbol, window_size)
-        price_windows_big[symbol] = PriceWindow(symbol, window_size_big)
+        cache24 = cache24_managers[symbol]
+
+        # 1. CurrentPrice → Cache24 (dacă nu e deja abonat)
+        current_price_mgr.subscribe_price(cache24)
+
+        # 2. PriceWindow mică — din ultimele WINDOWS_SIZE_MIN secunde
+        price_windows[symbol] = PriceWindow.from_cache24(
+            symbol,
+            window_seconds=WINDOWS_SIZE_MIN,
+            cache24=cache24,
+        )
+
+        # 3. PriceWindow mare — din ultimele window_size_big * TIME_SLEEP_GET_PRICE secunde
+        price_windows_big[symbol] = PriceWindow.from_cache24(
+            symbol,
+            window_seconds=window_size_big * TIME_SLEEP_GET_PRICE,
+            cache24=cache24,
+        )
+
         trend_states[symbol] = TrendState(max_duration_seconds=2.5 * 60 * 60, expiration_trend_time=2.7 * 60, fresh_trend_time=3.7 * 60)
         trend_states_big[symbol] = TrendState(max_duration_seconds=3 * 60 * 60, expiration_trend_time=2.7 * 60, fresh_trend_time=3.7 * 60)
+
+        print(f"[{symbol}] PriceWindow small: {len(price_windows[symbol].prices)} sample-uri "
+              f"(rate={price_windows[symbol].sample_rate_sec:.2f}s)")
+        print(f"[{symbol}] PriceWindow big:   {len(price_windows_big[symbol].prices)} sample-uri "
+              f"(rate={price_windows_big[symbol].sample_rate_sec:.2f}s)")
 
     TIME_SLEEP_BETWEEN_SYMBOLS = 0
     print(f"Quantities: {api.quantities}")

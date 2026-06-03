@@ -538,5 +538,88 @@ class TestCacheCurrentPriceFrequency(unittest.TestCase):
         self.assertAlmostEqual(self.mgr.get_sample_rate("BTCUSDT", fallback=1.23), 1.23)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# PriceWindow — wiring complet Cache24PriceManager → PriceWindow
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestPriceWindowCache24Wiring(unittest.TestCase):
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def _make_wired(self, entries, symbol="BTCUSDT", window_seconds=None):
+        """Creează Cache24PriceManager + PriceWindow abonat la el."""
+        mgr = _make_cache24_manager(symbol, entries, self.tmp)
+        if window_seconds is None:
+            window_seconds = len(entries) * 0.8
+        pw = ta.PriceWindow.from_cache24(symbol, window_seconds, mgr)
+        return pw, mgr
+
+    def test_subscribed_flag_set_after_from_cache24(self):
+        entries = _synthetic_entries(20)
+        pw, _ = self._make_wired(entries)
+        self.assertTrue(pw._subscribed_to_cache24)
+
+    def test_not_subscribed_by_default(self):
+        pw = ta.PriceWindow("BTCUSDT", 50)
+        self.assertFalse(pw._subscribed_to_cache24)
+
+    def test_on_price_update_ignored_for_wrong_symbol(self):
+        entries = _synthetic_entries(10)
+        pw, mgr = self._make_wired(entries, symbol="BTCUSDT")
+        n_before = len(pw.prices)
+        pw.on_price_update("ETHUSDT", int(time.time() * 1000), 3000.0)
+        self.assertEqual(len(pw.prices), n_before)
+
+    def test_on_price_update_adds_price(self):
+        entries = _synthetic_entries(10)
+        pw, mgr = self._make_wired(entries, symbol="BTCUSDT")
+        n_before = len(pw.prices)
+        pw.on_price_update("BTCUSDT", int(time.time() * 1000), 99999.0)
+        self.assertEqual(len(pw.prices), min(n_before + 1, pw.window_size))
+
+    def test_cache24_notifies_pricewindow(self):
+        """Când Cache24PriceManager primește un preț nou, PriceWindow e actualizat automat."""
+        entries = _synthetic_entries(10)
+        pw, mgr = self._make_wired(entries, symbol="BTCUSDT")
+        n_before = len(pw.prices)
+        ts_ms = int(time.time() * 1000)
+        mgr.on_price_update("BTCUSDT", ts_ms, 77777.0)
+        self.assertEqual(len(pw.prices), min(n_before + 1, pw.window_size))
+        self.assertIn(77777.0, pw.prices)
+
+    def test_unsubscribe_stops_updates(self):
+        entries = _synthetic_entries(10)
+        pw, mgr = self._make_wired(entries, symbol="BTCUSDT")
+        pw.unsubscribe_from_cache24(mgr)
+        self.assertFalse(pw._subscribed_to_cache24)
+        n_before = len(pw.prices)
+        mgr.on_price_update("BTCUSDT", int(time.time() * 1000), 55555.0)
+        self.assertEqual(len(pw.prices), n_before)  # nu s-a actualizat
+
+    def test_multiple_windows_same_cache24(self):
+        """Două ferestre (mică și mare) pot fi abonate la același Cache24."""
+        entries = _synthetic_entries(50)
+        mgr = _make_cache24_manager("BTCUSDT", entries, self.tmp)
+        pw_small = ta.PriceWindow.from_cache24("BTCUSDT", 20 * 0.8, mgr)
+        pw_big   = ta.PriceWindow.from_cache24("BTCUSDT", 50 * 0.8, mgr)
+
+        ts_ms = int(time.time() * 1000)
+        mgr.on_price_update("BTCUSDT", ts_ms, 12345.0)
+
+        self.assertIn(12345.0, pw_small.prices)
+        self.assertIn(12345.0, pw_big.prices)
+
+    def test_subscribe_to_cache24_method_directly(self):
+        entries = _synthetic_entries(10)
+        mgr = _make_cache24_manager("BTCUSDT", entries, self.tmp)
+        pw = ta.PriceWindow("BTCUSDT", 20)
+        self.assertFalse(pw._subscribed_to_cache24)
+        pw.subscribe_to_cache24(mgr)
+        self.assertTrue(pw._subscribed_to_cache24)
+        mgr.on_price_update("BTCUSDT", int(time.time() * 1000), 88888.0)
+        self.assertIn(88888.0, pw.prices)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
