@@ -520,6 +520,7 @@ def handle_symbol(symbol, current_price, price_window, price_window_big,
 
 MIN_EVAL_INTERVAL_SEC = 1.5    # floor: cel mult o evaluare la 1.5s per simbol
 MAX_EVAL_INTERVAL_SEC = 30.0   # ceiling/heartbeat: cel puțin o evaluare la 30s
+EPSILON_K = 1.0                # multiplicator pt pragul de zgomot (k * stddev gradient)
 
 
 class TrendCoordinator:
@@ -575,10 +576,13 @@ class TrendCoordinator:
         # ca gate-ul buy/sell să reacționeze în ~latența unui tick, nu la 1.5s.
         try:
             import trend_api
-            g = self.windows[symbol].get_recent_gradient()
+            win = self.windows[symbol]
+            g = win.get_recent_gradient()
+            eps = win.get_noise_epsilon(k=EPSILON_K)   # prag de zgomot informat per simbol
             trend_api.update_instant(
                 symbol,
                 gradient_recent=g,
+                epsilon=eps,
                 final_trend=(1 if g > 0 else -1 if g < 0 else 0),
                 current_price=price,
                 ts=time.time(),

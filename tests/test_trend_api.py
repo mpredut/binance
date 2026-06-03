@@ -127,6 +127,17 @@ class TestIsFavorableToWait(unittest.TestCase):
                                 _snap(gradient_recent=-eps * 10, current_price=60000.0))
         self.assertTrue(trend_api.is_favorable_to_wait("BUY", "BTCUSDT"))
 
+    def test_informed_epsilon_from_snapshot_used(self):
+        # epsilon informat (volatilitate) din snapshot are prioritate
+        # gradient sub epsilon-ul publicat → zgomot → așteptăm
+        trend_api.publish_trend("BTCUSDT",
+                                _snap(gradient_recent=0.4, epsilon=1.0, current_price=60000.0))
+        self.assertTrue(trend_api.is_favorable_to_wait("BUY", "BTCUSDT"))
+        # gradient peste epsilon, urcă clar → BUY plasează acum
+        trend_api.publish_trend("BTCUSDT",
+                                _snap(gradient_recent=5.0, epsilon=1.0, current_price=60000.0))
+        self.assertFalse(trend_api.is_favorable_to_wait("BUY", "BTCUSDT"))
+
 
 class TestCrossProcessSharing(unittest.TestCase):
     """Simulează writer (tradeall) + reader (rtrade) prin același fișier."""

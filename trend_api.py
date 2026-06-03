@@ -72,9 +72,10 @@ class InstantTrendCache:
     # ── citire (reader, cross-process) ───────────────────────────────────────
 
     def _read_file(self):
-        """Citește fișierul partajat, cu cache pe mtime ca să nu re-parseze inutil."""
+        """Citește fișierul partajat, cu cache pe mtime_ns (rezoluție nanosecundă,
+        ca să nu rateze scrieri din aceeași secundă)."""
         try:
-            mtime = os.path.getmtime(self.filename)
+            mtime = os.stat(self.filename).st_mtime_ns
         except OSError:
             return {}
         if mtime == self._file_mtime and self._file_cache is not None:
@@ -89,11 +90,17 @@ class InstantTrendCache:
         return data
 
     def get(self, symbol):
-        """Cross-process: sursa de adevăr e fișierul (scris de writer)."""
-        data = self._read_file()
-        return data.get(symbol)
+        """Writer: _mem e autoritar (mereu proaspăt). Reader (alt proces, _mem gol):
+        citește din fișierul partajat."""
+        with self._lock:
+            if symbol in self._mem:
+                return dict(self._mem[symbol])
+        return self._read_file().get(symbol)
 
     def get_all(self):
+        with self._lock:
+            if self._mem:
+                return {s: dict(v) for s, v in self._mem.items()}
         return dict(self._read_file())
 
     def clear(self):
@@ -142,6 +149,11 @@ def clear():
 # ── Decizie de întârziere (oportunistă: aștept preț mai bun) ──────────────────
 
 def _epsilon(snapshot):
+    # Preferă epsilon-ul INFORMAT din volatilitate (publicat de writer), dacă există;
+    # altfel fallback pe pragul relativ la preț.
+    eps = snapshot.get("epsilon")
+    if eps is not None and eps > 0:
+        return float(eps)
     price = abs(snapshot.get("current_price") or 0.0)
     return max(FAVORABLE_ABS_EPS, price * FAVORABLE_REL_EPS)
 
