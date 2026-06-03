@@ -876,12 +876,13 @@ class CacheInstantTrendManager:
     # Praguri pentru check_price_change (small/big) — aceleași ca în tradeall.
     PRICE_CHANGE_THRESHOLD_SMALL = u.calculate_difference_percent(60000, 60000 - 310)
     PRICE_CHANGE_THRESHOLD_BIG   = u.calculate_difference_percent(97000, 95000 - 377)
-    FULL_EVAL_INTERVAL_SEC = 1.5   # cadența calculului complet (metrici)
-    FLUSH_INTERVAL_SEC     = 0.5   # cadența scrierii pe fișier (I/O decuplat)
+    FULL_EVAL_INTERVAL_SEC = 3.0   # cadența calculului GREU (metrici complete)
+    FLUSH_INTERVAL_SEC     = 0.5   # cadența scrierii pe fișier (doar writer-ul)
 
-    def __init__(self, symbols, filename="cache_instant_trend.json"):
+    def __init__(self, symbols, filename="cache_instant_trend.json", writer=False):
         self.symbols = list(symbols)
         self.filename = filename
+        self.writer = writer   # doar writer-ul scrie fișierul (ex. procesul cacheManager.py)
         self._mem = {}
         self._lock = threading.RLock()
         self._file_mtime = None
@@ -1028,15 +1029,18 @@ class CacheInstantTrendManager:
             self._mem[symbol] = snap
 
     def update_snapshot(self, symbol, **fields):
-        """Memorie + flush IMEDIAT pe fișier. Pentru apelanți externi (tradeall,
-        teste) care vor persistență sincronă."""
+        """Memorie + flush IMEDIAT pe fișier DOAR dacă e writer. Apelanții externi
+        (tradeall non-writer, teste) actualizează memoria fără a scrie fișierul."""
         self._set_mem(symbol, **fields)
-        with self._lock:
-            self._write_file()
+        if self.writer:
+            with self._lock:
+                self._write_file()
 
     def _start_flush_loop(self):
         """Thread SEPARAT care scrie memoria pe fișier la FLUSH_INTERVAL_SEC.
-        Decuplează I/O-ul de căile de calcul (rapid + greu)."""
+        Decuplează I/O-ul de căile de calcul. Rulează DOAR la writer."""
+        if not self.writer:
+            return
         if self._flush_thread is not None and self._flush_thread.is_alive():
             return
         def run():
@@ -1121,16 +1125,22 @@ class CacheInstantTrendManager:
 _instant_trend_instance = None
 _instant_trend_lock = threading.Lock()
 
-def get_instant_trend_manager(symbols=None, filename="cache_instant_trend.json"):
-    """Singleton CacheInstantTrendManager. Writer-ul apelează apoi start_computation()."""
+def get_instant_trend_manager(symbols=None, filename="cache_instant_trend.json", writer=False):
+    """Singleton CacheInstantTrendManager.
+    writer=True → procesul scrie fișierul (ex. cacheManager.py). Ceilalți (tradeall
+    care calculează pt logica lui, sau readerii) folosesc writer=False."""
     global _instant_trend_instance
     if _instant_trend_instance is not None:
+        if writer:
+            _instant_trend_instance.writer = True   # promovare la writer (idempotent)
         return _instant_trend_instance
     with _instant_trend_lock:
         if _instant_trend_instance is not None:
+            if writer:
+                _instant_trend_instance.writer = True
             return _instant_trend_instance
         _syms = symbols if symbols is not None else sym.symbols
-        _instant_trend_instance = CacheInstantTrendManager(_syms, filename)
+        _instant_trend_instance = CacheInstantTrendManager(_syms, filename, writer=writer)
     return _instant_trend_instance
 
 
@@ -1579,7 +1589,7 @@ if __name__ == "__main__":
         _trend_cpm = get_current_price_manager(
             ws_manager=bapi_ws.bapi_ws_manager, sync_ts=0.8)
         _trend_cache24 = CacheFactory.get("Price24")
-        _trend_mgr = get_instant_trend_manager()
+        _trend_mgr = get_instant_trend_manager(writer=True)   # singurul writer al fișierului
         _trend_mgr.start_computation(_trend_cache24, _trend_cpm, run_full_eval=True)
         print("⚙️ cacheManager: calcul trend complet pornit (cache_instant_trend.json).")
     except Exception as e:

@@ -61,9 +61,22 @@ class TestStore(unittest.TestCase):
     def test_get_unknown_none(self):
         self.assertIsNone(self.m.get_snapshot("NOPE"))
 
+    def test_non_writer_does_not_write_file(self):
+        fname = os.path.join(self.tmp, "nw.json")
+        m = cm.CacheInstantTrendManager(["BTCUSDT"], fname, writer=False)
+        m.update_snapshot("BTCUSDT", gradient_recent=0.5)
+        self.assertFalse(os.path.exists(fname))     # non-writer nu scrie
+        self.assertIsNotNone(m.get_snapshot("BTCUSDT"))  # dar are in memorie
+
+    def test_writer_writes_file(self):
+        fname = os.path.join(self.tmp, "w.json")
+        m = cm.CacheInstantTrendManager(["BTCUSDT"], fname, writer=True)
+        m.update_snapshot("BTCUSDT", gradient_recent=0.5)
+        self.assertTrue(os.path.exists(fname))      # writer scrie
+
     def test_cross_process_reader_sees_writer(self):
         fname = os.path.join(self.tmp, "shared.json")
-        writer = cm.CacheInstantTrendManager(["BTCUSDT"], fname)
+        writer = cm.CacheInstantTrendManager(["BTCUSDT"], fname, writer=True)
         reader = cm.CacheInstantTrendManager(["BTCUSDT"], fname)
         writer.update_snapshot("BTCUSDT", gradient_recent=-0.7, current_price=60000.0)
         snap = reader.get_snapshot("BTCUSDT")
@@ -73,7 +86,7 @@ class TestStore(unittest.TestCase):
     def test_cross_process_rapid_updates(self):
         # două update-uri în aceeași secundă — reader le vede pe ambele (mtime_ns)
         fname = os.path.join(self.tmp, "rapid.json")
-        writer = cm.CacheInstantTrendManager(["BTCUSDT"], fname)
+        writer = cm.CacheInstantTrendManager(["BTCUSDT"], fname, writer=True)
         reader = cm.CacheInstantTrendManager(["BTCUSDT"], fname)
         writer.update_snapshot("BTCUSDT", gradient_recent=0.1, current_price=60000.0)
         reader.get_snapshot("BTCUSDT")
