@@ -614,71 +614,39 @@ class StateTracker:
                 print(e)
             time.sleep(50)
 
-    def update_sell_recommendation(self, file_path):
+    def update_sell_recommendation(self, file_path=None):
+        """Construiește sell_recommendation din:
+          - CONFIG static (force_sell, procent_desired_profit, etc.) = defaults din cod
+          - SEMNALE de trend (slope/pos/gradient/tick/min/max) = snapshot-ul din
+            CacheInstantTrendManager (cross-process, scris de tradeall).
+        Înlocuiește fostul sell_recommendation.csv."""
         global sell_recommendation
         try:
-            if os.path.exists(file_path) and os.path.getsize(file_path) == 0:
-                raise pd.errors.EmptyDataError("Empty file")
+            import cacheManager as cm
+            mgr = cm.get_instant_trend_manager()
 
-            df = pd.read_csv(file_path)
-            if df.empty or 'symbol' not in df.columns:
-                raise pd.errors.EmptyDataError("Empty or invalid file")
-
-            # Citește și completează NaN-urile cu defaults
-            df = pd.read_csv('sell_recommendation.csv').fillna({
-                'force_sell': 0,
-                'procent_desired_profit': 0.0,
-                'expired_duration': 0,
-                'min_procent': 0.0,
-                'days_after_use_current_price': 0,
-                'slope': 0.0,
-                'pos': 0,
-                'gradient': 0.0,
-                'tick': 0,
-                'min': 0.0,
-                'max': 0.0
-            })
+            new_rec = {}
+            for symbol, cfg in default_values_sell_recommendation.items():
+                rec = dict(cfg)   # config static (force_sell, procente, expired_duration, ...)
+                snap = mgr.get_snapshot(symbol)
+                if snap:
+                    rec['slope']    = float(snap.get('slope_small', 0.0) or 0.0)
+                    rec['pos']      = int(snap.get('pos', 0) or 0)
+                    rec['gradient'] = float(snap.get('final_trend', 0.0) or 0.0)
+                    rec['tick']     = int(snap.get('tick', 0) or 0)
+                    rec['min']      = float(snap.get('min', 0.0) or 0.0)
+                    rec['max']      = float(snap.get('max', 0.0) or 0.0)
+                new_rec[symbol] = rec
 
             with sell_lock:
-                sell_recommendation = {
-                    row['symbol']: {
-                        'force_sell': bool(row['force_sell']),
-                        'procent_desired_profit': float(row['procent_desired_profit']),
-                        'expired_duration': int(row['expired_duration']),
-                        'min_procent': float(row['min_procent']),
-                        'days_after_use_current_price': int(row['days_after_use_current_price']),
-                        'slope': float(row['slope']),
-                        'pos': int(row['pos']),
-                        'gradient': float(row['gradient']),
-                        'tick': int(row['tick']),
-                        'min': float(row['min']),
-                        'max': float(row['max'])
-                    } for _, row in df.iterrows()
-                }
+                sell_recommendation = new_rec
 
-            print(f"Thread count: {len(threading.enumerate())}")
-            for t in threading.enumerate():
-                 print(f"{t.name} daemon={t.daemon}")
-            print(f"sell_recommendation updated from file!")
-            #self.display_sell_recommendation()
-                
-            # Update the states based on the current sell_recommendation
+            print(f"sell_recommendation actualizat din CacheInstantTrendManager!")
             self.update_states_from_sell_recommendation()
-        except FileNotFoundError:
-            print(f"Error: File {file_path} not found. Using default values.")
-            sell_recommendation = default_values_sell_recommendation
-        except (pd.errors.EmptyDataError, pd.errors.ParserError):
-            print(f"Error: File {file_path} is empty or invalid. Recreating with default values.")
-            sell_recommendation = default_values_sell_recommendation
-            df = pd.DataFrame.from_dict(default_values_sell_recommendation, orient='index').reset_index()
-            df.rename(columns={'index': 'symbol'}, inplace=True)
-            df.to_csv(file_path, index=False)
         except Exception as e:
-            print(f"Error reading file: {file_path}. Error : {e}. Using default values.")
-            sell_recommendation = default_values_sell_recommendation
-
-        # Reprogram the update for every 2 minutes
-        #Timer(120, self.update_sell_recommendation, [file_path]).start()
+            print(f"Eroare update_sell_recommendation din cacheManager: {e}. Folosesc defaults.")
+            with sell_lock:
+                sell_recommendation = default_values_sell_recommendation
 
 
 

@@ -232,80 +232,9 @@ class TrendState:
   
 
 
-# Cache-ul care va fi actualizat periodic
-default_values_sell_recommendation = {
-    "BTCUSDT": {
-        'force_sell': 0,
-        'procent_desired_profit': 0.07,
-        'expired_duration': 3600 * 3.7,
-        'min_procent': 0.0099,
-        'days_after_use_current_price': 7,
-        'slope': 0.0,      # Valoare default pentru slope
-        'pos': 0,          # Valoare default pentru pos
-        'gradient': 0.0,   # Valoare default pentru gradient
-        'tick': 0,         # Valoare default pentru tick
-        'min': 0.0,        # Valoare default pentru min
-        'max': 0.0         # Valoare default pentru max
-    },
-    "ETHUSDT": {
-        'force_sell': 0,
-        'procent_desired_profit': 0.07,
-        'expired_duration': 3600 * 3.7,
-        'min_procent': 0.0099,
-        'days_after_use_current_price': 7,
-        'slope': 0.0,      # Valoare default pentru slope
-        'pos': 0,          # Valoare default pentru pos
-        'gradient': 0.0,   # Valoare default pentru gradient
-        'tick': 0,         # Valoare default pentru tick
-        'min': 0.0,        # Valoare default pentru min
-        'max': 0.0         # Valoare default pentru max
-    }
-}
-def initialize_csv_file(file_path):
-    if not os.path.exists(file_path):
-        # Convert the default values dictionary to a DataFrame
-        df = pd.DataFrame.from_dict(default_values_sell_recommendation, orient='index').reset_index()
-        df.rename(columns={'index': 'symbol'}, inplace=True)
-        
-        # Write the DataFrame to CSV
-        df.to_csv(file_path, index=False)
-        print(f"CSV file created with default values at {file_path}.")
-    else:
-        print(f"CSV file already exists at {file_path}.")
-
-def update_csv_file(file_path, symbol, slope, tick, min_val, max_val, pos, gradient):
-    try:
-        # Load the existing CSV data
-        df = pd.read_csv(file_path)
-
-        # Check if the symbol already exists in the CSV
-        if symbol in df['symbol'].values:
-            # Update existing row with new values
-            df.loc[df['symbol'] == symbol, ['slope', 'tick', 'min', 'max', 'pos', 'gradient']] = [
-                slope, tick, min_val, max_val, pos, gradient
-            ]
-        else:
-            # Append a new row if symbol does not exist
-            new_row = {
-                'symbol': symbol,
-                'slope': slope,
-                'tick': tick,
-                'min': min_val,
-                'max': max_val,
-                'pos': pos,
-                'gradient': gradient,
-                # Ensure other columns are populated from default values
-                **default_values_sell_recommendation.get(symbol, {})
-            }
-            df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-
-        # Write the updated DataFrame back to the CSV
-        df.to_csv(file_path, index=False)
-        print(f"Updated {symbol} in CSV with slope: {slope}, tick: {tick}, min: {min_val}, max: {max_val}, pos: {pos}, gradient: {gradient}")
-    except Exception as e:
-        print(f"Error updating CSV file: {e}")
-    
-filename = "sell_recommendation.csv"
+# NOTĂ: sell_recommendation.csv a fost eliminat. Semnalele de trend
+# (slope/pos/gradient/tick/min/max) sunt publicate în CacheInstantTrendManager
+# (snapshot per simbol) și citite cross-process de monitortrades etc.
 
 
 
@@ -484,13 +413,12 @@ def handle_symbol(symbol, current_price, price_window, price_window_big,
     slope_big, price_diff = analyzer_big.check_price_change(PRICE_CHANGE_THRESHOLD_BIG_EUR)
     logic("BIG", True, symbol, gradient, slope_big, trend_state_big, current_price)
 
-    update_csv_file(filename, symbol, slope, count, 0, 0, pos, gradient)
-
     for moneda in web.monede:
         if moneda["nume"] == symbol:
             moneda["watch"] = True if slope_big != 0 else False
 
-    # Snapshot pentru cache (citibil rapid din API buy/sell)
+    # Snapshot complet pentru cache cross-process (citit de monitortrades etc.).
+    # Înlocuiește fostul sell_recommendation.csv: slope/pos/gradient/tick/min/max.
     return {
         "symbol": symbol,
         "final_trend": gradient,
@@ -501,6 +429,9 @@ def handle_symbol(symbol, current_price, price_window, price_window_big,
         "slope_big": slope_big,
         "slope_max_min": slope_max_min,
         "pos": pos,
+        "tick": count,
+        "min": price_window.get_min() or 0.0,
+        "max": price_window.get_max() or 0.0,
         "current_price": current_price,
         "ts": time.time(),
     }
@@ -616,8 +547,6 @@ class TrendCoordinator:
 
 
 if __name__ == "__main__":
-    initialize_csv_file(filename)
-
     trades = apitrades.get_my_trades_24(order_type=None, symbol=sym.btcsymbol, days_ago=0, limit=1000)
     print(f" --------- {len(trades)}")
     print(f" my trades of today : {trades}")
