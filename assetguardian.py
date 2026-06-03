@@ -132,7 +132,7 @@ def sell_all_assets():
                 sell_symbol,
                 price=current_price,
                 qty=qty,
-                force=True,
+                force=False,
             )
             if order:
                 sell_count += 1
@@ -182,7 +182,7 @@ def buy_with_all_cash(buy_symbol=BUY_SYMBOL_DEFAULT, cash_ratio=BUY_USE_CASH_RAT
             buy_symbol,
             price=current_price,
             qty=qty,
-            force=True,
+            force=False,
         )
         if order:
             print(f" BUY safe-order sent: {buy_symbol}, qty={qty:.8f}")
