@@ -982,6 +982,38 @@ class TestAppendJsonlPersist(unittest.TestCase):
         r = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
         self.assertEqual(len(r.cache.get("SYM")), 5)
 
+    def test_maintain_prunes_old_entries(self):
+        fname = os.path.join(self.tmp, "p.jsonl")
+        m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
+        m.save_state = True
+        m.RETENTION_DAYS = 730
+        now_ms = int(time.time() * 1000)
+        old_ms = now_ms - 800 * 24 * 3600 * 1000   # >2 ani
+        with m.lock:
+            m.cache["SYM"] = [[old_ms, 1.0], [now_ms, 2.0]]
+        m.save_state_to_file_if_enabled()
+        m.maintain_append_persist()
+        with m.lock:
+            self.assertEqual(m.cache["SYM"], [[now_ms, 2.0]])   # cea veche ștearsă
+
+    def test_rotation_archives_and_keeps_latest(self):
+        fname = os.path.join(self.tmp, "r.jsonl")
+        m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
+        m.save_state = True
+        m.MAX_FILE_BYTES = 1          # forțăm rotația
+        m.ROTATE_KEEP_FRACTION = 0.10
+        now_ms = int(time.time() * 1000)
+        with m.lock:
+            m.cache["SYM"] = [[now_ms + i, float(i)] for i in range(100)]
+        m.save_state_to_file_if_enabled()
+        m.maintain_append_persist()
+        # arhivă creată + memoria păstrează ultimele 10%
+        archives = [f for f in os.listdir(self.tmp) if ".archive" in f]
+        self.assertTrue(archives)
+        with m.lock:
+            self.assertEqual(len(m.cache["SYM"]), 10)
+            self.assertEqual(m.cache["SYM"][-1], [now_ms + 99, 99.0])
+
     def test_skips_corrupt_lines(self):
         fname = os.path.join(self.tmp, "t4.jsonl")
         with open(fname, "w") as f:

@@ -68,6 +68,12 @@ def _should_poll_for_manager(cls_name):
         return (not _ws_available) or (not _ws_is_healthy)
 
 class CacheManagerInterface(ABC):
+    # ── Politică retenție/rotație pentru cache-uri append (verificată periodic) ──
+    RETENTION_DAYS              = 730              # ~2 ani: șterge intrările mai vechi
+    MAX_FILE_BYTES             = 1_000_000_000    # ~1 GB: peste asta → rotație
+    RETENTION_CHECK_INTERVAL_SEC = 7 * 24 * 3600  # verificare săptămânală
+    ROTATE_KEEP_FRACTION       = 0.10             # la rotație păstrăm ultimele 10%
+
     def __init__(self, sync_ts, symbols, filename, append_mode = True, api_client=api,
                  append_persist=False):
         self.cls_name = self.__class__.__name__
@@ -286,6 +292,58 @@ class CacheManagerInterface(ABC):
         except Exception as e:
             print(f"[{self.cls_name}][Eroare] compact JSONL {self.filename}: {e}")
 
+    @staticmethod
+    def _entry_timestamp_ms(item):
+        """Timestamp (ms) al unei intrări — dict (time/timestamp) sau listă [ts, val]."""
+        if isinstance(item, dict):
+            return item.get("time") or item.get("timestamp") or 0
+        if isinstance(item, (list, tuple)) and item:
+            return item[0]
+        return 0
+
+    def maintain_append_persist(self):
+        """Mentenanță periodică (săptămânal) pentru cache-uri append:
+          1. PRUNE: șterge intrările mai vechi de RETENTION_DAYS.
+          2. ROTAȚIE: dacă fișierul > MAX_FILE_BYTES → arhivează (alt nume) și
+             păstrează doar ultimele ROTATE_KEEP_FRACTION în fișierul curent."""
+        if not self.append_persist:
+            return
+        # 1) prune time-based
+        cutoff_ms = int((time.time() - self.RETENTION_DAYS * 24 * 3600) * 1000)
+        changed = False
+        with self.lock:
+            for symbol, items in list(self.cache.items()):
+                kept = [it for it in items if self._entry_timestamp_ms(it) >= cutoff_ms]
+                if len(kept) != len(items):
+                    self.cache[symbol] = kept
+                    changed = True
+        if changed:
+            builtins.print(f"[{self.cls_name}][maintain] prune >{self.RETENTION_DAYS}z din {self.filename}")
+            self.compact_jsonl()
+        # 2) rotație size-based
+        try:
+            if os.path.exists(self.filename) and os.path.getsize(self.filename) > self.MAX_FILE_BYTES:
+                self._rotate_keep_latest()
+        except OSError:
+            pass
+
+    def _rotate_keep_latest(self):
+        """Arhivează fișierul curent și păstrează doar ultimele ROTATE_KEEP_FRACTION
+        înregistrări (per simbol) în fișierul cu numele curent."""
+        with self.lock:
+            archive = f"{self.filename}.{int(time.time())}.archive"
+            try:
+                os.replace(self.filename, archive)   # mută istoricul complet în arhivă
+            except OSError as e:
+                builtins.print(f"[{self.cls_name}][maintain] arhivare eșuată: {e}")
+                return
+            for symbol, items in self.cache.items():
+                keep_n = max(1, int(len(items) * self.ROTATE_KEEP_FRACTION))
+                self.cache[symbol] = items[-keep_n:]
+            self._persisted_counts = {}
+            self.compact_jsonl()   # rescrie fișierul curent doar cu ce-am păstrat
+        builtins.print(f"[{self.cls_name}][maintain] ROTAȚIE: arhivat → {archive}, "
+                       f"păstrat ultimele {int(self.ROTATE_KEEP_FRACTION*100)}%")
 
     @abstractmethod
     def get_remote_items(self, symbol, startTime):
@@ -373,6 +431,7 @@ class CacheManagerInterface(ABC):
             return self.thread  # thread deja pornit, returnează-l
 
         def run():
+            last_maint = time.time()
             while True:
                 print(f"\n[{self.cls_name}] Sync started at {time.strftime('%Y-%m-%d %H:%M:%S')} for {self.symbols}")
                 if _should_poll_for_manager(self.cls_name):
@@ -381,6 +440,10 @@ class CacheManagerInterface(ABC):
                     print(f"[{self.cls_name}] Skip polling (WS-only mode active, WS healthy).")
                 print(f"[{self.cls_name}] save state is {self.save_state}.")
                 self.save_state_to_file_if_enabled()
+                # Mentenanță retenție/rotație (append): săptămânal
+                if self.append_persist and (time.time() - last_maint) > self.RETENTION_CHECK_INTERVAL_SEC:
+                    self.maintain_append_persist()
+                    last_maint = time.time()
                 print(f"[{self.cls_name}] Sync completed for {self.symbols}")
                 time.sleep(self.sync_ts)
 
