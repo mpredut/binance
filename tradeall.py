@@ -983,7 +983,10 @@ if __name__ == "__main__":
     # Conectăm chain-ul complet:
     # CacheCurrentPriceManager → Cache24PriceManager → PriceWindow
     import cacheManager as cm
-    current_price_mgr = cm.get_current_price_manager()
+    # IMPORTANT: creem singleton-ul INAINTE de Cache24 cu sync_ts corect.
+    # Cache24PriceManager.get_remote_items() apeleaza get_current_price_manager()
+    # intern -- daca l-am crea acolo, ar porni cu sync_ts=30 hardcodat.
+    current_price_mgr = cm.get_current_price_manager(sync_ts=TIME_SLEEP_GET_PRICE)
     cache24_managers = cm.CacheFactory.get("Price24")   # dict {symbol: Cache24PriceManager}
 
     for symbol in sym.symbols:
@@ -1029,15 +1032,12 @@ if __name__ == "__main__":
             trend_state_big = trend_states_big[symbol]
 
             time.sleep(TIME_SLEEP_BETWEEN_SYMBOLS)
-            current_price = api.get_current_price(symbol)
+            # Citim din cache — CacheCurrentPriceManager se actualizează singur
+            # prin polling thread (sync_ts = TIME_SLEEP_GET_PRICE)
+            current_price = current_price_mgr.get_price_value(symbol)
             if current_price is None:
                 time.sleep(TIME_SLEEP_GET_PRICE)
                 continue
-
-            # Injectăm prețul în CacheCurrentPriceManager → propagă automat
-            # Cache24PriceManager → PriceWindow (ambele ferestre)
-            ts_ms = int(time.time() * 1000)
-            current_price_mgr.on_items_update(symbol, [current_price])
 
             handle_symbol(symbol, current_price, price_window, price_window_big, trend_state, trend_state_big)
 

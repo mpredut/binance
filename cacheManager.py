@@ -689,17 +689,24 @@ class CacheCurrentPriceManager(CacheManagerInterface):
         while dq and dq[0] < cutoff:
             dq.popleft()
 
-    def on_items_update(self, symbol: str, items):
-        self._ws_last_event_ts = time.time()
-        price = items[0] if items else None
-        if price is None:
-            return
+    def _push_price(self, symbol: str, price: float) -> None:
+        """Injectează un preț în cache și notifică subscriberii.
+        Nu atinge _ws_last_event_ts — folosit de polling thread și get_price.
+        _ws_last_event_ts e actualizat DOAR de on_items_update (eveniment WS real)."""
         ts_ms = int(time.time() * 1000)
         if not self.fetchtime_time_per_symbol:
             self.fetchtime_time_per_symbol = self._CacheManagerInterface__rebuild_fetchtime_times()
         self._record_price_timestamp(symbol)
         self.update_cache_per_symbol(symbol, [[ts_ms, price]])
         self._notify_price_subscribers(symbol, ts_ms, price)
+
+    def on_items_update(self, symbol: str, items):
+        """Callback pentru evenimente WS reale — actualizează și health-ul WS."""
+        self._ws_last_event_ts = time.time()   # doar evenimentele WS reale
+        price = items[0] if items else None
+        if price is None:
+            return
+        self._push_price(symbol, price)
 
     # ── CacheManagerInterface — metode abstracte ──────────────────────────────
 
@@ -734,14 +741,21 @@ class CacheCurrentPriceManager(CacheManagerInterface):
         self.save_state = save_state
 
         if self.thread is not None and self.thread.is_alive():
+            # Thread deja pornit — doar actualizam sync_ts, thread-ul il citeste dinamic
             return self.thread
 
         def run():
             time.sleep(self.sync_ts)   # prima iterație după un interval, nu imediat
             while True:
                 if not self._ws_is_healthy():
-                    print(f"[{self.cls_name}] WS inactiv – fallback polling {self.symbols}")
-                    self.query_remote_and_update_cache()
+                    # Fetch HTTP și propagă prin chain fără a marca WS ca activ
+                    for symbol in list(self.symbols):
+                        try:
+                            items = self.get_remote_items(symbol, None)
+                            if items:
+                                self._push_price(symbol, items[0][1])
+                        except Exception as e:
+                            print(f"[{self.cls_name}] Eroare polling {symbol}: {e}")
                 else:
                     print(f"[{self.cls_name}] WS activ – skip polling {self.symbols}")
                 self.save_state_to_file_if_enabled()
@@ -783,8 +797,7 @@ class CacheCurrentPriceManager(CacheManagerInterface):
             print(f"[{self.cls_name}] {symbol} stale ({age}ms) – HTTP fetch forțat")
             new = self.get_remote_items(symbol, None)
             if new:
-                self.update_cache_per_symbol(symbol, new)
-                self._notify_price_subscribers(symbol, new[0][0], new[0][1])
+                self._push_price(symbol, new[0][1])
                 self.save_state_to_file_if_enabled()
             with self.lock:
                 entries = self.cache.get(symbol)
@@ -801,19 +814,32 @@ class CacheCurrentPriceManager(CacheManagerInterface):
 _current_price_instance: Optional[CacheCurrentPriceManager] = None
 _current_price_lock = threading.Lock()
 
-def get_current_price_manager(ws_manager=None, symbols=None) -> CacheCurrentPriceManager:
-    """Returnează (și creează dacă e nevoie) singleton-ul CacheCurrentPriceManager."""
+def get_current_price_manager(ws_manager=None, symbols=None, sync_ts=None) -> CacheCurrentPriceManager:
+    """Returnează (și creează dacă e nevoie) singleton-ul CacheCurrentPriceManager.
+
+    sync_ts : intervalul de polling în secunde.
+              - None (default): NU modifică sync_ts-ul existent. La prima creare
+                folosește CURRENTPRICE_SYNC_INTERVAL_SEC.
+              - valoare explicită: setează/actualizează live (thread-ul îl
+                citește dinamic la fiecare iterație).
+              IMPORTANT: apelurile interne (ex. Cache24PriceManager.get_remote_items)
+              trebuie să folosească None ca să nu suprascrie configurarea din main.
+    """
     global _current_price_instance
     if _current_price_instance is not None:
+        if sync_ts is not None:
+            _current_price_instance.sync_ts = sync_ts   # actualizare live
         return _current_price_instance
     with _current_price_lock:
         if _current_price_instance is not None:
+            if sync_ts is not None:
+                _current_price_instance.sync_ts = sync_ts
             return _current_price_instance
         _syms = symbols if symbols is not None else sym.symbols
         _current_price_instance = CacheCurrentPriceManager(
-            sync_ts  = 30,
-            symbols  = _syms,
-            filename = "cache_currentprice.json",
+            sync_ts     = sync_ts if sync_ts is not None else CURRENTPRICE_SYNC_INTERVAL_SEC,
+            symbols     = _syms,
+            filename    = "cache_currentprice.json",
             ws_manager  = ws_manager,
             api_client  = api,
         )
