@@ -1363,7 +1363,9 @@ def _append_trade_from_execution_report(event):
 
 def _refresh_asset_value_from_ws_event():
     asset_cache = get_cache_manager("AssetValue", symbols=["TOTAL"])
-    asset_cache.update_cache_per_symbol("TOTAL")
+    items = asset_cache.get_remote_items("TOTAL", None)   # update_cache_per_symbol cere new_items
+    if items:
+        asset_cache.update_cache_per_symbol("TOTAL", items)
 
 
 def _persist_ws_updated_caches(event_type):
