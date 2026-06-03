@@ -1014,6 +1014,73 @@ class TestAppendJsonlPersist(unittest.TestCase):
             self.assertEqual(len(m.cache["SYM"]), 10)
             self.assertEqual(m.cache["SYM"][-1], [now_ms + 99, 99.0])
 
+    # ── Siguranță: rotația/mentenanța NU pierde date ──────────────────────────
+
+    def _count_lines(self, path):
+        return sum(1 for _ in open(path))
+
+    def test_rotation_archive_has_FULL_history(self):
+        """Datele NU se pierd: arhiva conține TOATE înregistrările originale."""
+        fname = os.path.join(self.tmp, "full.jsonl")
+        m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
+        m.save_state = True
+        m.MAX_FILE_BYTES = 1
+        now = int(time.time() * 1000)
+        with m.lock:
+            m.cache["SYM"] = [[now + i, float(i)] for i in range(100)]
+        m.save_state_to_file_if_enabled()
+        self.assertEqual(self._count_lines(fname), 100)
+        m.maintain_append_persist()
+        archive = [os.path.join(self.tmp, f) for f in os.listdir(self.tmp) if ".archive" in f][0]
+        self.assertEqual(self._count_lines(archive), 100)   # arhiva = TOT istoricul
+        self.assertEqual(self._count_lines(fname), 10)       # curent = ultimele 10%
+        # reconstruire din arhivă → toate datele recuperabile
+        r = ConcreteTestManager(9999, ["SYM"], archive, append_persist=True)
+        self.assertEqual(len(r.cache["SYM"]), 100)
+
+    def test_maintain_noop_leaves_file_intact(self):
+        """Date recente, fișier mic → maintain NU șterge nimic, NU creează arhivă."""
+        fname = os.path.join(self.tmp, "intact.jsonl")
+        m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
+        m.save_state = True
+        now = int(time.time() * 1000)
+        with m.lock:
+            m.cache["SYM"] = [[now, 1.0], [now + 1, 2.0]]
+        m.save_state_to_file_if_enabled()
+        before = open(fname).read()
+        m.maintain_append_persist()
+        self.assertEqual(open(fname).read(), before)         # fișier neschimbat
+        self.assertEqual([f for f in os.listdir(self.tmp) if ".archive" in f], [])  # fără arhivă
+        self.assertEqual(len(m.cache["SYM"]), 2)             # date intacte
+
+    def test_maintain_missing_file_no_crash(self):
+        fname = os.path.join(self.tmp, "nofile.jsonl")
+        m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
+        m.maintain_append_persist()   # fișier inexistent → fără crash
+        self.assertEqual([f for f in os.listdir(self.tmp) if ".archive" in f], [])
+
+    def test_maintain_noop_when_not_append_persist(self):
+        fname = os.path.join(self.tmp, "fullrw.json")
+        _write_cache_file(fname, {"SYM": [[1, 1.0]]})
+        m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=False)
+        before = open(fname).read()
+        m.maintain_append_persist()   # no-op pentru non-append
+        self.assertEqual(open(fname).read(), before)
+
+    def test_prune_keeps_file_and_recent(self):
+        fname = os.path.join(self.tmp, "prune.jsonl")
+        m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
+        m.save_state = True
+        now = int(time.time() * 1000)
+        old = now - 800 * 24 * 3600 * 1000
+        with m.lock:
+            m.cache["SYM"] = [[old, 1.0], [now, 2.0]]
+        m.save_state_to_file_if_enabled()
+        m.maintain_append_persist()
+        self.assertTrue(os.path.exists(fname))               # fișierul EXISTĂ
+        r = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
+        self.assertEqual(r.cache["SYM"], [[now, 2.0]])       # recentul păstrat, vechiul șters
+
     def test_skips_corrupt_lines(self):
         fname = os.path.join(self.tmp, "t4.jsonl")
         with open(fname, "w") as f:
