@@ -1032,8 +1032,7 @@ class TestTrendCoordinator(unittest.TestCase):
         snap = coord.evaluate("BTCUSDT")
         for key in ("final_trend", "growth_coefficient", "slope_full",
                     "gradient_recent", "slope_small", "slope_big",
-                    "slope_max_min", "pos", "tick", "min", "max",
-                    "current_price", "ts"):
+                    "slope_max_min", "pos", "current_price", "ts"):
             self.assertIn(key, snap)
 
 

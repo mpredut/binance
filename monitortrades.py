@@ -630,12 +630,9 @@ class StateTracker:
                 rec = dict(cfg)   # config static (force_sell, procente, expired_duration, ...)
                 snap = mgr.get_snapshot(symbol)
                 if snap:
+                    # Doar slope și gradient sunt folosite efectiv (is_trend_up).
                     rec['slope']    = float(snap.get('slope_small', 0.0) or 0.0)
-                    rec['pos']      = int(snap.get('pos', 0) or 0)
                     rec['gradient'] = float(snap.get('final_trend', 0.0) or 0.0)
-                    rec['tick']     = int(snap.get('tick', 0) or 0)
-                    rec['min']      = float(snap.get('min', 0.0) or 0.0)
-                    rec['max']      = float(snap.get('max', 0.0) or 0.0)
                 new_rec[symbol] = rec
 
             with sell_lock:

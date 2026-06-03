@@ -417,8 +417,9 @@ def handle_symbol(symbol, current_price, price_window, price_window_big,
         if moneda["nume"] == symbol:
             moneda["watch"] = True if slope_big != 0 else False
 
-    # Snapshot complet pentru cache cross-process (citit de monitortrades etc.).
-    # Înlocuiește fostul sell_recommendation.csv: slope/pos/gradient/tick/min/max.
+    # Snapshot pentru cache cross-process. monitortrades folosește efectiv doar
+    # slope_small (→slope) și final_trend (→gradient) prin is_trend_up; restul
+    # sunt metrici de trend pentru alți consumatori / gate-ul de buy/sell.
     return {
         "symbol": symbol,
         "final_trend": gradient,
@@ -429,9 +430,6 @@ def handle_symbol(symbol, current_price, price_window, price_window_big,
         "slope_big": slope_big,
         "slope_max_min": slope_max_min,
         "pos": pos,
-        "tick": count,
-        "min": price_window.get_min() or 0.0,
-        "max": price_window.get_max() or 0.0,
         "current_price": current_price,
         "ts": time.time(),
     }
@@ -558,6 +556,8 @@ if __name__ == "__main__":
     # corect (altfel Cache24.get_remote_items l-ar crea intern cu sync_ts=30).
     import cacheManager as cm
     import bapi_ws
+    # WS user-data bridge e opt-in; tradeall vrea execution reports (fill-uri).
+    cm.enable_real_ws_event_sync()
     current_price_mgr = cm.get_current_price_manager(
         ws_manager=bapi_ws.bapi_ws_manager,
         sync_ts=TIME_SLEEP_GET_PRICE,

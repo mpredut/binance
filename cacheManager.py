@@ -1427,12 +1427,19 @@ def _initialize_once():
         return
     sys.modules["_cacheManager_initialized"] = True
     enable_real_ws_event_sync()
-    print("⚙️ cacheManager importat! (real WS events + API polling mode)")
+    print("⚙️ cacheManager: WS user-data bridge pornit (execution reports).")
 
-_initialize_once()
+# WS user-data bridge e OPT-IN: NU mai pornește automat la import.
+# Procesele care vor execution reports în timp real (ex. procesul dedicat
+# cacheManager.py, sau tradeall) apelează explicit:
+#     import cacheManager as cm
+#     cm.enable_real_ws_event_sync()   # sau cm._initialize_once()
+# Readerii (monitortrades, assetguardian, ...) care doar citesc cache-uri
+# nu mai pornesc WS — se bazează pe polling.
 
-               
+
 if __name__ == "__main__":
+    _initialize_once()   # procesul dedicat de cache vrea WS + persistă în fișier
     threads = []
 
     for name, config in CacheFactory._CONFIG.items():
