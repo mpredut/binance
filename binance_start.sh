@@ -49,6 +49,7 @@ scripts=(
     "tradeall.py"
     "monitortrades.py"
     "rtrade.py"
+    "run_price_monitor.py"
 )
 
 echo "🔍 Verific existența scripturilor..."
