@@ -26,6 +26,37 @@ import bapi as api
 from bapi_client import client
 
 
+def _maybe_wait_trend(side, symbol, wait_trend, max_wait_sec):
+    """Gate de întârziere oportunistă, partajat de toate funcțiile de plasare.
+    Așteaptă cât timp trendul aduce un preț mai bun (BUY: preț scade,
+    SELL: preț urcă), până la max_wait_sec. No-op dacă wait_trend e False
+    sau trend_api lipsește. Returnează secundele așteptate."""
+    if not wait_trend:
+        return 0.0
+    try:
+        import trend_api
+        waited = trend_api.wait_for_favorable_entry(side, symbol, max_wait_sec=max_wait_sec)
+        if waited:
+            print(f"[{side} {symbol}] așteptat {waited:.1f}s pentru preț mai bun (trend favorabil)")
+        return waited
+    except Exception as e:
+        print(f"[{side} {symbol}] trend gate indisponibil: {e}")
+        return 0.0
+
+
+def _fresh_price(symbol):
+    """Prețul cel mai proaspăt (WS via CacheCurrentPriceManager), cu fallback
+    pe bapi.get_current_price. Folosit după wait, pentru reacție rapidă."""
+    try:
+        import cacheManager as cm
+        p = cm.get_current_price_manager().get_price_value(symbol)
+        if p is not None:
+            return p
+    except Exception:
+        pass
+    return api.get_current_price(symbol)
+
+
 
 def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
     import bapi_allorders as apiorders
@@ -105,8 +136,8 @@ def place_BUY_order(symbol, price, qty):
         if not cfg.is_trade_enabled() :
             print(f"Trade is desabled!")
             return None
-            
-        price = round(min(price, api.get_current_price(symbol)), 2)
+
+        price = round(min(price, _fresh_price(symbol)), 2)
         qty = round(qty, 4)    
         BUY_order = client.order_limit_buy(
             symbol=symbol,
@@ -129,8 +160,8 @@ def place_SELL_order(symbol, price, qty):
         if not cfg.is_trade_enabled() :
             print(f"Trade is disabled!")
             return None
-            
-        price = round(max(price, api.get_current_price(symbol)), 2)
+
+        price = round(max(price, _fresh_price(symbol)), 2)
         qty = round(qty, 4)    
         SELL_order = client.order_limit_sell(
             symbol=symbol,
@@ -180,7 +211,7 @@ def place_BUY_order_at_market(symbol, qty):
         if not cfg.is_trade_enabled():
             print(f"Trade este dezactivat!")
             return None
-            
+
         qty = round(qty, 4)  # Rotunjim cantitatea la 4 zecimale
         BUY_order = client.order_market_buy(
             symbol=symbol,
@@ -300,8 +331,10 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
         return False
 
 
-def place_order(order_type, symbol, price, qty, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
-    order = __place_order(order_type, symbol, price, qty, force, cancelorders, hours, fee_percentage)
+def place_order(order_type, symbol, price, qty, force=False, cancelorders=False, hours=5,
+                fee_percentage=0.001):
+    order = __place_order(order_type, symbol, price, qty, force, cancelorders, hours,
+                          fee_percentage)
     
     if order is None:
         if force and order_type == 'BUY':
@@ -314,10 +347,13 @@ def place_order(order_type, symbol, price, qty, force=False, cancelorders=False,
          
 
 from decimal import Decimal, ROUND_DOWN
-def __place_order(order_type, symbol, price, qty, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
-    
+# Gate-ul de trend e MEREU activ la acest nivel (ultimul, comun tuturor tipurilor
+# de ordin). max_wait_sec = 1h. Nu se mai expune în API-urile de mai sus.
+def __place_order(order_type, symbol, price, qty, force=False, cancelorders=False, hours=5,
+                  fee_percentage=0.001, wait_trend=True, max_wait_sec=3600.0):
+
     order_type = order_type.upper()
-    sym.validate_params(order_type, symbol, price, qty)  
+    sym.validate_params(order_type, symbol, price, qty)
         
     try:
         print(f"Order Request {order_type} {symbol} qty {qty}, Price {price}")
@@ -358,6 +394,12 @@ def __place_order(order_type, symbol, price, qty, force=False, cancelorders=Fals
         
         print(f"Trying to place {order_type} order of {symbol} for quantity {qty:.8f} at {'market price' if force else f'price {price}'}")
 
+        # GATE unic de întârziere oportunistă — chiar înainte de trimitere, ca să
+        # reacționăm ultra-rapid la inversarea trendului (flip-to-send minim).
+        # Acoperă toate tipurile: BUY/SELL × limit/market.
+        if _maybe_wait_trend(order_type, symbol, wait_trend, max_wait_sec):
+            current_price = _fresh_price(symbol)   # preț proaspăt după așteptare
+
         if order_type == 'SELL':
             price = round(max(price, current_price), 0)
             if force:
@@ -385,14 +427,15 @@ def __place_order(order_type, symbol, price, qty, force=False, cancelorders=Fals
 
 
 def place_safe_order(order_type, symbol, price, qty, safeback_seconds=48*3600+60, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
-    
+
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)
     
     if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=safeback_seconds, max_daily_trades=15, profit_percentage = 0.15) :
         return None
-      
-    return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders, hours=hours, fee_percentage=fee_percentage)    
+
+    return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders,
+                       hours=hours, fee_percentage=fee_percentage)
     
 
 def place_order_smart(order_type, symbol, price, qty, safeback_seconds=48*3600+60, force=False, cancelorders=True, hours=5, pair=True):
@@ -416,7 +459,7 @@ def place_order_smart(order_type, symbol, price, qty, safeback_seconds=48*3600+6
             
             price = min(price, current_price)
             price = round(price * 0.999, 0)
-            order = place_safe_order("BUY", symbol, price=price, qty=qty, 
+            order = place_safe_order("BUY", symbol, price=price, qty=qty,
                 safeback_seconds=safeback_seconds, force=force, cancelorders=cancelorders, hours=hours)
             # appy pair
             if order and pair :            

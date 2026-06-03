@@ -292,6 +292,19 @@ class PriceWindow:
         with self._lock:
             return len(self.prices)
 
+    def get_recent_gradient(self) -> float:
+        """Doar momentumul recent (media np.gradient pe ultimele recent_n sample-uri).
+        Ieftin și tăcut — pentru semnalul rapid per-tick (gate buy/sell)."""
+        with self._lock:
+            prices = list(self.prices)
+        if len(prices) < 2:
+            return 0.0
+        grad = np.gradient(np.array(prices))
+        n = self.recent_n
+        if len(grad) >= n:
+            return float(np.mean(grad[-n:]))
+        return float(np.mean(grad))
+
     def get_instant_trend(self):
         """Returnează (final_trend, growth_coefficient, slope_full, gradient_recent).
 
@@ -1024,9 +1037,25 @@ class TrendCoordinator:
     # ── Semnal de la Cache24 (subscriber) ─────────────────────────────────────
     def on_price_update(self, symbol: str, ts_ms: int, price: float) -> None:
         with self._lock:
-            if symbol in self._dirty:
-                self._dirty[symbol] = True
-        self._event.set()   # trezește bucla de evaluare
+            if symbol not in self._dirty:
+                return
+            self._dirty[symbol] = True
+        self._event.set()   # trezește bucla de evaluare (eval completă, throttled)
+
+        # Canal RAPID: publică gradientul instant la fiecare tick (ieftin, tăcut)
+        # ca gate-ul buy/sell să reacționeze în ~latența unui tick, nu la 1.5s.
+        try:
+            import trend_api
+            g = self.windows[symbol].get_recent_gradient()
+            trend_api.update_instant(
+                symbol,
+                gradient_recent=g,
+                final_trend=(1 if g > 0 else -1 if g < 0 else 0),
+                current_price=price,
+                ts=time.time(),
+            )
+        except Exception as e:
+            print(f"[TrendCoordinator] update_instant {symbol}: {e}")
 
     # ── Decizie: simbolul trebuie evaluat acum? ───────────────────────────────
     def _is_due(self, symbol, now):
@@ -1051,6 +1080,9 @@ class TrendCoordinator:
             self._trend_cache[symbol] = snapshot
             self._dirty[symbol] = False
             self._last_eval[symbol] = time.time()
+        # Publică pentru consumatori externi (ex. bapi_placeorder)
+        import trend_api
+        trend_api.publish_trend(symbol, snapshot)
         return snapshot
 
     # ── API rapid pentru buy/sell ─────────────────────────────────────────────

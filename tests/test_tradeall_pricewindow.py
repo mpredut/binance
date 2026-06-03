@@ -779,6 +779,19 @@ class TestWindowAnalyzer(unittest.TestCase):
         pw = _window([100 + i for i in range(20)])
         self.assertEqual(pw.get_trend(), pw.get_instant_trend())
 
+    def test_get_recent_gradient_uptrend(self):
+        pw = _window([100 + i for i in range(20)])
+        self.assertGreater(pw.get_recent_gradient(), 0)
+
+    def test_get_recent_gradient_downtrend(self):
+        pw = _window([200 - i for i in range(20)])
+        self.assertLess(pw.get_recent_gradient(), 0)
+
+    def test_get_recent_gradient_insufficient(self):
+        pw = ta.PriceWindow("BTCUSDT", 10)
+        pw.process_price(100.0)
+        self.assertEqual(pw.get_recent_gradient(), 0.0)
+
     def test_slope_max_min_uptrend(self):
         pw = _window([100 + i for i in range(20)])
         an = ta.WindowAnalyzer(pw)
@@ -918,6 +931,24 @@ class TestTrendCoordinator(unittest.TestCase):
         self.assertIn("final_trend", cached)
         self.assertIn("slope_full", cached)
         self.assertFalse(coord._dirty["BTCUSDT"])   # curățat după evaluare
+
+    def test_evaluate_publishes_to_trend_api(self):
+        import trend_api
+        trend_api.clear()
+        coord = self._make_coord()
+        snap = coord.evaluate("BTCUSDT")
+        self.assertEqual(trend_api.get_trend_snapshot("BTCUSDT"), snap)
+
+    def test_tick_publishes_instant_gradient_fast(self):
+        # canal rapid: on_price_update publică gradientul instant la fiecare tick
+        import trend_api
+        trend_api.clear()
+        coord = self._make_coord()
+        coord.on_price_update("BTCUSDT", int(time.time() * 1000), 60500.0)
+        snap = trend_api.get_trend_snapshot("BTCUSDT")
+        self.assertIsNotNone(snap)
+        self.assertIn("gradient_recent", snap)
+        self.assertEqual(snap["current_price"], 60500.0)
 
     def test_get_cached_trend_none_before_eval(self):
         coord = self._make_coord()
