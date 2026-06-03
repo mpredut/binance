@@ -30,12 +30,13 @@ def _maybe_wait_trend(side, symbol, wait_trend, max_wait_sec):
     """Gate de întârziere oportunistă, partajat de toate funcțiile de plasare.
     Așteaptă cât timp trendul aduce un preț mai bun (BUY: preț scade,
     SELL: preț urcă), până la max_wait_sec. No-op dacă wait_trend e False
-    sau trend_api lipsește. Returnează secundele așteptate."""
+    sau managerul de trend lipsește. Returnează secundele așteptate."""
     if not wait_trend:
         return 0.0
     try:
-        import trend_api
-        waited = trend_api.wait_for_favorable_entry(side, symbol, max_wait_sec=max_wait_sec)
+        import cacheManager as cm
+        waited = cm.get_instant_trend_manager().wait_for_favorable_entry(
+            side, symbol, max_wait_sec=max_wait_sec)
         if waited:
             print(f"[{side} {symbol}] așteptat {waited:.1f}s pentru preț mai bun (trend favorabil)")
         return waited

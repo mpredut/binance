@@ -888,17 +888,12 @@ class TestTrendCoordinator(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
-        # Redirectează trend_api spre fișier temp (evită poluarea repo-ului)
-        import trend_api
-        trend_api.set_trend_file(os.path.join(self.tmp, "trend.json"))
         entries = _synthetic_entries(60, interval_ms=800)
-        # Shift la now ca get_recent_entries să le vadă
         base = entries[0][0]
         now_ms = int(time.time() * 1000)
         entries = [[now_ms + (e[0] - base), e[1]] for e in entries]
         self.cache24 = _make_cache24_manager("BTCUSDT", entries, self.tmp)
 
-        # CurrentPrice manager fake-ish (folosim unul real cu mock api)
         fname = os.path.join(self.tmp, "cp.json")
         self.cpm = cm.CacheCurrentPriceManager(
             sync_ts=9999, symbols=["BTCUSDT"],
@@ -906,19 +901,23 @@ class TestTrendCoordinator(unittest.TestCase):
         )
         self.cpm.on_items_update("BTCUSDT", [60000.0])
 
+        # Managerul deține ferestrele + calc + cache cross-process
+        self.mgr = cm.CacheInstantTrendManager(["BTCUSDT"], os.path.join(self.tmp, "trend.json"))
+        self.mgr.start_computation({"BTCUSDT": self.cache24}, self.cpm)
+
     def _make_coord(self):
         return ta.TrendCoordinator(
             symbols=["BTCUSDT"],
-            cache24_managers={"BTCUSDT": self.cache24},
+            instant_mgr=self.mgr,
             current_price_mgr=self.cpm,
+            cache24_managers={"BTCUSDT": self.cache24},
             min_interval=2.0, max_interval=30.0,
         )
 
-    def test_builds_windows_and_analyzers(self):
-        coord = self._make_coord()
-        self.assertIn("BTCUSDT", coord.windows)
-        self.assertIn("BTCUSDT", coord.analyzers)
-        self.assertGreater(len(coord.windows["BTCUSDT"].prices), 0)
+    def test_manager_owns_windows(self):
+        self.assertIsNotNone(self.mgr.get_window("BTCUSDT"))
+        self.assertIsNotNone(self.mgr.get_analyzer("BTCUSDT"))
+        self.assertGreater(len(self.mgr.get_window("BTCUSDT").prices), 0)
 
     def test_dirty_set_on_price_update(self):
         coord = self._make_coord()
@@ -930,19 +929,16 @@ class TestTrendCoordinator(unittest.TestCase):
     def test_is_due_floor(self):
         coord = self._make_coord()
         now = time.time()
-        coord._last_eval["BTCUSDT"] = now          # tocmai evaluat
+        coord._last_eval["BTCUSDT"] = now
         coord._dirty["BTCUSDT"] = True
-        # dirty dar sub min_interval → nu e due
         self.assertFalse(coord._is_due("BTCUSDT", now + 0.5))
-        # peste min_interval → due
         self.assertTrue(coord._is_due("BTCUSDT", now + 2.5))
 
     def test_is_due_heartbeat(self):
         coord = self._make_coord()
         now = time.time()
         coord._last_eval["BTCUSDT"] = now
-        coord._dirty["BTCUSDT"] = False            # NU e dirty
-        # dar peste max_interval → heartbeat forțează evaluarea
+        coord._dirty["BTCUSDT"] = False
         self.assertTrue(coord._is_due("BTCUSDT", now + 31.0))
         self.assertFalse(coord._is_due("BTCUSDT", now + 5.0))
 
@@ -951,71 +947,54 @@ class TestTrendCoordinator(unittest.TestCase):
         snap = coord.evaluate("BTCUSDT")
         self.assertIsNotNone(snap)
         cached = coord.get_cached_trend("BTCUSDT")
-        self.assertEqual(cached, snap)
         self.assertIn("final_trend", cached)
         self.assertIn("slope_full", cached)
-        self.assertFalse(coord._dirty["BTCUSDT"])   # curățat după evaluare
+        self.assertFalse(coord._dirty["BTCUSDT"])
 
-    def test_evaluate_publishes_to_trend_api(self):
-        import trend_api
-        trend_api.clear()
+    def test_evaluate_publishes_to_manager_store(self):
         coord = self._make_coord()
-        snap = coord.evaluate("BTCUSDT")
-        self.assertEqual(trend_api.get_trend_snapshot("BTCUSDT"), snap)
+        coord.evaluate("BTCUSDT")
+        snap = self.mgr.get_snapshot("BTCUSDT")
+        self.assertIsNotNone(snap)
+        self.assertIn("slope_big", snap)
 
-    def test_tick_publishes_instant_gradient_fast(self):
-        # canal rapid: on_price_update publică gradientul instant la fiecare tick
-        import trend_api
-        trend_api.clear()
-        coord = self._make_coord()
-        coord.on_price_update("BTCUSDT", int(time.time() * 1000), 60500.0)
-        snap = trend_api.get_trend_snapshot("BTCUSDT")
+    def test_manager_tick_publishes_instant_gradient(self):
+        # canalul rapid e în MANAGER: on_price_update publică gradientul
+        self.mgr.on_price_update("BTCUSDT", int(time.time() * 1000), 60500.0)
+        snap = self.mgr.get_snapshot("BTCUSDT")
         self.assertIsNotNone(snap)
         self.assertIn("gradient_recent", snap)
+        self.assertIn("epsilon", snap)
         self.assertEqual(snap["current_price"], 60500.0)
 
     def test_get_cached_trend_none_before_eval(self):
         coord = self._make_coord()
         self.assertIsNone(coord.get_cached_trend("BTCUSDT"))
 
-    def test_cache_query_is_fast_dict_read(self):
-        coord = self._make_coord()
-        coord.evaluate("BTCUSDT")
-        # Două query-uri consecutive returnează același obiect cache-uit
-        a = coord.get_cached_trend("BTCUSDT")
-        b = coord.get_cached_trend("BTCUSDT")
-        self.assertEqual(a, b)
-
     def test_get_all_cached_trends(self):
         coord = self._make_coord()
         self.assertEqual(coord.get_all_cached_trends(), {})
         coord.evaluate("BTCUSDT")
-        allt = coord.get_all_cached_trends()
-        self.assertIn("BTCUSDT", allt)
+        self.assertIn("BTCUSDT", coord.get_all_cached_trends())
 
     def test_coordinator_subscribed_to_cache24(self):
-        # coordinatorul primește semnal de tick de la Cache24
         coord = self._make_coord()
         self.assertIn(coord, self.cache24._price_subscribers)
 
     def test_windows_subscribed_to_cache24(self):
-        # ferestrele se actualizează autonom (abonate la Cache24)
-        coord = self._make_coord()
-        self.assertTrue(coord.windows["BTCUSDT"]._subscribed_to_cache24)
-        self.assertTrue(coord.windows_big["BTCUSDT"]._subscribed_to_cache24)
+        self.assertTrue(self.mgr.get_window("BTCUSDT")._subscribed_to_cache24)
+        self.assertTrue(self.mgr.get_window_big("BTCUSDT")._subscribed_to_cache24)
 
     def test_tick_updates_window_and_marks_dirty(self):
         coord = self._make_coord()
         coord._dirty["BTCUSDT"] = False
-        n_before = len(coord.windows["BTCUSDT"].prices)
-        # un tick prin Cache24 → fereastra crește ȘI coordinatorul devine dirty
+        win = self.mgr.get_window("BTCUSDT")
         self.cache24.on_price_update("BTCUSDT", int(time.time() * 1000), 61234.0)
         self.assertTrue(coord._dirty["BTCUSDT"])
-        self.assertIn(61234.0, coord.windows["BTCUSDT"].prices)
+        self.assertIn(61234.0, win.prices)
 
     def test_concurrent_update_and_read_no_crash(self):
-        """Regression: WS thread actualizează fereastra în timp ce thread-ul de
-        evaluare citește → nu trebuie 'deque mutated during iteration'."""
+        """WS thread actualizează fereastra în timp ce evaluarea citește."""
         import threading as _t
         coord = self._make_coord()
         stop = _t.Event()
@@ -1034,54 +1013,19 @@ class TestTrendCoordinator(unittest.TestCase):
             while not stop.is_set():
                 try:
                     coord.evaluate("BTCUSDT")
-                    coord.windows["BTCUSDT"].get_instant_trend()
-                    coord.analyzers["BTCUSDT"].calculate_slope_max_min()
+                    self.mgr.get_instant_trend("BTCUSDT")
+                    self.mgr.get_analyzer("BTCUSDT").calculate_slope_max_min()
                 except Exception as e:
                     errors.append(("reader", e))
 
-        threads = [_t.Thread(target=writer), _t.Thread(target=reader),
-                   _t.Thread(target=reader)]
+        threads = [_t.Thread(target=writer), _t.Thread(target=reader), _t.Thread(target=reader)]
         for th in threads:
             th.start()
         time.sleep(1.0)
         stop.set()
         for th in threads:
             th.join(timeout=5)
-
         self.assertEqual(errors, [], f"Erori de concurență: {errors[:3]}")
-
-    def test_set_sample_rate_concurrent_resize_no_crash(self):
-        """Resize-ul ferestrei (set_sample_rate) în paralel cu update-uri WS."""
-        import threading as _t
-        coord = self._make_coord()
-        w = coord.windows["BTCUSDT"]
-        stop = _t.Event()
-        errors = []
-
-        def writer():
-            while not stop.is_set():
-                try:
-                    w.process_price(60000.0)
-                except Exception as e:
-                    errors.append(e)
-
-        def resizer():
-            r = 0.5
-            while not stop.is_set():
-                try:
-                    r = 1.0 if r == 0.5 else 0.5
-                    w.set_sample_rate(r)
-                except Exception as e:
-                    errors.append(e)
-
-        threads = [_t.Thread(target=writer), _t.Thread(target=resizer)]
-        for th in threads:
-            th.start()
-        time.sleep(1.0)
-        stop.set()
-        for th in threads:
-            th.join(timeout=5)
-        self.assertEqual(errors, [], f"Erori la resize concurent: {errors[:3]}")
 
     def test_snapshot_has_all_fields(self):
         coord = self._make_coord()

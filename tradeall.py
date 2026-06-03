@@ -520,13 +520,16 @@ def handle_symbol(symbol, current_price, price_window, price_window_big,
 
 MIN_EVAL_INTERVAL_SEC = 1.5    # floor: cel mult o evaluare la 1.5s per simbol
 MAX_EVAL_INTERVAL_SEC = 30.0   # ceiling/heartbeat: cel puțin o evaluare la 30s
-EPSILON_K = 1.0                # multiplicator pt pragul de zgomot (k * stddev gradient)
 
 
 class TrendCoordinator:
-    def __init__(self, symbols, cache24_managers, current_price_mgr,
+    """Bucla de EVALUARE TRADING (event-driven + heartbeat). Ferestrele, calculul
+    de trend și cache-ul cross-process stau în CacheInstantTrendManager; aici doar
+    consumăm (windows/analyzers/trend) și luăm decizii (handle_symbol/logic)."""
+    def __init__(self, symbols, instant_mgr, current_price_mgr, cache24_managers=None,
                  min_interval=MIN_EVAL_INTERVAL_SEC, max_interval=MAX_EVAL_INTERVAL_SEC):
         self.symbols = list(symbols)
+        self.instant_mgr = instant_mgr
         self.current_price_mgr = current_price_mgr
         self.min_interval = min_interval
         self.max_interval = max_interval
@@ -535,60 +538,26 @@ class TrendCoordinator:
         self._lock = threading.Lock()
         self._dirty = {s: True for s in self.symbols}      # forțăm o primă evaluare
         self._last_eval = {s: 0.0 for s in self.symbols}
-        self._trend_cache = {}                              # {symbol: snapshot dict}
 
-        self.windows = {}
-        self.windows_big = {}
-        self.analyzers = {}
-        self.analyzers_big = {}
         self.trend_states = {}
         self.trend_states_big = {}
-
         for symbol in self.symbols:
-            cache24 = cache24_managers[symbol]
-            current_price_mgr.subscribe_price(cache24)   # CurrentPrice → Cache24
-
-            w = PriceWindow.from_cache24(symbol, window_seconds=WINDOW_SECONDS_SMALL, cache24=cache24)
-            wb = PriceWindow.from_cache24(symbol, window_seconds=WINDOW_SECONDS_BIG, cache24=cache24)
-            self.windows[symbol] = w
-            self.windows_big[symbol] = wb
-            self.analyzers[symbol] = WindowAnalyzer(w)
-            self.analyzers_big[symbol] = WindowAnalyzer(wb)
             self.trend_states[symbol] = TrendState(max_duration_seconds=2.5 * 60 * 60,
                                                    expiration_trend_time=2.7 * 60, fresh_trend_time=3.7 * 60)
             self.trend_states_big[symbol] = TrendState(max_duration_seconds=3 * 60 * 60,
                                                        expiration_trend_time=2.7 * 60, fresh_trend_time=3.7 * 60)
+            # Ferestrele + canalul rapid sunt în instant_mgr; aici ne abonăm la
+            # Cache24 DOAR pentru semnalul de evaluare (dirty + event).
+            if cache24_managers is not None:
+                cache24_managers[symbol].subscribe_price(self)
 
-            cache24.subscribe_price(self)   # primim semnal de tick
-
-            print(f"[{symbol}] window small: {len(w.prices)} sample-uri (rate={w.sample_rate_sec:.2f}s)")
-            print(f"[{symbol}] window big:   {len(wb.prices)} sample-uri (rate={wb.sample_rate_sec:.2f}s)")
-
-    # ── Semnal de la Cache24 (subscriber) ─────────────────────────────────────
+    # ── Semnal de la Cache24 (subscriber) — trezește evaluarea ────────────────
     def on_price_update(self, symbol: str, ts_ms: int, price: float) -> None:
         with self._lock:
             if symbol not in self._dirty:
                 return
             self._dirty[symbol] = True
-        self._event.set()   # trezește bucla de evaluare (eval completă, throttled)
-
-        # Canal RAPID: publică gradientul instant la fiecare tick (ieftin, tăcut)
-        # ca gate-ul buy/sell să reacționeze în ~latența unui tick, nu la 1.5s.
-        try:
-            import trend_api
-            win = self.windows[symbol]
-            g = win.get_recent_gradient()
-            eps = win.get_noise_epsilon(k=EPSILON_K)   # prag de zgomot informat per simbol
-            trend_api.update_instant(
-                symbol,
-                gradient_recent=g,
-                epsilon=eps,
-                final_trend=(1 if g > 0 else -1 if g < 0 else 0),
-                current_price=price,
-                ts=time.time(),
-            )
-        except Exception as e:
-            print(f"[TrendCoordinator] update_instant {symbol}: {e}")
+        self._event.set()
 
     # ── Decizie: simbolul trebuie evaluat acum? ───────────────────────────────
     def _is_due(self, symbol, now):
@@ -605,28 +574,24 @@ class TrendCoordinator:
             return None
         snapshot = handle_symbol(
             symbol, current_price,
-            self.windows[symbol], self.windows_big[symbol],
-            self.analyzers[symbol], self.analyzers_big[symbol],
+            self.instant_mgr.get_window(symbol), self.instant_mgr.get_window_big(symbol),
+            self.instant_mgr.get_analyzer(symbol), self.instant_mgr.get_analyzer_big(symbol),
             self.trend_states[symbol], self.trend_states_big[symbol],
         )
         with self._lock:
-            self._trend_cache[symbol] = snapshot
             self._dirty[symbol] = False
             self._last_eval[symbol] = time.time()
-        # Publică pentru consumatori externi (ex. bapi_placeorder)
-        import trend_api
-        trend_api.publish_trend(symbol, snapshot)
+        # Publică snapshot-ul complet (merge) în store-ul cross-process.
+        # snapshot conține deja cheia "symbol" → o scoatem (e arg pozițional).
+        fields = {k: v for k, v in snapshot.items() if k != "symbol"}
+        self.instant_mgr.update_snapshot(symbol, **fields)
         return snapshot
 
-    # ── API rapid pentru buy/sell ─────────────────────────────────────────────
     def get_cached_trend(self, symbol):
-        """O(1) — ultimul snapshot de trend pentru decizii buy/sell."""
-        with self._lock:
-            return self._trend_cache.get(symbol)
+        return self.instant_mgr.get_snapshot(symbol)
 
     def get_all_cached_trends(self):
-        with self._lock:
-            return dict(self._trend_cache)
+        return self.instant_mgr.get_all_snapshots()
 
     # ── Bucla principală event-driven + heartbeat ─────────────────────────────
     def run(self):
@@ -672,10 +637,15 @@ if __name__ == "__main__":
 
     print(f"Quantities: {api.quantities}")
 
+    # Managerul de trend: deține ferestrele, calculează trendul, cache cross-process.
+    instant_mgr = cm.get_instant_trend_manager()
+    instant_mgr.start_computation(cache24_managers, current_price_mgr)
+
     coordinator = TrendCoordinator(
         symbols=sym.symbols,
-        cache24_managers=cache24_managers,
+        instant_mgr=instant_mgr,
         current_price_mgr=current_price_mgr,
+        cache24_managers=cache24_managers,
     )
     coordinator.run()
 

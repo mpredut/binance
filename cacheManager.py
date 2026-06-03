@@ -855,6 +855,201 @@ def get_current_price_manager(ws_manager=None, symbols=None, sync_ts=None) -> Ca
 
 
 # ######
+# ###### CacheInstantTrendManager — ferestre + trend calculat + cache cross-process
+# ######
+
+class CacheInstantTrendManager:
+    """Deține ferestrele de preț per simbol, calculează trendul instant și
+    cache-uiește snapshot-ul într-un fișier partajat ÎNTRE PROCESE.
+
+    Writer (tradeall): start_computation() construiește ferestrele, se abonează
+      la Cache24 și la fiecare tick publică gradientul + epsilon (canal rapid).
+    Reader (rtrade, bapi_placeorder): folosește doar gate-ul, citind din fișier.
+
+    API de calcul : get_instant_trend(symbol), get_window/get_analyzer(symbol)
+    API store     : update_snapshot, get_snapshot, get_all_snapshots
+    API gate      : is_favorable_to_wait(side, symbol), wait_for_favorable_entry(...)
+    """
+    EPSILON_K         = 1.0     # k * stddev(gradient) — prag de zgomot informat
+    FAVORABLE_REL_EPS = 1e-5    # fallback relativ la preț dacă lipsește epsilon
+    TREND_STALE_SEC   = 15.0    # snapshot mai vechi → nu mai întârziem
+
+    def __init__(self, symbols, filename="cache_instant_trend.json"):
+        self.symbols = list(symbols)
+        self.filename = filename
+        self._mem = {}
+        self._lock = threading.RLock()
+        self._file_mtime = None
+        self._file_cache = None
+        # stare writer (populate de start_computation)
+        self.windows = {}
+        self.windows_big = {}
+        self.analyzers = {}
+        self.analyzers_big = {}
+        self._computing = False
+
+    # ── Writer: construiește ferestre + abonare la Cache24 ────────────────────
+    def start_computation(self, cache24_managers=None, current_price_mgr=None):
+        if self._computing:
+            return
+        import pricewindow as pw
+        if cache24_managers is None:
+            cache24_managers = get_cache_manager("Price24")
+        if current_price_mgr is None:
+            current_price_mgr = get_current_price_manager()
+        for s in self.symbols:
+            c24 = cache24_managers[s]
+            current_price_mgr.subscribe_price(c24)          # CurrentPrice → Cache24
+            w  = pw.PriceWindow.from_cache24(s, pw.WINDOW_SECONDS_SMALL, c24)
+            wb = pw.PriceWindow.from_cache24(s, pw.WINDOW_SECONDS_BIG,   c24)
+            self.windows[s]      = w
+            self.windows_big[s]  = wb
+            self.analyzers[s]     = pw.WindowAnalyzer(w)
+            self.analyzers_big[s] = pw.WindowAnalyzer(wb)
+            c24.subscribe_price(self)                       # semnal de tick → canal rapid
+            print(f"[InstantTrend][{s}] window small: {len(w.prices)} (rate={w.sample_rate_sec:.2f}s) "
+                  f"big: {len(wb.prices)} (rate={wb.sample_rate_sec:.2f}s)")
+        self._computing = True
+
+    # ── Subscriber Cache24 — canal RAPID (gradient + epsilon la fiecare tick) ──
+    def on_price_update(self, symbol, ts_ms, price):
+        win = self.windows.get(symbol)
+        if win is None:
+            return
+        try:
+            g = win.get_recent_gradient()
+            eps = win.get_noise_epsilon(self.EPSILON_K)
+            self.update_snapshot(symbol, gradient_recent=g, epsilon=eps,
+                                 final_trend=(1 if g > 0 else -1 if g < 0 else 0),
+                                 current_price=price, ts=time.time())
+        except Exception as e:
+            print(f"[CacheInstantTrendManager] on_price_update {symbol}: {e}")
+
+    # ── API de calcul ─────────────────────────────────────────────────────────
+    def get_window(self, symbol):        return self.windows.get(symbol)
+    def get_window_big(self, symbol):    return self.windows_big.get(symbol)
+    def get_analyzer(self, symbol):      return self.analyzers.get(symbol)
+    def get_analyzer_big(self, symbol):  return self.analyzers_big.get(symbol)
+
+    def get_instant_trend(self, symbol):
+        win = self.windows.get(symbol)
+        return win.get_instant_trend() if win else None
+
+    # ── Store cross-process (fișier JSON, atomic) ─────────────────────────────
+    def _write_file(self):
+        try:
+            tmp = self.filename + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(self._mem, f)
+            os.replace(tmp, self.filename)
+        except Exception as e:
+            print(f"[CacheInstantTrendManager] scriere {self.filename}: {e}")
+
+    def _read_file(self):
+        # Citim mereu (fișier mic, citit ocazional de readeri) — corectitudine
+        # cross-process garantată, fără riscul de mtime cu rezoluție grosieră.
+        try:
+            with open(self.filename, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def update_snapshot(self, symbol, **fields):
+        """Merge câmpuri în snapshot + persistă (canal rapid și eval completă)."""
+        with self._lock:
+            snap = dict(self._mem.get(symbol) or self._read_file().get(symbol) or {})
+            snap.update(fields)
+            snap["symbol"] = symbol
+            self._mem[symbol] = snap
+            self._write_file()
+
+    def get_snapshot(self, symbol):
+        """Writer: _mem autoritar. Reader (alt proces): fișier."""
+        with self._lock:
+            if symbol in self._mem:
+                return dict(self._mem[symbol])
+        return self._read_file().get(symbol)
+
+    def get_all_snapshots(self):
+        with self._lock:
+            if self._mem:
+                return {s: dict(v) for s, v in self._mem.items()}
+        return dict(self._read_file())
+
+    def clear(self):
+        with self._lock:
+            self._mem.clear()
+            self._file_mtime = None
+            self._file_cache = None
+            try:
+                if os.path.exists(self.filename):
+                    os.remove(self.filename)
+            except Exception:
+                pass
+
+    # ── API gate (întârziere oportunistă + epsilon informat) ──────────────────
+    def _epsilon(self, snap):
+        eps = snap.get("epsilon")
+        if eps is not None and eps > 0:
+            return float(eps)
+        price = abs(snap.get("current_price") or 0.0)
+        return price * self.FAVORABLE_REL_EPS
+
+    def is_favorable_to_wait(self, side, symbol, now=None):
+        """Zgomot (|g| <= eps) → True (așteptăm claritate). Trend clar:
+        BUY așteaptă cât scade, plasează când urcă clar; SELL invers."""
+        snap = self.get_snapshot(symbol)
+        if snap is None:
+            return False
+        now = now if now is not None else time.time()
+        if now - snap.get("ts", 0) > self.TREND_STALE_SEC:
+            return False
+        g = snap.get("gradient_recent", 0.0)
+        eps = self._epsilon(snap)
+        if abs(g) <= eps:
+            return True
+        side = side.upper()
+        if side == "BUY":
+            return g < 0
+        if side == "SELL":
+            return g > 0
+        return False
+
+    def wait_for_favorable_entry(self, side, symbol, max_wait_sec=3600.0,
+                                 poll_sec=0.2, sleep_fn=time.sleep):
+        """Blochează cât timp trendul e favorabil, până la max_wait_sec.
+        Heartbeat vizual (.) la ~1s. Returnează secundele așteptate."""
+        deadline = time.time() + max_wait_sec
+        waited = 0.0
+        next_dot = 1.0
+        while time.time() < deadline and self.is_favorable_to_wait(side, symbol):
+            sleep_fn(poll_sec)
+            waited += poll_sec
+            if waited >= next_dot:
+                print(".", end="", flush=True)
+                next_dot += 1.0
+        if waited > 0:
+            print()
+        return waited
+
+
+_instant_trend_instance = None
+_instant_trend_lock = threading.Lock()
+
+def get_instant_trend_manager(symbols=None, filename="cache_instant_trend.json"):
+    """Singleton CacheInstantTrendManager. Writer-ul apelează apoi start_computation()."""
+    global _instant_trend_instance
+    if _instant_trend_instance is not None:
+        return _instant_trend_instance
+    with _instant_trend_lock:
+        if _instant_trend_instance is not None:
+            return _instant_trend_instance
+        _syms = symbols if symbols is not None else sym.symbols
+        _instant_trend_instance = CacheInstantTrendManager(_syms, filename)
+    return _instant_trend_instance
+
+
+# ######
 # ###### GLOBAL VARIABLE FOR CACHE #######
 # ######
      
