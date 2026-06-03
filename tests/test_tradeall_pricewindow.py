@@ -792,6 +792,27 @@ class TestWindowAnalyzer(unittest.TestCase):
         pw.process_price(100.0)
         self.assertEqual(pw.get_recent_gradient(), 0.0)
 
+    def test_noise_epsilon_zero_for_constant(self):
+        pw = _window([100.0] * 20)
+        self.assertAlmostEqual(pw.get_noise_epsilon(), 0.0, places=6)
+
+    def test_noise_epsilon_positive_for_volatile(self):
+        import random
+        random.seed(1)
+        pw = _window([100 + random.uniform(-5, 5) for _ in range(30)])
+        self.assertGreater(pw.get_noise_epsilon(), 0.0)
+
+    def test_noise_epsilon_scales_with_volatility(self):
+        calm = _window([100 + (i % 2) * 0.1 for i in range(30)])
+        wild = _window([100 + (i % 2) * 10 for i in range(30)])
+        self.assertLess(calm.get_noise_epsilon(), wild.get_noise_epsilon())
+
+    def test_noise_epsilon_insufficient_data(self):
+        pw = ta.PriceWindow("BTCUSDT", 10)
+        pw.process_price(100.0)
+        pw.process_price(101.0)
+        self.assertEqual(pw.get_noise_epsilon(), 0.0)
+
     def test_slope_max_min_uptrend(self):
         pw = _window([100 + i for i in range(20)])
         an = ta.WindowAnalyzer(pw)
