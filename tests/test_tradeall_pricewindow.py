@@ -867,6 +867,9 @@ class TestTrendCoordinator(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
+        # Redirectează trend_api spre fișier temp (evită poluarea repo-ului)
+        import trend_api
+        trend_api.set_trend_file(os.path.join(self.tmp, "trend.json"))
         entries = _synthetic_entries(60, interval_ms=800)
         # Shift la now ca get_recent_entries să le vadă
         base = entries[0][0]

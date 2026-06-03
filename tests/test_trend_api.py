@@ -2,10 +2,17 @@
 Teste pentru trend_api — cache de trend expus extern + întârziere oportunistă
 a plasării ordinelor (așteptăm preț mai bun cât timp trendul e favorabil).
 """
+import os
 import time
+import tempfile
 import unittest
 
 import trend_api
+
+
+def setUpModule():
+    # Izolează testele de fișierul real cache_instant_trend.json
+    trend_api.set_trend_file(os.path.join(tempfile.mkdtemp(), "trend_test.json"))
 
 
 def _snap(gradient_recent, ts=None, **extra):
@@ -91,6 +98,63 @@ class TestIsFavorableToWait(unittest.TestCase):
     def test_case_insensitive_side(self):
         trend_api.publish_trend("BTCUSDT", _snap(gradient_recent=-0.3))
         self.assertTrue(trend_api.is_favorable_to_wait("buy", "BTCUSDT"))
+
+    # ── epsilon / deadband: zgomot → așteptăm vizibilitate clară ──────────────
+
+    def test_noise_buy_waits_for_clarity(self):
+        # gradient sub epsilon relativ (preț mare) → zgomot → așteptăm
+        eps = 60000.0 * trend_api.FAVORABLE_REL_EPS
+        trend_api.publish_trend("BTCUSDT",
+                                _snap(gradient_recent=eps / 2, current_price=60000.0))
+        self.assertTrue(trend_api.is_favorable_to_wait("BUY", "BTCUSDT"))
+
+    def test_noise_sell_waits_for_clarity(self):
+        eps = 60000.0 * trend_api.FAVORABLE_REL_EPS
+        trend_api.publish_trend("BTCUSDT",
+                                _snap(gradient_recent=-eps / 2, current_price=60000.0))
+        self.assertTrue(trend_api.is_favorable_to_wait("SELL", "BTCUSDT"))
+
+    def test_clear_uptrend_buy_places_now(self):
+        # peste epsilon, prețul urcă clar → BUY NU mai așteaptă (plasează acum)
+        eps = 60000.0 * trend_api.FAVORABLE_REL_EPS
+        trend_api.publish_trend("BTCUSDT",
+                                _snap(gradient_recent=eps * 10, current_price=60000.0))
+        self.assertFalse(trend_api.is_favorable_to_wait("BUY", "BTCUSDT"))
+
+    def test_clear_downtrend_buy_waits(self):
+        eps = 60000.0 * trend_api.FAVORABLE_REL_EPS
+        trend_api.publish_trend("BTCUSDT",
+                                _snap(gradient_recent=-eps * 10, current_price=60000.0))
+        self.assertTrue(trend_api.is_favorable_to_wait("BUY", "BTCUSDT"))
+
+
+class TestCrossProcessSharing(unittest.TestCase):
+    """Simulează writer (tradeall) + reader (rtrade) prin același fișier."""
+
+    def setUp(self):
+        self.fname = os.path.join(tempfile.mkdtemp(), "shared_trend.json")
+
+    def test_reader_sees_writer_publish(self):
+        writer = trend_api.InstantTrendCache(self.fname)
+        reader = trend_api.InstantTrendCache(self.fname)
+        writer.publish("BTCUSDT", _snap(gradient_recent=-0.7, current_price=60000.0))
+        snap = reader.get("BTCUSDT")
+        self.assertIsNotNone(snap)
+        self.assertEqual(snap["gradient_recent"], -0.7)
+
+    def test_reader_sees_instant_update(self):
+        writer = trend_api.InstantTrendCache(self.fname)
+        reader = trend_api.InstantTrendCache(self.fname)
+        writer.publish("BTCUSDT", _snap(gradient_recent=0.1, current_price=60000.0,
+                                        slope_big=5.0))
+        writer.update_instant("BTCUSDT", gradient_recent=-0.9, ts=time.time())
+        snap = reader.get("BTCUSDT")
+        self.assertEqual(snap["gradient_recent"], -0.9)   # update vizibil cross-process
+        self.assertEqual(snap["slope_big"], 5.0)          # câmp bogat păstrat
+
+    def test_reader_missing_file_returns_none(self):
+        reader = trend_api.InstantTrendCache(self.fname)
+        self.assertIsNone(reader.get("BTCUSDT"))
 
 
 class TestWaitForFavorableEntry(unittest.TestCase):

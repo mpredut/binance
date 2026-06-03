@@ -1,74 +1,159 @@
 """
-trend_api — punct neutru de acces la trendul curent (instant + general).
+trend_api — cache de trend partajat ÎNTRE PROCESE (instant + general).
 
-TrendCoordinator (tradeall.py) publică aici, la fiecare evaluare, snapshot-ul
-de trend per simbol. Orice modul (ex. bapi_placeorder) poate interoga rapid
-(O(1)) trendul fără să depindă de tradeall → fără import circular.
+Arhitectură multi-proces:
+  - 1 WRITER : tradeall.py (TrendCoordinator) publică snapshot-urile.
+  - N READERI: rtrade.py, monitortrades.py, assetguardian.py, bapi_placeorder...
+    citesc trendul pentru gate-ul de buy/sell.
 
-Folosire tipică (întârziere oportunistă a plasării ordinului):
+Partajarea se face printr-un fișier JSON mic (cache_instant_trend.json), la fel
+ca pattern-ul din cacheManager. Single-writer / multi-reader → fără conflicte.
+Pentru un fișier mic, citit la cerere, fișierul e suficient de rapid (sub-ms);
+redis/socket ar adăuga infrastructură fără câștig real la scara asta.
+
+Folosire (gate oportunist — așteptăm preț mai bun cât timp trendul e favorabil):
     import trend_api
-    trend_api.wait_for_favorable_entry("BUY", "BTCUSDT", max_wait_sec=60)
-    # ... abia apoi plasează ordinul, la un preț potențial mai bun.
+    trend_api.wait_for_favorable_entry("BUY", "BTCUSDT", max_wait_sec=3600)
 """
+import os
+import json
 import time
 import threading
 
-# Snapshot-ul publicat de TrendCoordinator are cel puțin câmpurile:
-#   final_trend, growth_coefficient, slope_full, gradient_recent,
-#   slope_small, slope_big, slope_max_min, pos, current_price, ts
-_trend_cache = {}
-_lock = threading.Lock()
+TREND_FILE = "cache_instant_trend.json"
 
-# Dacă snapshot-ul e mai vechi decât atât, nu mai întârziem (date stale).
+# Sub acest prag (relativ la preț) gradientul e considerat ZGOMOT → așteptăm
+# până avem vizibilitate clară de trend.
+FAVORABLE_REL_EPS = 1e-5   # 0.001% din preț per sample
+FAVORABLE_ABS_EPS = 0.0    # floor absolut
+
+# Snapshot mai vechi de atât → nu mai întârziem (date stale).
 TREND_STALE_SEC = 15.0
 
 
-# ── Publicare / citire ───────────────────────────────────────────────────────
+# ════════════════════════════════════════════════════════════════════════════
+# InstantTrendCache — store file-backed, partajat între procese.
+# ════════════════════════════════════════════════════════════════════════════
+class InstantTrendCache:
+    def __init__(self, filename=TREND_FILE):
+        self.filename = filename
+        self._mem = {}
+        self._lock = threading.Lock()
+        self._file_mtime = None
+        self._file_cache = None
 
-def publish_trend(symbol: str, snapshot: dict) -> None:
-    """Snapshot COMPLET, după o evaluare completă (throttled). Suprascrie tot."""
-    with _lock:
-        _trend_cache[symbol] = dict(snapshot)
+    # ── scriere (writer) ─────────────────────────────────────────────────────
+
+    def _write_file(self):
+        try:
+            tmp = self.filename + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(self._mem, f)
+            os.replace(tmp, self.filename)   # atomic
+        except Exception as e:
+            print(f"[trend_api] eroare scriere {self.filename}: {e}")
+
+    def publish(self, symbol, snapshot):
+        """Snapshot COMPLET (replace) — de la o evaluare completă (throttled)."""
+        with self._lock:
+            self._mem[symbol] = dict(snapshot)
+            self._write_file()
+
+    def update_instant(self, symbol, **fields):
+        """Update RAPID (merge) — câmpurile fierbinți la fiecare tick WS.
+        Păstrează câmpurile bogate de la ultimul publish."""
+        with self._lock:
+            base = dict(self._mem.get(symbol) or self._read_file().get(symbol) or {})
+            base.update(fields)
+            base["symbol"] = symbol
+            self._mem[symbol] = base
+            self._write_file()
+
+    # ── citire (reader, cross-process) ───────────────────────────────────────
+
+    def _read_file(self):
+        """Citește fișierul partajat, cu cache pe mtime ca să nu re-parseze inutil."""
+        try:
+            mtime = os.path.getmtime(self.filename)
+        except OSError:
+            return {}
+        if mtime == self._file_mtime and self._file_cache is not None:
+            return self._file_cache
+        try:
+            with open(self.filename, "r") as f:
+                data = json.load(f)
+        except Exception:
+            return self._file_cache or {}
+        self._file_mtime = mtime
+        self._file_cache = data
+        return data
+
+    def get(self, symbol):
+        """Cross-process: sursa de adevăr e fișierul (scris de writer)."""
+        data = self._read_file()
+        return data.get(symbol)
+
+    def get_all(self):
+        return dict(self._read_file())
+
+    def clear(self):
+        with self._lock:
+            self._mem.clear()
+            self._file_mtime = None
+            self._file_cache = None
+            try:
+                if os.path.exists(self.filename):
+                    os.remove(self.filename)
+            except Exception:
+                pass
 
 
-def update_instant(symbol: str, **fields) -> None:
-    """Update RAPID (per tick WS) — doar câmpurile fierbinți (gradient_recent,
-    final_trend, current_price, ts). Merge peste snapshot-ul existent ca să
-    păstreze câmpurile bogate de la ultima evaluare completă.
+# ── Singleton + API la nivel de modul ────────────────────────────────────────
 
-    Ăsta e canalul de latență mică pentru gate-ul de buy/sell."""
-    with _lock:
-        snap = dict(_trend_cache.get(symbol) or {})
-        snap.update(fields)
-        snap["symbol"] = symbol
-        _trend_cache[symbol] = snap
+_cache = InstantTrendCache()
 
 
-def get_trend_snapshot(symbol: str):
-    """O(1). Returnează ultimul snapshot de trend sau None."""
-    with _lock:
-        return _trend_cache.get(symbol)
+def set_trend_file(filename):
+    """Schimbă fișierul partajat (ex. în teste)."""
+    global _cache
+    _cache = InstantTrendCache(filename)
 
 
-def get_all_trends() -> dict:
-    with _lock:
-        return dict(_trend_cache)
+def publish_trend(symbol, snapshot):
+    _cache.publish(symbol, snapshot)
 
 
-def clear() -> None:
-    with _lock:
-        _trend_cache.clear()
+def update_instant(symbol, **fields):
+    _cache.update_instant(symbol, **fields)
+
+
+def get_trend_snapshot(symbol):
+    return _cache.get(symbol)
+
+
+def get_all_trends():
+    return _cache.get_all()
+
+
+def clear():
+    _cache.clear()
 
 
 # ── Decizie de întârziere (oportunistă: aștept preț mai bun) ──────────────────
 
-def is_favorable_to_wait(side: str, symbol: str, now: float = None) -> bool:
-    """True dacă merită să mai AȘTEPTĂM (trendul ne aduce un preț mai bun).
+def _epsilon(snapshot):
+    price = abs(snapshot.get("current_price") or 0.0)
+    return max(FAVORABLE_ABS_EPS, price * FAVORABLE_REL_EPS)
 
-    BUY : prețul încă scade  (gradient_recent < 0) → așteptăm să cumpărăm mai ieftin.
-    SELL: prețul încă urcă    (gradient_recent > 0) → așteptăm să vindem mai scump.
 
-    Returnează False dacă nu există snapshot, e stale, sau trendul nu mai e favorabil.
+def is_favorable_to_wait(side, symbol, now=None):
+    """True dacă merită să mai AȘTEPTĂM.
+
+    Zgomot (|gradient_recent| <= epsilon): True → așteptăm vizibilitate clară.
+    Trend clar:
+        BUY : favorabil cât timp prețul SCADE (g < -eps) → cumpărăm mai ieftin;
+              dacă prețul URCĂ clar (g > eps) → plasăm acum (înainte să fie mai scump).
+        SELL: invers.
     """
     snap = get_trend_snapshot(symbol)
     if snap is None:
@@ -78,6 +163,10 @@ def is_favorable_to_wait(side: str, symbol: str, now: float = None) -> bool:
         return False
 
     g = snap.get("gradient_recent", 0.0)
+    eps = _epsilon(snap)
+    if abs(g) <= eps:
+        return True   # zgomot → așteptăm până se clarifică trendul
+
     side = side.upper()
     if side == "BUY":
         return g < 0
@@ -86,25 +175,19 @@ def is_favorable_to_wait(side: str, symbol: str, now: float = None) -> bool:
     return False
 
 
-def wait_for_favorable_entry(side: str, symbol: str,
-                             max_wait_sec: float = 60.0,
-                             poll_sec: float = 0.2,
-                             sleep_fn=time.sleep) -> float:
+def wait_for_favorable_entry(side, symbol, max_wait_sec=3600.0,
+                             poll_sec=0.2, sleep_fn=time.sleep):
     """Blochează cât timp trendul e favorabil (preț încă în direcția dorită),
-    până la `max_wait_sec`. Returnează numărul de secunde așteptate.
-
-    Plasarea ordinului se face DUPĂ acest apel, la prețul (potențial mai bun)
-    de atunci. `sleep_fn` e injectabil pentru testare.
-    """
+    până la max_wait_sec. Heartbeat vizual (.) la ~1s. Returnează secundele așteptate."""
     deadline = time.time() + max_wait_sec
     waited = 0.0
     next_dot = 1.0
     while time.time() < deadline and is_favorable_to_wait(side, symbol):
         sleep_fn(poll_sec)
         waited += poll_sec
-        if waited >= next_dot:            # heartbeat vizual ~1/secundă
+        if waited >= next_dot:
             print(".", end="", flush=True)
             next_dot += 1.0
     if waited > 0:
-        print()                           # newline după șirul de puncte
+        print()
     return waited
