@@ -2,6 +2,7 @@ import os
 import time
 import datetime
 import math
+import threading
 from binance.exceptions import BinanceAPIException
 from collections import deque
 
@@ -133,11 +134,19 @@ class PriceTrendAnalyzer:
 from collections import deque
 from bisect import insort, bisect_left
 class PriceWindow:
-    def __init__(self, symbol, window_size, sample_rate_sec=None, initial_prices=None):
+    def __init__(self, symbol, window_size, sample_rate_sec=None, initial_prices=None,
+                 window_seconds=None):
         self.symbol = symbol
         self.window_size = int(window_size)
         self.sample_rate_sec = sample_rate_sec if sample_rate_sec is not None else TIME_SLEEP_GET_PRICE
+        # Durata țintă (secunde). Dacă e setată, set_sample_rate redimensionează
+        # fereastra ca să acopere mereu această durată, indiferent de rata reală.
+        self.window_seconds = window_seconds
         self._subscribed_to_cache24 = False
+        # Lock: WS/Cache24 actualizează fereastra pe alt thread decât cel care
+        # evaluează (TrendCoordinator). Protejează prices/sorted_prices la
+        # mutație ȘI la iterare (altfel "deque mutated during iteration").
+        self._lock = threading.RLock()
         self.prices = deque(maxlen=self.window_size)
         self.sorted_prices = []
 
@@ -149,6 +158,23 @@ class PriceWindow:
     def recent_n(self) -> int:
         """Numărul de sample-uri recente corespunzând RECENT_GRADIENT_SECONDS."""
         return max(2, int(RECENT_GRADIENT_SECONDS / self.sample_rate_sec))
+
+    def set_sample_rate(self, rate):
+        """Actualizează rata reală de sampling. Dacă window_seconds e setat,
+        redimensionează fereastra (deque maxlen) ca să acopere mereu durata țintă.
+        Astfel fereastra rămâne precisă (3.7 min / 2.5h) chiar dacă rata variază."""
+        if rate is None or rate <= 0:
+            return
+        self.sample_rate_sec = rate
+        if self.window_seconds is None:
+            return
+        new_size = max(10, int(self.window_seconds / rate))
+        with self._lock:
+            if new_size != self.window_size:
+                self.window_size = new_size
+                kept = list(self.prices)[-new_size:]
+                self.prices = deque(kept, maxlen=new_size)
+                self.sorted_prices = sorted(self.prices)
 
     def on_price_update(self, symbol: str, ts_ms: int, price: float) -> None:
         """Callback de la Cache24PriceManager — actualizează fereastra automat."""
@@ -182,6 +208,7 @@ class PriceWindow:
 
         window_seconds trebuie să fie <= Cache24PriceManager.KEEP_HOURS * 3600 (24h).
         sample_rate_sec și window_size sunt calculate automat din datele reale.
+        window_seconds e memorat ca țintă → set_sample_rate menține durata dinamic.
         """
         entries = cache24.get_recent_entries(symbol, last_seconds=window_seconds)
 
@@ -189,7 +216,7 @@ class PriceWindow:
         window_size = max(10, int(window_seconds / sample_rate))
 
         prices = [e[1] for e in entries]
-        pw = cls(symbol, window_size, sample_rate_sec=sample_rate)
+        pw = cls(symbol, window_size, sample_rate_sec=sample_rate, window_seconds=window_seconds)
         for p in prices:
             pw.process_price(p)
 
@@ -207,77 +234,63 @@ class PriceWindow:
 
     def process_price(self, price):
         print(f"{self.symbol}: {price}")
-        if len(self.prices) == self.window_size:
-            oldest_price = self.prices.popleft()
-            index = bisect_left(self.sorted_prices, oldest_price)
-            if index < len(self.sorted_prices) and self.sorted_prices[index] == oldest_price:
-                del self.sorted_prices[index]
-            else :
-                print("HAHAHAHAA")
+        with self._lock:
+            if len(self.prices) == self.window_size:
+                oldest_price = self.prices.popleft()
+                index = bisect_left(self.sorted_prices, oldest_price)
+                if index < len(self.sorted_prices) and self.sorted_prices[index] == oldest_price:
+                    del self.sorted_prices[index]
+                else :
+                    print("HAHAHAHAA")
 
-        self.prices.append(price)
-        insort(self.sorted_prices, price)
-        
-        if len(self.sorted_prices) != len(self.prices) :
-            print("XXXXXXXXXXXXXXXXXXX")
+            self.prices.append(price)
+            insort(self.sorted_prices, price)
+
+            if len(self.sorted_prices) != len(self.prices) :
+                print("XXXXXXXXXXXXXXXXXXX")
 
     def get_newest_index(self):
         return len(self.prices) - 1 if self.prices else None
     
     def get_min(self):
-        if not self.sorted_prices:
-            return None
-
-        #print("Sorted prices:", self.sorted_prices)  # Debug
-        min_price = self.sorted_prices[0]
-        close_min_values = [price for price in self.sorted_prices if u.are_close(price, min_price, 0.01)]
-        
-        #print("Close minimum values:", close_min_values)  # Debug
-        avg_min = sum(close_min_values) / len(close_min_values) if close_min_values else min_price
-        #print("Average minimum value:", avg_min)  # Debug
-        return avg_min
+        with self._lock:
+            if not self.sorted_prices:
+                return None
+            min_price = self.sorted_prices[0]
+            close_min_values = [price for price in self.sorted_prices if u.are_close(price, min_price, 0.01)]
+            return sum(close_min_values) / len(close_min_values) if close_min_values else min_price
 
     def get_max(self):
-        if not self.sorted_prices:
-            return None
-
-        #print("Sorted prices:", self.sorted_prices)  # Debug
-        max_price = self.sorted_prices[-1]
-        close_max_values = [price for price in reversed(self.sorted_prices) if u.are_close(price, max_price, 0.01)]
-        
-        #print("Close maximum values:", close_max_values)  # Debug
-        avg_max = sum(close_max_values) / len(close_max_values) if close_max_values else max_price
-        #print("Average maximum value:", avg_max)  # Debug
-        return avg_max
+        with self._lock:
+            if not self.sorted_prices:
+                return None
+            max_price = self.sorted_prices[-1]
+            close_max_values = [price for price in reversed(self.sorted_prices) if u.are_close(price, max_price, 0.01)]
+            return sum(close_max_values) / len(close_max_values) if close_max_values else max_price
 
     def get_min_and_index(self):
-        if not self.sorted_prices:
-            print("BED1")
-            return None, None
-
-        min_price = self.get_min()
-        min_indices = [i for i, price in enumerate(self.prices) if u.are_close(price, min_price, 0.01)]
-        
-        #print("Min indices:", min_indices)  # Debug
-        centroid_index = sum(min_indices) / len(min_indices) if min_indices else None
-        #print(f"Min price: {min_price}, Centroid index for min: {centroid_index}")  # Debug
-        return min_price, centroid_index
+        with self._lock:
+            if not self.sorted_prices:
+                print("BED1")
+                return None, None
+            min_price = self.get_min()
+            min_indices = [i for i, price in enumerate(self.prices) if u.are_close(price, min_price, 0.01)]
+            centroid_index = sum(min_indices) / len(min_indices) if min_indices else None
+            return min_price, centroid_index
 
     def get_max_and_index(self):
-        if not self.sorted_prices:
-            print("BED2")
-            return None, None
-
-        max_price = self.get_max()
-        max_indices = [i for i, price in enumerate(self.prices) if u.are_close(price, max_price, 0.01)]
-        
-        #print("Max indices:", max_indices)  # Debug
-        centroid_index = sum(max_indices) / len(max_indices) if max_indices else None
-        #print(f"Max price: {max_price}, Centroid index for max: {centroid_index}")  # Debug
-        return max_price, centroid_index
+        with self._lock:
+            if not self.sorted_prices:
+                print("BED2")
+                return None, None
+            max_price = self.get_max()
+            max_indices = [i for i, price in enumerate(self.prices) if u.are_close(price, max_price, 0.01)]
+            centroid_index = sum(max_indices) / len(max_indices) if max_indices else None
+            return max_price, centroid_index
 
     def current_window_size(self):
-        return len(self.prices)
+        with self._lock:
+            return len(self.prices)
 
     def get_instant_trend(self):
         """Returnează (final_trend, growth_coefficient, slope_full, gradient_recent).
@@ -287,7 +300,11 @@ class PriceWindow:
         growth_coefficient : medie aritmetică slope_full + gradient_recent
         final_trend     : semn al growth_coefficient (-1 / 0 / 1)
         """
-        analyzer = PriceTrendAnalyzer(self.prices)
+        # Snapshot sub lock — evită "deque mutated during iteration" când WS
+        # actualizează fereastra în paralel.
+        with self._lock:
+            prices_snapshot = list(self.prices)
+        analyzer = PriceTrendAnalyzer(prices_snapshot)
 
         # Tendință stabilă — regresia liniară pe toată fereastra
         _, slope_full, _ = analyzer.linear_regression_trend()
@@ -474,10 +491,13 @@ EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
 TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
 # am voie 6 ordere per perioada de expirare care este 2.6 ore. deaceea am impartit la 6
 TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + EXP_TIME_SELL_ORDER/ 6 + 4*79  # seconds to sleep for order placement
-WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 3.7 * 60  # minutes
-window_size = WINDOWS_SIZE_MIN / TIME_SLEEP_GET_PRICE / 2
+# ── Durate ferestre (în SECUNDE) — sursa de adevăr ───────────────────────────
+# Numărul real de sample-uri NU mai e hardcodat: PriceWindow.from_cache24 îl
+# calculează DINAMIC din rata reală de sampling (median al gap-urilor din
+# Cache24): window_size = window_seconds / sample_rate_real.
+WINDOW_SECONDS_SMALL = 3.7 * 60          # 3.7 minute — toate prețurile pe 3.7 min
+WINDOW_SECONDS_BIG   = 2.5 * 60 * 60     # 2.5 ore
 
-window_size_big = 2 * 60 * 60 / TIME_SLEEP_GET_PRICE / 3  # in realitate 2.5 ore
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
 TREND_TO_BE_OLD_SECONDS = 60 * 60 * 1.9
@@ -894,8 +914,8 @@ def handle_symbol(symbol, current_price, price_window, price_window_big,
         import cacheManager as cm
         actual_rate = cm.get_current_price_manager().get_sample_rate(
             symbol, fallback=TIME_SLEEP_GET_PRICE)
-        price_window.sample_rate_sec = actual_rate
-        price_window_big.sample_rate_sec = actual_rate
+        price_window.set_sample_rate(actual_rate)
+        price_window_big.set_sample_rate(actual_rate)
     except Exception:
         pass
 
@@ -955,7 +975,6 @@ def handle_symbol(symbol, current_price, price_window, price_window_big,
 #   • cache-uiește rezultatul → get_cached_trend(symbol) e O(1) pentru API buy/sell
 # Single-threaded loop → fără reentranță pe plasarea ordinelor.
 # ════════════════════════════════════════════════════════════════════════════
-import threading
 
 MIN_EVAL_INTERVAL_SEC = 1.5    # floor: cel mult o evaluare la 1.5s per simbol
 MAX_EVAL_INTERVAL_SEC = 30.0   # ceiling/heartbeat: cel puțin o evaluare la 30s
@@ -986,10 +1005,8 @@ class TrendCoordinator:
             cache24 = cache24_managers[symbol]
             current_price_mgr.subscribe_price(cache24)   # CurrentPrice → Cache24
 
-            w = PriceWindow.from_cache24(symbol, window_seconds=WINDOWS_SIZE_MIN, cache24=cache24)
-            wb = PriceWindow.from_cache24(symbol,
-                                          window_seconds=window_size_big * TIME_SLEEP_GET_PRICE,
-                                          cache24=cache24)
+            w = PriceWindow.from_cache24(symbol, window_seconds=WINDOW_SECONDS_SMALL, cache24=cache24)
+            wb = PriceWindow.from_cache24(symbol, window_seconds=WINDOW_SECONDS_BIG, cache24=cache24)
             self.windows[symbol] = w
             self.windows_big[symbol] = wb
             self.analyzers[symbol] = WindowAnalyzer(w)
@@ -1057,9 +1074,15 @@ class TrendCoordinator:
                 continue
             print(f"----------------------------------")
             for symbol in due:
-                self.evaluate(symbol)
-            html_content = web.genereaza_html(web.monede)
-            web.salveaza_html(html_content, "index.html")
+                try:
+                    self.evaluate(symbol)
+                except Exception as e:
+                    print(f"[TrendCoordinator] Eroare la evaluare {symbol}: {e}")
+            try:
+                html_content = web.genereaza_html(web.monede)
+                web.salveaza_html(html_content, "index.html")
+            except Exception as e:
+                print(f"[TrendCoordinator] Eroare la generare HTML: {e}")
 
 
 if __name__ == "__main__":

@@ -171,6 +171,42 @@ class TestPriceWindowSampleRate(unittest.TestCase):
         pw.sample_rate_sec = 1.5
         self.assertAlmostEqual(pw.sample_rate_sec, 1.5)
 
+    def test_set_sample_rate_no_resize_without_window_seconds(self):
+        pw = ta.PriceWindow("BTCUSDT", 50)   # window_seconds=None
+        pw.set_sample_rate(2.0)
+        self.assertAlmostEqual(pw.sample_rate_sec, 2.0)
+        self.assertEqual(pw.window_size, 50)   # neschimbat
+
+    def test_set_sample_rate_resizes_to_target_duration(self):
+        # țintă 60s; la rate 1s → ~60 sample, la rate 2s → ~30 sample
+        pw = ta.PriceWindow("BTCUSDT", 60, sample_rate_sec=1.0, window_seconds=60.0)
+        pw.set_sample_rate(2.0)
+        self.assertEqual(pw.window_size, 30)
+        self.assertEqual(pw.prices.maxlen, 30)
+
+    def test_set_sample_rate_resize_keeps_recent_prices(self):
+        pw = ta.PriceWindow("BTCUSDT", 100, sample_rate_sec=1.0, window_seconds=100.0)
+        for p in range(100):
+            pw.process_price(float(p))
+        pw.set_sample_rate(4.0)   # 100/4 = 25 sample
+        self.assertEqual(pw.window_size, 25)
+        self.assertEqual(len(pw.prices), 25)
+        self.assertIn(99.0, pw.prices)        # cele mai recente păstrate
+        self.assertEqual(len(pw.sorted_prices), len(pw.prices))
+
+    def test_set_sample_rate_ignores_invalid(self):
+        pw = ta.PriceWindow("BTCUSDT", 50, window_seconds=60.0)
+        pw.set_sample_rate(0)
+        pw.set_sample_rate(None)
+        self.assertEqual(pw.window_size, 50)
+
+    def test_from_cache24_stores_window_seconds(self):
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        mgr = _make_cache24_manager("BTCUSDT", _synthetic_entries(30), tmp)
+        pw = ta.PriceWindow.from_cache24("BTCUSDT", 24.0, mgr)
+        self.assertAlmostEqual(pw.window_seconds, 24.0)
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # PriceWindow._sample_rate_from_entries
@@ -515,12 +551,16 @@ class TestCacheCurrentPriceFrequency(unittest.TestCase):
         self.assertEqual(self.mgr.get_update_frequency("BTCUSDT"), 0.0)
 
     def test_sample_rate_two_updates(self):
+        t0 = time.time()
         self.mgr.on_items_update("BTCUSDT", [60000.0])
         time.sleep(0.15)
         self.mgr.on_items_update("BTCUSDT", [60001.0])
+        elapsed = time.time() - t0
         rate = self.mgr.get_sample_rate("BTCUSDT", fallback=9.9)
+        # rata măsurată ≈ intervalul real dintre cele 2 update-uri (nu fallback-ul)
         self.assertGreater(rate, 0.0)
-        self.assertLess(rate, 1.0)
+        self.assertLess(rate, 9.9)                  # nu e fallback-ul
+        self.assertLessEqual(rate, elapsed + 0.5)   # robust la jitter de scheduling
 
     def test_frequency_positive_after_updates(self):
         for _ in range(5):
@@ -914,6 +954,76 @@ class TestTrendCoordinator(unittest.TestCase):
         self.cache24.on_price_update("BTCUSDT", int(time.time() * 1000), 61234.0)
         self.assertTrue(coord._dirty["BTCUSDT"])
         self.assertIn(61234.0, coord.windows["BTCUSDT"].prices)
+
+    def test_concurrent_update_and_read_no_crash(self):
+        """Regression: WS thread actualizează fereastra în timp ce thread-ul de
+        evaluare citește → nu trebuie 'deque mutated during iteration'."""
+        import threading as _t
+        coord = self._make_coord()
+        stop = _t.Event()
+        errors = []
+
+        def writer():
+            i = 0
+            while not stop.is_set():
+                try:
+                    self.cache24.on_price_update("BTCUSDT", int(time.time() * 1000), 60000.0 + (i % 50))
+                except Exception as e:
+                    errors.append(("writer", e))
+                i += 1
+
+        def reader():
+            while not stop.is_set():
+                try:
+                    coord.evaluate("BTCUSDT")
+                    coord.windows["BTCUSDT"].get_instant_trend()
+                    coord.analyzers["BTCUSDT"].calculate_slope_max_min()
+                except Exception as e:
+                    errors.append(("reader", e))
+
+        threads = [_t.Thread(target=writer), _t.Thread(target=reader),
+                   _t.Thread(target=reader)]
+        for th in threads:
+            th.start()
+        time.sleep(1.0)
+        stop.set()
+        for th in threads:
+            th.join(timeout=5)
+
+        self.assertEqual(errors, [], f"Erori de concurență: {errors[:3]}")
+
+    def test_set_sample_rate_concurrent_resize_no_crash(self):
+        """Resize-ul ferestrei (set_sample_rate) în paralel cu update-uri WS."""
+        import threading as _t
+        coord = self._make_coord()
+        w = coord.windows["BTCUSDT"]
+        stop = _t.Event()
+        errors = []
+
+        def writer():
+            while not stop.is_set():
+                try:
+                    w.process_price(60000.0)
+                except Exception as e:
+                    errors.append(e)
+
+        def resizer():
+            r = 0.5
+            while not stop.is_set():
+                try:
+                    r = 1.0 if r == 0.5 else 0.5
+                    w.set_sample_rate(r)
+                except Exception as e:
+                    errors.append(e)
+
+        threads = [_t.Thread(target=writer), _t.Thread(target=resizer)]
+        for th in threads:
+            th.start()
+        time.sleep(1.0)
+        stop.set()
+        for th in threads:
+            th.join(timeout=5)
+        self.assertEqual(errors, [], f"Erori la resize concurent: {errors[:3]}")
 
     def test_snapshot_has_all_fields(self):
         coord = self._make_coord()
