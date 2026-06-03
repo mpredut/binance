@@ -1034,6 +1034,11 @@ if __name__ == "__main__":
                 time.sleep(TIME_SLEEP_GET_PRICE)
                 continue
 
+            # Injectăm prețul în CacheCurrentPriceManager → propagă automat
+            # Cache24PriceManager → PriceWindow (ambele ferestre)
+            ts_ms = int(time.time() * 1000)
+            current_price_mgr.on_items_update(symbol, [current_price])
+
             handle_symbol(symbol, current_price, price_window, price_window_big, trend_state, trend_state_big)
 
         html_content = web.genereaza_html(web.monede)
