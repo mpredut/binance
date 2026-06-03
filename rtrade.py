@@ -293,6 +293,12 @@ class TradingBot:
 DEFAULT_ADJUSTMENT_PERCENT = round(u.calculate_difference_percent(60000, 60000 - 380) / 100, 4)
 print(f"[INFO] DEFAULT_ADJUSTMENT_PERCENT = {DEFAULT_ADJUSTMENT_PERCENT}")
 
+# WS user-data bridge explicit: rtrade plasează ordine prin place_order_smart,
+# care verifică intern istoricul de orders/trades (guard-uri max_daily_trades,
+# manage_quantity). WS ține acel cache proaspăt (altfel doar polling la 3 min).
+import cacheManager as cm
+cm.enable_real_ws_event_sync()
+
 bot = TradingBot(sym.taosymbol, 100, DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
 #bot = TradingBot(sym.taosymbol, api.quantities[sym.taosymbol], DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
 bot.run()
