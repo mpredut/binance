@@ -101,6 +101,11 @@ class CacheManagerInterface(ABC):
 
         self.thread = None
         self.save_state = False
+        # dacă True, bucla de sync doarme un interval înainte de prima iterație.
+        # Respectă valoarea pre-setată de subclase ÎNAINTE de super().__init__
+        # (thread-ul pornește în super → trebuie setat din timp).
+        if not hasattr(self, "_first_sleep"):
+            self._first_sleep = False
         self.lock = threading.RLock()
 
         # Subscriber pattern comun — clasele derivate forward prețuri către
@@ -503,24 +508,29 @@ class CacheManagerInterface(ABC):
             self.fetchtime_time_per_symbol = self.__rebuild_fetchtime_times()
         self.update_cache_per_symbol(symbol, items)
         
+    def _should_poll(self):
+        """Decide dacă bucla de sync face poll la API. Suprascriabil de subclase:
+          - Cache24PriceManager → False (push-based: prețurile vin prin on_price_update)
+          - CacheCurrentPriceManager → doar când WS e mort (fallback)
+        Default: gating-ul global WS_ONLY_MODE."""
+        return _should_poll_for_manager(self.cls_name)
+
     def periodic_sync(self, sync_ts=None, save_state=True):
         if sync_ts is not None:
             self.sync_ts = sync_ts
         self.save_state = save_state  # actualizează save_state indiferent
 
         if self.thread is not None and self.thread.is_alive():
-            return self.thread  # thread deja pornit, returnează-l
+            return self.thread  # thread deja pornit, returnează-l (citește sync_ts dinamic)
 
         def run():
+            if self._first_sleep:
+                time.sleep(self.sync_ts)   # prima iterație după un interval (ex. CurrentPrice)
             last_maint = time.time()
             last_resync = time.time()
             while True:
-                print(f"\n[{self.cls_name}] Sync started at {time.strftime('%Y-%m-%d %H:%M:%S')} for {self.symbols}")
-                if _should_poll_for_manager(self.cls_name):
+                if self._should_poll():
                     self.query_remote_and_update_cache()
-                else:
-                    print(f"[{self.cls_name}] Skip polling (WS-only mode active, WS healthy).")
-                print(f"[{self.cls_name}] save state is {self.save_state}.")
                 self.save_state_to_file_if_enabled()   # are guard anti-suprascriere date vechi
                 # Reconciliere mem↔fișier periodică (la 10 min)
                 if (time.time() - last_resync) > self.RESYNC_INTERVAL_SEC:
@@ -530,7 +540,6 @@ class CacheManagerInterface(ABC):
                 if self.append_persist and (time.time() - last_maint) > self.RETENTION_CHECK_INTERVAL_SEC:
                     self.maintain_append_persist()
                     last_maint = time.time()
-                print(f"[{self.cls_name}] Sync completed for {self.symbols}")
                 time.sleep(self.sync_ts)
 
         self.thread = threading.Thread(target=run, name=self.cls_name, daemon=True)
@@ -744,24 +753,10 @@ class Cache24PriceManager(CacheManagerInterface):
     def get_all_symbols_from_cache(self):
         return self.symbols
 
-    def periodic_sync(self, sync_ts=None, save_state=True):
-        """Doar salvează starea periodic. Prețurile vin exclusiv prin on_price_update."""
-        if sync_ts is not None:
-            self.sync_ts = sync_ts
-        self.save_state = save_state
-
-        if self.thread is not None and self.thread.is_alive():
-            return self.thread
-
-        def run():
-            while True:
-                self.save_state_to_file_if_enabled()
-                time.sleep(self.sync_ts)
-
-        self.thread = threading.Thread(target=run, name=self.cls_name, daemon=True)
-        self.thread.daemon = True
-        self.thread.start()
-        return self.thread
+    def _should_poll(self):
+        # Push-based: prețurile vin EXCLUSIV prin on_price_update (de la CurrentPrice).
+        # Folosește base periodic_sync (doar save + resync + maintain), fără poll.
+        return False
 
 
 class CachePriceTrendManager(CacheManagerInterface):
@@ -889,6 +884,7 @@ class CacheCurrentPriceManager(CacheManagerInterface):
         self._ws_last_event_ts  = 0.0      # setat înainte de super() !
         self._price_subscribers = []       # idem (base __init__ respectă hasattr)
         self._update_timestamps: dict = defaultdict(deque)  # idem — înainte de super()
+        self._first_sleep       = True     # nu face fallback HTTP imediat (lasă WS să se conecteze)
         super().__init__(sync_ts, symbols, filename, append_mode=False, api_client=api_client)
         if ws_manager is not None:
             ws_manager.subscribe(self)
@@ -963,31 +959,10 @@ class CacheCurrentPriceManager(CacheManagerInterface):
 
     # ── Periodic sync — polling numai când WS e mort ──────────────────────────
 
-    def periodic_sync(self, sync_ts=None, save_state=True):
-        if sync_ts is not None:
-            self.sync_ts = sync_ts
-        self.save_state = save_state
-
-        if self.thread is not None and self.thread.is_alive():
-            # Thread deja pornit — doar actualizam sync_ts, thread-ul il citeste dinamic
-            return self.thread
-
-        def run():
-            time.sleep(self.sync_ts)   # prima iterație după un interval, nu imediat
-            while True:
-                if not self._ws_is_healthy():
-                    # Fetch HTTP fallback — reutilizează query_remote_and_update_cache;
-                    # _persist_items (override) propagă prin chain via _push_price.
-                    self.query_remote_and_update_cache()
-                else:
-                    print(f"[{self.cls_name}] WS activ – skip polling {self.symbols}")
-                self.save_state_to_file_if_enabled()
-                time.sleep(self.sync_ts)
-
-        self.thread = threading.Thread(target=run, name=self.cls_name, daemon=True)
-        self.thread.daemon = True
-        self.thread.start()
-        return self.thread
+    def _should_poll(self):
+        # Fetch HTTP DOAR ca fallback, când WS e mort. query_remote_and_update_cache
+        # → _persist_items (override) propagă prin chain via _push_price.
+        return not self._ws_is_healthy()
 
     # ── Public API ────────────────────────────────────────────────────────────
 
