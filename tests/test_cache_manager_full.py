@@ -1210,5 +1210,34 @@ class TestAtomicWrite(unittest.TestCase):
             self.assertEqual(json.load(f), {"v": "vechi"})   # conținutul vechi intact
 
 
+class TestWSBridgeClassify(unittest.TestCase):
+    """_classify decide între ping / răspuns comandă / eveniment real."""
+
+    def test_ping_response(self):
+        kind, payload = cm.BinanceUserDataStreamBridge._classify({"id": "ping", "status": 200})
+        self.assertEqual(kind, "ping")
+
+    def test_command_response(self):
+        kind, _ = cm.BinanceUserDataStreamBridge._classify({"id": "sub", "status": 200})
+        self.assertEqual(kind, "response")
+
+    def test_wrapped_event_unwrapped(self):
+        inner = {"e": "executionReport", "s": "BTCUSDT", "i": 42}
+        kind, payload = cm.BinanceUserDataStreamBridge._classify({"event": inner})
+        self.assertEqual(kind, "event")
+        self.assertEqual(payload, inner)          # despachetat din 'event'
+
+    def test_bare_event(self):
+        ev = {"e": "executionReport", "s": "BTCUSDT"}
+        kind, payload = cm.BinanceUserDataStreamBridge._classify(ev)
+        self.assertEqual(kind, "event")
+        self.assertEqual(payload, ev)
+
+    def test_ping_not_routed_to_handler(self):
+        # bug fix: răspunsul la ping NU trebuie să fie tratat ca eveniment
+        kind, _ = cm.BinanceUserDataStreamBridge._classify({"id": "ping", "status": 200})
+        self.assertNotEqual(kind, "event")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -22,8 +22,8 @@ import bapi as api
 
 
 # disable logs by redefine with dummy
-def print(*args, **kwargs):
-   pass
+#def print(*args, **kwargs):
+#   pass
 #log.print = lambda *args, **kwargs: None
 
 
@@ -80,7 +80,7 @@ def _mark_ws_event_received():
 
 
 def _mark_ws_unhealthy():
-    print("UNHAPPY -:( ) : _mark_ws_unhealthy ")
+    builtins.print("UNHAPPY -:( WS marcat ca UNHEALTHY")
     global _ws_is_healthy
     with _ws_health_lock:
         _ws_is_healthy = False
@@ -1597,22 +1597,54 @@ import asyncio, websockets
 from keys.apikeys import api_key_ws
 
 class BinanceUserDataStreamBridge:
+    WS_URL = "wss://ws-api.binance.com:443/ws-api/v3"
+    RECV_TIMEOUT_SEC = 30
+
     def __init__(self, event_handler, keepalive_sec=30 * 60):
         self.event_handler = event_handler
         self.keepalive_sec = keepalive_sec
         self._started = False
+        self._stop = threading.Event()
         self._watchdog_thread = None
+        self._run_thread = None
         self._signing_key = u._load_ed25519_signing_key()
 
     def start(self):
         if self._started:
             return
         self._started = True
-        self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True)
-        self._watchdog_thread.daemon = True  # Asigură că acest thread nu blochează închiderea procesului
+        self._stop.clear()
+        self._watchdog_thread = threading.Thread(target=self._watchdog_loop, daemon=True, name="WSWatchdog")
         self._watchdog_thread.start()
-        thread = threading.Thread(target=self._run_loop, daemon=True)
-        thread.start()
+        self._run_thread = threading.Thread(target=self._run_loop, daemon=True, name="WSBridge")
+        self._run_thread.start()
+
+    def stop(self):
+        """Oprire curată: buclele de listen/watchdog ies la următoarea iterație."""
+        self._stop.set()
+
+    def _signed_logon_msg(self, msg_id):
+        """Mesaj session.logon semnat Ed25519 — folosit la login ȘI la keepalive (DRY)."""
+        timestamp = int(time.time() * 1000)
+        params_str = f"apiKey={api_key_ws}&timestamp={timestamp}"
+        signature = u._sign_ed25519(self._signing_key, params_str)
+        return json.dumps({
+            "id": msg_id,
+            "method": "session.logon",
+            "params": {"apiKey": api_key_ws, "timestamp": timestamp, "signature": signature},
+        })
+
+    @staticmethod
+    def _classify(event):
+        """Clasifică un mesaj primit → (kind, payload):
+          'ping'     răspuns la ping-ul nostru (doar liveness),
+          'response' răspuns la o comandă (login/sub/keepalive),
+          'event'    eveniment real de user-data (payload despachetat din 'event')."""
+        if "id" in event:
+            return ("ping" if event.get("id") == "ping" else "response"), event
+        if "event" in event:          # WS API nou învelește evenimentul în "event"
+            return "event", event["event"]
+        return "event", event
 
     def _run_loop(self):
         loop = asyncio.new_event_loop()
@@ -1623,7 +1655,7 @@ class BinanceUserDataStreamBridge:
         if self._signing_key is None:
             _mark_ws_available(False)
             _mark_ws_unhealthy()
-            print("[cacheManager][WS] Cheia Ed25519 lipseste, fallback polling.")
+            builtins.print("[cacheManager][WS] Cheia Ed25519 lipsește → fallback polling.")
             return
 
         try:
@@ -1631,110 +1663,69 @@ class BinanceUserDataStreamBridge:
         except ImportError:
             _mark_ws_available(False)
             _mark_ws_unhealthy()
-            print("[cacheManager][WS] ImportError!")
+            builtins.print("[cacheManager][WS] websockets neinstalat → fallback polling.")
             return
 
-        #_mark_ws_event_received()
         _mark_ws_available(True)
-        last_keepalive = time.time()
         reconnect_delay = 1
-        last_ping = time.time()
 
-        while True:
+        while not self._stop.is_set():
             try:
-                url = "wss://ws-api.binance.com:443/ws-api/v3"
-                async with ws_module.connect(url, ping_interval=20, ping_timeout=20) as ws:
-                    # Login
-                    timestamp = int(time.time() * 1000)
-                    params_str = f"apiKey={api_key_ws}&timestamp={timestamp}"
-                    signature = u._sign_ed25519(self._signing_key, params_str)
-
-                    await ws.send(json.dumps({
-                        "id": "login",
-                        "method": "session.logon",
-                        "params": {
-                            "apiKey": api_key_ws,
-                            "timestamp": timestamp,
-                            "signature": signature
-                        }
-                    }))
-
+                async with ws_module.connect(self.WS_URL, ping_interval=20, ping_timeout=20) as ws:
+                    await ws.send(self._signed_logon_msg("login"))
                     resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
                     if resp.get("status") != 200:
-                        print(f"[cacheManager][WS] Login failed: {resp}")
+                        builtins.print(f"[cacheManager][WS] Login eșuat: {resp}")
                         await asyncio.sleep(reconnect_delay)
                         reconnect_delay = min(60, reconnect_delay * 2)
                         continue
+                    builtins.print("[cacheManager][WS] ✅ Login OK")
 
-                    print("[cacheManager][WS] ✅ Login OK!")
-
-                    # Subscribe
-                    await ws.send(json.dumps({
-                        "id": "sub",
-                        "method": "userDataStream.subscribe"
-                    }))
-
+                    await ws.send(json.dumps({"id": "sub", "method": "userDataStream.subscribe"}))
                     _mark_ws_event_received()
                     reconnect_delay = 1
-                    last_keepalive = time.time()
+                    last_keepalive = last_ping = time.time()
 
-                    while True:
-                        # Keepalive
-                        if time.time() - last_keepalive >= self.keepalive_sec:
-                            timestamp = int(time.time() * 1000)
-                            params_str = f"apiKey={api_key_ws}&timestamp={timestamp}"
-                            signature = u._sign_ed25519(self._signing_key, params_str)
-                            await ws.send(json.dumps({
-                                "id": "keepalive",
-                                "method": "session.logon",
-                                "params": {
-                                    "apiKey": api_key_ws,
-                                    "timestamp": timestamp,
-                                    "signature": signature
-                                }
-                            }))
-                            last_keepalive = time.time()
-
-                        # Ping propriu la fiecare WS_LOSS_TIMEOUT_SEC/2 s ca să știm că conexiunea e vie
-                        if time.time() - last_ping >= WS_LOSS_TIMEOUT_SEC / 2:
-                            print("ping sending ...")
+                    while not self._stop.is_set():
+                        now = time.time()
+                        # Keepalive: re-logon periodic (reîmprospătează sesiunea autentificată)
+                        if now - last_keepalive >= self.keepalive_sec:
+                            await ws.send(self._signed_logon_msg("keepalive"))
+                            last_keepalive = now
+                        # Ping propriu — confirmă că legătura e vie chiar fără evenimente
+                        if now - last_ping >= WS_LOSS_TIMEOUT_SEC / 2:
                             await ws.send(json.dumps({"id": "ping", "method": "ping"}))
-                            last_ping = time.time()
+                            last_ping = now
 
                         try:
-                            raw = await asyncio.wait_for(ws.recv(), timeout=30)
+                            raw = await asyncio.wait_for(ws.recv(), timeout=self.RECV_TIMEOUT_SEC)
                         except asyncio.TimeoutError:
-                            # Normal — nu au venit events, continuăm loop-ul
-                            print("[cacheManager][WS] Heartbeat (no events in 30s)")
-                            #_mark_ws_event_received()  # resetăm watchdog-ul
+                            print("[cacheManager][WS] Heartbeat (no events)")   # debug (no-op)
                             continue
 
                         event = json.loads(raw)
-                        print(f"[WS RAW] {json.dumps(event)[:200]}")
-                        # Skip răspuns la ping sau răspunsuri la comenzi (au "id") 
-                        if "id" in event:
-                            if event["id"]=="ping":
-                                print("ping received, reset watchdog!")
-                                _mark_ws_event_received()  # resetăm watchdog-ul
-                            else: 
-                                print(f"[WS] Răspuns comandă ignorat: id={event.get('id')} status={event.get('status')}")
-                                continue
-                        
-                        # ── Nou WS API învelește evenimentul în "event" ──
-                        if "event" in event:
-                            event = event["event"]
-                            
+                        print(f"[WS RAW] {raw[:200]}")                          # debug (no-op)
+                        kind, payload = self._classify(event)
+                        if kind == "ping":
+                            _mark_ws_event_received()                           # liveness
+                            continue
+                        if kind == "response":
+                            # login/sub/keepalive — semnalăm DOAR erorile (ex. keepalive expirat)
+                            if event.get("status") not in (None, 200):
+                                builtins.print(f"[cacheManager][WS] Răspuns eroare "
+                                               f"id={event.get('id')} status={event.get('status')}: {event}")
+                            continue
                         _mark_ws_event_received()
-                        self.event_handler(event)
+                        self.event_handler(payload)
 
             except Exception as e:
                 _mark_ws_unhealthy()
-                print(f"[cacheManager][WS] Eroare: {e}. Reconnect în {reconnect_delay}s...")
+                builtins.print(f"[cacheManager][WS] Eroare: {e}. Reconnect în {reconnect_delay}s...")
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(60, reconnect_delay * 2)
 
     def _watchdog_loop(self):
-        while True:
+        while not self._stop.is_set():
             now = time.time()
             with _ws_health_lock:
                 age = now - _ws_last_event_ts if _ws_last_event_ts else float("inf")
@@ -1742,8 +1733,8 @@ class BinanceUserDataStreamBridge:
                 ws_healthy = _ws_is_healthy
             if ws_available and ws_healthy and age > WS_LOSS_TIMEOUT_SEC:
                 _mark_ws_unhealthy()
-                print(f"[cacheManager][WARNING] Fără evenimente WS de {int(age)}s. Fallback polling.")
-            time.sleep(5)
+                builtins.print(f"[cacheManager][WS][WARN] Fără evenimente WS de {int(age)}s → fallback polling.")
+            self._stop.wait(5)
 #end of BinanceUserDataStreamBridge class
 
 def _upsert_order_from_execution_report(event):
