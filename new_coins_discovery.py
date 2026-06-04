@@ -424,31 +424,44 @@ class NewCoinsMonitor:
         self.alert_callbacks.append(callback)
 
     def _trigger_alerts(self, new_coins: List[Dict], source_name: str, auto_add: bool = True):
+        if not new_coins:
+            return
+
+        source_has_price = source_name.lower() == "coinmarketcap"
+        alerts = []
+
         for coin in new_coins:
-            source_has_price = (source_name.lower() == "coinmarketcap")
             if auto_add and source_has_price:
-                added = self.add_new_coin_to_watchlist(coin)
-                auto_added_status = added
+                auto_added_status = self.add_new_coin_to_watchlist(coin)
             else:
                 auto_added_status = False
-                if source_name.lower() != "coinmarketcap":
-                    print(f"[NewCoinsMonitor] ℹ️ {coin['symbol']} discovered from {source_name} - informational only (no price in the system)")
-            for callback in self.alert_callbacks:
-                try:
-                    callback({
-                        "type": "new_coin_discovered",
-                        "source": source_name,
-                        "symbol": coin['symbol'],
-                        "name": coin.get('name', coin['symbol']),
-                        "added_at": coin.get('added_at'),
-                        "price": coin.get('price', 0),
-                        "auto_added": auto_added_status,
-                        "has_price": source_has_price,
-                        "url": coin.get('url', '')
-                    })
-                except Exception as e:
-                    print(f"[NewCoinsMonitor] Callback error: {e}")
 
+                if not source_has_price:
+                    print(
+                        f"[NewCoinsMonitor] ℹ️ {coin['symbol']} discovered from "
+                        f"{source_name} - informational only (no price in the system)"
+                    )
+
+            alerts.append({
+                "type": "new_coin_discovered",
+                "source": source_name,
+                "symbol": coin["symbol"],
+                "name": coin.get("name", coin["symbol"]),
+                "added_at": coin.get("added_at"),
+                "price": coin.get("price", 0),
+                "auto_added": auto_added_status,
+                "has_price": source_has_price,
+                "url": coin.get("url", "")
+            })
+
+        # trimite toate alertele într-un singur callback
+        for callback in self.alert_callbacks:
+            try:
+                callback(alerts)
+            except Exception as e:
+                print(f"[NewCoinsMonitor] Callback error: {e}")
+
+                
     def start_monitoring(self, interval_seconds: int = REFRESH_INTERVAL_SECONDS):
         if self._running:
             return

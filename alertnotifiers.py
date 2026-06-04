@@ -58,7 +58,7 @@ class AlertNotifier:
             f"🆕 NEW COIN: {alert.get('symbol', 'N/A')} - {alert.get('name', alert.get('symbol', 'N/A'))}",
             f"Source: {alert.get('source', 'unknown')}",
             f"Added: {AlertNotifier.format_human_readable_time(alert.get('added_at'))}",
-            f"Price: ${alert.get('price', 0):.6f}" if alert.get('price') is not None else "Price: N/A",
+            f"Price: ${alert.get('price', 0):.4f}" if alert.get('price') is not None else "Price: N/A",
         ]
         url = alert.get("url")
         if url:
@@ -83,7 +83,7 @@ class AlertNotifier:
 
             lines.append(
                 f"{alert.symbol}: {direction} {alert.percent_change:+.2f}% "
-                f"| C ${alert.current_price:.8f} | R ${alert.reference_price:.8f} "
+                f"| C ${alert.current_price:.4f} | R ${alert.reference_price:.4f} "
                 f"({reference_time})"
             )
 
