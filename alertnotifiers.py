@@ -55,7 +55,7 @@ class AlertNotifier:
     @staticmethod
     def format_new_coin_message(alert: dict) -> str:
         lines = [
-            f"🆕 NC: {alert.get('symbol', 'N/A')} - {alert.get('name', alert.get('symbol', 'N/A'))}",
+            f"🆕: {alert.get('symbol', 'N/A')} - {alert.get('name', alert.get('symbol', 'N/A'))}",
             f"Source: {alert.get('source', 'unknown')}",
             f"Added: {AlertNotifier.format_human_readable_time(alert.get('added_at'))}",
             f"Price: ${alert.get('price', 0):.4f}" if alert.get('price') is not None else "Price: N/A",
