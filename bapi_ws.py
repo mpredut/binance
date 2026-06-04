@@ -6,8 +6,9 @@ BinanceWSBase
     Nucleul comun (thread + asyncio loop, reconnect cu backoff, stop curat,
     sleep întreruptibil). Subclasele implementează doar `_connect_and_run`.
 
-BinanceWebSocketManager   (public, market data)
+BinanceMarketStream       (public, market data)
     Combined Stream: 1 WS · 1 thread · N simboluri (ticker), subscribe dinamic.
+    (alias vechi: BinanceWebSocketManager)
     URL: wss://stream.binance.com:9443/stream?streams=btcusdt@ticker/...
 
 BinanceUserDataStream     (privat, user-data — execution reports)
@@ -166,9 +167,10 @@ class BinanceWSBase:
 #  Market data — Combined Stream (public)
 # ══════════════════════════════════════════════════════════════════════════════
 
-class BinanceWebSocketManager(BinanceWSBase):
+class BinanceMarketStream(BinanceWSBase):
     """
-    Preturi live via Combined Stream: 1 thread, 1 WS, N simboluri multiplexate.
+    Stream de MARKET DATA (public): preturi live via Combined Stream — 1 thread,
+    1 WS, N simboluri multiplexate. Simetric cu BinanceUserDataStream.
 
     Public API:
         start()/stop(), add_symbol(s)/remove_symbol(s), get_price(s),
@@ -187,7 +189,7 @@ class BinanceWebSocketManager(BinanceWSBase):
             for s in symbols:
                 self._subscribed.add(s.upper())
 
-    def start(self, name: str = "BinanceWS", daemon: bool = False) -> "BinanceWebSocketManager":
+    def start(self, name: str = "BinanceWS", daemon: bool = False) -> "BinanceMarketStream":
         # market manager rulează ca thread NON-daemon (ca varianta originală)
         super().start(name=name, daemon=daemon)
         return self
@@ -513,13 +515,17 @@ class BinanceUserDataStream(BinanceWSBase):
             self._stop_event.wait(5)
 
 
+# Alias de compatibilitate (cod/teste vechi care folosesc numele generic anterior).
+BinanceWebSocketManager = BinanceMarketStream
+
+
 # ─── Entry point market data (singleton partajat, start LAZY) ──────────────────
 
-bapi_ws_manager = BinanceWebSocketManager(symbols=sym.symbols)   # fără socket la import
+bapi_ws_manager = BinanceMarketStream(symbols=sym.symbols)   # fără socket la import
 
 
-def get_ws_manager() -> BinanceWebSocketManager:
-    """Întoarce managerul de market data, pornindu-l la prima cerere (start lazy)."""
+def get_ws_manager() -> BinanceMarketStream:
+    """Întoarce stream-ul de market data, pornindu-l la prima cerere (start lazy)."""
     if not bapi_ws_manager.is_running:
         bapi_ws_manager.start()
     return bapi_ws_manager
