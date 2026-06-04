@@ -561,7 +561,7 @@ if __name__ == "__main__":
     # WS user-data bridge e opt-in; tradeall vrea execution reports (fill-uri).
     cm.enable_real_ws_event_sync()
     current_price_mgr = cm.get_current_price_manager(
-        ws_manager=bapi_ws.bapi_ws_manager,
+        ws_manager=bapi_ws.get_ws_manager(),
         sync_ts=TIME_SLEEP_GET_PRICE,
     )
     cache24_managers = cm.CacheFactory.get("Price24")   # dict {symbol: Cache24PriceManager}
