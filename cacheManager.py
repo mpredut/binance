@@ -1081,11 +1081,18 @@ class CacheInstantTrendManager:
     PRICE_CHANGE_THRESHOLD_BIG   = u.calculate_difference_percent(97000, 95000 - 377)
     FULL_EVAL_INTERVAL_SEC = 3.0   # cadența calculului GREU (metrici complete)
     FLUSH_INTERVAL_SEC     = 0.5   # cadența scrierii pe fișier (doar writer-ul)
+    # Durate ferestre (secunde) — configurabile. Ambele sunt slice-uri din ACELAȘI
+    # Cache24 (24h), deci ≤ 24h. Numărul de sample-uri e calculat dinamic din rata reală.
+    WINDOW_SMALL_SEC = 3.7 * 60        # 3.7 min — momentum/gate
+    WINDOW_BIG_SEC   = 2.5 * 60 * 60   # 2.5 ore — trend lung
 
-    def __init__(self, symbols, filename="cache_instant_trend.json", writer=False):
+    def __init__(self, symbols, filename="cache_instant_trend.json", writer=False,
+                 window_small_sec=None, window_big_sec=None):
         self.symbols = list(symbols)
         self.filename = filename
         self.writer = writer   # doar writer-ul scrie fișierul (ex. procesul cacheManager.py)
+        self.window_small_sec = window_small_sec if window_small_sec is not None else self.WINDOW_SMALL_SEC
+        self.window_big_sec   = window_big_sec   if window_big_sec   is not None else self.WINDOW_BIG_SEC
         self._mem = {}
         self._lock = threading.RLock()
         self._file_mtime = None
@@ -1119,8 +1126,8 @@ class CacheInstantTrendManager:
         for s in self.symbols:
             c24 = cache24_managers[s]
             current_price_mgr.subscribe_price(c24)          # CurrentPrice → Cache24
-            w  = pw.PriceWindow.from_cache24(s, pw.WINDOW_SECONDS_SMALL, c24)
-            wb = pw.PriceWindow.from_cache24(s, pw.WINDOW_SECONDS_BIG,   c24)
+            w  = pw.PriceWindow.from_cache24(s, self.window_small_sec, c24)
+            wb = pw.PriceWindow.from_cache24(s, self.window_big_sec,   c24)
             self.windows[s]      = w
             self.windows_big[s]  = wb
             self.analyzers[s]     = pw.WindowAnalyzer(w)
@@ -1338,16 +1345,25 @@ class CacheInstantTrendManager:
         price = abs(snap.get("current_price") or 0.0)
         return price * self.FAVORABLE_REL_EPS
 
-    def is_favorable_to_wait(self, side, symbol, now=None):
+    def is_favorable_to_wait(self, side, symbol, mode="gradient", now=None):
         """Zgomot (|g| <= eps) → True (așteptăm claritate). Trend clar:
-        BUY așteaptă cât scade, plasează când urcă clar; SELL invers."""
+        BUY așteaptă cât scade, plasează când urcă clar; SELL invers.
+
+        mode:
+          'gradient' (default) → folosește gradient_recent (momentum, rapid)
+          'full'               → folosește growth_coefficient (scor complet pe
+                                  toată fereastra: avg(slope_full, gradient_recent),
+                                  actualizat la FULL_EVAL_INTERVAL_SEC)."""
         snap = self.get_snapshot(symbol)
         if snap is None:
             return False
         now = now if now is not None else time.time()
         if now - snap.get("ts", 0) > self.TREND_STALE_SEC:
             return False
-        g = snap.get("gradient_recent", 0.0)
+        if mode == "full":
+            g = snap.get("growth_coefficient", snap.get("gradient_recent", 0.0))
+        else:
+            g = snap.get("gradient_recent", 0.0)
         eps = self._epsilon(snap)
         if abs(g) <= eps:
             return True
@@ -1359,13 +1375,13 @@ class CacheInstantTrendManager:
         return False
 
     def wait_for_favorable_entry(self, side, symbol, max_wait_sec=3600.0,
-                                 poll_sec=0.2, sleep_fn=time.sleep):
+                                 poll_sec=0.2, sleep_fn=time.sleep, mode="gradient"):
         """Blochează cât timp trendul e favorabil, până la max_wait_sec.
         Heartbeat vizual (.) la ~1s. Returnează secundele așteptate."""
         deadline = time.time() + max_wait_sec
         waited = 0.0
         next_dot = 1.0
-        while time.time() < deadline and self.is_favorable_to_wait(side, symbol):
+        while time.time() < deadline and self.is_favorable_to_wait(side, symbol, mode=mode):
             sleep_fn(poll_sec)
             waited += poll_sec
             if waited >= next_dot:

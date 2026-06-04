@@ -173,6 +173,14 @@ class TestGate(unittest.TestCase):
         f.setdefault("current_price", 0.0)   # eps=0 → testăm direcția pură
         self.m.update_snapshot("BTCUSDT", **f)
 
+    def test_mode_gradient_vs_full(self):
+        # gradient_recent și growth_coefficient au semne OPUSE → mode-ul decide
+        self._pub(gradient_recent=-0.5, growth_coefficient=0.5)
+        # mode gradient (default): folosește gradient_recent (-0.5) → BUY așteaptă
+        self.assertTrue(self.m.is_favorable_to_wait("BUY", "BTCUSDT", mode="gradient"))
+        # mode full: folosește growth_coefficient (+0.5) → BUY plasează acum
+        self.assertFalse(self.m.is_favorable_to_wait("BUY", "BTCUSDT", mode="full"))
+
     def test_buy_waits_falling(self):
         self._pub(gradient_recent=-0.5)
         self.assertTrue(self.m.is_favorable_to_wait("BUY", "BTCUSDT"))
@@ -258,6 +266,15 @@ class TestComputation(unittest.TestCase):
         self.assertIn(61234.0, win.prices)
         self.assertGreaterEqual(len(win.prices), n_before)
         self.assertIsNotNone(self.m.get_snapshot("BTCUSDT"))
+
+    def test_configurable_window_durations(self):
+        m = cm.CacheInstantTrendManager(["BTCUSDT"], os.path.join(self.tmp, "cfg.json"),
+                                        window_small_sec=120, window_big_sec=3600)
+        self.assertEqual(m.window_small_sec, 120)
+        self.assertEqual(m.window_big_sec, 3600)
+        m.start_computation({"BTCUSDT": self.cache24}, self.cpm)
+        # fereastra mică reflectă durata configurată (≤ ce e în cache24)
+        self.assertIsNotNone(m.get_window("BTCUSDT"))
 
     def test_start_computation_idempotent(self):
         w1 = self.m.get_window("BTCUSDT")

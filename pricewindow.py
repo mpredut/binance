@@ -23,7 +23,7 @@ import utils as u
 
 # ── Constante window ─────────────────────────────────────────────────────────
 DEFAULT_SAMPLE_RATE_SEC = 0.8     # rata nominală de sampling (fallback)
-RECENT_GRADIENT_SECONDS = 5.0     # fereastra de momentum recent (în secunde)
+RECENT_GRADIENT_SECONDS = 60.0    # fereastra de momentum recent (în secunde) — ~1 minut
 WINDOW_SECONDS_SMALL = 3.7 * 60          # 3.7 minute
 WINDOW_SECONDS_BIG   = 2.5 * 60 * 60     # 2.5 ore
 
@@ -166,7 +166,7 @@ class PriceWindow:
         self._subscribed_to_cache24 = False
 
     def process_price(self, price):
-        print(f"{self.symbol}: {price}")
+        #print(f"{self.symbol}: {price}")
         with self._lock:
             if len(self.prices) == self.window_size:
                 oldest_price = self.prices.popleft()
