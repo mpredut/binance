@@ -1,3 +1,5 @@
+# ⚠️ COD MORT — modul NEIMPORTAT nicăieri (înlocuit de cacheManager.CacheTradeManager).
+# Păstrat ca referință. Nu rula direct.
 import json
 import os
 import time

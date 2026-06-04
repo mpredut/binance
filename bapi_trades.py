@@ -168,6 +168,7 @@ def get_my_trades_24(order_type, symbol, days_ago=0, limit=1000):
         return []
 
 
+# ⚠️ COD MORT — nefolosit (niciun apelant). Variantă experimentală pe get_all_orders.
 def get_my_trades_24_NEW(order_type, symbol, days_ago=0, limit=1000):
     import time
     sym.validate_ordertype(order_type)
@@ -623,6 +624,7 @@ def print_trade(trade):
         return
     print(json.dumps(trade, indent=2))
 
+# ⚠️ COD MORT — nefolosit (singurul apel e comentat în bapi_placeorder). Unealtă de diagnostic.
 def compare_trade_sources(symbol, order_type="BUY", max_age_seconds=3600, limit=1000):
     
     print(f"\n🔍 Comparare pentru simbolul {symbol}, order_type {order_type}")

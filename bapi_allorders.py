@@ -17,6 +17,7 @@ import symbols as sym
 #######
 
 ####fixed
+# ⚠️ COD MORT — nefolosit (niciun apelant). Păstrat ca referință. Vezi get_filled_orders.
 def get_filled_orders_bed(order_type, symbol, backdays=3, limit=1000):
     try:
         # Validare simbol
