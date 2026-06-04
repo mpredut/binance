@@ -17,4 +17,5 @@ __pycache__/
 *.pem
 cache_*.jsonl
 *.meta
+*.bak
 .watchdog_state.json
