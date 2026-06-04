@@ -36,7 +36,7 @@ def _maybe_wait_trend(side, symbol, wait_trend, max_wait_sec):
     try:
         import cacheManager as cm
         waited = cm.get_instant_trend_manager().wait_for_favorable_entry(
-            side, symbol, max_wait_sec=max_wait_sec)
+            side, symbol, max_wait_sec=max_wait_sec, poll_sec=0.2, sleep_fn=time.sleep, mode="full")
         if waited:
             print(f"[{side} {symbol}] așteptat {waited:.1f}s pentru preț mai bun (trend favorabil)")
         return waited

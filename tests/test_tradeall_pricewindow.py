@@ -983,7 +983,7 @@ class TestTrendCoordinator(unittest.TestCase):
 
     def test_windows_subscribed_to_cache24(self):
         self.assertTrue(self.mgr.get_window("BTCUSDT")._subscribed_to_cache24)
-        self.assertTrue(self.mgr.get_window_big("BTCUSDT")._subscribed_to_cache24)
+        self.assertTrue(self.mgr.get_window("BTCUSDT", self.mgr.window_big_sec)._subscribed_to_cache24)
 
     def test_tick_updates_window_and_marks_dirty(self):
         coord = self._make_coord()

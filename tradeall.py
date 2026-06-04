@@ -503,8 +503,10 @@ class TrendCoordinator:
             return None
         snapshot = handle_symbol(
             symbol, current_price,
-            self.instant_mgr.get_window(symbol), self.instant_mgr.get_window_big(symbol),
-            self.instant_mgr.get_analyzer(symbol), self.instant_mgr.get_analyzer_big(symbol),
+            self.instant_mgr.get_window(symbol),
+            self.instant_mgr.get_window(symbol, self.instant_mgr.window_big_sec),
+            self.instant_mgr.get_analyzer(symbol),
+            self.instant_mgr.get_analyzer(symbol, self.instant_mgr.window_big_sec),
             self.trend_states[symbol], self.trend_states_big[symbol],
         )
         with self._lock:

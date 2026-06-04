@@ -244,7 +244,7 @@ class TestComputation(unittest.TestCase):
 
     def test_windows_built(self):
         self.assertIsNotNone(self.m.get_window("BTCUSDT"))
-        self.assertIsNotNone(self.m.get_window_big("BTCUSDT"))
+        self.assertIsNotNone(self.m.get_window("BTCUSDT", self.m.window_big_sec))
         self.assertIsNotNone(self.m.get_analyzer("BTCUSDT"))
 
     def test_get_instant_trend(self):
@@ -269,12 +269,64 @@ class TestComputation(unittest.TestCase):
 
     def test_configurable_window_durations(self):
         m = cm.CacheInstantTrendManager(["BTCUSDT"], os.path.join(self.tmp, "cfg.json"),
-                                        window_small_sec=120, window_big_sec=3600)
-        self.assertEqual(m.window_small_sec, 120)
-        self.assertEqual(m.window_big_sec, 3600)
+                                        window_seconds=[120, 3600])
+        self.assertEqual(m.window_small_sec, 120)   # cea mai mică
+        self.assertEqual(m.window_big_sec, 3600)    # cea mai mare
         m.start_computation({"BTCUSDT": self.cache24}, self.cpm)
-        # fereastra mică reflectă durata configurată (≤ ce e în cache24)
+        # fereastra mică (primary) reflectă durata configurată (≤ ce e în cache24)
         self.assertIsNotNone(m.get_window("BTCUSDT"))
+        self.assertIsNotNone(m.get_window("BTCUSDT", 3600))
+
+    def test_n_windows_list(self):
+        # LISTĂ de N timpi → sortată crescător; primary = cea mai mică
+        m = cm.CacheInstantTrendManager(["BTCUSDT"], os.path.join(self.tmp, "n.json"),
+                                        window_seconds=[3600, 60, 600])
+        self.assertEqual(m.window_seconds, [60.0, 600.0, 3600.0])
+        self.assertEqual(m.window_small_sec, 60.0)
+        self.assertEqual(m.window_big_sec, 3600.0)
+        m.start_computation({"BTCUSDT": self.cache24}, self.cpm)
+        for sec in (60, 600, 3600):
+            self.assertIsNotNone(m.get_window("BTCUSDT", sec))
+        m.evaluate_full("BTCUSDT")
+        snap = m.get_snapshot("BTCUSDT")
+        # back-compat: slope_small (cea mai mică) + slope_big (cea mai mare)
+        self.assertIn("slope_small", snap)
+        self.assertIn("slope_big", snap)
+        # generic: slope per fiecare fereastră, keyed pe secunde
+        for sec in (60, 600, 3600):
+            self.assertIn(str(sec), snap["slopes"])
+        self.assertIn("gradient_recent", snap)   # din primary
+
+    def test_thresholds_default_per_window(self):
+        m = cm.CacheInstantTrendManager(["BTCUSDT"], os.path.join(self.tmp, "thd.json"),
+                                        window_seconds=[60, 3600])
+        # default: cea mai mică → SMALL, cea mai mare → BIG
+        self.assertEqual(m.threshold_for("BTCUSDT", 60), m.PRICE_CHANGE_THRESHOLD_SMALL)
+        self.assertEqual(m.threshold_for("BTCUSDT", 3600), m.PRICE_CHANGE_THRESHOLD_BIG)
+
+    def test_thresholds_per_window_dict(self):
+        m = cm.CacheInstantTrendManager(["BTCUSDT"], os.path.join(self.tmp, "thw.json"),
+                                        window_seconds=[60, 3600],
+                                        thresholds={60: 0.3, 3600: 1.5})
+        self.assertEqual(m.threshold_for("BTCUSDT", 60), 0.3)
+        self.assertEqual(m.threshold_for("BTCUSDT", 3600), 1.5)
+
+    def test_thresholds_per_symbol(self):
+        # BTC vs TAO — volatilitate diferită → praguri diferite
+        m = cm.CacheInstantTrendManager(["BTCUSDT", "TAOUSDT"], os.path.join(self.tmp, "ths.json"),
+                                        window_seconds=[60, 3600],
+                                        thresholds={"BTCUSDT": {60: 0.3}, "TAOUSDT": {60: 1.2}})
+        self.assertEqual(m.threshold_for("BTCUSDT", 60), 0.3)
+        self.assertEqual(m.threshold_for("TAOUSDT", 60), 1.2)
+        # fereastra fără override → default per fereastră
+        self.assertEqual(m.threshold_for("TAOUSDT", 3600), m.PRICE_CHANGE_THRESHOLD_BIG)
+
+    def test_thresholds_callable(self):
+        m = cm.CacheInstantTrendManager(["BTCUSDT"], os.path.join(self.tmp, "thc.json"),
+                                        window_seconds=[60, 3600],
+                                        thresholds=lambda sym, sec: 0.9 if sec < 100 else 2.0)
+        self.assertEqual(m.threshold_for("BTCUSDT", 60), 0.9)
+        self.assertEqual(m.threshold_for("BTCUSDT", 3600), 2.0)
 
     def test_start_computation_idempotent(self):
         w1 = self.m.get_window("BTCUSDT")

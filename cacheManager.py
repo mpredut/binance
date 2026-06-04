@@ -1062,36 +1062,77 @@ class CacheInstantTrendManager:
     EPSILON_K         = 1.0     # k * stddev(gradient) — prag de zgomot informat
     FAVORABLE_REL_EPS = 1e-5    # fallback relativ la preț dacă lipsește epsilon
     TREND_STALE_SEC   = 15.0    # snapshot mai vechi → nu mai întârziem
-    # Praguri pentru check_price_change (small/big) — aceleași ca în tradeall.
+    # Praguri (PROCENT) pentru check_price_change — per fereastră (small/big), ca în tradeall.
+    # Sunt procente, deci scale-invariante ca formulă; pot fi suprascrise per-simbol prin
+    # parametrul `thresholds` (vezi __init__), fiindcă volatilitatea diferă (BTC vs TAO).
     PRICE_CHANGE_THRESHOLD_SMALL = u.calculate_difference_percent(60000, 60000 - 310)
     PRICE_CHANGE_THRESHOLD_BIG   = u.calculate_difference_percent(97000, 95000 - 377)
     FULL_EVAL_INTERVAL_SEC = 3.0   # cadența calculului GREU (metrici complete)
     FLUSH_INTERVAL_SEC     = 0.5   # cadența scrierii pe fișier (doar writer-ul)
-    # Durate ferestre (secunde) — configurabile. Ambele sunt slice-uri din ACELAȘI
+    # Durate ferestre (secunde) — o LISTĂ de timpi. TOATE sunt slice-uri din ACELAȘI
     # Cache24 (24h), deci ≤ 24h. Numărul de sample-uri e calculat dinamic din rata reală.
-    WINDOW_SMALL_SEC = 3.7 * 60        # 3.7 min — momentum/gate
-    WINDOW_BIG_SEC   = 2.5 * 60 * 60   # 2.5 ore — trend lung
+    # Cea mai mică fereastră = "primary" (canalul rapid gradient_recent + get_instant_trend).
+    WINDOW_SECONDS = [3.7 * 60, 2.5 * 60 * 60]   # [3.7 min momentum, 2.5 ore trend]
 
     def __init__(self, symbols, filename="cache_instant_trend.json", writer=False,
-                 window_small_sec=None, window_big_sec=None):
+                 window_seconds=None, thresholds=None):
         self.symbols = list(symbols)
         self.filename = filename
         self.writer = writer   # doar writer-ul scrie fișierul (ex. procesul cacheManager.py)
-        self.window_small_sec = window_small_sec if window_small_sec is not None else self.WINDOW_SMALL_SEC
-        self.window_big_sec   = window_big_sec   if window_big_sec   is not None else self.WINDOW_BIG_SEC
+        # Listă de N timpi (secunde), sortată crescător → window_seconds[0] = primary.
+        secs = list(window_seconds) if window_seconds else list(self.WINDOW_SECONDS)
+        self.window_seconds = sorted(float(s) for s in secs)
+        # Praguri check_price_change — per FEREASTRĂ și (opțional) per SIMBOL. `thresholds`:
+        #   - callable(symbol, seconds) -> procent           (cel mai general)
+        #   - dict {seconds: procent}                         (per fereastră, toate simbolurile)
+        #   - dict {symbol: {seconds: procent}}               (per simbol + fereastră)
+        #   - None → default: small→PRICE_CHANGE_THRESHOLD_SMALL, restul→..._BIG
+        self._threshold_fn = self._build_threshold_fn(thresholds)
         self._mem = {}
         self._lock = threading.RLock()
         self._file_mtime = None
         self._file_cache = None
-        # stare writer (populate de start_computation)
+        # stare writer (populate de start_computation): dict[symbol][secunde] -> PriceWindow / WindowAnalyzer
         self.windows = {}
-        self.windows_big = {}
         self.analyzers = {}
-        self.analyzers_big = {}
         self.current_price_mgr = None
         self._computing = False
         self._full_eval_thread = None
         self._flush_thread = None
+
+    # durate ferestrelor extreme (cea mai mică / cea mai mare), derivate din listă
+    @property
+    def window_small_sec(self):
+        return self.window_seconds[0]
+
+    @property
+    def window_big_sec(self):
+        return self.window_seconds[-1]
+
+    def _build_threshold_fn(self, thresholds):
+        """Normalizează `thresholds` la o funcție (symbol, seconds) -> procent."""
+        if callable(thresholds):
+            return thresholds
+        small, big = self.window_seconds[0], self.window_seconds[-1]
+
+        def per_window_default(sec):
+            # default clasic: cea mai mică fereastră → SMALL, restul → BIG
+            return self.PRICE_CHANGE_THRESHOLD_SMALL if float(sec) <= small else self.PRICE_CHANGE_THRESHOLD_BIG
+
+        if isinstance(thresholds, dict):
+            # dict per-simbol {symbol: {sec: pct}} sau per-fereastră {sec: pct}
+            per_symbol = all(isinstance(v, dict) for v in thresholds.values()) and len(thresholds) > 0
+            if per_symbol:
+                tbl = {sym: {float(k): v for k, v in d.items()} for sym, d in thresholds.items()}
+                return lambda sym, sec: tbl.get(sym, {}).get(float(sec), per_window_default(sec))
+            tbl = {float(k): v for k, v in thresholds.items()}
+            return lambda sym, sec: tbl.get(float(sec), per_window_default(sec))
+
+        return lambda sym, sec: per_window_default(sec)
+
+    def threshold_for(self, symbol, seconds):
+        """Pragul (procent) pentru o fereastră a unui simbol."""
+        return self._threshold_fn(symbol, float(seconds))
 
     # ── Writer: construiește ferestre + abonare la Cache24 ────────────────────
     def start_computation(self, cache24_managers=None, current_price_mgr=None, run_full_eval=False):
@@ -1112,15 +1153,16 @@ class CacheInstantTrendManager:
         for s in self.symbols:
             c24 = cache24_managers[s]
             current_price_mgr.subscribe_price(c24)          # CurrentPrice → Cache24
-            w  = pw.PriceWindow.from_cache24(s, self.window_small_sec, c24)
-            wb = pw.PriceWindow.from_cache24(s, self.window_big_sec,   c24)
-            self.windows[s]      = w
-            self.windows_big[s]  = wb
-            self.analyzers[s]     = pw.WindowAnalyzer(w)
-            self.analyzers_big[s] = pw.WindowAnalyzer(wb)
+            self.windows[s]   = {}
+            self.analyzers[s] = {}
+            parts = []
+            for sec in self.window_seconds:
+                w = pw.PriceWindow.from_cache24(s, sec, c24)
+                self.windows[s][sec]   = w
+                self.analyzers[s][sec] = pw.WindowAnalyzer(w)
+                parts.append(f"{sec:.0f}s: {len(w.prices)} (rate={w.sample_rate_sec:.2f}s)")
             c24.subscribe_price(self)                       # semnal de tick → canal rapid
-            print(f"[InstantTrend][{s}] window small: {len(w.prices)} (rate={w.sample_rate_sec:.2f}s) "
-                  f"big: {len(wb.prices)} (rate={wb.sample_rate_sec:.2f}s)")
+            print(f"[InstantTrend][{s}] " + " ".join(parts))
         self._computing = True
         self._start_flush_loop()        # I/O decuplat (scrie fișierul în fundal)
         if run_full_eval:
@@ -1128,31 +1170,39 @@ class CacheInstantTrendManager:
 
     # ── Calcul COMPLET (metrici) — scrie snapshot complet, FĂRĂ logică de trading ──
     def evaluate_full(self, symbol):
-        win = self.windows.get(symbol)
-        wb  = self.windows_big.get(symbol)
-        an  = self.analyzers.get(symbol)
-        anb = self.analyzers_big.get(symbol)
-        if win is None or an is None:
+        wins = self.windows.get(symbol)
+        ans  = self.analyzers.get(symbol)
+        if not wins or not ans:
+            return None
+        primary = self.window_seconds[0]
+        if primary not in wins:
             return None
         current_price = None
         if self.current_price_mgr is not None:
             current_price = self.current_price_mgr.get_price_value(symbol)
 
-        slope, pos = an.check_price_change(self.PRICE_CHANGE_THRESHOLD_SMALL)
-        gradient, gc, slope_full, gradient_recent = win.get_instant_trend()
-        slope_max_min = an.calculate_slope_max_min()
-        slope_big = 0
-        if anb is not None:
-            slope_big, _ = anb.check_price_change(self.PRICE_CHANGE_THRESHOLD_BIG)
-        eps = win.get_noise_epsilon(self.EPSILON_K)
+        # slope pentru fiecare fereastră din listă (N ferestre), keyed pe secunde
+        slopes = {}
+        primary_pos = None
+        for sec in self.window_seconds:
+            slope, pos = ans[sec].check_price_change(self._threshold_fn(symbol, sec))
+            slopes[sec] = slope
+            if sec == primary:
+                primary_pos = pos
 
+        # metrici detaliate doar din fereastra PRIMARY (cea mai mică)
+        pwin, pan = wins[primary], ans[primary]
+        gradient, gc, slope_full, gradient_recent = pwin.get_instant_trend()
         # DOAR memorie (fără I/O); _flush_loop scrie fișierul în fundal.
         self._set_mem(
             symbol,
             final_trend=gradient, growth_coefficient=gc,
             slope_full=slope_full, gradient_recent=gradient_recent,
-            slope_small=slope, slope_big=slope_big, slope_max_min=slope_max_min,
-            pos=pos, epsilon=eps,
+            slope_small=slopes[self.window_seconds[0]],     # cea mai mică
+            slope_big=slopes[self.window_seconds[-1]],      # cea mai mare
+            slopes={f"{int(s)}": v for s, v in slopes.items()},
+            slope_max_min=pan.calculate_slope_max_min(),
+            pos=primary_pos, epsilon=pwin.get_noise_epsilon(self.EPSILON_K),
             current_price=(current_price if current_price is not None else 0.0),
             ts=time.time(),
         )
@@ -1173,7 +1223,7 @@ class CacheInstantTrendManager:
 
     # ── Subscriber Cache24 — canal RAPID (gradient + epsilon la fiecare tick) ──
     def on_price_update(self, symbol, ts_ms, price):
-        win = self.windows.get(symbol)
+        win = self.get_window(symbol)   # fereastra PRIMARY
         if win is None:
             return
         try:
@@ -1187,13 +1237,18 @@ class CacheInstantTrendManager:
             print(f"[CacheInstantTrendManager] on_price_update {symbol}: {e}")
 
     # ── API de calcul ─────────────────────────────────────────────────────────
-    def get_window(self, symbol):        return self.windows.get(symbol)
-    def get_window_big(self, symbol):    return self.windows_big.get(symbol)
-    def get_analyzer(self, symbol):      return self.analyzers.get(symbol)
-    def get_analyzer_big(self, symbol):  return self.analyzers_big.get(symbol)
+    def get_window(self, symbol, seconds=None):
+        """Fereastra pentru `seconds` (None → primary = cea mai mică)."""
+        wins = self.windows.get(symbol) or {}
+        return wins.get(float(seconds) if seconds is not None else self.window_seconds[0])
+
+    def get_analyzer(self, symbol, seconds=None):
+        """Analyzer-ul pentru `seconds` (None → primary = cea mai mică)."""
+        ans = self.analyzers.get(symbol) or {}
+        return ans.get(float(seconds) if seconds is not None else self.window_seconds[0])
 
     def get_instant_trend(self, symbol):
-        win = self.windows.get(symbol)
+        win = self.get_window(symbol)
         return win.get_instant_trend() if win else None
 
     # ── Store cross-process (fișier JSON, atomic) ─────────────────────────────
@@ -1331,7 +1386,7 @@ class CacheInstantTrendManager:
         price = abs(snap.get("current_price") or 0.0)
         return price * self.FAVORABLE_REL_EPS
 
-    def is_favorable_to_wait(self, side, symbol, mode="gradient", now=None):
+    def is_favorable_to_wait(self, side, symbol, mode="full", now=None):
         """Zgomot (|g| <= eps) → True (așteptăm claritate). Trend clar:
         BUY așteaptă cât scade, plasează când urcă clar; SELL invers.
 
@@ -1361,7 +1416,7 @@ class CacheInstantTrendManager:
         return False
 
     def wait_for_favorable_entry(self, side, symbol, max_wait_sec=3600.0,
-                                 poll_sec=0.2, sleep_fn=time.sleep, mode="gradient"):
+                                 poll_sec=0.2, sleep_fn=time.sleep, mode="full"):
         """Blochează cât timp trendul e favorabil, până la max_wait_sec.
         Heartbeat vizual (.) la ~1s. Returnează secundele așteptate."""
         deadline = time.time() + max_wait_sec
