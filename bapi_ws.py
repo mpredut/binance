@@ -58,19 +58,25 @@ class _Cmd:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class BinanceWSBase:
+    # Sesiune considerată „stabilă" → resetăm backoff-ul doar dacă a rezistat atât.
+    # Previne reconnect-storm (login repetat) care ar putea lovi connection rate-limit-ul.
+    STABLE_SESSION_SEC = 60.0
+
     def __init__(self):
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._retry_delay = WS_RETRY_INITIAL
+        self._start_lock = threading.Lock()
 
     # ─── Ciclu de viață thread ────────────────────────────────────────────────
     def start(self, name: str = "BinanceWS", daemon: bool = True) -> "BinanceWSBase":
-        if self.is_running:
-            logger.info("%s already running", name)
-            return self
-        self._stop_event.clear()
-        self._thread = threading.Thread(target=self._thread_worker, name=name, daemon=daemon)
-        self._thread.start()
+        with self._start_lock:          # [F2] apeluri concurente de start() sunt safe
+            if self.is_running:
+                logger.info("%s already running", name)
+                return self
+            self._stop_event.clear()
+            self._thread = threading.Thread(target=self._thread_worker, name=name, daemon=daemon)
+            self._thread.start()
         logger.info("%s started", name)
         return self
 
@@ -426,7 +432,8 @@ class BinanceUserDataStream(BinanceWSBase):
             if resp.get("status") != 200:
                 raise RuntimeError(f"login eșuat: {resp}")     # → backoff în bază
             logger.info("[WS] ✅ Login OK")
-            self._reset_backoff()
+            # NU resetăm backoff aici: reset-ul se face în _run_with_reconnect doar
+            # dacă sesiunea rezistă (anti reconnect-storm → connection rate-limit).
 
             await ws.send(json.dumps({"id": "sub", "method": "userDataStream.subscribe"}))
             self._mark_event()
@@ -462,18 +469,24 @@ class BinanceUserDataStream(BinanceWSBase):
                 self.on_event(payload)
 
     async def _run_with_reconnect(self, body: Callable) -> None:
-        # ca baza, dar marcăm unhealthy la fiecare cădere de conexiune
+        # marcăm unhealthy la fiecare cădere; resetăm backoff DOAR după sesiune stabilă
+        # ([F5], anti reconnect-storm care ar lovi connection rate-limit-ul Binance).
         while not self._stop_event.is_set():
+            t0 = time.time()
             try:
                 await body()
-                self._reset_backoff()
             except Exception as e:
                 self._mark_unhealthy()
-                if self._stop_event.is_set() or self._is_shutdown_error(e):
+                if self._is_shutdown_error(e):
                     break
-                logger.warning("[WS] Eroare: %s. Reconnect în %.1fs", e, self._retry_delay)
-                await self._interruptible_sleep(self._retry_delay)
-                self._retry_delay = min(self._retry_delay * 2, WS_RETRY_MAX)
+                logger.warning("[WS] Eroare: %s", e)
+            if self._stop_event.is_set():
+                break
+            if time.time() - t0 >= self.STABLE_SESSION_SEC:
+                self._reset_backoff()          # sesiunea a rezistat → reluăm de la delay mic
+            logger.info("[WS] reconnect în %.1fs", self._retry_delay)
+            await self._interruptible_sleep(self._retry_delay)
+            self._retry_delay = min(self._retry_delay * 2, WS_RETRY_MAX)
         logger.info("[WS] reconnect loop stopped")
 
     def _watchdog_loop(self) -> None:

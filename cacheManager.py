@@ -1692,15 +1692,18 @@ def _handle_binance_ws_event(event):
                 f"symbol={symbol} orderId={event.get('i')} "
                 f"status={event.get('X')} execType={event.get('x')} side={event.get('S')}"
             )
-        # Reîmprospătăm ATÂT Order CÂT ȘI Trade (ambele derivă din trade-uri).
-        # Targetat pe simbolul din event dacă există (eficient), altfel toate.
-        for cache_name in ("Order", "Trade"):
-            mgr = get_cache_manager(cache_name)
-            if symbol:
-                _refresh_symbol_in_cache(mgr, symbol)
-            else:
-                mgr.query_remote_and_update_cache()
-            mgr.save_state_to_file_if_enabled()
+        # Derivăm Order + Trade DIRECT din payload-ul WS (ZERO apeluri REST) — evită
+        # rate-limit-ul Binance pe rafale de fill-uri și e instant. Re-fetch-ul REST
+        # rămâne doar ca fallback când lipsește simbolul (caz rar). Golurile de la
+        # eventuale deconectări WS sunt acoperite de polling-ul de fallback (WS unhealthy).
+        if symbol:
+            _upsert_order_from_execution_report(event)
+            _append_trade_from_execution_report(event)
+        else:
+            for cache_name in ("Order", "Trade"):
+                get_cache_manager(cache_name).query_remote_and_update_cache()
+        get_cache_manager("Order").save_state_to_file_if_enabled()
+        get_cache_manager("Trade").save_state_to_file_if_enabled()
         return
 
     if event_type in ("balanceUpdate", "outboundAccountPosition"):
