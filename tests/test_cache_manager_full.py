@@ -969,6 +969,30 @@ class TestAppendJsonlPersist(unittest.TestCase):
         r = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
         self.assertEqual(r.cache.get("SYM"), [{"id": 1}, {"id": 2}])
 
+    def test_compact_dedups(self):
+        fname = os.path.join(self.tmp, "dedup.jsonl")
+        m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
+        m.save_state = True
+        with m.lock:
+            m.cache["SYM"] = [{"id": 1}, {"id": 1}, {"id": 2}, {"id": 2}, {"id": 3}]
+        m.save_state_to_file_if_enabled()
+        m.compact_jsonl()
+        with m.lock:
+            self.assertEqual(m.cache["SYM"], [{"id": 1}, {"id": 2}, {"id": 3}])  # dedup în memorie
+        n = sum(1 for _ in open(fname))
+        self.assertEqual(n, 3)   # dedup pe disc
+
+    def test_save_to_file_unconditional_vs_if_enabled(self):
+        fname = _tmp_file(self.tmp, "split.json")
+        m = ConcreteTestManager(9999, ["SYM"], fname)
+        m.save_state = False
+        with m.lock:
+            m.cache["SYM"] = [[1, 1.0]]
+        m.save_state_to_file_if_enabled()       # save_state=False → NU scrie
+        self.assertFalse(os.path.exists(fname))
+        m.save_state_to_file()                  # neconditionat → scrie
+        self.assertTrue(os.path.exists(fname))
+
     def test_compact_rewrites(self):
         fname = os.path.join(self.tmp, "t3.jsonl")
         m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)

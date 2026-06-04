@@ -74,6 +74,7 @@ class CacheManagerInterface(ABC):
     RETENTION_CHECK_INTERVAL_SEC = 7 * 24 * 3600  # verificare săptămânală
     ROTATE_KEEP_FRACTION       = 0.10             # la rotație păstrăm ultimele 10%
     RESYNC_INTERVAL_SEC        = 10 * 60          # reconciliere mem↔fișier la 10 min
+    DEDUP_WINDOW               = 2000             # dedup per-update doar față de ultimele N items
 
     def __init__(self, sync_ts, symbols, filename, append_mode = True, api_client=api,
                  append_persist=False):
@@ -245,9 +246,13 @@ class CacheManagerInterface(ABC):
             print(f"[{self.cls_name}][Eroare] meta {self.filename}: {e}")
 
     def save_state_to_file_if_enabled(self):
-        if not self.save_state:
-            return
-        # GUARD: NU suprascrie date mai NOI din fișier (alt proces a scris între timp).
+        """Scrie DOAR dacă save_state e activat (writer). No-op pentru readeri."""
+        if self.save_state:
+            self.save_state_to_file()
+
+    def save_state_to_file(self):
+        """Scrie EFECTIV pe disc (indiferent de save_state) — pentru writer/failover.
+        Are guard: NU suprascrie date mai NOI din fișier (alt proces între timp)."""
         if self._persisted_max_ts() > self._mem_max_ts():
             builtins.print(f"[{self.cls_name}][resync] fișier mai nou decât memoria → "
                            f"refuz suprascrierea cu date vechi ({self.filename})")
@@ -339,12 +344,21 @@ class CacheManagerInterface(ABC):
                     pass
 
     def compact_jsonl(self):
-        """Rescrie fișierul JSONL din memorie (compactare — elimină eventuale
-        linii vechi/duplicate). De rulat ocazional, nu la fiecare flush."""
+        """Rescrie fișierul JSONL din memorie + ELIMINĂ DUPLICATELE (în memorie și pe
+        disc). Dedup complet aici (periodic) — ca să nu plătim costul la fiecare update."""
         if not self.append_persist:
             return
         try:
             with self.lock:
+                for symbol, items in list(self.cache.items()):
+                    seen = set()
+                    deduped = []
+                    for item in items:
+                        k = json.dumps(item, sort_keys=True)
+                        if k not in seen:
+                            seen.add(k)
+                            deduped.append(item)
+                    self.cache[symbol] = deduped   # dedup și în memorie
                 tmp = self.filename + ".tmp"
                 with open(tmp, "w") as f:
                     for symbol, items in self.cache.items():
@@ -447,9 +461,12 @@ class CacheManagerInterface(ABC):
                 #    new_items = [new_items]
                 #elif not isinstance(new_items, list):
                 #    new_items = [new_items]                    
-                cache_copy = list(self.cache.get(symbol, []))
+                # Dedup DOAR față de fereastra recentă (polling re-aduce date suprapuse
+                # recente). Ieftin O(DEDUP_WINDOW) în loc de O(tot cache-ul) per update.
+                # Dedup-ul complet se face periodic în compact_jsonl.
+                cache_copy = list(self.cache.get(symbol, []))[-self.DEDUP_WINDOW:]
                 new_items = self.filter_new_items(cache_copy, new_items)
-                print(f"[{self.cls_name}][Info] {symbol}:  Din {count_new_items} pastrez doar {len(new_items)}") 
+                print(f"[{self.cls_name}][Info] {symbol}:  Din {count_new_items} pastrez doar {len(new_items)}")
                 new_items = [item for item in new_items if item is not None]
                 if not new_items:
                     return
