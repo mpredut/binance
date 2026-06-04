@@ -83,28 +83,48 @@ print_notification_channels_status()
 
 def alert_handler(alert):
     AlertNotifier.send(alert, enable_phone_webhook=True)
- 
-def new_coin_alert_handler(coin_info):
-    source = coin_info.get('source', 'unknown')
-    has_price = coin_info.get('has_price', False)
-    auto_added = coin_info.get('auto_added', False)
-    added_at = AlertNotifier.format_human_readable_time(coin_info.get('added_at'))
+
+def new_coin_alerts_handler(alerts):
+    if not alerts:
+        return
 
     print("\n" + "=" * 70)
-    print(f"🆕 NEW COIN: {coin_info['symbol']} - {coin_info.get('name', 'N/A')}")
-    print(f"   📡 Source: {source}")
-    print(f"   📅 Added: {added_at}")
-
-    if has_price:
-        print(f"   💰 Price: ${coin_info.get('price', 0):.8f}")
-        print(f"   ✅ Auto-added to watchlist: {auto_added}")
-    else:
-        print(f"   ⚠️ Source {source} does not provide price - informational only")
-        print(f"   💡 The coin will only be monitored after a price becomes available from CoinMarketCap")
-
-    if coin_info.get('url'):
-        print(f"   🔗 {coin_info['url']}")
+    print(f"🆕 {len(alerts)} NEW COINS DISCOVERED")
     print("=" * 70)
+
+    for coin_info in alerts:
+        source = coin_info.get('source', 'unknown')
+        has_price = coin_info.get('has_price', False)
+        auto_added = coin_info.get('auto_added', False)
+        added_at = AlertNotifier.format_human_readable_time(
+            coin_info.get('added_at')
+        )
+
+        print(
+            f"🆕 {coin_info['symbol']} - "
+            f"{coin_info.get('name', 'N/A')}"
+        )
+        print(f"   📡 Source: {source}")
+        print(f"   📅 Added: {added_at}")
+
+        if has_price:
+            print(f"   💰 Price: ${coin_info.get('price', 0):.8f}")
+            print(f"   ✅ Auto-added: {auto_added}")
+        else:
+            print("   ⚠️ Informational only")
+
+        if coin_info.get('url'):
+            print(f"   🔗 {coin_info['url']}")
+
+        print()
+
+    print("=" * 70)
+
+    # trimite UN SINGUR mesaj pentru toate monedele
+    AlertNotifier.send(
+        alerts,
+        enable_phone_webhook=True
+    )
 
     AlertNotifier.send([coin_info], enable_phone_webhook=True)
 
@@ -154,7 +174,7 @@ def start_new_coin_checker(cachePriceAll):
 
     factory = NewCoinsFactory(enabled_sources=ENABLED_SOURCES, cmc_api_key=CMC_API_KEY)
     new_coins_checker = NewCoinsMonitor(cachePriceAll, factory=factory)
-    new_coins_checker.register_alert_callback(new_coin_alert_handler)
+    new_coins_checker.register_alerts_callback(new_coin_alerts_handler)
     new_coins_checker.start_monitoring(interval_seconds=3600)
     print(f"New coin checker started! Active sources: {factory.get_available_sources()}")
 

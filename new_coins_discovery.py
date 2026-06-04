@@ -420,10 +420,17 @@ class NewCoinsMonitor:
                     print(f"[NewCoinsMonitor] Ignored invalid symbol: {symbol} (from {source_name})")
                     continue
 
-    def register_alert_callback(self, callback: Callable):
+    def register_alerts_callback(self, callback: Callable):
         self.alert_callbacks.append(callback)
 
     def _trigger_alerts(self, new_coins: List[Dict], source_name: str, auto_add: bool = True):
+        for callback in self.alert_callbacks:
+            try:
+                print(f"Calling callback: {callback}")
+                callback(alerts)
+            except Exception as e:
+                print(f"[NewCoinsMonitor] Callback {callback} error: {e}")
+
         if not new_coins:
             return
 
