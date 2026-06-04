@@ -1,6 +1,7 @@
 import json
 import os
 import contextlib
+import cachepaths
 import time
 import datetime
 import asyncio
@@ -116,7 +117,7 @@ class CacheManagerInterface(ABC):
 
         self.sync_ts = sync_ts
         self.symbols = symbols
-        self.filename = filename
+        self.filename = cachepaths.cache_path(filename)   # → subfolderul cachedb/
         self.append_mode = append_mode
         self.api_client = api_client
         # Persistență prin APPEND (JSONL) — pentru cache-uri pur-append (Trade,
@@ -1103,7 +1104,7 @@ class CacheInstantTrendManager:
     def __init__(self, symbols, filename="cache_instant_trend.json", writer=False,
                  window_seconds=None, thresholds=None):
         self.symbols = list(symbols)
-        self.filename = filename
+        self.filename = cachepaths.cache_path(filename)   # → subfolderul cachedb/
         self.writer = writer   # doar writer-ul scrie fișierul (ex. procesul cacheManager.py)
         # Listă de N timpi (secunde), sortată crescător → window_seconds[0] = primary.
         secs = list(window_seconds) if window_seconds else list(self.WINDOW_SECONDS)

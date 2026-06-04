@@ -19,6 +19,8 @@ import glob
 import time
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# Fișierele de cache stau în cachedb/ (suprascris de BINANCE_CACHE_DIR sau --dir).
+CACHE_DIR = os.environ.get("BINANCE_CACHE_DIR", os.path.join(BASE_DIR, "cachedb"))
 
 
 def _atomic_write_lines(path, lines):
@@ -121,7 +123,7 @@ def _arg_value(flag, default=None):
 
 def main():
     dry_run = "--dry-run" in sys.argv
-    work_dir = _arg_value("--dir", BASE_DIR)   # rulează de oriunde (ex. dir-ul de pe server)
+    work_dir = _arg_value("--dir", CACHE_DIR)   # implicit cachedb/ (sau --dir / BINANCE_CACHE_DIR)
     # cache_price_trend.json e cache-ul PriceTrend (full-rewrite json, NU per-simbol
     # append) → rămâne .json, îl excludem din migrare.
     EXCLUDE = {"trend"}

@@ -32,7 +32,9 @@ except Exception:
     pass
 
 BASE_DIR = Path(__file__).resolve().parent
-CACHE_FILE = Path(os.environ.get("WATCHDOG_CACHE_FILE", BASE_DIR / "cache_prices_multi.json"))
+# Cache-ul stă în subfolderul cachedb/ (BINANCE_CACHE_DIR îl poate suprascrie).
+_CACHE_DIR = Path(os.environ.get("BINANCE_CACHE_DIR", BASE_DIR / "cachedb"))
+CACHE_FILE = Path(os.environ.get("WATCHDOG_CACHE_FILE", _CACHE_DIR / "cache_prices_multi.json"))
 STATE_FILE = BASE_DIR / ".watchdog_state.json"
 STALE_MINUTES = float(os.environ.get("WATCHDOG_STALE_MINUTES", "20"))
 COOLDOWN_MINUTES = float(os.environ.get("WATCHDOG_COOLDOWN_MINUTES", "60"))
