@@ -120,7 +120,9 @@ class TestCacheManagerInterface(unittest.TestCase):
         mgr.enable_save_state_to_file()
         mgr.cache["SYM"] = [[1, 2.0]]
         mgr.save_state_to_file_if_enabled()
-        self.assertFalse(os.path.exists(fname + ".tmp"))
+        import glob
+        self.assertTrue(os.path.exists(fname))              # fișierul final scris
+        self.assertEqual(glob.glob(fname + "*.tmp"), [])    # niciun tmp rămas
 
     # ── update_cache_per_symbol ───────────────────────────────────────────────
 
