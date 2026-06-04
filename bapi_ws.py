@@ -6,12 +6,12 @@ BinanceWSBase
     Nucleul comun (thread + asyncio loop, reconnect cu backoff, stop curat,
     sleep întreruptibil). Subclasele implementează doar `_connect_and_run`.
 
-BinanceMarketStream       (public, market data)
+BinancePriceStream       (public, market data)
     Combined Stream: 1 WS · 1 thread · N simboluri (ticker), subscribe dinamic.
     (alias vechi: BinanceWebSocketManager)
     URL: wss://stream.binance.com:9443/stream?streams=btcusdt@ticker/...
 
-BinanceUserDataStream     (privat, user-data — execution reports)
+BinanceAccountStream     (privat, user-data — execution reports)
     WS-API cu session.logon (Ed25519) + keepalive; livrează evenimentele prin
     callback-uri (on_event/on_available/on_healthy/on_unhealthy), deci nu
     depinde de cacheManager (fără import circular).
@@ -167,10 +167,10 @@ class BinanceWSBase:
 #  Market data — Combined Stream (public)
 # ══════════════════════════════════════════════════════════════════════════════
 
-class BinanceMarketStream(BinanceWSBase):
+class BinancePriceStream(BinanceWSBase):
     """
     Stream de MARKET DATA (public): preturi live via Combined Stream — 1 thread,
-    1 WS, N simboluri multiplexate. Simetric cu BinanceUserDataStream.
+    1 WS, N simboluri multiplexate. Simetric cu BinanceAccountStream.
 
     Public API:
         start()/stop(), add_symbol(s)/remove_symbol(s), get_price(s),
@@ -189,7 +189,7 @@ class BinanceMarketStream(BinanceWSBase):
             for s in symbols:
                 self._subscribed.add(s.upper())
 
-    def start(self, name: str = "BinanceWS", daemon: bool = False) -> "BinanceMarketStream":
+    def start(self, name: str = "BinanceWS", daemon: bool = False) -> "BinancePriceStream":
         # market manager rulează ca thread NON-daemon (ca varianta originală)
         super().start(name=name, daemon=daemon)
         return self
@@ -366,7 +366,7 @@ class BinanceMarketStream(BinanceWSBase):
 #  User-data — WS-API cu session.logon (privat, execution reports)
 # ══════════════════════════════════════════════════════════════════════════════
 
-class BinanceUserDataStream(BinanceWSBase):
+class BinanceAccountStream(BinanceWSBase):
     """
     Stream autentificat de user-data. Livrează evenimentele prin callback-uri,
     ca să NU depindă de cacheManager (fără import circular):
@@ -413,7 +413,7 @@ class BinanceUserDataStream(BinanceWSBase):
             self._healthy = False
         self.on_unhealthy()
 
-    def start(self, name: str = "WSUserData", daemon: bool = True) -> "BinanceUserDataStream":
+    def start(self, name: str = "WSUserData", daemon: bool = True) -> "BinanceAccountStream":
         super().start(name=name, daemon=daemon)
         if self._watchdog_thread is None or not self._watchdog_thread.is_alive():
             self._watchdog_thread = threading.Thread(
@@ -515,16 +515,18 @@ class BinanceUserDataStream(BinanceWSBase):
             self._stop_event.wait(5)
 
 
-# Alias de compatibilitate (cod/teste vechi care folosesc numele generic anterior).
-BinanceWebSocketManager = BinanceMarketStream
+# Alias-uri de compatibilitate (nume anterioare folosite în cod/teste).
+BinanceWebSocketManager = BinancePriceStream   # nume generic original
+BinanceMarketStream     = BinancePriceStream   # nume intermediar
+BinanceUserDataStream   = BinanceAccountStream  # termenul oficial Binance pt user-data
 
 
 # ─── Entry point market data (singleton partajat, start LAZY) ──────────────────
 
-bapi_ws_manager = BinanceMarketStream(symbols=sym.symbols)   # fără socket la import
+bapi_ws_manager = BinancePriceStream(symbols=sym.symbols)   # fără socket la import
 
 
-def get_ws_manager() -> BinanceMarketStream:
+def get_ws_manager() -> BinancePriceStream:
     """Întoarce stream-ul de market data, pornindu-l la prima cerere (start lazy)."""
     if not bapi_ws_manager.is_running:
         bapi_ws_manager.start()

@@ -877,7 +877,7 @@ class CacheCurrentPriceManager(CacheManagerInterface):
     Menține CEL MAI RECENT preț per simbol, cu timestamp în ms.
     Drop-in replacement pentru bapi.get_current_price().
 
-    Sursa primară   : WebSocket (BinanceMarketStream) via subscribe().
+    Sursa primară   : WebSocket (BinancePriceStream) via subscribe().
     Fallback timer  : polling HTTP la fiecare SYNC_TS secunde, DOAR când WS
                       e tăcut mai mult de WS_TIMEOUT_SEC.
     Staleness check : get_price() forțează HTTP imediat dacă prețul e mai
@@ -1020,7 +1020,7 @@ class CacheCurrentPriceManager(CacheManagerInterface):
         return entry[1] if entry else None
 
     def attach_ws_manager(self, ws_manager) -> None:
-        """Conectează un BinanceMarketStream ca sursă primară de preț.
+        """Conectează un BinancePriceStream ca sursă primară de preț.
         ws_manager.subscribe(self) → on_items_update(symbol, [price]) la fiecare tick.
         Idempotent (ws_manager.subscribe deduplichează)."""
         if ws_manager is None:
@@ -1734,7 +1734,7 @@ def enable_real_ws_event_sync():
         import bapi_ws
         # Clasa de stream trăiește în bapi_ws; cacheManager doar cablează callback-urile
         # de health (care driveează fallback-ul de polling via _should_poll).
-        _ws_bridge = bapi_ws.BinanceUserDataStream(
+        _ws_bridge = bapi_ws.BinanceAccountStream(
             on_event=_handle_binance_ws_event,
             on_available=_mark_ws_available,
             on_healthy=_mark_ws_event_received,
