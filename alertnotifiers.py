@@ -46,6 +46,13 @@ class AlertNotifier:
         return getattr(alert, "symbol", "N/A")
 
     @staticmethod
+    def utf8_header(value: str) -> str:
+        """Valoare de header HTTP care păstrează caractere non-ASCII (ex. simbol '小蝌蚪').
+        Header-ele sunt latin-1, dar ntfy decodează valoarea ca UTF-8 → trecem octeții
+        UTF-8 prin latin-1 (passthrough). Așa simbolurile non-ASCII ajung intacte."""
+        return value.encode("utf-8").decode("latin-1")
+
+    @staticmethod
     def format_new_coin_message(alert: dict) -> str:
         lines = [
             f"🆕 NEW COIN: {alert.get('symbol', 'N/A')} - {alert.get('name', alert.get('symbol', 'N/A'))}",
@@ -178,14 +185,12 @@ class AlertNotifier:
 
         try:
             if "ntfy.sh/" in webhook_url:
-                # Header-ele HTTP sunt latin-1 → titlul (poate avea simboluri non-ASCII,
-                # ex. '小蝌蚪') se sanitizează; mesajul UTF-8 din corp rămâne intact.
-                ascii_title = title.encode("ascii", "ignore").decode().strip() or "CryptoAlerts"
+                # ntfy decodează Title ca UTF-8 → păstrăm simbolurile non-ASCII (ex. '小蝌蚪').
                 response = requests.post(
                     webhook_url,
                     data=message.encode("utf-8"),
                     headers={
-                        "Title": ascii_title,
+                        "Title": AlertNotifier.utf8_header(title),
                         "Priority": os.environ.get("NTFY_PRIORITY", "high"),
                         "Tags": tags,
                     },

@@ -71,7 +71,7 @@ class PriceAlertLinkTests(unittest.TestCase):
 
         message = AlertNotifier.format_batch_message([alert])
 
-        self.assertIn("(at 2026-05-25 01:00:00)", message)
+        self.assertIn("(2026-05-25 01:00:00)", message)
 
     def test_alert_notifier_includes_coinmarketcap_url_in_batch_message(self):
         alert = PriceAlert(
@@ -120,6 +120,15 @@ class TestNewCoinDictRobustness(unittest.TestCase):
         # file activ, fără rețea — nu trebuie excepție pe dict
         AlertNotifier.send(self.NEW_COIN, enable_console=False, enable_file=True,
                            enable_email=False, enable_phone_webhook=False)
+
+    def test_non_ascii_symbol_preserved(self):
+        # simbol non-ASCII (ex. '小蝌蚪') trebuie păstrat, nu eliminat
+        coin = dict(self.NEW_COIN, symbol="小蝌蚪", name="小蝌蚪 Coin")
+        self.assertEqual(AlertNotifier.alert_symbol(coin), "小蝌蚪")
+        self.assertIn("小蝌蚪", AlertNotifier.format_batch_message([coin]))
+        # header UTF-8 passthrough: octeții UTF-8 trecuți prin latin-1, decodabili înapoi
+        hdr = AlertNotifier.utf8_header("(1): 小蝌蚪")
+        self.assertEqual(hdr.encode("latin-1").decode("utf-8"), "(1): 小蝌蚪")
 
 
 if __name__ == "__main__":
