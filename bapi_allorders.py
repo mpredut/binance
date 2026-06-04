@@ -80,23 +80,48 @@ def get_filled_orders_bed(order_type, symbol, backdays=3, limit=1000):
         return []
 
 from collections import defaultdict
+
+
+def paginate_my_trades(api_client, symbol, start_time_ms, limit=1000):
+    """Aduce TOATE trade-urile din [start_time_ms, acum], paginat — Binance întoarce
+    max `limit` (1000) pe cerere. Prima pagină pe startTime, apoi pe fromId
+    (id-ul ultimului trade + 1), până când o pagină vine cu < limit (ultima).
+    Așa nu pierdem trade-uri când în perioadă sunt > 1000 înregistrări."""
+    out = []
+    from_id = None
+    while True:
+        try:
+            if from_id is None:
+                batch = api_client.get_my_trades(symbol=symbol, startTime=start_time_ms, limit=limit) or []
+            else:
+                batch = api_client.get_my_trades(symbol=symbol, fromId=from_id, limit=limit) or []
+        except BinanceAPIException as api_err:
+            err_msg = str(api_err)
+            if getattr(api_err, "code", None) == -1003 or "too much request weight" in err_msg.lower():
+                print(f"[paginate_my_trades] rate limit → backoff 60s: {err_msg}")
+                time.sleep(60)
+                continue
+            print(f"[paginate_my_trades] {symbol}: {api_err}")
+            break
+        if not batch:
+            break
+        out.extend(batch)
+        if len(batch) < limit:          # ultima pagină
+            break
+        from_id = batch[-1]["id"] + 1   # următoarea pagină de la id-ul următor
+        time.sleep(0.2)                 # politicos cu rate-limit-ul
+    return out
+
+
 def get_filled_orders(order_type, symbol, startTime, limit=1000):
     try:
         sym.validate_symbols(symbol)
         sym.validate_ordertype(order_type)
 
         end_time = int(time.time() * 1000)  # ms
-        #start_time = end_time - backdays * 24 * 60 * 60 * 1000
 
-        try:
-            trades = client.get_my_trades(symbol=symbol, startTime=startTime, limit=limit) or []
-        except BinanceAPIException as api_err:
-            err_msg = str(api_err)
-            print(f"Unexpected Binance API error in get_filled_orders: {api_err}")
-            if api_err.code == -1003 or "Way too much request weight used" in err_msg:
-                print("Rate limit hit: backing off before next request.{err_msg}")
-                time.sleep(60)
-            return []
+        # paginat → nu trunchiem la 1000 când perioada are mai multe trade-uri
+        trades = paginate_my_trades(client, symbol, startTime, limit)
 
         filtered = [
             {
@@ -153,10 +178,10 @@ def get_filled_orders(order_type, symbol, startTime, limit=1000):
 
 
 def get_recent_filled_orders(order_type, symbol, max_age_seconds):
-
-    #backdays = math.ceil(max_age_seconds / (24 * 60 * 60))  # Aproximăm numărul de zile
-
-    all_filled_orders = get_filled_orders(order_type, symbol, max_age_seconds)    
+    # max_age_seconds = DURATĂ → startTime ABSOLUT (ms) = acum - durată.
+    # (înainte se pasa durata direct ca startTime → fetch din ~1970, trades greșite)
+    start_time_ms = int(time.time() * 1000) - int(max_age_seconds * 1000)
+    all_filled_orders = get_filled_orders(order_type, symbol, start_time_ms)
     recent_filled_orders = []
     current_time = time.time()
     if(len(all_filled_orders) < 1) :

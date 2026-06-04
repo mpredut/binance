@@ -120,9 +120,10 @@ class TestCacheManagerInterface(unittest.TestCase):
         mgr.enable_save_state_to_file()
         mgr.cache["SYM"] = [[1, 2.0]]
         mgr.save_state_to_file_if_enabled()
-        import glob
         self.assertTrue(os.path.exists(fname))              # fișierul final scris
-        self.assertEqual(glob.glob(fname + "*.tmp"), [])    # niciun tmp rămas
+        # tmp-ul are nume UNIC (pid+tid) → numele fix nu apare niciodată (determinist;
+        # un glob ar prinde tmp-ul concurent al thread-ului periodic_sync → flaky).
+        self.assertFalse(os.path.exists(fname + ".tmp"))
 
     # ── update_cache_per_symbol ───────────────────────────────────────────────
 

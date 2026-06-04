@@ -118,9 +118,9 @@ def monitor_filled_buy_orders_old():
         print("Fire active detectate, iesim din functie pentru a nu porni fire noi.")
         return
  
-    maxage_trade_s =  3 * 24 * 3600  # Timpul maxim in care ordinele executate sunt considerate recente (2 ore)
-    starttime = int(time.time()) -  maxage_trade_s
-    filled_buy_orders = apiorders.get_recent_filled_orders("BUY", sym.btcsymbol, starttime)
+    maxage_trade_s =  3 * 24 * 3600  # Câtă vechime maximă au ordinele considerate „recente"
+    # get_recent_filled_orders așteaptă o DURATĂ (secunde), nu un timestamp absolut.
+    filled_buy_orders = apiorders.get_recent_filled_orders("BUY", sym.btcsymbol, maxage_trade_s)
 
     for order in filled_buy_orders:
         current_time = time.time()

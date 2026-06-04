@@ -109,20 +109,38 @@ class BinanceWSBase:
         await self._run_with_reconnect(self._connect_and_run)
 
     async def _run_with_reconnect(self, body: Callable) -> None:
+        # Reconectare cu backoff. Cheie anti rate-limit:
+        #  - între ORICE două încercări dormim _retry_delay (chiar și la disconnect
+        #    „curat", fără excepție) → fără storm de reconectări instant;
+        #  - backoff-ul se resetează DOAR după o sesiune stabilă (>= STABLE_SESSION_SEC),
+        #    nu la fiecare conectare → flapping-ul crește delay-ul.
         while not self._stop_event.is_set():
+            t0 = time.time()
+            exc = None
             try:
-                await body()
-                self._reset_backoff()                 # ieșire curată → resetăm delay-ul
+                await body()                          # întoarce/ridică la sfârșitul sesiunii
             except Exception as e:
-                if self._stop_event.is_set() or self._is_shutdown_error(e):
+                exc = e
+                if self._is_shutdown_error(e):
                     break
-                logger.warning("WS error: %s. Reconnect în %.1fs", e, self._retry_delay)
-                await self._interruptible_sleep(self._retry_delay)
-                self._retry_delay = min(self._retry_delay * 2, WS_RETRY_MAX)
+                logger.warning("WS error: %s", e)
+            self._on_session_end(exc)
+            if self._stop_event.is_set():
+                break
+            if time.time() - t0 >= self.STABLE_SESSION_SEC:
+                self._reset_backoff()                 # sesiune stabilă → reluăm de la delay mic
+            logger.info("WS reconnect în %.1fs", self._retry_delay)
+            await self._interruptible_sleep(self._retry_delay)
+            self._retry_delay = min(self._retry_delay * 2, WS_RETRY_MAX)
         logger.info("WS reconnect loop stopped")
 
     def _reset_backoff(self) -> None:
         self._retry_delay = WS_RETRY_INITIAL
+
+    def _on_session_end(self, exc: Optional[Exception]) -> None:
+        """Hook la sfârșitul unei sesiuni (exc=None dacă s-a încheiat curat).
+        Subclasele pot reacționa (ex. user-data marchează WS unhealthy)."""
+        pass
 
     async def _connect_and_run(self) -> None:
         """O conexiune completă (subclasa implementează). Ridică la disconnect."""
@@ -212,10 +230,15 @@ class BinanceWebSocketManager(BinanceWSBase):
         await self._run_with_reconnect(self._connect_and_run)
 
     async def _connect_and_run(self) -> None:
-        with self._lock:
-            current_symbols = set(self._subscribed)
-        if not current_symbols:
-            await self._interruptible_sleep(1.0)        # nimic de abonat → așteptăm
+        # Așteptarea de simboluri se face AICI (nu ca „sesiune") ca să nu penalizeze
+        # backoff-ul: _connect_and_run întoarce doar după o sesiune reală de conexiune.
+        while not self._stop_event.is_set():
+            with self._lock:
+                current_symbols = set(self._subscribed)
+            if current_symbols:
+                break
+            await self._interruptible_sleep(1.0)
+        if self._stop_event.is_set() or not current_symbols:
             return
         url = self._build_url(current_symbols)
         logger.info("Connecting to combined stream (%d symbols)...", len(current_symbols))
@@ -224,8 +247,7 @@ class BinanceWebSocketManager(BinanceWSBase):
             close_timeout=WS_CLOSE_TIMEOUT,
         ) as ws:
             logger.info("Connected. Streams active: %d", len(current_symbols))
-            self._reset_backoff()
-            await self._session(ws)
+            await self._session(ws)             # backoff-ul îl gestionează _run_with_reconnect
 
     async def _session(self, ws) -> None:
         """recv_loop (date) + cmd_loop (subscribe/unsubscribe) concurente; la
@@ -468,26 +490,10 @@ class BinanceUserDataStream(BinanceWSBase):
                 self._mark_event()
                 self.on_event(payload)
 
-    async def _run_with_reconnect(self, body: Callable) -> None:
-        # marcăm unhealthy la fiecare cădere; resetăm backoff DOAR după sesiune stabilă
-        # ([F5], anti reconnect-storm care ar lovi connection rate-limit-ul Binance).
-        while not self._stop_event.is_set():
-            t0 = time.time()
-            try:
-                await body()
-            except Exception as e:
-                self._mark_unhealthy()
-                if self._is_shutdown_error(e):
-                    break
-                logger.warning("[WS] Eroare: %s", e)
-            if self._stop_event.is_set():
-                break
-            if time.time() - t0 >= self.STABLE_SESSION_SEC:
-                self._reset_backoff()          # sesiunea a rezistat → reluăm de la delay mic
-            logger.info("[WS] reconnect în %.1fs", self._retry_delay)
-            await self._interruptible_sleep(self._retry_delay)
-            self._retry_delay = min(self._retry_delay * 2, WS_RETRY_MAX)
-        logger.info("[WS] reconnect loop stopped")
+    def _on_session_end(self, exc: Optional[Exception]) -> None:
+        # la orice cădere de sesiune (exc != None) marcăm WS unhealthy → fallback polling
+        if exc is not None:
+            self._mark_unhealthy()
 
     def _watchdog_loop(self) -> None:
         while not self._stop_event.is_set():

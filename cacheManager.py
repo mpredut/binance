@@ -596,8 +596,10 @@ class CacheTradeManager(CacheManagerInterface):
         current_time = int(time.time() * 1000)
         backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
         
-        # clientul INJECTAT (self.api_client), nu globalul → testabil + un singur client
-        new_trades = self.api_client.client.get_my_trades(symbol=symbol, startTime=startTime, limit=1000)
+        # clientul INJECTAT (self.api_client), paginat → nu trunchiem la 1000 când
+        # perioada are mai multe trade-uri.
+        import bapi_allorders as apiorders
+        new_trades = apiorders.paginate_my_trades(self.api_client.client, symbol, startTime, limit=1000)
         #new_trades = apitrades.get_my_trades(order_type=None, symbol=symbol, backdays=backdays, limit=1000)
  
         existing_ids = set(str(t["id"]) for t in self.cache.get(symbol, []) if "id" in t)
