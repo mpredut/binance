@@ -91,6 +91,12 @@ def get_my_trades_24(order_type, symbol, days_ago=0, limit=1000):
         end_time = current_time - days_ago * 24 * 60 * 60 * 1000
         start_time = end_time - 24 * 60 * 60 * 1000  # Cu 24 de ore in urma de la end_time
 
+        # Binance întoarce max `limit` (1000) trade-uri / cerere. Bucla paginează
+        # avansând start_time la timpul ultimului trade + 1ms, până când o pagină vine
+        # cu < limit → astfel NU pierdem trade-uri nici dacă ziua are > 1000 înregistrări.
+        # Atenție (edge rar): dacă > 1 trade au EXACT același timestamp ms la granița
+        # paginii, avansarea cu +1ms le-ar putea sări. Paginarea pe fromId
+        # (vezi bapi_allorders.paginate_my_trades) e imună la acest caz.
         while start_time < end_time:
 
             trades = api.client.get_my_trades(symbol=symbol, limit=limit, startTime=start_time, endTime=end_time)
