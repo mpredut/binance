@@ -7,6 +7,7 @@ cachedb/
 cache_*.json
 last_watch_config.json
 priceanalysis.json
+index.html
 
 # Build
 *.egg-info/
