@@ -123,5 +123,33 @@ echo
 echo "Procese Python active:"
 ps aux | grep '[p]ython'
 
+# ===== Watchdog (cron la 5 min) — instalat/refresh idempotent =====
+# Rulează DOAR pe această mașină (cea care pornește monitorul). Căile sunt derivate
+# din mediul curent (SCRIPT_DIR + python-ul din venv activat), deci e corect oriunde.
+WATCHDOG_MARKER="price_monitor_watchdog.py"
+WATCHDOG_PY="$(command -v python)"
+WATCHDOG_LINE="*/5 * * * * cd $SCRIPT_DIR && $WATCHDOG_PY $SCRIPT_DIR/$WATCHDOG_MARKER >> $SCRIPT_DIR/watchdog.log 2>&1"
+
+install_watchdog() {
+    ( crontab -l 2>/dev/null | grep -v "$WATCHDOG_MARKER"; echo "$WATCHDOG_LINE" ) | crontab -
+    echo "✔ Watchdog activ (cron la 5 min) → $SCRIPT_DIR/watchdog.log"
+}
+remove_watchdog() {
+    crontab -l 2>/dev/null | grep -v "$WATCHDOG_MARKER" | crontab - 2>/dev/null
+    echo "✔ Watchdog dezactivat"
+}
+install_watchdog
+
+# La Ctrl+C / SIGTERM: oprim procesele ȘI scoatem watchdog-ul, ca o oprire INTENȚIONATĂ
+# să nu declanșeze alarma „monitorul s-a oprit". Repornirea îl reinstalează.
+cleanup() {
+    echo
+    echo "🛑 Oprire..."
+    remove_watchdog
+    for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null; done
+    exit 0
+}
+trap cleanup INT TERM
+
 echo "All good, wait command for service... <ctrl c> please!"
 wait
