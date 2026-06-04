@@ -1091,5 +1091,69 @@ class TestAppendJsonlPersist(unittest.TestCase):
         self.assertEqual(r.cache.get("SYM"), [{"id": 1}, {"id": 2}])   # sare linia coruptă
 
 
+class TestMemFileResync(unittest.TestCase):
+    """Reziliență: guard anti-suprascriere date vechi + reconciliere mem↔fișier."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def _mgr(self, fname, append_persist=False):
+        m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=append_persist)
+        m.save_state = True
+        return m
+
+    def test_refuses_overwrite_with_older(self):
+        fname = _tmp_file(self.tmp, "g.json")
+        # Writerul A scrie date NOI (fetchtime mare)
+        a = self._mgr(fname)
+        with a.lock:
+            a.cache["SYM"] = [[1, 1.0]]
+            a.fetchtime_time_per_symbol["SYM"] = 2000   # nou
+        a.save_state_to_file_if_enabled()
+        # Writerul B are date VECHI (fetchtime mic) → NU trebuie să suprascrie
+        b = ConcreteTestManager(9999, ["SYM"], fname)
+        b.save_state = True
+        with b.lock:
+            b.cache["SYM"] = [[9, 9.0]]
+            b.fetchtime_time_per_symbol["SYM"] = 1000   # mai vechi
+        b.save_state_to_file_if_enabled()
+        # fișierul rămâne cu datele lui A (nu suprascris cu B vechi)
+        data = json.load(open(fname))
+        self.assertEqual(data["items"]["SYM"], [[1, 1.0]])
+
+    def test_allows_overwrite_with_newer(self):
+        fname = _tmp_file(self.tmp, "g2.json")
+        a = self._mgr(fname)
+        with a.lock:
+            a.cache["SYM"] = [[1, 1.0]]
+            a.fetchtime_time_per_symbol["SYM"] = 1000
+        a.save_state_to_file_if_enabled()
+        b = ConcreteTestManager(9999, ["SYM"], fname)
+        b.save_state = True
+        with b.lock:
+            b.cache["SYM"] = [[9, 9.0]]
+            b.fetchtime_time_per_symbol["SYM"] = 3000   # mai NOU → suprascrie
+        b.save_state_to_file_if_enabled()
+        data = json.load(open(fname))
+        self.assertEqual(data["items"]["SYM"], [[9, 9.0]])
+
+    def test_resync_reloads_when_file_newer(self):
+        fname = _tmp_file(self.tmp, "r.json")
+        # Procesul A scrie date noi pe disc
+        a = self._mgr(fname)
+        with a.lock:
+            a.cache["SYM"] = [[5, 5.0]]
+            a.fetchtime_time_per_symbol["SYM"] = 5000
+        a.save_state_to_file_if_enabled()
+        # Procesul B are date vechi în memorie → resync trebuie să reîncarce
+        b = ConcreteTestManager(9999, ["SYM"], fname)
+        with b.lock:
+            b.cache["SYM"] = [[1, 1.0]]
+            b.fetchtime_time_per_symbol["SYM"] = 1000
+        b.resync_mem_file()
+        with b.lock:
+            self.assertEqual(b.cache["SYM"], [[5, 5.0]])   # reîncărcat din fișier
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

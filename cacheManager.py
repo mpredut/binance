@@ -73,6 +73,7 @@ class CacheManagerInterface(ABC):
     MAX_FILE_BYTES             = 1_000_000_000    # ~1 GB: peste asta → rotație
     RETENTION_CHECK_INTERVAL_SEC = 7 * 24 * 3600  # verificare săptămânală
     ROTATE_KEEP_FRACTION       = 0.10             # la rotație păstrăm ultimele 10%
+    RESYNC_INTERVAL_SEC        = 10 * 60          # reconciliere mem↔fișier la 10 min
 
     def __init__(self, sync_ts, symbols, filename, append_mode = True, api_client=api,
                  append_persist=False):
@@ -212,11 +213,48 @@ class CacheManagerInterface(ABC):
             self.save_state_to_file_if_enabled()
 
 
+    # ── Reziliență mem↔fișier: freshness + guard + resync ─────────────────────
+    def _mem_max_ts(self):
+        """Freshness memoriei: cel mai recent fetchtime (ms)."""
+        if not self.fetchtime_time_per_symbol:
+            return 0
+        try:
+            return max(self.fetchtime_time_per_symbol.values())
+        except Exception:
+            return 0
+
+    def _persisted_max_ts(self):
+        """Freshness fișierului din sidecar .meta (citire ieftină)."""
+        try:
+            with open(self.filename + ".meta") as mf:
+                return json.load(mf).get("max_ts", 0)
+        except Exception:
+            return 0
+
+    def _write_meta(self):
+        """Sidecar mic cu freshness (max_ts) + fetchtime + counts. Atomic."""
+        try:
+            tmp = self.filename + ".meta.tmp"
+            with open(tmp, "w") as mf:
+                json.dump({"max_ts": self._mem_max_ts(),
+                           "saved_at": int(time.time() * 1000),
+                           "fetchtime": self.fetchtime_time_per_symbol,
+                           "counts": self._persisted_counts}, mf)
+            os.replace(tmp, self.filename + ".meta")
+        except Exception as e:
+            print(f"[{self.cls_name}][Eroare] meta {self.filename}: {e}")
+
     def save_state_to_file_if_enabled(self):
         if not self.save_state:
             return
+        # GUARD: NU suprascrie date mai NOI din fișier (alt proces a scris între timp).
+        if self._persisted_max_ts() > self._mem_max_ts():
+            builtins.print(f"[{self.cls_name}][resync] fișier mai nou decât memoria → "
+                           f"refuz suprascrierea cu date vechi ({self.filename})")
+            return
         if self.append_persist:
             self._save_jsonl_append()
+            self._write_meta()
             return
         try:
             with self.lock:
@@ -228,13 +266,41 @@ class CacheManagerInterface(ABC):
                     }, f, indent=1)
                 os.replace(tmp_file, self.filename)
                 print(f"[{self.cls_name}][info] Save cache to file {self.filename}")
+            self._write_meta()
         except Exception as e:
             print(f"[{self.cls_name}][Eroare] La salvarea fișierului cache {self.filename} / .tmp : {e}")
+
+    def _reload_from_disk(self):
+        """Reîncarcă cache-ul din fișier (când fișierul e mai nou — alt proces)."""
+        if self.append_persist:
+            self._load_jsonl()
+            return
+        if os.path.exists(self.filename):
+            try:
+                with open(self.filename) as f:
+                    data = json.load(f)
+                with self.lock:
+                    items = data.get("items", {})
+                    if isinstance(items, dict):
+                        self.cache = items
+                    self.fetchtime_time_per_symbol = data.get("fetchtime", {})
+            except Exception as e:
+                print(f"[{self.cls_name}][Eroare] reload {self.filename}: {e}")
+
+    def resync_mem_file(self):
+        """Reconciliere periodică: fișier mai nou → reîncarc; memorie mai nouă → scriu."""
+        file_ts = self._persisted_max_ts()
+        mem_ts = self._mem_max_ts()
+        if file_ts > mem_ts:
+            builtins.print(f"[{self.cls_name}][resync] fișier mai nou → reîncarc ({self.filename})")
+            self._reload_from_disk()
+        elif mem_ts > file_ts and self.save_state:
+            self.save_state_to_file_if_enabled()
 
     # ── Persistență APPEND (JSONL) pentru cache-uri pur-append ────────────────
     def _save_jsonl_append(self):
         """Scrie DOAR items-urile noi (delta de la ultimul flush), prin append.
-        Nu rescrie tot fișierul. fetchtime + counts într-un sidecar mic."""
+        Nu rescrie tot fișierul. (meta o scrie save_state_to_file_if_enabled)."""
         try:
             with self.lock:
                 with open(self.filename, "a") as f:
@@ -245,9 +311,6 @@ class CacheManagerInterface(ABC):
                         for item in items[start:]:
                             f.write(json.dumps({"s": symbol, "i": item}) + "\n")
                         self._persisted_counts[symbol] = len(items)
-                with open(self.filename + ".meta", "w") as mf:
-                    json.dump({"fetchtime": self.fetchtime_time_per_symbol,
-                               "counts": self._persisted_counts}, mf)
         except Exception as e:
             print(f"[{self.cls_name}][Eroare] append JSONL {self.filename}: {e}")
 
@@ -289,6 +352,7 @@ class CacheManagerInterface(ABC):
                             f.write(json.dumps({"s": symbol, "i": item}) + "\n")
                 os.replace(tmp, self.filename)
                 self._persisted_counts = {s: len(v) for s, v in self.cache.items()}
+            self._write_meta()
         except Exception as e:
             print(f"[{self.cls_name}][Eroare] compact JSONL {self.filename}: {e}")
 
@@ -432,6 +496,7 @@ class CacheManagerInterface(ABC):
 
         def run():
             last_maint = time.time()
+            last_resync = time.time()
             while True:
                 print(f"\n[{self.cls_name}] Sync started at {time.strftime('%Y-%m-%d %H:%M:%S')} for {self.symbols}")
                 if _should_poll_for_manager(self.cls_name):
@@ -439,7 +504,11 @@ class CacheManagerInterface(ABC):
                 else:
                     print(f"[{self.cls_name}] Skip polling (WS-only mode active, WS healthy).")
                 print(f"[{self.cls_name}] save state is {self.save_state}.")
-                self.save_state_to_file_if_enabled()
+                self.save_state_to_file_if_enabled()   # are guard anti-suprascriere date vechi
+                # Reconciliere mem↔fișier periodică (la 10 min)
+                if (time.time() - last_resync) > self.RESYNC_INTERVAL_SEC:
+                    self.resync_mem_file()
+                    last_resync = time.time()
                 # Mentenanță retenție/rotație (append): săptămânal
                 if self.append_persist and (time.time() - last_maint) > self.RETENTION_CHECK_INTERVAL_SEC:
                     self.maintain_append_persist()
