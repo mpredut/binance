@@ -45,10 +45,14 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
     for order_id in list(orders.keys()):
         order = orders[order_id]
         price = order['price']
-        
+
+        if not price or price <= 0:          # gardă: evită împărțirea la 0 pe preț invalid
+            print(f"Preț invalid ({price}) pentru ordinul {order_id}, sar peste.")
+            continue
+
         if order_id not in initial_prices:
             initial_prices[order_id] = price
-        
+
         difference_percent = abs(current_price - price) / price * 100
         print(f"{order_type.capitalize()} price {price}, current price {current_price} difference: {difference_percent:.2f}%, Order ID {order_id}")
         
@@ -149,4 +153,6 @@ def monitor_orders():
             print(f"Eroare: {e}")
             time.sleep(TIME_SLEEP_ERROR)
 
-monitor_orders()
+
+if __name__ == "__main__":
+    monitor_orders()
