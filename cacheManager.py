@@ -74,7 +74,7 @@ class CacheManagerInterface(ABC):
     RETENTION_CHECK_INTERVAL_SEC = 7 * 24 * 3600  # verificare săptămânală
     ROTATE_KEEP_FRACTION       = 0.10             # la rotație păstrăm ultimele 10%
     RESYNC_INTERVAL_SEC        = 10 * 60          # reconciliere mem↔fișier la 10 min
-    DEDUP_WINDOW               = 2000             # dedup per-update doar față de ultimele N items
+    DEDUP_WINDOW               = 100             # dedup per-update doar față de ultimele N items
 
     def __init__(self, sync_ts, symbols, filename, append_mode = True, api_client=api,
                  append_persist=False):
