@@ -76,7 +76,8 @@ class TradeCacheManager:
     
     def _get_my_trades(self, symbol, startTime):
         try:
-            new_trades = api.client.get_my_trades(symbol=symbol, startTime=start_time)
+            # `startTime` e parametrul (înainte folosea `start_time` inexistent → NameError)
+            new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime)
         except Exception as e:
             print(f"[Eroare] Binance API pentru {symbol}: {e}")
             return

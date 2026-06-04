@@ -203,7 +203,7 @@ def get_my_trades_24_NEW(order_type, symbol, days_ago=0, limit=1000):
             for o in filtered_orders:
                 trade_like = {
                     'symbol': o['symbol'],
-                    'Id': o['orderId'],
+                    'id': o['orderId'],            # cheia e 'id' (consumatorii o folosesc), nu 'Id'
                     'orderId': o['orderId'],
                     'price': o['price'],
                     'qty': o['executedQty'],       # cantitatea total executată
@@ -638,11 +638,12 @@ def compare_trade_sources(symbol, order_type="BUY", max_age_seconds=3600, limit=
             and (current_time_ms - trade['time']) <= max_age_ms
         }
 
-    # 1. Cache principal
+    # 1. Cache principal (trade_cache e o LISTĂ de trade-uri)
     main_map = filter_trades(trade_cache)
 
-    # 2. TCM cache
-    tcm_map = filter_trades(cache_trade_manager.cache)
+    # 2. TCM cache — .cache e un DICT {symbol: [trades]}, deci luăm lista simbolului
+    # (înainte se itera dict-ul → cheile/simbolurile → trade['symbol'] pe string → crash)
+    tcm_map = filter_trades(cache_trade_manager.cache.get(symbol, []) if cache_trade_manager else [])
 
     # 3. API Binance
     try:

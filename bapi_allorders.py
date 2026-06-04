@@ -48,7 +48,9 @@ def get_filled_orders_bed(order_type, symbol, backdays=3, limit=1000):
                 print(f"[Eroare Binance] {symbol}: {api_err}")
                 orders = []
 
-            print(f"{len(orders)} orders retrieved for interval {interval_ms/60*60*1000}")
+            # NOTĂ: un singur get_all_orders/interval e plafonat la `limit` (1000) →
+            # dacă un interval are > 1000 ordine, se trunchiază (ar trebui paginat pe orderId).
+            print(f"{len(orders)} orders retrieved for interval {interval_ms/(60*60*1000):.0f}h")
 
             filtered_orders = [
                 {
