@@ -419,6 +419,12 @@ class BinanceUserDataStream(BinanceWSBase):
             self._watchdog_thread.start()
         return self
 
+    def stop(self, timeout: float = WS_STOP_TIMEOUT) -> bool:
+        ok = super().stop(timeout=timeout)              # setează _stop_event + join run-thread
+        if self._watchdog_thread and self._watchdog_thread.is_alive():
+            self._watchdog_thread.join(timeout=timeout)  # oprire curată și a watchdog-ului
+        return ok
+
     # ─── logon semnat (login + keepalive) ─────────────────────────────────────
     def _signed_logon_msg(self, msg_id: str) -> str:
         timestamp = int(time.time() * 1000)

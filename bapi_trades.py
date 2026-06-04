@@ -266,49 +266,30 @@ def get_my_trades(order_type, symbol, backdays: int = 3, limit=1000):
         
         
 def get_my_trades_simple(order_type, symbol, backdays=3, limit=1000):
-   
+
     sym.validate_ordertype(order_type)
     sym.validate_symbols(symbol)
-    
-    all_trades = []
+
     try:
-        current_time = int(time.time() * 1000) 
+        import bapi_allorders as apiorders
+        # PAGINAT pe toată fereastra (fromId) → nu mai trunchiem la 1000 când o zi are
+        # mai multe trade-uri (înainte: o singură cerere/zi → pierdea înregistrări).
+        start_time = int(time.time() * 1000) - (backdays + 1) * 24 * 60 * 60 * 1000
+        all_trades = apiorders.paginate_my_trades(api.client, symbol, start_time, limit)
 
-        max_interval = 24 * 60 * 60 * 1000
+        if order_type == "BUY":
+            all_trades = [t for t in all_trades if t['isBuyer']]
+        elif order_type == "SELL":
+            all_trades = [t for t in all_trades if not t['isBuyer']]
 
-        end_time = current_time
-
-        for day in range(backdays + 1):
-            # Calculam start_time pentru ziua curenta in intervalul de 24 de ore
-            start_time = end_time - max_interval
-            print(f"get_my_trades_simple: Fetching trades for day {day}...")
-            time.sleep(2)
-            trades = api.client.get_my_trades(symbol=symbol, limit=limit, startTime=start_time, endTime=end_time)
-            if trades:
-                #filtered_trades = [trade for trade in trades if trade['isBuyer'] == (order_type == "BUY")]
-                if order_type == "BUY":
-                    filtered_trades = [trade for trade in trades if trade['isBuyer']]
-                elif order_type == "SELL":
-                    filtered_trades = [trade for trade in trades if not trade['isBuyer']]
-                else:
-                    filtered_trades = trades
-                
-                all_trades.extend(filtered_trades)
-            
-            # Actualizam end_time pentru ziua anterioara (inainte de aceasta perioada de 24 de ore)
-            end_time = start_time
-
-        #return all_trades
-        ##HACK elimin trades duplicate pe baza orderId
+        # dedup pe orderId, păstrând trade-ul cel mai recent
         latest_trades = {}
         for trade in all_trades:
             order_id = trade['orderId']
-            
-            # Verificam daca nu avem deja acest `orderId` sau daca tranzactia curenta este mai recenta
             if order_id not in latest_trades or trade['time'] > latest_trades[order_id]['time']:
-                latest_trades[order_id] = trade  # Actualizam cu cea mai recenta tranzactie
+                latest_trades[order_id] = trade
 
-        return list(latest_trades.values()) #lista nu dictionar!
+        return list(latest_trades.values())
 
     except Exception as e:
         print(f"An error occurred: {e}")
