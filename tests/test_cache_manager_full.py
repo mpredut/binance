@@ -1179,5 +1179,36 @@ class TestMemFileResync(unittest.TestCase):
             self.assertEqual(b.cache["SYM"], [[5, 5.0]])   # reîncărcat din fișier
 
 
+class TestAtomicWrite(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def test_atomic_write_json_roundtrip(self):
+        p = os.path.join(self.tmp, "a.json")
+        cm.atomic_write_json(p, {"x": 1, "y": [2, 3]})
+        with open(p) as f:
+            self.assertEqual(json.load(f), {"x": 1, "y": [2, 3]})
+        self.assertFalse(os.path.exists(p + ".tmp"))   # tmp curățat
+
+    def test_atomic_write_cleanup_on_error(self):
+        p = os.path.join(self.tmp, "b.json")
+        with self.assertRaises(ValueError):
+            with cm.atomic_write(p) as f:
+                f.write("partial")
+                raise ValueError("boom")
+        self.assertFalse(os.path.exists(p))            # fișierul țintă neatins
+        self.assertFalse(os.path.exists(p + ".tmp"))   # tmp șters
+
+    def test_atomic_write_preserves_old_on_error(self):
+        p = os.path.join(self.tmp, "c.json")
+        cm.atomic_write_json(p, {"v": "vechi"})
+        with self.assertRaises(ValueError):
+            with cm.atomic_write(p) as f:
+                f.write("nou-incomplet")
+                raise ValueError("boom")
+        with open(p) as f:
+            self.assertEqual(json.load(f), {"v": "vechi"})   # conținutul vechi intact
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

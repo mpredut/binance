@@ -1,5 +1,6 @@
 import json
 import os
+import contextlib
 import time
 import datetime
 import asyncio
@@ -24,6 +25,33 @@ import bapi as api
 def print(*args, **kwargs):
    pass
 #log.print = lambda *args, **kwargs: None
+
+
+@contextlib.contextmanager
+def atomic_write(path):
+    """Context-manager pentru scriere atomică: dă un file handle pe `path + .tmp`,
+    iar la ieșirea cu succes face os.replace(tmp, path) (rename atomic). La eroare
+    șterge tmp-ul și re-ridică. Un cititor cross-process vede ori fișierul vechi,
+    ori cel nou complet — niciodată unul parțial. Folosit pt JSON și JSONL."""
+    tmp = path + ".tmp"
+    f = open(tmp, "w")
+    try:
+        yield f
+        f.close()
+        os.replace(tmp, path)
+    except BaseException:
+        f.close()
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def atomic_write_json(path, obj, indent=None):
+    """Scriere atomică a unui JSON (vezi atomic_write). Ridică excepția la eroare."""
+    with atomic_write(path) as f:
+        json.dump(obj, f, indent=indent)
 
 #log.disable_print()
 
@@ -241,13 +269,11 @@ class CacheManagerInterface(ABC):
     def _write_meta(self):
         """Sidecar mic cu freshness (max_ts) + fetchtime + counts. Atomic."""
         try:
-            tmp = self.filename + ".meta.tmp"
-            with open(tmp, "w") as mf:
-                json.dump({"max_ts": self._mem_max_ts(),
-                           "saved_at": int(time.time() * 1000),
-                           "fetchtime": self.fetchtime_time_per_symbol,
-                           "counts": self._persisted_counts}, mf)
-            os.replace(tmp, self.filename + ".meta")
+            atomic_write_json(self.filename + ".meta",
+                              {"max_ts": self._mem_max_ts(),
+                               "saved_at": int(time.time() * 1000),
+                               "fetchtime": self.fetchtime_time_per_symbol,
+                               "counts": self._persisted_counts})
         except Exception as e:
             print(f"[{self.cls_name}][Eroare] meta {self.filename}: {e}")
 
@@ -269,13 +295,10 @@ class CacheManagerInterface(ABC):
             return
         try:
             with self.lock:
-                tmp_file = self.filename + ".tmp"
-                with open(tmp_file, "w") as f:
-                    json.dump({
-                        "items": self.cache,
-                        "fetchtime": self.fetchtime_time_per_symbol
-                    }, f, indent=1)
-                os.replace(tmp_file, self.filename)
+                atomic_write_json(self.filename,
+                                  {"items": self.cache,
+                                   "fetchtime": self.fetchtime_time_per_symbol},
+                                  indent=1)
                 print(f"[{self.cls_name}][info] Save cache to file {self.filename}")
             self._write_meta()
         except Exception as e:
@@ -365,12 +388,10 @@ class CacheManagerInterface(ABC):
                             seen.add(k)
                             deduped.append(item)
                     self.cache[symbol] = deduped   # dedup și în memorie
-                tmp = self.filename + ".tmp"
-                with open(tmp, "w") as f:
+                with atomic_write(self.filename) as f:
                     for symbol, items in self.cache.items():
                         for item in items:
                             f.write(json.dumps({"s": symbol, "i": item}) + "\n")
-                os.replace(tmp, self.filename)
                 self._persisted_counts = {s: len(v) for s, v in self.cache.items()}
             self._write_meta()
         except Exception as e:
@@ -1254,10 +1275,7 @@ class CacheInstantTrendManager:
     # ── Store cross-process (fișier JSON, atomic) ─────────────────────────────
     def _write_file(self):
         try:
-            tmp = self.filename + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump(self._mem, f)
-            os.replace(tmp, self.filename)
+            atomic_write_json(self.filename, self._mem)
         except Exception as e:
             print(f"[CacheInstantTrendManager] scriere {self.filename}: {e}")
 
