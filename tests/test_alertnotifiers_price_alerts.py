@@ -89,5 +89,38 @@ class PriceAlertLinkTests(unittest.TestCase):
         self.assertIn("Link: https://coinmarketcap.com/currencies/tao/", message)
 
 
+class TestNewCoinDictRobustness(unittest.TestCase):
+    """Alertele de monedă nouă sunt dict-uri (nu PriceAlert) — nu trebuie să crape."""
+
+    NEW_COIN = {
+        "type": "new_coin_discovered", "source": "coinmarketcap",
+        "symbol": "RWS", "name": "Real World Services", "added_at": None,
+        "price": 0.0154, "auto_added": True, "has_price": True,
+        "url": "https://coinmarketcap.com/currencies/real-world-services/",
+    }
+
+    def test_alert_symbol_dict_and_obj(self):
+        self.assertEqual(AlertNotifier.alert_symbol(self.NEW_COIN), "RWS")
+        alert = PriceAlert("TAO", "up", 100.0, 90.0, 11.0, 5.0)
+        self.assertEqual(AlertNotifier.alert_symbol(alert), "TAO")
+
+    def test_save_to_file_handles_new_coin_dict(self):
+        import tempfile, os
+        path = os.path.join(tempfile.mkdtemp(), "alerts.log")
+        self.assertTrue(AlertNotifier.save_to_file(self.NEW_COIN, filename=path))
+        self.assertIn("NEW COIN RWS", open(path, encoding="utf-8").read())
+
+    def test_format_batch_mixed(self):
+        alert = PriceAlert("TAO", "down", 80.0, 100.0, -20.0, 7.5)
+        msg = AlertNotifier.format_batch_message([self.NEW_COIN, alert])
+        self.assertIn("RWS", msg)
+        self.assertIn("TAO", msg)
+
+    def test_send_does_not_raise_on_dict(self):
+        # file activ, fără rețea — nu trebuie excepție pe dict
+        AlertNotifier.send(self.NEW_COIN, enable_console=False, enable_file=True,
+                           enable_email=False, enable_phone_webhook=False)
+
+
 if __name__ == "__main__":
     unittest.main()

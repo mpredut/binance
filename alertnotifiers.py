@@ -39,6 +39,13 @@ class AlertNotifier:
         return isinstance(alert, dict) and alert.get("type") == "new_coin_discovered"
 
     @staticmethod
+    def alert_symbol(alert: Any) -> str:
+        """Simbolul, indiferent dacă alert e obiect PriceAlert sau dict (monedă nouă)."""
+        if isinstance(alert, dict):
+            return alert.get("symbol", "N/A")
+        return getattr(alert, "symbol", "N/A")
+
+    @staticmethod
     def format_new_coin_message(alert: dict) -> str:
         lines = [
             f"🆕 NEW COIN: {alert.get('symbol', 'N/A')} - {alert.get('name', alert.get('symbol', 'N/A'))}",
@@ -91,10 +98,16 @@ class AlertNotifier:
         if not alert_file.is_absolute():
             alert_file = BASE_DIR / alert_file
         try:
-            reference_time = AlertNotifier.format_human_readable_time(
-                getattr(alert, "reference_time", None) or getattr(alert, "timestamp", None)
-            )
             with alert_file.open("a", encoding="utf-8") as f:
+                if AlertNotifier.is_new_coin_alert(alert):
+                    f.write(f"[{datetime.now().isoformat()}] NEW COIN {alert.get('symbol')} "
+                            f"(source: {alert.get('source', 'unknown')})\n")
+                    f.write(AlertNotifier.format_new_coin_message(alert) + "\n")
+                    f.write("-" * 50 + "\n")
+                    return True
+                reference_time = AlertNotifier.format_human_readable_time(
+                    getattr(alert, "reference_time", None) or getattr(alert, "timestamp", None)
+                )
                 f.write(f"[{datetime.now().isoformat()}] {alert.symbol} - {alert.alert_type} - {alert.percent_change:+.2f}%\n")
                 f.write(f"  Price: ${alert.current_price:.4f}\n")
                 f.write(f"  Reference: ${alert.reference_price:.4f} (at {reference_time})\n")
@@ -124,7 +137,7 @@ class AlertNotifier:
             print("[Notifier] Email: SMTP_USERNAME, SMTP_PASSWORD, and ALERT_TO_EMAIL are required")
             return False
 
-        symbols = ", ".join(alert.symbol for alert in alerts)
+        symbols = ", ".join(AlertNotifier.alert_symbol(alert) for alert in alerts)
         subject = f"CryptoAlerts: {len(alerts)} symbols ({symbols})"
         body = AlertNotifier.format_batch_message(alerts)
         msg = MIMEText(body, "plain", "utf-8")
@@ -156,7 +169,7 @@ class AlertNotifier:
             print("[Notifier] Phone webhook: PHONE_ALERT_URL or NTFY_TOPIC is missing")
             return False
 
-        symbols = ", ".join(alert.symbol for alert in alerts)
+        symbols = ", ".join(AlertNotifier.alert_symbol(alert) for alert in alerts)
         title = f"({len(alerts)}): {symbols}"
 
         message = AlertNotifier.format_batch_message(alerts)
@@ -165,11 +178,14 @@ class AlertNotifier:
 
         try:
             if "ntfy.sh/" in webhook_url:
+                # Header-ele HTTP sunt latin-1 → titlul (poate avea simboluri non-ASCII,
+                # ex. '小蝌蚪') se sanitizează; mesajul UTF-8 din corp rămâne intact.
+                ascii_title = title.encode("ascii", "ignore").decode().strip() or "CryptoAlerts"
                 response = requests.post(
                     webhook_url,
                     data=message.encode("utf-8"),
                     headers={
-                        "Title": title,
+                        "Title": ascii_title,
                         "Priority": os.environ.get("NTFY_PRIORITY", "high"),
                         "Tags": tags,
                     },
