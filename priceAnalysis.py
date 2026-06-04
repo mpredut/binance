@@ -324,11 +324,87 @@ def format_timestamp(ts):
     return datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
 
 
+# Minim de puncte într-o fereastră ca slope-ul să fie credibil; sub el = gap.
+MIN_POINTS_PER_WINDOW = 4
+
+
+def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
+                           min_consecutive_blocks=3, noise_tolerance=2,
+                           min_points_per_window=MIN_POINTS_PER_WINDOW):
+    """Detectează trendul pe ferestre definite în TIMP (nu în număr de puncte),
+    deci robust la densitate neuniformă și găuri — fără să modifice datele brute.
+
+    timestamps: secunde, sortate crescător. Fereastra acoperă [t, t+window_hours];
+    pasul e step_hours reali. O fereastră cu < min_points_per_window puncte = gap
+    și OPREȘTE trendul acolo (nu inventăm date peste gol).
+
+    Întoarce dict {direction, start_timestamp, duration_seconds,
+    estimated_future_hours, current_slope_h, blocks(perechi de indici pt desen)} sau None.
+    """
+    timestamps = np.asarray(timestamps, dtype=float)
+    prices = np.asarray(prices, dtype=float)
+    if len(timestamps) < 2:
+        return None
+
+    t_end, t_first = timestamps[-1], timestamps[0]
+    window_sec = window_hours * 3600.0
+    step_sec = step_hours * 3600.0
+
+    def slope_h(t_lo, t_hi):
+        """slope/oră pe punctele din [t_lo, t_hi) + (lo, hi) indici; None dacă gap."""
+        lo = int(np.searchsorted(timestamps, t_lo, "left"))
+        hi = int(np.searchsorted(timestamps, t_hi, "left"))
+        if hi - lo < min_points_per_window:
+            return None, (lo, hi)
+        x, y = timestamps[lo:hi], prices[lo:hi]
+        s, _ = np.polyfit(x - x[0], y, 1)
+        return s * 3600.0, (lo, hi)
+
+    cur, cur_idx = slope_h(t_end - window_sec, t_end + 1.0)
+    if cur is None:
+        return None                                  # date recente insuficiente
+    current_sign = np.sign(cur) or 1.0
+
+    blocks = [cur_idx]
+    consecutive, noise = 1, 0
+    t_ws = t_end - window_sec - step_sec
+    while t_ws >= t_first:
+        s, idx = slope_h(t_ws, t_ws + window_sec)
+        if s is None:
+            break                                    # gap → nu confirmăm peste gol
+        if np.sign(s) == current_sign:
+            blocks.append(idx); consecutive += 1; noise = 0
+        elif noise < noise_tolerance:
+            noise += 1; blocks.append(idx)
+        elif consecutive >= min_consecutive_blocks:
+            break
+        else:
+            blocks.append(idx)
+        t_ws -= step_sec
+
+    if len(blocks) < min_consecutive_blocks:
+        return None
+
+    trend_start_ts = timestamps[blocks[-1][0]] - (noise_tolerance + 1) * window_sec
+    duration_seconds = t_end - trend_start_ts
+    if duration_seconds <= 0:
+        return None
+    return {
+        'direction': 'up' if current_sign > 0 else 'down',
+        'start_timestamp': float(trend_start_ts),
+        'duration_seconds': float(duration_seconds),
+        'estimated_future_hours': float(duration_seconds / 3600.0 * 0.5),
+        'current_slope_h': float(cur),
+        'blocks': blocks,
+    }
+
+
 def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int = 8,
                            min_consecutive_blocks: int = 3,
                            noise_tolerance: int = 2,  # ← NOU: permite 2 blocuri zgomot
                            lookback_days: int = 30,
-                           draw: bool = True) -> Optional[dict]:
+                           draw: bool = True,
+                           min_points_per_window: int = MIN_POINTS_PER_WINDOW) -> Optional[dict]:
     data: List[Tuple[int, float]] = priceLstFor(symbol)
     if len(data) < 2:
         return None
@@ -344,96 +420,39 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
         return None
     
     timestamps, prices = zip(*data)
-    timestamps = np.array(timestamps) / 1000
+    timestamps = np.array(timestamps) / 1000      # ms → secunde
     prices = np.array(prices)
-    
-    delta = np.median(np.diff(timestamps))
-    points_per_hour = int(3600 / delta)
-    window = min(points_per_hour * window_hours, len(prices))
-    step = points_per_hour * step_hours
-    
-    print(f"\n{'='*60}")
-    print(f"[{symbol}] Analiză trend")
-    print(f"{'='*60}")
-    print(f"Puncte totale:  {len(prices)}")
-    print(f"Fereastră:      {window} puncte ({window_hours}h)")
-    print(f"Pas:            {step} puncte ({step_hours}h)")
-    print(f"Toleranță zgomot: {noise_tolerance} blocuri")
-    
-    # Detectăm semnul trendului curent (ultimul bloc)
-    last_start = len(prices) - window
-    last_x = timestamps[last_start:] - timestamps[last_start]
-    last_y = prices[last_start:]
-    current_slope_s, _ = np.polyfit(last_x, last_y, 1)
-    current_slope_h = current_slope_s * 3600
-    current_sign = np.sign(current_slope_h)
-    
-    trend_emoji = "📈" if current_sign > 0 else "📉"
-    print(f"\nTrend curent:   {trend_emoji} {'UP' if current_sign > 0 else 'DOWN'}")
-    print(f"Slope/h:        {current_slope_h:.6f}")
-    
-    # Mergem backwards și căutăm când s-a schimbat semnul
-    trend_blocks = [(last_start, len(prices))]
-    consecutive_same_sign = 1
-    noise_counter = 0  # ← NOU: contorizează blocurile cu semn opus
-    
-    for start in range(len(prices) - window - step, -1, -step):
-        end = start + window
-        x_block = timestamps[start:end] - timestamps[start]
-        y_block = prices[start:end]
-        
-        slope_s, _ = np.polyfit(x_block, y_block, 1)
-        slope_h = slope_s * 3600
-        block_sign = np.sign(slope_h)
-        
-        if block_sign == current_sign:
-            # Același semn - continuăm trendul și resetăm noise
-            trend_blocks.append((start, end))
-            consecutive_same_sign += 1
-            noise_counter = 0  # ← resetăm zgomotul
-        elif noise_counter < noise_tolerance:
-            # Semn diferit dar încă în zona de toleranță
-            noise_counter += 1
-            trend_blocks.append((start, end))  # ← includem și zgomotul
-            print(f"   Zgomot detectat ({noise_counter}/{noise_tolerance}) la {format_timestamp(timestamps[start])}")
-        elif consecutive_same_sign >= min_consecutive_blocks:
-            # Am avut suficiente blocuri + zgomotul a fost depășit → STOP
-            print(f"\n⚠️  Schimbare trend reală la: {format_timestamp(timestamps[start])}")
-            print(f"   (după {consecutive_same_sign} blocuri + {noise_counter} zgomot)")
-            break
-        else:
-            # Nu avem suficiente blocuri consecutive → continuăm
-            trend_blocks.append((start, end))
-    
-    if len(trend_blocks) < min_consecutive_blocks:
-        print(f"\n❌ Insuficiente blocuri consecutive: {len(trend_blocks)} < {min_consecutive_blocks}")
+
+    # Calcul pe ferestre definite în TIMP (robust la densitate neuniformă + găuri).
+    res = detect_long_term_trend(
+        timestamps, prices, window_hours=window_hours, step_hours=step_hours,
+        min_consecutive_blocks=min_consecutive_blocks, noise_tolerance=noise_tolerance,
+        min_points_per_window=min_points_per_window)
+
+    if res is None:
+        print(f"[{symbol}] Trend indeterminabil (date insuficiente sau gap în fereastra recentă).")
         return None
-    
-    # Calculăm durata trendului
-    trend_start_ts = timestamps[trend_blocks[-1][0]]
-    trend_start_ts = trend_start_ts - (noise_tolerance+1) * window_hours * 60 * 60 # totdeauna in realitate a inceput mai devreme! 
-    duration_seconds = timestamps[-1] - trend_start_ts
-    duration_hours = duration_seconds / 3600
-    duration_days = duration_seconds / 86400
-    
-    trend_direction = 'up' if current_sign > 0 else 'down'
-    
-    print(f"\n✅ REZULTAT:")
-    print(f"   Direcție:        {trend_emoji} {trend_direction.upper()}")
-    print(f"   Start trend:     {format_timestamp(trend_start_ts)}")
-    print(f"   Durată:          {format_duration(duration_seconds)} ({duration_days:.1f} zile)")
-    print(f"   Blocuri trend:   {len(trend_blocks)}")
+
+    direction = res['direction']
+    emoji = "📈" if direction == 'up' else "📉"
+    dur = res['duration_seconds']
+    print(f"\n{'='*60}")
+    print(f"[{symbol}] Trend {emoji} {direction.upper()} | slope/h={res['current_slope_h']:.4f}")
+    print(f"  Puncte (ultimele {lookback_days}z): {len(prices)} | fereastră={window_hours}h "
+          f"pas={step_hours}h | blocuri={len(res['blocks'])}")
+    print(f"  Start: {format_timestamp(res['start_timestamp'])} | "
+          f"Durată: {format_duration(dur)} ({dur/86400:.1f} zile)")
     print(f"{'='*60}\n")
-    
+
     if draw:
-        drawPriceLst(timestamps, prices, trend_blocks, symbol, trend_direction, duration_hours)
-    
+        drawPriceLst(timestamps, prices, res['blocks'], symbol, direction, dur / 3600.0)
+
     return {
         'timestamp': int(time.time()),
-        'direction': trend_direction,
-        'start_timestamp': trend_start_ts,
-        'duration_seconds': duration_seconds,
-        'estimated_future_hours': duration_hours * 0.5
+        'direction': direction,
+        'start_timestamp': res['start_timestamp'],
+        'duration_seconds': dur,
+        'estimated_future_hours': res['estimated_future_hours'],
     }
 
 # Și pentru write_all_trends, adaugă formatare:
