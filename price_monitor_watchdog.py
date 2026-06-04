@@ -92,9 +92,12 @@ def _send_ntfy(title, message):
         return False
     try:
         import requests
+        # Header-ele HTTP trebuie latin-1 → titlul (cu emoji) se sanitizează la ASCII;
+        # emoji rămâne în corpul mesajului (trimis ca UTF-8).
+        ascii_title = title.encode("ascii", "ignore").decode().strip() or "Price monitor alert"
         if "ntfy.sh/" in url:
             r = requests.post(url, data=message.encode("utf-8"),
-                              headers={"Title": title, "Priority": "urgent",
+                              headers={"Title": ascii_title, "Priority": "urgent",
                                        "Tags": "warning"}, timeout=10)
         else:
             r = requests.post(url, json={"title": title, "message": message}, timeout=10)
