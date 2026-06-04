@@ -149,10 +149,11 @@ class CacheManagerInterface(ABC):
         with self.lock:
             return list(self.cache.keys())       
         
-    @abstractmethod
     def rebuild_fetchtime_times(self):
-        """Metoda abstractă – trebuie implementată de clasele derivate."""
-        pass 
+        """Default: None → __rebuild_fetchtime_times deduce generic din timestamp-urile
+        item-urilor (dict 'time'/'timestamp' sau listă [ts, ...]). Subclasele pot
+        suprascrie dacă au o logică specifică."""
+        return None
     
     
     def __rebuild_fetchtime_times(self):
@@ -565,9 +566,6 @@ class CacheTradeManager(CacheManagerInterface):
         required_keys = ['symbol', 'id', 'orderId', 'price', 'qty', 'time', 'isBuyer']
         return all(k in trade for k in required_keys)
 
-    def rebuild_fetchtime_times(self):
-        return None
-        
     def get_remote_items(self, symbol, startTime):
         import importlib
         apitrades = importlib.import_module("bapi_trades")
@@ -601,16 +599,9 @@ class CacheOrderManager(CacheManagerInterface):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
         
     def _is_valid_trade(self, trade):
-       required_keys = ['orderId', 'price', 'quantity', 'timestamp', 'side']    
+       required_keys = ['orderId', 'price', 'quantity', 'timestamp', 'side']
        return all(k in trade for k in required_keys)
-     
-    def get_all_symbols_from_cache(self):
-        with self.lock:
-            return list(self.cache.keys())
-            
-    def rebuild_fetchtime_times(self):
-        return None
-        
+
     def get_remote_items(self, symbol, startTime):
         #import bapi_trades as apitrades
         import bapi_allorders as apiorders
@@ -763,13 +754,8 @@ class CachePriceTrendManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=False)
 
-    #def get_all_symbols_from_cache(self):
-    #    return [t.get("symbol") for t in self.cache if "symbol" in t]
+    # get_all_symbols_from_cache → moștenit din base (list(self.cache.keys()))
 
-    def get_all_symbols_from_cache(self):
-        with self.lock:
-            return list(self.cache.keys())
-        
     # def rebuild_fetchtime_times(self):
         # """
         # Deducem timpul ultimei înregistrări per simbol din self.cache
