@@ -20,4 +20,4 @@ __pycache__/
 cache_*.jsonl
 *.meta
 *.bak
-.watchdog_state.json
+*.json
