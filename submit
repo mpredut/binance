@@ -1,3 +1,3 @@
 git add -u
-git commit -m'update const dedup to low valuse'
+git commit -m'variate fixes'
 git push origin
