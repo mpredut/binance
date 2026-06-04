@@ -9,7 +9,7 @@ User=predut
 WorkingDirectory=/home/predut/binance
 ExecStart=/bin/bash /home/predut/binance/binance_start.sh
 Restart=always
-RestartSec=1200
+RestartSec=30
 StandardOutput=journal
 StandardError=journal
 
