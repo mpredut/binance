@@ -25,6 +25,7 @@ import runtime_context as rc
 
 import bapi as api
 from bapi_client import client
+import trade_cooldown
 
 
 def _maybe_wait_trend(side, symbol, wait_trend, max_wait_sec):
@@ -413,6 +414,15 @@ def __place_order(order_type, symbol, price, qty, force=False, cancelorders=Fals
         if _maybe_wait_trend(order_type, symbol, wait_trend, max_wait_sec):
             current_price = _fresh_price(symbol)   # preț proaspăt după așteptare
 
+        # GATE anti rapid-fire (cross-proces + cross-thread): nu plasăm două ordine
+        # pe ACELAȘI simbol la < cooldown. Verificare-și-rezervare ATOMICĂ.
+        allowed, last = trade_cooldown.reserve_trade(order_type, symbol)
+        if not allowed:
+            age = time.time() - last.get("timestamp", 0)
+            print(f"[{order_type} {symbol}] BLOCAT de cooldown: ultim ordin "
+                  f"({last.get('side')}) acum {age:.0f}s (< {trade_cooldown.DEFAULT_COOLDOWN_SEC}s)")
+            return None
+
         if order_type == 'SELL':
             price = round(max(price, current_price), 0)
             if force:
@@ -427,12 +437,18 @@ def __place_order(order_type, symbol, price, qty, force=False, cancelorders=Fals
                 order = place_BUY_order(symbol, price, qty);
         else:
             print(f"Invalid order type: {order_type}")
+            trade_cooldown.release_trade(symbol)        # tip invalid → eliberăm rezervarea
             return None
 
+        if order:
+            trade_cooldown.update_binance_order_id(symbol, order.get("orderId"))
+        else:
+            trade_cooldown.release_trade(symbol)        # plasare eșuată → nu blocăm cooldown-ul
         return order
 
     except BinanceAPIException as e:
         print(f"Error placing {order_type.upper()} order: {e}")
+        trade_cooldown.release_trade(symbol)            # excepție → eliberăm rezervarea
         return None
     #except Exception as e:
     #    print(f"place_order: A aparut o eroare: {e}")
