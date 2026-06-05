@@ -230,6 +230,7 @@ def main():
     print("⏳ Starting periodic cleanup (every 6 hours)...")
     cleanup_thread = threading.Thread(
         target=periodic_cleanup,
+        name="periodic_cleanup",
         args=(cachePriceAll, None),
         daemon=True
     )

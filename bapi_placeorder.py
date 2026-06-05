@@ -21,6 +21,7 @@ import utils as u
 import symbols as sym
 import config as cfg
 import priceAnalysis as pa
+import runtime_context as rc
 
 import bapi as api
 from bapi_client import client
@@ -139,15 +140,17 @@ def place_BUY_order(symbol, price, qty):
             return None
 
         price = round(min(price, _fresh_price(symbol)), 2)
-        qty = round(qty, 4)    
+        qty = round(qty, 4)
+        client_order_id = rc.create_client_order_id()
         BUY_order = client.order_limit_buy(
             symbol=symbol,
             quantity=qty,
-            price=str(price)
+            price=str(price),
+            newClientOrderId=client_order_id
         )
-        
+
         if BUY_order:
-            print(f"BUY order placed successfully: {BUY_order['orderId']}")
+            print(f"BUY order placed successfully: {BUY_order['orderId']} clientId {client_order_id}")
         else :
             print(f"Eroare la plasarea ordinului de BUY")
         
@@ -163,15 +166,17 @@ def place_SELL_order(symbol, price, qty):
             return None
 
         price = round(max(price, _fresh_price(symbol)), 2)
-        qty = round(qty, 4)    
+        qty = round(qty, 4)
+        client_order_id = rc.create_client_order_id()
         SELL_order = client.order_limit_sell(
             symbol=symbol,
             quantity=qty,
-            price=str(price)
+            price=str(price),
+            newClientOrderId=client_order_id
         )
-        
+
         if SELL_order:
-            print(f"SELL order placed successfully: {SELL_order['orderId']}")
+            print(f"SELL order placed successfully: {SELL_order['orderId']} clientId {client_order_id}")
         else :
             print(f"Eroare la plasarea ordinului de SELL")
         
@@ -188,21 +193,24 @@ def place_SELL_BUY_order(order_type, symbol, price, qty) :
         return None
     
     order = None
+    client_order_id = rc.create_client_order_id()
     if order_type == "BUY":
         order = client.order_limit_buy(
             symbol=symbol,
             quantity=qty,
-            price=str(price)
+            price=str(price),
+            newClientOrderId=client_order_id
         )
     elif order_type == "SELL":
         order = client.order_limit_sell(
             symbol=symbol,
             quantity=qty,
-            price=str(price)
+            price=str(price),
+            newClientOrderId=client_order_id
         )
-    
+
     if order:
-        print(f"{order_type} order placed successfully: {order['orderId']}")
+        print(f"{order_type} order placed successfully: {order['orderId']} clientId {client_order_id}")
     else :
         print(f"Eroare la plasarea ordinului de {order_type}, pret {price:.2f}")
     return order
@@ -214,13 +222,15 @@ def place_BUY_order_at_market(symbol, qty):
             return None
 
         qty = round(qty, 4)  # Rotunjim cantitatea la 4 zecimale
+        client_order_id = rc.create_client_order_id()
         BUY_order = client.order_market_buy(
             symbol=symbol,
-            quantity=qty
+            quantity=qty,
+            newClientOrderId=client_order_id
         )
-        
+
         if BUY_order:
-            print(f"BUY order de market executat cu succes: {BUY_order['orderId']}")
+            print(f"BUY order de market executat cu succes: {BUY_order['orderId']} clientId {client_order_id}")
         else:
             print(f"Eroare la plasarea ordinului de BUY de market")
         
@@ -237,13 +247,15 @@ def place_SELL_order_at_market(symbol, qty):
             return None
 
         qty = round(qty, 4)  # Rotunjim cantitatea la 4 zecimale
+        client_order_id = rc.create_client_order_id()
         SELL_order = client.order_market_sell(
             symbol=symbol,
-            quantity=qty
+            quantity=qty,
+            newClientOrderId=client_order_id
         )
-        
+
         if SELL_order:
-            print(f"SELL order de market executat cu succes: {SELL_order['orderId']}")
+            print(f"SELL order de market executat cu succes: {SELL_order['orderId']} clientId {client_order_id}")
         else:
             print(f"Eroare la plasarea ordinului de SELL de market")
         

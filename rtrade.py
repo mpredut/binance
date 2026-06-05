@@ -253,8 +253,8 @@ class TradingBot:
                 def run_sell():
                     sell_result[0] = self.repetitive_sell(current_price, self.filled_buy_price)
 
-                t1 = threading.Thread(target=run_buy)
-                t2 = threading.Thread(target=run_sell)
+                t1 = threading.Thread(target=run_buy, name="run_buy")
+                t2 = threading.Thread(target=run_sell, name="run_sell")
 
                 t1.start()
                 t2.start()

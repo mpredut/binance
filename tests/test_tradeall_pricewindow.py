@@ -1018,7 +1018,11 @@ class TestTrendCoordinator(unittest.TestCase):
                 except Exception as e:
                     errors.append(("reader", e))
 
-        threads = [_t.Thread(target=writer), _t.Thread(target=reader), _t.Thread(target=reader)]
+        threads = [
+            _t.Thread(target=writer, name="writer"),
+            _t.Thread(target=reader, name="reader_1"),
+            _t.Thread(target=reader, name="reader_2"),
+        ]
         for th in threads:
             th.start()
         time.sleep(1.0)

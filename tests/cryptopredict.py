@@ -118,8 +118,8 @@ predictor = CryptoPredictor()
 predictor.load_model()
 
 # Rulează serviciul de actualizare periodică și cel de predicție în paralel
-update_thread = threading.Thread(target=predictor.start_update_service)
-predict_thread = threading.Thread(target=predictor.start_prediction_service)
+update_thread = threading.Thread(target=predictor.start_update_service, name="start_update_service")
+predict_thread = threading.Thread(target=predictor.start_prediction_service, name="start_prediction_service")
 
 update_thread.start()
 time.sleep(60)

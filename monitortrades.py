@@ -521,7 +521,12 @@ def monitor_trades(filename, interval=3600, limit=1000, years_to_keep=2):
 
 # Functia pentru a porni monitorizarea periodica intr-un thread separat
 def start_monitoring(filename, interval=3600, limit=1000, years_to_keep=2):
-    monitoring_thread = Thread(target=monitor_trades, args=(filename, interval, limit, years_to_keep), daemon=True)
+    monitoring_thread = Thread(
+        target=monitor_trades,
+        name="monitor_trades",
+        args=(filename, interval, limit, years_to_keep),
+        daemon=True
+    )
     monitoring_thread.start()
 
 

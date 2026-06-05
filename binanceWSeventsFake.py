@@ -176,6 +176,7 @@ def startWSevents(handler=None, interval_sec=47):
 
     poll_thread = threading.Thread(
         target=_poll_loop,
+        name="poll_loop",
         args=(handler, interval_sec),
         daemon=True
     )
