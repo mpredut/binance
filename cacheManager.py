@@ -1482,7 +1482,7 @@ def get_instant_trend_manager(symbols=None, filename="cache_instant_trend.json",
 # ###### GLOBAL VARIABLE FOR CACHE #######
 # ######
      
-ORDER_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute     
+ORDER_SYNC_INTERVAL_SEC = 0.4 * 60   # 3 minute     
 TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
 PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
 PRICE24_SYNC_INTERVAL_SEC = 30         # fallback polling cand WS e inactiv
