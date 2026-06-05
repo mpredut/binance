@@ -21,6 +21,7 @@ import time
 import socket
 import threading
 import multiprocessing
+import contextlib
 
 try:
     import fcntl  # Unix (Linux/WSL) — bot-ul rulează pe Linux
@@ -115,6 +116,44 @@ def update_binance_order_id(symbol, order_id):
         if symbol in state:
             state[symbol]["binance_order_id"] = order_id
             _write(state)
+
+
+class _Reservation:
+    """Obiectul dat de `trade_slot`. allowed=False → blocat de cooldown.
+    Apelează commit() DOAR dacă ordinul a fost plasat → rezervarea rămâne (cooldown
+    activ). Fără commit, la ieșirea din `with` rezervarea e anulată (rollback)."""
+    def __init__(self, allowed, info, symbol):
+        self.allowed = allowed
+        self.info = info
+        self.symbol = symbol
+        self._committed = False
+
+    def commit(self, binance_order_id=None):
+        self._committed = True
+        if binance_order_id is not None:
+            update_binance_order_id(self.symbol, binance_order_id)
+
+
+@contextlib.contextmanager
+def trade_slot(side, symbol, cooldown_sec=DEFAULT_COOLDOWN_SEC, client_order_id=None):
+    """RAII / scope-based pentru cooldown (ca un guard C++):
+        with trade_slot(side, symbol) as slot:
+            if not slot.allowed:          # blocat de cooldown
+                return
+            order = ...plasează...
+            if order:
+                slot.commit(order_id)     # succes → rezervarea RĂMÂNE (cooldown activ)
+            # altfel (eșec/excepție/uitat) → eliberare AUTOMATĂ la ieșire din `with`
+
+    Lock-ul fcntl NU e ținut peste plasare (doar în reserve/release) → fără risc de
+    deadlock; ce persistă e starea cooldown-ului, nu lock-ul."""
+    allowed, info = reserve_trade(side, symbol, cooldown_sec, client_order_id)
+    res = _Reservation(allowed, info, symbol)
+    try:
+        yield res
+    finally:
+        if allowed and not res._committed:
+            release_trade(symbol)         # rollback: nimic plasat → nu blocăm cooldown-ul
 
 
 def get_last_trade_age(symbol):

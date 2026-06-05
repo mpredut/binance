@@ -79,6 +79,37 @@ class TestTradeCooldown(unittest.TestCase):
         results = [q.get() for _ in range(10)]
         self.assertEqual(sum(1 for r in results if r), 1)   # un singur câștigător
 
+    # ─── RAII / trade_slot ────────────────────────────────────────────────────
+    def test_slot_commit_keeps_reservation(self):
+        with tc.trade_slot("BUY", "BTCUSDC", cooldown_sec=180) as slot:
+            self.assertTrue(slot.allowed)
+            slot.commit(999)                         # ordin plasat
+        # commit → rezervarea RĂMÂNE → al doilea e blocat
+        self.assertFalse(tc.reserve_trade("SELL", "BTCUSDC", cooldown_sec=180)[0])
+
+    def test_slot_no_commit_auto_releases(self):
+        with tc.trade_slot("BUY", "BTCUSDC", cooldown_sec=180) as slot:
+            self.assertTrue(slot.allowed)
+            # NU facem commit (ca și cum ordinul a eșuat / am uitat)
+        # auto-release la ieșire → din nou permis
+        self.assertTrue(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)[0])
+
+    def test_slot_exception_auto_releases(self):
+        with self.assertRaises(RuntimeError):
+            with tc.trade_slot("BUY", "BTCUSDC", cooldown_sec=180) as slot:
+                self.assertTrue(slot.allowed)
+                raise RuntimeError("plasare a crăpat")   # excepție → rollback automat
+        self.assertTrue(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)[0])
+
+    def test_slot_blocked_does_not_release_existing(self):
+        # primul rezervă; al doilea slot e blocked → la ieșire NU trebuie să șteargă
+        # rezervarea primului
+        self.assertTrue(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)[0])
+        with tc.trade_slot("SELL", "BTCUSDC", cooldown_sec=180) as slot:
+            self.assertFalse(slot.allowed)
+        # rezervarea inițială încă activă
+        self.assertFalse(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)[0])
+
     def test_get_last_trade_age(self):
         self.assertIsNone(tc.get_last_trade_age("BTCUSDC"))
         tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)

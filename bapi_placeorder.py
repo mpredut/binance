@@ -414,42 +414,34 @@ def __place_order(order_type, symbol, price, qty, force=False, cancelorders=Fals
         if _maybe_wait_trend(order_type, symbol, wait_trend, max_wait_sec):
             current_price = _fresh_price(symbol)   # preț proaspăt după așteptare
 
-        # GATE anti rapid-fire (cross-proces + cross-thread): nu plasăm două ordine
-        # pe ACELAȘI simbol la < cooldown. Verificare-și-rezervare ATOMICĂ.
-        allowed, last = trade_cooldown.reserve_trade(order_type, symbol)
-        if not allowed:
-            age = time.time() - last.get("timestamp", 0)
-            print(f"[{order_type} {symbol}] BLOCAT de cooldown: ultim ordin "
-                  f"({last.get('side')}) acum {age:.0f}s (< {trade_cooldown.DEFAULT_COOLDOWN_SEC}s)")
-            return None
+        # GATE anti rapid-fire (cross-proces + cross-thread), stil RAII: rezervarea se
+        # ELIBEREAZĂ AUTOMAT la ieșirea din `with` dacă nu facem commit (eșec/excepție/
+        # uitat) → fără blocaje fantomă, fără release manual. Lock-ul nu e ținut peste
+        # plasare → fără deadlock.
+        with trade_cooldown.trade_slot(order_type, symbol) as slot:
+            if not slot.allowed:
+                age = time.time() - slot.info.get("timestamp", 0)
+                print(f"[{order_type} {symbol}] BLOCAT de cooldown: ultim ordin "
+                      f"({slot.info.get('side')}) acum {age:.0f}s (< {trade_cooldown.DEFAULT_COOLDOWN_SEC}s)")
+                return None
 
-        if order_type == 'SELL':
-            price = round(max(price, current_price), 0)
-            if force:
-                 order = place_SELL_order_at_market(symbol, qty);
+            if order_type == 'SELL':
+                price = round(max(price, current_price), 0)
+                order = place_SELL_order_at_market(symbol, qty) if force else place_SELL_order(symbol, price, qty)
+            elif order_type == 'BUY':
+                price = round(min(price, current_price), 0)
+                order = place_BUY_order_at_market(symbol, qty) if force else place_BUY_order(symbol, price, qty)
             else:
-                order = place_SELL_order(symbol, price, qty);
-        elif order_type == 'BUY':
-            price = round(min(price, current_price), 0)
-            if force:
-                 order = place_BUY_order_at_market(symbol, qty);
-            else:
-                order = place_BUY_order(symbol, price, qty);
-        else:
-            print(f"Invalid order type: {order_type}")
-            trade_cooldown.release_trade(symbol)        # tip invalid → eliberăm rezervarea
-            return None
+                print(f"Invalid order type: {order_type}")
+                return None                                  # fără commit → auto-release
 
-        if order:
-            trade_cooldown.update_binance_order_id(symbol, order.get("orderId"))
-        else:
-            trade_cooldown.release_trade(symbol)        # plasare eșuată → nu blocăm cooldown-ul
-        return order
+            if order:
+                slot.commit(order.get("orderId"))            # succes → cooldown rămâne activ
+            return order                                      # order None → auto-release
 
     except BinanceAPIException as e:
         print(f"Error placing {order_type.upper()} order: {e}")
-        trade_cooldown.release_trade(symbol)            # excepție → eliberăm rezervarea
-        return None
+        return None                                           # with deja a eliberat (no commit)
     #except Exception as e:
     #    print(f"place_order: A aparut o eroare: {e}")
     #    return None
