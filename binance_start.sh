@@ -1,5 +1,18 @@
 #!/bin/bash
 
+# ===== SINGLE-INSTANCE (flock) — împiedică două instanțe să ruleze simultan =====
+# Fără asta, o a doua instanță (ex. systemd + lansare manuală) intra în „război de
+# supervizare": fiecare reînvie procesele pe care le omoară cealaltă → DUPLICARE.
+# A doua instanță nu obține lock-ul → iese imediat.
+LOCK_PATH="/home/predut/binance/binance_start.lock"
+exec 9>"$LOCK_PATH" || exit 1
+if ! flock -n 9; then
+    echo "❌ binance_start.sh rulează deja (lock activ: $LOCK_PATH)."
+    echo "   Pentru restart: 'systemctl restart binance' sau oprește instanța existentă."
+    exit 1
+fi
+# lock-ul (fd 9) e ținut cât trăiește scriptul; se eliberează automat la ieșire.
+
 VPN_RETRY_TIMEOUT=60
 SLEEP_AFTER_VPN_CONNECT=3
 SLEEP_AFTER_KILL=5
