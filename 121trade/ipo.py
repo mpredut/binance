@@ -189,6 +189,13 @@ def main() -> int:
     log(f"    lansare      : verific pana {label} e lansat (deja-listat: imediat; IPO: la deschidere)")
     log(f"    ntfy/email   : {os.environ.get('NTFY_TOPIC') or '-'} / {os.environ.get('ALERT_TO_EMAIL') or '-'}")
 
+    # --- PRE-FLIGHT: confirma instrumentul la PORNIRE (prinde erorile de config imediat,
+    #     nu dupa zile de asteptare pana la lansare). ISIN gresit -> opreste acum.
+    #     Daca tickerul nu e inca in metadata (IPO neinceput), doar avertizeaza si continua.
+    log("    pre-flight: verific instrumentul pe T212...")
+    if not verify_instrument(client, t212_ticker, expected_isin):
+        return 1
+
     # --- Mecanism IDENTIC pentru ORICE simbol: astept pana instrumentul e LANSAT
     #     (are volum real). NVDA -> trece imediat; SPCX -> asteapta lansarea reala.
     #     --skip-wait sare peste (de urgenta).
@@ -196,7 +203,7 @@ def main() -> int:
         if not _wait_for_launch(args, yahoo_symbol, label, interval):
             return 130  # intrerupt
 
-    # --- verifica instrumentul, apoi tranzactioneaza ---
+    # --- verificare FINALA dupa lansare (prinde reutilizarea de ticker), apoi tranzactioneaza ---
     if not verify_instrument(client, t212_ticker, expected_isin):
         return 1
 
