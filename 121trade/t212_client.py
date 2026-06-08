@@ -124,8 +124,18 @@ class T212Client:
         return ok
 
     def get_portfolio(self) -> list[dict] | None:
-        """Pozitiile deschise din cont (pentru reconciliere)."""
+        """Pozitiile deschise din cont (sursa de adevar pentru reconciliere)."""
         status, body = http_get(f"{self.base}/equity/portfolio", headers=self._headers())
+        if status != 200 or not body:
+            return None
+        try:
+            return json.loads(body)
+        except ValueError:
+            return None
+
+    def list_active_orders(self) -> list[dict] | None:
+        """Ordinele inca PENDING (cele executate dispar de aici -> apar in portofoliu)."""
+        status, body = http_get(f"{self.base}/equity/orders", headers=self._headers())
         if status != 200 or not body:
             return None
         try:

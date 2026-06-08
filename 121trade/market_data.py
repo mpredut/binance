@@ -84,6 +84,12 @@ def check_market(sym: str) -> dict | None:
     live_state = state in ("REGULAR", "PRE", "PREPRE", "POST", "POSTPOST")
     really_trading = bool(price) and volume > 0 and fresh and live_state
 
+    # 'launched' = instrumentul a tranzactionat cu adevarat (are volum real),
+    # indiferent daca piata e DESCHISA acum. Asa, o actiune deja listata (NVDA)
+    # e recunoscuta ca lansata si in afara orelor de piata, dar un placeholder
+    # de IPO (volum 0, ex SPCX inainte de listare) NU.
+    launched = bool(price) and volume > 0
+
     return {
         "price":    price,
         "currency": meta.get("currency"),
@@ -92,5 +98,6 @@ def check_market(sym: str) -> dict | None:
         "state":    state or "?",
         "age_min":  round(age_sec / 60, 1) if age_sec is not None else None,
         "name":     meta.get("longName") or meta.get("shortName") or "",
-        "trading":  really_trading,
+        "trading":  really_trading,   # se tranzactioneaza ACUM (piata deschisa)
+        "launched": launched,         # a inceput sa se tranzactioneze (e instrument real)
     }

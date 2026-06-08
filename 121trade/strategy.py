@@ -83,9 +83,21 @@ def _new_state() -> dict:
         "dca_buys": 0,
         "entry_price": None,
         "last_buy_price": None,
-        "realized_pnl_usd": 0.0,
+        "realized_pnl_usd": 0.0,   # profit BRUT cumulat (fara fee)
+        "realized_net_usd": 0.0,   # profit NET cumulat (dupa taxa FX 0.15% x2)
+        "fees_usd": 0.0,           # total taxe FX platite
         "orders": [],           # {id, side, qty, limit, amount, kind, ts}
     }
+
+
+def _sell_pnl(avg: float, price: float, qty: float) -> tuple[float, float, float]:
+    """Returneaza (brut, fee_fx, net) pentru o vanzare de `qty` la `price`, cost mediu `avg`.
+
+    Taxa FX 0.15% se aplica si pe valoarea cumparata (baza de cost), si pe cea vanduta.
+    """
+    gross = (price - avg) * qty
+    fee = (FX_FEE_PCT / 100.0) * (avg * qty + price * qty)
+    return gross, fee, gross - fee
 
 
 class Strategy:
@@ -119,8 +131,11 @@ class Strategy:
             try:
                 with open(self.state_file, "r", encoding="utf-8") as f:
                     st = json.load(f)
-                log(f"  [STRAT] stare incarcata (ciclu {st.get('cycle')}, qty {st.get('qty')})")
-                return st
+                # migrare: completeaza cheile noi lipsa (ex. net/fees din versiuni vechi)
+                merged = _new_state()
+                merged.update(st)
+                log(f"  [STRAT] stare incarcata (ciclu {merged.get('cycle')}, qty {merged.get('qty')})")
+                return merged
             except (OSError, ValueError) as e:
                 log(f"  ! [STRAT] nu pot citi starea ({e}), pornesc curat")
         return _new_state()
@@ -172,19 +187,26 @@ class Strategy:
             self._cancel_open("SELL")     # avg s-a schimbat -> reasezam TP
         else:  # SELL
             avg = self._avg_cost() or price
-            realized = (price - avg) * qty
-            self.s["realized_pnl_usd"] += realized
+            gross, fee, net = _sell_pnl(avg, price, qty)
+            self.s["realized_pnl_usd"] += gross
+            self.s["realized_net_usd"] += net
+            self.s["fees_usd"] += fee
             self.s["qty"] -= qty
-            log(f"  [STRAT] {tag}SELL FILLED {qty} @ {price:.2f} USD  realized={realized:+.2f} USD")
-            notify(title=f"{tag}{self.yahoo_sym} SELL {qty} @ {price:.2f}  P&L {realized:+.2f} USD",
-                   body=(f"Realized {realized:+.2f} USD (total {self.s['realized_pnl_usd']:+.2f})\n"
+            log(f"  [STRAT] {tag}SELL FILLED {qty} @ {price:.2f} USD  "
+                f"brut={gross:+.2f}  fee={fee:.2f}  net={net:+.2f} USD")
+            notify(title=f"{tag}{self.yahoo_sym} SELL {qty} @ {price:.2f}  NET {net:+.2f} USD",
+                   body=(f"Brut {gross:+.2f}  - fee FX {fee:.2f}  = NET {net:+.2f} USD\n"
+                         f"Net total {self.s['realized_net_usd']:+.2f} USD\n"
                          f"Ciclu {self.s['cycle']} inchis.\n{now_str()}"),
                    source="strategy", price=price, desktop=self.desktop)
             if self.s["qty"] <= 1e-9:
-                pnl = self.s["realized_pnl_usd"]
+                pnl, net_tot, fees = (self.s["realized_pnl_usd"],
+                                      self.s["realized_net_usd"], self.s["fees_usd"])
                 nxt = self.s.get("cycle", 1) + 1
                 self.s = _new_state()
                 self.s["realized_pnl_usd"] = pnl
+                self.s["realized_net_usd"] = net_tot
+                self.s["fees_usd"] = fees
                 self.s["cycle"] = nxt
                 log(f"  [STRAT] === ciclu inchis, reincep (ciclu {nxt}) ===")
 
@@ -241,44 +263,127 @@ class Strategy:
             self.s["orders"].remove(o)
 
     def reconcile(self, price: float) -> None:
-        # intai BUY (umplem pozitia, recalculam avg), apoi SELL (take-profit)
+        if self.dry_run:
+            self._reconcile_paper(price)
+        else:
+            self._reconcile_real(price)
+
+    # -- reconciliere PAPER (simulare) -----------------------------------------
+    def _reconcile_paper(self, price: float) -> None:
+        # BUY: presupunem fill la limita; SELL: fill cand pretul atinge limita
         for side in ("BUY", "SELL"):
             for o in [x for x in self.s["orders"] if x["side"] == side]:
                 if o not in self.s["orders"]:
                     continue
-                fq, fp, filled = o["qty"], o["limit"], False
-                if self.dry_run:
-                    if side == "BUY":
-                        filled = True
-                    elif price >= o["limit"]:
-                        filled = True
-                    else:
-                        continue
-                else:
-                    info = self.client.get_order_status(o["id"])
-                    if not info:
-                        continue
-                    st = (info.get("status") or "").upper()
-                    if st == "FILLED":
-                        fq = float(info.get("filledQuantity") or o["qty"])
-                        fp = float(info.get("fillPrice") or o["limit"])
-                        filled = True
-                    elif st in ("CANCELLED", "REJECTED"):
-                        log(f"  [STRAT] ordin {o['id']} {st}")
-                        self._remove_order(o)
-                        continue
-                    else:
-                        age_min = (time.time() - o.get("ts", 0)) / 60
-                        if (side == "BUY" and age_min > self.p.order_ttl_min
-                                and price > o["limit"] * 1.003):
-                            log(f"  [STRAT] BUY {o['id']} neexecutat {age_min:.0f}min, "
-                                f"pret a urcat — anulez & reasez")
-                            self.client.cancel_order(o["id"])
-                            self._remove_order(o)
-                        continue
-                if filled:
+                if side == "BUY":
                     self._remove_order(o)
-                    self._apply_fill(o, fq, fp)
+                    self._apply_fill(o, o["qty"], o["limit"])
+                elif price >= o["limit"]:
+                    self._remove_order(o)
+                    self._apply_fill(o, o["qty"], o["limit"])
+
+    # -- reconciliere REALA: portofoliul T212 e SURSA DE ADEVAR ----------------
+    # (ordinele executate dispar din /equity/orders/{id} -> 404; pozitia apare
+    #  in portofoliu. Deci ne uitam la portofoliu, nu la statusul ordinului.)
+    def _portfolio_position(self) -> tuple[float, float] | None:
+        pf = self.client.get_portfolio()
+        if pf is None:
+            return None
+        for p in pf:
+            if str(p.get("ticker", "")).upper() == self.ticker.upper():
+                return float(p.get("quantity") or 0.0), float(p.get("averagePrice") or 0.0)
+        return 0.0, 0.0   # nu detinem nimic
+
+    def _active_order_ids(self) -> set | None:
+        orders = self.client.list_active_orders()
+        if orders is None:
+            return None
+        return {o.get("id") for o in orders
+                if str(o.get("ticker", "")).upper() == self.ticker.upper()}
+
+    def _reconcile_real(self, price: float) -> None:
+        real = self._portfolio_position()
+        if real is None:
+            log("  [STRAT] portofoliu indisponibil — sar reconcilierea acest tick")
+            return
+        real_qty, real_avg = real
+        active = self._active_order_ids()
+        if active is None:
+            active = {o["id"] for o in self.s["orders"]}   # nu putem lista -> nu curatam
+
+        prev_qty = self.s["qty"]
+        prev_avg = self._avg_cost() or real_avg
+
+        # --- BUY executat: pozitia a crescut (sau adoptam o pozitie pre-existenta) ---
+        if real_qty > prev_qty + 1e-6:
+            fq = real_qty - prev_qty
+            fp = ((real_avg * real_qty - prev_avg * prev_qty) / fq) if fq > 0 else real_avg
+            is_dca = prev_qty > 1e-9
+            self.s["last_buy_price"] = fp
+            if self.s["entry_price"] is None:
+                self.s["entry_price"] = fp
+            if is_dca:
+                self.s["dca_buys"] += 1
+            self.s["qty"] = real_qty
+            self.s["cost_usd"] = real_qty * real_avg
+            self.s["spent_cash"] = round(real_qty * real_avg / self.fx_to_usd, 2)
+            log(f"  [STRAT] BUY EXECUTAT {fq:.4f} @ {fp:.2f} USD "
+                f"({'DCA' if is_dca else 'ENTRY'})  qty={real_qty:.4f} avg={real_avg:.2f}")
+            notify(title=f"{self.yahoo_sym} BUY {fq:.4f} @ {fp:.2f}",
+                   body=(f"{'DCA' if is_dca else 'ENTRY'} executat\nqty {real_qty:.4f}  "
+                         f"avg {real_avg:.2f} USD\ndesfasurat {self.s['spent_cash']:.0f} {self.ccy}  "
+                         f"DCA {self.s['dca_buys']}/{self.p.max_dca_buys}\n{now_str()}"),
+                   source="strategy", price=fp, desktop=self.desktop)
+            self._cancel_open("SELL")   # avg schimbat -> reasezam TP la pasul urmator
+
+        # --- SELL executat: pozitia a scazut ---
+        elif real_qty < prev_qty - 1e-6:
+            sold = prev_qty - real_qty
+            gross, fee, net = _sell_pnl(prev_avg, price, sold)
+            self.s["realized_pnl_usd"] += gross
+            self.s["realized_net_usd"] += net
+            self.s["fees_usd"] += fee
+            self.s["qty"] = real_qty
+            self.s["cost_usd"] = real_qty * real_avg
+            self.s["spent_cash"] = round(real_qty * real_avg / self.fx_to_usd, 2)
+            log(f"  [STRAT] SELL EXECUTAT {sold:.4f} @ ~{price:.2f} USD  "
+                f"brut={gross:+.2f}  fee={fee:.2f}  net={net:+.2f} USD")
+            notify(title=f"{self.yahoo_sym} SELL {sold:.4f} @ ~{price:.2f}  NET {net:+.2f} USD",
+                   body=(f"Brut {gross:+.2f}  - fee FX {fee:.2f}  = NET {net:+.2f} USD\n"
+                         f"Net total {self.s['realized_net_usd']:+.2f} USD\n{now_str()}"),
+                   source="strategy", price=price, desktop=self.desktop)
+
+        else:
+            # pozitie neschimbata -> sincronizam valorile cu realitatea
+            self.s["qty"] = real_qty
+            self.s["cost_usd"] = real_qty * real_avg
+            if real_qty > 1e-9:
+                self.s["spent_cash"] = round(real_qty * real_avg / self.fx_to_usd, 2)
+
+        # --- curata ordinele care nu mai sunt active; TTL pe BUY-uri stale ---
+        for o in list(self.s["orders"]):
+            if str(o["id"]).startswith("PAPER"):
+                continue
+            if o["id"] not in active:
+                self._remove_order(o)        # nu mai e pending (executat sau anulat)
+            elif (o["side"] == "BUY"
+                  and (time.time() - o.get("ts", 0)) / 60 > self.p.order_ttl_min
+                  and price > o["limit"] * 1.003):
+                log(f"  [STRAT] BUY {o['id']} neexecutat, pret a urcat — anulez & reasez")
+                self.client.cancel_order(o["id"])
+                self._remove_order(o)
+
+        # --- ciclu inchis (am vandut tot) -> reincepe ---
+        if real_qty <= 1e-9 and prev_qty > 1e-9:
+            pnl, net_tot, fees = (self.s["realized_pnl_usd"],
+                                  self.s["realized_net_usd"], self.s["fees_usd"])
+            nxt = self.s.get("cycle", 1) + 1
+            self.s = _new_state()
+            self.s["realized_pnl_usd"] = pnl
+            self.s["realized_net_usd"] = net_tot
+            self.s["fees_usd"] = fees
+            self.s["cycle"] = nxt
+            log(f"  [STRAT] === ciclu inchis, reincep (ciclu {nxt}) ===")
 
     # -- pas de decizie --------------------------------------------------------
     def step(self, price: float) -> None:
@@ -343,13 +448,17 @@ class Strategy:
                 self._save()
 
                 avg = self._avg_cost()
+                net = self.s.get("realized_net_usd", 0.0)
+                fees = self.s.get("fees_usd", 0.0)
                 if avg:
                     log(f"  [STRAT] pret={price:.2f}  qty={self.s['qty']:.2f}  avg={avg:.2f}  "
                         f"desf={self.s['spent_cash']:.0f}{self.ccy}  "
-                        f"pnl={self.s['realized_pnl_usd']:+.2f}USD  ord={len(self.s['orders'])}")
+                        f"NET={net:+.2f}USD (brut {self.s['realized_pnl_usd']:+.2f}, fee {fees:.2f})  "
+                        f"ord={len(self.s['orders'])}")
                 else:
                     log(f"  [STRAT] pret={price:.2f}  qty=0  "
-                        f"pnl={self.s['realized_pnl_usd']:+.2f}USD  (astept intrare)")
+                        f"NET={net:+.2f}USD (brut {self.s['realized_pnl_usd']:+.2f}, fee {fees:.2f})  "
+                        f"(astept intrare)")
                 time.sleep(self.p.check_minutes * 60)
         except KeyboardInterrupt:
             log("  [STRAT] oprit manual.")

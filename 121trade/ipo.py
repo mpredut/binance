@@ -121,6 +121,8 @@ def main() -> int:
     ap.add_argument("--interval",          type=int, default=POLL_SECONDS)
     ap.add_argument("--desktop",           action="store_true")
     ap.add_argument("--market-hours-only", action="store_true")
+    ap.add_argument("--skip-wait",         action="store_true",
+                    help="Sari peste verificarea de lansare (porneste direct chiar daca feed-ul zice ca nu se tranzactioneaza inca)")
     ap.add_argument("--paper",             action="store_true",
                     help="Forteaza PAPER (test sigur, fara bani), indiferent de .env")
     ap.add_argument("--execute",           action="store_true",
@@ -147,7 +149,6 @@ def main() -> int:
     t212_ticker  = (args.symbol or os.environ.get("T212_TICKER") or "").strip()
     yahoo_symbol = os.environ.get("YAHOO_SYMBOL") or (t212_to_yahoo(t212_ticker) if t212_ticker else "")
     label        = os.environ.get("SYMBOL_LABEL") or yahoo_symbol or t212_ticker
-    wait_launch  = os.environ.get("WAIT_FOR_LAUNCH", "false").strip().lower() == "true"
     expected_isin = os.environ.get("EXPECTED_ISIN", "").strip()
 
     # strategie / ordin
@@ -185,11 +186,13 @@ def main() -> int:
     log(f"    mediu T212   : {t212_env.upper()}")
     log(f"    mod          : {'STRATEGIE (DCA+TP)' if strat_enabled else 'ordin unic'}")
     log(f"    executie     : {'PAPER (fara bani)' if (strat_dry if strat_enabled else order_dry) else '⚠ REAL — BANI ADEVARATI'}")
-    log(f"    wait-launch  : {'da (IPO)' if wait_launch else 'nu (porneste direct)'}")
+    log(f"    lansare      : verific pana {label} e lansat (deja-listat: imediat; IPO: la deschidere)")
     log(f"    ntfy/email   : {os.environ.get('NTFY_TOPIC') or '-'} / {os.environ.get('ALERT_TO_EMAIL') or '-'}")
 
-    # --- asteapta lansarea (doar pt IPO) ---
-    if wait_launch:
+    # --- Mecanism IDENTIC pentru ORICE simbol: astept pana instrumentul e LANSAT
+    #     (are volum real). NVDA -> trece imediat; SPCX -> asteapta lansarea reala.
+    #     --skip-wait sare peste (de urgenta).
+    if not args.skip_wait:
         if not _wait_for_launch(args, yahoo_symbol, label, interval):
             return 130  # intrerupt
 
@@ -215,21 +218,25 @@ def _wait_for_launch(args, yahoo_symbol, label, interval) -> bool:
                 time.sleep(min(interval * 5, 600))
                 continue
             m = check_market(yahoo_symbol)
-            if m and m.get("trading"):
+            # 'launched' = instrumentul a tranzactionat real (are volum), chiar daca
+            # piata e inchisa acum. Asa, o actiune deja listata (NVDA) porneste imediat,
+            # iar un placeholder de IPO (SPCX, volum 0) e asteptat pana se deschide.
+            if m and m.get("launched"):
                 ts = now_str()
-                body = (f"{label} SE TRANZACTIONEAZA pe {m.get('exchange')}.\n"
+                now_open = "se tranzactioneaza ACUM" if m.get("trading") else f"piata {m.get('state')}"
+                body = (f"{label} e DISPONIBIL pe {m.get('exchange')} ({now_open}).\n"
                         f"Pret: {m['price']} {m.get('currency') or ''}  "
                         f"(vol {m.get('volume')}, {m.get('state')})\n{ts}")
                 log("############################################")
-                log(f">>> {label} S-A LANSAT — TRANZACTIONARE REALA <<<")
+                log(f">>> {label} E DISPONIBIL — pornesc tranzactionarea <<<")
                 log(body.replace("\n", " | "))
                 log("############################################")
-                notify(title=f"{label} a inceput tranzactionarea!", body=body,
+                notify(title=f"{label} disponibil — pornesc!", body=body,
                        source=m.get("exchange") or "market", price=m.get("price"),
                        desktop=args.desktop)
                 return True
             if m:
-                log(f"ping - astept  |  pret={m.get('price')} vol={m.get('volume')} "
+                log(f"ping - astept lansarea  |  pret={m.get('price')} vol={m.get('volume')} "
                     f"state={m.get('state')} age={m.get('age_min')}min")
             else:
                 log("ping - simbol indisponibil pe feed")
