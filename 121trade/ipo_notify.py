@@ -11,6 +11,9 @@ import sys
 import time
 from datetime import datetime
 
+# Add parent directory to path to import alertnotifiers
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from alertnotifiers import AlertNotifier
 from ipo_common import log
 
@@ -24,9 +27,10 @@ def notify(title: str, body: str, source: str,
         sys.stdout.flush()
         time.sleep(0.2)
 
+    symbol = os.environ.get("SYMBOL_LABEL") or os.environ.get("YAHOO_SYMBOL") or "STOCK"
     alert = {
         "type": "new_coin_discovered",
-        "symbol": "SPCX",
+        "symbol": symbol,
         "name": title,
         "source": source,
         "price": price,
