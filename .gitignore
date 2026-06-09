@@ -1,6 +1,16 @@
-# Secrets / config local
+# ============================================================================
+# Secrete: .env (per platforma) e gitignored si NU se comite NICIODATA.
+# Config NEsensibil:   config.env (per platforma)  -> SE comite (versionat).
+# Template secrete:    .env.example (per platforma) -> SE comite (placeholders).
+# ============================================================================
 .env
 .claude/settings.local.json
+
+# Editor swap / temporar
+*.swp
+*.swo
+*.tmp
+*~
 
 # Cache files (runtime, per-proces) — acum in subfolderul cachedb/
 cachedb/

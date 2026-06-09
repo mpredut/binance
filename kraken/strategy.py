@@ -47,6 +47,7 @@ class StratParams:
     max_dca_buys: int
     enable_takeprofit: bool
     order_ttl_min: float
+    stop_loss_pct: float     # SIGURANTA: vinde tot daca pierderea >= acest % (0 = oprit)
 
     @classmethod
     def from_env(cls) -> "StratParams":
@@ -63,6 +64,7 @@ class StratParams:
             max_dca_buys       = int(float_env("STRAT_MAX_DCA_BUYS") or 10),
             enable_takeprofit  = (mode != "dca_only"),
             order_ttl_min      = float_env("STRAT_ORDER_TTL_MIN") or 10.0,
+            stop_loss_pct      = float_env("STRAT_STOP_LOSS_PCT") or 0.0,
         )
 
 
@@ -253,6 +255,30 @@ class Strategy:
                 log(f"  [STRAT] === ciclu inchis, reincep (ciclu {self.s['cycle']}) ===")
 
     # -- decizie ---------------------------------------------------------------
+    def _check_stop_loss(self, price: float) -> bool:
+        """Inchide TOT daca pierderea nerealizata depaseste pragul (anti-runaway DCA)."""
+        if self.p.stop_loss_pct <= 0:
+            return False
+        avg = self._avg()
+        if not avg:
+            return False
+        loss_pct = (avg - price) / avg * 100   # long: pierdem cand pretul < pret mediu
+        if loss_pct >= self.p.stop_loss_pct:
+            log(f"  🛑 [STRAT] STOP-LOSS: pierdere {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — VAND TOT (taie pierderea)")
+            for o in list(self.s["orders"]):           # anuleaza toate ordinele pendinte (si DCA-urile)
+                if not self.dry_run and not str(o["txid"]).startswith("PAPER"):
+                    try:
+                        self.client.cancel_order(o["txid"])
+                    except KrakenError:
+                        pass
+                self._remove(o)
+            self._place("sell", self.s["qty"], round(price * 0.995, self.price_dec), kind="STOP")
+            notify(title=f"🛑 STOP-LOSS {self.pair} ({loss_pct:.1f}%)",
+                   body=f"Pierdere {loss_pct:.1f}% >= prag {self.p.stop_loss_pct}% — am vandut tot.\n{now_str()}",
+                   source="kraken", price=price, desktop=self.desktop)
+            return True
+        return False
+
     def step(self, price: float) -> None:
         held = self.s["qty"]
         disc = 1 - self.p.entry_discount_pct / 100
@@ -265,6 +291,10 @@ class Strategy:
                 return
             self._place("buy", self._qty_for(self.p.entry_amount, price * disc),
                         price * disc, kind="ENTRY", amount=self.p.entry_amount)
+            return
+
+        # STOP-LOSS: taie pierderea inainte de DCA/TP
+        if self._check_stop_loss(price):
             return
 
         avg = self._avg()

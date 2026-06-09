@@ -43,7 +43,8 @@ def main() -> int:
     for i, a in enumerate(sys.argv):
         if a == "--env-file" and i + 1 < len(sys.argv):
             env_file = sys.argv[i + 1]
-    load_dotenv(env_file)
+    load_dotenv(env_file)                                                      # secrete (gitignored)
+    load_dotenv(os.path.join(os.path.dirname(env_file) or ".", "config.env"))  # config versionat (comis)
 
     ap = argparse.ArgumentParser(description="Bot DCA+TP pe Hyperliquid (perp long-only).")
     ap.add_argument("--env-file", default=env_file)

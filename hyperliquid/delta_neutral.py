@@ -39,7 +39,10 @@ class DNParams:
     spot_pair: str       # @index spot (ex @107)
     spot_token: str      # tokenul spot (ex HYPE)
     notional: float      # USDC per picior
-    min_funding_hr: float # funding/ora minim ca sa stai in pozitie (ex 0.0)
+    entry_funding_hr: float  # deschide cand funding MEDIU >= asta
+    exit_funding_hr: float   # inchide cand funding MEDIU < asta (mai negativ -> histerezis, nu churn)
+    funding_window_h: float  # peste cate ore mediezi funding-ul (anti-zgomot, ignora citiri izolate)
+    min_hold_h: float        # nu inchide mai devreme de atat (lasa timpul sa lucreze pt funding)
     rebalance_pct: float # toleranta delta (% din marime) inainte de rebalansare
     check_minutes: float
     sz_decimals: int
@@ -60,7 +63,10 @@ class DNParams:
             spot_pair   = os.environ.get("HL_SPOT_PAIR", "@107").strip(),
             spot_token  = os.environ.get("HL_SPOT_TOKEN", coin).strip(),
             notional    = float_env("DN_NOTIONAL") or 100.0,
-            min_funding_hr = (float_env("DN_MIN_FUNDING_HR_PCT") or 0.0) / 100.0,
+            entry_funding_hr = (float_env("DN_ENTRY_FUNDING_HR_PCT") if float_env("DN_ENTRY_FUNDING_HR_PCT") is not None else 0.0) / 100.0,
+            exit_funding_hr  = (float_env("DN_EXIT_FUNDING_HR_PCT") if float_env("DN_EXIT_FUNDING_HR_PCT") is not None else -0.005) / 100.0,
+            funding_window_h = float_env("DN_FUNDING_WINDOW_H") or 4.0,
+            min_hold_h       = float_env("DN_MIN_HOLD_H") or 6.0,
             rebalance_pct  = float_env("DN_REBALANCE_PCT") or 5.0,
             check_minutes  = float_env("DN_CHECK_MINUTES") or 5.0,
             sz_decimals = szd,
@@ -73,7 +79,8 @@ class DNParams:
 
 def _new_state() -> dict:
     return {"status": "flat", "target_sz": 0.0, "fees_paid": 0.0,
-            "funding_accrued": 0.0, "opened_at": None, "liq_alerted": False,
+            "funding_accrued": 0.0, "opened_at": None, "opened_ts": None, "liq_alerted": False,
+            "funding_hist": [],   # [[ts, rate], ...] pt media pe fereastra
             "spot_qty": 0.0, "perp_szi": 0.0}   # spot_qty/perp_szi folosite doar in PAPER
 
 
@@ -167,7 +174,8 @@ class DeltaNeutral:
             f"(~{self.p.notional} USDC/picior, levier {self.p.perp_leverage}x)")
         self._buy_spot(sz, L["spot_px"])
         self._short_perp(sz, L["perp_px"])
-        self.s["status"] = "open"; self.s["target_sz"] = sz; self.s["opened_at"] = now_str()
+        self.s["status"] = "open"; self.s["target_sz"] = sz
+        self.s["opened_at"] = now_str(); self.s["opened_ts"] = time.time()
         notify(title=f"Delta-neutral {self.p.coin} DESCHIS",
                body=f"long {sz} spot + short {sz} perp\nfunding {L['funding']*100:.4f}%/ora\n{now_str()}",
                source="dn", desktop=self.desktop)
@@ -238,7 +246,8 @@ class DeltaNeutral:
     def run(self):
         log("  === DELTA-NEUTRAL PORNIT ===")
         log(f"      coin={self.p.coin} spot={self.p.spot_pair}  notional={self.p.notional} USDC/picior  {'[PAPER]' if self.dry_run else '⚠ REAL'}")
-        log(f"      min funding ca sa stau: {self.p.min_funding_hr*100:.4f}%/ora   rebalans la {self.p.rebalance_pct}% delta")
+        log(f"      intrare funding>= {self.p.entry_funding_hr*100:.4f}%/ora  | iesire funding< {self.p.exit_funding_hr*100:.4f}%/ora")
+        log(f"      mediere {self.p.funding_window_h}h  | tin minim {self.p.min_hold_h}h  | rebalans la {self.p.rebalance_pct}% delta")
         try:
             while True:
                 L = self.legs()
@@ -259,25 +268,41 @@ class DeltaNeutral:
             if sq > 1e-6 and pq > 1e-6:
                 self.s["status"] = "open"
                 self.s["target_sz"] = round((sq + pq) / 2, 6)
+                if not self.s.get("opened_ts"):
+                    self.s["opened_ts"] = time.time()
                 log(f"  [DN] adopt pozitie existenta: spot {L['spot_qty']} / perp {L['perp_szi']} "
                     f"-> status=open, target={self.s['target_sz']}")
         fhr = L["funding"]
         delta = L["spot_qty"] + L["perp_szi"]       # ~0 cand e hedge-uit
         basis = (L["perp_px"] - L["spot_px"]) / L["spot_px"] * 100
 
+        # --- funding MEDIAT pe fereastra (ignora citiri izolate, anti-churn) ---
+        now = time.time()
+        hist = self.s.setdefault("funding_hist", [])
+        hist.append([now, fhr])
+        self.s["funding_hist"] = [x for x in hist if now - x[0] <= self.p.funding_window_h * 3600]
+        avg_f = sum(x[1] for x in self.s["funding_hist"]) / len(self.s["funding_hist"])
+
         if self.s["status"] == "flat":
-            if fhr >= self.p.min_funding_hr:
+            if avg_f >= self.p.entry_funding_hr:
                 self._open(L)
             else:
-                log(f"  [DN] funding {fhr*100:.4f}%/ora < prag — astept (flat)")
+                log(f"  [DN] funding mediu {avg_f*100:+.4f}%/ora < prag intrare — astept (flat)")
         else:
             self.s["funding_accrued"] += fhr * abs(L["perp_szi"]) * L["perp_px"] * (self.p.check_minutes/60)
             reduced = self._check_liq(L)            # protectie: alerta + reduce automat
-            if fhr < self.p.min_funding_hr:
-                self._close(L, f"funding {fhr*100:.4f}%/ora sub prag")
-            elif not reduced:                       # daca am redus, sar peste rebalans (date proaspete la urmatorul tick)
+            held_h = (now - (self.s.get("opened_ts") or now)) / 3600
+            # INCHIDE doar daca media e sub prag SI am tinut suficient (histerezis + timp minim)
+            if avg_f < self.p.exit_funding_hr and held_h >= self.p.min_hold_h:
+                self._close(L, f"funding mediu {avg_f*100:.4f}%/ora sub prag, tinut {held_h:.1f}h")
+            elif avg_f < self.p.exit_funding_hr:
+                log(f"  [DN] funding mediu negativ dar tinut doar {held_h:.1f}h < {self.p.min_hold_h}h "
+                    f"— NU inchid (las timpul sa lucreze, evit churn-ul)")
+                if not reduced:
+                    self._rebalance(L)
+            elif not reduced:
                 self._rebalance(L)
 
-        log(f"  [DN] funding={fhr*100:+.4f}%/ora (~{fhr*24*365*100:.1f}%/an)  delta={delta:+.4f}  "
-            f"basis={basis:+.3f}%  status={self.s['status']}  "
+        log(f"  [DN] funding={fhr*100:+.4f}%/ora (mediu {avg_f*100:+.4f}, ~{avg_f*24*365*100:.0f}%/an)  "
+            f"delta={delta:+.4f}  basis={basis:+.3f}%  status={self.s['status']}  "
             f"funding_acumulat~{self.s['funding_accrued']:+.4f}  fee~{self.s['fees_paid']:.4f} USDC")

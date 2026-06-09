@@ -53,6 +53,7 @@ class StratParams:
     enable_takeprofit: bool
     order_ttl_min: float
     signal_gate: bool        # True = intra DOAR daca semnalul (trend/predictie) e in favoarea directiei
+    stop_loss_pct: float     # inchide tot daca pierderea nerealizata depaseste acest % (0 = oprit)
 
     @classmethod
     def from_env(cls) -> "StratParams":
@@ -74,6 +75,7 @@ class StratParams:
             enable_takeprofit  = (mode != "dca_only"),
             order_ttl_min      = float_env("STRAT_ORDER_TTL_MIN") or 10.0,
             signal_gate        = os.environ.get("HL_SIGNAL_GATE", "false").strip().lower() == "true",
+            stop_loss_pct      = float_env("STRAT_STOP_LOSS_PCT") or 0.0,
         )
 
 
@@ -264,6 +266,29 @@ class Strategy:
             (self.s["realized_gross"], self.s["realized_net"], self.s["fees_total"], self.s["cycle"]) = keep
             log(f"  [STRAT] === ciclu inchis, reincep (ciclu {self.s['cycle']}) ===")
 
+    def _check_stop_loss(self, price: float) -> bool:
+        """Inchide TOT daca pierderea nerealizata depaseste pragul (evita acumularea de pierzatori)."""
+        if self.p.stop_loss_pct <= 0:
+            return False
+        avg = self._avg()
+        if not avg:
+            return False
+        loss_pct = -self.sign * (price - avg) / avg * 100   # pozitiv cand pierdem
+        if loss_pct >= self.p.stop_loss_pct:
+            log(f"  🛑 [STRAT] STOP-LOSS: pierdere {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — INCHID tot (taie pierderea)")
+            # anuleaza TOATE ordinele pendinte (inclusiv DCA-uri) ca sa nu se reumple pozitia
+            for o in list(self.s["orders"]):
+                if not self.dry_run and not str(o["oid"]).startswith("PAPER"):
+                    self.client.cancel(self.coin, o["oid"])
+                self._remove(o)
+            agg = price * (1 - self.sign * 0.005)           # pret agresiv -> fill sigur
+            self._place("close", self.s["qty"], agg, "STOP")
+            notify(title=f"🛑 {self.coin}: STOP-LOSS ({loss_pct:.1f}%)",
+                   body=f"Pierdere {loss_pct:.1f}% >= prag {self.p.stop_loss_pct}% — am inchis pozitia.\n{now_str()}",
+                   source="hyperliquid", price=price, desktop=self.desktop)
+            return True
+        return False
+
     # -- decizie ---------------------------------------------------------------
     def step(self, price: float) -> None:
         held = self.s["qty"]
@@ -283,6 +308,9 @@ class Strategy:
                 log(f"  [STRAT] plafon {self.p.max_budget} {self.ccy} atins"); return
             px = price * (1 - self.sign * d)
             self._place("open", self._sz_for(self.p.entry_amount, px), px, "ENTRY", self.p.entry_amount)
+            return
+        # STOP-LOSS: taie pierderea daca pozitia merge prea mult contra (anti-runaway DCA)
+        if self._check_stop_loss(price):
             return
         avg = self._avg()
         if self.p.enable_takeprofit and avg:
