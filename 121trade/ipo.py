@@ -108,14 +108,29 @@ def start_trading(client, t212_ticker, label, strat_enabled, strat_dry,
 # Main
 # ---------------------------------------------------------------------------
 def main() -> int:
+    import glob
     env_file = os.environ.get("ENV_FILE", ".env")
+    profile = os.environ.get("IPO_PROFILE")
     for i, a in enumerate(sys.argv):
         if a == "--env-file" and i + 1 < len(sys.argv):
             env_file = sys.argv[i + 1]
-    load_dotenv(env_file)                                                      # secrete (gitignored)
-    load_dotenv(os.path.join(os.path.dirname(env_file) or ".", "config.env"))  # config versionat (comis)
+        if a in ("--profile", "-p") and i + 1 < len(sys.argv):
+            profile = sys.argv[i + 1]
+    load_dotenv(env_file)                                   # secrete comune (gitignored)
+    if profile:                                            # config pe profil (comis): config.<profil>.env
+        cfg_dir = os.path.dirname(env_file) or "."
+        cfg = os.path.join(cfg_dir, f"config.{profile}.env")
+        if not os.path.exists(cfg):
+            avail = sorted(os.path.basename(p)[7:-4]
+                           for p in glob.glob(os.path.join(cfg_dir, "config.*.env")))
+            log(f"! profil necunoscut '{profile}' (lipseste {cfg})")
+            log(f"  profile disponibile: {', '.join(avail) or '(niciunul)'}")
+            return 2
+        load_dotenv(cfg)
 
     ap = argparse.ArgumentParser(description="Watcher + auto-trade generic pe T212.")
+    ap.add_argument("--profile", "-p",     required=True, metavar="NUME",
+                    help="OBLIGATORIU: profil de config -> incarca config.<NUME>.env (ex: spcx, nvda)")
     ap.add_argument("--env-file",          default=env_file)
     ap.add_argument("--symbol",            metavar="T212_TICKER",
                     help="Override instrument (altfel din .env T212_TICKER)")
