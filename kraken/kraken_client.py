@@ -49,7 +49,8 @@ class KrakenClient:
             raise KrakenError("Lipsesc cheile Kraken (KRAKEN_API_KEY / KRAKEN_API_SECRET)")
         urlpath = f"/0/private/{method}"
         data = dict(data or {})
-        data["nonce"] = str(int(time.time() * 1000))
+        # nonce in nanosecunde: maxim monoton, depaseste orice nonce (ms/us) folosit anterior pe cheie
+        data["nonce"] = str(time.time_ns())
         headers = {
             "API-Key": self.api_key,
             "API-Sign": self._signature(urlpath, data, self.api_secret),
