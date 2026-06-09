@@ -1,0 +1,24 @@
+[Unit]
+# Serviciu systemd pentru botul delta-neutral Hyperliquid.
+# Instalare:
+#   sudo cp hl-dn.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now hl-dn
+# Monitorizare:  journalctl -u hl-dn -f
+# Oprire:        sudo systemctl stop hl-dn
+Description=Hyperliquid delta-neutral bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mariusp
+WorkingDirectory=/home/mariusp/binance/hyperliquid
+ExecStart=/home/mariusp/binance/.venv/bin/python /home/mariusp/binance/hyperliquid/dn_bot.py
+Restart=always
+RestartSec=15
+StandardOutput=append:/home/mariusp/binance/hyperliquid/dn.log
+StandardError=append:/home/mariusp/binance/hyperliquid/dn.log
+
+[Install]
+WantedBy=multi-user.target
