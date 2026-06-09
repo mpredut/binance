@@ -55,6 +55,7 @@ def main() -> int:
     ap.add_argument("--price", action="store_true")
     ap.add_argument("--balance", action="store_true")
     ap.add_argument("--positions", action="store_true")
+    ap.add_argument("--signal", action="store_true", help="Arata semnalul de trend/predictie curent")
     ap.add_argument("--test-strategy", metavar="COIN")
     args = ap.parse_args()
 
@@ -81,6 +82,12 @@ def main() -> int:
     if args.positions:
         szi, entry = client.position(coin)
         log(f"[POSITION] {coin}: size={szi} entryPx={entry}")
+        return 0
+    if args.signal:
+        from signals import get_signal
+        s = get_signal(client, coin)
+        log(f"[SIGNAL] {coin}: trend={s['trend']}  confidence={s['confidence']}  sursa={s['source']}"
+            + (f"  ({s['detail']})" if s.get("detail") else ""))
         return 0
     if args.test_strategy:
         log(f"[TEST] strategie {args.test_strategy}  {'PAPER' if strat_dry else '⚠ REAL'}")

@@ -27,6 +27,7 @@ from common import log, now_str, float_env
 from notify import notify
 from hl_client import HLClient, HLError
 from market_data import get_price
+from signals import get_signal
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 HL_FEE_PCT = float_env("HL_FEE_PCT") or 0.035
@@ -51,6 +52,7 @@ class StratParams:
     max_dca_buys: int
     enable_takeprofit: bool
     order_ttl_min: float
+    signal_gate: bool        # True = intra DOAR daca semnalul (trend/predictie) e in favoarea directiei
 
     @classmethod
     def from_env(cls) -> "StratParams":
@@ -71,6 +73,7 @@ class StratParams:
             max_dca_buys       = int(float_env("STRAT_MAX_DCA_BUYS") or 10),
             enable_takeprofit  = (mode != "dca_only"),
             order_ttl_min      = float_env("STRAT_ORDER_TTL_MIN") or 10.0,
+            signal_gate        = os.environ.get("HL_SIGNAL_GATE", "false").strip().lower() == "true",
         )
 
 
@@ -267,6 +270,15 @@ class Strategy:
         d = self.p.entry_discount_pct / 100
         if held <= 1e-12:
             if self._open_pending(): return
+            # POARTA DE SEMNAL: nu intra contra trendului/predictiei
+            if self.p.signal_gate:
+                sig = get_signal(self.client, self.coin)
+                want = "up" if self.sign > 0 else "down"   # long vrea trend up; short vrea down
+                if sig["trend"] != want:
+                    log(f"  [STRAT] semnal={sig['trend']} (conf {sig['confidence']}, {sig['source']}) "
+                        f"!= {want} pt {self.p.direction} — NU intru (astept trend favorabil)")
+                    return
+                log(f"  [STRAT] semnal={sig['trend']} favorabil pt {self.p.direction} — intru")
             if self.s["spent"] + self.p.entry_amount > self.p.max_budget:
                 log(f"  [STRAT] plafon {self.p.max_budget} {self.ccy} atins"); return
             px = price * (1 - self.sign * d)

@@ -14,6 +14,8 @@ Necesita rularea cu python-ul din venv-ul cu SDK:
 
 from __future__ import annotations
 
+import time
+
 from common import log
 
 try:
@@ -150,6 +152,48 @@ class HLClient:
         except Exception as e:  # noqa: BLE001
             log(f"  ! funding_rate({coin}) esuat: {e}")
         return None
+
+    def position_full(self, coin: str) -> dict | None:
+        """Pozitia perp completa: szi, entryPx, liquidationPx, unrealizedPnl, marginUsed..."""
+        try:
+            for ap in self._user_state().get("assetPositions", []):
+                p = ap.get("position", {})
+                if p.get("coin") == coin:
+                    return p
+        except Exception as e:  # noqa: BLE001
+            log(f"  ! position_full esuat: {e}")
+        return None
+
+    def margin_summary(self) -> dict:
+        """Valoarea contului perp + margine folosita + retragibil."""
+        try:
+            st = self._user_state()
+            ms = st.get("marginSummary", {})
+            return {"accountValue": float(ms.get("accountValue") or 0),
+                    "totalMarginUsed": float(ms.get("totalMarginUsed") or 0),
+                    "withdrawable": float(st.get("withdrawable") or 0)}
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def funding_history(self, start_ms: int) -> list[dict]:
+        """Istoricul platilor de funding (real incasat/platit) de la start_ms incoace."""
+        if not self.address:
+            return []
+        try:
+            return self.info.user_funding_history(self.address, start_ms)
+        except Exception as e:  # noqa: BLE001
+            log(f"  ! funding_history esuat: {e}")
+            return []
+
+    def candles(self, coin: str, interval: str = "1h", lookback_hours: int = 60) -> list[dict]:
+        """Lumanari OHLCV (pentru indicatori de trend)."""
+        end = int(time.time() * 1000)
+        start = end - lookback_hours * 3600 * 1000
+        try:
+            return self.info.candles_snapshot(coin, interval, start, end)
+        except Exception as e:  # noqa: BLE001
+            log(f"  ! candles({coin}) esuat: {e}")
+            return []
 
     def spot_order(self, pair: str, is_buy: bool, sz: float, px: float,
                    sz_decimals: int = 2) -> tuple[bool, int | None, str]:
