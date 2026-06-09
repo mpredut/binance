@@ -118,6 +118,61 @@ class HLClient:
             return []
         return [o for o in oo if coin is None or o.get("coin") == coin]
 
+    # ----- SPOT + funding (citiri) --------------------------------------------
+    def spot_mid(self, pair: str) -> float | None:
+        """Pret spot pentru perechea @index (ex @107 = HYPE/USDC)."""
+        try:
+            v = self.info.all_mids().get(pair)
+            return float(v) if v is not None else None
+        except Exception as e:  # noqa: BLE001
+            log(f"  ! spot_mid({pair}) esuat: {e}")
+            return None
+
+    def spot_balance(self, token: str) -> float:
+        """Cantitatea detinuta din token-ul spot (ex 'HYPE', 'USDC')."""
+        if not self.address:
+            return 0.0
+        try:
+            for b in self.info.spot_user_state(self.address).get("balances", []):
+                if b.get("coin") == token:
+                    return float(b.get("total") or 0)
+        except Exception as e:  # noqa: BLE001
+            log(f"  ! spot_balance({token}) esuat: {e}")
+        return 0.0
+
+    def funding_rate(self, coin: str) -> float | None:
+        """Rata de funding curenta (pe ora) a perp-ului. Pozitiv = long platesc short."""
+        try:
+            meta, ctxs = self.info.meta_and_asset_ctxs()
+            for i, a in enumerate(meta["universe"]):
+                if a["name"] == coin:
+                    return float(ctxs[i].get("funding") or 0)
+        except Exception as e:  # noqa: BLE001
+            log(f"  ! funding_rate({coin}) esuat: {e}")
+        return None
+
+    def spot_order(self, pair: str, is_buy: bool, sz: float, px: float,
+                   sz_decimals: int = 2) -> tuple[bool, int | None, str]:
+        """Ordin LIMIT pe spot. pair = numele @index (ex @107)."""
+        if not self.exchange:
+            raise HLError("Fara agent wallet (HL_SECRET_KEY)")
+        sz = round(sz, sz_decimals)
+        px = _round_px(px, sz_decimals, is_perp=False)
+        try:
+            res = self.exchange.order(pair, is_buy, sz, px, {"limit": {"tif": "Gtc"}})
+        except Exception as e:  # noqa: BLE001
+            return False, None, str(e)
+        if res.get("status") != "ok":
+            return False, None, str(res)
+        st = res["response"]["data"]["statuses"][0]
+        if "resting" in st:
+            return True, st["resting"]["oid"], "resting"
+        if "filled" in st:
+            return True, st["filled"].get("oid"), f"filled {st['filled'].get('totalSz')}"
+        if "error" in st:
+            return False, None, st["error"]
+        return True, None, str(st)
+
     # ----- tranzactionare (semnat) --------------------------------------------
     def set_leverage(self, coin: str, leverage: int) -> None:
         if not self.exchange:

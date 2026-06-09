@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
 """
-strategy.py — motor DCA + take-profit pe Hyperliquid (PERP long-only).
+strategy.py — motor DCA + take-profit pe Hyperliquid (PERP), LONG sau SHORT.
 
-Aceeasi logica ca T212/Kraken, adaptata pentru Hyperliquid:
-  * Pozitia (marime + pret mediu de intrare) vine direct din clearinghouseState
-    -> reconciliere curata din pozitie (ca la T212, nu trebuie sa urmarim noi avg).
-  * "buy" = deschide/mareste long; "TP" = ordin sell reduce-only la avg*(1+TP).
-  * Fee Hyperliquid MINUSCUL (~0.045% taker / 0.015% maker) -> TP poate fi strans.
+Generalizat pe directie (HL_DIRECTION = long | short):
+  * LONG : intra cumparand sub piata; DCA cand pretul SCADE; TP cand pretul URCA.
+  * SHORT: intra vanzand peste piata; DCA cand pretul URCA;  TP cand pretul SCADE.
 
-Long-only la levier mic (1x): lichidarea e foarte departe, comportament ~spot.
+Convensie cu semn: sign = +1 (long) / -1 (short).
+  open_px  = price * (1 - sign * discount)       (intrare/DCA)
+  tp_px    = avg   * (1 + sign * takeprofit)      (inchidere, reduce-only)
+  DCA cand : sign * (price - last_open) <= -drop  (pretul a mers CONTRA noua)
+  profit   = sign * (price - avg) * qty
+
+Pozitia + pretul mediu vin din clearinghouseState (szi semnat, entryPx).
+Fee HL minuscul -> TP poate fi strans. Levier din HL_LEVERAGE (1 = cvasi-spot).
 """
 
 from __future__ import annotations
@@ -24,17 +29,18 @@ from hl_client import HLClient, HLError
 from market_data import get_price
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-HL_FEE_PCT = float_env("HL_FEE_PCT") or 0.035   # per leg, estimativ (maker ~0.015, taker ~0.045)
+HL_FEE_PCT = float_env("HL_FEE_PCT") or 0.035
 
 
-def state_path_for(coin: str) -> str:
+def state_path_for(coin: str, direction: str) -> str:
     safe = "".join(c for c in coin if c.isalnum() or c in "._-")
-    return os.path.join(_HERE, f".state_{safe}.json")
+    return os.path.join(_HERE, f".state_{safe}_{direction}.json")
 
 
 @dataclass
 class StratParams:
     currency: str
+    direction: str            # "long" | "short"
     entry_amount: float
     entry_discount_pct: float
     dca_amount: float
@@ -49,8 +55,12 @@ class StratParams:
     @classmethod
     def from_env(cls) -> "StratParams":
         mode = os.environ.get("STRATEGY_MODE", "avg_tp").strip().lower()
+        direction = os.environ.get("HL_DIRECTION", "long").strip().lower()
+        if direction not in ("long", "short"):
+            direction = "long"
         return cls(
             currency           = os.environ.get("STRAT_CURRENCY", "USDC").strip().upper(),
+            direction          = direction,
             entry_amount       = float_env("STRAT_ENTRY") or 50.0,
             entry_discount_pct = float_env("STRAT_ENTRY_DISCOUNT_PCT") or 0.2,
             dca_amount         = float_env("STRAT_DCA") or 30.0,
@@ -64,18 +74,12 @@ class StratParams:
         )
 
 
-def _sell_pnl(avg: float, price: float, qty: float) -> tuple[float, float, float]:
-    gross = (price - avg) * qty
-    fee = (HL_FEE_PCT / 100.0) * (avg * qty + price * qty)
-    return gross, fee, gross - fee
-
-
 def _new_state() -> dict:
     return {
         "cycle": 1, "qty": 0.0, "cost": 0.0, "spent": 0.0, "dca_buys": 0,
-        "entry_price": None, "last_buy_price": None,
+        "entry_price": None, "last_open_price": None,
         "realized_gross": 0.0, "realized_net": 0.0, "fees_total": 0.0,
-        "orders": [],   # {oid, side, sz, px, amount, kind, ts}
+        "orders": [],   # {oid, role(open/close), side, sz, px, amount, kind, ts}
     }
 
 
@@ -89,7 +93,10 @@ class Strategy:
         self.dry_run = dry_run
         self.desktop = desktop
         self.leverage = leverage
-        self.state_file = state_path_for(coin)
+        self.sign = 1 if params.direction == "long" else -1
+        self.open_side = "buy" if self.sign > 0 else "sell"     # deschide/mareste pozitia
+        self.close_side = "sell" if self.sign > 0 else "buy"    # reduce (reduce-only)
+        self.state_file = state_path_for(coin, params.direction)
         self.s = self._load()
         self._paper_seq = 0
         self.sz_dec = 2
@@ -125,44 +132,45 @@ class Strategy:
     def _sz_for(self, amount: float, price: float) -> float:
         return round(amount / price, self.sz_dec) if price > 0 else 0.0
 
-    def _has_open(self, side: str) -> bool:
-        return any(o["side"] == side for o in self.s["orders"])
+    def _open_pending(self) -> bool:
+        return any(o["role"] == "open" for o in self.s["orders"])
 
-    def _find_open(self, side: str) -> dict | None:
-        return next((o for o in self.s["orders"] if o["side"] == side), None)
+    def _close_order(self) -> dict | None:
+        return next((o for o in self.s["orders"] if o["role"] == "close"), None)
 
     def _remove(self, o: dict) -> None:
         if o in self.s["orders"]:
             self.s["orders"].remove(o)
 
     # -- plasare ---------------------------------------------------------------
-    def _place(self, side: str, sz: float, px: float, kind: str, amount: float = 0.0,
-               reduce_only: bool = False) -> None:
+    def _place(self, role: str, sz: float, px: float, kind: str, amount: float = 0.0) -> None:
         sz = round(sz, self.sz_dec)
         if sz <= 0:
             log("  ! [STRAT] sz 0 — sar"); return
+        side = self.open_side if role == "open" else self.close_side
+        reduce_only = (role == "close")
         if self.dry_run:
             self._paper_seq += 1
-            log(f"  [STRAT] [PAPER] {side.upper()} {kind} {sz} @ {px:.4f} {self.ccy}")
-            self.s["orders"].append({"oid": f"PAPER-{self._paper_seq}", "side": side, "sz": sz,
-                                     "px": px, "amount": amount, "kind": kind, "ts": time.time()})
+            log(f"  [STRAT] [PAPER] {role.upper()}({side}) {kind} {sz} @ {px:.4f} {self.ccy}")
+            self.s["orders"].append({"oid": f"PAPER-{self._paper_seq}", "role": role, "side": side,
+                                     "sz": sz, "px": px, "amount": amount, "kind": kind, "ts": time.time()})
             return
         ok, oid, msg = self.client.place_limit(self.coin, side == "buy", sz, px, reduce_only=reduce_only)
         if ok:
-            log(f"  [STRAT] {side.upper()} {kind} plasat oid={oid} {sz} @ {px:.4f} ({msg})")
-            self.s["orders"].append({"oid": oid, "side": side, "sz": sz, "px": px,
+            log(f"  [STRAT] {role.upper()}({side}) {kind} plasat oid={oid} {sz} @ {px:.4f} ({msg})")
+            self.s["orders"].append({"oid": oid, "role": role, "side": side, "sz": sz, "px": px,
                                      "amount": amount, "kind": kind, "ts": time.time()})
         else:
-            log(f"  ! [STRAT] {side} {kind} esuat: {msg}")
+            log(f"  ! [STRAT] {role} {kind} esuat: {msg}")
 
-    def _cancel_open(self, side: str) -> None:
-        o = self._find_open(side)
+    def _cancel_close(self) -> None:
+        o = self._close_order()
         if not o:
             return
         if not self.dry_run and not str(o["oid"]).startswith("PAPER"):
             self.client.cancel(self.coin, o["oid"])
         self._remove(o)
-        log(f"  [STRAT] anulat {side} {o['oid']}")
+        log(f"  [STRAT] anulat close {o['oid']}")
 
     # -- reconciliere ----------------------------------------------------------
     def reconcile(self, price: float) -> None:
@@ -172,111 +180,115 @@ class Strategy:
             self._reconcile_real(price)
 
     def _reconcile_paper(self, price: float) -> None:
-        for side in ("buy", "sell"):
-            for o in [x for x in self.s["orders"] if x["side"] == side]:
+        for role in ("open", "close"):
+            for o in [x for x in self.s["orders"] if x["role"] == role]:
                 if o not in self.s["orders"]:
                     continue
-                if side == "buy" or price >= o["px"]:
+                # open: umple instant; close: umple cand pretul a atins targetul (cu semn)
+                if role == "open" or self.sign * (price - o["px"]) >= 0:
                     self._remove(o)
-                    self._apply_paper_fill(o, o["sz"], o["px"])
-
-    def _apply_paper_fill(self, o, sz, px):
-        if o["side"] == "buy":
-            self.s["qty"] += sz; self.s["cost"] += sz * px
-            self.s["last_buy_price"] = px
-            if self.s["entry_price"] is None: self.s["entry_price"] = px
-            self.s["spent"] += o.get("amount", sz * px)
-            if o.get("kind") == "DCA": self.s["dca_buys"] += 1
-            avg = self._avg()
-            log(f"  [STRAT] [PAPER] BUY FILLED {sz} @ {px:.4f} qty={self.s['qty']} avg={avg:.4f}")
-            self._cancel_open("sell")
-        else:
-            self._book_sell(self._avg() or px, px, sz)
+                    if role == "open":
+                        self._apply_open(o["sz"], o["px"], o.get("amount", 0.0), o.get("kind"))
+                    else:
+                        self._apply_close(self._avg() or o["px"], o["px"], o["sz"])
 
     def _reconcile_real(self, price: float) -> None:
         try:
             szi, entry = self.client.position(self.coin)
         except HLError as e:
-            log(f"  [STRAT] pozitie indisponibila ({e}) — sar reconcilierea"); return
+            log(f"  [STRAT] pozitie indisponibila ({e})"); return
+        qty_now = abs(szi)
         active = {o.get("oid") for o in self.client.open_orders(self.coin)}
         prev = self.s["qty"]
 
-        if szi > prev + 1e-9:                       # BUY executat
-            fq = szi - prev
+        if qty_now > prev + 1e-9:        # s-a deschis/marit pozitia
             fp = entry if entry > 0 else price
-            is_dca = prev > 1e-9
-            self.s["last_buy_price"] = fp
-            if self.s["entry_price"] is None: self.s["entry_price"] = fp
-            if is_dca: self.s["dca_buys"] += 1
-            self.s["qty"] = szi; self.s["cost"] = szi * entry
-            self.s["spent"] = round(szi * entry, 2)
-            log(f"  [STRAT] BUY EXECUTAT {fq:.6f} @ {fp:.4f} ({'DCA' if is_dca else 'ENTRY'}) qty={szi} avg={entry:.4f}")
-            notify(title=f"{self.coin} BUY {fq:.6f} @ {fp:.4f}",
-                   body=f"{'DCA' if is_dca else 'ENTRY'} qty {szi} avg {entry:.4f}\n{now_str()}",
-                   source="hyperliquid", price=fp, desktop=self.desktop)
-            self._cancel_open("sell")
-        elif szi < prev - 1e-9:                     # SELL executat
-            self._book_sell(self._avg() or entry or price, price, prev - szi)
-            self.s["qty"] = szi; self.s["cost"] = szi * entry
+            self._apply_open(qty_now - prev, fp, round((qty_now - prev) * fp, 2), None,
+                             real_qty=qty_now, real_avg=entry)
+        elif qty_now < prev - 1e-9:      # s-a redus (TP)
+            self._apply_close(self._avg() or entry or price, price, prev - qty_now,
+                              real_qty=qty_now, real_avg=entry)
         else:
-            self.s["qty"] = szi
-            if szi > 1e-12: self.s["cost"] = szi * entry
+            self.s["qty"] = qty_now
+            if qty_now > 1e-12: self.s["cost"] = qty_now * entry
 
         for o in list(self.s["orders"]):
             if str(o["oid"]).startswith("PAPER"): continue
             if o["oid"] not in active:
                 self._remove(o)
-            elif o["side"] == "buy" and (time.time()-o.get("ts",0))/60 > self.p.order_ttl_min and price > o["px"]*1.003:
-                log(f"  [STRAT] buy {o['oid']} neexecutat, pret a urcat — anulez & reasez")
+            elif o["role"] == "open" and (time.time()-o.get("ts",0))/60 > self.p.order_ttl_min \
+                    and self.sign*(price - o["px"]) > 0.003*o["px"]:
+                log(f"  [STRAT] open {o['oid']} neexecutat, pret a fugit — anulez & reasez")
                 self.client.cancel(self.coin, o["oid"]); self._remove(o)
 
-        if szi <= 1e-12 and prev > 1e-9:
+    def _apply_open(self, fq, fp, amount, kind, real_qty=None, real_avg=None):
+        is_dca = self.s["qty"] > 1e-9
+        self.s["last_open_price"] = fp
+        if self.s["entry_price"] is None: self.s["entry_price"] = fp
+        if is_dca: self.s["dca_buys"] += 1
+        if real_qty is not None:
+            self.s["qty"] = real_qty; self.s["cost"] = real_qty * real_avg
+            self.s["spent"] = round(real_qty * real_avg, 2)
+        else:
+            self.s["qty"] += fq; self.s["cost"] += fq * fp
+            self.s["spent"] += amount or fq * fp
+        avg = self._avg()
+        tag = "[PAPER] " if self.dry_run else ""
+        log(f"  [STRAT] {tag}OPEN {self.p.direction.upper()} {fq:.6f} @ {fp:.4f} "
+            f"({'DCA' if is_dca else 'ENTRY'}) qty={self.s['qty']:.6f} avg={avg:.4f}")
+        notify(title=f"{tag}{self.coin} OPEN {self.p.direction} {fq:.6f} @ {fp:.4f}",
+               body=f"{'DCA' if is_dca else 'ENTRY'} qty {self.s['qty']:.6f} avg {avg:.4f}\n{now_str()}",
+               source="hyperliquid", price=fp, desktop=self.desktop)
+        self._cancel_close()   # avg schimbat -> reasezam TP
+
+    def _apply_close(self, avg, price, sz, real_qty=None, real_avg=None):
+        gross = self.sign * (price - avg) * sz
+        fee = (HL_FEE_PCT/100.0) * (avg*sz + price*sz)
+        net = gross - fee
+        self.s["realized_gross"] += gross; self.s["realized_net"] += net; self.s["fees_total"] += fee
+        tag = "[PAPER] " if self.dry_run else ""
+        log(f"  [STRAT] {tag}CLOSE {sz:.6f} @ {price:.4f}  brut={gross:+.4f} fee={fee:.4f} net={net:+.4f}")
+        notify(title=f"{tag}{self.coin} CLOSE {sz:.6f} @ {price:.4f}  NET {net:+.2f}",
+               body=f"Brut {gross:+.4f} - fee {fee:.4f} = NET {net:+.4f}\nNet total {self.s['realized_net']:+.4f}\n{now_str()}",
+               source="hyperliquid", price=price, desktop=self.desktop)
+        if real_qty is not None:
+            self.s["qty"] = real_qty; self.s["cost"] = real_qty * (real_avg or 0)
+        else:
+            self.s["qty"] -= sz
+        if self.s["qty"] <= 1e-12:
             keep = (self.s["realized_gross"], self.s["realized_net"], self.s["fees_total"], self.s.get("cycle",1)+1)
             self.s = _new_state()
             (self.s["realized_gross"], self.s["realized_net"], self.s["fees_total"], self.s["cycle"]) = keep
             log(f"  [STRAT] === ciclu inchis, reincep (ciclu {self.s['cycle']}) ===")
 
-    def _book_sell(self, avg: float, price: float, sz: float) -> None:
-        gross, fee, net = _sell_pnl(avg, price, sz)
-        self.s["realized_gross"] += gross; self.s["realized_net"] += net; self.s["fees_total"] += fee
-        log(f"  [STRAT] {'[PAPER] ' if self.dry_run else ''}SELL {sz} @ {price:.4f}  "
-            f"brut={gross:+.4f} fee={fee:.4f} net={net:+.4f} {self.ccy}")
-        notify(title=f"{self.coin} SELL {sz} @ {price:.4f}  NET {net:+.2f} {self.ccy}",
-               body=f"Brut {gross:+.4f} - fee {fee:.4f} = NET {net:+.4f}\nNet total {self.s['realized_net']:+.4f}\n{now_str()}",
-               source="hyperliquid", price=price, desktop=self.desktop)
-        # in PAPER reducem manual pozitia; in REAL o ia din clearinghouseState
-        if self.dry_run:
-            self.s["qty"] -= sz
-            if self.s["qty"] <= 1e-12:
-                keep = (self.s["realized_gross"], self.s["realized_net"], self.s["fees_total"], self.s.get("cycle",1)+1)
-                self.s = _new_state()
-                (self.s["realized_gross"], self.s["realized_net"], self.s["fees_total"], self.s["cycle"]) = keep
-                log(f"  [STRAT] === ciclu inchis, reincep (ciclu {self.s['cycle']}) ===")
-
     # -- decizie ---------------------------------------------------------------
     def step(self, price: float) -> None:
         held = self.s["qty"]
-        disc = 1 - self.p.entry_discount_pct / 100
+        d = self.p.entry_discount_pct / 100
         if held <= 1e-12:
-            if self._has_open("buy"): return
+            if self._open_pending(): return
             if self.s["spent"] + self.p.entry_amount > self.p.max_budget:
                 log(f"  [STRAT] plafon {self.p.max_budget} {self.ccy} atins"); return
-            self._place("buy", self._sz_for(self.p.entry_amount, price*disc), price*disc, "ENTRY", self.p.entry_amount)
+            px = price * (1 - self.sign * d)
+            self._place("open", self._sz_for(self.p.entry_amount, px), px, "ENTRY", self.p.entry_amount)
             return
         avg = self._avg()
         if self.p.enable_takeprofit and avg:
-            target = avg * (1 + self.p.takeprofit_pct/100)
-            sell = self._find_open("sell")
-            if sell is None:
-                self._place("sell", held, target, "TP", reduce_only=True)
-            elif abs(sell["px"]-target)/target > 0.001 or abs(sell["sz"]-held) > 1e-9:
-                self._cancel_open("sell"); self._place("sell", held, target, "TP", reduce_only=True)
-        if (self.s["dca_buys"] < self.p.max_dca_buys and self.s["last_buy_price"]
-                and price <= self.s["last_buy_price"]*(1 - self.p.dca_drop_pct/100)
+            target = avg * (1 + self.sign * self.p.takeprofit_pct/100)
+            o = self._close_order()
+            if o is None:
+                self._place("close", held, target, "TP")
+            elif abs(o["px"]-target)/target > 0.001 or abs(o["sz"]-held) > 1e-9:
+                self._cancel_close(); self._place("close", held, target, "TP")
+        # DCA: pretul a mers CONTRA pozitiei cu drop%
+        moved = self.sign * (price - self.s["last_open_price"]) / self.s["last_open_price"] if self.s["last_open_price"] else 0
+        if (self.s["dca_buys"] < self.p.max_dca_buys and self.s["last_open_price"]
+                and moved <= -self.p.dca_drop_pct/100
                 and self.s["spent"] + self.p.dca_amount <= self.p.max_budget
-                and not self._has_open("buy")):
-            log(f"  [STRAT] dip {price:.4f} — DCA")
-            self._place("buy", self._sz_for(self.p.dca_amount, price*disc), price*disc, "DCA", self.p.dca_amount)
+                and not self._open_pending()):
+            px = price * (1 - self.sign * d)
+            log(f"  [STRAT] pret contra ({moved*100:.2f}%) — DCA")
+            self._place("open", self._sz_for(self.p.dca_amount, px), px, "DCA", self.p.dca_amount)
 
     # -- bucla -----------------------------------------------------------------
     def run(self) -> None:
@@ -284,13 +296,12 @@ class Strategy:
         if not self.dry_run and self.client.exchange:
             self.client.set_leverage(self.coin, self.leverage)
         log("  === STRATEGIE HYPERLIQUID PORNITA ===")
-        log(f"      coin       : {self.coin} (perp, levier {self.leverage}x)  {'[PAPER]' if self.dry_run else '⚠ REAL'}")
+        log(f"      coin       : {self.coin} perp  DIRECTIE={self.p.direction.upper()} levier {self.leverage}x  {'[PAPER]' if self.dry_run else '⚠ REAL'}")
         log(f"      mod        : {mode}")
-        log(f"      intrare    : {self.p.entry_amount} {self.ccy} @ market-{self.p.entry_discount_pct}%")
-        log(f"      DCA        : {self.p.dca_amount} {self.ccy} la -{self.p.dca_drop_pct}% (max {self.p.max_dca_buys})")
-        log(f"      take-profit: +{self.p.takeprofit_pct}%" if self.p.enable_takeprofit else "      TP: off")
-        log(f"      PLAFON     : {self.p.max_budget} {self.ccy} / ciclu")
-        log(f"      ! fee HL ~{HL_FEE_PCT}%/leg (minuscul) -> TP={self.p.takeprofit_pct}% e ok")
+        log(f"      intrare    : {self.p.entry_amount} {self.ccy} @ market{'-' if self.sign>0 else '+'}{self.p.entry_discount_pct}%")
+        log(f"      DCA        : {self.p.dca_amount} {self.ccy} la {self.p.dca_drop_pct}% contra (max {self.p.max_dca_buys})")
+        log(f"      take-profit: {self.p.takeprofit_pct}% in favoare" if self.p.enable_takeprofit else "      TP: off")
+        log(f"      PLAFON     : {self.p.max_budget} {self.ccy} / ciclu  |  fee HL ~{HL_FEE_PCT}%/leg")
         try:
             while True:
                 price = get_price(self.client, self.coin)
@@ -298,9 +309,9 @@ class Strategy:
                     log("  [STRAT] pret indisponibil"); time.sleep(self.p.check_minutes*60); continue
                 self.reconcile(price); self.step(price); self._save()
                 avg = self._avg()
-                pos = f"qty={self.s['qty']} avg={avg:.4f}" if avg else "qty=0 (astept intrare)"
-                log(f"  [STRAT] pret={price:.4f}  {pos}  NET={self.s['realized_net']:+.2f} "
-                    f"(brut {self.s['realized_gross']:+.2f}, fee {self.s['fees_total']:.2f}) {self.ccy}  ord={len(self.s['orders'])}")
+                pos = f"qty={self.s['qty']:.6f} avg={avg:.4f}" if avg else "qty=0 (astept intrare)"
+                log(f"  [STRAT] pret={price:.4f} [{self.p.direction}]  {pos}  "
+                    f"NET={self.s['realized_net']:+.2f} (brut {self.s['realized_gross']:+.2f}, fee {self.s['fees_total']:.2f}) {self.ccy}  ord={len(self.s['orders'])}")
                 time.sleep(self.p.check_minutes*60)
         except KeyboardInterrupt:
             log("  [STRAT] oprit manual."); self._save()
