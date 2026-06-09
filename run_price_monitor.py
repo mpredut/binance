@@ -15,7 +15,8 @@ from pricechecker import start_price_alert_checker, PRICE_ALERT_CONFIG
 from new_coins_discovery import create_new_coins_checker, NewCoinsMonitor, NewCoinsFactory, MAX_NEW_COINS_TO_TRACK
 from alertnotifiers import AlertNotifier
 
-load_dotenv()
+load_dotenv()                                                # secrete comune (gitignored)
+load_dotenv(Path(__file__).resolve().parent / "config.env")  # config versionat (comis)
 
 CMC_API_KEY = os.environ.get('CMC_API_KEY')
 TIME_INTERVAL_CLEANUP = 6 * 60 * 60  # 6 hours in seconds

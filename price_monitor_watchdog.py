@@ -27,7 +27,8 @@ from pathlib import Path
 
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv()                                                # secrete comune (gitignored)
+    load_dotenv(Path(__file__).resolve().parent / "config.env")  # config versionat (comis)
 except Exception:
     pass
 
