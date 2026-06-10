@@ -63,7 +63,8 @@ class StratParams:
             check_minutes      = float_env("STRAT_CHECK_MINUTES") or 2.0,
             takeprofit_pct     = float_env("STRAT_TAKEPROFIT_PCT") or 1.0,
             max_budget         = float_env("STRAT_MAX_BUDGET") or 500.0,
-            max_dca_buys       = int(float_env("STRAT_MAX_DCA_BUYS") or 10),
+            # NU "or 10": zeroul explicit (= fara DCA, doar gestionare iesire) e valid
+            max_dca_buys       = int(float_env("STRAT_MAX_DCA_BUYS")) if float_env("STRAT_MAX_DCA_BUYS") is not None else 10,
             enable_takeprofit  = (mode != "dca_only"),
             order_ttl_min      = float_env("STRAT_ORDER_TTL_MIN") or 10.0,
             stop_loss_pct      = float_env("STRAT_STOP_LOSS_PCT") or 0.0,
