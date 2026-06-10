@@ -228,7 +228,9 @@ class TestAdoptare(Base):
         s = self._strategy(FakeKraken(bal={"TSTX": "37.5"}))
         s.step(200.0)
         self.assertTrue(s.s["adopted"])
-        self.assertEqual(s.s["qty"], 37.5)
+        # adoptarea din balanta lasa un praf (balanta Kraken e raportata rotunjit)
+        self.assertAlmostEqual(s.s["qty"], 37.5, delta=0.001)
+        self.assertLess(s.s["qty"], 37.5 + 1e-12, "nu vinde niciodata peste ledger")
         self.assertAlmostEqual(s.s["cost"] / s.s["qty"], 200.0)
         sells = [o for o in s.s["orders"] if o["side"] == "sell" and o["kind"] == "TP"]
         self.assertEqual(len(sells), 1, "TP plasat imediat dupa adoptare")
@@ -255,10 +257,11 @@ class TestAdoptare(Base):
     def test_nu_readopta_dupa_restart(self):
         s = self._strategy(FakeKraken(bal={"TSTX": "37.5"}))
         s._maybe_adopt()
+        q1 = s.s["qty"]
         s._save()
         s2 = self._strategy(FakeKraken(bal={"TSTX": "99999"}))   # balanta crescuta intre timp
         s2._maybe_adopt()
-        self.assertEqual(s2.s["qty"], 37.5, "restart nu re-adopta / nu dubleaza")
+        self.assertEqual(s2.s["qty"], q1, "restart nu re-adopta / nu dubleaza")
 
     def test_alocarea_nu_consuma_plafonul_dca(self):
         s = self._strategy(FakeKraken(bal={"TSTX": "37.5"}))
