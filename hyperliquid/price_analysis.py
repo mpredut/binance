@@ -49,6 +49,7 @@ def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
 
     blocks = [cur_idx]
     consecutive, noise = 1, 0
+    confirm_lo = cur_idx[0]      # cel mai vechi punct care CONFIRMA directia curenta
     t_ws = t_end - window_sec - step_sec
     while t_ws >= t_first:
         s, idx = slope_h(t_ws, t_ws + window_sec)
@@ -56,18 +57,19 @@ def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
             break
         if np.sign(s) == current_sign:
             blocks.append(idx); consecutive += 1; noise = 0
+            confirm_lo = idx[0]
         elif noise < noise_tolerance:
-            noise += 1; blocks.append(idx)
-        elif consecutive >= min_consecutive_blocks:
-            break
+            noise += 1; blocks.append(idx)           # tentativ: poate trendul continua dincolo de zgomot
         else:
-            blocks.append(idx)
+            break                                    # zgomot peste toleranta → trendul s-a terminat aici
         t_ws -= step_sec
 
-    if len(blocks) < min_consecutive_blocks:
+    # fara minim de blocuri CONFIRMATE nu exista trend coerent (un bounce de o zi
+    # contra unei scaderi de 4 zile NU e "trend up de 4 zile")
+    if consecutive < min_consecutive_blocks:
         return None
 
-    trend_start_ts = timestamps[blocks[-1][0]] - (noise_tolerance + 1) * window_sec
+    trend_start_ts = float(timestamps[confirm_lo])   # durata = strict ce e confirmat
     duration_seconds = t_end - trend_start_ts
     if duration_seconds <= 0:
         return None
