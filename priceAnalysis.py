@@ -522,10 +522,26 @@ def write_all_trends_old(symbols, filename="priceanalysis.json"):
 
 
 
-def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=14, quant_seconds=3600*24, draw=False):
+def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=None, quant_seconds=3600*24, draw=False):
+    """T_quanta=None (implicit) = AUTO: T estimat EMPIRIC din istoricul monedei
+    (hibrid cu prior-ul 14, favorizand empiricul cand avem episoade destule),
+    specializat per simbol si tinut in cache pe disc (trend_survival.estimate_T).
+    Poti da explicit T_quanta=14 ca sa fortezi comportamentul vechi."""
     import cacheManager as cm
     global last_timestamp
     global last_w
+
+    if T_quanta is None:
+        try:
+            from trend_survival import estimate_T
+            est = estimate_T(symbol)
+            T_quanta = est["T"]
+            print(f"[{symbol}] T AUTO (empiric hibrid): {T_quanta} zile  "
+                  f"(n={est['n']} episoade, w_empiric={est['w']}, "
+                  f"mediana={est.get('median_d')}z, P90={est.get('p90_d')}z)")
+        except Exception as e:
+            T_quanta = 14
+            print(f"[{symbol}] estimarea T a esuat ({e}) — folosesc prior T=14")
 
     all_trend_data = cm.get_cache_manager("PriceTrend").cache
     if symbol not in all_trend_data:
@@ -541,9 +557,9 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=14
     print(f"   Start trend:     {format_timestamp(trend["start_timestamp"])}")
     print(f"   Durată:          {format_duration(trend["duration_seconds"])} ({duration_days:.1f} zile)")
     timestamp = trend['timestamp']
-    # cheia memo include order_type: BUY si SELL au ponderi total diferite —
-    # cheia veche doar pe simbol intorcea ponderea de BUY la un apel de SELL
-    memo_key = (symbol, order_type.upper())
+    # cheia memo include order_type (BUY/SELL au ponderi total diferite) si T
+    # (T-ul auto se poate schimba la reestimare — nu servim ponderi pt alt T)
+    memo_key = (symbol, order_type.upper(), T_quanta)
     if timestamp == last_timestamp.get(memo_key):
         cached_w = last_w.get(memo_key)
         if cached_w is not None and len(cached_w) > 0 and not np.isnan(cached_w[0]):

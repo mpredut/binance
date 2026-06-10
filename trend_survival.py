@@ -129,6 +129,91 @@ def verdict(cont: dict, mid: float) -> str:
     return "INVALIDAT: trendurile batrane mor mai repede — caderea gaussienei e justificata"
 
 
+# ---------------------------------------------------------------------------
+# Estimarea EMPIRICA + HIBRIDA a orizontului T (in loc de T=14 hardcodat)
+# ---------------------------------------------------------------------------
+import os
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+T_CACHE_FILE = os.path.join(_HERE, "cachedb", "trend_T_cache.json")
+
+
+def hybrid_T(dur_hours, prior_T=14.0, k=30.0, t_min=4, t_max=30) -> dict:
+    """T hibrid: empiric (favorizat cand avem date) amestecat cu prior-ul.
+
+    Calibrare: varful gaussienei (T/2) trebuie sa pice la varsta TIPICA a unui
+    trend -> T_emp = max(P90, 2*mediana) al duratelor reale (varful ~ mediana,
+    capatul Zonei 1 ~ P90: doar ~10% din trenduri traiesc dincolo -> Zona 2 =
+    decila de top, "depasit dar persistent").
+
+    Hibrid: T = w*T_emp + (1-w)*prior,  w = n/(n+k)  — cu putine episoade
+    ramanem aproape de prior; cu n>=100 domina empiricul (cum a cerut Marius).
+    """
+    n = len(dur_hours)
+    if n == 0:
+        return {"T": int(round(prior_T)), "n": 0, "w": 0.0,
+                "median_d": None, "p90_d": None, "T_emp": None}
+    d = np.asarray(dur_hours, dtype=float) / 24.0
+    med, p90 = float(np.median(d)), float(np.percentile(d, 90))
+    t_emp = max(p90, 2.0 * med)
+    w = n / (n + k)
+    T = min(max(w * t_emp + (1 - w) * prior_T, t_min), t_max)
+    return {"T": int(round(T)), "n": n, "w": round(w, 2),
+            "median_d": round(med, 1), "p90_d": round(p90, 1), "T_emp": round(t_emp, 1)}
+
+
+def estimate_T(symbol: str, days: int = 540, window_h: int = 24, step_h: int = 8,
+               prior_T: float = 14.0, ttl_days: float = 7.0) -> dict:
+    """T pentru un simbol, SPECIALIZAT pe moneda: estimat empiric din istoric,
+    hibridizat cu prior-ul, tinut in cache pe disc (recalculat dupa ttl_days).
+    Cade inapoi pe cache-ul vechi sau pe prior daca reteaua/datele lipsesc."""
+    cache = {}
+    try:
+        with open(T_CACHE_FILE) as f:
+            cache = json.load(f)
+    except (OSError, ValueError):
+        pass
+    ent = cache.get(symbol)
+    if ent and time.time() - ent.get("ts", 0) < ttl_days * 86400:
+        return ent
+
+    # simbolul de date: incearca exact, apoi varianta USDT (istoric mai adanc)
+    candidates = [symbol]
+    if symbol.upper().endswith("USDC"):
+        candidates.append(symbol.upper().replace("USDC", "USDT"))
+    ts = px = None
+    used = None
+    for sym in candidates:
+        try:
+            ts, px = fetch_klines(sym, days)
+            if len(ts) >= 100:
+                used = sym
+                break
+        except Exception:  # noqa: BLE001
+            continue
+    if used is None:
+        if ent:
+            return ent                                  # cache vechi > nimic
+        return {"T": int(round(prior_T)), "n": 0, "w": 0.0, "source_symbol": None,
+                "median_d": None, "p90_d": None, "T_emp": None, "ts": 0}
+
+    bt, bs = block_slopes(ts, px, window_h, step_h)
+    eps = episodes(bt, bs, window_h)
+    res = hybrid_T([e["dur_h"] for e in eps], prior_T=prior_T)
+    res["source_symbol"] = used
+    res["ts"] = time.time()
+    cache[symbol] = res
+    try:
+        os.makedirs(os.path.dirname(T_CACHE_FILE), exist_ok=True)
+        tmp = T_CACHE_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(cache, f, indent=2)
+        os.replace(tmp, T_CACHE_FILE)
+    except OSError:
+        pass
+    return res
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Supravietuirea empirica a trendurilor.")
     ap.add_argument("--symbol", default="BTCUSDT")
@@ -136,7 +221,17 @@ def main() -> int:
     ap.add_argument("--window", type=int, default=24, help="ore/fereastra (productie: 16)")
     ap.add_argument("--step", type=int, default=8)
     ap.add_argument("--T", type=float, default=14.0, help="orizontul gaussienei (zile), mid=T/2")
+    ap.add_argument("--estimate", action="store_true",
+                    help="doar estimeaza T (empiric+hibrid, cu cache) si iese")
     args = ap.parse_args()
+
+    if args.estimate:
+        est = estimate_T(args.symbol, days=args.days, window_h=args.window,
+                         step_h=args.step, prior_T=args.T)
+        print(f"[{args.symbol}] T estimat = {est['T']} zile  "
+              f"(empiric {est.get('T_emp')}z din n={est['n']} episoade, pondere empiric w={est['w']}, "
+              f"mediana {est.get('median_d')}z, P90 {est.get('p90_d')}z, sursa {est.get('source_symbol')})")
+        return 0
 
     ts, px = fetch_klines(args.symbol, args.days)
     if len(ts) < 100:

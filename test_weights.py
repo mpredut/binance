@@ -96,5 +96,32 @@ class TestZone(unittest.TestCase):
                                msg="contra-trend pe trend batran nu depaseste max_against_trend")
 
 
+class TestEstimareT(unittest.TestCase):
+    """hybrid_T: empiric favorizat cand avem date, prior cand nu (fara retea)."""
+
+    def test_multe_episoade_domina_empiricul(self):
+        from trend_survival import hybrid_T
+        durs = [72.0] * 100 + [160.0] * 20            # mediana 3z, P90 ~6.7z
+        r = hybrid_T(durs, prior_T=14.0)
+        self.assertLessEqual(r["T"], 9, "cu n=120 episoade, T trebuie aproape de empiric (~7), nu de 14")
+        self.assertGreaterEqual(r["w"], 0.75)
+
+    def test_putine_episoade_raman_la_prior(self):
+        from trend_survival import hybrid_T
+        r = hybrid_T([72.0] * 5, prior_T=14.0)
+        self.assertGreaterEqual(r["T"], 11, "cu 5 episoade, prior-ul trebuie sa domine")
+
+    def test_fara_episoade_prior_curat(self):
+        from trend_survival import hybrid_T
+        r = hybrid_T([], prior_T=14.0)
+        self.assertEqual(r["T"], 14)
+        self.assertEqual(r["n"], 0)
+
+    def test_limitele_de_siguranta(self):
+        from trend_survival import hybrid_T
+        self.assertGreaterEqual(hybrid_T([10.0] * 500)["T"], 4, "T nu coboara sub 4 zile")
+        self.assertLessEqual(hybrid_T([2000.0] * 500)["T"], 30, "T nu urca peste 30 zile")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
