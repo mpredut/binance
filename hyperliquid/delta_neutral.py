@@ -19,6 +19,7 @@ NU e „bani gratis": funding-ul se poate INVERSA (devii platitor), ai fee pe
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import time
@@ -30,6 +31,7 @@ from hl_client import HLClient, HLError
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 HL_FEE_PCT = float_env("HL_FEE_PCT") or 0.035
+MIN_ORDER_USD = 10.5          # Hyperliquid respinge ordine sub ~$10 — nu le mai trimitem
 _OLD_STATE = os.path.join(_HERE, ".state_dn.json")   # numele vechi (o singura moneda)
 
 
@@ -95,6 +97,11 @@ def _new_state() -> dict:
     return {"status": "flat", "target_sz": 0.0, "fees_paid": 0.0,
             "funding_accrued": 0.0, "opened_at": None, "opened_ts": None, "liq_alerted": False,
             "funding_hist": [],   # [[ts, rate], ...] pt media pe fereastra
+            "orphan_count": 0,    # tick-uri consecutive cu un singur picior (anti-glitch)
+            "gone_count": 0,      # tick-uri consecutive cu AMBELE picioare disparute
+            "drift_count": 0,     # tick-uri consecutive cu drift mare (confirmare inainte de trade)
+            "order_fails": 0,     # ordine esuate consecutiv (alerta la 3)
+            "cooldown_until": 0,  # nu redeschide inainte de acest timestamp (anti-thrash)
             "spot_qty": 0.0, "perp_szi": 0.0}   # spot_qty/perp_szi folosite doar in PAPER
 
 
@@ -125,20 +132,45 @@ class DeltaNeutral:
 
     def _save(self):
         try:
-            with open(self.state_file, "w") as f: json.dump(self.s, f, indent=2)
+            tmp = self.state_file + ".tmp"   # scriere ATOMICA: crash la mijloc nu corupe starea
+            with open(tmp, "w") as f:
+                json.dump(self.s, f, indent=2)
+            os.replace(tmp, self.state_file)
         except OSError as e:
             log(f"  ! [DN] nu pot salva: {e}")
 
+    def _acquire_lock(self) -> bool:
+        """Lacat pe stare: A DOUA instanta pe aceeasi moneda refuza sa porneasca
+        (doua boturi ar dubla ordinele si s-ar bate pe rebalans)."""
+        try:
+            self._lock_fh = open(self.state_file + ".lock", "w")
+            fcntl.flock(self._lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError:
+            try:
+                self._lock_fh.close()
+            except (OSError, AttributeError):
+                pass
+            return False
+
     # -- stratul de citire: cele doua picioare ---------------------------------
-    def legs(self) -> dict:
+    def legs(self) -> dict | None:
+        """Citeste preturi + cantitati. None daca ORICE citire esueaza — un 0 fals
+        la balanta/pozitie ar face rebalansarea sa deschida un picior dublu."""
         spot_px = self.client.spot_mid(self.p.spot_pair)
         perp_px = self.client.mid(self.p.coin)
         funding = self.client.funding_rate(self.p.coin)
+        if spot_px is None or perp_px is None or funding is None:
+            return None
         if self.dry_run:
             spot_qty = self.s["spot_qty"]; perp_szi = self.s["perp_szi"]
         else:
-            spot_qty = self.client.spot_balance(self.p.spot_token)
-            perp_szi, _ = self.client.position(self.p.coin)
+            try:
+                spot_qty = self.client.spot_balance_strict(self.p.spot_token)
+                perp_szi, _ = self.client.position_strict(self.p.coin)
+            except Exception as e:  # noqa: BLE001
+                log(f"  [DN] citirea contului a esuat ({e}) — sar peste tick (nu ghicesc)")
+                return None
         return {"spot_px": spot_px, "perp_px": perp_px, "funding": funding,
                 "spot_qty": spot_qty, "perp_szi": perp_szi}
 
@@ -146,45 +178,81 @@ class DeltaNeutral:
         return round(sz, self.p.sz_decimals)
 
     # -- executie ---------------------------------------------------------------
+    def _skip_dust(self, sz: float, px: float, what: str) -> bool:
+        """HL respinge ordine sub ~$10 — nu le trimitem (evitam spam de respingeri)."""
+        if sz * px < MIN_ORDER_USD:
+            log(f"  [DN] {what} {sz} (~${sz*px:.2f}) sub minimul HL — sar (dust)")
+            return True
+        return False
+
+    def _record(self, ok: bool, sz: float, px: float):
+        """Contorizeaza esecurile consecutive de ordine; fee doar la succes."""
+        if ok:
+            self.s["order_fails"] = 0
+            self.s["fees_paid"] += (HL_FEE_PCT/100) * sz * px
+        else:
+            self.s["order_fails"] = self.s.get("order_fails", 0) + 1
+            if self.s["order_fails"] == 3:
+                notify(title=f"⚠ DN {self.p.coin}: 3 ordine esuate consecutiv",
+                       body="Verifica marginea/colateralul pe Hyperliquid. "
+                            "Botul continua sa incerce (fara sa dubleze nimic).",
+                       source="dn", desktop=self.desktop)
+
     def _buy_spot(self, sz: float, px: float):
         sz = self._round(sz)
-        if sz <= 0: return
+        if sz <= 0 or self._skip_dust(sz, px, "BUY SPOT"): return
         if self.dry_run:
             self.s["spot_qty"] += sz; log(f"  [DN] [PAPER] BUY SPOT {sz} {self.p.spot_token} @ {px:.4f}")
+            self._record(True, sz, px)
         else:
             ok, oid, msg = self.client.spot_order(self.p.spot_pair, True, sz, px * 1.001, self.p.sz_decimals)
             log(f"  [DN] BUY SPOT {sz} @ ~{px:.4f} -> ok={ok} {msg}")
-        self.s["fees_paid"] += (HL_FEE_PCT/100) * sz * px
+            self._record(ok, sz, px)
 
     def _sell_spot(self, sz: float, px: float):
         sz = self._round(sz)
-        if sz <= 0: return
+        if sz <= 0 or self._skip_dust(sz, px, "SELL SPOT"): return
         if self.dry_run:
             self.s["spot_qty"] -= sz; log(f"  [DN] [PAPER] SELL SPOT {sz} @ {px:.4f}")
+            self._record(True, sz, px)
         else:
             ok, oid, msg = self.client.spot_order(self.p.spot_pair, False, sz, px * 0.999, self.p.sz_decimals)
             log(f"  [DN] SELL SPOT {sz} @ ~{px:.4f} -> ok={ok} {msg}")
-        self.s["fees_paid"] += (HL_FEE_PCT/100) * sz * px
+            self._record(ok, sz, px)
 
     def _short_perp(self, sz: float, px: float):
         sz = self._round(sz)
-        if sz <= 0: return
+        if sz <= 0 or self._skip_dust(sz, px, "SHORT PERP"): return
         if self.dry_run:
             self.s["perp_szi"] -= sz; log(f"  [DN] [PAPER] SHORT PERP {sz} {self.p.coin} @ {px:.4f}")
+            self._record(True, sz, px)
         else:
             ok, oid, msg = self.client.place_limit(self.p.coin, False, sz, px * 0.999, reduce_only=False)
             log(f"  [DN] SHORT PERP {sz} @ ~{px:.4f} -> ok={ok} {msg}")
-        self.s["fees_paid"] += (HL_FEE_PCT/100) * sz * px
+            self._record(ok, sz, px)
 
     def _cover_perp(self, sz: float, px: float):
         sz = self._round(sz)
-        if sz <= 0: return
+        if sz <= 0 or self._skip_dust(sz, px, "COVER PERP"): return
         if self.dry_run:
             self.s["perp_szi"] += sz; log(f"  [DN] [PAPER] COVER PERP {sz} @ {px:.4f}")
+            self._record(True, sz, px)
         else:
             ok, oid, msg = self.client.place_limit(self.p.coin, True, sz, px * 1.001, reduce_only=True)
             log(f"  [DN] COVER PERP {sz} @ ~{px:.4f} -> ok={ok} {msg}")
-        self.s["fees_paid"] += (HL_FEE_PCT/100) * sz * px
+            self._record(ok, sz, px)
+
+    def _cancel_open_orders(self):
+        """Best-effort: anuleaza ordinele ramase pe coin/pereche (curatenie la incident)."""
+        if self.dry_run:
+            return
+        try:
+            for o in self.client.open_orders():
+                if o.get("coin") in (self.p.coin, self.p.spot_pair):
+                    self.client.cancel(o.get("coin"), o.get("oid"))
+                    log(f"  [DN] ordin ramas anulat: {o.get('coin')} oid={o.get('oid')}")
+        except Exception as e:  # noqa: BLE001
+            log(f"  ! [DN] curatenia ordinelor a esuat ({e}) — continui")
 
     # -- actiuni de nivel inalt -------------------------------------------------
     def _open(self, L: dict):
@@ -214,17 +282,86 @@ class DeltaNeutral:
         self.s = _new_state(); self.s["funding_accrued"] = keep_fund; self.s["fees_paid"] = keep_fee
 
     def _rebalance(self, L: dict):
-        """Aduce ambele picioare la target_sz (corecteaza fill-uri partiale / drift)."""
+        """Aduce ambele picioare la target_sz (corecteaza fill-uri partiale / drift).
+        Un drift URIAS (>50% din tinta) e suspect (glitch de citire / fill masiv) —
+        cere confirmare pe 2 tick-uri consecutive inainte sa tranzactioneze."""
         tgt = self.s["target_sz"]; tol = tgt * self.p.rebalance_pct/100
-        if abs(L["spot_qty"] - tgt) > tol:
-            d = tgt - L["spot_qty"]
-            (self._buy_spot if d > 0 else self._sell_spot)(abs(d), L["spot_px"])
-            log(f"  [DN] rebalans SPOT {d:+.4f} (target {tgt})")
-        short = abs(L["perp_szi"])
-        if abs(short - tgt) > tol:
-            d = tgt - short
-            (self._short_perp if d > 0 else self._cover_perp)(abs(d), L["perp_px"])
-            log(f"  [DN] rebalans PERP {d:+.4f} (target {tgt})")
+        d_spot = tgt - L["spot_qty"]
+        d_perp = tgt - abs(L["perp_szi"])
+        if tgt > 0 and max(abs(d_spot), abs(d_perp)) > tgt * 0.5:
+            self.s["drift_count"] = self.s.get("drift_count", 0) + 1
+            if self.s["drift_count"] < 2:
+                log("  [DN] drift mare detectat — astept confirmarea pe inca un tick (anti-glitch)")
+                return
+        else:
+            self.s["drift_count"] = 0
+        if abs(d_spot) > tol:
+            (self._buy_spot if d_spot > 0 else self._sell_spot)(abs(d_spot), L["spot_px"])
+            log(f"  [DN] rebalans SPOT {d_spot:+.4f} (target {tgt})")
+        if abs(d_perp) > tol:
+            (self._short_perp if d_perp > 0 else self._cover_perp)(abs(d_perp), L["perp_px"])
+            log(f"  [DN] rebalans PERP {d_perp:+.4f} (target {tgt})")
+        self.s["drift_count"] = 0
+
+    def _go_flat(self, reason: str, cooldown_s: float = 3600):
+        """Marcheaza flat + cooldown (anti-thrash) pastrand contoarele de P&L."""
+        keep_fund, keep_fee = self.s["funding_accrued"], self.s["fees_paid"]
+        self.s = _new_state()
+        self.s["funding_accrued"], self.s["fees_paid"] = keep_fund, keep_fee
+        self.s["cooldown_until"] = time.time() + cooldown_s
+        log(f"  [DN] -> flat ({reason}); cooldown {cooldown_s/60:.0f} min inainte de o noua deschidere")
+
+    def _check_legs_integrity(self, L: dict) -> bool:
+        """Picior disparut (lichidare short / vanzare manuala / glitch API).
+        Confirmare pe 2 tick-uri consecutive inainte de ORICE actiune — o citire
+        gresita nu tranzactioneaza. True = a tratat cazul, tick-ul se opreste aici."""
+        tgt = self.s["target_sz"]
+        if tgt <= 0:
+            self._go_flat("tinta zero", cooldown_s=0)
+            return True
+        sq, pq = L["spot_qty"], abs(L["perp_szi"])
+        spot_gone, perp_gone = sq < tgt * 0.1, pq < tgt * 0.1
+        if spot_gone and perp_gone:
+            self.s["gone_count"] = self.s.get("gone_count", 0) + 1
+            if self.s["gone_count"] < 2:
+                log("  [DN] ambele picioare par disparute — astept confirmarea (anti-glitch)")
+                return True
+            log("  [DN] pozitia a disparut de pe cont (inchisa manual?)")
+            self._cancel_open_orders()
+            notify(title=f"DN {self.p.coin}: pozitia a disparut — trec pe flat",
+                   body=f"Ambele picioare au disparut de pe cont (inchise manual?). "
+                        f"Curat ordinele ramase si astept 1h inainte de o noua deschidere.\n{now_str()}",
+                   source="dn", desktop=self.desktop)
+            self._go_flat("ambele picioare disparute")
+            return True
+        if spot_gone != perp_gone:                    # exact UNUL a disparut -> RISC DIRECTIONAL
+            self.s["orphan_count"] = self.s.get("orphan_count", 0) + 1
+            if self.s["orphan_count"] < 2:
+                log("  [DN] un picior pare disparut — astept confirmarea (anti-glitch)")
+                return True
+            what = ("short-ul perp (LICHIDAT sau inchis manual)" if perp_gone
+                    else "spot-ul (vandut manual?)")
+            log(f"  ⚠ [DN] {what} a disparut — pozitia NU mai e neutra!")
+            self._cancel_open_orders()
+            if self.p.auto_protect:
+                if perp_gone and sq > 0:
+                    self._sell_spot(sq, L["spot_px"])
+                if spot_gone and pq > 0:
+                    self._cover_perp(pq, L["perp_px"])
+                notify(title=f"🛡 DN {self.p.coin}: picior disparut — am inchis si restul",
+                       body=f"{what}. Am lichidat piciorul ramas ca sa elimin riscul directional.\n"
+                            f"Cooldown 1h inainte de o noua deschidere.\n{now_str()}",
+                       source="dn", desktop=self.desktop)
+                self._go_flat("picior orfan inchis")
+            else:
+                notify(title=f"⚠ DN {self.p.coin}: picior disparut — INTERVENTIE MANUALA",
+                       body=f"{what}, iar DN_AUTO_PROTECT=false: nu actionez singur. "
+                            f"Pozitia ramasa e DIRECTIONALA (risc de pret)!\n{now_str()}",
+                       source="dn", desktop=self.desktop)
+            return True
+        self.s["orphan_count"] = 0
+        self.s["gone_count"] = 0
+        return False
 
     # -- monitorizare + protectie lichidare (doar short-ul perp poate fi lichidat) --
     def _check_liq(self, L: dict) -> bool:
@@ -266,20 +403,42 @@ class DeltaNeutral:
 
     # -- bucla ------------------------------------------------------------------
     def run(self):
+        if not self._acquire_lock():
+            log(f"  ! [DN] ALTA INSTANTA ruleaza deja pe {self.p.coin} — IES (anti-dublare)")
+            notify(title=f"DN {self.p.coin}: instanta dubla refuzata",
+                   body="Un alt dn_bot ruleaza deja pe aceeasi moneda/stare. "
+                        "Aceasta instanta s-a oprit singura ca sa nu dubleze ordinele.",
+                   source="dn", desktop=self.desktop)
+            return
         log("  === DELTA-NEUTRAL PORNIT ===")
         log(f"      coin={self.p.coin} spot={self.p.spot_pair}  notional={self.p.notional} USDC/picior  {'[PAPER]' if self.dry_run else '⚠ REAL'}")
         log(f"      intrare funding>= {self.p.entry_funding_hr*100:.4f}%/ora  | iesire funding< {self.p.exit_funding_hr*100:.4f}%/ora")
         log(f"      mediere {self.p.funding_window_h}h  | tin minim {self.p.min_hold_h}h  | rebalans la {self.p.rebalance_pct}% delta")
-        try:
-            while True:
+        errors = 0
+        while True:
+            try:
                 L = self.legs()
-                if L["spot_px"] is None or L["perp_px"] is None or L["funding"] is None:
-                    log("  [DN] date indisponibile — reincerc"); time.sleep(self.p.check_minutes*60); continue
-                self.tick(L)
+                if L is None:
+                    log("  [DN] date indisponibile — reincerc")
+                else:
+                    self.tick(L)
+                    errors = 0
                 self._save()
-                time.sleep(self.p.check_minutes*60)
-        except KeyboardInterrupt:
-            log("  [DN] oprit manual."); self._save()
+            except KeyboardInterrupt:
+                log("  [DN] oprit manual."); self._save(); return
+            except Exception as e:  # noqa: BLE001 — botul autonom NU moare la o exceptie
+                errors += 1
+                log(f"  ! [DN] eroare neasteptata (#{errors} consecutiv): {e!r} — botul continua")
+                if errors == 3:
+                    notify(title=f"⚠ DN {self.p.coin}: erori repetate",
+                           body=f"{e!r}\nBotul ruleaza in continuare si reincearca cu backoff.",
+                           source="dn", desktop=self.desktop)
+                try:
+                    self._save()
+                except Exception:  # noqa: BLE001
+                    pass
+            # backoff exponential la erori (pana la 30 min), altfel ritmul normal
+            time.sleep(min(self.p.check_minutes * 60 * (2 ** min(errors, 3)), 1800))
 
     def tick(self, L: dict) -> None:
         """Un pas de decizie (extras ca sa fie testabil): deschide / tine / inchide / rebalanseaza."""
@@ -306,11 +465,15 @@ class DeltaNeutral:
         avg_f = sum(x[1] for x in self.s["funding_hist"]) / len(self.s["funding_hist"])
 
         if self.s["status"] == "flat":
-            if avg_f >= self.p.entry_funding_hr:
+            if now < self.s.get("cooldown_until", 0):
+                log(f"  [DN] in cooldown dupa un incident ({(self.s['cooldown_until']-now)/60:.0f} min ramase) — nu redeschid")
+            elif avg_f >= self.p.entry_funding_hr:
                 self._open(L)
             else:
                 log(f"  [DN] funding mediu {avg_f*100:+.4f}%/ora < prag intrare — astept (flat)")
         else:
+            if self._check_legs_integrity(L):       # lichidare/inchidere manuala/glitch
+                return
             self.s["funding_accrued"] += fhr * abs(L["perp_szi"]) * L["perp_px"] * (self.p.check_minutes/60)
             reduced = self._check_liq(L)            # protectie: alerta + reduce automat
             held_h = (now - (self.s.get("opened_ts") or now)) / 3600

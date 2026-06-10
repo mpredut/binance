@@ -32,13 +32,20 @@ def notify(title: str, body: str, source: str,
         "added_at": datetime.now(),
         "url": None,
     }
+    # o notificare esuata NU are voie sa intrerupa botul / o actiune de trading
     ntfy_topic = os.environ.get("NTFY_TOPIC")
     ntfy_url = f"https://ntfy.sh/{ntfy_topic}" if ntfy_topic else None
-    AlertNotifier.send_phone_webhook_batch([alert], webhook_url=ntfy_url)
+    try:
+        AlertNotifier.send_phone_webhook_batch([alert], webhook_url=ntfy_url)
+    except Exception as e:  # noqa: BLE001
+        log(f"  ! notify ntfy esuat: {e}")
     if os.environ.get("ALERT_TO_EMAIL"):
-        AlertNotifier.send_email_batch([alert])
+        try:
+            AlertNotifier.send_email_batch([alert])
+        except Exception as e:  # noqa: BLE001
+            log(f"  ! notify email esuat: {e}")
     if desktop:
         try:
             subprocess.run(["notify-send", "-u", "critical", title, body], check=False)
-        except FileNotFoundError:
+        except (FileNotFoundError, OSError):
             pass

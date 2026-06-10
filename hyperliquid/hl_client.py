@@ -89,15 +89,21 @@ class HLClient:
             raise HLError("HL_ACCOUNT_ADDRESS lipsa")
         return self.info.user_state(self.address)
 
+    def position_strict(self, coin: str) -> tuple[float, float]:
+        """Ca position(), dar RIDICA exceptia la eroare API — pt cod care trebuie
+        sa distinga 'nu am pozitie' (0) de 'nu stiu' (ex. delta-neutral, unde un
+        0 fals ar duce la deschiderea unui picior dublu)."""
+        for ap in self._user_state().get("assetPositions", []):
+            p = ap.get("position", {})
+            if p.get("coin") == coin:
+                return float(p.get("szi") or 0), float(p.get("entryPx") or 0)
+        return 0.0, 0.0
+
     def position(self, coin: str) -> tuple[float, float]:
-        """(szi, entryPx) pentru coin. szi>0 = long. (0,0) daca nu exista pozitie."""
+        """(szi, entryPx) pentru coin. szi>0 = long. (0,0) daca nu exista pozitie
+        SAU la eroare API (logata)."""
         try:
-            for ap in self._user_state().get("assetPositions", []):
-                p = ap.get("position", {})
-                if p.get("coin") == coin:
-                    szi = float(p.get("szi") or 0)
-                    entry = float(p.get("entryPx") or 0)
-                    return szi, entry
+            return self.position_strict(coin)
         except HLError:
             raise
         except Exception as e:  # noqa: BLE001
@@ -146,14 +152,20 @@ class HLClient:
             log(f"  ! spot_mid({pair}) esuat: {e}")
             return None
 
-    def spot_balance(self, token: str) -> float:
-        """Cantitatea detinuta din token-ul spot (ex 'HYPE', 'USDC')."""
+    def spot_balance_strict(self, token: str) -> float:
+        """Ca spot_balance(), dar RIDICA exceptia la eroare API (vezi position_strict)."""
         if not self.address:
-            return 0.0
+            raise HLError("HL_ACCOUNT_ADDRESS lipsa")
+        for b in self.info.spot_user_state(self.address).get("balances", []):
+            if b.get("coin") == token:
+                return float(b.get("total") or 0)
+        return 0.0
+
+    def spot_balance(self, token: str) -> float:
+        """Cantitatea detinuta din token-ul spot (ex 'HYPE', 'USDC').
+        0.0 daca nu exista SAU la eroare API (logata)."""
         try:
-            for b in self.info.spot_user_state(self.address).get("balances", []):
-                if b.get("coin") == token:
-                    return float(b.get("total") or 0)
+            return self.spot_balance_strict(token)
         except Exception as e:  # noqa: BLE001
             log(f"  ! spot_balance({token}) esuat: {e}")
         return 0.0
