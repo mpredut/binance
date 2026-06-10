@@ -330,7 +330,8 @@ MIN_POINTS_PER_WINDOW = 4
 
 def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
                            min_consecutive_blocks=3, noise_tolerance=2,
-                           min_points_per_window=MIN_POINTS_PER_WINDOW):
+                           min_points_per_window=MIN_POINTS_PER_WINDOW,
+                           detection_lag_hours=0.0):
     """Detectează trendul pe ferestre definite în TIMP (nu în număr de puncte),
     deci robust la densitate neuniformă și găuri — fără să modifice datele brute.
 
@@ -389,8 +390,13 @@ def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
         return None
 
     blocks = blocks[:confirm_pos + 1]                # coada de zgomot neconfirmata nu face parte din trend
-    trend_start_ts = float(timestamps[confirm_lo])   # durata = strict ce e confirmat (fara extensii inventate)
-    duration_seconds = t_end - trend_start_ts
+    # durata = intervalul CONFIRMAT + lag-ul de detectie (trendul incepe in realitate
+    # INAINTE ca detectorul sa-l confirme — corectie explicita, ex. ~2 zile).
+    # PLAFONAT la span-ul datelor: durata nu poate depasi cat istoric avem.
+    confirmed_start = float(timestamps[confirm_lo])
+    duration_seconds = (t_end - confirmed_start) + detection_lag_hours * 3600.0
+    duration_seconds = min(duration_seconds, t_end - t_first)
+    trend_start_ts = t_end - duration_seconds
     if duration_seconds <= 0:
         return None
     return {
@@ -408,7 +414,10 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
                            noise_tolerance: int = 2,  # ← NOU: permite 2 blocuri zgomot
                            lookback_days: int = 30,
                            draw: bool = True,
-                           min_points_per_window: int = MIN_POINTS_PER_WINDOW) -> Optional[dict]:
+                           min_points_per_window: int = MIN_POINTS_PER_WINDOW,
+                           detection_lag_hours: float = 48.0) -> Optional[dict]:
+    # detection_lag_hours: trendul incepe in realitate INAINTE sa-l confirme
+    # detectorul — euristica ta empirica: ~2 zile. Explicit, nu ascuns in formula.
     data: List[Tuple[int, float]] = priceLstFor(symbol)
     if len(data) < 2:
         return None
@@ -431,7 +440,8 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
     res = detect_long_term_trend(
         timestamps, prices, window_hours=window_hours, step_hours=step_hours,
         min_consecutive_blocks=min_consecutive_blocks, noise_tolerance=noise_tolerance,
-        min_points_per_window=min_points_per_window)
+        min_points_per_window=min_points_per_window,
+        detection_lag_hours=detection_lag_hours)
 
     if res is None:
         print(f"[{symbol}] Trend indeterminabil (date insuficiente sau gap în fereastra recentă).")
@@ -531,8 +541,11 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=14
     print(f"   Start trend:     {format_timestamp(trend["start_timestamp"])}")
     print(f"   Durată:          {format_duration(trend["duration_seconds"])} ({duration_days:.1f} zile)")
     timestamp = trend['timestamp']
-    if timestamp == last_timestamp.get(symbol):
-        cached_w = last_w.get(symbol)
+    # cheia memo include order_type: BUY si SELL au ponderi total diferite —
+    # cheia veche doar pe simbol intorcea ponderea de BUY la un apel de SELL
+    memo_key = (symbol, order_type.upper())
+    if timestamp == last_timestamp.get(memo_key):
+        cached_w = last_w.get(memo_key)
         if cached_w is not None and len(cached_w) > 0 and not np.isnan(cached_w[0]):
             print(f"not new timestamp, use weight from mem cache.")
             return float(cached_w[0])
@@ -569,8 +582,8 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=14
         plt.legend()
         plt.show()
 
-    last_w[symbol] = w        # w e deja slice de la current_pos
-    last_timestamp[symbol] = timestamp
+    last_w[memo_key] = w        # w e deja slice de la current_pos
+    last_timestamp[memo_key] = timestamp
     return current_weight     # w[0] = ponderea pentru acum
 
 last_timestamp = {}
@@ -578,19 +591,18 @@ last_w = {}
 
 
 #Zona 1: 0 → T          = gaussian (confident la mijloc, nesigur la capete)
-#Zona 2: T → T*(1+proc) = trend depășit dar persistent → pondere 1.0
-#Zona 3: > T*(1+proc)   = trend foarte bătrân → poate fi orice → conservator
+#Zona 2: T → T*(1+proc) = trend depășit dar persistent → pondere mare (0.86)
+#Zona 3: > T*(1+proc)   = trend foarte bătrân → poate fi orice → conservator (0.22)
 
-#SELL+UP sau BUY+DOWN:
-#capete → 0.15  (vinzi/cumperi puțin)  ✅
-#mijloc → 0.00  (nu tranzacționezi)    ✅
+#ALINIAT (BUY+UP sau SELL+DOWN): gaussiana scalata la VARF=peak_weight
+#mijloc → 0.95 (tranzacționezi maxim)   capete → ~0.17 (tranzacționezi puțin)
 
-#BUY+UP sau SELL+DOWN:
-#capete → 0.05  (tranzacționezi puțin) ✅
-#mijloc → 0.95  (tranzacționezi maxim) ✅
+#CONTRA-TREND (SELL+UP sau BUY+DOWN): inversul gaussienei GLOBALE
+#mijloc → 0.02 (nu tranzacționezi)      AMBELE capete → ~0.13-0.15
 
 def get_trade_weight(T, trend_len, trend, order_type,
-                     exceed_percent=0.4, max_against_trend=0.15):
+                     exceed_percent=0.4, max_against_trend=0.15,
+                     peak_weight=0.95, min_weight=0.02):
     aligned = (
         (order_type.upper() == "BUY"  and trend == "up") or
         (order_type.upper() == "SELL" and trend == "down")
@@ -598,33 +610,41 @@ def get_trade_weight(T, trend_len, trend, order_type,
 
     T_extended = T * (1 + exceed_percent)
 
-    # ZONA 2: trend depășit dar persistent
+    # ZONA 2: trend depășit dar persistent → momentum puternic in directia lui
     if T < trend_len <= T_extended:
         w_val = 0.86 if aligned else max_against_trend
         print(f"[DEBUG] Zona 2: trend_len={trend_len:.2f} depășește T={T} dar e sub T_extended={T_extended}. Aligned={aligned}, return {w_val}  ")
         return np.array([0.0]), np.array([w_val])
 
-    # ZONA 3: trend foarte bătrân
+    # ZONA 3: trend foarte bătrân → conservator IN AMBELE directii
     if trend_len > T_extended:
-        print(f"[DEBUG] Zona 3: trend_len={trend_len:.2f} e peste T_extended={T_extended}. return [0.22] ")
-        return np.array([0.0]), np.array([0.22])
+        w_val = 0.22 if aligned else max_against_trend
+        print(f"[DEBUG] Zona 3: trend_len={trend_len:.2f} e peste T_extended={T_extended}. Aligned={aligned}, return {w_val} ")
+        return np.array([0.0]), np.array([w_val])
 
-    # ZONA 1: gaussian pe T întreg, slice de la trend_len
-    idx = int(trend_len)
-    t_seq, w_seq = u.gaussian_weights_from_idx(T=T, idx=idx)  # returnează slice [idx..T-1]
-    if len(w_seq) == 0:
-        print(f"[DEBUG] Zona 1: trend_len={trend_len:.2f}, dar gaussian_weights_from_idx a returnat w_seq gol. return [0.05]")
+    # ZONA 1: gaussiana pe T întreg, slice de la vârsta curentă a trendului.
+    # idx plafonat la T-1: la trend_len == T slice-ul nu mai e gol (cusatura cu Zona 2).
+    idx = min(int(trend_len), T - 1)
+    t_full, w_full = u.gaussian_weights_from_idx(T=T, idx=0)
+    if len(w_full) == 0:
+        print(f"[DEBUG] Zona 1: gaussian_weights_from_idx a returnat gol. return [0.05]")
         return np.array([0.0]), np.array([0.05])
-    print(f"[DEBUG] Zona 1: trend_len={trend_len:.2f}, gaussian slice de la idx={idx} până la T={T}. Aligned={aligned}, w[0]={w_seq[0]:.4f}")
-   
-    if not aligned:
-        print(f"[DEBUG] Order type {order_type} nu e aliniat cu trend {trend}, inversăm ponderea și aplicăm max_against_trend={max_against_trend}")
-        w_max = w_seq.max()
-        w_normalized = w_seq / w_max if w_max > 0 else w_seq
-        min_weight = 0.02
-        w_seq = min_weight + (1 - w_normalized) * (max_against_trend - min_weight)
+    # utils normalizeaza ca DISTRIBUTIE (suma=1, varf ~0.11) — pt ponderi de trading
+    # scalam la VARF: mijlocul curbei = peak_weight, nu ~0.11 (bug-ul vechi de scara,
+    # care facea Zona 1 de 8-40x mai mica decat Zona 2)
+    w01_full = w_full / w_full.max()                  # 0..1, varful = 1
+    t_seq, w01 = t_full[idx:], w01_full[idx:]
+    print(f"[DEBUG] Zona 1: trend_len={trend_len:.2f}, slice de la idx={idx} până la T={T}. Aligned={aligned}, gauss01[0]={w01[0]:.4f}")
 
-    return t_seq, w_seq  # t_seq și w_seq sunt slice [idx..T-1]
+    if aligned:
+        w_seq = w01 * peak_weight
+    else:
+        # inversul curbei GLOBALE (nu al slice-ului — bug-ul vechi dadea 0.02 la
+        # capatul batran in loc de ~0.15): mijloc -> min_weight, capete -> max_against_trend
+        print(f"[DEBUG] Order type {order_type} nu e aliniat cu trend {trend}, invers global, max_against_trend={max_against_trend}")
+        w_seq = min_weight + (1.0 - w01) * (max_against_trend - min_weight)
+
+    return t_seq, w_seq  # slice [idx..T-1]
     
     
     

@@ -94,6 +94,37 @@ class TestZgomot(unittest.TestCase):
         self.assertEqual(r["direction"], "up")
 
 
+class TestLagDetectie(unittest.TestCase):
+    """detection_lag_hours: trendul incepe inaintea confirmarii (euristica ~2 zile),
+    explicit si PLAFONAT la span-ul datelor (durata nu poate depasi istoricul)."""
+
+    def test_lag_se_adauga_dar_nu_depaseste_span_ul(self):
+        ts, px = series(down(96))                     # span = 95h
+        r = run(ts, px, detection_lag_hours=48)
+        self.assertIsNotNone(r)
+        self.assertLessEqual(r["duration_seconds"], ts[-1] - ts[0] + 1,
+                             "lag-ul nu are voie sa scoata durata peste datele existente")
+        self.assertGreater(r["duration_seconds"] / 3600, 90, "plafonat la span, nu taiat sub")
+
+    def test_lag_se_adauga_cand_incape_in_span(self):
+        d = down(96)
+        u_ = up(72, start=d[-1], rate=0.25)           # trend up confirmat ~3 zile
+        r = run(*series(d, u_), detection_lag_hours=48)
+        self.assertIsNotNone(r)
+        self.assertEqual(r["direction"], "up")
+        dur_h = r["duration_seconds"] / 3600
+        self.assertGreater(dur_h, 95, "durata trebuie sa includa lag-ul (+48h)")
+        self.assertLess(dur_h, 135)
+
+    def test_fara_lag_durata_e_strict_confirmata(self):
+        d = down(96)
+        u_ = up(72, start=d[-1], rate=0.25)
+        r0 = run(*series(d, u_), detection_lag_hours=0)
+        r48 = run(*series(d, u_), detection_lag_hours=48)
+        self.assertAlmostEqual(r48["duration_seconds"] - r0["duration_seconds"],
+                               48 * 3600, delta=1.0)
+
+
 class TestGapuri(unittest.TestCase):
     def test_gap_in_date_opreste_confirmarea(self):
         # 2 zile down, GAP de 2 zile (fara puncte), apoi 2 zile down recente

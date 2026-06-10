@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""
+Teste pt get_trade_weight (ponderile gaussiene de cash-permission) — bug-urile
+reparate: scara Zona 1 vs Zona 2/3, inversarea contra-trend la capatul batran,
+cusatura la exact T, Zona 3 care ignora alinierea.
+
+  /home/mariusp/binance/.venv/bin/python test_weights.py -v
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from priceAnalysis import get_trade_weight  # noqa: E402
+
+T = 14
+
+
+def w(trend_len, trend="up", order_type="BUY", **kw):
+    _, ws = get_trade_weight(T=T, trend_len=trend_len, trend=trend,
+                             order_type=order_type, **kw)
+    return float(ws[0])
+
+
+class TestAliniat(unittest.TestCase):
+    """BUY+up / SELL+down: gaussiana scalata la varf (mijloc ~0.95)."""
+
+    def test_mijlocul_da_ponderea_maxima(self):
+        self.assertAlmostEqual(w(7), 0.95, delta=0.02,
+                               msg="varful curbei trebuie ~0.95, nu ~0.11 (bug-ul de scara)")
+
+    def test_capetele_dau_pondere_mica(self):
+        self.assertLess(w(0.5), 0.25)
+        self.assertLess(w(13), 0.25)
+
+    def test_creste_spre_mijloc(self):
+        self.assertLess(w(0.5), w(3))
+        self.assertLess(w(3), w(7))
+        self.assertGreater(w(7), w(10))
+
+    def test_scara_coerenta_cu_zona_2(self):
+        # inainte de fix: 13.9 zile -> 0.021 si 14.1 zile -> 0.86 (salt de 40x)
+        self.assertGreater(w(13.5), 0.1)
+        self.assertLess(w(14.1) / max(w(13.5), 1e-9), 7,
+                        "saltul Zona1->Zona2 trebuie rezonabil, nu 40x")
+
+    def test_sell_pe_down_e_aliniat(self):
+        self.assertAlmostEqual(w(7, trend="down", order_type="SELL"), 0.95, delta=0.02)
+
+
+class TestContraTrend(unittest.TestCase):
+    """SELL+up / BUY+down: mijloc -> ~0.02 (nu tranzactiona), capete -> ~0.13-0.15."""
+
+    def test_mijlocul_blocheaza(self):
+        self.assertAlmostEqual(w(7, order_type="SELL"), 0.02, delta=0.01)
+
+    def test_ambele_capete_permit_putin(self):
+        young = w(0.5, order_type="SELL")
+        old = w(13, order_type="SELL")
+        self.assertGreater(young, 0.1)
+        self.assertGreater(old, 0.1, "bug-ul vechi: capatul batran dadea 0.02 in loc de ~0.13")
+        self.assertAlmostEqual(young, old, delta=0.03, msg="curba globala e simetrica")
+
+    def test_niciodata_peste_plafonul_contra_trend(self):
+        for tl in (0.5, 3, 7, 10, 13, 15, 21):
+            self.assertLessEqual(w(tl, order_type="SELL"), 0.15 + 1e-9)
+
+
+class TestZone(unittest.TestCase):
+    def test_cusatura_la_exact_T_nu_da_fallback(self):
+        self.assertGreater(w(14.0), 0.1, "la exact T slice-ul nu mai e gol (fallback 0.05)")
+
+    def test_zona_2_aliniat(self):
+        self.assertAlmostEqual(w(15), 0.86)
+
+    def test_zona_2_contra(self):
+        self.assertAlmostEqual(w(15, order_type="SELL"), 0.15)
+
+    def test_zona_3_respecta_alinierea(self):
+        self.assertAlmostEqual(w(21), 0.22)
+        self.assertAlmostEqual(w(21, order_type="SELL"), 0.15,
+                               msg="contra-trend pe trend batran nu depaseste max_against_trend")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
