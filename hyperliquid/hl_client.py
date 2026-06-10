@@ -121,6 +121,22 @@ class HLClient:
         return [o for o in oo if coin is None or o.get("coin") == coin]
 
     # ----- SPOT + funding (citiri) --------------------------------------------
+    def resolve_spot_pair(self, token: str) -> str | None:
+        """Gaseste automat perechea spot TOKEN/USDC (@index) din spotMeta —
+        generic pt orice token (HYPE -> @107, USOL -> @156, PURR -> PURR/USDC)."""
+        try:
+            m = self.info.spot_meta()
+            tokens = {t.get("name"): t.get("index") for t in m.get("tokens", [])}
+            ti, usdc = tokens.get(token), tokens.get("USDC")
+            if ti is None or usdc is None:
+                return None
+            for u in m.get("universe", []):
+                if u.get("tokens") == [ti, usdc]:
+                    return u.get("name")
+        except Exception as e:  # noqa: BLE001
+            log(f"  ! resolve_spot_pair({token}) esuat: {e}")
+        return None
+
     def spot_mid(self, pair: str) -> float | None:
         """Pret spot pentru perechea @index (ex @107 = HYPE/USDC)."""
         try:

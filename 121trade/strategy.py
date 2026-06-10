@@ -119,13 +119,19 @@ class Strategy:
 
     # -- valuta ----------------------------------------------------------------
     def _fx_to_usd(self, currency: str) -> float:
-        """Cati USD intr-o unitate din valuta data."""
+        """Cati USD intr-o unitate din valuta data — generic pt orice valuta Yahoo."""
         if currency == "USD":
             return 1.0
         if currency == "EUR":
             return get_eur_usd()          # USD per EUR
-        # RON (default): USD per RON = 1 / (RON per USD)
-        return 1.0 / get_usd_ron()
+        if currency == "RON":
+            return 1.0 / get_usd_ron()    # USD per RON = 1 / (RON per USD)
+        rate = get_price_usd(f"{currency}USD=X")   # generic: GBP, CHF, PLN...
+        if rate:
+            return rate
+        log(f"  ! curs {currency}/USD indisponibil — tratez sumele ca USD (1:1). "
+            f"Verifica STRAT_CURRENCY!")
+        return 1.0
 
     # -- persistenta -----------------------------------------------------------
     def _load(self) -> dict:

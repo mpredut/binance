@@ -30,7 +30,13 @@ from hl_client import HLClient, HLError
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 HL_FEE_PCT = float_env("HL_FEE_PCT") or 0.035
-STATE = os.path.join(_HERE, ".state_dn.json")
+_OLD_STATE = os.path.join(_HERE, ".state_dn.json")   # numele vechi (o singura moneda)
+
+
+def state_path_for(coin: str) -> str:
+    """Stare per-moneda — poti rula DN pe mai multe monede in paralel."""
+    safe = "".join(c if c.isalnum() else "_" for c in coin)
+    return os.path.join(_HERE, f".state_dn_{safe}.json")
 
 
 @dataclass
@@ -58,10 +64,18 @@ class DNParams:
         if client is not None:
             try: szd = client.sz_decimals(coin)
             except HLError: pass
+        spot_token = os.environ.get("HL_SPOT_TOKEN", coin).strip()
+        spot_pair = os.environ.get("HL_SPOT_PAIR", "").strip()
+        if not spot_pair and client is not None:       # gol = rezolva automat din spotMeta
+            spot_pair = client.resolve_spot_pair(spot_token) or ""
+            if spot_pair:
+                log(f"  [DN] pereche spot rezolvata automat: {spot_token} -> {spot_pair}")
+        if not spot_pair:
+            spot_pair = "@107"                          # fallback istoric (HYPE/USDC)
         return cls(
             coin        = coin,
-            spot_pair   = os.environ.get("HL_SPOT_PAIR", "@107").strip(),
-            spot_token  = os.environ.get("HL_SPOT_TOKEN", coin).strip(),
+            spot_pair   = spot_pair,
+            spot_token  = spot_token,
             notional    = float_env("DN_NOTIONAL") or 100.0,
             entry_funding_hr = (float_env("DN_ENTRY_FUNDING_HR_PCT") if float_env("DN_ENTRY_FUNDING_HR_PCT") is not None else 0.0) / 100.0,
             exit_funding_hr  = (float_env("DN_EXIT_FUNDING_HR_PCT") if float_env("DN_EXIT_FUNDING_HR_PCT") is not None else -0.005) / 100.0,
@@ -90,12 +104,20 @@ class DeltaNeutral:
         self.p = params
         self.dry_run = dry_run
         self.desktop = desktop
+        self.state_file = state_path_for(params.coin)
+        # migrare de la numele vechi (.state_dn.json, o singura moneda) — pastreaza starea
+        if not os.path.exists(self.state_file) and os.path.exists(_OLD_STATE):
+            try:
+                os.rename(_OLD_STATE, self.state_file)
+                log(f"  [DN] stare migrata: .state_dn.json -> {os.path.basename(self.state_file)}")
+            except OSError as e:
+                log(f"  ! [DN] migrare stare esuata: {e}")
         self.s = self._load()
 
     def _load(self) -> dict:
-        if os.path.exists(STATE):
+        if os.path.exists(self.state_file):
             try:
-                with open(STATE) as f:
+                with open(self.state_file) as f:
                     m = _new_state(); m.update(json.load(f)); return m
             except (OSError, ValueError):
                 pass
@@ -103,7 +125,7 @@ class DeltaNeutral:
 
     def _save(self):
         try:
-            with open(STATE, "w") as f: json.dump(self.s, f, indent=2)
+            with open(self.state_file, "w") as f: json.dump(self.s, f, indent=2)
         except OSError as e:
             log(f"  ! [DN] nu pot salva: {e}")
 
