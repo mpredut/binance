@@ -23,6 +23,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.request
@@ -44,7 +45,8 @@ def _load_state() -> dict:
         except (OSError, ValueError) as e:
             log(f"  ! nu pot citi starea ({e}) — pornesc curat")
     return {"known_assets": {}, "allocated": None, "pair": None,
-            "alerted_pair": False, "alerted_tp": False, "alerted_sl": False}
+            "alerted_pair": False, "alerted_tp": False, "alerted_sl": False,
+            "bot_pid": None, "alerted_need_price": False}
 
 
 def _save_state(st: dict) -> None:
@@ -160,6 +162,85 @@ def check_levels(client: KrakenClient, st: dict, alloc_price: float,
                source="xstock-watch", price=price, desktop=desktop)
 
 
+# -- pornire automata bot ------------------------------------------------------
+BOT_SCRIPT = os.path.join(_HERE, "kraken_bot.py")
+BOT_LOG = os.path.join(_HERE, "xstock_bot.log")
+
+
+def _bot_alive(pid) -> bool:
+    if not pid:
+        return False
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    try:
+        # daca e copilul nostru si a murit, seceram zombie-ul (altfel kill 0 ar minti)
+        done, _ = os.waitpid(pid, os.WNOHANG)
+        if done == pid:
+            return False
+    except (ChildProcessError, OSError):
+        pass  # nu e copilul nostru (ex. watcher repornit) — verificam cu kill 0
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def maybe_start_bot(st: dict, alloc_price: float, desktop: bool) -> None:
+    """PORNESTE AUTOMAT kraken_bot cu adoptarea alocarii cand sunt indeplinite:
+    alocare in cont + pereche listata pe API + pret de alocare cunoscut.
+    Idempotent: tine PID-ul in stare; la restart nu dubleaza (verifica daca botul
+    traieste); daca botul a murit, il REPORNESTE (watchdog) — strategia isi reia
+    propria stare din state-file-ul per pereche, deci nu dubleaza pozitia."""
+    if os.environ.get("XSTOCK_AUTOSTART", "true").strip().lower() != "true":
+        return
+    if not (st["allocated"] and st["pair"]):
+        return
+    if alloc_price <= 0:
+        if not st["alerted_need_price"]:
+            st["alerted_need_price"] = True
+            notify(title="⚠ xStock: completeaza XSTOCK_ALLOC_PRICE",
+                   body=f"Alocarea {st['allocated']['asset']} e in cont si perechea "
+                        f"{st['pair']} e listata, dar nu stiu pretul alocarii. "
+                        f"Seteaza XSTOCK_ALLOC_PRICE in config.env ca sa pornesc botul automat.",
+                   source="xstock-watch", desktop=desktop)
+        return
+    if _bot_alive(st.get("bot_pid")):
+        return
+    relaunch = st.get("bot_pid") is not None
+    env = dict(os.environ)
+    env["STRAT_ADOPT_COST"] = str(alloc_price)
+    # parametri reglati pt IPO volatil (suprascriu config.env DOAR pt instanta asta)
+    for src, dst in (("XSTOCK_BOT_TP_PCT", "STRAT_TAKEPROFIT_PCT"),
+                     ("XSTOCK_BOT_DCA_DROP_PCT", "STRAT_DCA_DROP_PCT"),
+                     ("XSTOCK_BOT_SL_PCT", "STRAT_STOP_LOSS_PCT"),
+                     ("XSTOCK_BOT_DCA", "STRAT_DCA"),
+                     ("XSTOCK_BOT_MAX_BUDGET", "STRAT_MAX_BUDGET"),
+                     ("XSTOCK_BOT_CHECK_MINUTES", "STRAT_CHECK_MINUTES")):
+        if os.environ.get(src):
+            env[dst] = os.environ[src]
+    cmd = [sys.executable, BOT_SCRIPT, "--pair", st["pair"]]
+    if os.environ.get("XSTOCK_BOT_PAPER", "false").strip().lower() == "true":
+        cmd.append("--paper")
+    try:
+        with open(BOT_LOG, "a", encoding="utf-8") as logf:
+            proc = subprocess.Popen(cmd, cwd=_HERE, env=env, stdout=logf,
+                                    stderr=subprocess.STDOUT, start_new_session=True)
+    except OSError as e:
+        log(f"  ! nu pot porni botul: {e}")
+        return
+    st["bot_pid"] = proc.pid
+    verb = "REPORNIT (era cazut)" if relaunch else "PORNIT AUTOMAT"
+    log(f"  🤖 BOT {verb}: pid {proc.pid}  pair {st['pair']}  adopt @ {alloc_price}  (log: {BOT_LOG})")
+    notify(title=f"🤖 BOT {verb} pe {st['pair']} (adopt @ {alloc_price})",
+           body=f"kraken_bot gestioneaza alocarea: TP/DCA/stop-loss. pid {proc.pid}, log {BOT_LOG}",
+           source="xstock-watch", price=alloc_price, desktop=desktop)
+
+
 def main() -> int:
     load_dotenv(os.path.join(_HERE, ".env"))
     load_dotenv(os.path.join(_HERE, "config.env"))
@@ -186,6 +267,8 @@ def main() -> int:
         print(f"active cunoscute: {len(st['known_assets'])} -> {', '.join(sorted(st['known_assets'])) or '-'}")
         print(f"alocare: {st['allocated'] or 'nedetectata'}")
         print(f"pereche API: {st['pair'] or 'nelistata'}")
+        alive = _bot_alive(st.get("bot_pid"))
+        print(f"bot: {'RULEAZA pid ' + str(st['bot_pid']) if alive else ('cazut (pid ' + str(st['bot_pid']) + ', va fi repornit)' if st.get('bot_pid') else 'nepornit')}")
         return 0
 
     log("=== xStock watcher pornit ===")
@@ -197,6 +280,7 @@ def main() -> int:
         check_balance(client, st, rx, args.desktop)
         check_pairs(client, st, rx, args.desktop)
         check_levels(client, st, alloc_price, tp_pct, sl_pct, yahoo_sym, args.desktop)
+        maybe_start_bot(st, alloc_price, args.desktop)
         _save_state(st)
         if args.once:
             return 0

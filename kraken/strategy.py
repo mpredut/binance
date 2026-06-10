@@ -321,6 +321,13 @@ class Strategy:
         held = self.s["qty"]
         disc = 1 - self.p.entry_discount_pct / 100
 
+        # adoptare in asteptare: NU cumpara o intrare noua — alocarea e pe drum
+        if self.p.adopt_cost > 0 and not self.s.get("adopted") and held <= 1e-12:
+            self._maybe_adopt()
+            if not self.s.get("adopted"):
+                return
+            held = self.s["qty"]
+
         if held <= 1e-12:
             if self._has_open("buy"):
                 return
