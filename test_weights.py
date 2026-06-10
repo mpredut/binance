@@ -32,14 +32,18 @@ class TestAliniat(unittest.TestCase):
         self.assertAlmostEqual(w(7), 0.95, delta=0.02,
                                msg="varful curbei trebuie ~0.95, nu ~0.11 (bug-ul de scara)")
 
-    def test_capetele_dau_pondere_mica(self):
-        self.assertLess(w(0.5), 0.25)
-        self.assertLess(w(13), 0.25)
+    def test_capatul_tanar_da_pondere_mica(self):
+        self.assertLess(w(0.5), 0.25, "trend tanar = posibil zgomot -> prudent")
+
+    def test_dupa_varf_plafon_la_mijloc_ipoteza_lindy_validata(self):
+        # validat empiric (trend_survival.py): trendul batran continua la fel de
+        # probabil ca la mijloc -> ne purtam ca la mijloc, nu coboram pe gaussiana
+        self.assertAlmostEqual(w(10), 0.95, delta=0.02)
+        self.assertAlmostEqual(w(13), 0.95, delta=0.02)
 
     def test_creste_spre_mijloc(self):
         self.assertLess(w(0.5), w(3))
         self.assertLess(w(3), w(7))
-        self.assertGreater(w(7), w(10))
 
     def test_scara_coerenta_cu_zona_2(self):
         # inainte de fix: 13.9 zile -> 0.021 si 14.1 zile -> 0.86 (salt de 40x)
@@ -57,12 +61,19 @@ class TestContraTrend(unittest.TestCase):
     def test_mijlocul_blocheaza(self):
         self.assertAlmostEqual(w(7, order_type="SELL"), 0.02, delta=0.01)
 
-    def test_ambele_capete_permit_putin(self):
-        young = w(0.5, order_type="SELL")
-        old = w(13, order_type="SELL")
-        self.assertGreater(young, 0.1)
-        self.assertGreater(old, 0.1, "bug-ul vechi: capatul batran dadea 0.02 in loc de ~0.13")
-        self.assertAlmostEqual(young, old, delta=0.03, msg="curba globala e simetrica")
+    def test_capatul_tanar_permite_putin_cel_batran_ramane_blocat(self):
+        # cu plafonul Lindy validat: trendul batran se poarta ca la mijloc,
+        # deci contra-trade-ul ramane blocat si la batranete
+        self.assertGreater(w(0.5, order_type="SELL"), 0.1)
+        self.assertAlmostEqual(w(13, order_type="SELL"), 0.02, delta=0.01)
+
+    def test_fara_plateau_curba_e_simetrica(self):
+        # comportamentul clasic (gaussiana pura) ramane disponibil
+        young = w(0.5, order_type="SELL", lindy_plateau=False)
+        old = w(13, order_type="SELL", lindy_plateau=False)
+        self.assertAlmostEqual(young, old, delta=0.03, msg="fara plafon, curba globala e simetrica")
+        self.assertGreater(old, 0.1)
+        self.assertLess(w(13, lindy_plateau=False), 0.25, "aliniat, fara plafon, coboara la capat")
 
     def test_niciodata_peste_plafonul_contra_trend(self):
         for tl in (0.5, 3, 7, 10, 13, 15, 21):

@@ -602,7 +602,7 @@ last_w = {}
 
 def get_trade_weight(T, trend_len, trend, order_type,
                      exceed_percent=0.4, max_against_trend=0.15,
-                     peak_weight=0.95, min_weight=0.02):
+                     peak_weight=0.95, min_weight=0.02, lindy_plateau=True):
     aligned = (
         (order_type.upper() == "BUY"  and trend == "up") or
         (order_type.upper() == "SELL" and trend == "down")
@@ -633,6 +633,14 @@ def get_trade_weight(T, trend_len, trend, order_type,
     # scalam la VARF: mijlocul curbei = peak_weight, nu ~0.11 (bug-ul vechi de scara,
     # care facea Zona 1 de 8-40x mai mica decat Zona 2)
     w01_full = w_full / w_full.max()                  # 0..1, varful = 1
+    if lindy_plateau:
+        # IPOTEZA (Marius) VALIDATA EMPIRIC (trend_survival.py pe BTC 700z + TAO 450z):
+        # P(trendul mai tine o zi | a tinut t zile) ramane ~0.65-0.75 si DUPA mijloc
+        # (efect Lindy), NU scade cum presupune coada dreapta a gaussienei.
+        # => dupa varf ne purtam ca la mijloc: PLAFON la varf, nu coborare.
+        peak_i = int(np.argmax(w01_full))
+        w01_full = w01_full.copy()
+        w01_full[peak_i:] = 1.0
     t_seq, w01 = t_full[idx:], w01_full[idx:]
     print(f"[DEBUG] Zona 1: trend_len={trend_len:.2f}, slice de la idx={idx} până la T={T}. Aligned={aligned}, gauss01[0]={w01[0]:.4f}")
 
