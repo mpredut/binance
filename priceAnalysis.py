@@ -331,7 +331,7 @@ MIN_POINTS_PER_WINDOW = 4
 def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
                            min_consecutive_blocks=3, noise_tolerance=2,
                            min_points_per_window=MIN_POINTS_PER_WINDOW,
-                           detection_lag_hours=0.0):
+                           detection_lag_hours=0.0, mk_alpha=None):
     """Detectează trendul pe ferestre definite în TIMP (nu în număr de puncte),
     deci robust la densitate neuniformă și găuri — fără să modifice datele brute.
 
@@ -364,6 +364,13 @@ def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
     cur, cur_idx = slope_h(t_end - window_sec, t_end + 1.0)
     if cur is None:
         return None                                  # date recente insuficiente
+    if mk_alpha:
+        # filtru Mann-Kendall: panta ferestrei CURENTE trebuie sa fie un trend
+        # SEMNIFICATIV statistic, nu zgomot — altfel nu raportam directie
+        from trend_stats import mann_kendall
+        _, _, p_mk = mann_kendall(prices[cur_idx[0]:cur_idx[1]])
+        if p_mk > mk_alpha:
+            return None
     current_sign = np.sign(cur) or 1.0
 
     blocks = [cur_idx]
@@ -415,9 +422,12 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
                            lookback_days: int = 30,
                            draw: bool = True,
                            min_points_per_window: int = MIN_POINTS_PER_WINDOW,
-                           detection_lag_hours: float = 48.0) -> Optional[dict]:
+                           detection_lag_hours: float = 48.0,
+                           mk_alpha: float = 0.05) -> Optional[dict]:
     # detection_lag_hours: trendul incepe in realitate INAINTE sa-l confirme
     # detectorul — euristica ta empirica: ~2 zile. Explicit, nu ascuns in formula.
+    # mk_alpha: filtru Mann-Kendall pe fereastra curenta (trendul trebuie sa fie
+    # semnificativ statistic, nu zgomot); None = dezactivat.
     data: List[Tuple[int, float]] = priceLstFor(symbol)
     if len(data) < 2:
         return None
@@ -441,11 +451,19 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
         timestamps, prices, window_hours=window_hours, step_hours=step_hours,
         min_consecutive_blocks=min_consecutive_blocks, noise_tolerance=noise_tolerance,
         min_points_per_window=min_points_per_window,
-        detection_lag_hours=detection_lag_hours)
+        detection_lag_hours=detection_lag_hours, mk_alpha=mk_alpha)
 
     if res is None:
-        print(f"[{symbol}] Trend indeterminabil (date insuficiente sau gap în fereastra recentă).")
+        print(f"[{symbol}] Trend indeterminabil (date insuficiente, gap sau nesemnificativ MK).")
         return None
+
+    # regimul seriei (Hurst): persistent = trend-following favorizat;
+    # mean-reverting = trendurile mor repede (informativ, atasat rezultatului)
+    from trend_stats import hurst_rs, hurst_regime
+    h = hurst_rs(prices)
+    res['hurst'] = h
+    res['regime'] = hurst_regime(h)
+    print(f"[{symbol}] Hurst={h:.2f} ({res['regime']})" if h else f"[{symbol}] Hurst: serie prea scurta")
 
     direction = res['direction']
     emoji = "📈" if direction == 'up' else "📉"

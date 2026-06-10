@@ -199,7 +199,18 @@ def estimate_T(symbol: str, days: int = 540, window_h: int = 24, step_h: int = 8
 
     bt, bs = block_slopes(ts, px, window_h, step_h)
     eps = episodes(bt, bs, window_h)
-    res = hybrid_T([e["dur_h"] for e in eps], prior_T=prior_T)
+    durs = [e["dur_h"] for e in eps]
+    res = hybrid_T(durs, prior_T=prior_T)
+    # curba de continuare empirica per moneda: P(mai tine 1 zi | a tinut t zile)
+    # — restul din "curba de supravietuire": disponibila pt ponderi viitoare
+    d = np.asarray(durs, dtype=float)
+    p_cont = {}
+    for t_days in range(1, 15):
+        alive = d > t_days * 24.0
+        if alive.sum() < 10:
+            break
+        p_cont[str(t_days)] = round(float((d > (t_days + 1) * 24.0).sum() / alive.sum()), 3)
+    res["p_cont"] = p_cont
     res["source_symbol"] = used
     res["ts"] = time.time()
     cache[symbol] = res
