@@ -33,14 +33,20 @@ from notify import notify
 from kraken_client import KrakenClient, KrakenError
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-STATE_FILE = os.path.join(_HERE, "xstock_state.json")
+
+
+def _state_file() -> str:
+    """Calea starii — configurabila (XSTOCK_STATE_FILE) ca sa poti rula mai multe
+    watchere in paralel (alte alocari/active), fiecare cu starea lui."""
+    return os.environ.get("XSTOCK_STATE_FILE") or os.path.join(_HERE, "xstock_state.json")
 
 
 # -- stare -------------------------------------------------------------------
 def _load_state() -> dict:
-    if os.path.exists(STATE_FILE):
+    path = _state_file()
+    if os.path.exists(path):
         try:
-            with open(STATE_FILE, "r", encoding="utf-8") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except (OSError, ValueError) as e:
             log(f"  ! nu pot citi starea ({e}) — pornesc curat")
@@ -51,7 +57,7 @@ def _load_state() -> dict:
 
 def _save_state(st: dict) -> None:
     try:
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
+        with open(_state_file(), "w", encoding="utf-8") as f:
             json.dump(st, f, indent=2)
     except OSError as e:
         log(f"  ! nu pot salva starea: {e}")
@@ -103,31 +109,40 @@ def check_balance(client: KrakenClient, st: dict, rx: str, desktop: bool) -> Non
     st["known_assets"] = assets
 
 
-def check_pairs(client: KrakenClient, st: dict, rx: str, desktop: bool) -> None:
-    """Perechea devine vizibila pe API-ul public = tranzactionabila programatic."""
+def check_pairs(client: KrakenClient, st: dict, rx: str, desktop: bool,
+                quote: str = "") -> None:
+    """Perechea devine vizibila pe API-ul public = tranzactionabila programatic.
+    Daca mai multe perechi se potrivesc (ex. SPCXx/USD si SPCXx/EUR), o prefera
+    pe cea cu valuta de cotare `quote`."""
     try:
         pairs = client.asset_pairs()
     except KrakenError as e:
         log(f"  ! asset_pairs: {e}")
         return
-    for k, v in pairs.items():
-        hay = f"{k} {v.get('wsname') or ''} {v.get('base') or ''}"
-        if re.search(rx, hay, re.I):
-            name = v.get("wsname") or k
-            st["pair"] = k
-            if not st["alerted_pair"]:
-                st["alerted_pair"] = True
-                px = None
-                try:
-                    px = client.last_price(k)
-                except KrakenError:
-                    pass
-                log(f"  🚀 PERECHE LISTATA pe API: {name} (pret {px})")
-                notify(title=f"🚀 {name} LISTAT pe Kraken API" + (f" @ {px}" if px else ""),
-                       body=f"Poti porni botul cu adoptarea alocarii:\n"
-                            f"STRAT_ADOPT_COST=<pret_alocare> python3 kraken_bot.py --pair {k}",
-                       source="xstock-watch", price=px, desktop=desktop)
-            return
+    matches = [(k, v) for k, v in pairs.items()
+               if re.search(rx, f"{k} {v.get('wsname') or ''} {v.get('base') or ''}", re.I)]
+    if not matches:
+        return
+    if quote:
+        pref = [(k, v) for k, v in matches
+                if (v.get("wsname") or k).upper().endswith("/" + quote.upper())]
+        if pref:
+            matches = pref
+    k, v = matches[0]
+    name = v.get("wsname") or k
+    st["pair"] = k
+    if not st["alerted_pair"]:
+        st["alerted_pair"] = True
+        px = None
+        try:
+            px = client.last_price(k)
+        except KrakenError:
+            pass
+        log(f"  🚀 PERECHE LISTATA pe API: {name} (pret {px})")
+        notify(title=f"🚀 {name} LISTAT pe Kraken API" + (f" @ {px}" if px else ""),
+               body=f"Poti porni botul cu adoptarea alocarii:\n"
+                    f"STRAT_ADOPT_COST=<pret_alocare> python3 kraken_bot.py --pair {k}",
+               source="xstock-watch", price=px, desktop=desktop)
 
 
 def check_levels(client: KrakenClient, st: dict, alloc_price: float,
@@ -241,6 +256,93 @@ def maybe_start_bot(st: dict, alloc_price: float, desktop: bool) -> None:
            source="xstock-watch", price=alloc_price, desktop=desktop)
 
 
+# -- proba end-to-end ----------------------------------------------------------
+def run_trial(client: KrakenClient, desktop: bool) -> int:
+    """PROBA completa pe API-ul REAL, cu bani ZERO: un activ EXISTENT din cont
+    (XSTOCK_TRIAL_ASSET, implicit ADA) e tratat ca alocare noua; perechea lui
+    reala e 'listarea'; botul porneste FORTAT pe PAPER; la final watchdog-ul e
+    verificat (kill -> repornire) si totul e curatat. Alerte reale cu [PROBA]."""
+    global notify
+    asset = os.environ.get("XSTOCK_TRIAL_ASSET", "ADA")
+    quote = os.environ.get("XSTOCK_QUOTE", "USD")
+    os.environ["XSTOCK_BOT_PAPER"] = "true"                      # bani ZERO, garantat
+    os.environ["XSTOCK_AUTOSTART"] = "true"
+    os.environ["XSTOCK_STATE_FILE"] = os.path.join(_HERE, "xstock_state_trial.json")
+    if os.path.exists(_state_file()):
+        os.remove(_state_file())
+    orig_notify = notify
+    notify = lambda **kw: orig_notify(**{**kw, "title": "[PROBA] " + kw.get("title", "")})
+    verdict = {}
+    bot_pid = None
+    trial_pair = None
+    try:
+        log("=== PROBA END-TO-END (bot PAPER, stare izolata, cont real) ===")
+        try:
+            bal = client.balance()
+        except KrakenError as e:
+            log(f"  ! nu pot citi balanta: {e}")
+            return 1
+        if float(bal.get(asset, 0) or 0) <= 0:
+            log(f"  ! n-ai {asset} in cont — alege alt activ: XSTOCK_TRIAL_ASSET=...")
+            return 1
+        st = _load_state()
+        st["known_assets"] = {a: float(q) for a, q in bal.items()
+                              if float(q) > 0 and a != asset}
+        log(f"  [proba] cobai: {asset} — il scot din snapshot ca sa 'soseasca' acum")
+        check_balance(client, st, asset, desktop)                # 1. detectie alocare
+        verdict["alocare detectata"] = bool(st["allocated"])
+        check_pairs(client, st, asset, desktop, quote)           # 2. pereche listata
+        verdict["pereche gasita"] = bool(st["pair"])
+        trial_pair = st["pair"]
+        alloc = client.last_price(st["pair"]) if st["pair"] else None
+        if not alloc:
+            log("  ! fara pret pt pereche — proba esuata")
+            return 1
+        log(f"  [proba] pret de alocare simulat: {alloc} (pretul curent)")
+        maybe_start_bot(st, alloc, desktop)                      # 3. bot pornit PAPER
+        bot_pid = st.get("bot_pid")
+        verdict["bot pornit (PAPER)"] = _bot_alive(bot_pid)
+        _save_state(st)
+        log("  [proba] astept 12s sa adopte pozitia si sa puna TP-ul paper...")
+        time.sleep(12)
+        os.kill(int(bot_pid), 15)                                # 4. watchdog
+        time.sleep(1.0)
+        verdict["moartea botului detectata"] = not _bot_alive(bot_pid)
+        maybe_start_bot(st, alloc, desktop)
+        bot_pid = st.get("bot_pid")
+        verdict["bot REPORNIT de watchdog"] = _bot_alive(bot_pid)
+        try:
+            with open(BOT_LOG, encoding="utf-8") as f:
+                tail = [ln.rstrip() for ln in f.readlines()[-14:]]
+            log("  [proba] log-ul botului (ce a facut cu 'alocarea'):")
+            for ln in tail:
+                print("      " + ln)
+        except OSError:
+            pass
+    finally:
+        notify = orig_notify
+        if bot_pid:
+            try:
+                os.kill(int(bot_pid), 15)
+                time.sleep(0.5)
+                _bot_alive(bot_pid)                              # seceram zombie-ul
+            except (OSError, TypeError, ValueError):
+                pass
+        if trial_pair:                                           # stergem starea PAPER a botului
+            from strategy import state_path_for
+            sp = state_path_for(trial_pair)
+            if os.path.exists(sp):
+                os.remove(sp)
+        if os.path.exists(_state_file()):
+            os.remove(_state_file())
+    ok = all(verdict.values()) and len(verdict) == 5
+    log("=== VERDICT PROBA ===")
+    for k, v in verdict.items():
+        log(f"    {'✅' if v else '❌'} {k}")
+    log(f"=== PROBA {'REUSITA — lantul intreg functioneaza' if ok else 'ESUATA — vezi mai sus'} ===")
+    return 0 if ok else 1
+
+
 def main() -> int:
     load_dotenv(os.path.join(_HERE, ".env"))
     load_dotenv(os.path.join(_HERE, "config.env"))
@@ -248,18 +350,23 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Watcher alocare xStocks (Kraken).")
     ap.add_argument("--once", action="store_true", help="o singura verificare si iese")
     ap.add_argument("--status", action="store_true", help="arata starea si iese")
+    ap.add_argument("--trial", action="store_true",
+                    help="PROBA end-to-end cu bani ZERO: activ existent ca alocare simulata, bot PAPER, watchdog testat, curatenie la final")
     ap.add_argument("--desktop", action="store_true")
     ap.add_argument("--interval", type=float,
                     default=float_env("XSTOCK_CHECK_MINUTES") or 10.0, help="minute")
     args = ap.parse_args()
 
     rx = os.environ.get("XSTOCK_REGEX", "SPCX|SPACEX")
+    quote = os.environ.get("XSTOCK_QUOTE", "USD")
     alloc_price = float_env("XSTOCK_ALLOC_PRICE") or 0.0
     tp_pct = float_env("XSTOCK_TP_ALERT_PCT") or 20.0
     sl_pct = float_env("XSTOCK_SL_ALERT_PCT") or 15.0
     yahoo_sym = os.environ.get("XSTOCK_YAHOO", "SPCX")
 
     client = KrakenClient(os.environ.get("KRAKEN_API_KEY"), os.environ.get("KRAKEN_API_SECRET"))
+    if args.trial:
+        return run_trial(client, args.desktop)
     st = _load_state()
 
     if args.status:
@@ -278,7 +385,7 @@ def main() -> int:
     log(f"    interval   : {args.interval} min")
     while True:
         check_balance(client, st, rx, args.desktop)
-        check_pairs(client, st, rx, args.desktop)
+        check_pairs(client, st, rx, args.desktop, quote)
         check_levels(client, st, alloc_price, tp_pct, sl_pct, yahoo_sym, args.desktop)
         maybe_start_bot(st, alloc_price, args.desktop)
         _save_state(st)
