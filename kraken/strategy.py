@@ -48,6 +48,8 @@ class StratParams:
     enable_takeprofit: bool
     order_ttl_min: float
     stop_loss_pct: float     # SIGURANTA: vinde tot daca pierderea >= acest % (0 = oprit)
+    adopt_cost: float        # >0 = ADOPTA pozitia existenta din cont la acest cost mediu (ex. alocare IPO/xStock)
+    adopt_qty: float         # cantitatea adoptata; 0 = citeste automat balanta activului de baza
 
     @classmethod
     def from_env(cls) -> "StratParams":
@@ -65,6 +67,8 @@ class StratParams:
             enable_takeprofit  = (mode != "dca_only"),
             order_ttl_min      = float_env("STRAT_ORDER_TTL_MIN") or 10.0,
             stop_loss_pct      = float_env("STRAT_STOP_LOSS_PCT") or 0.0,
+            adopt_cost         = float_env("STRAT_ADOPT_COST") or 0.0,
+            adopt_qty          = float_env("STRAT_ADOPT_QTY") or 0.0,
         )
 
 
@@ -279,6 +283,40 @@ class Strategy:
             return True
         return False
 
+    def _maybe_adopt(self) -> None:
+        """Adopta o pozitie EXISTENTA din cont (ex. alocare IPO/xStock) in loc sa
+        cumpere intrarea. Ruleaza o singura data, DOAR pe stare proaspata, ca sa
+        nu strice un ciclu in curs (ex. botul de HYPE)."""
+        if self.p.adopt_cost <= 0 or self.s.get("adopted"):
+            return
+        if (self.s["qty"] > 1e-12 or self.s["orders"]
+                or self.s["cycle"] != 1 or self.s["spent"] > 0):
+            log("  [STRAT] adopt: starea nu e proaspata — NU adopt (ciclu in curs)")
+            return
+        qty = self.p.adopt_qty
+        if qty <= 0:  # citeste cantitatea din balanta (activul de baza al perechii)
+            try:
+                info = self.client.pair_info(self.pair) or {}
+                base = info.get("base", "")
+                qty = float(self.client.balance().get(base, 0) or 0)
+            except KrakenError as e:
+                log(f"  ! [STRAT] adopt: nu pot citi balanta ({e})")
+                return
+        if qty <= 1e-12:
+            log("  [STRAT] adopt: balanta 0 pe activul de baza — astept alocarea")
+            return
+        self.s["qty"] = qty
+        self.s["cost"] = qty * self.p.adopt_cost
+        self.s["entry_price"] = self.p.adopt_cost
+        self.s["last_buy_price"] = self.p.adopt_cost
+        self.s["adopted"] = True
+        self._save()
+        log(f"  📥 [STRAT] POZITIE ADOPTATA: {qty} @ {self.p.adopt_cost} {self.ccy} — gestionez TP/DCA/SL")
+        notify(title=f"📥 {self.pair}: pozitie adoptata {qty:.6f} @ {self.p.adopt_cost}",
+               body=f"Strategia gestioneaza de acum alocarea: TP +{self.p.takeprofit_pct}%, "
+                    f"DCA -{self.p.dca_drop_pct}%, stop-loss {self.p.stop_loss_pct}%.",
+               source="kraken-bot", price=self.p.adopt_cost, desktop=self.desktop)
+
     def step(self, price: float) -> None:
         held = self.s["qty"]
         disc = 1 - self.p.entry_discount_pct / 100
@@ -327,6 +365,7 @@ class Strategy:
         log(f"      take-profit: +{self.p.takeprofit_pct}%" if self.p.enable_takeprofit else "      take-profit: off")
         log(f"      PLAFON     : {self.p.max_budget} {self.ccy} / ciclu")
         log(f"      ! fee Kraken ~0.26% taker / ~0.16% maker per leg; TP={self.p.takeprofit_pct}%")
+        self._maybe_adopt()
         try:
             while True:
                 price = get_price(self.client, self.pair)
