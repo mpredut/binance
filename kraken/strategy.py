@@ -305,6 +305,15 @@ class Strategy:
         if qty <= 1e-12:
             log("  [STRAT] adopt: balanta 0 pe activul de baza — astept alocarea")
             return
+        if self.p.adopt_qty <= 0:
+            # Kraken raporteaza balanta ROTUNJITA: vinderea intregii cantitati
+            # poate depasi ledger-ul cu o zecimila -> "EOrder:Insufficient funds"
+            # la TP/stop-loss, la nesfarsit. Lasam un praf: o unitate la
+            # penultima zecimala (ex. 5.1715916 -> 5.1715914, ~$0.00001 dust).
+            step = 10.0 ** -(max(self.vol_dec - 1, 1))
+            qty = round(int((qty - step) / step) * step, self.vol_dec)
+            if qty <= 0:
+                return
         self.s["qty"] = qty
         self.s["cost"] = qty * self.p.adopt_cost
         self.s["entry_price"] = self.p.adopt_cost
