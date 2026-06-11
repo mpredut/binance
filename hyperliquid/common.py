@@ -6,7 +6,13 @@ common.py — utilitare partajate (logging, .env) pentru botul Hyperliquid.
 from __future__ import annotations
 
 import os
+import socket
 from datetime import datetime, timezone, timedelta
+
+# REZILIENTA: SDK-ul Hyperliquid face cereri FARA read-timeout — daca netul cade
+# in mijlocul unei cereri deschise, procesul ar atarna la nesfarsit (fara eroare,
+# fara puls). Timeout implicit global: orice socket fara timeout explicit = 30s.
+socket.setdefaulttimeout(30)
 
 BUCHAREST = timezone(timedelta(hours=3))
 
