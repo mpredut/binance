@@ -16,6 +16,10 @@ sleep 1
 nohup python3 dn_bot.py --watch > dn_watch.log 2>&1 &
 
 echo "=== KRAKEN BOT ==="
+# NU sterge .state_HYPEUSD.json: botul isi reia pozitia din el; fara stare ar
+# porni curat si ar CUMPARA o intrare noua peste pozitia veche (incidentul de 10 iun).
+# pkill prinde si eventualul bot SPCX pornit de watcher — watchdog-ul il
+# reporneste singur in <1 min, e ok.
 pkill -f kraken_bot.py 2>/dev/null || true
 sleep 1
 cd ~/binance/kraken
