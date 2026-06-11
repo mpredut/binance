@@ -385,11 +385,16 @@ def main() -> int:
     log(f"    interval   : {args.interval} min")
     beats = 0
     while True:
-        check_balance(client, st, rx, args.desktop)
-        check_pairs(client, st, rx, args.desktop, quote)
-        check_levels(client, st, alloc_price, tp_pct, sl_pct, yahoo_sym, args.desktop)
-        maybe_start_bot(st, alloc_price, args.desktop)
-        _save_state(st)
+        try:
+            check_balance(client, st, rx, args.desktop)
+            check_pairs(client, st, rx, args.desktop, quote)
+            check_levels(client, st, alloc_price, tp_pct, sl_pct, yahoo_sym, args.desktop)
+            maybe_start_bot(st, alloc_price, args.desktop)
+            _save_state(st)
+        except KeyboardInterrupt:
+            return 0
+        except Exception as e:  # noqa: BLE001 — REZILIENTA: net picat/DNS -> reincerc, nu mor
+            log(f"  ! ciclu esuat ({e.__class__.__name__}: {e}) — reincerc la urmatorul")
         if args.once:
             return 0
         beats += 1                       # puls keep-alive: un punct pe ciclu, vizibil in tail -f

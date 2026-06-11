@@ -159,10 +159,18 @@ def main() -> int:
 
     dry = args.paper or not (os.environ.get("STRAT_EXECUTE", "false").lower() == "true")
     need_wallet = not dry and not (args.funding or args.status or args.watch)
-    try:
-        client = _client(need_wallet)
-    except HLError as e:
-        log(f"! {e}"); return 1
+    # REZILIENTA: fara net la pornire (DNS/conexiune), NU murim — reincercam in loop
+    while True:
+        try:
+            client = _client(need_wallet)
+            break
+        except HLError as e:
+            log(f"! {e}"); return 1          # eroare de CONFIG (chei lipsa) — nu retry
+        except KeyboardInterrupt:
+            return 130
+        except Exception as e:  # noqa: BLE001 — net picat: reincearca
+            log(f"! conexiune esuata ({e.__class__.__name__}) — reincerc in 60s")
+            time.sleep(60)
     params = DNParams.from_env(client)
 
     if args.funding:

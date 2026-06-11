@@ -68,11 +68,19 @@ def main() -> int:
 
     # clientul: wallet necesar doar pt tranzactionare reala
     need_wallet = not strat_dry or args.balance or args.positions
-    try:
-        client = _build_client(need_wallet)
-    except HLError as e:
-        log(f"! {e}")
-        return 1
+    # REZILIENTA: fara net la pornire, reincercam in loop (nu murim cu traceback)
+    while True:
+        try:
+            client = _build_client(need_wallet)
+            break
+        except HLError as e:
+            log(f"! {e}")
+            return 1                         # eroare de CONFIG — nu retry
+        except KeyboardInterrupt:
+            return 130
+        except Exception as e:  # noqa: BLE001
+            log(f"! conexiune esuata ({e.__class__.__name__}) — reincerc in 60s")
+            time.sleep(60)
 
     if args.price:
         p = get_price(client, coin); log(f"[PRICE] {coin} = {p}")
