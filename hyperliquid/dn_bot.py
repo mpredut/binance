@@ -78,6 +78,8 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
             perp_px = client.mid(params.coin) or 0.0
             fhr = client.funding_rate(params.coin)
             liq = float(pos.get("liquidationPx") or 0)
+            if errors:
+                log(f"  [WATCH] ✓ conexiune RECUPERATA dupa {errors} incercari esuate")
             errors = 0
             delta_usd = abs(spot_qty + szi) * perp_px
             has_pos = abs(spot_qty) * perp_px > 5 or abs(szi) * perp_px > 5

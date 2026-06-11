@@ -42,6 +42,23 @@ def _round_px(px: float, sz_decimals: int, is_perp: bool = True) -> float:
     return round(px, max(max_dec, 0))
 
 
+def _force_timeout(api_obj, seconds: float = 30.0) -> None:
+    """SDK-ul HL (requests) NU seteaza read-timeout: o cerere pe o conexiune
+    keep-alive moarta (net taiat) ar bloca procesul LA NESFARSIT, fara eroare.
+    Fortam timeout implicit pe sesiunea requests a obiectului API."""
+    try:
+        sess = api_obj.session
+        orig = sess.request
+
+        def _req(*a, **kw):
+            kw.setdefault("timeout", seconds)
+            return orig(*a, **kw)
+
+        sess.request = _req
+    except Exception:  # noqa: BLE001 — daca SDK-ul isi schimba interna, nu blocam pornirea
+        pass
+
+
 class HLClient:
     def __init__(self, secret_key: str | None = None, account_address: str | None = None,
                  mainnet: bool = True):
@@ -50,12 +67,14 @@ class HLClient:
                           f"(ruleaza cu python-ul din .venv)")
         self.base = constants.MAINNET_API_URL if mainnet else constants.TESTNET_API_URL
         self.info = Info(self.base, skip_ws=True)
+        _force_timeout(self.info)      # REZILIENTA: SDK-ul nu pune read-timeout
         self.address = account_address
         self.exchange = None
         if secret_key:
             wallet = eth_account.Account.from_key(secret_key)
             self.address = account_address or wallet.address
             self.exchange = Exchange(wallet, self.base, account_address=self.address)
+            _force_timeout(self.exchange)
         self._meta_cache: dict[str, dict] = {}
 
     # ----- meta / preturi ------------------------------------------------------
