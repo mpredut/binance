@@ -129,7 +129,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
             log(f"  ! [WATCH] eroare (#{errors}): {e!r} — continui")
         if once:
             return 0
-        time.sleep(min(params.check_minutes * 60 * (2 ** min(errors, 3)), 1800))
+        time.sleep(min(params.check_minutes * 60 * (2 ** min(errors, 3)), 300))
 
 
 def _client(need_wallet: bool) -> HLClient:

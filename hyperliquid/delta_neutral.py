@@ -437,8 +437,8 @@ class DeltaNeutral:
                     self._save()
                 except Exception:  # noqa: BLE001
                     pass
-            # backoff exponential la erori (pana la 30 min), altfel ritmul normal
-            time.sleep(min(self.p.check_minutes * 60 * (2 ** min(errors, 3)), 1800))
+            # backoff exponential la erori (plafonat la 5 min), altfel ritmul normal
+            time.sleep(min(self.p.check_minutes * 60 * (2 ** min(errors, 3)), 300))
 
     def tick(self, L: dict) -> None:
         """Un pas de decizie (extras ca sa fie testabil): deschide / tine / inchide / rebalanseaza."""
