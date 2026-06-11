@@ -383,6 +383,7 @@ def main() -> int:
     log(f"    alocare    : {alloc_price if alloc_price > 0 else 'pret necunoscut (doar detectie)'}")
     log(f"    alerte     : +{tp_pct}% / -{sl_pct}%  (pret: Kraken sau Yahoo {yahoo_sym})")
     log(f"    interval   : {args.interval} min")
+    beats = 0
     while True:
         check_balance(client, st, rx, args.desktop)
         check_pairs(client, st, rx, args.desktop, quote)
@@ -391,6 +392,9 @@ def main() -> int:
         _save_state(st)
         if args.once:
             return 0
+        beats += 1                       # puls keep-alive: un punct pe ciclu, vizibil in tail -f
+        sys.stdout.write("." if beats % 60 else ".\n")
+        sys.stdout.flush()
         time.sleep(args.interval * 60)
 
 
