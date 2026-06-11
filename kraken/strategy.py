@@ -390,9 +390,14 @@ class Strategy:
                     log("  [STRAT] pret indisponibil — reincerc")
                     time.sleep(self.p.check_minutes * 60)
                     continue
-                self.reconcile(price)
-                self.step(price)
-                self._save()
+                try:
+                    self.reconcile(price)
+                    self.step(price)
+                    self._save()
+                except Exception as e:  # noqa: BLE001 — REZILIENTA: net/API picat -> reincerc
+                    log(f"  ! [STRAT] eroare ({e.__class__.__name__}: {e}) — reincerc")
+                    time.sleep(self.p.check_minutes * 60)
+                    continue
                 avg = self._avg()
                 pos = f"qty={self.s['qty']:.8f} avg={avg:.{self.price_dec}f}" if avg else "qty=0 (astept intrare)"
                 log(f"  [STRAT] pret={price}  {pos}  "
