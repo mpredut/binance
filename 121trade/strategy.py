@@ -239,6 +239,10 @@ class Strategy:
                                      "ts": time.time()})
         else:
             log(f"  ! [STRAT] BUY {kind} esuat HTTP {status}: {json.dumps(data)[:200]}")
+            if "insufficient" in json.dumps(data).lower():
+                # cont fara cash liber: nu mai spama la fiecare tick — pauza 30 min
+                self.s["buy_backoff_until"] = time.time() + 1800
+                log("  [STRAT] fonduri insuficiente — pauza cumparari 30 min (alimenteaza contul)")
 
     def _place_sell(self, qty: float, limit: float) -> None:
         if self.dry_run:
@@ -418,6 +422,12 @@ class Strategy:
     def step(self, price: float) -> None:
         held = self.s["qty"]
         disc = 1 - self.p.entry_discount_pct / 100
+
+        # backoff dupa "insufficient funds": nu incerca cumparari cat contul e gol
+        if time.time() < self.s.get("buy_backoff_until", 0):
+            if self._check_stop_loss(price):
+                return
+            return
 
         if held <= 1e-9:
             if self._has_open("BUY"):
