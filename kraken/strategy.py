@@ -50,6 +50,7 @@ class StratParams:
     stop_loss_pct: float     # SIGURANTA: vinde tot daca pierderea >= acest % (0 = oprit)
     adopt_cost: float        # >0 = ADOPTA pozitia existenta din cont la acest cost mediu (ex. alocare IPO/xStock)
     adopt_qty: float         # cantitatea adoptata; 0 = citeste automat balanta activului de baza
+    reentry_drop_pct: float  # dupa TP, reintra DOAR daca pretul scade cu acest % sub pretul vandut (0 = imediat)
 
     @classmethod
     def from_env(cls) -> "StratParams":
@@ -70,6 +71,7 @@ class StratParams:
             stop_loss_pct      = float_env("STRAT_STOP_LOSS_PCT") or 0.0,
             adopt_cost         = float_env("STRAT_ADOPT_COST") or 0.0,
             adopt_qty          = float_env("STRAT_ADOPT_QTY") or 0.0,
+            reentry_drop_pct   = float_env("STRAT_REENTRY_DROP_PCT") or 0.0,
         )
 
 
@@ -86,6 +88,7 @@ def _new_state() -> dict:
         "realized_gross": 0.0,
         "realized_net": 0.0,
         "fees_total": 0.0,
+        "last_sell_price": None,  # pretul ultimei vanzari (regula de reintrare)
         "orders": [],           # {txid, side, vol, price, amount, kind, ts}
     }
 
@@ -257,6 +260,7 @@ class Strategy:
                 self.s = _new_state()
                 (self.s["realized_gross"], self.s["realized_net"],
                  self.s["fees_total"], self.s["cycle"]) = keep
+                self.s["last_sell_price"] = price   # pt regula de reintrare (nu recumpara mai sus)
                 log(f"  [STRAT] === ciclu inchis, reincep (ciclu {self.s['cycle']}) ===")
 
     # -- decizie ---------------------------------------------------------------
@@ -341,6 +345,15 @@ class Strategy:
         if held <= 1e-12:
             if self._has_open("buy"):
                 return
+            # REGULA DE REINTRARE: dupa o vanzare, nu recumpara mai sus — asteapta
+            # o scadere reala sub pretul vandut (anti "vand la 60.64, recumpar la 61.1")
+            lsp = self.s.get("last_sell_price")
+            if self.p.reentry_drop_pct > 0 and lsp:
+                prag = lsp * (1 - self.p.reentry_drop_pct / 100)
+                if price > prag:
+                    log(f"  [STRAT] reintrare blocata: pret {price} > prag {prag:.2f} "
+                        f"(vandut la {lsp}, astept -{self.p.reentry_drop_pct}%)")
+                    return
             if self.s["spent"] + self.p.entry_amount > self.p.max_budget:
                 log(f"  [STRAT] plafon {self.p.max_budget} {self.ccy} atins — nu intru")
                 return
