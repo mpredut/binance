@@ -51,6 +51,7 @@ class StratParams:
     adopt_cost: float        # >0 = ADOPTA pozitia existenta din cont la acest cost mediu (ex. alocare IPO/xStock)
     adopt_qty: float         # cantitatea adoptata; 0 = citeste automat balanta activului de baza
     reentry_drop_pct: float  # dupa TP, reintra DOAR daca pretul scade cu acest % sub pretul vandut (0 = imediat)
+    tp_tranches: list        # [(pct, cota%), ...] vanzare graduala; [] = TP clasic pe tot
 
     @classmethod
     def from_env(cls) -> "StratParams":
@@ -72,7 +73,21 @@ class StratParams:
             adopt_cost         = float_env("STRAT_ADOPT_COST") or 0.0,
             adopt_qty          = float_env("STRAT_ADOPT_QTY") or 0.0,
             reentry_drop_pct   = float_env("STRAT_REENTRY_DROP_PCT") or 0.0,
+            tp_tranches        = _parse_tranches(os.environ.get("STRAT_TP_TRANCHES", "")),
         )
+
+
+def _parse_tranches(spec: str) -> list:
+    """"3:50,6:50" -> [(3.0, 50.0), (6.0, 50.0)]; cotele trebuie sa dea 100."""
+    out = []
+    for part in spec.split(","):
+        if ":" in part:
+            try:
+                pct, share = part.split(":")
+                out.append((float(pct), float(share)))
+            except ValueError:
+                return []
+    return out if out and abs(sum(s for _, s in out) - 100) < 1e-6 else []
 
 
 def _new_state() -> dict:
@@ -367,13 +382,27 @@ class Strategy:
 
         avg = self._avg()
         if self.p.enable_takeprofit and avg:
-            target = avg * (1 + self.p.takeprofit_pct / 100)
-            sell = self._find_open("sell")
-            if sell is None:
-                self._place("sell", held, target, kind="TP")
-            elif abs(sell["price"] - target) / target > 0.001 or abs(sell["vol"] - held) > 1e-9:
-                self._cancel_open("sell")
-                self._place("sell", held, target, kind="TP")
+            # TP in TRANSE (optional, STRAT_TP_TRANCHES="3:50,6:50"): vinde gradual.
+            # Fara tranче configurate = comportamentul clasic (un TP pe tot).
+            tranches = self.p.tp_tranches or [(self.p.takeprofit_pct, 100.0)]
+            desired, rem = [], held
+            for i, (pct, share) in enumerate(tranches):
+                q = rem if i == len(tranches) - 1 else min(rem, round(held * share / 100, self.vol_dec))
+                rem = round(rem - q, self.vol_dec)
+                if q > 0:
+                    desired.append((round(avg * (1 + pct / 100), self.price_dec), q))
+            if self.ordermin and any(q < self.ordermin for _, q in desired):
+                desired = [(round(avg * (1 + tranches[0][0] / 100), self.price_dec), held)]
+            sells = [o for o in self.s["orders"] if o["side"] == "sell"]
+            ok = (len(sells) == len(desired) and
+                  all(abs(o["price"] - p) / p <= 0.001 and abs(o["vol"] - q) <= 1e-9
+                      for o, (p, q) in zip(sorted(sells, key=lambda x: x["price"]),
+                                           sorted(desired))))
+            if not ok:
+                while self._find_open("sell"):
+                    self._cancel_open("sell")
+                for p_, q_ in desired:
+                    self._place("sell", q_, p_, kind="TP")
 
         if (self.s["dca_buys"] < self.p.max_dca_buys
                 and self.s["last_buy_price"]
