@@ -216,6 +216,7 @@ class Strategy:
                 self.s["realized_net_usd"] = net_tot
                 self.s["fees_usd"] = fees
                 self.s["cycle"] = nxt
+                self.s["last_sell_price"] = price   # regula de reintrare: nu recumpara mai sus
                 log(f"  [STRAT] === ciclu inchis, reincep (ciclu {nxt}) ===")
 
     # -- plasare / anulare -----------------------------------------------------
@@ -431,6 +432,14 @@ class Strategy:
 
         if held <= 1e-9:
             if self._has_open("BUY"):
+                return
+            # REGULA DE REINTRARE (ca pe Kraken): dupa vanzare nu recumpara mai sus —
+            # anti "vand la 174.17, recumpar la 174.9"
+            lsp = self.s.get("last_sell_price")
+            rdp = float_env("STRAT_REENTRY_DROP_PCT") or 0.0
+            if rdp > 0 and lsp and price > lsp * (1 - rdp / 100):
+                log(f"  [STRAT] reintrare blocata: {price:.2f} > prag {lsp * (1 - rdp / 100):.2f} "
+                    f"(vandut la {lsp:.2f}, astept -{rdp}%)")
                 return
             if self.s["spent_cash"] + self.p.entry_amount > self.p.max_budget:
                 log(f"  [STRAT] plafon buget {self.p.max_budget:.0f} {self.ccy} atins — nu intru")
