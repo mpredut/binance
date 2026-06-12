@@ -169,6 +169,12 @@ def check_levels(client: KrakenClient, st: dict, alloc_price: float,
                body=f"Valoare estimata: {qty * price:.0f} (alocat la {alloc_price}). "
                     f"Ia in calcul vanzarea partiala / pornirea botului cu adoptare.",
                source="xstock-watch", price=price, desktop=desktop)
+    tp2 = float_env("XSTOCK_TP2_ALERT_PCT") or 0.0   # transa 2 (vanzare manuala in transe)
+    if tp2 and not st.get("alerted_tp2") and chg >= tp2:
+        st["alerted_tp2"] = True
+        notify(title=f"📈📈 TRANSA 2: xStock {chg:+.1f}% ({price})",
+               body=f"A doua tinta atinsa — vinde restul. Valoare: {qty * price:.0f}.",
+               source="xstock-watch", price=price, desktop=desktop)
     if not st["alerted_sl"] and chg <= -sl_pct:
         st["alerted_sl"] = True
         notify(title=f"📉 xStock {chg:+.1f}% sub alocare ({price})",
