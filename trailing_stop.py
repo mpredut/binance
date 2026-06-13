@@ -1,0 +1,183 @@
+#!/usr/bin/env python3
+"""
+trailing_stop.py — TRAILING STOP per-moneda pe holdings Binance.
+
+De ce exista: assetguardian.sell_all_assets() declanseaza corect dar cheama
+place_safe_order(force=False) -> trece prin apply_weight_limit -> intr-un uptrend
+ponderea contra-trend e 0.02 -> ordinul e zero-uit -> "Orders sent: 0". Adica
+mecanismul de protectie nu vinde NIMIC (vezi logul TAO 13 iun: a tras de sute de
+ori, a vandut 0). Trailing stop-ul:
+  * tine pozitia cat pretul URCA (urmareste varful)
+  * vinde DOAR cand pretul scade trail% de la varf -> protejeaza castigul real
+  * foloseste force=True -> ocoleste weight-ul (altfel ar fi zero-uit la fel)
+
+Validat pe backtest (vezi conversatie): TAO trailing 12% > detinere pura
+(+5%, drawdown 50%->41%); BTC trailing 5-12% bate detinerea cu +24% in scadere.
+Pragul e DIFERENTIAT pe moneda: ~2.2 x volatilitatea zilnica, plafon [5%,18%]
+(TAO volatil -> 10%; BTC -> 5%). Un prag unic ar strica una din monede.
+
+SIGURANTA:
+  * TRAILING_ENABLED=false (implicit) -> DRY-RUN: doar logheaza ce AR vinde.
+  * actioneaza doar pe monedele din symbols.py.
+  * varful e persistat (supravietuieste restartului) -> nu se reseteaza.
+  * sare ordinele sub notional minim.
+
+  TRAILING_ENABLED=true python trailing_stop.py            # bucla
+  python trailing_stop.py --once                            # o verificare (dry-run)
+  python trailing_stop.py --status                          # varfuri + praguri curente
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+import time
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_STATE = os.path.join(_HERE, "cachedb", "trailing_state.json")
+
+# trailing % per moneda — ~2.2 x volatilitate zilnica, plafon [5,18] (din backtest)
+TRAIL_PCT = {
+    "BTCUSDC": 5.0,
+    "TAOUSDC": 10.0,
+}
+DEFAULT_TRAIL_PCT = 10.0
+SELL_FRACTION = float(os.environ.get("TRAILING_SELL_FRACTION", "1.0"))  # 1.0=tot, 0.5=jumatate
+MIN_NOTIONAL_USD = 11.0
+CHECK_SECONDS = float(os.environ.get("TRAILING_CHECK_SECONDS", "60"))
+
+
+def should_sell(current: float, peak: float, trail_pct: float) -> bool:
+    """True daca pretul a cazut >= trail% de la varf."""
+    return peak > 0 and trail_pct > 0 and current <= peak * (1 - trail_pct / 100.0)
+
+
+class TrailingStop:
+    def __init__(self, api, po, sym, log=print, enabled=None,
+                 sell_fraction=SELL_FRACTION, state_file=DEFAULT_STATE):
+        self.api = api
+        self.po = po
+        self.sym = sym
+        self.log = log
+        self.enabled = (os.environ.get("TRAILING_ENABLED", "false").lower() == "true"
+                        if enabled is None else enabled)
+        self.sell_fraction = sell_fraction
+        self.state_file = state_file
+
+    # -- stare (varful per moneda) --------------------------------------------
+    def _load(self) -> dict:
+        try:
+            with open(self.state_file) as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return {}
+
+    def _save(self, state: dict):
+        try:
+            os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
+            tmp = self.state_file + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(state, f, indent=2)
+            os.replace(tmp, self.state_file)
+        except OSError as e:
+            self.log(f"  ! [TRAIL] nu pot salva starea: {e}")
+
+    def trail_pct_for(self, symbol: str) -> float:
+        return TRAIL_PCT.get(symbol, DEFAULT_TRAIL_PCT)
+
+    def _free_qty(self, balances: list, asset: str) -> float:
+        for bal in balances or []:
+            if bal.get("asset") == asset:
+                try:
+                    return float(bal.get("free", 0.0))
+                except (TypeError, ValueError):
+                    return 0.0
+        return 0.0
+
+    # -- un pas ----------------------------------------------------------------
+    def check_once(self) -> None:
+        try:
+            balances = self.api.get_account_assets_balances()
+        except Exception as e:  # noqa: BLE001
+            self.log(f"  ! [TRAIL] balante indisponibile ({e}) — sar tick-ul")
+            return
+        state = self._load()
+        for symbol in self.sym.symbols:
+            try:
+                asset = self.api.split_symbol(symbol)[0]
+                qty = self._free_qty(balances, asset)
+                price = self.api.get_current_price(symbol)
+                if not price or price <= 0:
+                    continue
+                if qty * price < MIN_NOTIONAL_USD:
+                    continue                                # nimic de protejat
+                st = state.setdefault(symbol, {"peak": price})
+                if price > st["peak"]:
+                    st["peak"] = price                      # varf nou -> urca trailing-ul
+                trail = self.trail_pct_for(symbol)
+                stop_at = st["peak"] * (1 - trail / 100.0)
+                if should_sell(price, st["peak"], trail):
+                    sell_qty = round(qty * self.sell_fraction, 8)
+                    if self.enabled and sell_qty * price >= MIN_NOTIONAL_USD:
+                        self.po.place_safe_order("SELL", symbol, price, sell_qty, force=True)
+                        self.log(f"  🛑 [TRAIL] VANDUT {symbol} {sell_qty} @ ~{price:.4f} "
+                                 f"(varf {st['peak']:.4f}, -{trail}%)")
+                        st["peak"] = price                  # re-armeaza de la pretul curent
+                    else:
+                        self.log(f"  🟡 [TRAIL][DRY] AR VINDE {symbol} {sell_qty} @ ~{price:.4f} "
+                                 f"(varf {st['peak']:.4f}, scadere >= {trail}%)  "
+                                 f"[seteaza TRAILING_ENABLED=true ca sa execute]")
+                else:
+                    self.log(f"  [TRAIL] {symbol}: {price:.4f}  varf {st['peak']:.4f}  "
+                             f"vinde sub {stop_at:.4f} (-{trail}%)")
+            except Exception as e:  # noqa: BLE001 — o moneda nu opreste restul
+                self.log(f"  ! [TRAIL] {symbol}: {e}")
+        self._save(state)
+
+    def run(self):
+        mode = "⚠ ACTIV (vinde real)" if self.enabled else "DRY-RUN (doar logheaza)"
+        self.log(f"=== TRAILING STOP pornit — {mode} ===")
+        self.log(f"    monede/praguri: " +
+                 ", ".join(f"{s}={self.trail_pct_for(s)}%" for s in self.sym.symbols))
+        while True:
+            try:
+                self.check_once()
+            except KeyboardInterrupt:
+                return
+            except Exception as e:  # noqa: BLE001
+                self.log(f"  ! [TRAIL] eroare ciclu ({e}) — continui")
+            time.sleep(CHECK_SECONDS)
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="Trailing stop per-moneda (Binance).")
+    ap.add_argument("--once", action="store_true", help="o verificare si iese")
+    ap.add_argument("--status", action="store_true", help="varfuri + praguri curente")
+    args = ap.parse_args()
+
+    import bapi as api
+    import bapi_placeorder as po
+    import symbols as sym
+    ts = TrailingStop(api, po, sym)
+
+    if args.status:
+        state = ts._load()
+        for s in sym.symbols:
+            st = state.get(s, {})
+            tr = ts.trail_pct_for(s)
+            peak = st.get("peak")
+            print(f"{s}: varf={peak}  trailing={tr}%  "
+                  f"vinde sub {peak * (1 - tr / 100):.4f}" if peak else f"{s}: fara varf inca")
+        print(f"ENABLED={ts.enabled} (dry-run daca False)")
+        return 0
+    if args.once:
+        ts.check_once()
+        return 0
+    ts.run()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
