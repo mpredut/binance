@@ -38,12 +38,14 @@ import time
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_STATE = os.path.join(_HERE, "cachedb", "trailing_state.json")
 
-# trailing % per moneda — ~2.2 x volatilitate zilnica, plafon [5,18] (din backtest)
+# trailing % per moneda — CALIBRAT pe feed-ul real din cachedb (291 zile, include
+# si declinul): TAO 10% era prea strans (whipsaw, -9% vs hold); 12% bate. BTC 5-8%
+# bate cu +20% in scadere. Valori robuste si pe bull-ul de 120z, si pe declin.
 TRAIL_PCT = {
-    "BTCUSDC": 5.0,
-    "TAOUSDC": 10.0,
+    "BTCUSDC": 8.0,
+    "TAOUSDC": 12.0,
 }
-DEFAULT_TRAIL_PCT = 10.0
+DEFAULT_TRAIL_PCT = 12.0
 SELL_FRACTION = float(os.environ.get("TRAILING_SELL_FRACTION", "1.0"))  # 1.0=tot, 0.5=jumatate
 MIN_NOTIONAL_USD = 11.0
 CHECK_SECONDS = float(os.environ.get("TRAILING_CHECK_SECONDS", "60"))

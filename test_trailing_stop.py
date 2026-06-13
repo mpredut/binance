@@ -75,7 +75,7 @@ class TestTrailing(Base):
         api = FakeApi(250.0)
         ts = self.ts(api)
         ts.check_once()                                # varf 250
-        api.price = 224.0                              # -10.4% de la 250 (prag TAO 10%)
+        api.price = 219.0                              # -12.4% de la 250 (prag TAO 12%)
         ts.check_once()
         self.assertEqual(len(self.po.orders), 1)
         self.assertEqual(self.po.orders[0]["side"], "SELL")
@@ -100,7 +100,7 @@ class TestTrailing(Base):
     def test_varf_persista_peste_restart(self):
         api = FakeApi(260.0)
         self.ts(api).check_once()                      # varf 260, instanta 1
-        api.price = 233.0                              # -10.4% de la 260
+        api.price = 228.0                              # -12.3% de la 260 (prag 12%)
         self.ts(api).check_once()                      # instanta 2 (restart) — citeste varful
         self.assertEqual(len(self.po.orders), 1, "varful 260 supravietuieste restartului")
 
@@ -132,9 +132,9 @@ class TestTrailing(Base):
 class TestPerMoneda(Base):
     def test_prag_diferentiat(self):
         ts = self.ts(FakeApi(1.0))
-        self.assertEqual(ts.trail_pct_for("BTCUSDC"), 5.0)
-        self.assertEqual(ts.trail_pct_for("TAOUSDC"), 10.0)
-        self.assertEqual(ts.trail_pct_for("XYZUSDC"), 10.0)   # default
+        self.assertEqual(ts.trail_pct_for("BTCUSDC"), 8.0)
+        self.assertEqual(ts.trail_pct_for("TAOUSDC"), 12.0)
+        self.assertEqual(ts.trail_pct_for("XYZUSDC"), 12.0)   # default
 
 
 if __name__ == "__main__":
