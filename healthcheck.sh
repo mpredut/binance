@@ -6,6 +6,35 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 HLPY="$ROOT/myenv/bin/python"
 { [ -x "$HLPY" ] && "$HLPY" -c "import eth_account" 2>/dev/null; } || HLPY=python3
 
+# ===== MOD --alert (pt CRON): verifica boturile, trimite ntfy DOAR daca lipseste ceva =====
+# Acopera golul: watchdog-ul existent reporneste flota, dar NU boturile. Alerteaza,
+# nu reporneste (boturile au nevoi de stare; mai bine te anunta sa dai ./all_start.sh).
+#   cron:  */10 * * * * /home/predut/binance/healthcheck.sh --alert >> /home/predut/binance/healthcheck.log 2>&1
+if [ "$1" = "--alert" ]; then
+    checks="dn_bot.py\$|DN-bot
+dn_bot.py --watch|DN-watch
+kraken_bot.py|Kraken-bot
+xstock_watch.py|xStock-watch
+ipo.py --profile spcx|IPO-SPCX
+cacheManager.py|cacheManager
+priceAnalysis.py|priceAnalysis
+tradeall.py|tradeall"
+    missing=""
+    while IFS='|' read -r pat label; do
+        [ -z "$pat" ] && continue
+        pgrep -f "$pat" >/dev/null 2>&1 || missing="$missing $label"
+    done <<< "$(echo -e "$checks")"
+    if [ -n "$missing" ]; then
+        TOPIC=$(grep -hs NTFY_TOPIC "$ROOT/kraken/.env" "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '" ')
+        [ -n "$TOPIC" ] && curl -s -m 10 -H "Title: Boti opriti pe server" \
+            -d "Procese moarte:$missing  -> ruleaza ./all_start.sh" "https://ntfy.sh/$TOPIC" >/dev/null
+        echo "$(date '+%H:%M') ALERTA: lipsesc -$missing"
+    else
+        echo "$(date '+%H:%M') OK (toti botii ruleaza)"
+    fi
+    exit 0
+fi
+
 echo "============ HEALTHCHECK $(date '+%Y-%m-%d %H:%M') ============"
 echo "=== PROCESE (etime = de cat ruleaza) ==="
 ps -eo etime,args | grep -E "dn_bot|kraken_bot|xstock_watch|ipo.py|trailing_stop|cacheManager|priceAnalysis|tradeall|rtrade|monitortrades|run_price_monitor|assetguardian" | grep -v grep
