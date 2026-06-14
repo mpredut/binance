@@ -43,6 +43,10 @@ fi
 # Bonus: dupa un reboot, aduce boturile inapoi singur. Cron sugerat:
 #   */5 * * * * /home/predut/binance/healthcheck.sh --supervise >> /home/predut/binance/healthcheck.log 2>&1
 if [ "$1" = "--supervise" ]; then
+    # lacat: o singura instanta --supervise odata (cron + rulare manuala nu se bat,
+    # nu pornesc dubluri). A doua instanta iese imediat.
+    exec 8>/tmp/binance_supervise.lock
+    flock -n 8 || { echo "$(date '+%H:%M') supervise deja ruleaza — sar (anti-dublare)"; exit 0; }
     SUP=/tmp/binance_sup; mkdir -p "$SUP"; WINDOW=1800; MAX=3
     TOPIC=$(grep -hs NTFY_TOPIC "$ROOT/kraken/.env" "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '" ')
     push(){ [ -n "$TOPIC" ] && curl -s -m 10 -H "Title: $1" -d "$2" "https://ntfy.sh/$TOPIC" >/dev/null; }
