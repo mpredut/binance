@@ -43,6 +43,12 @@ fi
 # Bonus: dupa un reboot, aduce boturile inapoi singur. Cron sugerat:
 #   */5 * * * * /home/predut/binance/healthcheck.sh --supervise >> /home/predut/binance/healthcheck.log 2>&1
 if [ "$1" = "--supervise" ]; then
+    # Garda statie locala: --supervise PORNESTE boti. Din checkout-ul de dezvoltare
+    # (WSL, /home/mariusp) asta ar lansa botii cu cheile reale local -> refuza aici.
+    # Serverul (/home/predut) NU e atins, deci supravegherea de acolo ramane activa.
+    case "$ROOT" in
+        /home/mariusp/*) echo "$(date '+%H:%M') supervise dezactivat pe statia locala ($ROOT) — pornesc boti DOAR pe server"; exit 0;;
+    esac
     # lacat: o singura instanta --supervise odata (cron + rulare manuala nu se bat,
     # nu pornesc dubluri). A doua instanta iese imediat.
     exec 8>/tmp/binance_supervise.lock
