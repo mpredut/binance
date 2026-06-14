@@ -52,8 +52,8 @@ echo "=== KRAKEN TRAILING (protectie crash HYPE) — momentan OPRIT ==="
 #   2. apoi adauga "KRAKEN_TRAILING_ENABLED=true " inainte de nohup ca sa vanda real.
 # Lansat cu cale (kraken/trailing_stop.py) ca pkill sa NU prinda si trailing-ul din
 # radacina (acelasi nume de fisier -> proces identic in ps).
-# pkill -f "kraken/trailing_stop.py" 2>/dev/null || true
-# sleep 1
-# cd ~/binance && nohup python3 kraken/trailing_stop.py > kraken/trail_k.log 2>&1 &
+ pkill -f "kraken/trailing_stop.py" 2>/dev/null || true
+ sleep 1
+ cd ~/binance && nohup python3 kraken/trailing_stop.py > kraken/trail_k.log 2>&1 &
 
 echo "DONE"
