@@ -457,7 +457,10 @@ class DeltaNeutral:
             return
         if not self.dry_run:
             try:
-                free = self.client.withdrawable()
+                # USDC-ul SPOT cumpara piciorul long; marginea short-ului e acoperita
+                # de colateralul unificat. withdrawable() (perp) e adesea $0 desi ai
+                # USDC in spot -> verificam balanta SPOT, sursa corecta.
+                free = self.client.spot_balance("USDC")
             except Exception as e:  # noqa: BLE001
                 log(f"  ! [DN] scale-up: nu pot citi colateralul ({e}) — amanat"); return
             if free < add * L["spot_px"]:                 # nu-mi permit tot -> cresc partial

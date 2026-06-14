@@ -48,6 +48,9 @@ class FakeClient:
     def withdrawable(self):
         return self.free
 
+    def spot_balance(self, token):
+        return self.free if token == "USDC" else self.spot_bal
+
     def spot_mid(self, pair): return 50.0
     def mid(self, coin): return 50.0
     def funding_rate(self, coin): return 0.0000125
