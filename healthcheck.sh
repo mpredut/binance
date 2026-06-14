@@ -56,8 +56,10 @@ if [ "$1" = "--supervise" ]; then
     SUP=/tmp/binance_sup; mkdir -p "$SUP"; WINDOW=1800; MAX=3
     TOPIC=$(grep -hs NTFY_TOPIC "$ROOT/kraken/.env" "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '" ')
     push(){ [ -n "$TOPIC" ] && curl -s -m 10 -H "Title: $1" -d "$2" "https://ntfy.sh/$TOPIC" >/dev/null; }
-    bots="dn_bot.py\$|$ROOT/hyperliquid|nohup python3 dn_bot.py > dn_bot.log 2>&1 &|DN-bot
-dn_bot.py --watch|$ROOT/hyperliquid|nohup python3 dn_bot.py --watch > dn_watch.log 2>&1 &|DN-watch
+    # dn_bot are nevoie de SDK-ul HL (eth_account) = doar in venv; python3 de sistem
+    # NU il are -> cron-ul ar esua sa-l reporneasca. Folosim $HLPY (venv, fallback python3).
+    bots="dn_bot.py\$|$ROOT/hyperliquid|nohup $HLPY dn_bot.py > dn_bot.log 2>&1 &|DN-bot
+dn_bot.py --watch|$ROOT/hyperliquid|nohup $HLPY dn_bot.py --watch > dn_watch.log 2>&1 &|DN-watch
 kraken_bot.py|$ROOT/kraken|nohup python3 kraken_bot.py > kraken_bot.log 2>&1 &|Kraken-bot
 xstock_watch.py|$ROOT/kraken|nohup python3 xstock_watch.py > xstock_watch.log 2>&1 &|xStock-watch
 ipo.py --profile nvda|$ROOT/121trade|nohup python3 ipo.py --profile nvda > nvda.log 2>&1 &|IPO-NVDA

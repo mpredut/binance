@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# python cu SDK Hyperliquid (eth_account): dn_bot ARE nevoie de el; python3 de
+# sistem NU il are. Prefera venv-ul, cade pe python3 (kraken/ipo merg si pe python3).
+HLPY="$HOME/binance/myenv/bin/python"
+{ [ -x "$HLPY" ] && "$HLPY" -c "import eth_account" 2>/dev/null; } || HLPY=python3
+
 echo "=== RESTART BINANCE ==="
 #sudo systemctl restart binance
 
@@ -7,13 +12,13 @@ echo "=== DN BOT ==="
 pkill -f dn_bot.py 2>/dev/null || true
 sleep 1
 cd ~/binance/hyperliquid
-nohup python3 dn_bot.py > dn_bot.log 2>&1 &
+nohup $HLPY dn_bot.py > dn_bot.log 2>&1 &
 
 echo "=== DN WATCH ==="
 cd ~/binance/hyperliquid
 pkill -f "dn_bot.py --watch" 2>/dev/null || true
 sleep 1
-nohup python3 dn_bot.py --watch > dn_watch.log 2>&1 &
+nohup $HLPY dn_bot.py --watch > dn_watch.log 2>&1 &
 
 echo "=== KRAKEN BOT ==="
 # NU sterge .state_HYPEUSD.json: botul isi reia pozitia din el; fara stare ar
