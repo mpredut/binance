@@ -35,6 +35,51 @@ tradeall.py|tradeall"
     exit 0
 fi
 
+# ===== MOD --supervise (pt CRON): repornește BOTURILE moarte (cu backoff) + alertă =====
+# Boturile (all_start) nu erau supravegheate de nimic. Aici le repornim individual
+# (restart curat -> isi reiau starea singure), cu backoff: max 3 reporniri / 30 min,
+# apoi escaladare la interventie manuala (anti crash-loop). FLOTA si TRAILING-ul =
+# doar alerta (flota o tine binance_start; trailing-ul are stare enabled, nu-l reporni orb).
+# Bonus: dupa un reboot, aduce boturile inapoi singur. Cron sugerat:
+#   */5 * * * * /home/predut/binance/healthcheck.sh --supervise >> /home/predut/binance/healthcheck.log 2>&1
+if [ "$1" = "--supervise" ]; then
+    SUP=/tmp/binance_sup; mkdir -p "$SUP"; WINDOW=1800; MAX=3
+    TOPIC=$(grep -hs NTFY_TOPIC "$ROOT/kraken/.env" "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '" ')
+    push(){ [ -n "$TOPIC" ] && curl -s -m 10 -H "Title: $1" -d "$2" "https://ntfy.sh/$TOPIC" >/dev/null; }
+    bots="dn_bot.py\$|$ROOT/hyperliquid|nohup python3 dn_bot.py > dn_bot.log 2>&1 &|DN-bot
+dn_bot.py --watch|$ROOT/hyperliquid|nohup python3 dn_bot.py --watch > dn_watch.log 2>&1 &|DN-watch
+kraken_bot.py|$ROOT/kraken|nohup python3 kraken_bot.py > kraken_bot.log 2>&1 &|Kraken-bot
+xstock_watch.py|$ROOT/kraken|nohup python3 xstock_watch.py > xstock_watch.log 2>&1 &|xStock-watch
+ipo.py --profile nvda|$ROOT/121trade|nohup python3 ipo.py --profile nvda > nvda.log 2>&1 &|IPO-NVDA
+ipo.py --profile spcx|$ROOT/121trade|nohup python3 ipo.py --profile spcx > spcx.log 2>&1 &|IPO-SPCX"
+    while IFS='|' read -r pat dir cmd label; do
+        [ -z "$pat" ] && continue
+        if pgrep -f "$pat" >/dev/null 2>&1; then
+            rm -f "$SUP/$label" "$SUP/$label.esc"            # viu -> reset backoff
+            continue
+        fi
+        cnt=0; ws=$(date +%s); now=$ws
+        [ -f "$SUP/$label" ] && read -r cnt ws < "$SUP/$label"
+        [ $((now - ws)) -gt $WINDOW ] && { cnt=0; ws=$now; }   # fereastra noua
+        if [ "$cnt" -ge "$MAX" ]; then
+            [ -f "$SUP/$label.esc" ] || { push "Bot in CRASH-LOOP" "$label a murit de ${cnt}x in 30min — NU mai repornesc, interventie manuala"; touch "$SUP/$label.esc"; }
+            echo "$(date '+%H:%M') $label CRASH-LOOP (nu repornesc)"; continue
+        fi
+        ( cd "$dir" && eval "$cmd" )                          # restart curat
+        cnt=$((cnt + 1)); echo "$cnt $ws" > "$SUP/$label"; rm -f "$SUP/$label.esc"
+        push "Bot repornit" "$label murise -> REPORNIT (incercarea $cnt/$MAX)"
+        echo "$(date '+%H:%M') $label REPORNIT (incercarea $cnt)"
+    done <<< "$bots"
+    # FLOTA + TRAILING: doar alerta (nu repornim de aici)
+    miss=""
+    for s in cacheManager.py priceAnalysis.py tradeall.py monitortrades.py rtrade.py run_price_monitor.py assetguardian.py "kraken/trailing_stop.py"; do
+        pgrep -f "$s" >/dev/null 2>&1 || miss="$miss ${s%.py}"
+    done
+    [ -n "$miss" ] && { push "Procese de verificat" "Moarte (nu le repornesc de aici):$miss"; echo "$(date '+%H:%M') alerta flota/trailing:$miss"; }
+    [ -z "$miss" ] && echo "$(date '+%H:%M') supervise OK"
+    exit 0
+fi
+
 echo "============ HEALTHCHECK $(date '+%Y-%m-%d %H:%M') ============"
 echo "=== PROCESE (etime = de cat ruleaza) ==="
 ps -eo etime,args | grep -E "dn_bot|kraken_bot|xstock_watch|ipo.py|trailing_stop|cacheManager|priceAnalysis|tradeall|rtrade|monitortrades|run_price_monitor|assetguardian" | grep -v grep
