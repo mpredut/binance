@@ -26,6 +26,8 @@ __pycache__/
 .pytest_cache/
 .venv/
 *.log
+*.log.[0-9]*
+.logrotate.state
 *.pem
 cache_*.jsonl
 *.meta
