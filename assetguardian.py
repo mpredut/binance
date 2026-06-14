@@ -7,7 +7,12 @@ import symbols as sym
 
 
 CHECK_INTERVAL_SECONDS = 0.9 * 60 # 9 minutes
-TARGET_GROWTH_PERCENT = 2.9
+# 2.9% declansa "sell all" la fiecare ciclu intr-un uptrend, dar sell_all_assets
+# cheama place_safe_order(force=False) -> apply_weight_limit zero-uia ordinul
+# (vindea NIMIC, spam "Orders sent: 0"). Walk-forward pe feed real (291z) a aratat
+# ca vanzarea agresiva pierde fata de deTinere -> ridicat la 100 (practic oprit).
+# Protectia reala de crash o face trailing_stop.py (force=True, prag larg ~22%).
+TARGET_GROWTH_PERCENT = 100.0
 TARGET_DROP_PERCENT = 7.0
 ASSET_REFERENCE_MINUTES_BACK_DEFAULT = 24 * 60 # 24 hours
 

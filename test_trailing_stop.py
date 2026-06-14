@@ -75,7 +75,7 @@ class TestTrailing(Base):
         api = FakeApi(250.0)
         ts = self.ts(api)
         ts.check_once()                                # varf 250
-        api.price = 219.0                              # -12.4% de la 250 (prag TAO 12%)
+        api.price = 190.0                              # -24% de la 250 (prag TAO 22%)
         ts.check_once()
         self.assertEqual(len(self.po.orders), 1)
         self.assertEqual(self.po.orders[0]["side"], "SELL")
@@ -85,7 +85,7 @@ class TestTrailing(Base):
         api = FakeApi(250.0)
         ts = self.ts(api)
         ts.check_once()
-        api.price = 240.0                              # -4% < 10%
+        api.price = 240.0                              # -4% < 22%
         ts.check_once()
         self.assertEqual(self.po.orders, [])
 
@@ -93,14 +93,14 @@ class TestTrailing(Base):
         api = FakeApi(250.0)
         ts = self.ts(api, enabled=False)
         ts.check_once()
-        api.price = 220.0
+        api.price = 190.0
         ts.check_once()
         self.assertEqual(self.po.orders, [], "dry-run: doar logheaza, nu plaseaza ordine")
 
     def test_varf_persista_peste_restart(self):
         api = FakeApi(260.0)
         self.ts(api).check_once()                      # varf 260, instanta 1
-        api.price = 228.0                              # -12.3% de la 260 (prag 12%)
+        api.price = 200.0                              # -23% de la 260 (prag 22%)
         self.ts(api).check_once()                      # instanta 2 (restart) — citeste varful
         self.assertEqual(len(self.po.orders), 1, "varful 260 supravietuieste restartului")
 
@@ -108,7 +108,7 @@ class TestTrailing(Base):
         api = FakeApi(250.0, free=4.0)
         ts = self.ts(api, frac=0.5)
         ts.check_once()
-        api.price = 220.0
+        api.price = 190.0
         ts.check_once()
         self.assertAlmostEqual(self.po.orders[0]["qty"], 2.0)   # 50% din 4
 
@@ -116,9 +116,9 @@ class TestTrailing(Base):
         api = FakeApi(250.0)
         ts = self.ts(api)
         ts.check_once()
-        api.price = 220.0; ts.check_once()             # vinde, varf se reseteaza la 220
+        api.price = 190.0; ts.check_once()             # vinde, varf se reseteaza la 190
         import json
-        self.assertEqual(json.load(open(self.sf))["TAOUSDC"]["peak"], 220.0)
+        self.assertEqual(json.load(open(self.sf))["TAOUSDC"]["peak"], 190.0)
 
     def test_sub_notional_minim_ignora(self):
         api = FakeApi(250.0, free=0.01)                # 0.01*250 = $2.5 < $11
@@ -132,9 +132,9 @@ class TestTrailing(Base):
 class TestPerMoneda(Base):
     def test_prag_diferentiat(self):
         ts = self.ts(FakeApi(1.0))
-        self.assertEqual(ts.trail_pct_for("BTCUSDC"), 8.0)
-        self.assertEqual(ts.trail_pct_for("TAOUSDC"), 12.0)
-        self.assertEqual(ts.trail_pct_for("XYZUSDC"), 12.0)   # default
+        self.assertEqual(ts.trail_pct_for("BTCUSDC"), 20.0)
+        self.assertEqual(ts.trail_pct_for("TAOUSDC"), 22.0)
+        self.assertEqual(ts.trail_pct_for("XYZUSDC"), 22.0)   # default
 
 
 if __name__ == "__main__":

@@ -11,10 +11,11 @@ ori, a vandut 0). Trailing stop-ul:
   * vinde DOAR cand pretul scade trail% de la varf -> protejeaza castigul real
   * foloseste force=True -> ocoleste weight-ul (altfel ar fi zero-uit la fel)
 
-Validat pe backtest (vezi conversatie): TAO trailing 12% > detinere pura
-(+5%, drawdown 50%->41%); BTC trailing 5-12% bate detinerea cu +24% in scadere.
-Pragul e DIFERENTIAT pe moneda: ~2.2 x volatilitatea zilnica, plafon [5%,18%]
-(TAO volatil -> 10%; BTC -> 5%). Un prag unic ar strica una din monede.
+ONEST (walk-forward out-of-sample, feed real 291z): trailing-ul STRANS NU bate
+detinerea — declinul vine cu reculuri care produc whipsaw + fee. NU e o sursa de
+profit. Rol corect: DISJUNCTOR DE CRASH cu prag LARG (~22%) — se declanseaza doar
+la un colaps sustinut, ca plasa impotriva scenariului care distruge detinerea.
+Ruleaza-l in dry-run intai; restul strategiei (hold+DCA+weight) ramane neschimbat.
 
 SIGURANTA:
   * TRAILING_ENABLED=false (implicit) -> DRY-RUN: doar logheaza ce AR vinde.
@@ -38,14 +39,16 @@ import time
 _HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_STATE = os.path.join(_HERE, "cachedb", "trailing_state.json")
 
-# trailing % per moneda — CALIBRAT pe feed-ul real din cachedb (291 zile, include
-# si declinul): TAO 10% era prea strans (whipsaw, -9% vs hold); 12% bate. BTC 5-8%
-# bate cu +20% in scadere. Valori robuste si pe bull-ul de 120z, si pe declin.
+# PRAG LARG = DISJUNCTOR DE CRASH, nu unealta de profit.
+# Walk-forward out-of-sample (feed real 291z) a aratat ca trailing-ul STRANS (8-12%)
+# NU bate detinerea — declinul vine cu reculuri violente care produc whipsaw + fee.
+# Singura valoare reala e protectia impotriva unui COLAPS sustinut (fara reculuri):
+# prag larg (~22%) se declanseaza doar la o cadere catastrofala, nu pe zgomot.
 TRAIL_PCT = {
-    "BTCUSDC": 8.0,
-    "TAOUSDC": 12.0,
+    "BTCUSDC": 20.0,
+    "TAOUSDC": 22.0,
 }
-DEFAULT_TRAIL_PCT = 12.0
+DEFAULT_TRAIL_PCT = 22.0
 SELL_FRACTION = float(os.environ.get("TRAILING_SELL_FRACTION", "1.0"))  # 1.0=tot, 0.5=jumatate
 MIN_NOTIONAL_USD = 11.0
 CHECK_SECONDS = float(os.environ.get("TRAILING_CHECK_SECONDS", "60"))
