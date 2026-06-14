@@ -19,17 +19,40 @@ def t212_to_yahoo(t212_ticker: str) -> str:
     return t212_ticker.split("_")[0]
 
 
-def get_price_usd(sym: str) -> float | None:
-    """Pret curent pentru orice simbol Yahoo (NVDA, SPCX, USDRON=X...)."""
-    status, body = http_get(YAHOO_CHART.format(sym=sym), headers=_UA)
+def _chart(sym: str, rng: str = "1d", interval: str = "5m"):
+    """Returneaza (meta, bars) de pe Yahoo chart. bars = [(ts, close, volume), ...]
+    cu close ne-null. Seria intraday e mai PROASPATA decat meta — la o listare noua
+    meta poate ramane statuta (ex SPCX: vol=0/pret vechi desi se tranzactioneaza)."""
+    status, body = http_get(YAHOO_CHART.format(sym=sym) + f"?range={rng}&interval={interval}",
+                            headers=_UA)
     if status != 200 or not body:
-        return None
+        return None, []
     try:
         data = json.loads(body)
-        meta = ((data.get("chart", {}).get("result") or [{}])[0]).get("meta", {})
-        return meta.get("regularMarketPrice") or None
+        result = (data.get("chart", {}).get("result") or [None])[0]
+        if not result:
+            return None, []
+        meta = result.get("meta", {})
+        ts = result.get("timestamp") or []
+        q = ((result.get("indicators", {}).get("quote") or [{}])[0])
+        closes = q.get("close") or []
+        vols = q.get("volume") or []
+        bars = [(t, c, (vols[i] if i < len(vols) else None))
+                for i, (t, c) in enumerate(zip(ts, closes)) if c is not None]
+        return meta, bars
     except (ValueError, KeyError, TypeError):
-        return None
+        return None, []
+
+
+def get_price_usd(sym: str) -> float | None:
+    """Pret curent (NVDA, SPCX, USDRON=X...). Prefera ultima bara din serie
+    (mai proaspata) si cade pe meta.regularMarketPrice doar daca seria lipseste."""
+    meta, bars = _chart(sym)
+    if bars:
+        return bars[-1][1]
+    if meta:
+        return meta.get("regularMarketPrice") or None
+    return None
 
 
 def get_usd_ron() -> float:
@@ -56,22 +79,15 @@ def check_market(sym: str) -> dict | None:
     Evita falsul pozitiv cu placeholder-ul de IPO (pret fix, volum 0):
     cere volum > 0, ultima tranzactie recenta (<15 min) si o stare de piata activa.
     """
-    status, body = http_get(YAHOO_CHART.format(sym=sym), headers=_UA)
-    if status != 200 or not body:
+    meta, bars = _chart(sym)
+    if meta is None and not bars:
         return None
-    try:
-        data = json.loads(body)
-        result = (data.get("chart", {}).get("result") or [None])[0]
-        if not result:
-            return None
-        meta = result.get("meta", {})
-    except (ValueError, KeyError, TypeError):
-        return None
+    meta = meta or {}
 
-    price   = meta.get("regularMarketPrice")
-    volume  = meta.get("regularMarketVolume") or 0
-    state   = (meta.get("marketState") or "").upper()
-    last_ts = meta.get("regularMarketTime")
+    price    = meta.get("regularMarketPrice")
+    meta_vol = meta.get("regularMarketVolume") or 0
+    state    = (meta.get("marketState") or "").upper()
+    last_ts  = meta.get("regularMarketTime")
 
     age_sec = None
     if last_ts:
@@ -80,24 +96,43 @@ def check_market(sym: str) -> dict | None:
         except (TypeError, ValueError):
             pass
 
-    fresh = age_sec is not None and age_sec < 15 * 60
-    live_state = state in ("REGULAR", "PRE", "PREPRE", "POST", "POSTPOST")
-    really_trading = bool(price) and volume > 0 and fresh and live_state
+    # --- semnale din SERIA intraday (robuste la meta statuta) ---
+    series_age = series_vol = None
+    series_price = None
+    series_moved = False
+    if bars:
+        recent = bars[-6:]                       # ~ultimele 30 min
+        series_age = time.time() - float(bars[-1][0])
+        series_price = bars[-1][1]
+        series_vol = sum(v for _, _, v in recent if v) or 0
+        cs = [c for _, c, _ in recent]
+        series_moved = len(cs) >= 2 and (max(cs) - min(cs)) > 0
 
-    # 'launched' = instrumentul a tranzactionat cu adevarat (are volum real),
-    # indiferent daca piata e DESCHISA acum. Asa, o actiune deja listata (NVDA)
-    # e recunoscuta ca lansata si in afara orelor de piata, dar un placeholder
-    # de IPO (volum 0, ex SPCX inainte de listare) NU.
-    launched = bool(price) and volume > 0
+    fresh_meta = age_sec is not None and age_sec < 15 * 60
+    fresh_series = series_age is not None and series_age < 20 * 60
+    live_state = state in ("REGULAR", "PRE", "PREPRE", "POST", "POSTPOST")
+
+    # 'launched' = a tranzactionat cu adevarat. Acum: volum pe meta SAU serie
+    # intraday proaspata cu tranzactionare reala (volum recent sau pret in miscare).
+    # Asa prinde SPCX-ul (meta statuta vol=0, dar seria avea bare live la 164) si
+    # NU se pacaleste de placeholder-ul pre-IPO (fara serie / serie plata).
+    launched = (bool(price) and meta_vol > 0) or \
+               (fresh_series and ((series_vol or 0) > 0 or series_moved))
+    really_trading = launched and (fresh_meta or fresh_series) and (live_state or series_moved)
+
+    age_min = None
+    eff_age = series_age if series_age is not None else age_sec
+    if eff_age is not None:
+        age_min = round(eff_age / 60, 1)
 
     return {
-        "price":    price,
+        "price":    series_price or price,   # prefera pretul din serie (mai proaspat)
         "currency": meta.get("currency"),
         "exchange": meta.get("exchangeName") or meta.get("fullExchangeName"),
-        "volume":   volume,
+        "volume":   meta_vol or (series_vol or 0),
         "state":    state or "?",
-        "age_min":  round(age_sec / 60, 1) if age_sec is not None else None,
+        "age_min":  age_min,
         "name":     meta.get("longName") or meta.get("shortName") or "",
-        "trading":  really_trading,   # se tranzactioneaza ACUM (piata deschisa)
-        "launched": launched,         # a inceput sa se tranzactioneze (e instrument real)
+        "trading":  really_trading,   # se tranzactioneaza ACUM
+        "launched": launched,         # a inceput sa se tranzactioneze
     }
