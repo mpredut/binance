@@ -58,6 +58,7 @@ class DNParams:
     auto_protect: bool   # True = reduce automat pozitia cand se apropie lichidarea
     reduce_pct: float    # cu cat % reduce ambele picioare la fiecare interventie
     perp_leverage: int   # levier pe short (mic = margine multa = lichidare departe)
+    allow_scale_up: bool # True = creste pozitia VIE pana la 'notional' (cu garda de colateral)
 
     @classmethod
     def from_env(cls, client: HLClient | None = None) -> "DNParams":
@@ -90,6 +91,7 @@ class DNParams:
             auto_protect  = os.environ.get("DN_AUTO_PROTECT", "true").strip().lower() == "true",
             reduce_pct    = float_env("DN_REDUCE_PCT") or 25.0,
             perp_leverage = int(float_env("DN_PERP_LEVERAGE") or 1),
+            allow_scale_up = os.environ.get("DN_ALLOW_SCALE_UP", "false").strip().lower() == "true",
         )
 
 
@@ -440,6 +442,37 @@ class DeltaNeutral:
             # backoff exponential la erori (plafonat la 5 min), altfel ritmul normal
             time.sleep(min(self.p.check_minutes * 60 * (2 ** min(errors, 3)), 300))
 
+    def _maybe_scale_up(self, L: dict) -> None:
+        """Creste pozitia VIE pana la 'notional' (DN_ALLOW_SCALE_UP). Bumpeaza target_sz
+        -> _rebalance cumpara diferenta pe AMBELE picioare (ramane neutru). Garda de
+        colateral: nu cumpara spot peste cat USDC liber ai (creste partial daca e cazul)."""
+        if not self.p.allow_scale_up:
+            return
+        cur_notional = self.s["target_sz"] * L["perp_px"]
+        if cur_notional >= self.p.notional * 0.95:
+            return                                        # deja la tinta
+        want = self._round(self.p.notional / L["perp_px"])
+        add = self._round(want - self.s["target_sz"])
+        if add <= 0:
+            return
+        if not self.dry_run:
+            try:
+                free = self.client.withdrawable()
+            except Exception as e:  # noqa: BLE001
+                log(f"  ! [DN] scale-up: nu pot citi colateralul ({e}) — amanat"); return
+            if free < add * L["spot_px"]:                 # nu-mi permit tot -> cresc partial
+                aff = self._round((free * 0.95) / L["spot_px"])
+                if aff <= 0:
+                    log(f"  [DN] scale-up dorit dar colateral insuficient (liber ${free:.0f})")
+                    return
+                want = self._round(self.s["target_sz"] + aff)
+        log(f"  [DN] ⬆ SCALE-UP catre ${self.p.notional:.0f}/picior: target {self.s['target_sz']} -> {want} "
+            f"(~${want*L['perp_px']:.0f}/picior). _rebalance cumpara diferenta.")
+        self.s["target_sz"] = want
+        notify(title=f"⬆ DN {self.p.coin}: cresc pozitia la ~${want*L['perp_px']:.0f}/picior",
+               body=f"Scale-up catre notional {self.p.notional}, ramane delta-neutral.\n{now_str()}",
+               source="dn", desktop=self.desktop)
+
     def tick(self, L: dict) -> None:
         """Un pas de decizie (extras ca sa fie testabil): deschide / tine / inchide / rebalanseaza."""
         # RECONCILIERE: daca exista deja o pozitie pe cont (restart / state sters), o ADOPTAM
@@ -476,6 +509,8 @@ class DeltaNeutral:
                 return
             self.s["funding_accrued"] += fhr * abs(L["perp_szi"]) * L["perp_px"] * (self.p.check_minutes/60)
             reduced = self._check_liq(L)            # protectie: alerta + reduce automat
+            if not reduced:
+                self._maybe_scale_up(L)             # creste pozitia la noul notional (bumpeaza target)
             held_h = (now - (self.s.get("opened_ts") or now)) / 3600
             # INCHIDE doar daca media e sub prag SI am tinut suficient (histerezis + timp minim)
             if avg_f < self.p.exit_funding_hr and held_h >= self.p.min_hold_h:

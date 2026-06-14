@@ -26,7 +26,8 @@ def params(**over) -> DNParams:
     base = dict(coin=COIN, spot_pair="@999", spot_token=COIN, notional=100.0,
                 entry_funding_hr=0.0, exit_funding_hr=-0.00005, funding_window_h=4.0,
                 min_hold_h=6.0, rebalance_pct=5.0, check_minutes=5.0, sz_decimals=2,
-                liq_alert_pct=20.0, auto_protect=True, reduce_pct=25.0, perp_leverage=1)
+                liq_alert_pct=20.0, auto_protect=True, reduce_pct=25.0, perp_leverage=1,
+                allow_scale_up=False)
     base.update(over)
     return DNParams(**base)
 
@@ -42,6 +43,10 @@ class FakeClient:
         self.spot_bal = 2.0
         self.perp_szi = -2.0
         self.liq_px = 0.0
+        self.free = 100000.0
+
+    def withdrawable(self):
+        return self.free
 
     def spot_mid(self, pair): return 50.0
     def mid(self, coin): return 50.0
@@ -265,6 +270,37 @@ class TestProtectieLichidare(Base):
         sells = [o for o in self.c.orders if o[0] == "spot" and o[1] == "sell"]
         self.assertEqual((len(covers), len(sells)), (1, 1), "reduce ambele picioare")
         self.assertTrue(any("LICHIDARE" in a or "redus" in a for a in self.alerts))
+
+
+class TestScaleUp(Base):
+    def test_dezactivat_nu_face_nimic(self):
+        d = self.make(dry=True, allow_scale_up=False, notional=400.0); self.opened(d, target=2.0)
+        d._maybe_scale_up(L())
+        self.assertEqual(d.s["target_sz"], 2.0)
+
+    def test_bumpeaza_target_la_notional(self):
+        d = self.make(dry=True, allow_scale_up=True, notional=400.0); self.opened(d, target=2.0)
+        d._maybe_scale_up(L())                 # perp_px 50 -> want 400/50 = 8.0
+        self.assertAlmostEqual(d.s["target_sz"], 8.0)
+
+    def test_nu_creste_peste_tinta(self):
+        d = self.make(dry=True, allow_scale_up=True, notional=400.0); self.opened(d, target=8.0)
+        d._maybe_scale_up(L())
+        self.assertEqual(d.s["target_sz"], 8.0)
+
+    def test_partial_cand_colateral_mic(self):
+        d = self.make(dry=False, allow_scale_up=True, notional=400.0); self.opened(d, target=2.0)
+        self.c.free = 100.0                    # doar $100 liber, spot_px 50 -> +~1.9
+        d._maybe_scale_up(L())
+        self.assertGreater(d.s["target_sz"], 2.0)
+        self.assertLess(d.s["target_sz"], 8.0)
+
+    def test_tick_executa_scale_up_si_cumpara_ambele_picioare(self):
+        d = self.make(dry=False, allow_scale_up=True, notional=400.0); self.opened(d, target=2.0)
+        d.tick(L()); d.tick(L())               # 2 tick-uri (confirmarea anti-glitch a rebalansului)
+        buys_spot = [o for o in self.c.orders if o[0] == "spot" and o[1] == "buy"]
+        buys_perp = [o for o in self.c.orders if o[0] == "perp" and o[1] == "sell"]
+        self.assertTrue(buys_spot and buys_perp, "scale-up cumpara spot + shorteaza perp (ramane neutru)")
 
 
 if __name__ == "__main__":
