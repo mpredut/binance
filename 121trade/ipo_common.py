@@ -58,9 +58,39 @@ def load_dotenv(path: str = ".env") -> None:
         log(f"  ! nu pot citi {path}: {e}")
 
 
-def float_env(key: str) -> float | None:
-    """Citeste un float din env, ignorand eventualele comentarii inline."""
-    raw = os.environ.get(key, "").split("#")[0].strip()
+def parse_dotenv(path: str) -> dict:
+    """Ca load_dotenv, dar RETURNEAZA un dict (nu atinge os.environ).
+
+    Necesar cand rulam mai multe active in ACELASI proces: fiecare activ isi ia
+    config-ul intr-un dict separat, fara sa se calce pe os.environ unul pe altul.
+    """
+    out: dict[str, str] = {}
+    if not os.path.exists(path):
+        return out
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for raw in f:
+                line = raw.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                if line.startswith("export "):
+                    line = line[len("export "):]
+                key, _, val = line.partition("=")
+                key = key.strip()
+                val = val.strip()
+                if not (val.startswith('"') or val.startswith("'")):
+                    val = val.split("#")[0].strip()
+                out[key.strip()] = val.strip('"').strip("'") if key else val
+    except OSError as e:
+        log(f"  ! nu pot citi {path}: {e}")
+    return out
+
+
+def float_env(key: str, env: dict | None = None) -> float | None:
+    """Citeste un float din env (os.environ implicit, sau un dict dat), ignorand
+    comentariile inline."""
+    src = os.environ if env is None else env
+    raw = (src.get(key, "") or "").split("#")[0].strip()
     try:
         return float(raw) if raw else None
     except ValueError:

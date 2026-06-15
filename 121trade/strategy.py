@@ -55,24 +55,31 @@ class StratParams:
     enable_takeprofit: bool
     order_ttl_min: float
     stop_loss_pct: float     # SIGURANTA: vinde tot daca pierderea >= acest % (0 = oprit)
+    yahoo_sym: str = ""             # simbol Yahoo (din config; gol => derivat din ticker)
+    reentry_drop_pct: float = 0.0   # dupa TP reintra doar la -X% sub pretul vandut (anti-churn)
 
     @classmethod
-    def from_env(cls) -> "StratParams":
-        mode = os.environ.get("STRATEGY_MODE", "avg_tp").strip().lower()
+    def from_env(cls, env: dict | None = None) -> "StratParams":
+        """Citeste din os.environ (implicit) SAU dintr-un dict dat. Dict-ul permite
+        mai multe active in acelasi proces, fiecare cu config-ul lui (fara coliziuni)."""
+        e = os.environ if env is None else env
+        mode = e.get("STRATEGY_MODE", "avg_tp").strip().lower()
         return cls(
-            currency           = os.environ.get("STRAT_CURRENCY", "RON").strip().upper(),
-            entry_amount       = float_env("STRAT_ENTRY") or 300.0,
-            entry_discount_pct = float_env("STRAT_ENTRY_DISCOUNT_PCT") or 0.2,
-            dca_amount         = float_env("STRAT_DCA") or 150.0,
-            dca_drop_pct       = float_env("STRAT_DCA_DROP_PCT") or 2.0,
-            check_minutes      = float_env("STRAT_CHECK_MINUTES") or 5.0,
-            takeprofit_pct     = float_env("STRAT_TAKEPROFIT_PCT") or 1.5,
-            max_budget         = float_env("STRAT_MAX_BUDGET") or 2000.0,
-            max_dca_buys       = int(float_env("STRAT_MAX_DCA_BUYS") or 10),
+            currency           = e.get("STRAT_CURRENCY", "RON").strip().upper(),
+            entry_amount       = float_env("STRAT_ENTRY", e) or 300.0,
+            entry_discount_pct = float_env("STRAT_ENTRY_DISCOUNT_PCT", e) or 0.2,
+            dca_amount         = float_env("STRAT_DCA", e) or 150.0,
+            dca_drop_pct       = float_env("STRAT_DCA_DROP_PCT", e) or 2.0,
+            check_minutes      = float_env("STRAT_CHECK_MINUTES", e) or 5.0,
+            takeprofit_pct     = float_env("STRAT_TAKEPROFIT_PCT", e) or 1.5,
+            max_budget         = float_env("STRAT_MAX_BUDGET", e) or 2000.0,
+            max_dca_buys       = int(float_env("STRAT_MAX_DCA_BUYS", e) or 10),
             validity           = "GOOD_TILL_CANCEL",
             enable_takeprofit  = (mode != "dca_only"),
-            order_ttl_min      = float_env("STRAT_ORDER_TTL_MIN") or 10.0,
-            stop_loss_pct      = float_env("STRAT_STOP_LOSS_PCT") or 0.0,
+            order_ttl_min      = float_env("STRAT_ORDER_TTL_MIN", e) or 10.0,
+            stop_loss_pct      = float_env("STRAT_STOP_LOSS_PCT", e) or 0.0,
+            yahoo_sym          = (e.get("YAHOO_SYMBOL") or "").strip(),
+            reentry_drop_pct   = float_env("STRAT_REENTRY_DROP_PCT", e) or 0.0,
         )
 
 
@@ -107,7 +114,7 @@ class Strategy:
                  dry_run: bool = True, desktop: bool = False):
         self.client = client
         self.ticker = ticker
-        self.yahoo_sym = os.environ.get("YAHOO_SYMBOL") or t212_to_yahoo(ticker)
+        self.yahoo_sym = params.yahoo_sym or t212_to_yahoo(ticker)
         self.p = params
         self.dry_run = dry_run
         self.desktop = desktop
@@ -436,7 +443,7 @@ class Strategy:
             # REGULA DE REINTRARE (ca pe Kraken): dupa vanzare nu recumpara mai sus —
             # anti "vand la 174.17, recumpar la 174.9"
             lsp = self.s.get("last_sell_price")
-            rdp = float_env("STRAT_REENTRY_DROP_PCT") or 0.0
+            rdp = self.p.reentry_drop_pct
             if rdp > 0 and lsp and price > lsp * (1 - rdp / 100):
                 log(f"  [STRAT] reintrare blocata: {price:.2f} > prag {lsp * (1 - rdp / 100):.2f} "
                     f"(vandut la {lsp:.2f}, astept -{rdp}%)")

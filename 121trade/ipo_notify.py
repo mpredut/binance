@@ -19,15 +19,20 @@ from ipo_common import log
 
 
 def notify(title: str, body: str, source: str,
-           price: float | None = None, desktop: bool = False) -> None:
-    """Trimite o notificare pe toate canalele active (terminal bell, ntfy, email, desktop)."""
+           price: float | None = None, desktop: bool = False,
+           symbol: str | None = None) -> None:
+    """Trimite o notificare pe toate canalele active (terminal bell, ntfy, email, desktop).
+
+    `symbol` explicit e preferat (multi-activ intr-un proces) fata de os.environ,
+    care e global si ar da simbolul gresit cand ruleaza mai multe active deodata.
+    """
     # 1) clopotel terminal
     for _ in range(5):
         sys.stdout.write("\a")
         sys.stdout.flush()
         time.sleep(0.2)
 
-    symbol = os.environ.get("SYMBOL_LABEL") or os.environ.get("YAHOO_SYMBOL") or "STOCK"
+    symbol = symbol or os.environ.get("SYMBOL_LABEL") or os.environ.get("YAHOO_SYMBOL") or "STOCK"
     alert = {
         "type": "new_coin_discovered",
         "symbol": symbol,

@@ -13,6 +13,9 @@ from __future__ import annotations
 
 import base64
 import json
+import os
+import threading
+import time
 
 from ipo_common import http_get, http_post_json, log
 
@@ -28,6 +31,20 @@ class T212Client:
         self.api_secret = api_secret
         self.env = (env or "live").lower()
         self.base = DEMO_BASE if self.env == "demo" else LIVE_BASE
+        # Throttle COMUN: un singur client poate fi partajat de mai multe threaduri
+        # (un thread per activ). Serializam + spatiem apelurile ca sa nu lovim
+        # rate-limit-ul T212 (429). T212_MIN_GAP_SEC = pauza minima intre apeluri.
+        self._lock = threading.Lock()
+        self._last = 0.0
+        self._min_gap = float(os.environ.get("T212_MIN_GAP_SEC", "0.3"))
+
+    def _pace(self) -> None:
+        """Asigura minim _min_gap secunde intre doua apeluri T212 (peste toate threadurile)."""
+        with self._lock:
+            wait = self._min_gap - (time.monotonic() - self._last)
+            if wait > 0:
+                time.sleep(wait)
+            self._last = time.monotonic()
 
     # -- auth / headers --------------------------------------------------------
     def _auth(self) -> str:
@@ -37,6 +54,9 @@ class T212Client:
         return self.api_key
 
     def _headers(self) -> dict:
+        # Fiecare request T212 isi cladeste antetele aici => loc bun pt throttle:
+        # spatiaza orice apel, indiferent de cate threaduri folosesc clientul.
+        self._pace()
         return {
             "Authorization": self._auth(),
             "User-Agent": _BROWSER_UA,  # evita 403 Cloudflare
@@ -45,6 +65,11 @@ class T212Client:
 
     # -- instrumente -----------------------------------------------------------
     def list_instruments(self) -> list[dict] | None:
+        # Cache TTL: metadata instrumentelor se schimba rar. Evita apelul GREU
+        # repetat (per activ la pornire) care declanseaza 429.
+        c = getattr(self, "_instr_cache", None)
+        if c and (time.monotonic() - c[0]) < 300:
+            return c[1]
         status, body = http_get(f"{self.base}/equity/metadata/instruments", headers=self._headers())
         if status == 429:
             log("  ! T212 rate limit (429)")
@@ -55,7 +80,9 @@ class T212Client:
         if status != 200 or not body:
             return None
         try:
-            return json.loads(body)
+            data = json.loads(body)
+            self._instr_cache = (time.monotonic(), data)
+            return data
         except ValueError:
             return None
 
