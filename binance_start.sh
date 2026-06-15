@@ -169,7 +169,7 @@ echo "All good. Supervizez procesele (repornesc orice cade). <ctrl c> = stop."
 # ===== Buclă de SUPERVIZARE =====
 # În loc de `wait` (care se întoarce doar dacă mor TOATE procesele), verificăm
 # periodic fiecare PID și repornim individual orice proces mort. Așa, dacă pică
-# UN singur script (ex. run_price_monitor), e repornit în max SUPERVISE_INTERVAL,
+# UN singur script (ex. market_alerts), e repornit în max SUPERVISE_INTERVAL,
 # nu rămâne mort până cad toate. systemd rămâne plasa de siguranță pt „a căzut tot".
 SUPERVISE_INTERVAL=30
 while true; do
