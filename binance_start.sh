@@ -4,7 +4,8 @@
 # Fără asta, o a doua instanță (ex. systemd + lansare manuală) intra în „război de
 # supervizare": fiecare reînvie procesele pe care le omoară cealaltă → DUPLICARE.
 # A doua instanță nu obține lock-ul → iese imediat.
-LOCK_PATH="/home/predut/binance/binance_start.lock"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"   # radacina = locul scriptului (portabil, fara /home/predut hardcodat)
+LOCK_PATH="$SCRIPT_DIR/binance_start.lock"
 exec 9>"$LOCK_PATH" || exit 1
 if ! flock -n 9; then
     echo "❌ binance_start.sh rulează deja (lock activ: $LOCK_PATH)."
@@ -38,7 +39,7 @@ echo "Port Forward: $(piactl get portforward)"
 
 # ===== Activare mediu virtual =====
 echo "📦 Activez mediul Python..."
-VENV_PATH="/home/predut/binance/myenv/bin/activate"
+VENV_PATH="$SCRIPT_DIR/myenv/bin/activate"
 if [ ! -f "$VENV_PATH" ]; then
     echo "❌ Mediul virtual nu există la $VENV_PATH. Abort!"
     exit 1
@@ -53,8 +54,7 @@ if [[ "$PYTHON_BIN" != *"myenv"* ]]; then
 fi
 echo "✔ Python activ: $PYTHON_BIN"
 
-# ===== Verific că scripturile există =====
-SCRIPT_DIR="/home/predut/binance"
+# ===== Verific că scripturile există =====  (SCRIPT_DIR e definit la inceput)
 scripts=(
     "cacheManager.py"
     "assetguardian.py"

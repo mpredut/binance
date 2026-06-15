@@ -1,5 +1,6 @@
 #!/bin/bash
-source /home/predut/binance/myenv/bin/activate
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"   # radacina = locul scriptului (portabil)
+source "$SCRIPT_DIR/myenv/bin/activate"
 
 # Usage:
 #   ./start.sh          - porneste normal, fara watchdog
@@ -21,7 +22,7 @@ scripts=(
     "rtrade.py"
 )
 
-SCRIPT_DIR="/home/predut/binance"
+# (SCRIPT_DIR e definit la inceput)
 
 # Omoară scripturile existente
 for script in "${scripts[@]}"; do
