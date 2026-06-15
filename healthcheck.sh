@@ -15,7 +15,7 @@ if [ "$1" = "--alert" ]; then
 dn_bot.py --watch|DN-watch
 kraken_bot.py|Kraken-bot
 xstock_watch.py|xStock-watch
-ipo.py --profile spcx|IPO-SPCX
+t212_bot.py|T212-bot
 cacheManager.py|cacheManager
 priceAnalysis.py|priceAnalysis
 tradeall.py|tradeall"
@@ -62,8 +62,7 @@ if [ "$1" = "--supervise" ]; then
 dn_bot.py --watch|$ROOT/hyperliquid|nohup $HLPY dn_bot.py --watch > dn_watch.log 2>&1 &|DN-watch
 kraken_bot.py|$ROOT/kraken|nohup python3 kraken_bot.py > kraken_bot.log 2>&1 &|Kraken-bot
 xstock_watch.py|$ROOT/kraken|nohup python3 xstock_watch.py > xstock_watch.log 2>&1 &|xStock-watch
-ipo.py --profile nvda|$ROOT/121trade|nohup python3 ipo.py --profile nvda > nvda.log 2>&1 &|IPO-NVDA
-ipo.py --profile spcx|$ROOT/121trade|nohup python3 ipo.py --profile spcx > spcx.log 2>&1 &|IPO-SPCX"
+t212_bot.py|$ROOT/121trade|nohup python3 t212_bot.py > t212_bot.log 2>&1 &|T212-bot"
     while IFS='|' read -r pat dir cmd label; do
         [ -z "$pat" ] && continue
         if pgrep -f "$pat" >/dev/null 2>&1; then
@@ -94,7 +93,7 @@ fi
 
 echo "============ HEALTHCHECK $(date '+%Y-%m-%d %H:%M') ============"
 echo "=== PROCESE (etime = de cat ruleaza) ==="
-ps -eo etime,args | grep -E "dn_bot|kraken_bot|xstock_watch|ipo.py|trailing_stop|cacheManager|priceAnalysis|tradeall|rtrade|monitortrades|run_price_monitor|assetguardian" | grep -v grep
+ps -eo etime,args | grep -E "dn_bot|kraken_bot|xstock_watch|t212_bot|ipo.py|trailing_stop|cacheManager|priceAnalysis|tradeall|rtrade|monitortrades|run_price_monitor|assetguardian" | grep -v grep
 
 echo "=== HYPERLIQUID DN ==="
 ( cd "$ROOT/hyperliquid" && "$HLPY" dn_bot.py --status 2>&1 | grep -E "SPOT|PERP|DELTA|FUNDING|LICHIDARE|COLATERAL" )
