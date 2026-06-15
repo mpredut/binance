@@ -798,6 +798,24 @@ HARD_TP_FRACTION   = 0.5        # vinde 50% din pozitia neta
 HARD_TP_COOLDOWN_S = 6 * 3600   # nu repeta TP-ul dur mai des de 6h
 _hard_tp_last = {}
 
+
+def get_available_qty(symbol):
+    """Cantitatea LIBERA reala din activul de baza al simbolului (ex. TAOUSDC -> free TAO).
+    Sursa de adevar pt 'vinde TOT ce ai disponibil', nu aproximarea din trade-uri."""
+    base = symbol
+    for q in ("USDC", "USDT", "BUSD", "FDUSD", "USD"):
+        if base.endswith(q):
+            base = base[:-len(q)]
+            break
+    try:
+        for bal in (api.get_account_assets_balances() or []):
+            if bal.get("asset") == base:
+                return float(bal.get("free", 0.0) or 0.0)
+    except Exception as e:
+        print(f"get_available_qty {symbol}: {e}")
+    return 0.0
+
+
 #//todo: review 0.5
 def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lost_threshold=0.033):
     #try:
@@ -835,6 +853,7 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
     # 2. Obtine pretul curent de pe piata
     current_price = api.get_current_price(symbol)
     print(f"Current price for {symbol}: {current_price}")
+    avail_qty = get_available_qty(symbol)   # TOATA cantitatea disponibila de vandut
 
     # 3. Verifica ordinele de cumparare
     if trade_orders_buy:
@@ -847,15 +866,15 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
         print(f"(increase: {price_increase * 100}%, decrease: {price_decrease * 100}%)")
         # 3.0. TP DUR: castig mare -> vinde o PROPORTIE din pozitie INDIFERENT de trend
         #      (coexista cu 3.1 de mai jos; backstop pt varfuri ratate de gate-ul de trend)
-        net_qty = position.get("net_qty", 0.0)
-        if HARD_TP_ENABLED and price_increase >= HARD_TP_PCT and net_qty > 0:
+        if HARD_TP_ENABLED and price_increase >= HARD_TP_PCT and avail_qty > 0:
             if current_time_s - _hard_tp_last.get(symbol, 0) >= HARD_TP_COOLDOWN_S:
-                hard_qty = round(net_qty * HARD_TP_FRACTION, 4)
+                hard_qty = round(avail_qty * HARD_TP_FRACTION, 4)
                 print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% >= {HARD_TP_PCT*100:.0f}% "
                       f"-> vand {HARD_TP_FRACTION*100:.0f}% ({hard_qty}) INDIFERENT de trend")
                 po.place_order_smart("SELL", symbol, current_price, hard_qty,
                     safeback_seconds=sbs, force=True, cancelorders=True, hours=2, pair=False)
                 _hard_tp_last[symbol] = current_time_s
+                return   # am vandut deja in acest tick; nu mai rula vanzarea de jos pe sold invechit
             else:
                 print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% dar in cooldown (ultimul acum "
                       f"{u.secondsToHours(current_time_s - _hard_tp_last.get(symbol, 0)):.1f}h)")
@@ -863,11 +882,11 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
         if price_increase > gain_threshold or u.are_close(price_increase, gain_threshold, target_tolerance_percent=1.0):
             if not is_trend_up(symbol):
                 print(f"Price increased with {price_increase * 100}% by more than {gain_threshold * 100}% versus buy price and not trend up!")
-                if can_sell:
-                    po.place_order_smart("SELL", symbol, current_price, 
-                        qty, safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=False)
+                if can_sell and avail_qty > 0:
+                    po.place_order_smart("SELL", symbol, current_price,
+                        avail_qty, safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=False)
                 else:
-                    print("No can sell")
+                    print(f"No can sell (can_sell={can_sell}, avail_qty={avail_qty})")
                 #po.place_SELL_order(symbol, current_price, qty)
                 #po.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
                 #    force=True, cancelorders=True, hours=1)
@@ -876,12 +895,12 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
         elif price_decrease > lost_threshold or u.are_close(price_decrease, lost_threshold, target_tolerance_percent=1.0):
             if not is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease * 100}% by more than {lost_threshold * 100}% versus buy price and not trend up!")
-                if can_sell:
-                    po.place_order_smart("SELL", symbol, current_price, 
-                        qty, safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=True)
+                if can_sell and avail_qty > 0:
+                    po.place_order_smart("SELL", symbol, current_price,
+                        avail_qty, safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=True)
                 #po.place_SELL_order(symbol, current_price, qty)
                 else:
-                    print("No can sell")
+                    print(f"No can sell (can_sell={can_sell}, avail_qty={avail_qty})")
             else:
                 print(f"No action taken, because trend is up!")
         else:
