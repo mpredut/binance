@@ -23,7 +23,7 @@ import cacheManager as cm  # noqa: E402
 import symbols as sym  # noqa: E402
 
 SYMBOLS = [sym.taosymbol, sym.btcsymbol]
-HARD_TP_PCT = 18.0
+HARD_TP_PCT = 17.0   # tine sincron cu monitortrades.conf (hard_tp_pct)
 GAIN_PCT = 9.2
 
 
