@@ -810,6 +810,11 @@ HARD_TP_FRACTION   = 0.5        # vinde 50% din pozitia neta
 HARD_TP_COOLDOWN_S = 6 * 3600   # nu repeta TP-ul dur mai des de 6h
 _hard_tp_last = {}
 
+# Referinta pt castig/TP:
+#   "last"    = ULTIMUL pret de cumparare (get_relevant_trade) — reactiv, ca la inceput
+#   "average" = media pe maxage_trade_s zile (TAO=17z, BTC=7z) — mai stabila
+TP_REFERENCE = "last"
+
 
 def get_available_qty(symbol):
     """Cantitatea LIBERA reala din activul de baza al simbolului (ex. TAOUSDC -> free TAO).
@@ -848,9 +853,13 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
     sell_price, sell_time, can_sell = get_relevant_trade(trade_orders_sell, "SELL", threshold_s, symbol)
 
     position = get_position_stats(symbol, maxage_trade_s)
-    if position["average_buy_price"] > 0:
+    # Referinta de pret pt castig: configurabila (TP_REFERENCE). Default "last" =
+    # ultimul pret de cumparare (buy_price din get_relevant_trade); "average" = media pe maxage zile.
+    if TP_REFERENCE == "average" and position["average_buy_price"] > 0:
         buy_price = position["average_buy_price"]
-        print(f"POSITION for {symbol} : {position}")
+        print(f"POSITION (referinta=AVG {maxage_trade_s/86400:.0f}z) for {symbol} : {position}")
+    else:
+        print(f"POSITION (referinta=ultimul buy {buy_price}) for {symbol} : {position}")
     if position["average_sell_price"] > 0:
         sell_price = position["average_sell_price"]
         print(f"POSITION for {symbol} : {position}")

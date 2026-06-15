@@ -48,7 +48,8 @@ def position(symbol, maxage=17 * 24 * 3600):
     tq = sum(float(o["qty"]) for o in buys)
     tv = sum(float(o["price"]) * float(o["qty"]) for o in buys)
     sq = sum(float(o["qty"]) for o in sells)
-    return (tv / tq if tq else 0.0), tq - sq, len(sells)
+    last_buy = float(buys[0]["price"]) if buys else 0.0   # ca get_relevant_trade (referinta botului)
+    return (tv / tq if tq else 0.0), tq - sq, len(sells), last_buy
 
 
 def main():
@@ -58,12 +59,13 @@ def main():
         snap = mgr.get_snapshot(s) or {}
         px = snap.get("current_price") or api.get_current_price(s) or 0.0
         gr = float(snap.get("gradient_recent", 0.0) or 0.0)
-        avg, net, n_sells = position(s)
+        avg, net, n_sells, last_buy = position(s)
         free = free_qty(s)
-        gain = (px - avg) / avg * 100 if avg else 0.0
+        ref = last_buy or avg   # botul foloseste ULTIMUL buy ca referinta (TP_REFERENCE="last")
+        gain = (px - ref) / ref * 100 if ref else 0.0
         trend = "UP  " if gr > 0 else ("DOWN" if gr < 0 else "flat")
-        hard_px = avg * (1 + HARD_TP_PCT / 100) if avg else 0.0
-        print(f"  {s}: px={px:.2f}  avg_buy={avg:.2f}  gain={gain:+.1f}%")
+        hard_px = ref * (1 + HARD_TP_PCT / 100) if ref else 0.0
+        print(f"  {s}: px={px:.2f}  ref=ULTIMUL_buy {ref:.2f} (avg {avg:.2f})  gain={gain:+.1f}%")
         print(f"      trend_instant={trend} ({gr:+.4f})  |  free={free:.4f}  net={net:.4f}  sells={n_sells}")
         flags = []
         if gain >= HARD_TP_PCT:
