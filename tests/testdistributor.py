@@ -1,6 +1,6 @@
 import unittest
 
-from monitortrades import ProcentDistributor
+from monitortrades_legacy import ProcentDistributor
 
 
 class TestProcentDistributor(unittest.TestCase):
