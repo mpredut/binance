@@ -20,7 +20,7 @@ trap 'rm -f "$CONF"' EXIT
 {
     for rel in hyperliquid/dn_bot.log hyperliquid/dn_watch.log \
                kraken/kraken_bot.log kraken/xstock_watch.log kraken/trail_k.log \
-               "121trade/t212_bot.log" healthcheck.log watchdog.log; do
+               "121trade/t212_bot.log" "121trade/price_alert.log" healthcheck.log watchdog.log; do
         [ -f "$ROOT/$rel" ] && echo "$ROOT/$rel"
     done
     cat <<'EOF'
