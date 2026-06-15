@@ -804,16 +804,43 @@ def get_position_stats(symbol, maxage_trade_s):
 #    PROPORTIE din pozitie pe castig MARE, INDIFERENT de trend = backstop pt varfuri
 #    pe care gate-ul de trend le-ar rata (ex. TAO la $287). Cooldown ca sa nu descarce
 #    tot in cascada. Comuta cu HARD_TP_ENABLED.
+# ── Parametri reglabili: defaults din cod, SUPRASCRISE de monitortrades.conf (optional) ──
 HARD_TP_ENABLED    = True
-HARD_TP_PCT        = 0.18       # de la +18% castig vs pretul mediu de cumparare
-HARD_TP_FRACTION   = 0.5        # vinde 50% din pozitia neta
-HARD_TP_COOLDOWN_S = 6 * 3600   # nu repeta TP-ul dur mai des de 6h
+HARD_TP_PCT        = 0.17       # castig (fractie) de la care TP-ul dur vinde o proportie
+HARD_TP_FRACTION   = 0.5        # cat vinde (din soldul liber)
+HARD_TP_COOLDOWN_S = 6 * 3600
+TP_REFERENCE       = "last"     # "last" (ultimul buy) | "average" (media pe maxage zile)
+SYMBOL_PARAMS      = {}         # {symbol: (gain_frac, lost_frac, maxage_s)} din conf
 _hard_tp_last = {}
 
-# Referinta pt castig/TP:
-#   "last"    = ULTIMUL pret de cumparare (get_relevant_trade) — reactiv, ca la inceput
-#   "average" = media pe maxage_trade_s zile (TAO=17z, BTC=7z) — mai stabila
-TP_REFERENCE = "last"
+
+def _load_mt_conf(path=None):
+    """Suprascrie parametrii din monitortrades.conf (optional; fallback pe valorile din cod)."""
+    global HARD_TP_ENABLED, HARD_TP_PCT, HARD_TP_FRACTION, HARD_TP_COOLDOWN_S, TP_REFERENCE
+    path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "monitortrades.conf")
+    if not os.path.exists(path):
+        return
+    try:
+        with open(path, encoding="utf-8") as f:
+            for raw in f:
+                line = raw.split("#", 1)[0].strip()
+                if not line or "=" not in line:
+                    continue
+                k, _, v = line.partition("="); k, v = k.strip(), v.strip()
+                if k == "hard_tp_enabled":      HARD_TP_ENABLED = v.lower() in ("yes", "true", "1", "on", "da")
+                elif k == "hard_tp_pct":        HARD_TP_PCT = float(v) / 100.0
+                elif k == "hard_tp_fraction":   HARD_TP_FRACTION = float(v)
+                elif k == "hard_tp_cooldown_h": HARD_TP_COOLDOWN_S = float(v) * 3600
+                elif k == "tp_reference":       TP_REFERENCE = v.lower()
+                elif "/" in v:                  # SIMBOL = gain% / lost% / maxage_zile
+                    p = [x.strip() for x in v.split("/")]
+                    if len(p) == 3:
+                        SYMBOL_PARAMS[k] = (float(p[0]) / 100.0, float(p[1]) / 100.0, int(float(p[2])) * 24 * 3600)
+    except (OSError, ValueError) as e:
+        print(f"monitortrades.conf: {e} — folosesc valorile din cod")
+
+
+_load_mt_conf()
 
 
 def get_available_qty(symbol):
@@ -997,11 +1024,11 @@ def main():
         print_number_of_trades(maxage_trade_s)
         
         print("-----BTC------")
-        monitor_price_and_trade(sym.btcsymbol, sbs=d*24*3600+60, maxage_trade_s=3600*24*7)
-        #print("-----TAOUSDT------")
-        #monitor_price_and_trade(sym.taosymbol,sbs=d*24*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
+        _bg, _bl, _bm = SYMBOL_PARAMS.get(sym.btcsymbol, (0.07, 0.033, 3600*24*7))
+        monitor_price_and_trade(sym.btcsymbol, sbs=d*24*3600+60, maxage_trade_s=_bm, gain_threshold=_bg, lost_threshold=_bl)
         print("-----TAOUSDC------")
-        monitor_price_and_trade(sym.taosymbol,sbs=d*24*3600+60, maxage_trade_s=3600*24*17, gain_threshold=0.092, lost_threshold=0.049)
+        _tg, _tl, _tm = SYMBOL_PARAMS.get(sym.taosymbol, (0.092, 0.049, 3600*24*17))
+        monitor_price_and_trade(sym.taosymbol, sbs=d*24*3600+60, maxage_trade_s=_tm, gain_threshold=_tg, lost_threshold=_tl)
         print("--------------")
   
         with sell_lock:
