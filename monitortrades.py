@@ -729,6 +729,18 @@ state_tracker = StateTracker()
 
 # Functie simplificata care verifica daca trendul este de crestere
 def is_trend_up(symbol):
+    """Trendul INSTANT, citit DIRECT din managerul de cache (up-to-date cu
+    cache_instant_trend.json), nu din copia sell_recommendation (care poate ramane in urma).
+    gradient_recent = momentum rapid real; fallback pe slope_small, apoi pe copie."""
+    try:
+        import cacheManager as cm
+        snap = cm.get_instant_trend_manager().get_snapshot(symbol)
+        if snap:
+            slope = float(snap.get('gradient_recent', snap.get('slope_small', 0.0)) or 0.0)
+            gradient = float(snap.get('final_trend', 0.0) or 0.0)
+            return slope > 0 or (slope == 0 and gradient > 0)
+    except Exception as e:
+        print(f"is_trend_up: snapshot direct esuat ({e}) — folosesc sell_recommendation")
     slope = sell_recommendation[symbol]['slope']
     gradient = sell_recommendation[symbol]['gradient']
     return slope > 0 or (slope == 0 and gradient > 0)
