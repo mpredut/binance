@@ -636,7 +636,10 @@ class StateTracker:
                 snap = mgr.get_snapshot(symbol)
                 if snap:
                     # Doar slope și gradient sunt folosite efectiv (is_trend_up).
-                    rec['slope']    = float(snap.get('slope_small', 0.0) or 0.0)
+                    # FIX: slope_small e adesea 0 (ferestre nepline) -> is_trend_up degenera
+                    # in final_trend (LENT). gradient_recent = momentum INSTANT real (canalul
+                    # rapid) -> asa is_trend_up reflecta trendul instant, cum trebuie.
+                    rec['slope']    = float(snap.get('gradient_recent', snap.get('slope_small', 0.0)) or 0.0)
                     rec['gradient'] = float(snap.get('final_trend', 0.0) or 0.0)
                 new_rec[symbol] = rec
 
@@ -785,6 +788,16 @@ def get_position_stats(symbol, maxage_trade_s):
         "sell_count": len(sell_orders),
     }
 
+# ── TP DUR — COEXISTA cu logica de trend de mai jos (nu o inlocuieste). Vinde o
+#    PROPORTIE din pozitie pe castig MARE, INDIFERENT de trend = backstop pt varfuri
+#    pe care gate-ul de trend le-ar rata (ex. TAO la $287). Cooldown ca sa nu descarce
+#    tot in cascada. Comuta cu HARD_TP_ENABLED.
+HARD_TP_ENABLED    = True
+HARD_TP_PCT        = 0.18       # de la +18% castig vs pretul mediu de cumparare
+HARD_TP_FRACTION   = 0.5        # vinde 50% din pozitia neta
+HARD_TP_COOLDOWN_S = 6 * 3600   # nu repeta TP-ul dur mai des de 6h
+_hard_tp_last = {}
+
 #//todo: review 0.5
 def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lost_threshold=0.033):
     #try:
@@ -832,7 +845,21 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
         price_decrease = (buy_price - current_price) / buy_price
 
         print(f"(increase: {price_increase * 100}%, decrease: {price_decrease * 100}%)")
-        # 3.1. Verifica daca trebuie sa plasezi un ordin de vanzare
+        # 3.0. TP DUR: castig mare -> vinde o PROPORTIE din pozitie INDIFERENT de trend
+        #      (coexista cu 3.1 de mai jos; backstop pt varfuri ratate de gate-ul de trend)
+        net_qty = position.get("net_qty", 0.0)
+        if HARD_TP_ENABLED and price_increase >= HARD_TP_PCT and net_qty > 0:
+            if current_time_s - _hard_tp_last.get(symbol, 0) >= HARD_TP_COOLDOWN_S:
+                hard_qty = round(net_qty * HARD_TP_FRACTION, 4)
+                print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% >= {HARD_TP_PCT*100:.0f}% "
+                      f"-> vand {HARD_TP_FRACTION*100:.0f}% ({hard_qty}) INDIFERENT de trend")
+                po.place_order_smart("SELL", symbol, current_price, hard_qty,
+                    safeback_seconds=sbs, force=True, cancelorders=True, hours=2, pair=False)
+                _hard_tp_last[symbol] = current_time_s
+            else:
+                print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% dar in cooldown (ultimul acum "
+                      f"{u.secondsToHours(current_time_s - _hard_tp_last.get(symbol, 0)):.1f}h)")
+        # 3.1. Verifica daca trebuie sa plasezi un ordin de vanzare (logica CURENTA, ramane)
         if price_increase > gain_threshold or u.are_close(price_increase, gain_threshold, target_tolerance_percent=1.0):
             if not is_trend_up(symbol):
                 print(f"Price increased with {price_increase * 100}% by more than {gain_threshold * 100}% versus buy price and not trend up!")
