@@ -690,7 +690,8 @@ def get_base_symbol(symbol: str) -> str:
     return symbol
 
 
-def create_cachePriceAll(cmc_api_key: Optional[str] = None):
+def create_cachePriceAll(cmc_api_key: Optional[str] = None, symbols=None, max_symbols=None):
+    # symbols/max_symbols din config (market_alerts.conf) daca sunt date; altfel hardcodul vechi
     all_symbols = []
     seen_bases = set()
     
@@ -700,7 +701,7 @@ def create_cachePriceAll(cmc_api_key: Optional[str] = None):
                 seen_bases.add(get_base_symbol(s))
                 all_symbols.append(s)
     
-    for sym_default in DEFAULT_SYMBOLS:
+    for sym_default in (symbols or DEFAULT_SYMBOLS):
         base_symbol = get_base_symbol(sym_default)
         if (
             base_symbol not in seen_bases
@@ -712,7 +713,7 @@ def create_cachePriceAll(cmc_api_key: Optional[str] = None):
     
     all_symbols = list(dict.fromkeys(all_symbols))
     all_symbols = [s for s in all_symbols if is_valid_symbol_for_monitoring(s)]
-    all_symbols = all_symbols[:MAX_MONITORED_SYMBOLS]
+    all_symbols = all_symbols[:(max_symbols or MAX_MONITORED_SYMBOLS)]
 
     print(f"[pricefetcher] Valid symbols to monitor: {len(all_symbols)}")
     print(f"[pricefetcher] List: {all_symbols}")

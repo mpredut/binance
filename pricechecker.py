@@ -76,10 +76,12 @@ class PriceChecker:
     Runs in a separate thread.
     """
 
-    def __init__(self, cachePriceAll, alert_callback: Optional[Callable] = None):
+    def __init__(self, cachePriceAll, alert_callback: Optional[Callable] = None,
+                 config: Optional[dict] = None):
         self.cachePriceAll = cachePriceAll
         self.alert_callback = alert_callback or self._default_alert_handler
-        self.config = PRICE_ALERT_CONFIG.copy()
+        # config din market_alerts.conf (cu per_coin) daca e dat; altfel hardcodul vechi
+        self.config = config or PRICE_ALERT_CONFIG.copy()
 
         # Prevent spam: remember the last alert per symbol and alert type
         self._last_alert_time = defaultdict(float)
@@ -191,9 +193,12 @@ class PriceChecker:
         return bool(symbol_added_time.get(symbol))
 
     def _get_thresholds_for_symbol(self, symbol: str) -> Dict:
-        if self._is_dynamic_symbol(symbol):
+        per_coin = self.config.get("per_coin", {})
+        if symbol in per_coin:                 # pragul propriu (din config) bate orice
+            return per_coin[symbol]
+        if self._is_dynamic_symbol(symbol):    # moneda noua -> prag pt monede noi
             return self.config["dynamic"]
-        return self.config["default"]
+        return self.config["default"]          # restul -> implicit
 
     def _record_alert_sent(self, symbol: str, alert_type: str):
         """Record that an alert was sent."""
@@ -328,7 +333,7 @@ class PriceChecker:
         }
 
 
-def start_price_alert_checker(cachePriceAll, alert_callback=None, check_interval_seconds=60):
-    Checker = PriceChecker(cachePriceAll, alert_callback=alert_callback)
+def start_price_alert_checker(cachePriceAll, alert_callback=None, check_interval_seconds=60, config=None):
+    Checker = PriceChecker(cachePriceAll, alert_callback=alert_callback, config=config)
     Checker.start_monitoring(check_interval_seconds)
     return Checker

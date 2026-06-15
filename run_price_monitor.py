@@ -170,13 +170,14 @@ def periodic_cleanup(cachePriceAll, new_coins_checker):
         else:
             print("[Periodic] new_coins_checker.cleanup_old_new_coins() does not exist")
 
-def start_new_coin_checker(cachePriceAll):
+def start_new_coin_checker(cachePriceAll, interval_seconds=3600,
+                           max_new_coins=MAX_NEW_COINS_TO_TRACK, sources=None):
     print("\n⏳ Initializing new coin checker...")
 
-    factory = NewCoinsFactory(enabled_sources=ENABLED_SOURCES, cmc_api_key=CMC_API_KEY)
+    factory = NewCoinsFactory(enabled_sources=sources or ENABLED_SOURCES, cmc_api_key=CMC_API_KEY)
     new_coins_checker = NewCoinsMonitor(cachePriceAll, factory=factory)
     new_coins_checker.register_alerts_callback(new_coin_alerts_handler)
-    new_coins_checker.start_monitoring(interval_seconds=3600)
+    new_coins_checker.start_monitoring(interval_seconds=interval_seconds)
     print(f"New coin checker started! Active sources: {factory.get_available_sources()}")
 
     print("\n⏳ Performing initial new coin discovery...")
@@ -185,7 +186,7 @@ def start_new_coin_checker(cachePriceAll):
     auto_added_count = 0
     for source_name, coins in new_coins_checker.all_new_coins.items():
         if source_name.lower() == "coinmarketcap":
-            for coin in coins[:MAX_NEW_COINS_TO_TRACK]:
+            for coin in coins[:max_new_coins]:
                 if new_coins_checker.add_new_coin_to_watchlist(coin):
                     auto_added_count += 1
         else:
