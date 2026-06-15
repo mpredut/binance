@@ -157,7 +157,7 @@ def check_once(now=None):
     title = "⚠️ Price monitor OPRIT"
     message = (f"Cache-ul de prețuri e STALE: ultima actualizare acum {age_txt} "
                f"(la {last_str}). Detaliu: {detail}. "
-               f"Probabil run_price_monitor.py s-a oprit — repornește-l.")
+               f"Probabil market_alerts.py s-a oprit — repornește-l.")
     print(f"[watchdog] ALARMĂ: {message}")
     _send_ntfy(title, message)
     _send_email(title, message)

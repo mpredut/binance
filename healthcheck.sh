@@ -83,7 +83,7 @@ t212_bot.py|$ROOT/121trade|nohup python3 t212_bot.py > t212_bot.log 2>&1 &|T212-
     done <<< "$bots"
     # FLOTA + TRAILING: doar alerta (nu repornim de aici)
     miss=""
-    for s in cacheManager.py priceAnalysis.py tradeall.py monitortrades.py rtrade.py run_price_monitor.py assetguardian.py "kraken/trailing_stop.py"; do
+    for s in cacheManager.py priceAnalysis.py tradeall.py monitortrades.py rtrade.py market_alerts.py assetguardian.py "kraken/trailing_stop.py"; do
         pgrep -f "$s" >/dev/null 2>&1 || miss="$miss ${s%.py}"
     done
     [ -n "$miss" ] && { push "Procese de verificat" "Moarte (nu le repornesc de aici):$miss"; echo "$(date '+%H:%M') alerta flota/trailing:$miss"; }
@@ -93,7 +93,7 @@ fi
 
 echo "============ HEALTHCHECK $(date '+%Y-%m-%d %H:%M') ============"
 echo "=== PROCESE (etime = de cat ruleaza) ==="
-ps -eo etime,args | grep -E "dn_bot|kraken_bot|xstock_watch|t212_bot|ipo.py|trailing_stop|cacheManager|priceAnalysis|tradeall|rtrade|monitortrades|run_price_monitor|assetguardian" | grep -v grep
+ps -eo etime,args | grep -E "dn_bot|kraken_bot|xstock_watch|t212_bot|ipo.py|trailing_stop|cacheManager|priceAnalysis|tradeall|rtrade|monitortrades|market_alerts|run_price_monitor|assetguardian" | grep -v grep
 
 echo "=== HYPERLIQUID DN ==="
 ( cd "$ROOT/hyperliquid" && "$HLPY" dn_bot.py --status 2>&1 | grep -E "SPOT|PERP|DELTA|FUNDING|LICHIDARE|COLATERAL" )
