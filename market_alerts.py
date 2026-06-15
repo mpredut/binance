@@ -72,7 +72,9 @@ def main():
     cleanup_thread.start()
 
     new_coins_checker = None
-    if os.environ.get("ALERT_NEW_COIN", "").upper() == "TRUE":
+    if not cfg.get("discover_new_coins", True):
+        print("NEW COIN ALERT DEZACTIVAT din config (discover_new_coins = no) — doar watchlist")
+    elif os.environ.get("ALERT_NEW_COIN", "").upper() == "TRUE":
         print("⏳ Pornesc checker-ul de monede noi...")
         new_coins_checker = start_new_coin_checker(
             cachePriceAll, interval_seconds=cfg["new_coins_scan_seconds"],

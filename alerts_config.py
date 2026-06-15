@@ -21,6 +21,7 @@ import os
 _DEFAULTS = {
     "watch": ["BTC", "TAO", "HYPE"],
     "sources": ["coinmarketcap", "coingecko"],
+    "discover_new_coins": True,   # no/false => doar watchlist, fara alerte de monede noi
     "max_monitored": 20,
     "max_new_coins": 15,
     "new_coins_scan_seconds": 3600,
@@ -64,7 +65,9 @@ def load_config(path: str) -> dict:
             key, _, val = line.partition("=")
             key, val = key.strip(), val.strip()
             try:
-                if key in _LIST_KEYS:
+                if key == "discover_new_coins":
+                    cfg[key] = val.strip().lower() in ("yes", "true", "1", "on", "da")
+                elif key in _LIST_KEYS:
                     norm = _LIST_KEYS[key]
                     cfg[key] = [norm(x.strip()) for x in val.split(",") if x.strip()]
                 elif key in _SETTING_KEYS:
