@@ -18,11 +18,34 @@ importa `market_api`. Deci market_api NU are voie sa importe pricefetcher/cacheM
 `binance_api.bapi_allorders` — ambele importa cacheManager doar LAZY (in functii), nu
 la nivel de modul, deci e sigur (nu se inchide ciclul prin market_api).
 """
+import os
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
 from binance_api import bapi as _bapi
 from binance_api import bapi_allorders as _allorders
+
+
+def env_value(folder: str, key: str) -> Optional[str]:
+    """Citeste `key` din folder/.env apoi folder/config.env (secretele per-provider,
+    gitignored, ex. kraken/.env -> KRAKEN_API_KEY). None daca lipseste. Citeste DOAR cheia
+    ceruta — NU polueaza os.environ (ar misruta NTFY/SMTP/etc. ale botului din acel folder)."""
+    for fname in (".env", "config.env"):
+        path = os.path.join(folder, fname)
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, _, v = line.partition("=")
+                    if k.strip() == key:
+                        return v.strip().strip('"').strip("'") or None
+        except OSError:
+            continue
+    return None
 
 
 def _normalize_order(o: dict) -> dict:

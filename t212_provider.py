@@ -18,7 +18,7 @@ import sys
 import time
 from typing import Optional, List
 
-from market_api import MarketDataProvider, _normalize_order
+from market_api import MarketDataProvider, _normalize_order, env_value
 
 _T212_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "212trading")
 
@@ -44,11 +44,13 @@ class T212Provider(MarketDataProvider):
         if _T212_DIR not in sys.path:
             sys.path.insert(0, _T212_DIR)
         from t212_client import T212Client  # noqa: import lazy
-        key = os.environ.get("T212_API_KEY")
+        # Cheile din 212trading/.env (secrete gitignored). env-ul flotei are prioritate.
+        key = os.environ.get("T212_API_KEY") or env_value(_T212_DIR, "T212_API_KEY")
         if not key:
-            raise RuntimeError("Lipseste T212_API_KEY (env)")
-        self._cli = T212Client(key, os.environ.get("T212_API_SECRET"),
-                               os.environ.get("T212_ENV", "live"))
+            raise RuntimeError("Lipseste T212_API_KEY (212trading/.env sau env)")
+        secret = os.environ.get("T212_API_SECRET") or env_value(_T212_DIR, "T212_API_SECRET")
+        env = os.environ.get("T212_ENV") or env_value(_T212_DIR, "T212_ENV") or "live"
+        self._cli = T212Client(key, secret, env)
         return self._cli
 
     def _position(self, symbol: str) -> Optional[dict]:

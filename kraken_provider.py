@@ -18,7 +18,7 @@ import math
 import time
 from typing import Optional, List
 
-from market_api import MarketDataProvider, _normalize_order
+from market_api import MarketDataProvider, _normalize_order, env_value
 
 _KRAKEN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kraken")
 
@@ -59,8 +59,10 @@ class KrakenProvider(MarketDataProvider):
             sys.modules.pop("common", None)           # scoate eventualul common al krakenului
             if saved_common is not None:
                 sys.modules["common"] = saved_common  # repune common-ul lui HL
-        self._cli = KrakenClient(os.environ.get("KRAKEN_API_KEY"),
-                                 os.environ.get("KRAKEN_API_SECRET"))
+        # Cheile din kraken/.env (NU din env-ul flotei). env-ul are prioritate daca e setat.
+        api_key = os.environ.get("KRAKEN_API_KEY") or env_value(_KRAKEN_DIR, "KRAKEN_API_KEY")
+        api_secret = os.environ.get("KRAKEN_API_SECRET") or env_value(_KRAKEN_DIR, "KRAKEN_API_SECRET")
+        self._cli = KrakenClient(api_key, api_secret)
         return self._cli
 
     # ── market-data (public, fara chei) ────────────────────────────────────────
