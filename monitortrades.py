@@ -19,6 +19,11 @@ from binance_api import bapi as api
 from binance_api import bapi_placeorder as po
 from binance_api import bapi_trades as apitrades
 from binance_api import bapi_allorders as apiorders
+# Faza 3 decuplare: CITIREA starii de cont (sold + ordine) trece prin facada generica,
+# nu mai direct prin bapi/apiorders. Asa monitortrades devine portabil pe HYPE.
+# `mkt` = singletonul facadei (azi ruteaza simbolurile Binance tot la bapi, identic).
+# place_order (po) si WS RAMAN Binance-specifice, neatinse.
+from market_api import api as mkt
 
 import utils as u
 import log
@@ -269,10 +274,11 @@ def get_relevant_trade(trade_orders, trade_type, threshold_s, symbol):
     return trade_price, trade_time, can_trade
 
 
-def get_position_stats(symbol, maxage_trade_s):
+def get_position_stats(symbol, maxage_trade_s, api=None):
 
-    buy_orders = apiorders.get_trade_orders("BUY", symbol, maxage_trade_s)
-    sell_orders = apiorders.get_trade_orders("SELL", symbol, maxage_trade_s)
+    api = api or mkt
+    buy_orders = api.get_orders(symbol, "BUY", maxage_trade_s)
+    sell_orders = api.get_orders(symbol, "SELL", maxage_trade_s)
 
     total_buy_qty = sum(float(o['qty']) for o in buy_orders)
     total_sell_qty = sum(float(o['qty']) for o in sell_orders)
@@ -345,18 +351,18 @@ def _load_mt_conf(path=None):
 _load_mt_conf()
 
 
-def get_available_qty(symbol):
+def get_available_qty(symbol, api=None):
     """Cantitatea LIBERA reala din activul de baza al simbolului (ex. TAOUSDC -> free TAO).
-    Sursa de adevar pt 'vinde TOT ce ai disponibil', nu aproximarea din trade-uri."""
+    Sursa de adevar pt 'vinde TOT ce ai disponibil', nu aproximarea din trade-uri.
+    `api` = facada de cont (default singletonul `mkt`); injectabil pt alt provider/test."""
+    api = api or mkt
     base = symbol
     for q in ("USDC", "USDT", "BUSD", "FDUSD", "USD"):
         if base.endswith(q):
             base = base[:-len(q)]
             break
     try:
-        for bal in (api.get_account_assets_balances() or []):
-            if bal.get("asset") == base:
-                return float(bal.get("free", 0.0) or 0.0)
+        return float(api.free_balance(base) or 0.0)
     except Exception as e:
         print(f"get_available_qty {symbol}: {e}")
     return 0.0
@@ -370,11 +376,12 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
     threshold_s = 3 * 60 * 60 # 3 h
     current_time_s = int(time.time())
     
-    # 1. Obtine ordinele de cumparare si vanzare recente pentru simbol
+    # 1. Obtine ordinele de cumparare si vanzare recente pentru simbol (prin facada,
+    #    normalizate la forma comuna {side,price,qty,timestamp} -> get_relevant_trade).
     #trade_orders_buy = apitrades.get_trade_orders("BUY", symbol, maxage_trade_s)
     #trade_orders_sell = apitrades.get_trade_orders("SELL", symbol, maxage_trade_s)
-    trade_orders_buy = apiorders.get_trade_orders("BUY", symbol, maxage_trade_s)
-    trade_orders_sell = apiorders.get_trade_orders("SELL", symbol, maxage_trade_s)
+    trade_orders_buy = mkt.get_orders(symbol, "BUY", maxage_trade_s)
+    trade_orders_sell = mkt.get_orders(symbol, "SELL", maxage_trade_s)
     if not (trade_orders_buy or trade_orders_sell):
         print(f"No trade orders found for {symbol} in the last {maxage_trade_s} seconds.")
         return 

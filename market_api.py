@@ -6,19 +6,35 @@ Aici e DOAR fundatia, BEHAVIOR-PRESERVING pentru Binance: facada ruteaza pe symb
 catre providerul potrivit, iar default-ul (cand nimeni nu revendica symbolul) e
 primul provider = Binance. Astfel symbolurile Binance ajung exact la bapi ca azi.
 
-DELIMITARE: facada acopera DOAR market-data (pret curent + istoric granular).
-Tranzactiile/ordinele si stream-ul WS de cont RAMAN Binance-specifice, in AFARA
-facadei (raman pe binance_api.bapi direct).
+DELIMITARE: facada acopera market-data (pret curent + istoric granular) si — din
+Faza 3 — CITIREA starii de cont (sold liber + istoric ordine/tranzactii), NORMALIZATA
+la o forma comuna. RAMAN in afara facadei (Binance-specific, pe bapi direct):
+plasarea de ordine (place_order) si stream-ul WS de cont.
 
 CAPCANA import circular: `pricefetcher` importa `cacheManager`, iar `cacheManager`
 importa `market_api`. Deci market_api NU are voie sa importe pricefetcher/cacheManager
-(ar inchide ciclul). BinanceProvider wrapeaza DIRECT `binance_api.bapi` — bapi nu
-importa cacheManager la nivel de modul (doar lazy, in functii), deci e sigur.
+(ar inchide ciclul). BinanceProvider wrapeaza DIRECT `binance_api.bapi` si
+`binance_api.bapi_allorders` — ambele importa cacheManager doar LAZY (in functii), nu
+la nivel de modul, deci e sigur (nu se inchide ciclul prin market_api).
 """
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
 from binance_api import bapi as _bapi
+from binance_api import bapi_allorders as _allorders
+
+
+def _normalize_order(o: dict) -> dict:
+    """Traduce un ordin/tranzactie din formatul NATIV al providerului in FORMA COMUNA:
+    {side, price, qty, timestamp}. `timestamp` ramane in MS (ca nativul Binance), pentru
+    ca get_position_stats / get_relevant_trade il consuma asa (sort + /1000). Asa toata
+    aritmetica (price*qty, ultimul buy) merge IDENTIC pe orice provider."""
+    return {
+        "side": (o.get("side") or "").upper(),
+        "price": float(o.get("price", 0.0) or 0.0),
+        "qty": float(o.get("qty", o.get("quantity", 0.0)) or 0.0),
+        "timestamp": o.get("timestamp"),
+    }
 
 
 class MarketDataProvider(ABC):
@@ -45,6 +61,30 @@ class MarketDataProvider(ABC):
     def name(self) -> str:
         ...
 
+    # ── CONT (Faza 3): citire stare cont, NORMALIZATA la forma comuna. ──────────
+    # Default None/[]: un provider pur market-data (fara cont) le poate lasa asa.
+    # Forma comuna:
+    #   balanta liber = float
+    #   order/trade   = {"side","price","qty","timestamp"}  (timestamp in ms)
+    def free_balance(self, asset: str) -> Optional[float]:
+        """Soldul LIBER (disponibil) al unui asset (ex. 'TAO'). None daca providerul
+        n-are notiune de cont. Sursa de adevar pt 'vinde tot ce ai disponibil'."""
+        return None
+
+    def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:
+        """Ordinele pt `symbol` din ultimele `since_s` secunde, optional filtrate pe
+        `side` ('BUY'/'SELL'; None = ambele), NORMALIZATE la forma comuna. Default []."""
+        return []
+
+    def get_trades(self, symbol: str, since_s: float) -> List[dict]:
+        """Toate tranzactiile (orice side) pt `symbol` din ultimele `since_s` secunde,
+        normalizate. Default = get_orders fara filtru de side."""
+        return self.get_orders(symbol, None, since_s)
+
+    def open_orders(self, symbol: str) -> List[dict]:
+        """Ordinele DESCHISE (neexecutate) pt `symbol`. Optional; default []."""
+        return []
+
 
 class BinanceProvider(MarketDataProvider):
     """Wrapeaza binance_api.bapi pentru market-data. Default-ul flotei azi.
@@ -67,6 +107,22 @@ class BinanceProvider(MarketDataProvider):
         # Perechile spot pe care le foloseste flota (USDC/USDT). Restul cad oricum
         # pe default = Binance in facada, deci ramane behavior-preserving.
         return symbol.endswith("USDC") or symbol.endswith("USDT")
+
+    # ── CONT: aceleasi date ca azi, doar reimpachetate prin facada. ─────────────
+    def free_balance(self, asset: str) -> Optional[float]:
+        # Mirror EXACT al buclei din monitortrades.get_available_qty (si trade_watch):
+        # parcurge soldurile, intoarce 'free' pt asset, altfel 0.0. get_account_assets_
+        # balances are deja try/except (intoarce [] la eroare) -> nu arunca aici.
+        for bal in (_bapi.get_account_assets_balances() or []):
+            if bal.get("asset") == asset:
+                return float(bal.get("free", 0.0) or 0.0)
+        return 0.0
+
+    def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:
+        # bapi_allorders.get_trade_orders(order_type, symbol, max_age_seconds) — aceeasi
+        # filtrare pe side+varsta ca pana acum; doar normalizam la forma comuna.
+        raw = _allorders.get_trade_orders(side, symbol, since_s) or []
+        return [_normalize_order(o) for o in raw]
 
 
 class MarketApi:
@@ -104,6 +160,22 @@ class MarketApi:
 
     def get_price_history(self, symbol: str, lookback_h: float) -> Optional[List]:
         return self._provider_for(symbol).get_price_history(symbol, lookback_h)
+
+    # ── CONT (Faza 3): rutare pe symbol/asset, normalizat de provider. ─────────
+    def free_balance(self, asset: str) -> Optional[float]:
+        # `asset` (ex. 'TAO') nu e un symbol, deci nu va revendica niciun provider via
+        # supports_symbol -> cade pe default = Binance. Behavior-preserving azi; cand
+        # apare HYPE, providerul lui isi va revendica asset-urile proprii.
+        return self._provider_for(asset).free_balance(asset)
+
+    def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:
+        return self._provider_for(symbol).get_orders(symbol, side, since_s)
+
+    def get_trades(self, symbol: str, since_s: float) -> List[dict]:
+        return self._provider_for(symbol).get_trades(symbol, since_s)
+
+    def open_orders(self, symbol: str) -> List[dict]:
+        return self._provider_for(symbol).open_orders(symbol)
 
     def supports_symbol(self, symbol: str) -> bool:
         return any(p.supports_symbol(symbol) for p in self._providers)
