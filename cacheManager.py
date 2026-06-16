@@ -1186,6 +1186,7 @@ class CacheInstantTrendManager:
             current_price_mgr = get_current_price_manager()
         self.current_price_mgr = current_price_mgr
         for s in self.symbols:
+          try:
             c24 = cache24_managers[s]
             current_price_mgr.subscribe_price(c24)          # CurrentPrice → Cache24
             self.windows[s]   = {}
@@ -1198,6 +1199,8 @@ class CacheInstantTrendManager:
                 parts.append(f"{sec:.0f}s: {len(w.prices)} (rate={w.sample_rate_sec:.2f}s)")
             c24.subscribe_price(self)                       # semnal de tick → canal rapid
             print(f"[InstantTrend][{s}] " + " ".join(parts))
+          except Exception as _e:
+            builtins.print(f"[InstantTrend][{s}] setup esuat ({_e}) — sar peste, Binance neafectat")
         self._computing = True
         self._start_flush_loop()        # I/O decuplat (scrie fișierul în fundal)
         if run_full_eval:
@@ -1770,9 +1773,48 @@ def _initialize_once():
 # nu mai pornesc WS — se bazează pe polling.
 
 
+def _start_nonbinance_trend_poller(cpm, symbols, interval_sec=20):
+    """Alimenteaza instant-trend pt simboluri FARA WS (non-Binance, ex HYPEUSD pe Kraken):
+    poll get_current_price prin facada -> _push_price in lantul CurrentPrice->Cache24->
+    InstantTrend. Toleranta per-simbol; Binance (WS) neafectat."""
+    def run():
+        while True:
+            for s in list(symbols):
+                try:
+                    p = cpm.market_api.get_current_price(symbol=s)
+                    if p is not None and float(p) > 0:
+                        cpm._push_price(s, float(p))
+                except Exception as _e:
+                    builtins.print(f"[NB-trend] {s}: {_e}")
+            time.sleep(interval_sec)
+    t = threading.Thread(target=run, name="NonBinanceTrendPoller", daemon=True)
+    t.start()
+    return t
+
+
 if __name__ == "__main__":
     _initialize_once()   # procesul dedicat de cache vrea WS + persistă în fișier
     threads = []
+
+    # Simboluri NON-Binance din instruments.conf (ex HYPEUSD pe Kraken) pt care vrem
+    # instant-trend cache-uit. Binance ramane din sym.symbols (WS). Defensiv: orice
+    # eroare -> doar Binance (comportament neschimbat).
+    _nb_syms = []
+    try:
+        from instruments_config import load_for
+        for _inst in load_for("mt").values():
+            if _inst.provider_name != "binance" and _inst.symbol not in sym.symbols:
+                _nb_syms.append(_inst.symbol)
+        _nb_syms = list(dict.fromkeys(_nb_syms))
+    except Exception as _e:
+        builtins.print(f"[cacheManager] instrumente non-Binance pt trend indisponibile: {_e}")
+        _nb_syms = []
+    _trend_syms = list(dict.fromkeys(list(sym.symbols) + _nb_syms))
+    # Price24 (dict per simbol) trebuie sa includa simbolurile non-Binance INAINTE de bucla
+    # generica, ca start_computation sa gaseasca cache24_managers[s] pt fiecare.
+    if _nb_syms:
+        CacheFactory.get("Price24", symbols=_trend_syms)
+        builtins.print(f"[cacheManager] instant-trend extins cu non-Binance: {_nb_syms}")
 
     for name, config in CacheFactory._CONFIG.items():
         cache = get_cache_manager(name)
@@ -1791,11 +1833,13 @@ if __name__ == "__main__":
     try:
         from binance_api import bapi_ws
         _trend_cpm = get_current_price_manager(
-            ws_manager=bapi_ws.get_ws_manager(), sync_ts=0.8)
+            ws_manager=bapi_ws.get_ws_manager(), symbols=_trend_syms, sync_ts=0.8)
         _trend_cache24 = CacheFactory.get("Price24")
-        _trend_mgr = get_instant_trend_manager(writer=True)   # singurul writer al fișierului
+        _trend_mgr = get_instant_trend_manager(symbols=_trend_syms, writer=True)   # singurul writer al fișierului
         _trend_mgr.start_computation(_trend_cache24, _trend_cpm, run_full_eval=True)
         print("⚙️ cacheManager: calcul trend complet pornit (cache_instant_trend.json).")
+        if _nb_syms:   # WS-ul e doar Binance -> impinge manual preturile non-Binance in lant
+            _start_nonbinance_trend_poller(_trend_cpm, _nb_syms, interval_sec=20)
     except Exception as e:
         print(f"[cacheManager] Nu pot porni calculul de trend: {e}")
 
