@@ -780,7 +780,7 @@ class Cache24PriceManager(CacheManagerInterface):
         return False
 
 
-class CachePriceTrendManager(CacheManagerInterface):
+class CachePriceLongTrendManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=False)
 
@@ -1532,8 +1532,8 @@ class CacheFactory:
             "filename": "cache_currentprice.json",  # un singur fișier, toți simbolii
             "sync_ts": lambda: CURRENTPRICE_SYNC_INTERVAL_SEC,
         },
-        "PriceTrend": {
-            "class": CachePriceTrendManager,
+        "PriceLongTrend": {
+            "class": CachePriceLongTrendManager,
             "filename": "cache_price_trend.json",
             "sync_ts": lambda: PRICETREND_SYNC_INTERVAL_SEC,
         },

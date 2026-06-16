@@ -8,7 +8,7 @@ Acoperire:
   - CacheOrderManager
   - CachePriceManager
   - Cache24PriceManager
-  - CachePriceTrendManager
+  - CachePriceLongTrendManager
   - CacheAssetValueManager
   - CacheCurrentPriceManager
   - CacheFactory / get_cache_manager
@@ -436,9 +436,9 @@ class TestCache24PriceManager(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 6. CachePriceTrendManager
+# 6. CachePriceLongTrendManager
 # ═══════════════════════════════════════════════════════════════════════════════
-class TestCachePriceTrendManager(unittest.TestCase):
+class TestCachePriceLongTrendManager(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -446,7 +446,7 @@ class TestCachePriceTrendManager(unittest.TestCase):
     def _make(self):
         api_mock = MagicMock()
         fname = _tmp_file(self.tmp, "cache_price_trend.json")
-        return cm.CachePriceTrendManager(9999, ["BTC"], fname, api_client=api_mock)
+        return cm.CachePriceLongTrendManager(9999, ["BTC"], fname, api_client=api_mock)
 
     def test_rebuild_fetchtime_from_dict_cache(self):
         mgr = self._make()

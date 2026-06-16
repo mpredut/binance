@@ -561,7 +561,7 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=No
             T_quanta = 14
             print(f"[{symbol}] estimarea T a esuat ({e}) — folosesc prior T=14")
 
-    all_trend_data = cm.get_cache_manager("PriceTrend").cache
+    all_trend_data = cm.get_cache_manager("PriceLongTrend").cache
     if symbol not in all_trend_data:
         print(f"Simbolul {symbol} nu există în trendurile citite.")
         return None
