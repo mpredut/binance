@@ -1,5 +1,5 @@
 # t212_provider.py
-"""T212Provider — stocks REALE pe Trading 212, peste 121trade/t212_client.py.
+"""T212Provider — stocks REALE pe Trading 212, peste 212trading/t212_client.py.
 
 T212 are model de PORTOFOLIU (pozitie cu averagePrice/quantity/currentPrice), nu istoric
 de ordine ca Binance/Kraken. Adaptam: pozitia detinuta = UN buy sintetic la averagePrice
@@ -11,7 +11,7 @@ acelasi ticker. Ore: actiuni reale = doar RTH (instrumentul are market_hours=rth
 poate sari cand piata e inchisa — currentPrice oricum lipseste atunci).
 
 Cheie: T212_API_KEY (+ optional T212_API_SECRET, T212_ENV=live|demo). Plasare: DRY pana
-la T212_LIVE_ORDERS=true. Import LAZY (sys.path pe 121trade/).
+la T212_LIVE_ORDERS=true. Import LAZY (sys.path pe 212trading/).
 """
 import os
 import sys
@@ -20,7 +20,7 @@ from typing import Optional, List
 
 from market_api import MarketDataProvider, _normalize_order
 
-_T212_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "121trade")
+_T212_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "212trading")
 
 
 def _live() -> bool:

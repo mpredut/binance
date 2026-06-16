@@ -42,7 +42,7 @@ echo "=== T212 BOT (toate activele din config.*.env, UN proces) ==="
 pkill -f "t212_bot.py" 2>/dev/null || true
 pkill -f "ipo.py --profile" 2>/dev/null || true   # opreste si vechile procese, daca mai ruleaza
 sleep 1
-cd ~/binance/121trade
+cd ~/binance/212trading
 nohup python3 t212_bot.py > t212_bot.log 2>&1 &
 
 

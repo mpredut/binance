@@ -62,7 +62,7 @@ if [ "$1" = "--supervise" ]; then
 dn_bot.py --watch|$ROOT/hyperliquid|nohup $HLPY dn_bot.py --watch > dn_watch.log 2>&1 &|DN-watch
 kraken_bot.py|$ROOT/kraken|nohup python3 kraken_bot.py > kraken_bot.log 2>&1 &|Kraken-bot
 xstock_watch.py|$ROOT/kraken|nohup python3 xstock_watch.py > xstock_watch.log 2>&1 &|xStock-watch
-t212_bot.py|$ROOT/121trade|nohup python3 t212_bot.py > t212_bot.log 2>&1 &|T212-bot"
+t212_bot.py|$ROOT/212trading|nohup python3 t212_bot.py > t212_bot.log 2>&1 &|T212-bot"
     while IFS='|' read -r pat dir cmd label; do
         [ -z "$pat" ] && continue
         if pgrep -f "$pat" >/dev/null 2>&1; then
@@ -122,7 +122,7 @@ PY
 )
 
 echo "=== T212 ==="
-( cd "$ROOT/121trade" && python3 - <<'PY' 2>/dev/null
+( cd "$ROOT/212trading" && python3 - <<'PY' 2>/dev/null
 import sys, os, time; sys.path.insert(0, ".")
 from ipo_common import load_dotenv
 load_dotenv(".env")

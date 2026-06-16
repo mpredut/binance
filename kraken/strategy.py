@@ -2,7 +2,7 @@
 """
 strategy.py — motor DCA + take-profit pe Kraken (Spot).
 
-Aceeasi logica validata la 121trade (entry la market-%, DCA pe scadere,
+Aceeasi logica validata la 212trading (entry la market-%, DCA pe scadere,
 take-profit la pret_mediu*(1+TP), reia ciclul), adaptata pentru Kraken:
 
   * Pret/sizing in valuta de cotare a perechii (HYPEEUR -> EUR, fara conversie FX).

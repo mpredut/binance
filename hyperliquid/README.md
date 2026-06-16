@@ -1,6 +1,6 @@
 # Hyperliquid bot — DCA + take-profit (perp long-only)
 
-Port al strategiei de la `121trade` / `kraken`, pe **Hyperliquid**.
+Port al strategiei de la `212trading` / `kraken`, pe **Hyperliquid**.
 Aceeași logică: intră long la `market − x%`, mai cumpără pe scădere (DCA),
 vinde tot (reduce-only) la `preț_mediu × (1 + TP%)`, reia ciclul.
 

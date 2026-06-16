@@ -9,7 +9,7 @@ close (stabil) -> nu da false alarme cand piata e inchisa.
   python3 price_alert.py RGNT --below 4
   python3 price_alert.py NVDA --above 250 --topic alt-topic
 Cron (la 15 min):
-  */15 * * * * cd ~/binance/121trade && python3 price_alert.py RGNT --below 4 >> price_alert.log 2>&1
+  */15 * * * * cd ~/binance/212trading && python3 price_alert.py RGNT --below 4 >> price_alert.log 2>&1
 """
 from __future__ import annotations
 

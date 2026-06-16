@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 notify.py — notificari (ntfy + email) prin AlertNotifier-ul partajat din proiect.
-Acelasi mecanism ca la 121trade.
+Acelasi mecanism ca la 212trading.
 """
 
 from __future__ import annotations

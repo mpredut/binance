@@ -1,6 +1,6 @@
 # Kraken bot — DCA + take-profit
 
-Port al strategiei de la `121trade` (Trading 212) pe **Kraken (Spot)**.
+Port al strategiei de la `212trading` (Trading 212) pe **Kraken (Spot)**.
 Aceeași logică: intră la `market − x%`, mai cumpără pe scădere (DCA), vinde tot
 la `preț_mediu × (1 + TP%)`, apoi reia ciclul. Simbolul e configurabil.
 
