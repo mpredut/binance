@@ -1814,6 +1814,10 @@ if __name__ == "__main__":
     # generica, ca start_computation sa gaseasca cache24_managers[s] pt fiecare.
     if _nb_syms:
         CacheFactory.get("Price24", symbols=_trend_syms)
+        # CurrentPrice (instanta din CacheFactory, fara WS -> polling prin facada) extinsa cu
+        # non-Binance: poleste HYPEUSD via Kraken -> cache_currentprice.json devine COERENT
+        # (altfel doar instanta _trend_cpm avea HYPEUSD, in memorie, nepersistat in fisier).
+        CacheFactory.get("CurrentPrice", symbols=_trend_syms)
         builtins.print(f"[cacheManager] instant-trend extins cu non-Binance: {_nb_syms}")
 
     for name, config in CacheFactory._CONFIG.items():
