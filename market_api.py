@@ -8,8 +8,9 @@ primul provider = Binance. Astfel symbolurile Binance ajung exact la bapi ca azi
 
 DELIMITARE: facada acopera market-data (pret curent + istoric granular) si — din
 Faza 3 — CITIREA starii de cont (sold liber + istoric ordine/tranzactii), NORMALIZATA
-la o forma comuna. RAMAN in afara facadei (Binance-specific, pe bapi direct):
-plasarea de ordine (place_order) si stream-ul WS de cont.
+la o forma comuna. Din Faza 2b acopera si PLASAREA de ordine (place_order), rutata pe
+symbol: BinanceProvider -> bapi_placeorder.place_order_smart (IDENTIC ca azi), iar
+HyperliquidProvider -> spot HL (DRY implicit). RAMANE in afara facadei stream-ul WS de cont.
 
 CAPCANA import circular: `pricefetcher` importa `cacheManager`, iar `cacheManager`
 importa `market_api`. Deci market_api NU are voie sa importe pricefetcher/cacheManager
@@ -85,6 +86,13 @@ class MarketDataProvider(ABC):
         """Ordinele DESCHISE (neexecutate) pt `symbol`. Optional; default []."""
         return []
 
+    # ── PLASARE ordine (Faza 2b): rutata pe symbol. Default no-op (provider pur
+    #    market-data). `**kwargs` cara parametrii specifici Binance (safeback_seconds,
+    #    force, cancelorders, hours, pair) fara sa-i impuna celorlalti provideri.
+    def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
+        """Plaseaza un ordin pt `symbol`. Default None (provider fara plasare)."""
+        return None
+
 
 class BinanceProvider(MarketDataProvider):
     """Wrapeaza binance_api.bapi pentru market-data. Default-ul flotei azi.
@@ -106,6 +114,10 @@ class BinanceProvider(MarketDataProvider):
     def supports_symbol(self, symbol: str) -> bool:
         # Perechile spot pe care le foloseste flota (USDC/USDT). Restul cad oricum
         # pe default = Binance in facada, deci ramane behavior-preserving.
+        # EXCEPTIE: HYPE* e servit de HyperliquidProvider (HL spot), nu de Binance —
+        # altfel claim-ul lacom pe *USDC ar fura HYPEUSDC inaintea providerului HL.
+        if symbol.upper().startswith("HYPE"):
+            return False
         return symbol.endswith("USDC") or symbol.endswith("USDT")
 
     # ── CONT: aceleasi date ca azi, doar reimpachetate prin facada. ─────────────
@@ -123,6 +135,14 @@ class BinanceProvider(MarketDataProvider):
         # filtrare pe side+varsta ca pana acum; doar normalizam la forma comuna.
         raw = _allorders.get_trade_orders(side, symbol, since_s) or []
         return [_normalize_order(o) for o in raw]
+
+    def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
+        # IDENTIC ca azi: deleaga la po.place_order_smart cu ACELEASI kwargs pe care
+        # monitortrades le pasa (safeback_seconds, force, cancelorders, hours, pair).
+        # Import LAZY: bapi_placeorder trage priceAnalysis->cacheManager->market_api,
+        # deci un import la nivel de modul ar inchide ciclul. Aici e sigur (runtime).
+        from binance_api import bapi_placeorder as _po
+        return _po.place_order_smart(side, symbol, price, qty, **kwargs)
 
 
 class MarketApi:
@@ -177,6 +197,11 @@ class MarketApi:
     def open_orders(self, symbol: str) -> List[dict]:
         return self._provider_for(symbol).open_orders(symbol)
 
+    def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
+        # Rutare pe symbol: HYPE -> HyperliquidProvider (spot HL, DRY implicit);
+        # restul -> BinanceProvider (po.place_order_smart, IDENTIC ca azi).
+        return self._provider_for(symbol).place_order(symbol, side, price, qty, **kwargs)
+
     def supports_symbol(self, symbol: str) -> bool:
         return any(p.supports_symbol(symbol) for p in self._providers)
 
@@ -190,5 +215,17 @@ class MarketApi:
 
 
 # Singleton injectat in constructori (api=None -> acest singleton).
-# Faza 2a: doar Binance. Faza 2b adauga HyperliquidProvider() in lista.
-api = MarketApi([BinanceProvider()])
+# ORDINE PROVIDERI: Binance ramane PRIMUL = default behavior-preserving pt symbolurile
+# nerevendicate (asset-uri bare BTC/TAO etc.). HyperliquidProvider revendica DOAR HYPE
+# (supports_symbol), iar Binance exclude explicit HYPE -> HYPEUSDC ajunge la HL.
+# Constructia HyperliquidProvider() e ieftina (NU atinge SDK-ul); SDK-ul se incarca
+# lenes la prima folosire. Daca pana si importul modulului ar esua (n-ar trebui),
+# cadem curat pe Binance-only, ca flota sa nu fie afectata.
+try:
+    from hyperliquid_provider import HyperliquidProvider
+    _extra_providers = [HyperliquidProvider()]
+except Exception as _e:  # noqa: BLE001
+    print(f"market_api: HyperliquidProvider indisponibil ({_e}) — doar Binance")
+    _extra_providers = []
+
+api = MarketApi([BinanceProvider()] + _extra_providers)

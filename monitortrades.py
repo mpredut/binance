@@ -107,6 +107,22 @@ default_values_sell_recommendation = {
         'tick': 0,         # Valoare default pentru tick
         'min': 0.0,        # Valoare default pentru min
         'max': 0.0         # Valoare default pentru max
+    },
+    # HYPE (Hyperliquid spot). Necesar AICI ca is_trend_up sa nu dea KeyError pe
+    # fallback cand cacheManager n-are inca snapshot de trend pt HYPEUSDC (flota
+    # nu scrie trend HYPE inca). slope/gradient=0 -> is_trend_up=False (neutru/sigur).
+    "HYPEUSDC": {
+        'force_sell': 0,
+        'procent_desired_profit': 0.07,
+        'expired_duration': 3600 * 3.7,
+        'min_procent': 0.0099,
+        'days_after_use_current_price': 7,
+        'slope': 0.0,      # Valoare default pentru slope
+        'pos': 0,          # Valoare default pentru pos
+        'gradient': 0.0,   # Valoare default pentru gradient
+        'tick': 0,         # Valoare default pentru tick
+        'min': 0.0,        # Valoare default pentru min
+        'max': 0.0         # Valoare default pentru max
     }
 }
 
@@ -407,8 +423,9 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
         can_trade = False
         
     
-    # 2. Obtine pretul curent de pe piata
-    current_price = api.get_current_price(symbol)
+    # 2. Obtine pretul curent de pe piata (prin FACADA: HYPEUSDC -> HL spot,
+    #    BTC/TAO USDC -> BinanceProvider.get_current_price = bapi, IDENTIC ca azi).
+    current_price = mkt.get_current_price(symbol)
     print(f"Current price for {symbol}: {current_price}")
     avail_qty = get_available_qty(symbol)   # TOATA cantitatea disponibila de vandut
 
@@ -428,7 +445,7 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
                 hard_qty = round(avail_qty * HARD_TP_FRACTION, 4)
                 print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% >= {HARD_TP_PCT*100:.0f}% "
                       f"-> vand {HARD_TP_FRACTION*100:.0f}% ({hard_qty}) INDIFERENT de trend")
-                po.place_order_smart("SELL", symbol, current_price, hard_qty,
+                mkt.place_order(symbol, "SELL", current_price, hard_qty,
                     safeback_seconds=sbs, force=True, cancelorders=True, hours=2, pair=False)
                 _hard_tp_last[symbol] = current_time_s
                 return   # am vandut deja in acest tick; nu mai rula vanzarea de jos pe sold invechit
@@ -440,7 +457,7 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
             if not is_trend_up(symbol):
                 print(f"Price increased with {price_increase * 100}% by more than {gain_threshold * 100}% versus buy price and not trend up!")
                 if can_sell and avail_qty > 0:
-                    po.place_order_smart("SELL", symbol, current_price,
+                    mkt.place_order(symbol, "SELL", current_price,
                         avail_qty, safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=False)
                 else:
                     print(f"No can sell (can_sell={can_sell}, avail_qty={avail_qty})")
@@ -453,7 +470,7 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
             if not is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease * 100}% by more than {lost_threshold * 100}% versus buy price and not trend up!")
                 if can_sell and avail_qty > 0:
-                    po.place_order_smart("SELL", symbol, current_price,
+                    mkt.place_order(symbol, "SELL", current_price,
                         avail_qty, safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=True)
                 #po.place_SELL_order(symbol, current_price, qty)
                 else:
@@ -475,7 +492,7 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
                 print(f"Price decreased with {price_decrease_versus_sell * 100}% by more than {gain_threshold * 100}% versus sell price: Placing buy order")
                 #api.cancel_orders_old_or_outlier("BUY", "BTCUSDT", qty, hours=0.5, price_difference_percentage=0.1)
                 if can_buy:
-                    po.place_order_smart("BUY", symbol, current_price + 0.5, 
+                    mkt.place_order(symbol, "BUY", current_price + 0.5,
                         qty, safeback_seconds=sbs, cancelorders=True, hours=48, pair=False)
                 else:
                    print("No can buy")
@@ -539,6 +556,16 @@ def main():
         _tg, _tl, _tm = SYMBOL_PARAMS.get(sym.taosymbol, (0.092, 0.049, 3600*24*17))
         monitor_price_and_trade(sym.taosymbol, sbs=d*24*3600+60, maxage_trade_s=_tm, gain_threshold=_tg, lost_threshold=_tl)
         print("--------------")
+
+        # HYPE (Hyperliquid SPOT) — OPT-IN: gated de MT_HYPE_ENABLED (default OFF), ca
+        # un simplu deploy sa NU activeze HYPE pe flota. Ordinele HL raman DRY pana cand
+        # HL_LIVE_ORDERS=true (poarta finala, vezi hyperliquid_provider). Rutarea HYPEUSDC
+        # -> HyperliquidProvider se face automat de facada; Binance ramane neatins.
+        if os.environ.get("MT_HYPE_ENABLED", "false").strip().lower() == "true":
+            print("-----HYPEUSDC (Hyperliquid spot)------")
+            _hg, _hl_, _hm = SYMBOL_PARAMS.get(sym.hypesymbol, (0.092, 0.049, 3600*24*17))
+            monitor_price_and_trade(sym.hypesymbol, sbs=d*24*3600+60, maxage_trade_s=_hm, gain_threshold=_hg, lost_threshold=_hl_)
+            print("--------------")
   
         with sell_lock:
             data = sell_recommendation[sym.btcsymbol]

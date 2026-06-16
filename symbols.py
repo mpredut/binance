@@ -8,6 +8,11 @@ from binance_api.bapi_client import client
 
 btcsymbol = 'BTCUSDC'
 taosymbol = 'TAOUSDC'
+# HYPE = SPOT Hyperliquid, rutat prin facada market_api la HyperliquidProvider.
+# INTENTIONAT NU e in `symbols` (lista Binance): codul Binance (validate_*, bucle pe
+# sym.symbols din tradeall etc.) NU trebuie sa-l atinga. E doar o eticheta de symbol
+# pe care monitortrades o paseaza facadei.
+hypesymbol = 'HYPEUSDC'
 #symbols = ["BTCUSDT", "BTCUSDC", "TAOUSDT", "TAOUSDC"]
 symbols = ["BTCUSDC",  "TAOUSDC"]
 forcesellsymbol = ["TAOUSDC", "BTCUSDC"]
