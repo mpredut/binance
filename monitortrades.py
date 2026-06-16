@@ -264,8 +264,11 @@ def is_trend_up(symbol):
             return slope > 0 or (slope == 0 and gradient > 0)
     except Exception as e:
         print(f"is_trend_up: snapshot direct esuat ({e}) — folosesc sell_recommendation")
-    slope = sell_recommendation[symbol]['slope']
-    gradient = sell_recommendation[symbol]['gradient']
+    rec = sell_recommendation.get(symbol)
+    if not rec:
+        return False   # simbol netrackuit (non-Binance, ex HYPEUSD pe Kraken): neutru -> nu blocheaza
+    slope = rec['slope']
+    gradient = rec['gradient']
     return slope > 0 or (slope == 0 and gradient > 0)
 
 
