@@ -14,7 +14,7 @@ import sys
 
 from market_api import api
 from instrument import Instrument
-from instruments_config import load_instruments
+from instruments_config import load_instruments, load_for
 
 FAIL = []
 
@@ -108,6 +108,29 @@ if hype:
     f_h = hype.free()
     f_hp = api.provider_by_name("hyperliquid").free_balance("HYPE")
     check(f_h is not None and f_h == f_hp, "HYPE free() == HL direct", f"instr={f_h} hl={f_hp}")
+
+print("\n==== 5. provideri noi (Kraken, T212) — explicit-only + multi-venue ====")
+kp = api.provider_by_name("kraken")
+tp = api.provider_by_name("t212")
+check(kp is not None, "provider_by_name('kraken')")
+check(tp is not None, "provider_by_name('t212')")
+check(kp is not None and kp.supports_symbol("HYPEUSD") is False,
+      "Kraken explicit-only (supports_symbol=False, nu fura rutarea facadei)")
+hk = inst.get("HYPE_KRAKEN")
+if hk and hype:
+    check(hk.provider_label == "Kraken" and hype.provider_label == "Hyperliquid",
+          "ACELASI activ HYPE rutat pe 2 venue-uri", f"Kraken={hk.symbol} / HL={hype.symbol}")
+ts = inst.get("TSLA_T212")
+if ts:
+    check(ts.provider_label == "T212" and ts.market_hours == "rth", "TSLA_T212 -> T212 (rth)")
+mt = load_for("mt")
+check(set(mt.keys()) == {"BTC_BINANCE", "TAO_BINANCE"},
+      "load_for('mt') = doar enabled (BTC,TAO); HYPE/Kraken/T212 sunt enabled=no",
+      str(sorted(mt.keys())))
+try:                                  # pret public Kraken (informativ, tolerant la retea)
+    print(f"  [info] Kraken HYPEUSD price = {kp.get_current_price('HYPEUSD') if kp else None}")
+except Exception as _e:  # noqa: BLE001
+    print(f"  [info] Kraken price indisponibil: {_e}")
 
 print("\n" + "=" * 56)
 if FAIL:

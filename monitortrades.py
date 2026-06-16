@@ -367,6 +367,23 @@ def _load_mt_conf(path=None):
 _load_mt_conf()
 
 
+from instrument import Instrument as _Instrument
+from instruments_config import load_for
+
+
+def _as_instrument(x):
+    """Accepta un Instrument SAU (compat) un symbol string -> Instrument rutat prin facada."""
+    if isinstance(x, _Instrument):
+        return x
+    sym = str(x)
+    base = sym
+    for q in ("USDC", "USDT", "BUSD", "FDUSD", "USD"):
+        if base.endswith(q):
+            base = base[:-len(q)]
+            break
+    return _Instrument(name=sym, symbol=sym, provider=mkt.provider_name_for(sym), base=base)
+
+
 def get_available_qty(symbol, api=None):
     """Cantitatea LIBERA reala din activul de baza al simbolului (ex. TAOUSDC -> free TAO).
     Sursa de adevar pt 'vinde TOT ce ai disponibil', nu aproximarea din trade-uri.
@@ -385,7 +402,23 @@ def get_available_qty(symbol, api=None):
 
 
 #//todo: review 0.5
-def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lost_threshold=0.033):
+def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None, lost_threshold=None):
+    inst = _as_instrument(inst)
+    symbol = inst.symbol
+    # params per-instrument (fallback pe argument, apoi pe globalele din cod) ───────────
+    if gain_threshold is None:
+        _g = inst.param("mt", "gain", None, float)
+        gain_threshold = _g / 100.0 if _g is not None else 0.07
+    if lost_threshold is None:
+        _l = inst.param("mt", "lost", None, float)
+        lost_threshold = _l / 100.0 if _l is not None else 0.033
+    if maxage_trade_s is None:
+        _md = inst.param("mt", "maxage_days", None, float)
+        maxage_trade_s = int(_md * 24 * 3600) if _md is not None else 4 * 24 * 3600
+    hard_tp_pct = inst.param("mt", "hardtp", HARD_TP_PCT * 100, float) / 100.0
+    hard_tp_frac = inst.param("mt", "hardtp_fraction", HARD_TP_FRACTION, float)
+    hard_tp_cd = inst.param("mt", "hardtp_cooldown_h", HARD_TP_COOLDOWN_S / 3600.0, float) * 3600
+    tp_ref = inst.param("mt", "ref", TP_REFERENCE)
     #try:
     
     qty = 1 #qty = calculate_position_size(...)    
@@ -396,18 +429,18 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
     #    normalizate la forma comuna {side,price,qty,timestamp} -> get_relevant_trade).
     #trade_orders_buy = apitrades.get_trade_orders("BUY", symbol, maxage_trade_s)
     #trade_orders_sell = apitrades.get_trade_orders("SELL", symbol, maxage_trade_s)
-    trade_orders_buy = mkt.get_orders(symbol, "BUY", maxage_trade_s)
-    trade_orders_sell = mkt.get_orders(symbol, "SELL", maxage_trade_s)
+    trade_orders_buy = inst.orders("BUY", maxage_trade_s)
+    trade_orders_sell = inst.orders("SELL", maxage_trade_s)
     if not (trade_orders_buy or trade_orders_sell):
         print(f"No trade orders found for {symbol} in the last {maxage_trade_s} seconds.")
         return 
     buy_price, buy_time, can_buy = get_relevant_trade(trade_orders_buy, "BUY", threshold_s, symbol)
     sell_price, sell_time, can_sell = get_relevant_trade(trade_orders_sell, "SELL", threshold_s, symbol)
 
-    position = get_position_stats(symbol, maxage_trade_s)
+    position = get_position_stats(symbol, maxage_trade_s, api=inst.provider)
     # Referinta de pret pt castig: configurabila (TP_REFERENCE). Default "last" =
     # ultimul pret de cumparare (buy_price din get_relevant_trade); "average" = media pe maxage zile.
-    if TP_REFERENCE == "average" and position["average_buy_price"] > 0:
+    if tp_ref == "average" and position["average_buy_price"] > 0:
         buy_price = position["average_buy_price"]
         print(f"POSITION (referinta=AVG {maxage_trade_s/86400:.0f}z) for {symbol} : {position}")
     else:
@@ -425,9 +458,12 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
     
     # 2. Obtine pretul curent de pe piata (prin FACADA: HYPEUSDC -> HL spot,
     #    BTC/TAO USDC -> BinanceProvider.get_current_price = bapi, IDENTIC ca azi).
-    current_price = mkt.get_current_price(symbol)
+    current_price = inst.price()
+    if current_price is None:
+        print(f"No current price for {symbol} (piata inchisa / indisponibil) — skip")
+        return
     print(f"Current price for {symbol}: {current_price}")
-    avail_qty = get_available_qty(symbol)   # TOATA cantitatea disponibila de vandut
+    avail_qty = inst.free()   # TOATA cantitatea disponibila a instrumentului (sold liber)
 
     # 3. Verifica ordinele de cumparare
     if trade_orders_buy:
@@ -440,12 +476,12 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
         print(f"(increase: {price_increase * 100}%, decrease: {price_decrease * 100}%)")
         # 3.0. TP DUR: castig mare -> vinde o PROPORTIE din pozitie INDIFERENT de trend
         #      (coexista cu 3.1 de mai jos; backstop pt varfuri ratate de gate-ul de trend)
-        if HARD_TP_ENABLED and price_increase >= HARD_TP_PCT and avail_qty > 0:
-            if current_time_s - _hard_tp_last.get(symbol, 0) >= HARD_TP_COOLDOWN_S:
-                hard_qty = round(avail_qty * HARD_TP_FRACTION, 4)
-                print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% >= {HARD_TP_PCT*100:.0f}% "
-                      f"-> vand {HARD_TP_FRACTION*100:.0f}% ({hard_qty}) INDIFERENT de trend")
-                mkt.place_order(symbol, "SELL", current_price, hard_qty,
+        if HARD_TP_ENABLED and price_increase >= hard_tp_pct and avail_qty > 0:
+            if current_time_s - _hard_tp_last.get(symbol, 0) >= hard_tp_cd:
+                hard_qty = round(avail_qty * hard_tp_frac, 4)
+                print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% >= {hard_tp_pct*100:.0f}% "
+                      f"-> vand {hard_tp_frac*100:.0f}% ({hard_qty}) INDIFERENT de trend")
+                inst.place("SELL", current_price, hard_qty,
                     safeback_seconds=sbs, force=True, cancelorders=True, hours=2, pair=False)
                 _hard_tp_last[symbol] = current_time_s
                 return   # am vandut deja in acest tick; nu mai rula vanzarea de jos pe sold invechit
@@ -457,7 +493,7 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
             if not is_trend_up(symbol):
                 print(f"Price increased with {price_increase * 100}% by more than {gain_threshold * 100}% versus buy price and not trend up!")
                 if can_sell and avail_qty > 0:
-                    mkt.place_order(symbol, "SELL", current_price,
+                    inst.place("SELL", current_price,
                         avail_qty, safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=False)
                 else:
                     print(f"No can sell (can_sell={can_sell}, avail_qty={avail_qty})")
@@ -470,7 +506,7 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
             if not is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease * 100}% by more than {lost_threshold * 100}% versus buy price and not trend up!")
                 if can_sell and avail_qty > 0:
-                    mkt.place_order(symbol, "SELL", current_price,
+                    inst.place("SELL", current_price,
                         avail_qty, safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=True)
                 #po.place_SELL_order(symbol, current_price, qty)
                 else:
@@ -492,7 +528,7 @@ def monitor_price_and_trade(symbol, sbs, maxage_trade_s, gain_threshold=0.07, lo
                 print(f"Price decreased with {price_decrease_versus_sell * 100}% by more than {gain_threshold * 100}% versus sell price: Placing buy order")
                 #api.cancel_orders_old_or_outlier("BUY", "BTCUSDT", qty, hours=0.5, price_difference_percentage=0.1)
                 if can_buy:
-                    mkt.place_order(symbol, "BUY", current_price + 0.5,
+                    inst.place("BUY", current_price + 0.5,
                         qty, safeback_seconds=sbs, cancelorders=True, hours=48, pair=False)
                 else:
                    print("No can buy")
@@ -549,22 +585,21 @@ def main():
         print_number_of_orders(maxage_trade_s)
         print_number_of_trades(maxage_trade_s)
         
-        print("-----BTC------")
-        _bg, _bl, _bm = SYMBOL_PARAMS.get(sym.btcsymbol, (0.07, 0.033, 3600*24*7))
-        monitor_price_and_trade(sym.btcsymbol, sbs=d*24*3600+60, maxage_trade_s=_bm, gain_threshold=_bg, lost_threshold=_bl)
-        print("-----TAOUSDC------")
-        _tg, _tl, _tm = SYMBOL_PARAMS.get(sym.taosymbol, (0.092, 0.049, 3600*24*17))
-        monitor_price_and_trade(sym.taosymbol, sbs=d*24*3600+60, maxage_trade_s=_tm, gain_threshold=_tg, lost_threshold=_tl)
-        print("--------------")
-
-        # HYPE (Hyperliquid SPOT) — OPT-IN: gated de MT_HYPE_ENABLED (default OFF), ca
-        # un simplu deploy sa NU activeze HYPE pe flota. Ordinele HL raman DRY pana cand
-        # HL_LIVE_ORDERS=true (poarta finala, vezi hyperliquid_provider). Rutarea HYPEUSDC
-        # -> HyperliquidProvider se face automat de facada; Binance ramane neatins.
-        if os.environ.get("MT_HYPE_ENABLED", "false").strip().lower() == "true":
-            print("-----HYPEUSDC (Hyperliquid spot)------")
-            _hg, _hl_, _hm = SYMBOL_PARAMS.get(sym.hypesymbol, (0.092, 0.049, 3600*24*17))
-            monitor_price_and_trade(sym.hypesymbol, sbs=d*24*3600+60, maxage_trade_s=_hm, gain_threshold=_hg, lost_threshold=_hl_)
+        # PAS 4: itereaza instrumentele ENABLED din instruments.conf (namespace mt.*),
+        # rutate EXPLICIT pe providerul lor. BTC/TAO (Binance) raman IDENTICE; HYPE/Kraken/
+        # T212 intra cand le pui enabled=yes. Ordinele non-Binance raman DRY pana la portile
+        # lor (HL_LIVE_ORDERS / KRAKEN_LIVE_ORDERS / T212_LIVE_ORDERS).
+        try:
+            _instruments = load_for("mt")   # doar enabled, cu params mt.*
+        except Exception as _e:
+            print(f"[instruments.conf] {_e} — sar peste acest ciclu")
+            _instruments = {}
+        for _inst in _instruments.values():
+            print(f"-----{_inst.name} ({_inst.symbol}@{_inst.provider_label})------")
+            try:
+                monitor_price_and_trade(_inst, sbs=d*24*3600+60)
+            except Exception as _e:
+                print(f"[{_inst.name}] eroare in monitor: {_e}")
             print("--------------")
   
         with sell_lock:

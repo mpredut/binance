@@ -232,11 +232,18 @@ class MarketApi:
 # Constructia HyperliquidProvider() e ieftina (NU atinge SDK-ul); SDK-ul se incarca
 # lenes la prima folosire. Daca pana si importul modulului ar esua (n-ar trebui),
 # cadem curat pe Binance-only, ca flota sa nu fie afectata.
-try:
-    from hyperliquid_provider import HyperliquidProvider
-    _extra_providers = [HyperliquidProvider()]
-except Exception as _e:  # noqa: BLE001
-    print(f"market_api: HyperliquidProvider indisponibil ({_e}) — doar Binance")
-    _extra_providers = []
+_extra_providers = []
+# Fiecare provider in propriul try/except: import LAZY al SDK-urilor/clientilor, deci
+# constructia e ieftina; daca unul lipseste, ceilalti raman. Kraken/T212 sunt
+# EXPLICIT-ONLY (supports_symbol=False) -> NU schimba rutarea pe symbol; reachable doar
+# prin Instrument (provider_by_name). Deci ordinea lor aici nu afecteaza behavior-ul.
+for _modname, _clsname in (("hyperliquid_provider", "HyperliquidProvider"),
+                           ("kraken_provider", "KrakenProvider"),
+                           ("t212_provider", "T212Provider")):
+    try:
+        _mod = __import__(_modname, fromlist=[_clsname])
+        _extra_providers.append(getattr(_mod, _clsname)())
+    except Exception as _e:  # noqa: BLE001
+        print(f"market_api: {_clsname} indisponibil ({_e})")
 
 api = MarketApi([BinanceProvider()] + _extra_providers)
