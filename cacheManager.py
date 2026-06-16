@@ -16,7 +16,7 @@ from typing import Optional
 import log
 import utils as u
 import symbols as sym
-import bapi as api
+from binance_api import bapi as api
 
 #from log import PRINT_CONTEXT
 
@@ -591,14 +591,14 @@ class CacheTradeManager(CacheManagerInterface):
 
     def get_remote_items(self, symbol, startTime):
         import importlib
-        apitrades = importlib.import_module("bapi_trades")
+        apitrades = importlib.import_module("binance_api.bapi_trades")
         
         current_time = int(time.time() * 1000)
         backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
         
         # clientul INJECTAT (self.api_client), paginat → nu trunchiem la 1000 când
         # perioada are mai multe trade-uri.
-        import bapi_allorders as apiorders
+        from binance_api import bapi_allorders as apiorders
         new_trades = apiorders.paginate_my_trades(self.api_client.client, symbol, startTime, limit=1000)
         #new_trades = apitrades.get_my_trades(order_type=None, symbol=symbol, backdays=backdays, limit=1000)
  
@@ -630,7 +630,7 @@ class CacheOrderManager(CacheManagerInterface):
 
     def get_remote_items(self, symbol, startTime):
         #import bapi_trades as apitrades
-        import bapi_allorders as apiorders
+        from binance_api import bapi_allorders as apiorders
         
         current_time = int(time.time() * 1000)
         #backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
@@ -1730,7 +1730,7 @@ def enable_real_ws_event_sync():
     with _ws_bridge_lock:
         if _ws_bridge is not None:
             return _ws_bridge
-        import bapi_ws
+        from binance_api import bapi_ws
         # Clasa de stream trăiește în bapi_ws; cacheManager doar cablează callback-urile
         # de health (care driveează fallback-ul de polling via _should_poll).
         _ws_bridge = bapi_ws.BinanceAccountStream(
@@ -1780,7 +1780,7 @@ if __name__ == "__main__":
     # Rulăm CALCULUL COMPLET aici → cache_instant_trend.json e menținut continuu,
     # independent de tradeall (monitortrades/rtrade citesc de aici).
     try:
-        import bapi_ws
+        from binance_api import bapi_ws
         _trend_cpm = get_current_price_manager(
             ws_manager=bapi_ws.get_ws_manager(), sync_ts=0.8)
         _trend_cache24 = CacheFactory.get("Price24")

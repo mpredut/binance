@@ -21,12 +21,12 @@ from binance.exceptions import BinanceAPIException
 import utils as u
 import symbols as sym
 
-from bapi_client import client
+from .bapi_client import client
 
 import binance
 print(binance.__version__)
 
-import bapi_ws
+from . import bapi_ws
 
 # Function to handle Ctrl+C and shut down the WebSocket properly
 def signal_handler(sig, frame):
@@ -359,7 +359,7 @@ def check_order_filled(order_id, symbol):
 
 def check_order_filled_by_time(order_type, symbol, time_back_in_seconds, pret_min=None, pret_max=None):
     #import bapi_trades as apitrades
-    import bapi_allorders as apiorders
+    from . import bapi_allorders as apiorders
 
     backdays = math.ceil(time_back_in_seconds / 86400)
     #trades = apitrades.get_my_trades(order_type, symbol, backdays=backdays, limit=1000)

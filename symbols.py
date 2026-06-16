@@ -3,7 +3,7 @@ import math
 
 
 ####MYLIB
-from bapi_client import client
+from binance_api.bapi_client import client
 
 
 btcsymbol = 'BTCUSDC'

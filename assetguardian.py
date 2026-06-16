@@ -1,7 +1,7 @@
 import time
 
-import bapi as api
-import bapi_placeorder as po
+from binance_api import bapi as api
+from binance_api import bapi_placeorder as po
 import cacheManager as cm
 import symbols as sym
 

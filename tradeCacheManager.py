@@ -10,7 +10,7 @@ import threading
 import log
 import utils as u
 import symbols as sym
-import bapi as api
+from binance_api import bapi as api
 
 SYNC_INTERVAL_SEC = 600/10*5  # 10 minute
 

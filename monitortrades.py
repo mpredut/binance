@@ -15,10 +15,10 @@ from threading import Thread,Timer
 
 #my imports
 import symbols as sym
-import bapi as api
-import bapi_placeorder as po
-import bapi_trades as apitrades
-import bapi_allorders as apiorders
+from binance_api import bapi as api
+from binance_api import bapi_placeorder as po
+from binance_api import bapi_trades as apitrades
+from binance_api import bapi_allorders as apiorders
 
 import utils as u
 import log

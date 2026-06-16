@@ -9,8 +9,8 @@ from binance.exceptions import BinanceAPIException
 #my imports
 import utils as u
 import symbols as sym
-import bapi as api
-import bapi_placeorder as po
+from binance_api import bapi as api
+from binance_api import bapi_placeorder as po
 
 
 

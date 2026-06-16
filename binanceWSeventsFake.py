@@ -6,7 +6,7 @@ import time
 import log
 import utils as u
 import symbols as sym
-import bapi as api
+from binance_api import bapi as api
 
 
 # ------------------------------

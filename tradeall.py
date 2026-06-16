@@ -11,11 +11,11 @@ import log
 import alertnotifiers as alert
 import utils as u
 import symbols as sym
-import bapi as api
-import bapi_placeorder as po
+from binance_api import bapi as api
+from binance_api import bapi_placeorder as po
 
-import bapi_trades as apitrades
-import bapi_allorders as apiorders
+from binance_api import bapi_trades as apitrades
+from binance_api import bapi_allorders as apiorders
 
 #import priceprediction as pp
 import pandas as pd
@@ -557,7 +557,7 @@ if __name__ == "__main__":
     # IMPORTANT: creem singleton-ul CacheCurrentPrice INAINTE de Cache24 cu sync_ts
     # corect (altfel Cache24.get_remote_items l-ar crea intern cu sync_ts=30).
     import cacheManager as cm
-    import bapi_ws
+    from binance_api import bapi_ws
     # WS user-data bridge e opt-in; tradeall vrea execution reports (fill-uri).
     cm.enable_real_ws_event_sync()
     current_price_mgr = cm.get_current_price_manager(

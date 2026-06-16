@@ -17,8 +17,8 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import bapi as api  # noqa: E402
-import bapi_allorders as apiorders  # noqa: E402
+from binance_api import bapi as api  # noqa: E402
+from binance_api import bapi_allorders as apiorders  # noqa: E402
 import cacheManager as cm  # noqa: E402
 import symbols as sym  # noqa: E402
 
