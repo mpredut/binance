@@ -43,9 +43,22 @@ class KrakenProvider(MarketDataProvider):
     def _client(self):
         if self._cli is not None:
             return self._cli
-        if _KRAKEN_DIR not in sys.path:
+        # kraken/ are 'common.py' cu ACELASI nume ca hyperliquid/common.py. Daca HL a fost
+        # deja folosit in proces, sys.modules['common'] = al lui HL -> kraken_client
+        # (`from common import http_get`) ar lua modulul GRESIT. Importam kraken_client cu
+        # kraken/ in fata si 'common' evacuat, apoi RESTAURAM sys.path + cache-ul ca HL sa nu
+        # fie afectat. kraken_client isi leaga http_get la IMPORT -> o rezolvare corecta e de ajuns.
+        saved_path = list(sys.path)
+        saved_common = sys.modules.pop("common", None)
+        sys.modules.pop("kraken_client", None)
+        try:
             sys.path.insert(0, _KRAKEN_DIR)
-        from kraken_client import KrakenClient  # noqa: import lazy
+            from kraken_client import KrakenClient  # noqa: import lazy
+        finally:
+            sys.path[:] = saved_path                  # restaureaza ordinea (HL neafectat)
+            sys.modules.pop("common", None)           # scoate eventualul common al krakenului
+            if saved_common is not None:
+                sys.modules["common"] = saved_common  # repune common-ul lui HL
         self._cli = KrakenClient(os.environ.get("KRAKEN_API_KEY"),
                                  os.environ.get("KRAKEN_API_SECRET"))
         return self._cli
