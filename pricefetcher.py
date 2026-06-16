@@ -17,6 +17,9 @@ from binance_api import bapi as api
 
 # Import the base classes from cacheManager
 from cacheManager import CacheManagerInterface, CacheFactory, _should_poll_for_manager
+# Facada market-data (Faza 2a). market_api -> binance_api.bapi (nu importa pricefetcher),
+# deci sigur. BinancePricePlatform foloseste facada ca client de pret.
+import market_api as _market_api
 
 
 # ============================================
@@ -61,7 +64,10 @@ class PricePlatformInterface(ABC):
 
 class BinancePricePlatform(PricePlatformInterface):
     def __init__(self, api_client=None):
-        self.api_client = api_client or api
+        # Clientul de pret = facada market-data (Faza 2a). Pe perechile Binance
+        # rutarea ajunge la bapi → comportament identic. `self.api_client` ramane
+        # un obiect cu .get_current_price(symbol=...), exact ca bapi.
+        self.api_client = api_client or _market_api.api
         self._supported_symbols: Set[str] = set()
         self._usdc_pairs: Set[str] = set()
         self._usdt_pairs: Set[str] = set()

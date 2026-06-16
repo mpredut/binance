@@ -17,6 +17,10 @@ import log
 import utils as u
 import symbols as sym
 from binance_api import bapi as api
+# Facada market-data (Faza 2a). Import sigur: market_api -> binance_api.bapi (nu
+# importa cacheManager), deci nu inchide niciun ciclu. Pretul curent al lantului
+# de trend (CurrentPrice) trece prin acest singleton; trading-ul ramane pe bapi.
+import market_api as _market_api
 
 #from log import PRINT_CONTEXT
 
@@ -891,12 +895,17 @@ class CacheCurrentPriceManager(CacheManagerInterface):
     STALE_THRESHOLD_MS = 5_000  # get_price() forțează HTTP dacă prețul e > 5s vechi
     FREQ_WINDOW_SEC    = 60     # fereastra de măsurare a frecvenței update-urilor
 
-    def __init__(self, sync_ts, symbols, filename, ws_manager=None, api_client=api):
+    def __init__(self, sync_ts, symbols, filename, ws_manager=None, api_client=api,
+                 market_api=None):
         self._ws_manager        = ws_manager
         self._ws_last_event_ts  = 0.0      # setat înainte de super() !
         self._price_subscribers = []       # idem (base __init__ respectă hasattr)
         self._update_timestamps: dict = defaultdict(deque)  # idem — înainte de super()
         self._first_sleep       = True     # nu face fallback HTTP imediat (lasă WS să se conecteze)
+        # Facada market-data (Faza 2a). Default = singleton-ul global; injectabil în
+        # teste / Faza 2b. Setat ÎNAINTE de super() fiindcă base __init__ → load_state
+        # → get_remote_items îl folosește deja. Pe symbolurile Binance rutează la bapi.
+        self.market_api = market_api or _market_api.api
         super().__init__(sync_ts, symbols, filename, append_mode=False, api_client=api_client)
         if ws_manager is not None:
             ws_manager.subscribe(self)
@@ -941,9 +950,9 @@ class CacheCurrentPriceManager(CacheManagerInterface):
     # ── CacheManagerInterface — metode abstracte ──────────────────────────────
 
     def get_remote_items(self, symbol, startTime):
-        """Fetch preț curent via bapi.get_current_price."""
+        """Fetch preț curent via facada market-data (Binance → bapi.get_current_price)."""
         try:
-            price = self.api_client.get_current_price(symbol=symbol)
+            price = self.market_api.get_current_price(symbol=symbol)
             if price is None:
                 return []
             ts_ms = int(time.time() * 1000)
