@@ -65,9 +65,11 @@ for s in exp:
 
 # 2. current price
 cp = load("cache_currentprice.json") or {}
-print(f"-- cache_currentprice.json: {sorted(cp.keys())}")
+# format: {'fetchtime': {...}, 'items': {symbol: [[ts_ms, price]]}} (sau direct pe symbol)
+items = cp.get("items", cp) if isinstance(cp, dict) else {}
+print(f"-- cache_currentprice.json: {sorted(k for k in items.keys() if k != 'fetchtime')}")
 for s in exp:
-    entries = cp.get(s)
+    entries = items.get(s)
     if not entries or not isinstance(entries, list):
         problems.append(f"currentprice LIPSA {s}")
         print(f"   {s:10} LIPSESTE")
