@@ -157,6 +157,10 @@ def main() -> int:
                     help="MONITOR read-only al pozitiei reale: zero ordine, doar alerte. "
                          "Sigur in paralel cu botul de pe server.")
     ap.add_argument("--once", action="store_true", help="(cu --watch) o singura verificare si iese")
+    ap.add_argument("--close", action="store_true",
+                    help="IESIRE: vinde TOT spot-ul + acopera TOT short-ul (flat), apoi iese. "
+                         "Real daca STRAT_EXECUTE=true (altfel/--paper = simulare). "
+                         "OPRESTE intai botul+watchdog (vezi dn_close.sh) ca sa nu se bata cu el.")
     args = ap.parse_args()
 
     dry = args.paper or not (os.environ.get("STRAT_EXECUTE", "false").lower() == "true")
@@ -183,6 +187,19 @@ def main() -> int:
         return _cmd_status(client, params)
     if args.watch:
         return _cmd_watch(client, params, desktop=False, once=args.once)
+    if args.close:
+        # IESIRE one-shot: flat pe ambele picioare. legs() in REAL citeste soldurile
+        # reale; daca citirea esueaza -> NU inchidem orbeste. Foloseste _close existent.
+        dn = DeltaNeutral(client, params, dry_run=dry, desktop=False)
+        L = dn.legs()
+        if L is None:
+            log("  [--close] nu pot citi picioarele (API?) — NU inchid orbeste"); return 1
+        log(f"  [--close] inchid pozitia ({'PAPER (simulare)' if dry else '⚠ REAL — BANI ADEVARATI'}): "
+            f"spot={L['spot_qty']:.4f} perp={L['perp_szi']:.4f}")
+        dn._close(L, "inchidere manuala --close")
+        dn._save()
+        log("  [--close] gata — verifica rezultatul cu --status.")
+        return 0
 
     log("=== Hyperliquid DELTA-NEUTRAL bot ===")
     log(f"    coin={params.coin}  spot={params.spot_pair}  notional={params.notional} USDC/picior")
