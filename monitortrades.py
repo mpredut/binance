@@ -463,7 +463,7 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
         print(f"No current price for {symbol} (piata inchisa / indisponibil) — skip")
         return
     print(f"Current price for {symbol}: {current_price}")
-    avail_qty = inst.free()   # TOATA cantitatea disponibila a instrumentului (sold liber)
+    avail_qty = inst.free() or 0.0   # TOATA cantitatea disponibila a instrumentului (None->0 pt Kraken/T212)
 
     # 3. Verifica ordinele de cumparare
     if trade_orders_buy:

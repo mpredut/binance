@@ -124,9 +124,11 @@ ts = inst.get("TSLA_T212")
 if ts:
     check(ts.provider_label == "T212" and ts.market_hours == "rth", "TSLA_T212 -> T212 (rth)")
 mt = load_for("mt")
-check(set(mt.keys()) == {"BTC_BINANCE", "TAO_BINANCE"},
-      "load_for('mt') = doar enabled (BTC,TAO); HYPE/Kraken/T212 sunt enabled=no",
-      str(sorted(mt.keys())))
+check(all(i.enabled for i in mt.values()) and
+      all(any(k.startswith("mt.") for k in i.params) for i in mt.values()),
+      "load_for('mt') = doar instrumente enabled + cu params mt.*", str(sorted(mt.keys())))
+check(hype is None or not hype.enabled, "HYPE_HL e enabled=no in config")
+check("HYPE_HL" not in mt, "HYPE_HL (enabled=no) NU apare in load_for")
 try:                                  # pret public Kraken (informativ, tolerant la retea)
     print(f"  [info] Kraken HYPEUSD price = {kp.get_current_price('HYPEUSD') if kp else None}")
 except Exception as _e:  # noqa: BLE001
