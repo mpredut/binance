@@ -49,11 +49,11 @@ def parse_monitortrades_conf(path="monitortrades.conf"):
 
 print("==== 1. INCARCARE instruments.conf ====")
 inst = load_instruments()
-for name in ("BTC_BINANCE", "TAO_BINANCE", "HYPE_HL"):
+for name in ("BINANCE_BTC", "BINANCE_TAO", "HYPERLIQUID_HYPE"):
     check(name in inst, f"sectiune {name} prezenta")
-tao = inst.get("TAO_BINANCE")
-btc = inst.get("BTC_BINANCE")
-hype = inst.get("HYPE_HL")
+tao = inst.get("BINANCE_TAO")
+btc = inst.get("BINANCE_BTC")
+hype = inst.get("HYPERLIQUID_HYPE")
 
 if tao:
     check(tao.symbol == "TAOUSDC" and tao.base == "TAO", "TAO symbol/base",
@@ -65,7 +65,7 @@ if hype:
 
 print("\n==== 2. params mt.* == monitortrades.conf (behavior-preserving) ====")
 g, per = parse_monitortrades_conf()
-for symname, key in (("BTC_BINANCE", "BTCUSDC"), ("TAO_BINANCE", "TAOUSDC")):
+for symname, key in (("BINANCE_BTC", "BTCUSDC"), ("BINANCE_TAO", "TAOUSDC")):
     it = inst.get(symname)
     exp = per.get(key)
     if it and exp:
@@ -116,13 +116,13 @@ check(kp is not None, "provider_by_name('kraken')")
 check(tp is not None, "provider_by_name('t212')")
 check(kp is not None and kp.supports_symbol("HYPEUSD") is False,
       "Kraken explicit-only (supports_symbol=False, nu fura rutarea facadei)")
-hk = inst.get("HYPE_KRAKEN")
+hk = inst.get("KRAKEN_HYPE")
 if hk and hype:
     check(hk.provider_label == "Kraken" and hype.provider_label == "Hyperliquid",
           "ACELASI activ HYPE rutat pe 2 venue-uri", f"Kraken={hk.symbol} / HL={hype.symbol}")
-ts = inst.get("TSLA_T212")
+ts = inst.get("T212_SPCX")
 if ts:
-    check(ts.provider_label == "T212" and ts.market_hours == "rth", "TSLA_T212 -> T212 (rth)")
+    check(ts.provider_label == "T212" and ts.market_hours == "rth", "T212_SPCX -> T212 (rth)")
 mt = load_for("mt")
 check(all(i.enabled for i in mt.values()) and
       all(any(k.startswith("mt.") for k in i.params) for i in mt.values()),

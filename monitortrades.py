@@ -263,13 +263,8 @@ def is_trend_up(symbol):
             gradient = float(snap.get('final_trend', 0.0) or 0.0)
             return slope > 0 or (slope == 0 and gradient > 0)
     except Exception as e:
-        print(f"is_trend_up: snapshot direct esuat ({e}) — folosesc sell_recommendation")
-    rec = sell_recommendation.get(symbol)
-    if not rec:
-        return False   # simbol netrackuit (non-Binance, ex HYPEUSD pe Kraken): neutru -> nu blocheaza
-    slope = rec['slope']
-    gradient = rec['gradient']
-    return slope > 0 or (slope == 0 and gradient > 0)
+        print(f"is_trend_up: snapshot direct esuat ({e}) — tratez ca neutru")
+    return False   # fara snapshot in cache -> neutru (nu blocheaza vanzarea pe castig)
 
 
 def get_relevant_trade(trade_orders, trade_type, threshold_s, symbol):
@@ -605,17 +600,9 @@ def main():
                 print(f"[{_inst.name}] eroare in monitor: {_e}")
             print("--------------")
   
-        with sell_lock:
-            data = sell_recommendation[sym.btcsymbol]
-        procent_desired_profit = data['procent_desired_profit']
-        expired_duration = data['expired_duration']
-        min_procent = data['min_procent']
-        force_sell = data['force_sell']
-        days_after_use_current_price = data['days_after_use_current_price']      
-        
-        #update_trades(trades, sym.btcsymbol, maxage_trade_s, procent_desired_profit, expired_duration, min_procent)
-        #apply_sell_orders(trades, days_after_use_current_price, force_sell)
-        #monitor_close_orders_by_age2(maxage_trade_s)
+        # (eliminat: blocul sell_recommendation[btcsymbol] -> procent_*/force_sell etc.
+        #  alimenta DOAR functii comentate (update_trades/apply_sell_orders). Trendul vine
+        #  acum direct din cacheManager via is_trend_up.)
         time.sleep(60*0.8)  # Astept 1.8 minute.
         
         
