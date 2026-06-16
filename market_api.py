@@ -158,6 +158,10 @@ class MarketApi:
             raise ValueError("MarketApi: lista de provideri nu poate fi goala")
         self._providers: List[MarketDataProvider] = list(providers)
         self._route: dict = {}   # symbol -> provider (memoizare lock-free, idempotenta)
+        # Registry pe NUME (ex. 'binance', 'hyperliquid'): rutare EXPLICITA pe venue
+        # pt descriptorul Instrument, in loc de ghicitul prin supports_symbol. Aditiv —
+        # nu schimba rutarea pe symbol de mai jos.
+        self._by_name: dict = {p.name.lower(): p for p in self._providers}
 
     def _provider_for(self, symbol: str) -> MarketDataProvider:
         provider = self._route.get(symbol)
@@ -208,6 +212,13 @@ class MarketApi:
     def provider_name_for(self, symbol: str) -> str:
         """Numele providerului care ar servi symbolul (util pt debug/loguri)."""
         return self._provider_for(symbol).name
+
+    def provider_by_name(self, name: str) -> Optional[MarketDataProvider]:
+        """Providerul inregistrat sub `name` (case-insensitive, ex. 'binance',
+        'hyperliquid'); None daca nu exista. Rutare EXPLICITA pe venue, folosita de
+        descriptorul Instrument: instrumentul isi declara providerul, nu-l mai ghicim
+        din string-ul de symbol (necesar cand acelasi activ e pe mai multe venue-uri)."""
+        return self._by_name.get((name or "").strip().lower())
 
     @property
     def providers(self) -> List[MarketDataProvider]:
