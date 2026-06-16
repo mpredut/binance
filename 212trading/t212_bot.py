@@ -121,7 +121,11 @@ def main() -> int:
     ap.add_argument("--env-file", default=os.path.join(_HERE, ".env"))
     args = ap.parse_args()
 
-    load_dotenv(args.env_file)  # secrete PARTAJATE (o singura data, in os.environ)
+    # Secrete PARTAJATE din root binance/.env (NTFY/SMTP/etc., comune flotei) + secrete
+    # SPECIFICE T212 din folderul propriu (212trading/.env). Specificul se incarca ULTIMUL
+    # (prioritate la suprapuneri). Asa cheile T212 stau in folderul lor, nu in root.
+    load_dotenv(os.path.join(os.path.dirname(_HERE), ".env"))  # shared (root)
+    load_dotenv(args.env_file)                                 # specific (212trading/.env)
     cfg_dir = os.path.dirname(args.env_file) or _HERE
     assets = discover_assets(cfg_dir)
     if args.only:
