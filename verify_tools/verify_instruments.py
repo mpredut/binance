@@ -9,8 +9,12 @@ NU atinge flota. Confirma:
   4. operatii generice prin Instrument == facada directa (pret, sold).
 Exit 0 daca tot trece.
 """
+import os
 import re
 import sys
+
+# rulat din verify_tools/ -> pune RADACINA repo pe path pt importurile de mai jos
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from market_api import api
 from instrument import Instrument

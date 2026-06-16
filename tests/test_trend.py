@@ -14,7 +14,7 @@ import unittest
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from priceAnalysis import detect_long_term_trend  # noqa: E402
 
 H = 3600.0
