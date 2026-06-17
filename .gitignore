@@ -1,38 +1,39 @@
 # ============================================================================
-# Secrete: .env (per platforma) e gitignored si NU se comite NICIODATA.
-# Config NEsensibil:   config.env (per platforma)  -> SE comite (versionat).
-# Template secrete:    .env.example (per platforma) -> SE comite (placeholders).
+# .gitignore
+# Secrete (.env, *.pem) NU se comit NICIODATA. Config NEsensibil = config.env /
+# *.conf (versionate). Datele/cache-ul (json/jsonl/meta/lock/bak) se ignora global.
 # ============================================================================
-.env
-.claude/settings.local.json
 
-# Editor swap / temporar
+# --- Secrete (niciodata in git) ---
+.env
+*.pem
+
+# --- Config local / editor ---
+.claude/settings.local.json
 *.swp
 *.swo
 *.tmp
 *~
 
-# Cache files (runtime, per-proces) — acum in subfolderul cachedb/
-cachedb/
-cache_*.json
-last_watch_config.json
-priceanalysis.json
-index.html
-
-# Build
-*.egg-info/
+# --- Python / build / venv ---
 __pycache__/
 *.pyc
+*.egg-info/
 .pytest_cache/
 .venv/
 .myenv/
+myenv/
+
+# --- Date runtime / cache (cachedb/ + fisiere razlete) ---
+cachedb/
+*.json
+*.jsonl
+*.meta
+*.lock
+*.bak
+index.html
+
+# --- Loguri ---
 *.log
 *.log.[0-9]*
 .logrotate.state
-*.pem
-cache_*.jsonl
-*.meta
-*.bak
-*.json
-*.lock
-trade_cooldown.json
