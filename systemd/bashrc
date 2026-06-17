@@ -19,7 +19,7 @@ printf "🌍 Public IP      : %s\n" "$(piactl get pubip)"
 #source myenv/bin/activate && python demon.py && deactivate
 #nohup python3 demon.py &
 #
-#./binance_start.sh
+#./flota_start.sh
 #
 ps -aux | grep binance
 ps -aux | grep python

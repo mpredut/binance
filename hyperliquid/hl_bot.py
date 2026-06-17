@@ -2,9 +2,9 @@
 """
 hl_bot.py — watcher + auto-trade DCA/take-profit pe Hyperliquid (PERP long-only).
 
-IMPORTANT: ruleaza cu python-ul din venv-ul cu SDK:
-    /home/mariusp/binance/.venv/bin/python hl_bot.py
-(sau: source ../.venv/bin/activate; python hl_bot.py)
+IMPORTANT: ruleaza cu venv-ul cu SDK Hyperliquid (eth_account). Cel mai simplu:
+    ./hl_run.sh            # alege singur myenv (server) / .venv (local) / python3
+(sau manual: source ../myenv/bin/activate; python hl_bot.py)
 
 Comenzi:
     ...python hl_bot.py                  # ruleaza dupa .env

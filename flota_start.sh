@@ -6,10 +6,10 @@
 # A doua instanță nu obține lock-ul → iese imediat.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"   # radacina = locul scriptului (portabil, fara /home/predut hardcodat)
 mkdir -p "$SCRIPT_DIR/logs"   # loguri de consola in folder dedicat (nu mai in root)
-LOCK_PATH="$SCRIPT_DIR/binance_start.lock"
+LOCK_PATH="$SCRIPT_DIR/flota_start.lock"
 exec 9>"$LOCK_PATH" || exit 1
 if ! flock -n 9; then
-    echo "❌ binance_start.sh rulează deja (lock activ: $LOCK_PATH)."
+    echo "❌ flota_start.sh rulează deja (lock activ: $LOCK_PATH)."
     echo "   Pentru restart: 'systemctl restart binance' sau oprește instanța existentă."
     exit 1
 fi

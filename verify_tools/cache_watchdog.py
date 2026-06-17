@@ -178,7 +178,7 @@ def check_once(now=None):
     title = "⚠️ Cache STALE pe server"
     message = ("Cache-uri învechite (probabil cacheManager/priceAnalysis s-au oprit):\n"
                + "\n".join(lines)
-               + "\nVerifică flota (binance_start) și repornește.")
+               + "\nVerifică flota (flota_start) și repornește.")
     print(f"[watchdog] ALARMĂ:\n{message}")
     _send_ntfy(title, message)
     _send_email(title, message)

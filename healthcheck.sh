@@ -8,7 +8,7 @@ HLPY="$ROOT/myenv/bin/python"
 
 # ===== MOD --alert (pt CRON): verifica boturile, trimite ntfy DOAR daca lipseste ceva =====
 # Acopera golul: watchdog-ul existent reporneste flota, dar NU boturile. Alerteaza,
-# nu reporneste (boturile au nevoi de stare; mai bine te anunta sa dai ./all_start.sh).
+# nu reporneste (boturile au nevoi de stare; mai bine te anunta sa dai ./bots_start.sh).
 #   cron:  */10 * * * * /home/predut/binance/healthcheck.sh --alert >> /home/predut/binance/healthcheck.log 2>&1
 if [ "$1" = "--alert" ]; then
     checks="dn_bot.py\$|DN-bot
@@ -27,7 +27,7 @@ tradeall.py|tradeall"
     if [ -n "$missing" ]; then
         TOPIC=$(grep -hs NTFY_TOPIC "$ROOT/kraken/.env" "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '" ')
         [ -n "$TOPIC" ] && curl -s -m 10 -H "Title: Boti opriti pe server" \
-            -d "Procese moarte:$missing  -> ruleaza ./all_start.sh" "https://ntfy.sh/$TOPIC" >/dev/null
+            -d "Procese moarte:$missing  -> ruleaza ./bots_start.sh" "https://ntfy.sh/$TOPIC" >/dev/null
         echo "$(date '+%H:%M') ALERTA: lipsesc -$missing"
     else
         echo "$(date '+%H:%M') OK (toti botii ruleaza)"
@@ -39,7 +39,7 @@ fi
 # Boturile (all_start) nu erau supravegheate de nimic. Aici le repornim individual
 # (restart curat -> isi reiau starea singure), cu backoff: max 3 reporniri / 30 min,
 # apoi escaladare la interventie manuala (anti crash-loop). FLOTA = doar alerta (o tine
-# binance_start). TRAILING-ul e acum repornit LIVE (KRAKEN_TRAILING_ENABLED=true) ca ceilalti boti.
+# flota_start). TRAILING-ul e acum repornit LIVE (KRAKEN_TRAILING_ENABLED=true) ca ceilalti boti.
 # Bonus: dupa un reboot, aduce boturile inapoi singur. Cron sugerat:
 #   */5 * * * * /home/predut/binance/healthcheck.sh --supervise >> /home/predut/binance/healthcheck.log 2>&1
 if [ "$1" = "--supervise" ]; then
@@ -82,7 +82,7 @@ kraken/trailing_stop.py|$ROOT|KRAKEN_TRAILING_ENABLED=true nohup python3 kraken/
         push "Bot repornit" "$label murise -> REPORNIT (incercarea $cnt/$MAX)"
         echo "$(date '+%H:%M') $label REPORNIT (incercarea $cnt)"
     done <<< "$bots"
-    # FLOTA: doar alerta (o tine binance_start). TRAILING-ul e acum in lista de restart de sus.
+    # FLOTA: doar alerta (o tine flota_start). TRAILING-ul e acum in lista de restart de sus.
     miss=""
     for s in cacheManager.py priceAnalysis.py tradeall.py monitortrades.py rtrade.py market_alerts.py assetguardian.py; do
         pgrep -f "$s" >/dev/null 2>&1 || miss="$miss ${s%.py}"

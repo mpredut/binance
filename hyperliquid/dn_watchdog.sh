@@ -4,7 +4,7 @@
 # dn_bot.log nu s-a mai scris de > DN_STALE_SEC). Heartbeat = mtime-ul dn_bot.log
 # (botul logheaza la FIECARE tick / eroare, deci log inghetat = bot hung).
 #
-# De ce: spre deosebire de flota Binance (binance_start.sh + cron watchdog), dn_bot
+# De ce: spre deosebire de flota Binance (flota_start.sh + cron watchdog), dn_bot
 # n-avea niciun supervizor — a stat hung ~39h fara sa-l reia nimeni. Vezi memoria
 # proiectului "dn-bot-fara-watchdog".
 #
