@@ -557,17 +557,20 @@ class CacheManagerInterface(ABC):
             last_maint = time.time()
             last_resync = time.time()
             while True:
-                if self._should_poll():
-                    self.query_remote_and_update_cache()
-                self.save_state_to_file_if_enabled()   # are guard anti-suprascriere date vechi
-                # Reconciliere mem↔fișier periodică (la 10 min)
-                if (time.time() - last_resync) > self.RESYNC_INTERVAL_SEC:
-                    self.resync_mem_file()
-                    last_resync = time.time()
-                # Mentenanță retenție/rotație (append): săptămânal
-                if self.append_persist and (time.time() - last_maint) > self.RETENTION_CHECK_INTERVAL_SEC:
-                    self.maintain_append_persist()
-                    last_maint = time.time()
+                try:
+                    if self._should_poll():
+                        self.query_remote_and_update_cache()
+                    self.save_state_to_file_if_enabled()   # are guard anti-suprascriere date vechi
+                    # Reconciliere mem↔fișier periodică (la 10 min)
+                    if (time.time() - last_resync) > self.RESYNC_INTERVAL_SEC:
+                        self.resync_mem_file()
+                        last_resync = time.time()
+                    # Mentenanță retenție/rotație (append): săptămânal
+                    if self.append_persist and (time.time() - last_maint) > self.RETENTION_CHECK_INTERVAL_SEC:
+                        self.maintain_append_persist()
+                        last_maint = time.time()
+                except Exception as _e:   # erori tranzitorii (retea/HTTP) NU mai omoara thread-ul de sync
+                    builtins.print(f"[{self.cls_name}] eroare in bucla de sync (continui): {_e}")
                 time.sleep(self.sync_ts)
 
         self.thread = threading.Thread(target=run, name=self.cls_name, daemon=True)
