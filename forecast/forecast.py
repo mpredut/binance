@@ -39,8 +39,8 @@ import numpy as np
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # forecast/ -> rădăcina repo
 sys.path.insert(0, _ROOT)
-from trend.trend_survival import fetch_klines  # noqa: E402
-from trend.trend_stats import mann_kendall, hurst_rs  # noqa: E402
+from trend_survival import fetch_klines  # noqa: E402
+from trend_stats import mann_kendall, hurst_rs  # noqa: E402
 
 HORIZON_H = 24
 WARMUP = 240            # ore de istoric necesare pt feature-uri (Hurst pe 240h)

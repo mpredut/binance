@@ -367,7 +367,7 @@ def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
     if mk_alpha:
         # filtru Mann-Kendall: panta ferestrei CURENTE trebuie sa fie un trend
         # SEMNIFICATIV statistic, nu zgomot — altfel nu raportam directie
-        from trend.trend_stats import mann_kendall
+        from forecast.trend_stats import mann_kendall
         _, _, p_mk = mann_kendall(prices[cur_idx[0]:cur_idx[1]])
         if p_mk > mk_alpha:
             return None
@@ -459,7 +459,7 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
 
     # regimul seriei (Hurst): persistent = trend-following favorizat;
     # mean-reverting = trendurile mor repede (informativ, atasat rezultatului)
-    from trend.trend_stats import hurst_rs, hurst_regime
+    from forecast.trend_stats import hurst_rs, hurst_regime
     h = hurst_rs(prices)
     res['hurst'] = h
     res['regime'] = hurst_regime(h)
@@ -551,7 +551,7 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=No
 
     if T_quanta is None:
         try:
-            from trend.trend_survival import estimate_T
+            from forecast.trend_survival import estimate_T
             est = estimate_T(symbol)
             T_quanta = est["T"]
             print(f"[{symbol}] T AUTO (empiric hibrid): {T_quanta} zile  "
