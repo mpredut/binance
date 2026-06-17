@@ -14,7 +14,10 @@
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-PY="${DN_PY:-$HERE/../myenv/bin/python}"   # python-ul cu SDK HL (myenv pe server)
+# myenv are SDK-ul HL (eth_account). Activam venv-ul -> `python3` devine cel din myenv
+# (model ca flota_start; cmdline curat "python3 dn_bot.py", fara cale hardcodata urata).
+VENV_ACT="$HERE/../myenv/bin/activate"
+[ -f "$VENV_ACT" ] && source "$VENV_ACT"
 LOG="$HERE/dn_bot.log"                      # heartbeat-ul rebalansarii
 WLOG="$HERE/dn_watchdog.log"                # jurnalul watchdog-ului
 STALE_SEC="${DN_STALE_SEC:-600}"            # >10 min fara scriere = hung (tick la 2 min, backoff max 5 min)
@@ -65,11 +68,11 @@ else
 fi
 
 if [ "$need_start" -eq 1 ]; then
-  if [ ! -x "$PY" ]; then
-    log "EROARE: python lipsa/neexecutabil la $PY — nu pot porni"
+  if ! python3 -c 'import eth_account' 2>/dev/null; then
+    log "EROARE: eth_account indisponibil (myenv neactivat?) — nu pot porni dn_bot"
     exit 1
   fi
   cd "$HERE" || exit 1
-  setsid nohup "$PY" dn_bot.py >> "$LOG" 2>&1 < /dev/null &
-  log "pornit dn_bot.py (PY=$PY)"
+  setsid nohup python3 dn_bot.py >> "$LOG" 2>&1 < /dev/null &
+  log "pornit dn_bot.py (python3 din myenv)"
 fi

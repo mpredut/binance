@@ -43,6 +43,7 @@ COOLDOWN_MINUTES = float(os.environ.get("WATCHDOG_COOLDOWN_MINUTES", "60"))
 _STALE_OVERRIDES = {
     "cache_price_long_trend.json": 90,
     "cache_asset_value.json": 60,
+    "cache_T_trend.json": 11520,   # T empiric per moneda: recalc la 7 zile -> prag 8 zile
 }
 
 

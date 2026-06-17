@@ -134,8 +134,8 @@ def verdict(cont: dict, mid: float) -> str:
 # ---------------------------------------------------------------------------
 import os
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-T_CACHE_FILE = os.path.join(_HERE, "cachedb", "cache_T_trend.json")
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # forecast/ -> radacina repo
+T_CACHE_FILE = os.path.join(_ROOT, "cachedb", "cache_T_trend.json")
 
 
 def hybrid_T(dur_hours, prior_T=14.0, k=30.0, t_min=4, t_max=30) -> dict:
