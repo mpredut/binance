@@ -1,7 +1,7 @@
 """
 pricewindow — primitive de fereastră de preț + analiză de trend.
 
-Extras din tradeall.py ca să fie reutilizabil (tradeall, CacheInstantTrendManager,
+Extras din tradeall.py ca să fie reutilizabil (tradeall, CachePriceShortTrendManager,
 teste) fără logica de trading.
 
 Conține:

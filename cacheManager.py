@@ -1079,10 +1079,10 @@ def get_current_price_manager(ws_manager=None, symbols=None, sync_ts=None) -> Ca
 
 
 # ######
-# ###### CacheInstantTrendManager — ferestre + trend calculat + cache cross-process
+# ###### CachePriceShortTrendManager — ferestre + trend calculat + cache cross-process
 # ######
 
-class CacheInstantTrendManager:
+class CachePriceShortTrendManager:
     """Deține ferestrele de preț per simbol, calculează trendul instant și
     cache-uiește snapshot-ul într-un fișier partajat ÎNTRE PROCESE.
 
@@ -1254,7 +1254,7 @@ class CacheInstantTrendManager:
                     try:
                         self.evaluate_full(s)
                     except Exception as e:
-                        print(f"[CacheInstantTrendManager] evaluate_full {s}: {e}")
+                        print(f"[CachePriceShortTrendManager] evaluate_full {s}: {e}")
                 time.sleep(self.FULL_EVAL_INTERVAL_SEC)
         self._full_eval_thread = threading.Thread(target=run, name="InstantTrendFullEval", daemon=True)
         self._full_eval_thread.start()
@@ -1272,7 +1272,7 @@ class CacheInstantTrendManager:
                           final_trend=(1 if g > 0 else -1 if g < 0 else 0),
                           current_price=price, ts=time.time())
         except Exception as e:
-            print(f"[CacheInstantTrendManager] on_price_update {symbol}: {e}")
+            print(f"[CachePriceShortTrendManager] on_price_update {symbol}: {e}")
 
     # ── API de calcul ─────────────────────────────────────────────────────────
     def get_window(self, symbol, seconds=None):
@@ -1294,7 +1294,7 @@ class CacheInstantTrendManager:
         try:
             atomic_write_json(self.filename, self._mem)
         except Exception as e:
-            print(f"[CacheInstantTrendManager] scriere {self.filename}: {e}")
+            print(f"[CachePriceShortTrendManager] scriere {self.filename}: {e}")
 
     def _read_file(self):
         # Citim mereu (fișier mic, citit ocazional de readeri) — corectitudine
@@ -1389,7 +1389,7 @@ class CacheInstantTrendManager:
         if self.is_snapshot_fresh(symbol, max_age_sec):
             return self._read_file().get(symbol)
         # Fișier prea vechi → failover: preiau calculul (autonom de aici încolo).
-        builtins.print(f"[CacheInstantTrendManager][WARN] fișier stale → "
+        builtins.print(f"[CachePriceShortTrendManager][WARN] fișier stale → "
                        f"failover la calcul propriu ({symbol})")
         self.prime_from_file()
         self.start_computation(cache24_managers, current_price_mgr)
@@ -1468,26 +1468,26 @@ class CacheInstantTrendManager:
         return waited
 
 
-_instant_trend_instance = None
-_instant_trend_lock = threading.Lock()
+_short_trend_instance = None
+_short_trend_lock = threading.Lock()
 
-def get_instant_trend_manager(symbols=None, filename="cache_instant_trend.json", writer=False):
-    """Singleton CacheInstantTrendManager.
+def get_short_trend_manager(symbols=None, filename="cache_instant_trend.json", writer=False):
+    """Singleton CachePriceShortTrendManager.
     writer=True → procesul scrie fișierul (ex. cacheManager.py). Ceilalți (tradeall
     care calculează pt logica lui, sau readerii) folosesc writer=False."""
-    global _instant_trend_instance
-    if _instant_trend_instance is not None:
+    global _short_trend_instance
+    if _short_trend_instance is not None:
         if writer:
-            _instant_trend_instance.writer = True   # promovare la writer (idempotent)
-        return _instant_trend_instance
-    with _instant_trend_lock:
-        if _instant_trend_instance is not None:
+            _short_trend_instance.writer = True   # promovare la writer (idempotent)
+        return _short_trend_instance
+    with _short_trend_lock:
+        if _short_trend_instance is not None:
             if writer:
-                _instant_trend_instance.writer = True
-            return _instant_trend_instance
+                _short_trend_instance.writer = True
+            return _short_trend_instance
         _syms = symbols if symbols is not None else sym.symbols
-        _instant_trend_instance = CacheInstantTrendManager(_syms, filename, writer=writer)
-    return _instant_trend_instance
+        _short_trend_instance = CachePriceShortTrendManager(_syms, filename, writer=writer)
+    return _short_trend_instance
 
 
 # ######
@@ -1839,7 +1839,7 @@ if __name__ == "__main__":
         _trend_cpm = get_current_price_manager(
             ws_manager=bapi_ws.get_ws_manager(), symbols=_trend_syms, sync_ts=0.8)
         _trend_cache24 = CacheFactory.get("Price24")
-        _trend_mgr = get_instant_trend_manager(symbols=_trend_syms, writer=True)   # singurul writer al fișierului
+        _trend_mgr = get_short_trend_manager(symbols=_trend_syms, writer=True)   # singurul writer al fișierului
         _trend_mgr.start_computation(_trend_cache24, _trend_cpm, run_full_eval=True)
         print("⚙️ cacheManager: calcul trend complet pornit (cache_instant_trend.json).")
         if _nb_syms:   # WS-ul e doar Binance -> impinge manual preturile non-Binance in lant

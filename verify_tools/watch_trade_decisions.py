@@ -53,7 +53,7 @@ def position(symbol, maxage=17 * 24 * 3600):
 
 
 def main():
-    mgr = cm.get_instant_trend_manager()
+    mgr = cm.get_short_trend_manager()
     print(f"==== TRADE WATCH {time.strftime('%Y-%m-%d %H:%M:%S')} ====")
     for s in SYMBOLS:
         snap = mgr.get_snapshot(s) or {}

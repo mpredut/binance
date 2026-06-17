@@ -146,12 +146,12 @@ class StateTracker:
         """Construiește sell_recommendation din:
           - CONFIG static (force_sell, procent_desired_profit, etc.) = defaults din cod
           - SEMNALE de trend (slope/pos/gradient/tick/min/max) = snapshot-ul din
-            CacheInstantTrendManager (cross-process, scris de tradeall).
+            CachePriceShortTrendManager (cross-process, scris de tradeall).
         Înlocuiește fostul sell_recommendation.csv."""
         global sell_recommendation
         try:
             import cacheManager as cm
-            mgr = cm.get_instant_trend_manager()
+            mgr = cm.get_short_trend_manager()
 
             new_rec = {}
             for symbol, cfg in default_values_sell_recommendation.items():
@@ -169,7 +169,7 @@ class StateTracker:
             with sell_lock:
                 sell_recommendation = new_rec
 
-            print(f"sell_recommendation actualizat din CacheInstantTrendManager!")
+            print(f"sell_recommendation actualizat din CachePriceShortTrendManager!")
             self.update_states_from_sell_recommendation()
         except Exception as e:
             print(f"Eroare update_sell_recommendation din cacheManager: {e}. Folosesc defaults.")
@@ -257,7 +257,7 @@ def is_trend_up(symbol):
     gradient_recent = momentum rapid real; fallback pe slope_small, apoi pe copie."""
     try:
         import cacheManager as cm
-        snap = cm.get_instant_trend_manager().get_snapshot(symbol)
+        snap = cm.get_short_trend_manager().get_snapshot(symbol)
         if snap:
             slope = float(snap.get('gradient_recent', snap.get('slope_small', 0.0)) or 0.0)
             gradient = float(snap.get('final_trend', 0.0) or 0.0)
@@ -551,7 +551,7 @@ def main():
 
     #api.get_binance_symbols(sym.taosymbol)
 
-    # sell_recommendation vine din CacheInstantTrendManager (cross-process), nu din CSV.
+    # sell_recommendation vine din CachePriceShortTrendManager (cross-process), nu din CSV.
     state_tracker.update_sell_recommendation()
     state_tracker.display_sell_recommendation()
 

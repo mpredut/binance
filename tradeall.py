@@ -233,7 +233,7 @@ class TrendState:
 
 
 # NOTĂ: sell_recommendation.csv a fost eliminat. Semnalele de trend
-# (slope/pos/gradient/tick/min/max) sunt publicate în CacheInstantTrendManager
+# (slope/pos/gradient/tick/min/max) sunt publicate în CachePriceShortTrendManager
 # (snapshot per simbol) și citite cross-process de monitortrades etc.
 
 
@@ -453,7 +453,7 @@ MAX_EVAL_INTERVAL_SEC = 30.0   # ceiling/heartbeat: cel puțin o evaluare la 30s
 
 class TrendCoordinator:
     """Bucla de EVALUARE TRADING (event-driven + heartbeat). Ferestrele, calculul
-    de trend și cache-ul cross-process stau în CacheInstantTrendManager; aici doar
+    de trend și cache-ul cross-process stau în CachePriceShortTrendManager; aici doar
     consumăm (windows/analyzers/trend) și luăm decizii (handle_symbol/logic)."""
     def __init__(self, symbols, instant_mgr, current_price_mgr, cache24_managers=None,
                  min_interval=MIN_EVAL_INTERVAL_SEC, max_interval=MAX_EVAL_INTERVAL_SEC):
@@ -569,7 +569,7 @@ if __name__ == "__main__":
     print(f"Quantities: {api.quantities}")
 
     # Managerul de trend: deține ferestrele, calculează trendul, cache cross-process.
-    instant_mgr = cm.get_instant_trend_manager()
+    instant_mgr = cm.get_short_trend_manager()
     instant_mgr.start_computation(cache24_managers, current_price_mgr)
 
     coordinator = TrendCoordinator(

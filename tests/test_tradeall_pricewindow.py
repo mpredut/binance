@@ -902,7 +902,7 @@ class TestTrendCoordinator(unittest.TestCase):
         self.cpm.on_items_update("BTCUSDT", [60000.0])
 
         # Managerul deține ferestrele + calc + cache cross-process
-        self.mgr = cm.CacheInstantTrendManager(["BTCUSDT"], os.path.join(self.tmp, "trend.json"))
+        self.mgr = cm.CachePriceShortTrendManager(["BTCUSDT"], os.path.join(self.tmp, "trend.json"))
         self.mgr.start_computation({"BTCUSDT": self.cache24}, self.cpm)
 
     def _make_coord(self):
