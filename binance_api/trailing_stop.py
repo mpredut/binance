@@ -36,8 +36,10 @@ import os
 import sys
 import time
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_STATE = os.path.join(_HERE, "cachedb", "trailing_state.json")
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # binance_api/ -> radacina repo
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)   # ruleaza si ca script (python binance_api/trailing_stop.py)
+DEFAULT_STATE = os.path.join(_ROOT, "cachedb", "trailing_state.json")
 
 # PRAG LARG = DISJUNCTOR DE CRASH, nu unealta de profit.
 # Walk-forward out-of-sample (feed real 291z) a aratat ca trailing-ul STRANS (8-12%)
