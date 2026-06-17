@@ -19,7 +19,7 @@ from binance_api import bapi as api
 from cacheManager import CacheManagerInterface, CacheFactory, _should_poll_for_manager
 # Facada market-data (Faza 2a). market_api -> binance_api.bapi (nu importa pricefetcher),
 # deci sigur. BinancePricePlatform foloseste facada ca client de pret.
-import market_api as _market_api
+import providers.market_api as _market_api
 
 
 # ============================================

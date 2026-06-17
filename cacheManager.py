@@ -20,7 +20,7 @@ from binance_api import bapi as api
 # Facada market-data (Faza 2a). Import sigur: market_api -> binance_api.bapi (nu
 # importa cacheManager), deci nu inchide niciun ciclu. Pretul curent al lantului
 # de trend (CurrentPrice) trece prin acest singleton; trading-ul ramane pe bapi.
-import market_api as _market_api
+import providers.market_api as _market_api
 
 #from log import PRINT_CONTEXT
 

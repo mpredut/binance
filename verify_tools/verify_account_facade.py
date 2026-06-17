@@ -19,7 +19,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from binance_api import bapi as api                  # noqa: E402
 from binance_api import bapi_allorders as apiorders  # noqa: E402
-from market_api import api as mkt                     # noqa: E402  (facada singleton)
+from providers.market_api import api as mkt                     # noqa: E402  (facada singleton)
 import symbols as sym                                 # noqa: E402
 
 MAXAGE = 17 * 24 * 3600   # ca trade_watch.position (referinta botului)

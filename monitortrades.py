@@ -23,7 +23,7 @@ from binance_api import bapi_allorders as apiorders
 # nu mai direct prin bapi/apiorders. Asa monitortrades devine portabil pe HYPE.
 # `mkt` = singletonul facadei (azi ruteaza simbolurile Binance tot la bapi, identic).
 # place_order (po) si WS RAMAN Binance-specifice, neatinse.
-from market_api import api as mkt
+from providers.market_api import api as mkt
 
 import utils as u
 import log

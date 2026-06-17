@@ -16,7 +16,7 @@ import sys
 # rulat din verify_tools/ -> pune RADACINA repo pe path pt importurile de mai jos
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from market_api import api
+from providers.market_api import api
 from instrument import Instrument
 from instruments_config import load_instruments, load_for
 

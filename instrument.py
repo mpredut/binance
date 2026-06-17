@@ -18,7 +18,7 @@ neambiguu chiar daca acelasi asset apare pe mai multe venue-uri.
 """
 from typing import Optional, List, Callable, Any
 
-from market_api import api as _default_api
+from providers.market_api import api as _default_api
 
 
 class Instrument:
