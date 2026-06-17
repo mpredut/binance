@@ -5,6 +5,7 @@
 # supervizare": fiecare reînvie procesele pe care le omoară cealaltă → DUPLICARE.
 # A doua instanță nu obține lock-ul → iese imediat.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"   # radacina = locul scriptului (portabil, fara /home/predut hardcodat)
+mkdir -p "$SCRIPT_DIR/logs"   # loguri de consola in folder dedicat (nu mai in root)
 LOCK_PATH="$SCRIPT_DIR/binance_start.lock"
 exec 9>"$LOCK_PATH" || exit 1
 if ! flock -n 9; then
@@ -97,7 +98,7 @@ FAILED=()
 echo "🚀 Pornesc scripturile Python..."
 # Pornim scripturile
 for script in "${scripts[@]}"; do
-    log="$SCRIPT_DIR/${script%.py}.log"
+    log="$SCRIPT_DIR/logs/${script%.py}.log"
     LOGS+=("$log")
     cd "$SCRIPT_DIR" || exit 1
     nohup python "$script" > "$log" 2>&1 &
@@ -141,7 +142,7 @@ ps aux | grep '[p]ython'
 # din mediul curent (SCRIPT_DIR + python-ul din venv activat), deci e corect oriunde.
 WATCHDOG_MARKER="price_monitor_watchdog.py"
 WATCHDOG_PY="$(command -v python)"
-WATCHDOG_LINE="*/5 * * * * cd $SCRIPT_DIR && $WATCHDOG_PY $SCRIPT_DIR/$WATCHDOG_MARKER >> $SCRIPT_DIR/watchdog.log 2>&1"
+WATCHDOG_LINE="*/5 * * * * cd $SCRIPT_DIR && $WATCHDOG_PY $SCRIPT_DIR/$WATCHDOG_MARKER >> $SCRIPT_DIR/logs/watchdog.log 2>&1"
 
 install_watchdog() {
     ( crontab -l 2>/dev/null | grep -v "$WATCHDOG_MARKER"; echo "$WATCHDOG_LINE" ) | crontab -
