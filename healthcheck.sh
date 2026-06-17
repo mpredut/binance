@@ -14,7 +14,7 @@ if [ "$1" = "--alert" ]; then
     checks="dn_bot.py\$|DN-bot
 dn_bot.py --watch|DN-watch
 kraken_bot.py|Kraken-bot
-xstock_watch.py|xStock-watch
+kraken_xstock_watch.py|xStock-watch
 t212_bot.py|T212-bot
 cacheManager.py|cacheManager
 priceAnalysis.py|priceAnalysis
@@ -61,7 +61,7 @@ if [ "$1" = "--supervise" ]; then
     bots="dn_bot.py\$|$ROOT/hyperliquid|nohup $HLPY dn_bot.py > dn_bot.log 2>&1 &|DN-bot
 dn_bot.py --watch|$ROOT/hyperliquid|nohup $HLPY dn_bot.py --watch > dn_watch.log 2>&1 &|DN-watch
 kraken_bot.py|$ROOT/kraken|nohup python3 kraken_bot.py > kraken_bot.log 2>&1 &|Kraken-bot
-xstock_watch.py|$ROOT/kraken|nohup python3 xstock_watch.py > xstock_watch.log 2>&1 &|xStock-watch
+kraken_xstock_watch.py|$ROOT/kraken|nohup python3 kraken_xstock_watch.py > kraken_xstock_watch.log 2>&1 &|xStock-watch
 t212_bot.py|$ROOT/212trading|nohup python3 t212_bot.py > t212_bot.log 2>&1 &|T212-bot
 kraken/trailing_stop.py|$ROOT|KRAKEN_TRAILING_ENABLED=true nohup python3 kraken/trailing_stop.py > kraken/trail_k.log 2>&1 &|Kraken-trailing"
     while IFS='|' read -r pat dir cmd label; do
@@ -94,7 +94,7 @@ fi
 
 echo "============ HEALTHCHECK $(date '+%Y-%m-%d %H:%M') ============"
 echo "=== PROCESE (etime = de cat ruleaza) ==="
-ps -eo etime,args | grep -E "dn_bot|kraken_bot|xstock_watch|t212_bot|ipo.py|trailing_stop|cacheManager|priceAnalysis|tradeall|rtrade|monitortrades|market_alerts|run_price_monitor|assetguardian" | grep -v grep
+ps -eo etime,args | grep -E "dn_bot|kraken_bot|kraken_xstock_watch|t212_bot|ipo.py|trailing_stop|cacheManager|priceAnalysis|tradeall|rtrade|monitortrades|market_alerts|run_price_monitor|assetguardian" | grep -v grep
 
 echo "=== HYPERLIQUID DN ==="
 ( cd "$ROOT/hyperliquid" && "$HLPY" dn_bot.py --status 2>&1 | grep -E "SPOT|PERP|DELTA|FUNDING|LICHIDARE|COLATERAL" )
@@ -106,7 +106,7 @@ from common import load_dotenv
 load_dotenv(".env"); load_dotenv("config.env")
 from kraken_client import KrakenClient
 try:
-    from xstock_watch import yahoo_last
+    from kraken_xstock_watch import yahoo_last
 except Exception:
     yahoo_last = lambda s: None
 c = KrakenClient(os.environ.get("KRAKEN_API_KEY"), os.environ.get("KRAKEN_API_SECRET"))

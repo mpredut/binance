@@ -17,7 +17,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import xstock_watch as xw  # noqa: E402
+import kraken_xstock_watch as xw  # noqa: E402
 import strategy            # noqa: E402
 from strategy import Strategy, StratParams, state_path_for  # noqa: E402
 

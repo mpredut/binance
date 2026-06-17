@@ -9,9 +9,9 @@ nohup python dn_bot.py --watch > dn_watch.log 2>&1 &
 echo "=== KRAKEN XSTOCK WATCH (doar ALERTE — fara auto-start!) ==="
 # XSTOCK_AUTOSTART=false e OBLIGATORIU local: serverul porneste botul real la
 # alocare; doua watchere cu auto-start = DOUA boturi pe aceeasi pozitie SPCX.
-pkill -f xstock_watch.py 2>/dev/null || true
+pkill -f kraken_xstock_watch.py 2>/dev/null || true
 sleep 1
 cd ~/binance/kraken
-XSTOCK_AUTOSTART=false nohup python xstock_watch.py > xstock_watch.log 2>&1 &
+XSTOCK_AUTOSTART=false nohup python kraken_xstock_watch.py > kraken_xstock_watch.log 2>&1 &
 
 echo "DONE"

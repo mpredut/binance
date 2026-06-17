@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-xstock_watch.py — watcher pt alocarea xStocks (ex. SPCX) pe Kraken.
+kraken_xstock_watch.py — watcher pt alocarea xStocks (ex. SPCX) pe Kraken.
 
 Ce face, la fiecare verificare:
   1. BALANTA (privat): detecteaza ORICE activ NOU aparut in cont (alocarea poate
@@ -12,9 +12,9 @@ Ce face, la fiecare verificare:
      +XSTOCK_TP_ALERT_PCT% / -XSTOCK_SL_ALERT_PCT% fata de pretul alocarii.
      Pret: perechea Kraken daca e listata, altfel subiacentul de pe Yahoo.
 
-  python3 xstock_watch.py            # bucla continua
-  python3 xstock_watch.py --once     # o singura verificare (test)
-  python3 xstock_watch.py --status   # arata snapshot-ul curent si iese
+  python3 kraken_xstock_watch.py            # bucla continua
+  python3 kraken_xstock_watch.py --once     # o singura verificare (test)
+  python3 kraken_xstock_watch.py --status   # arata snapshot-ul curent si iese
 """
 
 from __future__ import annotations

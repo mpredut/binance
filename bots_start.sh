@@ -31,10 +31,10 @@ cd ~/binance/kraken
 nohup python3 kraken_bot.py > kraken_bot.log 2>&1 &
 
 echo "=== KRAKEN XSTOCK WATCH ==="
-pkill -f xstock_watch.py 2>/dev/null || true
+pkill -f kraken_xstock_watch.py 2>/dev/null || true
 sleep 1
 cd ~/binance/kraken
-nohup python3 xstock_watch.py > xstock_watch.log 2>&1 &
+nohup python3 kraken_xstock_watch.py > kraken_xstock_watch.log 2>&1 &
 
 echo "=== T212 BOT (toate activele din config.*.env, UN proces) ==="
 # Inlocuieste cele 2 procese ipo.py --profile. Adaugi un activ = creezi
