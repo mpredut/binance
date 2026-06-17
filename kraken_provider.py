@@ -24,7 +24,11 @@ _KRAKEN_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "kraken")
 
 
 def _live() -> bool:
-    return os.environ.get("KRAKEN_LIVE_ORDERS", "false").strip().lower() == "true"
+    # os.environ are prioritate; fallback pe kraken/.env (la fel ca cheile API).
+    v = os.environ.get("KRAKEN_LIVE_ORDERS")
+    if v is None:
+        v = env_value(_KRAKEN_DIR, "KRAKEN_LIVE_ORDERS")
+    return (v or "false").strip().lower() == "true"
 
 
 class KrakenProvider(MarketDataProvider):
