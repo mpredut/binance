@@ -445,7 +445,7 @@ class TestCachePriceLongTrendManager(unittest.TestCase):
 
     def _make(self):
         api_mock = MagicMock()
-        fname = _tmp_file(self.tmp, "cache_price_trend.json")
+        fname = _tmp_file(self.tmp, "cache_price_long_trend.json")
         return cm.CachePriceLongTrendManager(9999, ["BTC"], fname, api_client=api_mock)
 
     def test_rebuild_fetchtime_from_dict_cache(self):

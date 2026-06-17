@@ -37,7 +37,8 @@ import time
 
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # forecast/ -> rădăcina repo
+sys.path.insert(0, _ROOT)
 from trend_survival import fetch_klines  # noqa: E402
 from trend_stats import mann_kendall, hurst_rs  # noqa: E402
 
@@ -149,7 +150,7 @@ def main() -> int:
     ap.add_argument("--days", type=int, default=400)
     ap.add_argument("--eval", action="store_true", help="doar raportul walk-forward")
     ap.add_argument("--forecast", action="store_true", help="scrie forecast.json")
-    ap.add_argument("--out", default="forecast.json")
+    ap.add_argument("--out", default=os.path.join(_ROOT, "cachedb", "forecast.json"))
     ap.add_argument("--loop", type=float, default=0, help="minute intre prognoze (0 = o data)")
     args = ap.parse_args()
 

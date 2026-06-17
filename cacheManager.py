@@ -1537,7 +1537,7 @@ class CacheFactory:
         },
         "PriceLongTrend": {
             "class": CachePriceLongTrendManager,
-            "filename": "cache_price_trend.json",
+            "filename": "cache_price_long_trend.json",
             "sync_ts": lambda: PRICETREND_SYNC_INTERVAL_SEC,
         },
         "AssetValue": {

@@ -25,7 +25,7 @@ import runtime_context as rc
 
 from . import bapi as api
 from .bapi_client import client
-import trade_cooldown
+from lock import trade_cooldown   # gate anti rapid-fire (mutat in pachetul lock/)
 
 
 def _maybe_wait_trend(side, symbol, wait_trend, max_wait_sec):

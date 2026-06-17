@@ -2,7 +2,7 @@ import os, sys, time, threading, tempfile, unittest
 import multiprocessing as mp
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import trade_cooldown as tc
+from lock import trade_cooldown as tc
 
 
 def _proc_attempt(state_file, lock_file, q):

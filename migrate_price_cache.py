@@ -124,9 +124,9 @@ def _arg_value(flag, default=None):
 def main():
     dry_run = "--dry-run" in sys.argv
     work_dir = _arg_value("--dir", CACHE_DIR)   # implicit cachedb/ (sau --dir / BINANCE_CACHE_DIR)
-    # cache_price_trend.json e cache-ul PriceTrend (full-rewrite json, NU per-simbol
-    # append) → rămâne .json, îl excludem din migrare.
-    EXCLUDE = {"trend"}
+    # cache_price_long_trend.json e cache-ul PriceLongTrend (full-rewrite json, NU
+    # per-simbol append) → rămâne .json, îl excludem din migrare.
+    EXCLUDE = {"long_trend"}
     files = sorted(glob.glob(os.path.join(work_dir, "cache_price_*.json")))
     files = [f for f in files
              if not f.endswith(".bak")
