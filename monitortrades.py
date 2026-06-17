@@ -400,6 +400,19 @@ def get_available_qty(symbol, api=None):
 
 
 #//todo: review 0.5
+def _place_guarded(inst, side, price, qty, min_qty, **kwargs):
+    """Plaseaza un ordin DOAR daca qty>0 si qty>=volumul minim al venue-ului. Evita
+    respingerile 'volume minimum not met' (ex Kraken pe praf). True daca a plasat efectiv."""
+    if qty is None or qty <= 0:
+        print(f"[{inst.symbol}] {side} skip: qty={qty}")
+        return False
+    if min_qty and qty < min_qty:
+        print(f"[{inst.symbol}] {side} skip: qty {qty} < volum minim venue {min_qty}")
+        return False
+    inst.place(side, price, qty, **kwargs)
+    return True
+
+
 def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None, lost_threshold=None):
     inst = _as_instrument(inst)
     symbol = inst.symbol
@@ -417,6 +430,9 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
     hard_tp_frac = inst.param("mt", "hardtp_fraction", HARD_TP_FRACTION, float)
     hard_tp_cd = inst.param("mt", "hardtp_cooldown_h", HARD_TP_COOLDOWN_S / 3600.0, float) * 3600
     tp_ref = inst.param("mt", "ref", TP_REFERENCE)
+    buy_budget = inst.param("mt", "buy_budget", None, float)   # USD per buy -> qty = buget/pret
+    buy_qty_cfg = inst.param("mt", "buy_qty", None, float)     # alternativ: qty FIX per buy
+    max_budget = inst.param("mt", "max_budget", None, float)   # plafon expunere totala (USD)
     #try:
     
     qty = 1 #qty = calculate_position_size(...)    
@@ -462,6 +478,7 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
         return
     print(f"Current price for {symbol}: {current_price}")
     avail_qty = inst.free() or 0.0   # TOATA cantitatea disponibila a instrumentului (None->0 pt Kraken/T212)
+    min_qty = inst.min_qty() or 0.0  # volum minim al venue-ului (gard anti-respingere)
 
     # 3. Verifica ordinele de cumparare
     if trade_orders_buy:
@@ -479,10 +496,10 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
                 hard_qty = round(avail_qty * hard_tp_frac, 4)
                 print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% >= {hard_tp_pct*100:.0f}% "
                       f"-> vand {hard_tp_frac*100:.0f}% ({hard_qty}) INDIFERENT de trend")
-                inst.place("SELL", current_price, hard_qty,
-                    safeback_seconds=sbs, force=True, cancelorders=True, hours=2, pair=False)
-                _hard_tp_last[symbol] = current_time_s
-                return   # am vandut deja in acest tick; nu mai rula vanzarea de jos pe sold invechit
+                if _place_guarded(inst, "SELL", current_price, hard_qty, min_qty,
+                                  safeback_seconds=sbs, force=True, cancelorders=True, hours=2, pair=False):
+                    _hard_tp_last[symbol] = current_time_s
+                    return   # am vandut deja in acest tick; nu mai rula vanzarea de jos pe sold invechit
             else:
                 print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% dar in cooldown (ultimul acum "
                       f"{u.secondsToHours(current_time_s - _hard_tp_last.get(symbol, 0)):.1f}h)")
@@ -491,8 +508,8 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
             if not is_trend_up(symbol):
                 print(f"Price increased with {price_increase * 100}% by more than {gain_threshold * 100}% versus buy price and not trend up!")
                 if can_sell and avail_qty > 0:
-                    inst.place("SELL", current_price,
-                        avail_qty, safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=False)
+                    _place_guarded(inst, "SELL", current_price, avail_qty, min_qty,
+                        safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=False)
                 else:
                     print(f"No can sell (can_sell={can_sell}, avail_qty={avail_qty})")
                 #po.place_SELL_order(symbol, current_price, qty)
@@ -504,8 +521,8 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
             if not is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease * 100}% by more than {lost_threshold * 100}% versus buy price and not trend up!")
                 if can_sell and avail_qty > 0:
-                    inst.place("SELL", current_price,
-                        avail_qty, safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=True)
+                    _place_guarded(inst, "SELL", current_price, avail_qty, min_qty,
+                        safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=True)
                 #po.place_SELL_order(symbol, current_price, qty)
                 else:
                     print(f"No can sell (can_sell={can_sell}, avail_qty={avail_qty})")
@@ -526,8 +543,14 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
                 print(f"Price decreased with {price_decrease_versus_sell * 100}% by more than {gain_threshold * 100}% versus sell price: Placing buy order")
                 #api.cancel_orders_old_or_outlier("BUY", "BTCUSDT", qty, hours=0.5, price_difference_percentage=0.1)
                 if can_buy:
-                    inst.place("BUY", current_price + 0.5,
-                        qty, safeback_seconds=sbs, cancelorders=True, hours=48, pair=False)
+                    # qty din BUGET (buy_budget/pret) sau qty fix configurat, altfel default (qty=1)
+                    _buy_qty = round((buy_budget / current_price) if buy_budget else (buy_qty_cfg or qty), 6)
+                    _pos_value = avail_qty * current_price
+                    if max_budget and _pos_value >= max_budget:
+                        print(f"[{symbol}] plafon buget atins ({_pos_value:.0f} >= {max_budget} USD) — nu cumpar")
+                    else:
+                        _place_guarded(inst, "BUY", current_price + 0.5, _buy_qty, min_qty,
+                            safeback_seconds=sbs, cancelorders=True, hours=48, pair=False)
                 else:
                    print("No can buy")
             else :

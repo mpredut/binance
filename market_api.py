@@ -116,6 +116,11 @@ class MarketDataProvider(ABC):
         """Plaseaza un ordin pt `symbol`. Default None (provider fara plasare)."""
         return None
 
+    def min_order_qty(self, symbol: str) -> float:
+        """Volumul minim de ordin pt symbol (0 = fara constrangere). Suprascris de
+        provideri care au minim explicit (ex. Kraken `ordermin` din pair_info)."""
+        return 0.0
+
 
 class BinanceProvider(MarketDataProvider):
     """Wrapeaza binance_api.bapi pentru market-data. Default-ul flotei azi.

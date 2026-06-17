@@ -34,6 +34,7 @@ def _live() -> bool:
 class KrakenProvider(MarketDataProvider):
     def __init__(self):
         self._cli = None  # lazy
+        self._minqty = {}  # cache symbol -> ordermin (din pair_info)
 
     @property
     def name(self) -> str:
@@ -76,6 +77,19 @@ class KrakenProvider(MarketDataProvider):
         except Exception as e:  # noqa: BLE001
             print(f"[Kraken] pret {symbol}: {e}")
             return None
+
+    def min_order_qty(self, symbol: str) -> float:
+        """Volumul minim (ordermin) al perechii, din pair_info (public). Cache-uit."""
+        if symbol in self._minqty:
+            return self._minqty[symbol]
+        mn = 0.0
+        try:
+            info = self._client().pair_info(symbol) or {}
+            mn = float(info.get("ordermin", 0) or 0.0)
+        except Exception as e:  # noqa: BLE001
+            print(f"[Kraken] ordermin {symbol}: {e}")
+        self._minqty[symbol] = mn
+        return mn
 
     def get_price_history(self, symbol: str, lookback_h: float) -> Optional[List]:
         """OHLC public -> [{timestamp(ms), price=close}] ascendent."""

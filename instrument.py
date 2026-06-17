@@ -82,6 +82,13 @@ class Instrument:
     def place(self, side: str, price: float, qty: float, **kwargs):
         return self._provider.place_order(self.symbol, side, price, qty, **kwargs)
 
+    def min_qty(self) -> float:
+        """Volumul minim de ordin al venue-ului pt symbol (0 = fara gard de volum)."""
+        try:
+            return float(self._provider.min_order_qty(self.symbol) or 0.0)
+        except Exception:  # noqa: BLE001
+            return 0.0
+
     # ── params namespaced (mt.* / tradeall.* / rtrade.*) ───────────────────────
     def param(self, consumer: str, key: str, default: Any = None,
               cast: Optional[Callable] = None) -> Any:
