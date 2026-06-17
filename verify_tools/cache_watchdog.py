@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-price_monitor_watchdog.py — verifică prospețimea cache-ului de prețuri și alarmează
-dacă monitorul de preț (run_price_monitor.py) s-a oprit sau nu mai actualizează.
+cache_watchdog.py — verifică prospețimea TUTUROR cache-urilor (cachedb/cache_*.json)
+și alarmează dacă vreunul s-a învechit (cacheManager/priceAnalysis murite silențios).
 
-Rulează ca task scurt (de ex. din cron, la fiecare 5 min). E independent de
-run_price_monitor, deci detectează exact cazul în care acela a murit silențios.
+Rulează ca task scurt din cron (la fiecare 5 min), independent de flotă.
 
-Semnal de prospețime: max(fetchtime din cache, mtime fișier). Dacă vârsta depășește
-WATCHDOG_STALE_MINUTES → trimite o alertă (ntfy + email), cu cooldown ca să nu spameze.
+Semnal de prospețime per fișier: max(fetchtime din cache, mtime fișier). Dacă vârsta
+depășește pragul (per-cache sau WATCHDOG_STALE_MINUTES) → alertă (ntfy + email), cu cooldown.
+(fost price_monitor_watchdog.py, care verifica un singur cache)
 
-Variabile de mediu (din .env):
-  PHONE_ALERT_URL / NTFY_TOPIC   — canal push (ca run_price_monitor)
+Variabile de mediu (din .env / config.env din rădăcină):
+  PHONE_ALERT_URL / NTFY_TOPIC   — canal push
   SMTP_USERNAME / SMTP_PASSWORD / ALERT_TO_EMAIL — email (opțional)
-  WATCHDOG_STALE_MINUTES      (default 20)
+  WATCHDOG_STALE_MINUTES      (default 20; cache-urile lente au prag mai mare)
   WATCHDOG_COOLDOWN_MINUTES   (default 60)
-  WATCHDOG_CACHE_FILE         (default cache_prices_multi.json)
+  BINANCE_CACHE_DIR           (default <radacina>/cachedb)
 """
 import os
 import sys
@@ -25,20 +25,31 @@ from datetime import datetime
 from email.mime.text import MIMEText
 from pathlib import Path
 
+_ROOT = Path(__file__).resolve().parent.parent   # verify_tools/ -> rădăcina repo
+
 try:
     from dotenv import load_dotenv
-    load_dotenv()                                                # secrete comune (gitignored)
-    load_dotenv(Path(__file__).resolve().parent / "config.env")  # config versionat (comis)
+    load_dotenv(_ROOT / ".env")                   # secrete comune (gitignored)
+    load_dotenv(_ROOT / "config.env")             # config versionat (comis)
 except Exception:
     pass
 
-BASE_DIR = Path(__file__).resolve().parent
-# Cache-ul stă în subfolderul cachedb/ (BINANCE_CACHE_DIR îl poate suprascrie).
-_CACHE_DIR = Path(os.environ.get("BINANCE_CACHE_DIR", BASE_DIR / "cachedb"))
-CACHE_FILE = Path(os.environ.get("WATCHDOG_CACHE_FILE", _CACHE_DIR / "cache_prices_multi.json"))
-STATE_FILE = BASE_DIR / ".watchdog_state.json"
+# Cache-urile stau in subfolderul cachedb/ (BINANCE_CACHE_DIR il poate suprascrie).
+_CACHE_DIR = Path(os.environ.get("BINANCE_CACHE_DIR", _ROOT / "cachedb"))
+STATE_FILE = _ROOT / ".watchdog_state.json"
 STALE_MINUTES = float(os.environ.get("WATCHDOG_STALE_MINUTES", "20"))
 COOLDOWN_MINUTES = float(os.environ.get("WATCHDOG_COOLDOWN_MINUTES", "60"))
+# Praguri per-cache (min): cele lente (trend lung, valoare activ) se actualizeaza rar.
+_STALE_OVERRIDES = {
+    "cache_price_long_trend.json": 90,
+    "cache_asset_value.json": 60,
+}
+
+
+def _cache_files():
+    """Toate cache_*.json din cachedb/ (exclude .bak/.tmp)."""
+    return sorted(p for p in _CACHE_DIR.glob("cache_*.json")
+                  if not p.name.endswith((".bak", ".tmp")))
 
 
 def _normalize_ts_seconds(value):
@@ -134,31 +145,41 @@ def _send_email(subject, body):
 
 
 def check_once(now=None):
-    """Verifică o dată. Întoarce True dacă a trimis alertă (cache stale + nu în cooldown)."""
+    """Verifică TOATE cache_*.json din cachedb/. Alertă dacă vreunul e stale (peste
+    pragul lui) și nu suntem în cooldown. Întoarce True dacă a trimis alertă."""
     now = now if now is not None else time.time()
-    freshness, detail = cache_freshness_seconds(CACHE_FILE)
-    age_min = (now - freshness) / 60.0 if freshness > 0 else float("inf")
-    is_stale = age_min > STALE_MINUTES
+    files = _cache_files()
+    stale = []
+    if not files:
+        stale.append(("(niciun cache_*.json)", float("inf"), STALE_MINUTES,
+                      f"{_CACHE_DIR} gol sau lipsește"))
+    for p in files:
+        freshness, detail = cache_freshness_seconds(p)
+        age_min = (now - freshness) / 60.0 if freshness > 0 else float("inf")
+        thr = _STALE_OVERRIDES.get(p.name, STALE_MINUTES)
+        if age_min > thr:
+            stale.append((p.name, age_min, thr, detail))
 
-    if not is_stale:
-        print(f"[watchdog] OK — cache proaspăt ({age_min:.1f} min < {STALE_MINUTES:.0f} min)")
+    if not stale:
+        print(f"[watchdog] OK — {len(files)} cache-uri proaspete")
         return False
 
     # cooldown: nu re-alarma prea des
     state = _load_state()
     last = state.get("last_alert_ts", 0)
     if (now - last) < COOLDOWN_MINUTES * 60:
-        print(f"[watchdog] STALE ({age_min:.1f} min) dar în cooldown — nu re-alarmez")
+        print(f"[watchdog] STALE ({', '.join(s[0] for s in stale)}) dar în cooldown — nu re-alarmez")
         return False
 
-    last_str = (datetime.fromtimestamp(freshness).strftime("%Y-%m-%d %H:%M:%S")
-                if freshness > 0 else "necunoscut")
-    age_txt = f"{age_min:.0f} min" if age_min != float("inf") else "∞"
-    title = "⚠️ Price monitor OPRIT"
-    message = (f"Cache-ul de prețuri e STALE: ultima actualizare acum {age_txt} "
-               f"(la {last_str}). Detaliu: {detail}. "
-               f"Probabil market_alerts.py s-a oprit — repornește-l.")
-    print(f"[watchdog] ALARMĂ: {message}")
+    lines = []
+    for name, age_min, thr, detail in stale:
+        age_txt = f"{age_min:.0f} min" if age_min != float("inf") else "∞"
+        lines.append(f"  • {name}: {age_txt} (prag {thr:.0f} min) — {detail}")
+    title = "⚠️ Cache STALE pe server"
+    message = ("Cache-uri învechite (probabil cacheManager/priceAnalysis s-au oprit):\n"
+               + "\n".join(lines)
+               + "\nVerifică flota (binance_start) și repornește.")
+    print(f"[watchdog] ALARMĂ:\n{message}")
     _send_ntfy(title, message)
     _send_email(title, message)
     state["last_alert_ts"] = now

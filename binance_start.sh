@@ -140,12 +140,12 @@ ps aux | grep '[p]ython'
 # ===== Watchdog (cron la 5 min) — instalat/refresh idempotent =====
 # Rulează DOAR pe această mașină (cea care pornește monitorul). Căile sunt derivate
 # din mediul curent (SCRIPT_DIR + python-ul din venv activat), deci e corect oriunde.
-WATCHDOG_MARKER="price_monitor_watchdog.py"
+WATCHDOG_MARKER="cache_watchdog.py"
 WATCHDOG_PY="$(command -v python)"
-WATCHDOG_LINE="*/5 * * * * cd $SCRIPT_DIR && $WATCHDOG_PY $SCRIPT_DIR/$WATCHDOG_MARKER >> $SCRIPT_DIR/logs/watchdog.log 2>&1"
+WATCHDOG_LINE="*/5 * * * * cd $SCRIPT_DIR && $WATCHDOG_PY $SCRIPT_DIR/verify_tools/$WATCHDOG_MARKER >> $SCRIPT_DIR/logs/watchdog.log 2>&1"
 
 install_watchdog() {
-    ( crontab -l 2>/dev/null | grep -v "$WATCHDOG_MARKER"; echo "$WATCHDOG_LINE" ) | crontab -
+    ( crontab -l 2>/dev/null | grep -v "$WATCHDOG_MARKER" | grep -v price_monitor_watchdog.py; echo "$WATCHDOG_LINE" ) | crontab -
     echo "✔ Watchdog activ (cron la 5 min) → $SCRIPT_DIR/watchdog.log"
 }
 remove_watchdog() {

@@ -1,8 +1,9 @@
 import os, sys, json, time, tempfile, unittest
+from pathlib import Path
 from unittest.mock import patch
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import price_monitor_watchdog as wd
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "verify_tools"))
+import cache_watchdog as wd
 
 
 def _write_cache(path, fetchtime_ms, mtime_sec=None):
@@ -16,7 +17,7 @@ class TestWatchdog(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         self.cache = os.path.join(self.tmp, "cache_prices_multi.json")
-        wd.CACHE_FILE = self.cache
+        wd._CACHE_DIR = Path(self.tmp)
         wd.STATE_FILE = os.path.join(self.tmp, ".state.json")
         wd.STALE_MINUTES = 20
         wd.COOLDOWN_MINUTES = 60

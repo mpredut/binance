@@ -6,8 +6,8 @@ import os
 import sys
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from suggest_thresholds import FLOOR, thresholds_from_prices  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "verify_tools"))
+from gen_alert_thresholds import FLOOR, thresholds_from_prices  # noqa: E402
 
 
 class TestThresholds(unittest.TestCase):

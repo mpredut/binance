@@ -21,7 +21,7 @@ import utils as u
 import symbols as sym
 import config as cfg
 import priceAnalysis as pa
-import runtime_context as rc
+from . import order_id_context as rc   # client_order_id + tag context (mutat in binance_api/)
 
 from . import bapi as api
 from .bapi_client import client

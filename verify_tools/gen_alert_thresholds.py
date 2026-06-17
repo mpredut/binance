@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-suggest_thresholds.py — FAZA 2: sugereaza praguri de alerta (UP/DOWN) pt monede,
-din VOLATILITATEA lor reala (CoinGecko), nu dintr-un default orb.
+gen_alert_thresholds.py — genereaza praguri de alerta (UP/DOWN) pt monede din
+VOLATILITATEA lor reala (CoinGecko), nu dintr-un default orb. (fost suggest_thresholds.py)
 
 Logica: la fiecare punct, calculeaza ca PriceChecker "cat a urcat fata de minimul pe
 24h" si "cat a scazut fata de maximul pe 24h". Ia percentila (p85) a acestor miscari
@@ -10,7 +10,7 @@ Logica: la fiecare punct, calculeaza ca PriceChecker "cat a urcat fata de minimu
 Output = linii gata de pus in market_alerts.conf. TU le revizuiesti (sunt provizorii;
 moneda noua are istoric subtire -> rafineaza pe masura ce se aduna date).
 
-  python3 suggest_thresholds.py SPCXX TAO BTC
+  python3 verify_tools/gen_alert_thresholds.py SPCXX TAO BTC
 """
 from __future__ import annotations
 

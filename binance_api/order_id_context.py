@@ -18,8 +18,8 @@ _PROCESS_NAME_OVERRIDES = {
     "rtrade": "RT",
     "monitortrades": "MT",
     "monitororder": "MO",
-    "run_price_monitor": "RPM",
-    "price_monitor_watchdog": "PMW",
+    "market_alerts": "MA",
+    "cache_watchdog": "CW",
     "server": "SRV",
 }
 
