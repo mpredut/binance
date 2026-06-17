@@ -20,7 +20,7 @@ from typing import Optional, List
 
 from .market_api import MarketDataProvider, _normalize_order, env_value
 
-_T212_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "212trading")
+_T212_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "212trading")
 
 
 def _live() -> bool:

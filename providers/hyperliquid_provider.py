@@ -32,7 +32,7 @@ from typing import List, Optional
 from .market_api import MarketDataProvider, _normalize_order
 
 # Radacina repo-ului + dir-ul hyperliquid/ (pt importurile bare `common`, `hl_client`).
-_REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # providers/ -> radacina
 _HL_DIR = os.path.join(_REPO_ROOT, "hyperliquid")
 
 # Comuta plasarea de ordine REALE pe HL. Implicit DRY (doar logheaza intentia).
