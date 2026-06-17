@@ -46,16 +46,14 @@ cd ~/binance/212trading
 nohup python3 t212_bot.py > t212_bot.log 2>&1 &
 
 
-echo "=== KRAKEN TRAILING (protectie crash HYPE) — momentan OPRIT ==="
+echo "=== KRAKEN TRAILING (protectie crash HYPE) — LIVE (vinde real) ==="
 # Disjunctor pe HYPE-ul cumparat MANUAL: vinde balanta LIBERA daca pretul cade
-# -15% de la varf (nu atinge cei 3.38 ai botului, blocati in TP). Cand vrei:
-#   1. decomenteaza cele 3 linii de mai jos FARA flag-ul ENABLED (ruleaza dry-run,
-#      doar logheaza ce-ar vinde) si lasa-l o zi sa vezi ca e sanatos;
-#   2. apoi adauga "KRAKEN_TRAILING_ENABLED=true " inainte de nohup ca sa vanda real.
+# -15% de la varf (nu atinge pozitia botului, blocata in TP). ACTIV prin
+# KRAKEN_TRAILING_ENABLED=true (scoate flag-ul ca sa revii la dry-run, care doar logheaza).
 # Lansat cu cale (kraken/trailing_stop.py) ca pkill sa NU prinda si trailing-ul din
 # radacina (acelasi nume de fisier -> proces identic in ps).
  pkill -f "kraken/trailing_stop.py" 2>/dev/null || true
  sleep 1
- cd ~/binance && nohup python3 kraken/trailing_stop.py > kraken/trail_k.log 2>&1 &
+ cd ~/binance && KRAKEN_TRAILING_ENABLED=true nohup python3 kraken/trailing_stop.py > kraken/trail_k.log 2>&1 &
 
 echo "DONE"

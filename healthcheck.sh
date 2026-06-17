@@ -38,8 +38,8 @@ fi
 # ===== MOD --supervise (pt CRON): repornește BOTURILE moarte (cu backoff) + alertă =====
 # Boturile (all_start) nu erau supravegheate de nimic. Aici le repornim individual
 # (restart curat -> isi reiau starea singure), cu backoff: max 3 reporniri / 30 min,
-# apoi escaladare la interventie manuala (anti crash-loop). FLOTA si TRAILING-ul =
-# doar alerta (flota o tine binance_start; trailing-ul are stare enabled, nu-l reporni orb).
+# apoi escaladare la interventie manuala (anti crash-loop). FLOTA = doar alerta (o tine
+# binance_start). TRAILING-ul e acum repornit LIVE (KRAKEN_TRAILING_ENABLED=true) ca ceilalti boti.
 # Bonus: dupa un reboot, aduce boturile inapoi singur. Cron sugerat:
 #   */5 * * * * /home/predut/binance/healthcheck.sh --supervise >> /home/predut/binance/healthcheck.log 2>&1
 if [ "$1" = "--supervise" ]; then
@@ -62,7 +62,8 @@ if [ "$1" = "--supervise" ]; then
 dn_bot.py --watch|$ROOT/hyperliquid|nohup $HLPY dn_bot.py --watch > dn_watch.log 2>&1 &|DN-watch
 kraken_bot.py|$ROOT/kraken|nohup python3 kraken_bot.py > kraken_bot.log 2>&1 &|Kraken-bot
 xstock_watch.py|$ROOT/kraken|nohup python3 xstock_watch.py > xstock_watch.log 2>&1 &|xStock-watch
-t212_bot.py|$ROOT/212trading|nohup python3 t212_bot.py > t212_bot.log 2>&1 &|T212-bot"
+t212_bot.py|$ROOT/212trading|nohup python3 t212_bot.py > t212_bot.log 2>&1 &|T212-bot
+kraken/trailing_stop.py|$ROOT|KRAKEN_TRAILING_ENABLED=true nohup python3 kraken/trailing_stop.py > kraken/trail_k.log 2>&1 &|Kraken-trailing"
     while IFS='|' read -r pat dir cmd label; do
         [ -z "$pat" ] && continue
         if pgrep -f "$pat" >/dev/null 2>&1; then
@@ -81,9 +82,9 @@ t212_bot.py|$ROOT/212trading|nohup python3 t212_bot.py > t212_bot.log 2>&1 &|T21
         push "Bot repornit" "$label murise -> REPORNIT (incercarea $cnt/$MAX)"
         echo "$(date '+%H:%M') $label REPORNIT (incercarea $cnt)"
     done <<< "$bots"
-    # FLOTA + TRAILING: doar alerta (nu repornim de aici)
+    # FLOTA: doar alerta (o tine binance_start). TRAILING-ul e acum in lista de restart de sus.
     miss=""
-    for s in cacheManager.py priceAnalysis.py tradeall.py monitortrades.py rtrade.py market_alerts.py assetguardian.py "kraken/trailing_stop.py"; do
+    for s in cacheManager.py priceAnalysis.py tradeall.py monitortrades.py rtrade.py market_alerts.py assetguardian.py; do
         pgrep -f "$s" >/dev/null 2>&1 || miss="$miss ${s%.py}"
     done
     [ -n "$miss" ] && { push "Procese de verificat" "Moarte (nu le repornesc de aici):$miss"; echo "$(date '+%H:%M') alerta flota/trailing:$miss"; }
