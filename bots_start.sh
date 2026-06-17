@@ -56,4 +56,13 @@ echo "=== KRAKEN TRAILING (protectie crash HYPE) — LIVE (vinde real) ==="
  sleep 1
  cd ~/binance && KRAKEN_TRAILING_ENABLED=true nohup python3 kraken/trailing_stop.py > kraken/trail_k.log 2>&1 &
 
+echo "=== BINANCE TRAILING (protectie crash BTC/TAO) — LIVE (vinde real) ==="
+# Disjunctor pe holdingurile Binance: vinde balanta LIBERA BTC/TAO daca pretul cade
+# -20/-22% de la varf (force=True; NU atinge pozitiile din ordinele TP). ACTIV prin
+# TRAILING_ENABLED=true (scoate flag-ul -> dry-run). Ruleaza cu myenv (SDK Binance) prin
+# activate -> cmdline curat "python3 binance_api/trailing_stop.py".
+ pkill -f "binance_api/trailing_stop.py" 2>/dev/null || true
+ sleep 1
+ ( cd ~/binance && source myenv/bin/activate && TRAILING_ENABLED=true nohup python3 binance_api/trailing_stop.py > binance_api/trail_b.log 2>&1 & )
+
 echo "DONE"

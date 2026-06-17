@@ -63,7 +63,8 @@ dn_bot.py --watch|$ROOT/hyperliquid|nohup $HLPY dn_bot.py --watch > dn_watch.log
 kraken_bot.py|$ROOT/kraken|nohup python3 kraken_bot.py > kraken_bot.log 2>&1 &|Kraken-bot
 kraken_xstock_watch.py|$ROOT/kraken|nohup python3 kraken_xstock_watch.py > kraken_xstock_watch.log 2>&1 &|xStock-watch
 t212_bot.py|$ROOT/212trading|nohup python3 t212_bot.py > t212_bot.log 2>&1 &|T212-bot
-kraken/trailing_stop.py|$ROOT|KRAKEN_TRAILING_ENABLED=true nohup python3 kraken/trailing_stop.py > kraken/trail_k.log 2>&1 &|Kraken-trailing"
+kraken/trailing_stop.py|$ROOT|KRAKEN_TRAILING_ENABLED=true nohup python3 kraken/trailing_stop.py > kraken/trail_k.log 2>&1 &|Kraken-trailing
+binance_api/trailing_stop.py|$ROOT|source $ROOT/myenv/bin/activate && TRAILING_ENABLED=true nohup python3 binance_api/trailing_stop.py > binance_api/trail_b.log 2>&1 &|Binance-trailing"
     while IFS='|' read -r pat dir cmd label; do
         [ -z "$pat" ] && continue
         if pgrep -f "$pat" >/dev/null 2>&1; then
