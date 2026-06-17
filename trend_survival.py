@@ -135,7 +135,7 @@ def verdict(cont: dict, mid: float) -> str:
 import os
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-T_CACHE_FILE = os.path.join(_HERE, "cachedb", "trend_T_cache.json")
+T_CACHE_FILE = os.path.join(_HERE, "cachedb", "cache_T_trend.json")
 
 
 def hybrid_T(dur_hours, prior_T=14.0, k=30.0, t_min=4, t_max=30) -> dict:
