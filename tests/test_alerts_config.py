@@ -7,7 +7,7 @@ import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from alerts_config import load_config, resolve  # noqa: E402
 
 SAMPLE = """

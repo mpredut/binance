@@ -13,7 +13,7 @@ import os
 import sys
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from priceAnalysis import get_trade_weight  # noqa: E402
 
 T = 14
