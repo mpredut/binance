@@ -12,13 +12,14 @@ echo "=== DN BOT ==="
 pkill -f dn_bot.py 2>/dev/null || true
 sleep 1
 cd ~/binance/hyperliquid
-nohup $HLPY dn_bot.py > dn_bot.log 2>&1 &
+# myenv (eth_account) via activate -> cmdline curat "python3 dn_bot.py" (nu cale hardcodata)
+( source ~/binance/myenv/bin/activate && nohup python3 dn_bot.py > dn_bot.log 2>&1 & )
 
 echo "=== DN WATCH ==="
 cd ~/binance/hyperliquid
 pkill -f "dn_bot.py --watch" 2>/dev/null || true
 sleep 1
-nohup $HLPY dn_bot.py --watch > dn_watch.log 2>&1 &
+( source ~/binance/myenv/bin/activate && nohup python3 dn_bot.py --watch > dn_watch.log 2>&1 & )
 
 echo "=== KRAKEN BOT ==="
 # NU sterge .state_HYPEUSD.json: botul isi reia pozitia din el; fara stare ar
