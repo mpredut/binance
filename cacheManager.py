@@ -623,9 +623,21 @@ class CacheTradeManager(CacheManagerInterface):
                 unique_new_trades.append(t)
                 existing_ids.add(trade_id)
 
-        print(f"[{self.cls_name}][info] Număr de unique_new_trades trades noi: {len(unique_new_trades)}")            
+        print(f"[{self.cls_name}][info] Număr de unique_new_trades trades noi: {len(unique_new_trades)}")
         return unique_new_trades
-        
+
+    def last_opposite_fill_price(self, symbol, order_type):
+        """Pretul ULTIMEI executii OPUSE pe symbol — PERSISTENT, fara limita de timp.
+        BUY -> ultimul SELL executat; SELL -> ultimul BUY executat. None daca nu exista.
+        Citeste din cache-ul PROPRIU de fills (executii reale via WS) -> ZERO apel API,
+        fara zgomotul ordinelor anulate (spre deosebire de Order cache, care are price=0)."""
+        want_buyer = (order_type.upper() == "SELL")   # opusul unui SELL e un BUY (isBuyer=True)
+        with self.lock:
+            for tr in reversed(self.cache.get(symbol, [])):   # append => ultimul e cel mai recent
+                if tr.get("isBuyer") == want_buyer:
+                    return float(tr["price"])
+        return None
+
 
 class CacheOrderManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
@@ -1620,9 +1632,18 @@ def _upsert_order_from_execution_report(event):
         return
 
     order_cache = get_cache_manager("Order")
+
+    # Order cache = DOAR ordine EXECUTATE (ca get_filled_orders). Ordinele NEexecutate
+    # (NEW) sau terminate fara fill (CANCELED/EXPIRED/REJECTED) NU se cacheaza: nu sunt
+    # tranzactii realizate si polueaza gardul de profit (anulatele veneau cu pret 0).
+    if event.get("X") not in ("FILLED", "PARTIALLY_FILLED"):
+        return
+
     order_item = {
         "orderId": event.get("i"),
-        "price": float(event.get("L") or event.get("p") or 0),
+        # L = ultimul pret executat (>0 la fill); cade pe p (pretul ordinului) ca rezerva.
+        # NU "L or p": L vine "0.00000000" (string truthy) la ne-fill -> ar da mereu 0.
+        "price": float(event.get("L") or 0) or float(event.get("p") or 0),
         "quantity": float(event.get("l") or event.get("q") or 0),
         "timestamp": int(event.get("T") or event.get("E") or int(time.time() * 1000)),
         "side": event.get("S"),

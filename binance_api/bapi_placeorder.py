@@ -266,7 +266,24 @@ def place_SELL_order_at_market(symbol, qty):
         return None
 
 
-def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, max_daily_trades=10, profit_percentage=0.01):
+def _last_opposite_fill_price(symbol, order_type):
+    """Pretul ULTIMEI executii OPUSE pe symbol — PERSISTENT, fara limita de timp.
+    Pt BUY -> ultimul SELL executat; pt SELL -> ultimul BUY executat. None daca nu exista.
+    Delegat catre clasa dedicata CacheTradeManager (cache de fills reale via WS) ->
+    ZERO apel API la Binance. Acelasi pattern ca get_trade_orders (via get_cache_manager)."""
+    try:
+        import cacheManager as cm
+        return cm.get_cache_manager("Trade").last_opposite_fill_price(symbol, order_type)
+    except Exception as e:
+        print(f"[GARD PERSISTENT] nu pot citi cache trades {symbol}: {e}")
+        return None
+
+
+def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, max_daily_trades=10, profit_percentage=0.01, bypass_profit_guard=False):
+    # bypass_profit_guard=True -> sare DOAR peste verificarile de profit (persistent +
+    # time-windowed), pastrand siguranta (limita zilnica, anti-spam 3 min). Folosit de
+    # DISJUNCTORUL DE CRASH (trailing_stop), care TREBUIE sa vanda in pierdere (stop-loss).
+    # Tradingul normal (rtrade/tradeall) NU il paseaza -> gardul ramane activ acolo.
     #import bapi_trades as apitrades
     from . import bapi_allorders as apiorders
     
@@ -286,6 +303,20 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
             price = round(max(price, current_price), 0)
 
         qty = round(qty, 4)
+
+        # ---- GARD PERSISTENT (fara limita de timp): nu cumpara peste ultimul SELL,
+        # nu vinde sub ultimul BUY. Acopera cazul "sell ieri, buy azi" (mai vechi decat
+        # fereastra time_back de mai jos). Daca nu exista tranzactie opusa -> trece mai departe.
+        last_opp = None if bypass_profit_guard else _last_opposite_fill_price(symbol, order_type)
+        if last_opp is not None:
+            if order_type == "BUY":
+                pdiff = u.value_diff_to_percent(last_opp, price)   # (ultim_SELL - pret_BUY)/ultim_SELL
+            else:
+                pdiff = u.value_diff_to_percent(price, last_opp)   # (pret_SELL - ultim_BUY)/pret_SELL
+            if pdiff < profit_percentage:
+                print(f"[GARD PERSISTENT] {order_type} {symbol} la {price} vs ultimul opus "
+                      f"{last_opp} -> diff {pdiff:.2f}% < prag {profit_percentage}% -> BLOCAT (neprofitabil)")
+                return False
 
         opposite_order_type = "SELL" if order_type == "BUY" else "BUY"
         backdays = math.ceil(time_back_in_seconds / 86400)
@@ -314,14 +345,18 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
         
         time_limit = float(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
         # Filtram tranzactiile opuse care au avut loc in intervalul specificat
-        recent_opposite_trades = [trade for trade in oposite_trades if float(trade['timestamp']) >= float(time_limit)]
+        # price > 0: ignora orice ordin fara pret real (defensiv; dupa fix-ul din cacheManager
+        # anulatele nu mai ajung in cache, dar pastram filtrul ca plasa de siguranta).
+        recent_opposite_trades = [trade for trade in oposite_trades
+                                  if float(trade['timestamp']) >= float(time_limit)
+                                  and float(trade.get('price', 0)) > 0]
         print(f"Ma raportrez doar la cele care sunt cu {time_back_in_seconds} sec. back , in numar de '{len(recent_opposite_trades)}'")
         for trade in recent_opposite_trades:
             readable = datetime.fromtimestamp(trade['timestamp'] / 1000)
             print(f"[CHECK] {readable} - price: {trade['price']} - included: {float(trade['timestamp']) >= time_limit}")
         
         #max_SELL_price = max(float(trade['quoteQty']) / float(trade['qty']) for trade in recent_opposite_trades)
-        if recent_opposite_trades:
+        if recent_opposite_trades and not bypass_profit_guard:
             if order_type == "BUY":
                 last_sell_price = min(float(trade['price']) for trade in recent_opposite_trades)
                 diff_percent = u.value_diff_to_percent(last_sell_price, price)
@@ -447,12 +482,12 @@ def __place_order(order_type, symbol, price, qty, force=False, cancelorders=Fals
     #    return None
 
 
-def place_safe_order(order_type, symbol, price, qty, safeback_seconds=48*3600+60, force=False, cancelorders=False, hours=5, fee_percentage=0.001):
+def place_safe_order(order_type, symbol, price, qty, safeback_seconds=48*3600+60, force=False, cancelorders=False, hours=5, fee_percentage=0.001, bypass_profit_guard=False):
 
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)
-    
-    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=safeback_seconds, max_daily_trades=25, profit_percentage = 1.15) :
+
+    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=safeback_seconds, max_daily_trades=25, profit_percentage = 1.15, bypass_profit_guard=bypass_profit_guard) :
         return None
 
     return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders,

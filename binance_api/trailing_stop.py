@@ -128,7 +128,9 @@ class TrailingStop:
                 if should_sell(price, st["peak"], trail):
                     sell_qty = round(qty * self.sell_fraction, 8)
                     if self.enabled and sell_qty * price >= MIN_NOTIONAL_USD:
-                        self.po.place_safe_order("SELL", symbol, price, sell_qty, force=True)
+                        # bypass_profit_guard=True: e STOP-LOSS, trebuie sa vanda in
+                        # pierdere (sub ultimul buy). Fara asta, gardul de profit l-ar bloca.
+                        self.po.place_safe_order("SELL", symbol, price, sell_qty, force=True, bypass_profit_guard=True)
                         self.log(f"  🛑 [TRAIL] VANDUT {symbol} {sell_qty} @ ~{price:.4f} "
                                  f"(varf {st['peak']:.4f}, -{trail}%)")
                         st["peak"] = price                  # re-armeaza de la pretul curent
