@@ -14,6 +14,7 @@ if [ "$1" = "--alert" ]; then
     checks="dn_bot.py\$|DN-bot
 dn_bot.py --watch|DN-watch
 kraken_bot.py|Kraken-bot
+kraken_cachemanager.py|Kraken-cache
 kraken_xstock_watch.py|xStock-watch
 t212_bot.py|T212-bot
 cacheManager.py|cacheManager
@@ -61,6 +62,7 @@ if [ "$1" = "--supervise" ]; then
     bots="dn_bot.py\$|$ROOT/hyperliquid|source $ROOT/myenv/bin/activate && nohup python3 dn_bot.py > dn_bot.log 2>&1 &|DN-bot
 dn_bot.py --watch|$ROOT/hyperliquid|source $ROOT/myenv/bin/activate && nohup python3 dn_bot.py --watch > dn_watch.log 2>&1 &|DN-watch
 kraken_bot.py|$ROOT/kraken|nohup python3 kraken_bot.py > kraken_bot.log 2>&1 &|Kraken-bot
+kraken_cachemanager.py|$ROOT/kraken|nohup python3 kraken_cachemanager.py > kraken_cachemanager.log 2>&1 &|Kraken-cache
 kraken_xstock_watch.py|$ROOT/kraken|nohup python3 kraken_xstock_watch.py > kraken_xstock_watch.log 2>&1 &|xStock-watch
 t212_bot.py|$ROOT/212trading|nohup python3 t212_bot.py > t212_bot.log 2>&1 &|T212-bot
 kraken/trailing_stop.py|$ROOT|KRAKEN_TRAILING_ENABLED=true nohup python3 kraken/trailing_stop.py > kraken/trail_k.log 2>&1 &|Kraken-trailing

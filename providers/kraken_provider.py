@@ -12,6 +12,7 @@ Chei: KRAKEN_API_KEY / KRAKEN_API_SECRET (env). Pretul/istoricul merg si fara ch
 (public). Plasarea: DRY (add_order validate=True) pana la KRAKEN_LIVE_ORDERS=true.
 Import LAZY al clientului (sys.path pe kraken/), ca flota sa nu cada daca lipseste ceva.
 """
+import json
 import os
 import sys
 import math
@@ -21,6 +22,9 @@ from typing import Optional, List
 from .market_api import MarketDataProvider, _normalize_order, env_value
 
 _KRAKEN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kraken")
+# Cache PARTAJAT de fills, produs de kraken/kraken_cachemanager.py (cross-proces).
+_KRAKEN_CACHE_FILE = os.path.join(os.path.dirname(_KRAKEN_DIR), "cachedb", "cache_trade_kraken.json")
+_CACHE_MAX_STALE_S = 30.0   # peste asta -> cachemanager probabil oprit -> fallback TradesHistory
 
 
 def _live() -> bool:
@@ -126,32 +130,66 @@ class KrakenProvider(MarketDataProvider):
             return None
 
     def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:
-        """Istoric tranzactii proprii (TradesHistory) pt pereche, filtrat pe side+varsta."""
+        """Tranzactii proprii pt pereche, filtrat pe side+varsta. Sursa: cache PARTAJAT
+        (kraken_cachemanager, cross-proces) daca e PROASPAT -> 1 fetch / N procese + vedere
+        comuna pt gard; altfel TradesHistory direct (fallback, sigur si fara cachemanager)."""
         try:
-            cli = self._client()
-            res = cli._private("TradesHistory")
-            trades = (res or {}).get("trades", {}) or {}
-            cutoff = time.time() - since_s
+            rows = self._fills_from_cache(symbol)
+            if rows is None:                                  # cache lipsa/vechi -> API direct
+                rows = self._fills_from_api(symbol)
+            cutoff_ms = (time.time() - since_s) * 1000.0
             want = (side or "").upper()
             out = []
-            su = symbol.upper()
-            for tr in trades.values():
-                p = str(tr.get("pair", "")).upper()
-                if su not in p and p not in su:
+            for r in rows:
+                if r["timestamp"] < cutoff_ms:
                     continue
-                if float(tr.get("time", 0)) < cutoff:
+                if want and r["side"] != want:
                     continue
-                s = "BUY" if str(tr.get("type", "")).lower() == "buy" else "SELL"
-                if want and s != want:
-                    continue
-                out.append(_normalize_order({
-                    "side": s, "price": tr.get("price"),
-                    "qty": tr.get("vol"), "timestamp": int(float(tr.get("time", 0)) * 1000),
-                }))
+                out.append(_normalize_order(r))
             return out
         except Exception as e:  # noqa: BLE001
             print(f"[Kraken] get_orders {symbol}: {e}")
             return []
+
+    def _fills_from_cache(self, symbol: str):
+        """Fills pt symbol din cache-ul PARTAJAT (kraken_cachemanager). None daca fisierul
+        lipseste / e prea vechi (cachemanager oprit) / n-are symbol -> get_orders cade pe API."""
+        try:
+            with open(_KRAKEN_CACHE_FILE) as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            return None
+        items = data.get("items") or {}
+        ft = data.get("fetchtime") or {}
+        su = symbol.upper()
+        key = next((k for k in items if su in k.upper() or k.upper() in su), None)
+        if key is None:
+            return None
+        if (time.time() * 1000.0 - float(ft.get(key, 0))) > _CACHE_MAX_STALE_S * 1000.0:
+            return None                                       # stale -> cachemanager probabil mort
+        return [{
+            "side": "BUY" if t.get("isBuyer") else "SELL",
+            "price": t.get("price"), "qty": t.get("qty"),
+            "timestamp": int(t.get("time", 0)),
+        } for t in items[key]]
+
+    def _fills_from_api(self, symbol: str):
+        """Fallback: TradesHistory direct (comportamentul de dinainte de cachemanager)."""
+        cli = self._client()
+        res = cli._private("TradesHistory")
+        trades = (res or {}).get("trades", {}) or {}
+        su = symbol.upper()
+        rows = []
+        for tr in trades.values():
+            p = str(tr.get("pair", "")).upper()
+            if su not in p and p not in su:
+                continue
+            rows.append({
+                "side": "BUY" if str(tr.get("type", "")).lower() == "buy" else "SELL",
+                "price": tr.get("price"), "qty": tr.get("vol"),
+                "timestamp": int(float(tr.get("time", 0)) * 1000),
+            })
+        return rows
 
     # ── plasare (DRY pana la KRAKEN_LIVE_ORDERS=true) ──────────────────────────
     def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):

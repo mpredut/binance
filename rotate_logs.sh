@@ -20,6 +20,7 @@ trap 'rm -f "$CONF"' EXIT
 {
     for rel in hyperliquid/dn_bot.log hyperliquid/dn_watch.log \
                kraken/kraken_bot.log kraken/kraken_xstock_watch.log kraken/trail_k.log \
+               kraken/kraken_cachemanager.log \
                binance_api/trail_b.log \
                "212trading/t212_bot.log" "212trading/price_alert.log" \
                logs/healthcheck.log logs/watchdog.log logs/cache_coherence.log; do

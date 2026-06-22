@@ -21,6 +21,16 @@ pkill -f "dn_bot.py --watch" 2>/dev/null || true
 sleep 1
 ( source ~/binance/myenv/bin/activate && nohup python3 dn_bot.py --watch > dn_watch.log 2>&1 & )
 
+echo "=== KRAKEN CACHEMANAGER (fills partajat cross-proces, HYPE multi-proces) ==="
+# Tine fills-urile Kraken intr-un fisier comun (cachedb/cache_trade_kraken.json) ca toate
+# procesele de trading HYPE sa vada aceleasi tranzactii (gard corect cross-proces) + un
+# singur fetcher (rate-limit). Mod 'poll' (REST) implicit; 'ws' real-time cu KRAKEN_CACHE_MODE=ws.
+# Cheia _WS dedicata (nonce separat). Pornit INAINTEA botilor ca fisierul sa existe la citire.
+pkill -f kraken_cachemanager.py 2>/dev/null || true
+sleep 1
+cd ~/binance/kraken
+nohup python3 kraken_cachemanager.py > kraken_cachemanager.log 2>&1 &
+
 echo "=== KRAKEN BOT ==="
 # NU sterge .state_HYPEUSD.json: botul isi reia pozitia din el; fara stare ar
 # porni curat si ar CUMPARA o intrare noua peste pozitia veche (incidentul de 10 iun).
