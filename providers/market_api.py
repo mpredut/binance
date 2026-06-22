@@ -116,10 +116,31 @@ class MarketDataProvider(ABC):
         """Plaseaza un ordin pt `symbol`. Default None (provider fara plasare)."""
         return None
 
+    def guards_internally(self) -> bool:
+        """True daca providerul aplica DEJA gardul de profit in place_order (ex. Binance,
+        via place_order_smart). Atunci Instrument.place NU mai ruleaza gardul agnostic
+        (anti-dublare). Default False -> gardul agnostic se aplica in Instrument.place."""
+        return False
+
     def min_order_qty(self, symbol: str) -> float:
         """Volumul minim de ordin pt symbol (0 = fara constrangere). Suprascris de
         provideri care au minim explicit (ex. Kraken `ordermin` din pair_info)."""
         return 0.0
+
+    def last_opposite_fill(self, symbol: str, order_type: str,
+                           since_s: float = 90 * 24 * 3600) -> Optional[float]:
+        """Pretul ULTIMEI executii OPUSE (pt BUY -> ultim SELL; pt SELL -> ultim BUY).
+        None daca nu exista. Folosit de gardul de profit AGNOSTIC (order_guard).
+        Default: cea mai recenta din get_orders pe side-ul opus (Kraken: TradesHistory =
+        fills reale). Provideri cu sursa dedicata (Binance: cache fills + API) suprascriu.
+        RIDICA pe eroare de citire -> apelantul (order_guard) propaga -> fail-closed."""
+        opp = "SELL" if order_type.upper() == "BUY" else "BUY"
+        fills = self.get_orders(symbol, opp, since_s) or []
+        if not fills:
+            return None
+        latest = max(fills, key=lambda o: o.get("timestamp") or 0)
+        price = float(latest.get("price") or 0)
+        return price or None
 
 
 class BinanceProvider(MarketDataProvider):
@@ -171,6 +192,19 @@ class BinanceProvider(MarketDataProvider):
         # deci un import la nivel de modul ar inchide ciclul. Aici e sigur (runtime).
         from binance_api import bapi_placeorder as _po
         return _po.place_order_smart(side, symbol, price, qty, **kwargs)
+
+    def last_opposite_fill(self, symbol: str, order_type: str, since_s: float = 0) -> Optional[float]:
+        # Sursa dedicata Binance (PERSISTENT, fara fereastra): cache de fills (CacheTradeManager)
+        # apoi API direct (get_my_trades). IDENTIC cu tier 2+3 din gardul vechi. Import LAZY
+        # (bapi_placeorder trage cacheManager->market_api -> ciclu daca ar fi la nivel de modul).
+        from binance_api import bapi_placeorder as _po
+        ref = _po._last_opposite_fill_price(symbol, order_type)        # cache fills (via WS)
+        if ref is None:
+            ref = _po._last_opposite_fill_price_api(symbol, order_type)  # fallback API direct
+        return ref
+
+    def guards_internally(self) -> bool:
+        return True   # place_order_smart -> place_safe_order -> if_place_safe_order (gard intern)
 
 
 class MarketApi:

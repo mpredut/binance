@@ -18,6 +18,7 @@ from binance.exceptions import BinanceAPIException
 
 ####MYLIB
 import utils as u
+import order_guard
 import symbols as sym
 import config as cfg
 import priceAnalysis as pa
@@ -350,38 +351,21 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
             readable = datetime.fromtimestamp(trade['timestamp'] / 1000)
             print(f"[CHECK] {readable} - price: {trade['price']} - included: {float(trade['timestamp']) >= time_limit}")
         
-        # ---- GARD PROFIT: 3 niveluri de referinta, in cascada ----
-        # 1) time-windowed: min(sell)/max(buy) din fereastra (cand are date).
-        # 2) persistent: ultimul fill opus din cache (fara limita de timp) cand fereastra e goala.
-        # 3) API DIRECT (get_my_trades) cand nici cache-ul n-are opusul (ex. cacheManager
-        #    nepopulat inca). Cand fereastra are date, min/max e oricum >= la fel de strict.
-        # bypass_profit_guard (ignora profit/istorie; il da disjunctorul de crash) sare tot.
-        # Orice eroare de cache/manager/API -> ridica -> prins de except-ul de jos -> fail-closed.
+        # ---- GARD PROFIT (AGNOSTIC, order_guard) ----
+        # Logica de profit traieste acum decuplat in order_guard, ca sa ruleze IDENTIC si pe
+        # alte venue-uri (ex. Kraken HYPE). Referinta, in cascada: 1) min(sell)/max(buy) din
+        # fereastra (Order cache, calculat aici); 2) altfel ultimul fill opus al providerului
+        # (BinanceProvider.last_opposite_fill = cache fills + API direct). bypass_profit_guard
+        # sare tot; orice eroare de citire ridica -> prins de except-ul de jos -> fail-closed.
         if not bypass_profit_guard:
-            if recent_opposite_trades:                       # 1) fereastra (time-windowed) PRIMAR
-                if order_type == "BUY":
-                    ref = min(float(t['price']) for t in recent_opposite_trades)
-                else:
-                    ref = max(float(t['price']) for t in recent_opposite_trades)
-                src = "fereastra"
-            else:
-                ref = _last_opposite_fill_price(symbol, order_type)   # 2) cache fills (persistent)
-                src = "persistent"
-                if ref is None:                              # 3) nici in cache -> API DIRECT (ultim resort)
-                    ref = _last_opposite_fill_price_api(symbol, order_type)
-                    src = "api"
-
-            if ref is not None and ref > 0:
-                if order_type == "BUY":
-                    diff_percent = u.value_diff_to_percent(ref, price)   # (ref_SELL - pret_BUY)/ref_SELL
-                else:
-                    diff_percent = u.value_diff_to_percent(price, ref)   # (pret_SELL - ref_BUY)/pret_SELL
-                print(f"[GARD] {order_type} {symbol}: ref {ref} ({src}), pret {price}, "
-                      f"diff {diff_percent:.2f}%, prag {profit_percentage}%")
-                if diff_percent < profit_percentage:
-                    print(f"Diferenta procentuala ({diff_percent:.2f}%) sub prag {profit_percentage}%. "
-                          f"Ordinul de {order_type} BLOCAT.")
-                    return False
+            window_ref = None
+            if recent_opposite_trades:                       # fereastra (time-windowed) PRIMAR
+                _prices = [float(t['price']) for t in recent_opposite_trades]
+                window_ref = min(_prices) if order_type == "BUY" else max(_prices)
+            from providers.market_api import BinanceProvider
+            if not order_guard.profit_guard(BinanceProvider(), symbol, order_type, price,
+                                            profit_percentage, window_ref=window_ref):
+                return False
         return True
 
     except BinanceAPIException as e:
@@ -502,7 +486,7 @@ def place_safe_order(order_type, symbol, price, qty, safeback_seconds=48*3600+60
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)
 
-    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=safeback_seconds, max_daily_trades=25, profit_percentage = 1.15, bypass_profit_guard=bypass_profit_guard) :
+    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=safeback_seconds, max_daily_trades=25, profit_percentage = order_guard.margin_for("binance"), bypass_profit_guard=bypass_profit_guard) :
         return None
 
     return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders,

@@ -19,6 +19,7 @@ neambiguu chiar daca acelasi asset apare pe mai multe venue-uri.
 from typing import Optional, List, Callable, Any
 
 from providers.market_api import api as _default_api
+import order_guard
 
 
 class Instrument:
@@ -80,6 +81,21 @@ class Instrument:
 
     # ── plasare ordin (DRY/real dupa portile providerului) ─────────────────────
     def place(self, side: str, price: float, qty: float, **kwargs):
+        # GARD DE PROFIT AGNOSTIC: nu cumpara peste ultimul SELL / nu vinde sub ultimul BUY.
+        # Se aplica DOAR providerilor care NU guardeaza intern (Binance o face deja in bapi
+        # via place_order_smart -> anti-dublare). Asa Kraken HYPE etc. capata aceeasi protectie.
+        # bypass_profit_guard=True (ex. disjunctor de crash) sare gardul. Pragul (%) e per-venue
+        # din order_guard.conf. Eroare la citirea referintei -> fail-closed (NU plaseaza).
+        bypass = bool(kwargs.pop("bypass_profit_guard", False))
+        if not bypass and not self._provider.guards_internally():
+            margin = order_guard.margin_for(self._provider.name)
+            try:
+                ok = order_guard.profit_guard(self._provider, self.symbol, side, price, margin)
+            except Exception as e:  # noqa: BLE001 — nu pot verifica -> nu tranzactionez orb
+                print(f"[{self.symbol}] {side} BLOCAT (fail-closed): nu pot verifica profitul ({e})")
+                return None
+            if not ok:
+                return None
         return self._provider.place_order(self.symbol, side, price, qty, **kwargs)
 
     def min_qty(self) -> float:
