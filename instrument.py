@@ -96,10 +96,19 @@ class Instrument:
                     self._provider, self.symbol, side, order_guard.window_for(self._provider.name))
                 ok = order_guard.profit_guard(self._provider, self.symbol, side, price, margin,
                                               window_ref=window_ref)
+                if not ok:
+                    return None
+                # PLAFON WEIGHT (gauss) pe SELL — echivalentul agnostic al apply_weight_limit
+                # Binance: distribuie pe curba gauss, NU vinde tot dintr-o data (ex. HYPE-Kraken).
+                # available=balanta base = corect pe SELL. (BUY: plafonat de buy_budget in
+                # monitortrades; weight pe BUY ar cere balanta de quote -> extensibil ulterior.)
+                if side.upper() == "SELL":
+                    qty = order_guard.weight_limit(self._provider, self.symbol, side, price, qty, base=self.base)
             except Exception as e:  # noqa: BLE001 — nu pot verifica -> nu tranzactionez orb
-                print(f"[{self.symbol}] {side} BLOCAT (fail-closed): nu pot verifica profitul ({e})")
+                print(f"[{self.symbol}] {side} BLOCAT (fail-closed): {e}")
                 return None
-            if not ok:
+            if qty is None or qty <= 0:
+                print(f"[{self.symbol}] {side} qty 0 dupa weight -> skip")
                 return None
         return self._provider.place_order(self.symbol, side, price, qty, **kwargs)
 

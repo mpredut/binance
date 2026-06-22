@@ -73,6 +73,36 @@ def window_reference(provider, symbol, order_type, window_s):
     return min(prices) if order_type.upper() == "BUY" else max(prices)
 
 
+def weight_limit(provider, symbol, order_type, price, required_qty, base=None):
+    """Plafon de CANTITATE per ordin pe curba gauss (echivalentul agnostic al
+    apply_weight_limit din bapi). Distribuie suma tranzactionabila proportional cu pozitia
+    in trend -> nu vinzi/cumperi tot dintr-o data. AGNOSTIC: gauss-ul vine din priceAnalysis
+    (symbol-ul are trend in _trend_syms, incl. HYPEUSD); 'traded 24h' din provider.get_orders
+    (Kraken: cache-ul propriu); balanta din provider.free_balance. Returneaza qty plafonat
+    (min(cerut, permis)). RIDICA pe eroare -> apelantul fail-closed (ca gardul)."""
+    import math
+    try:
+        import priceAnalysis as pa
+        weight = pa.get_weight_for_cash_permission_at_quant_time(symbol, order_type)
+    except Exception as e:
+        print(f"[WEIGHT] {symbol}: nu pot calcula gauss ({e}) -> default 0.03")
+        weight = None
+    if weight is None or (isinstance(weight, float) and math.isnan(weight)) or weight <= 0:
+        weight = 0.03
+    recent = provider.get_orders(symbol, order_type, 86400) or []      # acelasi side, ultimele 24h
+    traded_value = sum(float(o.get("price", 0)) * float(o.get("qty", o.get("quantity", 0))) for o in recent)
+    available = float(provider.free_balance(base or symbol) or 0.0)
+    total_ref = traded_value + available * price                       # tot ce-ai putea tranzactiona (quote)
+    max_trade_value = total_ref * weight                               # plafon pe gauss
+    remaining_value = max(0.0, max_trade_value - traded_value)         # cat mai poti azi
+    remaining_qty = remaining_value / price if price else 0.0
+    adjusted = min(required_qty, remaining_qty)
+    print(f"[WEIGHT] {order_type} {symbol}: weight={weight} traded24h={traded_value:.2f} "
+          f"avail={available:.6f} max={max_trade_value:.2f} remaining={remaining_value:.2f} "
+          f"cerut={required_qty:.6f} -> {adjusted:.6f}")
+    return adjusted
+
+
 def profit_guard(provider, symbol, order_type, price, profit_percentage, window_ref=None):
     """True = ordinul e profitabil fata de referinta (poate fi plasat); False = blocat.
     Referinta, in cascada:
