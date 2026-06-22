@@ -90,7 +90,12 @@ class Instrument:
         if not bypass and not self._provider.guards_internally():
             margin = order_guard.margin_for(self._provider.name)
             try:
-                ok = order_guard.profit_guard(self._provider, self.symbol, side, price, margin)
+                # tier 1: referinta min/max din fereastra (per venue, order_guard.conf);
+                # daca fereastra e goala / dezactivata -> profit_guard cade pe last_opposite_fill.
+                window_ref = order_guard.window_reference(
+                    self._provider, self.symbol, side, order_guard.window_for(self._provider.name))
+                ok = order_guard.profit_guard(self._provider, self.symbol, side, price, margin,
+                                              window_ref=window_ref)
             except Exception as e:  # noqa: BLE001 — nu pot verifica -> nu tranzactionez orb
                 print(f"[{self.symbol}] {side} BLOCAT (fail-closed): nu pot verifica profitul ({e})")
                 return None

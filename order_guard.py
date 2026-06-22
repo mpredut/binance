@@ -49,6 +49,30 @@ def margin_for(provider_name):
     return m.get((provider_name or "").lower(), m["default"])
 
 
+def window_for(provider_name):
+    """Fereastra (SECUNDE) pt referinta min/max time-windowed, per venue (cheia
+    `<venue>_window_h` in conf). 0 = fara tier time-windowed (doar last_opposite_fill)."""
+    m = _load_margins()
+    key = (provider_name or "").lower() + "_window_h"
+    hours = m.get(key, m.get("default_window_h", 0.0))
+    return float(hours) * 3600.0
+
+
+def window_reference(provider, symbol, order_type, window_s):
+    """Referinta TIME-WINDOWED: min(sell) pt un BUY / max(buy) pt un SELL, din ordinele/fills
+    OPUSE din ultimele window_s secunde (provider.get_orders). None daca fereastra e goala sau
+    window_s<=0. RIDICA pe eroare de citire -> apelantul fail-closed (ca last_opposite_fill).
+    Ignora preturile <=0 (defensiv). Acelasi tier 1 ca la Binance, dar agnostic."""
+    if not window_s or window_s <= 0:
+        return None
+    opp = "SELL" if order_type.upper() == "BUY" else "BUY"
+    recent = provider.get_orders(symbol, opp, window_s) or []
+    prices = [float(o.get("price") or 0) for o in recent if float(o.get("price") or 0) > 0]
+    if not prices:
+        return None
+    return min(prices) if order_type.upper() == "BUY" else max(prices)
+
+
 def profit_guard(provider, symbol, order_type, price, profit_percentage, window_ref=None):
     """True = ordinul e profitabil fata de referinta (poate fi plasat); False = blocat.
     Referinta, in cascada:
