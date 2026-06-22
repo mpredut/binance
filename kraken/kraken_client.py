@@ -18,12 +18,53 @@ import base64
 import hashlib
 import hmac
 import json
+import threading
 import time
 import urllib.parse
 
 from common import http_get, http_post_form, log
 
 API_URL = "https://api.kraken.com"
+
+# ─── Cache TTL partajat (per-proces) pt call-urile de CITIRE ──────────────────
+# Kraken numara apelurile API pe cheie (rate-limit). Mai multi consumatori (monitortrades
+# via provider, kraken_bot, trailing, xstock_watch) + gardul de profit (TradesHistory la
+# fiecare plasare, de 2x: window + last_opposite_fill) lovesc des aceleasi endpointuri.
+# Cache-uim citirile cu TTL scurt, PARTAJAT intre TOATE instantele KrakenClient din proces.
+# Metodele de SCRIERE (AddOrder/CancelOrder) INVALIDEAZA starea de cont -> gardul/boturile
+# vad IMEDIAT propria tranzactie (zero fereastra de staleness pe actiunile proprii).
+# Nu acopera cross-PROCES (fiecare proces are cache propriu); TTL-ul margineste decalajul.
+_CACHE = {}                       # (method, params_key) -> (expiry_ts, result)
+_CACHE_LOCK = threading.Lock()
+_READ_TTL = {                     # secunde; metodele NElistate NU se cacheaza (ex. QueryOrders)
+    "Ticker": 3.0, "AssetPairs": 3600.0,
+    "Balance": 15.0, "TradesHistory": 20.0, "ClosedOrders": 20.0, "OpenOrders": 5.0,
+}
+_WRITE_METHODS = ("AddOrder", "CancelOrder", "CancelAll")
+_INVALIDATE_ON_WRITE = ("Balance", "TradesHistory", "ClosedOrders", "OpenOrders")
+
+
+def _params_key(params: dict) -> tuple:
+    return tuple(sorted((str(k), str(v)) for k, v in params.items() if k != "nonce"))
+
+
+def _cache_get(method: str, params: dict):
+    with _CACHE_LOCK:
+        hit = _CACHE.get((method, _params_key(params)))
+    if hit and hit[0] > time.time():
+        return True, hit[1]
+    return False, None
+
+
+def _cache_put(method: str, params: dict, ttl: float, result) -> None:
+    with _CACHE_LOCK:
+        _CACHE[(method, _params_key(params))] = (time.time() + ttl, result)
+
+
+def _cache_invalidate(methods) -> None:
+    with _CACHE_LOCK:
+        for k in [k for k in _CACHE if k[0] in methods]:
+            _CACHE.pop(k, None)
 
 
 class KrakenError(Exception):
@@ -44,11 +85,16 @@ class KrakenClient:
         mac = hmac.new(base64.b64decode(secret), message, hashlib.sha512)
         return base64.b64encode(mac.digest()).decode()
 
-    def _private(self, method: str, data: dict | None = None) -> dict:
+    def _private(self, method: str, data: dict | None = None, fresh: bool = False) -> dict:
         if not self.api_key or not self.api_secret:
             raise KrakenError("Lipsesc cheile Kraken (KRAKEN_API_KEY / KRAKEN_API_SECRET)")
-        urlpath = f"/0/private/{method}"
         data = dict(data or {})
+        ttl = _READ_TTL.get(method)
+        if ttl and not fresh:                       # citire cache-uibila -> serveste din cache daca e proaspat
+            ok, val = _cache_get(method, data)
+            if ok:
+                return val
+        urlpath = f"/0/private/{method}"
         # nonce in nanosecunde: maxim monoton, depaseste orice nonce (ms/us) folosit anterior pe cheie
         data["nonce"] = str(time.time_ns())
         headers = {
@@ -56,14 +102,28 @@ class KrakenClient:
             "API-Sign": self._signature(urlpath, data, self.api_secret),
         }
         status, body = http_post_form(API_URL + urlpath, data, headers=headers)
-        return self._parse(status, body)
+        result = self._parse(status, body)
+        if ttl:
+            _cache_put(method, data, ttl, result)
+        if method in _WRITE_METHODS:                # AddOrder/CancelOrder -> starea de cont s-a schimbat
+            _cache_invalidate(_INVALIDATE_ON_WRITE)
+        return result
 
-    def _public(self, method: str, params: dict | None = None) -> dict:
+    def _public(self, method: str, params: dict | None = None, fresh: bool = False) -> dict:
+        params = dict(params or {})
+        ttl = _READ_TTL.get(method)
+        if ttl and not fresh:
+            ok, val = _cache_get(method, params)
+            if ok:
+                return val
         url = f"{API_URL}/0/public/{method}"
         if params:
             url += "?" + urllib.parse.urlencode(params)
         status, body = http_get(url)
-        return self._parse(status, body)
+        result = self._parse(status, body)
+        if ttl:
+            _cache_put(method, params, ttl, result)
+        return result
 
     @staticmethod
     def _parse(status: int, body: bytes) -> dict:
