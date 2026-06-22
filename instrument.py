@@ -98,12 +98,12 @@ class Instrument:
                                               window_ref=window_ref)
                 if not ok:
                     return None
-                # PLAFON WEIGHT (gauss) pe SELL — echivalentul agnostic al apply_weight_limit
-                # Binance: distribuie pe curba gauss, NU vinde tot dintr-o data (ex. HYPE-Kraken).
-                # available=balanta base = corect pe SELL. (BUY: plafonat de buy_budget in
-                # monitortrades; weight pe BUY ar cere balanta de quote -> extensibil ulterior.)
-                if side.upper() == "SELL":
-                    qty = order_guard.weight_limit(self._provider, self.symbol, side, price, qty, base=self.base)
+                # PLAFON WEIGHT (gauss) pe AMBELE directii — echivalentul agnostic al
+                # apply_weight_limit Binance: distribuie pe curba gauss, NU tranzactiona tot
+                # dintr-o data (ex. HYPE-Kraken). weight_limit e side-aware: SELL->balanta base,
+                # BUY->balanta quote/pret.
+                qty = order_guard.weight_limit(self._provider, self.symbol, side, price, qty,
+                                               base=self.base, quote=self.quote)
             except Exception as e:  # noqa: BLE001 — nu pot verifica -> nu tranzactionez orb
                 print(f"[{self.symbol}] {side} BLOCAT (fail-closed): {e}")
                 return None
