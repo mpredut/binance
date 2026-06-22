@@ -40,6 +40,9 @@ MODE = os.environ.get("KRAKEN_CACHE_MODE", "poll").strip().lower()   # poll | ws
 WS_URL = "wss://ws-auth.kraken.com/"      # endpoint AUTENTIFICAT (canalul privat ownTrades)
 CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                           "cachedb", "cache_trade_kraken.json")
+LEDGER_LOOKBACK_S = float(os.environ.get("KRAKEN_CACHE_LOOKBACK_H", "336")) * 3600   # default 14 zile
+# active de cotare (USD-like) -> sufixul de symbol; restul (HYPE, BTC...) = base
+_QUOTE = {"ZUSD": "USD", "USD": "USD", "USDC": "USDC", "USDT": "USDT", "USDG": "USDG", "ZEUR": "EUR"}
 
 
 def _normalize(txid, tr):
@@ -63,18 +66,51 @@ def _atomic_write(path, obj):
     os.replace(tmp, path)            # atomic: cititorii nu vad fisier pe jumatate scris
 
 
-def _fetch_rest_into(client, cache):
-    """Un fetch TradesHistory -> umple cache pe symbol (folosit de poll SI de seed-ul WS)."""
-    res = client._private("TradesHistory", fresh=True)   # fresh: ocoleste cache-ul TTL al clientului
-    trades = (res or {}).get("trades", {}) or {}
-    by_sym = {}
-    for txid, tr in trades.items():
-        n = _normalize(txid, tr)
-        if PAIRS and "*" not in PAIRS and n["symbol"] not in PAIRS:
+def _ledger_to_fills(ledger):
+    """Grupeaza intrarile Ledgers pe refid -> fills {symbol,id,orderId,price,qty,time,isBuyer}.
+    UNIFICA spot (type=trade) + instant-buy/convert (type=receive/spend): fiecare are un leg
+    BASE (HYPE) + un leg QUOTE (USD-like), acelasi refid. Ignora staking/deposit/withdrawal
+    (un singur leg). Pretul = |quote| / |base|; isBuyer = primit base (>0)."""
+    by_ref = {}
+    for x in ledger.values():
+        by_ref.setdefault(x.get("refid"), []).append(x)
+    fills = []
+    for refid, legs in by_ref.items():
+        if len(legs) < 2:
+            continue                                      # un singur leg -> staking/deposit, nu trade
+        quote = next((l for l in legs if str(l.get("asset", "")).upper() in _QUOTE), None)
+        base = next((l for l in legs if l is not quote and str(l.get("asset", "")).upper() not in _QUOTE), None)
+        if not quote or not base or str(base.get("type")) not in ("trade", "receive", "spend"):
             continue
-        by_sym.setdefault(n["symbol"], []).append(n)
+        try:
+            ba = float(base["amount"]); qa = float(quote["amount"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        if ba == 0:
+            continue
+        fills.append({
+            "symbol": str(base["asset"]).upper() + _QUOTE[str(quote["asset"]).upper()],
+            "id": str(refid), "orderId": str(refid),
+            "price": abs(qa) / abs(ba), "qty": abs(ba),
+            "time": int(float(base.get("time", 0)) * 1000),
+            "isBuyer": ba > 0,                            # primit base = cumparare
+        })
+    return fills
+
+
+def _fetch_rest_into(client, cache):
+    """Un fetch LEDGERS (UNIFICAT: spot + instant-buy/convert) -> umple cache pe symbol.
+    Folosit de poll SI de seed-ul WS. Sursa unica de adevar pt ORICE executie — TradesHistory
+    spot NU vede instant-buy-urile (vezi incidentul 06:47: cumparare instant invizibila acolo)."""
+    res = client._private("Ledgers", {"start": int(time.time() - LEDGER_LOOKBACK_S)}, fresh=True)
+    fills = _ledger_to_fills((res or {}).get("ledger", {}) or {})
+    by_sym = {}
+    for f in fills:
+        if PAIRS and "*" not in PAIRS and f["symbol"] not in PAIRS:
+            continue
+        by_sym.setdefault(f["symbol"], []).append(f)
     for sym, lst in by_sym.items():
-        lst.sort(key=lambda t: t["time"])               # crescator -> ultimul = cel mai recent
+        lst.sort(key=lambda t: t["time"])                # crescator -> ultimul = cel mai recent
         cache["items"][sym] = lst
         cache["fetchtime"][sym] = int(time.time() * 1000)
 
@@ -101,8 +137,10 @@ def _ws_token(client):
 
 
 def ws_loop(client):
-    """Real-time: subscribe ownTrades -> scrie fisierul la FIECARE fill (zero-lag).
-    Seed initial din REST (sa nu pornesti cu cache gol) + reconnect automat."""
+    """Real-time: subscribe ownTrades (DOAR spot!) -> scrie fisierul la FIECARE fill (zero-lag).
+    Seed initial din Ledgers (unificat, prinde si instant-buy-urile EXISTENTE) + reconnect automat.
+    LIMITARE: instant-buy-urile NOI in timpul WS nu vin pe ownTrades (sunt off-orderbook) -> cand
+    activezi WS, adauga un re-poll Ledgers periodic (ex 30s) ca sa le prinzi si pe alea."""
     import websocket  # lazy: doar in modul WS, ca poll-ul sa mearga fara dependenta
 
     cache = {"items": {}, "fetchtime": {}}
