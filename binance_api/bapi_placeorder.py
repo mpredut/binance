@@ -276,6 +276,17 @@ def _last_opposite_fill_price(symbol, order_type):
     return cm.get_cache_manager("Trade").last_opposite_fill_price(symbol, order_type)
 
 
+def _last_opposite_fill_price_api(symbol, order_type):
+    """Fallback API DIRECT (get_my_trades) cand cache-ul nu are tranzactia opusa
+    (ex. cacheManager nepopulat inca / simbol nou). RIDICA exceptie pe eroare ->
+    apelantul face fail-closed. None DOAR daca Binance confirma ca nu exista opus."""
+    want_buyer = (order_type.upper() == "SELL")   # opusul unui SELL e un BUY (isBuyer=True)
+    for tr in reversed(client.get_my_trades(symbol=symbol, limit=200)):
+        if tr["isBuyer"] == want_buyer:
+            return float(tr["price"])
+    return None
+
+
 def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, max_daily_trades=10, profit_percentage=0.01, bypass_profit_guard=False):
     # bypass_profit_guard=True -> IGNORA gardul de profit/istorie. ATENTIE: e DIFERIT de
     # `force` (care doar executa la MARKET in __place_order, dar RESPECTA gardul). Sare peste
@@ -339,28 +350,32 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
             readable = datetime.fromtimestamp(trade['timestamp'] / 1000)
             print(f"[CHECK] {readable} - price: {trade['price']} - included: {float(trade['timestamp']) >= time_limit}")
         
-        # ---- GARD PROFIT: time-windowed PRIMAR + persistent FALLBACK ----
-        # Referinta = min(sell)/max(buy) din fereastra; daca fereastra e GOALA, cade pe
-        # ultimul fill opus (persistent, fara limita de timp). Cand fereastra are date,
-        # min/max e oricum >= la fel de strict ca persistentul (ultimul fill e in fereastra).
+        # ---- GARD PROFIT: 3 niveluri de referinta, in cascada ----
+        # 1) time-windowed: min(sell)/max(buy) din fereastra (cand are date).
+        # 2) persistent: ultimul fill opus din cache (fara limita de timp) cand fereastra e goala.
+        # 3) API DIRECT (get_my_trades) cand nici cache-ul n-are opusul (ex. cacheManager
+        #    nepopulat inca). Cand fereastra are date, min/max e oricum >= la fel de strict.
         # bypass_profit_guard (ignora profit/istorie; il da disjunctorul de crash) sare tot.
-        # Daca persistentul nu poate citi cache-ul -> ridica -> prins de except-ul de jos ->
-        # fail-closed (cand bypass=False).
+        # Orice eroare de cache/manager/API -> ridica -> prins de except-ul de jos -> fail-closed.
         if not bypass_profit_guard:
-            if recent_opposite_trades:                       # fereastra are date
+            if recent_opposite_trades:                       # 1) fereastra (time-windowed) PRIMAR
                 if order_type == "BUY":
                     ref = min(float(t['price']) for t in recent_opposite_trades)
                 else:
                     ref = max(float(t['price']) for t in recent_opposite_trades)
-            else:                                            # fereastra GOALA -> persistent
-                ref = _last_opposite_fill_price(symbol, order_type)
+                src = "fereastra"
+            else:
+                ref = _last_opposite_fill_price(symbol, order_type)   # 2) cache fills (persistent)
+                src = "persistent"
+                if ref is None:                              # 3) nici in cache -> API DIRECT (ultim resort)
+                    ref = _last_opposite_fill_price_api(symbol, order_type)
+                    src = "api"
 
             if ref is not None and ref > 0:
                 if order_type == "BUY":
                     diff_percent = u.value_diff_to_percent(ref, price)   # (ref_SELL - pret_BUY)/ref_SELL
                 else:
                     diff_percent = u.value_diff_to_percent(price, ref)   # (pret_SELL - ref_BUY)/pret_SELL
-                src = "fereastra" if recent_opposite_trades else "persistent"
                 print(f"[GARD] {order_type} {symbol}: ref {ref} ({src}), pret {price}, "
                       f"diff {diff_percent:.2f}%, prag {profit_percentage}%")
                 if diff_percent < profit_percentage:
