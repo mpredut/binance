@@ -34,7 +34,11 @@ def _load_margins():
                 if not line or "=" not in line:
                     continue
                 k, _, v = line.partition("=")
-                m[k.strip().lower()] = float(v.strip())
+                k = k.strip().lower(); v = v.strip()
+                try:                       # praguri/ore/weight = float; proxy = string (ex BTCUSDC)
+                    m[k] = float(v)
+                except ValueError:
+                    m[k] = v
     except FileNotFoundError:
         pass
     except Exception as e:
@@ -56,6 +60,14 @@ def window_for(provider_name):
     key = (provider_name or "").lower() + "_window_h"
     hours = m.get(key, m.get("default_window_h", 0.0))
     return float(hours) * 3600.0
+
+
+def weight_proxy_for(provider_name):
+    """Symbol-ul al carui trend/gauss e PROXY cand symbol-ul curent n-are trend lung propriu
+    (ex HYPE -> BTC pana are date). Cheia `<venue>_weight_proxy` sau `default_weight_proxy`.
+    None = fara proxy (cade pe default 0.03)."""
+    m = _load_margins()
+    return m.get((provider_name or "").lower() + "_weight_proxy", m.get("default_weight_proxy"))
 
 
 def window_reference(provider, symbol, order_type, window_s):
@@ -81,13 +93,26 @@ def weight_limit(provider, symbol, order_type, price, required_qty, base=None, q
     (Kraken: cache-ul propriu); balanta din provider.free_balance. Returneaza qty plafonat
     (min(cerut, permis)). RIDICA pe eroare -> apelantul fail-closed (ca gardul)."""
     import math
-    try:
-        import priceAnalysis as pa
-        weight = pa.get_weight_for_cash_permission_at_quant_time(symbol, order_type)
-    except Exception as e:
-        print(f"[WEIGHT] {symbol}: nu pot calcula gauss ({e}) -> default 0.03")
-        weight = None
-    if weight is None or (isinstance(weight, float) and math.isnan(weight)) or weight <= 0:
+    def _ok(w):
+        return w is not None and not (isinstance(w, float) and math.isnan(w)) and w > 0
+
+    def _gauss(sym):
+        try:
+            import priceAnalysis as pa
+            return pa.get_weight_for_cash_permission_at_quant_time(sym, order_type)
+        except Exception as e:
+            print(f"[WEIGHT] {sym}: nu pot calcula gauss ({e})")
+            return None
+
+    weight = _gauss(symbol)                                 # gauss-ul propriu (daca symbol-ul are trend lung)
+    if not _ok(weight):                                     # n-are trend propriu (ex HYPE) -> proxy (ex BTC)
+        proxy = weight_proxy_for(getattr(provider, "name", ""))
+        if proxy and proxy != symbol:
+            pw = _gauss(proxy)
+            if _ok(pw):
+                weight = pw
+                print(f"[WEIGHT] {symbol}: fara trend propriu -> proxy {proxy} (weight={weight})")
+    if not _ok(weight):                                     # nici proxy -> default conservator
         weight = 0.03
     recent = provider.get_orders(symbol, order_type, 86400) or []      # acelasi side, ultimele 24h
     traded_value = sum(float(o.get("price", 0)) * float(o.get("qty", o.get("quantity", 0))) for o in recent)
