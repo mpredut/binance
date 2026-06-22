@@ -735,6 +735,10 @@ class Cache24PriceManager(CacheManagerInterface):
 
     def __init__(self, sync_ts, symbols, filename, api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
+        # Curata datele STRAINE incarcate dintr-un fisier vechi redundant (inainte de fix-ul
+        # de filtrare, fiecare cache_24price_X tinea toate monedele). Tine DOAR symbol-ul nostru.
+        with self.lock:
+            self.cache = {s: v for s, v in self.cache.items() if s in self.symbols}
 
     # subscribe_price / unsubscribe_price / _notify_price_subscribers — moștenite
     # din CacheManagerInterface.
@@ -743,6 +747,11 @@ class Cache24PriceManager(CacheManagerInterface):
 
     def on_price_update(self, symbol: str, ts_ms: int, price: float):
         """Apelat de CacheCurrentPriceManager la fiecare preț nou (WS sau HTTP)."""
+        # FILTRU: managerul e PER-SYMBOL (symbols=[s]), dar CurrentPrice face BROADCAST cu TOATE
+        # symbolurile catre toti abonatii. Stocam DOAR symbol-ul nostru -> fiecare fisier
+        # cache_24price_X tine o singura moneda (nu redundant). Nu re-notificam nici ticks straini.
+        if symbol not in self.symbols:
+            return
         if not self.fetchtime_time_per_symbol:
             self.fetchtime_time_per_symbol = self._CacheManagerInterface__rebuild_fetchtime_times()
         self.update_cache_per_symbol(symbol, [[ts_ms, price]])
