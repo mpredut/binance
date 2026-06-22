@@ -1852,6 +1852,15 @@ if __name__ == "__main__":
         # (altfel doar instanta _trend_cpm avea HYPEUSD, in memorie, nepersistat in fisier).
         CacheFactory.get("CurrentPrice", symbols=_trend_syms)
         builtins.print(f"[cacheManager] instant-trend extins cu non-Binance: {_nb_syms}")
+        # Trend LUNG (gauss) pt non-Binance (ex HYPEUSD) — GATED pe LONGTREND_NONBINANCE
+        # (default OFF -> weight_limit foloseste proxy BTC). Activat: include istoricul de pret
+        # (Price) + long-trend pt HYPE -> incepe sa ACUMULEZE date ACUM; semnificativ dupa
+        # ~lookback_days. priceAnalysis (acelasi flag) calculeaza -> priceanalysis.json ->
+        # PriceLongTrend -> gauss HYPE. "Acolo, gata de activat cand ai date suficiente."
+        if os.environ.get("LONGTREND_NONBINANCE", "").strip().lower() == "true":
+            CacheFactory.get("Price", symbols=_trend_syms)
+            CacheFactory.get("PriceLongTrend", symbols=_trend_syms)
+            builtins.print(f"[cacheManager] trend LUNG non-Binance ACTIVAT: {_nb_syms}")
 
     for name, config in CacheFactory._CONFIG.items():
         cache = get_cache_manager(name)

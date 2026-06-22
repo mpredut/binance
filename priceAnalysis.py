@@ -698,7 +698,21 @@ UPDATE_AND_REFRESH_TREND = 60*1 # un minut
 if __name__ == "__main__":
     #shm = shmu.shmConnectForWrite(shmu.shmname)
     build_price_cache_manager()
-    symbols = sym.symbols
+    symbols = list(sym.symbols)
+    # Trend LUNG pt non-Binance (ex HYPEUSD pe Kraken) — GATED pe LONGTREND_NONBINANCE
+    # (default OFF -> weight_limit foloseste proxy BTC). Activarea (env=true + restart) baga
+    # HYPE in calculul de trend; semnificativ DUPA ce se acumuleaza ~lookback_days de istoric
+    # de pret HYPE. weight_limit comuta automat de pe proxy pe trendul HYPE cand apare. Asa e
+    # "acolo, gata de activat cand ai date suficiente".
+    if os.environ.get("LONGTREND_NONBINANCE", "").strip().lower() == "true":
+        try:
+            from instruments_config import load_for
+            for _inst in load_for("mt").values():
+                if _inst.provider_name != "binance" and _inst.symbol not in symbols:
+                    symbols.append(_inst.symbol)
+            print(f"[priceAnalysis] trend LUNG non-Binance ACTIVAT: {symbols}")
+        except Exception as _e:
+            print(f"[priceAnalysis] non-Binance trend indisponibil: {_e}")
     try:
         while True:
             process = psutil.Process(os.getpid())
