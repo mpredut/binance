@@ -58,6 +58,7 @@ class StratParams:
     yahoo_sym: str = ""             # simbol Yahoo (din config; gol => derivat din ticker)
     reentry_drop_pct: float = 0.0   # dupa TP reintra doar la -X% sub pretul vandut (anti-churn)
     tp_ladder: list = field(default_factory=list)   # scale-out: [(nivel%, fractie0-1)]; gol => vinde tot la takeprofit_pct
+    fx_fee_pct: float = FX_FEE_PCT   # taxa FX T212 / directie (din STRAT_FX_FEE_PCT; default modul)
 
     @classmethod
     def from_env(cls, env: dict | None = None) -> "StratParams":
@@ -84,11 +85,13 @@ class StratParams:
         # nr maxim DCA: "auto" => calculat din buget ((buget-intrare)/dca); altfel explicit; gol => 10
         _mdb = (e.get("STRAT_MAX_DCA_BUYS") or "").strip().lower()
         if _mdb in ("auto", "buget", "budget"):
-            _max_dca = max(0, int((_budget - _entry) // _dca))
+            _max_dca = max(0, int((_budget - _entry) // _dca)) if _dca > 0 else 0
+            _entry = _budget - _max_dca * _dca   # intrarea ABSOARBE restul -> bugetul e acoperit INTEGRAL (intrare + N*DCA = buget, fara tampon)
         elif _mdb:
             _max_dca = int(float(_mdb))
         else:
             _max_dca = 10
+        _fx_fee = float_env("STRAT_FX_FEE_PCT", e) or FX_FEE_PCT
         return cls(
             currency           = e.get("STRAT_CURRENCY", "RON").strip().upper(),
             entry_amount       = _entry,
@@ -106,6 +109,7 @@ class StratParams:
             yahoo_sym          = (e.get("YAHOO_SYMBOL") or "").strip(),
             reentry_drop_pct   = float_env("STRAT_REENTRY_DROP_PCT", e) or 0.0,
             tp_ladder          = _ladder,
+            fx_fee_pct         = _fx_fee,
         )
 
 
@@ -126,13 +130,13 @@ def _new_state() -> dict:
     }
 
 
-def _sell_pnl(avg: float, price: float, qty: float) -> tuple[float, float, float]:
+def _sell_pnl(avg: float, price: float, qty: float, fee_pct: float = FX_FEE_PCT) -> tuple[float, float, float]:
     """Returneaza (brut, fee_fx, net) pentru o vanzare de `qty` la `price`, cost mediu `avg`.
 
-    Taxa FX 0.15% se aplica si pe valoarea cumparata (baza de cost), si pe cea vanduta.
+    Taxa FX (fee_pct%) se aplica si pe valoarea cumparata (baza de cost), si pe cea vanduta.
     """
     gross = (price - avg) * qty
-    fee = (FX_FEE_PCT / 100.0) * (avg * qty + price * qty)
+    fee = (fee_pct / 100.0) * (avg * qty + price * qty)
     return gross, fee, gross - fee
 
 
@@ -229,7 +233,7 @@ class Strategy:
             self._cancel_open("SELL")     # avg s-a schimbat -> reasezam TP
         else:  # SELL
             avg = self._avg_cost() or price
-            gross, fee, net = _sell_pnl(avg, price, qty)
+            gross, fee, net = _sell_pnl(avg, price, qty, self.p.fx_fee_pct)
             self.s["realized_pnl_usd"] += gross
             self.s["realized_net_usd"] += net
             self.s["fees_usd"] += fee
@@ -425,7 +429,7 @@ class Strategy:
         # --- SELL executat: pozitia a scazut ---
         elif real_qty < prev_qty - 1e-6:
             sold = prev_qty - real_qty
-            gross, fee, net = _sell_pnl(prev_avg, price, sold)
+            gross, fee, net = _sell_pnl(prev_avg, price, sold, self.p.fx_fee_pct)
             self.s["realized_pnl_usd"] += gross
             self.s["realized_net_usd"] += net
             self.s["fees_usd"] += fee
@@ -566,7 +570,7 @@ class Strategy:
             log("      take-profit: dezactivat (dca_only)")
         log(f"      PLAFON     : {self.p.max_budget:.0f} {self.ccy} / ciclu")
         log(f"      check      : la {self.p.check_minutes:.0f} min   |  1 {self.ccy} = {self.fx_to_usd:.4f} USD")
-        log(f"      ! prag rentabilitate ~{FX_FEE_PCT*2:.2f}% (FX) + spread; TP={self.p.takeprofit_pct}%")
+        log(f"      ! prag rentabilitate ~{self.p.fx_fee_pct*2:.2f}% (FX) + spread; TP={self.p.takeprofit_pct}%")
 
         try:
             while True:
