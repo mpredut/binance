@@ -24,7 +24,7 @@ from __future__ import annotations
 import json
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ipo_common import log, now_str, float_env
 from ipo_notify import notify
@@ -57,6 +57,7 @@ class StratParams:
     stop_loss_pct: float     # SIGURANTA: vinde tot daca pierderea >= acest % (0 = oprit)
     yahoo_sym: str = ""             # simbol Yahoo (din config; gol => derivat din ticker)
     reentry_drop_pct: float = 0.0   # dupa TP reintra doar la -X% sub pretul vandut (anti-churn)
+    tp_ladder: list = field(default_factory=list)   # scale-out: [(nivel%, fractie0-1)]; gol => vinde tot la takeprofit_pct
 
     @classmethod
     def from_env(cls, env: dict | None = None) -> "StratParams":
@@ -64,6 +65,16 @@ class StratParams:
         mai multe active in acelasi proces, fiecare cu config-ul lui (fara coliziuni)."""
         e = os.environ if env is None else env
         mode = e.get("STRATEGY_MODE", "avg_tp").strip().lower()
+        # scara de vanzare (scale-out): "11:33,20:33,30:34" -> [(11.0,0.33),(20.0,0.33),(30.0,0.34)]
+        _ladder = []
+        for _part in (e.get("STRAT_TP_LADDER") or "").split(","):
+            _part = _part.strip()
+            if ":" in _part:
+                _lvl, _frac = _part.split(":", 1)
+                try:
+                    _ladder.append((float(_lvl), float(_frac) / 100.0))
+                except ValueError:
+                    pass
         return cls(
             currency           = e.get("STRAT_CURRENCY", "RON").strip().upper(),
             entry_amount       = float_env("STRAT_ENTRY", e) or 300.0,
@@ -80,6 +91,7 @@ class StratParams:
             stop_loss_pct      = float_env("STRAT_STOP_LOSS_PCT", e) or 0.0,
             yahoo_sym          = (e.get("YAHOO_SYMBOL") or "").strip(),
             reentry_drop_pct   = float_env("STRAT_REENTRY_DROP_PCT", e) or 0.0,
+            tp_ladder          = _ladder,
         )
 
 
@@ -95,7 +107,8 @@ def _new_state() -> dict:
         "realized_pnl_usd": 0.0,   # profit BRUT cumulat (fara fee)
         "realized_net_usd": 0.0,   # profit NET cumulat (dupa taxa FX 0.15% x2)
         "fees_usd": 0.0,           # total taxe FX platite
-        "orders": [],           # {id, side, qty, limit, amount, kind, ts}
+        "tp_sold_levels": [],   # nivele din scara TP deja vandute in ciclul curent (scale-out)
+        "orders": [],           # {id, side, qty, limit, amount, kind, ts, level}
     }
 
 
@@ -252,21 +265,22 @@ class Strategy:
                 self.s["buy_backoff_until"] = time.time() + 1800
                 log("  [STRAT] fonduri insuficiente — pauza cumparari 30 min (alimenteaza contul)")
 
-    def _place_sell(self, qty: float, limit: float) -> None:
+    def _place_sell(self, qty: float, limit: float, level: float | None = None) -> None:
+        tag = f"+{level:g}%" if level is not None else ""
         if self.dry_run:
             self._paper_seq += 1
-            log(f"  [STRAT] [PAPER] plasez SELL TP {qty:.2f} @ {limit:.2f} USD")
+            log(f"  [STRAT] [PAPER] plasez SELL TP{tag} {qty:.2f} @ {limit:.2f} USD")
             self.s["orders"].append({"id": f"PAPER-{self._paper_seq}", "side": "SELL",
                                      "qty": round(qty, 2), "limit": round(limit, 2),
-                                     "kind": "TP", "ts": time.time()})
+                                     "kind": "TP", "level": level, "ts": time.time()})
             return
         status, data = self.client.place_limit_order(self.ticker, -abs(qty), round(limit, 2), self.p.validity)
         if status in (200, 201):
-            log(f"  [STRAT] SELL TP plasat id={data.get('id')} {qty:.2f} @ {limit:.2f}")
+            log(f"  [STRAT] SELL TP{tag} plasat id={data.get('id')} {qty:.2f} @ {limit:.2f}")
             self.s["orders"].append({"id": data.get("id"), "side": "SELL", "qty": round(qty, 2),
-                                     "limit": round(limit, 2), "kind": "TP", "ts": time.time()})
+                                     "limit": round(limit, 2), "kind": "TP", "level": level, "ts": time.time()})
         else:
-            log(f"  ! [STRAT] SELL TP esuat HTTP {status}: {json.dumps(data)[:200]}")
+            log(f"  ! [STRAT] SELL TP{tag} esuat HTTP {status}: {json.dumps(data)[:200]}")
 
     def _cancel_open(self, side: str) -> None:
         o = self._find_open(side)
@@ -276,6 +290,42 @@ class Strategy:
             self.client.cancel_order(o["id"])
         self.s["orders"].remove(o)
         log(f"  [STRAT] anulat ordin {side} {o['id']}")
+
+    def _cancel_specific(self, o: dict) -> None:
+        if not self.dry_run and not str(o["id"]).startswith("PAPER"):
+            self.client.cancel_order(o["id"])
+        self._remove_order(o)
+
+    def _manage_tp_ladder(self, held: float, avg: float) -> None:
+        """Scale-out: un ordin SELL per nivel din scara (nivel%, fractie), la avg*(1+nivel%).
+        Nivelele deja vandute (tp_sold_levels) NU se recreeaza; restul se dimensioneaza din
+        held-ul curent proportional cu fractiile ramase -> pastreaza fractiile originale pe
+        masura ce transele se executa, si se re-aseaza cand avg se schimba (dupa DCA)."""
+        # in mod scara, anuleaza orice SELL legacy fara nivel (ex. TP unic de dinainte de scara)
+        for o in [x for x in self.s["orders"] if x["side"] == "SELL" and x.get("level") is None]:
+            self._cancel_specific(o)
+        sold = set(self.s.get("tp_sold_levels", []))
+        remaining = [(lvl, frac) for (lvl, frac) in self.p.tp_ladder if lvl not in sold]
+        total = sum(f for _, f in remaining)
+        if total <= 0 or held <= 1e-9:
+            return
+        desired = {}   # nivel -> (qty, limit)
+        for lvl, frac in remaining:
+            q = round(held * frac / total, 2)
+            if q > 0:
+                desired[lvl] = (q, round(avg * (1 + lvl / 100.0), 2))
+        open_sells = {o.get("level"): o for o in self.s["orders"]
+                      if o["side"] == "SELL" and o.get("level") is not None}
+        # anuleaza ordinele ne-dorite sau cu pret/qty schimbat (avg s-a mutat dupa DCA)
+        for lvl, o in list(open_sells.items()):
+            d = desired.get(lvl)
+            if d is None or abs(o["limit"] - d[1]) / d[1] > 0.001 or abs(o["qty"] - d[0]) > 1e-6:
+                self._cancel_specific(o)
+                open_sells.pop(lvl, None)
+        # plaseaza nivelele lipsa
+        for lvl, (q, lim) in desired.items():
+            if lvl not in open_sells:
+                self._place_sell(q, lim, level=lvl)
 
     # -- reconciliere ----------------------------------------------------------
     def _remove_order(self, o: dict) -> None:
@@ -300,6 +350,8 @@ class Strategy:
                     self._apply_fill(o, o["qty"], o["limit"])
                 elif price >= o["limit"]:
                     self._remove_order(o)
+                    if o.get("level") is not None:
+                        self.s.setdefault("tp_sold_levels", []).append(o["level"])
                     self._apply_fill(o, o["qty"], o["limit"])
 
     # -- reconciliere REALA: portofoliul T212 e SURSA DE ADEVAR ----------------
@@ -386,6 +438,8 @@ class Strategy:
             if str(o["id"]).startswith("PAPER"):
                 continue
             if o["id"] not in active:
+                if o["side"] == "SELL" and o.get("level") is not None:
+                    self.s.setdefault("tp_sold_levels", []).append(o["level"])  # transa executata
                 self._remove_order(o)        # nu mai e pending (executat sau anulat)
             elif (o["side"] == "BUY"
                   and (time.time() - o.get("ts", 0)) / 60 > self.p.order_ttl_min
@@ -463,13 +517,16 @@ class Strategy:
         avg = self._avg_cost()
 
         if self.p.enable_takeprofit and avg:
-            target = avg * (1 + self.p.takeprofit_pct / 100)
-            sell = self._find_open("SELL")
-            if sell is None:
-                self._place_sell(held, target)
-            elif abs(sell["limit"] - target) / target > 0.001 or abs(sell["qty"] - held) > 1e-6:
-                self._cancel_open("SELL")
-                self._place_sell(held, target)
+            if self.p.tp_ladder:
+                self._manage_tp_ladder(held, avg)        # scale-out in trepte
+            else:
+                target = avg * (1 + self.p.takeprofit_pct / 100)
+                sell = self._find_open("SELL")
+                if sell is None:
+                    self._place_sell(held, target)
+                elif abs(sell["limit"] - target) / target > 0.001 or abs(sell["qty"] - held) > 1e-6:
+                    self._cancel_open("SELL")
+                    self._place_sell(held, target)
 
         if (self.s["dca_buys"] < self.p.max_dca_buys
                 and self.s["last_buy_price"]
