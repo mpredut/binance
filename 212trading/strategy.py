@@ -366,6 +366,7 @@ class Strategy:
             self.s["qty"] = real_qty
             self.s["cost_usd"] = real_qty * real_avg
             self.s["spent_cash"] = round(real_qty * real_avg / self.fx_to_usd, 2)
+            self.s["last_sell_price"] = price   # garda profit: nu recumpara mai sus de ultima vanzare (calea REALA)
             log(f"  [STRAT] SELL EXECUTAT {sold:.4f} @ ~{price:.2f} USD  "
                 f"brut={gross:+.2f}  fee={fee:.2f}  net={net:+.2f} USD")
             notify(title=f"{self.yahoo_sym} SELL {sold:.4f} @ ~{price:.2f}  NET {net:+.2f} USD",
@@ -403,6 +404,7 @@ class Strategy:
             self.s["realized_net_usd"] = net_tot
             self.s["fees_usd"] = fees
             self.s["cycle"] = nxt
+            self.s["last_sell_price"] = price   # garda profit: dupa vanzare totala, reintra DOAR sub pretul vandut (calea REALA)
             log(f"  [STRAT] === ciclu inchis, reincep (ciclu {nxt}) ===")
 
     # -- pas de decizie --------------------------------------------------------
