@@ -59,6 +59,7 @@ class StratParams:
     reentry_drop_pct: float = 0.0   # dupa TP reintra doar la -X% sub pretul vandut (anti-churn)
     tp_ladder: list = field(default_factory=list)   # scale-out: [(nivel%, fractie0-1)]; gol => vinde tot la takeprofit_pct
     fx_fee_pct: float = FX_FEE_PCT   # taxa FX T212 / directie (din STRAT_FX_FEE_PCT; default modul)
+    loss_alert_step: float = 1.0     # notifica la fiecare X% de adancire a pierderii nerealizate (0 = off)
 
     @classmethod
     def from_env(cls, env: dict | None = None) -> "StratParams":
@@ -92,6 +93,9 @@ class StratParams:
         else:
             _max_dca = 10
         _fx_fee = float_env("STRAT_FX_FEE_PCT", e) or FX_FEE_PCT
+        _loss_step = float_env("STRAT_LOSS_ALERT_STEP", e)
+        if _loss_step is None:
+            _loss_step = 1.0
         return cls(
             currency           = e.get("STRAT_CURRENCY", "RON").strip().upper(),
             entry_amount       = _entry,
@@ -110,6 +114,7 @@ class StratParams:
             reentry_drop_pct   = float_env("STRAT_REENTRY_DROP_PCT", e) or 0.0,
             tp_ladder          = _ladder,
             fx_fee_pct         = _fx_fee,
+            loss_alert_step    = _loss_step,
         )
 
 
@@ -125,6 +130,7 @@ def _new_state() -> dict:
         "realized_pnl_usd": 0.0,   # profit BRUT cumulat (fara fee)
         "realized_net_usd": 0.0,   # profit NET cumulat (dupa taxa FX 0.15% x2)
         "fees_usd": 0.0,           # total taxe FX platite
+        "loss_band": 0,         # banda de pierdere deja alertata (anti-spam alerte de adancire)
         "tp_sold_levels": [],   # nivele din scara TP deja vandute in ciclul curent (scale-out)
         "orders": [],           # {id, side, qty, limit, amount, kind, ts, level}
     }
@@ -507,8 +513,26 @@ class Strategy:
                    source="strategy", price=price, desktop=self.desktop)
         return True
 
+    def _check_loss_alert(self, price: float) -> None:
+        """Alerta INFORMATIVA (nu vinde) cand pierderea nerealizata se adanceste cu inca un prag
+        (loss_alert_step%). O notificare per banda noua => util fara spam; coboara tacut la recuperare."""
+        step = self.p.loss_alert_step
+        avg = self._avg_cost()
+        if step <= 0 or not avg:
+            return
+        loss_pct = (avg - price) / avg * 100
+        band = int(loss_pct // step) if loss_pct > 0 else 0
+        if band > self.s.get("loss_band", 0):
+            log(f"  📉 [STRAT] {self.yahoo_sym} pierdere -{loss_pct:.1f}% (prag {band*step:.0f}%)")
+            notify(title=f"📉 {self.yahoo_sym} -{loss_pct:.1f}%",
+                   body=f"Pierdere nerealizata -{loss_pct:.1f}% (a trecut de {band*step:.0f}%). "
+                        f"qty {self.s['qty']:.2f} @ avg {avg:.2f}, pret {price:.2f}.\n{now_str()}",
+                   source="strategy", price=price, desktop=self.desktop)
+        self.s["loss_band"] = band
+
     def step(self, price: float) -> None:
         held = self.s["qty"]
+        self._check_loss_alert(price)   # alerta pe adancirea pierderii (oricand detinem; nu vinde)
         disc = 1 - self.p.entry_discount_pct / 100
 
         # backoff dupa "insufficient funds": nu incerca cumparari cat contul e gol
