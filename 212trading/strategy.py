@@ -283,22 +283,22 @@ class Strategy:
                 self.s["buy_backoff_until"] = time.time() + 1800
                 log("  [STRAT] fonduri insuficiente — pauza cumparari 30 min (alimenteaza contul)")
 
-    def _place_sell(self, qty: float, limit: float, level: float | None = None) -> None:
+    def _place_sell(self, qty: float, limit: float, level: float | None = None, kind: str = "TP") -> None:
         tag = f"+{level:g}%" if level is not None else ""
         if self.dry_run:
             self._paper_seq += 1
-            log(f"  [STRAT] [PAPER] plasez SELL TP{tag} {qty:.2f} @ {limit:.2f} USD")
+            log(f"  [STRAT] [PAPER] plasez SELL {kind}{tag} {qty:.2f} @ {limit:.2f} USD")
             self.s["orders"].append({"id": f"PAPER-{self._paper_seq}", "side": "SELL",
                                      "qty": round(qty, 2), "limit": round(limit, 2),
-                                     "kind": "TP", "level": level, "ts": time.time()})
+                                     "kind": kind, "level": level, "ts": time.time()})
             return
         status, data = self.client.place_limit_order(self.ticker, -abs(qty), round(limit, 2), self.p.validity)
         if status in (200, 201):
-            log(f"  [STRAT] SELL TP{tag} plasat id={data.get('id')} {qty:.2f} @ {limit:.2f}")
+            log(f"  [STRAT] SELL {kind}{tag} plasat id={data.get('id')} {qty:.2f} @ {limit:.2f}")
             self.s["orders"].append({"id": data.get("id"), "side": "SELL", "qty": round(qty, 2),
-                                     "limit": round(limit, 2), "kind": "TP", "level": level, "ts": time.time()})
+                                     "limit": round(limit, 2), "kind": kind, "level": level, "ts": time.time()})
         else:
-            log(f"  ! [STRAT] SELL TP{tag} esuat HTTP {status}: {json.dumps(data)[:200]}")
+            log(f"  ! [STRAT] SELL {kind}{tag} esuat HTTP {status}: {json.dumps(data)[:200]}")
 
     def _cancel_open(self, side: str) -> None:
         o = self._find_open(side)
@@ -488,18 +488,24 @@ class Strategy:
         if not avg:
             return False
         loss_pct = (avg - price) / avg * 100   # long: pierdem cand pretul < pret mediu
-        if loss_pct >= self.p.stop_loss_pct:
-            log(f"  🛑 [STRAT] STOP-LOSS: pierdere {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — VAND TOT (taie pierderea)")
-            for o in list(self.s["orders"]):           # anuleaza toate ordinele pendinte (si DCA-urile)
+        if loss_pct < self.p.stop_loss_pct:
+            self.s["sl_alerted"] = False        # pretul a revenit peste prag -> permite o noua alerta daca recade
+            return False
+        # ANTI-SPAM: plaseaza SL-ul O DATA; re-plaseaza DOAR daca limita a ramas in urma (pretul a cazut sub ea)
+        sl = next((o for o in self.s["orders"] if o.get("kind") == "SL"), None)
+        if sl is None or price < sl["limit"]:
+            for o in list(self.s["orders"]):           # anuleaza toate ordinele pendinte (si DCA/TP-urile)
                 if not self.dry_run and not str(o["id"]).startswith("PAPER"):
                     self.client.cancel_order(o["id"])
                 self._remove_order(o)
-            self._place_sell(self.s["qty"], round(price * 0.995, 2))   # vinde agresiv -> fill sigur
+            self._place_sell(self.s["qty"], round(price * 0.995, 2), kind="SL")   # vinde agresiv -> fill sigur
+        if not self.s.get("sl_alerted"):           # notifica O SINGURA DATA per episod
+            self.s["sl_alerted"] = True
+            log(f"  🛑 [STRAT] STOP-LOSS: pierdere {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — VAND TOT (taie pierderea)")
             notify(title=f"🛑 STOP-LOSS {self.yahoo_sym} ({loss_pct:.1f}%)",
-                   body=f"Pierdere {loss_pct:.1f}% >= prag {self.p.stop_loss_pct}% — am vandut tot.\n{now_str()}",
+                   body=f"Pierdere {loss_pct:.1f}% >= prag {self.p.stop_loss_pct}% — vand tot.\n{now_str()}",
                    source="strategy", price=price, desktop=self.desktop)
-            return True
-        return False
+        return True
 
     def step(self, price: float) -> None:
         held = self.s["qty"]
