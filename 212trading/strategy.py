@@ -60,6 +60,7 @@ class StratParams:
     tp_ladder: list = field(default_factory=list)   # scale-out: [(nivel%, fractie0-1)]; gol => vinde tot la takeprofit_pct
     fx_fee_pct: float = FX_FEE_PCT   # taxa FX T212 / directie (din STRAT_FX_FEE_PCT; default modul)
     loss_alert_step: float = 1.0     # notifica la fiecare X% de adancire a pierderii nerealizate (0 = off)
+    ladder_min_free: float = 6.0     # lasa min acest $ NEREZERVAT pe scara TP (T212 cere pozitie libera, "min-opened-position")
 
     @classmethod
     def from_env(cls, env: dict | None = None) -> "StratParams":
@@ -98,6 +99,9 @@ class StratParams:
         _loss_step = float_env("STRAT_LOSS_ALERT_STEP", e)
         if _loss_step is None:
             _loss_step = 1.0
+        _ladder_free = float_env("STRAT_LADDER_MIN_FREE", e)
+        if _ladder_free is None:
+            _ladder_free = 6.0
         return cls(
             currency           = e.get("STRAT_CURRENCY", "RON").strip().upper(),
             entry_amount       = _entry,
@@ -117,6 +121,7 @@ class StratParams:
             tp_ladder          = _ladder,
             fx_fee_pct         = _fx_fee,
             loss_alert_step    = _loss_step,
+            ladder_min_free    = _ladder_free,
         )
 
 
@@ -336,13 +341,15 @@ class Strategy:
         total = sum(f for _, f in remaining)
         if total <= 0 or held <= 1e-9:
             return
-        # ultima transa (nivelul cel mai inalt) ia RESTUL exact -> suma transelor = held FIX,
-        # altfel rotunjirea poate depasi held si ultimul SELL e respins (selling-more-than-owned)
+        # ultima transa (nivelul cel mai inalt) ia RESTUL, MINUS un buffer nerezervat -> suma <= held;
+        # evita oversell-ul prin rotunjire SI lasa pozitie libera (T212 "min-opened-position").
         desired = {}   # nivel -> (qty, limit)
+        buf = (self.p.ladder_min_free / avg) if (self.p.ladder_min_free > 0 and avg > 0) else 0.0
         remaining_sorted = sorted(remaining, key=lambda x: x[0])
         acc = 0.0
         for i, (lvl, frac) in enumerate(remaining_sorted):
-            q = round(held - acc, 2) if i == len(remaining_sorted) - 1 else round(held * frac / total, 2)
+            last = (i == len(remaining_sorted) - 1)
+            q = round(held - acc - buf, 2) if last else round(held * frac / total, 2)
             acc += q
             if q > 0:
                 desired[lvl] = (q, round(avg * (1 + lvl / 100.0), 2))
