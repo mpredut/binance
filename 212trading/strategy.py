@@ -75,9 +75,12 @@ class StratParams:
                     _ladder.append((float(_lvl), float(_frac) / 100.0))
                 except ValueError:
                     pass
-        _entry = float_env("STRAT_ENTRY", e) or 300.0
-        _dca = float_env("STRAT_DCA", e) or 150.0
         _budget = float_env("STRAT_MAX_BUDGET", e) or 2000.0
+        # intrare/DCA: ca PROCENT din buget (general, scaleaza cu bugetul) SAU absolut (fallback vechi)
+        _entry_pct = float_env("STRAT_ENTRY_PCT", e)
+        _entry = (_budget * _entry_pct / 100.0) if _entry_pct else (float_env("STRAT_ENTRY", e) or 300.0)
+        _dca_pct = float_env("STRAT_DCA_PCT", e)
+        _dca = (_budget * _dca_pct / 100.0) if _dca_pct else (float_env("STRAT_DCA", e) or 150.0)
         # nr maxim DCA: "auto" => calculat din buget ((buget-intrare)/dca); altfel explicit; gol => 10
         _mdb = (e.get("STRAT_MAX_DCA_BUYS") or "").strip().lower()
         if _mdb in ("auto", "buget", "budget"):
