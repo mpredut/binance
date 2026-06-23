@@ -291,7 +291,7 @@ class Strategy:
                 self.s["buy_backoff_until"] = time.time() + 1800
                 log("  [STRAT] fonduri insuficiente — pauza cumparari 30 min (alimenteaza contul)")
 
-    def _place_sell(self, qty: float, limit: float, level: float | None = None, kind: str = "TP") -> None:
+    def _place_sell(self, qty: float, limit: float, level: float | None = None, kind: str = "TP") -> bool:
         tag = f"+{level:g}%" if level is not None else ""
         if self.dry_run:
             self._paper_seq += 1
@@ -299,14 +299,15 @@ class Strategy:
             self.s["orders"].append({"id": f"PAPER-{self._paper_seq}", "side": "SELL",
                                      "qty": round(qty, 2), "limit": round(limit, 2),
                                      "kind": kind, "level": level, "ts": time.time()})
-            return
+            return True
         status, data = self.client.place_limit_order(self.ticker, -abs(qty), round(limit, 2), self.p.validity)
         if status in (200, 201):
             log(f"  [STRAT] SELL {kind}{tag} plasat id={data.get('id')} {qty:.2f} @ {limit:.2f}")
             self.s["orders"].append({"id": data.get("id"), "side": "SELL", "qty": round(qty, 2),
                                      "limit": round(limit, 2), "kind": kind, "level": level, "ts": time.time()})
-        else:
-            log(f"  ! [STRAT] SELL {kind}{tag} esuat HTTP {status}: {json.dumps(data)[:200]}")
+            return True
+        log(f"  ! [STRAT] SELL {kind}{tag} esuat HTTP {status}: {json.dumps(data)[:200]}")
+        return False
 
     def _cancel_open(self, side: str) -> None:
         o = self._find_open(side)
@@ -353,10 +354,17 @@ class Strategy:
             if d is None or abs(o["limit"] - d[1]) / d[1] > 0.001 or abs(o["qty"] - d[0]) > 1e-6:
                 self._cancel_specific(o)
                 open_sells.pop(lvl, None)
-        # plaseaza nivelele lipsa
+        # plaseaza nivelele lipsa; daca o transa esueaza persistent (ex. T212 min-opened-position
+        # pe ultima dintr-o pozitie fractionara mica), BACKOFF 30 min in loc de retry la fiecare tick
+        now = time.time()
+        fails = self.s.setdefault("tp_fail_until", {})
         for lvl, (q, lim) in desired.items():
-            if lvl not in open_sells:
-                self._place_sell(q, lim, level=lvl)
+            if lvl in open_sells:
+                continue
+            if now < fails.get(str(lvl), 0):
+                continue
+            if not self._place_sell(q, lim, level=lvl):
+                fails[str(lvl)] = now + 1800
 
     # -- reconciliere ----------------------------------------------------------
     def _remove_order(self, o: dict) -> None:
