@@ -92,7 +92,9 @@ class StratParams:
             _max_dca = int(float(_mdb))
         else:
             _max_dca = 10
-        _fx_fee = float_env("STRAT_FX_FEE_PCT", e) or FX_FEE_PCT
+        _fx_fee = float_env("STRAT_FX_FEE_PCT", e)
+        if _fx_fee is None:                 # 0 e valid (cont USD, fara FX) -> nu folosi `or`
+            _fx_fee = FX_FEE_PCT
         _loss_step = float_env("STRAT_LOSS_ALERT_STEP", e)
         if _loss_step is None:
             _loss_step = 1.0
@@ -522,13 +524,16 @@ class Strategy:
             return
         loss_pct = (avg - price) / avg * 100
         band = int(loss_pct // step) if loss_pct > 0 else 0
+        # HIGH-WATER MARK: notifica DOAR cand pierderea bate un nou maxim (cu inca un prag).
+        # NU coboara la recuperare -> daca recade la un nivel deja alertat, NU re-notifica.
+        # Se reseteaza singur la inchiderea ciclului (vanzare -> _new_state -> loss_band=0).
         if band > self.s.get("loss_band", 0):
             log(f"  📉 [STRAT] {self.yahoo_sym} pierdere -{loss_pct:.1f}% (prag {band*step:.0f}%)")
             notify(title=f"📉 {self.yahoo_sym} -{loss_pct:.1f}%",
                    body=f"Pierdere nerealizata -{loss_pct:.1f}% (a trecut de {band*step:.0f}%). "
                         f"qty {self.s['qty']:.2f} @ avg {avg:.2f}, pret {price:.2f}.\n{now_str()}",
                    source="strategy", price=price, desktop=self.desktop)
-        self.s["loss_band"] = band
+            self.s["loss_band"] = band
 
     def step(self, price: float) -> None:
         held = self.s["qty"]
