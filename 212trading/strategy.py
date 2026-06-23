@@ -335,9 +335,14 @@ class Strategy:
         total = sum(f for _, f in remaining)
         if total <= 0 or held <= 1e-9:
             return
+        # ultima transa (nivelul cel mai inalt) ia RESTUL exact -> suma transelor = held FIX,
+        # altfel rotunjirea poate depasi held si ultimul SELL e respins (selling-more-than-owned)
         desired = {}   # nivel -> (qty, limit)
-        for lvl, frac in remaining:
-            q = round(held * frac / total, 2)
+        remaining_sorted = sorted(remaining, key=lambda x: x[0])
+        acc = 0.0
+        for i, (lvl, frac) in enumerate(remaining_sorted):
+            q = round(held - acc, 2) if i == len(remaining_sorted) - 1 else round(held * frac / total, 2)
+            acc += q
             if q > 0:
                 desired[lvl] = (q, round(avg * (1 + lvl / 100.0), 2))
         open_sells = {o.get("level"): o for o in self.s["orders"]
