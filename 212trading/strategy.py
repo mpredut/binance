@@ -75,16 +75,27 @@ class StratParams:
                     _ladder.append((float(_lvl), float(_frac) / 100.0))
                 except ValueError:
                     pass
+        _entry = float_env("STRAT_ENTRY", e) or 300.0
+        _dca = float_env("STRAT_DCA", e) or 150.0
+        _budget = float_env("STRAT_MAX_BUDGET", e) or 2000.0
+        # nr maxim DCA: "auto" => calculat din buget ((buget-intrare)/dca); altfel explicit; gol => 10
+        _mdb = (e.get("STRAT_MAX_DCA_BUYS") or "").strip().lower()
+        if _mdb in ("auto", "buget", "budget"):
+            _max_dca = max(0, int((_budget - _entry) // _dca))
+        elif _mdb:
+            _max_dca = int(float(_mdb))
+        else:
+            _max_dca = 10
         return cls(
             currency           = e.get("STRAT_CURRENCY", "RON").strip().upper(),
-            entry_amount       = float_env("STRAT_ENTRY", e) or 300.0,
+            entry_amount       = _entry,
             entry_discount_pct = float_env("STRAT_ENTRY_DISCOUNT_PCT", e) or 0.2,
-            dca_amount         = float_env("STRAT_DCA", e) or 150.0,
+            dca_amount         = _dca,
             dca_drop_pct       = float_env("STRAT_DCA_DROP_PCT", e) or 2.0,
             check_minutes      = float_env("STRAT_CHECK_MINUTES", e) or 5.0,
             takeprofit_pct     = float_env("STRAT_TAKEPROFIT_PCT", e) or 1.5,
-            max_budget         = float_env("STRAT_MAX_BUDGET", e) or 2000.0,
-            max_dca_buys       = int(float_env("STRAT_MAX_DCA_BUYS", e) or 10),
+            max_budget         = _budget,
+            max_dca_buys       = _max_dca,
             validity           = "GOOD_TILL_CANCEL",
             enable_takeprofit  = (mode != "dca_only"),
             order_ttl_min      = float_env("STRAT_ORDER_TTL_MIN", e) or 10.0,
