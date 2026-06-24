@@ -35,7 +35,9 @@ from kraken_client import KrakenClient
 
 # ── config (din env, cu default-uri) ─────────────────────────────────────────
 PAIRS = [p for p in os.environ.get("KRAKEN_CACHE_PAIRS", "HYPEUSD").split(",") if p]
-POLL_INTERVAL = float(os.environ.get("KRAKEN_CACHE_POLL_S", "5"))
+POLL_INTERVAL = float(os.environ.get("KRAKEN_CACHE_POLL_S", "30"))   # Ledgers e GREU si TOATE procesele Kraken
+                                                                     # impart contorul de cont -> 5s = rate-limit; 30s e
+                                                                     # suficient pt gardul de profit (sub-5s = modul ws)
 POLL_BACKOFF_INIT = float(os.environ.get("KRAKEN_CACHE_BACKOFF_INIT_S", "10"))   # prima pauza dupa eroare
 POLL_BACKOFF_MAX = float(os.environ.get("KRAKEN_CACHE_BACKOFF_MAX_S", "120"))    # max 2 min (sub pragul watchdog 20 min)
 MODE = os.environ.get("KRAKEN_CACHE_MODE", "poll").strip().lower()   # poll | ws

@@ -356,6 +356,50 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
             return None
 
 
+class StockYahooPricePlatform(PricePlatformInterface):
+    """Stocks tokenizate (SPCX, NVDA, RGNT...) via Yahoo Finance — ULTIMUL RESORT.
+    Crypto e revendicat de Binance/Hyperliquid/CMC inainte; aici ajung doar tickerele
+    de actiuni (CMC nu le are, fiind stocks). Sursa = aceeasi ca T212/price_alert
+    (212trading/market_data). Prefera ultima bara intraday (mai proaspata decat meta,
+    care la SPCX poate fi statuta). Tickerele vin din STOCK_TICKERS (default 'SPCX')."""
+    _YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
+    _UA = {"User-Agent": "Mozilla/5.0 (pricefetcher)"}
+
+    def __init__(self, tickers: Optional[List[str]] = None):
+        src = tickers if tickers is not None else os.environ.get("STOCK_TICKERS", "SPCX").split(",")
+        self._symbols: Set[str] = {t.strip().upper() for t in src if t.strip()}
+
+    @property
+    def platform_name(self) -> str:
+        return "Yahoo"
+
+    def get_available_symbols(self) -> Set[str]:
+        return self._symbols.copy()
+
+    def supports_symbol(self, symbol: str) -> bool:
+        # DOAR tickerele configurate -> nu deturna crypto si nu face apel de retea aici
+        return symbol.upper() in self._symbols
+
+    def get_price(self, symbol: str) -> Optional[float]:
+        try:
+            sym_y = symbol.split("_")[0]                      # NVDA_US_EQ -> NVDA
+            url = self._YAHOO.format(sym=sym_y) + "?range=1d&interval=5m"
+            resp = requests.get(url, headers=self._UA, timeout=10)
+            resp.raise_for_status()
+            result = (resp.json().get("chart", {}).get("result") or [None])[0]
+            if not result:
+                return None
+            q = (result.get("indicators", {}).get("quote") or [{}])[0]
+            closes = [c for c in (q.get("close") or []) if c is not None]
+            if closes:
+                return float(closes[-1])                      # ultima bara intraday (cea mai proaspata)
+            price = (result.get("meta", {}) or {}).get("regularMarketPrice")  # fallback: meta
+            return float(price) if price else None
+        except Exception as e:
+            print(f"[YahooPlatform] Error for {symbol}: {e}")
+            return None
+
+
 # ============================================
 # Price Platform Factory
 # ============================================
@@ -368,6 +412,7 @@ class PricePlatformFactory:
         ]
         if cmc_api_key:
             self._platforms.append(CoinMarketCapPricePlatform(cmc_api_key))
+        self._platforms.append(StockYahooPricePlatform())   # ULTIMUL: stocks tokenizate (SPCX...)
         self._symbol_platform_cache: Dict[str, str] = {}
         self._discover_all_symbols()
     
