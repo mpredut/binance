@@ -77,10 +77,8 @@ echo "=== BINANCE TRAILING (protectie crash BTC/TAO) — LIVE (vinde real) ==="
 # activate -> cmdline curat "python3 binance_api/trailing_stop.py".
  pkill -f "binance_api/trailing_stop.py" 2>/dev/null || true
  sleep 1
- # config re-buy trailing (dupa crash sell): BOUNCE_PCT=recul% de la minim pt re-intrare;
- # REBUY_SKIP_IF_TREND_DOWN=nu prinde cutitul; SELL_SKIP_IF_TREND_UP=anti-wick (default off).
+ # config in binance_api/trailing.conf (nu mai e in env)
  ( cd "$ROOT" && source "$ROOT/$_venv/bin/activate" && \
-   TRAILING_ENABLED=true TRAILING_REBUY_BOUNCE_PCT=1.2 TRAILING_REBUY_SKIP_IF_TREND_DOWN=true TRAILING_SELL_SKIP_IF_TREND_UP=false \
    nohup python3 binance_api/trailing_stop.py > binance_api/trail_b.log 2>&1 & )
 
 echo "DONE"

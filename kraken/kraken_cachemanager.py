@@ -36,6 +36,8 @@ from kraken_client import KrakenClient
 # ── config (din env, cu default-uri) ─────────────────────────────────────────
 PAIRS = [p for p in os.environ.get("KRAKEN_CACHE_PAIRS", "HYPEUSD").split(",") if p]
 POLL_INTERVAL = float(os.environ.get("KRAKEN_CACHE_POLL_S", "5"))
+POLL_BACKOFF_INIT = float(os.environ.get("KRAKEN_CACHE_BACKOFF_INIT_S", "10"))   # prima pauza dupa eroare
+POLL_BACKOFF_MAX = float(os.environ.get("KRAKEN_CACHE_BACKOFF_MAX_S", "120"))    # max 2 min (sub pragul watchdog 20 min)
 MODE = os.environ.get("KRAKEN_CACHE_MODE", "poll").strip().lower()   # poll | ws
 WS_URL = "wss://ws-auth.kraken.com/"      # endpoint AUTENTIFICAT (canalul privat ownTrades)
 CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -116,17 +118,22 @@ def _fetch_rest_into(client, cache):
 
 
 def poll_loop(client):
-    """V1 (default): la fiecare POLL_INTERVAL ia TradesHistory, scrie fisierul."""
+    """V1 (default): la fiecare POLL_INTERVAL ia Ledgers, scrie fisierul.
+    Backoff exponential la eroare (rate-limit/nonce) -> nu mai bate Kraken la infinit."""
     cache = {"items": {}, "fetchtime": {}}
+    backoff = POLL_BACKOFF_INIT
     while True:
         try:
             _fetch_rest_into(client, cache)
             _atomic_write(CACHE_FILE, cache)
             log(f"[kraken_cache][poll] {sum(len(v) for v in cache['items'].values())} fills "
                 f"pt {list(cache['items'].keys())}")
+            backoff = POLL_BACKOFF_INIT   # reset dupa succes
+            time.sleep(POLL_INTERVAL)
         except Exception as e:
-            log(f"[kraken_cache][poll] eroare: {e}")
-        time.sleep(POLL_INTERVAL)
+            log(f"[kraken_cache][poll] eroare (backoff {backoff:.0f}s): {e}")
+            time.sleep(backoff)
+            backoff = min(backoff * 2, POLL_BACKOFF_MAX)
 
 
 # ── WS `ownTrades` (real-time, ZERO-LAG) — COMPLET, ready, NEACTIV implicit ───
