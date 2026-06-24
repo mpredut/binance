@@ -55,6 +55,14 @@ SELL_FRACTION = float(os.environ.get("TRAILING_SELL_FRACTION", "1.0"))  # 1.0=to
 MIN_NOTIONAL_USD = 11.0
 CHECK_SECONDS = float(os.environ.get("TRAILING_CHECK_SECONDS", "60"))
 
+# RE-BUY dupa stop-loss de crash: trailing-ul a vandut (cu bypass) -> tot el recumpara (cu bypass),
+# scutit de garda de profit (care, cu fereastra ei lunga, ar bloca re-intrarea). Declansare: pretul
+# revine REBUY_BOUNCE_PCT% de la minimul de dupa vanzare (confirmare ca s-a oprit caderea) -> nu
+# prinde cutitul. 1 transa acum; REBUY_TRANCHES rezervat pt extindere (DCA pe dip).
+REBUY_ENABLED = os.environ.get("TRAILING_REBUY_ENABLED", "true").lower() == "true"
+REBUY_BOUNCE_PCT = float(os.environ.get("TRAILING_REBUY_BOUNCE_PCT", "3.0"))
+REBUY_TRANCHES = int(os.environ.get("TRAILING_REBUY_TRANCHES", "1"))
+
 
 def should_sell(current: float, peak: float, trail_pct: float) -> bool:
     """True daca pretul a cazut >= trail% de la varf."""
@@ -103,6 +111,29 @@ class TrailingStop:
                     return 0.0
         return 0.0
 
+    # -- re-buy dupa crash sell ------------------------------------------------
+    def _handle_rebuy(self, symbol: str, st: dict, price: float) -> None:
+        """Recumparare dupa stop-loss de crash: cand pretul revine REBUY_BOUNCE_PCT% de la minimul
+        de dupa vanzare (confirma ca s-a oprit caderea), recumpara qty vanduta (force + bypass garda)."""
+        rb = st.get("rebuy")
+        if not rb:
+            return
+        rb["low"] = min(rb.get("low", price), price)          # urmareste fundul de dupa vanzare
+        if price < rb["low"] * (1 + REBUY_BOUNCE_PCT / 100.0):
+            return                                            # reculul inca neconfirmat -> asteapta
+        buy_qty = round(float(rb.get("qty", 0)), 8)           # 1 transa = qty intreg (extensibil la REBUY_TRANCHES)
+        if buy_qty <= 0:
+            st.pop("rebuy", None)
+            return
+        if self.enabled and buy_qty * price >= MIN_NOTIONAL_USD:
+            self.po.place_safe_order("BUY", symbol, price, buy_qty, force=True, bypass_profit_guard=True)
+            self.log(f"  🟢 [TRAIL] RE-BUY {symbol} {buy_qty} @ ~{price:.4f}  "
+                     f"(recul +{REBUY_BOUNCE_PCT}% de la minim {rb['low']:.4f}; vandut la {rb.get('sell_price', 0):.4f})")
+        else:
+            self.log(f"  🟡 [TRAIL][DRY] AR RE-CUMPARA {symbol} {buy_qty} @ ~{price:.4f}  "
+                     f"(recul de la minim {rb['low']:.4f})  [TRAILING_ENABLED=true ca sa execute]")
+        st.pop("rebuy", None)                                 # 1 transa -> gata
+
     # -- un pas ----------------------------------------------------------------
     def check_once(self) -> None:
         try:
@@ -118,9 +149,11 @@ class TrailingStop:
                 price = self.api.get_current_price(symbol)
                 if not price or price <= 0:
                     continue
+                st = state.setdefault(symbol, {"peak": price})
+                if REBUY_ENABLED and st.get("rebuy"):       # re-buy pending dupa crash — INAINTE de check-ul de qty (qty~0 dupa vanzare)
+                    self._handle_rebuy(symbol, st, price)
                 if qty * price < MIN_NOTIONAL_USD:
                     continue                                # nimic de protejat
-                st = state.setdefault(symbol, {"peak": price})
                 if price > st["peak"]:
                     st["peak"] = price                      # varf nou -> urca trailing-ul
                 trail = self.trail_pct_for(symbol)
@@ -135,6 +168,8 @@ class TrailingStop:
                         self.log(f"  🛑 [TRAIL] VANDUT {symbol} {sell_qty} @ ~{price:.4f} "
                                  f"(varf {st['peak']:.4f}, -{trail}%)")
                         st["peak"] = price                  # re-armeaza de la pretul curent
+                        if REBUY_ENABLED:                   # armeaza re-buy: recumpara cand pretul revine de la minim
+                            st["rebuy"] = {"qty": sell_qty, "sell_price": price, "low": price}
                     else:
                         self.log(f"  🟡 [TRAIL][DRY] AR VINDE {symbol} {sell_qty} @ ~{price:.4f} "
                                  f"(varf {st['peak']:.4f}, scadere >= {trail}%)  "
