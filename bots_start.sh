@@ -60,15 +60,15 @@ cd ~/binance/212trading
 nohup python3 t212_bot.py > t212_bot.log 2>&1 &
 
 
-echo "=== KRAKEN TRAILING (protectie crash HYPE) — LIVE (vinde real) ==="
+echo "=== KRAKEN TRAILING (protectie crash HYPE + re-buy) — LIVE (vinde real) ==="
 # Disjunctor pe HYPE-ul cumparat MANUAL: vinde balanta LIBERA daca pretul cade
-# -15% de la varf (nu atinge pozitia botului, blocata in TP). ACTIV prin
-# KRAKEN_TRAILING_ENABLED=true (scoate flag-ul ca sa revii la dry-run, care doar logheaza).
+# -15% de la varf (nu atinge pozitia botului, blocata in TP) + re-buy pe recul.
+# Config in kraken/trailing.conf (KRAKEN_TRAILING_ENABLED etc. — nu mai e in shell).
 # Lansat cu cale (kraken/trailing_stop.py) ca pkill sa NU prinda si trailing-ul din
 # radacina (acelasi nume de fisier -> proces identic in ps).
  pkill -f "kraken/trailing_stop.py" 2>/dev/null || true
  sleep 1
- cd ~/binance && KRAKEN_TRAILING_ENABLED=true nohup python3 kraken/trailing_stop.py > kraken/trail_k.log 2>&1 &
+ cd ~/binance && nohup python3 kraken/trailing_stop.py > kraken/trail_k.log 2>&1 &
 
 echo "=== BINANCE TRAILING (protectie crash BTC/TAO) — LIVE (vinde real) ==="
 # Disjunctor pe holdingurile Binance: vinde balanta LIBERA BTC/TAO daca pretul cade
