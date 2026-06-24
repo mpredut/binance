@@ -272,7 +272,8 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
             self._last_refresh = time.time()
         except Exception as e:
             print(f"[CMCPlatform] Error loading symbols: {e}")
-    
+            self._last_refresh = time.time()  # nu retesta imediat; respecta _refresh_interval (3600s)
+
     def refresh_symbols(self):
         if self.api_key and time.time() - self._last_refresh > self._refresh_interval:
             self._load_symbols()
