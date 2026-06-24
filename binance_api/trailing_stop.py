@@ -60,8 +60,14 @@ CHECK_SECONDS = float(os.environ.get("TRAILING_CHECK_SECONDS", "60"))
 # revine REBUY_BOUNCE_PCT% de la minimul de dupa vanzare (confirmare ca s-a oprit caderea) -> nu
 # prinde cutitul. 1 transa acum; REBUY_TRANCHES rezervat pt extindere (DCA pe dip).
 REBUY_ENABLED = os.environ.get("TRAILING_REBUY_ENABLED", "true").lower() == "true"
-REBUY_BOUNCE_PCT = float(os.environ.get("TRAILING_REBUY_BOUNCE_PCT", "3.0"))
+REBUY_BOUNCE_PCT = float(os.environ.get("TRAILING_REBUY_BOUNCE_PCT", "1.2"))
 REBUY_TRANCHES = int(os.environ.get("TRAILING_REBUY_TRANCHES", "1"))
+# Filtre de trend (citite din cache_instant_trend via cacheManager). ACTIONEAZA doar la semnal
+# CLAR opus; neutru/necunoscut -> NU blocheaza (degradare sigura, comportament = ca fara filtru).
+# Re-buy: sari daca trend CLAR jos (nu prinde cutitul). Sell de crash: implicit NEFILTRAT (disjunctorul
+# trebuie sa ramana fiabil); pune true daca vrei sa NU vinda cand trendul instant e clar SUS (anti-wick).
+REBUY_SKIP_IF_TREND_DOWN = os.environ.get("TRAILING_REBUY_SKIP_IF_TREND_DOWN", "true").lower() == "true"
+SELL_SKIP_IF_TREND_UP = os.environ.get("TRAILING_SELL_SKIP_IF_TREND_UP", "false").lower() == "true"
 
 
 def should_sell(current: float, peak: float, trail_pct: float) -> bool:
@@ -111,6 +117,19 @@ class TrailingStop:
                     return 0.0
         return 0.0
 
+    # -- trend instant (din cacheManager) — pt filtrele optionale --------------
+    def _trend_value(self, symbol: str) -> float:
+        """Panta trendului instant (>0 sus, <0 jos, 0 neutru/necunoscut). 0 la orice eroare
+        -> filtrele de trend devin no-op (degradare sigura, comportament ca fara filtru)."""
+        try:
+            import cacheManager as cm
+            snap = cm.get_short_trend_manager().get_snapshot(symbol)
+            if snap:
+                return float(snap.get('gradient_recent', snap.get('slope_small', 0.0)) or 0.0)
+        except Exception:
+            pass
+        return 0.0
+
     # -- re-buy dupa crash sell ------------------------------------------------
     def _handle_rebuy(self, symbol: str, st: dict, price: float) -> None:
         """Recumparare dupa stop-loss de crash: cand pretul revine REBUY_BOUNCE_PCT% de la minimul
@@ -121,6 +140,9 @@ class TrailingStop:
         rb["low"] = min(rb.get("low", price), price)          # urmareste fundul de dupa vanzare
         if price < rb["low"] * (1 + REBUY_BOUNCE_PCT / 100.0):
             return                                            # reculul inca neconfirmat -> asteapta
+        if REBUY_SKIP_IF_TREND_DOWN and self._trend_value(symbol) < 0:
+            self.log(f"  [TRAIL] re-buy {symbol} amanat — trend instant CLAR jos (nu prind cutitul)")
+            return
         buy_qty = round(float(rb.get("qty", 0)), 8)           # 1 transa = qty intreg (extensibil la REBUY_TRANCHES)
         if buy_qty <= 0:
             st.pop("rebuy", None)
@@ -159,6 +181,9 @@ class TrailingStop:
                 trail = self.trail_pct_for(symbol)
                 stop_at = st["peak"] * (1 - trail / 100.0)
                 if should_sell(price, st["peak"], trail):
+                    if SELL_SKIP_IF_TREND_UP and self._trend_value(symbol) > 0:
+                        self.log(f"  [TRAIL] {symbol}: -{trail}% atins dar trend instant SUS — NU vand (anti-wick)")
+                        continue
                     sell_qty = round(qty * self.sell_fraction, 8)
                     if self.enabled and sell_qty * price >= MIN_NOTIONAL_USD:
                         # force=True -> vinde la MARKET (executie sigura in crash);

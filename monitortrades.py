@@ -599,7 +599,7 @@ def main():
     #taosymbol_target_price = api.get_current_price(sym.taosymbol)
     #po.place_safe_order("BUY", sym.taosymbol, taosymbol_target_price - 10, 1)
 
-    d = 14
+    d = int(os.environ.get("MT_GUARD_WINDOW_DAYS", "12"))  # fereastra gardei de profit (zile). 14 prindea un sell din 11 iun ($201) si bloca re-intrarea; 12 il exclude.
     while True:
 
         #state_tracker.display_states()
