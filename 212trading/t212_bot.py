@@ -61,7 +61,7 @@ def verify_isin(client: T212Client, ticker: str, expected_isin: str) -> bool:
         return True
     if str(match.get("isin", "")) != expected_isin:
         log(f"  ! [{ticker}] ISIN {match.get('isin')} != asteptat {expected_isin} — NU tranzactionez")
-        notify(title=f"⚠ {ticker}: ISIN nepotrivit", source="verify",
+        notify(title=f"⚠ {ticker}: ISIN nepotrivit", source="T212",
                body=f"Gasit {match.get('isin')}, asteptam {expected_isin}.", symbol=ticker)
         return False
     return True
@@ -95,7 +95,7 @@ def run_asset(name: str, cfg: dict, client: T212Client, force_paper: bool, skip_
                 ok = wait_for_launch(
                     yahoo, label, interval, stop=STOP,
                     on_launch=lambda m: notify(
-                        title=f"{label} disponibil — pornesc!", source="listing",
+                        title=f"{label} disponibil — pornesc!", source="T212",
                         body=f"{label} tranzactionabil pe {m.get('exchange')} @ {m.get('price')}",
                         price=m.get("price"), symbol=label))
                 if not ok:

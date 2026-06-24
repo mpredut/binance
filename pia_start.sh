@@ -31,7 +31,7 @@ while true; do
     PORT=$(piactl get portforward)
     echo "Port Forward: $PORT"
 
-    state=$(piactl get connectionstate)
+    state=$(piactl get connectionstate | tr -d '\r')
     if [ "$state" != "Connected" ]; then
         echo "❌ VPN PICAT (state = $state). Ies → systemd va restarta."
         exit 1

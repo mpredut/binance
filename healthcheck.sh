@@ -2,8 +2,10 @@
 # healthcheck.sh — verificare consolidata READ-ONLY: procese + conturi (HL/Kraken/T212).
 # Ruleaza pe server oricand:  ./healthcheck.sh
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-# python cu SDK Hyperliquid (eth_account): prefera myenv, cade pe python3
-HLPY="$ROOT/myenv/bin/python"
+# python cu SDK Hyperliquid (eth_account): prefera venv, cade pe python3
+_venv=""
+for _d in ".venv" "myenv"; do [ -f "$ROOT/$_d/bin/activate" ] && _venv="$_d" && break; done
+HLPY="$ROOT/$_venv/bin/python"
 { [ -x "$HLPY" ] && "$HLPY" -c "import eth_account" 2>/dev/null; } || HLPY=python3
 
 # ===== MOD --alert (pt CRON): verifica boturile, trimite ntfy DOAR daca lipseste ceva =====
@@ -59,14 +61,14 @@ if [ "$1" = "--supervise" ]; then
     push(){ [ -n "$TOPIC" ] && curl -s -m 10 -H "Title: $1" -d "$2" "https://ntfy.sh/$TOPIC" >/dev/null; }
     # dn_bot are nevoie de SDK-ul HL (eth_account) = doar in venv; python3 de sistem
     # NU il are -> cron-ul ar esua sa-l reporneasca. Folosim $HLPY (venv, fallback python3).
-    bots="dn_bot.py\$|$ROOT/hyperliquid|source $ROOT/myenv/bin/activate && nohup python3 dn_bot.py > dn_bot.log 2>&1 &|DN-bot
-dn_bot.py --watch|$ROOT/hyperliquid|source $ROOT/myenv/bin/activate && nohup python3 dn_bot.py --watch > dn_watch.log 2>&1 &|DN-watch
+    bots="dn_bot.py\$|$ROOT/hyperliquid|source $ROOT/$_venv/bin/activate && nohup python3 dn_bot.py > dn_bot.log 2>&1 &|DN-bot
+dn_bot.py --watch|$ROOT/hyperliquid|source $ROOT/$_venv/bin/activate && nohup python3 dn_bot.py --watch > dn_watch.log 2>&1 &|DN-watch
 kraken_bot.py|$ROOT/kraken|nohup python3 kraken_bot.py > kraken_bot.log 2>&1 &|Kraken-bot
 kraken_cachemanager.py|$ROOT/kraken|nohup python3 kraken_cachemanager.py > kraken_cachemanager.log 2>&1 &|Kraken-cache
 kraken_xstock_watch.py|$ROOT/kraken|nohup python3 kraken_xstock_watch.py > kraken_xstock_watch.log 2>&1 &|xStock-watch
 t212_bot.py|$ROOT/212trading|nohup python3 t212_bot.py > t212_bot.log 2>&1 &|T212-bot
 kraken/trailing_stop.py|$ROOT|KRAKEN_TRAILING_ENABLED=true nohup python3 kraken/trailing_stop.py > kraken/trail_k.log 2>&1 &|Kraken-trailing
-binance_api/trailing_stop.py|$ROOT|source $ROOT/myenv/bin/activate && TRAILING_ENABLED=true nohup python3 binance_api/trailing_stop.py > binance_api/trail_b.log 2>&1 &|Binance-trailing"
+binance_api/trailing_stop.py|$ROOT|source $ROOT/$_venv/bin/activate && TRAILING_ENABLED=true nohup python3 binance_api/trailing_stop.py > binance_api/trail_b.log 2>&1 &|Binance-trailing"
     while IFS='|' read -r pat dir cmd label; do
         [ -z "$pat" ] && continue
         if pgrep -f "$pat" >/dev/null 2>&1; then

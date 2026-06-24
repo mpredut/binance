@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -242,7 +243,7 @@ class Strategy:
                    body=(f"{order.get('kind')} fill\nqty {self.s['qty']:.2f}  avg {avg:.2f} USD\n"
                          f"desfasurat {self.s['spent_cash']:.0f} {self.ccy}  "
                          f"DCA {self.s['dca_buys']}/{self.p.max_dca_buys}\n{now_str()}"),
-                   source="strategy", price=price, desktop=self.desktop)
+                   source="T212", price=price, desktop=self.desktop)
             self._cancel_open("SELL")     # avg s-a schimbat -> reasezam TP
         else:  # SELL
             avg = self._avg_cost() or price
@@ -257,7 +258,7 @@ class Strategy:
                    body=(f"Brut {gross:+.2f}  - fee FX {fee:.2f}  = NET {net:+.2f} USD\n"
                          f"Net total {self.s['realized_net_usd']:+.2f} USD\n"
                          f"Ciclu {self.s['cycle']} inchis.\n{now_str()}"),
-                   source="strategy", price=price, desktop=self.desktop)
+                   source="T212", price=price, desktop=self.desktop)
             if self.s["qty"] <= 1e-9:
                 pnl, net_tot, fees = (self.s["realized_pnl_usd"],
                                       self.s["realized_net_usd"], self.s["fees_usd"])
@@ -312,6 +313,21 @@ class Strategy:
                                      "limit": round(limit, 2), "kind": kind, "level": level, "ts": time.time()})
             return True
         log(f"  ! [STRAT] SELL {kind}{tag} esuat HTTP {status}: {json.dumps(data)[:200]}")
+        if status == 400 and "selling-equity-not-owned" in str(data):
+            # HARDENING: reseteaza la 0 DOAR daca owned e chiar ~0 (pozitie inchisa real),
+            # NU si cand owned>0 (free < ordin din rezervari/transe) -> altfel ai sterge o pozitie reala
+            _m = re.search(r'owned["\']?\s*[:=]\s*([0-9.]+)', str(data))
+            _owned = float(_m.group(1)) if _m else 0.0
+            if _owned <= 1e-6:
+                log("  ! [STRAT] T212 confirmă owned=0 — resetez starea (poziția închisă/vândută)")
+                self.s["qty"] = 0.0
+                self.s["cost_usd"] = 0.0
+                self.s["spent_cash"] = 0.0
+                self.s["orders"] = []
+                self.s["locked_zero_until"] = time.time() + 300  # ignora adoptie stala 5 min
+                self._save()
+            else:
+                log(f"  ! [STRAT] selling-not-owned dar owned={_owned} (free<ordin) — NU resetez pozitia")
         return False
 
     def _cancel_open(self, side: str) -> None:
@@ -433,10 +449,14 @@ class Strategy:
         prev_avg = self._avg_cost() or real_avg
 
         # --- BUY executat: pozitia a crescut (sau adoptam o pozitie pre-existenta) ---
+        if real_qty > prev_qty + 1e-6 and time.time() < self.s.get("locked_zero_until", 0):
+            log("  [STRAT] adoptie ignorata — portfolio stale (not-owned recent, lock activ)")
+            return
         if real_qty > prev_qty + 1e-6:
             fq = real_qty - prev_qty
             fp = ((real_avg * real_qty - prev_avg * prev_qty) / fq) if fq > 0 else real_avg
             is_dca = prev_qty > 1e-9
+            is_adoption = prev_qty < 1e-9   # pozitie gasita in portfolio, nu plasata de noi
             self.s["last_buy_price"] = fp
             if self.s["entry_price"] is None:
                 self.s["entry_price"] = fp
@@ -445,13 +465,15 @@ class Strategy:
             self.s["qty"] = real_qty
             self.s["cost_usd"] = real_qty * real_avg
             self.s["spent_cash"] = round(real_qty * real_avg / self.fx_to_usd, 2)
+            kind_label = "ADOPTAT" if is_adoption else ("DCA" if is_dca else "ENTRY")
             log(f"  [STRAT] BUY EXECUTAT {fq:.4f} @ {fp:.2f} USD "
-                f"({'DCA' if is_dca else 'ENTRY'})  qty={real_qty:.4f} avg={real_avg:.2f}")
-            notify(title=f"{self.yahoo_sym} BUY {fq:.4f} @ {fp:.2f}",
-                   body=(f"{'DCA' if is_dca else 'ENTRY'} executat\nqty {real_qty:.4f}  "
-                         f"avg {real_avg:.2f} USD\ndesfasurat {self.s['spent_cash']:.0f} {self.ccy}  "
+                f"({kind_label})  qty={real_qty:.4f} avg={real_avg:.2f}")
+            notify(title=f"{self.yahoo_sym} {'ADOPTAT' if is_adoption else 'BUY'} {fq:.4f} @ avg {real_avg:.2f}",
+                   body=(f"{kind_label} — pozitie {'preluata din portfolio' if is_adoption else 'executata'}\n"
+                         f"qty {real_qty:.4f}  avg {real_avg:.2f} USD  pret curent ~{fp:.2f}\n"
+                         f"desfasurat {self.s['spent_cash']:.0f} {self.ccy}  "
                          f"DCA {self.s['dca_buys']}/{self.p.max_dca_buys}\n{now_str()}"),
-                   source="strategy", price=fp, desktop=self.desktop)
+                   source="T212", price=fp, desktop=self.desktop)
             self._cancel_open("SELL")   # avg schimbat -> reasezam TP la pasul urmator
 
         # --- SELL executat: pozitia a scazut ---
@@ -470,7 +492,7 @@ class Strategy:
             notify(title=f"{self.yahoo_sym} SELL {sold:.4f} @ ~{price:.2f}  NET {net:+.2f} USD",
                    body=(f"Brut {gross:+.2f}  - fee FX {fee:.2f}  = NET {net:+.2f} USD\n"
                          f"Net total {self.s['realized_net_usd']:+.2f} USD\n{now_str()}"),
-                   source="strategy", price=price, desktop=self.desktop)
+                   source="T212", price=price, desktop=self.desktop)
 
         else:
             # pozitie neschimbata -> sincronizam valorile cu realitatea
@@ -532,7 +554,7 @@ class Strategy:
             log(f"  🛑 [STRAT] STOP-LOSS: pierdere {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — VAND TOT (taie pierderea)")
             notify(title=f"🛑 STOP-LOSS {self.yahoo_sym} ({loss_pct:.1f}%)",
                    body=f"Pierdere {loss_pct:.1f}% >= prag {self.p.stop_loss_pct}% — vand tot.\n{now_str()}",
-                   source="strategy", price=price, desktop=self.desktop)
+                   source="T212", price=price, desktop=self.desktop)
         return True
 
     def _check_loss_alert(self, price: float) -> None:
@@ -552,7 +574,7 @@ class Strategy:
             notify(title=f"📉 {self.yahoo_sym} -{loss_pct:.1f}%",
                    body=f"Pierdere nerealizata -{loss_pct:.1f}% (a trecut de {band*step:.0f}%). "
                         f"qty {self.s['qty']:.2f} @ avg {avg:.2f}, pret {price:.2f}.\n{now_str()}",
-                   source="strategy", price=price, desktop=self.desktop)
+                   source="T212", price=price, desktop=self.desktop)
             self.s["loss_band"] = band
 
     def step(self, price: float) -> None:
@@ -560,13 +582,11 @@ class Strategy:
         self._check_loss_alert(price)   # alerta pe adancirea pierderii (oricand detinem; nu vinde)
         disc = 1 - self.p.entry_discount_pct / 100
 
-        # backoff dupa "insufficient funds": nu incerca cumparari cat contul e gol
-        if time.time() < self.s.get("buy_backoff_until", 0):
-            if self._check_stop_loss(price):
-                return
-            return
+        in_backoff = time.time() < self.s.get("buy_backoff_until", 0)
 
         if held <= 1e-9:
+            if in_backoff:   # backoff dupa "insufficient funds": nu incerca cumparari cat contul e gol
+                return
             if self._has_open("BUY"):
                 return
             # REGULA DE REINTRARE (ca pe Kraken): dupa vanzare nu recumpara mai sus —
@@ -601,7 +621,8 @@ class Strategy:
                     self._cancel_open("SELL")
                     self._place_sell(held, target)
 
-        if (self.s["dca_buys"] < self.p.max_dca_buys
+        if (not in_backoff
+                and self.s["dca_buys"] < self.p.max_dca_buys
                 and self.s["last_buy_price"]
                 and price <= self.s["last_buy_price"] * (1 - self.p.dca_drop_pct / 100)
                 and self.s["spent_cash"] + self.p.dca_amount <= self.p.max_budget

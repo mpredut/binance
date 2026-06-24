@@ -24,10 +24,10 @@ PYTHON_START_WAIT=5   # secunde să așteptăm după pornire înainte să verifi
 echo "🔐 Verific conexiunea VPN..."
 SECONDS_PASSED=0
 sleep 5
-while [ "$(piactl get connectionstate)" != "Connected" ]; do
+while [ "$(piactl get connectionstate | tr -d '\r')" != "Connected" ]; do
     echo "⏳ VPN nu este conectat. Încerc reconectare..."
     piactl connect
-    sleep SLEEP_AFTER_VPN_CONNECT
+    sleep $SLEEP_AFTER_VPN_CONNECT
     SECONDS_PASSED=$((SECONDS_PASSED + SLEEP_AFTER_VPN_CONNECT))
     if [ "$SECONDS_PASSED" -ge "$VPN_RETRY_TIMEOUT" ]; then
         echo "❌ VPN nu s-a conectat in $VPN_RETRY_TIMEOUT sec!"
@@ -40,16 +40,20 @@ echo "Port Forward: $(piactl get portforward)"
 
 # ===== Activare mediu virtual =====
 echo "📦 Activez mediul Python..."
-VENV_PATH="$SCRIPT_DIR/myenv/bin/activate"
-if [ ! -f "$VENV_PATH" ]; then
-    echo "❌ Mediul virtual nu există la $VENV_PATH. Abort!"
+VENV_DIR=""
+for _d in ".venv" "myenv"; do
+    [ -f "$SCRIPT_DIR/$_d/bin/activate" ] && VENV_DIR="$_d" && break
+done
+VENV_PATH="$SCRIPT_DIR/$VENV_DIR/bin/activate"
+if [ -z "$VENV_DIR" ] || [ ! -f "$VENV_PATH" ]; then
+    echo "❌ Niciun venv găsit (.venv / myenv) în $SCRIPT_DIR. Abort!"
     exit 1
 fi
 source "$VENV_PATH"
 
 # Verifică că python e cel din venv
 PYTHON_BIN=$(which python)
-if [[ "$PYTHON_BIN" != *"myenv"* ]]; then
+if [[ "$PYTHON_BIN" != *"$VENV_DIR"* ]]; then
     echo "❌ Python activ nu e din venv: $PYTHON_BIN. Abort!"
     exit 1
 fi

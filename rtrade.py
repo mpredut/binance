@@ -84,16 +84,20 @@ class TradingBot:
             
             buy_order = None
             h = 0.3/failure_count
-            if self.is_sell_filled: # sunt disperat
-                if adjustment_percent == MIN_adjustment_percent:
-                    print(f"[{self.symbol}] sunt disperat!")
-                    buy_order = po.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, 
-                        safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
+            try:
+                if self.is_sell_filled: # sunt disperat
+                    if adjustment_percent == MIN_adjustment_percent:
+                        print(f"[{self.symbol}] sunt disperat!")
+                        buy_order = po.place_safe_order("BUY", self.symbol, target_buy_price, self.qty,
+                            safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
+                    else:
+                        buy_order = po.place_safe_order("BUY", self.symbol, target_buy_price, self.qty,
+                            safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
                 else:
-                    buy_order = po.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, 
-                        safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
-            else:
-                buy_order = po.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, cancelorders=True, hours=16)     
+                    buy_order = po.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, cancelorders=True, hours=16)
+            except po.WeightLimitBlock as e:
+                print(f"[{self.symbol}] Limita 24h atinsă — ies fără retry ({e})")
+                return None
 
             if buy_order is None:
                 print(f"[{self.symbol}] Order BUY failed, retryed {failure_count} times. Retrying again ...")
@@ -170,16 +174,20 @@ class TradingBot:
 
             sell_order = None
             h = 0.23/failure_count
-            if self.is_buy_filled: # sunt disperat
-                if adjustment_percent == MIN_adjustment_percent:
-                    print(f"[{self.symbol}] sunt disperat!")
-                    sell_order = po.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, 
-                        safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
+            try:
+                if self.is_buy_filled: # sunt disperat
+                    if adjustment_percent == MIN_adjustment_percent:
+                        print(f"[{self.symbol}] sunt disperat!")
+                        sell_order = po.place_safe_order("SELL", self.symbol, target_sell_price, self.qty,
+                            safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
+                    else:
+                        sell_order = po.place_safe_order("SELL", self.symbol, target_sell_price, self.qty,
+                            safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
                 else:
-                    sell_order = po.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, 
-                        safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
-            else:
-                sell_order = po.place_safe_order("SELL", self.symbol, target_sell_price,  self.qty, cancelorders=True, hours=12)
+                    sell_order = po.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, cancelorders=True, hours=12)
+            except po.WeightLimitBlock as e:
+                print(f"[{self.symbol}] Limita 24h atinsă (SELL) — ies fără retry ({e})")
+                return None
 
             if sell_order is None:
                 print(f"[{self.symbol}] Order SELL failed, retryed {failure_count} times. Retrying again ...")

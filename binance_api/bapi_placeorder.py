@@ -29,6 +29,11 @@ from .bapi_client import client
 from lock import trade_cooldown   # gate anti rapid-fire (mutat in pachetul lock/)
 
 
+class WeightLimitBlock(Exception):
+    """Ridicată când limita 24h de tranzacționare e atinsă — nu are sens să retryi."""
+    pass
+
+
 def _maybe_wait_trend(side, symbol, wait_trend, max_wait_sec):
     """Gate de întârziere oportunistă, partajat de toate funcțiile de plasare.
     Așteaptă cât timp trendul aduce un preț mai bun (BUY: preț scade,
@@ -406,6 +411,9 @@ def __place_order(order_type, symbol, price, qty, force=False, cancelorders=Fals
     try:
         print(f"Order Request {order_type} {symbol} qty {qty}, Price {price}")
         qty, available_qty = manage_quantity(order_type, symbol, qty, price_to_be_traded=price, cancelorders=cancelorders, hours=hours)
+
+        if qty == 0.0:
+            raise WeightLimitBlock(f"{order_type} {symbol}: limita 24h atinsă — nu retry")
 
         if available_qty <= 0:
             print(f"No sufficient quantity available to place the {order_type} order.")

@@ -2,7 +2,10 @@
 
 # python cu SDK Hyperliquid (eth_account): dn_bot ARE nevoie de el; python3 de
 # sistem NU il are. Prefera venv-ul, cade pe python3 (kraken/ipo merg si pe python3).
-HLPY="$HOME/binance/myenv/bin/python"
+ROOT="$HOME/binance"
+_venv=""
+for _d in ".venv" "myenv"; do [ -f "$ROOT/$_d/bin/activate" ] && _venv="$_d" && break; done
+HLPY="$ROOT/$_venv/bin/python"
 { [ -x "$HLPY" ] && "$HLPY" -c "import eth_account" 2>/dev/null; } || HLPY=python3
 
 echo "=== RESTART BINANCE ==="
@@ -13,13 +16,13 @@ pkill -f dn_bot.py 2>/dev/null || true
 sleep 1
 cd ~/binance/hyperliquid
 # myenv (eth_account) via activate -> cmdline curat "python3 dn_bot.py" (nu cale hardcodata)
-( source ~/binance/myenv/bin/activate && nohup python3 dn_bot.py > dn_bot.log 2>&1 & )
+( source "$ROOT/$_venv/bin/activate" && nohup python3 dn_bot.py > dn_bot.log 2>&1 & )
 
 echo "=== DN WATCH ==="
 cd ~/binance/hyperliquid
 pkill -f "dn_bot.py --watch" 2>/dev/null || true
 sleep 1
-( source ~/binance/myenv/bin/activate && nohup python3 dn_bot.py --watch > dn_watch.log 2>&1 & )
+( source "$ROOT/$_venv/bin/activate" && nohup python3 dn_bot.py --watch > dn_watch.log 2>&1 & )
 
 echo "=== KRAKEN CACHEMANAGER (fills partajat cross-proces, HYPE multi-proces) ==="
 # Tine fills-urile Kraken intr-un fisier comun (cachedb/cache_trade_kraken.json) ca toate
@@ -74,6 +77,6 @@ echo "=== BINANCE TRAILING (protectie crash BTC/TAO) — LIVE (vinde real) ==="
 # activate -> cmdline curat "python3 binance_api/trailing_stop.py".
  pkill -f "binance_api/trailing_stop.py" 2>/dev/null || true
  sleep 1
- ( cd ~/binance && source myenv/bin/activate && TRAILING_ENABLED=true nohup python3 binance_api/trailing_stop.py > binance_api/trail_b.log 2>&1 & )
+ ( cd "$ROOT" && source "$ROOT/$_venv/bin/activate" && TRAILING_ENABLED=true nohup python3 binance_api/trailing_stop.py > binance_api/trail_b.log 2>&1 & )
 
 echo "DONE"
