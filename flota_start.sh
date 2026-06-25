@@ -59,16 +59,22 @@ if [[ "$PYTHON_BIN" != *"$VENV_DIR"* ]]; then
 fi
 echo "✔ Python activ: $PYTHON_BIN"
 
-# ===== Verific că scripturile există =====  (SCRIPT_DIR e definit la inceput)
-scripts=(
-    "cacheManager.py"
-    "assetguardian.py"
-    "priceAnalysis.py"
-    "tradeall.py"
-    "monitortrades.py"
-    "rtrade.py"
-    "market_alerts.py"
-)
+# ===== Lista flotei din manifestul UNIC procs.conf (role=fleet) =====
+# Sursa unica de adevar (acelasi fisier citit de bots_start.sh + healthcheck.sh).
+# Adaugi/scoti un proces de flota -> editezi procs.conf, nu acest fisier.
+MANIFEST="$SCRIPT_DIR/procs.conf"
+scripts=()
+if [ -f "$MANIFEST" ]; then
+    while IFS='|' read -r _pat _dir _cmd _label _hb _stale _role; do
+        [ -z "$_pat" ] && continue
+        case "$_pat" in \#*) continue;; esac
+        [ "$_role" = fleet ] && scripts+=("$_pat")
+    done < "$MANIFEST"
+fi
+if [ "${#scripts[@]}" -eq 0 ]; then
+    echo "❌ Nicio intrare role=fleet in $MANIFEST. Abort!"
+    exit 1
+fi
 
 echo "🔍 Verific existența scripturilor..."
 for script in "${scripts[@]}"; do
