@@ -228,7 +228,11 @@ def main() -> int:
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--status", action="store_true")
     args = ap.parse_args()
-    client = KrakenClient(os.environ.get("KRAKEN_API_KEY"), os.environ.get("KRAKEN_API_SECRET"))
+    # Cheie dedicata trailing (KRAKEN_API_KEY_TRAIL) -> nonce separat de _BOT (kraken_bot + xstock_watch).
+    # Fallback pe _BOT daca _TRAIL lipseste din .env.
+    key    = os.environ.get("KRAKEN_API_KEY_TRAIL")    or os.environ.get("KRAKEN_API_KEY_BOT")
+    secret = os.environ.get("KRAKEN_API_SECRET_TRAIL") or os.environ.get("KRAKEN_API_SECRET_BOT")
+    client = KrakenClient(key, secret)
     ts = KrakenTrailing(client)
     if args.status:
         st = ts._load()

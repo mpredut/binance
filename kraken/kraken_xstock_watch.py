@@ -370,7 +370,7 @@ def main() -> int:
     sl_pct = float_env("XSTOCK_SL_ALERT_PCT") or 15.0
     yahoo_sym = os.environ.get("XSTOCK_YAHOO", "SPCX")
 
-    client = KrakenClient(os.environ.get("KRAKEN_API_KEY"), os.environ.get("KRAKEN_API_SECRET"))
+    client = KrakenClient(os.environ.get("KRAKEN_API_KEY_BOT"), os.environ.get("KRAKEN_API_SECRET_BOT"))
     if args.trial:
         return run_trial(client, args.desktop)
     st = _load_state()

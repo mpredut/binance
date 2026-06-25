@@ -16,8 +16,8 @@ Doua moduri (KRAKEN_CACHE_MODE):
                    Cod COMPLET, ready, dar NEACTIV implicit. Necesita `pip install
                    websocket-client`. Il pornesti cu KRAKEN_CACHE_MODE=ws in env.
 
-Cheie: perechea DEDICATA _WS (KRAKEN_API_KEY_WS/_SECRET_WS) -> secventa de nonce proprie,
-separata de procesele de trading. Fallback pe cheia default.
+Cheie: perechea DEDICATA _CACHE (KRAKEN_API_KEY_CACHE/_SECRET_CACHE) -> secventa de nonce proprie,
+separata de procesele de trading. Fallback pe cheia _BOT daca _CACHE lipseste.
 
 Format fisier = COMPATIBIL cu cache_trade.json Binance: {"items": {symbol: [trade]}, "fetchtime"}
 cu trade = {symbol,id,orderId,price,qty,time,isBuyer} -> KrakenProvider il citeste cu aceeasi logica.
@@ -209,16 +209,16 @@ def ws_loop(client):
 def main():
     load_dotenv(".env")
     load_dotenv("config.env")
-    # Cheia DEDICATA a cachemanager-ului (perechea _WS) -> secventa de nonce PROPRIE, separata
-    # de procesele de trading (KRAKEN_API_KEY). Asa nu se ciocnesc nonce-urile (Kraken cere
-    # nonce strict crescator per cheie). Fallback pe cheia default daca _WS lipseste.
-    key = os.environ.get("KRAKEN_API_KEY_WS") or os.environ.get("KRAKEN_API_KEY")
-    secret = os.environ.get("KRAKEN_API_SECRET_WS") or os.environ.get("KRAKEN_API_SECRET")
-    used_ws_key = bool(os.environ.get("KRAKEN_API_KEY_WS") and os.environ.get("KRAKEN_API_SECRET_WS"))
+    # Cheia DEDICATA a cachemanager-ului (_CACHE) -> secventa de nonce PROPRIE, separata
+    # de procesele de trading (_BOT/_TRAIL). Asa nu se ciocnesc nonce-urile (Kraken cere
+    # nonce strict crescator per cheie). Fallback pe cheia _BOT daca _CACHE lipseste.
+    key = os.environ.get("KRAKEN_API_KEY_CACHE") or os.environ.get("KRAKEN_API_KEY_BOT")
+    secret = os.environ.get("KRAKEN_API_SECRET_CACHE") or os.environ.get("KRAKEN_API_SECRET_BOT")
+    used_ws_key = bool(os.environ.get("KRAKEN_API_KEY_CACHE") and os.environ.get("KRAKEN_API_SECRET_CACHE"))
     if not key or not secret:
-        log("[kraken_cache] FATAL: lipsesc cheile Kraken (_WS sau default) in kraken/.env"); return
+        log("[kraken_cache] FATAL: lipsesc cheile Kraken (_CACHE sau _BOT) in kraken/.env"); return
     client = KrakenClient(key, secret)
-    log(f"[kraken_cache] start: mode={MODE} cheie={'_WS dedicata' if used_ws_key else 'default'} "
+    log(f"[kraken_cache] start: mode={MODE} cheie={'_CACHE dedicata' if used_ws_key else '_BOT (fallback)'} "
         f"pairs={PAIRS} poll={POLL_INTERVAL}s -> {CACHE_FILE}")
     if MODE == "ws":
         ws_loop(client)        # real-time (necesita websocket-client)

@@ -33,7 +33,7 @@ POLL_SECONDS = 60
 
 
 def _build_client() -> KrakenClient:
-    return KrakenClient(os.environ.get("KRAKEN_API_KEY"), os.environ.get("KRAKEN_API_SECRET"))
+    return KrakenClient(os.environ.get("KRAKEN_API_KEY_BOT"), os.environ.get("KRAKEN_API_SECRET_BOT"))
 
 
 def main() -> int:
@@ -85,7 +85,7 @@ def main() -> int:
 
     log("=== Kraken bot ===")
     log(f"    pereche      : {label}  ({pair})")
-    log(f"    chei         : {'da' if os.environ.get('KRAKEN_API_KEY') else 'NU (doar public/paper)'}")
+    log(f"    chei         : {'da' if os.environ.get('KRAKEN_API_KEY_BOT') else 'NU (doar public/paper)'}")
     log(f"    executie     : {'PAPER (fara bani)' if strat_dry else '⚠ REAL — BANI ADEVARATI'}")
     log(f"    ntfy/email   : {os.environ.get('NTFY_TOPIC') or '-'} / {os.environ.get('ALERT_TO_EMAIL') or '-'}")
 
