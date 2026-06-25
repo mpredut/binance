@@ -62,6 +62,8 @@ class StratParams:
     fx_fee_pct: float = FX_FEE_PCT   # taxa FX T212 / directie (din STRAT_FX_FEE_PCT; default modul)
     loss_alert_step: float = 1.0     # notifica la fiecare X% de adancire a pierderii nerealizate (0 = off)
     ladder_min_free: float = 6.0     # lasa min acest $ NEREZERVAT pe scara TP (T212 cere pozitie libera, "min-opened-position")
+    sl_rebuy_enabled: bool = False   # dupa stop-loss de catastrofa, reintra pe RECUL in sus de la minim (ca trailing-ul Binance/Kraken), nu sub-vanzare
+    sl_rebuy_bounce_pct: float = 1.2 # recul% de la minimul de dupa SL pt re-buy (confirma ca s-a oprit caderea -> nu prinde cutitul)
 
     @classmethod
     def from_env(cls, env: dict | None = None) -> "StratParams":
@@ -123,6 +125,8 @@ class StratParams:
             fx_fee_pct         = _fx_fee,
             loss_alert_step    = _loss_step,
             ladder_min_free    = _ladder_free,
+            sl_rebuy_enabled   = (e.get("STRAT_SL_REBUY_ENABLED", "false").strip().lower() == "true"),
+            sl_rebuy_bounce_pct= float_env("STRAT_SL_REBUY_BOUNCE_PCT", e) or 1.2,
         )
 
 
@@ -520,6 +524,7 @@ class Strategy:
         if real_qty <= 1e-9 and prev_qty > 1e-9:
             pnl, net_tot, fees = (self.s["realized_pnl_usd"],
                                   self.s["realized_net_usd"], self.s["fees_usd"])
+            was_sl = bool(self.s.get("sl_pending"))   # inchidere din stop-loss de catastrofa?
             nxt = self.s.get("cycle", 1) + 1
             self.s = _new_state()
             self.s["realized_pnl_usd"] = pnl
@@ -527,6 +532,9 @@ class Strategy:
             self.s["fees_usd"] = fees
             self.s["cycle"] = nxt
             self.s["last_sell_price"] = price   # garda profit: dupa vanzare totala, reintra DOAR sub pretul vandut (calea REALA)
+            if was_sl and self.p.sl_rebuy_enabled:   # catastrofa -> re-buy pe RECUL (nu sub-vanzare); prinde recuperarea
+                self.s["sl_rebuy"] = {"low": price, "sell_price": price}
+                log(f"  🟢 [STRAT] re-buy pe recul ARMAT dupa stop-loss (asteptam +{self.p.sl_rebuy_bounce_pct}% de la minim)")
             log(f"  [STRAT] === ciclu inchis, reincep (ciclu {nxt}) ===")
 
     # -- pas de decizie --------------------------------------------------------
@@ -540,6 +548,7 @@ class Strategy:
         loss_pct = (avg - price) / avg * 100   # long: pierdem cand pretul < pret mediu
         if loss_pct < self.p.stop_loss_pct:
             self.s["sl_alerted"] = False        # pretul a revenit peste prag -> permite o noua alerta daca recade
+            self.s["sl_pending"] = False        # episod SL incheiat (pretul a revenit peste prag) -> inchiderea ulterioara NU mai e catastrofa
             return False
         # ANTI-SPAM: plaseaza SL-ul O DATA; re-plaseaza DOAR daca limita a ramas in urma (pretul a cazut sub ea)
         sl = next((o for o in self.s["orders"] if o.get("kind") == "SL"), None)
@@ -549,6 +558,7 @@ class Strategy:
                     self.client.cancel_order(o["id"])
                 self._remove_order(o)
             self._place_sell(self.s["qty"], round(price * 0.995, 2), kind="SL")   # vinde agresiv -> fill sigur
+            self.s["sl_pending"] = True         # marcheaza episodul: inchiderea ciclului = catastrofa -> armeaza re-buy pe recul
         if not self.s.get("sl_alerted"):           # notifica O SINGURA DATA per episod
             self.s["sl_alerted"] = True
             log(f"  🛑 [STRAT] STOP-LOSS: pierdere {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — VAND TOT (taie pierderea)")
@@ -577,6 +587,28 @@ class Strategy:
                    source="T212", price=price, desktop=self.desktop)
             self.s["loss_band"] = band
 
+    def _handle_sl_rebuy(self, price: float) -> None:
+        """Re-buy pe RECUL dupa stop-loss de catastrofa: urmareste minimul de dupa vanzare si
+        reintra (ENTRY) cand pretul revine sl_rebuy_bounce_pct% de la fund — prinde recuperarea,
+        nu cutitul. Mecanism analog trailing-ului Binance/Kraken (recul, nu sub-vanzare)."""
+        rb = self.s.get("sl_rebuy")
+        if not rb:
+            return
+        rb["low"] = min(rb.get("low", price), price)          # urmareste fundul de dupa SL
+        if price < rb["low"] * (1 + self.p.sl_rebuy_bounce_pct / 100.0):
+            return                                            # recul neconfirmat -> asteapta
+        self.s.pop("sl_rebuy", None)                          # consuma armarea (1 transa)
+        if self.s["spent_cash"] + self.p.entry_amount > self.p.max_budget:
+            log(f"  [STRAT] re-buy SL anulat — plafon buget {self.p.max_budget:.0f} {self.ccy} atins")
+            return
+        disc = 1 - self.p.entry_discount_pct / 100
+        log(f"  🟢 [STRAT] RE-BUY dupa SL: recul +{self.p.sl_rebuy_bounce_pct}% de la minim {rb['low']:.2f} — reintru ENTRY")
+        notify(title=f"🟢 {self.yahoo_sym} RE-BUY dupa stop-loss",
+               body=(f"Recul +{self.p.sl_rebuy_bounce_pct}% de la minimul {rb['low']:.2f} dupa catastrofa — "
+                     f"reintru cu {self.p.entry_amount:.0f} {self.ccy}.\n{now_str()}"),
+               source="T212", price=price, desktop=self.desktop)
+        self._place_buy(self.p.entry_amount, price * disc, kind="ENTRY")
+
     def step(self, price: float) -> None:
         held = self.s["qty"]
         self._check_loss_alert(price)   # alerta pe adancirea pierderii (oricand detinem; nu vinde)
@@ -588,6 +620,11 @@ class Strategy:
             if in_backoff:   # backoff dupa "insufficient funds": nu incerca cumparari cat contul e gol
                 return
             if self._has_open("BUY"):
+                return
+            # RE-BUY pe RECUL dupa stop-loss de catastrofa (ca trailing-ul Binance/Kraken):
+            # prinde recuperarea, are prioritate fata de reintrarea sub-vanzare cat e armat.
+            if self.s.get("sl_rebuy"):
+                self._handle_sl_rebuy(price)
                 return
             # REGULA DE REINTRARE (ca pe Kraken): dupa vanzare nu recumpara mai sus —
             # anti "vand la 174.17, recumpar la 174.9"
