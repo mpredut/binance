@@ -15,6 +15,10 @@ in crash (force), tot el recumpara cand pretul revine REBUY_BOUNCE_PCT% de la mi
 de dupa vanzare (confirma ca s-a oprit caderea -> nu prinde cutitul). Filtre de trend
 optionale (cache_instant_trend HYPE). Config in kraken/trailing.conf (nu in shell).
 
+Masina de stari (trailing + re-buy) e in trailing_core.TrailingCore, partajata cu
+Binance; aici e doar ADAPTORUL Kraken (API + log/notify specific). Comportament
+identic — vezi kraken/test_trailing_kraken.py.
+
   python3 trailing_stop.py        # bucla (enabled din trailing.conf)
   python3 trailing_stop.py --once                              # o verificare
   python3 trailing_stop.py --status                            # varfuri + praguri
@@ -23,7 +27,6 @@ optionale (cache_instant_trend HYPE). Config in kraken/trailing.conf (nu in shel
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import time
@@ -34,6 +37,11 @@ from notify import notify
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)   # ca sa importam nucleul partajat din radacina repo
+
+from trailing_core import TrailingCore, should_sell  # noqa: E402  (should_sell reexportat pt teste/compat)
+
 STATE_FILE = os.path.join(_HERE, "trailing_state.json")
 CACHE_TREND = os.path.join(_ROOT, "cachedb", "cache_instant_trend.json")
 
@@ -75,33 +83,30 @@ REBUY_SKIP_IF_TREND_DOWN = os.environ.get("KRAKEN_TRAILING_REBUY_SKIP_IF_TREND_D
 SELL_SKIP_IF_TREND_UP = os.environ.get("KRAKEN_TRAILING_SELL_SKIP_IF_TREND_UP", "false").lower() == "true"
 
 
-def should_sell(current: float, peak: float, trail_pct: float) -> bool:
-    return peak > 0 and trail_pct > 0 and current <= peak * (1 - trail_pct / 100.0)
-
-
 class KrakenTrailing:
+    """ADAPTOR Kraken pt TrailingCore: API (balanta libera, pret, sell/buy limit, trend) +
+    log/notify specific. Masina de stari (varf, trailing, re-buy) e in TrailingCore."""
+
     def __init__(self, client: KrakenClient, log=log, enabled=None, state_file=STATE_FILE):
         self.client = client
         self.log = log
         self.enabled = (os.environ.get("KRAKEN_TRAILING_ENABLED", "false").lower() == "true"
                         if enabled is None else enabled)
         self.state_file = state_file
+        self.core = TrailingCore(
+            self, log=log, enabled=self.enabled, state_file=state_file,
+            min_notional=MIN_NOTIONAL_USD, rebuy_enabled=REBUY_ENABLED,
+            rebuy_bounce_pct=REBUY_BOUNCE_PCT,
+            rebuy_skip_if_trend_down=REBUY_SKIP_IF_TREND_DOWN,
+            sell_skip_if_trend_up=SELL_SKIP_IF_TREND_UP,
+            sell_fraction=1.0, item_isolation=False)
 
+    # -- stare (delegare la core; pastrate pt --status si teste) ---------------
     def _load(self) -> dict:
-        try:
-            with open(self.state_file) as f:
-                return json.load(f)
-        except (OSError, ValueError):
-            return {}
+        return self.core.load()
 
     def _save(self, st: dict):
-        try:
-            tmp = self.state_file + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump(st, f, indent=2)
-            os.replace(tmp, self.state_file)
-        except OSError as e:
-            self.log(f"  ! [TRAIL-K] nu pot salva: {e}")
+        self.core.save(st)
 
     def trail_pct_for(self, asset: str) -> float:
         return TRAIL_PCT.get(asset, DEFAULT_TRAIL_PCT)
@@ -121,6 +126,7 @@ class KrakenTrailing:
         """Panta trendului instant (>0 sus, <0 jos, 0 neutru/necunoscut). 0 la orice eroare
         -> filtrele devin no-op (degradare sigura, comportament ca fara filtru)."""
         try:
+            import json
             with open(CACHE_TREND) as f:
                 snap = json.load(f).get(pair)
             if snap:
@@ -129,84 +135,75 @@ class KrakenTrailing:
             pass
         return 0.0
 
-    # -- re-buy dupa crash sell -----------------------------------------------
-    def _handle_rebuy(self, asset: str, pair: str, st: dict, price: float) -> None:
-        """Recumparare dupa stop-loss de crash: cand pretul revine REBUY_BOUNCE_PCT% de la minimul
-        de dupa vanzare (confirma ca s-a oprit caderea), recumpara qty vanduta."""
-        rb = st.get("rebuy")
-        if not rb:
-            return
-        rb["low"] = min(rb.get("low", price), price)          # urmareste fundul de dupa vanzare
-        if price < rb["low"] * (1 + REBUY_BOUNCE_PCT / 100.0):
-            return                                            # reculul inca neconfirmat
-        if REBUY_SKIP_IF_TREND_DOWN and self._trend_value(pair) < 0:
-            self.log(f"  [TRAIL-K] re-buy {asset} amanat — trend instant CLAR jos (nu prind cutitul)")
-            return
-        qty = round(float(rb.get("qty", 0)), 8)
-        if qty <= 0:
-            st.pop("rebuy", None)
-            return
-        if self.enabled and qty * price >= MIN_NOTIONAL_USD:
-            try:
-                # limit usor PESTE pret -> fill sigur (ca add_order sell e usor sub)
-                self.client.add_order(pair, "buy", qty, round(price * 1.005, 4), ordertype="limit")
-                self.log(f"  🟢 [TRAIL-K] RE-BUY {qty} {asset} @ ~{price:.4f}  "
-                         f"(recul +{REBUY_BOUNCE_PCT}% de la minim {rb['low']:.4f}; vandut la {rb.get('sell_price', 0):.4f})")
-                notify(title=f"🟢 RE-BUY {asset}: {qty:.4f} @ ~{price:.2f}",
-                       body=f"Recul +{REBUY_BOUNCE_PCT}% de la minimul {rb['low']:.2f} dupa crash sell — reintru.",
-                       source="kraken-trail", price=price, desktop=False)
-            except KrakenError as e:
-                self.log(f"  ! [TRAIL-K] re-buy {asset} esuat: {e}")
-                return                                        # pastreaza rebuy -> reincearca data viitoare
-        else:
-            self.log(f"  🟡 [TRAIL-K][DRY] AR RE-CUMPARA {qty} {asset} @ ~{price:.4f}  "
-                     f"(recul de la minim {rb['low']:.4f})  [KRAKEN_TRAILING_ENABLED=true ca sa execute]")
-        st.pop("rebuy", None)                                 # 1 transa -> gata
+    # == contract ADAPTOR pt TrailingCore =====================================
+    def assets(self):
+        for asset, trail in TRAIL_PCT.items():
+            yield (asset, asset, PAIR_FOR.get(asset, asset + "USD"), trail)  # key=asset, pair separat
 
-    def check_once(self) -> None:
+    def begin_tick(self) -> bool:
+        return True   # Kraken citeste balanta per-asset (in free_qty), nu in bloc
+
+    def free_qty(self, asset: str) -> float:
+        return self._free(asset)
+
+    def price(self, pair: str):
+        return self.client.last_price(pair)
+
+    def trend(self, pair: str) -> float:
+        return self._trend_value(pair)
+
+    def execute_sell(self, key, asset, pair, qty, price, peak, trail) -> bool:
         try:
-            state = self._load()
-            for asset, trail in TRAIL_PCT.items():
-                pair = PAIR_FOR.get(asset, asset + "USD")
-                free = self._free(asset)
-                price = self.client.last_price(pair)
-                if not price or price <= 0:
-                    continue
-                st = state.setdefault(asset, {"peak": price})
-                if REBUY_ENABLED and st.get("rebuy"):     # re-buy pending — INAINTE de check-ul de notional (free~0 dupa vanzare)
-                    self._handle_rebuy(asset, pair, st, price)
-                if free * price < MIN_NOTIONAL_USD:
-                    continue                              # nimic de protejat
-                if price > st["peak"]:
-                    st["peak"] = price
-                stop_at = st["peak"] * (1 - trail / 100.0)
-                if should_sell(price, st["peak"], trail):
-                    if SELL_SKIP_IF_TREND_UP and self._trend_value(pair) > 0:
-                        self.log(f"  [TRAIL-K] {asset}: -{trail}% atins dar trend instant SUS — NU vand (anti-wick)")
-                        continue
-                    if self.enabled:
-                        try:
-                            self.client.add_order(pair, "sell", round(free, 8),
-                                                  round(price * 0.995, 4), ordertype="limit")
-                            self.log(f"  🛑 [TRAIL-K] VANDUT {free} {asset} @ ~{price:.4f} "
-                                     f"(varf {st['peak']:.4f}, -{trail}%)")
-                            notify(title=f"🛑 TRAILING {asset}: vandut {free:.4f} @ ~{price:.2f}",
-                                   body=f"Crash >{trail}% de la varf {st['peak']:.2f}. Protectie declansata.",
-                                   source="kraken-trail", price=price, desktop=False)
-                            st["peak"] = price                # re-armeaza de la pretul curent
-                            if REBUY_ENABLED:                 # armeaza re-buy: recumpara cand pretul revine de la minim
-                                st["rebuy"] = {"qty": round(free, 8), "sell_price": price, "low": price}
-                        except KrakenError as e:
-                            self.log(f"  ! [TRAIL-K] vanzare {asset} esuata: {e}")
-                    else:
-                        self.log(f"  🟡 [TRAIL-K][DRY] AR VINDE {free} {asset} @ ~{price:.4f} "
-                                 f"(varf {st['peak']:.4f}, -{trail}%)  [KRAKEN_TRAILING_ENABLED=true ca sa execute]")
-                else:
-                    self.log(f"  [TRAIL-K] {asset}: {price:.4f}  varf {st['peak']:.4f}  "
-                             f"vinde sub {stop_at:.4f} (-{trail}%)  (liber {free:.4f})")
-            self._save(state)
-        except Exception as e:  # noqa: BLE001 — rezilienta: net picat -> reincearca
-            self.log(f"  ! [TRAIL-K] ciclu esuat ({e.__class__.__name__}: {e}) — reincerc")
+            self.client.add_order(pair, "sell", round(qty, 8),
+                                  round(price * 0.995, 4), ordertype="limit")
+            self.log(f"  🛑 [TRAIL-K] VANDUT {qty} {asset} @ ~{price:.4f} "
+                     f"(varf {peak:.4f}, -{trail}%)")
+            notify(title=f"🛑 TRAILING {asset}: vandut {qty:.4f} @ ~{price:.2f}",
+                   body=f"Crash >{trail}% de la varf {peak:.2f}. Protectie declansata.",
+                   source="kraken-trail", price=price, desktop=False)
+            return True
+        except KrakenError as e:
+            self.log(f"  ! [TRAIL-K] vanzare {asset} esuata: {e}")
+            return False
+
+    def execute_rebuy(self, key, asset, pair, qty, price, rb) -> bool:
+        try:
+            # limit usor PESTE pret -> fill sigur (ca add_order sell e usor sub)
+            self.client.add_order(pair, "buy", qty, round(price * 1.005, 4), ordertype="limit")
+            self.log(f"  🟢 [TRAIL-K] RE-BUY {qty} {asset} @ ~{price:.4f}  "
+                     f"(recul +{REBUY_BOUNCE_PCT}% de la minim {rb['low']:.4f}; vandut la {rb.get('sell_price', 0):.4f})")
+            notify(title=f"🟢 RE-BUY {asset}: {qty:.4f} @ ~{price:.2f}",
+                   body=f"Recul +{REBUY_BOUNCE_PCT}% de la minimul {rb['low']:.2f} dupa crash sell — reintru.",
+                   source="kraken-trail", price=price, desktop=False)
+            return True
+        except KrakenError as e:
+            self.log(f"  ! [TRAIL-K] re-buy {asset} esuat: {e}")
+            return False                                      # pastreaza rebuy -> reincearca data viitoare
+
+    def log_dry_sell(self, key, asset, pair, qty, price, peak, trail) -> None:
+        self.log(f"  🟡 [TRAIL-K][DRY] AR VINDE {qty} {asset} @ ~{price:.4f} "
+                 f"(varf {peak:.4f}, -{trail}%)  [KRAKEN_TRAILING_ENABLED=true ca sa execute]")
+
+    def log_dry_rebuy(self, key, asset, pair, qty, price, rb) -> None:
+        self.log(f"  🟡 [TRAIL-K][DRY] AR RE-CUMPARA {qty} {asset} @ ~{price:.4f}  "
+                 f"(recul de la minim {rb['low']:.4f})  [KRAKEN_TRAILING_ENABLED=true ca sa execute]")
+
+    def log_hold(self, key, asset, pair, price, peak, stop_at, trail, free) -> None:
+        self.log(f"  [TRAIL-K] {asset}: {price:.4f}  varf {peak:.4f}  "
+                 f"vinde sub {stop_at:.4f} (-{trail}%)  (liber {free:.4f})")
+
+    def log_skip_rebuy_trend(self, asset) -> None:
+        self.log(f"  [TRAIL-K] re-buy {asset} amanat — trend instant CLAR jos (nu prind cutitul)")
+
+    def log_skip_sell_trend(self, key, asset, pair, trail) -> None:
+        self.log(f"  [TRAIL-K] {asset}: -{trail}% atins dar trend instant SUS — NU vand (anti-wick)")
+
+    def log_tick_error(self, e) -> None:
+        self.log(f"  ! [TRAIL-K] ciclu esuat ({e.__class__.__name__}: {e}) — reincerc")
+
+    # -- un pas / bucla --------------------------------------------------------
+    def check_once(self) -> None:
+        self.core.check_once()
 
     def run(self):
         mode = "⚠ ACTIV (vinde real)" if self.enabled else "DRY-RUN (doar logheaza)"

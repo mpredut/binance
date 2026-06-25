@@ -17,6 +17,10 @@ profit. Rol corect: DISJUNCTOR DE CRASH cu prag LARG (~22%) — se declanseaza d
 la un colaps sustinut, ca plasa impotriva scenariului care distruge detinerea.
 Ruleaza-l in dry-run intai; restul strategiei (hold+DCA+weight) ramane neschimbat.
 
+Masina de stari (trailing + re-buy) e in trailing_core.TrailingCore, partajata cu
+Kraken; aici e doar ADAPTORUL Binance (API + log specific). Comportament identic —
+vezi tests/test_trailing_stop.py.
+
 SIGURANTA:
   * TRAILING_ENABLED=false (implicit) -> DRY-RUN: doar logheaza ce AR vinde.
   * actioneaza doar pe monedele din symbols.py.
@@ -31,7 +35,6 @@ SIGURANTA:
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import time
@@ -39,6 +42,9 @@ import time
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # binance_api/ -> radacina repo
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)   # ruleaza si ca script (python binance_api/trailing_stop.py)
+
+from trailing_core import TrailingCore, should_sell  # noqa: E402  (should_sell reexportat pt teste/compat)
+
 DEFAULT_STATE = os.path.join(_ROOT, "cachedb", "trailing_state.json")
 
 
@@ -91,12 +97,10 @@ REBUY_SKIP_IF_TREND_DOWN = os.environ.get("TRAILING_REBUY_SKIP_IF_TREND_DOWN", "
 SELL_SKIP_IF_TREND_UP = os.environ.get("TRAILING_SELL_SKIP_IF_TREND_UP", "false").lower() == "true"
 
 
-def should_sell(current: float, peak: float, trail_pct: float) -> bool:
-    """True daca pretul a cazut >= trail% de la varf."""
-    return peak > 0 and trail_pct > 0 and current <= peak * (1 - trail_pct / 100.0)
-
-
 class TrailingStop:
+    """ADAPTOR Binance pt TrailingCore: pune la dispozitie API-ul (balante, pret, sell/buy,
+    trend) + log-urile specifice. Masina de stari (varf, trailing, re-buy) e in TrailingCore."""
+
     def __init__(self, api, po, sym, log=print, enabled=None,
                  sell_fraction=SELL_FRACTION, state_file=DEFAULT_STATE):
         self.api = api
@@ -107,24 +111,21 @@ class TrailingStop:
                         if enabled is None else enabled)
         self.sell_fraction = sell_fraction
         self.state_file = state_file
+        self._balances = []
+        self.core = TrailingCore(
+            self, log=log, enabled=self.enabled, state_file=state_file,
+            min_notional=MIN_NOTIONAL_USD, rebuy_enabled=REBUY_ENABLED,
+            rebuy_bounce_pct=REBUY_BOUNCE_PCT,
+            rebuy_skip_if_trend_down=REBUY_SKIP_IF_TREND_DOWN,
+            sell_skip_if_trend_up=SELL_SKIP_IF_TREND_UP,
+            sell_fraction=sell_fraction, item_isolation=True)
 
-    # -- stare (varful per moneda) --------------------------------------------
+    # -- stare (delegare la core; pastrate pt --status si teste) ---------------
     def _load(self) -> dict:
-        try:
-            with open(self.state_file) as f:
-                return json.load(f)
-        except (OSError, ValueError):
-            return {}
+        return self.core.load()
 
     def _save(self, state: dict):
-        try:
-            os.makedirs(os.path.dirname(self.state_file), exist_ok=True)
-            tmp = self.state_file + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump(state, f, indent=2)
-            os.replace(tmp, self.state_file)
-        except OSError as e:
-            self.log(f"  ! [TRAIL] nu pot salva starea: {e}")
+        self.core.save(state)
 
     def trail_pct_for(self, symbol: str) -> float:
         return TRAIL_PCT.get(symbol, DEFAULT_TRAIL_PCT)
@@ -151,81 +152,69 @@ class TrailingStop:
             pass
         return 0.0
 
-    # -- re-buy dupa crash sell ------------------------------------------------
-    def _handle_rebuy(self, symbol: str, st: dict, price: float) -> None:
-        """Recumparare dupa stop-loss de crash: cand pretul revine REBUY_BOUNCE_PCT% de la minimul
-        de dupa vanzare (confirma ca s-a oprit caderea), recumpara qty vanduta (force + bypass garda)."""
-        rb = st.get("rebuy")
-        if not rb:
-            return
-        rb["low"] = min(rb.get("low", price), price)          # urmareste fundul de dupa vanzare
-        if price < rb["low"] * (1 + REBUY_BOUNCE_PCT / 100.0):
-            return                                            # reculul inca neconfirmat -> asteapta
-        if REBUY_SKIP_IF_TREND_DOWN and self._trend_value(symbol) < 0:
-            self.log(f"  [TRAIL] re-buy {symbol} amanat — trend instant CLAR jos (nu prind cutitul)")
-            return
-        buy_qty = round(float(rb.get("qty", 0)), 8)           # 1 transa = qty intreg (extensibil la REBUY_TRANCHES)
-        if buy_qty <= 0:
-            st.pop("rebuy", None)
-            return
-        if self.enabled and buy_qty * price >= MIN_NOTIONAL_USD:
-            self.po.place_safe_order("BUY", symbol, price, buy_qty, force=True, bypass_profit_guard=True)
-            self.log(f"  🟢 [TRAIL] RE-BUY {symbol} {buy_qty} @ ~{price:.4f}  "
-                     f"(recul +{REBUY_BOUNCE_PCT}% de la minim {rb['low']:.4f}; vandut la {rb.get('sell_price', 0):.4f})")
-        else:
-            self.log(f"  🟡 [TRAIL][DRY] AR RE-CUMPARA {symbol} {buy_qty} @ ~{price:.4f}  "
-                     f"(recul de la minim {rb['low']:.4f})  [TRAILING_ENABLED=true ca sa execute]")
-        st.pop("rebuy", None)                                 # 1 transa -> gata
+    # == contract ADAPTOR pt TrailingCore =====================================
+    def assets(self):
+        for symbol in self.sym.symbols:
+            asset = self.api.split_symbol(symbol)[0]
+            yield (symbol, asset, symbol, self.trail_pct_for(symbol))  # key=pair=symbol pe Binance
 
-    # -- un pas ----------------------------------------------------------------
-    def check_once(self) -> None:
+    def begin_tick(self) -> bool:
         try:
-            balances = self.api.get_account_assets_balances()
+            self._balances = self.api.get_account_assets_balances()
+            return True
         except Exception as e:  # noqa: BLE001
             self.log(f"  ! [TRAIL] balante indisponibile ({e}) — sar tick-ul")
-            return
-        state = self._load()
-        for symbol in self.sym.symbols:
-            try:
-                asset = self.api.split_symbol(symbol)[0]
-                qty = self._free_qty(balances, asset)
-                price = self.api.get_current_price(symbol)
-                if not price or price <= 0:
-                    continue
-                st = state.setdefault(symbol, {"peak": price})
-                if REBUY_ENABLED and st.get("rebuy"):       # re-buy pending dupa crash — INAINTE de check-ul de qty (qty~0 dupa vanzare)
-                    self._handle_rebuy(symbol, st, price)
-                if qty * price < MIN_NOTIONAL_USD:
-                    continue                                # nimic de protejat
-                if price > st["peak"]:
-                    st["peak"] = price                      # varf nou -> urca trailing-ul
-                trail = self.trail_pct_for(symbol)
-                stop_at = st["peak"] * (1 - trail / 100.0)
-                if should_sell(price, st["peak"], trail):
-                    if SELL_SKIP_IF_TREND_UP and self._trend_value(symbol) > 0:
-                        self.log(f"  [TRAIL] {symbol}: -{trail}% atins dar trend instant SUS — NU vand (anti-wick)")
-                        continue
-                    sell_qty = round(qty * self.sell_fraction, 8)
-                    if self.enabled and sell_qty * price >= MIN_NOTIONAL_USD:
-                        # force=True -> vinde la MARKET (executie sigura in crash);
-                        # bypass_profit_guard=True -> ignora gardul de profit/istorie (e STOP-LOSS,
-                        # vinde sub ultimul buy). Fara bypass, gardul l-ar bloca.
-                        self.po.place_safe_order("SELL", symbol, price, sell_qty, force=True, bypass_profit_guard=True)
-                        self.log(f"  🛑 [TRAIL] VANDUT {symbol} {sell_qty} @ ~{price:.4f} "
-                                 f"(varf {st['peak']:.4f}, -{trail}%)")
-                        st["peak"] = price                  # re-armeaza de la pretul curent
-                        if REBUY_ENABLED:                   # armeaza re-buy: recumpara cand pretul revine de la minim
-                            st["rebuy"] = {"qty": sell_qty, "sell_price": price, "low": price}
-                    else:
-                        self.log(f"  🟡 [TRAIL][DRY] AR VINDE {symbol} {sell_qty} @ ~{price:.4f} "
-                                 f"(varf {st['peak']:.4f}, scadere >= {trail}%)  "
-                                 f"[seteaza TRAILING_ENABLED=true ca sa execute]")
-                else:
-                    self.log(f"  [TRAIL] {symbol}: {price:.4f}  varf {st['peak']:.4f}  "
-                             f"vinde sub {stop_at:.4f} (-{trail}%)")
-            except Exception as e:  # noqa: BLE001 — o moneda nu opreste restul
-                self.log(f"  ! [TRAIL] {symbol}: {e}")
-        self._save(state)
+            return False
+
+    def free_qty(self, asset: str) -> float:
+        return self._free_qty(self._balances, asset)
+
+    def price(self, pair: str):
+        return self.api.get_current_price(pair)
+
+    def trend(self, pair: str) -> float:
+        return self._trend_value(pair)
+
+    def execute_sell(self, key, asset, pair, qty, price, peak, trail) -> bool:
+        # force=True -> vinde la MARKET (executie sigura in crash);
+        # bypass_profit_guard=True -> ignora gardul de profit/istorie (e STOP-LOSS,
+        # vinde sub ultimul buy). Fara bypass, gardul l-ar bloca.
+        self.po.place_safe_order("SELL", pair, price, qty, force=True, bypass_profit_guard=True)
+        self.log(f"  🛑 [TRAIL] VANDUT {pair} {qty} @ ~{price:.4f} "
+                 f"(varf {peak:.4f}, -{trail}%)")
+        return True
+
+    def execute_rebuy(self, key, asset, pair, qty, price, rb) -> bool:
+        self.po.place_safe_order("BUY", pair, price, qty, force=True, bypass_profit_guard=True)
+        self.log(f"  🟢 [TRAIL] RE-BUY {pair} {qty} @ ~{price:.4f}  "
+                 f"(recul +{REBUY_BOUNCE_PCT}% de la minim {rb['low']:.4f}; vandut la {rb.get('sell_price', 0):.4f})")
+        return True
+
+    def log_dry_sell(self, key, asset, pair, qty, price, peak, trail) -> None:
+        self.log(f"  🟡 [TRAIL][DRY] AR VINDE {pair} {qty} @ ~{price:.4f} "
+                 f"(varf {peak:.4f}, scadere >= {trail}%)  "
+                 f"[seteaza TRAILING_ENABLED=true ca sa execute]")
+
+    def log_dry_rebuy(self, key, asset, pair, qty, price, rb) -> None:
+        self.log(f"  🟡 [TRAIL][DRY] AR RE-CUMPARA {pair} {qty} @ ~{price:.4f}  "
+                 f"(recul de la minim {rb['low']:.4f})  [TRAILING_ENABLED=true ca sa execute]")
+
+    def log_hold(self, key, asset, pair, price, peak, stop_at, trail, free) -> None:
+        self.log(f"  [TRAIL] {pair}: {price:.4f}  varf {peak:.4f}  "
+                 f"vinde sub {stop_at:.4f} (-{trail}%)")
+
+    def log_skip_rebuy_trend(self, asset) -> None:
+        self.log(f"  [TRAIL] re-buy {asset} amanat — trend instant CLAR jos (nu prind cutitul)")
+
+    def log_skip_sell_trend(self, key, asset, pair, trail) -> None:
+        self.log(f"  [TRAIL] {pair}: -{trail}% atins dar trend instant SUS — NU vand (anti-wick)")
+
+    def log_item_error(self, key, e) -> None:
+        self.log(f"  ! [TRAIL] {key}: {e}")
+
+    # -- un pas / bucla --------------------------------------------------------
+    def check_once(self) -> None:
+        self.core.check_once()
 
     def run(self):
         mode = "⚠ ACTIV (vinde real)" if self.enabled else "DRY-RUN (doar logheaza)"
