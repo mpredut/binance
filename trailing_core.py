@@ -42,7 +42,8 @@ def should_sell(current: float, peak: float, trail_pct: float) -> bool:
 class TrailingCore:
     def __init__(self, adapter, *, log, enabled, state_file, min_notional,
                  rebuy_enabled, rebuy_bounce_pct, rebuy_skip_if_trend_down,
-                 sell_skip_if_trend_up, sell_fraction=1.0, item_isolation=True):
+                 sell_skip_if_trend_up, sell_fraction=1.0, item_isolation=True,
+                 min_profit_pct=0.0):
         self.a = adapter
         self.log = log
         self.enabled = enabled
@@ -53,6 +54,7 @@ class TrailingCore:
         self.rebuy_skip_if_trend_down = rebuy_skip_if_trend_down
         self.sell_skip_if_trend_up = sell_skip_if_trend_up
         self.sell_fraction = sell_fraction
+        self.min_profit_pct = min_profit_pct
         # item_isolation=True (Binance): try per-moneda + save mereu dupa bucla (o moneda
         # picata nu opreste restul). False (Kraken): try pe tot tick-ul; eroare -> log + fara
         # save (reincearca data viitoare). Pastreaza exact structura de erori a fiecaruia.
@@ -101,6 +103,8 @@ class TrailingCore:
         else:
             self.a.log_dry_rebuy(key, asset, pair, qty, price, rb)
         st.pop("rebuy", None)                                 # 1 transa -> gata
+        if self.min_profit_pct > 0:
+            st["warmup_at"] = price * (1 + self.min_profit_pct / 100.0)  # warming up din nou de la pretul de re-buy
 
     # -- un activ -------------------------------------------------------------
     def _process(self, key, asset, pair, trail, state) -> None:
@@ -108,11 +112,21 @@ class TrailingCore:
         price = self.a.price(pair)
         if not price or price <= 0:
             return
+        is_new = key not in state
         st = state.setdefault(key, {"peak": price})
+        if is_new and self.min_profit_pct > 0:
+            st["warmup_at"] = price * (1 + self.min_profit_pct / 100.0)  # primul tick: seteaza pragul de activare
         if self.rebuy_enabled and st.get("rebuy"):            # re-buy pending INAINTE de check-ul de notional (free~0 dupa vanzare)
             self._handle_rebuy(key, asset, pair, st, price)
         if free * price < self.min_notional:
             return                                            # nimic de protejat
+        if "warmup_at" in st:
+            # warming up: asteapta pana pretul depaseste pragul (setat la primul tick sau dupa re-buy)
+            if price < st["warmup_at"]:
+                self.log(f"  [TRAIL] {asset}: {price:.4f}  warming up — activ la {st['warmup_at']:.4f}"
+                         f" (+{self.min_profit_pct}%)")
+                return
+            st.pop("warmup_at")                              # prag atins -> trailing activ de-acum incolo
         if price > st["peak"]:
             st["peak"] = price                                # varf nou -> urca trailing-ul
         stop_at = st["peak"] * (1 - trail / 100.0)

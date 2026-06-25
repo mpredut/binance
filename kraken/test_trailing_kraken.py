@@ -33,8 +33,9 @@ class Base(unittest.TestCase):
         for p in (self.sf, self.sf + ".tmp"):
             if os.path.exists(p):
                 os.remove(p)
-    def ts(self, client, enabled=True):
-        return KrakenTrailing(client, log=lambda *a: None, enabled=enabled, state_file=self.sf)
+    def ts(self, client, enabled=True, min_profit_pct=0.0):
+        return KrakenTrailing(client, log=lambda *a: None, enabled=enabled, state_file=self.sf,
+                              min_profit_pct=min_profit_pct)
 
 
 class TestLogica(unittest.TestCase):
@@ -91,6 +92,27 @@ class TestTrailingKraken(Base):
         c.price = 40.0
         ts.check_once()
         self.assertEqual(c.orders, [])
+
+
+class TestMinProfitKraken(Base):
+    """Prag minim de profit inainte sa se activeze trailing-ul (Kraken)."""
+
+    def test_warming_up_nu_vinde_sub_prag(self):
+        c = FakeK(60.0)
+        ts = self.ts(c, min_profit_pct=5.0)
+        ts.check_once()                    # initial=60, activ la 63.0
+        c.price = 48.0                     # crash -20% dar sub pragul de activare
+        ts.check_once()
+        self.assertEqual(c.orders, [], "nu vinde inainte sa atinga pragul de profit")
+
+    def test_activ_dupa_prag_vinde(self):
+        c = FakeK(60.0)
+        ts = self.ts(c, min_profit_pct=5.0)
+        ts.check_once()                    # initial=60
+        c.price = 64.0; ts.check_once()   # +6.7% > 5% -> trailing activ, peak=64
+        c.price = 53.0; ts.check_once()   # -17.2% de la peak 64 (prag HYPE 15%)
+        self.assertEqual(len(c.orders), 1, "vinde dupa ce a trecut pragul de profit")
+        self.assertEqual(c.orders[0]["side"], "sell")
 
 
 if __name__ == "__main__":

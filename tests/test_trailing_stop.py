@@ -46,9 +46,10 @@ class Base(unittest.TestCase):
         for p in (self.sf, self.sf + ".tmp"):
             if os.path.exists(p):
                 os.remove(p)
-    def ts(self, api, enabled=True, frac=1.0):
+    def ts(self, api, enabled=True, frac=1.0, min_profit_pct=0.0):
         return TrailingStop(api, self.po, FakeSym(), log=lambda *a: None,
-                            enabled=enabled, sell_fraction=frac, state_file=self.sf)
+                            enabled=enabled, sell_fraction=frac, state_file=self.sf,
+                            min_profit_pct=min_profit_pct)
 
 
 class TestLogica(unittest.TestCase):
@@ -135,6 +136,46 @@ class TestPerMoneda(Base):
         self.assertEqual(ts.trail_pct_for("BTCUSDC"), 20.0)
         self.assertEqual(ts.trail_pct_for("TAOUSDC"), 22.0)
         self.assertEqual(ts.trail_pct_for("XYZUSDC"), 22.0)   # default
+
+
+class TestMinProfit(Base):
+    """Prag minim de profit inainte sa se activeze trailing-ul."""
+
+    def test_warming_up_nu_vinde_sub_prag(self):
+        api = FakeApi(250.0)
+        ts = self.ts(api, min_profit_pct=5.0)
+        ts.check_once()                    # initial=250, activ la 262.5
+        api.price = 190.0                  # crash -24% dar sub pragul de activare
+        ts.check_once()
+        self.assertEqual(self.po.orders, [], "nu vinde inainte sa atinga pragul de profit")
+
+    def test_activ_dupa_prag_vinde(self):
+        api = FakeApi(250.0)
+        ts = self.ts(api, min_profit_pct=5.0)
+        ts.check_once()                    # initial=250
+        api.price = 263.0                  # +5.2% > 5% prag -> trailing activ
+        ts.check_once()                    # peak=263
+        api.price = 200.0                  # -23.9% de la peak 263 (prag TAO 22%)
+        ts.check_once()
+        self.assertEqual(len(self.po.orders), 1, "vinde dupa ce a trecut de pragul de profit")
+        self.assertEqual(self.po.orders[0]["side"], "SELL")
+
+    def test_initial_se_reseteaza_la_rebuy(self):
+        """Dupa un crash-sell + re-buy, initial se reseteaza la pretul de re-buy."""
+        api = FakeApi(250.0)
+        ts = self.ts(api, min_profit_pct=5.0)
+        ts.check_once()                    # initial=250, peak=250
+        api.price = 263.0; ts.check_once() # trece de prag -> activ
+        api.price = 200.0; ts.check_once() # crash -23.9% -> vinde; armeaza rebuy
+        self.assertEqual(len(self.po.orders), 1)
+        # simuleaza rebuy: pretul urca 1.2% de la 200 -> 202.4
+        api.price = 199.0; ts.check_once() # low=199
+        api.price = 201.5; ts.check_once() # +1.26% de la 199 -> re-buy; initial=201.5
+        # acum trailing inactiv pana la 201.5*1.05=211.6
+        api.price = 180.0; ts.check_once() # crash de la 201.5 dar sub pragul de activare
+        # ordinele: 1 vanzare + 1 re-buy; al treilea NU se executa (warming up)
+        sells = [o for o in self.po.orders if o["side"] == "SELL"]
+        self.assertEqual(len(sells), 1, "al doilea crash nu declanseaza vanzare (warming up dupa rebuy)")
 
 
 if __name__ == "__main__":

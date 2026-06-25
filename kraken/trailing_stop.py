@@ -81,13 +81,17 @@ REBUY_BOUNCE_PCT = float(os.environ.get("KRAKEN_TRAILING_REBUY_BOUNCE_PCT", "1.2
 # Sell de crash: implicit NEFILTRAT (disjunctorul ramane fiabil); true = anti-wick.
 REBUY_SKIP_IF_TREND_DOWN = os.environ.get("KRAKEN_TRAILING_REBUY_SKIP_IF_TREND_DOWN", "true").lower() == "true"
 SELL_SKIP_IF_TREND_UP = os.environ.get("KRAKEN_TRAILING_SELL_SKIP_IF_TREND_UP", "false").lower() == "true"
+# Prag minim de profit inainte sa se activeze trailing-ul (0 = activ imediat, ca inainte).
+# Previne vanzarea in pierdere dupa un dip normal imediat dupa cumparare.
+MIN_PROFIT_PCT = float(os.environ.get("KRAKEN_TRAILING_MIN_PROFIT_PCT", "0.0"))
 
 
 class KrakenTrailing:
     """ADAPTOR Kraken pt TrailingCore: API (balanta libera, pret, sell/buy limit, trend) +
     log/notify specific. Masina de stari (varf, trailing, re-buy) e in TrailingCore."""
 
-    def __init__(self, client: KrakenClient, log=log, enabled=None, state_file=STATE_FILE):
+    def __init__(self, client: KrakenClient, log=log, enabled=None, state_file=STATE_FILE,
+                 min_profit_pct=MIN_PROFIT_PCT):
         self.client = client
         self.log = log
         self.enabled = (os.environ.get("KRAKEN_TRAILING_ENABLED", "false").lower() == "true"
@@ -99,7 +103,8 @@ class KrakenTrailing:
             rebuy_bounce_pct=REBUY_BOUNCE_PCT,
             rebuy_skip_if_trend_down=REBUY_SKIP_IF_TREND_DOWN,
             sell_skip_if_trend_up=SELL_SKIP_IF_TREND_UP,
-            sell_fraction=1.0, item_isolation=False)
+            sell_fraction=1.0, item_isolation=False,
+            min_profit_pct=min_profit_pct)
 
     # -- stare (delegare la core; pastrate pt --status si teste) ---------------
     def _load(self) -> dict:

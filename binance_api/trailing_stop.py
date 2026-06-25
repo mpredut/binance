@@ -95,6 +95,9 @@ REBUY_TRANCHES = int(os.environ.get("TRAILING_REBUY_TRANCHES", "1"))
 # trebuie sa ramana fiabil); pune true daca vrei sa NU vinda cand trendul instant e clar SUS (anti-wick).
 REBUY_SKIP_IF_TREND_DOWN = os.environ.get("TRAILING_REBUY_SKIP_IF_TREND_DOWN", "true").lower() == "true"
 SELL_SKIP_IF_TREND_UP = os.environ.get("TRAILING_SELL_SKIP_IF_TREND_UP", "false").lower() == "true"
+# Prag minim de profit inainte sa se activeze trailing-ul (0 = activ imediat, ca inainte).
+# Previne vanzarea in pierdere dupa un dip normal imediat dupa cumparare.
+MIN_PROFIT_PCT = float(os.environ.get("TRAILING_MIN_PROFIT_PCT", "0.0"))
 
 
 class TrailingStop:
@@ -102,7 +105,8 @@ class TrailingStop:
     trend) + log-urile specifice. Masina de stari (varf, trailing, re-buy) e in TrailingCore."""
 
     def __init__(self, api, po, sym, log=print, enabled=None,
-                 sell_fraction=SELL_FRACTION, state_file=DEFAULT_STATE):
+                 sell_fraction=SELL_FRACTION, state_file=DEFAULT_STATE,
+                 min_profit_pct=MIN_PROFIT_PCT):
         self.api = api
         self.po = po
         self.sym = sym
@@ -118,7 +122,8 @@ class TrailingStop:
             rebuy_bounce_pct=REBUY_BOUNCE_PCT,
             rebuy_skip_if_trend_down=REBUY_SKIP_IF_TREND_DOWN,
             sell_skip_if_trend_up=SELL_SKIP_IF_TREND_UP,
-            sell_fraction=sell_fraction, item_isolation=True)
+            sell_fraction=sell_fraction, item_isolation=True,
+            min_profit_pct=min_profit_pct)
 
     # -- stare (delegare la core; pastrate pt --status si teste) ---------------
     def _load(self) -> dict:
