@@ -110,7 +110,9 @@ if [ "$1" = "--supervise" ]; then
             [ -f "$SUP/$label.esc" ] || { push "Bot in CRASH-LOOP" "$label ($st) de ${cnt}x in 30min — NU mai repornesc, interventie manuala"; touch "$SUP/$label.esc"; }
             echo "$(date '+%H:%M') $label CRASH-LOOP (nu repornesc)"; continue
         fi
-        ( cd "$dir" && eval "$cmd" )                          # restart curat ($ROOT/$VENV expandate aici)
+        # 8>&- : botul pornit NU mosteneste fd 8 (lock-ul supervise) -> fara scurgere de lock
+        # (altfel viitoarele --supervise gasesc lock-ul tinut de bot si sar "deja ruleaza" la infinit).
+        ( cd "$dir" && eval "$cmd" ) 8>&-                     # restart curat ($ROOT/$VENV expandate aici)
         cnt=$((cnt + 1)); echo "$cnt $ws" > "$SUP/$label"; rm -f "$SUP/$label.esc"
         push "Bot repornit" "$label ($st) -> REPORNIT (incercarea $cnt/$MAX)"
         echo "$(date '+%H:%M') $label REPORNIT ($st, incercarea $cnt)"
