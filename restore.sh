@@ -15,26 +15,14 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 SECRETS="${1:-}"
 fail() { echo "❌ $*" >&2; exit 1; }
 
-# Fisiere care NU sunt in git (gitignored). Aceeasi lista ca in backup_secrets.sh.
-SECRET_ITEMS=".env hyperliquid/.env kraken/.env 212trading/.env keys/apikeys.py keys/ed25519_private.pem keys/ed25519_public.pem"
-STATE_ITEMS="hyperliquid/.state_dn_HYPE.json kraken/.state_HYPEUSD.json"   # optional (recuperare curata)
-
 echo "===== RESTORE binance @ $ROOT ====="
 [ -n "$SECRETS" ] || fail "Uz: $0 <folder_secrete>  (facut cu ./backup_secrets.sh)"
 [ -d "$SECRETS" ] || fail "Folderul de secrete nu exista: $SECRETS"
 command -v python3 >/dev/null || fail "python3 lipseste (apt install python3 python3-venv)"
 
-echo "--- [1/5] restore secrete + stare din $SECRETS ---"
-for rel in $SECRET_ITEMS $STATE_ITEMS; do
-    if [ -f "$SECRETS/$rel" ]; then
-        mkdir -p "$ROOT/$(dirname "$rel")"
-        cp -p "$SECRETS/$rel" "$ROOT/$rel"
-        echo "    ✔ $rel"
-    else
-        case " $STATE_ITEMS " in *" $rel "*) :;; *) echo "    ! lipseste din backup: $rel";; esac
-    fi
-done
-[ -d "$SECRETS/cachedb" ] && cp -rp "$SECRETS/cachedb" "$ROOT/" && echo "    ✔ cachedb/"
+echo "--- [1/5] restore secrete + stare din $SECRETS (tot ce e in folder) ---"
+# Folderul oglindeste structura repo-ului (facut de backup_secrets.sh): copiem tot.
+cp -rp "$SECRETS/." "$ROOT/" && echo "    ✔ restaurat tot (.env, keys/, .state*, cachedb/, ...)"
 
 echo "--- [2/5] venv (myenv) + dependinte ---"
 [ -x "$ROOT/myenv/bin/python" ] || python3 -m venv "$ROOT/myenv" || fail "nu pot crea venv"
