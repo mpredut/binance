@@ -1,99 +1,122 @@
 #!/bin/bash
-# healthcheck.sh — verificare consolidata READ-ONLY: procese + conturi (HL/Kraken/T212).
-# Ruleaza pe server oricand:  ./healthcheck.sh
+# healthcheck.sh — supraveghere + raport consolidat pentru boti/flota (HL/Kraken/T212).
+#
+# SURSA UNICA DE ADEVAR: procs.conf (citit si de bots_start.sh + flota_start.sh).
+# Aici NU mai exista liste de procese hardcodate. Detectie DUBLA: absenta (pgrep) SI
+# hang (proces viu dar log inghetat, heartbeat pe mtime) — inlocuieste dn_watchdog.sh.
+#   --supervise  (cron */5): reporneste botii (role=bot) morti/inghetati cu backoff; flota = doar alerta.
+#   --alert      : doar alerta daca lipseste/e hung ceva (nu reporneste).
+#   --check      : preview READ-ONLY (ce ar face --supervise) — sigur, nu atinge nimic.
+#   (fara arg)   : raport complet (procese + conturi HL/Kraken/T212).
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+MANIFEST="$ROOT/procs.conf"
 # python cu SDK Hyperliquid (eth_account): prefera venv, cade pe python3
-_venv=""
-for _d in ".venv" "myenv"; do [ -f "$ROOT/$_d/bin/activate" ] && _venv="$_d" && break; done
-HLPY="$ROOT/$_venv/bin/python"
+VENV=""
+for _d in ".venv" "myenv"; do [ -f "$ROOT/$_d/bin/activate" ] && VENV="$_d" && break; done
+HLPY="$ROOT/$VENV/bin/python"
 { [ -x "$HLPY" ] && "$HLPY" -c "import eth_account" 2>/dev/null; } || HLPY=python3
+now=$(date +%s)
 
-# ===== MOD --alert (pt CRON): verifica boturile, trimite ntfy DOAR daca lipseste ceva =====
-# Acopera golul: watchdog-ul existent reporneste flota, dar NU boturile. Alerteaza,
-# nu reporneste (boturile au nevoi de stare; mai bine te anunta sa dai ./bots_start.sh).
-#   cron:  */10 * * * * /home/predut/binance/healthcheck.sh --alert >> /home/predut/binance/healthcheck.log 2>&1
-if [ "$1" = "--alert" ]; then
-    checks="dn_bot.py\$|DN-bot
-dn_bot.py --watch|DN-watch
-kraken_bot.py|Kraken-bot
-kraken_cachemanager.py|Kraken-cache
-kraken_xstock_watch.py|xStock-watch
-t212_bot.py|T212-bot
-cacheManager.py|cacheManager
-priceAnalysis.py|priceAnalysis
-tradeall.py|tradeall"
-    missing=""
-    while IFS='|' read -r pat label; do
+# Starea unei linii din manifest: ecou 'ok' | 'absent' | 'hung' (hung = viu dar heartbeat vechi).
+proc_state() {
+    local pat="$1" dir="$2" hblog="$3" hbstale="$4"
+    pgrep -f "$pat" >/dev/null 2>&1 || { echo absent; return; }
+    if [ -n "$hblog" ] && [ -n "$hbstale" ]; then
+        local lp="$hblog"; case "$hblog" in /*) ;; *) lp="$dir/$hblog";; esac
+        if [ -f "$lp" ]; then
+            local age=$(( now - $(stat -c %Y "$lp") ))
+            [ "$age" -ge "$hbstale" ] && { echo hung; return; }
+        fi
+    fi
+    echo ok
+}
+
+# ===== MOD --check: preview READ-ONLY (nu atinge nimic) ====================
+if [ "$1" = "--check" ]; then
+    echo "=== CHECK (read-only) $(date '+%H:%M:%S') — sursa: $MANIFEST ==="
+    while IFS='|' read -r pat dir cmd label hblog hbstale role; do
         [ -z "$pat" ] && continue
-        pgrep -f "$pat" >/dev/null 2>&1 || missing="$missing $label"
-    done <<< "$(echo -e "$checks")"
+        case "$pat" in \#*) continue;; esac
+        dir=$(eval echo "$dir")
+        st=$(proc_state "$pat" "$dir" "$hblog" "$hbstale")
+        extra=""
+        if [ -n "$hblog" ]; then
+            lp="$hblog"; case "$hblog" in /*) ;; *) lp="$dir/$hblog";; esac
+            [ -f "$lp" ] && extra="(heartbeat ${hblog}: $(( now - $(stat -c %Y "$lp") ))s/${hbstale}s)"
+        fi
+        act="-"
+        [ "$st" != ok ] && { [ "$role" = bot ] && act="REPORNIRE" || act="alerta"; }
+        printf '  %-16s %-6s %-7s %-10s %s\n' "$label" "$role" "$st" "$act" "$extra"
+    done < "$MANIFEST"
+    exit 0
+fi
+
+# ===== MOD --alert: DOAR alerta (ntfy) daca lipseste/e hung ceva ===========
+if [ "$1" = "--alert" ]; then
+    missing=""
+    while IFS='|' read -r pat dir cmd label hblog hbstale role; do
+        [ -z "$pat" ] && continue
+        case "$pat" in \#*) continue;; esac
+        dir=$(eval echo "$dir")
+        st=$(proc_state "$pat" "$dir" "$hblog" "$hbstale")
+        [ "$st" != ok ] && missing="$missing $label($st)"
+    done < "$MANIFEST"
     if [ -n "$missing" ]; then
         TOPIC=$(grep -hs NTFY_TOPIC "$ROOT/kraken/.env" "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '" ')
-        [ -n "$TOPIC" ] && curl -s -m 10 -H "Title: Boti opriti pe server" \
-            -d "Procese moarte:$missing  -> ruleaza ./bots_start.sh" "https://ntfy.sh/$TOPIC" >/dev/null
-        echo "$(date '+%H:%M') ALERTA: lipsesc -$missing"
+        [ -n "$TOPIC" ] && curl -s -m 10 -H "Title: Procese pe server" \
+            -d "Moarte/hung:$missing  -> verifica (./bots_start.sh / flota_start)" "https://ntfy.sh/$TOPIC" >/dev/null
+        echo "$(date '+%H:%M') ALERTA: $missing"
     else
-        echo "$(date '+%H:%M') OK (toti botii ruleaza)"
+        echo "$(date '+%H:%M') OK (toate proceselele ruleaza)"
     fi
     exit 0
 fi
 
-# ===== MOD --supervise (pt CRON): repornește BOTURILE moarte (cu backoff) + alertă =====
-# Boturile (all_start) nu erau supravegheate de nimic. Aici le repornim individual
-# (restart curat -> isi reiau starea singure), cu backoff: max 3 reporniri / 30 min,
-# apoi escaladare la interventie manuala (anti crash-loop). FLOTA = doar alerta (o tine
-# flota_start). TRAILING-ul e repornit LIVE ca ceilalti boti (config in */trailing.conf).
-# Bonus: dupa un reboot, aduce boturile inapoi singur. Cron sugerat:
-#   */5 * * * * /home/predut/binance/healthcheck.sh --supervise >> /home/predut/binance/healthcheck.log 2>&1
+# ===== MOD --supervise (cron */5): reporneste boti morti/inghetati + alerta flota =====
 if [ "$1" = "--supervise" ]; then
-    # Garda statie locala: --supervise PORNESTE boti. Din checkout-ul de dezvoltare
-    # (WSL, /home/mariusp) asta ar lansa botii cu cheile reale local -> refuza aici.
-    # Serverul (/home/predut) NU e atins, deci supravegherea de acolo ramane activa.
+    # Garda statie locala: --supervise PORNESTE boti cu cheile reale. Din checkout-ul
+    # de dezvoltare (WSL, /home/mariusp) refuzam. Serverul (/home/predut) ramane activ.
     case "$ROOT" in
-        /home/mariusp/*) echo "$(date '+%H:%M') supervise dezactivat pe statia locala ($ROOT) — pornesc boti DOAR pe server"; exit 0;;
+        /home/mariusp/*) echo "$(date '+%H:%M') supervise dezactivat pe statia locala ($ROOT)"; exit 0;;
     esac
-    # lacat: o singura instanta --supervise odata (cron + rulare manuala nu se bat,
-    # nu pornesc dubluri). A doua instanta iese imediat.
     exec 8>/tmp/binance_supervise.lock
     flock -n 8 || { echo "$(date '+%H:%M') supervise deja ruleaza — sar (anti-dublare)"; exit 0; }
     SUP=/tmp/binance_sup; mkdir -p "$SUP"; WINDOW=1800; MAX=3
     TOPIC=$(grep -hs NTFY_TOPIC "$ROOT/kraken/.env" "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '" ')
     push(){ [ -n "$TOPIC" ] && curl -s -m 10 -H "Title: $1" -d "$2" "https://ntfy.sh/$TOPIC" >/dev/null; }
-    # dn_bot are nevoie de SDK-ul HL (eth_account) = doar in venv; python3 de sistem
-    # NU il are -> cron-ul ar esua sa-l reporneasca. Folosim $HLPY (venv, fallback python3).
-    bots="dn_bot.py\$|$ROOT/hyperliquid|source $ROOT/$_venv/bin/activate && nohup python3 dn_bot.py > dn_bot.log 2>&1 &|DN-bot
-dn_bot.py --watch|$ROOT/hyperliquid|source $ROOT/$_venv/bin/activate && nohup python3 dn_bot.py --watch > dn_watch.log 2>&1 &|DN-watch
-kraken_bot.py|$ROOT/kraken|nohup python3 kraken_bot.py > kraken_bot.log 2>&1 &|Kraken-bot
-kraken_cachemanager.py|$ROOT/kraken|nohup python3 kraken_cachemanager.py > kraken_cachemanager.log 2>&1 &|Kraken-cache
-kraken_xstock_watch.py|$ROOT/kraken|nohup python3 kraken_xstock_watch.py > kraken_xstock_watch.log 2>&1 &|xStock-watch
-t212_bot.py|$ROOT/212trading|nohup python3 t212_bot.py > t212_bot.log 2>&1 &|T212-bot
-kraken/trailing_stop.py|$ROOT|nohup python3 kraken/trailing_stop.py > kraken/trail_k.log 2>&1 &|Kraken-trailing
-binance_api/trailing_stop.py|$ROOT|source $ROOT/$_venv/bin/activate && nohup python3 binance_api/trailing_stop.py > binance_api/trail_b.log 2>&1 &|Binance-trailing"
-    while IFS='|' read -r pat dir cmd label; do
+    alert_miss=""
+    while IFS='|' read -r pat dir cmd label hblog hbstale role; do
         [ -z "$pat" ] && continue
-        if pgrep -f "$pat" >/dev/null 2>&1; then
-            rm -f "$SUP/$label" "$SUP/$label.esc"            # viu -> reset backoff
+        case "$pat" in \#*) continue;; esac
+        dir=$(eval echo "$dir")
+        st=$(proc_state "$pat" "$dir" "$hblog" "$hbstale")
+        if [ "$st" = ok ]; then
+            [ "$role" = bot ] && rm -f "$SUP/$label" "$SUP/$label.esc"   # sanatos -> reset backoff
             continue
         fi
-        cnt=0; ws=$(date +%s); now=$ws
+        if [ "$role" != bot ]; then          # flota: doar alerta (o tine flota_start)
+            alert_miss="$alert_miss $label($st)"
+            continue
+        fi
+        # role=bot, stare absent|hung
+        if [ "$st" = hung ]; then
+            echo "$(date '+%H:%M') $label HUNG (heartbeat vechi) -> kill"
+            pkill -f "$pat" 2>/dev/null; sleep 2; pkill -9 -f "$pat" 2>/dev/null
+        fi
+        cnt=0; ws=$now
         [ -f "$SUP/$label" ] && read -r cnt ws < "$SUP/$label"
         [ $((now - ws)) -gt $WINDOW ] && { cnt=0; ws=$now; }   # fereastra noua
         if [ "$cnt" -ge "$MAX" ]; then
-            [ -f "$SUP/$label.esc" ] || { push "Bot in CRASH-LOOP" "$label a murit de ${cnt}x in 30min — NU mai repornesc, interventie manuala"; touch "$SUP/$label.esc"; }
+            [ -f "$SUP/$label.esc" ] || { push "Bot in CRASH-LOOP" "$label ($st) de ${cnt}x in 30min — NU mai repornesc, interventie manuala"; touch "$SUP/$label.esc"; }
             echo "$(date '+%H:%M') $label CRASH-LOOP (nu repornesc)"; continue
         fi
-        ( cd "$dir" && eval "$cmd" )                          # restart curat
+        ( cd "$dir" && eval "$cmd" )                          # restart curat ($ROOT/$VENV expandate aici)
         cnt=$((cnt + 1)); echo "$cnt $ws" > "$SUP/$label"; rm -f "$SUP/$label.esc"
-        push "Bot repornit" "$label murise -> REPORNIT (incercarea $cnt/$MAX)"
-        echo "$(date '+%H:%M') $label REPORNIT (incercarea $cnt)"
-    done <<< "$bots"
-    # FLOTA: doar alerta (o tine flota_start). TRAILING-ul e acum in lista de restart de sus.
-    miss=""
-    for s in cacheManager.py priceAnalysis.py tradeall.py monitortrades.py rtrade.py market_alerts.py assetguardian.py; do
-        pgrep -f "$s" >/dev/null 2>&1 || miss="$miss ${s%.py}"
-    done
-    [ -n "$miss" ] && { push "Procese de verificat" "Moarte (nu le repornesc de aici):$miss"; echo "$(date '+%H:%M') alerta flota/trailing:$miss"; }
-    [ -z "$miss" ] && echo "$(date '+%H:%M') supervise OK"
+        push "Bot repornit" "$label ($st) -> REPORNIT (incercarea $cnt/$MAX)"
+        echo "$(date '+%H:%M') $label REPORNIT ($st, incercarea $cnt)"
+    done < "$MANIFEST"
+    [ -n "$alert_miss" ] && { push "Procese de verificat" "Moarte/hung (nu le repornesc de aici):$alert_miss"; echo "$(date '+%H:%M') alerta flota:$alert_miss"; }
+    [ -z "$alert_miss" ] && echo "$(date '+%H:%M') supervise: flota OK"
     exit 0
 fi
 
