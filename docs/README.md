@@ -4,8 +4,16 @@ Documentația transversală a sistemului de trading. READMI-urile de componentă
 lângă codul lor (convenție — sunt linkate mai jos).
 
 ## Operațional / runbook
+- [OPERATIONS.md](OPERATIONS.md) — cum funcționează (arhitectură, manifest, supraveghere) +
+  **capcane & lecții** (lock-leak fd, hang vs crash, co-mingling DN, bit execuție, quoting) + diagnostic.
 - [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) — refacere completă pe VM nou (sămânța DR,
   backup secrete, restore.sh), backup periodic, ce e/nu e în git.
+
+## Design & strategie (de ce-uri durabile)
+- [STRATEGY.md](STRATEGY.md) — logica de trading: detecție trend (lag +48h, curbă de
+  supraviețuire, lindy plateau), garda de profit, trailing re-buy, T212 profit-guard/ladder, xStocks.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — facadă `providers/market_api` + provideri, HYPE pe HL,
+  Kraken multi-proces (cacheManager partajat).
 
 ## README de componentă (lângă cod)
 - [../hyperliquid/README.md](../hyperliquid/README.md) — Hyperliquid: delta-neutral (dn_bot) + provider HYPE.
