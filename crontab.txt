@@ -1,0 +1,5 @@
+*/5 * * * * /home/predut/binance/healthcheck.sh --supervise >> /home/predut/binance/logs/healthcheck.log 2>&1
+17 * * * * /home/predut/binance/rotate_logs.sh >/dev/null 2>&1
+*/15 * * * * /usr/bin/python3 /home/predut/binance/212trading/price_alert.py RGNT --below 4 >> /home/predut/binance/212trading/price_alert.log 2>&1
+*/15 * * * * cd /home/predut/binance && /home/predut/binance/myenv/bin/python verify_tools/check_cache_coherence.py >> /home/predut/binance/logs/cache_coherence.log 2>&1
+*/5 * * * * cd /home/predut/binance && /home/predut/binance/myenv/bin/python /home/predut/binance/verify_tools/cache_watchdog.py >> /home/predut/binance/logs/watchdog.log 2>&1
