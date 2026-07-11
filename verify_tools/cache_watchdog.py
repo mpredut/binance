@@ -40,10 +40,19 @@ STATE_FILE = _ROOT / ".watchdog_state.json"
 STALE_MINUTES = float(os.environ.get("WATCHDOG_STALE_MINUTES", "20"))
 COOLDOWN_MINUTES = float(os.environ.get("WATCHDOG_COOLDOWN_MINUTES", "60"))
 # Praguri per-cache (min): cele lente (trend lung, valoare activ) se actualizeaza rar.
+# Cache-urile de order/trade sunt EVENT-DRIVEN: cacheManager le rescrie DOAR cand apare
+# un order/trade nou pe exchange. Intr-o perioada linistita (fara fill-uri) mtime-ul lor
+# imbatraneste natural peste 20 min -> fals pozitiv. Nu ascund o cadere reala a flotei:
+# daca flota moare, cache-urile RAPIDE de pret (cache_currentprice prag 20, cache_asset_value
+# prag 60) declanseaza alarma oricum. Le dau prag mare, doar ca plasa de siguranta pt un
+# cache cu adevarat blocat (>24h fara nimic e suspect chiar si intr-o piata moarta).
 _STALE_OVERRIDES = {
     "cache_price_long_trend.json": 90,
     "cache_asset_value.json": 60,
     "cache_T_trend.json": 11520,   # T empiric per moneda: recalc la 7 zile -> prag 8 zile
+    "cache_order.json": 1440,      # event-driven: se scrie doar la order nou (prag 24h)
+    "cache_trade.json": 1440,      # event-driven: se scrie doar la trade nou (prag 24h)
+    "cache_trade_kraken.json": 1440,  # idem, fill-urile Kraken
 }
 
 

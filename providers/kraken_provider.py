@@ -69,8 +69,19 @@ class KrakenProvider(MarketDataProvider):
             if saved_common is not None:
                 sys.modules["common"] = saved_common  # repune common-ul lui HL
         # Cheile din kraken/.env (NU din env-ul flotei). env-ul are prioritate daca e setat.
-        api_key = os.environ.get("KRAKEN_API_KEY") or env_value(_KRAKEN_DIR, "KRAKEN_API_KEY")
-        api_secret = os.environ.get("KRAKEN_API_SECRET") or env_value(_KRAKEN_DIR, "KRAKEN_API_SECRET")
+        # kraken/.env NU defineste KRAKEN_API_KEY simplu, doar variantele cu sufix
+        # (_BOT/_TRAIL/_CACHE/_SPARE). Flota e un consumator concurent distinct de
+        # kraken_bot (_BOT) / trailing (_TRAIL) / cachemanager (_CACHE), deci foloseste
+        # perechea dedicata _SPARE -> secventa de nonce proprie (fara ciocniri). Fallback
+        # pe KRAKEN_API_KEY simplu, apoi pe _BOT, ca sa nu ramana orb daca _SPARE lipseste.
+        api_key = (os.environ.get("KRAKEN_API_KEY")
+                   or env_value(_KRAKEN_DIR, "KRAKEN_API_KEY")
+                   or env_value(_KRAKEN_DIR, "KRAKEN_API_KEY_SPARE")
+                   or env_value(_KRAKEN_DIR, "KRAKEN_API_KEY_BOT"))
+        api_secret = (os.environ.get("KRAKEN_API_SECRET")
+                      or env_value(_KRAKEN_DIR, "KRAKEN_API_SECRET")
+                      or env_value(_KRAKEN_DIR, "KRAKEN_API_SECRET_SPARE")
+                      or env_value(_KRAKEN_DIR, "KRAKEN_API_SECRET_BOT"))
         self._cli = KrakenClient(api_key, api_secret)
         return self._cli
 
