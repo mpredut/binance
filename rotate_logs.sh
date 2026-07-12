@@ -17,23 +17,24 @@ LOGROTATE="$(command -v logrotate || echo /usr/sbin/logrotate)"
 
 CONF="$(mktemp)"
 trap 'rm -f "$CONF"' EXIT
+# GLOB per director cunoscut (nu lista hardcodata -> orice log nou e acoperit AUTOMAT,
+# fara sa trebuiasca adaugat manual). Directoare distincte => fara suprapuneri (logrotate
+# da eroare la fisier dublu). NU folosim */*.log (ar prinde myenv/venv). NU includem
+# logger/ (rotit de logging.py insusi). copytruncate: botii tin fisierul deschis.
 {
-    for rel in hyperliquid/dn_bot.log hyperliquid/dn_watch.log \
-               kraken/kraken_bot.log kraken/kraken_xstock_watch.log kraken/trail_k.log \
-               kraken/kraken_cachemanager.log \
-               binance_api/trail_b.log \
-               "212trading/t212_bot.log" "212trading/price_alert.log" \
-               logs/healthcheck.log logs/watchdog.log logs/cache_coherence.log; do
-        [ -f "$ROOT/$rel" ] && echo "$ROOT/$rel"
-    done
-    cat <<'EOF'
+    cat <<EOF
+$ROOT/logs/*.log
+$ROOT/kraken/*.log
+$ROOT/hyperliquid/*.log
+$ROOT/212trading/*.log
+$ROOT/binance_api/*.log
+$ROOT/*.log
 {
     size 20M
     rotate 3
     missingok
     notifempty
     compress
-    delaycompress
     copytruncate
 }
 EOF
