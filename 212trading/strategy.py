@@ -264,7 +264,7 @@ class Strategy:
             log(f"  [STRAT] {tag}SELL FILLED {qty} @ {price:.2f} USD  "
                 f"brut={gross:+.2f}  fee={fee:.2f}  net={net:+.2f} USD")
             notify(title=f"{tag}{self.yahoo_sym} SELL {qty}@{price:.2f} N{net:+.2f}$",
-                   body=(f"br{gross:+.2f} fee{fee:.2f} N{net:+.2f}$ | "
+                   body=(f"a{avg:.2f} · br{gross:+.2f} fee{fee:.2f} N{net:+.2f}$ | "
                          f"Ntot{self.s['realized_net_usd']:+.2f}$ | ciclu{self.s['cycle']} inchis"),
                    source="T212", price=price, desktop=self.desktop)
             if self.s["qty"] <= 1e-9:
@@ -496,7 +496,7 @@ class Strategy:
             log(f"  [STRAT] SELL EXECUTAT {sold:.4f} @ ~{price:.2f} USD  "
                 f"brut={gross:+.2f}  fee={fee:.2f}  net={net:+.2f} USD")
             notify(title=f"{self.yahoo_sym} SELL {sold:.4f}@~{price:.2f} N{net:+.2f}$",
-                   body=f"br{gross:+.2f} fee{fee:.2f} N{net:+.2f}$ | Ntot{self.s['realized_net_usd']:+.2f}$",
+                   body=f"a{prev_avg:.2f} · br{gross:+.2f} fee{fee:.2f} N{net:+.2f}$ | Ntot{self.s['realized_net_usd']:+.2f}$",
                    source="T212", price=price, desktop=self.desktop)
 
         else:
