@@ -446,7 +446,12 @@ class Strategy:
     def _reconcile_real(self, price: float) -> None:
         real = self._portfolio_position()
         if real is None:
-            log("  [STRAT] portofoliu indisponibil — sar reconcilierea acest tick")
+            # Debounce: logam prima data si la fiecare 10 minute (nu la fiecare tick).
+            now = time.time()
+            last = getattr(self, "_pf_unavail_logged", 0)
+            if now - last > 600:
+                log("  [STRAT] portofoliu indisponibil — sar reconcilierea (suprima repetatele 10 min)")
+                self._pf_unavail_logged = now
             return
         real_qty, real_avg = real
         active = self._active_order_ids()
