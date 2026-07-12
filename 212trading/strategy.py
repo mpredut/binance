@@ -65,6 +65,7 @@ class StratParams:
     sl_rebuy_enabled: bool = False   # dupa stop-loss de catastrofa, reintra pe RECUL in sus de la minim (ca trailing-ul Binance/Kraken), nu sub-vanzare
     sl_rebuy_bounce_pct: float = 1.2 # recul% de la minimul de dupa SL pt re-buy (confirma ca s-a oprit caderea -> nu prinde cutitul)
     dca_trend_gate_pct: float = 0.0  # GATE DCA pe trend (ca Binance/Kraken): daca panta scurta (%/bara) < -acest prag => NU face DCA (nu arunca capital intr-un downtrend confirmat). 0 = OFF (comportament neschimbat)
+    trail_pct: float = 0.0           # TRAILING crash-breaker (ca Binance/Kraken): vinde TOT daca pretul scade acest % de la PEAK-ul pozitiei. Iese devreme dintr-un declin sustinut (backtest SPCX: -7.5% -> -1.4% la 8%). 0 = OFF. Complementar stop-loss-ului fix (catastrofa).
 
     @classmethod
     def from_env(cls, env: dict | None = None) -> "StratParams":
@@ -129,6 +130,7 @@ class StratParams:
             sl_rebuy_enabled   = (e.get("STRAT_SL_REBUY_ENABLED", "false").strip().lower() == "true"),
             sl_rebuy_bounce_pct= float_env("STRAT_SL_REBUY_BOUNCE_PCT", e) or 1.2,
             dca_trend_gate_pct = float_env("STRAT_DCA_TREND_GATE_PCT", e) or 0.0,
+            trail_pct          = float_env("STRAT_TRAIL_PCT", e) or 0.0,
         )
 
 
@@ -147,6 +149,8 @@ def _new_state() -> dict:
         "loss_band": 0,         # banda de pierdere deja alertata (anti-spam alerte de adancire)
         "tp_sold_levels": [],   # nivele din scara TP deja vandute in ciclul curent (scale-out)
         "orders": [],           # {id, side, qty, limit, amount, kind, ts, level}
+        "pos_peak": 0.0,        # cel mai mare pret cat detinem pozitia (pt trailing crash-breaker)
+        "tr_alerted": False,    # anti-spam: notificarea de trailing s-a trimis deja in episodul curent
     }
 
 
@@ -540,6 +544,41 @@ class Strategy:
             log(f"  [STRAT] === ciclu inchis, reincep (ciclu {nxt}) ===")
 
     # -- pas de decizie --------------------------------------------------------
+    def _check_trailing(self, price: float) -> bool:
+        """TRAILING crash-breaker: vinde TOT daca pretul a cazut trail_pct% de la PEAK-ul pozitiei.
+        Complementar stop-loss-ului fix (din avg): iese DEVREME dintr-un declin sustinut, inainte
+        sa se adanceasca pana la catastrofa (backtest SPCX: -7.5% -> -1.4% la prag 8%). Ca la
+        Binance/Kraken. Refoloseste armarea sl_rebuy (re-intrare pe recul). Intoarce True daca a
+        actionat (opreste procesarea tick-ului)."""
+        if self.p.trail_pct <= 0 or self.s["qty"] <= 1e-9:
+            self.s["pos_peak"] = 0.0            # flat / trailing oprit -> reseteaza peak-ul
+            self.s["tr_alerted"] = False
+            return False
+        peak = self.s.get("pos_peak", 0.0) or 0.0
+        if price > peak:
+            self.s["pos_peak"] = peak = price   # urmareste maximul cat detinem
+        if peak <= 0:
+            return False
+        drop_pct = (peak - price) / peak * 100
+        if drop_pct < self.p.trail_pct:
+            return False
+        # a cazut prag% de la peak -> vinde TOT (o data; re-plaseaza doar daca limita ramane in urma)
+        tr = next((o for o in self.s["orders"] if o.get("kind") == "TR"), None)
+        if tr is None or price < tr["limit"]:
+            for o in list(self.s["orders"]):    # anuleaza tot pendintele (DCA/TP/SL)
+                if not self.dry_run and not str(o["id"]).startswith("PAPER"):
+                    self.client.cancel_order(o["id"])
+                self._remove_order(o)
+            self._place_sell(self.s["qty"], round(price * 0.995, 2), kind="TR")  # agresiv -> fill sigur
+            self.s["sl_pending"] = True         # armeaza re-buy pe recul (ca stop-loss-ul de catastrofa)
+        if not self.s.get("tr_alerted"):
+            self.s["tr_alerted"] = True
+            log(f"  📉 [STRAT] TRAILING: -{drop_pct:.2f}% de la peak {peak:.2f} >= {self.p.trail_pct}% — VAND TOT")
+            notify(title=f"📉 TRAILING {self.yahoo_sym} (-{drop_pct:.1f}% de la peak)",
+                   body=f"Cadere {drop_pct:.1f}% de la peak {peak:.2f} >= prag {self.p.trail_pct}% — vand tot.\n{now_str()}",
+                   source="T212", price=price, desktop=self.desktop)
+        return True
+
     def _check_stop_loss(self, price: float) -> bool:
         """Inchide TOT daca pierderea nerealizata depaseste pragul (anti-runaway DCA)."""
         if self.p.stop_loss_pct <= 0:
@@ -640,6 +679,10 @@ class Strategy:
                 log(f"  [STRAT] plafon buget {self.p.max_budget:.0f} {self.ccy} atins — nu intru")
                 return
             self._place_buy(self.p.entry_amount, price * disc, kind="ENTRY")
+            return
+
+        # TRAILING crash-breaker (mai STRANS decat stop-loss-ul de catastrofa) -> verificat PRIMUL
+        if self._check_trailing(price):
             return
 
         # STOP-LOSS: taie pierderea inainte de DCA/TP
