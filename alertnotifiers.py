@@ -265,22 +265,19 @@ _OPS_MARKERS = ("ESUAT", "ERORI", "MANUAL", "DISPARUT", "DEZECHILIBR")
 def _topic_for(title: str, source: str) -> Optional[str]:
     """Ruteaza notificarea pe topic-ul ntfy potrivit categoriei (title + source):
       guard  = stop-loss/trailing/crash/lichidare (BANI in pericol)
-      ops    = erori/esuat/manual/pozitie disparuta (SISTEM)
-      funding= DN (deschidere/inchidere/funding)
+      error  = erori/esuat/manual/pozitie disparuta/watchdog (SISTEM)
       price  = alerte de prag pret
-      trades = fill-uri, 'X disponibil' (rutina) — restul.
-    Citeste NTFY_TOPIC_<CAT>; fallback NTFY_TOPIC. Consistent cu email-ul (guard+ops = urgent)."""
+      trades = fill-uri, 'X disponibil', DN rutina (deschis/inchis/funding) — restul.
+    Citeste NTFY_TOPIC_<CAT>; fallback NTFY_TOPIC. Consistent cu email-ul (guard+error = urgent)."""
     t = title.upper(); s = (source or "").lower()
     if any(m in t for m in _GUARD_MARKERS):
         cat = "GUARD"
     elif any(m in t for m in _OPS_MARKERS) or "watchdog" in s:
-        cat = "OPS"
-    elif s in ("dn", "dn-watch") or "hyperliquid" in s or "funding" in t.lower() or "DN " in title:
-        cat = "FUNDING"
+        cat = "ERROR"
     elif "alert" in s or "prag" in t.lower() or "threshold" in t.lower():
         cat = "PRICE"
     else:
-        cat = "TRADES"
+        cat = "TRADES"       # include DN de rutina (deschis/inchis/funding) — fara topic separat.
     return os.environ.get(f"NTFY_TOPIC_{cat}") or os.environ.get("NTFY_TOPIC")
 # NOTA: fara 📉 (folosit si de alerta INFORMATIVA de pierdere '📉 SPCX -8%') si fara ⚠ singur
 # (prea larg). Trailing-ul e prins de cuvantul 'TRAILING'. Urgentele DN (⚠ ...) au si LICHID/
