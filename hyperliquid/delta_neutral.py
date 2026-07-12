@@ -170,6 +170,8 @@ class DeltaNeutral:
             try:
                 spot_qty = self.client.spot_balance_strict(self.p.spot_token)
                 perp_szi, _ = self.client.position_strict(self.p.coin)
+                self.s["spot_qty"] = spot_qty   # persista pozitia REALA in state (in live nu mai ramane 0 ca placeholder-ul de paper)
+                self.s["perp_szi"] = perp_szi
             except Exception as e:  # noqa: BLE001
                 log(f"  [DN] citirea contului a esuat ({e}) — sar peste tick (nu ghicesc)")
                 return None
