@@ -44,7 +44,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)   # ruleaza si ca script (python binance_api/trailing_stop.py)
 
 from trailing_core import TrailingCore, should_sell  # noqa: E402  (should_sell reexportat pt teste/compat)
-from botcore import load_dotenv  # noqa: E402  (parser KEY=VALUE comun)
+from botcore import load_dotenv, single_instance  # noqa: E402  (parser KEY=VALUE + single-instance comun)
 
 DEFAULT_STATE = os.path.join(_ROOT, "cachedb", "trailing_state.json")
 
@@ -225,6 +225,8 @@ def main() -> int:
     ap.add_argument("--once", action="store_true", help="o verificare si iese")
     ap.add_argument("--status", action="store_true", help="varfuri + praguri curente")
     args = ap.parse_args()
+    if not (args.once or args.status):
+        single_instance("binance_trailing")
 
     from binance_api import bapi as api
     from binance_api import bapi_placeorder as po

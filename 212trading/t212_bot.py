@@ -28,7 +28,7 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ipo_common import load_dotenv, log, parse_dotenv  # noqa: E402
+from ipo_common import load_dotenv, log, parse_dotenv, single_instance  # noqa: E402
 from ipo_notify import notify  # noqa: E402
 from listing_watcher import wait_for_launch  # noqa: E402
 from strategy import Strategy, StratParams  # noqa: E402
@@ -120,6 +120,8 @@ def main() -> int:
     ap.add_argument("--list", action="store_true", help="Arata activele si iesi")
     ap.add_argument("--env-file", default=os.path.join(_HERE, ".env"))
     args = ap.parse_args()
+    if not args.list:
+        single_instance("t212_bot")   # o singura instanta -> previne dubla-tranzactionare
 
     # Secrete PARTAJATE din root binance/.env (NTFY/SMTP/etc., comune flotei) + secrete
     # SPECIFICE T212 din folderul propriu (212trading/.env). Specificul se incarca ULTIMUL

@@ -13,7 +13,9 @@ kraken/HL doar Bucuresti); ramane per-provider. La fel functiile HTTP specifice
 """
 from __future__ import annotations
 
+import fcntl
 import os
+import sys
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone, timedelta
@@ -21,9 +23,28 @@ from datetime import datetime, timezone, timedelta
 HTTP_TIMEOUT = 25
 BUCHAREST = timezone(timedelta(hours=3))   # EEST vara
 
+_LOCKS: dict = {}   # tine fd-urile de lock deschise cat traieste procesul (nu le colecta GC)
+
 
 def log(msg: str) -> None:
     print(f"[{datetime.now(timezone.utc).astimezone(BUCHAREST):%H:%M:%S}] {msg}", flush=True)
+
+
+def single_instance(name: str, lockdir: str = "/tmp") -> None:
+    """Single-instance guard: prima instanta obtine lock-ul EXCLUSIV (flock) pe
+    <lockdir>/binance_<name>.lock si il tine cat traieste procesul; a doua instanta NU-l
+    obtine -> iese (exit 0). Previne dubla-lansare = dubla-tranzactionare. Ca flock-ul din
+    flota_start.sh, dar per-proces Python -> protejeaza indiferent CUM e lansat botul
+    (bots_start, healthcheck, systemd, manual)."""
+    path = os.path.join(lockdir, f"binance_{name}.lock")
+    fd = open(path, "w")
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print(f"[{name}] ruleaza deja (lock activ: {path}) — ies.", flush=True)
+        sys.exit(0)
+    fd.write(str(os.getpid())); fd.flush()
+    _LOCKS[name] = fd   # pastreaza referinta -> lock-ul ramane pana moare procesul
 
 
 def load_dotenv(path: str = ".env") -> None:

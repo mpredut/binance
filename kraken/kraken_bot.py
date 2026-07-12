@@ -23,7 +23,7 @@ import os
 import sys
 import time
 
-from kraken_common import load_dotenv, log, now_str, float_env
+from kraken_common import load_dotenv, log, now_str, float_env, single_instance
 from kraken_client import KrakenClient, KrakenError
 from market_data import get_price, pair_available
 from notify import notify
@@ -56,6 +56,8 @@ def main() -> int:
     ap.add_argument("--balance", action="store_true", help="Arata soldurile (necesita chei)")
     ap.add_argument("--test-strategy", metavar="PAIR", help="Ruleaza strategia ACUM pe perechea data")
     args = ap.parse_args()
+    if not any(getattr(args, a, None) for a in ("balance", "find_pair", "price", "test_strategy")):
+        single_instance("kraken_bot")   # o singura instanta (nu blocheaza query-urile de mai sus)
 
     client = _build_client()
 

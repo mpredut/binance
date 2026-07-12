@@ -19,7 +19,7 @@ import sys
 
 import time
 
-from common import load_dotenv, log
+from common import load_dotenv, log, single_instance
 from hl_client import HLClient, HLError
 from delta_neutral import DeltaNeutral, DNParams
 
@@ -162,6 +162,10 @@ def main() -> int:
                          "Real daca STRAT_EXECUTE=true (altfel/--paper = simulare). "
                          "OPRESTE intai botul+watchdog (vezi dn_close.sh) ca sa nu se bata cu el.")
     args = ap.parse_args()
+    if args.watch:
+        single_instance("dn_watch")            # watcher-ul e proces separat -> lock propriu
+    elif not (args.once or args.status or args.close):
+        single_instance("dn_bot")
 
     dry = args.paper or not (os.environ.get("STRAT_EXECUTE", "false").lower() == "true")
     need_wallet = not dry and not (args.funding or args.status or args.watch)

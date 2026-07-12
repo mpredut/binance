@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 socket.setdefaulttimeout(30)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # radacina repo
-from botcore import BUCHAREST, log, load_dotenv, float_env  # noqa: E402,F401  (re-export compat)
+from botcore import BUCHAREST, log, load_dotenv, float_env, single_instance  # noqa: E402,F401  (re-export compat)
 
 
 def now_str() -> str:

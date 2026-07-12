@@ -28,7 +28,7 @@ import sys
 import time
 import urllib.request
 
-from kraken_common import log, load_dotenv, float_env
+from kraken_common import log, load_dotenv, float_env, single_instance
 from notify import notify
 from kraken_client import KrakenClient, KrakenError
 
@@ -362,6 +362,8 @@ def main() -> int:
     ap.add_argument("--interval", type=float,
                     default=float_env("XSTOCK_CHECK_MINUTES") or 10.0, help="minute")
     args = ap.parse_args()
+    if not (args.once or args.status):
+        single_instance("kraken_xstock_watch")
 
     rx = os.environ.get("XSTOCK_REGEX", "SPCX|SPACEX")
     quote = os.environ.get("XSTOCK_QUOTE", "USD")

@@ -30,7 +30,7 @@ import json
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from kraken_common import load_dotenv, log
+from kraken_common import load_dotenv, log, single_instance
 from kraken_client import KrakenClient
 
 # ── config (din env, cu default-uri) ─────────────────────────────────────────
@@ -207,6 +207,7 @@ def ws_loop(client):
 
 
 def main():
+    single_instance("kraken_cachemanager")   # o singura instanta (un singur fetcher -> rate-limit minim)
     load_dotenv(".env")
     load_dotenv("config.env")
     # Cheia DEDICATA a cachemanager-ului (_CACHE) -> secventa de nonce PROPRIE, separata

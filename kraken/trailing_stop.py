@@ -31,7 +31,7 @@ import os
 import sys
 import time
 
-from kraken_common import load_dotenv, log, float_env
+from kraken_common import load_dotenv, log, float_env, single_instance
 from kraken_client import KrakenClient, KrakenError
 from notify import notify
 
@@ -212,6 +212,8 @@ def main() -> int:
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--status", action="store_true")
     args = ap.parse_args()
+    if not (args.once or args.status):
+        single_instance("kraken_trailing")
     # Cheie dedicata trailing (KRAKEN_API_KEY_TRAIL) -> nonce separat de _BOT (kraken_bot + xstock_watch).
     # Fallback pe _BOT daca _TRAIL lipseste din .env.
     key    = os.environ.get("KRAKEN_API_KEY_TRAIL")    or os.environ.get("KRAKEN_API_KEY_BOT")

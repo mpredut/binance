@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # radacina repo
 from botcore import (  # noqa: E402,F401  (re-export: compat `from common import ...`)
-    BUCHAREST, HTTP_TIMEOUT, log, load_dotenv, float_env, http_get,
+    BUCHAREST, HTTP_TIMEOUT, log, load_dotenv, float_env, http_get, single_instance,
 )
 
 
