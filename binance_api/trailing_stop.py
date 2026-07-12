@@ -44,29 +44,13 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)   # ruleaza si ca script (python binance_api/trailing_stop.py)
 
 from trailing_core import TrailingCore, should_sell  # noqa: E402  (should_sell reexportat pt teste/compat)
+from botcore import load_dotenv  # noqa: E402  (parser KEY=VALUE comun)
 
 DEFAULT_STATE = os.path.join(_ROOT, "cachedb", "trailing_state.json")
 
 
-def _load_conf():
-    """Incarca trailing.conf (KEY=VALUE) si populeaza env vars (daca nu sunt deja setate extern)."""
-    conf_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "trailing.conf")
-    try:
-        with open(conf_path) as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" in line:
-                    k, _, v = line.partition("=")
-                    k = k.strip()
-                    if k and k not in os.environ:   # env extern suprascrie (pt test ad-hoc)
-                        os.environ[k] = v.strip()
-    except OSError:
-        pass   # lipsa fisier -> valorile din env/default raman
-
-
-_load_conf()
+# Config KEY=VALUE din trailing.conf -> env (ENV extern suprascrie). load_dotenv COMUN (botcore).
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "trailing.conf"))
 
 # PRAG LARG = DISJUNCTOR DE CRASH, nu unealta de profit.
 # Walk-forward out-of-sample (feed real 291z) a aratat ca trailing-ul STRANS (8-12%)

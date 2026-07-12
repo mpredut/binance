@@ -46,25 +46,9 @@ STATE_FILE = os.path.join(_HERE, "trailing_state.json")
 CACHE_TREND = os.path.join(_ROOT, "cachedb", "cache_instant_trend.json")
 
 
-def _load_conf():
-    """Incarca kraken/trailing.conf (KEY=VALUE) in env (daca nu-s setate extern).
-    ENV extern suprascrie config-ul (pt test ad-hoc)."""
-    conf = os.path.join(_HERE, "trailing.conf")
-    try:
-        with open(conf) as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                k, _, v = line.partition("=")
-                k = k.strip()
-                if k and k not in os.environ:
-                    os.environ[k] = v.strip()
-    except OSError:
-        pass
-
-
-_load_conf()
+# Config KEY=VALUE din kraken/trailing.conf -> env (ENV extern suprascrie, pt test ad-hoc).
+# Foloseste load_dotenv-ul COMUN (botcore via kraken_common) in loc de un parser propriu.
+load_dotenv(os.path.join(_HERE, "trailing.conf"))
 
 # prag larg per ASSET (disjunctor de crash, nu unealta de profit) + perechea de vanzare
 TRAIL_PCT = {"HYPE": 15.0}
