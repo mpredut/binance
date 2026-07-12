@@ -55,6 +55,26 @@ def get_price_usd(sym: str) -> float | None:
     return None
 
 
+def trend_slope_pct(sym: str, bars: int = 12) -> float | None:
+    """Panta trendului pe termen scurt: regresie liniara (OLS) pe ultimele `bars` inchideri
+    din chart-ul Yahoo (5m), normalizata ca % din pret PE BARA. Negativ = downtrend.
+    Intoarce None daca nu-s destule date. Folosit ca GATE la DCA (ca Binance/Kraken:
+    nu arunca capital intr-un cutit in cadere)."""
+    _, bars_rows = _chart(sym)
+    closes = [c for (_, c, _) in bars_rows][-bars:]
+    if len(closes) < max(4, bars // 2):
+        return None
+    n = len(closes)
+    xs = list(range(n))
+    mx = sum(xs) / n
+    my = sum(closes) / n
+    denom = sum((x - mx) ** 2 for x in xs)
+    if denom == 0 or my == 0:
+        return None
+    slope = sum((xs[i] - mx) * (closes[i] - my) for i in range(n)) / denom
+    return slope / my * 100.0     # % din pret pe bara (5m)
+
+
 def get_usd_ron() -> float:
     """Curs USD/RON curent. Fallback 4.65 daca feed-ul nu raspunde."""
     rate = get_price_usd("USDRON=X")

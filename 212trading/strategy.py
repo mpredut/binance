@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 
 from ipo_common import log, now_str, float_env
 from ipo_notify import notify
-from market_data import get_eur_usd, get_usd_ron, get_price_usd, t212_to_yahoo
+from market_data import get_eur_usd, get_usd_ron, get_price_usd, t212_to_yahoo, trend_slope_pct
 from t212_client import T212Client
 
 FX_FEE_PCT = 0.15  # taxa conversie valutara T212, per directie
@@ -64,6 +64,7 @@ class StratParams:
     ladder_min_free: float = 6.0     # lasa min acest $ NEREZERVAT pe scara TP (T212 cere pozitie libera, "min-opened-position")
     sl_rebuy_enabled: bool = False   # dupa stop-loss de catastrofa, reintra pe RECUL in sus de la minim (ca trailing-ul Binance/Kraken), nu sub-vanzare
     sl_rebuy_bounce_pct: float = 1.2 # recul% de la minimul de dupa SL pt re-buy (confirma ca s-a oprit caderea -> nu prinde cutitul)
+    dca_trend_gate_pct: float = 0.0  # GATE DCA pe trend (ca Binance/Kraken): daca panta scurta (%/bara) < -acest prag => NU face DCA (nu arunca capital intr-un downtrend confirmat). 0 = OFF (comportament neschimbat)
 
     @classmethod
     def from_env(cls, env: dict | None = None) -> "StratParams":
@@ -127,6 +128,7 @@ class StratParams:
             ladder_min_free    = _ladder_free,
             sl_rebuy_enabled   = (e.get("STRAT_SL_REBUY_ENABLED", "false").strip().lower() == "true"),
             sl_rebuy_bounce_pct= float_env("STRAT_SL_REBUY_BOUNCE_PCT", e) or 1.2,
+            dca_trend_gate_pct = float_env("STRAT_DCA_TREND_GATE_PCT", e) or 0.0,
         )
 
 
@@ -664,6 +666,15 @@ class Strategy:
                 and price <= self.s["last_buy_price"] * (1 - self.p.dca_drop_pct / 100)
                 and self.s["spent_cash"] + self.p.dca_amount <= self.p.max_budget
                 and not self._has_open("BUY")):
+            # GATE pe trend (ca Binance/Kraken): nu face DCA daca activul e in downtrend
+            # confirmat (panta scurta prea negativa) -> nu arunca capital intr-un cutit in
+            # cadere. Verificat DOAR aici (moment de DCA, rar), nu la fiecare tick. 0 = OFF.
+            if self.p.dca_trend_gate_pct > 0:
+                slope = trend_slope_pct(self.yahoo_sym)
+                if slope is not None and slope < -self.p.dca_trend_gate_pct:
+                    log(f"  [STRAT] DCA BLOCAT de trend: panta {slope:+.3f}%/bara "
+                        f"< -{self.p.dca_trend_gate_pct}% (downtrend) — astept stabilizare")
+                    return
             log(f"  [STRAT] dip: {price:.2f} <= {self.s['last_buy_price']:.2f}"
                 f"×(1-{self.p.dca_drop_pct}%) — DCA")
             self._place_buy(self.p.dca_amount, price * disc, kind="DCA")
