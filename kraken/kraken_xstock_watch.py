@@ -28,7 +28,7 @@ import sys
 import time
 import urllib.request
 
-from common import log, load_dotenv, float_env
+from kraken_common import log, load_dotenv, float_env
 from notify import notify
 from kraken_client import KrakenClient, KrakenError
 

@@ -31,7 +31,7 @@ import os
 import sys
 import time
 
-from common import load_dotenv, log, float_env
+from kraken_common import load_dotenv, log, float_env
 from kraken_client import KrakenClient, KrakenError
 from notify import notify
 

@@ -9,7 +9,7 @@ si are un pret valid. Pentru HYPE -> da; pentru un SPCX inca nelistat -> nu.
 
 from __future__ import annotations
 
-from common import log
+from kraken_common import log
 from kraken_client import KrakenClient, KrakenError
 
 

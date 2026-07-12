@@ -52,22 +52,16 @@ class KrakenProvider(MarketDataProvider):
     def _client(self):
         if self._cli is not None:
             return self._cli
-        # kraken/ are 'common.py' cu ACELASI nume ca hyperliquid/common.py. Daca HL a fost
-        # deja folosit in proces, sys.modules['common'] = al lui HL -> kraken_client
-        # (`from common import http_get`) ar lua modulul GRESIT. Importam kraken_client cu
-        # kraken/ in fata si 'common' evacuat, apoi RESTAURAM sys.path + cache-ul ca HL sa nu
-        # fie afectat. kraken_client isi leaga http_get la IMPORT -> o rezolvare corecta e de ajuns.
+        # Import LAZY: kraken/ in fata pe sys.path (sa gaseasca kraken_client + kraken_common),
+        # apoi RESTAURAM sys.path ca alti provideri sa nu fie afectati. kraken/ foloseste
+        # 'kraken_common' (nume UNIC) -> nu mai e coliziune cu hyperliquid/common.py, deci nu mai
+        # e nevoie de dansul de evacuare a lui 'common' (vezi refactor botcore + kraken_common).
         saved_path = list(sys.path)
-        saved_common = sys.modules.pop("common", None)
-        sys.modules.pop("kraken_client", None)
         try:
             sys.path.insert(0, _KRAKEN_DIR)
             from kraken_client import KrakenClient  # noqa: import lazy
         finally:
-            sys.path[:] = saved_path                  # restaureaza ordinea (HL neafectat)
-            sys.modules.pop("common", None)           # scoate eventualul common al krakenului
-            if saved_common is not None:
-                sys.modules["common"] = saved_common  # repune common-ul lui HL
+            sys.path[:] = saved_path                  # restaureaza ordinea (alti provideri neafectati)
         # Cheile din kraken/.env (NU din env-ul flotei). env-ul are prioritate daca e setat.
         # kraken/.env NU defineste KRAKEN_API_KEY simplu, doar variantele cu sufix
         # (_BOT/_TRAIL/_CACHE/_SPARE). Flota e un consumator concurent distinct de

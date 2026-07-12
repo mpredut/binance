@@ -16,7 +16,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from alertnotifiers import AlertNotifier
-from common import log
+from kraken_common import log
 
 
 def notify(title: str, body: str, source: str,

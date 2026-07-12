@@ -23,7 +23,7 @@ import os
 import sys
 import time
 
-from common import load_dotenv, log, now_str, float_env
+from kraken_common import load_dotenv, log, now_str, float_env
 from kraken_client import KrakenClient, KrakenError
 from market_data import get_price, pair_available
 from notify import notify

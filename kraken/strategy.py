@@ -21,7 +21,7 @@ import os
 import time
 from dataclasses import dataclass
 
-from common import log, now_str, float_env
+from kraken_common import log, now_str, float_env
 from notify import notify
 from kraken_client import KrakenClient, KrakenError
 from market_data import get_price, pair_precision

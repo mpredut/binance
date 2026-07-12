@@ -22,7 +22,7 @@ import threading
 import time
 import urllib.parse
 
-from common import http_get, http_post_form, log
+from kraken_common import http_get, http_post_form, log
 
 API_URL = "https://api.kraken.com"
 
