@@ -69,12 +69,24 @@ class AlertNotifier:
         return "\n".join(lines)
 
     @staticmethod
+    def format_bot_event(alert: dict) -> str:
+        """Corp COMPACT pt evenimente de bot (trade/guard/...): detaliul + platforma (S:source).
+        Numele (=actiunea) devine TITLUL ntfy. Fara 🆕/Added (ntfy pune deja timestamp)."""
+        body = (alert.get("body") or "").strip()
+        tag = f"S:{alert.get('source', '?')}"
+        head = body or alert.get("name", alert.get("symbol", "?"))
+        return f"{head} · {tag}"
+
+    @staticmethod
     def format_batch_message(alerts) -> str:
         # listează simbolurile separate prin virgulă pe prima linie
         #symbols = ", ".join(alert.symbol for alert in alerts)
         #lines = [f"({len(alerts)}): {symbols}",    "",]
         lines = []
         for alert in alerts:
+            if isinstance(alert, dict) and alert.get("type") == "bot_event":
+                lines.append(AlertNotifier.format_bot_event(alert))
+                continue
             if AlertNotifier.is_new_coin_alert(alert):
                 lines.append(AlertNotifier.format_new_coin_message(alert))
                 continue
@@ -180,7 +192,11 @@ class AlertNotifier:
             return False
 
         symbols = ", ".join(AlertNotifier.alert_symbol(alert) for alert in alerts)
-        title = f"({len(alerts)}): {symbols}"
+        # pt un SINGUR eveniment de bot: titlul = actiunea (name); altfel '(N): simboluri'
+        if len(alerts) == 1 and isinstance(alerts[0], dict) and alerts[0].get("type") == "bot_event":
+            title = alerts[0].get("name") or symbols
+        else:
+            title = f"({len(alerts)}): {symbols}"
 
         message = AlertNotifier.format_batch_message(alerts)
         tags = "chart_with_upwards_trend"
@@ -283,11 +299,12 @@ def notify(title: str, body: str, source: str, symbol: str,
         sys.stdout.flush()
         time.sleep(0.2)
     alert = {
-        "type": "new_coin_discovered",
-        "symbol": symbol,
-        "name": title,
+        "type": "bot_event",          # eveniment de bot (trade/guard/etc.) — randare compacta,
+        "symbol": symbol,             # NU sablonul de 'moneda noua' (🆕/Added) care ramane pt discovery
+        "name": title,                # = actiunea (devine TITLUL ntfy)
         "source": source,
         "price": price,
+        "body": body,                 # detaliul compact (o linie) construit de apelant
         "added_at": datetime.now(),
         "url": None,
     }
