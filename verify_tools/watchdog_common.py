@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """watchdog_common.py — infrastructura PARTAJATA de alertare pentru watchdog-uri
-(cache_watchdog, log_anomaly_watchdog): incarca env-ul, trimite push (ntfy) + email,
-si tine starea de cooldown. Extras din cache_watchdog ca sa nu duplicam (DRY).
+(watchdogfor_cache, watchdogfor_anomaly): incarca env-ul, trimite push (ntfy) + email,
+si tine starea de cooldown. Extras din watchdogfor_cache ca sa nu duplicam (DRY).
 
 Variabile de mediu (din .env / config.env din radacina):
   PHONE_ALERT_URL / NTFY_TOPIC                    — canal push

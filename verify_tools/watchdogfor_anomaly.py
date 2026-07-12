@@ -33,16 +33,24 @@ COOLDOWN_MIN = float(os.environ.get("ANOMALY_COOLDOWN_MINUTES", "30"))
 # Categorii de anomalii: (regex case-insensitive, prag implicit de aparitii/fereastra).
 # Pragul e cat de multe aparitii NOI (de la ultima rulare) declanseaza alerta.
 _CATS = {
-    "rate_limit": (re.compile(r"429|rate limit|too ?many ?requests", re.I), 30),
-    "auth":       (re.compile(r"auth esuat|lipsesc cheile|\b40[13]\b|invalid.*key", re.I), 3),
+    "rate_limit": (re.compile(r"\b429\b|rate limit|too ?many ?requests", re.I), 30),
+    "auth":       (re.compile(r"auth esuat|lipsesc cheile|unauthorized|forbidden|"
+                             r"http\s*40[13]\b|status[=\s]*40[13]\b|\(40[13]\)|invalid.*api.*key", re.I), 3),
     "blind":      (re.compile(r"indisponibil|sar reconcilierea|zbor orb", re.I), 25),
-    "traceback":  (re.compile(r"traceback \(most recent|unhandled|fatal", re.I), 1),
-    "error":      (re.compile(r"\besuat\b|\beroare\b|\bexception\b", re.I), 40),
-    "stale":      (re.compile(r"\bstale\b|invechit|cache.*mort", re.I), 3),
+    "traceback":  (re.compile(r"traceback \(most recent|unhandledexception|\bfatal\b", re.I), 1),
 }
+# Regex-urile sunt SPECIFICE intentionat (calibrate pe loguri reale):
+#  - fara categorie generica 'error' (eroare/esuat) -> pe loguri uriase (rtrade sute MB/zi)
+#    ar da mii de potriviri benigne (retry-uri) -> alarma falsa.
+#  - 'auth' cere context HTTP (nu bare 40[13], care prindea preturi/cantitati '401').
+#  - fara categorie 'stale': staleness-ul e treaba lui watchdogfor_cache (ar dubla alerta;
+#    'portfolio stale' din strategy.py e benign, nu anomalie).
 
 # Fisiere de log de scanat (doar cele atinse recent -> active).
 _LOG_GLOBS = ["logger/*.log", "logs/*.log", "212trading/*.log", "hyperliquid/*.log", "kraken/*.log"]
+# Plafon octeti cititi per fisier per rulare: logurile mari (rtrade) cresc cu MB/min;
+# fara plafon, un gap urias ar incarca sute de MB in RAM (OOM). Citim doar coada.
+_MAX_READ_BYTES = int(os.environ.get("ANOMALY_MAX_READ_BYTES", str(4 * 1024 * 1024)))
 
 
 def _active_logs():
@@ -75,10 +83,11 @@ def _new_lines(path, offsets):
         last = 0
     if size == last:
         return []
+    start = last if (size - last) <= _MAX_READ_BYTES else size - _MAX_READ_BYTES  # plafon RAM
     try:
         with open(path, "r", errors="replace") as f:
-            f.seek(last)
-            data = f.read()
+            f.seek(start)
+            data = f.read(_MAX_READ_BYTES)
     except OSError:
         return []
     offsets[path] = size

@@ -150,17 +150,20 @@ ps aux | grep '[p]ython'
 # ===== Watchdog (cron la 5 min) — instalat/refresh idempotent =====
 # Rulează DOAR pe această mașină (cea care pornește monitorul). Căile sunt derivate
 # din mediul curent (SCRIPT_DIR + python-ul din venv activat), deci e corect oriunde.
-WATCHDOG_MARKER="cache_watchdog.py"
 WATCHDOG_PY="$(command -v python)"
-WATCHDOG_LINE="*/5 * * * * cd $SCRIPT_DIR && $WATCHDOG_PY $SCRIPT_DIR/verify_tools/$WATCHDOG_MARKER >> $SCRIPT_DIR/logs/watchdog.log 2>&1"
+# Doua watchdog-uri: prospetime cache + anomalii (rata erori din loguri).
+_WD_CACHE="*/5 * * * * cd $SCRIPT_DIR && $WATCHDOG_PY $SCRIPT_DIR/verify_tools/watchdogfor_cache.py >> $SCRIPT_DIR/logs/watchdog.log 2>&1"
+_WD_ANOM="*/5 * * * * cd $SCRIPT_DIR && $WATCHDOG_PY $SCRIPT_DIR/verify_tools/watchdogfor_anomaly.py >> $SCRIPT_DIR/logs/anomaly_watchdog.log 2>&1"
+# Markere de curatat din crontab (inclusiv numele VECHI, ca sa nu ramana orfane dupa rename).
+_WD_STRIP='cache_watchdog\.py|log_anomaly_watchdog\.py|watchdogfor_cache\.py|watchdogfor_anomaly\.py|price_monitor_watchdog\.py'
 
 install_watchdog() {
-    ( crontab -l 2>/dev/null | grep -v "$WATCHDOG_MARKER" | grep -v price_monitor_watchdog.py; echo "$WATCHDOG_LINE" ) | crontab -
-    echo "✔ Watchdog activ (cron la 5 min) → $SCRIPT_DIR/watchdog.log"
+    ( crontab -l 2>/dev/null | grep -vE "$_WD_STRIP"; echo "$_WD_CACHE"; echo "$_WD_ANOM" ) | crontab -
+    echo "✔ Watchdog-uri active (cache + anomalii, cron la 5 min)"
 }
 remove_watchdog() {
-    crontab -l 2>/dev/null | grep -v "$WATCHDOG_MARKER" | crontab - 2>/dev/null
-    echo "✔ Watchdog dezactivat"
+    crontab -l 2>/dev/null | grep -vE "$_WD_STRIP" | crontab - 2>/dev/null
+    echo "✔ Watchdog-uri dezactivate"
 }
 install_watchdog
 

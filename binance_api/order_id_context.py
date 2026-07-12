@@ -19,7 +19,7 @@ _PROCESS_NAME_OVERRIDES = {
     "monitortrades": "MT",
     "monitororder": "MO",
     "market_alerts": "MA",
-    "cache_watchdog": "CW",
+    "watchdogfor_cache": "CW",
     "server": "SRV",
 }
 
