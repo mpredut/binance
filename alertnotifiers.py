@@ -70,12 +70,19 @@ class AlertNotifier:
 
     @staticmethod
     def format_bot_event(alert: dict) -> str:
-        """Corp COMPACT pt evenimente de bot (trade/guard/...): detaliul + platforma (S:source).
-        Numele (=actiunea) devine TITLUL ntfy. Fara 🆕/Added (ntfy pune deja timestamp)."""
+        """Corp COMPACT pt evenimente de bot (trade/guard/...): detaliul · platforma · timestamp.
+        Numele (=actiunea) devine TITLUL ntfy. Platforma plain (se deduce). Timestamp scurt
+        FARA an ('MM-DD HH:MM')."""
         body = (alert.get("body") or "").strip()
-        tag = f"S:{alert.get('source', '?')}"
         head = body or alert.get("name", alert.get("symbol", "?"))
-        return f"{head} · {tag}"
+        parts = [head, str(alert.get("source", "?"))]
+        ts = alert.get("added_at")
+        if ts is not None:
+            try:
+                parts.append(ts.strftime("%m-%d %H:%M"))   # fara an
+            except Exception:  # noqa: BLE001
+                pass
+        return " · ".join(parts)
 
     @staticmethod
     def format_batch_message(alerts) -> str:
