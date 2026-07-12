@@ -2,6 +2,9 @@
 import requests
 import os
 import smtplib
+import subprocess
+import sys
+import time
 from datetime import datetime
 from email.mime.text import MIMEText
 from pathlib import Path
@@ -228,3 +231,44 @@ class AlertNotifier:
             AlertNotifier.send_email_batch(alerts)
         if enable_phone_webhook:
             AlertNotifier.send_phone_webhook_batch(alerts)
+
+
+def notify(title: str, body: str, source: str, symbol: str,
+           price: Optional[float] = None, desktop: bool = False) -> None:
+    """Wrapper PARTAJAT de notificare — folosit de flota (Binance) SI de kraken/HL/212.
+    Clopotel terminal + alerta pe ntfy + email + desktop, prin AlertNotifier. `symbol` =
+    eticheta activului, rezolvata de APELANT (fiecare bot are alt env de simbol). O notificare
+    esuata NU intrerupe trading-ul (try/except). Foloseste print() ca sa mearga si pe flota
+    (unde log.py captureaza print) si pe boti (python3 simplu -> stdout in .log-ul lor).
+
+    Extras din wrapper-ele duplicate kraken/notify.py, hyperliquid/notify.py, 212trading/ipo_notify.py.
+    """
+    for _ in range(5):
+        sys.stdout.write("\a")
+        sys.stdout.flush()
+        time.sleep(0.2)
+    alert = {
+        "type": "new_coin_discovered",
+        "symbol": symbol,
+        "name": title,
+        "source": source,
+        "price": price,
+        "added_at": datetime.now(),
+        "url": None,
+    }
+    ntfy_topic = os.environ.get("NTFY_TOPIC")
+    ntfy_url = f"https://ntfy.sh/{ntfy_topic}" if ntfy_topic else None
+    try:
+        AlertNotifier.send_phone_webhook_batch([alert], webhook_url=ntfy_url)
+    except Exception as e:  # noqa: BLE001
+        print(f"  ! notify ntfy esuat: {e}")
+    if os.environ.get("ALERT_TO_EMAIL"):
+        try:
+            AlertNotifier.send_email_batch([alert])
+        except Exception as e:  # noqa: BLE001
+            print(f"  ! notify email esuat: {e}")
+    if desktop:
+        try:
+            subprocess.run(["notify-send", "-u", "critical", title, body], check=False)
+        except (FileNotFoundError, OSError):
+            pass

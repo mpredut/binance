@@ -1,51 +1,16 @@
 #!/usr/bin/env python3
-"""notify.py — ntfy + email prin AlertNotifier-ul partajat din radacina proiectului."""
-
+"""notify.py — subtire peste notify() PARTAJAT din alertnotifiers.py (radacina).
+Doar rezolva simbolul specific HL si deleaga (logica comuna = in alertnotifiers)."""
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
-import time
-from datetime import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from alertnotifiers import AlertNotifier
-from common import log
+from alertnotifiers import notify as _notify  # noqa: E402
 
 
 def notify(title: str, body: str, source: str,
            price: float | None = None, desktop: bool = False) -> None:
-    for _ in range(5):
-        sys.stdout.write("\a")
-        sys.stdout.flush()
-        time.sleep(0.2)
-
     symbol = os.environ.get("SYMBOL_LABEL") or os.environ.get("HL_COIN") or "HL"
-    alert = {
-        "type": "new_coin_discovered",
-        "symbol": symbol,
-        "name": title,
-        "source": source,
-        "price": price,
-        "added_at": datetime.now(),
-        "url": None,
-    }
-    # o notificare esuata NU are voie sa intrerupa botul / o actiune de trading
-    ntfy_topic = os.environ.get("NTFY_TOPIC")
-    ntfy_url = f"https://ntfy.sh/{ntfy_topic}" if ntfy_topic else None
-    try:
-        AlertNotifier.send_phone_webhook_batch([alert], webhook_url=ntfy_url)
-    except Exception as e:  # noqa: BLE001
-        log(f"  ! notify ntfy esuat: {e}")
-    if os.environ.get("ALERT_TO_EMAIL"):
-        try:
-            AlertNotifier.send_email_batch([alert])
-        except Exception as e:  # noqa: BLE001
-            log(f"  ! notify email esuat: {e}")
-    if desktop:
-        try:
-            subprocess.run(["notify-send", "-u", "critical", title, body], check=False)
-        except (FileNotFoundError, OSError):
-            pass
+    _notify(title, body, source, symbol, price=price, desktop=desktop)
