@@ -30,7 +30,7 @@ class TestWatchdog(unittest.TestCase):
     def test_fresh_cache_no_alert(self):
         now = time.time()
         _write_cache(self.cache, int(now * 1000))   # proaspăt
-        with patch.object(wd, "_send_ntfy") as ntfy, patch.object(wd, "_send_email") as email:
+        with patch.object(wd.wc, "send_ntfy") as ntfy, patch.object(wd.wc, "send_email") as email:
             self.assertFalse(wd.check_once(now=now))
             ntfy.assert_not_called()
             email.assert_not_called()
@@ -39,8 +39,8 @@ class TestWatchdog(unittest.TestCase):
         now = time.time()
         old = now - 60 * 60   # acum o oră → stale
         _write_cache(self.cache, int(old * 1000), mtime_sec=old)
-        with patch.object(wd, "_send_ntfy", return_value=True) as ntfy, \
-             patch.object(wd, "_send_email", return_value=True) as email:
+        with patch.object(wd.wc, "send_ntfy", return_value=True) as ntfy, \
+             patch.object(wd.wc, "send_email", return_value=True) as email:
             self.assertTrue(wd.check_once(now=now))
             ntfy.assert_called_once()
             email.assert_called_once()
@@ -48,16 +48,16 @@ class TestWatchdog(unittest.TestCase):
     def test_cooldown_suppresses_second_alert(self):
         now = time.time()
         _write_cache(self.cache, int((now - 3600) * 1000), mtime_sec=now - 3600)
-        with patch.object(wd, "_send_ntfy", return_value=True), \
-             patch.object(wd, "_send_email", return_value=True):
+        with patch.object(wd.wc, "send_ntfy", return_value=True), \
+             patch.object(wd.wc, "send_email", return_value=True):
             self.assertTrue(wd.check_once(now=now))            # prima → alertă
             self.assertFalse(wd.check_once(now=now + 60))      # în cooldown → nu
             self.assertTrue(wd.check_once(now=now + 3700))     # după cooldown → da
 
     def test_missing_cache_is_stale(self):
         now = time.time()   # fișier inexistent
-        with patch.object(wd, "_send_ntfy", return_value=True) as ntfy, \
-             patch.object(wd, "_send_email", return_value=True):
+        with patch.object(wd.wc, "send_ntfy", return_value=True) as ntfy, \
+             patch.object(wd.wc, "send_email", return_value=True):
             self.assertTrue(wd.check_once(now=now))
             ntfy.assert_called_once()
 
