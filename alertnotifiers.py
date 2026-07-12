@@ -233,13 +233,24 @@ class AlertNotifier:
             AlertNotifier.send_phone_webhook_batch(alerts)
 
 
+_URGENT_MARKERS = ("🛑", "🛡", "LICHID", "STOP-LOSS", "STOP_LOSS", "TRAILING", "ESUAT",
+                   "MANUAL", "ERORI", "CATASTROF", "CRASH", "DISPARUT", "DEZECHILIBR")
+# NOTA: fara 📉 (folosit si de alerta INFORMATIVA de pierdere '📉 SPCX -8%') si fara ⚠ singur
+# (prea larg). Trailing-ul e prins de cuvantul 'TRAILING'. Urgentele DN (⚠ ...) au si LICHID/
+# ERORI/MANUAL in titlu -> tot prinse. Vezi mai jos: overridezi cu email=True/False la nevoie.
+
+
 def notify(title: str, body: str, source: str, symbol: str,
-           price: Optional[float] = None, desktop: bool = False) -> None:
+           price: Optional[float] = None, desktop: bool = False,
+           email: Optional[bool] = None) -> None:
     """Wrapper PARTAJAT de notificare — folosit de flota (Binance) SI de kraken/HL/212.
-    Clopotel terminal + alerta pe ntfy + email + desktop, prin AlertNotifier. `symbol` =
-    eticheta activului, rezolvata de APELANT (fiecare bot are alt env de simbol). O notificare
-    esuata NU intrerupe trading-ul (try/except). Foloseste print() ca sa mearga si pe flota
-    (unde log.py captureaza print) si pe boti (python3 simplu -> stdout in .log-ul lor).
+    Clopotel terminal + alerta pe ntfy (mereu) + email (DOAR daca email=True) + desktop, prin
+    AlertNotifier. `symbol` = eticheta activului, rezolvata de APELANT. O notificare esuata NU
+    intrerupe trading-ul (try/except). Foloseste print() ca sa mearga si pe flota (log.py
+    captureaza print) si pe boti (python3 -> stdout in .log-ul lor).
+
+    email=True DOAR pt URGENTE (stop-loss/trailing/crash/liq/erori) — informativele (fill-uri,
+    'X disponibil', alerte pret) merg doar pe ntfy, ca sa nu inunde email-ul.
 
     Extras din wrapper-ele duplicate kraken/notify.py, hyperliquid/notify.py, 212trading/ipo_notify.py.
     """
@@ -262,7 +273,9 @@ def notify(title: str, body: str, source: str, symbol: str,
         AlertNotifier.send_phone_webhook_batch([alert], webhook_url=ntfy_url)
     except Exception as e:  # noqa: BLE001
         print(f"  ! notify ntfy esuat: {e}")
-    if os.environ.get("ALERT_TO_EMAIL"):
+    if email is None:   # auto: email DOAR daca titlul are un marker de urgenta (nu la fill-uri/'disponibil'/pret)
+        email = any(m in title.upper() for m in _URGENT_MARKERS)
+    if email and os.environ.get("ALERT_TO_EMAIL"):
         try:
             AlertNotifier.send_email_batch([alert])
         except Exception as e:  # noqa: BLE001

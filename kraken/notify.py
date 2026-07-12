@@ -14,6 +14,6 @@ from alertnotifiers import notify as _notify  # noqa: E402
 
 
 def notify(title: str, body: str, source: str,
-           price: float | None = None, desktop: bool = False) -> None:
+           price: float | None = None, desktop: bool = False, email: bool = False) -> None:
     symbol = os.environ.get("SYMBOL_LABEL") or os.environ.get("KRAKEN_PAIR") or "CRYPTO"
-    _notify(title, body, source, symbol, price=price, desktop=desktop)
+    _notify(title, body, source, symbol, price=price, desktop=desktop, email=email)
