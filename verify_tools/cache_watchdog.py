@@ -20,19 +20,13 @@ import os
 import sys
 import json
 import time
-import smtplib
-from datetime import datetime
-from email.mime.text import MIMEText
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parent.parent   # verify_tools/ -> rădăcina repo
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import watchdog_common as wc       # infrastructura partajata: env, ntfy/email, state
 
-try:
-    from dotenv import load_dotenv
-    load_dotenv(_ROOT / ".env")                   # secrete comune (gitignored)
-    load_dotenv(_ROOT / "config.env")             # config versionat (comis)
-except Exception:
-    pass
+_ROOT = wc.ROOT                                   # verify_tools/ -> rădăcina repo
+wc.load_env()
 
 # Cache-urile stau in subfolderul cachedb/ (BINANCE_CACHE_DIR il poate suprascrie).
 _CACHE_DIR = Path(os.environ.get("BINANCE_CACHE_DIR", _ROOT / "cachedb"))
@@ -90,70 +84,6 @@ def cache_freshness_seconds(path):
     return newest, "ok"
 
 
-def _load_state():
-    try:
-        return json.load(open(STATE_FILE))
-    except Exception:
-        return {}
-
-
-def _save_state(state):
-    try:
-        tmp = str(STATE_FILE) + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(state, f)
-        os.replace(tmp, STATE_FILE)
-    except Exception as e:
-        print(f"[watchdog] nu pot scrie state: {e}")
-
-
-def _send_ntfy(title, message):
-    url = os.environ.get("PHONE_ALERT_URL")
-    if not url and os.environ.get("NTFY_TOPIC"):
-        url = f"https://ntfy.sh/{os.environ['NTFY_TOPIC']}"
-    if not url:
-        print("[watchdog] fără PHONE_ALERT_URL/NTFY_TOPIC — sar push-ul")
-        return False
-    try:
-        import requests
-        # ntfy decodează Title ca UTF-8 → trecem octeții UTF-8 prin latin-1, ca să
-        # păstrăm caractere non-ASCII (emoji, simboluri non-latine) în titlu.
-        utf8_title = title.encode("utf-8").decode("latin-1")
-        if "ntfy.sh/" in url:
-            r = requests.post(url, data=message.encode("utf-8"),
-                              headers={"Title": utf8_title, "Priority": "urgent",
-                                       "Tags": "warning"}, timeout=10)
-        else:
-            r = requests.post(url, json={"title": title, "message": message}, timeout=10)
-        ok = r.status_code < 400
-        print(f"[watchdog] push {'OK' if ok else 'EȘUAT ' + str(r.status_code)}")
-        return ok
-    except Exception as e:
-        print(f"[watchdog] push excepție: {e}")
-        return False
-
-
-def _send_email(subject, body):
-    user = os.environ.get("SMTP_USERNAME")
-    pwd = os.environ.get("SMTP_PASSWORD")
-    to = os.environ.get("ALERT_TO_EMAIL")
-    if not (user and pwd and to):
-        return False
-    try:
-        msg = MIMEText(body, "plain", "utf-8")
-        msg["From"], msg["To"], msg["Subject"] = user, to, subject
-        with smtplib.SMTP(os.environ.get("SMTP_SERVER", "smtp.gmail.com"),
-                          int(os.environ.get("SMTP_PORT", "587")), timeout=15) as s:
-            s.starttls()
-            s.login(user, pwd)
-            s.sendmail(user, [to], msg.as_string())
-        print("[watchdog] email trimis")
-        return True
-    except Exception as e:
-        print(f"[watchdog] email excepție: {e}")
-        return False
-
-
 def check_once(now=None):
     """Verifică TOATE cache_*.json din cachedb/. Alertă dacă vreunul e stale (peste
     pragul lui) și nu suntem în cooldown. Întoarce True dacă a trimis alertă."""
@@ -175,7 +105,7 @@ def check_once(now=None):
         return False
 
     # cooldown: nu re-alarma prea des
-    state = _load_state()
+    state = wc.load_state(STATE_FILE)
     last = state.get("last_alert_ts", 0)
     if (now - last) < COOLDOWN_MINUTES * 60:
         print(f"[watchdog] STALE ({', '.join(s[0] for s in stale)}) dar în cooldown — nu re-alarmez")
@@ -190,10 +120,10 @@ def check_once(now=None):
                + "\n".join(lines)
                + "\nVerifică flota (flota_start) și repornește.")
     print(f"[watchdog] ALARMĂ:\n{message}")
-    _send_ntfy(title, message)
-    _send_email(title, message)
+    wc.send_ntfy(title, message)
+    wc.send_email(title, message)
     state["last_alert_ts"] = now
-    _save_state(state)
+    wc.save_state(STATE_FILE, state)
     return True
 
 

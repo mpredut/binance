@@ -139,10 +139,12 @@ class T212Client:
     def get_order_status(self, order_id) -> dict | None:
         status, body = http_get(f"{self.base}/equity/orders/{order_id}", headers=self._headers())
         if status != 200:
+            self._log_read_fail("status ordin", status)
             return None
         try:
             return json.loads(body)
         except ValueError:
+            self._log_read_fail("status ordin (JSON invalid)", status)
             return None
 
     def cancel_order(self, order_id) -> bool:
