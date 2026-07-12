@@ -249,10 +249,9 @@ class Strategy:
             avg = self._avg_cost()
             log(f"  [STRAT] {tag}BUY FILLED {qty} @ {price:.2f} USD ({order.get('kind')})  "
                 f"qty_total={self.s['qty']:.2f} avg={avg:.2f}")
-            notify(title=f"{tag}{self.yahoo_sym} BUY {qty} @ {price:.2f}",
-                   body=(f"{order.get('kind')} fill\nqty {self.s['qty']:.2f}  avg {avg:.2f} USD\n"
-                         f"desfasurat {self.s['spent_cash']:.0f} {self.ccy}  "
-                         f"DCA {self.s['dca_buys']}/{self.p.max_dca_buys}\n{now_str()}"),
+            notify(title=f"{tag}{self.yahoo_sym} BUY {qty}@{price:.2f}",
+                   body=(f"{order.get('kind')} | q{self.s['qty']:.2f} a{avg:.2f} | "
+                         f"desf{self.s['spent_cash']:.0f}{self.ccy} DCA{self.s['dca_buys']}/{self.p.max_dca_buys}"),
                    source="T212", price=price, desktop=self.desktop)
             self._cancel_open("SELL")     # avg s-a schimbat -> reasezam TP
         else:  # SELL
@@ -264,10 +263,9 @@ class Strategy:
             self.s["qty"] -= qty
             log(f"  [STRAT] {tag}SELL FILLED {qty} @ {price:.2f} USD  "
                 f"brut={gross:+.2f}  fee={fee:.2f}  net={net:+.2f} USD")
-            notify(title=f"{tag}{self.yahoo_sym} SELL {qty} @ {price:.2f}  NET {net:+.2f} USD",
-                   body=(f"Brut {gross:+.2f}  - fee FX {fee:.2f}  = NET {net:+.2f} USD\n"
-                         f"Net total {self.s['realized_net_usd']:+.2f} USD\n"
-                         f"Ciclu {self.s['cycle']} inchis.\n{now_str()}"),
+            notify(title=f"{tag}{self.yahoo_sym} SELL {qty}@{price:.2f} N{net:+.2f}$",
+                   body=(f"br{gross:+.2f} fee{fee:.2f} N{net:+.2f}$ | "
+                         f"Ntot{self.s['realized_net_usd']:+.2f}$ | ciclu{self.s['cycle']} inchis"),
                    source="T212", price=price, desktop=self.desktop)
             if self.s["qty"] <= 1e-9:
                 pnl, net_tot, fees = (self.s["realized_pnl_usd"],
@@ -478,11 +476,9 @@ class Strategy:
             kind_label = "ADOPTAT" if is_adoption else ("DCA" if is_dca else "ENTRY")
             log(f"  [STRAT] BUY EXECUTAT {fq:.4f} @ {fp:.2f} USD "
                 f"({kind_label})  qty={real_qty:.4f} avg={real_avg:.2f}")
-            notify(title=f"{self.yahoo_sym} {'ADOPTAT' if is_adoption else 'BUY'} {fq:.4f} @ avg {real_avg:.2f}",
-                   body=(f"{kind_label} — pozitie {'preluata din portfolio' if is_adoption else 'executata'}\n"
-                         f"qty {real_qty:.4f}  avg {real_avg:.2f} USD  pret curent ~{fp:.2f}\n"
-                         f"desfasurat {self.s['spent_cash']:.0f} {self.ccy}  "
-                         f"DCA {self.s['dca_buys']}/{self.p.max_dca_buys}\n{now_str()}"),
+            notify(title=f"{self.yahoo_sym} {'ADOPTAT' if is_adoption else 'BUY'} {fq:.4f}@a{real_avg:.2f}",
+                   body=(f"{kind_label} | q{real_qty:.4f} a{real_avg:.2f} p~{fp:.2f} | "
+                         f"desf{self.s['spent_cash']:.0f}{self.ccy} DCA{self.s['dca_buys']}/{self.p.max_dca_buys}"),
                    source="T212", price=fp, desktop=self.desktop)
             self._cancel_open("SELL")   # avg schimbat -> reasezam TP la pasul urmator
 
@@ -499,9 +495,8 @@ class Strategy:
             self.s["last_sell_price"] = price   # garda profit: nu recumpara mai sus de ultima vanzare (calea REALA)
             log(f"  [STRAT] SELL EXECUTAT {sold:.4f} @ ~{price:.2f} USD  "
                 f"brut={gross:+.2f}  fee={fee:.2f}  net={net:+.2f} USD")
-            notify(title=f"{self.yahoo_sym} SELL {sold:.4f} @ ~{price:.2f}  NET {net:+.2f} USD",
-                   body=(f"Brut {gross:+.2f}  - fee FX {fee:.2f}  = NET {net:+.2f} USD\n"
-                         f"Net total {self.s['realized_net_usd']:+.2f} USD\n{now_str()}"),
+            notify(title=f"{self.yahoo_sym} SELL {sold:.4f}@~{price:.2f} N{net:+.2f}$",
+                   body=f"br{gross:+.2f} fee{fee:.2f} N{net:+.2f}$ | Ntot{self.s['realized_net_usd']:+.2f}$",
                    source="T212", price=price, desktop=self.desktop)
 
         else:
@@ -574,8 +569,8 @@ class Strategy:
         if not self.s.get("tr_alerted"):
             self.s["tr_alerted"] = True
             log(f"  📉 [STRAT] TRAILING: -{drop_pct:.2f}% de la peak {peak:.2f} >= {self.p.trail_pct}% — VAND TOT")
-            notify(title=f"📉 TRAILING {self.yahoo_sym} (-{drop_pct:.1f}% de la peak)",
-                   body=f"Cadere {drop_pct:.1f}% de la peak {peak:.2f} >= prag {self.p.trail_pct}% — vand tot.\n{now_str()}",
+            notify(title=f"📉 TRAILING {self.yahoo_sym} -{drop_pct:.1f}%",
+                   body=f"de la peak{peak:.2f} ≥{self.p.trail_pct}% — vand tot",
                    source="T212", price=price, desktop=self.desktop)
         return True
 
@@ -603,8 +598,8 @@ class Strategy:
         if not self.s.get("sl_alerted"):           # notifica O SINGURA DATA per episod
             self.s["sl_alerted"] = True
             log(f"  🛑 [STRAT] STOP-LOSS: pierdere {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — VAND TOT (taie pierderea)")
-            notify(title=f"🛑 STOP-LOSS {self.yahoo_sym} ({loss_pct:.1f}%)",
-                   body=f"Pierdere {loss_pct:.1f}% >= prag {self.p.stop_loss_pct}% — vand tot.\n{now_str()}",
+            notify(title=f"🛑 SL {self.yahoo_sym} -{loss_pct:.1f}%",
+                   body=f"pierdere {loss_pct:.1f}% ≥prag{self.p.stop_loss_pct}% — vand tot",
                    source="T212", price=price, desktop=self.desktop)
         return True
 
