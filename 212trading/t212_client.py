@@ -37,6 +37,11 @@ class T212Client:
         self._lock = threading.Lock()
         self._last = 0.0
         self._min_gap = float(os.environ.get("T212_MIN_GAP_SEC", "0.3"))
+        # Cache scurt PARTAJAT pt portofoliu: e la nivel de CONT (un apel = toate pozitiile),
+        # deci cele N threaduri (un activ fiecare) nu mai fac N apeluri redundante -> nu mai
+        # lovim rate-limit-ul T212 (429 pe /equity/portfolio, ~1 apel/5s). TTL 6s > 5s = sigur.
+        self._pf_cache: tuple[float, list] | None = None
+        self._pf_ttl = float(os.environ.get("T212_PORTFOLIO_TTL_SEC", "6.0"))
 
     def _pace(self) -> None:
         """Asigura minim _min_gap secunde intre doua apeluri T212 (peste toate threadurile)."""
@@ -150,22 +155,58 @@ class T212Client:
             log(f"  ! [T212] cancel ordin {order_id} -> HTTP {status}")
         return ok
 
+    def _log_read_fail(self, what: str, status: int) -> None:
+        """Logheaza MOTIVUL unui read esuat (portofoliu/ordine) cu DEBOUNCE: o singura data
+        la 60s per (endpoint, status). Fara asta un 429 la fiecare tick spameaza logul cu
+        'indisponibil' (vezi t212_bot: ~1 din 5 ticks). Cu asta stim DE CE (429/auth/timeout)
+        fara zgomot — semnal de anomalie observabil, nu 'zbor orb'."""
+        now = time.monotonic()
+        cache = getattr(self, "_read_fail_log", None)
+        if cache is None:
+            cache = self._read_fail_log = {}
+        last = cache.get(what)
+        if last and last[0] == status and (now - last[1]) < 60:
+            return                                  # acelasi motiv, recent -> nu re-loga
+        cache[what] = (status, now)
+        if status == 429:
+            log(f"  ! T212 {what}: rate limit (429) — indisponibil temporar")
+        elif status in (401, 403):
+            log(f"  ! T212 {what}: auth esuat ({status}) — verifica cheia")
+        elif status == 0:
+            log(f"  ! T212 {what}: timeout/retea (status 0)")
+        else:
+            log(f"  ! T212 {what}: HTTP {status}")
+
     def get_portfolio(self) -> list[dict] | None:
-        """Pozitiile deschise din cont (sursa de adevar pentru reconciliere)."""
+        """Pozitiile deschise din cont (sursa de adevar pentru reconciliere).
+        Cache scurt PARTAJAT (TTL) intre threaduri -> coalesce apelurile celor N active
+        intr-unul singur, sub rate-limit-ul T212 (vezi _pf_ttl in __init__)."""
+        now = time.monotonic()
+        with self._lock:
+            c = self._pf_cache
+            if c and (now - c[0]) < self._pf_ttl:
+                return c[1]
         status, body = http_get(f"{self.base}/equity/portfolio", headers=self._headers())
         if status != 200 or not body:
+            self._log_read_fail("portofoliu", status)
             return None
         try:
-            return json.loads(body)
+            data = json.loads(body)
         except ValueError:
+            self._log_read_fail("portofoliu (JSON invalid)", status)
             return None
+        with self._lock:
+            self._pf_cache = (time.monotonic(), data)
+        return data
 
     def list_active_orders(self) -> list[dict] | None:
         """Ordinele inca PENDING (cele executate dispar de aici -> apar in portofoliu)."""
         status, body = http_get(f"{self.base}/equity/orders", headers=self._headers())
         if status != 200 or not body:
+            self._log_read_fail("ordine active", status)
             return None
         try:
             return json.loads(body)
         except ValueError:
+            self._log_read_fail("ordine active (JSON invalid)", status)
             return None
