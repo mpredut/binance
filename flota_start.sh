@@ -111,7 +111,7 @@ for script in "${scripts[@]}"; do
     log="$SCRIPT_DIR/logs/${script%.py}.log"
     LOGS+=("$log")
     cd "$SCRIPT_DIR" || exit 1
-    nohup python "$script" > "$log" 2>&1 9>&- &
+    nohup python "$script" >> "$log" 2>&1 9>&- &
     PID=$!
     PIDS+=("$PID")
 done
@@ -193,7 +193,7 @@ while true; do
             log="${LOGS[$i]}"
             echo "♻ $(date '+%H:%M:%S') $script a murit (PID ${PIDS[$i]}) → repornesc"
             cd "$SCRIPT_DIR" || exit 1
-            nohup python "$script" > "$log" 2>&1 9>&- &
+            nohup python "$script" >> "$log" 2>&1 9>&- &
             PIDS[$i]=$!
             echo "   → nou PID ${PIDS[$i]} → $log"
         fi
