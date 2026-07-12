@@ -45,7 +45,9 @@ def save_state(state_file, state):
 
 
 def send_ntfy(title, message):
-    url = os.environ.get("PHONE_ALERT_URL")
+    # watchdog = categoria OPS -> prefera topic-ul dedicat; fallback PHONE_ALERT_URL / NTFY_TOPIC
+    topic = os.environ.get("NTFY_TOPIC_OPS")
+    url = (f"https://ntfy.sh/{topic}" if topic else None) or os.environ.get("PHONE_ALERT_URL")
     if not url and os.environ.get("NTFY_TOPIC"):
         url = f"https://ntfy.sh/{os.environ['NTFY_TOPIC']}"
     if not url:

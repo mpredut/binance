@@ -30,6 +30,12 @@ from alertnotifiers import AlertNotifier
 load_dotenv()                                                # secrete comune (gitignored)
 load_dotenv(Path(__file__).resolve().parent / "config.env")  # config versionat (comis)
 
+# market_alerts = categoria PRICE -> ruteaza push-urile pe topic-ul dedicat (daca e setat).
+# Overridez PHONE_ALERT_URL (are precedenta in send_phone_webhook_batch) pt acest proces.
+_price_topic = os.environ.get("NTFY_TOPIC_PRICE")
+if _price_topic:
+    os.environ["PHONE_ALERT_URL"] = f"https://ntfy.sh/{_price_topic}"
+
 CMC_API_KEY = os.environ.get('CMC_API_KEY')
 TIME_INTERVAL_CLEANUP = 6 * 60 * 60  # 6 hours in seconds
 REQUIRED_ENV_VARS = ("CMC_API_KEY", "PHONE_ALERT_URL")

@@ -235,6 +235,30 @@ class AlertNotifier:
 
 _URGENT_MARKERS = ("🛑", "🛡", "LICHID", "STOP-LOSS", "STOP_LOSS", "TRAILING", "ESUAT",
                    "MANUAL", "ERORI", "CATASTROF", "CRASH", "DISPARUT", "DEZECHILIBR")
+_GUARD_MARKERS = ("🛑", "🛡", "STOP-LOSS", "STOP_LOSS", "TRAILING", "LICHID", "CATASTROF", "CRASH")
+_OPS_MARKERS = ("ESUAT", "ERORI", "MANUAL", "DISPARUT", "DEZECHILIBR")
+
+
+def _topic_for(title: str, source: str) -> Optional[str]:
+    """Ruteaza notificarea pe topic-ul ntfy potrivit categoriei (title + source):
+      guard  = stop-loss/trailing/crash/lichidare (BANI in pericol)
+      ops    = erori/esuat/manual/pozitie disparuta (SISTEM)
+      funding= DN (deschidere/inchidere/funding)
+      price  = alerte de prag pret
+      trades = fill-uri, 'X disponibil' (rutina) — restul.
+    Citeste NTFY_TOPIC_<CAT>; fallback NTFY_TOPIC. Consistent cu email-ul (guard+ops = urgent)."""
+    t = title.upper(); s = (source or "").lower()
+    if any(m in t for m in _GUARD_MARKERS):
+        cat = "GUARD"
+    elif any(m in t for m in _OPS_MARKERS) or "watchdog" in s:
+        cat = "OPS"
+    elif s in ("dn", "dn-watch") or "hyperliquid" in s or "funding" in t.lower() or "DN " in title:
+        cat = "FUNDING"
+    elif "alert" in s or "prag" in t.lower() or "threshold" in t.lower():
+        cat = "PRICE"
+    else:
+        cat = "TRADES"
+    return os.environ.get(f"NTFY_TOPIC_{cat}") or os.environ.get("NTFY_TOPIC")
 # NOTA: fara 📉 (folosit si de alerta INFORMATIVA de pierdere '📉 SPCX -8%') si fara ⚠ singur
 # (prea larg). Trailing-ul e prins de cuvantul 'TRAILING'. Urgentele DN (⚠ ...) au si LICHID/
 # ERORI/MANUAL in titlu -> tot prinse. Vezi mai jos: overridezi cu email=True/False la nevoie.
@@ -267,7 +291,7 @@ def notify(title: str, body: str, source: str, symbol: str,
         "added_at": datetime.now(),
         "url": None,
     }
-    ntfy_topic = os.environ.get("NTFY_TOPIC")
+    ntfy_topic = _topic_for(title, source)          # rutare pe topic dupa categorie
     ntfy_url = f"https://ntfy.sh/{ntfy_topic}" if ntfy_topic else None
     try:
         AlertNotifier.send_phone_webhook_batch([alert], webhook_url=ntfy_url)
