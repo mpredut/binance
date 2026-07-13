@@ -7,8 +7,6 @@
 # --- Secrete (niciodata in git) ---
 .env
 *.pem
-# monitor_night.py contine parola SSH a serverului (unealta ops locala, nu se comite)
-monitor_night.py
 
 # --- Config local / editor ---
 .claude/settings.local.json
