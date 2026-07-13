@@ -48,9 +48,10 @@ def main() -> int:
     args = ap.parse_args()
 
     load_dotenv(args.env_file)
-    topic = args.topic or os.environ.get("NTFY_TOPIC")
+    # alerta de PRET -> topicul dedicat categoriei (NTFY_TOPIC_PRICE), fallback pe cel generic.
+    topic = args.topic or os.environ.get("NTFY_TOPIC_PRICE") or os.environ.get("NTFY_TOPIC")
     if not topic:
-        log("! niciun topic ntfy (--topic sau NTFY_TOPIC in .env)"); return 1
+        log("! niciun topic ntfy (--topic / NTFY_TOPIC_PRICE / NTFY_TOPIC in .env)"); return 1
     if args.below is None and args.above is None:
         log("! da macar --below sau --above"); return 1
 
