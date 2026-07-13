@@ -118,7 +118,7 @@ def _wait_for_listing(client, pair, label, interval, desktop) -> bool:
             info = pair_available(client, pair)
             if info:
                 p = get_price(client, pair)
-                body = f"{label} ({pair}) e disponibil pe Kraken. Pret: {p}\n{now_str()}"
+                body = f"{label} ({pair}) disponibil pe Kraken, pret {p}"
                 log("############################################")
                 log(f">>> {label} LISTAT PE KRAKEN — pornesc <<<")
                 log("############################################")
