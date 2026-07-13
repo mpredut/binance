@@ -251,9 +251,9 @@ class Strategy:
             avg = self._avg()
             log(f"  [STRAT] {tag}BUY FILLED {vol} @ {price} {self.ccy} ({o.get('kind')})  "
                 f"qty={self.s['qty']:.8f} avg={avg:.{self.price_dec}f} fee={fee}")
-            notify(title=f"{tag}{self.pair} BUY {vol} @ {price}",
-                   body=(f"{o.get('kind')} fill  qty {self.s['qty']:.8f}  avg {avg}\n"
-                         f"desfasurat {self.s['spent']:.2f} {self.ccy}\n{now_str()}"),
+            notify(title=f"{tag}{self.pair} BUY {vol:.2f}@{price:.2f}",
+                   body=(f"{o.get('kind')} | q{self.s['qty']:.2f} a{avg:.2f} | "
+                         f"desf{self.s['spent']:.0f}{self.ccy}"),
                    source="kraken", price=price, desktop=self.desktop)
             self._cancel_open("sell")
         else:  # sell
@@ -265,9 +265,9 @@ class Strategy:
             self.s["qty"] -= vol
             log(f"  [STRAT] {tag}SELL FILLED {vol} @ {price} {self.ccy}  "
                 f"brut={gross:+.4f} fee_ciclu={self.s['cycle_fees']:.4f} net={net:+.4f}")
-            notify(title=f"{tag}{self.pair} SELL {vol} @ {price}  NET {net:+.2f} {self.ccy}",
-                   body=(f"Brut {gross:+.4f} - fee {self.s['cycle_fees']:.4f} = NET {net:+.4f}\n"
-                         f"Net total {self.s['realized_net']:+.4f} {self.ccy}\n{now_str()}"),
+            notify(title=f"{tag}{self.pair} SELL {vol:.2f}@{price:.2f} N{net:+.2f}{self.ccy}",
+                   body=(f"a{avg:.2f} · br{gross:+.2f} fee{self.s['cycle_fees']:.2f} N{net:+.2f} | "
+                         f"Ntot{self.s['realized_net']:+.2f}{self.ccy}"),
                    source="kraken", price=price, desktop=self.desktop)
             if self.s["qty"] <= 1e-12:
                 keep = (self.s["realized_gross"], self.s["realized_net"],
@@ -297,8 +297,8 @@ class Strategy:
                         pass
                 self._remove(o)
             self._place("sell", self.s["qty"], round(price * 0.995, self.price_dec), kind="STOP")
-            notify(title=f"🛑 STOP-LOSS {self.pair} ({loss_pct:.1f}%)",
-                   body=f"Pierdere {loss_pct:.1f}% >= prag {self.p.stop_loss_pct}% — am vandut tot.\n{now_str()}",
+            notify(title=f"🛑 SL {self.pair} -{loss_pct:.1f}%",
+                   body=f"pierdere {loss_pct:.1f}% ≥prag{self.p.stop_loss_pct}% — vand tot",
                    source="kraken", price=price, desktop=self.desktop)
             return True
         return False
@@ -341,9 +341,8 @@ class Strategy:
         self.s["adopted"] = True
         self._save()
         log(f"  📥 [STRAT] POZITIE ADOPTATA: {qty} @ {self.p.adopt_cost} {self.ccy} — gestionez TP/DCA/SL")
-        notify(title=f"📥 {self.pair}: pozitie adoptata {qty:.6f} @ {self.p.adopt_cost}",
-               body=f"Strategia gestioneaza de acum alocarea: TP +{self.p.takeprofit_pct}%, "
-                    f"DCA -{self.p.dca_drop_pct}%, stop-loss {self.p.stop_loss_pct}%.",
+        notify(title=f"📥 {self.pair} ADOPTAT {qty:.2f}@{self.p.adopt_cost}",
+               body=f"TP+{self.p.takeprofit_pct}% DCA-{self.p.dca_drop_pct}% SL{self.p.stop_loss_pct}%",
                source="kraken-bot", price=self.p.adopt_cost, desktop=self.desktop)
 
     def step(self, price: float) -> None:
