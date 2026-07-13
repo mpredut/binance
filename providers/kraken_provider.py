@@ -76,8 +76,16 @@ class KrakenProvider(MarketDataProvider):
                       or env_value(_KRAKEN_DIR, "KRAKEN_API_SECRET")
                       or env_value(_KRAKEN_DIR, "KRAKEN_API_SECRET_SPARE")
                       or env_value(_KRAKEN_DIR, "KRAKEN_API_SECRET_BOT"))
-        self._cli = KrakenClient(api_key, api_secret)
-        return self._cli
+        cli = KrakenClient(api_key, api_secret)
+        # Cacheaza DOAR daca avem chei. Altfel (kraken/.env lipsa/incomplet la primul apel)
+        # NU cacheza un client ORB -> reincearca sa citeasca cheile la urmatorul tick, deci
+        # se auto-vindeca daca apar cheile, FARA restart (fixul simptomului "pornit fara chei").
+        if api_key and api_secret:
+            self._cli = cli
+        else:
+            print("[Kraken] ⚠ PORNIT FARA chei (kraken/.env lipsa/incomplet la primul apel de cont)"
+                  " -> citirile de cont (balance/orders) vor esua; NU cachez, reincerc la urmatorul tick.")
+        return cli
 
     # ── market-data (public, fara chei) ────────────────────────────────────────
     def get_current_price(self, symbol: str) -> Optional[float]:
