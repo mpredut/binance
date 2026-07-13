@@ -711,12 +711,18 @@ class Strategy:
                 and not self._has_open("BUY")):
             # GATE pe trend (ca Binance/Kraken): nu face DCA daca activul e in downtrend
             # confirmat (panta scurta prea negativa) -> nu arunca capital intr-un cutit in
-            # cadere. Verificat DOAR aici (moment de DCA, rar), nu la fiecare tick. 0 = OFF.
+            # cadere. 0 = OFF. ATENTIE: intr-un dip sustinut conditia de DCA e adevarata
+            # la FIECARE tick (~18s), deci fara fereastra gate-ul ar re-verifica (apel
+            # Yahoo) si re-loga la fiecare tick, toata noaptea (~4800 linii). Cand blocam,
+            # tinem blocajul 5 min fara re-verificare — panta e pe bare de 5m oricum.
             if self.p.dca_trend_gate_pct > 0:
+                if time.time() < getattr(self, "_dca_gate_until", 0):
+                    return   # blocat recent de trend — re-verificam abia dupa fereastra
                 slope = trend_slope_pct(self.yahoo_sym)
                 if slope is not None and slope < -self.p.dca_trend_gate_pct:
+                    self._dca_gate_until = time.time() + 300
                     log(f"  [STRAT] DCA BLOCAT de trend: panta {slope:+.3f}%/bara "
-                        f"< -{self.p.dca_trend_gate_pct}% (downtrend) — astept stabilizare")
+                        f"< -{self.p.dca_trend_gate_pct}% (downtrend) — re-verific in 5 min")
                     return
             log(f"  [STRAT] dip: {price:.2f} <= {self.s['last_buy_price']:.2f}"
                 f"×(1-{self.p.dca_drop_pct}%) — DCA")

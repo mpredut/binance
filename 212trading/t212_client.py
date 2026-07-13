@@ -37,11 +37,16 @@ class T212Client:
         self._lock = threading.Lock()
         self._last = 0.0
         self._min_gap = float(os.environ.get("T212_MIN_GAP_SEC", "0.3"))
-        # Cache scurt PARTAJAT pt portofoliu: e la nivel de CONT (un apel = toate pozitiile),
+        # Cache scurt PARTAJAT pt citirile la nivel de CONT (un apel = tot contul),
         # deci cele N threaduri (un activ fiecare) nu mai fac N apeluri redundante -> nu mai
-        # lovim rate-limit-ul T212 (429 pe /equity/portfolio, ~1 apel/5s). TTL 6s > 5s = sigur.
+        # lovim rate-limit-ul T212 (~1 apel/5s pe /equity/portfolio SI /equity/orders).
+        # TTL 6s > 5s = sigur.
         self._pf_cache: tuple[float, list] | None = None
+        self._ord_cache: tuple[float, list] | None = None
         self._pf_ttl = float(os.environ.get("T212_PORTFOLIO_TTL_SEC", "6.0"))
+        # Anti-stampede: cand expira TTL-ul, UN singur thread face fetch-ul; celelalte
+        # asteapta pe acest lock si refolosesc rezultatul lui (vezi _read_cached).
+        self._fetch_lock = threading.Lock()
 
     def _pace(self) -> None:
         """Asigura minim _min_gap secunde intre doua apeluri T212 (peste toate threadurile)."""
@@ -134,6 +139,11 @@ class T212Client:
             data = json.loads(body) if body else {}
         except ValueError:
             data = {"raw": body.decode(errors="replace")[:500]}
+        # Invalidare NECONDITIONATA (si pe esec ambiguu): lista de ordine s-a schimbat
+        # (sau nu stim sigur) -> urmatorul list_active_orders citeste proaspat, ca
+        # reconcilierea sa vada ordinul nou si sa nu-l scoata din tracking.
+        with self._lock:
+            self._ord_cache = None
         return status, data
 
     def get_order_status(self, order_id) -> dict | None:
@@ -155,6 +165,8 @@ class T212Client:
         ok = status in (200, 201, 204)
         if not ok:
             log(f"  ! [T212] cancel ordin {order_id} -> HTTP {status}")
+        with self._lock:
+            self._ord_cache = None   # lista de ordine s-a schimbat -> citire proaspata
         return ok
 
     def _log_read_fail(self, what: str, status: int) -> None:
@@ -179,36 +191,43 @@ class T212Client:
         else:
             log(f"  ! T212 {what}: HTTP {status}")
 
+    def _read_cached(self, attr: str, path: str, what: str) -> list | None:
+        """GET cu cache TTL + anti-stampede (double-checked locking). Fara asta, cele
+        N threaduri treceau SIMULTAN de verificarea TTL cand expira cache-ul -> N apeluri
+        aproape simultane -> 429 garantat pe endpoint-urile T212 cu limita ~1 apel/5s
+        (asa aparea '429 ordine active' la fiecare tick, toata noaptea)."""
+        with self._lock:
+            c = getattr(self, attr)
+            if c and (time.monotonic() - c[0]) < self._pf_ttl:
+                return c[1]
+        with self._fetch_lock:
+            with self._lock:   # alt thread poate a reumplut cache-ul cat am asteptat lock-ul
+                c = getattr(self, attr)
+                if c and (time.monotonic() - c[0]) < self._pf_ttl:
+                    return c[1]
+            status, body = http_get(f"{self.base}{path}", headers=self._headers())
+            if status != 200 or not body:
+                self._log_read_fail(what, status)
+                return None
+            try:
+                data = json.loads(body)
+            except ValueError:
+                self._log_read_fail(f"{what} (JSON invalid)", status)
+                return None
+            with self._lock:
+                setattr(self, attr, (time.monotonic(), data))
+            return data
+
     def get_portfolio(self) -> list[dict] | None:
         """Pozitiile deschise din cont (sursa de adevar pentru reconciliere).
         Cache scurt PARTAJAT (TTL) intre threaduri -> coalesce apelurile celor N active
         intr-unul singur, sub rate-limit-ul T212 (vezi _pf_ttl in __init__)."""
-        now = time.monotonic()
-        with self._lock:
-            c = self._pf_cache
-            if c and (now - c[0]) < self._pf_ttl:
-                return c[1]
-        status, body = http_get(f"{self.base}/equity/portfolio", headers=self._headers())
-        if status != 200 or not body:
-            self._log_read_fail("portofoliu", status)
-            return None
-        try:
-            data = json.loads(body)
-        except ValueError:
-            self._log_read_fail("portofoliu (JSON invalid)", status)
-            return None
-        with self._lock:
-            self._pf_cache = (time.monotonic(), data)
-        return data
+        return self._read_cached("_pf_cache", "/equity/portfolio", "portofoliu")
 
     def list_active_orders(self) -> list[dict] | None:
-        """Ordinele inca PENDING (cele executate dispar de aici -> apar in portofoliu)."""
-        status, body = http_get(f"{self.base}/equity/orders", headers=self._headers())
-        if status != 200 or not body:
-            self._log_read_fail("ordine active", status)
-            return None
-        try:
-            return json.loads(body)
-        except ValueError:
-            self._log_read_fail("ordine active (JSON invalid)", status)
-            return None
+        """Ordinele inca PENDING (cele executate dispar de aici -> apar in portofoliu).
+        Acelasi cache TTL ca portofoliul (reconcilierea il cere la fiecare tick, din N
+        threaduri). Cache-ul e INVALIDAT la place/cancel: un ordin proaspat plasat
+        TREBUIE vazut de reconciliere imediat, altfel il crede executat/anulat si il
+        scoate din tracking (SELL si-ar marca gresit transa in tp_sold_levels)."""
+        return self._read_cached("_ord_cache", "/equity/orders", "ordine active")
