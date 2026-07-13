@@ -147,8 +147,8 @@ class KrakenTrailing:
                                   round(price * 0.995, 4), ordertype="limit")
             self.log(f"  🛑 [TRAIL-K] VANDUT {qty} {asset} @ ~{price:.4f} "
                      f"(varf {peak:.4f}, -{trail}%)")
-            notify(title=f"🛑 TRAILING {asset}: vandut {qty:.4f} @ ~{price:.2f}",
-                   body=f"Crash >{trail}% de la varf {peak:.2f}. Protectie declansata.",
+            notify(title=f"🛑 TRAILING {asset} vandut {qty:.2f}@~{price:.2f}",
+                   body=f"crash >{trail}% de la varf {peak:.2f}",
                    source="kraken-trail", price=price, desktop=False)
             return True
         except KrakenError as e:
@@ -161,8 +161,8 @@ class KrakenTrailing:
             self.client.add_order(pair, "buy", qty, round(price * 1.005, 4), ordertype="limit")
             self.log(f"  🟢 [TRAIL-K] RE-BUY {qty} {asset} @ ~{price:.4f}  "
                      f"(recul +{REBUY_BOUNCE_PCT}% de la minim {rb['low']:.4f}; vandut la {rb.get('sell_price', 0):.4f})")
-            notify(title=f"🟢 RE-BUY {asset}: {qty:.4f} @ ~{price:.2f}",
-                   body=f"Recul +{REBUY_BOUNCE_PCT}% de la minimul {rb['low']:.2f} dupa crash sell — reintru.",
+            notify(title=f"🟢 RE-BUY {asset} {qty:.2f}@~{price:.2f}",
+                   body=f"recul +{REBUY_BOUNCE_PCT}% de la min {rb['low']:.2f} dupa crash",
                    source="kraken-trail", price=price, desktop=False)
             return True
         except KrakenError as e:

@@ -87,12 +87,12 @@ def poll_order_until_terminal(client: T212Client, order_id, ticker: str,
             if st == "FILLED":
                 log(f"  [ORDER] ✓ FILLED: {fq} @ {fp} USD")
                 notify(title=f"✓ Ordin executat: {ticker}",
-                       body=f"Qty {fq} @ {fp} USD\nMoment: {now_str()}",
+                       body=f"q{fq} @ {fp}",
                        source="T212 order", price=float(fp or 0), desktop=desktop)
             else:
                 log(f"  [ORDER] ✗ {st}")
                 notify(title=f"✗ Ordin {st}: {ticker}",
-                       body=f"id={order_id}\nMoment: {now_str()}",
+                       body=f"id={order_id}",
                        source="T212 order", desktop=desktop)
             return
     log(f"  [ORDER] timeout polling — {order_id} inca neterminat dupa {ORDER_STATUS_MAX_WAIT}s")

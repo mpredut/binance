@@ -98,7 +98,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
                     if armed["delta"]:
                         armed["delta"] = False
                         notify(title=f"👁 MONITOR {params.coin}: delta ${delta_usd:.2f} — dezechilibrat",
-                               body=f"spot {spot_qty:.4f} / perp {szi:.4f}. Botul de pe server ar trebui sa rebalanseze.",
+                               body=f"spot {spot_qty:.2f} / perp {szi:.2f} — serverul ar trebui sa rebalanseze",
                                source="dn-watch", desktop=desktop)
                 else:
                     armed["delta"] = True
@@ -108,7 +108,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
                     if 0 < dist <= params.liq_alert_pct and armed["liq"]:
                         armed["liq"] = False
                         notify(title=f"👁 MONITOR {params.coin}: short la {dist:.1f}% de LICHIDARE",
-                               body=f"pret {perp_px:.4f} / lichidare {liq:.4f}. Daca botul de pe server nu reduce singur, intervino!",
+                               body=f"p{perp_px:.2f} liq{liq:.2f} — daca serverul nu reduce singur, intervino!",
                                source="dn-watch", desktop=desktop)
                     elif dist > params.liq_alert_pct * 1.5:
                         armed["liq"] = True

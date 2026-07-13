@@ -270,8 +270,8 @@ class DeltaNeutral:
         self._short_perp(sz, L["perp_px"])
         self.s["status"] = "open"; self.s["target_sz"] = sz
         self.s["opened_at"] = now_str(); self.s["opened_ts"] = time.time()
-        notify(title=f"Delta-neutral {self.p.coin} DESCHIS",
-               body=f"long {sz} spot + short {sz} perp\nfunding {L['funding']*100:.4f}%/ora\n{now_str()}",
+        notify(title=f"DN {self.p.coin} DESCHIS",
+               body=f"long {sz} spot + short {sz} perp | fund {L['funding']*100:.4f}%/h",
                source="dn", desktop=self.desktop)
 
     def _close(self, L: dict, reason: str):
@@ -279,8 +279,8 @@ class DeltaNeutral:
         log(f"  [DN] <<< INCHID delta-neutral ({reason}): vand {sz_spot} spot + acopar {sz_perp} perp")
         if sz_spot > 0: self._sell_spot(sz_spot, L["spot_px"])
         if sz_perp > 0: self._cover_perp(sz_perp, L["perp_px"])
-        notify(title=f"Delta-neutral {self.p.coin} INCHIS ({reason})",
-               body=f"funding incasat ~{self.s['funding_accrued']:+.4f}  fee ~{self.s['fees_paid']:.4f}\n{now_str()}",
+        notify(title=f"DN {self.p.coin} INCHIS ({reason})",
+               body=f"fund~{self.s['funding_accrued']:+.2f}$ fee~{self.s['fees_paid']:.2f}$",
                source="dn", desktop=self.desktop)
         keep_fund = self.s["funding_accrued"]; keep_fee = self.s["fees_paid"]
         self.s = _new_state(); self.s["funding_accrued"] = keep_fund; self.s["fees_paid"] = keep_fee
@@ -333,8 +333,7 @@ class DeltaNeutral:
             log("  [DN] pozitia a disparut de pe cont (inchisa manual?)")
             self._cancel_open_orders()
             notify(title=f"DN {self.p.coin}: pozitia a disparut — trec pe flat",
-                   body=f"Ambele picioare au disparut de pe cont (inchise manual?). "
-                        f"Curat ordinele ramase si astept 1h inainte de o noua deschidere.\n{now_str()}",
+                   body=f"ambele picioare disparute (inchise manual?) — curat ordinele, cooldown 1h",
                    source="dn", desktop=self.desktop)
             self._go_flat("ambele picioare disparute")
             return True
@@ -353,14 +352,12 @@ class DeltaNeutral:
                 if spot_gone and pq > 0:
                     self._cover_perp(pq, L["perp_px"])
                 notify(title=f"🛡 DN {self.p.coin}: picior disparut — am inchis si restul",
-                       body=f"{what}. Am lichidat piciorul ramas ca sa elimin riscul directional.\n"
-                            f"Cooldown 1h inainte de o noua deschidere.\n{now_str()}",
+                       body=f"{what} — lichidat piciorul ramas (elimin riscul directional), cooldown 1h",
                        source="dn", desktop=self.desktop)
                 self._go_flat("picior orfan inchis")
             else:
                 notify(title=f"⚠ DN {self.p.coin}: picior disparut — INTERVENTIE MANUALA",
-                       body=f"{what}, iar DN_AUTO_PROTECT=false: nu actionez singur. "
-                            f"Pozitia ramasa e DIRECTIONALA (risc de pret)!\n{now_str()}",
+                       body=f"{what}, DN_AUTO_PROTECT=false: nu actionez singur — pozitia ramasa e DIRECTIONALA!",
                        source="dn", desktop=self.desktop)
             return True
         self.s["orphan_count"] = 0
@@ -386,7 +383,7 @@ class DeltaNeutral:
                 self.s["liq_alerted"] = True
                 log(f"  ⚠ [DN] SHORT aproape de LICHIDARE! pret={perp_px:.4f} liq={liq:.4f} ({dist_pct:.1f}% distanta)")
                 notify(title=f"⚠ {self.p.coin}: short aproape de LICHIDARE!",
-                       body=(f"Pret {perp_px:.4f}, lichidare la {liq:.4f} (doar {dist_pct:.1f}% distanta).\n{now_str()}"),
+                       body=f"p{perp_px:.2f} liq{liq:.2f} (dist {dist_pct:.1f}%)",
                        source="dn", desktop=self.desktop)
             # PREVENTIV: reduce automat ambele picioare -> scade short-ul -> lichidarea se departeaza
             if self.p.auto_protect:
@@ -397,8 +394,7 @@ class DeltaNeutral:
                     self._sell_spot(cut, L["spot_px"])
                     self.s["target_sz"] = max(0.0, self.s["target_sz"] - cut)
                     notify(title=f"🛡 {self.p.coin}: am redus preventiv pozitia",
-                           body=(f"Aproape de lichidare -> am redus {cut} pe ambele picioare.\n"
-                                 f"Pozitia e mai mica si mai sigura, tot neutra.\n{now_str()}"),
+                           body=f"aproape de lichidare — redus {cut} pe ambele picioare, raman neutru",
                            source="dn", desktop=self.desktop)
                     return True
         elif dist_pct > self.p.liq_alert_pct * 1.5:
@@ -475,7 +471,7 @@ class DeltaNeutral:
             f"(~${want*L['perp_px']:.0f}/picior). _rebalance cumpara diferenta.")
         self.s["target_sz"] = want
         notify(title=f"⬆ DN {self.p.coin}: cresc pozitia la ~${want*L['perp_px']:.0f}/picior",
-               body=f"Scale-up catre notional {self.p.notional}, ramane delta-neutral.\n{now_str()}",
+               body=f"scale-up spre notional {self.p.notional}, raman neutru",
                source="dn", desktop=self.desktop)
 
     def tick(self, L: dict) -> None:

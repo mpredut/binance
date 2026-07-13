@@ -241,8 +241,8 @@ class Strategy:
         tag = "[PAPER] " if self.dry_run else ""
         log(f"  [STRAT] {tag}OPEN {self.p.direction.upper()} {fq:.6f} @ {fp:.4f} "
             f"({'DCA' if is_dca else 'ENTRY'}) qty={self.s['qty']:.6f} avg={avg:.4f}")
-        notify(title=f"{tag}{self.coin} OPEN {self.p.direction} {fq:.6f} @ {fp:.4f}",
-               body=f"{'DCA' if is_dca else 'ENTRY'} qty {self.s['qty']:.6f} avg {avg:.4f}\n{now_str()}",
+        notify(title=f"{tag}{self.coin} OPEN {self.p.direction} {fq:.2f}@{fp:.2f}",
+               body=f"{'DCA' if is_dca else 'ENTRY'} | q{self.s['qty']:.2f} a{avg:.2f}",
                source="hyperliquid", price=fp, desktop=self.desktop)
         self._cancel_close()   # avg schimbat -> reasezam TP
 
@@ -253,8 +253,8 @@ class Strategy:
         self.s["realized_gross"] += gross; self.s["realized_net"] += net; self.s["fees_total"] += fee
         tag = "[PAPER] " if self.dry_run else ""
         log(f"  [STRAT] {tag}CLOSE {sz:.6f} @ {price:.4f}  brut={gross:+.4f} fee={fee:.4f} net={net:+.4f}")
-        notify(title=f"{tag}{self.coin} CLOSE {sz:.6f} @ {price:.4f}  NET {net:+.2f}",
-               body=f"Brut {gross:+.4f} - fee {fee:.4f} = NET {net:+.4f}\nNet total {self.s['realized_net']:+.4f}\n{now_str()}",
+        notify(title=f"{tag}{self.coin} CLOSE {sz:.2f}@{price:.2f} N{net:+.2f}",
+               body=f"a{avg:.2f} · br{gross:+.2f} fee{fee:.2f} N{net:+.2f} | Ntot{self.s['realized_net']:+.2f}",
                source="hyperliquid", price=price, desktop=self.desktop)
         if real_qty is not None:
             self.s["qty"] = real_qty; self.s["cost"] = real_qty * (real_avg or 0)
@@ -283,8 +283,8 @@ class Strategy:
                 self._remove(o)
             agg = price * (1 - self.sign * 0.005)           # pret agresiv -> fill sigur
             self._place("close", self.s["qty"], agg, "STOP")
-            notify(title=f"🛑 {self.coin}: STOP-LOSS ({loss_pct:.1f}%)",
-                   body=f"Pierdere {loss_pct:.1f}% >= prag {self.p.stop_loss_pct}% — am inchis pozitia.\n{now_str()}",
+            notify(title=f"🛑 SL {self.coin} -{loss_pct:.1f}%",
+                   body=f"pierdere {loss_pct:.1f}% ≥prag{self.p.stop_loss_pct}% — inchis pozitia",
                    source="hyperliquid", price=price, desktop=self.desktop)
             return True
         return False

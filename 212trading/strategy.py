@@ -623,8 +623,7 @@ class Strategy:
         if band > self.s.get("loss_band", 0):
             log(f"  📉 [STRAT] {self.yahoo_sym} pierdere -{loss_pct:.1f}% (prag {band*step:.0f}%)")
             notify(title=f"📉 {self.yahoo_sym} -{loss_pct:.1f}%",
-                   body=f"Pierdere nerealizata -{loss_pct:.1f}% (a trecut de {band*step:.0f}%). "
-                        f"qty {self.s['qty']:.2f} @ avg {avg:.2f}, pret {price:.2f}.\n{now_str()}",
+                   body=f"pierdere -{loss_pct:.1f}% (peste {band*step:.0f}%) | q{self.s['qty']:.2f} a{avg:.2f} p{price:.2f}",
                    source="T212", price=price, desktop=self.desktop)
             self.s["loss_band"] = band
 
@@ -645,8 +644,8 @@ class Strategy:
         disc = 1 - self.p.entry_discount_pct / 100
         log(f"  🟢 [STRAT] RE-BUY dupa SL: recul +{self.p.sl_rebuy_bounce_pct}% de la minim {rb['low']:.2f} — reintru ENTRY")
         notify(title=f"🟢 {self.yahoo_sym} RE-BUY dupa stop-loss",
-               body=(f"Recul +{self.p.sl_rebuy_bounce_pct}% de la minimul {rb['low']:.2f} dupa catastrofa — "
-                     f"reintru cu {self.p.entry_amount:.0f} {self.ccy}.\n{now_str()}"),
+               body=(f"recul +{self.p.sl_rebuy_bounce_pct}% de la min {rb['low']:.2f} — "
+                     f"reintru cu {self.p.entry_amount:.0f}{self.ccy}"),
                source="T212", price=price, desktop=self.desktop)
         self._place_buy(self.p.entry_amount, price * disc, kind="ENTRY")
 

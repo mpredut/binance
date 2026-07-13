@@ -133,7 +133,7 @@ def _wait_for_listing(client, coin, label, interval, desktop) -> bool:
                 p = get_price(client, coin)
                 log(f">>> {label} disponibil pe Hyperliquid (pret {p}) — pornesc <<<")
                 notify(title=f"{label} disponibil pe Hyperliquid!",
-                       body=f"{coin} pret {p}\n{now_str()}", source="hyperliquid", price=p, desktop=desktop)
+                       body=f"{coin} pret {p}", source="hyperliquid", price=p, desktop=desktop)
                 return True
             log(f"ping - astept {coin}...")
             time.sleep(interval)
