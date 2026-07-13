@@ -66,6 +66,7 @@ class StratParams:
     sl_rebuy_bounce_pct: float = 1.2 # recul% de la minimul de dupa SL pt re-buy (confirma ca s-a oprit caderea -> nu prinde cutitul)
     dca_trend_gate_pct: float = 0.0  # GATE DCA pe trend (ca Binance/Kraken): daca panta scurta (%/bara) < -acest prag => NU face DCA (nu arunca capital intr-un downtrend confirmat). 0 = OFF (comportament neschimbat)
     trail_pct: float = 0.0           # TRAILING crash-breaker (ca Binance/Kraken): vinde TOT daca pretul scade acest % de la PEAK-ul pozitiei. Iese devreme dintr-un declin sustinut (backtest SPCX: -7.5% -> -1.4% la 8%). 0 = OFF. Complementar stop-loss-ului fix (catastrofa).
+    trail_min_profit_pct: float = 5.0  # WARM-UP (fidel trailing_core Binance/Kraken, MIN_PROFIT_PCT): trailing-ul e INACTIV pana cand pretul urca acest % peste avg -> protejeaza CASTIGURILE, nu vinde bag-ul pe un dip ordinar (profit-guard). 0 = armat imediat (loss-cutter). Worst-case vanzare ~ avg*(1+w)*(1-trail).
 
     @classmethod
     def from_env(cls, env: dict | None = None) -> "StratParams":
@@ -107,6 +108,9 @@ class StratParams:
         _ladder_free = float_env("STRAT_LADDER_MIN_FREE", e)
         if _ladder_free is None:
             _ladder_free = 6.0
+        _trail_minp = float_env("STRAT_TRAIL_MIN_PROFIT_PCT", e)
+        if _trail_minp is None:             # 0 e valid (loss-cutter, fara warm-up) -> nu folosi `or`
+            _trail_minp = 5.0               # default = originalul Binance/Kraken (MIN_PROFIT_PCT=5)
         return cls(
             currency           = e.get("STRAT_CURRENCY", "RON").strip().upper(),
             entry_amount       = _entry,
@@ -131,6 +135,7 @@ class StratParams:
             sl_rebuy_bounce_pct= float_env("STRAT_SL_REBUY_BOUNCE_PCT", e) or 1.2,
             dca_trend_gate_pct = float_env("STRAT_DCA_TREND_GATE_PCT", e) or 0.0,
             trail_pct          = float_env("STRAT_TRAIL_PCT", e) or 0.0,
+            trail_min_profit_pct = _trail_minp,
         )
 
 
@@ -151,6 +156,7 @@ def _new_state() -> dict:
         "orders": [],           # {id, side, qty, limit, amount, kind, ts, level}
         "pos_peak": 0.0,        # cel mai mare pret cat detinem pozitia (pt trailing crash-breaker)
         "tr_alerted": False,    # anti-spam: notificarea de trailing s-a trimis deja in episodul curent
+        "tr_armed": False,      # warm-up trecut? trailing-ul devine activ DOAR dupa ce pretul a urcat trail_min_profit_pct% peste avg (profit-guard); se re-armeaza pe ciclu nou
     }
 
 
@@ -553,7 +559,19 @@ class Strategy:
         if self.p.trail_pct <= 0 or self.s["qty"] <= 1e-9:
             self.s["pos_peak"] = 0.0            # flat / trailing oprit -> reseteaza peak-ul
             self.s["tr_alerted"] = False
+            self.s["tr_armed"] = False          # ciclu nou -> warm-up de la capat
             return False
+        # WARM-UP (fidel trailing_core Binance/Kraken): trailing INACTIV pana cand pretul urca
+        # trail_min_profit_pct% peste avg -> protejeaza castigurile, NU vinde bag-ul pe un dip
+        # ordinar (respecta profit-guard-ul; catastrofa ramane la stop_loss_pct). 0 = armat direct.
+        if not self.s.get("tr_armed"):
+            minp = self.p.trail_min_profit_pct
+            avg = self._avg_cost()
+            if minp > 0 and (not avg or price < avg * (1 + minp / 100.0)):
+                return False                    # warming up — nu urmarim peak, nu vindem
+            self.s["tr_armed"] = True
+            self.s["pos_peak"] = price          # peak porneste de la pretul de activare
+            log(f"  [STRAT] trailing ARMAT: pret {price:.2f} ≥ avg{(avg or 0):.2f}+{minp}% — protejez de-acum (-{self.p.trail_pct}% de la peak)")
         peak = self.s.get("pos_peak", 0.0) or 0.0
         if price > peak:
             self.s["pos_peak"] = peak = price   # urmareste maximul cat detinem
