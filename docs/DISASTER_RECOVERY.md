@@ -74,6 +74,27 @@ Rulează pe mașina vie (creează folder + tar, fără să atingă git):
 Reține: secretele nu intră NICIODATĂ în git (sunt în `.gitignore`). Backup-ul e
 responsabilitatea ta să-l ții în siguranță și off-machine.
 
+## Copie locală pe WSL (interimar, până la Storj) — task Windows
+Serverul reface backup-ul zilnic (cron 03:30, `backup_secrets.sh`). Un task Windows îl
+**trage** în WSL la 04:00 (WSL nu ajunge la server — doar Windows, via pscp/scp). Scriptul
+e versionat: [`../windows/pull-binance-backup.ps1`](../windows/pull-binance-backup.ps1) (keyless).
+
+Setare pe un Windows nou (o dată):
+```powershell
+# 1. cheie SSH (fara parola, pt automatizare) + adaug publica pe server
+ssh-keygen -t ed25519 -f "$env:USERPROFILE\.ssh\id_binance" -N '""' -C binance-backup-pull -q
+# adauga continutul id_binance.pub in ~/.ssh/authorized_keys pe server (o data, cu parola)
+# 2. copiaza scriptul din repo pe Windows (ajusteaza caile daca difera)
+copy <repo>\windows\pull-binance-backup.ps1 C:\Users\<user>\pull-binance-backup.ps1
+# 3. task zilnic 04:00 cu recuperare daca PC-ul era oprit
+$a=New-ScheduledTaskAction -Execute powershell.exe -Argument '-ExecutionPolicy Bypass -WindowStyle Hidden -File C:\Users\<user>\pull-binance-backup.ps1'
+$t=New-ScheduledTaskTrigger -Daily -At 4:00am
+$s=New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+Register-ScheduledTask -TaskName BinanceBackupPull -Action $a -Trigger $t -Settings $s -Force
+```
+Cheia PRIVATĂ `id_binance` NU intră în git (o pui în backup-ul de secrete sau o regenerezi +
+re-adaugi publica pe server). Când pornește Storj, task-ul ăsta devine opțional.
+
 ## La reboot (fără refacere) — totul revine singur
 - `binance.service` e `enabled` → systemd pornește flota după VPN.
 - crontab persistă pe disc → `healthcheck --supervise` (cron */5) pornește boții în ≤5 min.
