@@ -75,9 +75,13 @@ Reține: secretele nu intră NICIODATĂ în git (sunt în `.gitignore`). Backup-
 responsabilitatea ta să-l ții în siguranță și off-machine.
 
 ## Copie locală pe WSL (interimar, până la Storj) — task Windows
-Serverul reface backup-ul zilnic (cron 03:30, `backup_secrets.sh`). Un task Windows îl
-**trage** în WSL la 04:00 (WSL nu ajunge la server — doar Windows, via pscp/scp). Scriptul
-e versionat: [`../windows/pull-binance-backup.ps1`](../windows/pull-binance-backup.ps1) (keyless).
+Serverul reface backup-ul zilnic (cron 03:30, `backup_secrets.sh`) și păstrează **istoric:
+ultimele 7 tarball-uri datate** (`binance-secrets-backup-YYYYMMDD.tar.gz`) pe lângă calea
+stabilă `binance-secrets-backup.tar.gz` (latest) — o corupere care intră în backup NU mai
+suprascrie unica copie bună. Un task Windows trage latest-ul la 04:00 (WSL nu ajunge la
+server — doar Windows): descarcă întâi **local** (`%USERPROFILE%\binance-secrets-backup.tar.gz`,
+merge și cu WSL oprit), apoi copiază și în WSL. Scriptul e versionat:
+[`../windows/pull-binance-backup.ps1`](../windows/pull-binance-backup.ps1) (keyless).
 
 Setare pe un Windows nou (o dată):
 ```powershell

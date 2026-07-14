@@ -1,19 +1,30 @@
-# pull-binance-backup.ps1 — trage backup-ul de secrete de pe server in WSL local.
-# INTERIMAR (pana la Storj off-site). Rulat de un task Windows (vezi docs/DISASTER_RECOVERY.md).
-# AUTH CU CHEIE SSH (fara parola in fisier) -> necesita ~/.ssh/id_binance + cheia publica in
-# authorized_keys pe server. Serverul reface backup-ul zilnic la 03:30 (cron); task-ul la 04:00.
+# pull-binance-backup.ps1 — trage backup-ul de secrete de pe server pe dev box.
+# INTERIMAR (pana la Storj off-site). Rulat de task-ul Windows "BinanceBackupPull"
+# (vezi docs/DISASTER_RECOVERY.md). AUTH CU CHEIE SSH (fara parola in fisier).
 #
-# Caile sunt specifice dev box-ului (C:\Users\<user>, distro WSL) — ajusteaza daca difera.
+# Strategie: descarca INTAI intr-o cale LOCALA Windows (merge si cu WSL oprit),
+# apoi copiaza si in WSL daca e disponibil. Asa backup-ul aterizeaza mereu undeva.
+# Caile sunt specifice dev box-ului — ajusteaza daca difera.
 $ErrorActionPreference = 'Stop'
-$key = "$env:USERPROFILE\.ssh\id_binance"
-$src = 'predut@192.168.0.144:/home/predut/binance-secrets-backup.tar.gz'
-$dst = '\\wsl.localhost\ubuntu-24.04\home\mariusp\binance-secrets-backup.tar.gz'
+$key      = "$env:USERPROFILE\.ssh\id_binance"
+$src      = 'predut@192.168.0.144:/home/predut/binance-secrets-backup.tar.gz'
+$dstLocal = "$env:USERPROFILE\binance-secrets-backup.tar.gz"
+$dstWsl   = '\\wsl.localhost\ubuntu-24.04\home\mariusp\binance-secrets-backup.tar.gz'
+$stamp    = Get-Date -Format 'yyyy-MM-dd HH:mm'
 
-scp -i "$key" -P 32238 -o StrictHostKeyChecking=accept-new -o BatchMode=yes "$src" "$dst"
-if ($LASTEXITCODE -eq 0) {
-    $sz = [math]::Round((Get-Item $dst).Length / 1MB, 1)
-    Write-Host ("{0} OK - backup tras in WSL ({1} MB): {2}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm'), $sz, $dst)
-} else {
-    Write-Host ("{0} ESUAT (scp exit {1}) - e WSL pornit? e serverul accesibil (VPN)?" -f (Get-Date -Format 'yyyy-MM-dd HH:mm'), $LASTEXITCODE)
+# 1) descarca local (nu depinde de WSL)
+scp -i "$key" -P 32238 -o StrictHostKeyChecking=accept-new -o BatchMode=yes "$src" "$dstLocal"
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ("{0} ESUAT (scp exit {1}) - e serverul accesibil (VPN)?" -f $stamp, $LASTEXITCODE)
     exit 1
+}
+$sz = [math]::Round((Get-Item $dstLocal).Length / 1MB, 1)
+Write-Host ("{0} OK - descarcat local ({1} MB): {2}" -f $stamp, $sz, $dstLocal)
+
+# 2) copiaza si in WSL, daca e pornit (best-effort; localul ramane oricum)
+try {
+    Copy-Item -Path $dstLocal -Destination $dstWsl -Force
+    Write-Host ("{0} OK - copiat si in WSL: {1}" -f $stamp, $dstWsl)
+} catch {
+    Write-Host ("{0} WSL indisponibil (oprit?) - raman doar cu copia locala Windows" -f $stamp)
 }
