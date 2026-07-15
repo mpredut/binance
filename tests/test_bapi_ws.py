@@ -3,8 +3,8 @@ import unittest
 
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
-import bapi_ws
-from bapi_ws import BinanceWebSocketManager
+from binance_api import bapi_ws
+from binance_api.bapi_ws import BinanceWebSocketManager
 
 
 class BapiWsShutdownHandlingTests(unittest.TestCase):

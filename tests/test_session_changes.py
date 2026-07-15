@@ -17,8 +17,8 @@ mock_bapi.get_current_price = MagicMock(return_value=50000.0)
 mock_bapi.client = MagicMock()
 sys.modules.setdefault("bapi", mock_bapi)
 
-import bapi_ws
-from bapi_ws import BinanceWebSocketManager
+from binance_api import bapi_ws
+from binance_api.bapi_ws import BinanceWebSocketManager
 
 # bapi e deja în sys.modules (setdefault de mai sus), importăm direct
 import cacheManager as cm
