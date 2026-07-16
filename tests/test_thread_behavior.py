@@ -44,6 +44,7 @@ def _make_mgr(filename, sync_ts, api_mock):
         filename=filename,
         ws_manager=None,
         api_client=api_mock,
+        market_api=api_mock,   # fetch-ul HTTP trece prin fațada market-data (injectabilă)
     )
 
 

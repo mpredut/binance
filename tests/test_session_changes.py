@@ -87,6 +87,7 @@ def _make_current_price_manager(tmp_dir, price=50000.0):
         filename=filename,
         ws_manager=None,
         api_client=mock_bapi,
+        market_api=mock_bapi,   # fetch-ul HTTP trece prin fațada market-data (injectabilă)
     )
     mgr.enable_save_state_to_file()
     return mgr
@@ -287,7 +288,7 @@ class TestIntegration(unittest.TestCase):
         # nou manager din același fișier
         mgr2 = cm.CacheCurrentPriceManager(
             sync_ts=9999, symbols=SYMBOLS,
-            filename=self.cur.filename, api_client=mock_bapi,
+            filename=self.cur.filename, api_client=mock_bapi, market_api=mock_bapi,
         )
         # citim direct din cache (nu prin get_price care are staleness check)
         with mgr2.lock:
