@@ -119,3 +119,32 @@ def http_get(url: str, headers: dict | None = None) -> tuple[int, bytes]:
     except Exception as e:  # noqa: BLE001
         log(f"  ! eroare retea GET: {e}")
         return 0, b""
+
+
+# ── Comparatii "aproape egal" (procentual, DETERMINIST) ──────────────────────
+# Sursa unica pt flota + boti. Inlocuieste utils.are_close (care avea
+# random.randint in bucla de toleranta -> acelasi input putea da True SAU False
+# in banda [tol*1.01, tol*1.5] — inacceptabil pt decizii de trading).
+
+def diff_percent(value1: float, value2: float) -> float:
+    """Diferenta procentuala simetrica (raportata la media absoluta a valorilor)."""
+    if value1 == 0 and value2 == 0:
+        return 0.0
+    return abs(value1 - value2) / ((abs(value1) + abs(value2)) / 2) * 100
+
+
+def are_close(value1: float, value2: float, tolerance_percent: float = 1.0) -> bool:
+    """True daca valorile difera cu cel mult tolerance_percent (determinist).
+
+    Pt praguri de pret: are_close(pret, prag, 0.05) -> pretul la 0.05% de prag
+    conteaza ca atins (nu mai ratam o intrare la 2-3 centi de prag)."""
+    return diff_percent(value1, value2) <= tolerance_percent
+
+
+def diff_equals_percent(value1: float, value2: float, target_percent: float,
+                        tolerance_percent: float = 1.0) -> bool:
+    """True daca DIFERENTA procentuala dintre valori este ≈ target_percent
+    (banda pe ambele parti, determinist). Alta intrebare decat are_close:
+    nu "sunt apropiate valorile?", ci "difera cu ~X%?" — ex: "a scazut cu ~10%?".
+    Inlocuieste utils.are_difference_equal_with_aprox_proc (care avea random)."""
+    return abs(diff_percent(value1, value2) - target_percent) <= tolerance_percent

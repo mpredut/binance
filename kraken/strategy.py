@@ -21,7 +21,7 @@ import os
 import time
 from dataclasses import dataclass
 
-from kraken_common import log, now_str, float_env
+from kraken_common import log, now_str, float_env, are_close
 from notify import notify
 from kraken_client import KrakenClient, KrakenError
 from market_data import get_price, pair_precision
@@ -51,6 +51,8 @@ class StratParams:
     adopt_cost: float        # >0 = ADOPTA pozitia existenta din cont la acest cost mediu (ex. alocare IPO/xStock)
     adopt_qty: float         # cantitatea adoptata; 0 = citeste automat balanta activului de baza
     reentry_drop_pct: float  # dupa TP, reintra DOAR daca pretul scade cu acest % sub pretul vandut (0 = imediat)
+    reentry_tolerance_pct: float  # "aproape de prag" conteaza ca atins: pret <= prag*(1+tol%) intra
+                                  # (15 iul: HYPE a ricosat la 65.93 vs prag 65.91 — 2 centi — si a ratat intrarea)
     tp_tranches: list        # [(pct, cota%), ...] vanzare graduala; [] = TP clasic pe tot
 
     @classmethod
@@ -73,6 +75,7 @@ class StratParams:
             adopt_cost         = float_env("STRAT_ADOPT_COST") or 0.0,
             adopt_qty          = float_env("STRAT_ADOPT_QTY") or 0.0,
             reentry_drop_pct   = float_env("STRAT_REENTRY_DROP_PCT") or 0.0,
+            reentry_tolerance_pct = float_env("STRAT_REENTRY_TOLERANCE_PCT") or 0.0,
             tp_tranches        = _parse_tranches(os.environ.get("STRAT_TP_TRANCHES", "")),
         )
 
@@ -364,8 +367,11 @@ class Strategy:
             lsp = self.s.get("last_sell_price")
             if self.p.reentry_drop_pct > 0 and lsp:
                 prag = lsp * (1 - self.p.reentry_drop_pct / 100)
-                if price > prag:
-                    log(f"  [STRAT] reintrare blocata: pret {price} > prag {prag:.2f} "
+                # toleranta "aproape de prag" (botcore.are_close, determinist): pretul la
+                # tol% de prag conteaza ca atins — altfel ratam intrari la 2-3 centi de prag
+                if price > prag and not are_close(price, prag, self.p.reentry_tolerance_pct):
+                    log(f"  [STRAT] reintrare blocata: pret {price} > prag {prag:.2f}"
+                        f"{f' (tol {self.p.reentry_tolerance_pct}%)' if self.p.reentry_tolerance_pct else ''} "
                         f"(vandut la {lsp}, astept -{self.p.reentry_drop_pct}%)")
                     return
             if self.s["spent"] + self.p.entry_amount > self.p.max_budget:
@@ -403,12 +409,16 @@ class Strategy:
                 for p_, q_ in desired:
                     self._place("sell", q_, p_, kind="TP")
 
+        prag_dca = (self.s["last_buy_price"] * (1 - self.p.dca_drop_pct / 100)
+                    if self.s["last_buy_price"] else None)
         if (self.s["dca_buys"] < self.p.max_dca_buys
-                and self.s["last_buy_price"]
-                and price <= self.s["last_buy_price"] * (1 - self.p.dca_drop_pct / 100)
+                and prag_dca
+                # "aproape de prag" conteaza ca atins (are_close, aceeasi toleranta ca reintrarea)
+                and (price <= prag_dca or are_close(price, prag_dca, self.p.reentry_tolerance_pct))
                 and self.s["spent"] + self.p.dca_amount <= self.p.max_budget
                 and not self._has_open("buy")):
-            log(f"  [STRAT] dip {price} <= {self.s['last_buy_price']}×(1-{self.p.dca_drop_pct}%) — DCA")
+            log(f"  [STRAT] dip {price} <= {self.s['last_buy_price']}×(1-{self.p.dca_drop_pct}%)"
+                f" (tol {self.p.reentry_tolerance_pct}%) — DCA")
             self._place("buy", self._qty_for(self.p.dca_amount, price * disc),
                         price * disc, kind="DCA", amount=self.p.dca_amount)
 

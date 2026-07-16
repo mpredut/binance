@@ -27,7 +27,7 @@ import re
 import time
 from dataclasses import dataclass, field
 
-from ipo_common import log, now_str, float_env
+from ipo_common import log, now_str, float_env, are_close
 from ipo_notify import notify
 from market_data import get_eur_usd, get_usd_ron, get_price_usd, t212_to_yahoo, trend_slope_pct
 from t212_client import T212Client
@@ -58,6 +58,7 @@ class StratParams:
     stop_loss_pct: float     # SIGURANTA: vinde tot daca pierderea >= acest % (0 = oprit)
     yahoo_sym: str = ""             # simbol Yahoo (din config; gol => derivat din ticker)
     reentry_drop_pct: float = 0.0   # dupa TP reintra doar la -X% sub pretul vandut (anti-churn)
+    reentry_tolerance_pct: float = 0.0  # "aproape de prag" = atins (are_close) — reintrare + DCA
     tp_ladder: list = field(default_factory=list)   # scale-out: [(nivel%, fractie0-1)]; gol => vinde tot la takeprofit_pct
     fx_fee_pct: float = FX_FEE_PCT   # taxa FX T212 / directie (din STRAT_FX_FEE_PCT; default modul)
     loss_alert_step: float = 1.0     # notifica la fiecare X% de adancire a pierderii nerealizate (0 = off)
@@ -127,6 +128,7 @@ class StratParams:
             stop_loss_pct      = float_env("STRAT_STOP_LOSS_PCT", e) or 0.0,
             yahoo_sym          = (e.get("YAHOO_SYMBOL") or "").strip(),
             reentry_drop_pct   = float_env("STRAT_REENTRY_DROP_PCT", e) or 0.0,
+            reentry_tolerance_pct = float_env("STRAT_REENTRY_TOLERANCE_PCT", e) or 0.0,
             tp_ladder          = _ladder,
             fx_fee_pct         = _fx_fee,
             loss_alert_step    = _loss_step,
@@ -688,10 +690,13 @@ class Strategy:
             # anti "vand la 174.17, recumpar la 174.9"
             lsp = self.s.get("last_sell_price")
             rdp = self.p.reentry_drop_pct
-            if rdp > 0 and lsp and price > lsp * (1 - rdp / 100):
-                log(f"  [STRAT] reintrare blocata: {price:.2f} > prag {lsp * (1 - rdp / 100):.2f} "
-                    f"(vandut la {lsp:.2f}, astept -{rdp}%)")
-                return
+            if rdp > 0 and lsp:
+                prag = lsp * (1 - rdp / 100)
+                # "aproape de prag" conteaza ca atins (are_close din botcore, determinist)
+                if price > prag and not are_close(price, prag, self.p.reentry_tolerance_pct):
+                    log(f"  [STRAT] reintrare blocata: {price:.2f} > prag {prag:.2f} "
+                        f"(vandut la {lsp:.2f}, astept -{rdp}%)")
+                    return
             if self.s["spent_cash"] + self.p.entry_amount > self.p.max_budget:
                 log(f"  [STRAT] plafon buget {self.p.max_budget:.0f} {self.ccy} atins — nu intru")
                 return
@@ -720,10 +725,13 @@ class Strategy:
                     self._cancel_open("SELL")
                     self._place_sell(held, target)
 
+        prag_dca = (self.s["last_buy_price"] * (1 - self.p.dca_drop_pct / 100)
+                    if self.s["last_buy_price"] else None)
         if (not in_backoff
                 and self.s["dca_buys"] < self.p.max_dca_buys
-                and self.s["last_buy_price"]
-                and price <= self.s["last_buy_price"] * (1 - self.p.dca_drop_pct / 100)
+                and prag_dca
+                # "aproape de prag" conteaza ca atins (are_close, aceeasi toleranta ca reintrarea)
+                and (price <= prag_dca or are_close(price, prag_dca, self.p.reentry_tolerance_pct))
                 and self.s["spent_cash"] + self.p.dca_amount <= self.p.max_budget
                 and not self._has_open("BUY")):
             # GATE pe trend (ca Binance/Kraken): nu face DCA daca activul e in downtrend

@@ -6,6 +6,8 @@ import platform
 import numpy as np
 from datetime import datetime, timedelta
 
+import botcore   # sursa unica pt are_close/diff_percent (partajat flota + boti)
+
 
 
 def beep(n):
@@ -28,9 +30,8 @@ def get_interval_time(valoare_prestabilita=97 * 79, marja_aleatoare=10):
     return interval
  
 def calculate_difference_percent(val1, val2):
-    if val1 == 0 and val2 == 0:
-        return 0.0  # Dacă ambele valori sunt zero, considerăm că sunt identice
-    return abs(val1 - val2) / ((abs(val1) + abs(val2)) / 2) * 100
+    """Delega la botcore.diff_percent (sursa unica flota+boti) — formula identica."""
+    return botcore.diff_percent(val1, val2)
 
     
 def value_diff_to_percent(value1, value2):
@@ -50,88 +51,32 @@ def slope(val1, idx1, val2, idx2):
 
 #valorile sunt in jurul procentului ca interval
 def are_difference_equal_with_aprox_proc(value1, value2, target_percent = 10.0):
-    max_iterations = random.randint(1, 100)
-    if max_iterations < 1:
-        max_iterations = 1
-    if max_iterations > 100:
-        max_iterations = 100
-    # Calculeaza initial_tolerance ca 1% din target_percent
-    initial_tolerance = target_percent * 0.01
-    tolerance_step = initial_tolerance * 0.1
-    #print(f"initial_tolerance {initial_tolerance}:")
-    #print(f"tolerance_step {tolerance_step}:")
+    """DEPRECATA (16 iul, zero apelanti in repo): foloseste botcore.diff_equals_percent.
+    Semantica: diferenta dintre valori este ≈ target_percent (nu 'valori apropiate').
+    Vechea implementare avea random.randint in banda de toleranta — eliminat.
+    Pastram tuplul (bool, iteration, tolerance) pt compatibilitate de semnatura.
+    Toleranta = target/4: mijlocul benzii vechi (crestea aleator intre target*0.01
+    si target*0.5) — determinist, aproximeaza comportamentul mediu de dinainte."""
+    tolerance = target_percent * 0.25
+    ok = botcore.diff_equals_percent(value1, value2, target_percent, tolerance)
+    return ok, 0, tolerance
 
-    #valoarea maxima a tolerantei  nu depaseste jumatate din target_percent
-    max_tolerance = max_iterations * tolerance_step + initial_tolerance
-    if max_tolerance > target_percent / 2:
-        # Ajusteaza tolerance_step pentru a respecta limita
-        tolerance_step = (target_percent / 2 - initial_tolerance) / max_iterations
-        print(f"tolerance_step adjust {tolerance_step}:")
 
- 
-    iteration = 0
-    tolerance = initial_tolerance
-
-    while iteration < max_iterations:
-        difference_percent = calculate_difference_percent(value1, value2)
-        lower_bound = target_percent - tolerance
-        upper_bound = target_percent + tolerance
-        #return lower_bound <= difference_percent <= upper_bound
-        
-        #print(f"Iteration {iteration}:")
-        #print(f"  Difference percent: {difference_percent:.4f}%")
-        #print(f"  Lower bound: {lower_bound:.4f}%")
-        #print(f"  Upper bound: {upper_bound:.4f}%")
-        
-        if lower_bound <= difference_percent <= upper_bound:
-            return True, iteration, tolerance
-
-        tolerance += tolerance_step
-        iteration += 1
-
-    return False, iteration, tolerance
+def are_close_random(value1, value2, target_tolerance_percent=1.0):
+    """NEDETERMINISTA prin design (nume explicit!): banda de acceptare variaza
+    aleator in [tol*1.01, tol*1.5] — acelasi input poate da True SAU False.
+    NU folosi pentru decizii de trading; pastrata doar daca vrei vreodata
+    fuzz/jitter intentionat. Varianta predictibila: are_close (botcore)."""
+    upper = target_tolerance_percent * (1.0 + 0.01 + random.random() * 0.49)
+    return botcore.diff_percent(value1, value2) <= upper
    
 
 #valorile sunt aproximativ egale nu mai  mult decat procentul aproximativ
 def are_close(value1, value2, target_tolerance_percent=1.0):
-    max_iterations = random.randint(1, 100)
-    if max_iterations < 1:
-        max_iterations = 1
-    if max_iterations > 100:
-        max_iterations = 100
-    # Calculeaza initial_tolerance ca 1% din target_tolerance_percent
-    initial_tolerance = target_tolerance_percent * 0.01
-    tolerance_step = initial_tolerance * 0.1
-    #print(f"initial_tolerance {initial_tolerance}:")
-    #print(f"tolerance_step {tolerance_step}:")
-
-    #valoarea maxima a tolerantei  nu depaseste jumatate din target_tolerance_percent
-    max_tolerance = max_iterations * tolerance_step + initial_tolerance
-    if max_tolerance > target_tolerance_percent / 2:
-        # Ajusteaza tolerance_step pentru a respecta limita
-        tolerance_step = (target_tolerance_percent / 2 - initial_tolerance) / max_iterations
-        print(f"tolerance_step adjust {tolerance_step}:")
-
-    iteration = 0
-    tolerance = initial_tolerance
-
-    difference_percent = calculate_difference_percent(value1, value2)
-    while iteration < max_iterations:
-        #lower_bound = target_tolerance_percent - tolerance
-        upper_bound = target_tolerance_percent + tolerance
-        #return lower_bound <= difference_percent <= upper_bound
-        
-        #print(f"Iteration {iteration}:")
-        #print(f"  Difference percent: {difference_percent:.4f}%")
-        #print(f"  Upper bound: {upper_bound:.4f}%")
-        
-        if difference_percent <= upper_bound:
-            return True#, iteration, tolerance
-
-        tolerance += tolerance_step
-        iteration += 1
-
-    return False#, iteration, tolerance
+    """Determinist (16 iul): delega la botcore.are_close — sursa unica flota+boti.
+    Vechea implementare avea random.randint in bucla de toleranta: acelasi input
+    putea da True SAU False in banda [tol*1.01, tol*1.5] — inacceptabil pt trading."""
+    return botcore.are_close(value1, value2, target_tolerance_percent)
     
     
     from datetime import datetime

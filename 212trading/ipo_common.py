@@ -17,6 +17,7 @@ from datetime import datetime, timezone, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # radacina repo
 from botcore import (  # noqa: E402,F401  (re-export: compat `from ipo_common import ...`)
     BUCHAREST, HTTP_TIMEOUT, log, load_dotenv, parse_dotenv, float_env, http_get, single_instance,
+    are_close, diff_percent,
 )
 
 ET = timezone(timedelta(hours=-4))        # US Eastern vara (EDT)
