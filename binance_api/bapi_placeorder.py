@@ -1,3 +1,4 @@
+import os
 import time
 import datetime
 import math
@@ -331,12 +332,12 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
         oposite_trades = apiorders.get_trade_orders(opposite_order_type, symbol, max_age_seconds=time_back_in_seconds) ## curent date
         if len(all_trades)/backdays > max_daily_trades:
             print(f"Am {len(oposite_trades)} trades. Limita zilnica este de {max_daily_trades} pentru '{order_type}'.")
-            return False
+            return False, "daily_limit"
         for trade in all_trades:
             trade_time = trade['timestamp'] / 1000  # 'time' este in milisecunde
             if trade_time > minutes_ago:
                 print(f"Are recent transactions in last 3 minutes")
-                return False
+                return False, "recent_transaction"
                 
         #print("Tranzactii anterioare:")
         #for trade in oposite_trades:
@@ -370,18 +371,18 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds, ma
             from providers.market_api import BinanceProvider
             if not order_guard.profit_guard(BinanceProvider(), symbol, order_type, price,
                                             profit_percentage, window_ref=window_ref):
-                return False
-        return True
+                return False, "profit_guard"
+        return True, None
 
     except BinanceAPIException as e:
         print(f"Eroare la verificare if place safe order {order_type}: {e}")
-        return False
+        return False, "guard_check_api_exception"
     except Exception as e:
         # obs.1: nu pot aduce datele / eroare manager -> fara bypass fail-closed (NU tranzactionez);
         # cu bypass_profit_guard (disjunctor crash) lasam sa treaca (trebuie executat).
         print(f"[GARD] {order_type} {symbol}: verificare esuata ({e}) -> "
               f"{'TREC (bypass)' if bypass_profit_guard else 'BLOCAT (fail-closed)'}")
-        return bool(bypass_profit_guard)
+        return bool(bypass_profit_guard), (None if bypass_profit_guard else "guard_check_failed")
 
 
 def place_order(order_type, symbol, price, qty, force=False, cancelorders=False, hours=5,
@@ -489,28 +490,58 @@ def __place_order(order_type, symbol, price, qty, force=False, cancelorders=Fals
     #    return None
 
 
-def place_safe_order(order_type, symbol, price, qty, safeback_seconds=48*3600+60, force=False, cancelorders=False, hours=5, fee_percentage=0.001, bypass_profit_guard=False):
+def place_safe_order(order_type, symbol, price, qty, safeback_seconds=48*3600+60, force=False, cancelorders=False, hours=5, fee_percentage=0.001, bypass_profit_guard=False, _reason_out=None):
 
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)
 
-    if not if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=safeback_seconds, max_daily_trades=25, profit_percentage = order_guard.margin_for("binance"), bypass_profit_guard=bypass_profit_guard) :
+    ok, reason = if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=safeback_seconds, max_daily_trades=25, profit_percentage = order_guard.margin_for("binance"), bypass_profit_guard=bypass_profit_guard)
+    if not ok:
+        if _reason_out is not None:
+            _reason_out["reason"] = reason
         return None
 
     return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders,
                        hours=hours, fee_percentage=fee_percentage)
     
 
-def place_order_smart(order_type, symbol, price, qty, safeback_seconds=48*3600+60, force=False, cancelorders=True, hours=5, pair=True):
-    
+ORDER_OUTCOMES_LOG_DIR = "logger"
+
+
+def _sanitize_outcome_field(value):
+    """Elimina caractere care ar sparge formatul pipe-delimited."""
+    return str(value).replace("|", "/").replace("\n", " ") if value is not None else ""
+
+
+def _log_order_outcome(symbol, side, price, qty, outcome, refuse_reason, motivation):
+    """Jurnal FLEET-WIDE (toti apelantii place_order_smart): un rand
+    pipe-delimited per incercare de ordin. Observational — nu poate afecta
+    returul catre caller (protejat de try/except)."""
+    try:
+        caller = os.path.basename(sys._getframe(2).f_code.co_filename)
+        os.makedirs(ORDER_OUTCOMES_LOG_DIR, exist_ok=True)
+        path = os.path.join(ORDER_OUTCOMES_LOG_DIR,
+                             f"order_outcomes_{datetime.now().strftime('%Y-%m-%d')}.log")
+        cols = [time.time(), symbol, side, price, qty, outcome,
+                refuse_reason or "", caller, motivation or ""]
+        line = "|".join(_sanitize_outcome_field(c) for c in cols)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception as e:
+        print(f"[_log_order_outcome] eroare scriere jurnal outcome: {e}")
+
+
+def place_order_smart(order_type, symbol, price, qty, safeback_seconds=48*3600+60, force=False, cancelorders=True, hours=5, pair=True, motivation=None):
+
     order_type = order_type.upper()
-    sym.validate_params(order_type, symbol, price, qty) 
+    sym.validate_params(order_type, symbol, price, qty)
     pair = False
+    reason_holder = {}
     try:
         qty = round(qty, 5)
         cancel = False
         current_price = api.get_current_price(symbol)
-        
+
         if order_type.upper() == 'BUY':
             open_SELL_orders = api.get_open_orders("SELL", symbol)
             # Anuleaza ordinele de vanzare existente la un pret mai mic decat pretul de cumparare dorit
@@ -519,18 +550,19 @@ def place_order_smart(order_type, symbol, price, qty, safeback_seconds=48*3600+6
                     cancel = api.cancel_order(symbol, order_id)
                     if not cancel:
                         print(f"Fail cancel order {order_id} prep. for BUY order. We wanted becuse low price for SELL.")
-            
+
             price = min(price, current_price)
             price = round(price * 0.999, 0)
             order = place_safe_order("BUY", symbol, price=price, qty=qty,
-                safeback_seconds=safeback_seconds, force=force, cancelorders=cancelorders, hours=hours)
+                safeback_seconds=safeback_seconds, force=force, cancelorders=cancelorders, hours=hours,
+                _reason_out=reason_holder)
             # appy pair
-            if order and pair :            
+            if order and pair :
                 price = max(price * 1.11, current_price)
                 price = round(price * 1.001, 0)
                 place_safe_order("SELL", symbol, price=price, qty=qty,
                     safeback_seconds=safeback_seconds, force=force, cancelorders=cancelorders, hours=hours)
-                
+
         elif order_type.upper() == 'SELL':
             open_BUY_orders = api.get_open_orders("BUY", symbol)
             # Anuleaza ordinele de cumparare existente la un pret mai mare decat pretul de vanzare dorit
@@ -539,11 +571,12 @@ def place_order_smart(order_type, symbol, price, qty, safeback_seconds=48*3600+6
                     cancel = api.cancel_order(symbol, order_id)
                     if not cancel:
                         print(f"Fail cancel order {order_id} prep. for SELL order. We wanted becuse high price for BUY")
-                   
+
             price = max(price, current_price)
             price = round(price * (1 + 0.001), 0)
             order = place_safe_order("SELL", symbol, price=price, qty=qty,
-                safeback_seconds=safeback_seconds, force=force, cancelorders=cancelorders, hours=hours)
+                safeback_seconds=safeback_seconds, force=force, cancelorders=cancelorders, hours=hours,
+                _reason_out=reason_holder)
             # appy pair
             if order and pair :
                 price = min(price * (1 - 0.11), current_price)
@@ -552,10 +585,16 @@ def place_order_smart(order_type, symbol, price, qty, safeback_seconds=48*3600+6
                     safeback_seconds=safeback_seconds, force=force, cancelorders=cancelorders, hours=hours)
         else:
             print("Tipul ordinului este invalid. Trebuie sa fie 'BUY' sau 'SELL'.")
+            _log_order_outcome(symbol, order_type, price, qty, "refused", "invalid_order_type", motivation)
             return None
-        
+
+        _log_order_outcome(symbol, order_type, price, qty,
+                            "executed" if order else "refused",
+                            None if order else reason_holder.get("reason", "no_fill"),
+                            motivation)
         return order
     except BinanceAPIException as e:
+        _log_order_outcome(symbol, order_type, price, qty, "refused", str(e), motivation)
         print(f"Eroare la plasarea ordinului de {order_type}: {e}")
         return None
         #return place_order(order_type, symbol, price, qty)

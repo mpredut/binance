@@ -1,6 +1,7 @@
 import os
 import time
 import datetime
+import json
 import math
 import threading
 from binance.exceptions import BinanceAPIException
@@ -45,6 +46,39 @@ SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 TREND_TO_BE_OLD_SECONDS = 60 * 60 * 1.9
 PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 310)
 PRICE_CHANGE_THRESHOLD_BIG_EUR = u.calculate_difference_percent(97000, 95000 - 377)
+
+DECISIONS_LOG_DIR = "logger"
+
+
+def _sanitize_field(value):
+    """Elimina caractere care ar sparge formatul pipe-delimited (A3)."""
+    return str(value).replace("|", "/").replace("\n", " ")
+
+
+def log_decision(symbol, event, **fields):
+    """Jurnal CONDENSAT (doar trend_start): un rand pipe-delimited per
+    tranzitie reala de trend, rotit zilnic ca restul din logger/.
+    Observational — nu influenteaza logica de trading."""
+    try:
+        os.makedirs(DECISIONS_LOG_DIR, exist_ok=True)
+        path = os.path.join(DECISIONS_LOG_DIR,
+                             f"tradeall_decisions_{datetime.date.today().isoformat()}.log")
+        cols = [time.time(), symbol, event,
+                fields.get("state", ""), fields.get("old_state", ""), fields.get("price", ""),
+                fields.get("prev_confirm_count", "")]
+        line = "|".join(_sanitize_field(c) for c in cols)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception as e:
+        print(f"[log_decision] eroare scriere jurnal decizii: {e}")
+
+
+def _fire_order(symbol, action, price, reason, **kwargs):
+    """Wrapper peste place_order_smart: paseaza motivul declansarii (Pas A2)
+    — executarea/refuzul se jurnalizeaza centralizat in bapi_placeorder.py."""
+    return po.place_order_smart(action, symbol, price, api.quantities[symbol],
+                                 motivation=reason, **kwargs)
+
 
 def track_and_place_order(action, symbol, count, proposed_price, current_price, order_ids=None):
     quantity = api.quantities[symbol]
@@ -110,7 +144,7 @@ def track_and_place_order(action, symbol, count, proposed_price, current_price, 
 
 
 class TrendState:
-    def __init__(self, max_duration_seconds, expiration_trend_time, fresh_trend_time):
+    def __init__(self, max_duration_seconds, expiration_trend_time, fresh_trend_time, now_fn=time.time):
         self.state = 'HOLD'
         self.old_state = self.state
         self.expired = False
@@ -121,13 +155,14 @@ class TrendState:
         self.confirm_count = 0
         self.expiration_trend_time = expiration_trend_time  # Pragul de timp Intre confirmari (In secunde)
         self.fresh_trend_time = fresh_trend_time            # Pragul pentru a fi considerat fresh
+        self._now = now_fn   # ceasul real implicit; backtester-ul injecteaza timpul tick-ului replay-uit (A5)
 
     def start_trend(self, new_state):
         #self.end_trend()  # Marcheaza sfârsitul trendului anterior
         assert new_state in ['UP', 'DOWN', 'HOLD'], "Invalid trend state"
         self.old_state = self.state
         self.state = new_state
-        self.start_time = time.time()
+        self.start_time = self._now()
         self.last_confirmation_time = self.start_time
         self.confirm_count = 1
         self.end_time = None
@@ -137,7 +172,7 @@ class TrendState:
 
     def confirm_trend(self):
         assert self.start_time is not None, "Trend must be started before confirming"
-        self.last_confirmation_time = time.time()
+        self.last_confirmation_time = self._now()
         self.confirm_count += 1
         print(f"{self.confirm_count} times trend confirmed: {self.state} at {u.timeToHMS(self.last_confirmation_time)}")
         return self.confirm_count
@@ -148,19 +183,19 @@ class TrendState:
         if self.last_confirmation_time <= self.start_time:
             raise ValueError("Start time must be before confirmation time")
         return self.last_confirmation_time - self.start_time
-        
+
     def get_started_trend_time(self):
         if self.start_time is None:
             return 0
-        return time.time() - self.start_time
-        
-    
+        return self._now() - self.start_time
+
+
     def is_trend_fresh(self, fresh_trend_time=None):
         if fresh_trend_time is None:
             fresh_trend_time = self.fresh_trend_time
         assert self.start_time is not None, "Trend must be started before checking freshness"
 
-        elapsed_time = time.time() - self.start_time
+        elapsed_time = self._now() - self.start_time
         if elapsed_time < fresh_trend_time:
             return True
 
@@ -195,7 +230,7 @@ class TrendState:
         if self.expired:
             return True
         if self.last_confirmation_time:
-            time_since_last_confirmation = time.time() - self.last_confirmation_time
+            time_since_last_confirmation = self._now() - self.last_confirmation_time
             if time_since_last_confirmation > self.expiration_trend_time:
                 print(f"Trend expired: {self.state}. Time since last confirmation: {time_since_last_confirmation} seconds")
                 self.end_trend()
@@ -208,7 +243,7 @@ class TrendState:
         self.end_time = self.last_confirmation_time
         print(f"Trend ended: {self.state} at {u.timeToHMS(self.end_time)} after {self.confirm_count} confirmations.")
         self.old_confirm_count = self.confirm_count
-        self.state == 'HOLD'
+        self.state = 'HOLD'
         self.confirm_count = 0
 
     def is_trend_up(self):
@@ -286,11 +321,14 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
             if trend_state.is_trend_uniform_confirmed() and trend_state.is_trend_fresh():
                 #track_and_place_order('BUY', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
                 if enable:
-                    po.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
+                    _fire_order(symbol, "BUY", proposed_price, "trend_confirmed_up", safeback_seconds=d*h*3600+60,
                         force=False, cancelorders=True, hours=1)
                 print(f"place_order_smart BUY")
         else:
+            prev_confirm_count = trend_state.confirm_count  # cat a "prins" trendul anterior (near-miss)
             old_trend = trend_state.start_trend('UP')  # Incepem un trend nou de crestere
+            log_decision(symbol, "trend_start", state="UP", old_state=old_trend, price=current_price,
+                         prev_confirm_count=prev_confirm_count)
             #track_and_place_order('BUY', sym.btcsymbol, 1, proposed_price, current_price, order_ids=order_ids)
             #po.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=16*3600+60,
             #    force=True, cancelorders=True, hours=1)
@@ -304,11 +342,14 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
             if trend_state.is_trend_uniform_confirmed() and trend_state.is_trend_fresh() :
                 #track_and_place_order('SELL', symbol, count, proposed_price, current_price, order_ids=order_ids)
                 if enable:
-                    po.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
+                    _fire_order(symbol, "SELL", proposed_price, "trend_confirmed_down", safeback_seconds=d*h*3600+60,
                         force=False, cancelorders=True, hours=1)
                 print(f"place_order_smart SELL")
         else:
+            prev_confirm_count = trend_state.confirm_count  # cat a "prins" trendul anterior (near-miss)
             old_trend = trend_state.start_trend('DOWN')  # Incepem un trend nou de scadere
+            log_decision(symbol, "trend_start", state="DOWN", old_state=old_trend, price=current_price,
+                         prev_confirm_count=prev_confirm_count)
             #track_and_place_order('SELL', symbol, 1, proposed_price, current_price, order_ids=order_ids)
             #po.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=16*3600+60,
             #    force=True, cancelorders=True, hours=1)
@@ -320,7 +361,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE BUY ALL {win} .... ")
             if enable:
-                po.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
+                _fire_order(symbol, "BUY", proposed_price, "consistent_or_old_up", safeback_seconds=d*h*3600+60,
                     force=False, cancelorders=True, hours=1)
     #18 de confirmari per minut * 3 minute
     if slope >= 0 and trend_state.is_trend_down():
@@ -328,7 +369,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE SELL ALL {win} .... ")
             if enable:
-                po.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
+                _fire_order(symbol, "SELL", proposed_price, "consistent_or_old_down", safeback_seconds=d*h*3600+60,
                     force=False, cancelorders=True, hours=1)
                     
     #
@@ -339,7 +380,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 2: BUY ALL {win} .... ")
             if enable:
-                po.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
+                _fire_order(symbol, "BUY", proposed_price, "slope<=-5.1_up", safeback_seconds=d*h*3600+60,
                     force=False, cancelorders=True, hours=1)
     #18 de confirmari per minut * 3 minute
     if slope >= 5.1 and trend_state.is_trend_down():
@@ -347,7 +388,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 2: SELL ALL {win} .... ")
             if enable:
-                po.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
+                _fire_order(symbol, "SELL", proposed_price, "slope>=5.1_down", safeback_seconds=d*h*3600+60,
                     force=False, cancelorders=True, hours=1)
                                                                                                                                                                  
     #
@@ -358,7 +399,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
         and trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 3: BUY ALL {win} .... ")
             if enable:
-                po.place_order_smart("BUY", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
+                _fire_order(symbol, "BUY", proposed_price, "slope<=-5.1_and_old_down", safeback_seconds=d*h*3600+60,
                     force=False, cancelorders=True, hours=1)
     #18 de confirmari per minut * 3 minute
     if slope >= 5.1 and trend_state.is_trend_up():
@@ -366,7 +407,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
         and trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 3: SELL ALL {win} .... ")
             if enable:
-                po.place_order_smart("SELL", symbol, proposed_price, api.quantities[symbol], safeback_seconds=d*h*3600+60,
+                _fire_order(symbol, "SELL", proposed_price, "slope>=5.1_and_old_up", safeback_seconds=d*h*3600+60,
                     force=False, cancelorders=True, hours=1)
    
 #todo ia acceleratiea pe timp scurt get minute 1-3 si daca e mare cumpara!   

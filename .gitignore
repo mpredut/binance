@@ -37,3 +37,7 @@ index.html
 *.log
 *.log.[0-9]*
 .logrotate.state
+
+# --- Observabilitate tradeall (artefacte generate, nu cod) ---
+tradeall_live/
+logger/backtest/
