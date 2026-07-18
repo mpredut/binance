@@ -46,6 +46,8 @@ LIVE_OUT_DIR = os.path.join(ROOT, "tradeall_live")
 PRICE_SAMPLES_PREFIX = "tradeall_price_samples_"
 DECISIONS_PREFIX = "tradeall_decisions_"
 OUTCOMES_PREFIX = "order_outcomes_"
+SHADOW_PREFIX = "tradeall_shadow_"
+SHADOW_COLOR = "#8250df"   # violet — semnalele shadow (Kalman), distinct de verde/rosu
 
 STATE_COLORS = {"UP": "#1a7f37", "DOWN": "#cf222e", "HOLD": "#8c8c8c"}
 DAY_SECONDS = 24 * 3600
@@ -167,7 +169,7 @@ def _load_history_jsonl_tail(symbol, max_bytes=4 * 1024 * 1024):
     return entries
 
 
-def load_price_series_live(symbol, days_back):
+def load_price_series_live(symbol, days_back, include_history=True):
     """Linia de pret pentru modul LIVE, din TOATE sursele deja existente,
     imbinata si sortata — graficul e plin din prima clipa, nu asteapta ca
     monitorul sa-si acumuleze propriile esantioane:
@@ -176,13 +178,16 @@ def load_price_series_live(symbol, days_back):
       3. cachedb/cache_price_{s}.jsonl       — istoricul lung (rar ~7min/tick, doar coada)
       4. logger/tradeall_price_samples_*.log — esantioanele proprii (fallback/umplere)
     Punctele dense au prioritate la coliziune de timestamp.
+    include_history=False: sare peste istoricul lung (3) — ferestrele <=24h il
+    au oricum acoperit de cache-urile dense; economiseste ~4MB de parsare/ciclu.
     """
     points = {}
-    for entry in _load_history_jsonl_tail(symbol):
-        try:
-            points[entry[0] / 1000.0] = float(entry[1])
-        except (TypeError, ValueError, IndexError):
-            continue
+    if include_history:
+        for entry in _load_history_jsonl_tail(symbol):
+            try:
+                points[entry[0] / 1000.0] = float(entry[1])
+            except (TypeError, ValueError, IndexError):
+                continue
     for fname in (f"cache_24price_long_{symbol}.json", f"cache_24price_{symbol}.json"):
         for entry in _load_cachedb_price_entries(fname, symbol):
             try:
@@ -229,6 +234,34 @@ def load_order_events(symbol, days_back):
                 continue
     events.sort(key=lambda e: e["ts"])
     return events
+
+
+def _parse_shadow_rows(rows, symbol):
+    """Randuri shadow: ts|symbol|signal|event|state|old_state|price|vel|vel_std."""
+    events = []
+    for row in rows:
+        ts, sym_, signal, event, state, old_state, price, vel, vel_std = row
+        if sym_ != symbol or event != "trend_start":
+            continue
+        try:
+            events.append({"ts": float(ts), "signal": signal, "state": int(state),
+                            "old_state": int(old_state), "price": float(price),
+                            "vel": vel, "vel_std": vel_std})
+        except ValueError:
+            continue
+    events.sort(key=lambda e: e["ts"])
+    return events
+
+
+def load_shadow_events(symbol, days_back):
+    rows = []
+    for d in reversed(_log_dates(days_back)):
+        rows.extend(_read_pipe_log(_daily_log_path(SHADOW_PREFIX, d), 9))
+    return _parse_shadow_rows(rows, symbol)
+
+
+def load_backtest_shadow_events(directory, symbol):
+    return _parse_shadow_rows(_read_pipe_log(os.path.join(directory, "tradeall_shadow.log"), 9), symbol)
 
 
 def build_trend_regions(events, window_start, window_end):
@@ -294,9 +327,11 @@ def load_backtest_order_events(directory, symbol):
 
 def render_chart(symbol, window_label, window_start, window_end,
                   price_ts, price_vals, trend_events, order_events, out_path,
-                  state_text=None):
+                  state_text=None, shadow_events=None):
     """Deseneaza un grafic dintr-un set de date DEJA incarcat (live sau backtest).
-    state_text (optional): caseta cu starea CURENTA a analizei (dreapta-sus)."""
+    state_text (optional): caseta cu starea CURENTA a analizei (dreapta-sus).
+    shadow_events (optional): tranzitiile semnalelor SHADOW (Kalman) — romburi
+    violet + linii punctate, de comparat vizual cu modelul actual (verde/rosu)."""
     vis_ts, vis_px = [], []
     for t, p in zip(price_ts, price_vals):
         if window_start <= t <= window_end:
@@ -346,6 +381,19 @@ def render_chart(symbol, window_label, window_start, window_end,
     else:
         ax.text(0.5, 0.5, "Inca nu sunt esantioane de pret\n(lasa monitorul sa ruleze putin)",
                 ha="center", va="center", transform=ax.transAxes, color="#888888")
+
+    # SHADOW (Kalman): romburi violet la tranzitii, cu directia noua ca eticheta.
+    # Linie punctata (nu dashed) — vizual distinct de trend_start-urile modelului.
+    shadow_map = {1: "K:UP", -1: "K:DOWN", 0: "K:FLAT"}
+    for e in (shadow_events or []):
+        if not (window_start <= e["ts"] <= window_end):
+            continue
+        t = datetime.fromtimestamp(e["ts"])
+        ax.axvline(t, color=SHADOW_COLOR, ls=":", lw=1, alpha=0.7, zorder=3)
+        ax.scatter(t, e["price"], marker="D", color=SHADOW_COLOR, s=32, zorder=6,
+                   edgecolors="white", linewidths=0.6)
+        ax.annotate(shadow_map.get(e["state"], "?"), (t, e["price"]), fontsize=5.5,
+                    xytext=(3, 8), textcoords="offset points", color=SHADOW_COLOR)
 
     visible_orders = [e for e in order_events if window_start <= e["ts"] <= window_end]
     executed = [e for e in visible_orders if e["outcome"] == "executed"]
@@ -402,7 +450,7 @@ def render_chart(symbol, window_label, window_start, window_end,
 
 def format_state_text(entry, header):
     trend_map = {1: "UP", -1: "DOWN", 0: "FLAT"}
-    return (
+    text = (
         f"{header}\n"
         f"pret:      {entry.get('current_price', '?')}\n"
         f"trend:     {trend_map.get(entry.get('final_trend'), '?')}\n"
@@ -411,10 +459,21 @@ def format_state_text(entry, header):
         f"slope mare:{entry.get('slope_big', 0):+.3f}\n"
         f"epsilon:   {entry.get('epsilon', 0):.4f}"
     )
+    # Randuri SHADOW — apar doar daca cheile exista in snapshot (tolerant)
+    if entry.get("kalman_trend") is not None:
+        text += (f"\nkalman:    {trend_map.get(entry.get('kalman_trend'), '?')} "
+                 f"(v={entry.get('kalman_vel', 0):+.3f}%/min ±{entry.get('kalman_vel_std', 0):.3f})")
+    v1h = entry.get("vol_1h_pct")
+    if v1h is not None:
+        text += (f"\nvol 1h:    {v1h:.2f}% → re:{entry.get('adapt_reentry_pct', '?')}% "
+                 f"dca:{entry.get('adapt_dca_pct', '?')}%")
+    return text
 
 
 def build_analysis_state_text(symbol):
-    """Starea CURENTA a analizei tradeall LIVE (cache_instant_trend.json)."""
+    """Starea CURENTA a analizei tradeall LIVE (cache_instant_trend.json),
+    combinata cu starea SHADOW (cachedb/shadow_state.json — scrisa direct de
+    tradeall, pentru ca fisierul de trend e detinut de procesul cacheManager)."""
     try:
         with open(CACHE_TREND_PATH, "r", encoding="utf-8") as f:
             entry = json.load(f).get(symbol)
@@ -422,6 +481,13 @@ def build_analysis_state_text(symbol):
         entry = None
     if not entry:
         return None
+    try:
+        with open(os.path.join(ROOT, "cachedb", "shadow_state.json"), "r", encoding="utf-8") as f:
+            sh = json.load(f).get(symbol)
+        if sh:
+            entry = {**entry, **{k: v for k, v in sh.items() if k not in ("ts", "price")}}
+    except (OSError, json.JSONDecodeError):
+        pass
     age = time.time() - entry.get("ts", 0)
     return format_state_text(entry, f"ANALIZA ACUM ({age:.0f}s in urma)")
 
@@ -442,7 +508,7 @@ def build_backtest_state_text(directory, symbol):
 
 def render_state_image(state_text, out_path):
     """Caseta de stare ca imagine SEPARATA (aratata pe grafic doar la hover, din HTML)."""
-    fig = plt.figure(figsize=(3.4, 2.1))
+    fig = plt.figure(figsize=(4.6, 2.5))
     fig.patch.set_alpha(0.0)
     ax = fig.add_axes([0, 0, 1, 1])
     ax.axis("off")
@@ -456,10 +522,12 @@ def render_symbol_chart_live(symbol, window_label, window_seconds, out_path):
     window_end = time.time()
     window_start = window_end - window_seconds
     days_back = 9 if window_seconds > DAY_SECONDS else 2  # marja pt regiuni incepute inainte de fereastra
+    include_history = window_seconds > DAY_SECONDS   # istoricul lung doar pt saptamana
     render_chart(symbol, window_label, window_start, window_end,
-                 *load_price_series_live(symbol, days_back),
+                 *load_price_series_live(symbol, days_back, include_history=include_history),
                  load_trend_starts(symbol, days_back),
-                 load_order_events(symbol, days_back), out_path)
+                 load_order_events(symbol, days_back), out_path,
+                 shadow_events=load_shadow_events(symbol, days_back))
 
 
 def render_symbol_chart_backtest(symbol, directory, out_path, window_hours=None):
@@ -487,7 +555,8 @@ def render_symbol_chart_backtest(symbol, directory, out_path, window_hours=None)
         label = "backtest (tot intervalul reluat)"
 
     render_chart(symbol, label, window_start, window_end,
-                 price_ts, price_vals, trend_events, order_events, out_path)
+                 price_ts, price_vals, trend_events, order_events, out_path,
+                 shadow_events=load_backtest_shadow_events(directory, symbol))
 
 
 def render_backtest_chunks(symbol, directory, chunk_hours=24, out_dir=None):
@@ -525,7 +594,7 @@ def render_backtest_chunks(symbol, directory, chunk_hours=24, out_dir=None):
 
 # ── HTML static cu toggle zi/saptamana + auto-refresh (fara server) ──────────
 
-def write_html(symbols):
+def write_html(symbols, live_minutes=60):
     blocks = []
     for s in symbols:
         blocks.append(f'''
@@ -556,7 +625,7 @@ button.active {{ background:#1f6feb; border-color:#1f6feb; }}
 </style></head>
 <body>
 <h2>tradeall — monitor live</h2>
-<button id="btn-live" class="active" onclick="show('live')">Live (30 min)</button>
+<button id="btn-live" class="active" onclick="show('live')">Live ({live_minutes:.0f} min)</button>
 <button id="btn-day" onclick="show('day')">Zi</button>
 <button id="btn-week" onclick="show('week')">Saptamana</button>
 {"".join(blocks)}
@@ -573,7 +642,7 @@ function show(which) {{
     document.getElementById('btn-' + v).classList.toggle('active', which === v);
   }});
 }}
-setInterval(bust, 5000);
+setInterval(bust, 2500);
 </script>
 </body></html>"""
     os.makedirs(LIVE_OUT_DIR, exist_ok=True)
@@ -621,7 +690,15 @@ def main():
                                       formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--symbols", default="BTCUSDC,TAOUSDC",
                          help="listă separată prin virgulă (implicit: BTCUSDC,TAOUSDC)")
-    parser.add_argument("--interval", type=float, default=5.0, help="secunde intre randari")
+    parser.add_argument("--interval", type=float, default=2.0,
+                         help="secunde intre cicluri (live + stare analiza; implicit 2)")
+    parser.add_argument("--live-minutes", type=float, default=60.0,
+                         help="fereastra tabului Live, in minute (implicit 60; TAO se misca rar "
+                              "— la 30min fereastra arata mai mult gol decat semnal)")
+    parser.add_argument("--day-refresh", type=float, default=30.0,
+                         help="la cate secunde se redeseneaza graficul pe ZI (implicit 30)")
+    parser.add_argument("--week-refresh", type=float, default=300.0,
+                         help="la cate secunde se redeseneaza graficul pe SAPTAMANA (implicit 300)")
     parser.add_argument("--backtest-dir", default=None,
                          help="daca e dat: mod BACKTEST — randeaza folderul unui run "
                               "tradeall_backtest.py in loc sa ruleze live")
@@ -672,28 +749,40 @@ def main():
             print("\n[tradeall_monitor] oprit.")
         return
 
-    write_html(symbols)
+    write_html(symbols, live_minutes=args.live_minutes)
     html_path = os.path.join(LIVE_OUT_DIR, "tradeall_live.html")
     print(f"[tradeall_monitor] simboluri: {symbols} | randare la {args.interval}s")
     print(f"[tradeall_monitor] deschide in browser: {html_path}")
 
+    # ESALONARE: live + starea analizei la FIECARE ciclu (senzatie de real-time);
+    # ziua/saptamana mai rar — la scara lor, nimic vizibil nu se schimba in 3s,
+    # iar randarea lor era ce facea ciclul sa dureze ~17s in loc de ~3s.
+    last_day = last_week = 0.0
     try:
         while True:
+            cycle_start = time.time()
             sample_current_prices(symbols)
             for symbol in symbols:
                 try:
-                    render_symbol_chart_live(symbol, "LIVE ultimele 30 min", 30 * 60,
+                    render_symbol_chart_live(symbol, f"LIVE ultimele {args.live_minutes:.0f} min",
+                                              args.live_minutes * 60,
                                               os.path.join(LIVE_OUT_DIR, f"tradeall_live_{symbol}_live.png"))
-                    render_symbol_chart_live(symbol, "ultimele 24h", DAY_SECONDS,
-                                              os.path.join(LIVE_OUT_DIR, f"tradeall_live_{symbol}_ziua.png"))
-                    render_symbol_chart_live(symbol, "ultimele 7 zile", WEEK_SECONDS,
-                                              os.path.join(LIVE_OUT_DIR, f"tradeall_live_{symbol}_saptamana.png"))
                     state_text = build_analysis_state_text(symbol)
                     if state_text:
                         render_state_image(state_text,
                                             os.path.join(LIVE_OUT_DIR, f"tradeall_live_{symbol}_state.png"))
+                    if cycle_start - last_day >= args.day_refresh:
+                        render_symbol_chart_live(symbol, "ultimele 24h", DAY_SECONDS,
+                                                  os.path.join(LIVE_OUT_DIR, f"tradeall_live_{symbol}_ziua.png"))
+                    if cycle_start - last_week >= args.week_refresh:
+                        render_symbol_chart_live(symbol, "ultimele 7 zile", WEEK_SECONDS,
+                                                  os.path.join(LIVE_OUT_DIR, f"tradeall_live_{symbol}_saptamana.png"))
                 except Exception as e:
                     print(f"[tradeall_monitor] eroare randare {symbol}: {e}")
+            if cycle_start - last_day >= args.day_refresh:
+                last_day = cycle_start
+            if cycle_start - last_week >= args.week_refresh:
+                last_week = cycle_start
             time.sleep(args.interval)
     except KeyboardInterrupt:
         print("\n[tradeall_monitor] oprit.")

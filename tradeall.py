@@ -509,6 +509,16 @@ class TrendCoordinator:
         self._dirty = {s: True for s in self.symbols}      # forțăm o primă evaluare
         self._last_eval = {s: 0.0 for s in self.symbols}
 
+        # Semnale SHADOW (observationale, plan 17 iul): Kalman trend + vol adaptiv.
+        # Un bug aici NU are voie sa opreasca trading-ul -> instantiere + apel guarded.
+        try:
+            import shadow_signals
+            self._shadow = shadow_signals.ShadowSet(
+                state_path=os.path.join("cachedb", "shadow_state.json"))
+        except Exception as _e:  # noqa: BLE001
+            print(f"[TrendCoordinator] shadow_signals indisponibil (continui fara): {_e}")
+            self._shadow = None
+
         self.trend_states = {}
         self.trend_states_big = {}
         for symbol in self.symbols:
@@ -556,6 +566,20 @@ class TrendCoordinator:
         # Publică snapshot-ul complet (merge) în store-ul cross-process.
         # snapshot conține deja cheia "symbol" → o scoatem (e arg pozițional).
         fields = {k: v for k, v in snapshot.items() if k != "symbol"}
+        # SHADOW (observational): chei suplimentare in snapshot + jurnal propriu la
+        # tranzitii Kalman. Guarded — nu poate afecta evaluarea/deciziile reale.
+        if self._shadow is not None:
+            try:
+                win = self.instant_mgr.get_window(symbol)
+                win_big = self.instant_mgr.get_window(symbol, self.instant_mgr.window_big_sec)
+                fields.update(self._shadow.update(
+                    symbol, snapshot["ts"], current_price,
+                    epsilon=win.get_noise_epsilon(),
+                    big_prices=list(win_big.prices),
+                    big_sample_rate=win_big.sample_rate_sec,
+                ))
+            except Exception as _e:  # noqa: BLE001
+                print(f"[TrendCoordinator] eroare shadow {symbol} (continui): {_e}")
         self.instant_mgr.update_snapshot(symbol, **fields)
         return snapshot
 

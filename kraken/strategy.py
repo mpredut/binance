@@ -17,8 +17,11 @@ ATENTIE la economie: fee Kraken spot ~0.26% taker / ~0.16% maker per tranzactie
 from __future__ import annotations
 
 import json
+import math
 import os
+import statistics
 import time
+from collections import deque
 from dataclasses import dataclass
 
 from kraken_common import log, now_str, float_env, are_close
@@ -123,6 +126,10 @@ class Strategy:
         self.state_file = state_path_for(pair)
         self.s = self._load()
         self._paper_seq = 0
+        # SHADOW vol-adaptiv (observational, plan 17 iul): istoric mic de pret in
+        # memorie (tick ~2min -> ~3h) pentru sigma; NU intra in state-file, se
+        # reconstruieste dupa restart (warm-up ~40min pana la >=20 puncte).
+        self._shadow_prices = deque(maxlen=90)
         # precizie pereche
         self.price_dec, self.vol_dec, self.ordermin = 5, 8, 0.0
         try:
@@ -348,9 +355,45 @@ class Strategy:
                body=f"TP+{self.p.takeprofit_pct}% DCA-{self.p.dca_drop_pct}% SL{self.p.stop_loss_pct}%",
                source="kraken-bot", price=self.p.adopt_cost, desktop=self.desktop)
 
+    # -- SHADOW vol-adaptiv (doar observatie/log, nu decide nimic) --------------
+    def _shadow_vol_1h(self) -> float | None:
+        """Volatilitate 1h (%) din istoricul propriu de tick-uri. None = warm-up."""
+        pts = list(self._shadow_prices)
+        if len(pts) < 20:
+            return None
+        rets = [math.log(pts[i][1] / pts[i - 1][1]) for i in range(1, len(pts))
+                if pts[i - 1][1] > 0 and pts[i][1] > 0]
+        dts = [pts[i][0] - pts[i - 1][0] for i in range(1, len(pts))]
+        if len(rets) < 19 or not dts:
+            return None
+        mean_dt = sum(dts) / len(dts)
+        if mean_dt <= 0:
+            return None
+        try:
+            std = statistics.stdev(rets)
+        except statistics.StatisticsError:
+            return None
+        return std * math.sqrt(3600.0 / mean_dt) * 100.0
+
+    def _shadow_reentry_line(self, price: float, lsp: float, prag_fix: float) -> None:
+        try:
+            k_re = float_env("SHADOW_K_REENTRY") or 2.0
+            vol = self._shadow_vol_1h()
+            if vol is None:
+                log(f"  [SHADOW] prag adaptiv: warm-up ({len(self._shadow_prices)}/20 puncte)")
+                return
+            adapt_pct = k_re * vol
+            prag_adapt = lsp * (1 - adapt_pct / 100)
+            verdict = "AR FI INTRAT" if price <= prag_adapt else "nu ar fi intrat nici el"
+            log(f"  [SHADOW] prag fix {prag_fix:.2f} vs adaptiv {prag_adapt:.2f} "
+                f"(vol_1h {vol:.2f}% x k={k_re}) → {verdict}")
+        except Exception as e:  # noqa: BLE001 — observational
+            log(f"  [SHADOW] eroare calcul ({e}) — ignor")
+
     def step(self, price: float) -> None:
         held = self.s["qty"]
         disc = 1 - self.p.entry_discount_pct / 100
+        self._shadow_prices.append((time.time(), price))   # istoric pt sigma (observational)
 
         # adoptare in asteptare: NU cumpara o intrare noua — alocarea e pe drum
         if self.p.adopt_cost > 0 and not self.s.get("adopted") and held <= 1e-12:
@@ -373,6 +416,7 @@ class Strategy:
                     log(f"  [STRAT] reintrare blocata: pret {price} > prag {prag:.2f}"
                         f"{f' (tol {self.p.reentry_tolerance_pct}%)' if self.p.reentry_tolerance_pct else ''} "
                         f"(vandut la {lsp}, astept -{self.p.reentry_drop_pct}%)")
+                    self._shadow_reentry_line(price, lsp, prag)
                     return
             if self.s["spent"] + self.p.entry_amount > self.p.max_budget:
                 log(f"  [STRAT] plafon {self.p.max_budget} {self.ccy} atins — nu intru")

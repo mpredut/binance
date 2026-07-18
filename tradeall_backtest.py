@@ -146,6 +146,12 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
     trend_state_big = ta.TrendState(max_duration_seconds=3 * 60 * 60, expiration_trend_time=2.7 * 60,
                                      fresh_trend_time=3.7 * 60, now_fn=clock)
 
+    # SHADOW (observational, plan 17 iul): aceleasi obiecte ca live, cu ceasul
+    # simulat; jurnal FLAT in folderul run-ului (monitorul de backtest il deseneaza).
+    import shadow_signals
+    shadow = shadow_signals.ShadowSet(
+        journal=shadow_signals.ShadowJournal(fixed_path=os.path.join(out_dir, "tradeall_shadow.log")))
+
     if source == "cache24":
         tick_source = load_ticks_cache24(symbol, start_ts, end_ts, filename=cache24_file)
     else:
@@ -175,6 +181,15 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
             slope_big, _price_diff = analyzer_big.check_price_change(ta.PRICE_CHANGE_THRESHOLD_BIG_EUR)
             ta.logic("BIG", True, symbol, gradient, slope_big, trend_state_big, price)
 
+            # SHADOW: acelasi apel ca in TrendCoordinator.evaluate live, cu ceas simulat
+            try:
+                shadow_fields = shadow.update(symbol, ts, price,
+                                               epsilon=window_small.get_noise_epsilon(),
+                                               big_prices=list(window_big.prices),
+                                               big_sample_rate=window_big.sample_rate_sec)
+            except Exception:
+                shadow_fields = {}
+
             n += 1
             if n % 100 == 0:
                 # Starea analizei SIMULATE — cititita de tradeall_monitor.py (hover pe grafic),
@@ -185,6 +200,7 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
                         "current_price": price, "final_trend": gradient,
                         "gradient_recent": _gr, "slope_small": slope, "slope_big": slope_big,
                         "epsilon": window_small.get_noise_epsilon(), "ts": ts,
+                        **shadow_fields,
                     }}
                     with open(os.path.join(out_dir, "analysis_state.json"), "w", encoding="utf-8") as sf:
                         json.dump(state, sf)
