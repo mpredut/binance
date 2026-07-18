@@ -41,7 +41,13 @@ KALMAN_QR = _f_env("SHADOW_KALMAN_QR", 0.0005)   # sweep 17 iul: 94% stabil dupa
 K_REENTRY = _f_env("SHADOW_K_REENTRY", 2.0)
 K_DCA = _f_env("SHADOW_K_DCA", 1.0)
 
-CONF_MULT = 1.64          # |vel| > 1.64*std -> directie cu ~90% incredere
+# Kalman e hranit SUBESANTIONAT (nu la fiecare tick): pe tick-uri de 1s viteza
+# urmareste oscilatiile de minute -> mii de tranzitii/zi (masurat 19 iul: 2868).
+# La 60s: ~4 tranzitii/zi pe BTC — scara de timp comparabila cu modelul actual.
+KALMAN_SAMPLE_SEC = _f_env("SHADOW_KALMAN_SAMPLE_SEC", 60.0)
+
+CONF_ENTER = 1.64         # intra pe directie la |vel| > 1.64*std (~90% incredere)
+CONF_EXIT = _f_env("SHADOW_KALMAN_EXIT", 0.8)   # histerezis: iese abia sub 0.8*std
 MIN_VEL_PCT_MIN = 0.005   # sub 0.005%/min consideram plat indiferent de std
 DT_MIN, DT_MAX = 0.05, 900.0
 
@@ -101,10 +107,17 @@ class KalmanTrend:
         vel_std = math.sqrt(max(float(self.P[1, 1]), 0.0))
         vel_pct_min = vel / price * 100.0 * 60.0
         std_pct_min = vel_std / price * 100.0 * 60.0
-        if abs(vel_pct_min) > max(CONF_MULT * std_pct_min, MIN_VEL_PCT_MIN):
-            trend = 1 if vel_pct_min > 0 else -1
+        # Schmitt trigger (histerezis): intra la CONF_ENTER*std, iese abia sub
+        # CONF_EXIT*std — elimina palpairea in jurul pragului unic.
+        trend = old_trend
+        if old_trend == 0:
+            if abs(vel_pct_min) > max(CONF_ENTER * std_pct_min, MIN_VEL_PCT_MIN):
+                trend = 1 if vel_pct_min > 0 else -1
         else:
-            trend = 0
+            if vel_pct_min * old_trend < 0 and abs(vel_pct_min) > CONF_ENTER * std_pct_min:
+                trend = -old_trend                      # flip direct, cu incredere plina
+            elif abs(vel_pct_min) < CONF_EXIT * std_pct_min:
+                trend = 0
         return {"vel": round(vel_pct_min, 5), "vel_std": round(std_pct_min, 5),
                 "trend": trend, "old_trend": old_trend}
 
@@ -183,6 +196,9 @@ class ShadowSet:
         self._state: dict = {}
         self._last_state_write = 0.0
         self._kalman: dict = {}
+        self._last_fed: dict = {}      # per simbol: ultimul ts hranit in Kalman
+        self._last_kfields: dict = {}  # per simbol: ultimele campuri Kalman (intre hraniri)
+        self._fed_prices: dict = {}    # per simbol: ultimele preturi HRANITE (pt epsilon la scara pasului)
 
     def _write_state(self, now: float) -> None:
         if not self.state_path or (now - self._last_state_write) < self.state_min_interval:
@@ -199,14 +215,37 @@ class ShadowSet:
 
     def update(self, symbol: str, ts: float, price: float, epsilon: float | None,
                big_prices, big_sample_rate: float) -> dict:
-        kf = self._kalman.get(symbol)
-        if kf is None:
-            kf = self._kalman[symbol] = KalmanTrend()
-        k = kf.update(ts, price, epsilon)
-
-        if k["trend"] != k["old_trend"]:
-            self.journal.log_transition(ts, symbol, "kalman", k["trend"], k["old_trend"],
-                                         price, k["vel"], k["vel_std"])
+        # Kalman e hranit doar la KALMAN_SAMPLE_SEC (vezi nota de la constante);
+        # intre hraniri refolosim ultimele campuri (snapshot-ul ramane populat).
+        last_fed = self._last_fed.get(symbol, -1e18)
+        if ts - last_fed >= KALMAN_SAMPLE_SEC:
+            kf = self._kalman.get(symbol)
+            if kf is None:
+                kf = self._kalman[symbol] = KalmanTrend()
+            # Zgomotul de masurare (R) trebuie masurat LA SCARA PASULUI Kalman
+            # (60s), nu la scara tick-ului de 1s — altfel masuratorile par
+            # nerealist de precise si semnalul palpaie (19 iul: 694 tranzitii/zi).
+            # Il calculam din chiar preturile HRANITE (subesantionate), fara
+            # factori de scalare ghiciti; fallback pe epsilonul caller-ului
+            # cat timp seria hranita e prea scurta (warm-up).
+            fed = self._fed_prices.setdefault(symbol, [])
+            fed.append(price)
+            if len(fed) > 60:
+                fed.pop(0)
+            if len(fed) >= 5:
+                import numpy as _np
+                eps_eff = float(_np.std(_np.gradient(_np.asarray(fed))))
+            else:
+                eps_eff = epsilon
+            k = kf.update(ts, price, eps_eff)
+            self._last_fed[symbol] = ts
+            self._last_kfields[symbol] = k
+            if k["trend"] != k["old_trend"]:
+                self.journal.log_transition(ts, symbol, "kalman", k["trend"], k["old_trend"],
+                                             price, k["vel"], k["vel_std"])
+        else:
+            k = self._last_kfields.get(symbol,
+                                        {"vel": 0.0, "vel_std": 0.0, "trend": 0, "old_trend": 0})
 
         v1h = vol_1h_pct(big_prices, big_sample_rate)
         adapt_re, adapt_dca = adaptive_thresholds(v1h)
