@@ -85,8 +85,17 @@ GATE_OUTCOME_LOG = None                 # backtestul il redirectioneaza (nu scri
 GATE_STALE_SEC = 300
 
 
+# Mod per simbol (env KALMAN_GATE_MODE_<SIMBOL> > env global > acest dict > strict).
+# TAO permissive (A/B 4 zile): kalman e aproape mereu FLAT pe TAO (zgomot cuantizat
+# la 0.1$ -> incertitudine mare) — un veto strict pe un semnal neinformativ ar opri
+# complet BUY-urile TAO; permissive blocheaza doar contra-trend (DOWN confirmat).
+GATE_MODE_DEFAULTS = {"TAOUSDC": "permissive"}
+
+
 def _kalman_gate_blocks(symbol, action):
-    mode = os.environ.get("KALMAN_GATE_MODE", "strict").strip().lower()
+    mode = (os.environ.get(f"KALMAN_GATE_MODE_{symbol}")
+            or os.environ.get("KALMAN_GATE_MODE")
+            or GATE_MODE_DEFAULTS.get(symbol, "strict")).strip().lower()
     if mode == "off" or _shadow_ref is None:
         return False, mode, None
     try:

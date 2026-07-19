@@ -44,9 +44,12 @@ _STALE_OVERRIDES = {
     "cache_price_long_trend.json": 90,
     "cache_asset_value.json": 60,
     "cache_T_trend.json": 11520,   # T empiric per moneda: recalc la 7 zile -> prag 8 zile
-    "cache_order.json": 1440,      # event-driven: se scrie doar la order nou (prag 24h)
-    "cache_trade.json": 1440,      # event-driven: se scrie doar la trade nou (prag 24h)
-    "cache_trade_kraken.json": 1440,  # idem, fill-urile Kraken
+    # Event-driven (continut nou DOAR la order/trade nou): sub semantica pe
+    # CONTINUT (19 iul), perioadele linistite >24h sunt legitime (masurat: 33h
+    # fara fill-uri cu toate BUY-urile refuzate de weight-limit) -> prag 72h.
+    "cache_order.json": 4320,
+    "cache_trade.json": 4320,
+    "cache_trade_kraken.json": 4320,
 }
 
 
@@ -64,24 +67,34 @@ def _normalize_ts_seconds(value):
 
 
 def cache_freshness_seconds(path):
-    """Cel mai recent semnal de prospețime (epoch secunde): max(fetchtime, mtime fișier).
-    Întoarce (freshness_sec, detalii) sau (0, motiv) dacă fișierul lipsește/e corupt."""
+    """Cel mai recent semnal de prospețime (epoch secunde), din CONTINUT:
+    fetchtime sau campurile "ts" per simbol. mtime e DOAR fallback cand
+    continutul nu are niciun timestamp — NU se combina cu max(): cacheManager
+    salveaza periodic si date INGHETATE (incident 19 iul: DNS cazut, preturi
+    vechi de 27 min, dar mtime proaspat la fiecare save -> watchdog orb).
+    Întoarce (freshness_sec, detalii) sau (0, motiv) dacă lipsește/e corupt."""
     p = Path(path)
     if not p.exists():
         return 0.0, f"fișierul {p.name} nu există"
     newest = 0.0
     try:
         data = json.load(open(p))
-        ft = data.get("fetchtime", {}) if isinstance(data, dict) else {}
-        for v in ft.values():
-            newest = max(newest, _normalize_ts_seconds(v))
+        if isinstance(data, dict):
+            for v in data.get("fetchtime", {}).values():
+                newest = max(newest, _normalize_ts_seconds(v))
+            if newest == 0.0:
+                # fara fetchtime (ex. cache_instant_trend): cauta "ts" per simbol
+                for v in data.values():
+                    if isinstance(v, dict):
+                        newest = max(newest, _normalize_ts_seconds(v.get("ts", 0)))
     except Exception as e:
         return 0.0, f"cache corupt: {e}"
+    if newest > 0.0:
+        return newest, "continut"
     try:
-        newest = max(newest, p.stat().st_mtime)
+        return p.stat().st_mtime, "mtime (continut fara timestamp)"
     except OSError:
-        pass
-    return newest, "ok"
+        return 0.0, "mtime indisponibil"
 
 
 def check_once(now=None):
