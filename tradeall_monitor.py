@@ -99,14 +99,17 @@ def sample_current_prices(symbols):
 
     os.makedirs(LOGGER_DIR, exist_ok=True)
     path = _daily_log_path(PRICE_SAMPLES_PREFIX, datetime.now().date())
-    now = time.time()
     try:
         with open(path, "a", encoding="utf-8") as f:
             for symbol in symbols:
                 entry = snapshot.get(symbol)
                 if not entry or "current_price" not in entry:
                     continue
-                f.write(f"{now}|{_sanitize_field(symbol)}|{entry['current_price']}\n")
+                # ts-ul SNAPSHOT-ului, nu ceasul nostru: daca sursa e inghetata
+                # (incident 19 iul: cacheManager mort, pret vechi de 27 min),
+                # esantionul cu timestamp CURENT dar pret VECHI s-ar intercala cu
+                # sursele vii si ar desena un "bloc" zimtat fals pe grafic.
+                f.write(f"{entry.get('ts', time.time())}|{_sanitize_field(symbol)}|{entry['current_price']}\n")
     except OSError as e:
         print(f"[tradeall_monitor] eroare scriere esantioane pret: {e}")
 
@@ -181,22 +184,26 @@ def load_price_series_live(symbol, days_back, include_history=True):
     include_history=False: sare peste istoricul lung (3) — ferestrele <=24h il
     au oricum acoperit de cache-urile dense; economiseste ~4MB de parsare/ciclu.
     """
+    # Imbinare pe GALETI de 1s: sursele au offset-uri de ceas diferite la ~1s;
+    # fara aliniere, doua fluxuri cu preturi usor diferite se intercaleaza si
+    # deseneaza un "bloc" zimtat fals. O galeata = un punct; prioritatea o dau
+    # sursele dense (scrise ULTIMELE suprascriu galeata).
     points = {}
+    own_ts, own_px = load_price_samples(symbol, days_back)
+    for t, p in zip(own_ts, own_px):
+        points[int(t)] = p
     if include_history:
         for entry in _load_history_jsonl_tail(symbol):
             try:
-                points[entry[0] / 1000.0] = float(entry[1])
+                points[int(entry[0] / 1000.0)] = float(entry[1])
             except (TypeError, ValueError, IndexError):
                 continue
-    for fname in (f"cache_24price_long_{symbol}.json", f"cache_24price_{symbol}.json"):
+    for fname in (f"cache_24price_{symbol}.json", f"cache_24price_long_{symbol}.json"):
         for entry in _load_cachedb_price_entries(fname, symbol):
             try:
-                points[entry[0] / 1000.0] = float(entry[1])
+                points[int(entry[0] / 1000.0)] = float(entry[1])
             except (TypeError, ValueError, IndexError):
                 continue
-    own_ts, own_px = load_price_samples(symbol, days_back)
-    for t, p in zip(own_ts, own_px):
-        points.setdefault(t, p)
     ts_sorted = sorted(points)
     return ts_sorted, [points[t] for t in ts_sorted]
 
@@ -376,8 +383,14 @@ def render_chart(symbol, window_label, window_start, window_end,
                     textcoords="offset points", color=color, va=va, rotation=0)
 
     if vis_ts:
+        # Afisare subesantionata cand sunt prea multe puncte (ziua = ~86k la 1s):
+        # peste ~6k puncte pe ~1100px linia devine o banda compacta ilizibila.
+        if len(vis_ts) > 6000:
+            stride = len(vis_ts) // 6000 + 1
+            vis_ts = vis_ts[::stride]
+            vis_px = vis_px[::stride]
         ax.plot([datetime.fromtimestamp(t) for t in vis_ts], vis_px,
-                color="#1f6feb", lw=1.2, label="pret")
+                color="#1f6feb", lw=0.8, label="pret")
     else:
         ax.text(0.5, 0.5, "Inca nu sunt esantioane de pret\n(lasa monitorul sa ruleze putin)",
                 ha="center", va="center", transform=ax.transAxes, color="#888888")

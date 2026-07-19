@@ -73,9 +73,48 @@ def log_decision(symbol, event, **fields):
         print(f"[log_decision] eroare scriere jurnal decizii: {e}")
 
 
+# ── KALMAN GATE (aprobat 19 iul): Kalman decide daca ordinele modelului actual
+# ajung la bani reali. Moduri (env KALMAN_GATE_MODE, citit la fiecare ordin):
+#   strict     BUY doar pe kalman UP, SELL doar pe kalman DOWN (default, aprobat)
+#   permissive blocheaza DOAR contra-trend (BUY pe DOWN / SELL pe UP)
+#   off        gate dezactivat (comportamentul dinainte)
+# FAIL-OPEN: daca shadow-ul lipseste/e vechi (>5 min), ordinul TRECE (gate-ul
+# nu are voie sa opreasca tradingul din cauza unei defectiuni de semnal).
+_shadow_ref = None                      # setat de TrendCoordinator.__init__
+GATE_OUTCOME_LOG = None                 # backtestul il redirectioneaza (nu scrie in jurnalul live)
+GATE_STALE_SEC = 300
+
+
+def _kalman_gate_blocks(symbol, action):
+    mode = os.environ.get("KALMAN_GATE_MODE", "strict").strip().lower()
+    if mode == "off" or _shadow_ref is None:
+        return False, mode, None
+    try:
+        trend, age = _shadow_ref.current_trend(symbol)
+    except Exception:
+        return False, mode, None
+    if trend is None or age > GATE_STALE_SEC:
+        return False, mode, None        # fail-open pe semnal absent/vechi
+    wanted = 1 if action == "BUY" else -1
+    if mode == "permissive":
+        return trend == -wanted, mode, trend
+    return trend != wanted, mode, trend  # strict
+
+
 def _fire_order(symbol, action, price, reason, **kwargs):
     """Wrapper peste place_order_smart: paseaza motivul declansarii (Pas A2)
-    — executarea/refuzul se jurnalizeaza centralizat in bapi_placeorder.py."""
+    — executarea/refuzul se jurnalizeaza centralizat in bapi_placeorder.py.
+    KALMAN GATE: ordinul pleaca spre executie DOAR daca trece de gate."""
+    blocked, mode, trend = _kalman_gate_blocks(symbol, action)
+    if blocked:
+        print(f"[KALMAN-GATE] {action} {symbol} BLOCAT (kalman_trend={trend}, mode={mode}, motiv={reason})")
+        try:
+            logger_fn = GATE_OUTCOME_LOG or po._log_order_outcome
+            logger_fn(symbol, action, price, api.quantities[symbol],
+                      "refused", f"kalman_gate_{mode}(trend={trend})", reason)
+        except Exception as _e:  # noqa: BLE001
+            print(f"[KALMAN-GATE] eroare jurnal ({_e}) — blocarea ramane")
+        return None
     return po.place_order_smart(action, symbol, price, api.quantities[symbol],
                                  motivation=reason, **kwargs)
 
@@ -515,6 +554,9 @@ class TrendCoordinator:
             import shadow_signals
             self._shadow = shadow_signals.ShadowSet(
                 state_path=os.path.join("cachedb", "shadow_state.json"))
+            global _shadow_ref
+            _shadow_ref = self._shadow   # gate-ul din _fire_order consulta acest semnal
+            print(f"[KALMAN-GATE] activ, mode={os.environ.get('KALMAN_GATE_MODE', 'strict')}")
         except Exception as _e:  # noqa: BLE001
             print(f"[TrendCoordinator] shadow_signals indisponibil (continui fara): {_e}")
             self._shadow = None

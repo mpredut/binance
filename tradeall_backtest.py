@@ -151,6 +151,14 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
     import shadow_signals
     shadow = shadow_signals.ShadowSet(
         journal=shadow_signals.ShadowJournal(fixed_path=os.path.join(out_dir, "tradeall_shadow.log")))
+    # KALMAN GATE si in backtest (paritate cu live), dar cu jurnalul de blocari
+    # redirectionat in folderul run-ului — NICIODATA in order_outcomes live (A5).
+    ta._shadow_ref = shadow
+    def _bt_gate_log(symbol_, side, price_, qty, outcome, reason, motivation):
+        cols = [clock(), symbol_, side, price_, qty, outcome, reason, "backtest", motivation]
+        with open(broker.path, "a", encoding="utf-8") as f:
+            f.write("|".join(_sanitize(c) for c in cols) + "\n")
+    ta.GATE_OUTCOME_LOG = _bt_gate_log
 
     if source == "cache24":
         tick_source = load_ticks_cache24(symbol, start_ts, end_ts, filename=cache24_file)

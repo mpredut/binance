@@ -213,6 +213,14 @@ class ShadowSet:
         except Exception as e:  # noqa: BLE001
             print(f"[shadow_signals] eroare scriere stare shadow: {e}")
 
+    def current_trend(self, symbol: str) -> tuple:
+        """(kalman_trend sau None, varsta_stare_sec) — pentru gate-ul din tradeall."""
+        st = self._state.get(symbol)
+        if not st:
+            return None, 1e18
+        import time as _t
+        return st.get("kalman_trend"), _t.time() - st.get("ts", 0)
+
     def update(self, symbol: str, ts: float, price: float, epsilon: float | None,
                big_prices, big_sample_rate: float) -> dict:
         # Kalman e hranit doar la KALMAN_SAMPLE_SEC (vezi nota de la constante);
