@@ -65,8 +65,16 @@ class BacktestBroker:
         self.fees = 0.0
         self.last_price = None
 
-    def place_order_smart(self, order_type, symbol, price, qty, motivation=None, **kwargs):
-        price = float(price); qty = float(qty)
+    def place_order_smart(self, order_type, symbol, price, qty=None, motivation=None, **kwargs):
+        # 21 iul: place_order_smart REAL are acum qty=None implicit ("orice cantitate
+        # permite apply_weight_limit") — _fire_order nu mai transmite deloc qty pt
+        # calea normala (logic()/logic_small()), doar kalman_primary/buy&hold il
+        # transmit explicit aici mai jos. Fara acest fallback, orice BUY/SELL venit
+        # din model_actual (fara kalman-primary) pica cu TypeError la primul semnal.
+        price = float(price)
+        if qty is None:
+            qty = BACKTEST_NOTIONAL_USD / price
+        qty = float(qty)
         self.last_price = price
         if order_type == "BUY":
             self.n_buy += 1
@@ -196,7 +204,7 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
         # MODUL KALMAN-PRIMAR: modelul vechi doar JURNALIZEAZA (ordinele lui nu
         # se executa); broker-ul e condus exclusiv de tranzitiile Kalman.
         _old_attempts = {"n": 0}
-        def _journal_only(order_type, symbol_, price_, qty_, motivation=None, **kw):
+        def _journal_only(order_type, symbol_, price_, qty_=None, motivation=None, **kw):
             _old_attempts["n"] += 1
             return None
         ta.po.place_order_smart = _journal_only
