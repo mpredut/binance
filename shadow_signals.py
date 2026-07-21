@@ -49,7 +49,15 @@ KALMAN_SAMPLE_SEC = _f_env("SHADOW_KALMAN_SAMPLE_SEC", 60.0)
 CONF_ENTER = 1.64         # intra pe directie la |vel| > 1.64*std (~90% incredere)
 CONF_EXIT = _f_env("SHADOW_KALMAN_EXIT", 0.8)   # histerezis: iese abia sub 0.8*std
 MIN_VEL_PCT_MIN = 0.005   # sub 0.005%/min consideram plat indiferent de std
-DT_MIN, DT_MAX = 0.05, 900.0
+DT_MIN = 0.05
+# 21 iul: peste acest gol (retea jos / proces oprit — incidentul VPN/DNS din 19
+# iul), viteza acumulata INAINTE de gol nu mai spune nimic despre ACUM. Vechiul
+# cod doar plafona dt la 900s si continua sa filtreze prin el — subestima cat de
+# nesigur devenise filtrul exact cand ar fi trebuit sa fie mai putin increzator
+# (acelasi tipar de bug ca timestamp-ul fabricat reparat azi in cacheManager).
+# 300s = acelasi prag folosit deja in tradeall.py (GATE_STALE_SEC) pt "semnal
+# prea vechi, nu-l mai folosi".
+GAP_RESET_SEC = 300.0
 
 
 class KalmanTrend:
@@ -80,7 +88,21 @@ class KalmanTrend:
             self.last_ts = ts
             return self._out(price, old_trend=self.trend)
 
-        dt = min(max(ts - self.last_ts, DT_MIN), DT_MAX)
+        raw_dt = ts - self.last_ts
+        if raw_dt > GAP_RESET_SEC:
+            # Gol mai lung decat GAP_RESET_SEC: NU propagam viteza veche prin el
+            # (nici macar plafonata) — reset identic warm-up-ului. vel=0 duce
+            # natural (prin _out) la trend FLAT pana se aduna date noi dupa gol,
+            # in loc sa iasa din gol "increzator" pe o directie stale.
+            self.x = np.array([price, 0.0])
+            self.P = np.diag([R * 10.0, (price * 1e-3) ** 2])
+            self.last_ts = ts
+            old_trend = self.trend
+            out = self._out(price, old_trend=old_trend)
+            self.trend = out["trend"]
+            return out
+
+        dt = max(raw_dt, DT_MIN)
         self.last_ts = ts
 
         F = np.array([[1.0, dt], [0.0, 1.0]])
