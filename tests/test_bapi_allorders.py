@@ -2,7 +2,7 @@ import os, sys, unittest
 from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-import bapi_allorders as ao
+from binance_api import bapi_allorders as ao
 
 
 class TestPaginateMyTrades(unittest.TestCase):

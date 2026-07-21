@@ -393,7 +393,9 @@ class TestCache24PriceManager(unittest.TestCase):
         api_mock = MagicMock()
         fname = _tmp_file(self.tmp, "cache_24price_BTC.json")
         cur_mgr = MagicMock()
-        cur_mgr.get_price_value.return_value = 50000.0
+        # get_remote_items foloseste get_price() (=[ts_ms, pret], nu doar pretul —
+        # 21 iul, fix timestamp fabricat), nu vechiul get_price_value().
+        cur_mgr.get_price.return_value = [int(time.time() * 1000), 50000.0]
         with patch("cacheManager.get_current_price_manager", return_value=cur_mgr):
             mgr = cm.Cache24PriceManager(9999, ["BTC"], fname, api_client=api_mock)
         return mgr
@@ -574,7 +576,11 @@ class TestCacheCurrentPriceManager(unittest.TestCase):
         fname = _tmp_file(self.tmp, "cache_currentprice.json")
         return cm.CacheCurrentPriceManager(
             sync_ts=9999, symbols=["BTC"], filename=fname,
-            ws_manager=None, api_client=api_mock
+            ws_manager=None, api_client=api_mock,
+            # get_remote_items() foloseste facada market_api (Faza 2a), nu api_client
+            # direct — fara asta fetch-ul real ar cadea pe singleton-ul REAL din
+            # providers/market_api.py in loc de mock.
+            market_api=api_mock,
         ), api_mock
 
     # ── on_items_update ───────────────────────────────────────────────────────
@@ -834,7 +840,7 @@ class TestCacheFactory(unittest.TestCase):
 
     def test_price_returns_dict_per_symbol(self):
         cur_mock = MagicMock()
-        cur_mock.get_price_value.return_value = 50000.0
+        cur_mock.get_price.return_value = [int(time.time() * 1000), 50000.0]
         with patch("cacheManager.get_current_price_manager", return_value=cur_mock):
             result = cm.CacheFactory.get("Price", symbols=["BTC", "ETH"])
         self.assertIsInstance(result, dict)
@@ -843,7 +849,7 @@ class TestCacheFactory(unittest.TestCase):
 
     def test_price24_returns_dict_per_symbol(self):
         cur_mock = MagicMock()
-        cur_mock.get_price_value.return_value = 50000.0
+        cur_mock.get_price.return_value = [int(time.time() * 1000), 50000.0]
         with patch("cacheManager.get_current_price_manager", return_value=cur_mock):
             result = cm.CacheFactory.get("Price24", symbols=["BTC"])
         self.assertIsInstance(result, dict)
@@ -851,14 +857,14 @@ class TestCacheFactory(unittest.TestCase):
 
     def test_price_filename_per_symbol(self):
         cur_mock = MagicMock()
-        cur_mock.get_price_value.return_value = 50000.0
+        cur_mock.get_price.return_value = [int(time.time() * 1000), 50000.0]
         with patch("cacheManager.get_current_price_manager", return_value=cur_mock):
             result = cm.CacheFactory.get("Price", symbols=["BTC"])
         self.assertIn("cache_price_BTC.json", result["BTC"].filename)
 
     def test_price24_filename_per_symbol(self):
         cur_mock = MagicMock()
-        cur_mock.get_price_value.return_value = 50000.0
+        cur_mock.get_price.return_value = [int(time.time() * 1000), 50000.0]
         with patch("cacheManager.get_current_price_manager", return_value=cur_mock):
             result = cm.CacheFactory.get("Price24", symbols=["BTC"])
         self.assertIn("cache_24price_BTC.json", result["BTC"].filename)
@@ -1104,12 +1110,43 @@ class TestAppendJsonlPersist(unittest.TestCase):
         self.assertEqual([f for f in os.listdir(self.tmp) if ".archive" in f], [])
 
     def test_maintain_noop_when_not_append_persist(self):
+        """21 iul: maintain_append_persist() ruleaza acum si pt append_persist=False
+        (gating generalizat pe append_mode, ca sa prindem si retentia lipsa de la
+        Trade/Order/AssetValue) — dar cu date FRESH (nimic de prunat), tot no-op:
+        nu se rescrie fisierul degeaba. Fixtura veche folosea timestamp=1 (1970,
+        deci mai veche decat orice RETENTION_DAYS real) — parea "no-op" doar pt
+        ca gating-ul vechi sarea peste tot pasul, nu pt ca nu era nimic de sters;
+        dupa generalizare chiar ștergea intrarea (fals pozitiv al testului, nu bug)."""
         fname = os.path.join(self.tmp, "fullrw.json")
-        _write_cache_file(fname, {"SYM": [[1, 1.0]]})
+        now_ms = int(time.time() * 1000)
+        _write_cache_file(fname, {"SYM": [[now_ms, 1.0]]})
         m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=False)
         before = open(fname).read()
-        m.maintain_append_persist()   # no-op pentru non-append
+        m.maintain_append_persist()   # date fresh -> nimic de prunat -> no-op
         self.assertEqual(open(fname).read(), before)
+        self.assertEqual(len(m.cache["SYM"]), 1)
+
+    def test_maintain_prunes_old_entries_even_when_not_append_persist(self):
+        """21 iul: retentia (RETENTION_DAYS) trebuie sa se aplice si claselor cu
+        JSON complet (append_persist=False) — asta era chiar bug-ul gasit (Trade/
+        Order/AssetValue creşteau nemarginit). Aici verificam explicit ramura
+        save_state_to_file() (nu compact_jsonl) dupa prune."""
+        fname = os.path.join(self.tmp, "fullrw_prune.json")
+        m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=False)
+        m.RETENTION_DAYS = 730
+        now_ms = int(time.time() * 1000)
+        old_ms = now_ms - 800 * 24 * 3600 * 1000   # >2 ani
+        with m.lock:
+            m.cache["SYM"] = [[old_ms, 1.0], [now_ms, 2.0]]
+        m.save_state_to_file_if_enabled()
+        m.maintain_append_persist()
+        with m.lock:
+            self.assertEqual(m.cache["SYM"], [[now_ms, 2.0]])   # cea veche ștearsă din memorie
+        m.enable_save_state_to_file()
+        m.save_state_to_file_if_enabled()
+        with open(fname) as f:
+            on_disk = json.load(f)
+        self.assertEqual(on_disk["items"]["SYM"], [[now_ms, 2.0]])   # si pe disc
 
     def test_prune_keeps_file_and_recent(self):
         fname = os.path.join(self.tmp, "prune.jsonl")

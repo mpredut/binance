@@ -44,6 +44,10 @@ def _make_mgr(filename, sync_ts, api_mock):
         filename=filename,
         ws_manager=None,
         api_client=api_mock,
+        # get_remote_items() foloseste facada market_api (Faza 2a), nu api_client
+        # direct — fara asta fetch-ul real ar cadea pe singleton-ul REAL din
+        # providers/market_api.py in loc de mock.
+        market_api=api_mock,
     )
 
 

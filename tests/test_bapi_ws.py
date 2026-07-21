@@ -1,10 +1,12 @@
 import os
+import sys
 import unittest
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
-import bapi_ws
-from bapi_ws import BinanceWebSocketManager
+from binance_api import bapi_ws
+from binance_api.bapi_ws import BinanceWebSocketManager
 
 
 class BapiWsShutdownHandlingTests(unittest.TestCase):

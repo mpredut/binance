@@ -9,6 +9,7 @@ Test pentru toate modificările din sesiunea curentă:
 import os, sys, json, time, tempfile, unittest
 from unittest.mock import MagicMock, patch, PropertyMock
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
 # ─── mock bapi înainte de import ──────────────────────────────────────────────
@@ -17,8 +18,8 @@ mock_bapi.get_current_price = MagicMock(return_value=50000.0)
 mock_bapi.client = MagicMock()
 sys.modules.setdefault("bapi", mock_bapi)
 
-import bapi_ws
-from bapi_ws import BinanceWebSocketManager
+from binance_api import bapi_ws
+from binance_api.bapi_ws import BinanceWebSocketManager
 
 # bapi e deja în sys.modules (setdefault de mai sus), importăm direct
 import cacheManager as cm
@@ -87,6 +88,12 @@ def _make_current_price_manager(tmp_dir, price=50000.0):
         filename=filename,
         ws_manager=None,
         api_client=mock_bapi,
+        # 21 iul: get_remote_items() ruleaza acum prin facada market_api (Faza 2a),
+        # nu prin api_client direct — fara asta, mock_bapi.get_current_price nu mai
+        # e apelat niciodata (fetch-ul real ar cadea pe providers/market_api.api,
+        # singleton-ul REAL) si assert_called()-urile de mai jos ar pica silentios
+        # in providers reale in loc de mock.
+        market_api=mock_bapi,
     )
     mgr.enable_save_state_to_file()
     return mgr
