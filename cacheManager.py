@@ -697,7 +697,18 @@ class CacheOrderManager(CacheManagerInterface):
         return unique_new_orders
 
 
-class CachePriceManager(CacheManagerInterface):
+class CacheSparsePriceManager(CacheManagerInterface):
+    """Istoric de pret RAR (cerere periodica la 7 min pt "care e pretul acum",
+    nu flux continuu de tick-uri) — 2 ani retentie, JSONL. Redenumit din
+    CachePriceManager (21 iul): numele vechi se confunda usor cu
+    Cache24PriceManager/Cache24LongPriceManager (dense, WS-push) si cu
+    CachePriceLongTrendManager (alta clasa, pt trend nu pret brut). "Sparse"
+    descrie trasatura STABILA (mecanismul de esantionare), spre deosebire de
+    o eticheta legata de retentie (care se schimba — "Long" ar fi fost si
+    inselator: cache-ul asta are de fapt retentia cea mai LUNGA dintre toate,
+    2 ani, mai mult decat "Cache24LongPriceManager"). Singurul consumator:
+    priceAnalysis.py (priceLstFor -> getTrendLongTerm_fixed -> apply_weight_limit)."""
+
     def __init__(self, sync_ts, symbols, filename, api_client=api):
         # pur-append, creștere CONTINUĂ (istoric preț la 7 min) → append JSONL
         super().__init__(sync_ts, symbols, filename, append_mode=True,
@@ -821,14 +832,20 @@ class Cache24PriceManager(CacheManagerInterface):
         return last_times
 
     def get_remote_items(self, symbol, startTime):
-        """Folosit doar la init când fișierul lipsește."""
+        """Folosit doar la init când fișierul lipsește.
+        21 iul: folosea get_price_value() (doar pretul, fara timestamp-ul
+        observatiei) + time.time() ("acum") — daca pretul era inghetat exact
+        la acel moment (retea jos), ar fi inregistrat o intrare fals-proaspata.
+        get_price() intoarce [timestamp_REAL, pret] — autorizat explicit sa
+        ating aceasta clasa pt acest fix punctual (acelasi bug, deja reparat
+        in CacheSparsePriceManager si Cache24LongPriceManager)."""
         try:
-            price = get_current_price_manager().get_price_value(symbol)
-            if price is None:
+            entry = get_current_price_manager().get_price(symbol)
+            if not entry or entry[1] is None:
                 return []
-            return [[int(time.time() * 1000), price]]
+            return [[int(entry[0]), entry[1]]]
         except Exception as e:
-            print(f"[{self.cls_name}][Eroare] get_price_value {symbol}: {e}")
+            print(f"[{self.cls_name}][Eroare] get_price {symbol}: {e}")
             return []
 
     def get_all_symbols_from_cache(self):
@@ -888,24 +905,10 @@ class Cache24LongPriceManager(Cache24PriceManager):
             self._persisted_counts[symbol] = max(0, self._persisted_counts.get(symbol, before) - removed)
             self.compact_jsonl()
 
-    def get_remote_items(self, symbol, startTime):
-        """Folosit doar la init cand fisierul lipseste (mostenit de la parinte,
-        dar suprascris aici: parintele foloseste get_price_value(), fara
-        timestamp, marcat cu time.time() — daca pretul e inghetat la exact
-        acel moment, ar inregistra o intrare fals-proaspata. Nu putem repara
-        asta in Cache24PriceManager (cerinta: neatins), deci suprascriem doar
-        aici, pt arhivator. get_price() intoarce [timestamp_REAL, pret]."""
-        try:
-            entry = get_current_price_manager().get_price(symbol)
-        except Exception as e:
-            print(f"[{self.cls_name}][Eroare] get_price {symbol}: {e}")
-            return []
-        if not entry:
-            return []
-        ts_ms, price = entry
-        if price is None:
-            return []
-        return [[int(ts_ms), price]]
+    # get_remote_items: mostenit NESCHIMBAT de la Cache24PriceManager (21 iul —
+    # avea acelasi bug de timestamp fabricat; reparat direct in parinte, cu
+    # autorizare explicita, deci suprascrierea de-aici a devenit redundanta
+    # si a fost eliminata).
 
 
 class CachePriceLongTrendManager(CacheManagerInterface):
@@ -1646,7 +1649,7 @@ class CacheFactory:
             "sync_ts": lambda: ORDER_SYNC_INTERVAL_SEC,
         },
         "Price": {
-            "class": CachePriceManager,
+            "class": CacheSparsePriceManager,
             "filename": None,  # dict per simbol
             "sync_ts": lambda: PRICE_SYNC_INTERVAL_SEC,
         },

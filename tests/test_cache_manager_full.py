@@ -6,7 +6,7 @@ Acoperire:
   - CacheManagerInterface (via ConcreteTestManager)
   - CacheTradeManager
   - CacheOrderManager
-  - CachePriceManager
+  - CacheSparsePriceManager (fost CachePriceManager)
   - Cache24PriceManager
   - CachePriceLongTrendManager
   - CacheAssetValueManager
@@ -298,9 +298,9 @@ class TestCacheOrderManager(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 4. CachePriceManager
+# 4. CacheSparsePriceManager (redenumit din CachePriceManager, 21 iul)
 # ═══════════════════════════════════════════════════════════════════════════════
-class TestCachePriceManager(unittest.TestCase):
+class TestCacheSparsePriceManager(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -314,10 +314,11 @@ class TestCachePriceManager(unittest.TestCase):
         api_mock.get_current_price.return_value = price
         fname = _tmp_file(self.tmp, "cache_price_BTC.json")
         # patch get_current_price_manager pentru a folosi mock-ul nostru
+        # get_price() (nu get_price_value()) — 21 iul, fix timestamp real, nu time.time()
         cur_mgr = MagicMock()
-        cur_mgr.get_price_value.return_value = price
+        cur_mgr.get_price.return_value = [int(time.time() * 1000), price]
         with patch("cacheManager.get_current_price_manager", return_value=cur_mgr):
-            mgr = cm.CachePriceManager(9999, ["BTC"], fname, api_client=api_mock)
+            mgr = cm.CacheSparsePriceManager(9999, ["BTC"], fname, api_client=api_mock)
         self._cur_mgr_mock = cur_mgr
         return mgr
 
@@ -338,22 +339,38 @@ class TestCachePriceManager(unittest.TestCase):
         fname = _tmp_file(self.tmp, "cp.json")
         api_mock = MagicMock()
         cur_mgr = MagicMock()
-        cur_mgr.get_price_value.return_value = 55000.0
+        ts = int(time.time() * 1000)
+        cur_mgr.get_price.return_value = [ts, 55000.0]
         with patch("cacheManager.get_current_price_manager", return_value=cur_mgr):
-            mgr = cm.CachePriceManager(9999, ["BTC"], fname, api_client=api_mock)
+            mgr = cm.CacheSparsePriceManager(9999, ["BTC"], fname, api_client=api_mock)
             result = mgr.get_remote_items("BTC", 0)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0][1], 55000.0)
+        self.assertEqual(result[0][0], ts)   # 21 iul: timestamp-ul REAL al observatiei, nu time.time()
 
     def test_get_remote_items_none_price_returns_empty(self):
         fname = _tmp_file(self.tmp, "cp_none.json")
         api_mock = MagicMock()
         cur_mgr = MagicMock()
-        cur_mgr.get_price_value.return_value = None
+        cur_mgr.get_price.return_value = None
         with patch("cacheManager.get_current_price_manager", return_value=cur_mgr):
-            mgr = cm.CachePriceManager(9999, ["BTC"], fname, api_client=api_mock)
+            mgr = cm.CacheSparsePriceManager(9999, ["BTC"], fname, api_client=api_mock)
             result = mgr.get_remote_items("BTC", 0)
         self.assertEqual(result, [])
+
+    def test_get_remote_items_uses_real_timestamp_not_wallclock(self):
+        """21 iul: pret 'inghetat' (observat cu 27 min in urma) trebuie inregistrat
+        cu timestamp-ul REAL al observatiei, nu cu ceasul de perete curent."""
+        fname = _tmp_file(self.tmp, "cp_frozen.json")
+        api_mock = MagicMock()
+        cur_mgr = MagicMock()
+        frozen_ts = int((time.time() - 27 * 60) * 1000)
+        cur_mgr.get_price.return_value = [frozen_ts, 12345.6]
+        with patch("cacheManager.get_current_price_manager", return_value=cur_mgr):
+            mgr = cm.CacheSparsePriceManager(9999, ["BTC"], fname, api_client=api_mock)
+            result = mgr.get_remote_items("BTC", 0)
+        self.assertEqual(result[0][0], frozen_ts)
+        self.assertNotAlmostEqual(result[0][0], int(time.time() * 1000), delta=5000)
 
     def test_append_mode_true(self):
         mgr = self._make()
@@ -780,8 +797,8 @@ class TestWsHealthFunctions(unittest.TestCase):
 
     def test_should_poll_ws_only_mode_on_not_managed(self):
         cm.WS_ONLY_MODE = True
-        # CachePriceManager nu e în lista managed → polling mereu
-        self.assertTrue(cm._should_poll_for_manager("CachePriceManager"))
+        # CacheSparsePriceManager nu e în lista managed → polling mereu
+        self.assertTrue(cm._should_poll_for_manager("CacheSparsePriceManager"))
         cm.WS_ONLY_MODE = False
 
     def test_should_poll_ws_only_mode_on_ws_unavailable(self):
