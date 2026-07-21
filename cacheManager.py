@@ -720,23 +720,28 @@ class CachePriceManager(CacheManagerInterface):
         return last_times
 
     def get_remote_items(self, symbol, startTime):
+        # 21 iul: foloseam get_price_value() (doar pretul, FARA timestamp-ul
+        # observatiei) si marcam intrarea cu time.time() ("acum") — daca reteaua
+        # era jos (incident 19 iul: VPN/DNS cazut), get_price_value intorcea
+        # oricum ultimul pret CUNOSCUT (inghetat), dar noi il inregistram in
+        # istoricul de 2 ani ca si cum ar fi fost observat chiar in acel
+        # moment. get_price() intoarce [timestamp_REAL_al_observatiei, pret] —
+        # daca pretul e inghetat, timestamp-ul ramane cel vechi (cinstit), nu
+        # unul fabricat-proaspat. Acelasi tipar de bug ca la sample_current_prices
+        # (tradeall_observe.py), reparat azi mai devreme.
         try:
-            price = get_current_price_manager().get_price_value(symbol)
+            entry = get_current_price_manager().get_price(symbol)
         except Exception as e:
-            print(f"[{self.cls_name}][Eroare] get_price_value {symbol}: {e}")
+            print(f"[{self.cls_name}][Eroare] get_price {symbol}: {e}")
             return []
 
+        if not entry:
+            return []
+        ts_ms, price = entry
         if price is None:
             return []
 
-        timestamp = int(time.time())  # timestamp UTC în secunde
-        # Conversie în local
-        local_dt = datetime.fromtimestamp(timestamp)  # local time
-        local_ts_ms = int(local_dt.timestamp() * 1000)
-
-        price_entry = [local_ts_ms, price]
-
-        return [price_entry]
+        return [[int(ts_ms), price]]
 
     def get_all_symbols_from_cache(self):
         return self.symbols
@@ -882,6 +887,25 @@ class Cache24LongPriceManager(Cache24PriceManager):
             removed = before - after
             self._persisted_counts[symbol] = max(0, self._persisted_counts.get(symbol, before) - removed)
             self.compact_jsonl()
+
+    def get_remote_items(self, symbol, startTime):
+        """Folosit doar la init cand fisierul lipseste (mostenit de la parinte,
+        dar suprascris aici: parintele foloseste get_price_value(), fara
+        timestamp, marcat cu time.time() — daca pretul e inghetat la exact
+        acel moment, ar inregistra o intrare fals-proaspata. Nu putem repara
+        asta in Cache24PriceManager (cerinta: neatins), deci suprascriem doar
+        aici, pt arhivator. get_price() intoarce [timestamp_REAL, pret]."""
+        try:
+            entry = get_current_price_manager().get_price(symbol)
+        except Exception as e:
+            print(f"[{self.cls_name}][Eroare] get_price {symbol}: {e}")
+            return []
+        if not entry:
+            return []
+        ts_ms, price = entry
+        if price is None:
+            return []
+        return [[int(ts_ms), price]]
 
 
 class CachePriceLongTrendManager(CacheManagerInterface):

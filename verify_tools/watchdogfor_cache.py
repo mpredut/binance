@@ -54,9 +54,13 @@ _STALE_OVERRIDES = {
 
 
 def _cache_files():
-    """Toate cache_*.json din cachedb/ (exclude .bak/.tmp)."""
-    return sorted(p for p in _CACHE_DIR.glob("cache_*.json")
-                  if not p.name.endswith((".bak", ".tmp")))
+    """Toate cache_*.json SI cache_*.jsonl din cachedb/ (exclude .bak/.tmp/.meta).
+    21 iul: cache_24price_long_*.jsonl (arhivatorul) devenise invizibil aici
+    dupa migrarea la JSONL — glob-ul verifica DOAR .json, deci watchdog-ul nu
+    mai alerta nici macar cand arhivatorul sta oprit zile intregi."""
+    patterns = ("cache_*.json", "cache_*.jsonl")
+    files = {p for pat in patterns for p in _CACHE_DIR.glob(pat)}
+    return sorted(p for p in files if not p.name.endswith((".bak", ".tmp", ".meta")))
 
 
 def _normalize_ts_seconds(value):
@@ -77,18 +81,42 @@ def cache_freshness_seconds(path):
     if not p.exists():
         return 0.0, f"fișierul {p.name} nu există"
     newest = 0.0
-    try:
-        data = json.load(open(p))
-        if isinstance(data, dict):
-            for v in data.get("fetchtime", {}).values():
-                newest = max(newest, _normalize_ts_seconds(v))
-            if newest == 0.0:
-                # fara fetchtime (ex. cache_instant_trend): cauta "ts" per simbol
-                for v in data.values():
-                    if isinstance(v, dict):
-                        newest = max(newest, _normalize_ts_seconds(v.get("ts", 0)))
-    except Exception as e:
-        return 0.0, f"cache corupt: {e}"
+    if p.name.endswith(".jsonl"):
+        # 21 iul: json.load() pe un fisier JSONL (linie-cu-linie, nu UN obiect)
+        # arunca eroare -> raporta gresit "cache corupt" (freshness=0, alarma
+        # falsa la fiecare rulare). Citim doar COADA (fisierul poate fi zeci
+        # de MB) si luam ts-ul din ULTIMA linie completa.
+        try:
+            with open(p, "rb") as f:
+                f.seek(0, 2)
+                size = f.tell()
+                f.seek(max(0, size - 8192))
+                chunk = f.read().decode("utf-8", errors="replace")
+            lines = [l for l in chunk.split("\n") if l.strip()]
+            for line in reversed(lines):
+                try:
+                    rec = json.loads(line)
+                    ts = rec.get("i", [0])[0] if isinstance(rec.get("i"), list) else 0
+                    if ts:
+                        newest = _normalize_ts_seconds(ts)
+                        break
+                except (json.JSONDecodeError, TypeError, IndexError):
+                    continue   # posibil linia taiata de seek — incercam pe cea de dinainte
+        except OSError as e:
+            return 0.0, f"cache corupt: {e}"
+    else:
+        try:
+            data = json.load(open(p))
+            if isinstance(data, dict):
+                for v in data.get("fetchtime", {}).values():
+                    newest = max(newest, _normalize_ts_seconds(v))
+                if newest == 0.0:
+                    # fara fetchtime (ex. cache_instant_trend): cauta "ts" per simbol
+                    for v in data.values():
+                        if isinstance(v, dict):
+                            newest = max(newest, _normalize_ts_seconds(v.get("ts", 0)))
+        except Exception as e:
+            return 0.0, f"cache corupt: {e}"
     if newest > 0.0:
         return newest, "continut"
     try:
