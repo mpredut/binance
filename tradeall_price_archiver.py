@@ -43,6 +43,12 @@ def main():
     p.add_argument("--months", type=float, default=6.0, help="retentie, in luni (implicit 6)")
     p.add_argument("--sync-ts", type=float, default=0.8,
                     help="cadenta nominala de sampling, ca la tradeall.py (implicit 0.8s)")
+    p.add_argument("--save-every", type=float, default=60.0,
+                    help="cadenta de SCRIERE pe disc a cache24_long (implicit 60s; NU sync_ts — "
+                         "acela ramane rapid pt fallback-ul HTTP al pretului curent). "
+                         "21 iul: la 0.8s (=sync_ts reutilizat gresit) rescria fisierul intreg "
+                         "(19.6MB BTC) de ~75x/minut -> 72%% CPU sustinut, crescand pe masura ce "
+                         "arhiva creste spre 6 luni.")
     args = p.parse_args()
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
     keep_hours = args.months * 30 * 24
@@ -56,13 +62,13 @@ def main():
 
     for symbol in symbols:
         filename = os.path.join(CACHEDB_DIR, f"cache_24price_long_{symbol}.json")
-        cache = cm.Cache24PriceManager(sync_ts=args.sync_ts, symbols=[symbol], filename=filename)
+        cache = cm.Cache24PriceManager(sync_ts=args.save_every, symbols=[symbol], filename=filename)
         cache.KEEP_HOURS = keep_hours   # override per-instanta (suportat explicit in cod)
         cache.enable_save_state_to_file()   # implicit False la constructie — fara asta nu scrie pe disc
         current_price_mgr.subscribe_price(cache)
 
     print(f"[tradeall_price_archiver] pornit: {symbols} | retentie {args.months} luni "
-          f"({keep_hours:.0f}h)")
+          f"({keep_hours:.0f}h) | scriere pe disc la {args.save_every:.0f}s")
     print("[tradeall_price_archiver] scriu in cachedb/cache_24price_long_<symbol>.json "
           "(separat de cache-ul live 24h al tradeall.py)")
     print("[tradeall_price_archiver] Ctrl+C opreste.")

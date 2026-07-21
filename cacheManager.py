@@ -1,3 +1,4 @@
+import bisect
 import json
 import os
 import contextlib
@@ -759,11 +760,23 @@ class Cache24PriceManager(CacheManagerInterface):
         self._notify_price_subscribers(symbol, ts_ms, price)
 
     def _trim_old_data(self, symbol):
+        """Elimina intrarile mai vechi de KEEP_HOURS. Apelat la FIECARE tick
+        (on_price_update) -> trebuie sa fie ieftin cand nu-i nimic de eliminat
+        (cazul normal la arhiva de 6 luni, unde nimic n-a expirat inca).
+        entries e append-only in ordine crescatoare de timp (on_price_update
+        adauga mereu un singur tick cu ts=acum) -> bisect gaseste primul index
+        NEexpirat in O(log n), fara sa copieze lista daca idx=0 (nimic expirat).
+        Inainte: list comprehension completa la fiecare tick -> O(n) mereu,
+        care crestea cu arhiva (21 iul: 72% CPU sustinut la ~20MB/simbol,
+        agravandu-se spre tinta de 6 luni)."""
         cutoff_ms = int((time.time() - self.KEEP_HOURS * 3600) * 1000)
         with self.lock:
             entries = self.cache.get(symbol)
-            if entries:
-                self.cache[symbol] = [e for e in entries if e[0] >= cutoff_ms]
+            if not entries:
+                return
+            idx = bisect.bisect_left(entries, cutoff_ms, key=lambda e: e[0])
+            if idx > 0:
+                self.cache[symbol] = entries[idx:]
 
     def get_recent_entries(self, symbol: str, last_seconds: float) -> list:
         """Returnează intrările [ts_ms, price] din ultimele `last_seconds` secunde."""

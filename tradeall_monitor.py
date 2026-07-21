@@ -198,8 +198,19 @@ def load_price_series_live(symbol, days_back, include_history=True):
                 points[int(entry[0] / 1000.0)] = float(entry[1])
             except (TypeError, ValueError, IndexError):
                 continue
-    for fname in (f"cache_24price_{symbol}.json", f"cache_24price_long_{symbol}.json"):
-        for entry in _load_cachedb_price_entries(fname, symbol):
+    for entry in _load_cachedb_price_entries(f"cache_24price_{symbol}.json", symbol):
+        try:
+            points[int(entry[0] / 1000.0)] = float(entry[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+    # cache_24price_long_{symbol}.json = arhiva NEMARGINITA a lui tradeall_price_archiver.py
+    # (creste continuu spre 6 luni, ~20MB+ azi) — json.load() pe tot fisierul la FIECARE
+    # ciclu (2s) pt fereastra live era risipa pura: cache_24price_{symbol}.json de mai sus
+    # acopera deja aceeasi densitate pe <=24h (aceleasi tick-uri live). O incarcam DOAR
+    # cand chiar aduce ceva in plus (fereastra saptamana, include_history=True) — 21 iul,
+    # gasit ca sursa principala a celor 46% CPU sustinut pe tradeall_monitor.py.
+    if include_history:
+        for entry in _load_cachedb_price_entries(f"cache_24price_long_{symbol}.json", symbol):
             try:
                 points[int(entry[0] / 1000.0)] = float(entry[1])
             except (TypeError, ValueError, IndexError):
