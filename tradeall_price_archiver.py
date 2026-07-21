@@ -2,7 +2,7 @@
 """
 tradeall_price_archiver.py — captureaza pretul LIVE (acelasi stream WS
 public ca tradeall.py) intr-un cache24 SEPARAT, cu retentie LUNGA (implicit
-6 luni, --months) in loc de 24h. Scop: incepand de ACUM, acumuleaza date de
+12 luni, --months) in loc de 24h. Scop: incepand de ACUM, acumuleaza date de
 pret la rezolutie DENSA (~1s, ca live), pentru backtesting viitor mult mai
 fidel decat cache_price_{symbol}.jsonl (istoricul existent, mult mai rar —
 vezi caveat-ul din plan, sectiunea A5).
@@ -21,7 +21,7 @@ spre cateva sute de MB la tinta de 6 luni; rescrierea completa avea un cost
 care creste o data cu arhiva, JSONL scrie doar tick-urile noi.
 
 Rulare (lasa-l sa ruleze continuu, la fel ca tradeall.py insusi):
-    ./tradeall_price_archiver.py --symbols BTCUSDC,TAOUSDC --months 6
+    ./tradeall_price_archiver.py --symbols BTCUSDC,TAOUSDC --months 12
 
 Apoi, dupa ce s-a acumulat destul istoric dens:
     ./tradeall_backtest.py --symbol BTCUSDC --start <data> --source cache24 \\
@@ -45,7 +45,10 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--symbols", default="BTCUSDC,TAOUSDC",
                     help="listă separată prin virgulă (implicit: BTCUSDC,TAOUSDC)")
-    p.add_argument("--months", type=float, default=6.0, help="retentie, in luni (implicit 6)")
+    p.add_argument("--months", type=float, default=12.0,
+                    help="retentie, in luni (implicit 12 — 21 iul, ridicat de la 6: dupa migrarea "
+                         "la JSONL costul de scriere nu mai creste cu arhiva, iar spatiul disponibil "
+                         "(14GB liber dupa curatarea logurilor) permite un istoric mai lung)")
     p.add_argument("--sync-ts", type=float, default=0.8,
                     help="cadenta nominala de sampling, ca la tradeall.py (implicit 0.8s)")
     p.add_argument("--save-every", type=float, default=60.0,
