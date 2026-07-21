@@ -16,7 +16,6 @@ from unittest.mock import MagicMock, patch
 
 # ── mock-uri pentru dependențele externe (înainte de orice import local) ───
 _mock_bapi = MagicMock()
-_mock_bapi.quantities        = {"BTCUSDT": 0.001, "ETHUSDT": 0.01}
 _mock_bapi.get_current_price = MagicMock(return_value=60000.0)
 _mock_bapi.cancel_order      = MagicMock(return_value=True)
 _mock_bapi.cancel_expired_orders = MagicMock()

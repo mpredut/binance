@@ -35,6 +35,17 @@ class WeightLimitBlock(Exception):
     pass
 
 
+def _resolve_qty(qty):
+    """Model uniform de cantitate (21 iul): qty=None ("nu dau cantitate") ->
+    foloseste maximul PERMIS de algoritm (apply_weight_limit + clamp pe
+    balanta reala, mai jos in lant) — nu un placeholder numeric arbitrar
+    (vechiul api.quantities[symbol], inconsistent intre 1000 si 10000 USD
+    nominal, oricum irelevant: era mereu taiat de weight-limit). Unde SE DA
+    o cantitate explicita, ramane neschimbata — algoritmul tot o plafoneaza
+    ca gard de siguranta, dar intentia apelantului nu e alterata."""
+    return float("inf") if qty is None else qty
+
+
 def _maybe_wait_trend(side, symbol, wait_trend, max_wait_sec):
     """Gate de întârziere oportunistă, partajat de toate funcțiile de plasare.
     Așteaptă cât timp trendul aduce un preț mai bun (BUY: preț scade,
@@ -70,6 +81,7 @@ def _fresh_price(symbol):
 
 def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
     from . import bapi_allorders as apiorders
+    required_qty = _resolve_qty(required_qty)
     try:
         # weight din permisiuni
         weight = pa.get_weight_for_cash_permission_at_quant_time(symbol, order_type)
@@ -112,7 +124,10 @@ def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
         print(f"apply_weight_limit: Error: {e}, order_type {order_type} and {symbol}")
         return required_qty
 
-def manage_quantity(order_type, symbol, required_qty, price_to_be_traded, cancelorders=False, hours=5):
+def manage_quantity(order_type, symbol, required_qty=None, price_to_be_traded=None, cancelorders=False, hours=5):
+    # required_qty=None -> _resolve_qty (in apply_weight_limit) foloseste maximul
+    # permis; required_qty rescris mai jos cu valoarea deja plafonata, deci restul
+    # functiei lucreaza mereu cu un numar real, niciodata None.
 
     current_price = api.get_current_price(symbol)
                 
@@ -403,10 +418,11 @@ def place_order(order_type, symbol, price, qty, force=False, cancelorders=False,
 from decimal import Decimal, ROUND_DOWN
 # Gate-ul de trend e MEREU activ la acest nivel (ultimul, comun tuturor tipurilor
 # de ordin). max_wait_sec = 1h. Nu se mai expune în API-urile de mai sus.
-def __place_order(order_type, symbol, price, qty, force=False, cancelorders=False, hours=5,
+def __place_order(order_type, symbol, price, qty=None, force=False, cancelorders=False, hours=5,
                   fee_percentage=0.001, wait_trend=True, max_wait_sec=3600.0):
 
     order_type = order_type.upper()
+    qty = _resolve_qty(qty)   # None = fara cantitate ceruta -> maximul permis de algoritm (defense in depth)
     sym.validate_params(order_type, symbol, price, qty)
         
     try:
@@ -490,9 +506,10 @@ def __place_order(order_type, symbol, price, qty, force=False, cancelorders=Fals
     #    return None
 
 
-def place_safe_order(order_type, symbol, price, qty, safeback_seconds=48*3600+60, force=False, cancelorders=False, hours=5, fee_percentage=0.001, bypass_profit_guard=False, _reason_out=None):
+def place_safe_order(order_type, symbol, price, qty=None, safeback_seconds=48*3600+60, force=False, cancelorders=False, hours=5, fee_percentage=0.001, bypass_profit_guard=False, _reason_out=None):
 
     order_type = order_type.upper()
+    qty = _resolve_qty(qty)   # None = fara cantitate ceruta -> maximul permis de algoritm
     sym.validate_params(order_type, symbol, price, qty)
 
     ok, reason = if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=safeback_seconds, max_daily_trades=25, profit_percentage = order_guard.margin_for("binance"), bypass_profit_guard=bypass_profit_guard)
@@ -531,9 +548,10 @@ def _log_order_outcome(symbol, side, price, qty, outcome, refuse_reason, motivat
         print(f"[_log_order_outcome] eroare scriere jurnal outcome: {e}")
 
 
-def place_order_smart(order_type, symbol, price, qty, safeback_seconds=48*3600+60, force=False, cancelorders=True, hours=5, pair=True, motivation=None):
+def place_order_smart(order_type, symbol, price, qty=None, safeback_seconds=48*3600+60, force=False, cancelorders=True, hours=5, pair=True, motivation=None):
 
     order_type = order_type.upper()
+    qty = _resolve_qty(qty)   # None = fara cantitate ceruta -> maximul permis de algoritm
     sym.validate_params(order_type, symbol, price, qty)
     pair = False
     reason_holder = {}

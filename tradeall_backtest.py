@@ -43,6 +43,11 @@ class _SimClock:
 
 
 FEE_PCT = 0.1   # comision spot Binance ~0.1% per leg (taker)
+# marime standard de pozitie pt simulare (kalman-primary + benchmark buy&hold) —
+# 21 iul: inlocuieste ta.api.quantities[symbol] (eliminat din bapi.py, era doar
+# un placeholder mereu taiat de weight-limit in live, dar aici chiar avem nevoie
+# de un NUMAR REAL, fix, ca sa comparam onest intre variante pe acelasi volum.
+BACKTEST_NOTIONAL_USD = 1000.0
 
 
 class BacktestBroker:
@@ -252,7 +257,7 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
                 ktrend = shadow_fields.get("kalman_trend", prev_ktrend)
                 if ktrend != prev_ktrend:
                     if ktrend == 1:
-                        broker.place_order_smart("BUY", symbol, price, ta.api.quantities[symbol],
+                        broker.place_order_smart("BUY", symbol, price, BACKTEST_NOTIONAL_USD / price,
                                                   motivation="kalman_up")
                     elif ktrend == -1:
                         broker.sell_all(symbol, price, motivation="kalman_down")
@@ -284,7 +289,7 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
     pnl = broker.pnl_summary()
     if first_price and broker.last_price:
         # benchmark: buy&hold pe aceeasi cantitate standard, acelasi interval
-        bh_qty = ta.api.quantities.get(symbol, 0)
+        bh_qty = BACKTEST_NOTIONAL_USD / first_price if first_price else 0
         pnl["buy_hold_net"] = round((broker.last_price - first_price) * bh_qty
                                      - 2 * bh_qty * first_price * FEE_PCT / 100, 2)
     pnl["mode"] = "kalman_primary" if kalman_primary else "model_actual"
