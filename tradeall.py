@@ -91,6 +91,15 @@ GATE_STALE_SEC = 300
 # complet BUY-urile TAO; permissive blocheaza doar contra-trend (DOWN confirmat).
 GATE_MODE_DEFAULTS = {"TAOUSDC": "permissive"}
 
+# KALMAN-PRIMAR (19 iul, pe cifre A/B 4 zile: BTC net +6.62$ vs 0$ model actual
+# si -3.97$ buy&hold): Kalman INITIAZA ordine la tranzitii, DOAR pe simbolurile
+# de mai jos. Iesirile raman pe mecanismele existente ale flotei (monitortrades/
+# trailing/profit-guard); ordinele trec prin _fire_order => TOATE garzile
+# (weight-limit, buget zilnic, cooldown, profit-guard) + gate-ul raman active.
+# Env: KALMAN_PRIMARY_SYMBOLS="BTCUSDC,TAOUSDC" sau "" (dezactivat).
+KALMAN_PRIMARY_SYMBOLS = set(
+    s.strip() for s in os.environ.get("KALMAN_PRIMARY_SYMBOLS", "BTCUSDC").split(",") if s.strip())
+
 
 def _kalman_gate_blocks(symbol, action):
     mode = (os.environ.get(f"KALMAN_GATE_MODE_{symbol}")
@@ -113,19 +122,22 @@ def _kalman_gate_blocks(symbol, action):
 def _fire_order(symbol, action, price, reason, **kwargs):
     """Wrapper peste place_order_smart: paseaza motivul declansarii (Pas A2)
     — executarea/refuzul se jurnalizeaza centralizat in bapi_placeorder.py.
-    KALMAN GATE: ordinul pleaca spre executie DOAR daca trece de gate."""
+    KALMAN GATE: ordinul pleaca spre executie DOAR daca trece de gate.
+    NU se da cantitate (21 iul, model uniform) — place_order_smart(qty=None)
+    foloseste maximul permis de apply_weight_limit + clamp pe balanta reala;
+    vechiul api.quantities[symbol] era doar un placeholder numeric arbitrar
+    ($1000/$10000 nominal, inconsistent), oricum mereu taiat de acelasi gard."""
     blocked, mode, trend = _kalman_gate_blocks(symbol, action)
     if blocked:
         print(f"[KALMAN-GATE] {action} {symbol} BLOCAT (kalman_trend={trend}, mode={mode}, motiv={reason})")
         try:
             logger_fn = GATE_OUTCOME_LOG or po._log_order_outcome
-            logger_fn(symbol, action, price, api.quantities[symbol],
+            logger_fn(symbol, action, price, None,
                       "refused", f"kalman_gate_{mode}(trend={trend})", reason)
         except Exception as _e:  # noqa: BLE001
             print(f"[KALMAN-GATE] eroare jurnal ({_e}) — blocarea ramane")
         return None
-    return po.place_order_smart(action, symbol, price, api.quantities[symbol],
-                                 motivation=reason, **kwargs)
+    return po.place_order_smart(action, symbol, price, motivation=reason, **kwargs)
 
 
 def track_and_place_order(action, symbol, count, proposed_price, current_price, order_ids=None):
@@ -623,12 +635,34 @@ class TrendCoordinator:
             try:
                 win = self.instant_mgr.get_window(symbol)
                 win_big = self.instant_mgr.get_window(symbol, self.instant_mgr.window_big_sec)
-                fields.update(self._shadow.update(
+                prev_ktrend = fields_prev_ktrend = None
+                st_prev = self._shadow._state.get(symbol)
+                if st_prev:
+                    prev_ktrend = st_prev.get("kalman_trend")
+                shadow_fields = self._shadow.update(
                     symbol, snapshot["ts"], current_price,
                     epsilon=win.get_noise_epsilon(),
                     big_prices=list(win_big.prices),
                     big_sample_rate=win_big.sample_rate_sec,
-                ))
+                )
+                fields.update(shadow_fields)
+                # KALMAN-PRIMAR: la tranzitie de trend, initiaza ordin (doar simbolurile
+                # activate; garzile + gate-ul din _fire_order raman singurele care decid
+                # daca banii chiar se misca).
+                new_ktrend = shadow_fields.get("kalman_trend")
+                if (symbol in KALMAN_PRIMARY_SYMBOLS and prev_ktrend is not None
+                        and new_ktrend != prev_ktrend):
+                    d, h = 14, 24
+                    if new_ktrend == 1:
+                        print(f"[KALMAN-PRIMAR] {symbol} ->UP: initiez BUY")
+                        _fire_order(symbol, "BUY", current_price, "kalman_primary_up",
+                                    safeback_seconds=d*h*3600+60, force=False,
+                                    cancelorders=True, hours=1)
+                    elif new_ktrend == -1:
+                        print(f"[KALMAN-PRIMAR] {symbol} ->DOWN: initiez SELL")
+                        _fire_order(symbol, "SELL", current_price, "kalman_primary_down",
+                                    safeback_seconds=d*h*3600+60, force=False,
+                                    cancelorders=True, hours=1)
             except Exception as _e:  # noqa: BLE001
                 print(f"[TrendCoordinator] eroare shadow {symbol} (continui): {_e}")
         self.instant_mgr.update_snapshot(symbol, **fields)
@@ -681,8 +715,6 @@ if __name__ == "__main__":
         sync_ts=TIME_SLEEP_GET_PRICE,
     )
     cache24_managers = cm.CacheFactory.get("Price24")   # dict {symbol: Cache24PriceManager}
-
-    print(f"Quantities: {api.quantities}")
 
     # Managerul de trend: deține ferestrele, calculează trendul, cache cross-process.
     instant_mgr = cm.get_short_trend_manager()
