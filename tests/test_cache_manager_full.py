@@ -574,13 +574,11 @@ class TestCacheCurrentPriceManager(unittest.TestCase):
         api_mock = MagicMock()
         api_mock.get_current_price.return_value = price
         fname = _tmp_file(self.tmp, "cache_currentprice.json")
+        # market_api=api_mock: fetch-ul HTTP trece acum prin fațada market-data
+        # (injectabilă în teste), nu prin api_client direct.
         return cm.CacheCurrentPriceManager(
             sync_ts=9999, symbols=["BTC"], filename=fname,
-            ws_manager=None, api_client=api_mock,
-            # get_remote_items() foloseste facada market_api (Faza 2a), nu api_client
-            # direct — fara asta fetch-ul real ar cadea pe singleton-ul REAL din
-            # providers/market_api.py in loc de mock.
-            market_api=api_mock,
+            ws_manager=None, api_client=api_mock, market_api=api_mock
         ), api_mock
 
     # ── on_items_update ───────────────────────────────────────────────────────

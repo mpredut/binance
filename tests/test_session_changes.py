@@ -88,12 +88,7 @@ def _make_current_price_manager(tmp_dir, price=50000.0):
         filename=filename,
         ws_manager=None,
         api_client=mock_bapi,
-        # 21 iul: get_remote_items() ruleaza acum prin facada market_api (Faza 2a),
-        # nu prin api_client direct — fara asta, mock_bapi.get_current_price nu mai
-        # e apelat niciodata (fetch-ul real ar cadea pe providers/market_api.api,
-        # singleton-ul REAL) si assert_called()-urile de mai jos ar pica silentios
-        # in providers reale in loc de mock.
-        market_api=mock_bapi,
+        market_api=mock_bapi,   # fetch-ul HTTP trece prin fațada market-data (injectabilă)
     )
     mgr.enable_save_state_to_file()
     return mgr
@@ -294,7 +289,7 @@ class TestIntegration(unittest.TestCase):
         # nou manager din același fișier
         mgr2 = cm.CacheCurrentPriceManager(
             sync_ts=9999, symbols=SYMBOLS,
-            filename=self.cur.filename, api_client=mock_bapi,
+            filename=self.cur.filename, api_client=mock_bapi, market_api=mock_bapi,
         )
         # citim direct din cache (nu prin get_price care are staleness check)
         with mgr2.lock:

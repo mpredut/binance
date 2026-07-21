@@ -1,0 +1,39 @@
+#!/bin/bash
+# ntfy_check.sh — verifică topicurile ntfy pentru mesaje de ALARMĂ (monitorizare de pe dev,
+# fără SSH la server). Folosit manual sau de jobul de monitorizare al sesiunii Claude.
+# Usage: ./ntfy_check.sh [since]   (default: 40m; ex. 12h)
+set -u
+cd "$(dirname "$0")"
+SINCE="${1:-40m}"
+
+# citește din .env fără să expună secretele în output
+PHONE_URL=$(grep -E '^\s*(export\s+)?PHONE_ALERT_URL=' .env | tail -1 | cut -d= -f2- | tr -d '" ')
+NT_TOPIC=$(grep -E '^\s*(export\s+)?NTFY_TOPIC=' .env | tail -1 | cut -d= -f2- | tr -d '" ')
+
+check_url() {
+    local url="$1" label="$2"
+    [ -z "$url" ] && { echo "$label: (topic lipsă în .env)"; return; }
+    curl -s -m 15 "$url/json?poll=1&since=$SINCE" | .venv/bin/python -c "
+import sys, json, datetime
+alarms, info = [], 0
+for line in sys.stdin:
+    line = line.strip()
+    if not line: continue
+    try: m = json.loads(line)
+    except Exception: continue
+    if m.get('event') != 'message': continue
+    title = (m.get('title') or ''); body = (m.get('message') or '')[:100]
+    ts = datetime.datetime.fromtimestamp(m.get('time', 0)).strftime('%d %H:%M')
+    low = (title + ' ' + body).lower()
+    if any(k in low for k in ('moarte','hung','oprit','stale','eroare','error','fail','crash','absent')):
+        alarms.append(f'{ts} [{title}] {body}')
+    else:
+        info += 1
+print(f'$label: informative={info} ALARME={len(alarms)}')
+for a in alarms[-8:]:
+    print('  !! ' + a)
+"
+}
+
+check_url "$PHONE_URL" "crypto-alerts"
+check_url "https://ntfy.sh/$NT_TOPIC" "flota/healthcheck"
