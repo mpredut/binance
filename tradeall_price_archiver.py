@@ -9,18 +9,23 @@ vezi caveat-ul din plan, sectiunea A5).
 
 NU atinge tradeall.py si NU scrie in cache_24price_{symbol}.json (fisierul
 LIVE folosit de tradeall pentru decizii) — scrie separat, in
-cachedb/cache_24price_long_{symbol}.json. Proces SEPARAT, cu propria
+cachedb/cache_24price_long_{symbol}.jsonl. Proces SEPARAT, cu propria
 conexiune WS (stream public de piata, fara chei API) — sigur sa ruleze in
-paralel cu tradeall.py; reutilizeaza Cache24PriceManager (cacheManager.py)
-neschimbat, doar cu KEEP_HOURS suprascris per instanta (deja documentat in
-cod ca fiind suportat: "configurabil per instanta daca e nevoie").
+paralel cu tradeall.py.
+
+21 iul: foloseste Cache24LongPriceManager (cacheManager.py) — clasa DEDICATA
+acestui script, separata de Cache24PriceManager (cea din tradeall.py, complet
+neatinsa). Persista JSONL (scriere incrementala) in loc de JSON complet
+rescris la fiecare salvare — arhiva a ajuns la ~20MB/simbol si tot creste
+spre cateva sute de MB la tinta de 6 luni; rescrierea completa avea un cost
+care creste o data cu arhiva, JSONL scrie doar tick-urile noi.
 
 Rulare (lasa-l sa ruleze continuu, la fel ca tradeall.py insusi):
     ./tradeall_price_archiver.py --symbols BTCUSDC,TAOUSDC --months 6
 
 Apoi, dupa ce s-a acumulat destul istoric dens:
     ./tradeall_backtest.py --symbol BTCUSDC --start <data> --source cache24 \\
-        --cache24-file cachedb/cache_24price_long_BTCUSDC.json
+        --cache24-file cachedb/cache_24price_long_BTCUSDC.jsonl
 """
 import argparse
 import os
@@ -61,15 +66,15 @@ def main():
     )
 
     for symbol in symbols:
-        filename = os.path.join(CACHEDB_DIR, f"cache_24price_long_{symbol}.json")
-        cache = cm.Cache24PriceManager(sync_ts=args.save_every, symbols=[symbol], filename=filename)
+        filename = os.path.join(CACHEDB_DIR, f"cache_24price_long_{symbol}.jsonl")
+        cache = cm.Cache24LongPriceManager(sync_ts=args.save_every, symbols=[symbol], filename=filename)
         cache.KEEP_HOURS = keep_hours   # override per-instanta (suportat explicit in cod)
         cache.enable_save_state_to_file()   # implicit False la constructie — fara asta nu scrie pe disc
         current_price_mgr.subscribe_price(cache)
 
     print(f"[tradeall_price_archiver] pornit: {symbols} | retentie {args.months} luni "
           f"({keep_hours:.0f}h) | scriere pe disc la {args.save_every:.0f}s")
-    print("[tradeall_price_archiver] scriu in cachedb/cache_24price_long_<symbol>.json "
+    print("[tradeall_price_archiver] scriu in cachedb/cache_24price_long_<symbol>.jsonl "
           "(separat de cache-ul live 24h al tradeall.py)")
     print("[tradeall_price_archiver] Ctrl+C opreste.")
 

@@ -156,11 +156,37 @@ def load_price_samples(symbol, days_back):
     return ts_list, px_list
 
 
-def _load_cachedb_price_entries(filename, symbol):
-    """Citeste [[ts_ms, price], ...] dintr-un fisier cache24-format din cachedb/."""
+def _load_cachedb_price_entries(filename, symbol, max_bytes=4 * 1024 * 1024):
+    """Citeste [[ts_ms, price], ...] dintr-un fisier cache24-format din cachedb/.
+    .jsonl (21 iul: cache_24price_long_* a trecut la JSONL, scriere incrementala
+    — vezi Cache24LongPriceManager) — citim doar coada (max_bytes), la fel ca
+    _load_history_jsonl_tail: fisierul creste spre sute de MB, dar fereastra
+    saptamana (singurul apelant) n-are nevoie de tot istoricul, doar de coada.
+    .json (formatul vechi, inca folosit de cache-ul LIVE 24h) — neschimbat."""
     path = os.path.join(ROOT, "cachedb", filename)
     if not os.path.exists(path):
         return []
+    if filename.endswith(".jsonl"):
+        entries = []
+        try:
+            with open(path, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                f.seek(max(0, size - max_bytes))
+                data = f.read().decode("utf-8", errors="replace")
+            lines = data.split("\n")[1:] if size > max_bytes else data.split("\n")
+            for line in lines:
+                if not line.strip():
+                    continue
+                try:
+                    rec = json.loads(line)
+                    if rec.get("s") == symbol:
+                        entries.append(rec["i"])
+                except (json.JSONDecodeError, KeyError, TypeError):
+                    continue
+        except OSError:
+            return []
+        return entries
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -202,7 +228,7 @@ def load_price_series_live(symbol, days_back, include_history=True):
     """Linia de pret pentru modul LIVE, din TOATE sursele deja existente,
     imbinata si sortata — graficul e plin din prima clipa, nu asteapta ca
     monitorul sa-si acumuleze propriile esantioane:
-      1. cachedb/cache_24price_long_{s}.json — arhivatorul (dens, retentie lunga)
+      1. cachedb/cache_24price_long_{s}.jsonl — arhivatorul (dens, retentie lunga)
       2. cachedb/cache_24price_{s}.json      — cache-ul live al flotei (dens, 24h)
       3. cachedb/cache_price_{s}.jsonl       — istoricul lung (rar ~7min/tick, doar coada)
       4. logger/tradeall_price_samples_*.log — esantioanele proprii (fallback/umplere)
@@ -229,14 +255,15 @@ def load_price_series_live(symbol, days_back, include_history=True):
             points[int(entry[0] / 1000.0)] = float(entry[1])
         except (TypeError, ValueError, IndexError):
             continue
-    # cache_24price_long_{symbol}.json = arhiva NEMARGINITA a lui tradeall_price_archiver.py
-    # (creste continuu spre 6 luni, ~20MB+ azi) — json.load() pe tot fisierul la FIECARE
-    # ciclu (2s) pt fereastra live era risipa pura: cache_24price_{symbol}.json de mai sus
-    # acopera deja aceeasi densitate pe <=24h (aceleasi tick-uri live). O incarcam DOAR
-    # cand chiar aduce ceva in plus (fereastra saptamana, include_history=True) — 21 iul,
-    # gasit ca sursa principala a celor 46% CPU sustinut pe tradeall_observe.py.
+    # cache_24price_long_{symbol}.jsonl = arhiva NEMARGINITA a lui tradeall_price_archiver.py
+    # (creste continuu spre 6 luni, ~23MB+ azi, format JSONL de la 21 iul) — parsarea
+    # completa la FIECARE ciclu (2s) pt fereastra live era risipa pura: cache_24price_
+    # {symbol}.json de mai sus acopera deja aceeasi densitate pe <=24h (aceleasi tick-uri
+    # live). O incarcam DOAR cand chiar aduce ceva in plus (fereastra saptamana,
+    # include_history=True) — 21 iul, gasit ca sursa principala a celor 46% CPU
+    # sustinut pe tradeall_observe.py.
     if include_history:
-        for entry in _load_cachedb_price_entries(f"cache_24price_long_{symbol}.json", symbol):
+        for entry in _load_cachedb_price_entries(f"cache_24price_long_{symbol}.jsonl", symbol):
             try:
                 points[int(entry[0] / 1000.0)] = float(entry[1])
             except (TypeError, ValueError, IndexError):

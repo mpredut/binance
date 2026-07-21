@@ -835,6 +835,55 @@ class Cache24PriceManager(CacheManagerInterface):
         return False
 
 
+class Cache24LongPriceManager(Cache24PriceManager):
+    """Varianta DEDICATA arhivatorului (tradeall_price_archiver.py, retentie
+    6 luni) — persistenta JSONL (scriere incrementala) in loc de JSON complet
+    rescris la fiecare salvare. Clasa SEPARATA de Cache24PriceManager (cea
+    folosita de tradeall.py pt cache-urile LIVE de 24h) — zero linii schimbate
+    acolo, zero risc pt trading real. Mostenește neschimbat on_price_update/
+    KEEP_HOURS de la parinte; suprascrie doar ce tine de persistenta.
+
+    De ce: arhiva a ajuns la ~20MB/simbol, crescand spre cateva sute de MB la
+    tinta de 6 luni. Cache24PriceManager (parintele) rescrie tot fisierul din
+    memorie la fiecare salvare (60s) — cost care creste o data cu arhiva.
+    JSONL scrie doar tick-urile noi, cost constant indiferent de istoric.
+
+    _trim_old_data (mostenit neschimbat de la parinte) elimina intrari VECHI
+    de la INCEPUTUL listei. JSONL-ul de baza (_save_jsonl_append) tine minte
+    doar CATE intrari a scris deja per simbol (_persisted_counts) — presupune
+    ca lista creste DOAR la coada, niciodata nu se scurteaza de la inceput.
+    Daca trim-ul ar elimina ceva fara ajustare, urmatoarea salvare ar DUPLICA
+    la coada intrarile ramase (crede ca-s inca nescrise). Suprascriem
+    _trim_old_data DOAR ca sa recompactam cand chiar se taie ceva (rar — nimic
+    nu-i mai vechi de 6 luni inca, deci in practica nu se intampla curand)."""
+
+    def __init__(self, sync_ts, symbols, filename, api_client=api):
+        # NU chemam super() (Cache24PriceManager.__init__): el nu expune
+        # append_persist si l-ar fixa la False INAINTE sa apuc sa-l setez eu —
+        # load_state() ruleaza in interiorul acelui __init__, prea devreme.
+        # Chemam bunicul (CacheManagerInterface) direct, cu append_persist=True
+        # din start (fara sa schimbam vreo linie in Cache24PriceManager).
+        CacheManagerInterface.__init__(self, sync_ts, symbols, filename,
+                                        append_mode=True, api_client=api_client,
+                                        append_persist=True)
+        # replicat manual din Cache24PriceManager.__init__ (curata simboluri straine
+        # dintr-un fisier vechi redundant — acelasi motiv, acelasi cod, doar copiat
+        # ca sa nu trebuiasca sa apelam super()).
+        with self.lock:
+            self.cache = {s: v for s, v in self.cache.items() if s in self.symbols}
+
+    def _trim_old_data(self, symbol):
+        with self.lock:
+            before = len(self.cache.get(symbol, []))
+        super()._trim_old_data(symbol)   # logica de taiere neschimbata, mostenita
+        with self.lock:
+            after = len(self.cache.get(symbol, []))
+        if after < before:
+            removed = before - after
+            self._persisted_counts[symbol] = max(0, self._persisted_counts.get(symbol, before) - removed)
+            self.compact_jsonl()
+
+
 class CachePriceLongTrendManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=False)

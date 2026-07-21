@@ -143,13 +143,31 @@ def load_ticks_history(symbol, start_ts, end_ts):
 def load_ticks_cache24(symbol, start_ts, end_ts, filename=None):
     """Citeste cache_24price_{symbol}.json (sau un cache24 cu retentie lunga,
     daca filename e dat) — rezolutie DENSA (~1s/tick, ca live), dar limitata
-    la ce a retinut acel cache (implicit doar ultimele ~24h)."""
+    la ce a retinut acel cache (implicit doar ultimele ~24h).
+    .jsonl (21 iul: cache_24price_long_*.jsonl, arhivatorul — vezi
+    Cache24LongPriceManager) — format linie-cu-linie, citit integral aici
+    (backtest-ul oricum parcurge tot intervalul cerut, spre deosebire de
+    tradeall_observe.py care citeste doar coada pt un grafic)."""
     path = filename or os.path.join(ROOT, "cachedb", f"cache_24price_{symbol}.json")
     if not os.path.exists(path):
         raise FileNotFoundError(f"Nu gasesc {path} (cache24 pentru {symbol})")
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    entries = data.get("items", {}).get(symbol, [])
+    if str(path).endswith(".jsonl"):
+        entries = []
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get("s") == symbol:
+                    entries.append(rec["i"])
+    else:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        entries = data.get("items", {}).get(symbol, [])
     for ts_ms, price in entries:
         ts = ts_ms / 1000.0
         if ts < start_ts:
@@ -319,7 +337,7 @@ def main():
                         "acel cache (implicit ultimele ~24h, sau un fisier cu retentie lunga daca "
                         "ruleaza deja tradeall_price_archiver.py)")
     p.add_argument("--cache24-file", default=None,
-                   help="cale explicita catre un fisier cache24 (ex. cache_24price_long_BTCUSDC.json); "
+                   help="cale explicita catre un fisier cache24 (ex. cache_24price_long_BTCUSDC.jsonl); "
                         "implicit: cachedb/cache_24price_<symbol>.json")
     p.add_argument("--quiet", action="store_true",
                    help="suprima print()-urile zgomotoase ale tradeall.logic() (mult mai rapid pe "
