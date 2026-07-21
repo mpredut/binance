@@ -414,11 +414,20 @@ class CacheManagerInterface(ABC):
         return 0
 
     def maintain_append_persist(self):
-        """Mentenanță periodică (săptămânal) pentru cache-uri append:
-          1. PRUNE: șterge intrările mai vechi de RETENTION_DAYS.
-          2. ROTAȚIE: dacă fișierul > MAX_FILE_BYTES → arhivează (alt nume) și
-             păstrează doar ultimele ROTATE_KEEP_FRACTION în fișierul curent."""
-        if not self.append_persist:
+        """Mentenanță periodică (săptămânal) pentru cache-uri append (append_mode=True):
+          1. PRUNE: șterge intrările mai vechi de RETENTION_DAYS — pt ORICE cache
+             append, nu doar JSONL (_entry_timestamp_ms e deja generic: dict cu
+             time/timestamp SAU [ts, val]).
+          2. ROTAȚIE pe mărime: doar pt JSONL (append_persist) — _rotate_keep_latest
+             foloseste compact_jsonl, specific formatului JSONL. Pt clasele cu JSON
+             complet (trade/order/asset_value), tinta MAX_FILE_BYTES (~1GB) e oricum
+             ireal de departe la ritmul lor de crestere (ani, nu zile) — retentia pe
+             TIMP (pasul 1) e cea care conteaza efectiv acolo.
+        21 iul: rulează acum pt orice append_mode=True (nu doar append_persist) —
+        gasit CacheTradeManager/CacheOrderManager/CacheAssetValueManager crescand
+        nemarginit, fara nicio retentie, pt ca inainte pasul asta rula DOAR pt
+        clasele JSONL."""
+        if not self.append_mode:
             return
         # 1) prune time-based
         cutoff_ms = int((time.time() - self.RETENTION_DAYS * 24 * 3600) * 1000)
@@ -431,8 +440,13 @@ class CacheManagerInterface(ABC):
                     changed = True
         if changed:
             builtins.print(f"[{self.cls_name}][maintain] prune >{self.RETENTION_DAYS}z din {self.filename}")
-            self.compact_jsonl()
-        # 2) rotație size-based
+            if self.append_persist:
+                self.compact_jsonl()
+            else:
+                self.save_state_to_file()   # rescriere completa, normala pt clasele astea
+        # 2) rotație size-based — doar JSONL (vezi docstring)
+        if not self.append_persist:
+            return
         try:
             if os.path.exists(self.filename) and os.path.getsize(self.filename) > self.MAX_FILE_BYTES:
                 self._rotate_keep_latest()
@@ -566,8 +580,12 @@ class CacheManagerInterface(ABC):
                     if (time.time() - last_resync) > self.RESYNC_INTERVAL_SEC:
                         self.resync_mem_file()
                         last_resync = time.time()
-                    # Mentenanță retenție/rotație (append): săptămânal
-                    if self.append_persist and (time.time() - last_maint) > self.RETENTION_CHECK_INTERVAL_SEC:
+                    # Mentenanță retenție/rotație (append): săptămânal. Pt ORICE cache
+                    # append_mode=True (nu doar JSONL/append_persist) — 21 iul, gasit
+                    # CacheTradeManager/CacheOrderManager/CacheAssetValueManager fara
+                    # nicio retentie reala (append_mode=True dar append_persist=False,
+                    # deci RETENTION_DAYS din clasa de baza nu se aplica niciodata).
+                    if self.append_mode and (time.time() - last_maint) > self.RETENTION_CHECK_INTERVAL_SEC:
                         self.maintain_append_persist()
                         last_maint = time.time()
                 except Exception as _e:   # erori tranzitorii (retea/HTTP) NU mai omoara thread-ul de sync
