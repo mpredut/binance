@@ -20,7 +20,9 @@ trap 'rm -f "$CONF"' EXIT
 # GLOB per director cunoscut (nu lista hardcodata -> orice log nou e acoperit AUTOMAT,
 # fara sa trebuiasca adaugat manual). Directoare distincte => fara suprapuneri (logrotate
 # da eroare la fisier dublu). NU folosim */*.log (ar prinde myenv/venv). NU includem
-# logger/ (rotit de logging.py insusi). copytruncate: botii tin fisierul deschis.
+# logger/*.log in general (fisierele CU DATA in nume — tradeall_2026-07-21.log etc. —
+# sunt rotite singure prin schimbare de fisier la miezul noptii, logging.py insusi).
+# copytruncate: botii tin fisierul deschis.
 {
     cat <<EOF
 $ROOT/logs/*.log
@@ -29,6 +31,25 @@ $ROOT/hyperliquid/*.log
 $ROOT/212trading/*.log
 $ROOT/binance_api/*.log
 $ROOT/*.log
+{
+    size 20M
+    rotate 3
+    missingok
+    notifempty
+    compress
+    copytruncate
+}
+EOF
+    # 21 iul: scripturi STANDALONE (nu fleet, nu boti) redirectate cu nohup >> catre
+    # fisiere cu NUME FIX in logger/ (nu au data in nume, deci NU se auto-gestioneaza
+    # ca restul lui logger/) — gasit crescand nemarginit: tradeall_price_archiver.log
+    # a ajuns la 324MB in ~4.5 ore (arhivatorul printeaza detaliat la fiecare tick).
+    # Lista explicita (nu glob pe tot logger/, ca sa NU atingem fisierele cu data).
+    cat <<EOF
+$ROOT/logger/tradeall_price_archiver.log
+$ROOT/logger/tradeall_monitor.log
+$ROOT/logger/tradeall_observe.log
+$ROOT/logger/http_server.log
 {
     size 20M
     rotate 3
