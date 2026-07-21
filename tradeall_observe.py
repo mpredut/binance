@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-tradeall_monitor.py — monitor SEPARAT, observational, pentru modelul de
+tradeall_observe.py — monitor SEPARAT, observational, pentru modelul de
 trend al tradeall. NU importa si NU porneste tradeall.py / bapi_placeorder.py
 — citeste doar fisiere text (pipe-delimited) din logger/ si cache_instant_trend.json.
 
@@ -15,11 +15,11 @@ Mod LIVE (implicit), in bucla (implicit 5s):
   5. Scrie tradeall_live.html static (auto-refresh + toggle zi/saptamana).
 
 Rulare manuala (LIVE):
-    ./tradeall_monitor.py [--symbols BTCUSDC,TAOUSDC] [--interval 5]
+    ./tradeall_observe.py [--symbols BTCUSDC,TAOUSDC] [--interval 5]
     apoi deschide tradeall_live.html intr-un browser (local sau prin ngrok).
 
 Mod BACKTEST (randeaza rezultatele unui run tradeall_backtest.py, A5):
-    ./tradeall_monitor.py --backtest-dir logger/backtest/<run_id> --symbols BTCUSDC
+    ./tradeall_observe.py --backtest-dir logger/backtest/<run_id> --symbols BTCUSDC
     (fara esantionare live; citeste fisierele FLATE din acel folder, fereastra
     = tot intervalul reluat pana acum; scrie PNG-ul in acelasi folder)
 """
@@ -62,21 +62,47 @@ def _daily_log_path(prefix, date):
     return os.path.join(LOGGER_DIR, f"{prefix}{date.isoformat()}.log")
 
 
+_PIPE_LOG_CACHE = {}   # path -> (bytes_consumati, ncols, rows) — vezi docstring
+
+
 def _read_pipe_log(path, ncols):
     """Citeste un fisier pipe-delimited; randuri malformate sunt ignorate
-    (robust la scrieri concurente/intrerupte)."""
-    rows = []
-    if not os.path.exists(path):
-        return rows
+    (robust la scrieri concurente/intrerupte).
+
+    Cache INCREMENTAL (21 iul — gasit ca sursa majora de CPU la monitor:
+    recitea 2 zile de jurnale COMPLET la fiecare ciclu de 2s, chiar daca
+    fisierele astea sunt append-only, un fisier nou pe zi). Acum tine minte
+    cati octeti s-au citit deja per fisier si parseaza DOAR partea noua;
+    o zi trecuta (fisier care nu mai creste) devine cache 100% dupa prima
+    citire — zero I/O la apelurile urmatoare. Foloseste binary+seek (nu
+    text-mode) ca sa nu depinda de subtilitati de encoding la offset."""
     try:
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                parts = line.rstrip("\n").split("|")
-                if len(parts) != ncols:
-                    continue
-                rows.append(parts)
+        size = os.path.getsize(path)
     except OSError:
-        pass
+        return []
+    cached = _PIPE_LOG_CACHE.get(path)
+    if cached and cached[1] == ncols and cached[0] == size:
+        return cached[2]                       # neschimbat -> zero I/O
+    if cached and cached[1] == ncols and size >= cached[0]:
+        offset, rows = cached[0], list(cached[2])
+    else:
+        offset, rows = 0, []                   # fisier nou/trunchiat -> de la zero
+    try:
+        with open(path, "rb") as f:
+            f.seek(offset)
+            chunk = f.read()
+    except OSError:
+        return rows
+    consumed = offset
+    for raw in chunk.splitlines(keepends=True):
+        if not raw.endswith(b"\n"):
+            break                               # linie incompleta (scriere in curs) — o reluam data viitoare
+        consumed += len(raw)
+        parts = raw.decode("utf-8", errors="replace").rstrip("\n").split("|")
+        if len(parts) != ncols:
+            continue
+        rows.append(parts)
+    _PIPE_LOG_CACHE[path] = (consumed, ncols, rows)
     return rows
 
 
@@ -94,7 +120,7 @@ def sample_current_prices(symbols):
         with open(CACHE_TREND_PATH, "r", encoding="utf-8") as f:
             snapshot = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
-        print(f"[tradeall_monitor] eroare citire cache_instant_trend.json: {e}")
+        print(f"[tradeall_observe] eroare citire cache_instant_trend.json: {e}")
         return
 
     os.makedirs(LOGGER_DIR, exist_ok=True)
@@ -111,7 +137,7 @@ def sample_current_prices(symbols):
                 # sursele vii si ar desena un "bloc" zimtat fals pe grafic.
                 f.write(f"{entry.get('ts', time.time())}|{_sanitize_field(symbol)}|{entry['current_price']}\n")
     except OSError as e:
-        print(f"[tradeall_monitor] eroare scriere esantioane pret: {e}")
+        print(f"[tradeall_observe] eroare scriere esantioane pret: {e}")
 
 
 # ── Incarcare jurnale (Pas A / A2) ────────────────────────────────────────────
@@ -208,7 +234,7 @@ def load_price_series_live(symbol, days_back, include_history=True):
     # ciclu (2s) pt fereastra live era risipa pura: cache_24price_{symbol}.json de mai sus
     # acopera deja aceeasi densitate pe <=24h (aceleasi tick-uri live). O incarcam DOAR
     # cand chiar aduce ceva in plus (fereastra saptamana, include_history=True) — 21 iul,
-    # gasit ca sursa principala a celor 46% CPU sustinut pe tradeall_monitor.py.
+    # gasit ca sursa principala a celor 46% CPU sustinut pe tradeall_observe.py.
     if include_history:
         for entry in _load_cachedb_price_entries(f"cache_24price_long_{symbol}.json", symbol):
             try:
@@ -465,9 +491,15 @@ def render_chart(symbol, window_label, window_start, window_end,
     ax.set_xlim(datetime.fromtimestamp(window_start), datetime.fromtimestamp(window_end))
     ax.set_title(f"{symbol} — {window_label}  (actualizat {datetime.now().strftime('%H:%M:%S')})")
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d %H:%M"))
-    fig.autofmt_xdate()
+    # 21 iul: fig.autofmt_xdate() + fig.tight_layout() masoara extentul textului
+    # (ticks/legenda/titlu) la FIECARE randare — profilat: ~96ms din ~360ms/apel
+    # doar tight_layout(), la o cadenta de 2s. Layout-ul nu se schimba structural
+    # intre cicluri (aceleasi fonturi/dimensiuni) -> margini FIXE, calibrate o
+    # data din tight_layout() real (fig.subplotpars dupa un run de referinta),
+    # + rotatia default a lui autofmt_xdate (30°, ha=right) fara re-masurare.
+    plt.setp(ax.get_xticklabels(), rotation=30, ha="right")
     ax.legend(loc="lower left", fontsize=8)
-    fig.tight_layout()
+    fig.subplots_adjust(left=0.065, right=0.985, top=0.92, bottom=0.16)
     fig.savefig(out_path, dpi=110)
     plt.close(fig)
 
@@ -595,7 +627,7 @@ def render_backtest_chunks(symbol, directory, chunk_hours=24, out_dir=None):
 
     all_ts = price_ts + [e["ts"] for e in trend_events] + [e["ts"] for e in order_events]
     if not all_ts:
-        print(f"[tradeall_monitor] {symbol}: inca nu sunt date pentru cadre")
+        print(f"[tradeall_observe] {symbol}: inca nu sunt date pentru cadre")
         return []
 
     chunk_sec = chunk_hours * 3600
@@ -742,7 +774,7 @@ def main():
         directory = os.path.abspath(args.backtest_dir)
         for symbol in symbols:
             paths = render_backtest_chunks(symbol, directory, chunk_hours=args.frame_hours)
-            print(f"[tradeall_monitor] {symbol}: {len(paths)} cadre generate in {directory}")
+            print(f"[tradeall_observe] {symbol}: {len(paths)} cadre generate in {directory}")
             for p in paths:
                 print(f"    {p}")
         return
@@ -752,9 +784,9 @@ def main():
         write_backtest_html(directory, symbols)
         html_path = os.path.join(directory, "tradeall_live_backtest.html")
         mode = f"fereastra glisanta {args.window_hours}h" if args.window_hours else "tot intervalul"
-        print(f"[tradeall_monitor] BACKTEST ({mode}): {directory} | simboluri: {symbols} | "
+        print(f"[tradeall_observe] BACKTEST ({mode}): {directory} | simboluri: {symbols} | "
               f"randare la {args.interval}s")
-        print(f"[tradeall_monitor] deschide in browser: {html_path}")
+        print(f"[tradeall_observe] deschide in browser: {html_path}")
         try:
             while True:
                 for symbol in symbols:
@@ -767,16 +799,16 @@ def main():
                             render_state_image(state_text,
                                                 os.path.join(directory, f"tradeall_live_{symbol}_state.png"))
                     except Exception as e:
-                        print(f"[tradeall_monitor] eroare randare {symbol}: {e}")
+                        print(f"[tradeall_observe] eroare randare {symbol}: {e}")
                 time.sleep(args.interval)
         except KeyboardInterrupt:
-            print("\n[tradeall_monitor] oprit.")
+            print("\n[tradeall_observe] oprit.")
         return
 
     write_html(symbols, live_minutes=args.live_minutes)
     html_path = os.path.join(LIVE_OUT_DIR, "tradeall_live.html")
-    print(f"[tradeall_monitor] simboluri: {symbols} | randare la {args.interval}s")
-    print(f"[tradeall_monitor] deschide in browser: {html_path}")
+    print(f"[tradeall_observe] simboluri: {symbols} | randare la {args.interval}s")
+    print(f"[tradeall_observe] deschide in browser: {html_path}")
 
     # ESALONARE: live + starea analizei la FIECARE ciclu (senzatie de real-time);
     # ziua/saptamana mai rar — la scara lor, nimic vizibil nu se schimba in 3s,
@@ -802,14 +834,14 @@ def main():
                         render_symbol_chart_live(symbol, "ultimele 7 zile", WEEK_SECONDS,
                                                   os.path.join(LIVE_OUT_DIR, f"tradeall_live_{symbol}_saptamana.png"))
                 except Exception as e:
-                    print(f"[tradeall_monitor] eroare randare {symbol}: {e}")
+                    print(f"[tradeall_observe] eroare randare {symbol}: {e}")
             if cycle_start - last_day >= args.day_refresh:
                 last_day = cycle_start
             if cycle_start - last_week >= args.week_refresh:
                 last_week = cycle_start
             time.sleep(args.interval)
     except KeyboardInterrupt:
-        print("\n[tradeall_monitor] oprit.")
+        print("\n[tradeall_observe] oprit.")
 
 
 if __name__ == "__main__":

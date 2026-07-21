@@ -13,7 +13,7 @@ Rulare:
     ./tradeall_backtest.py --symbol BTCUSDC --start 2026-06-01 --end 2026-06-08 --speed real
 
 Vizualizare (in timp ce ruleaza sau dupa): intr-un alt terminal,
-    ./tradeall_monitor.py --backtest-dir logger/backtest/<run_id> --symbols BTCUSDC
+    ./tradeall_observe.py --backtest-dir logger/backtest/<run_id> --symbols BTCUSDC
 """
 import argparse
 import json
@@ -42,24 +42,60 @@ class _SimClock:
         return self.ts
 
 
+FEE_PCT = 0.1   # comision spot Binance ~0.1% per leg (taker)
+
+
 class BacktestBroker:
     """Stub pentru po.place_order_smart: simuleaza executia (fara retea),
     scrie in propriul folder de backtest, acelasi format pipe ca order_outcomes
-    live (Pas A2) — asa incat tradeall_monitor.py sa il poata randa identic."""
+    live (Pas A2) — asa incat tradeall_observe.py sa il poata randa identic.
+    Tine si CONTABILITATE P&L: pozitie, cost mediu, realizat, comisioane."""
     def __init__(self, out_dir, clock):
         self.clock = clock
         self.path = os.path.join(out_dir, "order_outcomes.log")
         self.n_buy = self.n_sell = 0
+        self.pos_qty = 0.0
+        self.pos_cost = 0.0       # cost total al pozitiei curente (fara fee)
+        self.realized = 0.0       # profit/pierdere realizata (fara fee)
+        self.fees = 0.0
+        self.last_price = None
 
     def place_order_smart(self, order_type, symbol, price, qty, motivation=None, **kwargs):
+        price = float(price); qty = float(qty)
+        self.last_price = price
         if order_type == "BUY":
             self.n_buy += 1
+            self.pos_qty += qty
+            self.pos_cost += qty * price
+            self.fees += qty * price * FEE_PCT / 100
         else:
+            if self.pos_qty <= 1e-12:
+                return None            # nu avem ce vinde (spot) — refuz ca in realitate
+            sell_q = min(qty, self.pos_qty)
+            avg = self.pos_cost / self.pos_qty
+            self.realized += (price - avg) * sell_q
+            self.fees += sell_q * price * FEE_PCT / 100
+            self.pos_cost -= avg * sell_q
+            self.pos_qty -= sell_q
             self.n_sell += 1
         cols = [self.clock(), symbol, order_type, price, qty, "executed", "", "backtest", motivation]
         with open(self.path, "a", encoding="utf-8") as f:
             f.write("|".join(_sanitize(c) for c in cols) + "\n")
         return {"orderId": -1, "backtest": True}   # obiect truthy, ca in "if order:" din logic()
+
+    def sell_all(self, symbol, price, motivation):
+        if self.pos_qty <= 1e-12:
+            return None
+        return self.place_order_smart("SELL", symbol, price, self.pos_qty, motivation=motivation)
+
+    def pnl_summary(self):
+        m2m = 0.0
+        if self.pos_qty > 1e-12 and self.last_price:
+            m2m = (self.last_price - self.pos_cost / self.pos_qty) * self.pos_qty
+        return {"buys": self.n_buy, "sells": self.n_sell,
+                "realized": round(self.realized, 2), "fees": round(self.fees, 2),
+                "open_qty": round(self.pos_qty, 6), "mark_to_market": round(m2m, 2),
+                "net_total": round(self.realized + m2m - self.fees, 2)}
 
 
 def make_decision_logger(out_dir, clock):
@@ -118,7 +154,8 @@ def load_ticks_cache24(symbol, start_ts, end_ts, filename=None):
         yield ts, price
 
 
-def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=None, quiet=False):
+def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=None, quiet=False,
+                 kalman_primary=False):
     out_dir = os.path.join(ROOT, "logger", "backtest", run_id)
     os.makedirs(out_dir, exist_ok=True)
     price_path = os.path.join(out_dir, "tradeall_price_samples.log")
@@ -132,7 +169,16 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
 
     clock = _SimClock()
     broker = BacktestBroker(out_dir, clock)
-    ta.po.place_order_smart = broker.place_order_smart               # stub — NU atinge reteaua
+    if kalman_primary:
+        # MODUL KALMAN-PRIMAR: modelul vechi doar JURNALIZEAZA (ordinele lui nu
+        # se executa); broker-ul e condus exclusiv de tranzitiile Kalman.
+        _old_attempts = {"n": 0}
+        def _journal_only(order_type, symbol_, price_, qty_, motivation=None, **kw):
+            _old_attempts["n"] += 1
+            return None
+        ta.po.place_order_smart = _journal_only
+    else:
+        ta.po.place_order_smart = broker.place_order_smart           # stub — NU atinge reteaua
     ta.log_decision = make_decision_logger(out_dir, clock)            # redirect — NU scrie in logurile live
 
     window_small = ta.PriceWindow(symbol, 300, sample_rate_sec=ta.TIME_SLEEP_GET_PRICE,
@@ -167,6 +213,8 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
 
     prev_ts = None
     n = 0
+    first_price = None
+    prev_ktrend = 0
     with open(price_path, "a", encoding="utf-8") as price_f:
         for ts, price in tick_source:
             clock.ts = ts   # ceasul simulat = timpul tick-ului REPLAY-uit, nu ceasul real (A5)
@@ -198,9 +246,22 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
             except Exception:
                 shadow_fields = {}
 
+            if first_price is None:
+                first_price = price
+            if kalman_primary:
+                ktrend = shadow_fields.get("kalman_trend", prev_ktrend)
+                if ktrend != prev_ktrend:
+                    if ktrend == 1:
+                        broker.place_order_smart("BUY", symbol, price, ta.api.quantities[symbol],
+                                                  motivation="kalman_up")
+                    elif ktrend == -1:
+                        broker.sell_all(symbol, price, motivation="kalman_down")
+                    prev_ktrend = ktrend
+                broker.last_price = price
+
             n += 1
             if n % 100 == 0:
-                # Starea analizei SIMULATE — cititita de tradeall_monitor.py (hover pe grafic),
+                # Starea analizei SIMULATE — cititita de tradeall_observe.py (hover pe grafic),
                 # acelasi continut ca cache_instant_trend.json in live. La 100 tick-uri, nu
                 # per-tick (I/O ieftin chiar si in fast-forward).
                 try:
@@ -220,10 +281,23 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
                 sys.stderr.write(f"[tradeall_backtest] {n} tick-uri, ultimul {datetime.fromtimestamp(ts)} "
                                  f"(BUY {broker.n_buy} / SELL {broker.n_sell})\n")
 
+    pnl = broker.pnl_summary()
+    if first_price and broker.last_price:
+        # benchmark: buy&hold pe aceeasi cantitate standard, acelasi interval
+        bh_qty = ta.api.quantities.get(symbol, 0)
+        pnl["buy_hold_net"] = round((broker.last_price - first_price) * bh_qty
+                                     - 2 * bh_qty * first_price * FEE_PCT / 100, 2)
+    pnl["mode"] = "kalman_primary" if kalman_primary else "model_actual"
+    try:
+        with open(os.path.join(out_dir, "pnl.json"), "w", encoding="utf-8") as pf:
+            json.dump(pnl, pf, indent=1)
+    except OSError:
+        pass
+    sys.stderr.write(f"[tradeall_backtest] P&L: {pnl}\n")
     sys.stderr.write(f"[tradeall_backtest] GATA: {n} tick-uri, BUY={broker.n_buy} SELL={broker.n_sell}\n")
     sys.stderr.write(f"[tradeall_backtest] rezultate in: {out_dir}\n")
     sys.stderr.write(f"[tradeall_backtest] vizualizare: "
-                      f"./tradeall_monitor.py --backtest-dir {out_dir} --symbols {symbol}\n")
+                      f"./tradeall_observe.py --backtest-dir {out_dir} --symbols {symbol}\n")
 
 
 def main():
@@ -245,13 +319,17 @@ def main():
     p.add_argument("--quiet", action="store_true",
                    help="suprima print()-urile zgomotoase ale tradeall.logic() (mult mai rapid pe "
                         "date dense/lungi); mesajele de progres proprii raman vizibile")
+    p.add_argument("--kalman-primary", action="store_true",
+                   help="Kalman conduce (BUY la ->UP, SELL tot la ->DOWN); modelul vechi doar "
+                        "jurnalizeaza. Pentru A/B pe P&L fata de rularea normala.")
     args = p.parse_args()
 
     start_ts = datetime.strptime(args.start, "%Y-%m-%d").timestamp()
     end_ts = datetime.strptime(args.end, "%Y-%m-%d").timestamp() if args.end else None
     run_id = args.run_id or f"{args.symbol}_{args.start}_{int(time.time())}"
 
-    run_backtest(args.symbol, start_ts, end_ts, args.speed, run_id, args.source, args.cache24_file, args.quiet)
+    run_backtest(args.symbol, start_ts, end_ts, args.speed, run_id, args.source, args.cache24_file,
+                 args.quiet, kalman_primary=args.kalman_primary)
 
 
 if __name__ == "__main__":
