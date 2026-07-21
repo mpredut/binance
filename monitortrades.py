@@ -490,8 +490,13 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
 
         print(f"(increase: {price_increase * 100}%, decrease: {price_decrease * 100}%)")
         # 3.0. TP DUR: castig mare -> vinde o PROPORTIE din pozitie INDIFERENT de trend
-        #      (coexista cu 3.1 de mai jos; backstop pt varfuri ratate de gate-ul de trend)
-        if HARD_TP_ENABLED and price_increase >= hard_tp_pct and avail_qty > 0:
+        #      (coexista cu 3.1 de mai jos; backstop pt varfuri ratate de gate-ul de trend).
+        # toleranta are_close, la fel ca la 3.1: fara ea, un pret care ratase pragul
+        # cu putin la un tick si apoi cade inapoi ar insemna ratarea PERMANENTA a
+        # exact varfului pe care mecanismul asta e menit sa-l prinda ("varfuri ratate").
+        hard_tp_hit = price_increase >= hard_tp_pct or u.are_close(
+            price_increase, hard_tp_pct, target_tolerance_percent=1.0)
+        if HARD_TP_ENABLED and hard_tp_hit and avail_qty > 0:
             if current_time_s - _hard_tp_last.get(symbol, 0) >= hard_tp_cd:
                 hard_qty = round(avail_qty * hard_tp_frac, 4)
                 print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% >= {hard_tp_pct*100:.0f}% "
