@@ -45,32 +45,37 @@ def priceLstFor(symbol: str) -> List[Tuple[int, float]]:
     return [(int(ts), float(p)) for ts, p in raw]
 
 
+_draw_fig = {}   # symbol -> (fig, ax), REFOLOSITE — vezi motivul in docstring
+
+
 def drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_direction, duration_hours):
-    import matplotlib
-    print(matplotlib.get_backend())
-    # Conversie timestamps -> datetime
+    """21 iul: plt.figure()+plt.close() la fiecare apel (chemat la fiecare
+    minut, per simbol, din getTrendLongTerm_fixed) LEAKA memorie — masurat
+    direct (RSS, nu doar tracemalloc care nu vede alocarile C): ~1.17MB/apel,
+    desi plt.close() se apela corect de fiecare data. E un gotcha cunoscut
+    matplotlib/Agg: cache-urile interne de fonturi/randare (freetype) nu se
+    elibereaza complet intre figuri noi succesive intr-o bucla lunga. Fix
+    standard: O SINGURA figura/axa PERSISTENTA per simbol, golita (ax.clear())
+    si redesenata, in loc de creata+distrusa la fiecare ciclu."""
     times = [datetime.fromtimestamp(ts) for ts in timestamps]
 
-    #plt.clf()  # curăță figura curentă (nu creează alta)
-    plt.figure(figsize=(12,5))
-    plt.plot(times, prices, label='Price', color='blue')
+    if symbol not in _draw_fig:
+        _draw_fig[symbol] = plt.subplots(figsize=(12, 5))
+    fig, ax = _draw_fig[symbol]
+    ax.clear()
 
-    # Evidențiem blocurile de trend
+    ax.plot(times, prices, label='Price', color='blue')
     for start, end in trend_block_indices:
-        plt.plot(times[start:end], prices[start:end], color='red', linewidth=2)
+        ax.plot(times[start:end], prices[start:end], color='red', linewidth=2)
 
-    plt.xlabel('Time')
-    plt.ylabel('Price')
-    plt.title(f"{symbol} - Trend {trend_direction}, durata {duration_hours:.2f}h")
-    plt.legend()
+    ax.set_xlabel('Time')
+    ax.set_ylabel('Price')
+    ax.set_title(f"{symbol} - Trend {trend_direction}, durata {duration_hours:.2f}h")
+    ax.legend()
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
+    fig.autofmt_xdate()
 
-    # Format data/ora pe axa X
-    plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d %H:%M'))
-    plt.gcf().autofmt_xdate()  # întoarce etichetele să nu se suprapună
-
-    plt.savefig(f"plot_{symbol}.png")  # Salvează
-    plt.show()
-    plt.close()
+    fig.savefig(f"plot_{symbol}.png")
 
 
 
