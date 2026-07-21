@@ -23,7 +23,7 @@ import os
 import time
 from dataclasses import dataclass
 
-from common import log, now_str, float_env
+from common import log, now_str, float_env, are_close
 from notify import notify
 from hl_client import HLClient, HLError
 from market_data import get_price
@@ -54,6 +54,8 @@ class StratParams:
     order_ttl_min: float
     signal_gate: bool        # True = intra DOAR daca semnalul (trend/predictie) e in favoarea directiei
     stop_loss_pct: float     # inchide tot daca pierderea nerealizata depaseste acest % (0 = oprit)
+    reentry_tolerance_pct: float  # "aproape de prag" conteaza ca atins la DCA (are_close, determinist)
+                                  # — 0 = dezactivat (comportament vechi, exact). Vezi kraken/212trading.
 
     @classmethod
     def from_env(cls) -> "StratParams":
@@ -76,6 +78,7 @@ class StratParams:
             order_ttl_min      = float_env("STRAT_ORDER_TTL_MIN") or 10.0,
             signal_gate        = os.environ.get("HL_SIGNAL_GATE", "false").strip().lower() == "true",
             stop_loss_pct      = float_env("STRAT_STOP_LOSS_PCT") or 0.0,
+            reentry_tolerance_pct = float_env("STRAT_REENTRY_TOLERANCE_PCT") or 0.0,
         )
 
 
@@ -320,10 +323,20 @@ class Strategy:
                 self._place("close", held, target, "TP")
             elif abs(o["px"]-target)/target > 0.001 or abs(o["sz"]-held) > 1e-9:
                 self._cancel_close(); self._place("close", held, target, "TP")
-        # DCA: pretul a mers CONTRA pozitiei cu drop%
-        moved = self.sign * (price - self.s["last_open_price"]) / self.s["last_open_price"] if self.s["last_open_price"] else 0
+        # DCA: pretul a mers CONTRA pozitiei cu drop%. Compar PRETUL cu un prag de
+        # PRET (nu procentul cu procentul — are_close e relativ la magnitudinea
+        # valorilor comparate, corect doar intre doua preturi, la fel ca in
+        # kraken/212strategy.py). toleranta = "aproape de prag" conteaza ca atins
+        # (STRAT_REENTRY_TOLERANCE_PCT, implicit 0 = comportament vechi, exact).
+        lop = self.s["last_open_price"]
+        moved = self.sign * (price - lop) / lop if lop else 0   # doar pt log
+        prag_dca = lop * (1 - self.sign * self.p.dca_drop_pct / 100) if lop else None
+        dca_hit = prag_dca is not None and (
+            self.sign * (prag_dca - price) >= 0
+            or (self.p.reentry_tolerance_pct > 0
+                and are_close(price, prag_dca, self.p.reentry_tolerance_pct)))
         if (self.s["dca_buys"] < self.p.max_dca_buys and self.s["last_open_price"]
-                and moved <= -self.p.dca_drop_pct/100
+                and dca_hit
                 and self.s["spent"] + self.p.dca_amount <= self.p.max_budget
                 and not self._open_pending()):
             px = price * (1 - self.sign * d)
