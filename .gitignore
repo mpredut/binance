@@ -40,4 +40,8 @@ index.html
 
 # --- Observabilitate tradeall (artefacte generate, nu cod) ---
 tradeall_live/
-logger/backtest/
+# 21 iul: logger/ intreg (nu doar backtest/) — jurnale generate, nu cod; gasit
+# netrackat inainte, risc real ca un "git add -A" neatent sa comita >1GB de
+# loguri in istoricul git permanent (vezi si logger_retention.sh/rotate_logs.sh
+# pt curatarea lor pe disc).
+logger/
