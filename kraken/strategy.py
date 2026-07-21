@@ -167,6 +167,19 @@ class Strategy:
     def _qty_for(self, amount: float, price: float) -> float:
         return round(amount / price, self.vol_dec) if price > 0 else 0.0
 
+    def _dust_safe_qty(self, qty: float) -> float:
+        """Kraken raporteaza balanta ROTUNJITA: vinderea intregii cantitati
+        poate depasi ledger-ul cu o zecimila -> 'EOrder:Insufficient funds',
+        la nesfarsit (bot-ul reincearca aceeasi cantitate in fiecare ciclu,
+        fara sa se corecteze singur — 21 iul, gasit ca sursa a 212 esecuri
+        repetate 'sell TP esuat' pe HYPEUSD). Lasam un praf: o unitate la
+        penultima zecimala (ex. 5.1715916 -> 5.1715914, ~$0.00001 dust) —
+        cost neglijabil, elimina blocarea permanenta la TP/stop-loss.
+        Acelasi calcul ca la _maybe_adopt (care avea deja fixul, dar doar
+        pt pozitii adoptate, nu si pt cele acumulate prin fill-uri proprii)."""
+        step = 10.0 ** -(max(self.vol_dec - 1, 1))
+        return round(int((qty - step) / step) * step, self.vol_dec)
+
     def _has_open(self, side: str) -> bool:
         return any(o["side"] == side for o in self.s["orders"])
 
@@ -273,6 +286,16 @@ class Strategy:
             self.s["realized_gross"] += gross
             self.s["realized_net"] += net
             self.s["qty"] -= vol
+            # dust-ul lasat la vanzare (_dust_safe_qty) ar ramane altfel ca un
+            # rest infim, permanent, in qty -> ciclul urmator crede ca INCA are
+            # o pozitie deschisa si nu reintra niciodata. Praguim la 0 real.
+            # Marja x2 fata de pasul de praf (nu doar x1): reziduul teoretic e
+            # ~1 pas, dar imprecizia in virgula mobila poate depasi usor pasul
+            # exact (testat: 1.0000000028e-07 vs prag 1e-07 -> comparatia <
+            # stricta rata din cauza asta).
+            if abs(self.s["qty"]) < 2 * 10.0 ** -(max(self.vol_dec - 1, 1)):
+                self.s["qty"] = 0.0
+                self.s["cost"] = 0.0
             log(f"  [STRAT] {tag}SELL FILLED {vol} @ {price} {self.ccy}  "
                 f"brut={gross:+.4f} fee_ciclu={self.s['cycle_fees']:.4f} net={net:+.4f}")
             notify(title=f"{tag}{self.pair} SELL {vol:.2f}@{price:.2f} N{net:+.2f}{self.ccy}",
@@ -306,7 +329,8 @@ class Strategy:
                     except KrakenError:
                         pass
                 self._remove(o)
-            self._place("sell", self.s["qty"], round(price * 0.995, self.price_dec), kind="STOP")
+            self._place("sell", self._dust_safe_qty(self.s["qty"]),
+                        round(price * 0.995, self.price_dec), kind="STOP")
             notify(title=f"🛑 SL {self.pair} -{loss_pct:.1f}%",
                    body=f"pierdere {loss_pct:.1f}% ≥prag{self.p.stop_loss_pct}% — vand tot",
                    source="kraken", price=price, desktop=self.desktop)
@@ -336,12 +360,7 @@ class Strategy:
             log("  [STRAT] adopt: balanta 0 pe activul de baza — astept alocarea")
             return
         if self.p.adopt_qty <= 0:
-            # Kraken raporteaza balanta ROTUNJITA: vinderea intregii cantitati
-            # poate depasi ledger-ul cu o zecimila -> "EOrder:Insufficient funds"
-            # la TP/stop-loss, la nesfarsit. Lasam un praf: o unitate la
-            # penultima zecimala (ex. 5.1715916 -> 5.1715914, ~$0.00001 dust).
-            step = 10.0 ** -(max(self.vol_dec - 1, 1))
-            qty = round(int((qty - step) / step) * step, self.vol_dec)
+            qty = self._dust_safe_qty(qty)
             if qty <= 0:
                 return
         self.s["qty"] = qty
@@ -436,7 +455,11 @@ class Strategy:
             tranches = self.p.tp_tranches or [(self.p.takeprofit_pct, 100.0)]
             desired, rem = [], held
             for i, (pct, share) in enumerate(tranches):
-                q = rem if i == len(tranches) - 1 else min(rem, round(held * share / 100, self.vol_dec))
+                # ultima transa = vinde tot ce-a ramas -> risc de "Insufficient funds"
+                # (balanta reala de pe Kraken poate fi cu o zecimila mai mica decat
+                # held-ul urmarit intern) — acelasi praf ca la adoptie.
+                q = self._dust_safe_qty(rem) if i == len(tranches) - 1 \
+                    else min(rem, round(held * share / 100, self.vol_dec))
                 rem = round(rem - q, self.vol_dec)
                 if q > 0:
                     desired.append((round(avg * (1 + pct / 100), self.price_dec), q))
