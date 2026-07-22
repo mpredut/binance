@@ -8,6 +8,8 @@ Acoperire:
   - PriceWindow.from_cache24: factory din Cache24PriceManager cu date reale
   - PriceWindow._sample_rate_from_entries: calcul rată din timestamp-uri
   - TrendState: lifecycle complet
+  - TrendState: cooldown per instanta de trend (already_confirmed/mark_confirmed,
+    can_retry_fire/mark_fire_attempt, reset la start_trend nou) — 22 iul
   - CacheCurrentPriceManager: get_sample_rate / get_update_frequency
 """
 import os, sys, json, time, tempfile, unittest
@@ -527,6 +529,71 @@ class TestTrendState(unittest.TestCase):
         ts = self._ts()
         ts.start_trend("UP")
         self.assertFalse(ts.is_trend_a_minim_validated())
+
+
+class TestTrendStateCooldown(unittest.TestCase):
+    """Cooldown per instanta de trend (22 iul) — vezi FIRE_MIN_RETRY_INTERVAL_SEC.
+    Ceas fals (contor mutabil) ca sa nu depindem de sleep-uri reale de 30 min."""
+
+    def _ts_with_clock(self):
+        clock = {"t": 1000.0}
+        ts = ta.TrendState(3600, 9999, 60, now_fn=lambda: clock["t"])
+        return ts, clock
+
+    def test_not_confirmed_initially(self):
+        ts, _ = self._ts_with_clock()
+        ts.start_trend("UP")
+        self.assertFalse(ts.already_confirmed("UP"))
+        self.assertFalse(ts.already_confirmed("DOWN"))
+
+    def test_mark_confirmed_sets_only_that_direction(self):
+        ts, _ = self._ts_with_clock()
+        ts.start_trend("UP")
+        ts.mark_confirmed("UP")
+        self.assertTrue(ts.already_confirmed("UP"))
+        self.assertFalse(ts.already_confirmed("DOWN"))
+
+    def test_start_trend_resets_confirmed_flags(self):
+        ts, _ = self._ts_with_clock()
+        ts.start_trend("UP")
+        ts.mark_confirmed("UP")
+        ts.start_trend("DOWN")   # trend nou -> orice confirmare veche nu mai conteaza
+        self.assertFalse(ts.already_confirmed("UP"))
+        self.assertFalse(ts.already_confirmed("DOWN"))
+
+    def test_can_retry_fire_true_before_any_attempt(self):
+        ts, _ = self._ts_with_clock()
+        ts.start_trend("UP")
+        self.assertTrue(ts.can_retry_fire("UP"))
+
+    def test_can_retry_fire_false_immediately_after_attempt(self):
+        ts, clock = self._ts_with_clock()
+        ts.start_trend("UP")
+        ts.mark_fire_attempt("UP")
+        self.assertFalse(ts.can_retry_fire("UP"))
+        self.assertTrue(ts.can_retry_fire("DOWN"), "directia opusa nu trebuie afectata")
+
+    def test_can_retry_fire_true_after_interval_elapsed(self):
+        ts, clock = self._ts_with_clock()
+        ts.start_trend("UP")
+        ts.mark_fire_attempt("UP")
+        clock["t"] += ta.FIRE_MIN_RETRY_INTERVAL_SEC + 1
+        self.assertTrue(ts.can_retry_fire("UP"))
+
+    def test_can_retry_fire_still_false_before_interval_elapsed(self):
+        ts, clock = self._ts_with_clock()
+        ts.start_trend("UP")
+        ts.mark_fire_attempt("UP")
+        clock["t"] += ta.FIRE_MIN_RETRY_INTERVAL_SEC - 1
+        self.assertFalse(ts.can_retry_fire("UP"))
+
+    def test_start_trend_resets_attempt_timestamps(self):
+        ts, clock = self._ts_with_clock()
+        ts.start_trend("UP")
+        ts.mark_fire_attempt("UP")
+        self.assertFalse(ts.can_retry_fire("UP"))
+        ts.start_trend("UP")   # trend nou -> reincercarea veche nu mai conteaza
+        self.assertTrue(ts.can_retry_fire("UP"))
 
 
 # ═══════════════════════════════════════════════════════════════════════════

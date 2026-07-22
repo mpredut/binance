@@ -47,6 +47,16 @@ TREND_TO_BE_OLD_SECONDS = 60 * 60 * 1.9
 PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 310)
 PRICE_CHANGE_THRESHOLD_BIG_EUR = u.calculate_difference_percent(97000, 95000 - 377)
 
+# 22 iul: cooldown per instanta de trend (investigat pe date reale, 21-22 iul,
+# 7 experimente in research/tradeall_trigger_gate/) — logic() nu avea niciun
+# "fire o singura data": refirerea se intampla la FIECARE evaluare cat timp
+# trend_state ramane validat, chiar daca nimic nou nu s-a intamplat (gasit pe
+# TAO: 186 BUY/0 SELL dintr-un singur trend). Testat: cooldown-ul REDUCE
+# tranzactiile la cateva pe simbol si transforma un rezultat sub buy&hold
+# (-57.56$) intr-unul care il bate (-1.0$) — FARA sa schimbe deloc conditiile
+# de start/confirmare de mai jos.
+FIRE_MIN_RETRY_INTERVAL_SEC = 30 * 60  # interval minim intre incercari RESPINSE (gate/weight-limit/buget)
+
 DECISIONS_LOG_DIR = "logger"
 
 
@@ -216,6 +226,15 @@ class TrendState:
         self.expiration_trend_time = expiration_trend_time  # Pragul de timp Intre confirmari (In secunde)
         self.fresh_trend_time = fresh_trend_time            # Pragul pentru a fi considerat fresh
         self._now = now_fn   # ceasul real implicit; backtester-ul injecteaza timpul tick-ului replay-uit (A5)
+        # Cooldown per instanta de trend (22 iul, vezi FIRE_MIN_RETRY_INTERVAL_SEC):
+        # _confirmed_{up,down} = "am EXECUTAT cu succes pe acest trend" (nu doar
+        # incercat) -> nu mai tragem deloc pana la un trend nou. _last_attempt_*
+        # = ultima incercare RESPINSA (gate/weight-limit/buget) -> reincercam
+        # abia dupa FIRE_MIN_RETRY_INTERVAL_SEC, nu la fiecare tick.
+        self._confirmed_up = False
+        self._confirmed_down = False
+        self._last_attempt_up_ts = None
+        self._last_attempt_down_ts = None
 
     def start_trend(self, new_state):
         #self.end_trend()  # Marcheaza sfârsitul trendului anterior
@@ -227,8 +246,31 @@ class TrendState:
         self.confirm_count = 1
         self.end_time = None
         self.expired = False
+        self._confirmed_up = False
+        self._confirmed_down = False
+        self._last_attempt_up_ts = None
+        self._last_attempt_down_ts = None
         print(f"Start of {self.state} trend at {u.timeToHMS(self.start_time)}")
         return self.old_state
+
+    def already_confirmed(self, direction):
+        return self._confirmed_up if direction == 'UP' else self._confirmed_down
+
+    def mark_confirmed(self, direction):
+        if direction == 'UP':
+            self._confirmed_up = True
+        else:
+            self._confirmed_down = True
+
+    def can_retry_fire(self, direction):
+        last = self._last_attempt_up_ts if direction == 'UP' else self._last_attempt_down_ts
+        return last is None or (self._now() - last) >= FIRE_MIN_RETRY_INTERVAL_SEC
+
+    def mark_fire_attempt(self, direction):
+        if direction == 'UP':
+            self._last_attempt_up_ts = self._now()
+        else:
+            self._last_attempt_down_ts = self._now()
 
     def confirm_trend(self):
         assert self.start_time is not None, "Trend must be started before confirming"
@@ -359,6 +401,22 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
     h = 24
     proposed_price = current_price
 
+    def _fire_once(direction, action, reason):
+        """Cooldown per instanta de trend (22 iul) — vezi FIRE_MIN_RETRY_INTERVAL_SEC.
+        "Confirmat" = executie REALA (returul lui _fire_order nu e None), nu doar
+        incercare — o respingere de gate/weight-limit/buget NU blocheaza definitiv,
+        doar impune un interval minim pana la reincercare."""
+        if trend_state.already_confirmed(direction):
+            return
+        if not trend_state.can_retry_fire(direction):
+            return
+        trend_state.mark_fire_attempt(direction)
+        if enable:
+            result = _fire_order(symbol, action, current_price, reason, safeback_seconds=d*h*3600+60,
+                force=False, cancelorders=True, hours=1)
+            if result is not None:
+                trend_state.mark_confirmed(direction)
+
     print(f"LOGIC gradient={gradient}, slope={slope}")
     # if gradient < 0 and slope < 0 :
         # if enable:
@@ -380,9 +438,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
             count = trend_state.confirm_trend() # Confirmam ca trendul de crestere continua
             if trend_state.is_trend_uniform_confirmed() and trend_state.is_trend_fresh():
                 #track_and_place_order('BUY', sym.btcsymbol, count, proposed_price, current_price, order_ids=order_ids)
-                if enable:
-                    _fire_order(symbol, "BUY", proposed_price, "trend_confirmed_up", safeback_seconds=d*h*3600+60,
-                        force=False, cancelorders=True, hours=1)
+                _fire_once("UP", "BUY", "trend_confirmed_up")
                 print(f"place_order_smart BUY")
         else:
             prev_confirm_count = trend_state.confirm_count  # cat a "prins" trendul anterior (near-miss)
@@ -401,9 +457,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
             count = trend_state.confirm_trend() # Confirmam ca trendul de scadere continua
             if trend_state.is_trend_uniform_confirmed() and trend_state.is_trend_fresh() :
                 #track_and_place_order('SELL', symbol, count, proposed_price, current_price, order_ids=order_ids)
-                if enable:
-                    _fire_order(symbol, "SELL", proposed_price, "trend_confirmed_down", safeback_seconds=d*h*3600+60,
-                        force=False, cancelorders=True, hours=1)
+                _fire_once("DOWN", "SELL", "trend_confirmed_down")
                 print(f"place_order_smart SELL")
         else:
             prev_confirm_count = trend_state.confirm_count  # cat a "prins" trendul anterior (near-miss)
@@ -420,17 +474,13 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
         if (trend_state.is_trend_consistent_validated()
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE BUY ALL {win} .... ")
-            if enable:
-                _fire_order(symbol, "BUY", proposed_price, "consistent_or_old_up", safeback_seconds=d*h*3600+60,
-                    force=False, cancelorders=True, hours=1)
+            _fire_once("UP", "BUY", "consistent_or_old_up")
     #18 de confirmari per minut * 3 minute
     if slope >= 0 and trend_state.is_trend_down():
         if (trend_state.is_trend_consistent_validated()
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE SELL ALL {win} .... ")
-            if enable:
-                _fire_order(symbol, "SELL", proposed_price, "consistent_or_old_down", safeback_seconds=d*h*3600+60,
-                    force=False, cancelorders=True, hours=1)
+            _fire_once("DOWN", "SELL", "consistent_or_old_down")
                     
     #
     #new case
@@ -439,17 +489,13 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
         if (trend_state.is_trend_consistent_validated()
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 2: BUY ALL {win} .... ")
-            if enable:
-                _fire_order(symbol, "BUY", proposed_price, "slope<=-5.1_up", safeback_seconds=d*h*3600+60,
-                    force=False, cancelorders=True, hours=1)
+            _fire_once("UP", "BUY", "slope<=-5.1_up")
     #18 de confirmari per minut * 3 minute
     if slope >= 5.1 and trend_state.is_trend_down():
         if (trend_state.is_trend_consistent_validated()
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 2: SELL ALL {win} .... ")
-            if enable:
-                _fire_order(symbol, "SELL", proposed_price, "slope>=5.1_down", safeback_seconds=d*h*3600+60,
-                    force=False, cancelorders=True, hours=1)
+            _fire_once("DOWN", "SELL", "slope>=5.1_down")
                                                                                                                                                                  
     #
     #new case
@@ -458,17 +504,13 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
         if (trend_state.is_trend_consistent_validated()
         and trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 3: BUY ALL {win} .... ")
-            if enable:
-                _fire_order(symbol, "BUY", proposed_price, "slope<=-5.1_and_old_down", safeback_seconds=d*h*3600+60,
-                    force=False, cancelorders=True, hours=1)
+            _fire_once("UP", "BUY", "slope<=-5.1_and_old_down")
     #18 de confirmari per minut * 3 minute
     if slope >= 5.1 and trend_state.is_trend_up():
         if (trend_state.is_trend_consistent_validated()
         and trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 3: SELL ALL {win} .... ")
-            if enable:
-                _fire_order(symbol, "SELL", proposed_price, "slope>=5.1_and_old_up", safeback_seconds=d*h*3600+60,
-                    force=False, cancelorders=True, hours=1)
+            _fire_once("DOWN", "SELL", "slope>=5.1_and_old_up")
    
 #todo ia acceleratiea pe timp scurt get minute 1-3 si daca e mare cumpara!   
 
