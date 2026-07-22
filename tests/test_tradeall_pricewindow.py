@@ -8,8 +8,9 @@ Acoperire:
   - PriceWindow.from_cache24: factory din Cache24PriceManager cu date reale
   - PriceWindow._sample_rate_from_entries: calcul rată din timestamp-uri
   - TrendState: lifecycle complet
-  - TrendState: cooldown per instanta de trend (already_confirmed/mark_confirmed,
-    can_retry_fire/mark_fire_attempt, reset la start_trend nou) — 22 iul
+  - TrendState: cooldown per instanta de trend (fire_limit_reached/mark_confirmed
+    cu FIRE_MAX_PER_TREND executii, can_retry_fire/mark_fire_attempt cu
+    FIRE_MIN_RETRY_INTERVAL_SEC, reset la start_trend nou) — 22 iul
   - CacheCurrentPriceManager: get_sample_rate / get_update_frequency
 """
 import os, sys, json, time, tempfile, unittest
@@ -540,26 +541,36 @@ class TestTrendStateCooldown(unittest.TestCase):
         ts = ta.TrendState(3600, 9999, 60, now_fn=lambda: clock["t"])
         return ts, clock
 
-    def test_not_confirmed_initially(self):
+    def test_fire_limit_not_reached_initially(self):
         ts, _ = self._ts_with_clock()
         ts.start_trend("UP")
-        self.assertFalse(ts.already_confirmed("UP"))
-        self.assertFalse(ts.already_confirmed("DOWN"))
+        self.assertFalse(ts.fire_limit_reached("UP"))
+        self.assertFalse(ts.fire_limit_reached("DOWN"))
 
-    def test_mark_confirmed_sets_only_that_direction(self):
+    def test_mark_confirmed_counts_only_that_direction(self):
         ts, _ = self._ts_with_clock()
         ts.start_trend("UP")
         ts.mark_confirmed("UP")
-        self.assertTrue(ts.already_confirmed("UP"))
-        self.assertFalse(ts.already_confirmed("DOWN"))
+        self.assertFalse(ts.fire_limit_reached("UP"), "o singura confirmare nu atinge limita (FIRE_MAX_PER_TREND=3)")
+        self.assertFalse(ts.fire_limit_reached("DOWN"))
 
-    def test_start_trend_resets_confirmed_flags(self):
+    def test_fire_limit_reached_after_max_confirmations(self):
         ts, _ = self._ts_with_clock()
         ts.start_trend("UP")
-        ts.mark_confirmed("UP")
+        for _ in range(ta.FIRE_MAX_PER_TREND):
+            ts.mark_confirmed("UP")
+        self.assertTrue(ts.fire_limit_reached("UP"))
+        self.assertFalse(ts.fire_limit_reached("DOWN"), "directia opusa nu trebuie afectata")
+
+    def test_start_trend_resets_confirmed_counts(self):
+        ts, _ = self._ts_with_clock()
+        ts.start_trend("UP")
+        for _ in range(ta.FIRE_MAX_PER_TREND):
+            ts.mark_confirmed("UP")
+        self.assertTrue(ts.fire_limit_reached("UP"))
         ts.start_trend("DOWN")   # trend nou -> orice confirmare veche nu mai conteaza
-        self.assertFalse(ts.already_confirmed("UP"))
-        self.assertFalse(ts.already_confirmed("DOWN"))
+        self.assertFalse(ts.fire_limit_reached("UP"))
+        self.assertFalse(ts.fire_limit_reached("DOWN"))
 
     def test_can_retry_fire_true_before_any_attempt(self):
         ts, _ = self._ts_with_clock()

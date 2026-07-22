@@ -55,7 +55,11 @@ PRICE_CHANGE_THRESHOLD_BIG_EUR = u.calculate_difference_percent(97000, 95000 - 3
 # tranzactiile la cateva pe simbol si transforma un rezultat sub buy&hold
 # (-57.56$) intr-unul care il bate (-1.0$) — FARA sa schimbe deloc conditiile
 # de start/confirmare de mai jos.
-FIRE_MIN_RETRY_INTERVAL_SEC = 30 * 60  # interval minim intre incercari RESPINSE (gate/weight-limit/buget)
+# 22 iul (update user): permite pana la FIRE_MAX_PER_TREND executii CONFIRMATE
+# (nu doar 1) per directie per instanta de trend, cu minim FIRE_MIN_RETRY_INTERVAL_SEC
+# intre orice doua incercari (reusite SAU respinse) — 6 min (redus de la 30 min).
+FIRE_MIN_RETRY_INTERVAL_SEC = 6 * 60    # interval minim intre incercari (reusite sau respinse)
+FIRE_MAX_PER_TREND = 3                  # cel mult atatea executii CONFIRMATE per directie per trend
 
 DECISIONS_LOG_DIR = "logger"
 
@@ -226,13 +230,15 @@ class TrendState:
         self.expiration_trend_time = expiration_trend_time  # Pragul de timp Intre confirmari (In secunde)
         self.fresh_trend_time = fresh_trend_time            # Pragul pentru a fi considerat fresh
         self._now = now_fn   # ceasul real implicit; backtester-ul injecteaza timpul tick-ului replay-uit (A5)
-        # Cooldown per instanta de trend (22 iul, vezi FIRE_MIN_RETRY_INTERVAL_SEC):
-        # _confirmed_{up,down} = "am EXECUTAT cu succes pe acest trend" (nu doar
-        # incercat) -> nu mai tragem deloc pana la un trend nou. _last_attempt_*
-        # = ultima incercare RESPINSA (gate/weight-limit/buget) -> reincercam
-        # abia dupa FIRE_MIN_RETRY_INTERVAL_SEC, nu la fiecare tick.
-        self._confirmed_up = False
-        self._confirmed_down = False
+        # Cooldown per instanta de trend (22 iul, vezi FIRE_MIN_RETRY_INTERVAL_SEC
+        # si FIRE_MAX_PER_TREND): _confirmed_count_{up,down} = cate executii REUSITE
+        # (nu doar incercate) s-au facut pe acest trend, per directie — pana la
+        # FIRE_MAX_PER_TREND, apoi se opreste pana la un trend nou. _last_attempt_*
+        # = ultima incercare (reusita SAU respinsa) -> orice reincercare (fie ea o
+        # noua executie in limita, fie o respingere de gate/weight-limit/buget)
+        # asteapta minim FIRE_MIN_RETRY_INTERVAL_SEC fata de precedenta.
+        self._confirmed_count_up = 0
+        self._confirmed_count_down = 0
         self._last_attempt_up_ts = None
         self._last_attempt_down_ts = None
 
@@ -246,21 +252,22 @@ class TrendState:
         self.confirm_count = 1
         self.end_time = None
         self.expired = False
-        self._confirmed_up = False
-        self._confirmed_down = False
+        self._confirmed_count_up = 0
+        self._confirmed_count_down = 0
         self._last_attempt_up_ts = None
         self._last_attempt_down_ts = None
         print(f"Start of {self.state} trend at {u.timeToHMS(self.start_time)}")
         return self.old_state
 
-    def already_confirmed(self, direction):
-        return self._confirmed_up if direction == 'UP' else self._confirmed_down
+    def fire_limit_reached(self, direction):
+        count = self._confirmed_count_up if direction == 'UP' else self._confirmed_count_down
+        return count >= FIRE_MAX_PER_TREND
 
     def mark_confirmed(self, direction):
         if direction == 'UP':
-            self._confirmed_up = True
+            self._confirmed_count_up += 1
         else:
-            self._confirmed_down = True
+            self._confirmed_count_down += 1
 
     def can_retry_fire(self, direction):
         last = self._last_attempt_up_ts if direction == 'UP' else self._last_attempt_down_ts
@@ -402,11 +409,12 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
     proposed_price = current_price
 
     def _fire_once(direction, action, reason):
-        """Cooldown per instanta de trend (22 iul) — vezi FIRE_MIN_RETRY_INTERVAL_SEC.
-        "Confirmat" = executie REALA (returul lui _fire_order nu e None), nu doar
-        incercare — o respingere de gate/weight-limit/buget NU blocheaza definitiv,
-        doar impune un interval minim pana la reincercare."""
-        if trend_state.already_confirmed(direction):
+        """Cooldown per instanta de trend (22 iul) — vezi FIRE_MIN_RETRY_INTERVAL_SEC
+        si FIRE_MAX_PER_TREND. "Confirmat" = executie REALA (returul lui _fire_order
+        nu e None), nu doar incercare — o respingere de gate/weight-limit/buget NU
+        blocheaza definitiv, doar impune un interval minim pana la reincercare.
+        Pana la FIRE_MAX_PER_TREND executii CONFIRMATE per directie per trend."""
+        if trend_state.fire_limit_reached(direction):
             return
         if not trend_state.can_retry_fire(direction):
             return
