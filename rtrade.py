@@ -19,10 +19,57 @@ from binance_api import bapi_placeorder as po
 
 #import priceprediction as pp
 
+# 23 iul: incarca parametrii tunabili din rtrade_config.env (versionat, se
+# COMITE — fara secrete) INAINTE de a citi orice os.environ.get(...) de mai jos.
+# botcore.load_dotenv NU suprascrie variabile deja setate in mediul real.
+from botcore import load_dotenv as _load_dotenv
+_load_dotenv("rtrade_config.env")
 
 # Intervalul de timp între încercările de anulare și recreere a ordinului (în secunde)
-WAIT_FOR_ORDER = 32 #seconds
-MIN_adjustment_percent = 0.01
+WAIT_FOR_ORDER = float(os.environ.get("RTRADE_WAIT_FOR_ORDER_SEC", "32"))
+MIN_adjustment_percent = float(os.environ.get("RTRADE_MIN_ADJUSTMENT_PCT", "0.01"))
+
+# Cantitatea tranzactionata per bot (vezi instantierea TradingBot mai jos).
+RTRADE_QTY = float(os.environ.get("RTRADE_QTY", "100"))
+
+# Ghicit initial de spread (fractie) pt filled_buy_price/filled_sell_price la
+# pornire, inainte de primul ordin real executat.
+RTRADE_INITIAL_SPREAD_PCT = float(os.environ.get("RTRADE_INITIAL_SPREAD_PCT", "0.1"))
+
+# Rata de "relaxare" a adjustment_percent cand partea opusa e deja umpluta.
+# ASIMETRIC intre BUY si SELL — pastrat exact ca in cod (nu se unifica).
+RTRADE_BUY_DECAY_PCT = float(os.environ.get("RTRADE_BUY_DECAY_PCT", "0.005"))
+RTRADE_SELL_DECAY_PCT = float(os.environ.get("RTRADE_SELL_DECAY_PCT", "0.01"))
+
+# Baza ferestrei "hours" (impartita la failure_count) pt calea disperata
+# (partea opusa deja umpluta). ASIMETRIC intre BUY (0.3) si SELL (0.23).
+RTRADE_BUY_DESPERATE_HOURS_BASE = float(os.environ.get("RTRADE_BUY_DESPERATE_HOURS_BASE", "0.3"))
+RTRADE_SELL_DESPERATE_HOURS_BASE = float(os.environ.get("RTRADE_SELL_DESPERATE_HOURS_BASE", "0.23"))
+
+# safeback_seconds pt calea disperata (1h + 60s), comun BUY/SELL.
+RTRADE_DESPERATE_SAFEBACK_SEC = float(os.environ.get("RTRADE_DESPERATE_SAFEBACK_SEC", str(1 * 3600 + 60)))
+
+# "hours" pt calea normala (nimic disperat inca). ASIMETRIC — BUY asteapta mai
+# mult (16h) decat SELL (12h).
+RTRADE_BUY_NORMAL_HOURS = float(os.environ.get("RTRADE_BUY_NORMAL_HOURS", "16"))
+RTRADE_SELL_NORMAL_HOURS = float(os.environ.get("RTRADE_SELL_NORMAL_HOURS", "12"))
+
+# Ofset de pret (fractie) pt ordinul de urmarire "disperat" imediat dupa ce
+# partea opusa s-a umplut (SELL la +X% dupa BUY umplut / BUY la -X% dupa SELL
+# umplut) si fereastra "hours" a acelui ordin de urmarire. Comun ambelor directii.
+RTRADE_FOLLOWUP_OFFSET_PCT = float(os.environ.get("RTRADE_FOLLOWUP_OFFSET_PCT", "0.01"))
+RTRADE_FOLLOWUP_HOURS = float(os.environ.get("RTRADE_FOLLOWUP_HOURS", "2.7"))
+
+# Toleranta are_close pt detectia "zi proasta" (pretul a trecut de referinta) si
+# multiplicatorul aplicat lui adjustment_percent in acel caz. Comun ambelor directii.
+RTRADE_BAD_DAY_TOLERANCE_PCT = float(os.environ.get("RTRADE_BAD_DAY_TOLERANCE_PCT", "0.1"))
+RTRADE_BAD_DAY_MULTIPLIER = float(os.environ.get("RTRADE_BAD_DAY_MULTIPLIER", "1.7"))
+
+# Epsilon ca sa evite diviziunea la zero in calculul ratei profit/pierdere.
+RTRADE_ZERO_EPSILON = float(os.environ.get("RTRADE_ZERO_EPSILON", "0.0001"))
+
+# Numarul maxim de esecuri acceptate inainte sa renunte la un ordin BUY/SELL.
+RTRADE_MAX_FAILURES = int(os.environ.get("RTRADE_MAX_FAILURES", "10"))
 
 class TradingBot:
     def __init__(self, symbol, qty, DEFAULT_ADJUSTMENT_PERCENT):
@@ -30,8 +77,8 @@ class TradingBot:
         self.qty = qty
         self.transaction_state = "COMPLETED"  # Starea inițială
         current_price = api.get_current_price(symbol)
-        self.filled_buy_price = round(current_price * (1 - 0.1), 4)
-        self.filled_sell_price = round(current_price * (1 + 0.1), 4)
+        self.filled_buy_price = round(current_price * (1 - RTRADE_INITIAL_SPREAD_PCT), 4)
+        self.filled_sell_price = round(current_price * (1 + RTRADE_INITIAL_SPREAD_PCT), 4)
         self.buy_filled = False
         self.sell_filled = False
         self.DEFAULT_ADJUSTMENT_PERCENT = DEFAULT_ADJUSTMENT_PERCENT
@@ -66,35 +113,35 @@ class TradingBot:
     def repetitive_buy(self, current_price, filled_sell_price):
         adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
         failure_count = 1  # Adaugăm un contor pentru numărul de eșecuri
-        max_failures = 10  # Definim numărul maxim de eșecuri acceptabile
+        max_failures = RTRADE_MAX_FAILURES  # Definim numărul maxim de eșecuri acceptabile
 
         while True:
 
             current_price = api.get_current_price(self.symbol)
 
             if self.is_sell_filled:
-                adjustment_percent = max(MIN_adjustment_percent, adjustment_percent - adjustment_percent * 0.005)
-            
+                adjustment_percent = max(MIN_adjustment_percent, adjustment_percent - adjustment_percent * RTRADE_BUY_DECAY_PCT)
+
             target_buy_price = round(current_price * (1 - adjustment_percent), 4)
             print(f"[{self.symbol}] Order BUY initiated at {target_buy_price:.2f} procent {adjustment_percent}%")
-            
+
             if self.is_buy_filled:
                 print(f"[{self.symbol}] Ignore BUY order. It was previously filled at {self.filled_buy_price:.2f}")
                 return self.mark_buy_filled(self.filled_buy_price)
-            
+
             buy_order = None
-            h = 0.3/failure_count
+            h = RTRADE_BUY_DESPERATE_HOURS_BASE / failure_count
             try:
                 if self.is_sell_filled: # sunt disperat
                     if adjustment_percent == MIN_adjustment_percent:
                         print(f"[{self.symbol}] sunt disperat!")
                         buy_order = po.place_safe_order("BUY", self.symbol, target_buy_price, self.qty,
-                            safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
+                            safeback_seconds=RTRADE_DESPERATE_SAFEBACK_SEC, force=False, cancelorders=True, hours=h)
                     else:
                         buy_order = po.place_safe_order("BUY", self.symbol, target_buy_price, self.qty,
-                            safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
+                            safeback_seconds=RTRADE_DESPERATE_SAFEBACK_SEC, force=False, cancelorders=True, hours=h)
                 else:
-                    buy_order = po.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, cancelorders=True, hours=16)
+                    buy_order = po.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, cancelorders=True, hours=RTRADE_BUY_NORMAL_HOURS)
             except po.WeightLimitBlock as e:
                 print(f"[{self.symbol}] Limita 24h atinsă — ies fără retry ({e})")
                 return None
@@ -120,34 +167,34 @@ class TradingBot:
             if api.check_order_filled(order_id, self.symbol):
                 print(f"[{self.symbol}] BUY order filled at {self.filled_buy_price:.2f}")
                 print(f"[{self.symbol}] SELL disperat tot 1....")
-                po.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + 0.01), self.qty, 
-                    force=True, cancelorders=True, hours=2.7)
+                po.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
+                    force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                 return self.mark_buy_filled(self.filled_buy_price)
-                 
-                
+
+
             filled_buy_price = api.check_order_filled_by_time("BUY", self.symbol, time_back_in_seconds=WAIT_FOR_ORDER)
             if filled_buy_price is not None:
                 print(f"[{self.symbol}] BUY order may have been filled :-) at {filled_buy_price:.2f}")
                 print(f"[{self.symbol}] SELL disperat tot 2 ....")
-                po.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + 0.01), self.qty, 
-                    force=True, cancelorders=True, hours=2.7)
+                po.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
+                    force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                 return self.mark_buy_filled(filled_buy_price)
-                
+
             current_price = api.get_current_price(self.symbol)
-            if current_price > filled_sell_price and not u.are_close(current_price, filled_sell_price, 0.1):
+            if current_price > filled_sell_price and not u.are_close(current_price, filled_sell_price, RTRADE_BAD_DAY_TOLERANCE_PCT):
                 print(f"[{self.symbol}] Bed day :-(. Trying BUY at current price - x2 {current_price:.2f}")
-                adjustment_percent = 1.7 * self.DEFAULT_ADJUSTMENT_PERCENT
+                adjustment_percent = RTRADE_BAD_DAY_MULTIPLIER * self.DEFAULT_ADJUSTMENT_PERCENT
             #else:
                 #adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
 
-            # if arrived here it means 
+            # if arrived here it means
             # current order was not filled , so try cancel and retry in the loop
             if not api.cancel_order(self.symbol, order_id):
                 if api.check_order_filled(order_id, self.symbol):
                     print(f"[{self.symbol}] Cancel BUY order failed. Maybe it was filled :-)? Moving to SELL ...")
                     print(f"[{self.symbol}] SELL disperat tot 3 ....")
-                    po.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + 0.01), self.qty, 
-                    force=True, cancelorders=True, hours=2.7)
+                    po.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
+                    force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                     return self.mark_buy_filled(self.filled_buy_price)
                 else:
                     print(f"[{self.symbol}] Cancel BUY order failed. Someone canceled it. Continuing BUY...")
@@ -156,15 +203,15 @@ class TradingBot:
     def repetitive_sell(self, current_price, filled_buy_price):
         adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
         failure_count = 1  # Adaugăm un contor pentru numărul de eșecuri
-        max_failures = 10  # Definim numărul maxim de eșecuri acceptabile
+        max_failures = RTRADE_MAX_FAILURES  # Definim numărul maxim de eșecuri acceptabile
 
         while True:
 
             current_price = api.get_current_price(self.symbol)
 
             if self.is_buy_filled:
-                adjustment_percent = max(MIN_adjustment_percent, adjustment_percent - adjustment_percent * 0.01)
-                
+                adjustment_percent = max(MIN_adjustment_percent, adjustment_percent - adjustment_percent * RTRADE_SELL_DECAY_PCT)
+
             target_sell_price = round(current_price * (1 + adjustment_percent), 4)
             print(f"[{self.symbol}] Order SELL initiated at {target_sell_price:.2f} procent {adjustment_percent}%")
 
@@ -173,18 +220,18 @@ class TradingBot:
                 return self.mark_sell_filled(self.filled_sell_price)
 
             sell_order = None
-            h = 0.23/failure_count
+            h = RTRADE_SELL_DESPERATE_HOURS_BASE / failure_count
             try:
                 if self.is_buy_filled: # sunt disperat
                     if adjustment_percent == MIN_adjustment_percent:
                         print(f"[{self.symbol}] sunt disperat!")
                         sell_order = po.place_safe_order("SELL", self.symbol, target_sell_price, self.qty,
-                            safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
+                            safeback_seconds=RTRADE_DESPERATE_SAFEBACK_SEC, force=False, cancelorders=True, hours=h)
                     else:
                         sell_order = po.place_safe_order("SELL", self.symbol, target_sell_price, self.qty,
-                            safeback_seconds=1*3600+60, force=False, cancelorders=True, hours=h)
+                            safeback_seconds=RTRADE_DESPERATE_SAFEBACK_SEC, force=False, cancelorders=True, hours=h)
                 else:
-                    sell_order = po.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, cancelorders=True, hours=12)
+                    sell_order = po.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, cancelorders=True, hours=RTRADE_SELL_NORMAL_HOURS)
             except po.WeightLimitBlock as e:
                 print(f"[{self.symbol}] Limita 24h atinsă (SELL) — ies fără retry ({e})")
                 return None
@@ -210,34 +257,34 @@ class TradingBot:
             if api.check_order_filled(order_id, self.symbol):
                 print(f"[{self.symbol}] SELL order filled at {self.filled_sell_price:.2f}")
                 print(f"[{self.symbol}] BUY disperat tot 1....")
-                po.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - 0.01), self.qty, 
-                    force=True, cancelorders=True, hours=2.7)
+                po.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
+                    force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                 return self.mark_sell_filled(self.filled_sell_price)
-                 
+
 
             filled_sell_price = api.check_order_filled_by_time("SELL", self.symbol, time_back_in_seconds=WAIT_FOR_ORDER)
             if filled_sell_price is not None:
                 print(f"[{self.symbol}] SELL order may have been filled :-) at {filled_sell_price:.2f}")
                 print(f"[{self.symbol}] BUY disperat tot 2....")
-                po.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - 0.01), self.qty, 
-                    force=True, cancelorders=True, hours=2.7)
+                po.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
+                    force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                 return self.mark_sell_filled(filled_sell_price)
 
             current_price = api.get_current_price(self.symbol)
-            if current_price < filled_buy_price and not u.are_close(current_price, filled_buy_price, 0.1):
+            if current_price < filled_buy_price and not u.are_close(current_price, filled_buy_price, RTRADE_BAD_DAY_TOLERANCE_PCT):
                 print(f"[{self.symbol}] Bed day :-(. Trying SELL at current price + x2 {current_price:.2f}")
-                adjustment_percent = 1.7 * self.DEFAULT_ADJUSTMENT_PERCENT
+                adjustment_percent = RTRADE_BAD_DAY_MULTIPLIER * self.DEFAULT_ADJUSTMENT_PERCENT
             #else:
                 #adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
-           
-            # if arrived here it means 
+
+            # if arrived here it means
             # current order was not filled , so try cancel and retry in the loop
             if not api.cancel_order(self.symbol, order_id):
                 if api.check_order_filled(order_id, self.symbol):
                     print(f"[{self.symbol}] Cancel SELL order failed. Maybe it was filled :-)? Moving to BUY ...")
                     print(f"[{self.symbol}] BUY disperat tot 3....")
-                    po.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - 0.01), self.qty, 
-                        force=True, cancelorders=True, hours=2.7)                     
+                    po.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
+                        force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                     return self.mark_sell_filled(self.filled_sell_price)
                 else:
                     print(f"[{self.symbol}] Cancel SELL order failed. Someone canceled it. Continuing sell...")
@@ -273,7 +320,7 @@ class TradingBot:
                 if not buy_result[0] or not sell_result[0]:
                     continue
                     
-                filled_buy_price = buy_result[0] + 0.0001  # avoid zero
+                filled_buy_price = buy_result[0] + RTRADE_ZERO_EPSILON  # avoid zero
                 filled_sell_price = sell_result[0]
 
                 print(f"[{self.symbol}] Transaction complete: Bought at {filled_buy_price:.2f}, Sold at {filled_sell_price:.2f}")
@@ -298,17 +345,25 @@ class TradingBot:
                 time.sleep(1)
                 
                 
-DEFAULT_ADJUSTMENT_PERCENT = round(u.calculate_difference_percent(60000, 60000 - 380) / 100, 4)
+_default_adj = round(u.calculate_difference_percent(60000, 60000 - 380) / 100, 4)
+DEFAULT_ADJUSTMENT_PERCENT = float(os.environ.get("RTRADE_DEFAULT_ADJUSTMENT_PCT", str(_default_adj)))
 print(f"[INFO] DEFAULT_ADJUSTMENT_PERCENT = {DEFAULT_ADJUSTMENT_PERCENT}")
 
-# WS user-data bridge explicit: rtrade plasează ordine prin place_order_smart,
-# care verifică intern istoricul de orders/trades (guard-uri max_daily_trades,
-# manage_quantity). WS ține acel cache proaspăt (altfel doar polling la 3 min).
-import cacheManager as cm
-cm.enable_real_ws_event_sync()
+# 23 iul: blocul de pornire efectiva (WS + instantiere bot + bot.run(), care e o
+# bucla LIVE infinita cu ordine reale) mutat sub __name__=="__main__" — inainte
+# rula necondiionat la IMPORT, ceea ce ar fi pornit tranzactionarea live doar prin
+# `import rtrade` (ex. dintr-un test). Nimic altceva nu importa acest modul azi
+# (verificat prin grep) si flota_start.sh il ruleaza cu `python rtrade.py`, deci
+# comportamentul de PRODUCTIE ramane identic — doar importul devine sigur.
+if __name__ == "__main__":
+    # WS user-data bridge explicit: rtrade plasează ordine prin place_order_smart,
+    # care verifică intern istoricul de orders/trades (guard-uri max_daily_trades,
+    # manage_quantity). WS ține acel cache proaspăt (altfel doar polling la 3 min).
+    import cacheManager as cm
+    cm.enable_real_ws_event_sync()
 
-bot = TradingBot(sym.taosymbol, 100, DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
-#bot = TradingBot(sym.taosymbol, api.quantities[sym.taosymbol], DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
-bot.run()
+    bot = TradingBot(sym.taosymbol, RTRADE_QTY, DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
+    #bot = TradingBot(sym.taosymbol, api.quantities[sym.taosymbol], DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
+    bot.run()
 
     
