@@ -1,8 +1,11 @@
 # instruments_config.py
 """Loader pt `instruments.conf` -> dict[name, Instrument].
 
-Registru CENTRAL, multi-consumator: monitortrades (mt.*), tradeall (tradeall.*),
-rtrade (rtrade.*) citesc ACELASI fisier; fiecare ia CORE + namespace-ul lui.
+Registru CENTRAL, gandit multi-consumator (fiecare bot ar lua CORE + namespace-ul
+lui, ex. mt.* pt monitortrades). 23 iul: verificat prin grep — azi SINGURUL
+consumator real e monitortrades.py (load_for("mt")); tradeall.py si rtrade.py
+NU importa acest modul si instruments.conf nu are chei tradeall.*/rtrade.*.
+Namespace-urile lor raman doar design pt cand/daca vor migra aici.
 
 CORE per sectiune: provider, symbol, base, quote, enabled, isolation, market_hours.
 Orice alta cheie (ex. 'mt.gain', 'tradeall.budget') intra in `params` ca string;
