@@ -186,8 +186,24 @@ def load_ticks_cache24(symbol, start_ts, end_ts, filename=None):
 
 
 def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=None, quiet=False,
-                 kalman_primary=False):
+                 kalman_primary=False, threshold_provider=None):
+    """threshold_provider OPTIONAL (default None = comportament VECHI, neschimbat:
+    foloseste ta.PRICE_CHANGE_THRESHOLD_EUR/_BIG_EUR fixe). Daca dat, e un callable
+    threshold_provider(window_small, window_big) -> (thr_small, thr_big), apelat la
+    FIECARE tick INAINTE de check_price_change() — asa poate un experiment sa testeze
+    praguri DINAMICE (ex. adaptive pe volatilitate) fara sa copieze bucla intreaga
+    (23 iul: research/tradeall_adaptive_thresholds/ facuse exact asta inainte, cu
+    riscul ca bucla proprie sa diverga tacut de asta, "oficiala", in timp)."""
     out_dir = os.path.join(ROOT, "logger", "backtest", run_id)
+    # 23 iul: curata folderul INAINTE de a rula — mai multe fisiere de aici
+    # (order_outcomes.log, tradeall_decisions.log, tradeall_shadow.log,
+    # tradeall_price_samples.log) se scriu cu open(..., "a") (append), deci fara
+    # asta o a DOUA rulare cu ACELASI run_id ar amesteca tacut istoricul vechi cu
+    # cel nou. Pana acum, fiecare caller trebuia sa-si aminteasca sa faca
+    # shutil.rmtree() singur (research/tradeall_trigger_gate/experiment_quality_
+    # signal_v2.py o facea manual) — mutat aici o data, pt toti apelantii.
+    import shutil as _shutil
+    _shutil.rmtree(out_dir, ignore_errors=True)
     os.makedirs(out_dir, exist_ok=True)
     price_path = os.path.join(out_dir, "tradeall_price_samples.log")
 
@@ -261,11 +277,16 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
             window_big.process_price(price)
             price_f.write(f"{ts}|{symbol}|{price}\n")
 
-            slope, _pos = analyzer_small.check_price_change(ta.PRICE_CHANGE_THRESHOLD_EUR)
+            if threshold_provider is not None:
+                thr_small, thr_big = threshold_provider(window_small, window_big)
+            else:
+                thr_small, thr_big = ta.PRICE_CHANGE_THRESHOLD_EUR, ta.PRICE_CHANGE_THRESHOLD_BIG_EUR
+
+            slope, _pos = analyzer_small.check_price_change(thr_small)
             gradient, _gc, _sf, _gr = window_small.get_instant_trend()
             ta.logic_small("SMALL", True, symbol, gradient, slope, trend_state, price)
 
-            slope_big, _price_diff = analyzer_big.check_price_change(ta.PRICE_CHANGE_THRESHOLD_BIG_EUR)
+            slope_big, _price_diff = analyzer_big.check_price_change(thr_big)
             ta.logic("BIG", True, symbol, gradient, slope_big, trend_state_big, price)
 
             # SHADOW: acelasi apel ca in TrendCoordinator.evaluate live, cu ceas simulat
@@ -279,6 +300,13 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
 
             if first_price is None:
                 first_price = price
+            # 23 iul: broker.last_price actualizat NECONDITIONAT, la fiecare tick — nu
+            # doar in modul kalman_primary. Bug gasit azi: fara asta, mark_to_market()
+            # foloseste pretul ULTIMEI TRANZACTII (nu pretul curent de piata) pt orice
+            # pozitie ramasa DESCHISA la final in modul normal (model_actual) — un BUY
+            # la 100 urmat de o urcare la 150 fara alt trade raporta mark_to_market=$0
+            # in loc de $50 (verificat izolat: net_total -$0.10 vs +$49.90 corect).
+            broker.last_price = price
             if kalman_primary:
                 ktrend = shadow_fields.get("kalman_trend", prev_ktrend)
                 if ktrend != prev_ktrend:
@@ -288,7 +316,6 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
                     elif ktrend == -1:
                         broker.sell_all(symbol, price, motivation="kalman_down")
                     prev_ktrend = ktrend
-                broker.last_price = price
 
             n += 1
             if n % 100 == 0:
