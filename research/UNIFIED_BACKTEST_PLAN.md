@@ -170,3 +170,120 @@ e un detaliu de implementare ascuns, nu ceva ce trebuie sa alegi manual.
 3. CLI-ul (§3): merita sa existe acum, sau ramanem cu scripturi individuale
    (ca azi) pana quand se acumuleaza mai multe cazuri si tiparul de adaptor
    devine mai clar din experienta, nu din design a priori?
+
+---
+
+## 6. Observatie 23 iul (dupa #1/#2): API-ul de piata are o interfata unificata
+care sa dea si "acum live" si "starea simulata la momentul X"?
+
+Intrebare user: exchange-urile au un API unificat prin care iei fie starea
+LIVE reala acum, fie starea SIMULATA la un moment X — ar fi un pas important
+pt backtest consistent?
+
+Raspuns: DA, e directia corecta, si e PARTIAL deja adevarat aici, dar in doua
+bucati separate care n-au fost inca unite:
+
+- `providers/market_api.py` (facada `mkt`) unifica deja LIVE-ul **intre
+  exchange-uri** (Binance/Kraken/Hyperliquid/T212 raspund la aceleasi apeluri:
+  `get_current_price`, `get_orders`, `free_balance`).
+- `tradeall_backtest.py`'s `_SimClock` + iteratorul de tick-uri istorice
+  unifica deja LIVE-vs-ISTORIC **pt timp**, dar DOAR pt tradeall.py, si NU
+  prin facada — e o bucla separata care re-construieste `PriceWindow`/
+  `TrendState` direct din date istorice, ocolind complet `TrendCoordinator`/
+  cacheManager (calea REALA prin care tradeall.py obtine preturi azi).
+
+Ce NU exista inca: facada `mkt` insasi sa aiba un "mod replay" — adica
+`mkt.get_current_price(symbol)` sa poata raspunde fie "acum", fie "la
+timestamp-ul simulat T", prin ACELASI apel. Daca ar exista, codul REAL al
+botilor (nu o reimplementare separata ca `kraken/backtest.py::simulate()`)
+ar putea rula neschimbat impotriva istoricului — eliminand complet riscul de
+derapaj intre "ce face botul real" si "ce simuleaza backtest-ul" (exact
+problema gasita azi la #1: bariera de reintrare lipsea din simulare pt ca
+simularea era o COPIE, nu codul real).
+
+Limita onesta: unificarea asta rezolva doar latura de "ce spunea piata" —
+tot ai nevoie de un broker simulat separat (ca `BacktestBroker`/motoarele
+`simulate()` de azi) ca sa decizi "s-ar fi executat ordinul asta la pretul
+istoric respectiv" — asta ramane un mecanism DIFERIT, complementar, nu
+dispare prin unificarea sursei de pret/timp.
+
+---
+
+## 7. Cerere user: flota (tradeall/monitortrades/rtrade/assetguardian) trebuie
+sa fie UNIFORMA ca sursa de pret (cache, nu live) si timp (din timestamp-ul
+pretului, sau scara simulata a backtestului) — de unde incepem?
+
+Aleg 2 module pt FAZA 1 (nu toate 4 deodata), pe criteriul "cel mai mic efort
+x cea mai mare valoare imediata":
+
+### FAZA 1: `tradeall.py` (formalizeaza ce exista deja) + `monitortrades.py` (nou)
+
+**`tradeall.py` — deja ~70% acolo.** `TrendState`/`PriceWindow` accepta deja
+`now_fn` injectabil (asta e EXACT mecanismul de "timpul vine din
+simulare" cerut) si `tradeall_backtest.py` deja re-alimenteaza `PriceWindow`
+cu preturi istorice in loc de live. Ce lipseste azi: mecanismul e ad hoc,
+scris o singura data in `tradeall_backtest.py`, nereutilizabil de altundeva
+(hook-ul `threshold_provider` de azi e un prim pas spre generalizare, dar
+sursa de pret + ceasul raman "cusute" in bucla lui `run_backtest()`, nu o
+componenta separata, reutilizabila). Faza 1 aici = extrage `_SimClock` +
+incarcarea tick-urilor istorice intr-o componenta mica, separata
+(`PriceReplaySource`?), NEschimband tradeall.py insusi (deja e suficient de
+injectabil).
+
+**`monitortrades.py` — 0% azi, dar cea mai mare valoare.** Nu exista NICIUN
+backtest pt el, si `BACKTEST_CANDIDATES.md` a identificat gain/lost per
+simbol (`instruments.conf`) ca cel mai valoros candidat NETESTAT din tot
+inventarul (#4-5, prioritate ÎNALTĂ). Ca sa devina testabil, ar trebui
+schimbat CHIAR `monitortrades.py` (nu doar adaugat un harness alaturi, ca la
+tradeall) in 2 puncte, MINIMAL, pastrand comportamentul implicit identic
+(acelasi standard de "zero schimbare de comportament" ca extragerile din
+config de azi):
+  - `time.time()` (apare direct, de 2 ori, in `monitor_price_and_trade`/`get_relevant_trade`)
+    -> injectat printr-un `now_fn=time.time` implicit (override-abil doar in teste/backtest).
+  - `inst.price()`/`inst.orders(...)` (calea reala prin care vine pretul/istoricul
+    de trade-uri) -> ar trebui sa poata primi un `Instrument` "de replay" care
+    citeste din `cache_price_{symbol}.jsonl`/`cache_24price_*` in loc sa bata
+    reteaua — posibil deja aproape gratis, daca `_as_instrument`/`Instrument`
+    accepta deja un provider custom (de verificat inainte sa scriem cod).
+
+**De ce NU rtrade/assetguardian in faza 1:**
+- `rtrade.py` ruleaza BUY si SELL pe THREAD-URI SEPARATE, concurent, pe
+  ACELASI simbol — niciun motor de azi (fleet sau pozitie) modeleaza asta;
+  ar necesita design nou, nu doar injectare de pret/timp.
+- `assetguardian.py` evalueaza o singura data la ~54s pe o valoare de
+  portofoliu AGREGATA (cache "AssetValue"), nu pe pretul unui simbol — sursa
+  lui de "adevar" e alt tip de cache decat cel de pret; injectarea
+  timpului/pretului e mai simpla acolo, dar valoarea de backtest e mai mica
+  (deja "practic oprit" pe crestere, vezi `BACKTEST_CANDIDATES.md` §exclusii).
+
+Raman FAZA 2, dupa ce tiparul (sursa de pret injectabila + ceas injectabil)
+se valideaza pe cele 2 din faza 1.
+
+### Ce ar insemna concret sursa de pret + ceas unificate (schematic, tot plan)
+
+Doua componente MICI, reutilizabile intre tradeall si monitortrades:
+
+- **`Clock`**: un obiect cu o metoda, `now() -> float`. Implicit = `time.time`
+  (comportament live, neschimbat). In replay: `now()` intoarce timestamp-ul
+  ULTIMULUI pret citit din sursa de mai jos — nu un ceas simulat care avanseaza
+  independent, exact cum a cerut mesajul ("timpul sa vina din timpul pretului
+  obtinut") — asta e deja tiparul `_SimClock` din `tradeall_backtest.py`,
+  doar generalizat sa nu fie legat de un singur fisier.
+- **`PriceSource`**: un obiect cu o metoda, `get_price(symbol) -> float`.
+  Implicit = calea live de azi (mkt/cacheManager, neschimbata). In replay:
+  citeste secvential din `cache_price_{symbol}.jsonl`/`cache_24price_*.json`,
+  avansand `Clock`-ul asociat la fiecare citire.
+
+Ambele module (tradeall, monitortrades) ar primi aceste 2 obiecte prin
+injectare (parametru cu default = comportamentul live de azi), nu prin
+monkeypatch extern — asta e diferenta fata de tiparul de azi din
+`tradeall_backtest.py` (care monkeypatch-uieste `ta.po.place_order_smart`
+etc. din AFARA) si ar face testarea mai directa/clara.
+
+### Atentie (acelasi standard ca extragerile de azi)
+
+Orice schimbare in `monitortrades.py` insusi (nu doar harness alaturi)
+trebuie sa treaca prin acelasi test: valoarea implicita (fara Clock/PriceSource
+custom injectat) trebuie sa reproduca EXACT comportamentul de azi — verificat
+numeric, cu teste dedicate, inainte de orice commit. Nu se schimba logica de
+decizie, doar SURSA datelor de intrare.
