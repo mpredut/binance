@@ -647,8 +647,13 @@ class TrendCoordinator:
         self._dirty = {s: True for s in self.symbols}      # forțăm o primă evaluare
         self._last_eval = {s: 0.0 for s in self.symbols}
 
-        # Semnale SHADOW (observationale, plan 17 iul): Kalman trend + vol adaptiv.
-        # Un bug aici NU are voie sa opreasca trading-ul -> instantiere + apel guarded.
+        # shadow_signals (plan 17 iul): Kalman trend + vol adaptiv. 23 iul: DOAR vol
+        # adaptiv (vol_1h_pct/adapt_reentry_pct/adapt_dca_pct) a ramas observational
+        # azi — tradeall nu are mecanism de reentry/DCA care sa le consume, sunt
+        # afisate doar in monitor. Kalman trend NU mai e shadow: promovat la bani
+        # reali pe 19 iul (KALMAN_GATE_MODE gateaza toate ordinele + KALMAN-PRIMAR
+        # initiaza BUY/SELL direct pe simbolurile din KALMAN_PRIMARY_SYMBOLS, vezi
+        # mai jos). Un bug aici NU are voie sa opreasca trading-ul -> instantiere + apel guarded.
         try:
             import shadow_signals
             self._shadow = shadow_signals.ShadowSet(
@@ -707,8 +712,11 @@ class TrendCoordinator:
         # Publică snapshot-ul complet (merge) în store-ul cross-process.
         # snapshot conține deja cheia "symbol" → o scoatem (e arg pozițional).
         fields = {k: v for k, v in snapshot.items() if k != "symbol"}
-        # SHADOW (observational): chei suplimentare in snapshot + jurnal propriu la
-        # tranzitii Kalman. Guarded — nu poate afecta evaluarea/deciziile reale.
+        # shadow_signals.update(): scrie cheile in snapshot (monitor). ATENTIE: NU mai
+        # e "doar observational" azi — kalman_trend de mai jos alimenteaza KALMAN-PRIMAR
+        # (initiaza ordine reale) si gate-ul din _fire_order (blocheaza ordine reale).
+        # Doar vol_1h_pct/adapt_reentry_pct/adapt_dca_pct raman pur observationale
+        # (niciun consumator in tradeall). Guarded — un bug aici nu poate opri evaluarea.
         if self._shadow is not None:
             try:
                 win = self.instant_mgr.get_window(symbol)
