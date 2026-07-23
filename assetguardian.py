@@ -1,3 +1,4 @@
+import os
 import time
 
 from binance_api import bapi as api
@@ -5,19 +6,24 @@ from binance_api import bapi_placeorder as po
 import cacheManager as cm
 import symbols as sym
 
+# 23 iul: incarca parametrii tunabili din assetguardian_config.env (versionat,
+# se COMITE — fara secrete) INAINTE de a citi orice os.environ.get(...) de mai
+# jos. botcore.load_dotenv NU suprascrie variabile deja setate in mediul real.
+from botcore import load_dotenv as _load_dotenv
+_load_dotenv("assetguardian_config.env")
 
-CHECK_INTERVAL_SECONDS = 0.9 * 60 # 9 minutes
+CHECK_INTERVAL_SECONDS = float(os.environ.get("AG_CHECK_INTERVAL_SEC", str(0.9 * 60)))  # 9 minute
 # 2.9% declansa "sell all" la fiecare ciclu intr-un uptrend, dar sell_all_assets
 # cheama place_safe_order(force=False) -> apply_weight_limit zero-uia ordinul
 # (vindea NIMIC, spam "Orders sent: 0"). Walk-forward pe feed real (291z) a aratat
 # ca vanzarea agresiva pierde fata de deTinere -> ridicat la 100 (practic oprit).
 # Protectia reala de crash o face trailing_stop.py (force=True, prag larg ~22%).
-TARGET_GROWTH_PERCENT = 100.0
-TARGET_DROP_PERCENT = 7.0
-ASSET_REFERENCE_MINUTES_BACK_DEFAULT = 24 * 60 # 24 hours
+TARGET_GROWTH_PERCENT = float(os.environ.get("AG_TARGET_GROWTH_PCT", "100.0"))
+TARGET_DROP_PERCENT = float(os.environ.get("AG_TARGET_DROP_PCT", "7.0"))
+ASSET_REFERENCE_MINUTES_BACK_DEFAULT = float(os.environ.get("AG_REFERENCE_MINUTES_BACK", str(24 * 60)))  # 24 ore
 
 BUY_SYMBOL_DEFAULT = sym.symbols[0] if sym.symbols else "BTCUSDC"
-BUY_USE_CASH_RATIO = 0.995
+BUY_USE_CASH_RATIO = float(os.environ.get("AG_BUY_USE_CASH_RATIO", "0.995"))
 
 def _read_cache_rows():
     try:
