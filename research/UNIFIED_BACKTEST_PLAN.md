@@ -354,3 +354,26 @@ ferestre) a durat ~5 min pe acest hardware; toti cei 4 parametri pilot ar
 insemna ~20-90 min per ciclu — prea lent pt "de mai multe ori pe zi" fara
 ajustari (fereastra mai scurta pt rulari de rutina? rotatie prin parametri in
 loc de toti deodata? de decis inainte de a pune pe cron).
+
+**Pilot RULAT complet (23 iul, seara)**: 3 din 4 chei NU confirmate (castigator
+diferit intre cele 2 ferestre — guardrail corect, respins ca zgomot). 1
+confirmata clar: TAO `mt.lost` — 5.6% a castigat pe AMBELE ferestre (edge vs
+buy&hold 259.85/329.0, fata de 84.07/208.21 la 4.9% actual). Aplicat automat
+(medie): 4.9 -> 5.25. Toate guardrail-urile au functionat ca proiectat.
+
+**TODO investigat, NU implementat (23 iul, seara — cerere user)**: observatie
+ca `priceAnalysis.py` si `tradeall.py` ar trebui sa fie sincrone intr-un
+backtest. Verificat prin grep: NU `priceAnalysis.py` scrie semnalul de trend
+citit de `is_trend_up()` — e chiar `tradeall.py` (`TrendCoordinator.evaluate()`
+scrie `gradient_recent`/`final_trend` in `cacheManager.get_short_trend_manager()`,
+un singleton cu memorie IN-PROCES + fallback pe fisier `cache_instant_trend.json`
+pt orice proces care nu are inca nimic in memorie — asta explica exact
+contaminarea gasita: procesul de backtest, fiind un proces NOU, cade pe
+fisierul de pe disc, care e scris LIVE de tradeall.py real). Fix-ul corect ar
+insemna: alimentat un `PriceWindow` (acelasi tip deja folosit de
+`tradeall_backtest.py`) cu ACELASI istoric replay-uit ca `ReplayMarketDataProvider`,
+calculand `gradient_recent` real din date istorice, publicat intr-un
+snapshot IZOLAT (nu fisierul global) pt ca `is_trend_up()` sa-l citeasca.
+Tractabil (piesele exista deja), dar netestat — amanat deliberat (nu la ora
+asta, fara sa poata fi validat riguros ca restul sesiunii) in favoarea
+rularilor de backtest deja construite si validate, lasate peste noapte.
