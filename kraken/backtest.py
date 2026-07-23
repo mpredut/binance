@@ -14,8 +14,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import urllib.request
+
+
+def _are_close(v1, v2, tol_pct):
+    """Aceeasi formula ca botcore.diff_percent/are_close (simetrica, pe media
+    absoluta) — determinista, fara sa importe botcore (backtest ruleaza izolat)."""
+    if tol_pct <= 0:
+        return False
+    denom = (abs(v1) + abs(v2)) / 2
+    if denom == 0:
+        return True
+    return abs(v1 - v2) / denom * 100 <= tol_pct
 
 
 def fetch_candles(pair, interval):
@@ -32,17 +44,28 @@ def fetch_candles(pair, interval):
     return [(float(x[1]), float(x[2]), float(x[3]), float(x[4])) for x in res[key]]
 
 
-def simulate(ohlc, P):
+def simulate(ohlc, P, reentry_arr=None):
+    """Motor DCA+TP+SL. `reentry_arr` OPTIONAL (default None = comportament VECHI,
+    neschimbat): daca dat (secventa per-bara, NaN = foloseste P["reentry_fallback"]),
+    activeaza bariera de reintrare dupa o inchidere de pozitie (TP/SL) — lipsea din
+    versiunea originala (gasit in research/kraken_adaptive_thresholds/, 23 iul:
+    strategia REALA, kraken/strategy.py step(), asteapta explicit sub
+    last_sell_price*(1-reentry_pct/100) inainte sa reintre; simulatorul reintra
+    imediat). P["reentry_tolerance_pct"] (implicit 0 = fara toleranta) controleaza
+    cat de "aproape de prag" conteaza ca atins (are_close, determinist)."""
     disc, drop, tp, sl = P["disc"]/100, P["drop"]/100, P["tp"]/100, P["sl"]/100
     fee = P["fee"]/100
+    reentry_tol = P.get("reentry_tolerance_pct", 0.0)
     qty = cost = spent = 0.0
     dca = 0; last_open = None
     realized = fees = 0.0
     cycles = wins = 0
     peak = eq = 0.0; maxdd = 0.0
     rest_buy = None; rest_sell = None
+    last_sell_price = None
+    blocked_ticks = 0
 
-    for (o, h, l, c) in ohlc:
+    for i, (o, h, l, c) in enumerate(ohlc):
         if rest_buy:
             px, sz = rest_buy
             if l <= px:
@@ -57,6 +80,7 @@ def simulate(ohlc, P):
                 avg = cost/qty
                 realized += (px-avg)*sz; fees += fee*sz*px
                 cycles += 1; wins += 1 if px > avg else 0
+                last_sell_price = px
                 qty = cost = spent = 0.0; dca = 0; last_open = None
                 rest_sell = None; rest_buy = None
         if qty > 1e-9 and sl > 0:                       # STOP-LOSS pe close
@@ -64,11 +88,22 @@ def simulate(ohlc, P):
             if (avg - c)/avg >= sl:
                 realized += (c-avg)*qty; fees += fee*qty*c
                 cycles += 1
+                last_sell_price = c
                 qty = cost = spent = 0.0; dca = 0; last_open = None
                 rest_sell = None; rest_buy = None
         if qty <= 1e-9:
             if rest_buy is None and spent + P["entry"] <= P["budget"]:
-                px = c*(1-disc); rest_buy = (px, round(P["entry"]/px, 8))
+                blocked = False
+                if reentry_arr is not None and last_sell_price:
+                    r = reentry_arr[i]
+                    reentry_pct = P.get("reentry_fallback", 0.0) if (isinstance(r, float) and math.isnan(r)) else r
+                    if reentry_pct > 0:
+                        prag = last_sell_price * (1 - reentry_pct / 100)
+                        if c > prag and not _are_close(c, prag, reentry_tol):
+                            blocked = True
+                            blocked_ticks += 1
+                if not blocked:
+                    px = c*(1-disc); rest_buy = (px, round(P["entry"]/px, 8))
         else:
             avg = cost/qty
             rest_sell = (avg*(1+tp), qty)
@@ -81,7 +116,8 @@ def simulate(ohlc, P):
     final_upnl = (ohlc[-1][3] - cost/qty)*qty if qty > 1e-9 else 0.0
     return {"realized": realized, "fees": fees, "net": realized - fees,
             "total": realized - fees + final_upnl, "final_upnl": final_upnl,
-            "cycles": cycles, "wins": wins, "maxdd": maxdd, "open_qty": qty}
+            "cycles": cycles, "wins": wins, "maxdd": maxdd, "open_qty": qty,
+            "blocked_ticks": blocked_ticks}
 
 
 def main() -> int:
