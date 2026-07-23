@@ -309,3 +309,48 @@ trebuie sa treaca prin acelasi test: valoarea implicita (fara Clock/PriceSource
 custom injectat) trebuie sa reproduca EXACT comportamentul de azi — verificat
 numeric, cu teste dedicate, inainte de orice commit. Nu se schimba logica de
 decizie, doar SURSA datelor de intrare.
+
+---
+
+## 8. Pilot construit 23 iul — status si un TODO real gasit (nu doar teoretic)
+
+Pilotul (monitortrades.py, `research/backtest_ranges.py` +
+`research/monitortrades_backtest/scheduled_pilot.py`) e construit si validat
+manual (dry-run, un parametru). In timpul validarii au iesit la iveala 2
+bug-uri REALE (nu ipotetice) in mecanismul de backtest insusi:
+
+1. **`run_replay_backtest.SYMBOLS` era o copie hardcodata** a `instruments.conf`,
+   inghetata inainte sa adaugam `mt.buy_budget`/`mt.max_budget` — orice test
+   ulterior rula FARA acea protectie, fara sa se observe (fix: citeste live,
+   la fiecare acces).
+2. **`is_trend_up()` citea cache-ul de trend LIVE** (contamina un replay
+   istoric cu starea REALA, curenta a pietei — acelasi backtest, rulat de 2
+   ori, dadea rezultate diferite). Fix APLICAT: neutralizat determinist
+   (`return False`) in timpul backtest-ului.
+
+Fix-ul #2 e o SIMPLIFICARE, nu fidelitate completa — observatie user (23 iul,
+seara): `priceAnalysis.py` (care alimenteaza semnalul de trend din API-ul
+Binance in productie) ar trebui sa ruleze SINCRON cu `tradeall.py`/replay-ul
+istoric intr-un backtest, nu doar neutralizat. Adica: `priceAnalysis.py` ar
+avea nevoie de ACELASI tratament de injectare pret+ceas ca `monitortrades.py`
+azi, calculand trendul DIN istoricul redat (acelasi ceas, aceleasi tick-uri),
+nu dintr-un feed live separat. Asta ar face `is_trend_up()` sa reflecte ce ar
+fi vazut CU ADEVARAT botul la acel moment istoric, nu doar "niciun semnal".
+
+**Ramane TODO explicit, NU implementat inca** — e o bucata de lucru comparabila
+ca marime cu ce am facut azi pt monitortrades.py (Instrument/MarketDataProvider),
+dar pt priceAnalysis.py, care azi n-are NICIUN punct de injectare. Pana atunci,
+orice backtest care foloseste is_trend_up() (deci orice backtest monitortrades)
+ramane cu simplificarea "neutru" — corect etichetata, dar incompleta.
+
+**Re-validare dupa fix-uri**: `instruments.conf` de azi (buy_budget=250,
+max_budget=3500 pt TAO) da rezultate STABILE si identice pt max_budget intre
+1500-5000 (net -$170.83 vs buy&hold -$426.06) — instabilitatea vazuta inainte
+de fix (acelasi max_budget dand +$3016 apoi -$5279) era in intregime bug-ul
+#2, nu sensibilitate reala la parametru. Nicio schimbare de config necesara.
+
+**Cadenta scheduler-ului**: o rulare completa pt 1 parametru (4 valori x 2
+ferestre) a durat ~5 min pe acest hardware; toti cei 4 parametri pilot ar
+insemna ~20-90 min per ciclu — prea lent pt "de mai multe ori pe zi" fara
+ajustari (fereastra mai scurta pt rulari de rutina? rotatie prin parametri in
+loc de toti deodata? de decis inainte de a pune pe cron).
