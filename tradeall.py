@@ -33,6 +33,14 @@ from pricewindow import (PriceTrendAnalyzer, PriceWindow, WindowAnalyzer,
                          RECENT_GRADIENT_SECONDS,
                          WINDOW_SECONDS_SMALL, WINDOW_SECONDS_BIG)
 
+# 23 iul: incarca parametrii tunabili din tradeall_config.env (versionat, se
+# COMITE — fara secrete) INAINTE de a citi orice os.environ.get(...) de mai jos.
+# botcore.load_dotenv NU suprascrie variabile deja setate in mediul real (ex.
+# systemd EnvironmentFile), doar completeaza ce lipseste — sigur de adaugat
+# fara sa schimbe ce era deja configurat altfel.
+from botcore import load_dotenv as _load_dotenv
+_load_dotenv("tradeall_config.env")
+
 
 TIME_SLEEP_GET_PRICE = 0.8       # seconds to sleep for price collection — valoare nominală
 EXP_TIME_BUY_ORDER = (2.6 * 60) * 60 # dupa 1.6 ore
@@ -43,9 +51,28 @@ TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + EXP_TIME_SELL_ORDER/ 6 + 4*79  # 
 
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
-TREND_TO_BE_OLD_SECONDS = 60 * 60 * 1.9
-PRICE_CHANGE_THRESHOLD_EUR = u.calculate_difference_percent(60000, 60000 - 310)
-PRICE_CHANGE_THRESHOLD_BIG_EUR = u.calculate_difference_percent(97000, 95000 - 377)
+# 23 iul: parametrii de mai jos erau constante hardcodate direct in cod —
+# scoase acum in variabile de mediu (config.env, sectiunea "tradeall.py"), cu
+# valori implicite IDENTICE cu ce rula pana acum (zero schimbare de comportament
+# daca nu se seteaza explicit env-ul). Cerere user: inventariat + externalizat
+# tot ce e parametru/multiplicator/prag, un bot pe rand, cu teste complete.
+TREND_TO_BE_OLD_SECONDS = float(os.environ.get("TRADEALL_TREND_OLD_HOURS", "1.9")) * 3600
+# valorile de mai jos erau calculate din u.calculate_difference_percent(60000, 60000-310)
+# si (97000, 95000-377) — pastrate ca procente directe, cu suficiente zecimale
+# cat sa reproduca EXACT rezultatul acelor apeluri (0.518...% / 2.481...%).
+PRICE_CHANGE_THRESHOLD_EUR = float(os.environ.get("TRADEALL_PRICE_CHANGE_THRESHOLD_PCT", "0.5180048459"))
+PRICE_CHANGE_THRESHOLD_BIG_EUR = float(os.environ.get("TRADEALL_PRICE_CHANGE_THRESHOLD_BIG_PCT", "2.4809130428"))
+
+# TrendState.is_trend_a_minim_validated/is_trend_consistent_validated/is_trend_uniform_confirmed
+# — pragurile de "cat de validat" trebuie sa fie un trend inainte sa fie considerat
+# de incredere (vezi metodele TrendState de mai jos).
+TREND_MIN_VALIDATED_SECONDS = float(os.environ.get("TRADEALL_TREND_MIN_VALIDATED_SEC", "30"))
+TREND_MIN_VALIDATED_CONFIRMS = int(os.environ.get("TRADEALL_TREND_MIN_VALIDATED_CONFIRMS", "3"))
+TREND_CONSISTENT_CONFIRMS = int(os.environ.get("TRADEALL_TREND_CONSISTENT_CONFIRMS", "24"))  # era 8*3
+TREND_UNIFORM_RATE_THRESHOLD = float(os.environ.get("TRADEALL_TREND_UNIFORM_RATE", "0.08"))
+# logic(): pragul de "panta extrema" (4 aparitii, simetrice UP/DOWN) care ocoleste
+# validarea normala si trateaza trendul ca deja "vechi" pt scopul acelor blocuri.
+SLOPE_EXTREME_THRESHOLD = float(os.environ.get("TRADEALL_SLOPE_EXTREME_THRESHOLD", "5.1"))
 
 # 22 iul: cooldown per instanta de trend (investigat pe date reale, 21-22 iul,
 # 7 experimente in research/tradeall_trigger_gate/) — logic() nu avea niciun
@@ -58,8 +85,8 @@ PRICE_CHANGE_THRESHOLD_BIG_EUR = u.calculate_difference_percent(97000, 95000 - 3
 # 22 iul (update user): permite pana la FIRE_MAX_PER_TREND executii CONFIRMATE
 # (nu doar 1) per directie per instanta de trend, cu minim FIRE_MIN_RETRY_INTERVAL_SEC
 # intre orice doua incercari (reusite SAU respinse) — 6 min (redus de la 30 min).
-FIRE_MIN_RETRY_INTERVAL_SEC = 6 * 60    # interval minim intre incercari (reusite sau respinse)
-FIRE_MAX_PER_TREND = 3                  # cel mult atatea executii CONFIRMATE per directie per trend
+FIRE_MIN_RETRY_INTERVAL_SEC = float(os.environ.get("TRADEALL_FIRE_MIN_RETRY_MINUTES", "6")) * 60
+FIRE_MAX_PER_TREND = int(os.environ.get("TRADEALL_FIRE_MAX_PER_TREND", "3"))
 
 DECISIONS_LOG_DIR = "logger"
 
@@ -314,23 +341,24 @@ class TrendState:
 
 
     def is_trend_a_minim_validated(self) :
-        return self.last_confirmation_time - self.start_time > 30 and self.confirm_count > 3
-    
+        return (self.last_confirmation_time - self.start_time > TREND_MIN_VALIDATED_SECONDS
+                and self.confirm_count > TREND_MIN_VALIDATED_CONFIRMS)
+
     def is_trend_consistent_validated(self) :
-         #14 de confirmari per minut * 3 minute ->defapt 6 confirmari per minut  
-        return self.confirm_count > 8 * 3 and self.is_trend_uniform_confirmed() # and  self.confirm_count < 100 * 3
-    
+         #14 de confirmari per minut * 3 minute ->defapt 6 confirmari per minut
+        return self.confirm_count > TREND_CONSISTENT_CONFIRMS and self.is_trend_uniform_confirmed()
+
     def is_trend_uniform_confirmed(self):
         if not self.is_trend_a_minim_validated() :
             return False
-        
+
         trend_duration = self.get_started_trend_time() #self.get_confirmed_trend_duration()
         if trend_duration == 0:
             return False
         rate = self.confirm_count * 2.5 * TIME_SLEEP_GET_PRICE / trend_duration
-        print(f"uniform rate is {rate} <> 0.1")
+        print(f"uniform rate is {rate} <> {TREND_UNIFORM_RATE_THRESHOLD}")
         #10 confirmari per 1.5 minute
-        return rate > 0.08 #0.1
+        return rate > TREND_UNIFORM_RATE_THRESHOLD
 
     def is_started_trend_older_than(self, old_trend_time):
         return self.get_started_trend_time() > old_trend_time
@@ -493,13 +521,13 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
     #
     #new case
     #
-    if slope <= -5.1 and trend_state.is_trend_up():
+    if slope <= -SLOPE_EXTREME_THRESHOLD and trend_state.is_trend_up():
         if (trend_state.is_trend_consistent_validated()
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 2: BUY ALL {win} .... ")
             _fire_once("UP", "BUY", "slope<=-5.1_up")
     #18 de confirmari per minut * 3 minute
-    if slope >= 5.1 and trend_state.is_trend_down():
+    if slope >= SLOPE_EXTREME_THRESHOLD and trend_state.is_trend_down():
         if (trend_state.is_trend_consistent_validated()
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 2: SELL ALL {win} .... ")
@@ -508,13 +536,13 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
     #
     #new case
     #
-    if slope <= -5.1 and trend_state.is_trend_down():
+    if slope <= -SLOPE_EXTREME_THRESHOLD and trend_state.is_trend_down():
         if (trend_state.is_trend_consistent_validated()
         and trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 3: BUY ALL {win} .... ")
             _fire_once("UP", "BUY", "slope<=-5.1_and_old_down")
     #18 de confirmari per minut * 3 minute
-    if slope >= 5.1 and trend_state.is_trend_up():
+    if slope >= SLOPE_EXTREME_THRESHOLD and trend_state.is_trend_up():
         if (trend_state.is_trend_consistent_validated()
         and trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 3: SELL ALL {win} .... ")
