@@ -56,6 +56,12 @@ class StratParams:
     reentry_drop_pct: float  # dupa TP, reintra DOAR daca pretul scade cu acest % sub pretul vandut (0 = imediat)
     reentry_tolerance_pct: float  # "aproape de prag" conteaza ca atins: pret <= prag*(1+tol%) intra
                                   # (15 iul: HYPE a ricosat la 65.93 vs prag 65.91 — 2 centi — si a ratat intrarea)
+    reentry_adaptive: bool   # 23 iul: prag de reintrare = K_REENTRY * vol_1h (nu procentul fix) —
+                             # investigat in research/kraken_adaptive_thresholds/: adaptivul bate
+                             # fixul pe HYPEUSD (~30 zile, TOTAL +3.26% vs +2.20%), K=2.0 confirmat
+                             # optim printr-un sweep dedicat (K=1.5 si K=2.5 dau amandoua mai putin).
+                             # Fail-safe: cade pe reentry_drop_pct (fix) daca volatilitatea nu poate
+                             # fi calculata inca (warm-up <20 puncte de pret).
     tp_tranches: list        # [(pct, cota%), ...] vanzare graduala; [] = TP clasic pe tot
 
     @classmethod
@@ -79,6 +85,7 @@ class StratParams:
             adopt_qty          = float_env("STRAT_ADOPT_QTY") or 0.0,
             reentry_drop_pct   = float_env("STRAT_REENTRY_DROP_PCT") or 0.0,
             reentry_tolerance_pct = float_env("STRAT_REENTRY_TOLERANCE_PCT") or 0.0,
+            reentry_adaptive   = os.environ.get("STRAT_REENTRY_ADAPTIVE", "false").strip().lower() == "true",
             tp_tranches        = _parse_tranches(os.environ.get("STRAT_TP_TRANCHES", "")),
         )
 
@@ -409,6 +416,26 @@ class Strategy:
         except Exception as e:  # noqa: BLE001 — observational
             log(f"  [SHADOW] eroare calcul ({e}) — ignor")
 
+    def _effective_reentry_drop_pct(self) -> tuple[float, str]:
+        """Pragul de reintrare EFECTIV folosit la decizie: adaptiv (K_REENTRY *
+        vol_1h) daca reentry_adaptive e activat SI volatilitatea poate fi
+        calculata; altfel cade pe reentry_drop_pct (fix) — fail-safe, ca
+        gate-ul Kalman (nu opreste/altereaza trading-ul din cauza unui semnal
+        indisponibil). Investigat 22-23 iul (research/kraken_adaptive_thresholds/,
+        vezi README.md): adaptiv bate fix pe HYPEUSD (TOTAL +3.26% vs +2.20%,
+        ~30 zile), K=2.0 confirmat optim printr-un sweep dedicat."""
+        if not self.p.reentry_adaptive:
+            return self.p.reentry_drop_pct, "fix"
+        try:
+            k_re = float_env("SHADOW_K_REENTRY") or 2.0
+            vol = self._shadow_vol_1h()
+        except Exception as e:  # noqa: BLE001 — nu opreste trading-ul
+            log(f"  [REINTRARE-ADAPTIV] eroare calcul ({e}) — fallback pe fix")
+            return self.p.reentry_drop_pct, "fix (fallback, eroare)"
+        if vol is None:
+            return self.p.reentry_drop_pct, f"fix (fallback, warm-up {len(self._shadow_prices)}/20)"
+        return k_re * vol, f"adaptiv (vol_1h {vol:.2f}% x k={k_re})"
+
     def step(self, price: float) -> None:
         held = self.s["qty"]
         disc = 1 - self.p.entry_discount_pct / 100
@@ -427,15 +454,17 @@ class Strategy:
             # REGULA DE REINTRARE: dupa o vanzare, nu recumpara mai sus — asteapta
             # o scadere reala sub pretul vandut (anti "vand la 60.64, recumpar la 61.1")
             lsp = self.s.get("last_sell_price")
-            if self.p.reentry_drop_pct > 0 and lsp:
-                prag = lsp * (1 - self.p.reentry_drop_pct / 100)
+            drop_pct, drop_source = self._effective_reentry_drop_pct()
+            if drop_pct > 0 and lsp:
+                prag = lsp * (1 - drop_pct / 100)
                 # toleranta "aproape de prag" (botcore.are_close, determinist): pretul la
                 # tol% de prag conteaza ca atins — altfel ratam intrari la 2-3 centi de prag
                 if price > prag and not are_close(price, prag, self.p.reentry_tolerance_pct):
-                    log(f"  [STRAT] reintrare blocata: pret {price} > prag {prag:.2f}"
+                    log(f"  [STRAT] reintrare blocata: pret {price} > prag {prag:.2f} [{drop_source}]"
                         f"{f' (tol {self.p.reentry_tolerance_pct}%)' if self.p.reentry_tolerance_pct else ''} "
-                        f"(vandut la {lsp}, astept -{self.p.reentry_drop_pct}%)")
-                    self._shadow_reentry_line(price, lsp, prag)
+                        f"(vandut la {lsp}, astept -{drop_pct:.2f}%)")
+                    if not self.p.reentry_adaptive:
+                        self._shadow_reentry_line(price, lsp, prag)   # log comparativ DOAR cand fixul inca decide
                     return
             if self.s["spent"] + self.p.entry_amount > self.p.max_budget:
                 log(f"  [STRAT] plafon {self.p.max_budget} {self.ccy} atins — nu intru")
