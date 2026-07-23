@@ -26,20 +26,15 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 
 import tradeall as ta  # reutilizam PriceWindow/WindowAnalyzer/TrendState/logic (A5) — nu reimplementam modelul
+# 23 iul: SimClock extras in providers/replay_clock.py (partajat cu
+# monitortrades — vezi UNIFIED_BACKTEST_PLAN.md §7/§8), pasat catre
+# TrendState(now_fn=...) ca fast-forward sa fie corect (A5). Alias
+# `_SimClock` pastrat pt orice referinta externa existenta (research/*.py).
+from providers.replay_clock import SimClock as _SimClock  # noqa: F401
 
 
 def _sanitize(value):
     return str(value).replace("|", "/").replace("\n", " ") if value is not None else ""
-
-
-class _SimClock:
-    """Timpul SIMULAT (al tick-ului replay-uit curent), NU ceasul real —
-    pasat catre TrendState(now_fn=...) ca fast-forward sa fie corect (A5)."""
-    def __init__(self):
-        self.ts = time.time()
-
-    def __call__(self):
-        return self.ts
 
 
 FEE_PCT = 0.1   # comision spot Binance ~0.1% per leg (taker)
