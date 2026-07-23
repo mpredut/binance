@@ -43,15 +43,48 @@ SEED_NOTIONAL_USD = 1000.0
 SBS = 12 * 24 * 3600 + 60   # acelasi default ca live (MT_GUARD_WINDOW_DAYS=12)
 FEE_PCT = 0.1
 
-# Valorile REALE de azi din instruments.conf — schimba aici pt un sweep pe alte valori.
-SYMBOLS = {
-    "BTCUSDC": {"base": "BTC", "params": {
-        "mt.gain": "7.0", "mt.lost": "3.3", "mt.maxage_days": "7",
-        "mt.hardtp": "17", "mt.hardtp_fraction": "0.5", "mt.hardtp_cooldown_h": "6", "mt.ref": "last"}},
-    "TAOUSDC": {"base": "TAO", "params": {
-        "mt.gain": "9.2", "mt.lost": "4.9", "mt.maxage_days": "17",
-        "mt.hardtp": "17", "mt.hardtp_fraction": "0.5", "mt.hardtp_cooldown_h": "6", "mt.ref": "last"}},
-}
+
+def _live_mt_params(section):
+    """Citeste parametrii mt.* CURENTI dintr-o sectiune din instruments.conf —
+    NU o copie hardcodata (gasit azi, 23 iul: SYMBOLS era o copie inghetata de
+    dinainte sa adaugam mt.buy_budget/mt.max_budget — scheduled_pilot.py testa
+    fara acea protectie, producand un rezultat catastrofal fals -$200k pe un
+    "buy again" cu qty=1 BTC intreg, nemodelat corect din cauza asta)."""
+    import configparser
+    cp = configparser.ConfigParser()
+    cp.read(os.path.join(ROOT, "instruments.conf"))
+    if section not in cp:
+        return {}
+    return {k: v for k, v in cp[section].items() if k.startswith("mt.")}
+
+
+class _LiveSymbols:
+    """dict-like: SYMBOLS[symbol]["params"] citeste instruments.conf LA FIECARE
+    ACCES (nu la import), ca sa nu poata deveni din nou o copie stale."""
+    _SECTIONS = {"BTCUSDC": ("BINANCE_BTC", "BTC"), "TAOUSDC": ("BINANCE_TAO", "TAO")}
+
+    def __getitem__(self, symbol):
+        section, base = self._SECTIONS[symbol]
+        return {"base": base, "params": _live_mt_params(section)}
+
+    def items(self):
+        return [(s, self[s]) for s in self._SECTIONS]
+
+
+SYMBOLS = _LiveSymbols()
+
+
+def _neutral_is_trend_up(symbol):
+    """Determinist, DOAR pt backtest: fara semnal de trend (neutru). GASIT
+    23 iul: is_trend_up() reala citeste cacheManager.get_short_trend_manager()
+    — pt simboluri REALE (BTCUSDC/TAOUSDC), asta e cache-ul LIVE, actualizat
+    CHIAR ACUM de tradeall.py/cacheManager.py, care ruleaza pe aceeasi masina.
+    Rulare acelasi backtest de 2 ori a dat rezultate DIFERITE, pt ca trendul
+    "live" citit se schimba intre rulari, contaminand un replay istoric cu
+    starea REALA, curenta a pietei. False = exact ce ar intoarce is_trend_up()
+    oricum pt un symbol FARA snapshot in cache (deja defaultul "sigur" din
+    cod: "fara snapshot in cache -> neutru, nu blocheaza vanzarea pe castig")."""
+    return False
 
 
 def run_symbol(symbol, params, base, quiet=True):
@@ -71,35 +104,40 @@ def run_symbol(symbol, params, base, quiet=True):
 
     maxage_s = int(float(params["mt.maxage_days"]) * 24 * 3600)
 
-    first_price = provider.advance(symbol)
-    if first_price is None:
-        return None
-    last_price = first_price
-    provider.place_order(symbol, "BUY", first_price, SEED_NOTIONAL_USD / first_price)
-    n_seeds = 1
-    n_ticks = 0
+    orig_is_trend_up = mt.is_trend_up
+    mt.is_trend_up = _neutral_is_trend_up
+    try:
+        first_price = provider.advance(symbol)
+        if first_price is None:
+            return None
+        last_price = first_price
+        provider.place_order(symbol, "BUY", first_price, SEED_NOTIONAL_USD / first_price)
+        n_seeds = 1
+        n_ticks = 0
 
-    while True:
-        price = provider.advance(symbol)
-        if price is None:
-            break
-        last_price = price
-        n_ticks += 1
+        while True:
+            price = provider.advance(symbol)
+            if price is None:
+                break
+            last_price = price
+            n_ticks += 1
 
-        buys = provider.get_orders(symbol, "BUY", since_s=maxage_s)
-        sells = provider.get_orders(symbol, "SELL", since_s=maxage_s)
-        if not buys and not sells:
-            provider.place_order(symbol, "BUY", price, SEED_NOTIONAL_USD / price)
-            n_seeds += 1
-            continue
+            buys = provider.get_orders(symbol, "BUY", since_s=maxage_s)
+            sells = provider.get_orders(symbol, "SELL", since_s=maxage_s)
+            if not buys and not sells:
+                provider.place_order(symbol, "BUY", price, SEED_NOTIONAL_USD / price)
+                n_seeds += 1
+                continue
 
-        try:
-            mt.monitor_price_and_trade(inst, sbs=SBS, now_fn=lambda: provider.now(symbol))
-        except Exception as e:  # noqa: BLE001
-            sys.stderr.write(f"[{symbol}] eroare in monitor_price_and_trade: {e}\n")
+            try:
+                mt.monitor_price_and_trade(inst, sbs=SBS, now_fn=lambda: provider.now(symbol))
+            except Exception as e:  # noqa: BLE001
+                sys.stderr.write(f"[{symbol}] eroare in monitor_price_and_trade: {e}\n")
 
-        if n_ticks % 20000 == 0:
-            sys.stderr.write(f"[{symbol}] {n_ticks} tick-uri, seed-uri={n_seeds}\n")
+            if n_ticks % 20000 == 0:
+                sys.stderr.write(f"[{symbol}] {n_ticks} tick-uri, seed-uri={n_seeds}\n")
+    finally:
+        mt.is_trend_up = orig_is_trend_up
 
     all_buys = provider.get_orders(symbol, "BUY", since_s=1e12)
     all_sells = provider.get_orders(symbol, "SELL", since_s=1e12)
