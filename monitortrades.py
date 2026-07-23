@@ -286,12 +286,16 @@ def is_trend_up(symbol):
     return False   # fara snapshot in cache -> neutru (nu blocheaza vanzarea pe castig)
 
 
-def get_relevant_trade(trade_orders, trade_type, threshold_s, symbol):
+def get_relevant_trade(trade_orders, trade_type, threshold_s, symbol, now_fn=None):
+    """now_fn: sursa de "acum" (implicit time.time — comportament neschimbat).
+    Injectabila pt backtest/replay (23 iul), acelasi tipar ca `api=None` de mai
+    jos (get_position_stats) — override doar cand cineva chiar il da."""
+    now_fn = now_fn or time.time
     if not trade_orders:
         print(f"Warning: No {trade_type} transactions for that currency!!!")
         return None, 0, True
-        
-    current_time_s = int(time.time())
+
+    current_time_s = int(now_fn())
      
     trade_orders.sort(key=lambda x: x['timestamp'], reverse=True)
     trade_price = float(trade_orders[0]['price'])
@@ -432,7 +436,13 @@ def _place_guarded(inst, side, price, qty, min_qty, **kwargs):
     return True
 
 
-def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None, lost_threshold=None):
+def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None, lost_threshold=None,
+                            now_fn=None):
+    """now_fn: sursa de "acum" (implicit time.time — comportament neschimbat).
+    Injectabila pt backtest/replay (23 iul, research/UNIFIED_BACKTEST_PLAN.md
+    Faza 1) — cand vine un ReplayMarketDataProvider, timpul poate fi legat de
+    ceasul aceluiasi provider (timpul "vine din pretul obtinut", nu separat)."""
+    now_fn = now_fn or time.time
     inst = _as_instrument(inst)
     symbol = inst.symbol
     # params per-instrument (fallback pe argument, apoi pe globalele din cod) ───────────
@@ -456,8 +466,8 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
     
     qty = 1 #qty = calculate_position_size(...)
     threshold_s = MT_RECENT_TRADE_BLOCK_SEC
-    current_time_s = int(time.time())
-    
+    current_time_s = int(now_fn())
+
     # 1. Obtine ordinele de cumparare si vanzare recente pentru simbol (prin facada,
     #    normalizate la forma comuna {side,price,qty,timestamp} -> get_relevant_trade).
     #trade_orders_buy = apitrades.get_trade_orders("BUY", symbol, maxage_trade_s)
@@ -466,9 +476,9 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
     trade_orders_sell = inst.orders("SELL", maxage_trade_s)
     if not (trade_orders_buy or trade_orders_sell):
         print(f"No trade orders found for {symbol} in the last {maxage_trade_s} seconds.")
-        return 
-    buy_price, buy_time, can_buy = get_relevant_trade(trade_orders_buy, "BUY", threshold_s, symbol)
-    sell_price, sell_time, can_sell = get_relevant_trade(trade_orders_sell, "SELL", threshold_s, symbol)
+        return
+    buy_price, buy_time, can_buy = get_relevant_trade(trade_orders_buy, "BUY", threshold_s, symbol, now_fn=now_fn)
+    sell_price, sell_time, can_sell = get_relevant_trade(trade_orders_sell, "SELL", threshold_s, symbol, now_fn=now_fn)
 
     position = get_position_stats(symbol, maxage_trade_s, api=inst.provider)
     # Referinta de pret pt castig: configurabila (TP_REFERENCE). Default "last" =
