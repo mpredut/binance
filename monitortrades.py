@@ -28,6 +28,25 @@ from providers.market_api import api as mkt
 import utils as u
 import log
 
+# 23 iul: incarca parametrii tunabili din monitortrades_config.env (versionat,
+# se COMITE — fara secrete) INAINTE de a citi orice os.environ.get(...) de mai
+# jos. botcore.load_dotenv NU suprascrie variabile deja setate in mediul real,
+# doar completeaza ce lipseste. Config-ul PER-INSTRUMENT (gain/lost/maxage/
+# hardtp) ramane neschimbat, in instruments.conf + monitortrades.conf — asta e
+# doar pt constantele GLOBALE care nu aveau inca niciun mecanism de override.
+from botcore import load_dotenv as _load_dotenv
+_load_dotenv("monitortrades_config.env")
+
+# Constante globale extrase (implicit = valorile vechi hardcodate, zero schimbare
+# de comportament daca fisierul de config nu e modificat).
+MT_ARE_CLOSE_TOLERANCE_PCT = float(os.environ.get("MT_ARE_CLOSE_TOLERANCE_PCT", "1.0"))
+MT_RECENT_TRADE_BLOCK_SEC = float(os.environ.get("MT_RECENT_TRADE_BLOCK_HOURS", "3")) * 3600
+MT_ALL_TRADES_BLOCK_SEC = float(os.environ.get("MT_ALL_TRADES_BLOCK_HOURS", "1")) * 3600
+MT_MAIN_LOOP_SLEEP_SEC = float(os.environ.get("MT_MAIN_LOOP_SLEEP_SEC", "48"))
+MT_BUY_PRICE_OFFSET = float(os.environ.get("MT_BUY_PRICE_OFFSET", "0.5"))
+MT_SELL_SAFEBACK_HOURS = float(os.environ.get("MT_SELL_SAFEBACK_HOURS", "2"))
+MT_BUY_SAFEBACK_HOURS = float(os.environ.get("MT_BUY_SAFEBACK_HOURS", "48"))
+
 
 # Cod legacy mutat in monitortrades_legacy.py pe 16 iun 2026 (vanzare graduala,
 # ProcentDistributor/BuyTransaction, monitor_close_orders_by_age*, update_trades/
@@ -435,8 +454,8 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
     max_budget = inst.param("mt", "max_budget", None, float)   # plafon expunere totala (USD)
     #try:
     
-    qty = 1 #qty = calculate_position_size(...)    
-    threshold_s = 3 * 60 * 60 # 3 h
+    qty = 1 #qty = calculate_position_size(...)
+    threshold_s = MT_RECENT_TRADE_BLOCK_SEC
     current_time_s = int(time.time())
     
     # 1. Obtine ordinele de cumparare si vanzare recente pentru simbol (prin facada,
@@ -463,7 +482,7 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
         sell_price = position["average_sell_price"]
         print(f"POSITION for {symbol} : {position}")
 
-    threshold_all_s = 1 * 60 * 60 # 1 h
+    threshold_all_s = MT_ALL_TRADES_BLOCK_SEC
     if current_time_s - max(buy_time, sell_time)  < threshold_all_s:
         print(f"Trades too ... recente."
             f"Pass only {u.secondsToHours(current_time_s -  max(buy_time, sell_time)):.2f} h. Wait to pass {u.secondsToHours(threshold_all_s)} h.")
@@ -495,26 +514,26 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
         # cu putin la un tick si apoi cade inapoi ar insemna ratarea PERMANENTA a
         # exact varfului pe care mecanismul asta e menit sa-l prinda ("varfuri ratate").
         hard_tp_hit = price_increase >= hard_tp_pct or u.are_close(
-            price_increase, hard_tp_pct, target_tolerance_percent=1.0)
+            price_increase, hard_tp_pct, target_tolerance_percent=MT_ARE_CLOSE_TOLERANCE_PCT)
         if HARD_TP_ENABLED and hard_tp_hit and avail_qty > 0:
             if current_time_s - _hard_tp_last.get(symbol, 0) >= hard_tp_cd:
                 hard_qty = round(avail_qty * hard_tp_frac, 4)
                 print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% >= {hard_tp_pct*100:.0f}% "
                       f"-> vand {hard_tp_frac*100:.0f}% ({hard_qty}) INDIFERENT de trend")
                 if _place_guarded(inst, "SELL", current_price, hard_qty, min_qty,
-                                  safeback_seconds=sbs, force=True, cancelorders=True, hours=2, pair=False):
+                                  safeback_seconds=sbs, force=True, cancelorders=True, hours=MT_SELL_SAFEBACK_HOURS, pair=False):
                     _hard_tp_last[symbol] = current_time_s
                     return   # am vandut deja in acest tick; nu mai rula vanzarea de jos pe sold invechit
             else:
                 print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% dar in cooldown (ultimul acum "
                       f"{u.secondsToHours(current_time_s - _hard_tp_last.get(symbol, 0)):.1f}h)")
         # 3.1. Verifica daca trebuie sa plasezi un ordin de vanzare (logica CURENTA, ramane)
-        if price_increase > gain_threshold or u.are_close(price_increase, gain_threshold, target_tolerance_percent=1.0):
+        if price_increase > gain_threshold or u.are_close(price_increase, gain_threshold, target_tolerance_percent=MT_ARE_CLOSE_TOLERANCE_PCT):
             if not is_trend_up(symbol):
                 print(f"Price increased with {price_increase * 100}% by more than {gain_threshold * 100}% versus buy price and not trend up!")
                 if can_sell and avail_qty > 0:
                     _place_guarded(inst, "SELL", current_price, avail_qty, min_qty,
-                        safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=False)
+                        safeback_seconds=sbs, force=False, cancelorders=True, hours=MT_SELL_SAFEBACK_HOURS, pair=False)
                 else:
                     print(f"No can sell (can_sell={can_sell}, avail_qty={avail_qty})")
                 #po.place_SELL_order(symbol, current_price, qty)
@@ -522,12 +541,12 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
                 #    force=True, cancelorders=True, hours=1)
             else :
                 print(f"No action taken, because trend is up!")
-        elif price_decrease > lost_threshold or u.are_close(price_decrease, lost_threshold, target_tolerance_percent=1.0):
+        elif price_decrease > lost_threshold or u.are_close(price_decrease, lost_threshold, target_tolerance_percent=MT_ARE_CLOSE_TOLERANCE_PCT):
             if not is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease * 100}% by more than {lost_threshold * 100}% versus buy price and not trend up!")
                 if can_sell and avail_qty > 0:
                     _place_guarded(inst, "SELL", current_price, avail_qty, min_qty,
-                        safeback_seconds=sbs, force=False, cancelorders=True, hours=2, pair=True)
+                        safeback_seconds=sbs, force=False, cancelorders=True, hours=MT_SELL_SAFEBACK_HOURS, pair=True)
                 #po.place_SELL_order(symbol, current_price, qty)
                 else:
                     print(f"No can sell (can_sell={can_sell}, avail_qty={avail_qty})")
@@ -543,7 +562,7 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
             return
         price_decrease_versus_sell = (sell_price - current_price) / sell_price
         print(f"(price_decrease_versus_sell: {price_decrease_versus_sell * 100}%)")
-        if price_decrease_versus_sell > gain_threshold or u.are_close(price_decrease_versus_sell, gain_threshold, target_tolerance_percent=1.0):
+        if price_decrease_versus_sell > gain_threshold or u.are_close(price_decrease_versus_sell, gain_threshold, target_tolerance_percent=MT_ARE_CLOSE_TOLERANCE_PCT):
             if is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease_versus_sell * 100}% by more than {gain_threshold * 100}% versus sell price: Placing buy order")
                 #api.cancel_orders_old_or_outlier("BUY", "BTCUSDT", qty, hours=0.5, price_difference_percentage=0.1)
@@ -554,8 +573,8 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
                     if max_budget and _pos_value >= max_budget:
                         print(f"[{symbol}] plafon buget atins ({_pos_value:.0f} >= {max_budget} USD) — nu cumpar")
                     else:
-                        _place_guarded(inst, "BUY", current_price + 0.5, _buy_qty, min_qty,
-                            safeback_seconds=sbs, cancelorders=True, hours=48, pair=False)
+                        _place_guarded(inst, "BUY", current_price + MT_BUY_PRICE_OFFSET, _buy_qty, min_qty,
+                            safeback_seconds=sbs, cancelorders=True, hours=MT_BUY_SAFEBACK_HOURS, pair=False)
                 else:
                    print("No can buy")
             else :
@@ -631,7 +650,7 @@ def main():
         # (eliminat: blocul sell_recommendation[btcsymbol] -> procent_*/force_sell etc.
         #  alimenta DOAR functii comentate (update_trades/apply_sell_orders). Trendul vine
         #  acum direct din cacheManager via is_trend_up.)
-        time.sleep(60*0.8)  # Astept 1.8 minute.
+        time.sleep(MT_MAIN_LOOP_SLEEP_SEC)  # 48 sec implicit (comentariul vechi zicea gresit "1.8 minute")
         
         
 if __name__ == "__main__":
