@@ -150,6 +150,11 @@ class ReplayMarketDataProvider(MarketDataProvider):
             out = [o for o in out if o["side"] == side.upper()]
         return out
 
+    def position(self, symbol: str) -> Tuple[float, float]:
+        """(qty, cost_total) al pozitiei curente simulate pt `symbol` — accesor
+        public pt driver-ele de backtest (nu citi self._positions direct)."""
+        return self._positions.get(symbol, (0.0, 0.0))
+
     def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
         """Executie INSTANTA la pretul cerut (simplificare Faza 1 — vezi docstring
         modulului). Actualizeaza pozitia (qty/cost mediu) si istoricul de ordine."""
