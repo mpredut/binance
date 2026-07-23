@@ -57,6 +57,25 @@ class TestDefaultsMatchOldHardcodedValues(unittest.TestCase):
         self.assertEqual(mt.MT_BUY_SAFEBACK_HOURS, 48)
 
 
+class TestDeadSymbolParamsRemoved(unittest.TestCase):
+    """23 iul: SYMBOL_PARAMS (populat din liniile per-simbol din monitortrades.conf)
+    era parsat dar NICIODATA citit — instruments.conf (mt.*) era deja sursa reala.
+    Eliminat ca sa nu induca in eroare (editarea liniilor per-simbol nu facea nimic).
+    Global fallback-urile (hard_tp_*, tp_reference) raman functionale."""
+
+    def test_symbol_params_no_longer_exists(self):
+        self.assertFalse(hasattr(mt, "SYMBOL_PARAMS"))
+
+    def test_global_hard_tp_fallbacks_still_load_from_conf(self):
+        # monitortrades.conf are hard_tp_enabled=yes, hard_tp_pct=17, etc. — trebuie
+        # sa se incarce in continuare corect dupa eliminarea liniilor per-simbol.
+        self.assertTrue(mt.HARD_TP_ENABLED)
+        self.assertEqual(mt.HARD_TP_PCT, 0.17)
+        self.assertEqual(mt.HARD_TP_FRACTION, 0.5)
+        self.assertEqual(mt.HARD_TP_COOLDOWN_S, 6 * 3600)
+        self.assertEqual(mt.TP_REFERENCE, "last")
+
+
 class TestEnvOverrideActuallyWorks(unittest.TestCase):
     """Setarea variabilei de mediu ÎNAINTE de (re)import chiar schimba valoarea."""
 

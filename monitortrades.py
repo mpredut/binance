@@ -351,12 +351,16 @@ HARD_TP_PCT        = 0.17       # castig (fractie) de la care TP-ul dur vinde o 
 HARD_TP_FRACTION   = 0.5        # cat vinde (din soldul liber)
 HARD_TP_COOLDOWN_S = 6 * 3600
 TP_REFERENCE       = "last"     # "last" (ultimul buy) | "average" (media pe maxage zile)
-SYMBOL_PARAMS      = {}         # {symbol: (gain_frac, lost_frac, maxage_s)} din conf
 _hard_tp_last = {}
 
 
 def _load_mt_conf(path=None):
-    """Suprascrie parametrii din monitortrades.conf (optional; fallback pe valorile din cod)."""
+    """Suprascrie parametrii GLOBALI (hard_tp_*, tp_reference) din monitortrades.conf
+    (optional; fallback pe valorile din cod). Parametrii PER-SIMBOL (gain/lost/maxage)
+    NU se citesc de aici — sursa de adevar e instruments.conf (namespace mt.*, vezi
+    inst.param("mt", ...) in monitor_price_and_trade). 23 iul: eliminat SYMBOL_PARAMS
+    (liniile SIMBOL = gain%/lost%/maxage_zile din monitortrades.conf erau parsate dar
+    NICIODATA citite — instruments.conf era deja sursa reala; confirmat prin grep."""
     global HARD_TP_ENABLED, HARD_TP_PCT, HARD_TP_FRACTION, HARD_TP_COOLDOWN_S, TP_REFERENCE
     path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "monitortrades.conf")
     if not os.path.exists(path):
@@ -373,10 +377,6 @@ def _load_mt_conf(path=None):
                 elif k == "hard_tp_fraction":   HARD_TP_FRACTION = float(v)
                 elif k == "hard_tp_cooldown_h": HARD_TP_COOLDOWN_S = float(v) * 3600
                 elif k == "tp_reference":       TP_REFERENCE = v.lower()
-                elif "/" in v:                  # SIMBOL = gain% / lost% / maxage_zile
-                    p = [x.strip() for x in v.split("/")]
-                    if len(p) == 3:
-                        SYMBOL_PARAMS[k] = (float(p[0]) / 100.0, float(p[1]) / 100.0, int(float(p[2])) * 24 * 3600)
     except (OSError, ValueError) as e:
         print(f"monitortrades.conf: {e} — folosesc valorile din cod")
 
