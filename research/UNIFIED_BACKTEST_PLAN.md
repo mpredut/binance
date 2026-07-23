@@ -233,18 +233,40 @@ injectabil).
 **`monitortrades.py` — 0% azi, dar cea mai mare valoare.** Nu exista NICIUN
 backtest pt el, si `BACKTEST_CANDIDATES.md` a identificat gain/lost per
 simbol (`instruments.conf`) ca cel mai valoros candidat NETESTAT din tot
-inventarul (#4-5, prioritate ÎNALTĂ). Ca sa devina testabil, ar trebui
-schimbat CHIAR `monitortrades.py` (nu doar adaugat un harness alaturi, ca la
-tradeall) in 2 puncte, MINIMAL, pastrand comportamentul implicit identic
-(acelasi standard de "zero schimbare de comportament" ca extragerile din
-config de azi):
-  - `time.time()` (apare direct, de 2 ori, in `monitor_price_and_trade`/`get_relevant_trade`)
-    -> injectat printr-un `now_fn=time.time` implicit (override-abil doar in teste/backtest).
-  - `inst.price()`/`inst.orders(...)` (calea reala prin care vine pretul/istoricul
-    de trade-uri) -> ar trebui sa poata primi un `Instrument` "de replay" care
-    citeste din `cache_price_{symbol}.jsonl`/`cache_24price_*` in loc sa bata
-    reteaua — posibil deja aproape gratis, daca `_as_instrument`/`Instrument`
-    accepta deja un provider custom (de verificat inainte sa scriem cod).
+inventarul (#4-5, prioritate ÎNALTĂ).
+
+**23 iul, CONFIRMAT (nu doar speculat) — seama de injectare EXISTA deja, completa:**
+- `Instrument.__init__(..., api=None)` — daca `api` nu e dat, cade pe
+  singleton-ul live (`_default_api`); daca E dat, `self._provider =
+  self._api.provider_by_name(provider)` foloseste ACEL api. Toate metodele
+  (`price()`, `orders()`, `free()`) delegheaza la `self._provider`.
+- `instruments_config.load_instruments(path=None, api=None)` si
+  `load_for(consumer, path=None, api=None, ...)` propaga DEJA acest `api` mai
+  departe catre fiecare `Instrument` construit din `instruments.conf`.
+- Concluzie: `monitortrades.py` NU trebuie schimbat DELOC la liniile unde
+  citeste pret/ordine (`inst.price()`, `inst.orders(...)`, `load_for("mt")`)
+  — doar construit/injectat un `MarketApi` diferit (unul de REPLAY) la
+  pornirea unui backtest. Asta era, de fapt, exact scopul pt care facada asta
+  a fost proiectata ("Faza 2a/2b" din docstring-ul `market_api.py` — cineva
+  intr-o sesiune anterioara planuise deja acest tip de extensie).
+- `MarketDataProvider` are deja un stub `get_price_history(symbol, lookback_h)`
+  — dar verificat azi: cele 2 implementari REALE existente (Hyperliquid,
+  Kraken) sunt LIVE-ONLY ("ultimele N ore de la time.time() ACUM", bat reteaua
+  reala de fiecare data) — bune pt backfill la pornirea unui bot, INUTILIZABILE
+  ca sursa de replay (nu citesc din cache local, nu accepta un moment T arbitrar
+  din trecut). T212/Binance nici nu-l implementeaza (return None).
+
+**Ramane de scris DOAR o piesa noua**: `ReplayMarketDataProvider` (implementeaza
+`MarketDataProvider`, citeste din `cache_price_{symbol}.jsonl`/`cache_24price_*`,
+tine un cursor/ceas intern care avanseaza cu fiecare citire) + injectarea celor
+2 `time.time()` din `monitortrades.py` (`get_relevant_trade`,
+`monitor_price_and_trade`) printr-un `now_fn` implicit = `time.time`, legat de
+ACELASI ceas pe care il avanseaza noul provider — asa timpul chiar vine "din
+timpul pretului obtinut", cum a cerut mesajul, nu dintr-un ceas simulat separat.
+
+Efortul e mult mai mic decat parea initial: 1 fisier nou (provider-ul de
+replay) + o injectare minima de ceas in monitortrades.py — NU o rescriere a
+cailor de pret/ordine, care functioneaza deja prin injectare de `api`.
 
 **De ce NU rtrade/assetguardian in faza 1:**
 - `rtrade.py` ruleaza BUY si SELL pe THREAD-URI SEPARATE, concurent, pe
