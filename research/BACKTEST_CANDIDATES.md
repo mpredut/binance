@@ -15,9 +15,9 @@ insasi) | 🟢 deja testat riguros (rezultat cunoscut, listat) | ⏳ sweep in cu
 
 | # | Fisier / bot | Variabila | Valoare azi | Status | Grid propus (pas) |
 |---|---|---|---|---|---|
-| 1 | `tradeall_config.env` | `TRADEALL_PRICE_CHANGE_THRESHOLD_PCT` (SMALL) | 0.518% fix | ⏳ | Sweep azi: adaptiv K×vol_1h ∈ {fix, K=1, K=2, K=3} |
-| 2 | `tradeall_config.env` | `TRADEALL_PRICE_CHANGE_THRESHOLD_BIG_PCT` | 2.481% fix | ⏳ | Cuplat cu #1 (raport fix ~4.79×) |
-| 3 | `shadow_signals.py` | `SHADOW_KALMAN_SAMPLE_SEC` | 60s | ⏳ | Sweep azi: {20, 60, 90, 150}s |
+| 1 | `tradeall_config.env` | `TRADEALL_PRICE_CHANGE_THRESHOLD_PCT` (SMALL) | 0.518% fix | 🟢 **RAMANE FIX** | Testat 23-24 iul, K∈{0.1,0.2,0.3,0.5}: TOATE catastrofal mai rele (BTC net -$29k..-$38k, TAO -$9k..-$119k, fata de FIX: BTC -$4.9k, TAO +$1.4k). Overtrading masiv (BTC k0.1: 6434 buy-uri vs 186 la fix). Concluzie decisiva, nu marginala — NU promova. |
+| 2 | `tradeall_config.env` | `TRADEALL_PRICE_CHANGE_THRESHOLD_BIG_PCT` | 2.481% fix | 🟢 **RAMANE FIX** | Cuplat cu #1 (raport fix ~4.79×), acelasi verdict. |
+| 3 | `shadow_signals.py` | `SHADOW_KALMAN_SAMPLE_SEC` | 60s | 🟢 **RAMANE 60s** | Testat 23-24 iul, {20,60,90,150}s: 20s → 18696 tranzitii/zgomot, overtrading catastrofal (net -$9k/-$10k); 90s/150s → ZERO tranzitii Kalman in tot istoricul (filtrul devine prea incert sa mai confirme vreun trend); 60s (actual) → doar 18 tranzitii, net usor POZITIV ($15.34 BTC). 60s e deja optim intre "prea zgomotos" si "complet surd", nu doar o valoare arbitrara. |
 | 4 | `instruments.conf` `[BINANCE_BTC]` | `mt.gain` / `mt.lost` | 7.0% / 3.3% | 🔴 | gain: {5, 6, 7, 8, 9}% · lost: {2.3, 2.8, 3.3, 3.8, 4.3}% |
 | 5 | `instruments.conf` `[BINANCE_TAO]` | `mt.gain` / `mt.lost` | 9.2% / 4.9% | 🔴 | gain: {7, 8, 9.2, 10.5, 12}% · lost: {3.5, 4.2, 4.9, 5.6, 6.3}% |
 | 6 | `kraken/config.env` | `STRAT_DCA_DROP_PCT` (valoarea FIXĂ insasi, nu K-ul adaptiv) | 1.0% | 🟡 (doar adaptiv-vs-fix testat, K=1.0→fix a fost CEL MAI SLAB K adaptiv) | {0.5, 0.75, 1.0, 1.5, 2.0}% |
@@ -90,10 +90,17 @@ insasi) | 🟢 deja testat riguros (rezultat cunoscut, listat) | ⏳ sweep in cu
 
 ---
 
-## Recomandare de ordine (dupa cele 2 sweep-uri de azi)
+## Recomandare de ordine (actualizat 24 iul, dupa pilotul + sweep-urile de peste noapte)
 
-1. **#4-5** (gain/lost per simbol pe monitortrades) — cel mai probabil sa aiba
-   impact mare (sunt pragurile de TP/SL reale, niciodata testate sistematic).
-2. **#6-7** (kraken DCA/TP ca valori fixe, nu doar adaptiv-vs-fix).
-3. **#15-16** (hard-TP global + maxage per instrument, monitortrades).
-4. Restul, dupa ce primele 4 arata daca merita continuat efortul.
+1. ~~**#4-5** (gain/lost per simbol pe monitortrades)~~ — FACUT: pilotul
+   (`research/monitortrades_backtest/scheduled_pilot.py`) a rulat toate 4,
+   confirmat si aplicat TAO `mt.lost` 4.9→5.25 (singurul semnal confirmat pe
+   ambele ferestre istorice), respins corect restul 3 ca zgomot. De asemenea
+   gasit si reparat (nu era pe lista initiala): lipsa `mt.buy_budget`/
+   `mt.max_budget` pt BTC/TAO (risc real — "buy again" cumpara qty=1 unitate
+   INTREAGA fara ele).
+2. ~~**#1-3** (praguri adaptive tradeall + Kalman sample rate)~~ — FACUT:
+   ambele RAMAN FIXE, verdict decisiv (vezi tabelul de mai sus).
+3. **#6-7** (kraken DCA/TP ca valori fixe, nu doar adaptiv-vs-fix) — inca netestat.
+4. **#15-16** (hard-TP global + maxage per instrument, monitortrades) — inca netestat.
+5. Restul, dupa ce acestea arata daca merita continuat efortul.

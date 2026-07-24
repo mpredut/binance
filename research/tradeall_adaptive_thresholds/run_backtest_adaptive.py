@@ -96,11 +96,13 @@ def run_adaptive(symbol, start_ts, end_ts, k_small, run_id):
 
 if __name__ == "__main__":
     hist_start = datetime.strptime("2025-08-27", "%Y-%m-%d").timestamp()
-    # 23 iul: redus de la [None,0.5,1.0,1.5,2.0,2.5,3.0,4.0] dupa ce arhiva reala
-    # s-a dovedit mult mai densa decat estimat (~888k tick-uri/simbol, nu ~66k) —
-    # un sweep de 8 valori x 2 simboluri ar fi durat ore. 4 valori (control + 3
-    # multiplicatori raspanditi) tot acopera intervalul relevant, in ~1/2 din timp.
-    K_SWEEP = [None, 1.0, 2.0, 3.0]   # None = control (praguri fixe, prin aceeasi bucla)
+    # 23 iul, RECALIBRAT: sweep-ul initial [None,1.0,2.0,3.0] s-a dovedit
+    # miscalibrat — K=2.0/3.0 au dat ZERO tranzactii pe toata istoria (praguri
+    # mult prea mari fata de vol_1h_pct reala), iar K=1.0 abia a tranzactionat
+    # (1 pe BTC, 3 pe TAO, fata de 186/1405 la FIX) — nicio comparatie corecta
+    # de frecventa. Redus la un interval mult mai jos, ca sa gasim zona unde
+    # frecventa de tranzactionare e comparabila cu FIX (nu doar "aproape inactiv").
+    K_SWEEP = [None, 0.1, 0.2, 0.3, 0.5]   # None = control (praguri fixe, prin aceeasi bucla)
 
     results = {}
     t_all = time.time()
