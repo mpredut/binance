@@ -62,5 +62,51 @@ class TestWatchdog(unittest.TestCase):
             ntfy.assert_called_once()
 
 
+class TestEventDrivenGating(unittest.TestCase):
+    """Gating flota-vie pt cache-urile event-driven (order/trade) — 28 iul.
+    Un cache de fill stale NU trebuie sa alarmeze cat timp flota e demonstrabil
+    vie (un cache de pret rapid e proaspat)."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        wd._CACHE_DIR = Path(self.tmp)
+        wd.STATE_FILE = os.path.join(self.tmp, ".state.json")
+        wd.STALE_MINUTES = 20
+        wd.COOLDOWN_MINUTES = 60
+        self.price = os.path.join(self.tmp, "cache_prices_multi.json")   # fleet-alive
+        self.order = os.path.join(self.tmp, "cache_order.json")          # event-driven
+
+    def test_fill_cache_stale_but_fleet_alive_no_alarm(self):
+        now = time.time()
+        _write_cache(self.price, int(now * 1000))                        # pret PROASPAT -> flota vie
+        _write_cache(self.order, int((now - 90 * 3600) * 1000),          # fill vechi de 90h (>72h prag)
+                     mtime_sec=now - 90 * 3600)
+        with patch.object(wd.wc, "send_ntfy") as ntfy, patch.object(wd.wc, "send_email") as email:
+            self.assertFalse(wd.check_once(now=now), "flota vie -> fill stale benign, fara alarma")
+            ntfy.assert_not_called()
+            email.assert_not_called()
+
+    def test_fill_cache_stale_and_fleet_dead_alarms(self):
+        now = time.time()
+        # AMBELE stale: pret vechi (flota moarta) + fill vechi -> alarma (fail-safe)
+        _write_cache(self.price, int((now - 3600) * 1000), mtime_sec=now - 3600)
+        _write_cache(self.order, int((now - 90 * 3600) * 1000), mtime_sec=now - 90 * 3600)
+        with patch.object(wd.wc, "send_ntfy", return_value=True) as ntfy, \
+             patch.object(wd.wc, "send_email", return_value=True):
+            self.assertTrue(wd.check_once(now=now), "flota moarta -> alarma trece")
+            ntfy.assert_called_once()
+
+    def test_fill_cache_beyond_hard_ceiling_alarms_even_if_fleet_alive(self):
+        now = time.time()
+        _write_cache(self.price, int(now * 1000))                        # flota vie
+        # fill mai vechi decat plafonul dur (30 zile) -> alarma oricum
+        old = now - (wd._EVENT_DRIVEN_HARD_CEILING_MIN + 60) * 60
+        _write_cache(self.order, int(old * 1000), mtime_sec=old)
+        with patch.object(wd.wc, "send_ntfy", return_value=True) as ntfy, \
+             patch.object(wd.wc, "send_email", return_value=True):
+            self.assertTrue(wd.check_once(now=now), "peste plafonul dur -> alarma chiar cu flota vie")
+            ntfy.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

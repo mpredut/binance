@@ -61,6 +61,23 @@ _STALE_OVERRIDES = {
     "cache_trade_kraken.json": 4320,
 }
 
+# 28 iul: gating pe "flota vie" pt cache-urile EVENT-DRIVEN (fill-uri order/trade).
+# Motiv: frecventa de update a acestora e determinata de PIATA (cand apare un fill),
+# NU de sanatatea flotei — masurat 28 iul: BTC 8 zile FARA fill (pozitie vanduta pe
+# 19 iul, piata in scadere, kalman fara intrari valide), TOATE cache-urile de pret
+# proaspete (0-5 min). Pragul de 72h declansa deci alarme false. Filosofia deja
+# documentata mai sus o spune: "daca flota moare, cache-urile RAPIDE de pret
+# declanseaza alarma oricum" — deci fill-cache-urile NU trebuie sa detecteze
+# independent moartea flotei. Regula: daca un cache "fleet-alive" (pret rapid) e
+# PROASPAT, flota e demonstrabil vie -> staleness pe order/trade e benigna
+# (doar "n-au fost fill-uri"), NU alarma. Fail-safe: daca NU putem confirma flota
+# vie (toate cache-urile de pret stale = flota chiar moarta), alarma TRECE normal.
+# PLAFON DUR: peste 30 zile alarmeaza oricum, chiar cu flota vie — atunci
+# fill-tracking-ul insusi (WS event sync) e probabil rupt, nu doar piata linistita.
+_EVENT_DRIVEN_CACHES = {"cache_order.json", "cache_trade.json", "cache_trade_kraken.json"}
+_FLEET_ALIVE_CACHES = {"cache_prices_multi.json", "cache_currentprice.json", "cache_instant_trend.json"}
+_EVENT_DRIVEN_HARD_CEILING_MIN = 43200   # 30 zile: peste asta fill-tracking suspect chiar si cu flota vie
+
 
 def _cache_files():
     """Toate cache_*.json SI cache_*.jsonl din cachedb/ (exclude .bak/.tmp/.meta).
@@ -140,6 +157,7 @@ def check_once(now=None):
     now = now if now is not None else time.time()
     files = _cache_files()
     stale = []
+    fleet_alive = False   # True daca un cache "fleet-alive" (pret rapid) e proaspat
     if not files:
         stale.append(("(niciun cache_*.json)", float("inf"), STALE_MINUTES,
                       f"{_CACHE_DIR} gol sau lipsește"))
@@ -147,8 +165,23 @@ def check_once(now=None):
         freshness, detail = cache_freshness_seconds(p)
         age_min = (now - freshness) / 60.0 if freshness > 0 else float("inf")
         thr = _STALE_OVERRIDES.get(p.name, STALE_MINUTES)
+        if p.name in _FLEET_ALIVE_CACHES and age_min <= thr:
+            fleet_alive = True
         if age_min > thr:
             stale.append((p.name, age_min, thr, detail))
+
+    # Gating flota-vie: daca flota e demonstrabil vie (un cache de pret rapid e
+    # proaspat), staleness pe cache-urile EVENT-DRIVEN (fill-uri) e benigna
+    # (doar "n-au fost fill-uri") si NU se alarmeaza — pana la plafonul dur, peste
+    # care fill-tracking-ul insusi e suspect. Fail-safe: daca flota NU e confirmata
+    # vie, nu se suprima nimic. Vezi nota de la _EVENT_DRIVEN_CACHES.
+    if fleet_alive:
+        suppressed = [s for s in stale
+                      if s[0] in _EVENT_DRIVEN_CACHES and s[1] < _EVENT_DRIVEN_HARD_CEILING_MIN]
+        if suppressed:
+            names = ", ".join(s[0] for s in suppressed)
+            print(f"[watchdog] {names} stale dar flota e vie (pret proaspat) — benign, nu alarmez")
+        stale = [s for s in stale if s not in suppressed]
 
     if not stale:
         print(f"[watchdog] OK — {len(files)} cache-uri proaspete")
