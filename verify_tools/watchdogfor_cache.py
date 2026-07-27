@@ -41,7 +41,16 @@ COOLDOWN_MINUTES = float(os.environ.get("WATCHDOG_COOLDOWN_MINUTES", "60"))
 # prag 60) declanseaza alarma oricum. Le dau prag mare, doar ca plasa de siguranta pt un
 # cache cu adevarat blocat (>24h fara nimic e suspect chiar si intr-o piata moarta).
 _STALE_OVERRIDES = {
-    "cache_price_long_trend.json": 90,
+    # 28 iul: 90 -> 1440 (24h). Vechea valoare de 90 min CONTRAZICEA filosofia
+    # documentata mai sus pt cache-urile lente ("prag mare, plasa de siguranta,
+    # >24h suspect"). cache_price_long_trend.json e scris DOAR cand
+    # detect_long_term_trend() gaseste un trend Mann-Kendall SEMNIFICATIV
+    # (priceAnalysis.py:461 — altfel "indeterminabil", nu scrie nimic). Intr-o
+    # piata choppy/laterala unde MK nu e semnificativ, continutul imbatraneste
+    # legitim ore intregi -> 90 min declansa alarme false constante (alarm
+    # fatigue = risc sa ascunda o alarma REALA). Daca priceAnalysis chiar moare,
+    # cache_currentprice (prag 20) alarmeaza oricum in <20 min.
+    "cache_price_long_trend.json": 1440,
     "cache_asset_value.json": 60,
     "cache_T_trend.json": 11520,   # T empiric per moneda: recalc la 7 zile -> prag 8 zile
     # Event-driven (continut nou DOAR la order/trade nou): sub semantica pe
