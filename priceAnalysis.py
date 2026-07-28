@@ -17,6 +17,17 @@ from datetime import datetime
 import utils as u
 import symbols as sym
 
+# ─── COD MORT pastrat INTENTIONAT pt referinta (idee de reactivat/fixat) ──────
+# Abordare ALTERNATIVA de IPC pt trenduri: shared memory (multiprocessing) in
+# loc de fisierul JSON (priceanalysis.json) folosit acum. Fragmentele originale,
+# consolidate aici ca sa nu imprastie codul viu:
+#   from multiprocessing import shared_memory
+#   import shmutils as shmu
+#   shm = shmu.shmConnectForWrite(shmu.shmname)   # la pornire (in __main__)
+#   shmu.shmWrite(shm, all_trends)                # in bucla, dupa write_all_trends
+#   ... finally: shm.close(); shm.unlink()        # la oprire
+# ──────────────────────────────────────────────────────────────────────────────
+
 price_cache_manager = None
 
 def build_price_cache_manager():

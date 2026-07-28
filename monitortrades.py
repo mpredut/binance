@@ -644,5 +644,12 @@ def main():
         
         
 if __name__ == "__main__":
-    
+
      main()
+
+
+# ─── IDEI DE REFERINTA (imbunatatiri viitoare, neimplementate) ────────────────
+# Problema conceptuala: is_trend_up() poate fi lagging + crypto face fake
+# reversals -> risc sa vinzi bottom / sa ratezi breakout. De adaugat eventual:
+# confidence score, confirmare multi-indicator, acord multi-timeframe.
+# ──────────────────────────────────────────────────────────────────────────────
