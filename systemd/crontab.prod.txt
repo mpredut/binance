@@ -1,7 +1,6 @@
 # crontab.prod — snapshot al crontab-ului de pe masina PROD (trading).
 # Reproductibil: dupa un dezastru, restaureaza cu:  crontab systemd/crontab.prod.txt
-# Generat: 2026-07-28 20:33:12. Actualizeaza dupa orice modificare de crontab.
-# (systemd units traiesc deja in systemd/*.service; astea sunt joburile cron, non-systemd.)
+# Generat: 2026-07-28 20:42:55. Actualizeaza dupa orice modificare de crontab.
 
 */5 * * * * /home/predut/binance/healthcheck.sh --supervise >> /home/predut/binance/logs/healthcheck.log 2>&1
 17 * * * * /home/predut/binance/rotate_logs.sh >/dev/null 2>&1
@@ -13,3 +12,4 @@
 */2 * * * * cd /home/predut/binance && /home/predut/binance/myenv/bin/python /home/predut/binance/verify_tools/watchdogfor_cacheandconfig.py >> /home/predut/binance/logs/watchdog.log 2>&1
 */5 * * * * cd /home/predut/binance && /home/predut/binance/myenv/bin/python /home/predut/binance/verify_tools/watchdogfor_anomaly.py >> /home/predut/binance/logs/anomaly_watchdog.log 2>&1
 */30 * * * * /home/predut/binance/refresh_dev.sh >> /home/predut/binance/logs/refresh_dev.log 2>&1
+0 */12 * * * /home/predut/binance/trigger_backtest_dev.sh >> /home/predut/binance/logs/backtest_cycle.log 2>&1
