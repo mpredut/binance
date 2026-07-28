@@ -62,6 +62,10 @@ def main():
                      help="arata ce ar aplica, fara sa scrie config/commit")
     args = ap.parse_args()
 
+    if os.environ.get("APPLY_DISABLED", "").strip().lower() in ("1", "true", "yes"):
+        print("[apply] APPLY_DISABLED=true -- ies fara sa fac nimic")
+        return
+
     proposals = _read_proposals()
     if not proposals:
         print("[apply] nicio propunere pe branch backtest-proposals — nimic de facut")
