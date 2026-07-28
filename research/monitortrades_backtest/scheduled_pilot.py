@@ -397,7 +397,7 @@ def main():
         print(json.dumps({k: v for k, v in entry.items() if k != "results"}, indent=2, default=str))
         if args.propose and entry.get("action") == "proposed":
             proposals.append({
-                "ts": entry["ts"], "full_key": full_key,
+                "ts": _now_iso(), "full_key": full_key,
                 "section": full_key.split(".", 1)[0], "key": key, "symbol": symbol,
                 "current_on_dev": entry["current_value"],
                 "winner_value": entry["winner_value"],
