@@ -21,7 +21,14 @@ echo "[refresh_dev $(date '+%F %T')] cod: git pull --ff-only pe dev"
 $SSH "$DEV_USER@$DEV_HOST" "cd ~/$DEV_PATH && git pull --ff-only origin main" 2>&1 | sed 's/^/  /'
 
 echo "[refresh_dev $(date '+%F %T')] date: rsync cachedb/ prod -> dev"
-rsync -a --info=stats1 -e "$SSH" \
-  "$SRC/cachedb/" "$DEV_USER@$DEV_HOST:$DEV_PATH/cachedb/" 2>&1 | sed 's/^/  /'
+# --exclude '*.tmp': cacheManager scrie atomic prin .tmp temporare care apar/dispar
+# in timp real; nu are rost sa le copiem. Toleram codurile 23/24 (fisiere partiale/
+# vanished) — benigne pe o sursa vie, NU un esec real de sync.
+rc=0
+rsync -a --info=stats1 --exclude '*.tmp' -e "$SSH" \
+  "$SRC/cachedb/" "$DEV_USER@$DEV_HOST:$DEV_PATH/cachedb/" 2>&1 | sed 's/^/  /' || rc=$?
+if [ "$rc" != 0 ] && [ "$rc" != 24 ] && [ "$rc" != 23 ]; then
+  echo "[refresh_dev] rsync a esuat cu cod $rc"; exit "$rc"
+fi
 
 echo "[refresh_dev $(date '+%F %T')] gata"
