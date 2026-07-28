@@ -1913,17 +1913,52 @@ def _initialize_once():
 # nu mai pornesc WS — se bazează pe polling.
 
 
-def _start_nonbinance_trend_poller(cpm, symbols, interval_sec=20):
+import concurrent.futures as _futures
+
+# 28 iul: deadline dur pe fetch-ul de pret non-Binance. Incident HYPE: poller-ul
+# a inghetat 5.5h pt ca get_current_price (HL) s-a blocat pe un DNS getaddrinfo
+# — NEACOPERIT de read-timeout-ul din hl_client (requests timeout nu prinde
+# rezolvarea DNS). Fara eroare, fara loop -> HYPE stale ore intregi. Deadline-ul
+# dur (rularea fetch-ului intr-un worker separat + future.result(timeout)) face
+# ca ORICE blocare (DNS/connect/read) sa ridice TimeoutError in loc sa inghete
+# poller-ul; poller-ul logheaza si continua, auto-refacandu-se cand reteaua revine.
+_NB_FETCH_DEADLINE_SEC = 15   # < interval_sec (20): un fetch blocat nu prelungeste ciclul
+
+
+def _fetch_price_with_deadline(market_api, symbol, pool, deadline_sec=_NB_FETCH_DEADLINE_SEC):
+    """get_current_price(symbol) cu DEADLINE DUR. Ridica _futures.TimeoutError daca
+    fetch-ul se blocheaza peste deadline_sec (la orice nivel: DNS/connect/read),
+    in loc sa blocheze apelantul la nesfarsit. Worker-ul blocat se elibereaza cand
+    OS-ul deblocheaza in cele din urma getaddrinfo/socket-ul (hang tranzitoriu)."""
+    fut = pool.submit(market_api.get_current_price, symbol=symbol)
+    return fut.result(timeout=deadline_sec)
+
+
+def _start_nonbinance_trend_poller(cpm, symbols, interval_sec=20,
+                                   fetch_deadline_sec=_NB_FETCH_DEADLINE_SEC):
     """Alimenteaza instant-trend pt simboluri FARA WS (non-Binance, ex HYPEUSD pe Kraken):
     poll get_current_price prin facada -> _push_price in lantul CurrentPrice->Cache24->
-    InstantTrend. Toleranta per-simbol; Binance (WS) neafectat."""
+    InstantTrend. Toleranta per-simbol; Binance (WS) neafectat. Fetch cu deadline dur
+    (vezi _fetch_price_with_deadline) — un blocaj de retea NU poate ingheta poller-ul.
+
+    Pool cu >=2 workeri: un fetch blocat ocupa un worker, dar poller-ul continua
+    (nu asteapta la nesfarsit). La un blocaj TRANZITORIU (DNS revine), worker-ul
+    se deblocheaza si totul se reia. La un blocaj PERMANENT, poller-ul logheaza
+    [NB-trend] la fiecare ciclu (vizibil) si watchdog-ul de cache alarmeaza la 20
+    min — spre deosebire de vechiul comportament (inghet TACUT ore intregi)."""
+    pool = _futures.ThreadPoolExecutor(
+        max_workers=max(2, len(list(symbols))), thread_name_prefix="NBTrendFetch")
+
     def run():
         while True:
             for s in list(symbols):
                 try:
-                    p = cpm.market_api.get_current_price(symbol=s)
+                    p = _fetch_price_with_deadline(cpm.market_api, s, pool, fetch_deadline_sec)
                     if p is not None and float(p) > 0:
                         cpm._push_price(s, float(p))
+                except _futures.TimeoutError:
+                    builtins.print(f"[NB-trend] {s}: fetch BLOCAT >{fetch_deadline_sec}s "
+                                   f"(deadline dur — probabil DNS/retea) — sar peste, reincerc ciclul urmator")
                 except Exception as _e:
                     builtins.print(f"[NB-trend] {s}: {_e}")
             time.sleep(interval_sec)
