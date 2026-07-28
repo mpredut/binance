@@ -121,8 +121,31 @@ def trend_wma(symbol: str, window_hours: int = 6):
 
 
 
+# ─── COD MORT pastrat INTENTIONAT pt referinta (idee de reactivat/fixat) ──────
+# Abordare ALTERNATIVA de trend: Holt’s Linear Trend (statsmodels Holt). Nu e
+# activa acum (folosim detect_long_term_trend), dar pastrata daca vrem s-o reluam.
+# from statsmodels.tsa.holtwinters import Holt
+# def trend_holt(symbol: str, smoothing_level: float = 0.3, smoothing_slope: float = 0.1, forecast_hours: int = 1):
+    # data = priceLstFor(symbol)
+    # if len(data) < 2:
+        # return None
+    # data = sorted(data, key=lambda x: x[0])
+    # timestamps, prices = zip(*data)
+    # timestamps = np.array(timestamps)
+    # prices = np.array(prices)
+    # delta = np.median(np.diff(timestamps))
+    # points_per_hour = int(3600 / delta)
+    # model = Holt(prices).fit(smoothing_level=smoothing_level, smoothing_slope=smoothing_slope, optimized=False)
+    # fitted = model.fittedvalues
+    # forecast_points = forecast_hours * points_per_hour   # Forecast scurt pentru trend
+    # future = model.forecast(forecast_points)
+    # trend_direction = 'up' if future[-1] > fitted[-1] else 'down'
+    # return {'direction': trend_direction, 'fitted': fitted, 'forecast': future}
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 def slope_tolerance_per_(symbol, price,
-                              base_tolerance = 0.0015, 
+                              base_tolerance = 0.0015,
                               ):
   
     min_tol = 0.0005 

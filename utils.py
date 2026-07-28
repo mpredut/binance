@@ -278,6 +278,28 @@ def _sign_ed25519(signing_key, payload: str) -> str:
     return base64.b64encode(signed.signature).decode()
 
 
+# ─── COD MORT pastrat INTENTIONAT pt referinta (idee de reactivat/fixat) ──────
+# Semnare Ed25519 (WS Binance): incarcare cheie PEM + semnare payload. Neactiva
+# acum, dar pastrata daca vrem sa reactivam auth-ul Ed25519 (necesita pachetul
+# `cryptography`).
+# from cryptography.hazmat.primitives import serialization
+# from cryptography.hazmat.primitives.asymmetric import ed25519
+# import base64
+# def _load_ed25519_signing_key():
+#     try:
+#         with open("keys/ed25519_private.pem", "rb") as f:
+#             private_key = serialization.load_pem_private_key(f.read(), password=None)
+#         if not isinstance(private_key, ed25519.Ed25519PrivateKey):
+#             raise ValueError("Cheia nu este Ed25519")
+#         return private_key
+#     except Exception as e:
+#         print(f"[cacheManager][WS] Eroare la incarcarea cheii Ed25519: {e}")
+#         return None
+# def _sign_ed25519(signing_key, payload: str) -> str:
+#     return base64.b64encode(signing_key.sign(payload.encode())).decode()
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 """
 locul unic care decide UNDE stau fișierele de cache.
 
