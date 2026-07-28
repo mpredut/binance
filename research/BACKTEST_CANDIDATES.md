@@ -20,8 +20,8 @@ insasi) | 🟢 deja testat riguros (rezultat cunoscut, listat) | ⏳ sweep in cu
 | 3 | `shadow_signals.py` | `SHADOW_KALMAN_SAMPLE_SEC` | 60s | 🟢 **RAMANE 60s** | Testat 23-24 iul, {20,60,90,150}s: 20s → 18696 tranzitii/zgomot, overtrading catastrofal (net -$9k/-$10k); 90s/150s → ZERO tranzitii Kalman in tot istoricul (filtrul devine prea incert sa mai confirme vreun trend); 60s (actual) → doar 18 tranzitii, net usor POZITIV ($15.34 BTC). 60s e deja optim intre "prea zgomotos" si "complet surd", nu doar o valoare arbitrara. |
 | 4 | `instruments.conf` `[BINANCE_BTC]` | `mt.gain` / `mt.lost` | 7.0% / 3.3% | 🔴 | gain: {5, 6, 7, 8, 9}% · lost: {2.3, 2.8, 3.3, 3.8, 4.3}% |
 | 5 | `instruments.conf` `[BINANCE_TAO]` | `mt.gain` / `mt.lost` | 9.2% / 4.9% | 🔴 | gain: {7, 8, 9.2, 10.5, 12}% · lost: {3.5, 4.2, 4.9, 5.6, 6.3}% |
-| 6 | `kraken/config.env` | `STRAT_DCA_DROP_PCT` (valoarea FIXĂ insasi, nu K-ul adaptiv) | 1.0% | 🟡 (doar adaptiv-vs-fix testat, K=1.0→fix a fost CEL MAI SLAB K adaptiv) | {0.5, 0.75, 1.0, 1.5, 2.0}% |
-| 7 | `kraken/config.env` | `STRAT_TAKEPROFIT_PCT` | 5.0% | 🟡 (comentariu vechi "sweep +8.8%" — verifica daca inca valabil) | {3.5, 4.25, 5.0, 6.0, 7.5}% |
+| 6 | `kraken/config.env` | `STRAT_DCA_DROP_PCT` | 1.0% → **1.25%** (28 iul) | 🟢 **APLICAT 1.0→1.25** | Sweep #6 pe HYPEUSD (kraken/backtest.py), 2 regimuri: 1.5 bate 1.0 pe AMBELE — bull 120z (+6.68% vs +5.85%, maxDD $156 vs $186) + decline 30z (-0.40% vs -0.55%, maxDD $202 vs $220), return SI drawdown mai bune. Semnal MODEST pe date HYPE-only care se SUPRAPUN (30z = coada celor 120z), deci amortizat la media 1.25 (ca TAO mt.lost). Caveat: Kraken API da doar ~720 bare recente — fara ferestre vechi INDEPENDENTE. |
+| 7 | `kraken/config.env` | `STRAT_TAKEPROFIT_PCT` | 5.0% | 🟢 **RAMANE 5.0** | Sweep #7, 2 regimuri: tp=5.0 (actual) e CEL MAI BUN pe AMBELE, decisiv — bull 120z (+5.85% vs +2.40% urmatorul) + decline 30z (-0.55% vs -2.01% urmatorul). Confirma nota veche "sweep +8.8%". Nicio schimbare. |
 | 8 | `tradeall_config.env` | `TRADEALL_FIRE_MIN_RETRY_MINUTES` | 6 min | 🟡 (o singura config. testata: 6 min a batut 30 min) | {3, 4.5, 6, 9, 12} min |
 | 9 | `tradeall_config.env` | `TRADEALL_FIRE_MAX_PER_TREND` | 3 | 🟡 (ales direct de user, netestat prin sweep) | {1, 2, 3, 4, 5} |
 
@@ -101,6 +101,20 @@ insasi) | 🟢 deja testat riguros (rezultat cunoscut, listat) | ⏳ sweep in cu
    INTREAGA fara ele).
 2. ~~**#1-3** (praguri adaptive tradeall + Kalman sample rate)~~ — FACUT:
    ambele RAMAN FIXE, verdict decisiv (vezi tabelul de mai sus).
-3. **#6-7** (kraken DCA/TP ca valori fixe, nu doar adaptiv-vs-fix) — inca netestat.
-4. **#15-16** (hard-TP global + maxage per instrument, monitortrades) — inca netestat.
-5. Restul, dupa ce acestea arata daca merita continuat efortul.
+3. ~~**#6-7** (kraken DCA/TP ca valori fixe)~~ — FACUT (28 iul, kraken/backtest.py,
+   2 regimuri HYPEUSD): #7 TP RAMANE 5.0 (cel mai bun pe ambele, decisiv);
+   #6 DCA drop APLICAT 1.0→1.25 (media, semnal modest dar consistent pe ambele
+   ferestre — return + drawdown). kraken_bot repornit, resume corect (qty 22.89),
+   DCA -1.25% activ.
+4. **NOU gasit (#6-7 sweep)**: `STRAT_STOP_LOSS_PCT`=7% ar putea fi PREA STRANS —
+   in sweep-ul default sl=15 a dominat sl=8 pe fereastra bull. DAR: date one-sided
+   (bull run, fara crash real care sa testeze riscul unui stop larg) → NU schimbat.
+   De investigat separat, prudent, cand avem si o fereastra cu crash.
+5. **#15-16** (hard-TP global + maxage per instrument, monitortrades) — inca netestat.
+6. Restul, dupa ce acestea arata daca merita continuat efortul.
+
+**Limitare metodologica kraken (#6-7)**: spre deosebire de tradeall/monitortrades
+(arhiva JSONL de 329 zile, ferestre independente), kraken/backtest.py ia OHLC
+LIVE din API (~720 bare recente) — nu putem face ferestre vechi INDEPENDENTE.
+Cele 2 "regimuri" (120z bull / 30z decline) se SUPRAPUN (30z = coada celor 120z).
+De asta schimbarile kraken sunt amortizate (media) si modeste, nu agresive.
