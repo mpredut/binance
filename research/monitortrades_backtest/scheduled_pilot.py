@@ -89,6 +89,17 @@ def _now_iso():
     return datetime.now().isoformat(timespec="seconds")
 
 
+def _git_head_short():
+    """Commit-ul (scurt) al codului care a produs propunerea — pt ca prod sa stie
+    exact ce versiune de motor/config a generat-o. '?' daca git nu raspunde."""
+    import subprocess
+    try:
+        return subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"],
+                              capture_output=True, text=True, timeout=5).stdout.strip() or "?"
+    except Exception:  # noqa: BLE001
+        return "?"
+
+
 def _append_audit(entry):
     os.makedirs(os.path.dirname(AUDIT_LOG), exist_ok=True)
     entry = dict(entry, ts=_now_iso())
@@ -198,7 +209,7 @@ def _run_one(symbol, base, params, series):
     return {"net": round(net, 2), "buy_hold": round(buy_hold, 2)}
 
 
-def evaluate_key(full_key, symbol, base, key, dry_run=True):
+def evaluate_key(full_key, symbol, base, key, dry_run=True, propose=False):
     grid_values = scan_backtest_ranges(INSTRUMENTS_CONF).get(full_key)
     if not grid_values:
         return {"full_key": full_key, "action": "skipped", "reason": "no_grid_annotation"}
@@ -267,6 +278,15 @@ def evaluate_key(full_key, symbol, base, key, dry_run=True):
         entry["reason"] = (f"castig neglijabil vs valoarea curenta {current} "
                             f"(+{margin_h1:.2f}/+{margin_h2:.2f} < {MIN_EDGE_MARGIN_USD} USD) "
                             f"— parametru posibil inert pe acest istoric")
+        return entry
+
+    # Mod DEV (--propose): castigatorul a trecut de guardrail-uri (confirmat pe 2
+    # ferestre + bate valoarea curenta cu marja). NU aplicam/rate-limitam aici —
+    # propunem valoarea BRUTA castigatoare; PROD decide la aplicare (media cu
+    # valoarea LUI live, rate-limit, audit). Vezi UNIFIED_BACKTEST_PLAN.md §9.
+    if propose:
+        entry["winner_value"] = winner_val
+        entry["action"] = "proposed"
         return entry
 
     last_change = _last_change_for(full_key)
@@ -345,6 +365,11 @@ def main():
     ap.add_argument("--only", default="",
                      help="ruleaza DOAR cheile care contin unul din aceste substring-uri "
                           "separate prin virgula (ex. 'maxage,hardtp' sau 'BINANCE_TAO'); gol = toate")
+    ap.add_argument("--propose", action="store_true",
+                     help="mod DEV: NU aplica/reporni; scrie propunerile confirmate (valoare "
+                          "castigatoare bruta) in --propose-out, pt fluxul git dev->prod")
+    ap.add_argument("--propose-out", default=os.path.join(ROOT, "backtest_proposals.json"),
+                     help="unde scrie propunerile in modul --propose (implicit backtest_proposals.json)")
     args = ap.parse_args()
 
     if os.environ.get("PILOT_DISABLED", "").strip().lower() in ("1", "true", "yes"):
@@ -363,11 +388,30 @@ def main():
         print(f"[scheduled_pilot] nicio cheie nu contine '{args.only}' -- ies")
         return
 
+    proposals = []
     for full_key, (symbol, base, key) in keys.items():
         print(f"=== {full_key} ===")
-        entry = evaluate_key(full_key, symbol, base, key, dry_run=args.dry_run)
+        entry = evaluate_key(full_key, symbol, base, key,
+                              dry_run=args.dry_run, propose=args.propose)
         _append_audit(entry)
         print(json.dumps({k: v for k, v in entry.items() if k != "results"}, indent=2, default=str))
+        if args.propose and entry.get("action") == "proposed":
+            proposals.append({
+                "ts": entry["ts"], "full_key": full_key,
+                "section": full_key.split(".", 1)[0], "key": key, "symbol": symbol,
+                "current_on_dev": entry["current_value"],
+                "winner_value": entry["winner_value"],
+                "margin_vs_current": entry.get("margin_vs_current"),
+                "dev_commit": _git_head_short(),
+            })
+
+    if args.propose:
+        # snapshot al propunerilor curente (suprascrie — fisierul = "ce propune dev
+        # ACUM"; prod le consuma si aplica cu propriile guardrail-uri). Gol = niciun
+        # semnal confirmat in acest ciclu (prod nu are ce aplica).
+        with open(args.propose_out, "w", encoding="utf-8") as f:
+            json.dump(proposals, f, indent=2, default=str)
+        print(f"\n[scheduled_pilot] {len(proposals)} propunere(i) scrise in {args.propose_out}")
 
 
 if __name__ == "__main__":
