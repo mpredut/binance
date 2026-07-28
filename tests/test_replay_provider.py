@@ -160,5 +160,31 @@ class TestMonitorPriceAndTradeIntegration(unittest.TestCase):
         self.assertAlmostEqual(sells[0]["price"], 115.0, places=2)
 
 
+class TestSimClock(unittest.TestCase):
+    """Fost test_replay_clock.py (unificat 28 iul) — SimClock, cealalta piesa
+    de infra replay din providers/, partajata intre tradeall si monitortrades."""
+
+    def test_callable_returns_ts(self):
+        from providers.replay_clock import SimClock
+        clock = SimClock()
+        clock.ts = 12345.0
+        self.assertEqual(clock(), 12345.0)
+
+    def test_advancing_ts_reflected_immediately(self):
+        from providers.replay_clock import SimClock
+        clock = SimClock()
+        clock.ts = 100.0
+        self.assertEqual(clock(), 100.0)
+        clock.ts = 200.0
+        self.assertEqual(clock(), 200.0)
+
+    def test_tradeall_backtest_uses_shared_class(self):
+        """tradeall_backtest._SimClock trebuie sa fie ACELASI tip ca
+        providers.replay_clock.SimClock (nu o reimplementare separata)."""
+        import tradeall_backtest as tb
+        from providers.replay_clock import SimClock
+        self.assertIs(tb._SimClock, SimClock)
+
+
 if __name__ == "__main__":
     unittest.main()

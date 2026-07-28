@@ -123,5 +123,15 @@ class TestEstimareT(unittest.TestCase):
         self.assertLessEqual(hybrid_T([2000.0] * 500)["T"], 30, "T nu urca peste 30 zile")
 
 
+class TestWeightForCashPermission(unittest.TestCase):
+    """Fost test_weight.py (unificat 28 iul) — get_weight_for_cash_permission_at_
+    quant_time (alta functie de weight din priceAnalysis) intoarce None sau float."""
+
+    def test_requires_order_type_and_returns_none_or_float(self):
+        import priceAnalysis as pa
+        weight = pa.get_weight_for_cash_permission_at_quant_time("BTCUSDC", order_type="BUY")
+        self.assertTrue(weight is None or isinstance(weight, float))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
