@@ -102,7 +102,12 @@ if __name__ == "__main__":
     # (1 pe BTC, 3 pe TAO, fata de 186/1405 la FIX) — nicio comparatie corecta
     # de frecventa. Redus la un interval mult mai jos, ca sa gasim zona unde
     # frecventa de tranzactionare e comparabila cu FIX (nu doar "aproape inactiv").
-    K_SWEEP = [None, 0.1, 0.2, 0.3, 0.5]   # None = control (praguri fixe, prin aceeasi bucla)
+    # 28 iul: env-configurabil (K_SWEEP="0.6,0.7,0.8,0.9") ca sa reluam ZONA DE
+    # TRANZITIE 0.5-1.0 — netestata: {0.1-0.5} au dat overtrading, {1.0-3.0} zero
+    # tranzactii, dar mijlocul (0.6-0.9) unde frecventa ar putea fi comparabila cu
+    # FIX n-a fost incercat. Verdictul "catastrofal" a sarit peste posibila zona utila.
+    _k_env = os.environ.get("K_SWEEP", "0.1,0.2,0.3,0.5")
+    K_SWEEP = [None] + [float(x) for x in _k_env.split(",") if x.strip()]   # None = control (FIX)
 
     results = {}
     t_all = time.time()
