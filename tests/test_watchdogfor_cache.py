@@ -108,6 +108,43 @@ class TestEventDrivenGating(unittest.TestCase):
             ntfy.assert_called_once()
 
 
+class TestFastPriceThreshold(unittest.TestCase):
+    """Prag dedicat strans (5min) + eligibilitate restart DOAR pt cache-urile
+    de pret rapide (~1s). Arhiva sparse .jsonl ramane pe pragul general si NU
+    declanseaza restart (28 iul)."""
+
+    def test_fast_price_caches_classified(self):
+        for n in ("cache_currentprice.json", "cache_prices_multi.json",
+                  "cache_instant_trend.json", "cache_24price_HYPEUSD.json",
+                  "cache_24price_BTCUSDC.json"):
+            self.assertTrue(wd._is_fast_price_cache(n), n)
+            self.assertEqual(wd._threshold_for(n), wd._FAST_PRICE_THRESHOLD_MIN, n)
+
+    def test_sparse_and_slow_not_fast(self):
+        # .jsonl sparse / arhivator + slow/event-driven NU sunt fast (nu restart)
+        for n in ("cache_price_BTCUSDC.jsonl", "cache_24price_long_BTCUSDC.jsonl",
+                  "cache_price_long_trend.json", "cache_order.json", "cache_asset_value.json"):
+            self.assertFalse(wd._is_fast_price_cache(n), n)
+
+    def test_sparse_archive_stall_does_not_restart(self):
+        """Un cache sparse .jsonl stale (nu fast) -> alarma, dar NU restart."""
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        wd._CACHE_DIR = Path(tmp)
+        wd.STATE_FILE = os.path.join(tmp, ".state.json")
+        wd.AUTO_RESTART = True
+        now = time.time()
+        jf = os.path.join(tmp, "cache_price_BTCUSDC.jsonl")
+        with open(jf, "w") as f:
+            f.write(json.dumps({"s": "BTCUSDC", "i": [int((now - 3600) * 1000), 65000.0]}) + "\n")
+        os.utime(jf, (now - 3600, now - 3600))
+        with patch.object(wd, "_do_restart", return_value=True) as restart, \
+             patch.object(wd.wc, "send_ntfy", return_value=True), \
+             patch.object(wd.wc, "send_email", return_value=True):
+            wd.check_once(now=now)
+            restart.assert_not_called()
+
+
 class TestAutoRestart(unittest.TestCase):
     """Auto-restart pe stall REAL de pret (28 iul). _do_restart e mock-uit —
     NU se atinge niciun proces real in teste."""

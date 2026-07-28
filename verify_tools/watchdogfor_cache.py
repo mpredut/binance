@@ -90,6 +90,35 @@ _EVENT_DRIVEN_CACHES = {"cache_order.json", "cache_trade.json", "cache_trade_kra
 _FLEET_ALIVE_CACHES = {"cache_prices_multi.json", "cache_currentprice.json", "cache_instant_trend.json"}
 _EVENT_DRIVEN_HARD_CEILING_MIN = 43200   # 30 zile: peste asta fill-tracking suspect chiar si cu flota vie
 
+# 28 iul: prag DEDICAT, mai STRANS, pt cache-urile de pret cu adevarat RAPIDE
+# (~1s cadenta: WS Binance / poller non-Binance). Pragul general de 20 min era
+# dimensionat pt cel mai LENT cache "rapid" (arhiva sparse cache_price_*.jsonl,
+# ~7 min) -> mult prea larg pt cele de 1s. Un stall de 5 min pe un cache de 1s
+# = ~300 update-uri ratate = problema reala (nu un blip). Astea sunt SI singurele
+# care declanseaza auto-restart-ul: cacheManager e cel care le scrie, deci
+# staleness-ul lor = cacheManager rupt = restart-ul chiar ajuta. Arhiva sparse
+# (.jsonl) ramane pe pragul general (are nevoie de marja).
+_FAST_PRICE_THRESHOLD_MIN = float(os.environ.get("WATCHDOG_FAST_PRICE_MINUTES", "5"))
+
+
+def _is_fast_price_cache(name):
+    """True pt cache-urile de pret RAPIDE (~1s): cele care primesc prag strans
+    SI declanseaza auto-restart. Exclude .jsonl (arhiva sparse ~7min / arhivator
+    ~60s) care raman pe pragul general."""
+    if name in ("cache_currentprice.json", "cache_prices_multi.json", "cache_instant_trend.json"):
+        return True
+    if name.startswith("cache_24price_") and name.endswith(".json"):   # per-simbol, WS/poll ~1-20s
+        return True
+    return False
+
+
+def _threshold_for(name):
+    """Pragul de staleness (min) pt un cache: fast-price -> prag strans; altfel
+    override-ul lui slow/event-driven; altfel default."""
+    if _is_fast_price_cache(name):
+        return _FAST_PRICE_THRESHOLD_MIN
+    return _STALE_OVERRIDES.get(name, STALE_MINUTES)
+
 
 def _cache_files():
     """Toate cache_*.json SI cache_*.jsonl din cachedb/ (exclude .bak/.tmp/.meta).
@@ -178,10 +207,10 @@ def _maybe_auto_restart(stale, now, state):
     Modifica state['auto_restart_history'] cand reporneste."""
     if not AUTO_RESTART:
         return False, ""
-    # Doar cache-urile RAPIDE (prag default, scrise de cacheManager) declanseaza.
-    # Cele din _STALE_OVERRIDES (long-trend, asset_value, fill-uri) sunt deliberat
-    # tolerante -> staleness-ul lor NU justifica un restart al procesului critic.
-    critical = [name for (name, _age, _thr, _det) in stale if name not in _STALE_OVERRIDES]
+    # Doar cache-urile de pret RAPIDE (scrise de cacheManager, ~1s) declanseaza.
+    # Cele slow/event-driven (long-trend, asset_value, fill-uri) SI arhiva sparse
+    # (.jsonl, alt proces / cadenta lenta) NU justifica un restart al cacheManager.
+    critical = [name for (name, _age, _thr, _det) in stale if _is_fast_price_cache(name)]
     if not critical:
         return False, ""
     hist = [t for t in state.get("auto_restart_history", []) if now - t < AUTO_RESTART_WINDOW_H * 3600]
@@ -214,7 +243,7 @@ def check_once(now=None):
     for p in files:
         freshness, detail = cache_freshness_seconds(p)
         age_min = (now - freshness) / 60.0 if freshness > 0 else float("inf")
-        thr = _STALE_OVERRIDES.get(p.name, STALE_MINUTES)
+        thr = _threshold_for(p.name)
         if p.name in _FLEET_ALIVE_CACHES and age_min <= thr:
             fleet_alive = True
         if age_min > thr:
