@@ -1,6 +1,6 @@
 # crontab.prod — snapshot al crontab-ului de pe masina PROD (trading).
 # Reproductibil: dupa un dezastru, restaureaza cu:  crontab systemd/crontab.prod.txt
-# Generat: 2026-07-28 19:36:59. Actualizeaza dupa orice modificare de crontab.
+# Generat: 2026-07-28 20:33:12. Actualizeaza dupa orice modificare de crontab.
 # (systemd units traiesc deja in systemd/*.service; astea sunt joburile cron, non-systemd.)
 
 */5 * * * * /home/predut/binance/healthcheck.sh --supervise >> /home/predut/binance/logs/healthcheck.log 2>&1
@@ -10,6 +10,6 @@
 30 3 * * * cd /home/predut/binance && ./backup_secrets.sh >> /home/predut/binance/logs/backup_secrets.log 2>&1
 */2 * * * * /home/predut/binance/deadman_switch.sh >> /home/predut/binance/logs/deadman.log 2>&1
 23 2 * * * /home/predut/binance/logger_retention.sh >> /home/predut/binance/logs/logger_retention.log 2>&1
-*/2 * * * * cd /home/predut/binance && /home/predut/binance/myenv/bin/python /home/predut/binance/verify_tools/watchdogfor_cache.py >> /home/predut/binance/logs/watchdog.log 2>&1
+*/2 * * * * cd /home/predut/binance && /home/predut/binance/myenv/bin/python /home/predut/binance/verify_tools/watchdogfor_cacheandconfig.py >> /home/predut/binance/logs/watchdog.log 2>&1
 */5 * * * * cd /home/predut/binance && /home/predut/binance/myenv/bin/python /home/predut/binance/verify_tools/watchdogfor_anomaly.py >> /home/predut/binance/logs/anomaly_watchdog.log 2>&1
 */30 * * * * /home/predut/binance/refresh_dev.sh >> /home/predut/binance/logs/refresh_dev.log 2>&1

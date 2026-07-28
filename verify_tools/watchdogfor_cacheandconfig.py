@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
 """
-cache_watchdog.py — verifică prospețimea TUTUROR cache-urilor (cachedb/cache_*.json)
-și alarmează dacă vreunul s-a învechit (cacheManager/priceAnalysis murite silențios).
+watchdogfor_cacheandconfig.py — DOUA responsabilitati intr-un singur watchdog:
 
-Rulează ca task scurt din cron (la fiecare 5 min), independent de flotă.
+1. CACHE: verifică prospețimea TUTUROR cache-urilor (cachedb/cache_*.json) și
+   alarmează / (optional) repornește cacheManager dacă vreunul s-a învechit
+   (cacheManager/priceAnalysis murite silențios).
+2. CONFIG (check_configs_once): detectează schimbări de CONȚINUT în fișierele de
+   config (instruments.conf etc.) și repornește procesul proprietar — inclusiv la
+   editări manuale. Respawn-safe prin healthcheck.sh --supervise (procs.conf).
+   Kill-switch WATCHDOG_CONFIG_RESTART (implicit off, activat din config.env).
+
+Rulează ca task scurt din cron (la fiecare 2 min), independent de flotă.
+(fost watchdogfor_cache.py — redenumit 28 iul cand a primit si config-watch.)
 
 Semnal de prospețime per fișier: max(fetchtime din cache, mtime fișier). Dacă vârsta
 depășește pragul (per-cache sau WATCHDOG_STALE_MINUTES) → alertă (ntfy + email), cu cooldown.
@@ -45,6 +53,30 @@ AUTO_RESTART_COOLDOWN_MIN = float(os.environ.get("WATCHDOG_AUTO_RESTART_COOLDOWN
 AUTO_RESTART_MAX = int(os.environ.get("WATCHDOG_AUTO_RESTART_MAX", "3"))
 AUTO_RESTART_WINDOW_H = float(os.environ.get("WATCHDOG_AUTO_RESTART_WINDOW_H", "6"))
 AUTO_RESTART_TARGET = "python cacheManager.py"   # pattern pgrep/pkill; flota_start respawneaza
+
+# ── CONFIG-WATCH: reporneste procesul proprietar cand un fisier de config s-a
+# schimbat. Detectie pe HASH de CONTINUT (nu mtime — o atingere fara schimbare
+# reala nu declanseaza reporniri false). Prinde SI editari manuale (azi trebuie
+# sa-ti amintesti sa repornesti dupa ce editezi un config). Toate procesele-tinta
+# sunt in procs.conf => respawn-safe prin healthcheck.sh --supervise (cron */5).
+# Kill-switch: WATCHDOG_CONFIG_RESTART (implicit false; activat din config.env).
+CONFIG_RESTART = os.environ.get("WATCHDOG_CONFIG_RESTART", "false").strip().lower() in ("1", "true", "yes", "on", "da")
+CONFIG_RESTART_COOLDOWN_MIN = float(os.environ.get("WATCHDOG_CONFIG_COOLDOWN_MIN", "5"))
+CONFIG_RESTART_MAX = int(os.environ.get("WATCHDOG_CONFIG_MAX", "5"))
+CONFIG_RESTART_WINDOW_H = float(os.environ.get("WATCHDOG_CONFIG_WINDOW_H", "6"))
+# config (relativ la radacina) -> procese proprietare (pattern pkill -f). Un config
+# cu mai multi consumatori (instruments.conf: monitortrades SI tradeall) -> repornim
+# pe toti. Config-uri partajate/secrete (config.env, .env) NU sunt aici deliberat
+# (prea larg pt auto-restart; o schimbare acolo ar cere restart de flota, decizie umana).
+_CONFIG_OWNERS = {
+    "instruments.conf": ["monitortrades.py", "tradeall.py"],
+    "monitortrades.conf": ["monitortrades.py"],
+    "monitortrades_config.env": ["monitortrades.py"],
+    "tradeall_config.env": ["tradeall.py"],
+    "rtrade_config.env": ["rtrade.py"],
+    "assetguardian_config.env": ["assetguardian.py"],
+}
+
 # Praguri per-cache (min): cele lente (trend lung, valoare activ) se actualizeaza rar.
 # Cache-urile de order/trade sunt EVENT-DRIVEN: cacheManager le rescrie DOAR cand apare
 # un order/trade nou pe exchange. Intr-o perioada linistita (fara fill-uri) mtime-ul lor
@@ -200,6 +232,76 @@ def _do_restart(target=AUTO_RESTART_TARGET):
     return True
 
 
+def _config_hash(path):
+    """SHA-256 al CONTINUTULUI (nu mtime). None daca fisierul lipseste."""
+    import hashlib
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    except FileNotFoundError:
+        return None
+
+
+def check_configs_once(now=None):
+    """Detecteaza schimbari de CONTINUT in fisierele de config (_CONFIG_OWNERS) si
+    reporneste procesele proprietare (respawn-safe prin procs.conf). Prima vedere a
+    unui fisier = doar baseline (nu reporneste). Debounce: hash-ul se actualizeaza pe
+    loc, deci o schimbare declanseaza O SINGURA data. Guardrail-uri: cooldown + plafon
+    (ca la auto-restart de cache) + kill-switch CONFIG_RESTART. Intoarce lista de
+    procese repornite."""
+    now = now if now is not None else time.time()
+    state = wc.load_state(STATE_FILE)
+    hashes = state.setdefault("config_hashes", {})
+
+    changed = []
+    for name in _CONFIG_OWNERS:
+        h = _config_hash(str(_ROOT / name))
+        if h is None:
+            continue
+        prev = hashes.get(name)
+        hashes[name] = h                      # actualizeaza mereu (baseline / debounce)
+        if prev is not None and h != prev:
+            changed.append(name)
+
+    if not changed:
+        wc.save_state(STATE_FILE, state)
+        return []
+
+    owners = sorted({o for n in changed for o in _CONFIG_OWNERS[n]})
+    note = f"config schimbat: {', '.join(changed)} -> proprietari: {', '.join(owners)}"
+
+    if not CONFIG_RESTART:
+        print(f"[watchdog] {note} — WATCHDOG_CONFIG_RESTART=false, doar notific")
+        wc.send_ntfy("⚙️ Config schimbat", note + "\n(auto-restart OFF; reporneste manual daca e nevoie)")
+        wc.save_state(STATE_FILE, state)
+        return []
+
+    hist = [t for t in state.get("config_restart_history", []) if now - t < CONFIG_RESTART_WINDOW_H * 3600]
+    if hist and (now - max(hist)) < CONFIG_RESTART_COOLDOWN_MIN * 60:
+        print(f"[watchdog] {note} — dar in COOLDOWN ({CONFIG_RESTART_COOLDOWN_MIN:.0f}min), nu repornesc acum")
+        wc.save_state(STATE_FILE, state)
+        return []
+    if len(hist) >= CONFIG_RESTART_MAX:
+        msg = f"⛔ PLAFON config-restart ({CONFIG_RESTART_MAX} in {CONFIG_RESTART_WINDOW_H:.0f}h). {note}. NU repornesc — verifica manual."
+        print(f"[watchdog] {msg}")
+        wc.send_ntfy("⛔ Config-restart plafonat", msg)
+        wc.save_state(STATE_FILE, state)
+        return []
+
+    for pat in owners:
+        _do_restart(pat)
+    hist.append(now)
+    state["config_restart_history"] = hist
+    wc.save_state(STATE_FILE, state)
+
+    msg = (f"🔄 {', '.join(changed)} s-a schimbat -> repornit {', '.join(owners)} "
+           f"(respawn prin healthcheck --supervise). Restart {len(hist)}/{CONFIG_RESTART_MAX} in {CONFIG_RESTART_WINDOW_H:.0f}h.")
+    print(f"[watchdog] {msg}")
+    wc.send_ntfy("🔄 Config schimbat -> restart", msg)
+    wc.send_email("Config schimbat -> restart proces", msg)
+    return owners
+
+
 def _maybe_auto_restart(stale, now, state):
     """Daca AUTO_RESTART e activat SI un cache de pret RAPID (nu unul din
     _STALE_OVERRIDES = slow/event-driven) e stale, reporneste cacheManager — cu
@@ -299,5 +401,9 @@ def check_once(now=None):
 
 
 if __name__ == "__main__":
+    # Config-watch intai (isi salveaza starea cu config_hashes/istoric), apoi cache.
+    # Cele doua ating chei DISJUNCTE din STATE_FILE, iar check_once salveaza doar la
+    # staleness -> config_hashes persista corect intre rulari.
+    check_configs_once()
     sent = check_once()
     sys.exit(2 if sent else 0)

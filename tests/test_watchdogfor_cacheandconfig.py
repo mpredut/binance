@@ -3,7 +3,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "verify_tools"))
-import watchdogfor_cache as wd
+import watchdogfor_cacheandconfig as wd
 
 
 def _write_cache(path, fetchtime_ms, mtime_sec=None):
@@ -219,6 +219,57 @@ class TestAutoRestart(unittest.TestCase):
             wd.check_once(now=now + 32 * 60)         # 3
             wd.check_once(now=now + 48 * 60)         # al 4-lea: PLAFON -> NU repornim
             self.assertEqual(restart.call_count, 3, "plafonul de 3/fereastra trebuie respectat")
+
+
+class TestConfigWatch(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.cfg = os.path.join(self.tmp, "fake.conf")
+        self._root0, self._owners0, self._cr0 = wd._ROOT, wd._CONFIG_OWNERS, wd.CONFIG_RESTART
+        wd._ROOT = Path(self.tmp)
+        wd.STATE_FILE = os.path.join(self.tmp, ".state.json")
+        wd._CONFIG_OWNERS = {"fake.conf": ["fakeproc.py"]}
+        wd.CONFIG_RESTART = True
+        wd.CONFIG_RESTART_COOLDOWN_MIN = 0   # fara cooldown in test
+        with open(self.cfg, "w") as f:
+            f.write("val = 1\n")
+
+    def tearDown(self):
+        wd._ROOT, wd._CONFIG_OWNERS, wd.CONFIG_RESTART = self._root0, self._owners0, self._cr0
+
+    def test_baseline_then_change_then_debounce(self):
+        with patch.object(wd, "_do_restart") as restart, \
+             patch.object(wd.wc, "send_ntfy"), patch.object(wd.wc, "send_email"):
+            # 1) prima vedere = doar baseline, FARA restart
+            self.assertEqual(wd.check_configs_once(), [])
+            restart.assert_not_called()
+            # 2) continut schimbat -> restart proprietarul
+            with open(self.cfg, "w") as f:
+                f.write("val = 2\n")
+            self.assertEqual(wd.check_configs_once(), ["fakeproc.py"])
+            restart.assert_called_once_with("fakeproc.py")
+            # 3) neschimbat -> debounce, fara al doilea restart
+            restart.reset_mock()
+            self.assertEqual(wd.check_configs_once(), [])
+            restart.assert_not_called()
+
+    def test_mtime_touch_without_content_change_no_restart(self):
+        with patch.object(wd, "_do_restart") as restart, \
+             patch.object(wd.wc, "send_ntfy"), patch.object(wd.wc, "send_email"):
+            wd.check_configs_once()                       # baseline
+            os.utime(self.cfg, (time.time() + 100, time.time() + 100))  # doar mtime, continut identic
+            self.assertEqual(wd.check_configs_once(), [])  # hash identic -> nimic
+            restart.assert_not_called()
+
+    def test_kill_switch_off_detects_but_no_restart(self):
+        wd.CONFIG_RESTART = False
+        with patch.object(wd, "_do_restart") as restart, \
+             patch.object(wd.wc, "send_ntfy"), patch.object(wd.wc, "send_email"):
+            wd.check_configs_once()                       # baseline
+            with open(self.cfg, "w") as f:
+                f.write("val = 3\n")
+            self.assertEqual(wd.check_configs_once(), [])  # detecteaza dar NU reporneste
+            restart.assert_not_called()
 
 
 if __name__ == "__main__":
