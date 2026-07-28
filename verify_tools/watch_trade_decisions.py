@@ -27,11 +27,8 @@ HARD_TP_PCT = 17.0   # tine sincron cu monitortrades.conf (hard_tp_pct)
 GAIN_PCT = 9.2
 
 
-def _base(symbol):
-    for q in ("USDC", "USDT", "BUSD", "FDUSD", "USD"):
-        if symbol.endswith(q):
-            return symbol[:-len(q)]
-    return symbol
+import utils  # noqa: E402 — base_asset centralizat in utils (28 iul)
+_base = utils.base_asset
 
 
 def free_qty(symbol):

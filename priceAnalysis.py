@@ -28,6 +28,16 @@ import symbols as sym
 #   ... finally: shm.close(); shm.unlink()        # la oprire
 # ──────────────────────────────────────────────────────────────────────────────
 
+# DEBUG trace (Zona 1/2/3 din get_trade_weight, tuning slope) — implicit OFF ca sa
+# nu polueze logul flotei. Activeaza cu PRICEANALYSIS_DEBUG=true la nevoie de tuning.
+_DEBUG = os.environ.get("PRICEANALYSIS_DEBUG", "").strip().lower() == "true"
+
+
+def _dbg(*args, **kwargs):
+    if _DEBUG:
+        print(*args, **kwargs)
+
+
 price_cache_manager = None
 
 def build_price_cache_manager():
@@ -168,10 +178,15 @@ def slope_tolerance_per_(symbol, price,
 
 
 
+# ─── COD MORT pastrat INTENTIONAT pt referinta (idee de reactivat/fixat) ──────
+# getTrendLongTerm: abordarea VECHE de detectie a trendului (comparatie bloc-cu-bloc
+# de pante + medie trend_ref, toleranta relativa). SUPERSEDATA de
+# getTrendLongTerm_fixed (detect_long_term_trend: ferestre pe TIMP + Mann-Kendall +
+# toleranta la zgomot). Neapelata acum, pastrata ca abordare alternativa de referinta.
 def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
                                 slope_tolerance: float = 0.0028, persistence_factor: float = 1.5,
                                 lookback_days=30, draw: bool = True) -> Optional[dict]:
-   
+
     data: List[Tuple[int, float]] = priceLstFor(symbol)
     if len(data) < 2:
         return None
@@ -192,9 +207,9 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
     window = min(window, len(prices))       # window size is never larger than the number of price points:
     step = points_per_hour * step_hours     # numar de puncte per step
     
-    print(f"[DEBUG] {symbol}: numar puncte={len(prices)}, window={window}, step={step}, delta(s)={delta}")
-    print(f"[DEBUG] {symbol}: numar de ferestre={len(prices)/window}, numar de pasi in price {len(prices)/step}")
-    print(f"[DEBUG] {symbol}: slope_tolerance={slope_tolerance}")
+    _dbg(f"[DEBUG] {symbol}: numar puncte={len(prices)}, window={window}, step={step}, delta(s)={delta}")
+    _dbg(f"[DEBUG] {symbol}: numar de ferestre={len(prices)/window}, numar de pasi in price {len(prices)/step}")
+    _dbg(f"[DEBUG] {symbol}: slope_tolerance={slope_tolerance}")
  
     last_slope_h = None
     sum_slope = 0
@@ -208,7 +223,7 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
     trend_block_indices_test=[]
     
     for start in range(len(prices) - window, -1, -step):
-        print(f"[DEBUG] start {start}")
+        _dbg(f"[DEBUG] start {start}")
         trend_block +=1
         end = start + window
         x_block = timestamps[start:end] - timestamps[start]
@@ -225,7 +240,7 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
         avg_price = prices[0]
         relative_tolerance = slope_tolerance_per_(symbol, avg_price, slope_tolerance) 
 
-        print(f"[DEBUG] {symbol}: relative_tolerance={relative_tolerance}, slope_h={slope_h}, last_slope_h={last_slope_h}")
+        _dbg(f"[DEBUG] {symbol}: relative_tolerance={relative_tolerance}, slope_h={slope_h}, last_slope_h={last_slope_h}")
         #drawPriceLst(x_block, y_block, trend_block_indices, symbol, "up", slope_h)
      
         if trend_ref_slope_h is None or last_slope_h is None:
@@ -239,7 +254,7 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
             if(len(trend_block_indices) == 0):
                 continue
             avg_slope = sum_slope / len(trend_block_indices)
-            print(f"[DEBUG] trendul curent difera {slope_h}. Se compara cu trend_ref_slope_h={trend_ref_slope_h} si avg_slope={avg_slope}")
+            _dbg(f"[DEBUG] trendul curent difera {slope_h}. Se compara cu trend_ref_slope_h={trend_ref_slope_h} si avg_slope={avg_slope}")
             if abs(slope_h - trend_ref_slope_h) >= relative_tolerance: # diferență semificativa fata de trend start
                 continue_trend = False;
             if abs(slope_h - avg_slope) >= relative_tolerance:  # diferență mare fata de medie
@@ -522,17 +537,6 @@ def write_all_trends(all_trends, filename="priceanalysis.json"):
     return all_trends
     
     
-def write_all_trends_old(symbols, filename="priceanalysis.json"):      
-    try:
-        with open(filename, "w") as f:
-            json.dump(all_trends, f, indent=2)
-        print(f"[write_all_trends] Rezultatele au fost scrise în {filename}")
-    except Exception as e:
-        print(f"[write_all_trends][Eroare] Nu pot scrie fișierul {filename}: {e}")
-    return all_trends
-
-
-
 def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=None, quant_seconds=3600*24, draw=False):
     """T_quanta=None (implicit) = AUTO: T estimat EMPIRIC din istoricul monedei
     (hibrid cu prior-ul 14, favorizand empiricul cand avem episoade destule),
@@ -640,13 +644,13 @@ def get_trade_weight(T, trend_len, trend, order_type,
     # ZONA 2: trend depășit dar persistent → momentum puternic in directia lui
     if T < trend_len <= T_extended:
         w_val = 0.86 if aligned else max_against_trend
-        print(f"[DEBUG] Zona 2: trend_len={trend_len:.2f} depășește T={T} dar e sub T_extended={T_extended}. Aligned={aligned}, return {w_val}  ")
+        _dbg(f"[DEBUG] Zona 2: trend_len={trend_len:.2f} depășește T={T} dar e sub T_extended={T_extended}. Aligned={aligned}, return {w_val}  ")
         return np.array([0.0]), np.array([w_val])
 
     # ZONA 3: trend foarte bătrân → conservator IN AMBELE directii
     if trend_len > T_extended:
         w_val = 0.22 if aligned else max_against_trend
-        print(f"[DEBUG] Zona 3: trend_len={trend_len:.2f} e peste T_extended={T_extended}. Aligned={aligned}, return {w_val} ")
+        _dbg(f"[DEBUG] Zona 3: trend_len={trend_len:.2f} e peste T_extended={T_extended}. Aligned={aligned}, return {w_val} ")
         return np.array([0.0]), np.array([w_val])
 
     # ZONA 1: gaussiana pe T întreg, slice de la vârsta curentă a trendului.
@@ -654,7 +658,7 @@ def get_trade_weight(T, trend_len, trend, order_type,
     idx = min(int(trend_len), T - 1)
     t_full, w_full = u.gaussian_weights_from_idx(T=T, idx=0)
     if len(w_full) == 0:
-        print(f"[DEBUG] Zona 1: gaussian_weights_from_idx a returnat gol. return [0.05]")
+        _dbg(f"[DEBUG] Zona 1: gaussian_weights_from_idx a returnat gol. return [0.05]")
         return np.array([0.0]), np.array([0.05])
     # utils normalizeaza ca DISTRIBUTIE (suma=1, varf ~0.11) — pt ponderi de trading
     # scalam la VARF: mijlocul curbei = peak_weight, nu ~0.11 (bug-ul vechi de scara,
@@ -669,14 +673,14 @@ def get_trade_weight(T, trend_len, trend, order_type,
         w01_full = w01_full.copy()
         w01_full[peak_i:] = 1.0
     t_seq, w01 = t_full[idx:], w01_full[idx:]
-    print(f"[DEBUG] Zona 1: trend_len={trend_len:.2f}, slice de la idx={idx} până la T={T}. Aligned={aligned}, gauss01[0]={w01[0]:.4f}")
+    _dbg(f"[DEBUG] Zona 1: trend_len={trend_len:.2f}, slice de la idx={idx} până la T={T}. Aligned={aligned}, gauss01[0]={w01[0]:.4f}")
 
     if aligned:
         w_seq = w01 * peak_weight
     else:
         # inversul curbei GLOBALE (nu al slice-ului — bug-ul vechi dadea 0.02 la
         # capatul batran in loc de ~0.15): mijloc -> min_weight, capete -> max_against_trend
-        print(f"[DEBUG] Order type {order_type} nu e aliniat cu trend {trend}, invers global, max_against_trend={max_against_trend}")
+        _dbg(f"[DEBUG] Order type {order_type} nu e aliniat cu trend {trend}, invers global, max_against_trend={max_against_trend}")
         w_seq = min_weight + (1.0 - w01) * (max_against_trend - min_weight)
 
     return t_seq, w_seq  # slice [idx..T-1]

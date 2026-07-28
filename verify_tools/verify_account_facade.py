@@ -24,14 +24,8 @@ import symbols as sym                                 # noqa: E402
 
 MAXAGE = 17 * 24 * 3600   # ca trade_watch.position (referinta botului)
 SYMBOLS = [sym.taosymbol, sym.btcsymbol]
-QUOTES = ("USDC", "USDT", "BUSD", "FDUSD", "USD")
-
-
-def base_of(symbol):
-    for q in QUOTES:
-        if symbol.endswith(q):
-            return symbol[:-len(q)]
-    return symbol
+import utils  # noqa: E402 — base_asset centralizat in utils (28 iul)
+base_of = utils.base_asset
 
 
 def free_direct(base):

@@ -9,6 +9,20 @@ from datetime import datetime, timedelta
 import botcore   # sursa unica pt are_close/diff_percent (partajat flota + boti)
 
 
+# Sufixele de cotare cunoscute, in ordinea de verificare (primul care se
+# potriveste castiga). Centralizat 28 iul — era copiat in monitortrades,
+# providers/replay_provider, verify_tools/*.
+_QUOTE_SUFFIXES = ("USDC", "USDT", "BUSD", "FDUSD", "USD")
+
+
+def base_asset(symbol: str) -> str:
+    """Activul de baza al unui symbol de trading: strip primul sufix de cotare
+    cunoscut (BTCUSDC -> BTC). Symbol fara sufix cunoscut -> intors neschimbat."""
+    for q in _QUOTE_SUFFIXES:
+        if symbol.endswith(q):
+            return symbol[:-len(q)]
+    return symbol
+
 
 def beep(n):
     for _ in range(n):

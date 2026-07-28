@@ -394,11 +394,7 @@ def _as_instrument(x):
     if isinstance(x, _Instrument):
         return x
     sym = str(x)
-    base = sym
-    for q in ("USDC", "USDT", "BUSD", "FDUSD", "USD"):
-        if base.endswith(q):
-            base = base[:-len(q)]
-            break
+    base = u.base_asset(sym)
     return _Instrument(name=sym, symbol=sym, provider=mkt.provider_name_for(sym), base=base)
 
 
@@ -407,11 +403,7 @@ def get_available_qty(symbol, api=None):
     Sursa de adevar pt 'vinde TOT ce ai disponibil', nu aproximarea din trade-uri.
     `api` = facada de cont (default singletonul `mkt`); injectabil pt alt provider/test."""
     api = api or mkt
-    base = symbol
-    for q in ("USDC", "USDT", "BUSD", "FDUSD", "USD"):
-        if base.endswith(q):
-            base = base[:-len(q)]
-            break
+    base = u.base_asset(symbol)
     try:
         return float(api.free_balance(base) or 0.0)
     except Exception as e:

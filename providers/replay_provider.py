@@ -29,18 +29,12 @@ import json
 import os
 from typing import Dict, List, Optional, Tuple
 
+import utils
 from providers.market_api import MarketDataProvider
 
-_QUOTE_SUFFIXES = ("USDC", "USDT", "BUSD", "FDUSD", "USD")
-
-
-def _base_asset(symbol: str) -> str:
-    """Acelasi heuristic ca monitortrades._as_instrument/get_available_qty:
-    strip sufixul de cotare -> asset de baza (BTCUSDC -> BTC)."""
-    for q in _QUOTE_SUFFIXES:
-        if symbol.endswith(q):
-            return symbol[: -len(q)]
-    return symbol
+# strip sufix de cotare -> asset de baza (BTCUSDC -> BTC). Centralizat in utils
+# (28 iul, era copiat aici + monitortrades + verify_tools).
+_base_asset = utils.base_asset
 
 
 def load_price_series(path: str, symbol: str) -> List[Tuple[float, float]]:
