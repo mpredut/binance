@@ -30,6 +30,15 @@ os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
 import scheduled_pilot as sp  # refolosim: _apply_config_change/_current_value/_append_audit/_notify_change/_last_change_for/constante  # noqa: E402
 
+# Incarca .env + config.env ca notificarile (PHONE_ALERT_URL/NTFY_TOPIC din .env) sa
+# functioneze — apply ruleaza standalone, nu prin fleet (care le incarca la pornire).
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(ROOT, ".env"))
+    load_dotenv(os.path.join(ROOT, "config.env"))
+except Exception:  # noqa: BLE001
+    pass
+
 BRANCH = "backtest-proposals"
 
 

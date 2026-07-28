@@ -412,6 +412,21 @@ def main():
         with open(args.propose_out, "w", encoding="utf-8") as f:
             json.dump(proposals, f, indent=2, default=str)
         print(f"\n[scheduled_pilot] {len(proposals)} propunere(i) scrise in {args.propose_out}")
+        if proposals:
+            # notifica utilizatorul ca exista propuneri de REVIZUIT+APLICAT (apply e manual)
+            try:
+                from dotenv import load_dotenv
+                load_dotenv(os.path.join(ROOT, ".env"))
+                load_dotenv(os.path.join(ROOT, "config.env"))
+                import alertnotifiers as alert
+                lines = [f"{p['full_key']}: {p['current_on_dev']} -> castigator {p['winner_value']}"
+                         for p in proposals]
+                alert.notify(title=f"Backtest: {len(proposals)} propunere(i) noi de config",
+                             body="Ruleaza apply_proposals.py pe prod pt a aplica (cu guardrail-uri):\n"
+                                  + "\n".join(lines),
+                             source="scheduled_pilot.py", symbol="backtest")
+            except Exception as e:  # noqa: BLE001
+                print(f"[scheduled_pilot] eroare notificare propuneri: {e}")
 
 
 if __name__ == "__main__":
