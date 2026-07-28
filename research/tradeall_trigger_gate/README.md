@@ -8,6 +8,14 @@ rulării lor proprii. Sunt scripturi de cercetare, nu cod de producție — nu
 rulează niciodată împotriva rețelei reale (folosesc `tradeall_backtest.py`,
 care simulează execuția).
 
+**STATUS (28 iul): cooldown-ul recomandat (Exp 7) E LIVE** — comis 22 iul
+(`c672485`, `b6c4ec2`) in `tradeall.py::logic()`/`TrendState` (`_fire_once`,
+`fire_limit_reached`, `can_retry_fire`, `mark_confirmed`), configurabil prin
+`TRADEALL_FIRE_MAX_PER_TREND`/`TRADEALL_FIRE_MIN_RETRY_MINUTES` in
+`tradeall_config.env` (3 executii / 6 min, exact varianta recomandata). NU mai
+e doar o recomandare din research — verifica `git log -- tradeall.py` inainte
+sa presupui ca ceva de aici n-a fost actionat.
+
 Concluzia completă (cifre, tabele, recomandare finală) e în memoria
 persistentă a asistentului: `tradeall-trigger-gate-investigation.md`
 (căutabilă/reference-abilă din orice sesiune viitoare Claude Code pe acest
