@@ -33,6 +33,18 @@ _CACHE_DIR = Path(os.environ.get("BINANCE_CACHE_DIR", _ROOT / "cachedb"))
 STATE_FILE = _ROOT / ".watchdog_state.json"
 STALE_MINUTES = float(os.environ.get("WATCHDOG_STALE_MINUTES", "20"))
 COOLDOWN_MINUTES = float(os.environ.get("WATCHDOG_COOLDOWN_MINUTES", "60"))
+
+# 28 iul: AUTO-RESTART (cerere user, dupa incidentul HYPE care a cerut restart manual).
+# Cand un cache de pret RAPID (prag default, scris de cacheManager) e stale = flota
+# chiar are o problema reala -> watchdog-ul reporneste cacheManager singur (supervisor-ul
+# flota_start il respawneaza in ~30s), pe langa alerta. Guardrail-uri contra buclelor:
+# cooldown intre restarturi + plafon per fereastra (peste care se OPRESTE si cere
+# interventie manuala). Kill-switch: WATCHDOG_AUTO_RESTART=false.
+AUTO_RESTART = os.environ.get("WATCHDOG_AUTO_RESTART", "false").strip().lower() in ("1", "true", "yes", "on", "da")
+AUTO_RESTART_COOLDOWN_MIN = float(os.environ.get("WATCHDOG_AUTO_RESTART_COOLDOWN_MIN", "15"))
+AUTO_RESTART_MAX = int(os.environ.get("WATCHDOG_AUTO_RESTART_MAX", "3"))
+AUTO_RESTART_WINDOW_H = float(os.environ.get("WATCHDOG_AUTO_RESTART_WINDOW_H", "6"))
+AUTO_RESTART_TARGET = "python cacheManager.py"   # pattern pgrep/pkill; flota_start respawneaza
 # Praguri per-cache (min): cele lente (trend lung, valoare activ) se actualizeaza rar.
 # Cache-urile de order/trade sunt EVENT-DRIVEN: cacheManager le rescrie DOAR cand apare
 # un order/trade nou pe exchange. Intr-o perioada linistita (fara fill-uri) mtime-ul lor
@@ -151,6 +163,44 @@ def cache_freshness_seconds(path):
         return 0.0, "mtime indisponibil"
 
 
+def _do_restart(target=AUTO_RESTART_TARGET):
+    """Omoara procesul-tinta (cacheManager); supervisor-ul flota_start il respawneaza.
+    Izolat pt testare (se poate mock-ui). Intoarce True daca pkill a rulat fara eroare."""
+    import subprocess
+    subprocess.run(["pkill", "-f", target], timeout=10, check=False)
+    return True
+
+
+def _maybe_auto_restart(stale, now, state):
+    """Daca AUTO_RESTART e activat SI un cache de pret RAPID (nu unul din
+    _STALE_OVERRIDES = slow/event-driven) e stale, reporneste cacheManager — cu
+    cooldown + plafon per fereastra. Intoarce (restarted: bool, note: str).
+    Modifica state['auto_restart_history'] cand reporneste."""
+    if not AUTO_RESTART:
+        return False, ""
+    # Doar cache-urile RAPIDE (prag default, scrise de cacheManager) declanseaza.
+    # Cele din _STALE_OVERRIDES (long-trend, asset_value, fill-uri) sunt deliberat
+    # tolerante -> staleness-ul lor NU justifica un restart al procesului critic.
+    critical = [name for (name, _age, _thr, _det) in stale if name not in _STALE_OVERRIDES]
+    if not critical:
+        return False, ""
+    hist = [t for t in state.get("auto_restart_history", []) if now - t < AUTO_RESTART_WINDOW_H * 3600]
+    if hist and (now - max(hist)) < AUTO_RESTART_COOLDOWN_MIN * 60:
+        return False, (f"auto-restart in COOLDOWN ({AUTO_RESTART_COOLDOWN_MIN:.0f}min de la ultimul) "
+                       f"— doar alertez, cacheManager NErepornit")
+    if len(hist) >= AUTO_RESTART_MAX:
+        return False, (f"⛔ PLAFON auto-restart atins ({AUTO_RESTART_MAX} in {AUTO_RESTART_WINDOW_H:.0f}h) "
+                       f"— INTERVENTIE MANUALA necesara, nu mai repornesc automat")
+    try:
+        _do_restart()
+        hist.append(now)
+        state["auto_restart_history"] = hist
+        return True, (f"🔁 cacheManager REPORNIT automat (cache stale: {', '.join(critical)}). "
+                      f"Restart {len(hist)}/{AUTO_RESTART_MAX} in fereastra de {AUTO_RESTART_WINDOW_H:.0f}h.")
+    except Exception as e:  # noqa: BLE001 — un restart esuat nu trebuie sa opreasca alerta
+        return False, f"auto-restart ESUAT ({e}) — reporneste MANUAL flota"
+
+
 def check_once(now=None):
     """Verifică TOATE cache_*.json din cachedb/. Alertă dacă vreunul e stale (peste
     pragul lui) și nu suntem în cooldown. Întoarce True dacă a trimis alertă."""
@@ -187,11 +237,20 @@ def check_once(now=None):
         print(f"[watchdog] OK — {len(files)} cache-uri proaspete")
         return False
 
-    # cooldown: nu re-alarma prea des
     state = wc.load_state(STATE_FILE)
+
+    # AUTO-RESTART: independent de cooldown-ul de ALERTA (are guardrail-urile lui).
+    # Modifica state['auto_restart_history'] daca reporneste efectiv.
+    restarted, restart_note = _maybe_auto_restart(stale, now, state)
+    if restart_note:
+        print(f"[watchdog] {restart_note}")
+
+    # Cooldown de alerta: nu re-alarma prea des. DAR un restart efectiv trece peste
+    # cooldown (eveniment important — user-ul trebuie sa stie ca s-a repornit).
     last = state.get("last_alert_ts", 0)
-    if (now - last) < COOLDOWN_MINUTES * 60:
+    if (now - last) < COOLDOWN_MINUTES * 60 and not restarted:
         print(f"[watchdog] STALE ({', '.join(s[0] for s in stale)}) dar în cooldown — nu re-alarmez")
+        wc.save_state(STATE_FILE, state)   # persista auto_restart_history chiar si fara alerta
         return False
 
     lines = []
@@ -200,8 +259,8 @@ def check_once(now=None):
         lines.append(f"  • {name}: {age_txt} (prag {thr:.0f} min) — {detail}")
     title = "⚠️ Cache STALE pe server"
     message = ("Cache-uri învechite (probabil cacheManager/priceAnalysis s-au oprit):\n"
-               + "\n".join(lines)
-               + "\nVerifică flota (flota_start) și repornește.")
+               + "\n".join(lines))
+    message += ("\n\n" + restart_note) if restart_note else "\nVerifică flota (flota_start) și repornește."
     print(f"[watchdog] ALARMĂ:\n{message}")
     wc.send_ntfy(title, message)
     wc.send_email(title, message)

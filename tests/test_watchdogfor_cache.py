@@ -108,5 +108,81 @@ class TestEventDrivenGating(unittest.TestCase):
             ntfy.assert_called_once()
 
 
+class TestAutoRestart(unittest.TestCase):
+    """Auto-restart pe stall REAL de pret (28 iul). _do_restart e mock-uit —
+    NU se atinge niciun proces real in teste."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        wd._CACHE_DIR = Path(self.tmp)
+        wd.STATE_FILE = os.path.join(self.tmp, ".state.json")
+        wd.STALE_MINUTES = 20
+        wd.COOLDOWN_MINUTES = 60
+        wd.AUTO_RESTART = True
+        wd.AUTO_RESTART_COOLDOWN_MIN = 15
+        wd.AUTO_RESTART_MAX = 3
+        wd.AUTO_RESTART_WINDOW_H = 6
+        self.price = os.path.join(self.tmp, "cache_prices_multi.json")   # cache RAPID
+        self.order = os.path.join(self.tmp, "cache_order.json")          # event-driven (in overrides)
+
+    def _stale_price(self, now):
+        _write_cache(self.price, int((now - 3600) * 1000), mtime_sec=now - 3600)  # 1h stale
+
+    def test_fast_cache_stall_triggers_restart(self):
+        now = time.time()
+        self._stale_price(now)
+        with patch.object(wd, "_do_restart", return_value=True) as restart, \
+             patch.object(wd.wc, "send_ntfy", return_value=True), \
+             patch.object(wd.wc, "send_email", return_value=True):
+            self.assertTrue(wd.check_once(now=now))
+            restart.assert_called_once()
+
+    def test_disabled_flag_no_restart(self):
+        now = time.time()
+        wd.AUTO_RESTART = False
+        self._stale_price(now)
+        with patch.object(wd, "_do_restart", return_value=True) as restart, \
+             patch.object(wd.wc, "send_ntfy", return_value=True), \
+             patch.object(wd.wc, "send_email", return_value=True):
+            wd.check_once(now=now)
+            restart.assert_not_called()
+
+    def test_slow_cache_stall_does_not_restart(self):
+        """Un cache din _STALE_OVERRIDES (event-driven/slow) stale, dar FLOTA MOARTA
+        (niciun pret proaspat) -> alarma, dar NU restart (staleness de fill nu
+        justifica repornirea procesului critic)."""
+        now = time.time()
+        _write_cache(self.order, int((now - 100 * 3600) * 1000), mtime_sec=now - 100 * 3600)
+        with patch.object(wd, "_do_restart", return_value=True) as restart, \
+             patch.object(wd.wc, "send_ntfy", return_value=True), \
+             patch.object(wd.wc, "send_email", return_value=True):
+            wd.check_once(now=now)
+            restart.assert_not_called()
+
+    def test_cooldown_blocks_second_restart(self):
+        now = time.time()
+        self._stale_price(now)
+        with patch.object(wd, "_do_restart", return_value=True) as restart, \
+             patch.object(wd.wc, "send_ntfy", return_value=True), \
+             patch.object(wd.wc, "send_email", return_value=True):
+            wd.check_once(now=now)                       # restart 1
+            wd.check_once(now=now + 5 * 60)              # +5min < cooldown 15min -> NU
+            self.assertEqual(restart.call_count, 1, "cooldown trebuie sa blocheze al 2-lea restart")
+            wd.check_once(now=now + 20 * 60)             # +20min > cooldown -> restart 2
+            self.assertEqual(restart.call_count, 2)
+
+    def test_max_per_window_then_escalates(self):
+        now = time.time()
+        self._stale_price(now)
+        with patch.object(wd, "_do_restart", return_value=True) as restart, \
+             patch.object(wd.wc, "send_ntfy", return_value=True), \
+             patch.object(wd.wc, "send_email", return_value=True):
+            wd.check_once(now=now)                   # 1
+            wd.check_once(now=now + 16 * 60)         # 2 (peste cooldown)
+            wd.check_once(now=now + 32 * 60)         # 3
+            wd.check_once(now=now + 48 * 60)         # al 4-lea: PLAFON -> NU repornim
+            self.assertEqual(restart.call_count, 3, "plafonul de 3/fereastra trebuie respectat")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
