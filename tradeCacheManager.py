@@ -107,28 +107,6 @@ class TradeCacheManager:
         start_time = self.last_fetch_time_per_symbol.get(symbol, 0)
 
         unique_new_trades = self._get_my_trades(symbol=symbol, startTime=start_time)
-        
-        # try:
-            # new_trades = api.client.get_my_trades(symbol=symbol, startTime=start_time)
-        # except Exception as e:
-            # print(f"[Eroare] Binance API pentru {symbol}: {e}")
-            # return
-
-        # # Elimină duplicatele (după id dacă există, altfel după time + symbol)
-        # existing_keys = set(
-            # (t.get("id"), t["symbol"]) for t in self.trade_cache if "id" in t
-        # )
-
-        # unique_new_trades = []
-        # for t in new_trades:
-            # if not self._is_valid_trade(t):
-                # print(f"BED DAY???")
-                # continue 
-            # key = (t.get("id"), t["symbol"]) if "id" in t else (t["symbol"], t["time"])
-            # if key not in existing_keys:
-                # unique_new_trades.append(t)
-                # existing_keys.add(key)
-
         self.trade_cache.extend(unique_new_trades)
         self.last_fetch_time_per_symbol[symbol] = current_time
 

@@ -40,7 +40,6 @@ def value_diff_to_percent(value1, value2):
         
     diff = value1 - value2
     percent = (diff / value1) * 100
-    #percent = (diff / ((abs(val1) + abs(val2)) / 2)  * 100
     return percent
 
 def slope(val1, idx1, val2, idx2):
@@ -86,7 +85,6 @@ def timestampToTime(timestamp_ms):
     timestamp_sec = timestamp_ms / 1000.0
     
     # Convertim în format datetime
-    #human_readable_time = datetime.utcfromtimestamp(timestamp_sec) ->UTC
     human_readable_time = datetime.fromtimestamp(timestamp_sec)
     
     # Returnam timpul ca string în format citibil
@@ -102,8 +100,6 @@ def timeMsToHMS(timestamp_ms):
     
     # Returnăm timpul ca string în format oră, minut și secundă
     return human_readable_time.strftime('%H:%M:%S')
-    #print(f"Start of {self.state} trend at {time.ctime(self.start_time)}")
-    #print(f"Start of {self.state} trend at {time.strftime('%H:%M:%S', time.localtime(self.start_time))}")
 
 def timeToHMS(timestamp_sec):
     human_readable_time = datetime.fromtimestamp(timestamp_sec)
@@ -163,7 +159,6 @@ def asymptotic_decrease(initial_procent, expired_duration, passs, half_life_dura
 def exponential_decrease(initial_procent, expired_duration, passs, half_life_duration=24*60*60):
 
     T = half_life_duration / expired_duration  # Calculate the time constant T
-    #return initial_procent * (2 ** (-passs / T))  # Exponential decrease formula
     return initial_procent * math.exp(-passs / T)  # Exponential decrease formula using e
     
 def decrese_value_by_increment_exp(increment_factor, value, coeficient=0.05):
@@ -281,34 +276,6 @@ def _load_ed25519_signing_key():
 def _sign_ed25519(signing_key, payload: str) -> str:
     signed = signing_key.sign(payload.encode())
     return base64.b64encode(signed.signature).decode()
-
-
-#from cryptography.hazmat.primitives import serialization
-#from cryptography.hazmat.primitives.asymmetric import ed25519
-#import base64
-
-#def _load_ed25519_signing_key():
-#    try:
-#        with open("keys/ed25519_private.pem", "rb") as f:
-#            private_key = serialization.load_pem_private_key(
-#                f.read(),
-#                password=None
-#            )
-#
-#        if not isinstance(private_key, ed25519.Ed25519PrivateKey):
-#            raise ValueError("Cheia nu este Ed25519")
-#
-#        return private_key
-#
-#    except Exception as e:
-#        print(f"[cacheManager][WS] Eroare la încărcarea cheii Ed25519: {e}")
-#        return None
-
-
-#def _sign_ed25519(signing_key, payload: str) -> str:
-#    signature = signing_key.sign(payload.encode())
-#    return base64.b64encode(signature).decode()
-
 
 
 """

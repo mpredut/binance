@@ -9,9 +9,6 @@ import pandas as pd
 import threading
 from threading import Thread,Timer
 
-####Binance
-#from binance.client import Client
-#from binance.exceptions import BinanceAPIException
 
 #my imports
 import symbols as sym
@@ -470,8 +467,6 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
 
     # 1. Obtine ordinele de cumparare si vanzare recente pentru simbol (prin facada,
     #    normalizate la forma comuna {side,price,qty,timestamp} -> get_relevant_trade).
-    #trade_orders_buy = apitrades.get_trade_orders("BUY", symbol, maxage_trade_s)
-    #trade_orders_sell = apitrades.get_trade_orders("SELL", symbol, maxage_trade_s)
     trade_orders_buy = inst.orders("BUY", maxage_trade_s)
     trade_orders_sell = inst.orders("SELL", maxage_trade_s)
     if not (trade_orders_buy or trade_orders_sell):
@@ -546,9 +541,6 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
                         safeback_seconds=sbs, force=False, cancelorders=True, hours=MT_SELL_SAFEBACK_HOURS, pair=False)
                 else:
                     print(f"No can sell (can_sell={can_sell}, avail_qty={avail_qty})")
-                #po.place_SELL_order(symbol, current_price, qty)
-                #po.place_order_smart("BUY", sym.btcsymbol, proposed_price, 0.017, safeback_seconds=16*3600+60,
-                #    force=True, cancelorders=True, hours=1)
             else :
                 print(f"No action taken, because trend is up!")
         elif price_decrease > lost_threshold or u.are_close(price_decrease, lost_threshold, target_tolerance_percent=MT_ARE_CLOSE_TOLERANCE_PCT):
@@ -557,7 +549,6 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
                 if can_sell and avail_qty > 0:
                     _place_guarded(inst, "SELL", current_price, avail_qty, min_qty,
                         safeback_seconds=sbs, force=False, cancelorders=True, hours=MT_SELL_SAFEBACK_HOURS, pair=True)
-                #po.place_SELL_order(symbol, current_price, qty)
                 else:
                     print(f"No can sell (can_sell={can_sell}, avail_qty={avail_qty})")
             else:
@@ -575,7 +566,6 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
         if price_decrease_versus_sell > gain_threshold or u.are_close(price_decrease_versus_sell, gain_threshold, target_tolerance_percent=MT_ARE_CLOSE_TOLERANCE_PCT):
             if is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease_versus_sell * 100}% by more than {gain_threshold * 100}% versus sell price: Placing buy order")
-                #api.cancel_orders_old_or_outlier("BUY", "BTCUSDT", qty, hours=0.5, price_difference_percentage=0.1)
                 if can_buy:
                     # qty din BUGET (buy_budget/pret) sau qty fix configurat, altfel default (qty=1)
                     _buy_qty = round((buy_budget / current_price) if buy_budget else (buy_qty_cfg or qty), 6)
@@ -606,8 +596,6 @@ def main():
     maxage_trade_s =  4 * 24 * 3600  # Timpul maxim in care ordinele executate/filled sunt considerate recente (3 zile)
     interval = 60 * 4 #4 minute
 
-    #api.get_binance_symbols(sym.taosymbol)
-
     # sell_recommendation vine din CachePriceShortTrendManager (cross-process), nu din CSV.
     state_tracker.update_sell_recommendation()
     state_tracker.display_sell_recommendation()
@@ -619,24 +607,16 @@ def main():
     )
     thread.start()
 
-    #for i in range(0, 5):
-    #close_sell_orders = apitrades.get_trade_orders("SELL", sym.taosymbol, maxage_trade_s)
     close_sell_orders = apiorders.get_trade_orders("SELL", sym.taosymbol, maxage_trade_s)
     print(f"get_trade_orders:           Found {len(close_sell_orders)} close 'SELL' orders in the last {u.secondsToDays(maxage_trade_s)} days.")
     close_buy_orders = apiorders.get_trade_orders("BUY", sym.taosymbol, maxage_trade_s)
     print(f"get_trade_orders:           Found {len(close_buy_orders)} close 'BUY' orders in the last {u.secondsToDays(maxage_trade_s)} days.")
     print(f"close_buy_orders {close_buy_orders}")
     print(f"close_sell_orders {close_sell_orders}")
-    
-    #return
-    
-    #taosymbol_target_price = api.get_current_price(sym.taosymbol)
-    #po.place_safe_order("BUY", sym.taosymbol, taosymbol_target_price - 10, 1)
 
     d = int(os.environ.get("MT_GUARD_WINDOW_DAYS", "12"))  # fereastra gardei de profit (zile). 14 prindea un sell din 11 iun ($201) si bloca re-intrarea; 12 il exclude.
     while True:
 
-        #state_tracker.display_states()
         print_number_of_orders(maxage_trade_s)
         print_number_of_trades(maxage_trade_s)
         
@@ -666,47 +646,3 @@ def main():
 if __name__ == "__main__":
     
      main()
-    #test()
-    # try:
-        # main()
-    # except Exception as e:
-        # print(f"Eroare capturata: {e}")
-    # finally:
-        # print("Fortare inchidere...")
-        # state_tracker.running = False
-        # sys.exit(1)  # opreste toate daemon threads
-    
-
-    #confirmation candles
-
-#Acum trend-ul se bazează pe:
-
-#slope
-#gradient
-
-#Aș adăuga:
-
-#confirmation periods
-#multiple timeframe agreement
-""" 
-14. Cea mai mare problemă conceptuală
-
-Ai:
-
-if not is_trend_up(symbol):
-    SELL
-
-dar:
-
-trend-ul poate fi lagging
-piața crypto face fake reversals
-
-Poți ajunge:
-
-să vinzi bottom
-să ratezi breakout
-
-Ar trebui:
-
-confidence score
-multi indicator confirmation """

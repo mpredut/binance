@@ -12,15 +12,10 @@ from typing import List, Dict, Tuple, Optional
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from datetime import datetime
-#from zoneinfo import ZoneInfo  # disponibil din Python 3.9+
 
 #my import
 import utils as u
 import symbols as sym
-
-### SHM import + my SHM import
-#from multiprocessing import shared_memory
-#import shmutils as shmu
 
 price_cache_manager = None
 
@@ -40,8 +35,6 @@ def priceLstFor(symbol: str) -> List[Tuple[int, float]]:
 
     # obține lista curentă din cache pentru simbol
     raw = manager.cache.get(symbol, [])
-    #manager.save_state_to_file()
-    
     return [(int(ts), float(p)) for ts, p in raw]
 
 
@@ -128,43 +121,7 @@ def trend_wma(symbol: str, window_hours: int = 6):
 
 
 
-#Holt’s Linear Trend
-# from statsmodels.tsa.holtwinters import Holt
-# def trend_holt(symbol: str, smoothing_level: float = 0.3, smoothing_slope: float = 0.1, forecast_hours: int = 1):
-    # data = priceLstFor(symbol)
-    # if len(data) < 2:
-        # return None
-
-    # data = sorted(data, key=lambda x: x[0])
-    # timestamps, prices = zip(*data)
-    # timestamps = np.array(timestamps)
-    # prices = np.array(prices)
-
-    # delta = np.median(np.diff(timestamps))
-    # points_per_hour = int(3600 / delta)
-
-    # model = Holt(prices).fit(smoothing_level=smoothing_level, smoothing_slope=smoothing_slope, optimized=False)
-    # fitted = model.fittedvalues
-
-    # # Forecast scurt pentru trend
-    # forecast_points = forecast_hours * points_per_hour
-    # future = model.forecast(forecast_points)
-
-    # trend_direction = 'up' if future[-1] > fitted[-1] else 'down'
-
-    # # vizualizare
-    # plt.figure(figsize=(12,5))
-    # plt.plot(timestamps, prices, label='Price', color='blue')
-    # plt.plot(timestamps, fitted, label='Holt fit', color='red', linewidth=2)
-    # plt.xlabel('Timestamp')
-    # plt.ylabel('Price')
-    # plt.title(f"{symbol} - Trend Holt: {trend_direction}")
-    # plt.legend()
-    # plt.show()
-
-    # return {'direction': trend_direction, 'fitted': fitted, 'forecast': future}
-
-def slope_tolerance_per_(symbol, price, 
+def slope_tolerance_per_(symbol, price,
                               base_tolerance = 0.0015, 
                               ):
   
@@ -173,8 +130,7 @@ def slope_tolerance_per_(symbol, price,
                               
     relative_tolerance = base_tolerance * price
     adaptive_tolerance = min(max(relative_tolerance, min_tol), max_tol)
-    #print(f"[DEBUG] {symbol}: price={price}, base_tol={base_tolerance}, adaptive_tolerance={adaptive_tolerance}")
-    return adaptive_tolerance       
+    return adaptive_tolerance
 
 
 
@@ -227,13 +183,11 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
         slope_s, intercept = np.polyfit(x_block, y_block, 1) # cu cat creste pe secunda - viteza slope
         
         trend_block_indices_test.append((0, window))
-            
-        #print(f"[DEBUG] {symbol}: start={start}, end={end}, slope={slope:.6f}")
+
         slope_h = slope_s * 3600 # slope per h
         if slope_h > 0 :
             trend_block_ups +=1
 
-        #avg_price = np.mean(y_block)
         avg_price = prices[0]
         relative_tolerance = slope_tolerance_per_(symbol, avg_price, slope_tolerance) 
 
@@ -696,12 +650,8 @@ def get_trade_weight(T, trend_len, trend, order_type,
     
     
     
-UPDATE_AND_REFRESH_TREND = 60*1 # un minut 
-#UPDATE_AND_REFRESH_TREND = PRICETREND_SYNC_INTERVAL_SEC*2
-#
-#
+UPDATE_AND_REFRESH_TREND = 60*1 # un minut
 if __name__ == "__main__":
-    #shm = shmu.shmConnectForWrite(shmu.shmname)
     build_price_cache_manager()
     symbols = list(sym.symbols)
     # Trend LUNG pt non-Binance (ex HYPEUSD pe Kraken) — GATED pe LONGTREND_NONBINANCE
@@ -725,28 +675,19 @@ if __name__ == "__main__":
             
             all_trends = {}
             for symbol in symbols:
-                #all_trends[symbol] = getTrendLongTerm(symbol,lookback_days=30, draw=True)
-                all_trends[symbol] = getTrendLongTerm_fixed(symbol, 
+                all_trends[symbol] = getTrendLongTerm_fixed(symbol,
                                             window_hours=16,
                                             step_hours=8,
                                             min_consecutive_blocks=3,
                                             noise_tolerance=2,  # ← permite 2 blocuri UP în trendul DOWN
                                             lookback_days=30,
                                             draw=True)
-                #get_weight_for_cash_permission_at_quant_time(symbol, T_quanta=275, order_type="BUY", draw=True)
             write_all_trends(all_trends);
 
             print(f"write : {all_trends}")
-            #shmu.shmWrite(shm, all_trends)
             time.sleep(UPDATE_AND_REFRESH_TREND)
     except KeyboardInterrupt:
         print(f"Închidere manuală...")
-    #except Exception as e:
-        #print(f"Oprire ? ...{e}")
-    #finally:
-        #shm.close()
-        #shm.unlink()
-        
-    
+
 
 ######################

@@ -5,8 +5,6 @@ import math
 from collections import deque
 import threading
 
-####Binance
-#from binance.exceptions import BinanceAPIException
 
 # my imports
 import log
@@ -16,8 +14,6 @@ import symbols as sym
 from binance_api import bapi as api
 from binance_api import bapi_placeorder as po
 
-
-#import priceprediction as pp
 
 # 23 iul: incarca parametrii tunabili din rtrade_config.env (versionat, se
 # COMITE — fara secrete) INAINTE de a citi orice os.environ.get(...) de mai jos.
@@ -148,13 +144,10 @@ class TradingBot:
 
             if buy_order is None:
                 print(f"[{self.symbol}] Order BUY failed, retryed {failure_count} times. Retrying again ...")
-                #api.cancel_recent_orders("BUY", self.symbol, max_failures * WAIT_FOR_ORDER/2)
                 time.sleep(WAIT_FOR_ORDER)
                 failure_count += 1
                 if failure_count > max_failures:
                     print(f"[{self.symbol}] Order BUY failed {failure_count} times. Exiting.")
-                    #self.mark_buy_filled()
-                    #return round(api.get_current_price(self.symbol) * (1 - 0.01), 4)
                     return None
                 continue
 
@@ -184,9 +177,6 @@ class TradingBot:
             if current_price > filled_sell_price and not u.are_close(current_price, filled_sell_price, RTRADE_BAD_DAY_TOLERANCE_PCT):
                 print(f"[{self.symbol}] Bed day :-(. Trying BUY at current price - x2 {current_price:.2f}")
                 adjustment_percent = RTRADE_BAD_DAY_MULTIPLIER * self.DEFAULT_ADJUSTMENT_PERCENT
-            #else:
-                #adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
-
             # if arrived here it means
             # current order was not filled , so try cancel and retry in the loop
             if not api.cancel_order(self.symbol, order_id):
@@ -238,13 +228,10 @@ class TradingBot:
 
             if sell_order is None:
                 print(f"[{self.symbol}] Order SELL failed, retryed {failure_count} times. Retrying again ...")
-                #api.cancel_recent_orders("SELL", self.symbol, max_failures * WAIT_FOR_ORDER/2)
                 time.sleep(WAIT_FOR_ORDER)
                 failure_count += 1
                 if failure_count > max_failures:
                     print(f"[{self.symbol}] Order SELL failed {failure_count} times. Exiting.")
-                    #self.mark_sell_filled()
-                    #return round(api.get_current_price(self.symbol) * (1 + 0.1), 4)
                     return None
                 continue
             
@@ -274,9 +261,6 @@ class TradingBot:
             if current_price < filled_buy_price and not u.are_close(current_price, filled_buy_price, RTRADE_BAD_DAY_TOLERANCE_PCT):
                 print(f"[{self.symbol}] Bed day :-(. Trying SELL at current price + x2 {current_price:.2f}")
                 adjustment_percent = RTRADE_BAD_DAY_MULTIPLIER * self.DEFAULT_ADJUSTMENT_PERCENT
-            #else:
-                #adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
-
             # if arrived here it means
             # current order was not filled , so try cancel and retry in the loop
             if not api.cancel_order(self.symbol, order_id):
@@ -334,8 +318,6 @@ class TradingBot:
                 # Reset pentru următoarea rundă
                 with self.lock:
                     self.buy_filled = self.sell_filled = False
-                #if self.buy_filled == self.sell_filled:
-                    #self.buy_filled = not self.sell_filled
             except Exception as e:
                 print(f"[{self.symbol}] Unexpected error: {e}")
                 #if self.buy_filled == self.sell_filled:
