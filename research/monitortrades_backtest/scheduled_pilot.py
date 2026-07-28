@@ -36,6 +36,7 @@ Rulare manuala (recomandat inainte de a fi pusa pe cron):
 from __future__ import annotations
 
 import argparse
+import concurrent.futures as _futures
 import json
 import os
 import re
@@ -388,13 +389,26 @@ def main():
         print(f"[scheduled_pilot] nicio cheie nu contine '{args.only}' -- ies")
         return
 
+    # Chei INDEPENDENTE => rulare in PARALEL (ProcessPoolExecutor). Fork pe Linux =>
+    # fiecare cheie are propriul rb.mt (deci monkeypatch-ul is_trend_up din _run_one
+    # ramane izolat per proces). Audit/proposals se colecteaza in parinte (fara race).
     proposals = []
-    for full_key, (symbol, base, key) in keys.items():
-        print(f"=== {full_key} ===")
-        entry = evaluate_key(full_key, symbol, base, key,
-                              dry_run=args.dry_run, propose=args.propose)
+    max_workers = min(len(keys), os.cpu_count() or 2)
+    # stderr (nu print/stdout): disable_print() + buffering-ul ProcessPool inghit
+    # stdout-ul parintelui; per-value lines folosesc deja sys.stderr.write si apar corect.
+    sys.stderr.write(f"[scheduled_pilot] {len(keys)} chei pe {max_workers} workeri paraleli\n")
+    with _futures.ProcessPoolExecutor(max_workers=max_workers) as ex:
+        fut2key = {ex.submit(evaluate_key, fk, sym, base, key, args.dry_run, args.propose): fk
+                   for fk, (sym, base, key) in keys.items()}
+        entries = {}
+        for fut in _futures.as_completed(fut2key):
+            entries[fut2key[fut]] = fut.result()
+    for full_key, (symbol, base, key) in keys.items():   # procesare in ordine stabila
+        entry = entries[full_key]
         _append_audit(entry)
-        print(json.dumps({k: v for k, v in entry.items() if k != "results"}, indent=2, default=str))
+        sys.stderr.write(f"=== {full_key} ===\n"
+                         + json.dumps({k: v for k, v in entry.items() if k != "results"},
+                                      indent=2, default=str) + "\n")
         if args.propose and entry.get("action") == "proposed":
             proposals.append({
                 "ts": _now_iso(), "full_key": full_key,
