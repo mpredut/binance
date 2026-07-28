@@ -160,16 +160,60 @@ e un detaliu de implementare ascuns, nu ceva ce trebuie sa alegi manual.
 
 ---
 
-## Intrebari pt discutie (nu decizii luate)
+## Intrebari pt discutie — DECISE 28 iul (user)
 
-1. Fisierul declarativ (§2): YAML separat, JSON separat, sau bloc in
-   `BACKTEST_CANDIDATES.md`? (recomand: bloc in acelasi .md, ca sa nu se
-   dedubleze intre proza si date)
-2. rtrade/assetguardian: le lasam in afara acestui efort (backtest separat,
-   mai tarziu) sau le includem de la inceput intr-un al treilea adaptor?
-3. CLI-ul (§3): merita sa existe acum, sau ramanem cu scripturi individuale
-   (ca azi) pana quand se acumuleaza mai multe cazuri si tiparul de adaptor
-   devine mai clar din experienta, nu din design a priori?
+1. Fisierul declarativ (§2): **bloc in `BACKTEST_CANDIDATES.md`** (nu YAML/JSON
+   sidecar) — un singur loc, langa tabelul de proza, fara dublare. E util in
+   principal ca sa alimenteze CLI-ul (§3); pana atunci ramane un registru
+   structurat, nu o necesitate.
+2. rtrade/assetguardian: **in afara deocamdata.** rtrade cere motor nou (BUY/SELL
+   concurent pe acelasi simbol, nemodelat de niciun motor de azi); assetguardian
+   are valoare de backtest mica. Le includem dupa ce tiparul de adaptor se
+   valideaza pe cele 2 din faza 1.
+3. CLI-ul (§3): **mai tarziu**, dupa inca 1-2 cazuri (ex. #15-16) — ramanem pe
+   scripturi individuale ca adaptorul sa iasa din experienta, nu din design a
+   priori.
+
+---
+
+## 9. Arhitectura pe 2 masini (DECISA 28 iul, user) — backtest pe "dev", aplicare pe productie
+
+Motivatie: rularea backtestelor pe masina de PRODUCTIE concureaza pt CPU cu
+tradingul live (exact ce a facut ~20-90 min/ciclu prohibitiv pt "de mai multe
+ori pe zi"). Mutarea pe o masina-oglinda (**"dev"**) rezolva asta si a fost
+blocajul real al periodizarii. Trei componente:
+
+**A. Masina dev ruleaza backtestele.** Citesc `cachedb/cache_price_{symbol}.jsonl`
+(arhiva de pret) + valorile LIVE din config (baseline-ul). Deci dev are nevoie
+de ambele proaspete → **sync productie→dev via git** (decizie user: git, nu
+ssh/rsync — da audit-trail gratis + reversibil). dev face pull la arhiva+config.
+
+**B. Scriere inapoi = POARTA de propunere, nu scriere directa** (guardrail-urile
+impartite pe cele 2 masini):
+- **dev** ruleaza gridul + confirmarea pe 2 ferestre → produce doar
+  *castigatorul confirmat* per cheie (semnalul curat), il propune (commit git).
+- **productia** primeste propunerea si APLICA: media cu valoarea live reala
+  (autoritativa acolo), rate-limit 7 zile, audit, scrie config. dev NU are drept
+  de scriere directa — aceleasi 5 guardrail-uri raman, doar CPU-ul se muta.
+
+**C. `watchdogfor_cacheandconfig.py`** (decizie user: UN singur .py pt cache SI
+config — extind watchdogfor_cache.py existent, NU un fisier separat). Pe langa
+staleness de cache (azi), se uita prin fisierele de config si reporneste
+procesul proprietar cand un config s-a schimbat recent. Generalizeaza
+`scheduled_pilot._restart_monitortrades()` + bonus: **prinde si editarile
+manuale** (azi editezi un config si trebuie sa-ti amintesti sa repornesti). 3
+cerinte ca sa fie robust:
+1. **Detectie pe hash de continut, NU pe mtime** (acelasi tipar content-based
+   deja folosit pt cache) — altfel o atingere de fisier fara schimbare reala
+   da reporniri false.
+2. **Harta config→proces** — atentie, unele config-uri au MAI MULTI consumatori:
+   `instruments.conf` e citit de monitortrades.py SI tradeall.py → o schimbare =
+   repornesti ambele.
+3. **Debounce / scriere atomica** — reporneste doar dupa o scriere completa, o
+   singura data.
+
+Ramane de implementat dupa ce se dau datele de conectare pe dev. Pana atunci:
+candidati de backtest care ruleaza 100% local (one-off, dry-run), vezi §8/#15-16.
 
 ---
 
@@ -377,3 +421,48 @@ snapshot IZOLAT (nu fisierul global) pt ca `is_trend_up()` sa-l citeasca.
 Tractabil (piesele exista deja), dar netestat — amanat deliberat (nu la ora
 asta, fara sa poata fi validat riguros ca restul sesiunii) in favoarea
 rularilor de backtest deja construite si validate, lasate peste noapte.
+
+---
+
+## 10. Strategia de cautare: OFAT vs grid complet (EXTENSIE, 28 iul — NU implementat)
+
+Intrebare user: iau parametrii unul cate unul, sau toate combinatiile? Estimare
+data: "4 params × 3 sample = 12 rulari".
+
+**Corectie de aritmetica** (capcana e combinatoriala, nu liniara):
+- **One-at-a-time (OFAT / coordonate)** — schimbi UN param, ceilalti raman fixati
+  pe valoarea live: `4 params × 3 sample = 12`. Cifra de 12 e corecta DOAR aici.
+- **Grid complet (produs cartezian)** — toate combinatiile: `3⁴ = 81`. Cu 5 sample
+  → `5⁴ = 625`. La ~37s/rulare (2 ferestre): OFAT ~9 min/simbol; grid 81 ~100
+  min/simbol; grid 625 ~13h/simbol. Explodeaza rapid.
+
+| | OFAT | Grid complet |
+|---|---|---|
+| Rulari (4p × 3s) | 12 | 81 |
+| Prinde interactiuni intre parametri? | NU | DA |
+| Interpretabil ("care knob e prost setat") | DA | greu (verdict cuplat) |
+
+**De ce conteaza interactiunile aici (nu teoretic):** `max_budget=5000` a dat
++$3016 intr-o configurare si -$5279 in alta, pe ACELASI istoric — parametrii se
+cupleaza tare. OFAT poate gasi un castigator pt param A bun DOAR la valoarea
+curenta a lui B; daca B se schimba, optimul lui A se muta.
+
+**Recomandare (pragmatica, bani reali):**
+1. **Default = OFAT** — exact ce face pilotul azi. Ieftin, verdict clar per param,
+   se preteaza la rotatie pe dev (un param/rulare).
+2. **Grid complet DOAR pe perechi cunoscute cuplate** (ex. `gain × lost`, sau
+   `hardtp × hardtp_fraction`) — 3×3=9 combinatii, ieftin, prinde fix interactiunea
+   pe care OFAT o rateaza. Grid pe toti 4 deodata → evitat (81+).
+3. **O rulare de confirmare la config-ul propus COMPLET inainte de aplicare** —
+   chiar cu OFAT + aplicare independenta per param, ajungi la o combinatie
+   nebacktestata impreuna; confirm-o o data inainte sa scrii config.
+4. **Ranguri stranse (3-4 sample)**, incluzand mereu valoarea live in grila.
+
+**Mitigare deja existenta:** rate-limit-ul de 7 zile per parametru din
+scheduled_pilot inseamna ca in productie schimbi oricum UN param odata (fiecare
+schimbare confirmata asteapta 7 zile) — nu aplici 4 mutari simultan orb. Riscul
+"config comun netestat" e marginit natural.
+
+**Extensie propusa (NU implementata):** un mod `--grid gain,lost` in
+scheduled_pilot care face produs cartezian DOAR peste perechea data (restul raman
+OFAT/fix). Mic, optional, de adaugat pe dev cand implementam faza dev/prod.

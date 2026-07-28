@@ -57,15 +57,31 @@ from providers.replay_provider import load_price_series
 INSTRUMENTS_CONF = os.path.join(ROOT, "instruments.conf")
 AUDIT_LOG = os.path.join(ROOT, "logger", "backtest_pilot_audit.jsonl")
 MIN_DAYS_BETWEEN_CHANGES = float(os.environ.get("PILOT_MIN_DAYS_BETWEEN_CHANGES", "7"))
+# Castigatorul trebuie sa bata valoarea CURENTA cu cel putin atata (net-buy_hold,
+# USD) pe AMBELE ferestre. Altfel schimbarea e sub zgomot / parametrul e inert pe
+# acest istoric (ex. gasit 28 iul: hard-TP nu se declanseaza -> toate valorile dau
+# rezultate identice, iar max() pe egalitate "aplica" fals primul element din grila).
+MIN_EDGE_MARGIN_USD = float(os.environ.get("PILOT_MIN_EDGE_MARGIN_USD", "1.0"))
 
-# Doar aceste 4 chei (BTC/TAO gain/lost) sunt in scope-ul pilotului — restul
-# adnotarilor viitoare din instruments.conf NU sunt atinse fara sa extindem
-# explicit lista asta (decizie user: pilot restrans, nu toate modulele).
+# Chei in scope-ul pilotului (BTC/TAO, monitortrades) — restul adnotarilor din
+# instruments.conf NU sunt atinse fara sa extindem explicit lista asta (decizie
+# user: pilot restrans la monitortrades, nu toate modulele). Toate traiesc ca
+# mt.* in instruments.conf, deci run_replay_backtest le fireaza deja prin params
+# (verificat: is_trend_up neutralizat, maxage->since_s, hardtp->inst.param).
+#   #4-5  gain/lost   (FACUT 23 iul: TAO mt.lost 4.9->5.25 aplicat)
+#   #16   maxage_days (28 iul)
+#   #15   hardtp / hardtp_fraction (28 iul; per-instrument, monitortrades.py:447)
 PILOT_KEYS = {
     "BINANCE_BTC.mt.gain": ("BTCUSDC", "BTC", "mt.gain"),
     "BINANCE_BTC.mt.lost": ("BTCUSDC", "BTC", "mt.lost"),
     "BINANCE_TAO.mt.gain": ("TAOUSDC", "TAO", "mt.gain"),
     "BINANCE_TAO.mt.lost": ("TAOUSDC", "TAO", "mt.lost"),
+    "BINANCE_BTC.mt.maxage_days": ("BTCUSDC", "BTC", "mt.maxage_days"),
+    "BINANCE_TAO.mt.maxage_days": ("TAOUSDC", "TAO", "mt.maxage_days"),
+    "BINANCE_BTC.mt.hardtp": ("BTCUSDC", "BTC", "mt.hardtp"),
+    "BINANCE_TAO.mt.hardtp": ("TAOUSDC", "TAO", "mt.hardtp"),
+    "BINANCE_BTC.mt.hardtp_fraction": ("BTCUSDC", "BTC", "mt.hardtp_fraction"),
+    "BINANCE_TAO.mt.hardtp_fraction": ("TAOUSDC", "TAO", "mt.hardtp_fraction"),
 }
 
 
@@ -108,6 +124,12 @@ def _edge(pnl):
     """net - buy_hold — masura de "cat mai bine decat simpla detinere",
     comparabila intre ferestre diferite (spre deosebire de net brut)."""
     return pnl["net"] - pnl["buy_hold"]
+
+
+def _num_str(x):
+    """Reprezentare compacta a unei valori numerice pt grila (17.0->'17',
+    0.5->'0.5', 5.25->'5.25') — folosita cand adaugam valoarea LIVE la testare."""
+    return "%g" % x
 
 
 def _split_series(symbol):
@@ -189,8 +211,16 @@ def evaluate_key(full_key, symbol, base, key, dry_run=True):
     if len(half1) < 100 or len(half2) < 100:
         return {"full_key": full_key, "action": "skipped", "reason": "istoric insuficient pt 2 ferestre"}
 
+    # Asigura ca valoarea LIVE curenta e printre cele testate: fara ea nu putem
+    # compara castigatorul CU ea, iar un parametru INERT (toate valorile dau
+    # rezultate identice) ar fi "aplicat" fals catre primul element din grila
+    # (max() pe egalitate intoarce primul). Gasit 28 iul la #15 hardtp.
+    test_values = list(grid_values)
+    if not any(abs(float(v) - current) < 1e-9 for v in test_values):
+        test_values.append(_num_str(current))
+
     results = {}
-    for v in grid_values:
+    for v in test_values:
         t0 = time.time()
         params = dict(base_params)
         params[key] = v
@@ -223,6 +253,20 @@ def evaluate_key(full_key, symbol, base, key, dry_run=True):
     if abs(winner_val - current) < 1e-9:
         entry["action"] = "no_change"
         entry["reason"] = "valoarea castigatoare = valoarea deja configurata"
+        return entry
+
+    # Castigatorul difera de valoarea curenta -> trebuie sa o BATA cu o marja
+    # semnificativa pe AMBELE ferestre. Marja ~0 = parametru inert pe acest istoric
+    # (ex. hard-TP nedeclansat), iar "castigatorul" e doar artefactul tie-break-ului.
+    cur_key = next(v for v in results if abs(float(v) - current) < 1e-9)
+    margin_h1 = results[winner]["edge_half1"] - results[cur_key]["edge_half1"]
+    margin_h2 = results[winner]["edge_half2"] - results[cur_key]["edge_half2"]
+    entry["margin_vs_current"] = {"half1": round(margin_h1, 2), "half2": round(margin_h2, 2)}
+    if margin_h1 < MIN_EDGE_MARGIN_USD or margin_h2 < MIN_EDGE_MARGIN_USD:
+        entry["action"] = "no_change"
+        entry["reason"] = (f"castig neglijabil vs valoarea curenta {current} "
+                            f"(+{margin_h1:.2f}/+{margin_h2:.2f} < {MIN_EDGE_MARGIN_USD} USD) "
+                            f"— parametru posibil inert pe acest istoric")
         return entry
 
     last_change = _last_change_for(full_key)
@@ -298,6 +342,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dry-run", action="store_true",
                      help="evalueaza si raporteaza, dar NU schimba config/restart botul")
+    ap.add_argument("--only", default="",
+                     help="ruleaza DOAR cheile care contin unul din aceste substring-uri "
+                          "separate prin virgula (ex. 'maxage,hardtp' sau 'BINANCE_TAO'); gol = toate")
     args = ap.parse_args()
 
     if os.environ.get("PILOT_DISABLED", "").strip().lower() in ("1", "true", "yes"):
@@ -309,7 +356,14 @@ def main():
     # suprimarea e necesara (altfel I/O-ul de consola domina timpul de rulare).
     rb.mt.log.disable_print()
 
-    for full_key, (symbol, base, key) in PILOT_KEYS.items():
+    only_terms = [t.strip() for t in args.only.split(",") if t.strip()]
+    keys = {k: v for k, v in PILOT_KEYS.items()
+            if not only_terms or any(t in k for t in only_terms)}
+    if not keys:
+        print(f"[scheduled_pilot] nicio cheie nu contine '{args.only}' -- ies")
+        return
+
+    for full_key, (symbol, base, key) in keys.items():
         print(f"=== {full_key} ===")
         entry = evaluate_key(full_key, symbol, base, key, dry_run=args.dry_run)
         _append_audit(entry)

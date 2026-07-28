@@ -36,8 +36,8 @@ insasi) | 🟢 deja testat riguros (rezultat cunoscut, listat) | ⏳ sweep in cu
 | 12 | `kraken/config.env` | `STRAT_ENTRY_DISCOUNT_PCT` | 0.8% | 🔴 | {0.3, 0.55, 0.8, 1.2, 1.6}% |
 | 13 | `monitortrades_config.env` | `MT_SELL_SAFEBACK_HOURS` | 2h | 🔴 | {1, 1.5, 2, 3, 4}h |
 | 14 | `monitortrades_config.env` | `MT_BUY_SAFEBACK_HOURS` | 48h | 🔴 | {24, 36, 48, 60, 72}h |
-| 15 | `monitortrades.conf` (global fallback) | `hard_tp_pct` / `hard_tp_fraction` | 17% / 0.5 | 🔴 | pct: {12, 14.5, 17, 20, 24}% · fractie: {0.25, 0.4, 0.5, 0.65, 0.8} |
-| 16 | `instruments.conf` `[BINANCE_BTC/TAO]` | `mt.maxage_days` | 7 / 17 | 🔴 | BTC: {4, 5.5, 7, 10, 14} · TAO: {10, 13, 17, 22, 28} |
+| 15 | `instruments.conf` `[BINANCE_BTC/TAO]` `mt.hardtp` / `mt.hardtp_fraction` (per-instrument, monitortrades.py:447; fallback global in `monitortrades.conf`) | `hard_tp` / `fraction` | 17% / 0.5 | 🟢 **RAMANE 17/0.5** | Testat 28 iul (pilot dry-run): **INERT pe acest istoric** — hard-TP nu se armeaza (pretul n-a urcat +12%..+24%), toate valorile dau rezultate IDENTICE (BTC net -274.22, TAO +152.69 pe tot gridul). Nimic de reglat pe date unde parametrul nu se declanseaza. A si expus un bug de guardrail in pilot (max() pe egalitate "aplica" fals primul din grila) — REPARAT: marja min vs valoarea curenta pe ambele ferestre. |
+| 16 | `instruments.conf` `[BINANCE_BTC/TAO]` | `mt.maxage_days` | 7 / 17 | 🟢 **RAMANE 7/17** | Testat 28 iul (pilot dry-run): BTC castigator diferit intre ferestre (10 vs 14) → respins ca zgomot; TAO castigator=17=valoarea curenta → deja optim. Niciun semnal confirmat. |
 | 17 | `assetguardian_config.env` | `AG_TARGET_DROP_PCT` | 7% | 🔴 | {4, 5.5, 7, 9, 12}% |
 | 18 | `assetguardian_config.env` | `AG_REFERENCE_MINUTES_BACK` | 1440 min (24h) | 🔴 | {360, 720, 1440, 2160, 2880} min (6h→48h) |
 | 19 | `rtrade_config.env` | `RTRADE_BAD_DAY_MULTIPLIER` | 1.7 | 🔴 | {1.2, 1.45, 1.7, 2.1, 2.5} |
@@ -110,7 +110,12 @@ insasi) | 🟢 deja testat riguros (rezultat cunoscut, listat) | ⏳ sweep in cu
    in sweep-ul default sl=15 a dominat sl=8 pe fereastra bull. DAR: date one-sided
    (bull run, fara crash real care sa testeze riscul unui stop larg) → NU schimbat.
    De investigat separat, prudent, cand avem si o fereastra cu crash.
-5. **#15-16** (hard-TP global + maxage per instrument, monitortrades) — inca netestat.
+5. ~~**#15-16** (hard-TP + maxage per instrument, monitortrades)~~ — FACUT (28 iul,
+   pilot `--only maxage,hardtp --dry-run`): ambele RAMAN pe valorile actuale.
+   #15 hard-TP INERT pe istoric (nedeclansat, toate valorile identice); #16 maxage
+   fara semnal (BTC zgomot intre ferestre, TAO deja optim). Bonus: dry-run-ul a
+   prins un fals-pozitiv de guardrail in scheduled_pilot (tie-break pe parametru
+   inert) — REPARAT cu marja minima vs valoarea curenta (MIN_EDGE_MARGIN_USD).
 6. Restul, dupa ce acestea arata daca merita continuat efortul.
 
 **Limitare metodologica kraken (#6-7)**: spre deosebire de tradeall/monitortrades
