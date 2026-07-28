@@ -18,12 +18,12 @@ insasi) | 🟢 deja testat riguros (rezultat cunoscut, listat) | ⏳ sweep in cu
 | 1 | `tradeall_config.env` | `TRADEALL_PRICE_CHANGE_THRESHOLD_PCT` (SMALL) | 0.518% fix | 🟢 **RAMANE FIX** | Testat 23-24 iul, K∈{0.1,0.2,0.3,0.5}: TOATE catastrofal mai rele (BTC net -$29k..-$38k, TAO -$9k..-$119k, fata de FIX: BTC -$4.9k, TAO +$1.4k). Overtrading masiv (BTC k0.1: 6434 buy-uri vs 186 la fix). Concluzie decisiva, nu marginala — NU promova. |
 | 2 | `tradeall_config.env` | `TRADEALL_PRICE_CHANGE_THRESHOLD_BIG_PCT` | 2.481% fix | 🟢 **RAMANE FIX** | Cuplat cu #1 (raport fix ~4.79×), acelasi verdict. |
 | 3 | `shadow_signals.py` | `SHADOW_KALMAN_SAMPLE_SEC` | 60s | 🟢 **RAMANE 60s** | Testat 23-24 iul, {20,60,90,150}s: 20s → 18696 tranzitii/zgomot, overtrading catastrofal (net -$9k/-$10k); 90s/150s → ZERO tranzitii Kalman in tot istoricul (filtrul devine prea incert sa mai confirme vreun trend); 60s (actual) → doar 18 tranzitii, net usor POZITIV ($15.34 BTC). 60s e deja optim intre "prea zgomotos" si "complet surd", nu doar o valoare arbitrara. |
-| 4 | `instruments.conf` `[BINANCE_BTC]` | `mt.gain` / `mt.lost` | 7.0% / 3.3% | 🔴 | gain: {5, 6, 7, 8, 9}% · lost: {2.3, 2.8, 3.3, 3.8, 4.3}% |
-| 5 | `instruments.conf` `[BINANCE_TAO]` | `mt.gain` / `mt.lost` | 9.2% / 4.9% | 🔴 | gain: {7, 8, 9.2, 10.5, 12}% · lost: {3.5, 4.2, 4.9, 5.6, 6.3}% |
+| 4 | `instruments.conf` `[BINANCE_BTC]` | `mt.gain` / `mt.lost` | 6.0% / 3.55% (28 iul, aplicat de pilot) | 🟢 **APLICAT prin scheduled_pilot** | Confirmat pe 2 ferestre (gain: winner 5.0, marja +33.78/+112.78; lost: winner 3.8, marja +331.42/+324.08) — medie cu valoarea veche (7.0/3.3): 6.0/3.55. Propus prin pipeline dev->git->apply_proposals.py, aplicat manual de user. |
+| 5 | `instruments.conf` `[BINANCE_TAO]` | `mt.gain` / `mt.lost` | 9.2% / 5.25% (aplicat 23-24 iul) | 🟢 **APLICAT** | `mt.lost` 4.9->5.25 (pilot, confirmat pe 2 ferestre, singurul din 4 chei TAO). `mt.gain` ramane 9.2 (fara semnal confirmat). |
 | 6 | `kraken/config.env` | `STRAT_DCA_DROP_PCT` | 1.0% → **1.25%** (28 iul) | 🟢 **APLICAT 1.0→1.25** | Sweep #6 pe HYPEUSD (kraken/backtest.py), 2 regimuri: 1.5 bate 1.0 pe AMBELE — bull 120z (+6.68% vs +5.85%, maxDD $156 vs $186) + decline 30z (-0.40% vs -0.55%, maxDD $202 vs $220), return SI drawdown mai bune. Semnal MODEST pe date HYPE-only care se SUPRAPUN (30z = coada celor 120z), deci amortizat la media 1.25 (ca TAO mt.lost). Caveat: Kraken API da doar ~720 bare recente — fara ferestre vechi INDEPENDENTE. |
 | 7 | `kraken/config.env` | `STRAT_TAKEPROFIT_PCT` | 5.0% | 🟢 **RAMANE 5.0** | Sweep #7, 2 regimuri: tp=5.0 (actual) e CEL MAI BUN pe AMBELE, decisiv — bull 120z (+5.85% vs +2.40% urmatorul) + decline 30z (-0.55% vs -2.01% urmatorul). Confirma nota veche "sweep +8.8%". Nicio schimbare. |
-| 8 | `tradeall_config.env` | `TRADEALL_FIRE_MIN_RETRY_MINUTES` | 6 min | 🟡 (o singura config. testata: 6 min a batut 30 min) | {3, 4.5, 6, 9, 12} min |
-| 9 | `tradeall_config.env` | `TRADEALL_FIRE_MAX_PER_TREND` | 3 | 🟡 (ales direct de user, netestat prin sweep) | {1, 2, 3, 4, 5} |
+| 8 | `tradeall_config.env` | `TRADEALL_FIRE_MIN_RETRY_MINUTES` | 6 min | 🟡 INCONCLUDENT (28 iul) | Sweep {3,4.5,6,9,12}min rulat pe felie densa 0.5z (BTC+TAO) — 0 BUY/0 SELL in TOATE configuratiile: fereastra prea scurta, NICIUN trend-start (conditia gradient/slope_big) nu s-a produs deloc. Parametrul conteaza DOAR cand exista un trend activ de refirit — netestabil fara o fereastra care sa contina macar un eveniment real (ca Exp 1, care a folosit 12h cu 1 eveniment cunoscut). De reluat cu fereastra tintita, nu una arbitrara. |
+| 9 | `tradeall_config.env` | `TRADEALL_FIRE_MAX_PER_TREND` | 3 | 🟡 INCONCLUDENT (28 iul) | Acelasi sweep/aceeasi cauza ca #8 — 0 trend-starts in felia testata, deci 0 executii indiferent de plafon. Vezi nota #8. |
 
 ---
 
@@ -34,8 +34,8 @@ insasi) | 🟢 deja testat riguros (rezultat cunoscut, listat) | ⏳ sweep in cu
 | 10 | `kraken/config.env` | `STRAT_ORDER_TTL_MIN` | 10 min | 🔴 | {5, 7.5, 10, 15, 20} min |
 | 11 | `kraken/config.env` | `STRAT_STOP_LOSS_PCT` | 7% | 🔴 | {5, 6, 7, 9, 11}% |
 | 12 | `kraken/config.env` | `STRAT_ENTRY_DISCOUNT_PCT` | 0.8% | 🔴 | {0.3, 0.55, 0.8, 1.2, 1.6}% |
-| 13 | `monitortrades_config.env` | `MT_SELL_SAFEBACK_HOURS` | 2h | 🔴 | {1, 1.5, 2, 3, 4}h |
-| 14 | `monitortrades_config.env` | `MT_BUY_SAFEBACK_HOURS` | 48h | 🔴 | {24, 36, 48, 60, 72}h |
+| 13 | `monitortrades_config.env` | `MT_SELL_SAFEBACK_HOURS` | 2h | 🟡 FARA DIFERENTIERE (28 iul) | Sweep {1,1.5,2,3,4}h pe istoric complet (329z, BTC+TAO): rezultat IDENTIC bit-cu-bit pe toate 4 valori (BTC buys=39/sells=26/net=-272.83; TAO buys=16/sells=16/net=+421.54). Plumbing verificat corect (env->constanta modulului, testat direct). Gap-urile reale intre evenimente nu cad aproape de niciun prag testat in acest istoric — parametrul nu diferentiaza nimic AICI, dar asta nu inseamna ca n-are efect in alt regim/istoric. |
+| 14 | `monitortrades_config.env` | `MT_BUY_SAFEBACK_HOURS` | 48h | 🟡 FARA DIFERENTIERE (28 iul) | Acelasi sweep/aceeasi cauza ca #13 — {24,36,60,72}h dau rezultate IDENTICE cu #13 (inclusiv intre ele). Vezi nota #13. |
 | 15 | `instruments.conf` `[BINANCE_BTC/TAO]` `mt.hardtp` / `mt.hardtp_fraction` (per-instrument, monitortrades.py:447; fallback global in `monitortrades.conf`) | `hard_tp` / `fraction` | 17% / 0.5 | 🟢 **RAMANE 17/0.5** | Testat 28 iul (pilot dry-run): **INERT pe acest istoric** — hard-TP nu se armeaza (pretul n-a urcat +12%..+24%), toate valorile dau rezultate IDENTICE (BTC net -274.22, TAO +152.69 pe tot gridul). Nimic de reglat pe date unde parametrul nu se declanseaza. A si expus un bug de guardrail in pilot (max() pe egalitate "aplica" fals primul din grila) — REPARAT: marja min vs valoarea curenta pe ambele ferestre. |
 | 16 | `instruments.conf` `[BINANCE_BTC/TAO]` | `mt.maxage_days` | 7 / 17 | 🟢 **RAMANE 7/17** | Testat 28 iul (pilot dry-run): BTC castigator diferit intre ferestre (10 vs 14) → respins ca zgomot; TAO castigator=17=valoarea curenta → deja optim. Niciun semnal confirmat. |
 | 17 | `assetguardian_config.env` | `AG_TARGET_DROP_PCT` | 7% | 🔴 | {4, 5.5, 7, 9, 12}% |
@@ -123,3 +123,28 @@ insasi) | 🟢 deja testat riguros (rezultat cunoscut, listat) | ⏳ sweep in cu
 LIVE din API (~720 bare recente) — nu putem face ferestre vechi INDEPENDENTE.
 Cele 2 "regimuri" (120z bull / 30z decline) se SUPRAPUN (30z = coada celor 120z).
 De asta schimbarile kraken sunt amortizate (media) si modeste, nu agresive.
+
+---
+
+## Motoare OHLC hyperliquid/212 — rulate 28 iul (existau, dar nerulate serios)
+
+`hyperliquid/backtest.py --mode sweep` (HYPE, 90z, buy&hold +38.2%) si
+`212trading/backtest.py --mode sweep` (NVDA/SPCX/RGNT, 2 ani):
+- HYPE: top +18.23% (tp=1.5/drop=1.0) — SUB buy&hold (+38.2%), tipar normal DCA+TP
+  pe piata puternic in crestere (iese cu profit, rateaza restul urcarii).
+- NVDA (buy&hold +76.4%): top doar +1.38% — mult SUB buy&hold, acelasi tipar.
+- SPCX (buy&hold **-27.6%**): top **-1.15%** — BATE clar buy&hold (pierde mult mai putin).
+- RGNT (buy&hold **-76.1%**): top **-10.58%** — BATE masiv buy&hold (strategia DCA+TP
+  a conservat capital semnificativ pe un crash de -76%).
+
+**Tipar clar**: pe active care SCAD mult, DCA+TP (ia profit, nu tine tot drumul in
+jos) bate decisiv buy&hold; pe active care CRESC mult, ramane sub (cost de
+oportunitate normal al oricarui take-profit).
+
+**Caveat metodologic important**: grila de sweep din `212trading/backtest.py`
+(`tp∈{1,1.5,2,3,5}%, drop∈{1,2,3,5}%`) e HARDCODATA la procente MICI — complet
+DISJUNCTA de config-ul LIVE al RGNT (`STRAT_TAKEPROFIT_PCT=35, STRAT_DCA_DROP_PCT=40`,
+explicit gandit pt miscari parabolice). Deci rezultatele de mai sus NU valideaza
+si NU invalideaza setarile live RGNT — testeaza un regim de procente irelevant
+pt acest instrument. Follow-up real (nefacut inca): extins sweep-ul in jurul
+valorilor live (tp 20-45%, drop 25-50%) pt RGNT specific.
