@@ -14,6 +14,7 @@ decide fail-closed. Returneaza True (poate plasa) / False (blocat).
 Pragul de profit (%) e per-venue in `order_guard.conf` (text, gitignorat? NU — versionat ca
 config nesensibil). Lipsa fisierului / valoare invalida -> default 1.15 (fail-safe)."""
 import os
+import time
 import utils as u
 
 _MARGINS = None   # cache: {provider_lower: procent, "default": 1.15}
@@ -133,6 +134,61 @@ def weight_limit(provider, symbol, order_type, price, required_qty, base=None, q
           f"avail={available:.6f} max={max_trade_value:.2f} remaining={remaining_value:.2f} "
           f"cerut={required_qty:.6f} -> {adjusted:.6f}")
     return adjusted
+
+
+def max_daily_trades_for(provider_name):
+    """Plafonul de tranzactii/zi pt un venue (fallback 'default_max_daily_trades' = 25)."""
+    m = _load_margins()
+    key = (provider_name or "").lower() + "_max_daily_trades"
+    return int(m.get(key, m.get("default_max_daily_trades", 25)))
+
+
+def safeback_sec_for(provider_name):
+    """Fereastra (SECUNDE) in care se cauta tranzactii pt plafonul zilnic, per venue
+    (fallback 'default_safeback_sec' = 48h+60s)."""
+    m = _load_margins()
+    key = (provider_name or "").lower() + "_safeback_sec"
+    return float(m.get(key, m.get("default_safeback_sec", 48 * 3600 + 60)))
+
+
+def recent_transaction_sec_for(provider_name):
+    """Fereastra anti-spam (SECUNDE): refuza un ordin nou pe acelasi symbol+side daca a
+    mai fost unul recent, per venue (fallback 'default_recent_transaction_sec' = 180)."""
+    m = _load_margins()
+    key = (provider_name or "").lower() + "_recent_transaction_sec"
+    return float(m.get(key, m.get("default_recent_transaction_sec", 180)))
+
+
+def daily_limit_guard(provider, symbol, order_type, max_daily_trades=None,
+                      safeback_sec=None, recent_transaction_sec=None):
+    """Echivalentul AGNOSTIC al if_place_safe_order (bapi_placeorder.py) — plafon zilnic +
+    anti-spam, folosind provider.get_orders() (Kraken: cache-ul propriu; Binance il are deja
+    intern, mai vechi, NU trece pe aici). Aceeasi logica: raporteaza ordinele PE ACELASI side
+    (order_type) din ultimele `safeback_sec`; peste `max_daily_trades`/zi -> "daily_limit";
+    unul in ultimele `recent_transaction_sec` -> "recent_transaction".
+
+    Returneaza (True, None) / (False, motiv). RIDICA pe eroare de citire (provider.get_orders)
+    -> apelantul decide fail-closed (ca profit_guard/weight_limit)."""
+    name = getattr(provider, "name", "")
+    max_daily_trades = max_daily_trades if max_daily_trades is not None else max_daily_trades_for(name)
+    safeback_sec = float(safeback_sec if safeback_sec is not None else safeback_sec_for(name))
+    recent_transaction_sec = float(recent_transaction_sec if recent_transaction_sec is not None
+                                   else recent_transaction_sec_for(name))
+    order_type = order_type.upper()
+    trades = provider.get_orders(symbol, order_type, safeback_sec) or []
+    backdays = max(safeback_sec / 86400.0, 1e-9)
+    if len(trades) / backdays > max_daily_trades:
+        print(f"[DAILY-LIMIT] {order_type} {symbol}: {len(trades)} tranzactii in "
+              f"{safeback_sec/3600:.1f}h, plafon {max_daily_trades}/zi -> BLOCAT")
+        return False, "daily_limit"
+    cutoff_ms = time.time() * 1000 - recent_transaction_sec * 1000
+    for t in trades:
+        ts = t.get("timestamp")
+        if ts is not None and float(ts) >= cutoff_ms:
+            print(f"[DAILY-LIMIT] {order_type} {symbol}: tranzactie recenta "
+                  f"(<{recent_transaction_sec:.0f}s) -> BLOCAT")
+            return False, "recent_transaction"
+    return True, None
 
 
 def profit_guard(provider, symbol, order_type, price, profit_percentage, window_ref=None):

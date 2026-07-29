@@ -569,30 +569,24 @@ def place_safe_order(order_type, symbol, price, qty=None, safeback_seconds=PLACE
     return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders, hours=hours)
     
 
-ORDER_OUTCOMES_LOG_DIR = "logger"
-
-
-def _sanitize_outcome_field(value):
-    """Elimina caractere care ar sparge formatul pipe-delimited."""
-    return str(value).replace("|", "/").replace("\n", " ") if value is not None else ""
+# 30 iul: jurnalul FLEET-WIDE extras in order_outcomes_log.py (sursa unica —
+# reutilizat acum si de Instrument.place() pt Kraken/Hyperliquid, care inainte
+# erau invizibile in logger/order_outcomes_*.log). Re-export pt compat inapoi
+# (orice cod care citea bapi_placeorder.ORDER_OUTCOMES_LOG_DIR direct).
+import order_outcomes_log as _outcomes_log
+ORDER_OUTCOMES_LOG_DIR = _outcomes_log.ORDER_OUTCOMES_LOG_DIR
 
 
 def _log_order_outcome(symbol, side, price, qty, outcome, refuse_reason, motivation):
     """Jurnal FLEET-WIDE (toti apelantii place_order_smart): un rand
     pipe-delimited per incercare de ordin. Observational — nu poate afecta
-    returul catre caller (protejat de try/except)."""
+    returul catre caller (protejat de try/except in order_outcomes_log)."""
     try:
         caller = os.path.basename(sys._getframe(2).f_code.co_filename)
-        os.makedirs(ORDER_OUTCOMES_LOG_DIR, exist_ok=True)
-        path = os.path.join(ORDER_OUTCOMES_LOG_DIR,
-                             f"order_outcomes_{datetime.now().strftime('%Y-%m-%d')}.log")
-        cols = [time.time(), symbol, side, price, qty, outcome,
-                refuse_reason or "", caller, motivation or ""]
-        line = "|".join(_sanitize_outcome_field(c) for c in cols)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-    except Exception as e:
-        print(f"[_log_order_outcome] eroare scriere jurnal outcome: {e}")
+    except Exception:
+        caller = None
+    _outcomes_log.log_order_outcome(symbol, side, price, qty, outcome, refuse_reason,
+                                    motivation, caller=caller)
 
 
 # `pair` ramane in semnatura DOAR pt compatibilitate cu apelantii existenti

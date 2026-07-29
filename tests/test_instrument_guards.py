@@ -1,0 +1,188 @@
+"""
+Teste pentru Instrument.place() — cele 4 protectii AGNOSTICE nou-adaugate (30 iul,
+cerere user: "guardrail-urile din bapi_placeorder ca implementare comuna pt toti
+providerii"): plafon zilnic + anti-spam (order_guard.daily_limit_guard), cooldown
+anti-rapid-fire (lock/trade_cooldown, deja generic), trend-wait (cacheManager,
+deja generic — cade pe "nu astepta" pt un symbol necunoscut) si jurnalul FLEET-WIDE
+(order_outcomes_log). Se aplica DOAR providerilor cu guards_internally()==False
+(Binance ramane neatins, isi pastreaza propria implementare — vezi bapi_placeorder.py).
+
+Provider FALS (nu Binance/Kraken reali) — izoleaza complet de retea; `guards_internally`
+implicit False, exact ca Kraken/Hyperliquid azi.
+"""
+import os
+import sys
+import time
+import glob
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
+
+from providers.market_api import MarketApi, MarketDataProvider
+from instrument import Instrument
+import order_outcomes_log as outcomes_log
+from lock import trade_cooldown as tc
+
+SYMBOL = "ZZZFAKEUSD"
+
+
+class _FakeProvider(MarketDataProvider):
+    """Provider minimal, in-memorie — guards_internally()=False (ca Kraken/HL)."""
+
+    def __init__(self, name="FakeVenue", price=100.0):
+        self._name = name
+        self._price = price
+        self._orders = []   # [{"side","price","qty","timestamp"(ms)}]
+        self.placed = []    # apeluri REALE catre place_order (dupa toate gate-urile)
+
+    @property
+    def name(self):
+        return self._name
+
+    def get_current_price(self, symbol):
+        return self._price
+
+    def supports_symbol(self, symbol):
+        return False
+
+    def free_balance(self, asset):
+        return 1_000_000.0   # suficient cat sa nu limiteze artificial qty in teste
+
+    def get_orders(self, symbol, side, since_s):
+        cutoff_ms = time.time() * 1000 - since_s * 1000
+        out = [o for o in self._orders
+              if o["symbol"] == symbol and o["timestamp"] >= cutoff_ms]
+        if side:
+            out = [o for o in out if o["side"] == side.upper()]
+        return out
+
+    def place_order(self, symbol, side, price, qty, **kwargs):
+        self.placed.append((symbol, side, price, qty, kwargs))
+        return {"orderId": len(self.placed)}
+
+    def guards_internally(self):
+        return False
+
+    def seed_trade(self, side, age_sec=0.0, price=100.0, qty=1.0, symbol=SYMBOL):
+        self._orders.append({"symbol": symbol, "side": side.upper(), "price": price,
+                             "qty": qty, "timestamp": (time.time() - age_sec) * 1000})
+
+
+class _GuardsInternallyProvider(_FakeProvider):
+    """Ca Binance: are deja propriul lant de gard -> Instrument.place() trebuie sa
+    SARA complet peste cele 4 protectii agnostice (fara cooldown, fara daily-limit)."""
+    def guards_internally(self):
+        return True
+
+
+class InstrumentGuardsTestCase(unittest.TestCase):
+    def setUp(self):
+        # Cooldown: state/lock izolate (tiparul din test_trade_cooldown.py) — altfel
+        # testul ar atinge lock/trade_cooldown.json REAL.
+        self._tmp = tempfile.mkdtemp()
+        tc.STATE_FILE = os.path.join(self._tmp, "trade_cooldown.json")
+        tc.LOCK_FILE = os.path.join(self._tmp, "trade_cooldown.lock")
+        # Jurnal outcome: director izolat — altfel testul ar scrie in logger/ REAL,
+        # citit de tradeall_observe.py in productie.
+        self._log_tmp = tempfile.mkdtemp()
+        self._orig_log_dir = outcomes_log.ORDER_OUTCOMES_LOG_DIR
+        outcomes_log.ORDER_OUTCOMES_LOG_DIR = self._log_tmp
+
+    def tearDown(self):
+        outcomes_log.ORDER_OUTCOMES_LOG_DIR = self._orig_log_dir
+
+    def _inst(self, provider):
+        api = MarketApi([provider])
+        return Instrument(name="ZZZFAKE", symbol=SYMBOL, provider=provider.name.lower(),
+                          base="ZZZFAKE", quote="USD", api=api)
+
+    def _log_lines(self):
+        files = glob.glob(os.path.join(self._log_tmp, "order_outcomes_*.log"))
+        lines = []
+        for f in files:
+            with open(f) as fh:
+                lines.extend(fh.read().splitlines())
+        return lines
+
+    # ── plafon zilnic + anti-spam ───────────────────────────────────────────────
+    def test_daily_limit_blocks_after_threshold(self):
+        p = _FakeProvider()
+        inst = self._inst(p)
+        # 60 tranzactii BUY vechi (>3min, sub pragul anti-spam) dar in fereastra de 48h
+        # (~2 zile) -> 60/2 = 30/zi, peste plafonul implicit de 25/zi.
+        for _ in range(60):
+            p.seed_trade("BUY", age_sec=4000.0)
+        order = inst.place("BUY", 100.0, 1.0)
+        self.assertIsNone(order)
+        self.assertEqual(p.placed, [])
+        lines = self._log_lines()
+        self.assertTrue(any("|refused|daily_limit|" in l for l in lines), lines)
+
+    def test_recent_transaction_blocks(self):
+        p = _FakeProvider()
+        p.seed_trade("BUY", age_sec=5.0)   # acum 5s, sub pragul implicit de 180s
+        inst = self._inst(p)
+        order = inst.place("BUY", 100.0, 1.0)
+        self.assertIsNone(order)
+        lines = self._log_lines()
+        self.assertTrue(any("|refused|recent_transaction|" in l for l in lines), lines)
+
+    def test_bypass_profit_guard_does_not_skip_daily_limit(self):
+        p = _FakeProvider()
+        for _ in range(60):
+            p.seed_trade("BUY", age_sec=4000.0)
+        inst = self._inst(p)
+        order = inst.place("BUY", 100.0, 1.0, bypass_profit_guard=True)
+        self.assertIsNone(order)   # plafonul zilnic ramane activ chiar si cu bypass
+
+    def test_first_order_allowed_and_logged(self):
+        p = _FakeProvider()
+        inst = self._inst(p)
+        order = inst.place("BUY", 100.0, 1.0)
+        self.assertIsNotNone(order)
+        self.assertEqual(len(p.placed), 1)
+        lines = self._log_lines()
+        self.assertTrue(any("|executed|" in l and SYMBOL in l for l in lines), lines)
+
+    # ── cooldown anti-rapid-fire ────────────────────────────────────────────────
+    def test_cooldown_blocks_second_order(self):
+        p = _FakeProvider()
+        inst = self._inst(p)
+        first = inst.place("BUY", 100.0, 1.0)
+        self.assertIsNotNone(first)
+        second = inst.place("SELL", 101.0, 1.0)   # < cooldown_sec dupa primul
+        self.assertIsNone(second)
+        self.assertEqual(len(p.placed), 1)   # doar primul a ajuns la provider
+        lines = self._log_lines()
+        self.assertTrue(any("|refused|cooldown|" in l for l in lines), lines)
+
+    def test_cooldown_independent_per_symbol(self):
+        p = _FakeProvider()
+        inst_a = Instrument(name="A", symbol="ZZZFAKEUSD_A", provider=p.name.lower(),
+                            base="A", quote="USD", api=MarketApi([p]))
+        inst_b = Instrument(name="B", symbol="ZZZFAKEUSD_B", provider=p.name.lower(),
+                            base="B", quote="USD", api=MarketApi([p]))
+        self.assertIsNotNone(inst_a.place("BUY", 100.0, 1.0))
+        self.assertIsNotNone(inst_b.place("BUY", 100.0, 1.0))   # alt symbol -> neafectat
+
+    # ── guards_internally (Binance-style) — sare TOT stratul agnostic ───────────
+    def test_guards_internally_provider_bypasses_new_gates(self):
+        p = _GuardsInternallyProvider()
+        inst = self._inst(p)
+        # seed care AR bloca daily-limit daca s-ar aplica -> nu trebuie sa blocheze
+        for _ in range(60):
+            p.seed_trade("BUY", age_sec=4000.0)
+        order = inst.place("BUY", 100.0, 1.0)
+        self.assertIsNotNone(order)
+        self.assertEqual(len(p.placed), 1)
+        # niciun log FLEET-WIDE nou (Binance isi loga singur, ca sa nu duplice)
+        self.assertEqual(self._log_lines(), [])
+        # a doua plasare imediata NU e blocata de cooldown (guards_internally sare peste el)
+        order2 = inst.place("SELL", 101.0, 1.0)
+        self.assertIsNotNone(order2)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
