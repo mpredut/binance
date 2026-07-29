@@ -1036,11 +1036,13 @@ class TestTrendCoordinator(unittest.TestCase):
         self.assertIn("slope_big", snap)
 
     def test_manager_tick_publishes_instant_gradient(self):
-        # canalul rapid e în MANAGER: on_price_update publică gradientul
+        # canalul rapid e în MANAGER: on_price_update publică gradientul, sub
+        # gradient_recent_fast (29 iul: gradient_recent e acum EXCLUSIV al caii
+        # lente, evaluate_full — vezi cachemanager-trend-race-investigation).
         self.mgr.on_price_update("BTCUSDT", int(time.time() * 1000), 60500.0)
         snap = self.mgr.get_snapshot("BTCUSDT")
         self.assertIsNotNone(snap)
-        self.assertIn("gradient_recent", snap)
+        self.assertIn("gradient_recent_fast", snap)
         self.assertIn("epsilon", snap)
         self.assertEqual(snap["current_price"], 60500.0)
 

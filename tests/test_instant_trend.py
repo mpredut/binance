@@ -252,10 +252,14 @@ class TestComputation(unittest.TestCase):
         self.assertIn(ft, (-1, 0, 1))
 
     def test_on_price_update_publishes_fast(self):
+        # 29 iul: calea rapida scrie gradient_recent_fast/trend_fast (NU mai
+        # gradient_recent/final_trend — acele chei sunt acum EXCLUSIV ale caii
+        # lente, evaluate_full, ca sa elimine cursa fast/slow masurata empiric
+        # 14.9%/21.0% disagreement pe date reale).
         self.m.on_price_update("BTCUSDT", int(time.time() * 1000), 60500.0)
         snap = self.m.get_snapshot("BTCUSDT")
         self.assertIsNotNone(snap)
-        self.assertIn("gradient_recent", snap)
+        self.assertIn("gradient_recent_fast", snap)
         self.assertIn("epsilon", snap)
         self.assertEqual(snap["current_price"], 60500.0)
 

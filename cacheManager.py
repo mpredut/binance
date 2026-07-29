@@ -1397,10 +1397,21 @@ class CachePriceShortTrendManager:
             return
         try:
             # Calea RAPIDĂ: doar gradient ieftin + memorie (zero I/O, zero calcul greu).
+            # 29 iul: NU mai scrie gradient_recent/final_trend — acele chei sunt acum
+            # scrise EXCLUSIV de evaluate_full() (calea lenta, formula bogata: regresie
+            # + gradient, aceeasi ca in tradeall.handle_symbol). Inainte, cele 2 cai
+            # scriau peste ACELEASI chei, fara nicio prioritate intre ele -> cursa reala,
+            # guvernata de timing de retea (nu de pret) intre tick-uri live si timer-ul
+            # de 3.0s -> masurat empiric (29 iul, pe arhiva istorica): 14.9% (BTC) / 21.0%
+            # (TAO) dintre tick-uri aveau semn DIFERIT intre cele 2 cai, iar calea rapida
+            # singura isi schimba semnul la 32-35% dintre tick-uri (fereastra prea mica/
+            # zgomotoasa pt un semnal de "trend"). Calea rapida ramane utila DOAR pt
+            # is_favorable_to_wait(mode='gradient'), care chiar vrea latenta mica -> scrisa
+            # sub chei separate (_fast), niciodata suprascriind rezultatul caii lente.
             g = win.get_recent_gradient()
             eps = win.get_noise_epsilon(self.EPSILON_K)
-            self._set_mem(symbol, gradient_recent=g, epsilon=eps,
-                          final_trend=(1 if g > 0 else -1 if g < 0 else 0),
+            self._set_mem(symbol, gradient_recent_fast=g, epsilon=eps,
+                          trend_fast=(1 if g > 0 else -1 if g < 0 else 0),
                           current_price=price, ts=time.time())
         except Exception as e:
             print(f"[CachePriceShortTrendManager] on_price_update {symbol}: {e}")
@@ -1557,7 +1568,8 @@ class CachePriceShortTrendManager:
         BUY așteaptă cât scade, plasează când urcă clar; SELL invers.
 
         mode:
-          'gradient' (default) → folosește gradient_recent (momentum, rapid)
+          'gradient' (default) → folosește gradient_recent_fast (momentum, rapid,
+                                  scris la fiecare tick — vezi on_price_update)
           'full'               → folosește growth_coefficient (scor complet pe
                                   toată fereastra: avg(slope_full, gradient_recent),
                                   actualizat la FULL_EVAL_INTERVAL_SEC)."""
@@ -1570,7 +1582,10 @@ class CachePriceShortTrendManager:
         if mode == "full":
             g = snap.get("growth_coefficient", snap.get("gradient_recent", 0.0))
         else:
-            g = snap.get("gradient_recent", 0.0)
+            # 29 iul: gradient_recent_fast (nu mai gradient_recent — acum scris DOAR
+            # de calea lenta, vezi on_price_update). Fallback pe gradient_recent daca
+            # doar calea lenta a rulat pana acum (inainte de primul tick rapid).
+            g = snap.get("gradient_recent_fast", snap.get("gradient_recent", 0.0))
         eps = self._epsilon(snap)
         if abs(g) <= eps:
             return True
