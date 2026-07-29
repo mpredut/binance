@@ -38,6 +38,7 @@ from providers.replay_provider import ReplayMarketDataProvider, load_price_serie
 from providers.market_api import MarketApi
 from instrument import Instrument
 import monitortrades as mt
+from replay_trend_source import ReplayTrendSource, DEFAULT_WINDOW_SECONDS
 
 SEED_NOTIONAL_USD = 1000.0
 SBS = 12 * 24 * 3600 + 60   # acelasi default ca live (MT_GUARD_WINDOW_DAYS=12)
@@ -75,19 +76,22 @@ SYMBOLS = _LiveSymbols()
 
 
 def _neutral_is_trend_up(symbol):
-    """Determinist, DOAR pt backtest: fara semnal de trend (neutru). GASIT
-    23 iul: is_trend_up() reala citeste cacheManager.get_short_trend_manager()
-    — pt simboluri REALE (BTCUSDC/TAOUSDC), asta e cache-ul LIVE, actualizat
-    CHIAR ACUM de tradeall.py/cacheManager.py, care ruleaza pe aceeasi masina.
-    Rulare acelasi backtest de 2 ori a dat rezultate DIFERITE, pt ca trendul
-    "live" citit se schimba intre rulari, contaminand un replay istoric cu
-    starea REALA, curenta a pietei. False = exact ce ar intoarce is_trend_up()
-    oricum pt un symbol FARA snapshot in cache (deja defaultul "sigur" din
-    cod: "fara snapshot in cache -> neutru, nu blocheaza vanzarea pe castig")."""
+    """PASTRAT ca referinta/fallback manual (nu mai e default-ul lui run_symbol,
+    vezi ReplayTrendSource mai jos) — inca folosit de scheduled_pilot.py::_run_one
+    (loop separat, propriu, NEATINS in aceasta trecere — vezi 29 iul). Determinist,
+    DOAR pt backtest: fara semnal de trend (neutru). GASIT 23 iul: is_trend_up()
+    reala citeste cacheManager.get_short_trend_manager() — pt simboluri REALE
+    (BTCUSDC/TAOUSDC), asta e cache-ul LIVE, actualizat CHIAR ACUM de
+    tradeall.py/cacheManager.py, care ruleaza pe aceeasi masina. Rulare acelasi
+    backtest de 2 ori a dat rezultate DIFERITE, pt ca trendul "live" citit se
+    schimba intre rulari, contaminand un replay istoric cu starea REALA, curenta
+    a pietei. False = exact ce ar intoarce is_trend_up() oricum pt un symbol FARA
+    snapshot in cache (deja defaultul "sigur" din cod: "fara snapshot in cache ->
+    neutru, nu blocheaza vanzarea pe castig")."""
     return False
 
 
-def run_symbol(symbol, params, base, quiet=True):
+def run_symbol(symbol, params, base, quiet=True, trend_window_seconds=DEFAULT_WINDOW_SECONDS):
     path = os.path.join(ROOT, "cachedb", f"cache_price_{symbol}.jsonl")
     series = load_price_series(path, symbol)
     if not series:
@@ -104,13 +108,21 @@ def run_symbol(symbol, params, base, quiet=True):
 
     maxage_s = int(float(params["mt.maxage_days"]) * 24 * 3600)
 
+    # 29 iul: is_trend_up() REPLICAT din istoricul redat (ReplayTrendSource), nu mai
+    # neutralizat — vezi replay_trend_source.py pt de ce (cursa fast/slow investigata
+    # si reparata live in cacheManager.py; tradeall.py ruleaza MEREU pe live, deci
+    # semnalul e mereu disponibil, la fel ca aici). trend_window_seconds parametrizabil
+    # pt teste A/B pe alt orizont (instant/mediu/lung), fara sa schimbe default-ul.
+    trend_source = ReplayTrendSource([symbol], window_seconds=trend_window_seconds)
+
     orig_is_trend_up = mt.is_trend_up
-    mt.is_trend_up = _neutral_is_trend_up
+    mt.is_trend_up = trend_source.is_trend_up
     try:
         first_price = provider.advance(symbol)
         if first_price is None:
             return None
         last_price = first_price
+        trend_source.advance(symbol, provider.now(symbol), first_price)
         provider.place_order(symbol, "BUY", first_price, SEED_NOTIONAL_USD / first_price)
         n_seeds = 1
         n_ticks = 0
@@ -121,6 +133,9 @@ def run_symbol(symbol, params, base, quiet=True):
                 break
             last_price = price
             n_ticks += 1
+            # Alimenteaza fereastra de trend INAINTE de decizie — asa semnalul
+            # reflecta doar ce s-ar fi vazut pana la acest tick (fara look-ahead).
+            trend_source.advance(symbol, provider.now(symbol), price)
 
             buys = provider.get_orders(symbol, "BUY", since_s=maxage_s)
             sells = provider.get_orders(symbol, "SELL", since_s=maxage_s)
