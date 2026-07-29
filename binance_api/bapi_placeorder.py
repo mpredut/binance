@@ -417,9 +417,17 @@ def place_order(order_type, symbol, price, qty, force=False, cancelorders=False,
 
 from decimal import Decimal, ROUND_DOWN
 # Gate-ul de trend e MEREU activ la acest nivel (ultimul, comun tuturor tipurilor
-# de ordin). max_wait_sec = 1h. Nu se mai expune în API-urile de mai sus.
+# de ordin). Nu se mai expune în API-urile de mai sus.
+# 30 iul: max_wait_sec REDUS de la 3600.0 (1 ORA — hardcodat asa din prima zi a
+# mecanismului, 3 iun, niciodata schimbat) la 10.0 (ordinul secundelor, cerere
+# user). Motiv: cu valoarea veche, o intarziere REALA (trend inca nefavorabil)
+# putea bloca activ o ora intreaga per ordin — mult peste intentia "prinde
+# primul semn scurt de inversare". should_wait() intoarce acum False (nu
+# blocheaza deloc) daca trendul lipseste/e stale, deci riscul de blocaj pe
+# infrastructura cazuta e deja eliminat separat; asta scurteaza si cazul
+# "trend cunoscut, dar inca nefavorabil".
 def __place_order(order_type, symbol, price, qty=None, force=False, cancelorders=False, hours=5,
-                  fee_percentage=0.001, wait_trend=True, max_wait_sec=3600.0):
+                  fee_percentage=0.001, wait_trend=True, max_wait_sec=10.0):
 
     order_type = order_type.upper()
     qty = _resolve_qty(qty)   # None = fara cantitate ceruta -> maximul permis de algoritm (defense in depth)

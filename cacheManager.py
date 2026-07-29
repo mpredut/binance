@@ -1585,9 +1585,12 @@ class CachePriceShortTrendManager:
         eliminat is_favorable_to_wait, era doar un alias fara niciun apelant extern
         real — vezi git log). True = ASTEAPTA.
 
-        Necunoscut/stale -> True (asteapta) — nu False ca inainte: decizie user
-        (29 iul), sigura aici pt ca apelantul (wait_for_favorable_entry) e oricum
-        plafonat de max_wait_sec, deci nu ramane blocat la nesfarsit.
+        Necunoscut/stale -> False (NU asteapta, executa imediat). CORECTAT 30 iul:
+        incercasem True (asteapta) intr-o trecere anterioara, motivat de "e oricum
+        plafonat de max_wait_sec" — dar user a semnalat corect riscul: daca
+        cacheManager.py cade (trendul devine stale), NU vrem ca ordinele sa ramana
+        blocate deloc, nici macar pana la un timeout mic. "Fara trend" != "asteapta
+        un trend" — inseamna "nu am pe ce sa ma bazez, execut fara intarziere".
 
         window_seconds: doar None (fereastra implicita, cea publicata azi) e
         suportat LIVE deocamdata — pt alte orizonturi vezi DynamicReplayTrendSource
@@ -1604,7 +1607,7 @@ class CachePriceShortTrendManager:
                   f"inca — folosesc fereastra implicita ({self.window_seconds[0]:.0f}s)")
         snap = self.fresh_snapshot(symbol, now=now)
         if snap is None:
-            return True
+            return False   # necunoscut/stale -> NU asteapta, executa imediat
         if fast:
             g = snap.get("gradient_recent_fast", snap.get("gradient_recent", 0.0))
         else:
@@ -1621,10 +1624,14 @@ class CachePriceShortTrendManager:
             return g > 0
         return False
 
-    def wait_for_favorable_entry(self, side, symbol, max_wait_sec=3600.0,
+    def wait_for_favorable_entry(self, side, symbol, max_wait_sec=10.0,
                                  poll_sec=0.2, sleep_fn=time.sleep, mode="full"):
-        """Blochează cât timp trendul e favorabil, până la max_wait_sec.
-        Heartbeat vizual (.) la ~1s. Returnează secundele așteptate."""
+        """Blochează cât timp trendul e favorabil, până la max_wait_sec (implicit
+        10s — redus 30 iul de la 1h, cerere user: "ordinul secundelor nu
+        minutelor"). Apelantul real (bapi_placeorder.__place_order) transmite
+        mereu propria valoare explicit, deci acest implicit conteaza doar pt
+        apelanti directi (teste, alte scripturi). Heartbeat vizual (.) la ~1s.
+        Returnează secundele așteptate."""
         deadline = time.time() + max_wait_sec
         waited = 0.0
         next_dot = 1.0

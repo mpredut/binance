@@ -194,14 +194,14 @@ class TestGate(unittest.TestCase):
         self.assertTrue(self.m.should_wait("SELL", "BTCUSDT"))
 
     def test_no_snapshot(self):
-        # 30 iul (unificare should_wait): necunoscut -> ASTEAPTA (True), nu False.
-        # Sigur aici pt ca apelantul (wait_for_favorable_entry) e plafonat de
-        # max_wait_sec, deci nu ramane blocat la nesfarsit.
-        self.assertTrue(self.m.should_wait("BUY", "BTCUSDT"))
+        # 30 iul: necunoscut -> NU asteapta (False), executa imediat. Corectat
+        # dupa o trecere anterioara (True) — user a semnalat riscul: daca
+        # cacheManager.py cade (trend stale), NU vrem ordine blocate deloc.
+        self.assertFalse(self.m.should_wait("BUY", "BTCUSDT"))
 
     def test_stale(self):
         self._pub(gradient_recent=-0.5, ts=time.time() - cm.CachePriceShortTrendManager.TREND_STALE_SEC - 5)
-        self.assertTrue(self.m.should_wait("BUY", "BTCUSDT"))
+        self.assertFalse(self.m.should_wait("BUY", "BTCUSDT"))
 
     def test_noise_waits_for_clarity(self):
         self._pub(gradient_recent=0.4, epsilon=1.0)   # sub epsilon → zgomot
