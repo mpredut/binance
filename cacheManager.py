@@ -1223,7 +1223,7 @@ class CachePriceShortTrendManager:
 
     API de calcul : get_instant_trend(symbol), get_window/get_analyzer(symbol)
     API store     : update_snapshot, get_snapshot, get_all_snapshots
-    API gate      : is_favorable_to_wait(side, symbol), wait_for_favorable_entry(...)
+    API gate      : should_wait(side, symbol), wait_for_favorable_entry(...)
     """
     EPSILON_K         = 1.0     # k * stddev(gradient) — prag de zgomot informat
     FAVORABLE_REL_EPS = 1e-5    # fallback relativ la preț dacă lipsește epsilon
@@ -1406,7 +1406,7 @@ class CachePriceShortTrendManager:
             # (TAO) dintre tick-uri aveau semn DIFERIT intre cele 2 cai, iar calea rapida
             # singura isi schimba semnul la 32-35% dintre tick-uri (fereastra prea mica/
             # zgomotoasa pt un semnal de "trend"). Calea rapida ramane utila DOAR pt
-            # is_favorable_to_wait(mode='gradient'), care chiar vrea latenta mica -> scrisa
+            # should_wait(fast=True), care chiar vrea latenta mica -> scrisa
             # sub chei separate (_fast), niciodata suprascriind rezultatul caii lente.
             g = win.get_recent_gradient()
             eps = win.get_noise_epsilon(self.EPSILON_K)
@@ -1563,32 +1563,57 @@ class CachePriceShortTrendManager:
         price = abs(snap.get("current_price") or 0.0)
         return price * self.FAVORABLE_REL_EPS
 
-    def is_favorable_to_wait(self, side, symbol, mode="full", now=None):
-        """Zgomot (|g| <= eps) → True (așteptăm claritate). Trend clar:
-        BUY așteaptă cât scade, plasează când urcă clar; SELL invers.
-
-        mode:
-          'gradient' (default) → folosește gradient_recent_fast (momentum, rapid,
-                                  scris la fiecare tick — vezi on_price_update)
-          'full'               → folosește growth_coefficient (scor complet pe
-                                  toată fereastra: avg(slope_full, gradient_recent),
-                                  actualizat la FULL_EVAL_INTERVAL_SEC)."""
+    def fresh_snapshot(self, symbol, now=None):
+        """Snapshot-ul lui `symbol` DOAR daca e proaspat (<=TREND_STALE_SEC) — None
+        altfel (fara snapshot SAU prea vechi). Punct UNIC de staleness-check (30 iul,
+        unificare is_trend_up/should_wait — foloseste-l direct, PUBLIC, e chemat si
+        din monitortrades.py): inainte, is_trend_up() din monitortrades.py NU avea
+        niciun staleness-check (bug documentat — folosea orice era in fisier,
+        oricat de vechi); acum ambele functii trec prin acelasi gard."""
         snap = self.get_snapshot(symbol)
         if snap is None:
-            return False
+            return None
         now = now if now is not None else time.time()
         if now - snap.get("ts", 0) > self.TREND_STALE_SEC:
-            return False
-        if mode == "full":
-            g = snap.get("growth_coefficient", snap.get("gradient_recent", 0.0))
-        else:
-            # 29 iul: gradient_recent_fast (nu mai gradient_recent — acum scris DOAR
-            # de calea lenta, vezi on_price_update). Fallback pe gradient_recent daca
-            # doar calea lenta a rulat pana acum (inainte de primul tick rapid).
-            g = snap.get("gradient_recent_fast", snap.get("gradient_recent", 0.0))
-        eps = self._epsilon(snap)
-        if abs(g) <= eps:
+            return None
+        return snap
+
+    def should_wait(self, side, symbol, window_seconds=None, fast=False,
+                     use_noise_gate=True, now=None):
+        """Nucleu UNIFICAT (30 iul) pt "ar trebui sa astept inainte sa execut o
+        intentie de BUY/SELL?" — SINGURUL loc unde traieste aceasta logica (30 iul:
+        eliminat is_favorable_to_wait, era doar un alias fara niciun apelant extern
+        real — vezi git log). True = ASTEAPTA.
+
+        Necunoscut/stale -> True (asteapta) — nu False ca inainte: decizie user
+        (29 iul), sigura aici pt ca apelantul (wait_for_favorable_entry) e oricum
+        plafonat de max_wait_sec, deci nu ramane blocat la nesfarsit.
+
+        window_seconds: doar None (fereastra implicita, cea publicata azi) e
+        suportat LIVE deocamdata — pt alte orizonturi vezi DynamicReplayTrendSource
+        (backtest, research/monitortrades_backtest/replay_trend_source.py).
+        fast=True -> canalul RAPID (gradient_recent_fast, latenta mica);
+        False (implicit) -> canalul BOGAT (growth_coefficient).
+        use_noise_gate: True (implicit, comportament VECHI neschimbat pt fostul
+        is_favorable_to_wait) -> zgomot (|g|<=eps) inseamna asteapta. Masurat
+        empiric (29 iul, backtest cu istoric real) ca aceasta regula STRICA
+        exact cazul "prinde primul semn slab de inversare" — apelanti noi pot
+        trece use_noise_gate=False."""
+        if window_seconds is not None and float(window_seconds) != self.window_seconds[0]:
+            print(f"[should_wait] window_seconds={window_seconds} nesuportat live "
+                  f"inca — folosesc fereastra implicita ({self.window_seconds[0]:.0f}s)")
+        snap = self.fresh_snapshot(symbol, now=now)
+        if snap is None:
             return True
+        if fast:
+            g = snap.get("gradient_recent_fast", snap.get("gradient_recent", 0.0))
+        else:
+            g = snap.get("growth_coefficient", snap.get("gradient_recent", 0.0))
+        g = float(g or 0.0)
+        if use_noise_gate:
+            eps = self._epsilon(snap)
+            if abs(g) <= eps:
+                return True
         side = side.upper()
         if side == "BUY":
             return g < 0
@@ -1603,7 +1628,7 @@ class CachePriceShortTrendManager:
         deadline = time.time() + max_wait_sec
         waited = 0.0
         next_dot = 1.0
-        while time.time() < deadline and self.is_favorable_to_wait(side, symbol, mode=mode):
+        while time.time() < deadline and self.should_wait(side, symbol, fast=(mode == "gradient")):
             sleep_fn(poll_sec)
             waited += poll_sec
             if waited >= next_dot:

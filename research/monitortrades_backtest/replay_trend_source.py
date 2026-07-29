@@ -190,25 +190,34 @@ class DynamicReplayTrendSource:
         threshold = min_agree if min_agree is not None else len(timeouts_sec)
         return sum(votes) >= threshold
 
-    def should_wait(self, symbol: str, side: str, timeout_sec: float, epsilon_k: float = 1.0) -> bool:
-        """Oglinda EXACTA a cacheManager.CachePriceShortTrendManager.is_favorable_to_wait
-        (live) — True = ASTEAPTA (nu inca un moment bun sa executi o intentie de
-        BUY/SELL in coada), False = OK, executa acum. BUY asteapta cat pretul
-        SCADE, plaseaza cand urca clar; SELL invers. Zgomot (|g|<=eps) -> asteapta
-        claritate. Raspuns la ideea user (29 iul): protejeaza intentiile de
-        BUY/SELL aflate in reincercare (retry) — nu refira orbeste la interval
-        fix, amana pana la primul semnal scurt de inversare (varf/prag)."""
+    def should_wait(self, symbol: str, side: str, timeout_sec: float,
+                    use_noise_gate: bool = False, epsilon_k: float = 1.0) -> bool:
+        """True = ASTEAPTA (nu inca un moment bun sa executi o intentie de BUY/SELL
+        in coada), False = OK, executa acum. BUY asteapta cat pretul SCADE, executa
+        la PRIMUL semn de urcare (g>=0); SELL invers (asteapta cat urca, executa la
+        primul semn de scadere, g<=0).
+
+        Precizare user (29 iul, dupa masurare empirica): "prima tendinta USOARA de
+        [inversare] -> intru" — orice semn, oricat de slab, e suficient. Implicit
+        (use_noise_gate=False) NU mai cere sa depaseasca un prag de zgomot (eps) —
+        varianta initiala (copiata fidel din cacheManager.is_favorable_to_wait) o
+        cerea, si asta a fost EXACT problema gasita: la cele 2 evenimente reale
+        testate, growth_coefficient era in interiorul lui eps (flat/zgomot la scara
+        scurta) desi trendul mai larg (pe care se baza deja decizia lui tradeall de
+        a firea) era deja confirmat — regula de zgomot tinea in asteptare MAI MULT
+        exact cand semnalul era slab/marginal, opusul a ce se dorea. use_noise_gate=
+        True pastreaza varianta veche (fidela cu is_favorable_to_wait) pt comparatie."""
         prices, _sample_rate = self._prices_and_rate(symbol, timeout_sec)
         if len(prices) < 3:
             return True   # date insuficiente -> comportament sigur: asteapta
-        arr = np.array(prices)
-        grad = np.gradient(arr)
-        eps = float(epsilon_k * np.std(grad))
         _final_trend, growth_coefficient, _slope_full, _gradient_recent = \
             _instant_trend_from_slice(prices, _sample_rate)
         g = growth_coefficient
-        if abs(g) <= eps:
-            return True
+        if use_noise_gate:
+            arr = np.array(prices)
+            eps = float(epsilon_k * np.std(np.gradient(arr)))
+            if abs(g) <= eps:
+                return True
         side = side.upper()
         if side == "BUY":
             return g < 0

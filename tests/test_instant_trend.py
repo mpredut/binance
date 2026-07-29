@@ -1,7 +1,7 @@
 """
 Teste pentru cacheManager.CachePriceShortTrendManager:
   - store cross-process (file-backed) + merge snapshot
-  - gate oportunist (is_favorable_to_wait / wait_for_favorable_entry) + epsilon
+  - gate oportunist (should_wait / wait_for_favorable_entry) + epsilon
   - calc API (windows, get_instant_trend) + canal rapid on_price_update
 """
 import os, sys, json, time, tempfile, unittest
@@ -174,39 +174,42 @@ class TestGate(unittest.TestCase):
         self.m.update_snapshot("BTCUSDT", **f)
 
     def test_mode_gradient_vs_full(self):
-        # gradient_recent și growth_coefficient au semne OPUSE → mode-ul decide
+        # gradient_recent și growth_coefficient au semne OPUSE → fast decide
         self._pub(gradient_recent=-0.5, growth_coefficient=0.5)
-        # mode gradient (default): folosește gradient_recent (-0.5) → BUY așteaptă
-        self.assertTrue(self.m.is_favorable_to_wait("BUY", "BTCUSDT", mode="gradient"))
-        # mode full: folosește growth_coefficient (+0.5) → BUY plasează acum
-        self.assertFalse(self.m.is_favorable_to_wait("BUY", "BTCUSDT", mode="full"))
+        # fast=True: folosește gradient_recent (-0.5) → BUY așteaptă
+        self.assertTrue(self.m.should_wait("BUY", "BTCUSDT", fast=True))
+        # fast=False (implicit): folosește growth_coefficient (+0.5) → BUY plasează acum
+        self.assertFalse(self.m.should_wait("BUY", "BTCUSDT", fast=False))
 
     def test_buy_waits_falling(self):
         self._pub(gradient_recent=-0.5)
-        self.assertTrue(self.m.is_favorable_to_wait("BUY", "BTCUSDT"))
+        self.assertTrue(self.m.should_wait("BUY", "BTCUSDT"))
 
     def test_buy_places_rising(self):
         self._pub(gradient_recent=0.5)
-        self.assertFalse(self.m.is_favorable_to_wait("BUY", "BTCUSDT"))
+        self.assertFalse(self.m.should_wait("BUY", "BTCUSDT"))
 
     def test_sell_waits_rising(self):
         self._pub(gradient_recent=0.5)
-        self.assertTrue(self.m.is_favorable_to_wait("SELL", "BTCUSDT"))
+        self.assertTrue(self.m.should_wait("SELL", "BTCUSDT"))
 
     def test_no_snapshot(self):
-        self.assertFalse(self.m.is_favorable_to_wait("BUY", "BTCUSDT"))
+        # 30 iul (unificare should_wait): necunoscut -> ASTEAPTA (True), nu False.
+        # Sigur aici pt ca apelantul (wait_for_favorable_entry) e plafonat de
+        # max_wait_sec, deci nu ramane blocat la nesfarsit.
+        self.assertTrue(self.m.should_wait("BUY", "BTCUSDT"))
 
     def test_stale(self):
         self._pub(gradient_recent=-0.5, ts=time.time() - cm.CachePriceShortTrendManager.TREND_STALE_SEC - 5)
-        self.assertFalse(self.m.is_favorable_to_wait("BUY", "BTCUSDT"))
+        self.assertTrue(self.m.should_wait("BUY", "BTCUSDT"))
 
     def test_noise_waits_for_clarity(self):
         self._pub(gradient_recent=0.4, epsilon=1.0)   # sub epsilon → zgomot
-        self.assertTrue(self.m.is_favorable_to_wait("BUY", "BTCUSDT"))
+        self.assertTrue(self.m.should_wait("BUY", "BTCUSDT"))
 
     def test_informed_epsilon_clear_up_places(self):
         self._pub(gradient_recent=5.0, epsilon=1.0)   # peste epsilon, urcă clar
-        self.assertFalse(self.m.is_favorable_to_wait("BUY", "BTCUSDT"))
+        self.assertFalse(self.m.should_wait("BUY", "BTCUSDT"))
 
     def test_wait_returns_immediately_when_unfavorable(self):
         self._pub(gradient_recent=0.5)   # urcă → BUY nu așteaptă

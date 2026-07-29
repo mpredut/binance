@@ -270,17 +270,24 @@ state_tracker = StateTracker()
 def is_trend_up(symbol):
     """Trendul INSTANT, citit DIRECT din managerul de cache (up-to-date cu
     cache_instant_trend.json), nu din copia sell_recommendation (care poate ramane in urma).
-    gradient_recent = momentum rapid real; fallback pe slope_small, apoi pe copie."""
+    gradient_recent = momentum rapid real; fallback pe slope_small, apoi pe copie.
+
+    30 iul (unificare cu should_wait din cacheManager.py): foloseste acum
+    fresh_snapshot() — ACELASI gard de prospetime (TREND_STALE_SEC, 15s) ca
+    celalalt mecanism de trend. INAINTE, aceasta functie nu avea NICIUN
+    staleness-check (bug documentat: folosea orice era in fisier, oricat de
+    vechi, daca cacheManager.py murea silentios). Formula ramane NESCHIMBATA
+    (slope>0 sau slope==0 si gradient>0) — doar sursa e acum garantat proaspata."""
     try:
         import cacheManager as cm
-        snap = cm.get_short_trend_manager().get_snapshot(symbol)
+        snap = cm.get_short_trend_manager().fresh_snapshot(symbol)
         if snap:
             slope = float(snap.get('gradient_recent', snap.get('slope_small', 0.0)) or 0.0)
             gradient = float(snap.get('final_trend', 0.0) or 0.0)
             return slope > 0 or (slope == 0 and gradient > 0)
     except Exception as e:
         print(f"is_trend_up: snapshot direct esuat ({e}) — tratez ca neutru")
-    return False   # fara snapshot in cache -> neutru (nu blocheaza vanzarea pe castig)
+    return False   # fara snapshot/stale in cache -> neutru (nu blocheaza vanzarea pe castig)
 
 
 def get_relevant_trade(trade_orders, trade_type, threshold_s, symbol, now_fn=None):
