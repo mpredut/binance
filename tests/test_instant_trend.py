@@ -356,5 +356,137 @@ class TestComputation(unittest.TestCase):
         self.assertTrue(m2._full_eval_thread.is_alive())
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Fereastra DINAMICA (30 iul) — get_instant_trend_for_window / is_trend_up_for_window
+# / should_wait(window_seconds=...), calculate PE CERERE dintr-un buffer Cache24
+# brut, in loc de cele 2 ferestre fixe precalculate.
+# ═══════════════════════════════════════════════════════════════════════════
+def _entries_trending(n, interval_sec, start, delta, end_offset_sec=0.0):
+    """Serie de preturi STRICT monotona (delta>0 → urcă, delta<0 → scade),
+    ultimul tick la `end_offset_sec` secunde in urma fata de acum (0 → chiar acum,
+    >0 → simuleaza date STALE)."""
+    now_ms = int(time.time() * 1000)
+    end_ms = now_ms - int(end_offset_sec * 1000)
+    step_ms = int(interval_sec * 1000)
+    start_ts = end_ms - (n - 1) * step_ms
+    return [[start_ts + i * step_ms, start + i * delta] for i in range(n)]
+
+
+class TestDynamicWindow(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def _cache24_up(self, n=120, interval_sec=1.0, delta=5.0, end_offset_sec=0.0):
+        entries = _entries_trending(n, interval_sec, 60000.0, delta, end_offset_sec)
+        return _make_cache24("BTCUSDT", entries, self.tmp)
+
+    def _mgr_with_cache24(self, cache24):
+        m = _mgr(self.tmp, name=f"dyn_{id(cache24)}.json")
+        cpm_fname = os.path.join(self.tmp, f"cp_{id(cache24)}.json")
+        cpm = cm.CacheCurrentPriceManager(sync_ts=9999, symbols=["BTCUSDT"],
+                                          filename=cpm_fname, ws_manager=None, api_client=mock_api)
+        m.start_computation({"BTCUSDT": cache24}, cpm)
+        return m
+
+    def test_unavailable_without_start_computation(self):
+        # manager "gol" (niciun start_computation) → fereastra dinamica indisponibila,
+        # NU crapa — "necunoscut", exact ca lipsa de snapshot.
+        m = _mgr(self.tmp)
+        self.assertIsNone(m.get_instant_trend_for_window("BTCUSDT", 60))
+        self.assertFalse(m.is_trend_up_for_window("BTCUSDT", 60))
+        self.assertFalse(m.should_wait("BUY", "BTCUSDT", window_seconds=60))
+
+    def test_unknown_symbol_returns_none(self):
+        m = self._mgr_with_cache24(self._cache24_up())
+        self.assertIsNone(m.get_instant_trend_for_window("ETHUSDT", 60))
+
+    def test_uptrend_detected(self):
+        m = self._mgr_with_cache24(self._cache24_up(delta=5.0))
+        dyn = m.get_instant_trend_for_window("BTCUSDT", 60)
+        self.assertIsNotNone(dyn)
+        self.assertEqual(dyn["final_trend"], 1)
+        self.assertGreater(dyn["growth_coefficient"], 0)
+        self.assertTrue(m.is_trend_up_for_window("BTCUSDT", 60))
+
+    def test_downtrend_detected(self):
+        m = self._mgr_with_cache24(self._cache24_up(delta=-5.0))
+        dyn = m.get_instant_trend_for_window("BTCUSDT", 60)
+        self.assertIsNotNone(dyn)
+        self.assertEqual(dyn["final_trend"], -1)
+        self.assertLess(dyn["growth_coefficient"], 0)
+        self.assertFalse(m.is_trend_up_for_window("BTCUSDT", 60))
+
+    def test_stale_returns_none(self):
+        # ultimul tick e mai vechi decat TREND_STALE_SEC → tratat ca stale, ca la fresh_snapshot
+        stale_offset = cm.CachePriceShortTrendManager.TREND_STALE_SEC + 30
+        m = self._mgr_with_cache24(self._cache24_up(end_offset_sec=stale_offset))
+        self.assertIsNone(m.get_instant_trend_for_window("BTCUSDT", 60))
+        self.assertFalse(m.should_wait("BUY", "BTCUSDT", window_seconds=60))
+
+    def test_too_few_samples_returns_none(self):
+        # fereastra ceruta (14s, minimul CM_DYNAMIC_WINDOW_MIN_SEC) prinde <3 tick-uri
+        # dintr-o serie cu esantioane la fiecare 10s.
+        m = self._mgr_with_cache24(self._cache24_up(n=20, interval_sec=10.0))
+        self.assertIsNone(m.get_instant_trend_for_window("BTCUSDT", 14))
+
+    def test_window_clamped_to_configured_bounds(self):
+        m = self._mgr_with_cache24(self._cache24_up(n=300, interval_sec=1.0))
+        below = m.get_instant_trend_for_window("BTCUSDT", 1.0)   # sub CM_DYNAMIC_WINDOW_MIN_SEC
+        self.assertIsNotNone(below)
+        self.assertEqual(below["window_seconds"], cm.CM_DYNAMIC_WINDOW_MIN_SEC)
+        above = m.get_instant_trend_for_window("BTCUSDT", 999999.0)  # peste CM_DYNAMIC_WINDOW_MAX_SEC
+        self.assertIsNotNone(above)
+        self.assertEqual(above["window_seconds"], cm.CM_DYNAMIC_WINDOW_MAX_SEC)
+
+    def test_should_wait_uses_dynamic_path_not_snapshot(self):
+        # Publicam manual un snapshot cu growth_coefficient POZITIV (ar spune "nu astepta"
+        # pt BUY pe fereastra implicita), dar bufferul brut Cache24 (fereastra custom) arata
+        # o scadere clara -> should_wait(window_seconds=custom) trebuie sa reflecte
+        # bufferul brut, NU snapshot-ul precalculat.
+        m = self._mgr_with_cache24(self._cache24_up(delta=-5.0))
+        m.update_snapshot("BTCUSDT", growth_coefficient=5.0, ts=time.time())
+        self.assertFalse(m.should_wait("BUY", "BTCUSDT"))                       # fereastra implicita: nu asteapta
+        self.assertTrue(m.should_wait("BUY", "BTCUSDT", window_seconds=60,
+                                      use_noise_gate=False))                    # fereastra dinamica: asteapta (scade)
+
+    def test_should_wait_dynamic_sell_side(self):
+        m = self._mgr_with_cache24(self._cache24_up(delta=5.0))
+        self.assertTrue(m.should_wait("SELL", "BTCUSDT", window_seconds=60, use_noise_gate=False))
+        self.assertFalse(m.should_wait("BUY", "BTCUSDT", window_seconds=60, use_noise_gate=False))
+
+    def test_wait_for_favorable_entry_forwards_window_seconds(self):
+        m = self._mgr_with_cache24(self._cache24_up(delta=-5.0))   # scade -> BUY asteapta (fereastra dinamica)
+        calls = []
+        waited = m.wait_for_favorable_entry(
+            "BUY", "BTCUSDT", max_wait_sec=2, poll_sec=0.5, window_seconds=60,
+            sleep_fn=lambda s: calls.append(s))
+        self.assertGreater(waited, 0.0)
+        self.assertTrue(calls)
+
+
+class TestCache24RecentEntriesBisect(unittest.TestCase):
+    """get_recent_entries a trecut de la list-comprehension (O(n)) la bisect
+    (O(log n + k)) — verifica exact aceeasi iesire, pt orice cutoff."""
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def test_matches_naive_filter(self):
+        entries = _entries_trending(500, 0.2, 100.0, 0.01)
+        c24 = _make_cache24("BTCUSDT", entries, self.tmp)
+        for last_seconds in (1, 5, 20, 60, 90, 1000):
+            cutoff_ms = int((time.time() - last_seconds) * 1000)
+            expected = [e for e in entries if e[0] >= cutoff_ms]
+            got = c24.get_recent_entries("BTCUSDT", last_seconds=last_seconds)
+            self.assertEqual(got, expected, f"mismatch la last_seconds={last_seconds}")
+
+    def test_empty_symbol(self):
+        c24 = _make_cache24("BTCUSDT", [], self.tmp)
+        self.assertEqual(c24.get_recent_entries("BTCUSDT", last_seconds=60), [])
+
+    def test_unknown_symbol(self):
+        c24 = _make_cache24("BTCUSDT", _entries_trending(10, 1.0, 100.0, 1.0), self.tmp)
+        self.assertEqual(c24.get_recent_entries("NOPE", last_seconds=60), [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

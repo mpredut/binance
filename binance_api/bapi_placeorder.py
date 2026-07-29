@@ -67,17 +67,21 @@ def _resolve_qty(qty):
     return float("inf") if qty is None else qty
 
 
-def _maybe_wait_trend(side, symbol, wait_trend, max_wait_sec):
+def _maybe_wait_trend(side, symbol):
     """Gate de întârziere oportunistă, partajat de toate funcțiile de plasare.
     Așteaptă cât timp trendul aduce un preț mai bun (BUY: preț scade,
-    SELL: preț urcă), până la max_wait_sec. No-op dacă wait_trend e False
-    sau managerul de trend lipsește. Returnează secundele așteptate."""
-    if not wait_trend:
+    SELL: preț urcă), până la PLACE_ORDER_MAX_WAIT_SEC. No-op dacă
+    PLACE_ORDER_WAIT_TREND e False sau managerul de trend lipsește.
+    Returnează secundele așteptate.
+    30 iul: wait_trend/max_wait_sec ELIMINATE ca parametri (erau MOARTE — singurul
+    apelant, __place_order, nu le suprascria niciodata; nimeni altcineva nu apela
+    aceasta functie privata). Citite direct din config, sursa unica de adevar."""
+    if not PLACE_ORDER_WAIT_TREND:
         return 0.0
     try:
         import cacheManager as cm
         waited = cm.get_short_trend_manager().wait_for_favorable_entry(
-            side, symbol, max_wait_sec=max_wait_sec, poll_sec=PLACE_ORDER_WAIT_POLL_SEC,
+            side, symbol, max_wait_sec=PLACE_ORDER_MAX_WAIT_SEC, poll_sec=PLACE_ORDER_WAIT_POLL_SEC,
             sleep_fn=time.sleep, mode=PLACE_ORDER_WAIT_MODE)
         if waited:
             print(f"[{side} {symbol}] așteptat {waited:.1f}s pentru preț mai bun (trend favorabil)")
@@ -332,13 +336,12 @@ def _last_opposite_fill_price_api(symbol, order_type):
 
 
 def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
-                        max_daily_trades=PLACE_ORDER_MAX_DAILY_TRADES, profit_percentage=0.01,
                         bypass_profit_guard=False):
-    # NOTA: max_daily_trades si profit_percentage sunt defaulturi MOARTE in practica —
-    # singurul apelant real (place_safe_order, mai jos) le suprascrie mereu explicit
-    # (PLACE_ORDER_MAX_DAILY_TRADES / order_guard.margin_for("binance")). Aliniat
-    # max_daily_trades la valoarea REAL folosita (era 10, dezacordat de ani de zile
-    # fata de cei 25 folositi efectiv) ca sa nu induca in eroare un viitor apelant direct.
+    # 30 iul: max_daily_trades si profit_percentage ELIMINATE ca parametri (erau
+    # MOARTE — 0 apelanti in tot repo-ul, singurul apelant real, place_safe_order
+    # mai jos, trecea mereu EXACT PLACE_ORDER_MAX_DAILY_TRADES / respectiv
+    # order_guard.margin_for("binance"), niciodata altceva). Citite direct mai
+    # jos, ca sursa unica de adevar — nu mai sunt parametri de suprascris.
     # bypass_profit_guard=True -> IGNORA gardul de profit/istorie. ATENTIE: e DIFERIT de
     # `force` (care doar executa la MARKET in __place_order, dar RESPECTA gardul). Sare peste
     # gardul de profit SI peste fail-closed, pastrand siguranta (limita zilnica, anti-spam).
@@ -374,8 +377,8 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
         #oposite_trades = apitrades.get_my_trades(opposite_order_type, symbol, backdays=backdays, limit=1000) ## curent date
         #oposite_trades = apitrades.get_trade_orders(opposite_order_type, symbol, max_age_seconds=time_back_in_seconds) ## curent date
         oposite_trades = apiorders.get_trade_orders(opposite_order_type, symbol, max_age_seconds=time_back_in_seconds) ## curent date
-        if len(all_trades)/backdays > max_daily_trades:
-            print(f"Am {len(oposite_trades)} trades. Limita zilnica este de {max_daily_trades} pentru '{order_type}'.")
+        if len(all_trades)/backdays > PLACE_ORDER_MAX_DAILY_TRADES:
+            print(f"Am {len(oposite_trades)} trades. Limita zilnica este de {PLACE_ORDER_MAX_DAILY_TRADES} pentru '{order_type}'.")
             return False, "daily_limit"
         for trade in all_trades:
             trade_time = trade['timestamp'] / 1000  # 'time' este in milisecunde
@@ -413,8 +416,10 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
                 _prices = [float(t['price']) for t in recent_opposite_trades]
                 window_ref = min(_prices) if order_type == "BUY" else max(_prices)
             from providers.market_api import BinanceProvider
+            # profit_percentage nu mai e parametru (30 iul, dead — vezi nota de mai sus);
+            # calculat aici, lazy, doar cand chiar se foloseste (nu si pe calea bypass).
             if not order_guard.profit_guard(BinanceProvider(), symbol, order_type, price,
-                                            profit_percentage, window_ref=window_ref):
+                                            order_guard.margin_for("binance"), window_ref=window_ref):
                 return False, "profit_guard"
         return True, None
 
@@ -429,18 +434,19 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
         return bool(bypass_profit_guard), (None if bypass_profit_guard else "guard_check_failed")
 
 
-def place_order(order_type, symbol, price, qty, force=False, cancelorders=False, hours=PLACE_ORDER_HOURS,
-                fee_percentage=PLACE_ORDER_FEE_PCT):
-    order = __place_order(order_type, symbol, price, qty, force, cancelorders, hours,
-                          fee_percentage)
-    
+def place_order(order_type, symbol, price, qty, force=False, cancelorders=False, hours=PLACE_ORDER_HOURS):
+    # fee_percentage NU mai e parametru (30 iul, dead — 0 apelanti in tot repo-ul
+    # au trecut vreodata altceva decat PLACE_ORDER_FEE_PCT); __place_order il
+    # citeste acum direct din config.
+    order = __place_order(order_type, symbol, price, qty, force, cancelorders, hours)
+
     if order is None:
         if force and order_type == 'BUY':
             print("ULTRA DUBIOS!!!!")
-            #order = place_SELL_order_at_market(symbol.forcesellsymbol[symbol], symbol.quantities[symbol]) 
+            #order = place_SELL_order_at_market(symbol.forcesellsymbol[symbol], symbol.quantities[symbol])
             #time.sleep(0.2)
-            #order = __place_order(order_type, symbol, price, qty, force, cancelorders, hours, fee_percentage)
-            
+            #order = __place_order(order_type, symbol, price, qty, force, cancelorders, hours)
+
     return order
          
 
@@ -456,9 +462,10 @@ from decimal import Decimal, ROUND_DOWN
 # infrastructura cazuta e deja eliminat separat; asta scurteaza si cazul
 # "trend cunoscut, dar inca nefavorabil". Acum configurabil (nu mai hardcodat)
 # via PLACE_ORDER_MAX_WAIT_SEC in bapi_placeorder_config.env.
-def __place_order(order_type, symbol, price, qty=None, force=False, cancelorders=False, hours=PLACE_ORDER_HOURS,
-                  fee_percentage=PLACE_ORDER_FEE_PCT, wait_trend=PLACE_ORDER_WAIT_TREND,
-                  max_wait_sec=PLACE_ORDER_MAX_WAIT_SEC):
+# 30 iul: fee_percentage/wait_trend/max_wait_sec ELIMINATE ca parametri (erau
+# MOARTE — singurul apelant, place_order, nu le suprascria niciodata, nici un
+# alt apelant din tot repo-ul, inclusiv old_trade/). Citite direct din config.
+def __place_order(order_type, symbol, price, qty=None, force=False, cancelorders=False, hours=PLACE_ORDER_HOURS):
 
     order_type = order_type.upper()
     qty = _resolve_qty(qty)   # None = fara cantitate ceruta -> maximul permis de algoritm (defense in depth)
@@ -478,20 +485,20 @@ def __place_order(order_type, symbol, price, qty=None, force=False, cancelorders
         if order_type == 'SELL':      
             print(f"available_qty {available_qty:.8f} versus requested {qty:.8f}")
             
-            adjusted_qty = qty * (1 + fee_percentage)
+            adjusted_qty = qty * (1 + PLACE_ORDER_FEE_PCT)
 
             if available_qty < adjusted_qty:
-                print(f"Adjusting {order_type} order quantity from {qty:.8f} to {available_qty / (1 + fee_percentage):.8f} to cover fees")
-                qty = available_qty / (1 + fee_percentage)
+                print(f"Adjusting {order_type} order quantity from {qty:.8f} to {available_qty / (1 + PLACE_ORDER_FEE_PCT):.8f} to cover fees")
+                qty = available_qty / (1 + PLACE_ORDER_FEE_PCT)
 
         elif order_type == 'BUY':
             # in cazul unei comenzi de BUY, trebuie sa calculezi cantitatea necesara de USDT pentru achizitionare
-            total_usdt_needed = qty * price * (1 + fee_percentage)
+            total_usdt_needed = qty * price * (1 + PLACE_ORDER_FEE_PCT)
 
             if available_qty * price < total_usdt_needed:
                 print(f"Not enough {symbol} available for {order_type}. You need {total_usdt_needed:.8f}, but you only have {available_qty:.8f} {symbol}.")
                 # Ajusteaza cantitatea pe care o poti cumpara cu USDT disponibili
-                qty = available_qty / (price * (1 + fee_percentage))
+                qty = available_qty / (price * (1 + PLACE_ORDER_FEE_PCT))
                 print(f"Adjusting {order_type} order quantity to {qty:.8f} based on available {symbol}.")
 
         # Rotunjim cantitatea la 5 zecimale in jos
@@ -509,7 +516,7 @@ def __place_order(order_type, symbol, price, qty=None, force=False, cancelorders
         # GATE unic de întârziere oportunistă — chiar înainte de trimitere, ca să
         # reacționăm ultra-rapid la inversarea trendului (flip-to-send minim).
         # Acoperă toate tipurile: BUY/SELL × limit/market.
-        if _maybe_wait_trend(order_type, symbol, wait_trend, max_wait_sec):
+        if _maybe_wait_trend(order_type, symbol):
             current_price = _fresh_price(symbol)   # preț proaspăt după așteptare
 
         # GATE anti rapid-fire (cross-proces + cross-thread), stil RAII: rezervarea se
@@ -545,20 +552,21 @@ def __place_order(order_type, symbol, price, qty=None, force=False, cancelorders
     #    return None
 
 
-def place_safe_order(order_type, symbol, price, qty=None, safeback_seconds=PLACE_ORDER_SAFEBACK_SEC, force=False, cancelorders=False, hours=PLACE_ORDER_HOURS, fee_percentage=PLACE_ORDER_FEE_PCT, bypass_profit_guard=False, _reason_out=None):
+# fee_percentage NU mai e parametru (30 iul, dead — vezi place_order). max_daily_trades/
+# profit_percentage nu mai sunt trecute la if_place_safe_order — le citeste ea insasi.
+def place_safe_order(order_type, symbol, price, qty=None, safeback_seconds=PLACE_ORDER_SAFEBACK_SEC, force=False, cancelorders=False, hours=PLACE_ORDER_HOURS, bypass_profit_guard=False, _reason_out=None):
 
     order_type = order_type.upper()
     qty = _resolve_qty(qty)   # None = fara cantitate ceruta -> maximul permis de algoritm
     sym.validate_params(order_type, symbol, price, qty)
 
-    ok, reason = if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=safeback_seconds, max_daily_trades=PLACE_ORDER_MAX_DAILY_TRADES, profit_percentage = order_guard.margin_for("binance"), bypass_profit_guard=bypass_profit_guard)
+    ok, reason = if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=safeback_seconds, bypass_profit_guard=bypass_profit_guard)
     if not ok:
         if _reason_out is not None:
             _reason_out["reason"] = reason
         return None
 
-    return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders,
-                       hours=hours, fee_percentage=fee_percentage)
+    return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders, hours=hours)
     
 
 ORDER_OUTCOMES_LOG_DIR = "logger"

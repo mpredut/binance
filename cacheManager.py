@@ -23,6 +23,21 @@ from binance_api import bapi as api
 # de trend (CurrentPrice) trece prin acest singleton; trading-ul ramane pe bapi.
 import providers.market_api as _market_api
 
+# 30 iul: incarca parametrii tunabili din cachemanager_config.env (versionat,
+# se COMITE — fara secrete), acelasi tipar ca tradeall_config.env/
+# monitortrades_config.env/bapi_placeorder_config.env. botcore.load_dotenv NU
+# suprascrie variabile deja setate in mediul real, doar completeaza ce lipseste.
+from botcore import load_dotenv as _load_dotenv
+_load_dotenv("cachemanager_config.env")
+
+# Limitele ferestrei DINAMICE (30 iul) — vezi
+# CachePriceShortTrendManager.get_instant_trend_for_window. Sub minim, prea
+# putine esantioane pt o panta cu sens; peste maxim, cost de calcul nejustificat
+# (si oricum plafonat de Cache24PriceManager.KEEP_HOURS=24h — nu poti cere un
+# orizont mai lung decat ce se pastreaza).
+CM_DYNAMIC_WINDOW_MIN_SEC = float(os.environ.get("CM_DYNAMIC_WINDOW_MIN_SEC", "14.0"))
+CM_DYNAMIC_WINDOW_MAX_SEC = float(os.environ.get("CM_DYNAMIC_WINDOW_MAX_SEC", "21600.0"))
+
 #from log import PRINT_CONTEXT
 
 
@@ -813,11 +828,23 @@ class Cache24PriceManager(CacheManagerInterface):
                 self.cache[symbol] = entries[idx:]
 
     def get_recent_entries(self, symbol: str, last_seconds: float) -> list:
-        """Returnează intrările [ts_ms, price] din ultimele `last_seconds` secunde."""
+        """Returnează intrările [ts_ms, price] din ultimele `last_seconds` secunde.
+        30 iul: bisect in loc de list comprehension completa (era O(n) pe TOT
+        bufferul, indiferent de last_seconds — cu KEEP_HOURS=24 asta poate fi zeci
+        de mii de intrari, la fiecare apel). entries e append-only, crescator dupa
+        ts (garantat de on_price_update) -> bisect gaseste cutoff-ul in O(log n),
+        slice-ul in sine costa O(k) (k = ce se returneaza), nu O(n). Aceeasi iesire,
+        doar mai rapid — folosit acum si de fereastra dinamica (vezi
+        CachePriceShortTrendManager.get_instant_trend_for_window), unde poate fi
+        apelat mult mai des decat la pornirea proceselor (from_cache24, o singura
+        data per fereastra fixa)."""
         cutoff_ms = int((time.time() - last_seconds) * 1000)
         with self.lock:
             entries = self.cache.get(symbol, [])
-            return [e for e in entries if e[0] >= cutoff_ms]
+            if not entries:
+                return []
+            idx = bisect.bisect_left(entries, cutoff_ms, key=lambda e: e[0])
+            return entries[idx:]
 
     # ── CacheManagerInterface ─────────────────────────────────────────────────
 
@@ -1262,6 +1289,11 @@ class CachePriceShortTrendManager:
         self.windows = {}
         self.analyzers = {}
         self.current_price_mgr = None
+        # dict[symbol] -> Cache24PriceManager, setat de start_computation() — sursa
+        # bufferului brut pt fereastra DINAMICA (get_instant_trend_for_window).
+        # None pana la start_computation() -> fereastra dinamica indisponibila in
+        # acest proces (safe: metodele care o folosesc cad pe "necunoscut", nu crapa).
+        self._cache24_managers = None
         self._computing = False
         self._full_eval_thread = None
         self._flush_thread = None
@@ -1316,6 +1348,7 @@ class CachePriceShortTrendManager:
         if current_price_mgr is None:
             current_price_mgr = get_current_price_manager()
         self.current_price_mgr = current_price_mgr
+        self._cache24_managers = cache24_managers   # pt fereastra dinamica (vezi __init__)
         for s in self.symbols:
           try:
             c24 = cache24_managers[s]
@@ -1430,6 +1463,84 @@ class CachePriceShortTrendManager:
     def get_instant_trend(self, symbol):
         win = self.get_window(symbol)
         return win.get_instant_trend() if win else None
+
+    # ── Fereastra DINAMICA (30 iul) ────────────────────────────────────────────
+    # Cerere user: "sa pot dinamic sa cer trend pe x minute", cu un range maxim,
+    # calculat DOAR pe fereastra ceruta (nu precalculat pe cele 2 fixe de mai sus),
+    # optimizat pt viteza. Sursa: bufferul BRUT (ts, pret) deja tinut de Cache24
+    # (pana la 24h, vezi Cache24PriceManager.KEEP_HOURS) — nu construim un buffer
+    # nou, refolosim ce exista deja live. get_recent_entries e acum O(log n + k)
+    # (bisect, vezi mai sus), deci costul e proportional cu fereastra CERUTA
+    # (k = cate esantioane intra in ea), nu cu tot bufferul de 24h.
+    def get_instant_trend_for_window(self, symbol, window_seconds, now=None):
+        """Calculeaza trendul PE CERERE pe o fereastra arbitrara (secunde), in loc
+        de cele 2 fixe (window_seconds din constructor). Nu construieste un
+        PriceWindow (evita bookkeeping-ul incremental sorted_prices/deque, inutil
+        pt un calcul o-singura-data) — foloseste direct formula partajata
+        pw.instant_trend_from_prices() pe o felie din bufferul brut Cache24.
+
+        Returneaza un dict cu final_trend/growth_coefficient/slope_full/
+        gradient_recent/epsilon/n_samples/window_seconds, sau None daca:
+        - acest proces n-are Cache24 cablat (start_computation() nu a rulat aici —
+          normal pt un proces pur-cititor; vezi should_wait, care trateaza None
+          la fel ca "necunoscut" -> nu asteapta, executa imediat, NU cade);
+        - simbolul nu e urmarit de Cache24 in acest proces;
+        - prea putine esantioane in fereastra ceruta (< 3, nu poti calcula panta).
+
+        window_seconds e clamat silentios la [CM_DYNAMIC_WINDOW_MIN_SEC,
+        CM_DYNAMIC_WINDOW_MAX_SEC] — un apelant care cere 2 secunde sau 3 zile nu
+        crapa, primeste raspunsul la limita cea mai apropiata (cu print de avertizare)."""
+        if self._cache24_managers is None:
+            return None
+        c24 = self._cache24_managers.get(symbol)
+        if c24 is None:
+            return None
+
+        req = float(window_seconds)
+        clamped = min(max(req, CM_DYNAMIC_WINDOW_MIN_SEC), CM_DYNAMIC_WINDOW_MAX_SEC)
+        if clamped != req:
+            print(f"[get_instant_trend_for_window] {symbol}: window_seconds={req:.0f} "
+                  f"in afara [{CM_DYNAMIC_WINDOW_MIN_SEC:.0f}, {CM_DYNAMIC_WINDOW_MAX_SEC:.0f}] "
+                  f"-> clamat la {clamped:.0f}")
+
+        try:
+            entries = c24.get_recent_entries(symbol, last_seconds=clamped)
+        except Exception as e:
+            print(f"[get_instant_trend_for_window] {symbol}: get_recent_entries a esuat ({e})")
+            return None
+        if len(entries) < 3:
+            return None   # prea putine esantioane -> "necunoscut", nu o presupunere zgomotoasa
+
+        now = now if now is not None else time.time()
+        newest_ts_sec = entries[-1][0] / 1000.0
+        if now - newest_ts_sec > self.TREND_STALE_SEC:
+            return None   # ultimul tick e prea vechi -> tratat ca stale, la fel ca fresh_snapshot()
+
+        import numpy as np
+        import pricewindow as pw
+        prices = [e[1] for e in entries]
+        sample_rate = pw.PriceWindow._sample_rate_from_entries(entries)
+        final_trend, growth_coefficient, slope_full, gradient_recent = pw.instant_trend_from_prices(
+            prices, sample_rate)
+        epsilon = float(self.EPSILON_K * np.std(np.gradient(np.array(prices))))
+
+        return dict(final_trend=final_trend, growth_coefficient=growth_coefficient,
+                    slope_full=slope_full, gradient_recent=gradient_recent,
+                    epsilon=epsilon, n_samples=len(entries), window_seconds=clamped,
+                    sample_rate_sec=sample_rate, ts=now)
+
+    def is_trend_up_for_window(self, symbol, window_seconds, now=None):
+        """Varianta fereastra-configurabila a monitortrades.is_trend_up() — aceeasi
+        conditie (slope>0 sau slope==0 si gradient>0), calculata pe orice orizont
+        din [CM_DYNAMIC_WINDOW_MIN_SEC, CM_DYNAMIC_WINDOW_MAX_SEC], nu doar cel fix
+        (~3.7min) publicat azi in cache_instant_trend.json. False daca fereastra
+        dinamica e indisponibila (acelasi fallback neutru/sigur ca is_trend_up())."""
+        dyn = self.get_instant_trend_for_window(symbol, window_seconds, now=now)
+        if dyn is None:
+            return False
+        slope = dyn["gradient_recent"]
+        gradient = dyn["final_trend"]
+        return slope > 0 or (slope == 0 and gradient > 0)
 
     # ── Store cross-process (fișier JSON, atomic) ─────────────────────────────
     def _write_file(self):
@@ -1592,19 +1703,39 @@ class CachePriceShortTrendManager:
         blocate deloc, nici macar pana la un timeout mic. "Fara trend" != "asteapta
         un trend" — inseamna "nu am pe ce sa ma bazez, execut fara intarziere".
 
-        window_seconds: doar None (fereastra implicita, cea publicata azi) e
-        suportat LIVE deocamdata — pt alte orizonturi vezi DynamicReplayTrendSource
-        (backtest, research/monitortrades_backtest/replay_trend_source.py).
-        fast=True -> canalul RAPID (gradient_recent_fast, latenta mica);
-        False (implicit) -> canalul BOGAT (growth_coefficient).
+        window_seconds: None -> fereastra implicita PRECALCULATA (cea publicata
+        azi in cache_instant_trend.json, cea mai rapida — deja in memorie, zero
+        calcul suplimentar). Orice ALTA valoare (30 iul: implementat, era doar un
+        stub inainte — vezi CachePriceShortTrendManager.get_instant_trend_for_window)
+        -> calculata PE CERERE dintr-un buffer brut Cache24, clamata silentios la
+        [CM_DYNAMIC_WINDOW_MIN_SEC, CM_DYNAMIC_WINDOW_MAX_SEC]. Disponibila DOAR in
+        procesele care au rulat start_computation() (cacheManager.py, tradeall.py);
+        intr-un proces pur-cititor cade pe "necunoscut" -> False (nu asteapta),
+        NICIODATA nu crapa sau blocheaza un ordin din lipsa de infrastructura.
+        fast=True -> canalul RAPID (gradient_recent_fast, latenta mica) — se aplica
+        DOAR pt window_seconds=None; ignorat pt o fereastra custom (acolo se
+        foloseste mereu formula bogata, e literalmente ce calculeaza fereastra
+        dinamica). False (implicit) -> canalul BOGAT (growth_coefficient).
         use_noise_gate: True (implicit, comportament VECHI neschimbat pt fostul
         is_favorable_to_wait) -> zgomot (|g|<=eps) inseamna asteapta. Masurat
         empiric (29 iul, backtest cu istoric real) ca aceasta regula STRICA
         exact cazul "prinde primul semn slab de inversare" — apelanti noi pot
         trece use_noise_gate=False."""
+        side = side.upper()
+
         if window_seconds is not None and float(window_seconds) != self.window_seconds[0]:
-            print(f"[should_wait] window_seconds={window_seconds} nesuportat live "
-                  f"inca — folosesc fereastra implicita ({self.window_seconds[0]:.0f}s)")
+            dyn = self.get_instant_trend_for_window(symbol, window_seconds, now=now)
+            if dyn is None:
+                return False   # necunoscut (fara Cache24 in acest proces, sau prea putine date/stale)
+            g = float(dyn["growth_coefficient"] or 0.0)
+            if use_noise_gate and abs(g) <= dyn["epsilon"]:
+                return True
+            if side == "BUY":
+                return g < 0
+            if side == "SELL":
+                return g > 0
+            return False
+
         snap = self.fresh_snapshot(symbol, now=now)
         if snap is None:
             return False   # necunoscut/stale -> NU asteapta, executa imediat
@@ -1617,7 +1748,6 @@ class CachePriceShortTrendManager:
             eps = self._epsilon(snap)
             if abs(g) <= eps:
                 return True
-        side = side.upper()
         if side == "BUY":
             return g < 0
         if side == "SELL":
@@ -1625,17 +1755,21 @@ class CachePriceShortTrendManager:
         return False
 
     def wait_for_favorable_entry(self, side, symbol, max_wait_sec=10.0,
-                                 poll_sec=0.2, sleep_fn=time.sleep, mode="full"):
+                                 poll_sec=0.2, sleep_fn=time.sleep, mode="full",
+                                 window_seconds=None):
         """Blochează cât timp trendul e favorabil, până la max_wait_sec (implicit
         10s — redus 30 iul de la 1h, cerere user: "ordinul secundelor nu
         minutelor"). Apelantul real (bapi_placeorder.__place_order) transmite
         mereu propria valoare explicit, deci acest implicit conteaza doar pt
         apelanti directi (teste, alte scripturi). Heartbeat vizual (.) la ~1s.
-        Returnează secundele așteptate."""
+        window_seconds: forwardat la should_wait — None (implicit) foloseste
+        fereastra precalculata; orice alta valoare cere fereastra DINAMICA (vezi
+        get_instant_trend_for_window). Returnează secundele așteptate."""
         deadline = time.time() + max_wait_sec
         waited = 0.0
         next_dot = 1.0
-        while time.time() < deadline and self.should_wait(side, symbol, fast=(mode == "gradient")):
+        while time.time() < deadline and self.should_wait(
+                side, symbol, window_seconds=window_seconds, fast=(mode == "gradient")):
             sleep_fn(poll_sec)
             waited += poll_sec
             if waited >= next_dot:

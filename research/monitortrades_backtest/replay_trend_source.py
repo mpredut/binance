@@ -117,22 +117,11 @@ def _instant_trend_from_slice(prices: Sequence[float], sample_rate_sec: float
     """Aceeasi formula ca PriceWindow.get_instant_trend(), aplicata direct pe o
     lista de preturi (fara sa reconstruiesti un PriceWindow) — pt felii calculate
     PE CERERE dintr-un buffer brut. Intoarce (final_trend, growth_coefficient,
-    slope_full, gradient_recent), identic ca semnatura cu get_instant_trend()."""
-    if len(prices) < 2:
-        return 0, 0.0, 0.0, 0.0
-    analyzer = pw.PriceTrendAnalyzer(list(prices))
-    _, slope_full, _ = analyzer.linear_regression_trend()
-    if slope_full is None:
-        slope_full = 0.0
-    gradient_lst, _ = analyzer.calculate_gradient()
-    recent_n = max(2, int(pw.RECENT_GRADIENT_SECONDS / sample_rate_sec)) if sample_rate_sec > 0 else 2
-    if len(gradient_lst) >= recent_n:
-        gradient_recent = float(np.mean(gradient_lst[-recent_n:]))
-    else:
-        gradient_recent = float(np.mean(gradient_lst)) if len(gradient_lst) else 0.0
-    growth_coefficient = (slope_full + gradient_recent) / 2.0
-    final_trend = 1 if growth_coefficient > 0 else (-1 if growth_coefficient < 0 else 0)
-    return final_trend, growth_coefficient, slope_full, gradient_recent
+    slope_full, gradient_recent), identic ca semnatura cu get_instant_trend().
+    30 iul: subtire wrapper peste pw.instant_trend_from_prices() (sursa unica a
+    formulei, extrasa ca sa nu se duplice — acum si cacheManager.py foloseste
+    aceeasi functie pt fereastra dinamica live)."""
+    return pw.instant_trend_from_prices(prices, sample_rate_sec)
 
 
 class DynamicReplayTrendSource:

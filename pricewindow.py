@@ -76,6 +76,34 @@ class PriceTrendAnalyzer:
         return gradient, avg_gradient
 
 
+def instant_trend_from_prices(prices, sample_rate_sec):
+    """Formula EXACTA din PriceWindow.get_instant_trend(), aplicata direct pe o
+    listă de prețuri + rata de eșantionare — fără să construiești un PriceWindow
+    întreg (evită bookkeeping-ul incremental sorted_prices/deque din process_price,
+    inutil pentru un calcul o-singură-dată pe o felie brută). Sursă UNICĂ a
+    formulei (30 iul, extrasă din duplicarea PriceWindow.get_instant_trend() /
+    research/monitortrades_backtest/replay_trend_source._instant_trend_from_slice)
+    — orice consumator de ferestre AD-HOC (cacheManager fereastră dinamică,
+    backtest replay) delegă aici.
+
+    Returnează (final_trend, growth_coefficient, slope_full, gradient_recent)."""
+    if len(prices) < 2:
+        return 0, 0.0, 0.0, 0.0
+    analyzer = PriceTrendAnalyzer(list(prices))
+    _, slope_full, _ = analyzer.linear_regression_trend()
+    if slope_full is None:
+        slope_full = 0.0
+    gradient_lst, _ = analyzer.calculate_gradient()
+    recent_n = max(2, int(RECENT_GRADIENT_SECONDS / sample_rate_sec)) if sample_rate_sec > 0 else 2
+    if len(gradient_lst) >= recent_n:
+        gradient_recent = float(np.mean(gradient_lst[-recent_n:]))
+    else:
+        gradient_recent = float(np.mean(gradient_lst)) if len(gradient_lst) else 0.0
+    growth_coefficient = (slope_full + gradient_recent) / 2.0
+    final_trend = 1 if growth_coefficient > 0 else (-1 if growth_coefficient < 0 else 0)
+    return final_trend, growth_coefficient, slope_full, gradient_recent
+
+
 class PriceWindow:
     def __init__(self, symbol, window_size, sample_rate_sec=None, initial_prices=None,
                  window_seconds=None):
@@ -250,34 +278,18 @@ class PriceWindow:
         return float(k * np.std(grad))
 
     def get_instant_trend(self):
-        """Returnează (final_trend, growth_coefficient, slope_full, gradient_recent)."""
+        """Returnează (final_trend, growth_coefficient, slope_full, gradient_recent).
+        30 iul: deleagă la instant_trend_from_prices() (sursa unică a formulei) —
+        aceeași ieșire ca înainte, doar fără duplicarea codului."""
         with self._lock:
             prices_snapshot = list(self.prices)
-        analyzer = PriceTrendAnalyzer(prices_snapshot)
-
-        _, slope_full, _ = analyzer.linear_regression_trend()
-        if slope_full is None:
-            slope_full = 0.0
-
-        gradient_lst, _ = analyzer.calculate_gradient()
-        n = self.recent_n
-        if len(gradient_lst) >= n:
-            gradient_recent = float(np.mean(gradient_lst[-n:]))
-        else:
-            gradient_recent = float(np.mean(gradient_lst)) if len(gradient_lst) else 0.0
+        final_trend, growth_coefficient, slope_full, gradient_recent = instant_trend_from_prices(
+            prices_snapshot, self.sample_rate_sec)
 
         print(
             f"[{self.symbol}] slope_full={slope_full:.4f} "
-            f"gradient_recent={gradient_recent:.4f} (recent_n={n}, rate={self.sample_rate_sec:.2f}s)"
+            f"gradient_recent={gradient_recent:.4f} (recent_n={self.recent_n}, rate={self.sample_rate_sec:.2f}s)"
         )
-
-        growth_coefficient = (slope_full + gradient_recent) / 2.0
-        if growth_coefficient > 0:
-            final_trend = 1
-        elif growth_coefficient < 0:
-            final_trend = -1
-        else:
-            final_trend = 0
 
         return final_trend, growth_coefficient, slope_full, gradient_recent
 
