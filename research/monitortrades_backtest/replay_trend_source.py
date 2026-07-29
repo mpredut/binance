@@ -33,7 +33,10 @@ foloseste ce i se potriveste):
 """
 from __future__ import annotations
 
-from typing import Dict, Optional
+from collections import deque
+from typing import Dict, List, Optional, Sequence, Tuple
+
+import numpy as np
 
 import pricewindow as pw
 
@@ -88,3 +91,127 @@ class ReplayTrendSource:
         slope = gradient_recent
         gradient = final_trend
         return slope > 0 or (slope == 0 and gradient > 0)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Prototip (29 iul, idee user): fereastra mica CONFIRMABILA si DINAMICA — in loc
+# de o singura fereastra FIXA (3.7 min, aleasa empiric de user din observatii),
+# is_trend_up(symbol, timeout) accepta ORICE durata din rangul mic (14-30s pana
+# la 9-11 min), calculata PE CERERE dintr-un buffer BRUT (ts, pret) — nu N
+# ferestre PriceWindow precalculate pe bucket-uri fixe. "Confirmabil" = verifici
+# acordul intre mai multe timeout-uri din rang inainte sa declari trend, in loc
+# sa te bazezi pe un singur esantion (acelasi principiu ca marja/confirmarea pe
+# 2 ferestre deja folosita peste tot in backtest-urile din sesiune).
+#
+# NEDECIS INCA (de validat empiric, nu presupus): daca "confirmare pe mai multe
+# timeout-uri" chiar bate o singura fereastra bine aleasa (3.7 min e deja
+# empiric validat de user) — de comparat direct pe date reale inainte de orice
+# concluzie.
+# ──────────────────────────────────────────────────────────────────────────────
+
+SMALL_TIMEOUT_RANGE_SEC = (14.0, 11 * 60.0)   # 14s - 11 min (user, 29 iul)
+
+
+def _instant_trend_from_slice(prices: Sequence[float], sample_rate_sec: float
+                               ) -> Tuple[int, float, float, float]:
+    """Aceeasi formula ca PriceWindow.get_instant_trend(), aplicata direct pe o
+    lista de preturi (fara sa reconstruiesti un PriceWindow) — pt felii calculate
+    PE CERERE dintr-un buffer brut. Intoarce (final_trend, growth_coefficient,
+    slope_full, gradient_recent), identic ca semnatura cu get_instant_trend()."""
+    if len(prices) < 2:
+        return 0, 0.0, 0.0, 0.0
+    analyzer = pw.PriceTrendAnalyzer(list(prices))
+    _, slope_full, _ = analyzer.linear_regression_trend()
+    if slope_full is None:
+        slope_full = 0.0
+    gradient_lst, _ = analyzer.calculate_gradient()
+    recent_n = max(2, int(pw.RECENT_GRADIENT_SECONDS / sample_rate_sec)) if sample_rate_sec > 0 else 2
+    if len(gradient_lst) >= recent_n:
+        gradient_recent = float(np.mean(gradient_lst[-recent_n:]))
+    else:
+        gradient_recent = float(np.mean(gradient_lst)) if len(gradient_lst) else 0.0
+    growth_coefficient = (slope_full + gradient_recent) / 2.0
+    final_trend = 1 if growth_coefficient > 0 else (-1 if growth_coefficient < 0 else 0)
+    return final_trend, growth_coefficient, slope_full, gradient_recent
+
+
+class DynamicReplayTrendSource:
+    """Buffer BRUT (ts, pret) per simbol, acoperind max(timeouts folosite) —
+    in loc de o fereastra PriceWindow FIXA. is_trend_up_at(symbol, timeout_sec)
+    taie bufferul la ultimele timeout_sec si calculeaza formula PE CERERE (nu
+    precalculat) — orice timeout din rang, nu doar bucket-uri fixe."""
+
+    def __init__(self, symbols, max_timeout_sec: float = SMALL_TIMEOUT_RANGE_SEC[1]):
+        self.max_timeout_sec = float(max_timeout_sec)
+        self._buf: Dict[str, deque] = {s: deque() for s in symbols}   # [(ts, price), ...] crescator
+
+    def advance(self, symbol: str, ts: float, price: float) -> None:
+        buf = self._buf.get(symbol)
+        if buf is None:
+            return
+        buf.append((ts, price))
+        cutoff = ts - self.max_timeout_sec
+        while buf and buf[0][0] < cutoff:
+            buf.popleft()
+
+    def _slice(self, symbol: str, timeout_sec: float) -> List[Tuple[float, float]]:
+        buf = self._buf.get(symbol)
+        if not buf:
+            return []
+        cutoff = buf[-1][0] - timeout_sec
+        return [(t, p) for t, p in buf if t >= cutoff]
+
+    def _prices_and_rate(self, symbol: str, timeout_sec: float) -> Tuple[List[float], float]:
+        pts = self._slice(symbol, timeout_sec)
+        if len(pts) < 2:
+            return [], pw.DEFAULT_SAMPLE_RATE_SEC
+        timestamps = [t for t, _ in pts]
+        prices = [p for _, p in pts]
+        gaps = [timestamps[i + 1] - timestamps[i] for i in range(len(timestamps) - 1)
+                if timestamps[i + 1] > timestamps[i]]
+        sample_rate = float(np.median(gaps)) if gaps else pw.DEFAULT_SAMPLE_RATE_SEC
+        return prices, sample_rate
+
+    def is_trend_up_at(self, symbol: str, timeout_sec: float) -> bool:
+        """is_trend_up(timeout) — cere idea user: fereastra mica DINAMICA, orice
+        durata din rang (14s-11min), nu doar 3.7min fix."""
+        prices, sample_rate = self._prices_and_rate(symbol, timeout_sec)
+        if len(prices) < 2:
+            return False
+        final_trend, _gc, _slope_full, gradient_recent = _instant_trend_from_slice(prices, sample_rate)
+        return gradient_recent > 0 or (gradient_recent == 0 and final_trend > 0)
+
+    def is_trend_up_confirmed(self, symbol: str, timeouts_sec: Sequence[float],
+                               min_agree: Optional[int] = None) -> bool:
+        """"Confirmabil": True doar daca cel putin `min_agree` din timeout-urile
+        date sunt de acord ca trendul e sus (implicit min_agree=toate — cel mai
+        strict). Raspuns la ideea user: nu te baza pe UN singur esantion zgomotos."""
+        votes = [self.is_trend_up_at(symbol, t) for t in timeouts_sec]
+        threshold = min_agree if min_agree is not None else len(timeouts_sec)
+        return sum(votes) >= threshold
+
+    def should_wait(self, symbol: str, side: str, timeout_sec: float, epsilon_k: float = 1.0) -> bool:
+        """Oglinda EXACTA a cacheManager.CachePriceShortTrendManager.is_favorable_to_wait
+        (live) — True = ASTEAPTA (nu inca un moment bun sa executi o intentie de
+        BUY/SELL in coada), False = OK, executa acum. BUY asteapta cat pretul
+        SCADE, plaseaza cand urca clar; SELL invers. Zgomot (|g|<=eps) -> asteapta
+        claritate. Raspuns la ideea user (29 iul): protejeaza intentiile de
+        BUY/SELL aflate in reincercare (retry) — nu refira orbeste la interval
+        fix, amana pana la primul semnal scurt de inversare (varf/prag)."""
+        prices, _sample_rate = self._prices_and_rate(symbol, timeout_sec)
+        if len(prices) < 3:
+            return True   # date insuficiente -> comportament sigur: asteapta
+        arr = np.array(prices)
+        grad = np.gradient(arr)
+        eps = float(epsilon_k * np.std(grad))
+        _final_trend, growth_coefficient, _slope_full, _gradient_recent = \
+            _instant_trend_from_slice(prices, _sample_rate)
+        g = growth_coefficient
+        if abs(g) <= eps:
+            return True
+        side = side.upper()
+        if side == "BUY":
+            return g < 0
+        if side == "SELL":
+            return g > 0
+        return False

@@ -31,6 +31,8 @@ import tradeall as ta  # reutilizam PriceWindow/WindowAnalyzer/TrendState/logic 
 # TrendState(now_fn=...) ca fast-forward sa fie corect (A5). Alias
 # `_SimClock` pastrat pt orice referinta externa existenta (research/*.py).
 from providers.replay_clock import SimClock as _SimClock  # noqa: F401
+sys.path.insert(0, os.path.join(ROOT, "research", "monitortrades_backtest"))
+from replay_trend_source import DynamicReplayTrendSource  # noqa: E402
 
 
 def _sanitize(value):
@@ -50,7 +52,8 @@ class BacktestBroker:
     scrie in propriul folder de backtest, acelasi format pipe ca order_outcomes
     live (Pas A2) — asa incat tradeall_observe.py sa il poata randa identic.
     Tine si CONTABILITATE P&L: pozitie, cost mediu, realizat, comisioane."""
-    def __init__(self, out_dir, clock):
+    def __init__(self, out_dir, clock, trend_gate=None, trend_gate_timeout_sec=None,
+                 trend_gate_max_wait_sec=3600.0):
         self.clock = clock
         self.path = os.path.join(out_dir, "order_outcomes.log")
         self.n_buy = self.n_sell = 0
@@ -59,13 +62,21 @@ class BacktestBroker:
         self.realized = 0.0       # profit/pierdere realizata (fara fee)
         self.fees = 0.0
         self.last_price = None
+        # 29 iul (idee user): gate de "asteapta un pret mai bun". FIDEL cu live
+        # (bapi_placeorder.__place_order -> _maybe_wait_trend -> wait_for_favorable_entry):
+        # gate-ul NU blocheaza ordinul, doar il INTARZIE pana la un tick favorabil
+        # (sau pana la max_wait, apoi plaseaza oricum). Efectul pe P&L = pret de
+        # intrare/iesire mai bun, NU tranzactii evitate. Ordinele amanate stau in
+        # self.pending si se executa pe tick-urile viitoare (process_pending, chemat
+        # din bucla principala). trend_gate=None => OFF (comportament vechi).
+        self.trend_gate = trend_gate
+        self.trend_gate_timeout_sec = trend_gate_timeout_sec
+        self.trend_gate_max_wait_sec = float(trend_gate_max_wait_sec)
+        self.pending = []          # [{side, symbol, qty_arg, motivation, deadline}]
+        self.n_waited = 0          # cate ordine au fost intarziate (apoi executate)
 
-    def place_order_smart(self, order_type, symbol, price, qty=None, motivation=None, **kwargs):
-        # 21 iul: place_order_smart REAL are acum qty=None implicit ("orice cantitate
-        # permite apply_weight_limit") — _fire_order nu mai transmite deloc qty pt
-        # calea normala (logic()/logic_small()), doar kalman_primary/buy&hold il
-        # transmit explicit aici mai jos. Fara acest fallback, orice BUY/SELL venit
-        # din model_actual (fara kalman-primary) pica cu TypeError la primul semnal.
+    def _execute(self, order_type, symbol, price, qty=None, motivation=None):
+        """Contabilitatea P&L reala (fara gate) — folosita direct sau dupa asteptare."""
         price = float(price)
         if qty is None:
             qty = BACKTEST_NOTIONAL_USD / price
@@ -91,6 +102,40 @@ class BacktestBroker:
             f.write("|".join(_sanitize(c) for c in cols) + "\n")
         return {"orderId": -1, "backtest": True}   # obiect truthy, ca in "if order:" din logic()
 
+    def place_order_smart(self, order_type, symbol, price, qty=None, motivation=None, **kwargs):
+        # Gate-ul se aplica NECONDITIONAT (si la force=True) — user (29 iul, "gatul
+        # e binevenit mereu"), consistent cu live. Daca directia NU e inca favorabila,
+        # INTARZIE (nu blocheaza): inregistreaza ordinul in pending, il executa la
+        # primul tick favorabil (sau la expirarea max_wait). Ca la live, apelantul
+        # (tradeall) primeste un rezultat truthy imediat -> marcheaza fire confirmat,
+        # exact ca dupa un wait_for_favorable_entry care se termina cu plasare.
+        if (self.trend_gate is not None
+                and self.trend_gate.should_wait(symbol, order_type, self.trend_gate_timeout_sec)):
+            self.pending.append({
+                "side": order_type, "symbol": symbol, "qty_arg": qty,
+                "motivation": motivation, "deadline": self.clock() + self.trend_gate_max_wait_sec})
+            self.n_waited += 1
+            return {"orderId": -1, "backtest": True, "pending": True}   # truthy, ca la live dupa wait
+        return self._execute(order_type, symbol, price, qty, motivation)
+
+    def process_pending(self, symbol, ts, price):
+        """Executa ordinele intarziate care au devenit favorabile SAU au expirat
+        (max_wait), la pretul tick-ului curent. Chemat pe FIECARE tick din bucla."""
+        if not self.pending:
+            return
+        still = []
+        for o in self.pending:
+            if o["symbol"] != symbol:
+                still.append(o)
+                continue
+            favorable = not self.trend_gate.should_wait(symbol, o["side"], self.trend_gate_timeout_sec)
+            expired = ts >= o["deadline"]
+            if favorable or expired:
+                self._execute(o["side"], symbol, price, o["qty_arg"], o["motivation"])
+            else:
+                still.append(o)
+        self.pending = still
+
     def sell_all(self, symbol, price, motivation):
         if self.pos_qty <= 1e-12:
             return None
@@ -103,7 +148,8 @@ class BacktestBroker:
         return {"buys": self.n_buy, "sells": self.n_sell,
                 "realized": round(self.realized, 2), "fees": round(self.fees, 2),
                 "open_qty": round(self.pos_qty, 6), "mark_to_market": round(m2m, 2),
-                "net_total": round(self.realized + m2m - self.fees, 2)}
+                "net_total": round(self.realized + m2m - self.fees, 2),
+                "n_waited": self.n_waited}
 
 
 def make_decision_logger(out_dir, clock):
@@ -181,7 +227,8 @@ def load_ticks_cache24(symbol, start_ts, end_ts, filename=None):
 
 
 def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=None, quiet=False,
-                 kalman_primary=False, threshold_provider=None):
+                 kalman_primary=False, threshold_provider=None, trend_gate_timeout_sec=None,
+                 trend_gate_max_wait_sec=3600.0):
     """threshold_provider OPTIONAL (default None = comportament VECHI, neschimbat:
     foloseste ta.PRICE_CHANGE_THRESHOLD_EUR/_BIG_EUR fixe). Daca dat, e un callable
     threshold_provider(window_small, window_big) -> (thr_small, thr_big), apelat la
@@ -209,8 +256,15 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
         # sys.stderr.write, care ramane vizibil).
         ta.log.disable_print()
 
+    # 29 iul (idee user): gate de "asteapta un moment favorabil" pt intentiile de
+    # BUY/SELL in reincercare — DynamicReplayTrendSource izolat (nu atinge
+    # cache_instant_trend.json), alimentat tick-cu-tick mai jos, in bucla principala.
+    trend_gate = DynamicReplayTrendSource([symbol]) if trend_gate_timeout_sec is not None else None
+
     clock = _SimClock()
-    broker = BacktestBroker(out_dir, clock)
+    broker = BacktestBroker(out_dir, clock, trend_gate=trend_gate,
+                            trend_gate_timeout_sec=trend_gate_timeout_sec,
+                            trend_gate_max_wait_sec=trend_gate_max_wait_sec)
     if kalman_primary:
         # MODUL KALMAN-PRIMAR: modelul vechi doar JURNALIZEAZA (ordinele lui nu
         # se executa); broker-ul e condus exclusiv de tranzitiile Kalman.
@@ -270,6 +324,9 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
                 window_big.set_sample_rate(dt)
             window_small.process_price(price)
             window_big.process_price(price)
+            if trend_gate is not None:
+                trend_gate.advance(symbol, ts, price)
+                broker.process_pending(symbol, ts, price)   # executa ordine intarziate devenite favorabile
             price_f.write(f"{ts}|{symbol}|{price}\n")
 
             if threshold_provider is not None:
@@ -375,6 +432,13 @@ def main():
     p.add_argument("--kalman-primary", action="store_true",
                    help="Kalman conduce (BUY la ->UP, SELL tot la ->DOWN); modelul vechi doar "
                         "jurnalizeaza. Pentru A/B pe P&L fata de rularea normala.")
+    p.add_argument("--trend-gate-timeout-sec", type=float, default=None,
+                   help="29 iul: gate 'asteapta un pret mai bun' pt BUY/SELL (fidel live: "
+                        "INTARZIE pana la tick favorabil, NU blocheaza). Fereastra SCURTA "
+                        "dinamica de trend. Implicit None = OFF (comportament vechi).")
+    p.add_argument("--trend-gate-max-wait-sec", type=float, default=3600.0,
+                   help="cat asteapta max un ordin intarziat inainte sa se plaseze oricum "
+                        "(implicit 3600 = valoarea live).")
     args = p.parse_args()
 
     start_ts = datetime.strptime(args.start, "%Y-%m-%d").timestamp()
@@ -382,7 +446,9 @@ def main():
     run_id = args.run_id or f"{args.symbol}_{args.start}_{int(time.time())}"
 
     run_backtest(args.symbol, start_ts, end_ts, args.speed, run_id, args.source, args.cache24_file,
-                 args.quiet, kalman_primary=args.kalman_primary)
+                 args.quiet, kalman_primary=args.kalman_primary,
+                 trend_gate_timeout_sec=args.trend_gate_timeout_sec,
+                 trend_gate_max_wait_sec=args.trend_gate_max_wait_sec)
 
 
 if __name__ == "__main__":
