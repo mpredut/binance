@@ -105,9 +105,18 @@ class Instrument:
 
         reason = None
         order = None
+        # 30 iul, fix: `safeback_seconds` e chiar parametrul pe care monitortrades.py
+        # (sbs=MT_GUARD_WINDOW_DAYS zile, implicit 12) si tradeall.py (14 zile) il
+        # SUPRASCRIU explicit la fiecare apel real — defaultul din config (48h) e
+        # aproape niciodata folosit efectiv pe Binance. instruments.conf are deja
+        # [KRAKEN_HYPE] enabled=yes sub "mt" -> acelasi `sbs` (12-14 zile) ar trebui
+        # sa se aplice IDENTIC si acolo, nu doar la Binance. NU se scoate din kwargs
+        # (ramane si pt provider.place_order(), desi Kraken/HL il ignora azi).
+        safeback_override = kwargs.get("safeback_seconds")
         try:
             # 1. PLAFON ZILNIC + ANTI-SPAM (agnostic) — NU sarit de bypass_profit_guard.
-            ok, reason = order_guard.daily_limit_guard(self._provider, self.symbol, side_u)
+            ok, reason = order_guard.daily_limit_guard(self._provider, self.symbol, side_u,
+                                                       safeback_sec=safeback_override)
             if not ok:
                 return None
 

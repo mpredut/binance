@@ -120,6 +120,28 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         lines = self._log_lines()
         self.assertTrue(any("|refused|daily_limit|" in l for l in lines), lines)
 
+    def test_safeback_seconds_default_window_misses_old_trades(self):
+        # 30 iul, fix: monitortrades.py (sbs=MT_GUARD_WINDOW_DAYS, implicit 12 ZILE) si
+        # tradeall.py (14 zile) suprascriu safeback_seconds la fiecare apel real — defaultul
+        # din config (48h) e aproape niciodata folosit efectiv. instruments.conf are deja
+        # [KRAKEN_HYPE] enabled=yes sub "mt", deci acelasi sbs se aplica si acolo.
+        p = _FakeProvider()
+        inst = self._inst(p)
+        for _ in range(60):
+            p.seed_trade("BUY", age_sec=5 * 24 * 3600)   # 5 zile in urma -> AFARA din 48h implicit
+        order = inst.place("BUY", 100.0, 1.0)   # fara override -> defaultul (48h) nu le vede
+        self.assertIsNotNone(order)
+
+    def test_safeback_seconds_override_sees_older_trades_and_blocks(self):
+        p = _FakeProvider()
+        inst = self._inst(p)
+        # 351 tranzactii, ca sa depaseasca 25/zi pe o fereastra de 14 zile (25*14=350).
+        for _ in range(351):
+            p.seed_trade("BUY", age_sec=5 * 24 * 3600)   # 5 zile in urma
+        # override explicit de 14 zile (identic cu tradeall.py: d=14, h=24) -> ACUM le vede -> blocat
+        order = inst.place("BUY", 100.0, 1.0, safeback_seconds=14 * 24 * 3600 + 60)
+        self.assertIsNone(order)
+
     def test_recent_transaction_blocks(self):
         p = _FakeProvider()
         p.seed_trade("BUY", age_sec=5.0)   # acum 5s, sub pragul implicit de 180s
