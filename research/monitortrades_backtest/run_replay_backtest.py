@@ -168,11 +168,25 @@ def run_symbol(symbol, params, base, quiet=True, trend_window_seconds=DEFAULT_WI
 
     result = dict(symbol=symbol, ticks=n_ticks, seeds=n_seeds, buys=len(all_buys), sells=len(all_sells),
                   net=round(net, 2), buy_hold=round(buy_hold_net, 2),
-                  first_price=first_price, last_price=last_price)
+                  first_price=first_price, last_price=last_price,
+                  trend_window_sec=trend_window_seconds)
     sys.stderr.write(f"[{symbol}] REZULTAT: {result}\n")
     return result
 
 
 if __name__ == "__main__":
-    for symbol, cfg in SYMBOLS.items():
-        run_symbol(symbol, cfg["params"], cfg["base"])
+    import argparse
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--symbol", choices=list(SYMBOLS._SECTIONS), default=None,
+                     help="ruleaza DOAR acest simbol (implicit: BTCUSDC + TAOUSDC)")
+    ap.add_argument("--trend-window-sec", type=float, default=DEFAULT_WINDOW_SECONDS,
+                     help=f"orizontul ferestrei pt ReplayTrendSource (secunde), implicit "
+                          f"{DEFAULT_WINDOW_SECONDS:.0f}s (~instant, 3.7min, ce citeste "
+                          f"is_trend_up() azi pe live). Pt teste A/B: mic 60-420 (1-7 min), "
+                          f"mediu 5400-21600 (1.5-6h, ca slope_big al lui tradeall).")
+    args = ap.parse_args()
+
+    targets = [args.symbol] if args.symbol else list(SYMBOLS._SECTIONS)
+    for symbol in targets:
+        cfg = SYMBOLS[symbol]
+        run_symbol(symbol, cfg["params"], cfg["base"], trend_window_seconds=args.trend_window_sec)
