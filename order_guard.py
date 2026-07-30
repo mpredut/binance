@@ -22,12 +22,22 @@ _MARGINS = None   # cache: {provider_lower: procent, "default": 1.15}
 
 
 def _load_margins():
-    """Citeste order_guard.conf (o data, cache-uit). Linii `provider = procent`, '#' comentariu.
-    Fail-safe: lipsa fisier / parse invalid -> {'default': 1.15}."""
+    """Citeste order_guard.conf (o data, cache-uit). Linii `cheie = valoare`, '#' comentariu.
+    order_guard.conf e SURSA UNICA de adevar pt aceste valori. Dictionarul de mai jos e
+    DOAR plasa de siguranta daca un rand lipseste din conf (ex. fisier trunchiat) — un
+    SINGUR loc cu fallback-uri, ca sa NU existe valori 'default' imprastiate/duplicate prin
+    functiile de mai jos (cerere user: sa nu fie confuzie intre valoarea reala din conf si
+    un shadow hardcodat). Daca modifici o valoare, schimb-o in order_guard.conf, nu aici."""
     global _MARGINS
     if _MARGINS is not None:
         return _MARGINS
-    m = {"default": 1.15}
+    m = {
+        "default": 1.15,                       # prag profit (%) fallback
+        "default_window_h": 0.0,               # fereastra gard profit (ore); 0 = doar last_opposite_fill
+        "default_max_daily_trades": 25,        # plafon tranzactii/zi
+        "default_safeback_sec": 48 * 3600 + 60,  # fereastra cautare tranzactii proprii (sec)
+        "default_recent_transaction_sec": 180,   # anti-spam (sec)
+    }
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "order_guard.conf")
     try:
         with open(path) as f:
@@ -60,7 +70,7 @@ def window_for(provider_name):
     `<venue>_window_h` in conf). 0 = fara tier time-windowed (doar last_opposite_fill)."""
     m = _load_margins()
     key = (provider_name or "").lower() + "_window_h"
-    hours = m.get(key, m.get("default_window_h", 0.0))
+    hours = m.get(key, m["default_window_h"])
     return float(hours) * 3600.0
 
 
@@ -138,26 +148,27 @@ def weight_limit(provider, symbol, order_type, price, required_qty, base=None, q
 
 
 def max_daily_trades_for(provider_name):
-    """Plafonul de tranzactii/zi pt un venue (fallback 'default_max_daily_trades' = 25)."""
+    """Plafonul de tranzactii/zi pt un venue (din order_guard.conf; fallback in seed-ul
+    din _load_margins). Valoarea o schimbi in order_guard.conf, nu aici."""
     m = _load_margins()
     key = (provider_name or "").lower() + "_max_daily_trades"
-    return int(m.get(key, m.get("default_max_daily_trades", 25)))
+    return int(m.get(key, m["default_max_daily_trades"]))
 
 
 def safeback_sec_for(provider_name):
     """Fereastra (SECUNDE) in care se cauta tranzactii pt plafonul zilnic, per venue
-    (fallback 'default_safeback_sec' = 48h+60s)."""
+    (din order_guard.conf; fallback in seed-ul din _load_margins)."""
     m = _load_margins()
     key = (provider_name or "").lower() + "_safeback_sec"
-    return float(m.get(key, m.get("default_safeback_sec", 48 * 3600 + 60)))
+    return float(m.get(key, m["default_safeback_sec"]))
 
 
 def recent_transaction_sec_for(provider_name):
     """Fereastra anti-spam (SECUNDE): refuza un ordin nou pe acelasi symbol+side daca a
-    mai fost unul recent, per venue (fallback 'default_recent_transaction_sec' = 180)."""
+    mai fost unul recent, per venue (din order_guard.conf; fallback in seed-ul _load_margins)."""
     m = _load_margins()
     key = (provider_name or "").lower() + "_recent_transaction_sec"
-    return float(m.get(key, m.get("default_recent_transaction_sec", 180)))
+    return float(m.get(key, m["default_recent_transaction_sec"]))
 
 
 def daily_limit_guard(provider, symbol, order_type, max_daily_trades=None,
