@@ -10,7 +10,13 @@ from threading import Thread, Timer
 
 import symbols as sym
 from binance_api import bapi as api
-from binance_api import bapi_placeorder as po
+from providers.market_api import api as _mkt   # proxy unic guardat (30 iul)
+
+def _legacy_place(side, symbol, price, qty, **kw):
+    """Shim compat pt codul LEGACY (nefolosit in flota — vezi monitortrades.py):
+    pastreaza ordinea (side, symbol, ...) pe care o folosesc apelurile de mai jos
+    (inclusiv thread targets), ruteaza prin proxy-ul unic guardat mkt.place()."""
+    return _mkt.place(symbol, side, price, qty, **kw)
 from binance_api import bapi_trades as apitrades
 from binance_api import bapi_allorders as apiorders
 import utils as u
@@ -91,7 +97,7 @@ def sell_order_gradually(order, start_time, end_time):
             print(f"Anulat ordinul anterior cu ID: {order_id}")
 
         # Plasam ordinul de vanzare
-        new_order = po.place_safe_order("SELL", symbol, target_price, filled_quantity)
+        new_order = _legacy_place("SELL", symbol, target_price, filled_quantity)
         if new_order:
             order_id = new_order['orderId']
             print(f"Plasat ordin de vanzare la pretul {target_price:.2f}. New Order ID: {order_id}")
@@ -178,7 +184,7 @@ def monitor_close_orders_by_age1(maxage_trade_s):
             print(f"Pretul curent ({current_price}) este cu 4% mai mare decat pretul de cumparare ({filled_price}). Initiem vanzarea.cantitate{quantity}")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=po.place_safe_order,
+            thread = threading.Thread(target=_legacy_place,
                 name="sell_monitor_close_orders_by_age1",
                 args=("SELL", symbol, current_price + 200, quantity))
             #sell_order_gradually, args=(order, current_time, end_time))
@@ -203,7 +209,7 @@ def monitor_close_orders_by_age1(maxage_trade_s):
             print(f"Pretul curent ({current_price}) este cu 4% mai mic decat pretul de vanzare ({filled_price}). Initiem cumpararea.cantitate{quantity}.")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=po.place_safe_order,
+            thread = threading.Thread(target=_legacy_place,
                 name="buy_monitor_close_orders_by_age1",
                 args=("BUY", symbol, current_price - 200, quantity))
             #sell_order_gradually, args=(order, current_time, end_time))
@@ -256,7 +262,7 @@ def monitor_close_orders_by_age2(maxage_trade_s):
             print(f"Pretul curent ({current_price}) este cu {procent_scazut:.2f}% mai mare decat pretul de cumparare ({filled_price}). Initiem vanzarea. Cantitate: {quantity}")
             
             # Pornim un fir nou pentru a vinde BTC-ul
-            thread = threading.Thread(target=po.place_safe_order,
+            thread = threading.Thread(target=_legacy_place,
                 name="monitor_close_orders_by_age2",
                 args=("SELL", symbol, current_price + 200, quantity))
             thread.start()
@@ -283,7 +289,7 @@ def monitor_close_orders_by_age2(maxage_trade_s):
             print(f"Pretul curent ({current_price}) este cu {procent_scazut:.2f}% mai mic decat pretul de vanzare ({filled_price}). Initiem cumpararea. Cantitate: {quantity}")
             
             # Pornim un fir nou pentru a cumpara BTC-ul
-            thread = threading.Thread(target=po.place_safe_order, 
+            thread = threading.Thread(target=_legacy_place, 
             name="monitor_close_orders_by_age2",
             args=("BUY", symbol, current_price - 200, quantity))
             thread.start()
@@ -477,7 +483,7 @@ def apply_sell_orders(trades, days, force_sell):
 
         # Verificam daca numarul de ordine a depasit 8
         if placed_order_count < 6:
-            new_sell_order_id = po.place_safe_order("SELL", symbol, sell_price, trade.qty)
+            new_sell_order_id = _legacy_place("SELL", symbol, sell_price, trade.qty)
             trade.sell_order_id = new_sell_order_id
             placed_order_count += 1
         else:
@@ -494,7 +500,7 @@ def apply_sell_orders(trades, days, force_sell):
         average_sell_price = total_weighted_price / total_quantity
         print(f"Total: Cantitate {total_quantity}, Pret {average_sell_price}")
         #quantity = min(api.get_asset_info("SELL", symbol), total_quantity)
-        new_sell_order_id = po.place_safe_order("SELL", symbol, average_sell_price, total_quantity)
+        new_sell_order_id = _legacy_place("SELL", symbol, average_sell_price, total_quantity)
         #trade.sell_order_id = new_sell_order_id
         
 
