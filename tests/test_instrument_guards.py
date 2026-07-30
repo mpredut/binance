@@ -110,11 +110,12 @@ class InstrumentGuardsTestCase(unittest.TestCase):
     def test_daily_limit_blocks_after_threshold(self):
         p = _FakeProvider()
         inst = self._inst(p)
-        # backdays = math.ceil(48h/86400) = 3 zile (rotunjit in SUS, ca la Binance) ->
-        # prag 25*3=75; 90 tranzactii vechi (>3min, sub pragul anti-spam) il depasesc.
+        # safeback explicit (48h) ca testul sa fie independent de defaultul din config
+        # (schimbat 30 iul la 14 zile). backdays = ceil(48h/86400) = 3 -> prag 25*3=75;
+        # 90 tranzactii vechi (>3min, sub pragul anti-spam) il depasesc.
         for _ in range(90):
             p.seed_trade("BUY", age_sec=4000.0)
-        order = inst.place("BUY", 100.0, 1.0)
+        order = inst.place("BUY", 100.0, 1.0, safeback_seconds=48 * 3600 + 60)
         self.assertIsNone(order)
         self.assertEqual(p.placed, [])
         lines = self._log_lines()
@@ -154,10 +155,10 @@ class InstrumentGuardsTestCase(unittest.TestCase):
 
     def test_bypass_profit_guard_does_not_skip_daily_limit(self):
         p = _FakeProvider()
-        for _ in range(90):   # vezi test_daily_limit_blocks_after_threshold (prag=75)
+        for _ in range(90):   # vezi test_daily_limit_blocks_after_threshold (safeback 48h -> prag 75)
             p.seed_trade("BUY", age_sec=4000.0)
         inst = self._inst(p)
-        order = inst.place("BUY", 100.0, 1.0, bypass_profit_guard=True)
+        order = inst.place("BUY", 100.0, 1.0, safeback_seconds=48 * 3600 + 60, bypass_profit_guard=True)
         self.assertIsNone(order)   # plafonul zilnic ramane activ chiar si cu bypass
 
     def test_first_order_allowed_and_logged(self):

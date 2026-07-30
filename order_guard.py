@@ -35,7 +35,7 @@ def _load_margins():
         "default": 1.15,                       # prag profit (%) fallback
         "default_window_h": 0.0,               # fereastra gard profit (ore); 0 = doar last_opposite_fill
         "default_max_daily_trades": 25,        # plafon tranzactii/zi
-        "default_safeback_sec": 48 * 3600 + 60,  # fereastra cautare tranzactii proprii (sec)
+        "default_safeback_sec": 14 * 24 * 3600 + 60,  # fereastra cautare tranzactii proprii (sec) — 14 zile
         "default_recent_transaction_sec": 180,   # anti-spam (sec)
     }
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "order_guard.conf")
