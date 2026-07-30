@@ -146,6 +146,25 @@ class MarketDataProvider(ABC):
         return order_guard.weight_limit(self, symbol, side, price, qty,
                                         base=base, quote=quote)
 
+    # ── AJUSTARE PRET + curatare ordine opuse (30 iul) — MECANICA specific-venue,
+    #    rulata de Instrument.place() INAINTE de gardul de profit (ca gardul sa vada
+    #    exact acelasi pret ca azi — vezi lantul Binance, unde nudge-ul ±0.1% + round
+    #    preceda gardul). Default AGNOSTIC: identitate (pretul cerut, neschimbat).
+    #    `cancel_opposite`: unele venue-uri (Binance) anuleaza ordinele opuse
+    #    contraproductive (SELL sub pretul de BUY / BUY peste pretul de SELL) inainte.
+    def adjust_order_price(self, symbol: str, side: str, price: float,
+                           cancel_opposite: bool = True) -> float:
+        """Intoarce pretul de folosit efectiv la trimitere (dupa nudge/round
+        specific-venue). Default: neschimbat."""
+        return price
+
+    def profit_guard_window_ref(self, symbol: str, side: str, safeback_sec: float):
+        """Referinta de pret pt gardul de profit, DIN SURSA venue-ului (30 iul —
+        hook, ca sa nu schimbe comportamentul Binance). Default AGNOSTIC: None ->
+        order_guard cade pe last_opposite_fill. Binance suprascrie cu min(sell)/
+        max(buy) din fereastra Order-cache (safeback_sec) — tier-1 bogat, ca azi."""
+        return None
+
     def last_opposite_fill(self, symbol: str, order_type: str,
                            since_s: float = 90 * 24 * 3600) -> Optional[float]:
         """Pretul ULTIMEI executii OPUSE (pt BUY -> ultim SELL; pt SELL -> ultim BUY).
