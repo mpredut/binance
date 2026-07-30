@@ -127,6 +127,25 @@ class MarketDataProvider(ABC):
         provideri care au minim explicit (ex. Kraken `ordermin` din pair_info)."""
         return 0.0
 
+    # ── PLAFON de CANTITATE (30 iul) — hook provider pt "cat pot tranzactiona per
+    #    ordin". Policy AGNOSTICA implicita: order_guard.weight_limit (curba gauss,
+    #    din priceAnalysis + provider.get_orders/free_balance). Binance suprascrie
+    #    cu apply_weight_limit (statistici REALE de la API-ul Binance pe 24h +
+    #    permisiuni de weight + balanta reala) — decizie user: "pastreaza ca hook
+    #    provider", ca orchestrarea sa devina agnostica FARA sa schimbe plafonul
+    #    bogat al Binance. `base`/`quote` vin din descriptorul Instrument (side-aware:
+    #    SELL foloseste balanta base, BUY balanta quote/pret). cancelorders/hours:
+    #    unele venue-uri (Binance) anuleaza ordine vechi ca sa elibereze cantitate.
+    def cap_quantity(self, symbol: str, side: str, price: float, qty: float,
+                     base: Optional[str] = None, quote: Optional[str] = None,
+                     cancelorders: bool = False, hours: float = 5) -> float:
+        """Plafoneaza `qty` la cat permite politica de weight a venue-ului.
+        Default AGNOSTIC (Kraken/HL/orice): order_guard.weight_limit (gauss).
+        RIDICA pe eroare de citire -> apelantul (Instrument.place) fail-closed."""
+        import order_guard
+        return order_guard.weight_limit(self, symbol, side, price, qty,
+                                        base=base, quote=quote)
+
     def last_opposite_fill(self, symbol: str, order_type: str,
                            since_s: float = 90 * 24 * 3600) -> Optional[float]:
         """Pretul ULTIMEI executii OPUSE (pt BUY -> ultim SELL; pt SELL -> ultim BUY).
@@ -202,6 +221,19 @@ class BinanceProvider(MarketDataProvider):
         if ref is None:
             ref = _po._last_opposite_fill_price_api(symbol, order_type)  # fallback API direct
         return ref
+
+    def cap_quantity(self, symbol: str, side: str, price: float, qty: float,
+                     base=None, quote=None, cancelorders: bool = False, hours: float = 5) -> float:
+        # PLAFON BOGAT Binance (30 iul, decizie user "pastreaza ca hook"): foloseste
+        # manage_quantity (apply_weight_limit pe statistici REALE API 24h + permisiuni
+        # priceAnalysis + balanta reala via get_asset_info), NU curba gauss agnostica.
+        # manage_quantity intoarce (qty_plafonat, available_qty); pt policy returnam qty-ul
+        # plafonat de weight — clampul de balanta/fee ramane MECANICA in place_order
+        # (BinanceProvider), unde traieste deja. Import LAZY (ciclu la nivel de modul).
+        from binance_api import bapi_placeorder as _po
+        capped_qty, _available = _po.manage_quantity(
+            side, symbol, qty, price_to_be_traded=price, cancelorders=cancelorders, hours=hours)
+        return capped_qty
 
     def guards_internally(self) -> bool:
         return True   # place_order_smart -> place_safe_order -> if_place_safe_order (gard intern)

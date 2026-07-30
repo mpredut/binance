@@ -131,12 +131,13 @@ class Instrument:
                 if not ok:
                     reason = "profit_guard"
                     return None
-                # PLAFON WEIGHT (gauss) pe AMBELE directii — echivalentul agnostic al
-                # apply_weight_limit Binance: distribuie pe curba gauss, NU tranzactiona tot
-                # dintr-o data (ex. HYPE-Kraken). weight_limit e side-aware: SELL->balanta base,
+                # PLAFON de CANTITATE pe AMBELE directii — via hook-ul providerului
+                # (30 iul): default agnostic = order_guard.weight_limit (gauss, ex.
+                # HYPE-Kraken); Binance suprascrie cu apply_weight_limit (API real).
+                # Nu tranzactiona tot dintr-o data. Side-aware: SELL->balanta base,
                 # BUY->balanta quote/pret.
-                qty = order_guard.weight_limit(self._provider, self.symbol, side_u, price, qty,
-                                               base=self.base, quote=self.quote)
+                qty = self._provider.cap_quantity(self.symbol, side_u, price, qty,
+                                                  base=self.base, quote=self.quote)
                 if qty is None or qty <= 0:
                     print(f"[{self.symbol}] {side_u} qty 0 dupa weight -> skip")
                     reason = "qty_zero_after_weight"
