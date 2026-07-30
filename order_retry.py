@@ -111,6 +111,9 @@ def is_expired(rec, now=None):
 
 
 def is_due(rec, now=None):
-    """True daca a trecut destul (RETRY_INTERVAL_SEC) de la ultima incercare."""
+    """True daca a trecut destul (RETRY_INTERVAL_SEC) de la ultima incercare — sau, pt un
+    ordin INCA neincercat (last_attempt_ts=0), de la CREARE (prima reincercare abia dupa
+    un interval de la esec, NU imediat -> evita spam de re-esecuri pe refuzuri de gard)."""
     now = now if now is not None else time.time()
-    return (now - float(rec.get("last_attempt_ts", 0))) >= RETRY_INTERVAL_SEC
+    base = max(float(rec.get("last_attempt_ts", 0)), float(rec.get("created_ts", 0)))
+    return (now - base) >= RETRY_INTERVAL_SEC
