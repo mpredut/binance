@@ -265,6 +265,11 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
     broker = BacktestBroker(out_dir, clock, trend_gate=trend_gate,
                             trend_gate_timeout_sec=trend_gate_timeout_sec,
                             trend_gate_max_wait_sec=trend_gate_max_wait_sec)
+    # 30 iul: tradeall._fire_order foloseste acum mkt.place(symbol, side, price, qty, ...)
+    # (proxy unic), nu po.place_order_smart(side, symbol, ...). Stub-uim ta.mkt.place cu un
+    # adaptor care schimba ordinea (symbol,side)->(side,symbol) si cheama broker-ul simulat
+    # -> NU atinge reteaua. (Patch-am si ta.po.place_order_smart ca plasa de siguranta pt
+    # orice cale reziduala.)
     if kalman_primary:
         # MODUL KALMAN-PRIMAR: modelul vechi doar JURNALIZEAZA (ordinele lui nu
         # se executa); broker-ul e condus exclusiv de tranzitiile Kalman.
@@ -273,8 +278,12 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
             _old_attempts["n"] += 1
             return None
         ta.po.place_order_smart = _journal_only
+        ta.mkt.place = lambda symbol_, side_, price_, qty_=None, **kw: _journal_only(
+            side_, symbol_, price_, qty_, **kw)
     else:
         ta.po.place_order_smart = broker.place_order_smart           # stub — NU atinge reteaua
+        ta.mkt.place = lambda symbol_, side_, price_, qty_=None, **kw: broker.place_order_smart(
+            side_, symbol_, price_, qty_, **kw)
     ta.log_decision = make_decision_logger(out_dir, clock)            # redirect — NU scrie in logurile live
 
     window_small = ta.PriceWindow(symbol, 300, sample_rate_sec=ta.TIME_SLEEP_GET_PRICE,

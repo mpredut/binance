@@ -13,7 +13,8 @@ import alertnotifiers as alert
 import utils as u
 import symbols as sym
 from binance_api import bapi as api
-from binance_api import bapi_placeorder as po
+from binance_api import bapi_placeorder as po   # pastrat pt _log_order_outcome (KALMAN gate)
+from providers.market_api import api as mkt      # proxy unic guardat (Instrument.place)
 
 from binance_api import bapi_trades as apitrades
 from binance_api import bapi_allorders as apiorders
@@ -167,13 +168,11 @@ def _kalman_gate_blocks(symbol, action):
 
 
 def _fire_order(symbol, action, price, reason, **kwargs):
-    """Wrapper peste place_order_smart: paseaza motivul declansarii (Pas A2)
-    — executarea/refuzul se jurnalizeaza centralizat in bapi_placeorder.py.
+    """Wrapper peste proxy-ul unic guardat (30 iul: mkt.place, era po.place_order_smart)
+    — executarea/refuzul se jurnalizeaza centralizat (order_outcomes, via Instrument.place).
     KALMAN GATE: ordinul pleaca spre executie DOAR daca trece de gate.
-    NU se da cantitate (21 iul, model uniform) — place_order_smart(qty=None)
-    foloseste maximul permis de apply_weight_limit + clamp pe balanta reala;
-    vechiul api.quantities[symbol] era doar un placeholder numeric arbitrar
-    ($1000/$10000 nominal, inconsistent), oricum mereu taiat de acelasi gard."""
+    NU se da cantitate (21 iul, model uniform) — qty=None foloseste maximul permis de
+    cap_quantity (Binance: apply_weight_limit API + clamp pe balanta reala)."""
     blocked, mode, trend = _kalman_gate_blocks(symbol, action)
     if blocked:
         print(f"[KALMAN-GATE] {action} {symbol} BLOCAT (kalman_trend={trend}, mode={mode}, motiv={reason})")
@@ -184,7 +183,7 @@ def _fire_order(symbol, action, price, reason, **kwargs):
         except Exception as _e:  # noqa: BLE001
             print(f"[KALMAN-GATE] eroare jurnal ({_e}) — blocarea ramane")
         return None
-    return po.place_order_smart(action, symbol, price, motivation=reason, **kwargs)
+    return mkt.place(symbol, action, price, None, motivation=reason, **kwargs)
 
 
 # 30 iul: track_and_place_order() NU mai e apelata nicaieri (0 apelanti in tot
