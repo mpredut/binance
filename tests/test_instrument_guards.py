@@ -191,6 +191,18 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         self.assertIsNotNone(inst_a.place("BUY", 100.0, 1.0))
         self.assertIsNotNone(inst_b.place("BUY", 100.0, 1.0))   # alt symbol -> neafectat
 
+    def test_facade_place_routes_through_pipeline(self):
+        # MarketApi.place() (proxy unic guardat, inlocuitorul lui place_order_smart):
+        # construieste Instrument efemer + ruleaza pipeline-ul (cooldown blocheaza al 2-lea).
+        p = _FakeProvider()
+        mkt = MarketApi([p])
+        first = mkt.place(SYMBOL, "BUY", 100.0, 1.0)
+        self.assertIsNotNone(first)
+        self.assertEqual(len(p.placed), 1)
+        second = mkt.place(SYMBOL, "SELL", 101.0, 1.0)   # < cooldown -> blocat
+        self.assertIsNone(second)
+        self.assertEqual(len(p.placed), 1)
+
     # ── guards_internally (Binance-style) — sare TOT stratul agnostic ───────────
     def test_guards_internally_provider_bypasses_new_gates(self):
         p = _GuardsInternallyProvider()

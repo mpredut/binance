@@ -344,9 +344,32 @@ class MarketApi:
         return self._provider_for(symbol).open_orders(symbol)
 
     def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
-        # Rutare pe symbol: HYPE -> HyperliquidProvider (spot HL, DRY implicit);
-        # restul -> BinanceProvider (po.place_order_smart, IDENTIC ca azi).
+        # MECANICA-ONLY (dispatch la provider, FARA garduri) — NU folosi direct pt
+        # plasare reala; foloseste .place() (guardat). Ramas pt cazuri interne/DRY.
         return self._provider_for(symbol).place_order(symbol, side, price, qty, **kwargs)
+
+    def place(self, symbol: str, side: str, price: float, qty: float,
+              base: Optional[str] = None, quote: Optional[str] = None, **kwargs):
+        """Plasare GUARDATA prin proxy-ul unic (30 iul): construieste un Instrument
+        efemer rutat pe symbol si ruleaza pipeline-ul agnostic complet (plafon zilnic,
+        gard profit, weight, trend-wait, cooldown, jurnal), cu hook-urile provider-ului
+        (Binance isi pastreaza mecanica bogata). Inlocuitorul unic pt vechile apeluri
+        directe po.place_order_smart/place_safe_order. `base`/`quote` derivate din symbol
+        daca nu-s date (side-aware pt weight/balanta). Import LAZY al Instrument (evita
+        ciclul market_api<->instrument la nivel de modul)."""
+        from instrument import Instrument
+        import utils as u
+        prov_name = self.provider_name_for(symbol)
+        if base is None:
+            try:
+                base = u.base_asset(symbol)
+            except Exception:
+                base = None
+        if quote is None and base and symbol.startswith(base) and symbol != base:
+            quote = symbol[len(base):]   # ex. BTCUSDC -> base=BTC -> quote=USDC
+        inst = Instrument(name=symbol, symbol=symbol, provider=prov_name,
+                          base=base, quote=quote, api=self)
+        return inst.place(side, price, qty, **kwargs)
 
     def supports_symbol(self, symbol: str) -> bool:
         return any(p.supports_symbol(symbol) for p in self._providers)
