@@ -651,3 +651,94 @@ def place_order_smart(order_type, symbol, price, qty=None, safeback_seconds=PLAC
     #    print(f"place_order_smart: A aparut o eroare: {e}")
     #    return None
         #return place_order(order_type, symbol, price, qty)
+
+
+# ============================================================================
+# MECANICA de plasare Binance, EXTRASA ca sa fie apelata prin proxy-ul unic
+# (Instrument.place() -> BinanceProvider). 30 iul: aceste 2 functii contin DOAR
+# mecanica specific-Binance (ajustare pret + curatare ordine opuse; clamp de
+# fee/balanta + min-notional + dispatch limit/market). PROTECTIA (plafon zilnic,
+# gard profit, weight, trend-wait, cooldown, jurnal) traieste in stratul AGNOSTIC
+# (Instrument.place + order_guard) — NU aici. Vechiul lant place_order_smart ramane
+# (apelanti directi) pana la rewiring; aceste functii sunt varianta noua, curata.
+# ============================================================================
+
+def adjust_price_and_cancel_opposite(order_type, symbol, price, cancel_opposite=True):
+    """MECANICA pret Binance (ex place_order_smart): (optional) anuleaza ordinele
+    OPUSE contraproductive (SELL sub pretul de BUY / BUY peste pretul de SELL), apoi
+    ajusteaza pretul (clamp la current +- nudge 0.1%, rotunjit). Intoarce pretul de
+    folosit. Rulat de Instrument.place() INAINTE de gardul de profit — ca gardul sa
+    vada exact acelasi pret ca in lantul vechi."""
+    order_type = order_type.upper()
+    current_price = api.get_current_price(symbol)
+    if order_type == "BUY":
+        if cancel_opposite:
+            open_SELL_orders = api.get_open_orders("SELL", symbol)
+            for order_id, order_details in open_SELL_orders.items():
+                if order_details['price'] < price:
+                    if not api.cancel_order(symbol, order_id):
+                        print(f"Fail cancel order {order_id} prep. for BUY (low SELL price).")
+        price = min(price, current_price)
+        price = round(price * 0.999, 0)
+    elif order_type == "SELL":
+        if cancel_opposite:
+            open_BUY_orders = api.get_open_orders("BUY", symbol)
+            for order_id, order_details in open_BUY_orders.items():
+                if order_details['price'] > price:
+                    if not api.cancel_order(symbol, order_id):
+                        print(f"Fail cancel order {order_id} prep. for SELL (high BUY price).")
+        price = max(price, current_price)
+        price = round(price * (1 + 0.001), 0)
+    return price
+
+
+def place_order_mechanics(order_type, symbol, price, qty, force=False):
+    """MECANICA de trimitere Binance (ex __place_order, DOAR partea de mecanica):
+    clamp de fee/balanta reala, min-notional (100 USDC), rotunjire, dispatch
+    limit/market. `qty` vine DEJA plafonat de weight (cap_quantity, in Instrument.place).
+    NU face weight/trend-wait/cooldown/garduri — acelea sunt in stratul agnostic.
+    Intoarce order dict sau None. Cooldown-ul (RAII) e tinut de Instrument.place in
+    jurul acestui apel."""
+    order_type = order_type.upper()
+    sym.validate_params(order_type, symbol, price, qty)
+    try:
+        current_price = api.get_current_price(symbol)
+        available_qty = api.get_asset_info(order_type, symbol, current_price)
+        if available_qty <= 0:
+            print(f"No sufficient quantity available to place the {order_type} order.")
+            return None
+
+        # clamp de fee/balanta (MECANICA Binance, identic cu vechiul __place_order)
+        if order_type == 'SELL':
+            adjusted_qty = qty * (1 + PLACE_ORDER_FEE_PCT)
+            if available_qty < adjusted_qty:
+                print(f"Adjusting {order_type} qty from {qty:.8f} to "
+                      f"{available_qty / (1 + PLACE_ORDER_FEE_PCT):.8f} to cover fees")
+                qty = available_qty / (1 + PLACE_ORDER_FEE_PCT)
+        elif order_type == 'BUY':
+            total_usdt_needed = qty * price * (1 + PLACE_ORDER_FEE_PCT)
+            if available_qty * price < total_usdt_needed:
+                qty = available_qty / (price * (1 + PLACE_ORDER_FEE_PCT))
+                print(f"Adjusting {order_type} qty to {qty:.8f} based on available {symbol}.")
+
+        qty = round(qty, 4)
+        qty = float(Decimal(qty).quantize(Decimal('0.0001'), rounding=ROUND_DOWN))
+
+        current_price = api.get_current_price(symbol)
+        if qty * current_price < 100:
+            print(f"Value {qty * current_price} of {symbol} too small to trade. by by!")
+            return None
+
+        print(f"Trying to place {order_type} {symbol} qty {qty:.8f} at "
+              f"{'market price' if force else f'price {price}'}")
+        if order_type == 'SELL':
+            price = round(max(price, current_price), 0)
+            return place_SELL_order_at_market(symbol, qty) if force else place_SELL_order(symbol, price, qty)
+        elif order_type == 'BUY':
+            price = round(min(price, current_price), 0)
+            return place_BUY_order_at_market(symbol, qty) if force else place_BUY_order(symbol, price, qty)
+        print(f"Invalid order type: {order_type}")
+        return None
+    except BinanceAPIException as e:
+        print(f"Error placing {order_type} order (mechanics): {e}")
+        return None

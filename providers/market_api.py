@@ -228,13 +228,31 @@ class BinanceProvider(MarketDataProvider):
         raw = _allorders.get_trade_orders(side, symbol, since_s) or []
         return [_normalize_order(o) for o in raw]
 
-    def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
-        # IDENTIC ca azi: deleaga la po.place_order_smart cu ACELEASI kwargs pe care
-        # monitortrades le pasa (safeback_seconds, force, cancelorders, hours, pair).
-        # Import LAZY: bapi_placeorder trage priceAnalysis->cacheManager->market_api,
-        # deci un import la nivel de modul ar inchide ciclul. Aici e sigur (runtime).
+    def place_order(self, symbol: str, side: str, price: float, qty: float, force: bool = False, **kwargs):
+        # 30 iul: MECANICA-ONLY (fee/balanta + min-notional + dispatch). Protectia
+        # (plafon zilnic, gard profit, weight, trend-wait, cooldown, jurnal) e rulata
+        # de Instrument.place() ca strat AGNOSTIC, prin hook-uri (adjust_order_price,
+        # profit_guard_window_ref, cap_quantity). guards_internally()=False acum, deci
+        # Binance trece prin pipeline-ul agnostic ca oricare provider — NU se mai
+        # dubleaza cu place_order_smart (care ramane doar pt apelantii directi
+        # inca ne-rewire-uiti: rtrade/tradeall/monitororder/... — vezi Task rewire).
+        # kwargs (safeback_seconds/cancelorders/hours/pair/motivation) sunt consumati
+        # de stratul agnostic; aici conteaza doar force (market vs limit).
         from binance_api import bapi_placeorder as _po
-        return _po.place_order_smart(side, symbol, price, qty, **kwargs)
+        return _po.place_order_mechanics(side, symbol, price, qty, force=force)
+
+    def adjust_order_price(self, symbol: str, side: str, price: float, cancel_opposite: bool = True) -> float:
+        from binance_api import bapi_placeorder as _po
+        return _po.adjust_price_and_cancel_opposite(side, symbol, price, cancel_opposite=cancel_opposite)
+
+    def profit_guard_window_ref(self, symbol: str, side: str, safeback_sec):
+        # Referinta tier-1 din fereastra Order-cache pe safeback (12-14 zile), ca in
+        # vechiul if_place_safe_order. Daca apelantul n-a dat safeback -> defaultul
+        # bogat (14 zile), nu None (ca sa nu cada pe last_opposite_fill mai slab).
+        import order_guard
+        from binance_api import bapi_placeorder as _po
+        sb = safeback_sec if safeback_sec else _po.PLACE_ORDER_SAFEBACK_SEC
+        return order_guard.window_reference(self, symbol, side, sb)
 
     def last_opposite_fill(self, symbol: str, order_type: str, since_s: float = 0) -> Optional[float]:
         # Sursa dedicata Binance (PERSISTENT, fara fereastra): cache de fills (CacheTradeManager)
@@ -260,7 +278,13 @@ class BinanceProvider(MarketDataProvider):
         return capped_qty
 
     def guards_internally(self) -> bool:
-        return True   # place_order_smart -> place_safe_order -> if_place_safe_order (gard intern)
+        # 30 iul: FALSE — Binance trece acum prin pipeline-ul AGNOSTIC din
+        # Instrument.place() (plafon zilnic, gard profit, weight via cap_quantity,
+        # trend-wait, cooldown, jurnal), cu hook-urile care-i pastreaza mecanica
+        # bogata (adjust_order_price, profit_guard_window_ref, cap_quantity). place_order
+        # e acum mecanica-only, deci NU se dubleaza gardul. (Era True cat timp Binance
+        # rula lantul propriu place_order_smart -> if_place_safe_order.)
+        return False
 
 
 class MarketApi:
