@@ -165,16 +165,18 @@ class TrailingStop:
         return self._trend_value(pair)
 
     def execute_sell(self, key, asset, pair, qty, price, peak, trail) -> bool:
+        # 30 iul: prin proxy-ul unic guardat (self.po = market_api.api, .place()).
         # force=True -> vinde la MARKET (executie sigura in crash);
         # bypass_profit_guard=True -> ignora gardul de profit/istorie (e STOP-LOSS,
-        # vinde sub ultimul buy). Fara bypass, gardul l-ar bloca.
-        self.po.place_safe_order("SELL", pair, price, qty, force=True, bypass_profit_guard=True)
+        # vinde sub ultimul buy). Fara bypass, gardul l-ar bloca. (Plafonul zilnic +
+        # cooldown raman active, ca in lantul vechi — bypass sare DOAR profit+weight.)
+        self.po.place(pair, "SELL", price, qty, force=True, bypass_profit_guard=True)
         self.log(f"  🛑 [TRAIL] VANDUT {pair} {qty} @ ~{price:.4f} "
                  f"(varf {peak:.4f}, -{trail}%)")
         return True
 
     def execute_rebuy(self, key, asset, pair, qty, price, rb) -> bool:
-        self.po.place_safe_order("BUY", pair, price, qty, force=True, bypass_profit_guard=True)
+        self.po.place(pair, "BUY", price, qty, force=True, bypass_profit_guard=True)
         self.log(f"  🟢 [TRAIL] RE-BUY {pair} {qty} @ ~{price:.4f}  "
                  f"(recul +{REBUY_BOUNCE_PCT}% de la minim {rb['low']:.4f}; vandut la {rb.get('sell_price', 0):.4f})")
         return True
@@ -229,7 +231,7 @@ def main() -> int:
         single_instance("binance_trailing")
 
     from binance_api import bapi as api
-    from binance_api import bapi_placeorder as po
+    from providers.market_api import api as po   # proxy unic guardat (.place()); era bapi_placeorder
     import symbols as sym
     ts = TrailingStop(api, po, sym)
 

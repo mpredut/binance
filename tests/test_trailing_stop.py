@@ -25,12 +25,17 @@ class FakeApi:
 
 
 class FakePo:
+    # 30 iul: TrailingStop foloseste acum proxy-ul unic guardat (.place(symbol, side,...)),
+    # nu place_safe_order. Fake-ul expune ambele (place nou + place_safe_order legacy)
+    # ca sa ramana robust; execute_sell/rebuy cheama .place().
     def __init__(self):
         self.orders = []
-    def place_safe_order(self, side, symbol, price, qty, force=False, **kw):
+    def place(self, symbol, side, price, qty, force=False, **kw):
         self.orders.append({"side": side, "symbol": symbol, "price": price,
                             "qty": qty, "force": force})
         return {"orderId": 1}
+    def place_safe_order(self, side, symbol, price, qty, force=False, **kw):
+        return self.place(symbol, side, price, qty, force=force, **kw)
 
 
 class FakeSym:

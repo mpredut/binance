@@ -12,7 +12,8 @@ import alertnotifiers as alert
 import utils as u
 import symbols as sym
 from binance_api import bapi as api
-from binance_api import bapi_placeorder as po
+from binance_api import bapi_placeorder as po   # pastrat pt WeightLimitBlock (dead-safe)
+from providers.market_api import api as mkt      # proxy unic guardat (Instrument.place)
 
 
 # 23 iul: incarca parametrii tunabili din rtrade_config.env (versionat, se
@@ -131,13 +132,13 @@ class TradingBot:
                 if self.is_sell_filled: # sunt disperat
                     if adjustment_percent == MIN_adjustment_percent:
                         print(f"[{self.symbol}] sunt disperat!")
-                        buy_order = po.place_safe_order("BUY", self.symbol, target_buy_price, self.qty,
+                        buy_order = mkt.place(self.symbol, "BUY", target_buy_price, self.qty,
                             safeback_seconds=RTRADE_DESPERATE_SAFEBACK_SEC, force=False, cancelorders=True, hours=h)
                     else:
-                        buy_order = po.place_safe_order("BUY", self.symbol, target_buy_price, self.qty,
+                        buy_order = mkt.place(self.symbol, "BUY", target_buy_price, self.qty,
                             safeback_seconds=RTRADE_DESPERATE_SAFEBACK_SEC, force=False, cancelorders=True, hours=h)
                 else:
-                    buy_order = po.place_safe_order("BUY", self.symbol, target_buy_price, self.qty, cancelorders=True, hours=RTRADE_BUY_NORMAL_HOURS)
+                    buy_order = mkt.place(self.symbol, "BUY", target_buy_price, self.qty, cancelorders=True, hours=RTRADE_BUY_NORMAL_HOURS)
             except po.WeightLimitBlock as e:
                 print(f"[{self.symbol}] Limita 24h atinsă — ies fără retry ({e})")
                 return None
@@ -160,7 +161,7 @@ class TradingBot:
             if api.check_order_filled(order_id, self.symbol):
                 print(f"[{self.symbol}] BUY order filled at {self.filled_buy_price:.2f}")
                 print(f"[{self.symbol}] SELL disperat tot 1....")
-                po.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
+                mkt.place(self.symbol, "SELL", api.get_current_price(self.symbol) * (1 + RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
                     force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                 return self.mark_buy_filled(self.filled_buy_price)
 
@@ -169,7 +170,7 @@ class TradingBot:
             if filled_buy_price is not None:
                 print(f"[{self.symbol}] BUY order may have been filled :-) at {filled_buy_price:.2f}")
                 print(f"[{self.symbol}] SELL disperat tot 2 ....")
-                po.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
+                mkt.place(self.symbol, "SELL", api.get_current_price(self.symbol) * (1 + RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
                     force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                 return self.mark_buy_filled(filled_buy_price)
 
@@ -183,7 +184,7 @@ class TradingBot:
                 if api.check_order_filled(order_id, self.symbol):
                     print(f"[{self.symbol}] Cancel BUY order failed. Maybe it was filled :-)? Moving to SELL ...")
                     print(f"[{self.symbol}] SELL disperat tot 3 ....")
-                    po.place_order_smart("SELL", self.symbol, api.get_current_price(self.symbol) * (1 + RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
+                    mkt.place(self.symbol, "SELL", api.get_current_price(self.symbol) * (1 + RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
                     force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                     return self.mark_buy_filled(self.filled_buy_price)
                 else:
@@ -215,13 +216,13 @@ class TradingBot:
                 if self.is_buy_filled: # sunt disperat
                     if adjustment_percent == MIN_adjustment_percent:
                         print(f"[{self.symbol}] sunt disperat!")
-                        sell_order = po.place_safe_order("SELL", self.symbol, target_sell_price, self.qty,
+                        sell_order = mkt.place(self.symbol, "SELL", target_sell_price, self.qty,
                             safeback_seconds=RTRADE_DESPERATE_SAFEBACK_SEC, force=False, cancelorders=True, hours=h)
                     else:
-                        sell_order = po.place_safe_order("SELL", self.symbol, target_sell_price, self.qty,
+                        sell_order = mkt.place(self.symbol, "SELL", target_sell_price, self.qty,
                             safeback_seconds=RTRADE_DESPERATE_SAFEBACK_SEC, force=False, cancelorders=True, hours=h)
                 else:
-                    sell_order = po.place_safe_order("SELL", self.symbol, target_sell_price, self.qty, cancelorders=True, hours=RTRADE_SELL_NORMAL_HOURS)
+                    sell_order = mkt.place(self.symbol, "SELL", target_sell_price, self.qty, cancelorders=True, hours=RTRADE_SELL_NORMAL_HOURS)
             except po.WeightLimitBlock as e:
                 print(f"[{self.symbol}] Limita 24h atinsă (SELL) — ies fără retry ({e})")
                 return None
@@ -244,7 +245,7 @@ class TradingBot:
             if api.check_order_filled(order_id, self.symbol):
                 print(f"[{self.symbol}] SELL order filled at {self.filled_sell_price:.2f}")
                 print(f"[{self.symbol}] BUY disperat tot 1....")
-                po.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
+                mkt.place(self.symbol, "BUY", api.get_current_price(self.symbol) * (1 - RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
                     force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                 return self.mark_sell_filled(self.filled_sell_price)
 
@@ -253,7 +254,7 @@ class TradingBot:
             if filled_sell_price is not None:
                 print(f"[{self.symbol}] SELL order may have been filled :-) at {filled_sell_price:.2f}")
                 print(f"[{self.symbol}] BUY disperat tot 2....")
-                po.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
+                mkt.place(self.symbol, "BUY", api.get_current_price(self.symbol) * (1 - RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
                     force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                 return self.mark_sell_filled(filled_sell_price)
 
@@ -267,7 +268,7 @@ class TradingBot:
                 if api.check_order_filled(order_id, self.symbol):
                     print(f"[{self.symbol}] Cancel SELL order failed. Maybe it was filled :-)? Moving to BUY ...")
                     print(f"[{self.symbol}] BUY disperat tot 3....")
-                    po.place_order_smart("BUY", self.symbol, api.get_current_price(self.symbol) * (1 - RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
+                    mkt.place(self.symbol, "BUY", api.get_current_price(self.symbol) * (1 - RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
                         force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                     return self.mark_sell_filled(self.filled_sell_price)
                 else:
