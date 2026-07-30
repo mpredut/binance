@@ -11,6 +11,7 @@ import utils as u
 import symbols as sym
 from binance_api import bapi as api
 from binance_api import bapi_placeorder as po
+from providers.market_api import api as mkt   # proxy unic guardat (Instrument.place)
 
 
 
@@ -81,8 +82,8 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
             
             quantity = order['quantity']
             
-            # incearca sa plaseze un nou ordin
-            new_order = po.place_safe_order(order_type, symbol, new_price, quantity)
+            # incearca sa plaseze un nou ordin (proxy unic guardat)
+            new_order = mkt.place(symbol, order_type, new_price, quantity)
             
             if new_order:
                 orders[new_order['orderId']] = {
@@ -105,11 +106,11 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
     for failed_order in failed_orders[:]:  # Iteram pe o copie a listei 
         print(f"retry order failed: {failed_order}")
         time.sleep(MONITOR_BETWEEN_ORDERS_INTERVAL)
-        retry_order = po.place_safe_order(
-            failed_order['order_type'],
+        retry_order = mkt.place(
             failed_order['symbol'],
+            failed_order['order_type'],
             failed_order['price'],
-            failed_order['quantity']
+            failed_order['quantity'],
         )
         if retry_order:
             print(f"Ordin plasat cu succes la retry. ID nou: {retry_order['orderId']}")

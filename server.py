@@ -32,6 +32,7 @@ from keys.apikeys import api_key, api_secret
 
 # my imports
 from binance_api import bapi as api
+from providers.market_api import api as mkt   # proxy unic guardat (Instrument.place)
 import log
 
 
@@ -67,8 +68,7 @@ async def sell(request: TradeRequest):
     current_price = api.get_current_price(str(request.symbol))
     sell_price = current_price * (1 + 0.01 )
     print(f"Pret BTC {current_price} {sell_price}")
-    po.place_order_smart("SELL", str(request.symbol), sell_price, request.amount)
-    # place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5, pair=True)
+    mkt.place(str(request.symbol), "SELL", sell_price, request.amount)   # proxy unic guardat
     return {"message": f"Vândut {request.amount} din {request.symbol}"}
 
 @app.post("/trade/buy")
@@ -79,8 +79,7 @@ async def buy(request: TradeRequest):
     current_price = api.get_current_price(str(request.symbol))
     sell_price = current_price * (1 - 0.01 )
     print(f"Pret BTC {current_price} {sell_price}")
-    po.place_order_smart("BUY", str(request.symbol), sell_price, request.amount)
-    # place_order_smart(order_type, symbol, price, qty, cancelorders=True, hours=5, pair=True)
+    mkt.place(str(request.symbol), "BUY", sell_price, request.amount)   # proxy unic guardat
     return {"message": f"Cumpărat {request.amount} din {request.symbol}"}
 
 @app.get("/status/get")

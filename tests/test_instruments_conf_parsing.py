@@ -66,7 +66,7 @@ class TestNoInlineCommentCorruption(unittest.TestCase):
         instruments = ic.load_instruments()
         inst = instruments["KRAKEN_HYPE"]
         self.assertEqual(inst.param("mt", "buy_budget", None, float), 200.0)
-        self.assertEqual(inst.param("mt", "max_budget", None, float), 700.0)
+        self.assertEqual(inst.param("mt", "max_budget", None, float), 5000.0)  # 30 iul: 700 -> 5000 (cerere user)
 
 
 def _raw_param_presence():
