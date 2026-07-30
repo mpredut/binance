@@ -15,6 +15,7 @@ Pragul de profit (%) e per-venue in `order_guard.conf` (text, gitignorat? NU —
 config nesensibil). Lipsa fisierului / valoare invalida -> default 1.15 (fail-safe)."""
 import os
 import time
+import math
 import utils as u
 
 _MARGINS = None   # cache: {provider_lower: procent, "default": 1.15}
@@ -161,11 +162,18 @@ def recent_transaction_sec_for(provider_name):
 
 def daily_limit_guard(provider, symbol, order_type, max_daily_trades=None,
                       safeback_sec=None, recent_transaction_sec=None):
-    """Echivalentul AGNOSTIC al if_place_safe_order (bapi_placeorder.py) — plafon zilnic +
-    anti-spam, folosind provider.get_orders() (Kraken: cache-ul propriu; Binance il are deja
-    intern, mai vechi, NU trece pe aici). Aceeasi logica: raporteaza ordinele PE ACELASI side
-    (order_type) din ultimele `safeback_sec`; peste `max_daily_trades`/zi -> "daily_limit";
-    unul in ultimele `recent_transaction_sec` -> "recent_transaction".
+    """Plafon zilnic + anti-spam — SURSA UNICA (30 iul: Binance delega aici acum, din
+    bapi_placeorder.if_place_safe_order(), in loc sa mentina o a doua implementare
+    inline; vezi si Kraken/Hyperliquid, prin Instrument.place()). Foloseste
+    provider.get_orders() (Kraken: cache-ul propriu; Binance: BinanceProvider, wrapper
+    subtire peste bapi_allorders.get_trade_orders() — ACELASI apel ca inainte).
+    Raporteaza ordinele PE ACELASI side (order_type) din ultimele `safeback_sec`;
+    peste `max_daily_trades`/zi -> "daily_limit"; unul in ultimele
+    `recent_transaction_sec` -> "recent_transaction".
+
+    backdays = math.ceil(safeback_sec/86400) — ROTUNJIT IN SUS, identic cu formula
+    istorica Binance (bapi_placeorder, din prima zi a mecanismului) — NU împărțire
+    simpla, ca sa nu schimbe pragul efectiv fata de ce rula deja pe Binance de 18 luni.
 
     Returneaza (True, None) / (False, motiv). RIDICA pe eroare de citire (provider.get_orders)
     -> apelantul decide fail-closed (ca profit_guard/weight_limit)."""
@@ -176,7 +184,7 @@ def daily_limit_guard(provider, symbol, order_type, max_daily_trades=None,
                                    else recent_transaction_sec_for(name))
     order_type = order_type.upper()
     trades = provider.get_orders(symbol, order_type, safeback_sec) or []
-    backdays = max(safeback_sec / 86400.0, 1e-9)
+    backdays = max(math.ceil(safeback_sec / 86400.0), 1)
     if len(trades) / backdays > max_daily_trades:
         print(f"[DAILY-LIMIT] {order_type} {symbol}: {len(trades)} tranzactii in "
               f"{safeback_sec/3600:.1f}h, plafon {max_daily_trades}/zi -> BLOCAT")

@@ -110,9 +110,9 @@ class InstrumentGuardsTestCase(unittest.TestCase):
     def test_daily_limit_blocks_after_threshold(self):
         p = _FakeProvider()
         inst = self._inst(p)
-        # 60 tranzactii BUY vechi (>3min, sub pragul anti-spam) dar in fereastra de 48h
-        # (~2 zile) -> 60/2 = 30/zi, peste plafonul implicit de 25/zi.
-        for _ in range(60):
+        # backdays = math.ceil(48h/86400) = 3 zile (rotunjit in SUS, ca la Binance) ->
+        # prag 25*3=75; 90 tranzactii vechi (>3min, sub pragul anti-spam) il depasesc.
+        for _ in range(90):
             p.seed_trade("BUY", age_sec=4000.0)
         order = inst.place("BUY", 100.0, 1.0)
         self.assertIsNone(order)
@@ -135,8 +135,9 @@ class InstrumentGuardsTestCase(unittest.TestCase):
     def test_safeback_seconds_override_sees_older_trades_and_blocks(self):
         p = _FakeProvider()
         inst = self._inst(p)
-        # 351 tranzactii, ca sa depaseasca 25/zi pe o fereastra de 14 zile (25*14=350).
-        for _ in range(351):
+        # backdays = math.ceil(14 zile + 60s / 86400) = 15 zile (rotunjit in SUS) ->
+        # prag 25*15=375; 400 tranzactii il depasesc.
+        for _ in range(400):
             p.seed_trade("BUY", age_sec=5 * 24 * 3600)   # 5 zile in urma
         # override explicit de 14 zile (identic cu tradeall.py: d=14, h=24) -> ACUM le vede -> blocat
         order = inst.place("BUY", 100.0, 1.0, safeback_seconds=14 * 24 * 3600 + 60)
@@ -153,7 +154,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
 
     def test_bypass_profit_guard_does_not_skip_daily_limit(self):
         p = _FakeProvider()
-        for _ in range(60):
+        for _ in range(90):   # vezi test_daily_limit_blocks_after_threshold (prag=75)
             p.seed_trade("BUY", age_sec=4000.0)
         inst = self._inst(p)
         order = inst.place("BUY", 100.0, 1.0, bypass_profit_guard=True)

@@ -349,17 +349,17 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
     # Tradingul normal NU-l paseaza -> gard activ; eroare cache/manager fara bypass -> fail-closed.
     #import bapi_trades as apitrades
     from . import bapi_allorders as apiorders
-    
+    from providers.market_api import BinanceProvider
 
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)
-    minutes_ago = time.time() - 3 * 60  # With 3 min in urma , time.time() => seconds
     #apitrades.compare_trade_sources(symbol, order_type=order_type, max_age_seconds=time_back_in_seconds, limit=1000)
-        
+    provider = BinanceProvider()
+
     try:
-        
+
         current_price = api.get_current_price(symbol)
-        
+
         if order_type == "BUY":
             price = round(min(price, current_price), 0)
         else:  # pentru "SELL"
@@ -369,29 +369,27 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
 
         opposite_order_type = "SELL" if order_type == "BUY" else "BUY"
         backdays = math.ceil(time_back_in_seconds / 86400)
-        #all_trades = apitrades.get_my_trades(order_type, symbol, backdays=backdays, limit=1000)
-        #all_trades = apitrades.get_trade_orders(order_type, symbol, max_age_seconds=time_back_in_seconds)
-        all_trades = apiorders.get_trade_orders(order_type, symbol, max_age_seconds=time_back_in_seconds)
-        
-        #all_trades = apitrades.get_trade_orders_24(order_type, symbol, days_back=backdays)
-        #oposite_trades = apitrades.get_my_trades(opposite_order_type, symbol, backdays=backdays, limit=1000) ## curent date
-        #oposite_trades = apitrades.get_trade_orders(opposite_order_type, symbol, max_age_seconds=time_back_in_seconds) ## curent date
+
+        # 30 iul: plafon zilnic + anti-spam DELEGATE la order_guard.daily_limit_guard()
+        # — elimina o a DOUA implementare a EXACT aceleiasi logici (era duplicata cu
+        # cea folosita deja de Kraken/Hyperliquid prin Instrument.place(), commit
+        # d8f7c86). BinanceProvider.get_orders() e doar un wrapper subtire peste
+        # apiorders.get_trade_orders() — ACEEASI sursa de date ca inainte, zero
+        # schimbare reala (formula backdays din daily_limit_guard e acum IDENTICA,
+        # math.ceil, ca sa nu schimbe pragul efectiv fata de cei 18 luni de aici).
+        # max_daily_trades/safeback_sec raman din PROPRIA configurare Binance
+        # (PLACE_ORDER_MAX_DAILY_TRADES / time_back_in_seconds), nu din
+        # order_guard.conf, ca sa nu introduca un al 2-lea knob care ar putea diverge.
+        ok, reason = order_guard.daily_limit_guard(
+            provider, symbol, order_type,
+            max_daily_trades=PLACE_ORDER_MAX_DAILY_TRADES,
+            safeback_sec=time_back_in_seconds)
+        if not ok:
+            return False, reason
+
         oposite_trades = apiorders.get_trade_orders(opposite_order_type, symbol, max_age_seconds=time_back_in_seconds) ## curent date
-        if len(all_trades)/backdays > PLACE_ORDER_MAX_DAILY_TRADES:
-            print(f"Am {len(oposite_trades)} trades. Limita zilnica este de {PLACE_ORDER_MAX_DAILY_TRADES} pentru '{order_type}'.")
-            return False, "daily_limit"
-        for trade in all_trades:
-            trade_time = trade['timestamp'] / 1000  # 'time' este in milisecunde
-            if trade_time > minutes_ago:
-                print(f"Are recent transactions in last 3 minutes")
-                return False, "recent_transaction"
-                
-        #print("Tranzactii anterioare:")
-        #for trade in oposite_trades:
-            #print(apitrades.format_trade(trade, time_limit))
-            
         print(f"Am {len(oposite_trades)} trades de tip {opposite_order_type} pentru {backdays} zile. ")
-        
+
         time_limit = float(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
         # Filtram tranzactiile opuse care au avut loc in intervalul specificat
         # price > 0: ignora orice ordin fara pret real (defensiv; dupa fix-ul din cacheManager
@@ -415,10 +413,11 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
             if recent_opposite_trades:                       # fereastra (time-windowed) PRIMAR
                 _prices = [float(t['price']) for t in recent_opposite_trades]
                 window_ref = min(_prices) if order_type == "BUY" else max(_prices)
-            from providers.market_api import BinanceProvider
             # profit_percentage nu mai e parametru (30 iul, dead — vezi nota de mai sus);
             # calculat aici, lazy, doar cand chiar se foloseste (nu si pe calea bypass).
-            if not order_guard.profit_guard(BinanceProvider(), symbol, order_type, price,
+            # `provider` (BinanceProvider) e deja construit mai sus, pt daily_limit_guard —
+            # reutilizat aici (e stateless, dar zero motiv sa construiesti 2 instante).
+            if not order_guard.profit_guard(provider, symbol, order_type, price,
                                             order_guard.margin_for("binance"), window_ref=window_ref):
                 return False, "profit_guard"
         return True, None
