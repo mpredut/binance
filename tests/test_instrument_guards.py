@@ -203,6 +203,29 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         self.assertIsNone(second)
         self.assertEqual(len(p.placed), 1)
 
+    def test_smart_flag_gates_price_adjust(self):
+        # CORECTIE 30 iul: place_order_smart (SMART: cancel-opuse + nudge) vs place_safe_order
+        # (SAFE: fara). smart=True cheama adjust_order_price; smart=False NU (pastreaza semantica
+        # fostului place_safe_order pt rtrade normal/assetguardian/trailing_stop/monitororder).
+        calls = []
+
+        class _SpyProvider(_FakeProvider):
+            def adjust_order_price(self, symbol, side, price, cancel_opposite=True):
+                calls.append((symbol, side, cancel_opposite))
+                return price
+
+        p = _SpyProvider()
+        inst = Instrument(name="ZZZFAKE", symbol=SYMBOL, provider=p.name.lower(),
+                          base="ZZZFAKE", quote="USD", api=MarketApi([p]))
+        inst.place("BUY", 100.0, 1.0, smart=True)
+        self.assertEqual(len(calls), 1, "smart=True trebuie sa cheme adjust_order_price")
+        calls.clear()
+        # cooldown ar bloca al 2-lea pe acelasi symbol -> alt symbol pt smart=False
+        inst2 = Instrument(name="ZZZFAKE2", symbol="ZZZFAKEUSD2", provider=p.name.lower(),
+                           base="ZZZFAKE2", quote="USD", api=MarketApi([p]))
+        inst2.place("BUY", 100.0, 1.0, smart=False)
+        self.assertEqual(calls, [], "smart=False NU trebuie sa cheme adjust_order_price")
+
     # ── guards_internally (Binance-style) — sare TOT stratul agnostic ───────────
     def test_guards_internally_provider_bypasses_new_gates(self):
         p = _GuardsInternallyProvider()

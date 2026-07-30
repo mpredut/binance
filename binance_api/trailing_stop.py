@@ -170,13 +170,13 @@ class TrailingStop:
         # bypass_profit_guard=True -> ignora gardul de profit/istorie (e STOP-LOSS,
         # vinde sub ultimul buy). Fara bypass, gardul l-ar bloca. (Plafonul zilnic +
         # cooldown raman active, ca in lantul vechi — bypass sare DOAR profit+weight.)
-        self.po.place(pair, "SELL", price, qty, force=True, bypass_profit_guard=True)
+        self.po.place(pair, "SELL", price, qty, force=True, bypass_profit_guard=True, smart=False)
         self.log(f"  🛑 [TRAIL] VANDUT {pair} {qty} @ ~{price:.4f} "
                  f"(varf {peak:.4f}, -{trail}%)")
         return True
 
     def execute_rebuy(self, key, asset, pair, qty, price, rb) -> bool:
-        self.po.place(pair, "BUY", price, qty, force=True, bypass_profit_guard=True)
+        self.po.place(pair, "BUY", price, qty, force=True, bypass_profit_guard=True, smart=False)
         self.log(f"  🟢 [TRAIL] RE-BUY {pair} {qty} @ ~{price:.4f}  "
                  f"(recul +{REBUY_BOUNCE_PCT}% de la minim {rb['low']:.4f}; vandut la {rb.get('sell_price', 0):.4f})")
         return True

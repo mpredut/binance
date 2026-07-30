@@ -133,12 +133,12 @@ class TradingBot:
                     if adjustment_percent == MIN_adjustment_percent:
                         print(f"[{self.symbol}] sunt disperat!")
                         buy_order = mkt.place(self.symbol, "BUY", target_buy_price, self.qty,
-                            safeback_seconds=RTRADE_DESPERATE_SAFEBACK_SEC, force=False, cancelorders=True, hours=h)
+                            safeback_seconds=RTRADE_DESPERATE_SAFEBACK_SEC, force=False, cancelorders=True, hours=h, smart=False)
                     else:
                         buy_order = mkt.place(self.symbol, "BUY", target_buy_price, self.qty,
-                            safeback_seconds=RTRADE_DESPERATE_SAFEBACK_SEC, force=False, cancelorders=True, hours=h)
+                            safeback_seconds=RTRADE_DESPERATE_SAFEBACK_SEC, force=False, cancelorders=True, hours=h, smart=False)
                 else:
-                    buy_order = mkt.place(self.symbol, "BUY", target_buy_price, self.qty, cancelorders=True, hours=RTRADE_BUY_NORMAL_HOURS)
+                    buy_order = mkt.place(self.symbol, "BUY", target_buy_price, self.qty, cancelorders=True, hours=RTRADE_BUY_NORMAL_HOURS, smart=False)
             except po.WeightLimitBlock as e:
                 print(f"[{self.symbol}] Limita 24h atinsă — ies fără retry ({e})")
                 return None
@@ -217,12 +217,12 @@ class TradingBot:
                     if adjustment_percent == MIN_adjustment_percent:
                         print(f"[{self.symbol}] sunt disperat!")
                         sell_order = mkt.place(self.symbol, "SELL", target_sell_price, self.qty,
-                            safeback_seconds=RTRADE_DESPERATE_SAFEBACK_SEC, force=False, cancelorders=True, hours=h)
+                            safeback_seconds=RTRADE_DESPERATE_SAFEBACK_SEC, force=False, cancelorders=True, hours=h, smart=False)
                     else:
                         sell_order = mkt.place(self.symbol, "SELL", target_sell_price, self.qty,
-                            safeback_seconds=RTRADE_DESPERATE_SAFEBACK_SEC, force=False, cancelorders=True, hours=h)
+                            safeback_seconds=RTRADE_DESPERATE_SAFEBACK_SEC, force=False, cancelorders=True, hours=h, smart=False)
                 else:
-                    sell_order = mkt.place(self.symbol, "SELL", target_sell_price, self.qty, cancelorders=True, hours=RTRADE_SELL_NORMAL_HOURS)
+                    sell_order = mkt.place(self.symbol, "SELL", target_sell_price, self.qty, cancelorders=True, hours=RTRADE_SELL_NORMAL_HOURS, smart=False)
             except po.WeightLimitBlock as e:
                 print(f"[{self.symbol}] Limita 24h atinsă (SELL) — ies fără retry ({e})")
                 return None

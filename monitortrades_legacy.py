@@ -16,7 +16,7 @@ def _legacy_place(side, symbol, price, qty, **kw):
     """Shim compat pt codul LEGACY (nefolosit in flota — vezi monitortrades.py):
     pastreaza ordinea (side, symbol, ...) pe care o folosesc apelurile de mai jos
     (inclusiv thread targets), ruteaza prin proxy-ul unic guardat mkt.place()."""
-    return _mkt.place(symbol, side, price, qty, **kw)
+    return _mkt.place(symbol, side, price, qty, smart=False, **kw)
 from binance_api import bapi_trades as apitrades
 from binance_api import bapi_allorders as apiorders
 import utils as u

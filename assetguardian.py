@@ -139,7 +139,7 @@ def sell_all_assets():
 
         try:
             current_price = api.get_current_price(sell_symbol)
-            order = mkt.place(sell_symbol, "SELL", current_price, qty, force=False)
+            order = mkt.place(sell_symbol, "SELL", current_price, qty, force=False, smart=False)
             if order:
                 sell_count += 1
                 print(f" SELL safe-order sent: {sell_symbol} qty={qty}")
@@ -183,7 +183,7 @@ def buy_with_all_cash(buy_symbol=BUY_SYMBOL_DEFAULT, cash_ratio=BUY_USE_CASH_RAT
         f"({cash_ratio*100:.2f}% of free cash), qty={qty:.8f}"
     )
     try:
-        order = mkt.place(buy_symbol, "BUY", current_price, qty, force=False)
+        order = mkt.place(buy_symbol, "BUY", current_price, qty, force=False, smart=False)
         if order:
             print(f" BUY safe-order sent: {buy_symbol}, qty={qty:.8f}")
             return True

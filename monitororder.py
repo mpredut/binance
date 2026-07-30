@@ -83,7 +83,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
             quantity = order['quantity']
             
             # incearca sa plaseze un nou ordin (proxy unic guardat)
-            new_order = mkt.place(symbol, order_type, new_price, quantity)
+            new_order = mkt.place(symbol, order_type, new_price, quantity, smart=False)
             
             if new_order:
                 orders[new_order['orderId']] = {
@@ -111,6 +111,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
             failed_order['order_type'],
             failed_order['price'],
             failed_order['quantity'],
+            smart=False,
         )
         if retry_order:
             print(f"Ordin plasat cu succes la retry. ID nou: {retry_order['orderId']}")

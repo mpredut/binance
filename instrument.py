@@ -113,14 +113,23 @@ class Instrument:
         # sa se aplice IDENTIC si acolo, nu doar la Binance. NU se scoate din kwargs
         # (ramane si pt provider.place_order(), desi Kraken/HL il ignora azi).
         safeback_override = kwargs.get("safeback_seconds")
-        cancel_opposite = bool(kwargs.get("cancelorders", True))
+        # `smart` (30 iul, CORECTIE): distinge cele DOUA interfete vechi colapsate aici —
+        # place_order_smart (SMART: cancel ordine opuse + nudge pret ±0.1% INAINTE de gard)
+        # vs place_safe_order (SAFE: FARA cancel-opuse, FARA nudge). Colapsarea initiala
+        # aplica gresit pre-procesarea "smart" si apelantilor SAFE. Default True (monitortrades/
+        # tradeall/place_order_smart, calea principala); apelantii fostului place_safe_order
+        # (rtrade normal, monitororder, assetguardian, trailing_stop, legacy) trec smart=False.
+        smart = bool(kwargs.pop("smart", True))
         try:
-            # 0. AJUSTARE PRET + curatare ordine opuse (MECANICA venue, hook) — RULATA
-            # INAINTE de gardul de profit, ca gardul sa vada exact acelasi pret ca azi
-            # (pe Binance: nudge ±0.1% + round + cancel ordine opuse contraproductive).
-            # Default agnostic (Kraken/HL): identitate -> pretul ramane neschimbat.
-            price = self._provider.adjust_order_price(self.symbol, side_u, price,
-                                                      cancel_opposite=cancel_opposite)
+            # 0. AJUSTARE PRET + curatare ordine opuse (MECANICA venue, hook) — DOAR daca
+            # smart, RULATA INAINTE de gardul de profit (ca gardul sa vada acelasi pret ca
+            # vechiul place_order_smart). Pe Binance: nudge ±0.1% + round + cancel ordine
+            # opuse contraproductive (neconditionat, ca in place_order_smart). smart=False ->
+            # pretul ramane neschimbat aici (ca vechiul place_safe_order); place_order_mechanics
+            # tot face clamp+round final la trimitere.
+            if smart:
+                price = self._provider.adjust_order_price(self.symbol, side_u, price,
+                                                          cancel_opposite=True)
 
             # 1. PLAFON ZILNIC + ANTI-SPAM (agnostic) — NU sarit de bypass_profit_guard.
             ok, reason = order_guard.daily_limit_guard(self._provider, self.symbol, side_u,
