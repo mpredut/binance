@@ -187,66 +187,14 @@ def _fire_order(symbol, action, price, reason, **kwargs):
     return po.place_order_smart(action, symbol, price, motivation=reason, **kwargs)
 
 
-def track_and_place_order(action, symbol, count, proposed_price, current_price, order_ids=None):
-    quantity = api.quantities[symbol]
-    print(f"Iteration {count} generated price {proposed_price} versus {current_price}")
-                    
-    if order_ids is None:
-        order_ids = []
-
-    if action == 'HOLD':
-        return order_ids
-
-    # Cancel any existing orders
-    if order_ids:
-        for order_id in order_ids:
-            if not api.cancel_order(symbol, order_id):
-                alert.check_alert(True, f"Order executed! be Happy :-){order_id:.2f}")
-        order_ids.clear()
-        
-    api.cancel_expired_orders(action, symbol, EXP_TIME_BUY_ORDER if action == 'BUY' else EXP_TIME_SELL_ORDER)
-        
-    num_orders, price_step = (1, 0.2) if action == "BUY" else (1, 0.08)
-
-    # Price is rising, place fewer, larger orders. # Increase the spacing between orders as percents
-    # Price is falling, place more, smaller orders # Reduce the spacing between orders as percents
-   
-    if action == 'BUY':
-        api.cancel_expired_orders(action, symbol, EXP_TIME_BUY_ORDER)
-
-        buy_price = min(proposed_price, current_price * 0.999)
-        print(f"BUY price: {buy_price:.2f} USDT")
-
-        alert.check_alert(True, f"BUY order {buy_price:.2f}")
-       
-        # Place the custom buy orders
-        for i in range(num_orders):
-            adjusted_buy_price = buy_price * (1 - i * price_step / 100)
-            order_quantity = quantity / num_orders  # Divide quantity among orders
-            print(f"Placing buy order at price: {adjusted_buy_price:.2f} USDT for {order_quantity:.6f} BTC")
-            order = po.place_order_smart("BUY", symbol, adjusted_buy_price, order_quantity, cancelorders=True, hours=0.3, pair=True)
-            if order:
-                order_ids.append(order['orderId'])
-
-    elif action == 'SELL':
-        api.cancel_expired_orders(action, symbol, EXP_TIME_SELL_ORDER)
-
-        sell_price = max(proposed_price, current_price * 1.001)
-        print(f"SELL price: {sell_price:.2f} USDT")
-        
-        alert.check_alert(True, f"SELL order {sell_price:.2f}")
-
-        # Place the custom sell orders
-        for i in range(num_orders):
-            adjusted_sell_price = sell_price * (1 + i * price_step / 100)
-            order_quantity = quantity / num_orders  # Divide quantity among orders
-            print(f"Placing sell order at price: {adjusted_sell_price:.2f} USDT for {order_quantity:.6f} BTC")
-            order = po.place_order_smart("SELL", symbol, adjusted_sell_price, order_quantity, cancelorders=True, hours=0.3, pair=True)
-            if order:
-                print(f"Sell order placed successfully with ID: {order['orderId']}")
-                order_ids.append(order['orderId']) 
-
-    return order_ids
+# 30 iul: track_and_place_order() STEARSA — cod MORT (0 apelanti in tot repo-ul,
+# verificat cu grep; era superseded de mult de _fire_order()/place_order_smart(qty=None),
+# vezi docstring-ul lui _fire_order: "vechiul api.quantities[symbol] era doar un
+# placeholder numeric arbitrar"). Continea SINGURELE 6 apeluri Binance-specifice directe
+# din tradeall.py (api.quantities/cancel_order/cancel_expired_orders) — dupa stergere,
+# singurul punct Binance-specific ramas in fisier e po.place_order_smart() (_fire_order),
+# ceea ce simplifica mult o eventuala migrare viitoare spre Instrument.place() (agnostic
+# de provider — discutat cu user, decizie separata, nefacuta inca).
 
 
 class TrendState:
