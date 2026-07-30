@@ -87,6 +87,13 @@ SLOPE_EXTREME_THRESHOLD = float(os.environ.get("TRADEALL_SLOPE_EXTREME_THRESHOLD
 FIRE_MIN_RETRY_INTERVAL_SEC = float(os.environ.get("TRADEALL_FIRE_MIN_RETRY_MINUTES", "6")) * 60
 FIRE_MAX_PER_TREND = int(os.environ.get("TRADEALL_FIRE_MAX_PER_TREND", "3"))
 
+# 30 iul: safeback_seconds pt _fire_order (3 aparitii identice in logic(), era
+# hardcodat local `d=14; h=24; d*h*3600+60` de fiecare data) — fereastra (ZILE) in
+# care place_safe_order/if_place_safe_order cauta tranzactiile PROPRII (plafon
+# zilnic + referinta gardei de profit, vezi order_guard.py/bapi_placeorder.py).
+FIRE_SAFEBACK_DAYS = float(os.environ.get("TRADEALL_FIRE_SAFEBACK_DAYS", "14"))
+FIRE_SAFEBACK_SEC = FIRE_SAFEBACK_DAYS * 24 * 3600 + 60
+
 DECISIONS_LOG_DIR = "logger"
 
 
@@ -408,11 +415,8 @@ class TrendState:
 
 
 def logic_small(win, enable, symbol, gradient, slope, trend_state, current_price) :
-
-    d = 0
-    h = 1
-    proposed_price = current_price
-
+    # 30 iul: d/h/proposed_price erau MOARTE (definite, niciodata folosite in corp) —
+    # sterse (gasite in trecere, la extragerea lui FIRE_SAFEBACK_SEC din logic()).
     print(f" SE ACTIVEAZA DUPA 3.5 la slope: gradient={gradient}, slope={slope}")
     if gradient < 0 and slope < -3.5:
         if enable:
@@ -425,8 +429,6 @@ def logic_small(win, enable, symbol, gradient, slope, trend_state, current_price
 
 def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
 
-    d = 14
-    h = 24
     proposed_price = current_price
 
     def _fire_once(direction, action, reason):
@@ -441,7 +443,7 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
             return
         trend_state.mark_fire_attempt(direction)
         if enable:
-            result = _fire_order(symbol, action, current_price, reason, safeback_seconds=d*h*3600+60,
+            result = _fire_order(symbol, action, current_price, reason, safeback_seconds=FIRE_SAFEBACK_SEC,
                 force=False, cancelorders=True, hours=1)
             if result is not None:
                 trend_state.mark_confirmed(direction)
@@ -713,16 +715,15 @@ class TrendCoordinator:
                 new_ktrend = shadow_fields.get("kalman_trend")
                 if (symbol in KALMAN_PRIMARY_SYMBOLS and prev_ktrend is not None
                         and new_ktrend != prev_ktrend):
-                    d, h = 14, 24
                     if new_ktrend == 1:
                         print(f"[KALMAN-PRIMAR] {symbol} ->UP: initiez BUY")
                         _fire_order(symbol, "BUY", current_price, "kalman_primary_up",
-                                    safeback_seconds=d*h*3600+60, force=False,
+                                    safeback_seconds=FIRE_SAFEBACK_SEC, force=False,
                                     cancelorders=True, hours=1)
                     elif new_ktrend == -1:
                         print(f"[KALMAN-PRIMAR] {symbol} ->DOWN: initiez SELL")
                         _fire_order(symbol, "SELL", current_price, "kalman_primary_down",
-                                    safeback_seconds=d*h*3600+60, force=False,
+                                    safeback_seconds=FIRE_SAFEBACK_SEC, force=False,
                                     cancelorders=True, hours=1)
             except Exception as _e:  # noqa: BLE001
                 print(f"[TrendCoordinator] eroare shadow {symbol} (continui): {_e}")
