@@ -113,7 +113,15 @@ class Instrument:
         # sa se aplice IDENTIC si acolo, nu doar la Binance. NU se scoate din kwargs
         # (ramane si pt provider.place_order(), desi Kraken/HL il ignora azi).
         safeback_override = kwargs.get("safeback_seconds")
+        cancel_opposite = bool(kwargs.get("cancelorders", True))
         try:
+            # 0. AJUSTARE PRET + curatare ordine opuse (MECANICA venue, hook) — RULATA
+            # INAINTE de gardul de profit, ca gardul sa vada exact acelasi pret ca azi
+            # (pe Binance: nudge ±0.1% + round + cancel ordine opuse contraproductive).
+            # Default agnostic (Kraken/HL): identitate -> pretul ramane neschimbat.
+            price = self._provider.adjust_order_price(self.symbol, side_u, price,
+                                                      cancel_opposite=cancel_opposite)
+
             # 1. PLAFON ZILNIC + ANTI-SPAM (agnostic) — NU sarit de bypass_profit_guard.
             ok, reason = order_guard.daily_limit_guard(self._provider, self.symbol, side_u,
                                                        safeback_sec=safeback_override)
@@ -122,10 +130,12 @@ class Instrument:
 
             if not bypass:
                 margin = order_guard.margin_for(self._provider.name)
-                # tier 1: referinta min/max din fereastra (per venue, order_guard.conf);
-                # daca fereastra e goala / dezactivata -> profit_guard cade pe last_opposite_fill.
-                window_ref = order_guard.window_reference(
-                    self._provider, self.symbol, side_u, order_guard.window_for(self._provider.name))
+                # tier 1: referinta min/max via hook-ul providerului. Default (Kraken/HL):
+                # fereastra per-venue din order_guard.conf; Binance: fereastra safeback_sec
+                # (Order-cache). Fereastra goala/dezactivata -> profit_guard cade pe
+                # last_opposite_fill.
+                window_ref = self._provider.profit_guard_window_ref(
+                    self.symbol, side_u, safeback_override)
                 ok = order_guard.profit_guard(self._provider, self.symbol, side_u, price, margin,
                                               window_ref=window_ref)
                 if not ok:

@@ -158,12 +158,17 @@ class MarketDataProvider(ABC):
         specific-venue). Default: neschimbat."""
         return price
 
-    def profit_guard_window_ref(self, symbol: str, side: str, safeback_sec: float):
-        """Referinta de pret pt gardul de profit, DIN SURSA venue-ului (30 iul —
-        hook, ca sa nu schimbe comportamentul Binance). Default AGNOSTIC: None ->
-        order_guard cade pe last_opposite_fill. Binance suprascrie cu min(sell)/
-        max(buy) din fereastra Order-cache (safeback_sec) — tier-1 bogat, ca azi."""
-        return None
+    def profit_guard_window_ref(self, symbol: str, side: str, safeback_sec):
+        """Referinta de pret (tier-1) pt gardul de profit, DIN SURSA venue-ului
+        (30 iul — hook). Default AGNOSTIC = comportamentul de pana acum din
+        Instrument.place(): min/max din fereastra per-venue din order_guard.conf
+        (window_for(name); ex. kraken_window_h=48h, altfel default_window_h=0 ->
+        None -> order_guard cade pe last_opposite_fill). Binance suprascrie cu
+        fereastra safeback_sec (Order-cache), tier-1 bogat ca azi. RIDICA pe eroare
+        de citire -> apelantul fail-closed (ca window_reference)."""
+        import order_guard
+        return order_guard.window_reference(self, symbol, side,
+                                            order_guard.window_for(self.name))
 
     def last_opposite_fill(self, symbol: str, order_type: str,
                            since_s: float = 90 * 24 * 3600) -> Optional[float]:
