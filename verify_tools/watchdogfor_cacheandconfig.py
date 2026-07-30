@@ -106,6 +106,19 @@ _STALE_OVERRIDES = {
     "cache_order.json": 4320,
     "cache_trade.json": 4320,
     "cache_trade_kraken.json": 4320,
+    # 30 iul: cache_prices_multi.json NU e scris de cacheManager.py — e scris de
+    # market_alerts.py (CacheAllPriceFetcherManager), pe o cadenta ~5:03-5:04 min
+    # (nu ~1s ca restul cache-urilor "fast price"). Era clasificat gresit ca
+    # fast-price (prag 5 min strans + declansator de auto-restart cacheManager) —
+    # pragul de 5 min era mai MIC decat cadenta lui normala, deci alarma fals-
+    # pozitiv la fiecare ciclu, si chiar si cand alarma era corecta, restart-ul
+    # tinta cacheManager.py, care n-are nicio legatura cu acest fisier (restart
+    # inutil, irosea plafonul de 3/6h pe alarme false). Gasit live 30 iul: 2 din
+    # cele 3 restart-uri dintr-o fereastra de 6h au fost exact aici, inainte sa
+    # loveasca plafonul pe un al treilea eveniment (posibil real, cache_currentprice).
+    # Prag 8 min (marja ~3 min peste cadenta reala) — doar alarma, FARA restart
+    # (vezi eliminarea din _is_fast_price_cache mai jos).
+    "cache_prices_multi.json": 8,
 }
 
 # 28 iul: gating pe "flota vie" pt cache-urile EVENT-DRIVEN (fill-uri order/trade).
@@ -137,10 +150,14 @@ _FAST_PRICE_THRESHOLD_MIN = float(os.environ.get("WATCHDOG_FAST_PRICE_MINUTES", 
 
 
 def _is_fast_price_cache(name):
-    """True pt cache-urile de pret RAPIDE (~1s): cele care primesc prag strans
-    SI declanseaza auto-restart. Exclude .jsonl (arhiva sparse ~7min / arhivator
-    ~60s) care raman pe pragul general."""
-    if name in ("cache_currentprice.json", "cache_prices_multi.json", "cache_instant_trend.json"):
+    """True pt cache-urile de pret RAPIDE (~1s), scrise chiar de cacheManager.py:
+    cele care primesc prag strans SI declanseaza auto-restart-ul lui cacheManager.
+    Exclude .jsonl (arhiva sparse ~7min / arhivator ~60s) care raman pe pragul
+    general. cache_prices_multi.json NU e aici (30 iul) — e scris de
+    market_alerts.py (cadenta ~5min, nu ~1s), deci restart-ul cacheManager n-ar
+    ajuta niciodata la staleness-ul lui; are prag propriu in _STALE_OVERRIDES
+    (alarma DOAR, fara restart)."""
+    if name in ("cache_currentprice.json", "cache_instant_trend.json"):
         return True
     if name.startswith("cache_24price_") and name.endswith(".json"):   # per-simbol, WS/poll ~1-20s
         return True

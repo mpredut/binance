@@ -110,11 +110,11 @@ class TestEventDrivenGating(unittest.TestCase):
 
 class TestFastPriceThreshold(unittest.TestCase):
     """Prag dedicat strans (5min) + eligibilitate restart DOAR pt cache-urile
-    de pret rapide (~1s). Arhiva sparse .jsonl ramane pe pragul general si NU
-    declanseaza restart (28 iul)."""
+    de pret rapide (~1s), scrise chiar de cacheManager.py. Arhiva sparse .jsonl
+    ramane pe pragul general si NU declanseaza restart (28 iul)."""
 
     def test_fast_price_caches_classified(self):
-        for n in ("cache_currentprice.json", "cache_prices_multi.json",
+        for n in ("cache_currentprice.json",
                   "cache_instant_trend.json", "cache_24price_HYPEUSD.json",
                   "cache_24price_BTCUSDC.json"):
             self.assertTrue(wd._is_fast_price_cache(n), n)
@@ -125,6 +125,17 @@ class TestFastPriceThreshold(unittest.TestCase):
         for n in ("cache_price_BTCUSDC.jsonl", "cache_24price_long_BTCUSDC.jsonl",
                   "cache_price_long_trend.json", "cache_order.json", "cache_asset_value.json"):
             self.assertFalse(wd._is_fast_price_cache(n), n)
+
+    def test_cache_prices_multi_reclassified_slow_override(self):
+        """30 iul: cache_prices_multi.json e scris de market_alerts.py (~5min
+        cadenta), NU de cacheManager.py — NU mai e "fast price" (era clasificat
+        gresit, pragul de 5min strans cauza alarme false pe cadenta lui normala
+        de ~5:03-5:04min, si restart-ul cacheManager n-avea niciun efect asupra
+        lui). Acum: prag propriu (8min) via _STALE_OVERRIDES, FARA restart."""
+        self.assertFalse(wd._is_fast_price_cache("cache_prices_multi.json"))
+        self.assertEqual(wd._threshold_for("cache_prices_multi.json"), 8)
+        self.assertNotEqual(wd._threshold_for("cache_prices_multi.json"),
+                           wd._FAST_PRICE_THRESHOLD_MIN)
 
     def test_sparse_archive_stall_does_not_restart(self):
         """Un cache sparse .jsonl stale (nu fast) -> alarma, dar NU restart."""
@@ -159,7 +170,10 @@ class TestAutoRestart(unittest.TestCase):
         wd.AUTO_RESTART_COOLDOWN_MIN = 15
         wd.AUTO_RESTART_MAX = 3
         wd.AUTO_RESTART_WINDOW_H = 6
-        self.price = os.path.join(self.tmp, "cache_prices_multi.json")   # cache RAPID
+        # 30 iul: cache_currentprice.json (nu cache_prices_multi.json — vezi
+        # test_cache_prices_multi_is_not_restart_eligible mai jos, acela e al
+        # market_alerts.py, nu al cacheManager.py, deci nu mai declanseaza restart).
+        self.price = os.path.join(self.tmp, "cache_currentprice.json")   # cache RAPID, scris de cacheManager
         self.order = os.path.join(self.tmp, "cache_order.json")          # event-driven (in overrides)
 
     def _stale_price(self, now):
@@ -194,6 +208,21 @@ class TestAutoRestart(unittest.TestCase):
              patch.object(wd.wc, "send_ntfy", return_value=True), \
              patch.object(wd.wc, "send_email", return_value=True):
             wd.check_once(now=now)
+            restart.assert_not_called()
+
+    def test_cache_prices_multi_is_not_restart_eligible(self):
+        """30 iul: cache_prices_multi.json (market_alerts.py, NU cacheManager.py)
+        stale -> alarma (prag propriu 8min din _STALE_OVERRIDES), dar NICIODATA
+        restart -- restart-ul targeteaza cacheManager.py, care n-are nicio
+        legatura cu acest fisier (era bug-ul gasit live 30 iul: 2 restart-uri
+        irosite pe alarme false + target gresit, inainte sa loveasca plafonul)."""
+        now = time.time()
+        multi = os.path.join(self.tmp, "cache_prices_multi.json")
+        _write_cache(multi, int((now - 3600) * 1000), mtime_sec=now - 3600)  # 1h stale
+        with patch.object(wd, "_do_restart", return_value=True) as restart, \
+             patch.object(wd.wc, "send_ntfy", return_value=True), \
+             patch.object(wd.wc, "send_email", return_value=True):
+            self.assertTrue(wd.check_once(now=now), "tot trebuie sa alarmeze")
             restart.assert_not_called()
 
     def test_cooldown_blocks_second_restart(self):
