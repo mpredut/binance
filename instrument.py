@@ -98,11 +98,17 @@ class Instrument:
         # bypass_profit_guard=True (ex. disjunctor de crash) sare DOAR gardul de profit +
         # plafonul de weight (comportament PREEXISTENT, neschimbat) — la fel ca la Binance,
         # NU sare plafonul zilnic, cooldown-ul sau trend-wait-ul (raman active si la disjunctor).
+        # `is_retry` (30 iul): setat de order_retry_worker cand REIA un ordin din coada —
+        # impiedica re-enqueue-ul (fara recursie infinita). Scos din kwargs (nu merge la provider).
+        is_retry = bool(kwargs.pop("is_retry", False))
         bypass = bool(kwargs.pop("bypass_profit_guard", False))
         side_u = side.upper()
         if self._provider.guards_internally():
             return self._provider.place_order(self.symbol, side, price, qty, **kwargs)
 
+        # Capturate INAINTE de orice pop/reassign, pt eventualul enqueue de re-plasare:
+        # intentia ORIGINALA (qty ne-plafonat) + kwargs care reproduc apelul.
+        orig_qty = qty
         reason = None
         order = None
         # 30 iul, fix: `safeback_seconds` e chiar parametrul pe care monitortrades.py
@@ -120,6 +126,11 @@ class Instrument:
         # tradeall/place_order_smart, calea principala); apelantii fostului place_safe_order
         # (rtrade normal, monitororder, assetguardian, trailing_stop, legacy) trec smart=False.
         smart = bool(kwargs.pop("smart", True))
+        # kwargs care reproduc EXACT acest apel la un retry (bypass/smart au fost pop-uite;
+        # restul — safeback_seconds/force/cancelorders/hours/motivation — raman in kwargs).
+        retry_kwargs = dict(kwargs)
+        retry_kwargs["bypass_profit_guard"] = bypass
+        retry_kwargs["smart"] = smart
         try:
             # 0. AJUSTARE PRET + curatare ordine opuse (MECANICA venue, hook) — DOAR daca
             # smart, RULATA INAINTE de gardul de profit (ca gardul sa vada acelasi pret ca
@@ -206,6 +217,16 @@ class Instrument:
             _outcomes_log.log_order_outcome(
                 self.symbol, side_u, price, qty, "executed" if order else "refused",
                 None if order else reason, kwargs.get("motivation"), caller=caller)
+            # RE-PLASARE (30 iul): daca a esuat (order None) si NU e deja un retry, salveaza
+            # intentia in coada persistenta -> order_retry_worker o reia periodic la pret
+            # curent, trecand din nou prin pipeline. Decizie user: retry pt TOT ce esueaza
+            # (rafinam ulterior). Best-effort: orice eroare aici NU afecteaza returul.
+            if order is None and not is_retry:
+                try:
+                    import order_retry
+                    order_retry.enqueue(self.symbol, side_u, orig_qty, retry_kwargs)
+                except Exception as _e:  # noqa: BLE001
+                    print(f"[{self.symbol}] {side_u} enqueue retry esuat (ignor): {_e}")
 
     def min_qty(self) -> float:
         """Volumul minim de ordin al venue-ului pt symbol (0 = fara gard de volum)."""

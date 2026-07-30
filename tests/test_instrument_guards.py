@@ -89,6 +89,12 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         self._log_tmp = tempfile.mkdtemp()
         self._orig_log_dir = outcomes_log.ORDER_OUTCOMES_LOG_DIR
         outcomes_log.ORDER_OUTCOMES_LOG_DIR = self._log_tmp
+        # Coada de re-plasare: izolata — Instrument.place() face enqueue pe esec, iar
+        # aceste teste declanseaza multe esecuri asteptate (cooldown/daily-limit) -> NU
+        # trebuie sa polueze cachedb/order_retry_queue.jsonl real.
+        import order_retry as _oq
+        _oq.QUEUE_FILE = os.path.join(self._tmp, "order_retry_queue.jsonl")
+        _oq.LOCK_FILE = os.path.join(self._tmp, "order_retry_queue.lock")
 
     def tearDown(self):
         outcomes_log.ORDER_OUTCOMES_LOG_DIR = self._orig_log_dir
@@ -202,6 +208,35 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         second = mkt.place(SYMBOL, "SELL", 101.0, 1.0)   # < cooldown -> blocat
         self.assertIsNone(second)
         self.assertEqual(len(p.placed), 1)
+
+    def test_failed_order_enqueued_for_retry(self):
+        import order_retry as _oq
+        p = _FakeProvider()
+        p.seed_trade("BUY", age_sec=5.0)   # anti-spam -> refuz
+        inst = self._inst(p)
+        order = inst.place("BUY", 100.0, 1.0)
+        self.assertIsNone(order)
+        q = _oq.load_all()
+        self.assertEqual(len(q), 1)
+        self.assertEqual(q[0]["symbol"], SYMBOL)
+        self.assertEqual(q[0]["side"], "BUY")
+
+    def test_retry_flag_prevents_reenqueue(self):
+        import order_retry as _oq
+        p = _FakeProvider()
+        p.seed_trade("BUY", age_sec=5.0)   # refuz
+        inst = self._inst(p)
+        order = inst.place("BUY", 100.0, 1.0, is_retry=True)   # e deja un retry
+        self.assertIsNone(order)
+        self.assertEqual(_oq.load_all(), [])   # NU se re-enqueue-aza (fara recursie)
+
+    def test_success_not_enqueued(self):
+        import order_retry as _oq
+        p = _FakeProvider()
+        inst = self._inst(p)
+        order = inst.place("BUY", 100.0, 1.0)
+        self.assertIsNotNone(order)
+        self.assertEqual(_oq.load_all(), [])   # succes -> nimic in coada
 
     def test_smart_flag_gates_price_adjust(self):
         # CORECTIE 30 iul: place_order_smart (SMART: cancel-opuse + nudge) vs place_safe_order
