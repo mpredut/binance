@@ -36,6 +36,17 @@ mic** (Kraken API ~720 bare, 3-5 cicluri, fereastra care se misca) -> dependent 
 solid. De verificat robust (multiple ferestre) inainte de a dezactiva. Singurul semnal ACTIONABIL
 din toata suita — restul confirma valorile fixe/actuale.
 
+**✅ APLICAT + RE-CONFIRMAT (30-31 iul):** verificat ROBUST (14 ferestre: 4h ~120z + 1h ~30z,
+`scratchpad/reentry_robust.py`) -> `STRAT_REENTRY_ADAPTIVE=false` LIVE (kraken_bot repornit).
+Re-rulat 31 iul pe date PROASPETE: **FIX 6 / tie 8 / adaptiv 0** — FIX nu pierde in NICIO
+fereastra, inclusiv sub-ferestrele bull (unde doar egaleaza, reintrarea nu se declanseaza).
+Decizia `false` ramane solida, ne mai regim-dependenta. #6 (DCA_DROP 1.25) + #7 (TP 5.0)
+re-rulate 31 iul (`backtest.py --mode sweep`, date proaspete): 4h/120z = 0 cicluri (in bull
+puternic entry-ul discount market-0.8% nu se umple -> fara semnal, artefact de fill); 1h/30z
+declin = TP mai mic/drop mai mare marginal mai bune, DAR toate pierd (-2.8..-3.4%), diferente
+mici, pur regim-de-declin (bull favorizeaza TP mare, cf #7 pe 2 regimuri). NICIO schimbare
+justificata — valorile live raman alegerea robusta amortizata.
+
 ---
 
 ## Prioritate MEDIE
