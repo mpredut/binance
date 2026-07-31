@@ -107,8 +107,9 @@ class Instrument:
             return self._provider.place_order(self.symbol, side, price, qty, **kwargs)
 
         # Capturate INAINTE de orice pop/reassign, pt eventualul enqueue de re-plasare:
-        # intentia ORIGINALA (qty ne-plafonat) + kwargs care reproduc apelul.
+        # intentia ORIGINALA (qty ne-plafonat, pretul CERUT) + kwargs care reproduc apelul.
         orig_qty = qty
+        orig_price = price   # pretul cerut = intentia apelantului -> gardul de pret la retry
         reason = None
         order = None
         # 30 iul, fix: `safeback_seconds` e chiar parametrul pe care monitortrades.py
@@ -224,7 +225,16 @@ class Instrument:
             if order is None and not is_retry:
                 try:
                     import order_retry
-                    order_retry.enqueue(self.symbol, side_u, orig_qty, retry_kwargs)
+                    if order_retry.RETRY_ENABLED:
+                        # pretul de piata la momentul esecului (best-effort) — pt gardul de
+                        # pret/dedup la retry. Il luam DOAR cand chiar enqueue-am.
+                        ref_price = None
+                        try:
+                            ref_price = self._provider.get_current_price(self.symbol)
+                        except Exception:  # noqa: BLE001
+                            ref_price = None
+                        order_retry.enqueue(self.symbol, side_u, orig_qty, retry_kwargs,
+                                            requested_price=orig_price, ref_price=ref_price)
                 except Exception as _e:  # noqa: BLE001
                     print(f"[{self.symbol}] {side_u} enqueue retry esuat (ignor): {_e}")
 

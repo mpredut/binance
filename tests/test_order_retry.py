@@ -20,6 +20,10 @@ class OrderRetryStoreTest(unittest.TestCase):
         oq.RETRY_INTERVAL_SEC = 300.0
         oq.RETRY_TTL_SEC = 86400.0
         oq.RETRY_MAX_ATTEMPTS = 0
+        oq.RETRY_PRICE_TOL = 0.002
+        oq.RETRY_DEDUP = True
+        oq.RETRY_DEDUP_PRICE_TOL = 0.003
+        oq.RETRY_MAX_QUEUE = 500
 
     def test_enqueue_and_load(self):
         i = oq.enqueue("BTCUSDC", "BUY", None,
@@ -33,7 +37,60 @@ class OrderRetryStoreTest(unittest.TestCase):
         self.assertIsNone(r["qty"])
         self.assertEqual(r["place_kwargs"]["safeback_seconds"], 999)
         self.assertEqual(r["attempts"], 0)
-        self.assertNotIn("price", r)   # pretul NU se salveaza (recalculat la retry)
+        self.assertNotIn("price", r)   # pretul NU se salveaza ca valoare de trimis
+
+    def test_enqueue_captures_price_intent(self):
+        oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63000.0, ref_price=62950.0,
+                   now=1000.0)
+        r = oq.load_all()[0]
+        self.assertEqual(r["requested_price"], 63000.0)
+        self.assertEqual(r["ref_price"], 62950.0)
+
+    def test_dedup_skips_duplicate_intent(self):
+        a = oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63000.0, now=1000.0)
+        # aceeasi intentie (pret in banda 0.3%) -> nu dubleaza, intoarce id-ul existent
+        b = oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63100.0, now=1001.0)
+        self.assertEqual(a, b)
+        self.assertEqual(len(oq.load_all()), 1)
+
+    def test_dedup_different_price_band_kept(self):
+        oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63000.0, now=1000.0)
+        # pret cerut mult diferit (>0.3%) -> intentie distincta, se pastreaza
+        oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=70000.0, now=1001.0)
+        self.assertEqual(len(oq.load_all()), 2)
+
+    def test_dedup_off_appends_always(self):
+        oq.RETRY_DEDUP = False
+        oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63000.0, now=1000.0)
+        oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63000.0, now=1001.0)
+        self.assertEqual(len(oq.load_all()), 2)
+
+    def test_max_queue_cap(self):
+        oq.RETRY_MAX_QUEUE = 2
+        oq.RETRY_DEDUP = False   # ca sa nu se comprime prin dedup
+        self.assertIsNotNone(oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0))
+        self.assertIsNotNone(oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=2.0))
+        self.assertIsNone(oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=3.0))  # plin
+        self.assertEqual(len(oq.load_all()), 2)
+
+    def test_price_gate_sell(self):
+        rec = {"side": "SELL", "requested_price": 100.0}
+        self.assertTrue(oq.price_gate_ok(rec, 100.0))         # egal -> ok
+        self.assertTrue(oq.price_gate_ok(rec, 101.0))         # mai sus -> ok (vinzi mai bine)
+        self.assertTrue(oq.price_gate_ok(rec, 99.9))          # in toleranta 0.2%
+        self.assertFalse(oq.price_gate_ok(rec, 95.0))         # mult sub -> asteapta
+        self.assertFalse(oq.price_gate_ok(rec, None))         # fara pret -> nu decidem
+
+    def test_price_gate_buy(self):
+        rec = {"side": "BUY", "requested_price": 100.0}
+        self.assertTrue(oq.price_gate_ok(rec, 100.0))
+        self.assertTrue(oq.price_gate_ok(rec, 99.0))          # mai jos -> ok (cumperi mai ieftin)
+        self.assertFalse(oq.price_gate_ok(rec, 105.0))        # mult peste -> asteapta
+
+    def test_price_gate_no_intent_skips(self):
+        # fara requested_price capturat (intrare veche/anormala) -> conservator, NU reia orb
+        self.assertFalse(oq.price_gate_ok({"side": "SELL"}, 50.0))
+        self.assertFalse(oq.price_gate_ok({"side": "BUY", "requested_price": 0}, 50.0))
 
     def test_enqueue_disabled_returns_none(self):
         oq.RETRY_ENABLED = False

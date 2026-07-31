@@ -33,9 +33,14 @@ class ProcessOnceTest(unittest.TestCase):
         oq.RETRY_INTERVAL_SEC = 300.0
         oq.RETRY_TTL_SEC = 86400.0
         oq.RETRY_MAX_ATTEMPTS = 0
+        oq.RETRY_PRICE_TOL = 0.002
+        oq.RETRY_DEDUP = True
+        oq.RETRY_DEDUP_PRICE_TOL = 0.003
+        oq.RETRY_MAX_QUEUE = 500
 
     def test_success_removes_from_queue(self):
-        oq.enqueue("BTCUSDC", "BUY", None, {"safeback_seconds": 9, "smart": False}, now=1000.0)
+        oq.enqueue("BTCUSDC", "BUY", None, {"safeback_seconds": 9, "smart": False},
+                   requested_price=63000.0, now=1000.0)   # BUY: pret curent <= cerut -> gate ok
         mkt = FakeMkt(price=63000.0, succeed=True)
         stats = worker.process_once(mkt, now=1000.0 + 400)   # due (>300s)
         self.assertEqual(stats["succeeded"], 1)
@@ -47,8 +52,8 @@ class ProcessOnceTest(unittest.TestCase):
         self.assertEqual(mkt.calls[0]["kw"]["smart"], False)
 
     def test_failure_keeps_and_increments_attempts(self):
-        oq.enqueue("BTCUSDC", "BUY", None, {}, now=1000.0)
-        mkt = FakeMkt(succeed=False)
+        oq.enqueue("BTCUSDC", "BUY", None, {}, requested_price=100.0, now=1000.0)
+        mkt = FakeMkt(succeed=False)   # price=100 default, BUY gate ok (100<=100)
         worker.process_once(mkt, now=1000.0 + 400)
         q = oq.load_all()
         self.assertEqual(len(q), 1)
@@ -83,6 +88,28 @@ class ProcessOnceTest(unittest.TestCase):
         stats = worker.process_once(mkt, now=1000.0 + 400)
         self.assertEqual(stats["attempted"], 0)
         self.assertEqual(len(oq.load_all()), 1)      # pret indisponibil -> ramane
+
+    def test_price_gate_skips_unfavorable(self):
+        # SELL cerut la 100; pretul curent 90 (sub) -> gardul opreste, ramane fara incercare
+        oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=100.0, now=1000.0)
+        mkt = FakeMkt(price=90.0, succeed=True)
+        stats = worker.process_once(mkt, now=1000.0 + 400)
+        self.assertEqual(stats["attempted"], 0)
+        self.assertEqual(stats["skipped_price"], 1)
+        self.assertEqual(len(mkt.calls), 0)          # NU s-a plasat nimic
+        q = oq.load_all()
+        self.assertEqual(len(q), 1)
+        self.assertEqual(q[0]["attempts"], 0)        # nu se numara ca incercare
+
+    def test_price_gate_allows_favorable(self):
+        # SELL cerut la 100; pretul curent 101 (peste) -> gardul lasa sa treaca, se reia
+        oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=100.0, now=1000.0)
+        mkt = FakeMkt(price=101.0, succeed=True)
+        stats = worker.process_once(mkt, now=1000.0 + 400)
+        self.assertEqual(stats["succeeded"], 1)
+        self.assertEqual(len(mkt.calls), 1)
+        self.assertEqual(mkt.calls[0]["price"], 101.0)   # reluat la pret CURENT
+        self.assertEqual(oq.load_all(), [])
 
 
 if __name__ == "__main__":

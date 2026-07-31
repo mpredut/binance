@@ -95,6 +95,9 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         import order_retry as _oq
         _oq.QUEUE_FILE = os.path.join(self._tmp, "order_retry_queue.jsonl")
         _oq.LOCK_FILE = os.path.join(self._tmp, "order_retry_queue.lock")
+        # pin explicit — testele nu trebuie sa depinda de kill-switch-ul din config live
+        _oq.RETRY_ENABLED = True
+        _oq.RETRY_DEDUP = True
 
     def tearDown(self):
         outcomes_log.ORDER_OUTCOMES_LOG_DIR = self._orig_log_dir
