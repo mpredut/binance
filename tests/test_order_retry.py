@@ -22,7 +22,6 @@ class OrderRetryStoreTest(unittest.TestCase):
         oq.RETRY_MAX_ATTEMPTS = 0
         oq.RETRY_PRICE_TOL = 0.002
         oq.RETRY_DEDUP = True
-        oq.RETRY_DEDUP_PRICE_TOL = 0.003
         oq.RETRY_MAX_QUEUE = 500
 
     def test_enqueue_and_load(self):
@@ -46,18 +45,30 @@ class OrderRetryStoreTest(unittest.TestCase):
         self.assertEqual(r["requested_price"], 63000.0)
         self.assertEqual(r["ref_price"], 62950.0)
 
-    def test_dedup_skips_duplicate_intent(self):
+    def test_dedup_same_side_refreshes_not_duplicates(self):
         a = oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63000.0, now=1000.0)
-        # aceeasi intentie (pret in banda 0.3%) -> nu dubleaza, intoarce id-ul existent
-        b = oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63100.0, now=1001.0)
+        # aceeasi intentie symbol+side -> NU dubleaza; reimprospateaza pretul, acelasi id
+        b = oq.enqueue("BTCUSDC", "SELL", 2.0, {}, requested_price=63100.0, now=1001.0)
         self.assertEqual(a, b)
-        self.assertEqual(len(oq.load_all()), 1)
+        items = oq.load_all()
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["requested_price"], 63100.0)   # tinta reimprospatata
+        self.assertEqual(items[0]["qty"], 2.0)
+        self.assertEqual(items[0]["created_ts"], 1000.0)         # vechimea PASTRATA (min)
 
-    def test_dedup_different_price_band_kept(self):
+    def test_dedup_collapses_ladder_any_distance(self):
+        # chiar la preturi MULT diferite (fostul "ladder") -> tot o singura intentie/side
         oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63000.0, now=1000.0)
-        # pret cerut mult diferit (>0.3%) -> intentie distincta, se pastreaza
         oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=70000.0, now=1001.0)
+        self.assertEqual(len(oq.load_all()), 1)
+        # side diferit = intentie distincta
+        oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=62000.0, now=1002.0)
         self.assertEqual(len(oq.load_all()), 2)
+
+    def test_dedup_preserves_attempts_on_refresh(self):
+        oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63000.0, now=1000.0, attempts=3)
+        oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63100.0, now=1001.0, attempts=0)
+        self.assertEqual(oq.load_all()[0]["attempts"], 3)    # max(attempts) pastrat
 
     def test_dedup_off_appends_always(self):
         oq.RETRY_DEDUP = False
@@ -110,6 +121,29 @@ class OrderRetryStoreTest(unittest.TestCase):
         rem = oq.load_all()
         self.assertEqual(len(rem), 1)
         self.assertEqual(rem[0]["symbol"], "TAOUSDC")
+
+    def test_claim_removes_and_returns(self):
+        a = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0, now=1000.0)
+        oq.enqueue("TAOUSDC", "SELL", 2.0, {}, requested_price=2.0, now=1001.0)
+        claimed = oq.claim([a])
+        self.assertEqual(len(claimed), 1)
+        self.assertEqual(claimed[0]["id"], a)
+        rem = oq.load_all()
+        self.assertEqual(len(rem), 1)             # scos din coada
+        self.assertEqual(rem[0]["symbol"], "TAOUSDC")
+
+    def test_claim_empty_noop(self):
+        oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0, now=1000.0)
+        self.assertEqual(oq.claim([]), [])
+        self.assertEqual(len(oq.load_all()), 1)
+
+    def test_reenqueue_preserves_created_ts(self):
+        # workerul re-adauga un esec pastrand vechimea -> TTL nu se reseteaza la fiecare esec
+        oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0,
+                   now=5000.0, created_ts=1000.0, attempts=2)
+        r = oq.load_all()[0]
+        self.assertEqual(r["created_ts"], 1000.0)
+        self.assertEqual(r["attempts"], 2)
 
     def test_is_due(self):
         rec = {"last_attempt_ts": 1000.0}

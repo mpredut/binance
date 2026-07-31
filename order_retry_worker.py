@@ -31,17 +31,20 @@ WORKER_POLL_SEC = float(os.environ.get("RETRY_WORKER_POLL_SEC", "30"))
 
 def process_once(mkt, now=None):
     """Un pas de golire a cozii. `mkt` = facada guardata (are get_current_price + place).
-    Intoarce un dict de statistici. Reia la pret CURENT, is_retry=True (fara re-enqueue)."""
+    SCHEMA "scoate-inainte-de-plasare": selecteaza ordinele SCADENTE + favorabile (pret in
+    avantaj), le SCOATE din coada (claim atomic) INAINTE de a le plasa — ca sa nu fie
+    reincercate de nimeni cat timp sunt in curs — apoi le plaseaza la pret CURENT
+    (is_retry=True). Succes -> raman scoase. Esec -> RE-adaugate (pastrand vechimea +
+    attempts+1). Expirate -> scoase + alerta. Intoarce un dict de statistici."""
     now = now if now is not None else time.time()
     snapshot = oq.load_all(now)
 
-    results = {}        # id -> True(succes)/False(esec) pt cele INCERCATE acum
-    expired_ids = set()
+    to_retry = []       # (rec, price) — scadente + favorabile la pret
+    expired = []
     skipped_price = 0   # scadente dar cu pretul inca dezavantajos vs cel cerut
     for r in snapshot:
-        rid = r.get("id")
         if oq.is_expired(r, now):
-            expired_ids.add(rid)
+            expired.append(r)
             continue
         if not oq.is_due(r, now):
             continue
@@ -59,40 +62,45 @@ def process_once(mkt, now=None):
         if not oq.price_gate_ok(r, price):
             skipped_price += 1
             continue
+        to_retry.append((r, price))
+
+    # SCOATE din coada expiratele + cele de reincercat INAINTE de plasare (claim atomic).
+    oq.claim([r["id"] for r in expired] + [r["id"] for (r, _) in to_retry], now)
+
+    for r in expired:
+        _alert_giveup(r, now)   # deja scoase din coada
+
+    succeeded = 0
+    for (r, price) in to_retry:
+        symbol = r.get("symbol")
         kwargs = dict(r.get("place_kwargs") or {})
-        kwargs["is_retry"] = True   # NU re-enqueue
+        kwargs["is_retry"] = True   # NU re-enqueue automat din pipeline (o facem noi la esec)
         try:
             order = mkt.place(symbol, r.get("side"), price, r.get("qty"), **kwargs)
         except Exception as e:  # noqa: BLE001
             print(f"[order_retry] retry {r.get('side')} {symbol} a aruncat ({e}) — tratez ca esec")
             order = None
-        results[rid] = bool(order)
         if order:
+            succeeded += 1
             print(f"[order_retry] RE-PLASAT cu succes {r.get('side')} {symbol} @ {price}")
+        else:
+            # esec -> RE-adauga in coada, pastrand vechimea (created_ts) + attempts+1.
+            # Trece prin dedup (symbol+side): daca un plasator a re-cerut intre timp, se
+            # comaseaza intr-o singura intentie.
+            oq.enqueue(symbol, r.get("side"), r.get("qty"),
+                       place_kwargs=r.get("place_kwargs"),
+                       requested_price=r.get("requested_price"),
+                       ref_price=r.get("ref_price"),
+                       now=now,
+                       created_ts=r.get("created_ts"),
+                       attempts=int(r.get("attempts", 0)) + 1,
+                       last_attempt_ts=now)
 
-    # Re-citeste (merge cu eventualele append-uri aparute in timpul apelurilor de retea)
-    # si rescrie coada: succese/expirate scoase, esecuri actualizate, restul neatins.
-    current = oq.load_all(now)
-    remaining = []
-    for r in current:
-        rid = r.get("id")
-        if rid in expired_ids:
-            _alert_giveup(r, now)
-            continue
-        res = results.get(rid)
-        if res is True:
-            continue   # succes -> scos
-        if res is False:
-            r["attempts"] = int(r.get("attempts", 0)) + 1
-            r["last_attempt_ts"] = now
-        remaining.append(r)
-    oq.rewrite(remaining)
-
-    return {"attempted": len(results),
-            "succeeded": sum(1 for v in results.values() if v),
-            "expired": len(expired_ids),
+    return {"attempted": len(to_retry),
+            "succeeded": succeeded,
+            "expired": len(expired),
             "skipped_price": skipped_price,
-            "remaining": len(remaining)}
+            "remaining": len(oq.load_all(now))}
 
 
 def _alert_giveup(rec, now):

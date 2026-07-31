@@ -38,10 +38,10 @@ RETRY_MAX_ATTEMPTS = int(float(os.environ.get("RETRY_MAX_ATTEMPTS", "0")))
 # cerut*(1+tol) — astepti sa scada). Transforma retry-ul din "orb pe timp" in "conditionat
 # de pret" -> fara ghost-orders la preturi dezavantajoase + un TTL lung devine sigur.
 RETRY_PRICE_TOL = float(os.environ.get("RETRY_PRICE_TOL", "0.002"))
-# Dedup la enqueue: NU dubla o intentie deja pending (acelasi symbol+side, pret cerut in
-# aceeasi banda). Opreste inundarea cozii de refuzuri de gard repetate ciclu-de-ciclu.
+# Dedup la enqueue: o SINGURA intentie pending per symbol+side. La re-enqueue al aceleiasi
+# intentii se REIMPROSPATEAZA tinta (pret/qty), NU se acumuleaza intrari (fara "ladder" de
+# preturi care s-ar declansa toate deodata cand pretul trece prin niveluri).
 RETRY_DEDUP = os.environ.get("RETRY_DEDUP", "true").strip().lower() == "true"
-RETRY_DEDUP_PRICE_TOL = float(os.environ.get("RETRY_DEDUP_PRICE_TOL", "0.003"))
 # Plafon DUR pe dimensiunea cozii (centura de siguranta). 0 = fara plafon.
 RETRY_MAX_QUEUE = int(float(os.environ.get("RETRY_MAX_QUEUE", "500")))
 
@@ -71,40 +71,21 @@ def _read_nolock():
     return items
 
 
-def _same_intent(rec, symbol, side, requested_price, tol):
-    """True daca `rec` e ACEEASI intentie pending: acelasi symbol+side si pret cerut in
-    aceeasi banda (tol). Fara pret pe AMBELE -> egale pe symbol+side; una cu pret si alta
-    fara -> DIFERITE (conservator, nu le confunda)."""
-    if rec.get("symbol") != symbol:
-        return False
-    if (rec.get("side") or "").upper() != (side or "").upper():
-        return False
-    rp = rec.get("requested_price")
-    if rp is None and requested_price is None:
-        return True
-    if rp is None or requested_price is None:
-        return False
-    try:
-        rp = float(rp); reqp = float(requested_price)
-    except (TypeError, ValueError):
-        return False
-    if rp <= 0 or reqp <= 0:
-        return rp == reqp
-    return abs(rp - reqp) / reqp <= tol
-
-
 def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_price=None,
-            now=None):
-    """Adauga un ordin esuat in coada (sub lock). Intoarce id-ul nou; sau id-ul intrarii
-    EXISTENTE daca dedup prinde o intentie identica pending; sau None daca RETRY_ENABLED e
-    False / plafonul de coada e atins. Captureaza INTENTIA DE PRET: `requested_price`
-    (pretul cerut de apelant) + `ref_price` (pretul de piata la esec) — folosite la retry
-    pt gardul de pret + dedup. Pretul NU se re-trimite ca valoare fixa (se recalculeaza
-    din pretul curent). `place_kwargs` = kwargs cu care s-a incercat plasarea, refolositi."""
+            now=None, created_ts=None, attempts=0, last_attempt_ts=0.0):
+    """Adauga (sau REIMPROSPATEAZA) un ordin esuat in coada, sub lock. Dedup pe symbol+side:
+    o SINGURA intentie pending per symbol+side. La potrivire, intrarea existenta se
+    reimprospateaza cu ultima tinta (pret/qty/kwargs), pastrand cel mai VECHI created_ts
+    (pt TTL) si max(attempts) — deci FARA ladder de intrari pe acelasi side. Intoarce id-ul
+    (nou sau al intrarii existente); None daca RETRY_ENABLED False / plafon coada atins.
+    Captureaza INTENTIA DE PRET (requested_price + ref_price) pt gardul de pret la retry.
+    `created_ts`/`attempts`/`last_attempt_ts` permit workerului sa RE-adauge un ordin esuat
+    pastrandu-i vechimea + istoricul de incercari (nu reseteaza TTL la fiecare esec)."""
     if not RETRY_ENABLED:
         return None
     now = now if now is not None else time.time()
     side_u = (side or "").upper()
+    cts = float(created_ts) if created_ts is not None else now
     rec = {
         "id": uuid.uuid4().hex,
         "symbol": symbol,
@@ -113,17 +94,28 @@ def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_pric
         "place_kwargs": dict(place_kwargs or {}),
         "requested_price": requested_price,
         "ref_price": ref_price,
-        "created_ts": now,
-        "attempts": 0,
-        "last_attempt_ts": 0.0,
+        "created_ts": cts,
+        "attempts": int(attempts),
+        "last_attempt_ts": float(last_attempt_ts),
     }
     _ensure_dir()
     with FileLock(LOCK_FILE):
         existing = _read_nolock()
         if RETRY_DEDUP:
             for e in existing:
-                if _same_intent(e, symbol, side_u, requested_price, RETRY_DEDUP_PRICE_TOL):
-                    return e.get("id")   # deja pending -> nu dubla intentia
+                if e.get("symbol") == symbol and (e.get("side") or "").upper() == side_u:
+                    # o SINGURA intentie per symbol+side -> reimprospateaza tinta, pastreaza
+                    # vechimea (min created_ts) + istoricul (max attempts). Fara ladder.
+                    e["requested_price"] = requested_price
+                    e["ref_price"] = ref_price
+                    e["qty"] = qty
+                    e["place_kwargs"] = dict(place_kwargs or {})
+                    e["created_ts"] = min(float(e.get("created_ts", cts)), cts)
+                    e["attempts"] = max(int(e.get("attempts", 0)), int(attempts))
+                    e["last_attempt_ts"] = max(float(e.get("last_attempt_ts", 0)),
+                                               float(last_attempt_ts))
+                    _write_nolock(existing)
+                    return e.get("id")
         if RETRY_MAX_QUEUE > 0 and len(existing) >= RETRY_MAX_QUEUE:
             print(f"[order_retry] coada plina ({len(existing)}/{RETRY_MAX_QUEUE}) "
                   f"— NU adaug {side_u} {symbol}")
@@ -140,21 +132,44 @@ def load_all(now=None):
         return _read_nolock()
 
 
+def claim(ids, now=None):
+    """SCOATE din coada intrarile cu id in `ids` (atomic, sub lock) si le intoarce (cele
+    gasite). Folosit de worker: scoate ordinul din coada INAINTE de a-l plasa, ca sa nu fie
+    reincercat de nimeni cat timp e in curs de plasare. Ce esueaza -> re-adaugat via enqueue
+    (pastrand vechimea/attempts). Ce se plaseaza cu succes -> ramane scos."""
+    ids = set(ids)
+    if not ids:
+        return []
+    _ensure_dir()
+    claimed = []
+    with FileLock(LOCK_FILE):
+        existing = _read_nolock()
+        remaining = [r for r in existing if r.get("id") not in ids]
+        claimed = [r for r in existing if r.get("id") in ids]
+        if claimed:
+            _write_nolock(remaining)
+    return claimed
+
+
+def _write_nolock(items):
+    """Scrie coada FARA a lua lock-ul (apelantul il detine). Atomic: tmp + os.replace."""
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(QUEUE_FILE), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            for rec in items:
+                f.write(json.dumps(rec) + "\n")
+        os.replace(tmp, QUEUE_FILE)
+    except Exception:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+
+
 def rewrite(items):
-    """Rescrie coada cu `items` (atomic: tmp + os.replace, sub lock). Folosit de reader
-    dupa un pas de procesare (scoate succesele/expiratele, actualizeaza attempts)."""
+    """Rescrie coada cu `items` (atomic, sub lock)."""
     _ensure_dir()
     with FileLock(LOCK_FILE):
-        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(QUEUE_FILE), suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                for rec in items:
-                    f.write(json.dumps(rec) + "\n")
-            os.replace(tmp, QUEUE_FILE)
-        except Exception:
-            if os.path.exists(tmp):
-                os.remove(tmp)
-            raise
+        _write_nolock(items)
 
 
 def is_expired(rec, now=None):

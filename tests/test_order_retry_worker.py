@@ -35,7 +35,6 @@ class ProcessOnceTest(unittest.TestCase):
         oq.RETRY_MAX_ATTEMPTS = 0
         oq.RETRY_PRICE_TOL = 0.002
         oq.RETRY_DEDUP = True
-        oq.RETRY_DEDUP_PRICE_TOL = 0.003
         oq.RETRY_MAX_QUEUE = 500
 
     def test_success_removes_from_queue(self):
@@ -110,6 +109,31 @@ class ProcessOnceTest(unittest.TestCase):
         self.assertEqual(len(mkt.calls), 1)
         self.assertEqual(mkt.calls[0]["price"], 101.0)   # reluat la pret CURENT
         self.assertEqual(oq.load_all(), [])
+
+    def test_removed_from_queue_before_place(self):
+        # cerinta user: intrarea e SCOASA din coada INAINTE de plasare (nu poate fi reincercata
+        # de nimeni cat timp e in curs). Verificam ca in timpul lui place(), coada e goala.
+        oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=100.0, now=1000.0)
+        seen = {}
+
+        class CheckMkt(FakeMkt):
+            def place(self, symbol, side, price, qty, **kw):
+                seen["in_queue_during_place"] = len(oq.load_all())
+                return super().place(symbol, side, price, qty, **kw)
+
+        mkt = CheckMkt(price=100.0, succeed=True)
+        worker.process_once(mkt, now=1000.0 + 400)
+        self.assertEqual(seen["in_queue_during_place"], 0)   # scoasa INAINTE de plasare
+        self.assertEqual(oq.load_all(), [])                  # succes -> ramane scoasa
+
+    def test_failure_reenqueues_preserving_age(self):
+        oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=100.0, now=1000.0)
+        mkt = FakeMkt(price=100.0, succeed=False)   # BUY gate ok (100<=100), dar esueaza
+        worker.process_once(mkt, now=1000.0 + 400)
+        q = oq.load_all()
+        self.assertEqual(len(q), 1)                  # re-adaugata dupa esec
+        self.assertEqual(q[0]["created_ts"], 1000.0) # vechimea PASTRATA (TTL nu se reseteaza)
+        self.assertEqual(q[0]["attempts"], 1)        # attempts+1
 
 
 if __name__ == "__main__":
