@@ -143,8 +143,10 @@ class KrakenTrailing:
 
     def execute_sell(self, key, asset, pair, qty, price, peak, trail) -> bool:
         try:
+            # pret usor SUB piata pt fill sigur; precizia (pair_decimals) o rotunjeste
+            # central add_order (nu hardcodat aici — evita respingerea Kraken pe zecimale).
             self.client.add_order(pair, "sell", round(qty, 8),
-                                  round(price * 0.995, 4), ordertype="limit")
+                                  price * 0.995, ordertype="limit")
             self.log(f"  🛑 [TRAIL-K] VANDUT {qty} {asset} @ ~{price:.4f} "
                      f"(varf {peak:.4f}, -{trail}%)")
             notify(title=f"🛑 TRAILING {asset} vandut {qty:.2f}@~{price:.2f}",
@@ -157,8 +159,9 @@ class KrakenTrailing:
 
     def execute_rebuy(self, key, asset, pair, qty, price, rb) -> bool:
         try:
-            # limit usor PESTE pret -> fill sigur (ca add_order sell e usor sub)
-            self.client.add_order(pair, "buy", qty, round(price * 1.005, 4), ordertype="limit")
+            # limit usor PESTE pret -> fill sigur (ca add_order sell e usor sub); precizia o
+            # rotunjeste central add_order (pair_decimals), nu hardcodat 4 zecimale.
+            self.client.add_order(pair, "buy", qty, price * 1.005, ordertype="limit")
             self.log(f"  🟢 [TRAIL-K] RE-BUY {qty} {asset} @ ~{price:.4f}  "
                      f"(recul +{REBUY_BOUNCE_PCT}% de la minim {rb['low']:.4f}; vandut la {rb.get('sell_price', 0):.4f})")
             notify(title=f"🟢 RE-BUY {asset} {qty:.2f}@~{price:.2f}",

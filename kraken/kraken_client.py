@@ -162,9 +162,25 @@ class KrakenClient:
         """Solduri pe active. {asset: cantitate}."""
         return self._private("Balance")
 
+    def price_decimals(self, pair: str) -> int:
+        """Zecimalele de PRET permise de Kraken pt pereche (pair_decimals din AssetPairs,
+        cache 1h). Default prudent 2 daca info-ul lipseste — Kraken accepta mereu MAI PUTINE
+        zecimale, niciodata mai multe (ex. HYPE/USD = 2)."""
+        try:
+            info = self.pair_info(pair)
+            if info and info.get("pair_decimals") is not None:
+                return int(info["pair_decimals"])
+        except Exception:  # noqa: BLE001 — orice esec -> fallback prudent, nu blocam ordinul
+            pass
+        return 2
+
     def add_order(self, pair: str, side: str, volume: float, price: float | None = None,
                   ordertype: str = "limit", validate: bool = False) -> dict:
-        """Plaseaza ordin. side='buy'|'sell'. validate=True -> doar valideaza (nu plaseaza)."""
+        """Plaseaza ordin. side='buy'|'sell'. validate=True -> doar valideaza (nu plaseaza).
+        Rotunjeste pretul la precizia REALA a perechii (pair_decimals) — protectie de
+        MECANICA centralizata pt TOTI apelantii Kraken (trailing/bot/xstock), analog cu
+        place_order_mechanics pe Binance. Fara asta, un pret cu prea multe zecimale e respins
+        de Kraken ('price can only be specified up to N decimals') si ordinul esueaza."""
         data = {
             "pair": pair,
             "type": side,
@@ -172,6 +188,7 @@ class KrakenClient:
             "volume": f"{volume}",
         }
         if ordertype == "limit" and price is not None:
+            price = round(float(price), self.price_decimals(pair))
             data["price"] = f"{price}"
         if validate:
             data["validate"] = "true"
