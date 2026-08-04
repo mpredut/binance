@@ -10,6 +10,17 @@
 # Idempotent; sigur de pus pe cron pe prod.
 set -euo pipefail
 
+# MUTEX (4 aug): refresh_dev poate fi pornit CONCURENT — o data din cron-ul propriu (*/30,
+# deci si la 00:00/12:00) SI o data apelat de trigger_backtest_dev.sh (0 */12 = 00:00/12:00).
+# Doua `git pull --ff-only` simultane pe dev -> FETCH_HEAD scris de amandoua -> 'Cannot
+# fast-forward to multiple branches'. flock serializeaza: al doilea asteapta (max 300s) sa
+# termine primul, apoi ruleaza (git pull devine 'already up to date', ieftin). Fara curse.
+exec 9>"/tmp/refresh_dev.lock"
+if ! flock -w 300 9; then
+  echo "[refresh_dev $(date '+%F %T')] alt refresh_dev ruleaza de >300s — sar peste"
+  exit 0
+fi
+
 DEV_HOST="${DEV_HOST:-192.168.0.138}"
 DEV_PORT="${DEV_PORT:-32238}"
 DEV_USER="${DEV_USER:-predut}"
