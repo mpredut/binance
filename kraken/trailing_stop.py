@@ -51,7 +51,7 @@ CACHE_TREND = os.path.join(_ROOT, "cachedb", "cache_instant_trend.json")
 load_dotenv(os.path.join(_HERE, "trailing.conf"))
 
 # prag larg per ASSET (disjunctor de crash, nu unealta de profit) + perechea de vanzare
-TRAIL_PCT = {"HYPE": 15.0}
+TRAIL_PCT = {"HYPE": 18.0}   # 4 aug: 15->18 (decizie user, mai lat = mai putin whipsaw)
 PAIR_FOR = {"HYPE": "HYPEUSD"}
 DEFAULT_TRAIL_PCT = 15.0
 MIN_NOTIONAL_USD = 10.0
