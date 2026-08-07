@@ -44,8 +44,12 @@ def fetch_candles(pair, interval):
     return [(float(x[1]), float(x[2]), float(x[3]), float(x[4])) for x in res[key]]
 
 
-def simulate(ohlc, P, reentry_arr=None):
-    """Motor DCA+TP+SL. `reentry_arr` OPTIONAL (default None = comportament VECHI,
+def simulate(ohlc, P, reentry_arr=None, sl_bounce_pct=None):
+    """Motor DCA+TP+SL. `sl_bounce_pct` OPTIONAL (default None = comportament VECHI): daca
+    dat, dupa un STOP-LOSS reintrarea e pe REVENIRE (pretul urca cu sl_bounce_pct% de la
+    minimul de dupa vanzare), NU pe scadere sub pretul vandut — reflecta fix-ul din
+    strategy.py (4 aug) care nu mai lasa botul blocat afara pe recuperare dupa SL.
+    `reentry_arr` OPTIONAL (default None = comportament VECHI,
     neschimbat): daca dat (secventa per-bara, NaN = foloseste P["reentry_fallback"]),
     activeaza bariera de reintrare dupa o inchidere de pozitie (TP/SL) — lipsea din
     versiunea originala (gasit in research/kraken_adaptive_thresholds/, 23 iul:
@@ -63,6 +67,7 @@ def simulate(ohlc, P, reentry_arr=None):
     peak = eq = 0.0; maxdd = 0.0
     rest_buy = None; rest_sell = None
     last_sell_price = None
+    last_exit_kind = None; sl_low = None   # pt reintrarea STOP-aware (bounce de la minim)
     blocked_ticks = 0
 
     for i, (o, h, l, c) in enumerate(ohlc):
@@ -80,7 +85,7 @@ def simulate(ohlc, P, reentry_arr=None):
                 avg = cost/qty
                 realized += (px-avg)*sz; fees += fee*sz*px
                 cycles += 1; wins += 1 if px > avg else 0
-                last_sell_price = px
+                last_sell_price = px; last_exit_kind = "TP"
                 qty = cost = spent = 0.0; dca = 0; last_open = None
                 rest_sell = None; rest_buy = None
         if qty > 1e-9 and sl > 0:                       # STOP-LOSS pe close
@@ -88,13 +93,20 @@ def simulate(ohlc, P, reentry_arr=None):
             if (avg - c)/avg >= sl:
                 realized += (c-avg)*qty; fees += fee*qty*c
                 cycles += 1
-                last_sell_price = c
+                last_sell_price = c; last_exit_kind = "STOP"; sl_low = c
                 qty = cost = spent = 0.0; dca = 0; last_open = None
                 rest_sell = None; rest_buy = None
         if qty <= 1e-9:
             if rest_buy is None and spent + P["entry"] <= P["budget"]:
                 blocked = False
-                if reentry_arr is not None and last_sell_price:
+                if sl_bounce_pct and last_exit_kind == "STOP" and last_sell_price:
+                    # STOP-aware: reintra pe REVENIRE (bounce de la minim), nu pe scadere
+                    sl_low = c if sl_low is None else min(sl_low, c)
+                    prag_b = sl_low * (1 + sl_bounce_pct / 100)
+                    if c < prag_b and not _are_close(c, prag_b, reentry_tol):
+                        blocked = True
+                        blocked_ticks += 1
+                elif reentry_arr is not None and last_sell_price:
                     r = reentry_arr[i]
                     reentry_pct = P.get("reentry_fallback", 0.0) if (isinstance(r, float) and math.isnan(r)) else r
                     if reentry_pct > 0:

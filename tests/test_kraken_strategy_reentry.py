@@ -34,7 +34,7 @@ def _make_strategy(tmp_pair="TESTPAIR_REENTRY", **param_overrides):
         dca_drop_pct=2.0, check_minutes=2.0, takeprofit_pct=1.9, max_budget=1000.0,
         max_dca_buys=10, enable_takeprofit=True, order_ttl_min=10.0, stop_loss_pct=0.0,
         adopt_cost=0.0, adopt_qty=0.0, reentry_drop_pct=2.2, reentry_tolerance_pct=0.05,
-        reentry_adaptive=False, tp_tranches=[],
+        reentry_adaptive=False, reentry_sl_bounce_pct=1.5, tp_tranches=[],
     )
     defaults.update(param_overrides)
     params = strat.StratParams(**defaults)
@@ -118,6 +118,45 @@ class TestReentryGateUsesEffectivePct(unittest.TestCase):
         # pret 97.0 < prag fix (97.8) -> reintrarea trebuie permisa
         s.step(97.0)
         self.assertTrue(s._has_open("buy"), "reintrarea trebuia permisa (pret sub pragul fix)")
+
+
+class TestStopAwareReentry(unittest.TestCase):
+    """4 aug: dupa un STOP-LOSS, reintrarea e pe REVENIRE (bounce de la minim), nu pe o
+    scadere si mai jos — altfel botul ramane blocat afara cand pretul isi revine."""
+
+    def test_stop_reentry_not_stranded_on_recovery(self):
+        # BUG-ul reparat: vandut 51.19 la stop-loss, pretul revine la 55.6 (peste vanzare).
+        # Regula veche (reintra doar sub 50.06) ar bloca la nesfarsit. Cea noua reintra.
+        s = _make_strategy(reentry_sl_bounce_pct=1.5, reentry_drop_pct=2.2, reentry_tolerance_pct=0.0)
+        s.s["qty"] = 0.0
+        s.s["last_sell_price"] = 51.19
+        s.s["last_exit_kind"] = "STOP"
+        s.s["sl_low"] = 51.19
+        s.step(55.6)
+        self.assertTrue(s._has_open("buy"), "dupa STOP, revenirea trebuie sa declanseze reintrarea")
+
+    def test_stop_reentry_blocked_until_bounce_then_enters(self):
+        s = _make_strategy(reentry_sl_bounce_pct=1.5, reentry_tolerance_pct=0.0)
+        s.s["qty"] = 0.0
+        s.s["last_sell_price"] = 51.19
+        s.s["last_exit_kind"] = "STOP"
+        s.s["sl_low"] = 51.19
+        s.step(50.0)                                  # inca scade -> urmareste minimul, nu intra
+        self.assertFalse(s._has_open("buy"))
+        self.assertEqual(s.s["sl_low"], 50.0)
+        s.step(50.8)                                  # +1.6% de la minim 50 -> bounce atins
+        self.assertTrue(s._has_open("buy"), "bounce >= prag -> reintra")
+
+    def test_tp_exit_keeps_old_drop_below_sell_rule(self):
+        # dupa TP (nu STOP), regula veche ramane: nu recumpara mai sus decat ai vandut
+        s = _make_strategy(reentry_sl_bounce_pct=1.5, reentry_drop_pct=2.2, reentry_tolerance_pct=0.0)
+        s.s["qty"] = 0.0
+        s.s["last_sell_price"] = 100.0
+        s.s["last_exit_kind"] = "TP"
+        s.step(98.5)                                  # 98.5 > prag 97.8 -> blocat (regula veche)
+        self.assertFalse(s._has_open("buy"))
+        s.step(97.0)                                  # 97.0 < 97.8 -> reintra
+        self.assertTrue(s._has_open("buy"))
 
 
 if __name__ == "__main__":

@@ -62,6 +62,13 @@ class StratParams:
                              # optim printr-un sweep dedicat (K=1.5 si K=2.5 dau amandoua mai putin).
                              # Fail-safe: cade pe reentry_drop_pct (fix) daca volatilitatea nu poate
                              # fi calculata inca (warm-up <20 puncte de pret).
+    reentry_sl_bounce_pct: float  # dupa STOP-LOSS (NU dupa TP): reintra pe REVENIRE — cand pretul
+                                  # urca cu acest % de la minimul atins dupa vanzare. Regula
+                                  # veche (reintra doar SUB pretul vandut) e corecta dupa un TP
+                                  # (ai vandut sus, astepti sa cumperi mai jos), dar dupa un
+                                  # stop-loss lasa botul BLOCAT afara cand pretul isi revine
+                                  # (4 aug: exact ce s-a intamplat — vandut 51.19, HYPE la 55.6,
+                                  # prag reintrare 50.06 nu se mai atinge). 0 = dezactivat (regula veche).
     tp_tranches: list        # [(pct, cota%), ...] vanzare graduala; [] = TP clasic pe tot
 
     @classmethod
@@ -86,6 +93,7 @@ class StratParams:
             reentry_drop_pct   = float_env("STRAT_REENTRY_DROP_PCT") or 0.0,
             reentry_tolerance_pct = float_env("STRAT_REENTRY_TOLERANCE_PCT") or 0.0,
             reentry_adaptive   = os.environ.get("STRAT_REENTRY_ADAPTIVE", "false").strip().lower() == "true",
+            reentry_sl_bounce_pct = float_env("STRAT_REENTRY_SL_BOUNCE_PCT") or 1.5,
             tp_tranches        = _parse_tranches(os.environ.get("STRAT_TP_TRANCHES", "")),
         )
 
@@ -117,6 +125,8 @@ def _new_state() -> dict:
         "realized_net": 0.0,
         "fees_total": 0.0,
         "last_sell_price": None,  # pretul ultimei vanzari (regula de reintrare)
+        "last_exit_kind": None,   # "TP"/"STOP"/... — cum s-a inchis ultimul ciclu (reintrare STOP-aware)
+        "sl_low": None,           # minimul de pret dupa un stop-loss (pt reintrarea pe revenire)
         "orders": [],           # {txid, side, vol, price, amount, kind, ts}
     }
 
@@ -316,6 +326,8 @@ class Strategy:
                 (self.s["realized_gross"], self.s["realized_net"],
                  self.s["fees_total"], self.s["cycle"]) = keep
                 self.s["last_sell_price"] = price   # pt regula de reintrare (nu recumpara mai sus)
+                self.s["last_exit_kind"] = o.get("kind")   # "TP"/"STOP" -> reintrare STOP-aware
+                self.s["sl_low"] = price            # minim initial pt reintrarea pe revenire dupa SL
                 log(f"  [STRAT] === ciclu inchis, reincep (ciclu {self.s['cycle']}) ===")
 
     # -- decizie ---------------------------------------------------------------
@@ -451,21 +463,36 @@ class Strategy:
         if held <= 1e-12:
             if self._has_open("buy"):
                 return
-            # REGULA DE REINTRARE: dupa o vanzare, nu recumpara mai sus — asteapta
-            # o scadere reala sub pretul vandut (anti "vand la 60.64, recumpar la 61.1")
+            # REGULA DE REINTRARE — STOP-aware (4 aug):
             lsp = self.s.get("last_sell_price")
-            drop_pct, drop_source = self._effective_reentry_drop_pct()
-            if drop_pct > 0 and lsp:
-                prag = lsp * (1 - drop_pct / 100)
-                # toleranta "aproape de prag" (botcore.are_close, determinist): pretul la
-                # tol% de prag conteaza ca atins — altfel ratam intrari la 2-3 centi de prag
-                if price > prag and not are_close(price, prag, self.p.reentry_tolerance_pct):
-                    log(f"  [STRAT] reintrare blocata: pret {price} > prag {prag:.2f} [{drop_source}]"
-                        f"{f' (tol {self.p.reentry_tolerance_pct}%)' if self.p.reentry_tolerance_pct else ''} "
-                        f"(vandut la {lsp}, astept -{drop_pct:.2f}%)")
-                    if not self.p.reentry_adaptive:
-                        self._shadow_reentry_line(price, lsp, prag)   # log comparativ DOAR cand fixul inca decide
+            if self.s.get("last_exit_kind") == "STOP" and self.p.reentry_sl_bounce_pct > 0 and lsp:
+                # dupa un STOP-LOSS: reintra pe REVENIRE (bounce de la minimul de dupa vanzare),
+                # NU asteptand o scadere si mai jos (regula veche lasa botul blocat afara cand
+                # pretul isi revine — ex. vandut 51.19, HYPE la 55.6, prag vechi 50.06 de neatins).
+                low = min(self.s.get("sl_low") or price, price)
+                self.s["sl_low"] = low
+                prag_bounce = low * (1 + self.p.reentry_sl_bounce_pct / 100)
+                if price < prag_bounce and not are_close(price, prag_bounce, self.p.reentry_tolerance_pct):
+                    log(f"  [STRAT] reintrare dupa STOP blocata: pret {price} < prag revenire "
+                        f"{prag_bounce:.{self.price_dec}f} (min {low}, +{self.p.reentry_sl_bounce_pct}%)")
                     return
+                log(f"  [STRAT] reintrare dupa STOP: revenire atinsa (pret {price} >= "
+                    f"{prag_bounce:.{self.price_dec}f}, min {low}) — reintru")
+            else:
+                # dupa un TP (sau fara SL): nu recumpara mai sus decat ai vandut — asteapta
+                # o scadere reala sub pretul vandut (anti "vand la 60.64, recumpar la 61.1")
+                drop_pct, drop_source = self._effective_reentry_drop_pct()
+                if drop_pct > 0 and lsp:
+                    prag = lsp * (1 - drop_pct / 100)
+                    # toleranta "aproape de prag" (botcore.are_close, determinist): pretul la
+                    # tol% de prag conteaza ca atins — altfel ratam intrari la 2-3 centi de prag
+                    if price > prag and not are_close(price, prag, self.p.reentry_tolerance_pct):
+                        log(f"  [STRAT] reintrare blocata: pret {price} > prag {prag:.2f} [{drop_source}]"
+                            f"{f' (tol {self.p.reentry_tolerance_pct}%)' if self.p.reentry_tolerance_pct else ''} "
+                            f"(vandut la {lsp}, astept -{drop_pct:.2f}%)")
+                        if not self.p.reentry_adaptive:
+                            self._shadow_reentry_line(price, lsp, prag)   # log comparativ DOAR cand fixul inca decide
+                        return
             if self.s["spent"] + self.p.entry_amount > self.p.max_budget:
                 log(f"  [STRAT] plafon {self.p.max_budget} {self.ccy} atins — nu intru")
                 return
