@@ -21,8 +21,13 @@ if [ -z "$TOPIC" ]; then
 fi
 
 HOST=$(hostname)
-curl -s -m 10 -H "In: 6m" -H "Title: SERVER OPRIT ($HOST)" \
+# --retry 4 --retry-all-errors (8 aug): reincearca push-ul si la blip-uri DNS/retea tranzitorii
+# (NameResolutionError), nu doar la 5xx. Un blip tipic (~30-40s) e depasit intr-o singura rulare
+# -> evita ratarea a 3 tick-uri consecutive care ar livra fals "SERVER OPRIT" (server-ul e viu,
+# doar rezolvarea DNS a picat momentan). Worst-case ~4x(10s+5s)=60s, sub cadenta de 2 min.
+curl -s -m 10 --retry 4 --retry-delay 5 --retry-all-errors --retry-connrefused \
+    -H "In: 6m" -H "Title: SERVER OPRIT ($HOST)" \
     -d "Nu a mai trimis heartbeat de 6 minute — verifica serverul (crash / reboot / fara curent)." \
     "https://ntfy.sh/$TOPIC/server-alive" >/dev/null \
     && echo "$(date '+%H:%M') deadman: impins (+6m)" \
-    || echo "$(date '+%H:%M') deadman: EROARE curl (fara net?)"
+    || echo "$(date '+%H:%M') deadman: EROARE curl dupa reincercari (blip DNS/net prelungit?)"
