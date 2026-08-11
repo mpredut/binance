@@ -71,3 +71,52 @@ print("-" * 57)
 print(f"{'TOTAL':<22}{tot_r:>+11.2f}{tot_u:>+12.2f}   -> NET {tot_r+tot_u:+.2f} USD")
 print("\nNota: Binance realized pe fereastra de 120z (cost-basis mai vechi de-atat = aproximat).")
 print("Fara comisioane Binance in realized (fill-urile API nu le expun aici); ~0.075%/leg cu BNB.")
+
+
+# ── ATRIBUIRE PER BOT (din get_all_orders, dupa prefixul clientOrderId) ──────────
+# Separa activitatea PE BOT (RT_/TA_/MT_/AG_) vs MANUAL (and_/web_/x-). realized_own =
+# doar partea de round-trip PROPRIU (min(buy_qty,sell_qty) x (avg_sell-avg_buy)); pt boti
+# care fac schimb de inventar (tradeall cumpara TAO, rtrade vinde) net_qty arata cine
+# acumuleaza vs distribuie. Fereastra = ultimele ~1000 ordine (get_all_orders).
+def _bot(cid):
+    for p, n in (("RT_", "rtrade"), ("TA_", "tradeall"), ("MT", "monitortrades"),
+                 ("MO", "monitororder"), ("AG", "assetguardian"), ("SRV", "server")):
+        if cid.startswith(p):
+            return n
+    if cid.startswith(("and_", "web_", "x-")):
+        return "MANUAL(app/web)"
+    return "alt:" + cid[:4]
+
+
+def per_bot(symbol):
+    from collections import defaultdict
+    try:
+        orders = bapi.client.get_all_orders(symbol=symbol, limit=1000)
+    except Exception as e:  # noqa: BLE001
+        print(f"  {symbol}: EROARE {e}"); return
+    g = defaultdict(lambda: {"bq": 0.0, "bv": 0.0, "sq": 0.0, "sv": 0.0})
+    for o in orders:
+        eq = float(o.get("executedQty", 0) or 0)
+        if eq <= 0:
+            continue
+        cqq = float(o.get("cummulativeQuoteQty", 0) or 0)
+        a = g[_bot(o.get("clientOrderId", ""))]
+        if o["side"] == "BUY":
+            a["bq"] += eq; a["bv"] += cqq
+        else:
+            a["sq"] += eq; a["sv"] += cqq
+    print(f"\n  {symbol} (ultimele {len(orders)} ordine):")
+    print(f"    {'sursa':<16}{'buy$':>9}{'sell$':>9}{'net_qty':>12}{'realized_own':>14}")
+    for b, a in sorted(g.items(), key=lambda x: -(x[1]["bq"] + x[1]["sq"])):
+        avg_b = a["bv"] / a["bq"] if a["bq"] else 0.0
+        avg_s = a["sv"] / a["sq"] if a["sq"] else 0.0
+        matched = min(a["bq"], a["sq"])
+        realized_own = matched * (avg_s - avg_b) if (avg_b and avg_s) else 0.0
+        print(f"    {b:<16}{a['bv']:>9.0f}{a['sv']:>9.0f}{a['bq'] - a['sq']:>+12.4f}{realized_own:>+14.2f}")
+
+
+print("\n=== ATRIBUIRE PER BOT (clientOrderId; realized_own = doar round-trip propriu) ===")
+for _sym in ("BTCUSDC", "TAOUSDC"):
+    per_bot(_sym)
+print("Nota: boti care schimba inventar intre ei (tradeall cumpara / rtrade vinde acelasi TAO)")
+print("NU au realized separabil curat — net_qty arata cine acumuleaza (+) vs distribuie (-).")
