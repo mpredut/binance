@@ -47,6 +47,22 @@ declin = TP mai mic/drop mai mare marginal mai bune, DAR toate pierd (-2.8..-3.4
 mici, pur regim-de-declin (bull favorizeaza TP mare, cf #7 pe 2 regimuri). NICIO schimbare
 justificata — valorile live raman alegerea robusta amortizata.
 
+**✅ RE-CONFIRMAT 11 aug (date proaspete, +11 zile) — schimbarile kraken_bot tin:**
+- SL 12.5 vs 7 (`scratchpad/sl_sweep.py`): SL=7 pierde in bull (-1% vs +10% la lat/off); SL lat
+  (12.5) capteaza upside-ul revenirilor. Ramane corect.
+- Reintrare STOP-aware (`scratchpad/reentry_sl_backtest.py`): NOU vs VECHI = +0.74 pct in declin,
+  blocked_ticks 259->210 (mai putin stranding); neutru in bull. Ajuta, nu strica.
+- Reintrare adaptiva vs FIX (`scratchpad/reentry_robust.py`): FIX 5 / tie 8 / adaptiv 1 -> FIX
+  castiga/egal 13/14. `reentry=false` ramane corect.
+
+**Filtru de trend rtrade (11 aug, LIVE) — validare pe date reale (`scratchpad/tao_regime_analysis.py`):**
+Din 32 fill-uri TAO (40z): doar **16% in trend clar** (|chg 1h|>1%; 4/5 = vanzari in miscare =
+cazul advers), **84% in range**. Deci filtrul e BINE TINTIT (prinde subsetul advers de trend,
+NU supra-restrictioneaza cele 84% range) dar impactul e MODEST — grosul pierderii TAO (-44.50)
+vine probabil din CHURN pe range (marja de flip 0.01% << comisioane 0.15%/round-trip), nu doar
+din trend. rtrade NU se poate backtesta curat (motorul nu simuleaza fill-uri limit). Levier
+complementar de investigat daca TAO tot pierde: RTRADE_FOLLOWUP_OFFSET_PCT (0.01%) vs comisioane.
+
 ---
 
 ## Prioritate MEDIE
