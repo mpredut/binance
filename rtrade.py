@@ -67,6 +67,37 @@ RTRADE_ZERO_EPSILON = float(os.environ.get("RTRADE_ZERO_EPSILON", "0.0001"))
 
 # Numarul maxim de esecuri acceptate inainte sa renunte la un ordin BUY/SELL.
 RTRADE_MAX_FAILURES = int(os.environ.get("RTRADE_MAX_FAILURES", "10"))
+# FILTRU DE TREND (11 aug): rtrade e un bot de spread -> pierde in trend CLAR (selectie
+# adversa: in declin BUY-ul se umple, SELL-ul de flip nu, ajunge sa vanda desperat in pierdere;
+# vazut pe TAO). Sta deoparte cand |gradient_recent| > K*epsilon (epsilon = podeaua de zgomot,
+# auto-calibrata pe volatilitate din cacheManager) pe o fereastra scurta. Kill-switch + prag.
+RTRADE_TREND_FILTER_ENABLED = os.environ.get("RTRADE_TREND_FILTER_ENABLED", "true").strip().lower() == "true"
+RTRADE_TREND_FILTER_K = float(os.environ.get("RTRADE_TREND_FILTER_K", "2.0"))
+RTRADE_TREND_WINDOW_SEC = float(os.environ.get("RTRADE_TREND_WINDOW_SEC", "900"))
+
+
+def _trend_too_strong(symbol):
+    """True daca `symbol` trend-uieste CLAR (|gradient_recent| > K*epsilon) -> rtrade (spread-bot)
+    sta deoparte, sa nu fie prins de selectia adversa a trendului. Fail-OPEN: trend
+    indisponibil/eroare -> False (nu blocheaza, la fel ca trend-wait din pipeline)."""
+    if not RTRADE_TREND_FILTER_ENABLED:
+        return False
+    try:
+        import cacheManager as cm
+        dyn = cm.get_short_trend_manager().get_instant_trend_for_window(symbol, RTRADE_TREND_WINDOW_SEC)
+    except Exception as e:  # noqa: BLE001 — gate oportunist, esec -> nu blocam tranzactionarea
+        print(f"[{symbol}] rtrade trend-filter indisponibil ({e}) -> nu blochez")
+        return False
+    if not dyn:
+        return False
+    grad = abs(float(dyn.get("gradient_recent", 0.0) or 0.0))
+    eps = abs(float(dyn.get("epsilon", 0.0) or 0.0))
+    strong = eps > 0 and grad > RTRADE_TREND_FILTER_K * eps
+    if strong:
+        print(f"[{symbol}] rtrade STA DEOPARTE: trend clar (|grad|={grad:.4g} > "
+              f"{RTRADE_TREND_FILTER_K}xeps={RTRADE_TREND_FILTER_K * eps:.4g}, fereastra {RTRADE_TREND_WINDOW_SEC:.0f}s)")
+    return strong
+
 
 class TradingBot:
     def __init__(self, symbol, qty, DEFAULT_ADJUSTMENT_PERCENT):
@@ -283,6 +314,12 @@ class TradingBot:
                     time.sleep(WAIT_FOR_ORDER)
                     continue
                 print(f"[{self.symbol}] Current price: {current_price:.2f}")
+
+                # FILTRU DE TREND: daca activul trend-uieste clar, rtrade (spread-bot) sta
+                # deoparte tot ciclul (nu prinde cutitul). Reia la urmatoarea iteratie.
+                if _trend_too_strong(self.symbol):
+                    time.sleep(WAIT_FOR_ORDER)
+                    continue
 
                 buy_result = [None]
                 sell_result = [None]
