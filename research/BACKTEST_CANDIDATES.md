@@ -58,10 +58,13 @@ justificata — valorile live raman alegerea robusta amortizata.
 **Filtru de trend rtrade (11 aug, LIVE) — validare pe date reale (`scratchpad/tao_regime_analysis.py`):**
 Din 32 fill-uri TAO (40z): doar **16% in trend clar** (|chg 1h|>1%; 4/5 = vanzari in miscare =
 cazul advers), **84% in range**. Deci filtrul e BINE TINTIT (prinde subsetul advers de trend,
-NU supra-restrictioneaza cele 84% range) dar impactul e MODEST — grosul pierderii TAO (-44.50)
-vine probabil din CHURN pe range (marja de flip 0.01% << comisioane 0.15%/round-trip), nu doar
-din trend. rtrade NU se poate backtesta curat (motorul nu simuleaza fill-uri limit). Levier
-complementar de investigat daca TAO tot pierde: RTRADE_FOLLOWUP_OFFSET_PCT (0.01%) vs comisioane.
+NU supra-restrictioneaza cele 84% range) dar impactul e MODEST. rtrade NU se poate backtesta
+curat (motorul nu simuleaza fill-uri limit).
+CORECTIE (11 aug): ipoteza initiala "fee-churn" era GRESITA — RTRADE_FOLLOWUP_OFFSET_PCT=0.01
+se foloseste ca (1+0.01) = **+1.00%** (NU 0.01%), deci marja de flip ACOPERA deja comisioanele
+(~0.15%). Pierderea TAO NU e din fee-churn; "churn-ul" de la 43s era plasare/anulare de ordine
+(fara comision, doar fill-urile au comision) + vanzarea desperata in trend (cazul advers real).
+Ala e adresat de filtrul de trend + followup-ul trend-aware (deja live). Nicio schimbare la flip.
 
 ---
 
