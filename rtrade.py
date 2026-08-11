@@ -99,6 +99,34 @@ def _trend_too_strong(symbol):
     return strong
 
 
+def _followup_force(symbol, side):
+    """Pt ordinul de flip (followup) dupa un fill: FORCE (piata, flip imediat) DOAR daca
+    trendul NU e ADVERS. Advers = SELL intr-un DECLIN clar (ar vinde jos) sau BUY intr-un
+    URCUS clar (ar cumpara sus). Advers -> intoarce False = limita RABDATOARE la pretul de
+    flip (se umple cand pretul revine, nu dumpeaza la piata). Trend slab/plat/favorabil sau
+    indisponibil, ori kill-switch off -> True (piata, ca inainte). Astfel, chiar si cand se
+    epuizeaza (disperat), rtrade NU vinde la piata / nu cumpara disperat impotriva trendului."""
+    if not RTRADE_TREND_FILTER_ENABLED:
+        return True
+    try:
+        import cacheManager as cm
+        dyn = cm.get_short_trend_manager().get_instant_trend_for_window(symbol, RTRADE_TREND_WINDOW_SEC)
+    except Exception:  # noqa: BLE001 — indisponibil -> comportament vechi (force)
+        return True
+    if not dyn:
+        return True
+    grad = float(dyn.get("gradient_recent", 0.0) or 0.0)
+    eps = abs(float(dyn.get("epsilon", 0.0) or 0.0))
+    if eps <= 0 or abs(grad) <= RTRADE_TREND_FILTER_K * eps:
+        return True   # trend slab/plat -> flip imediat e ok
+    su = (side or "").upper()
+    adverse = (su == "SELL" and grad < 0) or (su == "BUY" and grad > 0)
+    if adverse:
+        print(f"[{symbol}] followup {su}: trend ADVERS (grad={grad:.4g}) -> limita rabdatoare, NU piata")
+        return False
+    return True
+
+
 class TradingBot:
     def __init__(self, symbol, qty, DEFAULT_ADJUSTMENT_PERCENT):
         self.symbol = symbol
@@ -193,7 +221,7 @@ class TradingBot:
                 print(f"[{self.symbol}] BUY order filled at {self.filled_buy_price:.2f}")
                 print(f"[{self.symbol}] SELL disperat tot 1....")
                 mkt.place(self.symbol, "SELL", api.get_current_price(self.symbol) * (1 + RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
-                    force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
+                    force=_followup_force(self.symbol, "SELL"), cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                 return self.mark_buy_filled(self.filled_buy_price)
 
 
@@ -202,7 +230,7 @@ class TradingBot:
                 print(f"[{self.symbol}] BUY order may have been filled :-) at {filled_buy_price:.2f}")
                 print(f"[{self.symbol}] SELL disperat tot 2 ....")
                 mkt.place(self.symbol, "SELL", api.get_current_price(self.symbol) * (1 + RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
-                    force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
+                    force=_followup_force(self.symbol, "SELL"), cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                 return self.mark_buy_filled(filled_buy_price)
 
             current_price = api.get_current_price(self.symbol)
@@ -216,7 +244,7 @@ class TradingBot:
                     print(f"[{self.symbol}] Cancel BUY order failed. Maybe it was filled :-)? Moving to SELL ...")
                     print(f"[{self.symbol}] SELL disperat tot 3 ....")
                     mkt.place(self.symbol, "SELL", api.get_current_price(self.symbol) * (1 + RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
-                    force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
+                    force=_followup_force(self.symbol, "SELL"), cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                     return self.mark_buy_filled(self.filled_buy_price)
                 else:
                     print(f"[{self.symbol}] Cancel BUY order failed. Someone canceled it. Continuing BUY...")
@@ -277,7 +305,7 @@ class TradingBot:
                 print(f"[{self.symbol}] SELL order filled at {self.filled_sell_price:.2f}")
                 print(f"[{self.symbol}] BUY disperat tot 1....")
                 mkt.place(self.symbol, "BUY", api.get_current_price(self.symbol) * (1 - RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
-                    force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
+                    force=_followup_force(self.symbol, "BUY"), cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                 return self.mark_sell_filled(self.filled_sell_price)
 
 
@@ -286,7 +314,7 @@ class TradingBot:
                 print(f"[{self.symbol}] SELL order may have been filled :-) at {filled_sell_price:.2f}")
                 print(f"[{self.symbol}] BUY disperat tot 2....")
                 mkt.place(self.symbol, "BUY", api.get_current_price(self.symbol) * (1 - RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
-                    force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
+                    force=_followup_force(self.symbol, "BUY"), cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                 return self.mark_sell_filled(filled_sell_price)
 
             current_price = api.get_current_price(self.symbol)
