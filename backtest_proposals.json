@@ -1,1 +1,16 @@
-[]
+[
+  {
+    "ts": "2026-08-18T02:14:12",
+    "full_key": "BINANCE_BTC.mt.gain",
+    "section": "BINANCE_BTC",
+    "key": "mt.gain",
+    "symbol": "BTCUSDC",
+    "current_on_dev": 6.0,
+    "winner_value": 5.0,
+    "margin_vs_current": {
+      "half1": 119.32,
+      "half2": 145.12
+    },
+    "dev_commit": "b8dc6ec"
+  }
+]
