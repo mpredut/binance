@@ -1,16 +1,16 @@
 [
   {
-    "ts": "2026-08-18T02:14:12",
-    "full_key": "BINANCE_BTC.mt.gain",
+    "ts": "2026-08-18T14:14:09",
+    "full_key": "BINANCE_BTC.mt.maxage_days",
     "section": "BINANCE_BTC",
-    "key": "mt.gain",
+    "key": "mt.maxage_days",
     "symbol": "BTCUSDC",
-    "current_on_dev": 6.0,
-    "winner_value": 5.0,
+    "current_on_dev": 7.0,
+    "winner_value": 14.0,
     "margin_vs_current": {
-      "half1": 119.32,
-      "half2": 145.12
+      "half1": 71.47,
+      "half2": 255.91
     },
-    "dev_commit": "b8dc6ec"
+    "dev_commit": "9c1c26a"
   }
 ]
