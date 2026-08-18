@@ -96,16 +96,22 @@ class KrakenProvider(MarketDataProvider):
             return None
 
     def min_order_qty(self, symbol: str) -> float:
-        """Volumul minim (ordermin) al perechii, din pair_info (public). Cache-uit."""
-        if symbol in self._minqty:
-            return self._minqty[symbol]
+        """Volumul minim (ordermin) al perechii, din pair_info (public). Cache-uit
+        DOAR pe succes (valoare pozitiva). Un fetch esuat (blip DNS/AssetPairs gol ->
+        ordermin=0) NU se mai cache-uieste: altfel 0-ul cache-uit dezactiva permanent
+        gardul anti-'volume minimum not met' din _place_guarded -> churn de ordine
+        respinse pe praf (ex HYPE 0.0175 < min 0.1). La 0 reincercam data urmatoare."""
+        cached = self._minqty.get(symbol)
+        if cached:  # doar valori POZITIVE sunt in cache (0/absent -> reincearca)
+            return cached
         mn = 0.0
         try:
             info = self._client().pair_info(symbol) or {}
             mn = float(info.get("ordermin", 0) or 0.0)
         except Exception as e:  # noqa: BLE001
             print(f"[Kraken] ordermin {symbol}: {e}")
-        self._minqty[symbol] = mn
+        if mn > 0:
+            self._minqty[symbol] = mn   # cache-uieste NUMAI lookup-ul reusit
         return mn
 
     def get_price_history(self, symbol: str, lookback_h: float) -> Optional[List]:

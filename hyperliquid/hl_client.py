@@ -67,7 +67,11 @@ class HLClient:
                           f"(ruleaza cu python-ul din .venv)")
         self.base = constants.MAINNET_API_URL if mainnet else constants.TESTNET_API_URL
         self.info = Info(self.base, skip_ws=True)
-        _force_timeout(self.info)      # REZILIENTA: SDK-ul nu pune read-timeout
+        # REZILIENTA: SDK-ul nu pune read-timeout. Pe CITIRI (info: mid/spot_mid/
+        # position/funding) fail-fast la 10s — in panele HL (502/504) apelurile de 30s
+        # inlantuite depaseau fereastra de heartbeat (600s dn_bot) -> healthcheck il
+        # declara HUNG si-l omora. 10s = pica repede, bucla isi bate heartbeat-ul.
+        _force_timeout(self.info, seconds=10)
         self.address = account_address
         self.exchange = None
         if secret_key:
