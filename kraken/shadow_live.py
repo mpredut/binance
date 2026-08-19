@@ -58,6 +58,11 @@ def _variants():
         "current": base,
         "tp4": dataclasses.replace(base, takeprofit_pct=4.0),
         "dca15": dataclasses.replace(base, dca_drop_pct=1.5),
+        # A: trailing adaptiv pe volatilitate (redesign overlay ca MODULARE). Backtest
+        # HYPE 240m: >= base in TOATE fold-urile OOS (+1.94% vs +0.83%, DD mai mic).
+        # Moduleaza trailing-ul LIVE existent (tp_trend_hold) — nu cumpara sus.
+        "A_trail": dataclasses.replace(base, tp_trail_adaptive=True, tp_trail_k=2.0,
+                                       tp_trail_min=1.5, tp_trail_max=8.0),
     }
 
 
@@ -208,7 +213,7 @@ def _print_block(title: str, blk: dict) -> None:
         return
     cur = r["current"]["total_pct"]
     print(f"    {'config':<9} {'net%':>8} {'total%':>8} {'maxDD%':>8} {'cicluri':>8}  vs current total")
-    for name in ("current", "tp4", "dca15"):
+    for name in r:   # dinamic (current e primul din _variants) — nu hardcodam lista
         x = r[name]
         diff = "" if name == "current" else f"{x['total_pct'] - cur:+.2f}pp"
         print(f"    {name:<9} {x['net_pct']:>8.2f} {x['total_pct']:>8.2f} "
