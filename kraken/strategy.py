@@ -82,7 +82,9 @@ class StratParams:
     # --- TREND OVERLAY (combina strategii pe regim; EXPERIMENTAL, default OFF) -----
     trend_overlay: bool = False       # True = in UPTREND confirmat, intra cu TOP-UP mare si
                                       # CALARESTE (hold+trailing) in loc de DCA/TP; in range = clasic.
-    trend_sma_n: int = 30             # fereastra SMA pt semnalul de trend (din _shadow_prices)
+    trend_sma_n: int = 30             # fereastra SMA (nr bare) pt semnalul de trend LUNG
+    trend_interval: int = 240         # minute/bara pt semnalul de trend (live: OHLC Kraken;
+                                      # backtest: barele fed-uite). 240=4h -> SMA(30)=~5 zile.
     trend_confirm_bars: int = 3       # bare consecutive de uptrend ca sa confirme (anti-fals)
     trend_topup: float = 2000.0       # cat cumpar la intrarea in trend (sume mai mari = prinde trendul)
     trend_trail_pct: float = 5.0      # trailing-ul pozitiei de trend (pullback de la varf la care ies)
@@ -117,6 +119,7 @@ class StratParams:
             tp_trail_pct       = float_env("STRAT_TP_TRAIL_PCT") or 2.0,
             trend_overlay      = os.environ.get("STRAT_TREND_OVERLAY", "false").strip().lower() == "true",
             trend_sma_n        = int(float_env("STRAT_TREND_SMA_N") or 30),
+            trend_interval     = int(float_env("STRAT_TREND_INTERVAL") or 240),
             trend_confirm_bars = int(float_env("STRAT_TREND_CONFIRM_BARS") or 3),
             trend_topup        = float_env("STRAT_TREND_TOPUP") or 2000.0,
             trend_trail_pct    = float_env("STRAT_TREND_TRAIL_PCT") or 5.0,
@@ -501,36 +504,53 @@ class Strategy:
         return k_re * vol, f"adaptiv (vol_1h {vol:.2f}% x k={k_re})"
 
     # -- TREND OVERLAY ---------------------------------------------------------
-    def _sma(self, n: int) -> float | None:
-        pts = [p for _, p in self._shadow_prices]
-        return sum(pts[-n:]) / n if len(pts) >= n else None
+    def _trend_closes(self) -> list:
+        """Seria de INCHIDERI pt semnalul de trend LUNG, ACELASI timescale live si backtest:
+        - BACKTEST (dry_run): barele fed-uite in step() (_shadow_prices = inchiderile lor).
+        - LIVE: OHLC Kraken pe trend_interval (fetch cache-uit 15min).
+        Rezolva gap-ul de cadenta: SMA(N) inseamna acelasi lucru in ambele (240m×30 = ~5 zile)."""
+        if self.dry_run:
+            return [p for _, p in self._shadow_prices]
+        try:
+            return self.client.ohlc_closes(self.pair, self.p.trend_interval)
+        except Exception as e:  # noqa: BLE001 — fara semnal -> pur si simplu nu intra in trend
+            log(f"  [STRAT] trend OHLC fetch esuat ({e}) — trend nedeterminat")
+            return []
 
-    def _uptrend_confirmed(self, price: float) -> bool:
-        """UPTREND = pret > SMA(N) SI SMA in crestere, confirmat `trend_confirm_bars` bare
-        consecutive. Din _shadow_prices -> determinist, IDENTIC live/backtest. Side-effect:
-        actualizeaza contorul de confirmare (apelat o singura data per step)."""
+    def _trend_up_series(self, closes: list) -> bool:
+        """UPTREND CONFIRMAT: ultimele `trend_confirm_bars` bare au close > SMA(N) SI SMA(N)
+        in crestere. Determinist -> IDENTIC live/backtest (aceeasi serie de inchideri)."""
         n = self.p.trend_sma_n
-        pts = [p for _, p in self._shadow_prices]
-        if len(pts) < n + 1:
-            self.s["trend_confirm_count"] = 0
+        k = max(1, self.p.trend_confirm_bars)
+        if len(closes) < n + k:
             return False
-        sma_now = sum(pts[-n:]) / n
-        sma_prev = sum(pts[-n - 1:-1]) / n
-        up = price > sma_now and sma_now > sma_prev
-        cnt = (self.s.get("trend_confirm_count", 0) + 1) if up else 0
-        self.s["trend_confirm_count"] = cnt
-        return cnt >= self.p.trend_confirm_bars
+        for j in range(k):
+            i = len(closes) - 1 - j
+            sma = sum(closes[i - n + 1:i + 1]) / n
+            sma_prev = sum(closes[i - n:i]) / n
+            if not (closes[i] > sma and sma > sma_prev):
+                return False
+        return True
+
+    def _uptrend_confirmed(self) -> bool:
+        return self._trend_up_series(self._trend_closes())
+
+    def _trend_sma(self) -> float | None:
+        """SMA(N) pe seria de trend — pt verificarea de trend-rupt (ExitB)."""
+        closes = self._trend_closes()
+        n = self.p.trend_sma_n
+        return sum(closes[-n:]) / n if len(closes) >= n else None
 
     def _overlay_step(self, price: float) -> bool:
         """Overlay de regim. True = a gestionat tick-ul (nu mai rula logica de range).
         In UPTREND confirmat: TOP-UP mare + hold; iese pe trailing (A) sau trailing SAU
         pret<SMA=trend rupt (B). In range (fara uptrend): False -> cade pe DCA/TP clasic."""
-        up = self._uptrend_confirmed(price)     # side-effect: contorul de confirmare
+        up = self._uptrend_confirmed()
         if self.s.get("trend_mode"):
             peak = max(self.s.get("trend_peak") or price, price)
             self.s["trend_peak"] = peak
             trail_stop = peak * (1 - self.p.trend_trail_pct / 100)
-            sma = self._sma(self.p.trend_sma_n)
+            sma = self._trend_sma()
             broke = self.p.trend_exit_break and sma is not None and price < sma
             if (price <= trail_stop or broke) and self.s["qty"] > 1e-12:
                 exit_px = round(price * 0.999, self.price_dec)

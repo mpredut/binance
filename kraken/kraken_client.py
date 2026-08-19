@@ -37,7 +37,7 @@ API_URL = "https://api.kraken.com"
 _CACHE = {}                       # (method, params_key) -> (expiry_ts, result)
 _CACHE_LOCK = threading.Lock()
 _READ_TTL = {                     # secunde; metodele NElistate NU se cacheaza (ex. QueryOrders)
-    "Ticker": 3.0, "AssetPairs": 3600.0,
+    "Ticker": 3.0, "AssetPairs": 3600.0, "OHLC": 900.0,   # OHLC pt semnalul de trend lung (15min)
     "Balance": 15.0, "TradesHistory": 20.0, "ClosedOrders": 20.0, "OpenOrders": 5.0,
 }
 _WRITE_METHODS = ("AddOrder", "CancelOrder", "CancelAll")
@@ -155,6 +155,14 @@ class KrakenClient:
     def ticker(self, pair: str) -> dict | None:
         res = self._public("Ticker", {"pair": pair})
         return next(iter(res.values())) if res else None
+
+    def ohlc_closes(self, pair: str, interval: int) -> list:
+        """Preturile de INCHIDERE OHLC (cache-uit 15min) pt semnalul de trend LUNG al
+        overlay-ului. interval in minute (60=1h, 240=4h, 1440=1z). Acelasi timescale ca
+        backtest-ul (care ruleaza pe aceleasi bare)."""
+        res = self._public("OHLC", {"pair": pair, "interval": interval})
+        key = next((k for k in res if k != "last"), None)
+        return [float(x[4]) for x in res[key]] if key else []
 
     def last_price(self, pair: str) -> float | None:
         t = self.ticker(pair)
