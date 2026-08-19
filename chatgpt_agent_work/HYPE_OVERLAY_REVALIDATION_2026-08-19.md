@@ -72,3 +72,33 @@ care diferențiază candidatul de live, cu toate condițiile:
 - avantajul nu provine dintr-o singură tranzacție;
 - rezultatul rezistă la fee/slippage stress;
 - zero efecte asupra ordinelor live în perioada shadow.
+
+## Revalidarea redesignurilor A/B adăugate ulterior
+
+Commit-urile `0914e6d` și `41f80f3` au introdus două mecanisme implicit oprite:
+
+- A: trailing TP adaptiv, `clamp(k × vol_1h, 1,5%, 8%)`;
+- B: blocarea DCA într-un downtrend detectat.
+
+Implementarea inițială calcula semnalul din tick-uri de aproximativ 2 minute în
+live, dar din close-uri de 4h în backtest. Scalarea cu rădăcina timpului nu face
+aceste două serii echivalente. Commit-ul `fdf0c42` mută A și B pe OHLC închis de
+240m în live/replay/shadow și face replay-ul să refuze intervalele incompatibile.
+
+După corecție, A și B au fost rulate pe cinci scheme 4h, în total 29 ferestre
+suprapuse:
+
+| Candidat | Delta medie vs live | W/T/L | DD higher/equal/lower | Worst paired delta |
+|---|---:|---:|---:|---:|
+| A trailing adaptiv | +0,43pp | 13/8/8 | 8/10/11 | -3,58pp |
+| B frână DCA | -0,56pp | 5/8/16 | 1/10/18 | -8,12pp |
+
+Pe cele 15 ferestre lunare, A a avut medie `+1,59%` față de live `+1,00%`, dar
+worst return `-7,78%` față de `-6,47%` și worst DD `14,23%` față de `12,99%`.
+În schema lungă cu trei fold-uri, A a fost puțin mai slab și cu DD mai mare.
+Prin urmare afirmația „A este cel puțin egal cu base în toate fold-urile OOS” nu
+se generalizează; A rămâne doar candidat shadow de 240m.
+
+B reduce drawdown-ul frecvent, dar sacrificiul de randament este prea mare și
+consistent. Rămâne oprit; ar putea fi reconsiderat numai ca limită explicită de
+risc, nu ca optimizare de profit.
