@@ -47,7 +47,7 @@ tradeall_live/
 logger/
 
 # Propunerile de backtest (dev) — traiesc DOAR pe branch-ul backtest-proposals
-# (scrise cu `git add -f`), nu pe main. Vezi publish_proposals.sh / apply_proposals.py.
+# (scrise cu `git add -f`), nu pe main. Vezi `offline/runners/`.
 backtest_proposals.json
 
 # Artefacte generate de drawPriceLst (priceAnalysis.py savefig) — nu cod.

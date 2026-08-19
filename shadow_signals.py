@@ -4,7 +4,7 @@ shadow_signals.py — semnale SHADOW (strict observationale) rulate in paralel
 cu modelul live din tradeall.py. NU iau decizii, NU ating place_order_smart —
 doar publica chei suplimentare in snapshot + jurnalizeaza tranzitiile proprii,
 ca sa poata fi comparate (vizual in tradeall_observe.py, cantitativ in
-tradeall_backtest.py) cu modelul actual INAINTE de orice promovare.
+offline/backtests/tradeall.py) cu modelul actual INAINTE de orice promovare.
 
 Componente:
   KalmanTrend  — filtru Kalman constant-velocity (stare: nivel + viteza).

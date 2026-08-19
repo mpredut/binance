@@ -60,7 +60,7 @@ def simulate(ohlc, P, reentry_arr=None, sl_bounce_pct=None):
     `reentry_arr` OPTIONAL (default None = comportament VECHI,
     neschimbat): daca dat (secventa per-bara, NaN = foloseste P["reentry_fallback"]),
     activeaza bariera de reintrare dupa o inchidere de pozitie (TP/SL) — lipsea din
-    versiunea originala (gasit in research/kraken_adaptive_thresholds/, 23 iul:
+    versiunea originala (gasit in offline/research/kraken_adaptive_thresholds/, 23 iul:
     strategia REALA, kraken/strategy.py step(), asteapta explicit sub
     last_sell_price*(1-reentry_pct/100) inainte sa reintre; simulatorul reintra
     imediat). P["reentry_tolerance_pct"] (implicit 0 = fara toleranta) controleaza

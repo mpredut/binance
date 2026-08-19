@@ -58,7 +58,7 @@ class StratParams:
     reentry_tolerance_pct: float  # "aproape de prag" conteaza ca atins: pret <= prag*(1+tol%) intra
                                   # (15 iul: HYPE a ricosat la 65.93 vs prag 65.91 — 2 centi — si a ratat intrarea)
     reentry_adaptive: bool   # 23 iul: prag de reintrare = K_REENTRY * vol_1h (nu procentul fix) —
-                             # investigat in research/kraken_adaptive_thresholds/: adaptivul bate
+                             # investigat in offline/research/kraken_adaptive_thresholds/: adaptivul bate
                              # fixul pe HYPEUSD (~30 zile, TOTAL +3.26% vs +2.20%), K=2.0 confirmat
                              # optim printr-un sweep dedicat (K=1.5 si K=2.5 dau amandoua mai putin).
                              # Fail-safe: cade pe reentry_drop_pct (fix) daca volatilitatea nu poate
@@ -460,7 +460,7 @@ class Strategy:
         vol_1h) daca reentry_adaptive e activat SI volatilitatea poate fi
         calculata; altfel cade pe reentry_drop_pct (fix) — fail-safe, ca
         gate-ul Kalman (nu opreste/altereaza trading-ul din cauza unui semnal
-        indisponibil). Investigat 22-23 iul (research/kraken_adaptive_thresholds/,
+        indisponibil). Investigat 22-23 iul (offline/research/kraken_adaptive_thresholds/,
         vezi README.md): adaptiv bate fix pe HYPEUSD (TOTAL +3.26% vs +2.20%,
         ~30 zile), K=2.0 confirmat optim printr-un sweep dedicat."""
         if not self.p.reentry_adaptive:

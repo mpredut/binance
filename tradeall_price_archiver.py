@@ -24,7 +24,7 @@ Rulare (lasa-l sa ruleze continuu, la fel ca tradeall.py insusi):
     ./tradeall_price_archiver.py --symbols BTCUSDC,TAOUSDC --months 12
 
 Apoi, dupa ce s-a acumulat destul istoric dens:
-    ./tradeall_backtest.py --symbol BTCUSDC --start <data> --source cache24 \\
+    ./offline/backtests/tradeall.py --symbol BTCUSDC --start <data> --source cache24 \\
         --cache24-file cachedb/cache_24price_long_BTCUSDC.jsonl
 """
 import argparse

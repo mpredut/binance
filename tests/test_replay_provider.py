@@ -1,5 +1,5 @@
 """
-Teste pentru ReplayMarketDataProvider (23 iul, research/UNIFIED_BACKTEST_PLAN.md
+Teste pentru ReplayMarketDataProvider (23 iul, offline/research/UNIFIED_BACKTEST_PLAN.md
 Faza 1 — pas 1 de implementare: monitortrades.py testabil pe date istorice,
 fara sa bata reteaua).
 
@@ -181,7 +181,7 @@ class TestSimClock(unittest.TestCase):
     def test_tradeall_backtest_uses_shared_class(self):
         """tradeall_backtest._SimClock trebuie sa fie ACELASI tip ca
         providers.replay_clock.SimClock (nu o reimplementare separata)."""
-        import tradeall_backtest as tb
+        from offline.backtests import tradeall as tb
         from providers.replay_clock import SimClock
         self.assertIs(tb._SimClock, SimClock)
 

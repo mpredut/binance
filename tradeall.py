@@ -75,7 +75,7 @@ TREND_UNIFORM_RATE_THRESHOLD = float(os.environ.get("TRADEALL_TREND_UNIFORM_RATE
 SLOPE_EXTREME_THRESHOLD = float(os.environ.get("TRADEALL_SLOPE_EXTREME_THRESHOLD", "5.1"))
 
 # 22 iul: cooldown per instanta de trend (investigat pe date reale, 21-22 iul,
-# 7 experimente in research/tradeall_trigger_gate/) — logic() nu avea niciun
+# 7 experimente in offline/research/tradeall_trigger_gate/) — logic() nu avea niciun
 # "fire o singura data": refirerea se intampla la FIECARE evaluare cat timp
 # trend_state ramane validat, chiar daca nimic nou nu s-a intamplat (gasit pe
 # TAO: 186 BUY/0 SELL dintr-un singur trend). Testat: cooldown-ul REDUCE

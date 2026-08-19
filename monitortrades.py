@@ -435,7 +435,7 @@ def _place_guarded(inst, side, price, qty, min_qty, **kwargs):
 def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None, lost_threshold=None,
                             now_fn=None):
     """now_fn: sursa de "acum" (implicit time.time — comportament neschimbat).
-    Injectabila pt backtest/replay (23 iul, research/UNIFIED_BACKTEST_PLAN.md
+    Injectabila pt backtest/replay (23 iul, offline/research/UNIFIED_BACKTEST_PLAN.md
     Faza 1) — cand vine un ReplayMarketDataProvider, timpul poate fi legat de
     ceasul aceluiasi provider (timpul "vine din pretul obtinut", nu separat)."""
     now_fn = now_fn or time.time

@@ -20,7 +20,7 @@ Nu recomand o rescriere în microservicii. Pentru un singur host ar crește codu
 
 ## 2. Măsurători
 
-- aproximativ 30.000 linii Python în afara `tests/`, `research/`, `.venv` și worktree-urilor;
+- aproximativ 30.000 linii Python în afara `tests/`, `offline/research/`, `.venv` și worktree-urilor;
 - `cacheManager.py`: 2.221 linii;
 - `pricefetcher.py`: 804 linii;
 - `tradeall.py`: 798 linii;
@@ -36,10 +36,10 @@ Rezultatul arată că simpla extragere a funcțiilor duplicate nu va produce red
 
 ### 3.1 Separarea codului activ de codul istoric
 
-Stare curentă: `archive/` este separat, iar prima tranșă `offline/` este realizată
-pentru diagnosticele WebSocket manuale, simulări și fostul director generic `altele/`.
-Backtest-urile și `research/` rămân temporar pe loc deoarece automatizarea prod→dev
-le referă direct; mutarea lor trebuie făcută atomic cu actualizarea runnerelor.
+Stare curentă: `archive/` este separat, iar `offline/` conține diagnosticele
+WebSocket manuale, simulările, fostul director generic `altele/`, cercetarea,
+engine-ul tradeall de backtest și runnerele prod→dev. Automatizarea și crontab-ul
+au fost actualizate atomic cu mutarea.
 
 Categorii care trebuie marcate explicit:
 
@@ -52,7 +52,7 @@ runtime/
 
 offline/
   backtests/
-  research/
+  offline/research/
   simulations/
   migrations/
 
@@ -67,7 +67,7 @@ Candidați evidenți pentru mutare, după validarea importurilor și a operațiu
 - `archive/old_trade/` (mutat din root);
 - `archive/monitortrades_legacy.py` (mutat din root);
 - `tradeall_observe.py`;
-- `tradeall_backtest.py`;
+- `offline/backtests/tradeall.py`;
 - `offline/simulations/` (mutat din `sim/`);
 - `offline/legacy_tools/` (mutat din `altele/`);
 - `offline/manual/ws/` (mutat din `tests/ws/`);
@@ -470,7 +470,7 @@ trading/
 
   offline/
     backtests/
-    research/
+    offline/research/
 ```
 
 ## 13. Imaginea redesignului

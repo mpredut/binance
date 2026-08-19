@@ -1,7 +1,7 @@
 """
 Teste pentru pragul de reintrare ADAPTIV din kraken/strategy.py (23 iul).
 
-Context: investigat in research/kraken_adaptive_thresholds/ — pragul adaptiv
+Context: investigat in offline/research/kraken_adaptive_thresholds/ — pragul adaptiv
 (K_REENTRY * vol_1h) bate pragul fix pe date reale (HYPEUSD, ~30 zile: TOTAL
 +3.26% vs +2.20%). Promovat la decizie reala prin StratParams.reentry_adaptive
 (implicit False — activat explicit via STRAT_REENTRY_ADAPTIVE=true), cu

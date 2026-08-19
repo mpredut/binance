@@ -1,13 +1,11 @@
-"""Teste pentru research/backtest_ranges.py (23 iul) — parsarea rangurilor de
+"""Teste pentru offline/research/backtest_ranges.py — parsarea rangurilor de
 test scrise ca text simplu deasupra unui parametru, in orice fisier de config."""
 import os
 import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "research"))
-
-from backtest_ranges import scan_backtest_ranges
+from offline.research.backtest_ranges import scan_backtest_ranges
 
 _TMP = "/tmp/claude_test_backtest_ranges.conf"
 

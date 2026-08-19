@@ -18,7 +18,7 @@ Rulare manuala (LIVE):
     ./tradeall_observe.py [--symbols BTCUSDC,TAOUSDC] [--interval 5]
     apoi deschide tradeall_live.html intr-un browser (local sau prin ngrok).
 
-Mod BACKTEST (randeaza rezultatele unui run tradeall_backtest.py, A5):
+Mod BACKTEST (randeaza rezultatele unui run offline/backtests/tradeall.py, A5):
     ./tradeall_observe.py --backtest-dir logger/backtest/<run_id> --symbols BTCUSDC
     (fara esantionare live; citeste fisierele FLATE din acel folder, fereastra
     = tot intervalul reluat pana acum; scrie PNG-ul in acelasi folder)
@@ -576,7 +576,7 @@ def build_analysis_state_text(symbol):
 
 
 def build_backtest_state_text(directory, symbol):
-    """Starea analizei din SIMULARE (analysis_state.json scris de tradeall_backtest.py)."""
+    """Starea analizei din SIMULARE (analysis_state.json scris de offline/backtests/tradeall.py)."""
     path = os.path.join(directory, "analysis_state.json")
     try:
         with open(path, "r", encoding="utf-8") as f:
@@ -617,7 +617,7 @@ def render_symbol_chart_backtest(symbol, directory, out_path, window_hours=None)
     """Daca window_hours e None: fereastra = tot intervalul reluat pana acum.
     Daca window_hours e dat: fereastra GLISANTA de acea lungime, ancorata la cel
     mai recent timestamp SIMULAT scris pana acum — apelata repetat (bucla din
-    main(), la fiecare --interval secunde) in timp ce tradeall_backtest.py ruleaza
+    main(), la fiecare --interval secunde) in timp ce offline/backtests/tradeall.py ruleaza
     concurent, fereastra "aluneca" urmarind ceasul simulat, ca un proces dinamic:
     evenimentele apar pe cadru exact cand backtester-ul ajunge la ele."""
     price_ts, price_vals = load_backtest_price_samples(directory, symbol)
@@ -784,7 +784,7 @@ def main():
                          help="la cate secunde se redeseneaza graficul pe SAPTAMANA (implicit 300)")
     parser.add_argument("--backtest-dir", default=None,
                          help="daca e dat: mod BACKTEST — randeaza folderul unui run "
-                              "tradeall_backtest.py in loc sa ruleze live")
+                              "offline/backtests/tradeall.py in loc sa ruleze live")
     parser.add_argument("--frame-hours", type=float, default=None,
                          help="cu --backtest-dir: in loc de UN grafic dens cu tot intervalul, "
                               "genereaza o SERIE de cadre STATICE (imagini), cate unul per N ore. "
@@ -792,7 +792,7 @@ def main():
     parser.add_argument("--window-hours", type=float, default=None,
                          help="cu --backtest-dir (fara --frame-hours): fereastra GLISANTA de N ore, "
                               "ancorata la ceasul simulat curent — ruleaza in bucla (ca live), "
-                              "aluneca pe masura ce tradeall_backtest.py scrie date noi in paralel; "
+                              "aluneca pe masura ce offline/backtests/tradeall.py scrie date noi in paralel; "
                               "evenimentele apar pe cadru exact cand backtester-ul ajunge la ele")
     args = parser.parse_args()
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]

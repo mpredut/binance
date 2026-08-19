@@ -21,9 +21,8 @@ import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
-sys.path.insert(0, os.path.join(ROOT, "research"))
 
-from backtest_ranges import scan_backtest_ranges  # noqa: E402
+from offline.research.backtest_ranges import scan_backtest_ranges  # noqa: E402
 
 # Fisiere INI (sectiuni [NUME]) cu adnotari — cheile scan-uite vin ca "SECTION.key".
 _INI_CONFIGS = [os.path.join(ROOT, "instruments.conf")]

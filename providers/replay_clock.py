@@ -1,12 +1,12 @@
 # providers/replay_clock.py
 """SimClock — ceasul simulat comun pt backtest/replay (23 iul,
-research/UNIFIED_BACKTEST_PLAN.md, pas de unificare tradeall+monitortrades).
+offline/research/UNIFIED_BACKTEST_PLAN.md, pas de unificare tradeall+monitortrades).
 
-Extras din tradeall_backtest.py (unde traia ca `_SimClock`, privat) — acum
+Extras din offline/backtests/tradeall.py (unde traia ca `_SimClock`, privat) — acum
 partajat, ca ORICE viitor cod de replay (tradeall, monitortrades, sau un
 al treilea modul) sa foloseasca ACELASI mecanism de "timp simulat", nu cate
 o reimplementare proprie. Interfata ramane identica cu originalul (`__call__`
-intoarce `.ts`), deci tradeall_backtest.py il poate importa fara nicio
+intoarce `.ts`), deci offline/backtests/tradeall.py il poate importa fara nicio
 schimbare de comportament.
 
 Principiu (deja stabilit azi pt monitortrades.ReplayMarketDataProvider):
@@ -23,7 +23,7 @@ class SimClock:
     (ex. TrendState(now_fn=clock), monitor_price_and_trade(now_fn=clock)).
 
     Default `.ts=time.time()` la constructie (identic cu `_SimClock` originalul
-    din tradeall_backtest.py) — in practica nu conteaza, driver-ul de replay
+    din offline/backtests/tradeall.py) — in practica nu conteaza, driver-ul de replay
     seteaza `.ts` la timestamp-ul primului tick INAINTE ca ceva sa citeasca
     ceasul, dar pastrat identic ca sa nu introduca nicio diferenta observabila."""
 

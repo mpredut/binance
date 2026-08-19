@@ -11,7 +11,7 @@ Finalizat:
 
 ## Ordinea recomandată
 
-### P0 — testele trebuie să fie complet offline
+### P0 — testele trebuie să fie complet offline — FINALIZAT
 
 Suita trece, dar logul arată efecte la import: inițializare de cache-uri globale,
 apeluri API Binance de citire și thread-uri care continuă după sumarul testelor.
@@ -22,18 +22,18 @@ apeluri API Binance de citire și thread-uri care continuă după sumarul testel
 3. fiecare executor/thread primește `shutdown()` determinist în cleanup;
 4. o gardă de test face orice acces de rețea ne-mock-uit să eșueze imediat.
 
-Rezultat cerut: aceeași suită verde, fără acces extern și fără loguri după sumar.
+Rezultat verificat: suita este verde, importul nu construiește clientul Binance,
+iar managerii, poller-ele și executors au shutdown determinist, fără loguri după sumar.
 
-### P1 — finalizarea separării offline, atomic
+### P1 — finalizarea separării offline, atomic — FINALIZAT
 
-Mutarea următoare trebuie făcută într-un singur lot deoarece automatizarea prod→dev
-folosește direct căile actuale:
+Mutarea a fost făcută într-un singur lot, inclusiv automatizarea prod→dev:
 
 - `research/` → `offline/research/`;
 - `tradeall_backtest.py` → `offline/backtests/tradeall.py`;
 - runnerele de backtest → `offline/runners/`;
-- actualizarea simultană a `run_backtest_cycle.sh`, `trigger_backtest_dev.sh`,
-  `refresh_dev.sh`, importurilor, documentației și testelor.
+- mutarea runnerelor în `offline/runners/` și actualizarea simultană a crontab-ului,
+  importurilor, documentației și testelor.
 
 `tradeall_observe.py` nu este integral offline (are mod live), iar
 `tradeall_price_archiver.py` produce date live; ele rămân în afara acestei mutări

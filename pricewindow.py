@@ -82,7 +82,7 @@ def instant_trend_from_prices(prices, sample_rate_sec):
     întreg (evită bookkeeping-ul incremental sorted_prices/deque din process_price,
     inutil pentru un calcul o-singură-dată pe o felie brută). Sursă UNICĂ a
     formulei (30 iul, extrasă din duplicarea PriceWindow.get_instant_trend() /
-    research/monitortrades_backtest/replay_trend_source._instant_trend_from_slice)
+    offline/research/monitortrades_backtest/replay_trend_source._instant_trend_from_slice)
     — orice consumator de ferestre AD-HOC (cacheManager fereastră dinamică,
     backtest replay) delegă aici.
 

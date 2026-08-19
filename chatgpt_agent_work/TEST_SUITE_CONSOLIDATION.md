@@ -117,9 +117,9 @@ Financial baseline:
 Complete suite:
 
 ```text
-576 passed, 185 subtests passed
+578 passed, 185 subtests passed
 ```
 
-Remaining non-failing debt: 13 dependency/process warnings and background cache/trend
-threads that can emit logs briefly after pytest shutdown. Thread ownership and teardown
-should be handled as a separate infrastructure refactor.
+Remaining non-failing debt: 13 dependency/process warnings. Background cache/trend and
+Binance time-resync workers now have explicit ownership and deterministic teardown;
+the session guard fails if one of the known runtime threads remains alive.

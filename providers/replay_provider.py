@@ -1,7 +1,7 @@
 # providers/replay_provider.py
 """ReplayMarketDataProvider — implementeaza MarketDataProvider peste date
 ISTORICE (cache_price_{symbol}.jsonl), pt backtest/replay
-(23 iul, research/UNIFIED_BACKTEST_PLAN.md Faza 1). NU bate reteaua NICIODATA.
+(23 iul, offline/research/UNIFIED_BACKTEST_PLAN.md Faza 1). NU bate reteaua NICIODATA.
 
 De ce exista: verificat in aceeasi sesiune ca `Instrument.__init__(api=...)` +
 `instruments_config.load_for(api=...)` accepta DEJA un `MarketDataProvider`
