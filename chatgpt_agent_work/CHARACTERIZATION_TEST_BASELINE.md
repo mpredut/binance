@@ -79,7 +79,7 @@ Full command:
 Verified result on 2026-08-19:
 
 ```text
-578 passed, 185 subtests passed
+591 passed, 185 subtests passed
 ```
 
 The lower top-level count is the result of the test-suite consolidation documented
@@ -110,3 +110,21 @@ pass.
 3. A changed assertion requires an explicit financial-behaviour decision.
 4. Bug fixes get a separate desired-behaviour test and commit.
 5. Preserve the old characterization until the behaviour change is reviewed.
+
+## Extended financial gate
+
+The execution/strategy foundation now also includes Kraken trailing, shared-engine
+replay, exact partial-fill accounting, risk metrics and temporal walk-forward splits:
+
+```bash
+offline/runners/run_financial_baseline.sh
+```
+
+Verified result on 2026-08-19:
+
+```text
+123 passed
+```
+
+Definitions, current limitations and the promotion gate are documented in
+`chatgpt_agent_work/STRATEGY_VALIDATION_FOUNDATION.md`.

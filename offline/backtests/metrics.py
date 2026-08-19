@@ -1,0 +1,123 @@
+"""Metrici financiare comune pentru comparații de strategie.
+
+Funcțiile sunt pure și nu citesc date, config sau stare runtime. Toate randamentele
+sunt calculate din equity mark-to-market, nu doar din tranzacțiile închise.
+"""
+
+from __future__ import annotations
+
+import math
+import statistics
+from collections.abc import Iterable, Sequence
+
+
+def calculate_performance_metrics(
+    equity_curve: Sequence[float],
+    *,
+    initial_capital: float,
+    periods_per_year: float | None = None,
+    exposure: Iterable[bool] | None = None,
+    trade_pnls: Iterable[float] | None = None,
+    turnover_notional: float = 0.0,
+    cvar_confidence: float = 0.95,
+) -> dict:
+    """Calculează metrici comparabile pentru o curbă de equity.
+
+    ``equity_curve`` trebuie să includă capitalul inițial ca primul punct.
+    Sharpe/Sortino/Calmar sunt ``None`` fără frecvența reală a barelor; această
+    alegere împiedică compararea falsă a seriilor de 1h cu cele de 4h/1d.
+    """
+    if initial_capital <= 0:
+        raise ValueError("initial_capital trebuie să fie pozitiv")
+    if not 0 < cvar_confidence < 1:
+        raise ValueError("cvar_confidence trebuie să fie între 0 și 1")
+
+    curve = [float(value) for value in equity_curve]
+    if not curve:
+        raise ValueError("equity_curve nu poate fi goală")
+    if not math.isclose(curve[0], initial_capital, rel_tol=1e-9, abs_tol=1e-9):
+        raise ValueError("primul punct din equity_curve trebuie să fie initial_capital")
+
+    peak = curve[0]
+    peak_index = 0
+    max_drawdown_abs = 0.0
+    max_drawdown_pct = 0.0
+    max_underwater_periods = 0
+    for index, equity in enumerate(curve[1:], start=1):
+        if equity >= peak:
+            peak = equity
+            peak_index = index
+            continue
+        drawdown_abs = peak - equity
+        drawdown_pct = drawdown_abs / peak if peak > 0 else 0.0
+        max_drawdown_abs = max(max_drawdown_abs, drawdown_abs)
+        max_drawdown_pct = max(max_drawdown_pct, drawdown_pct)
+        max_underwater_periods = max(max_underwater_periods, index - peak_index)
+
+    periodic_returns = []
+    returns_valid = True
+    for previous, current in zip(curve, curve[1:]):
+        if previous <= 0:
+            returns_valid = False
+            break
+        periodic_returns.append(current / previous - 1.0)
+
+    annualized_return = sharpe = sortino = calmar = None
+    if periods_per_year is not None and periods_per_year <= 0:
+        raise ValueError("periods_per_year trebuie să fie pozitiv")
+    if periods_per_year and periodic_returns and returns_valid:
+        periods = len(periodic_returns)
+        growth = curve[-1] / initial_capital
+        if growth > 0:
+            annualized_return = growth ** (periods_per_year / periods) - 1.0
+
+        mean_return = statistics.fmean(periodic_returns)
+        if len(periodic_returns) > 1:
+            volatility = statistics.stdev(periodic_returns)
+            if volatility > 0:
+                sharpe = mean_return / volatility * math.sqrt(periods_per_year)
+
+        downside_deviation = math.sqrt(
+            statistics.fmean(min(value, 0.0) ** 2 for value in periodic_returns)
+        )
+        if downside_deviation > 0:
+            sortino = mean_return / downside_deviation * math.sqrt(periods_per_year)
+        if annualized_return is not None and max_drawdown_pct > 0:
+            calmar = annualized_return / max_drawdown_pct
+
+    cvar = None
+    if periodic_returns and returns_valid:
+        tail_size = max(1, math.ceil((1.0 - cvar_confidence) * len(periodic_returns)))
+        cvar = statistics.fmean(sorted(periodic_returns)[:tail_size])
+
+    exposure_values = [] if exposure is None else list(exposure)
+    exposure_pct = (
+        100.0 * sum(bool(value) for value in exposure_values) / len(exposure_values)
+        if exposure_values else 0.0
+    )
+
+    pnls = [float(value) for value in ([] if trade_pnls is None else trade_pnls)]
+    gross_profit = sum(value for value in pnls if value > 0)
+    gross_loss = -sum(value for value in pnls if value < 0)
+    winning_trades = sum(value > 0 for value in pnls)
+
+    return {
+        "net_pnl": curve[-1] - initial_capital,
+        "return_pct": (curve[-1] / initial_capital - 1.0) * 100.0,
+        "annualized_return_pct": (
+            annualized_return * 100.0 if annualized_return is not None else None
+        ),
+        "max_drawdown_abs": max_drawdown_abs,
+        "max_drawdown_pct": max_drawdown_pct * 100.0,
+        "max_underwater_periods": max_underwater_periods,
+        "sharpe": sharpe,
+        "sortino": sortino,
+        "calmar": calmar,
+        "cvar_95_pct": cvar * 100.0 if cvar is not None else None,
+        "exposure_pct": exposure_pct,
+        "trade_count": len(pnls),
+        "win_rate_pct": 100.0 * winning_trades / len(pnls) if pnls else None,
+        "profit_factor": gross_profit / gross_loss if gross_loss > 0 else None,
+        "expectancy": statistics.fmean(pnls) if pnls else None,
+        "turnover_pct": turnover_notional / initial_capital * 100.0,
+    }

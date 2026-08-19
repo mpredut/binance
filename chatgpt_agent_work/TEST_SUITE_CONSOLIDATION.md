@@ -117,7 +117,7 @@ Financial baseline:
 Complete suite:
 
 ```text
-578 passed, 185 subtests passed
+591 passed, 185 subtests passed
 ```
 
 Remaining non-failing debt: 13 dependency/process warnings. Background cache/trend and

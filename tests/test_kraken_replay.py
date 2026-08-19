@@ -3,8 +3,11 @@ Caracterizare: pe o serie determinista, motorul ruleaza fara retea/notificari/fi
 de stare si intoarce metrici sanatoase (contabilitate din _apply_fill-ul live)."""
 import os
 import importlib.util
+import json
 import sys
+import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "kraken"))
@@ -53,8 +56,11 @@ def _params(**over):
 
 class ReplayEngineTest(unittest.TestCase):
     def test_runs_and_returns_metrics(self):
-        res = rp.run_replay(_series(), _params(), fee_pct=0.26)
-        for k in ("realized", "net", "fees", "total", "cycles", "wins", "maxdd", "open_qty"):
+        res = rp.run_replay(_series(), _params(), fee_pct=0.26, bar_minutes=60)
+        for k in ("realized", "net", "fees", "total", "cycles", "wins", "maxdd",
+                  "open_qty", "return_pct", "max_drawdown_pct", "sharpe", "sortino",
+                  "calmar", "cvar_95_pct", "exposure_pct", "profit_factor",
+                  "expectancy", "turnover_pct", "fills"):
             self.assertIn(k, res)
         self.assertEqual(res["cycles"], 2)          # motorul inchide 2 cicluri pe seria asta
         self.assertEqual(res["wins"], 1)
@@ -62,6 +68,7 @@ class ReplayEngineTest(unittest.TestCase):
         self.assertLess(res["net"], res["realized"]) # net = brut - fee-uri
         self.assertGreaterEqual(res["fees"], 0.0)
         self.assertGreaterEqual(res["maxdd"], 0.0)
+        self.assertAlmostEqual(res["net_pnl"], res["total"])
 
     def test_no_state_file_written(self):
         before = set(os.listdir(os.path.join(ROOT, "kraken")))
@@ -69,6 +76,31 @@ class ReplayEngineTest(unittest.TestCase):
         after = set(os.listdir(os.path.join(ROOT, "kraken")))
         new_state = [f for f in (after - before) if "REPLAY" in f or f.startswith(".state")]
         self.assertEqual(new_state, [], f"replay NU trebuie sa scrie stare: {new_state}")
+
+    def test_existing_replay_state_cannot_contaminate_result(self):
+        clean = rp.run_replay(_series(), _params(), fee_pct=0.26)
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = os.path.join(tmp, ".state_REPLAY.json")
+            contaminated = strat._new_state()
+            contaminated.update({"qty": 99.0, "cost": 1.0, "realized_net": 999999.0})
+            with open(state_path, "w", encoding="utf-8") as handle:
+                json.dump(contaminated, handle)
+            with patch.object(strat, "state_path_for", return_value=state_path):
+                replayed = rp.run_replay(_series(), _params(), fee_pct=0.26)
+        self.assertEqual(replayed, clean)
+
+    def test_order_created_at_close_cannot_fill_on_same_bar(self):
+        # Low-ul 1 ar umple orice BUY, dar ordinul este decis abia la close=100.
+        # Harness-ul trebuie să îl poată executa doar în bara următoare.
+        first_bar = (100.0, 200.0, 1.0, 100.0)
+        one_bar = rp.run_replay([first_bar], _params(), fee_pct=0.26)
+        self.assertEqual(one_bar["fills"], 0)
+        self.assertEqual(one_bar["open_qty"], 0.0)
+
+        second_bar = (100.0, 101.0, 99.0, 100.0)
+        two_bars = rp.run_replay([first_bar, second_bar], _params(), fee_pct=0.26)
+        self.assertEqual(two_bars["fills"], 1)
+        self.assertGreater(two_bars["open_qty"], 0.0)
 
 
 if __name__ == "__main__":

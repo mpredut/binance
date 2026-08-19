@@ -172,7 +172,8 @@ def main() -> int:
 
     engine = "simulate (rapid)" if args.fast else "motor LIVE (faithful)"
     if args.mode == "single":
-        m = simulate(ohlc, base) if args.fast else rp.run_replay(ohlc, _bt_params(base), fee_pct=args.fee)
+        m = simulate(ohlc, base) if args.fast else rp.run_replay(
+            ohlc, _bt_params(base), fee_pct=args.fee, bar_minutes=args.interval)
         tot = m["total"]/args.budget*100
         wr = 100*m["wins"]/m["cycles"] if m["cycles"] else 0
         print(f"=== BACKTEST KRAKEN {args.pair} interval={args.interval}m ({len(ohlc)} bare) [{engine}] ===")
@@ -180,6 +181,17 @@ def main() -> int:
         print(f"  TOTAL REAL: {tot:+.2f}% din buget  ⇐ realizat ${m['realized']:+.2f} + pozitie deschisa ${m['final_upnl']:+.2f} - fee ${m['fees']:.2f}")
         print(f"  (realizat singur: {m['net']/args.budget*100:+.2f}%)")
         print(f"  cicluri: {m['cycles']}  win-rate {wr:.0f}%   max drawdown ${m['maxdd']:.2f}")
+        if not args.fast:
+            def metric(name, digits=2):
+                value = m.get(name)
+                return "n/a" if value is None else f"{value:.{digits}f}"
+            print(f"  RISC: maxDD {metric('max_drawdown_pct')}%  "
+                  f"Sharpe {metric('sharpe')}  Sortino {metric('sortino')}  "
+                  f"Calmar {metric('calmar')}  CVaR95 {metric('cvar_95_pct')}%")
+            print(f"  EXECUTIE: expunere {metric('exposure_pct')}%  "
+                  f"turnover {metric('turnover_pct')}%  fills {m['fills']}  "
+                  f"profit-factor {metric('profit_factor')}  "
+                  f"expectancy ${metric('expectancy')}")
         print(f"  buy&hold: {bh:+.2f}%   pozitie la final: {m['open_qty']:.6f}")
         return 0
 
@@ -189,7 +201,8 @@ def main() -> int:
         for drop in (1.0, 2.0, 3.0, 5.0):
             for sl in (8.0, 15.0):
                 P = dict(base); P["tp"] = tp; P["drop"] = drop; P["sl"] = sl
-                m = simulate(ohlc, P) if args.fast else rp.run_replay(ohlc, _bt_params(P), fee_pct=args.fee)
+                m = simulate(ohlc, P) if args.fast else rp.run_replay(
+                    ohlc, _bt_params(P), fee_pct=args.fee, bar_minutes=args.interval)
                 rows.append((m["total"]/args.budget*100, tp, drop, sl, m["cycles"], m["maxdd"]))
     rows.sort(reverse=True)
     print("  top 8 (total% | tp | drop | sl | cicluri | maxDD$):")
