@@ -1,11 +1,9 @@
-"""kraken/replay.py — motor de BACKTEST care ruleaza STRATEGIA LIVE (kraken/strategy.py:
-Strategy.step + _apply_fill) peste OHLC istoric. Faza 2 a unificarii: fidelitate 100%
-fata de productie — exact aceleasi decizii (tp_tranches, reintrare adaptiva/STOP-aware,
-DCA cu toleranta) pe care vechiul simulate() NU le modela.
+"""Replay care rulează strategia live Kraken peste OHLC istoric.
 
-Design izolat: fill-ul OHLC (buy@low, sell@high) traieste AICI, in harness — NU atinge
-calea reconcile() a botului live. Reutilizam _apply_fill (contabilitate reala:
-qty/cost/realized/fee/inchidere ciclu) si step() (deciziile reale)."""
+Strategia decide ordinele. Harness-ul modelează separat fill-urile, costurile și
+ambiguitatea intrabar, fără rețea, notificări sau stare persistentă.
+"""
+
 from __future__ import annotations
 
 import os
@@ -14,19 +12,19 @@ from unittest.mock import MagicMock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import strategy as _strat
+from offline.backtests.execution import (
+    ExecutionModel,
+    choose_intrabar_scenario,
+    split_order_fill,
+)
 from offline.backtests.metrics import calculate_performance_metrics
 
 
-def _silent(*_a, **_k):
+def _silent(*_args, **_kwargs):
     return None
 
 
-def run_replay(ohlc, params, fee_pct: float = 0.26,
-               bar_minutes: float | None = None,
-               warmup_ohlc=()) -> dict:
-    """ohlc: lista de (open, high, low, close). params: StratParams. fee_pct: comision
-    per leg (%). Intoarce metrici compatibile cu simulate(): realized/net/fees/total/
-    final_upnl/cycles/wins/maxdd/open_qty."""
+def _validate_replay(ohlc, params, bar_minutes: float | None) -> None:
     if not ohlc:
         raise ValueError("ohlc nu poate fi gol")
     if (params.trend_overlay or params.dca_trend_brake) and (
@@ -44,87 +42,139 @@ def run_replay(ohlc, params, fee_pct: float = 0.26,
         )
     if params.reentry_adaptive and bar_minutes is None:
         raise ValueError("reentry_adaptive cere bar_minutes pentru volatilitatea temporală")
+
+
+def run_replay(
+    ohlc,
+    params,
+    fee_pct: float = 0.26,
+    bar_minutes: float | None = None,
+    warmup_ohlc=(),
+    execution: ExecutionModel | None = None,
+) -> dict:
+    """Rulează replay-ul; ipotezele implicite păstrează baseline-ul anterior."""
+    _validate_replay(ohlc, params, bar_minutes)
+    model = execution or ExecutionModel()
+    return choose_intrabar_scenario(
+        model,
+        lambda scenario: _run_once(
+            ohlc,
+            params,
+            fee_pct=fee_pct,
+            bar_minutes=bar_minutes,
+            warmup_ohlc=warmup_ohlc,
+            execution=scenario,
+        ),
+    )
+
+
+def _run_once(
+    ohlc,
+    params,
+    *,
+    fee_pct: float,
+    bar_minutes: float | None,
+    warmup_ohlc,
+    execution: ExecutionModel,
+) -> dict:
     client = MagicMock()
-    client.pair_info.return_value = None      # precizie implicita (fara retea)
-    orig_notify = _strat.notify
-    _strat.notify = _silent                   # fara push/desktop in replay
+    client.pair_info.return_value = None
+    original_notify = _strat.notify
+    _strat.notify = _silent
     try:
-        s = _strat.Strategy(
-            client, "REPLAY", params, dry_run=True,
-            # Nu citi deloc un eventual .state_REPLAY rămas pe disc. Constructorul
-            # live își păstrează comportamentul când initial_state nu este furnizat.
+        strategy = _strat.Strategy(
+            client,
+            "REPLAY",
+            params,
+            dry_run=True,
             initial_state=_strat._new_state(),
             replay_mode=True,
         )
-        # Încălzește numai semnalele (SMA/vol/trend), fără poziție, ordine sau P&L.
-        # Astfel fiecare segment TEST rămâne financiar independent.
         warmup_step = bar_minutes * 60 if bar_minutes else 1.0
-        for index, (_o, _h, _l, close) in enumerate(
+        for index, (_open, _high, _low, close) in enumerate(
                 warmup_ohlc, start=-len(warmup_ohlc)):
-            s._shadow_prices.append((index * warmup_step, float(close)))
-        s._save = _silent                     # fara fisier de stare
-        cycle0 = s.s.get("cycle", 1)
-        wins = 0
-        fill_count = 0
+            strategy._shadow_prices.append((index * warmup_step, float(close)))
+        strategy._save = _silent
+        cycle0 = strategy.s.get("cycle", 1)
+        wins = fill_count = ambiguous_bars = 0
         turnover_notional = 0.0
         trade_pnls = []
-        cycle_net_start = s.s["realized_net"]
+        cycle_net_start = strategy.s["realized_net"]
         initial_capital = float(params.max_budget)
         equity_curve = [initial_capital]
         exposure = []
-        for bar_index, (_o, h, l, c) in enumerate(ohlc):
-            # --- FILL OHLC-aware: buy se umple daca low<=limita, sell daca high>=limita.
-            #     Ordinea buy-apoi-sell (ca simulate). _apply_fill = contabilitatea LIVE.
-            for order in list(s.s["orders"]):
-                if order not in s.s["orders"]:
-                    continue
-                if order["side"] != "buy":
-                    continue
-                if l <= order["price"]:
-                    vol, px = order["vol"], order["price"]
-                    s._remove(order)
-                    s._apply_fill(order, vol, px, fee=fee_pct / 100 * vol * px)
-                    fill_count += 1
-                    turnover_notional += vol * px
-            for order in list(s.s["orders"]):
-                if order not in s.s["orders"]:
-                    continue
-                if order["side"] != "sell":
-                    continue
-                # SELL market (iesire trailing/stop) = se executa imediat, la open-ul barei
-                # (nu asteapta high>=limita — altfel nu iese intr-o cadere brusca). SELL limita
-                # (TP asezat deasupra) = fill doar daca high atinge limita.
+
+        for bar_index, (open_, high, low, close) in enumerate(ohlc):
+            def eligible(order: dict) -> bool:
                 if order.get("market"):
-                    fill_ok, px = True, _o
-                elif h >= order["price"]:
-                    fill_ok, px = True, order["price"]
-                else:
-                    fill_ok, px = False, None
-                if fill_ok:
-                    vol = order["vol"]
-                    g0 = s.s["realized_gross"]
-                    s._remove(order)
-                    s._apply_fill(order, vol, px, fee=fee_pct / 100 * vol * px)
+                    return True
+                return execution.limit_touched(
+                    order["side"], high=high, low=low, limit=order["price"],
+                )
+
+            eligible_sides = {
+                order["side"].lower()
+                for order in strategy.s["orders"]
+                if eligible(order)
+            }
+            if {"buy", "sell"}.issubset(eligible_sides):
+                ambiguous_bars += 1
+
+            for side in execution.side_order():
+                for order in list(strategy.s["orders"]):
+                    if order not in strategy.s["orders"] or order["side"] != side:
+                        continue
+                    if not eligible(order):
+                        continue
+                    market = bool(order.get("market"))
+                    fill_order, volume, complete = split_order_fill(
+                        order,
+                        quantity_key="vol",
+                        amount_key="amount" if side == "buy" else None,
+                        ratio=execution.partial_fill_ratio,
+                        force_full=market,
+                    )
+                    if complete:
+                        strategy._remove(order)
+                    price = (
+                        execution.market_price(side, open_)
+                        if market else float(order["price"])
+                    )
+                    if side == "sell":
+                        volume = min(volume, strategy.s["qty"])
+                        if volume <= 1e-12:
+                            strategy._remove(order)
+                            continue
+                        fill_order["vol"] = volume
+                        gross_before = strategy.s["realized_gross"]
+                    fee = fee_pct / 100.0 * volume * price
+                    strategy._apply_fill(fill_order, volume, price, fee=fee)
                     fill_count += 1
-                    turnover_notional += vol * px
-                    if s.s["realized_gross"] > g0:      # castig brut (px>avg), ca simulate
-                        wins += 1
-                    if s.s.get("cycle", 1) > cycle0 + len(trade_pnls):
-                        trade_pnls.append(s.s["realized_net"] - cycle_net_start)
-                        cycle_net_start = s.s["realized_net"]
-            # --- DECIZIA = step-ul LIVE (entry/DCA/TP/stop/reintrare) pe close ---
+                    turnover_notional += volume * price
+                    if side == "sell":
+                        if strategy.s["realized_gross"] > gross_before:
+                            wins += 1
+                        if strategy.s.get("cycle", 1) > cycle0 + len(trade_pnls):
+                            trade_pnls.append(
+                                strategy.s["realized_net"] - cycle_net_start
+                            )
+                            cycle_net_start = strategy.s["realized_net"]
+
             replay_time = bar_index * bar_minutes * 60 if bar_minutes else bar_index
-            s.step(c, timestamp=replay_time)
-            # --- equity mark-to-market pe close, pt drawdown ---
-            qty = s.s["qty"]
-            upnl = (c - s.s["cost"] / qty) * qty if qty > 1e-12 else 0.0
-            equity_curve.append(initial_capital + s.s["realized_net"] + upnl)
+            strategy.step(close, timestamp=replay_time)
+            qty = strategy.s["qty"]
+            unrealized = (
+                (close - strategy.s["cost"] / qty) * qty if qty > 1e-12 else 0.0
+            )
+            equity_curve.append(initial_capital + strategy.s["realized_net"] + unrealized)
             exposure.append(qty > 1e-12)
     finally:
-        _strat.notify = orig_notify
+        _strat.notify = original_notify
 
-    qty = s.s["qty"]
-    final_upnl = (ohlc[-1][3] - s.s["cost"] / qty) * qty if qty > 1e-12 else 0.0
+    qty = strategy.s["qty"]
+    final_upnl = (
+        (ohlc[-1][3] - strategy.s["cost"] / qty) * qty if qty > 1e-12 else 0.0
+    )
     periods_per_year = 365.0 * 24 * 60 / bar_minutes if bar_minutes else None
     performance = calculate_performance_metrics(
         equity_curve,
@@ -134,19 +184,22 @@ def run_replay(ohlc, params, fee_pct: float = 0.26,
         trade_pnls=trade_pnls,
         turnover_notional=turnover_notional,
     )
-    r = lambda x: round(x, 10)
+    rounded = lambda value: round(value, 10)
     result = {
-        "realized": r(s.s["realized_gross"]),
-        "net": r(s.s["realized_net"]),
-        "fees": r(s.s["fees_total"]),
-        "total": r(s.s["realized_net"] + final_upnl),
-        "final_upnl": r(final_upnl),
-        "cycles": s.s.get("cycle", 1) - cycle0,
+        "realized": rounded(strategy.s["realized_gross"]),
+        "net": rounded(strategy.s["realized_net"]),
+        "fees": rounded(strategy.s["fees_total"]),
+        "total": rounded(strategy.s["realized_net"] + final_upnl),
+        "final_upnl": rounded(final_upnl),
+        "cycles": strategy.s.get("cycle", 1) - cycle0,
         "wins": wins,
-        "maxdd": r(performance["max_drawdown_abs"]),
-        "open_qty": r(qty),
+        "maxdd": rounded(performance["max_drawdown_abs"]),
+        "open_qty": rounded(qty),
         "fills": fill_count,
+        "ambiguous_bars": ambiguous_bars,
     }
-    result.update({key: (round(value, 10) if isinstance(value, float) else value)
-                   for key, value in performance.items()})
+    result.update({
+        key: (round(value, 10) if isinstance(value, float) else value)
+        for key, value in performance.items()
+    })
     return result

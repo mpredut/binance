@@ -55,6 +55,17 @@ def _params(**over):
 
 
 class ReplayEngineTest(unittest.TestCase):
+    def test_partial_limit_fill_remains_for_the_next_bar(self):
+        bars = [(100, 101, 99, 100), (100, 101, 99, 100)]
+        full = rp.run_replay(bars, _params(), fee_pct=0.26)
+        partial = rp.run_replay(
+            bars, _params(), fee_pct=0.26,
+            execution=rp.ExecutionModel(partial_fill_ratio=0.5),
+        )
+        self.assertEqual(full["fills"], 1)
+        self.assertEqual(partial["fills"], 1)
+        self.assertAlmostEqual(partial["open_qty"], full["open_qty"] / 2)
+
     def test_runs_and_returns_metrics(self):
         res = rp.run_replay(_series(), _params(), fee_pct=0.26, bar_minutes=60)
         for k in ("realized", "net", "fees", "total", "cycles", "wins", "maxdd",
@@ -118,6 +129,20 @@ class ReplayEngineTest(unittest.TestCase):
         self.assertEqual(result["cycles"], 1)
         self.assertEqual(result["open_qty"], 0.0)
         self.assertLess(result["net"], 0.0)
+
+    def test_market_slippage_makes_gap_stop_more_conservative(self):
+        bars = [
+            (100.0, 101.0, 99.0, 100.0),
+            (100.0, 101.0, 99.0, 100.0),
+            (80.0, 82.0, 78.0, 80.0),
+            (70.0, 71.0, 69.0, 70.0),
+        ]
+        plain = rp.run_replay(bars, _params(stop_loss_pct=10), fee_pct=0.26)
+        stressed = rp.run_replay(
+            bars, _params(stop_loss_pct=10), fee_pct=0.26,
+            execution=rp.ExecutionModel(spread_bps=20, market_slippage_bps=80),
+        )
+        self.assertLess(stressed["return_pct"], plain["return_pct"])
 
     def test_overlay_requires_replay_bars_at_configured_trend_interval(self):
         with self.assertRaisesRegex(ValueError, "trend_interval"):

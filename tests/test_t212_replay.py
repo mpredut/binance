@@ -47,6 +47,48 @@ def _params(**overrides):
 
 
 class T212ReplayTest(unittest.TestCase):
+    def test_partial_fill_remains_open_for_later_bars(self):
+        params = _params()
+        bars = [(100, 101, 99, 100), (100, 101, 99, 100)]
+        full = replay.run_replay(bars, params, bar_minutes=1440)
+        partial = replay.run_replay(
+            bars, params, bar_minutes=1440,
+            execution=replay.ExecutionModel(partial_fill_ratio=0.5),
+        )
+        self.assertEqual(full["fills"], 1)
+        self.assertEqual(partial["fills"], 1)
+        self.assertAlmostEqual(partial["open_qty"], full["open_qty"] / 2)
+
+    def test_historical_fx_changes_position_sizing_at_decision_time(self):
+        params = _params(STRAT_CURRENCY="RON")
+        bars = [(100, 101, 99, 100), (100, 101, 99, 100)]
+        one_to_one = replay.run_replay(bars, params, bar_minutes=1440, fx_to_usd=1.0)
+        historical = replay.run_replay(
+            bars, params, bar_minutes=1440, fx_to_usd=[0.5, 0.5],
+        )
+        self.assertAlmostEqual(historical["open_qty"], one_to_one["open_qty"] / 2)
+        self.assertEqual(historical["account_currency"], "RON")
+
+    def test_worst_case_reports_ambiguous_buy_and_sell_paths(self):
+        params = _params()
+        bars = [
+            (100, 101, 99, 100),   # decide ENTRY
+            (100, 101, 99, 100),   # fill ENTRY, decide TP
+            (97, 101, 96.9, 97),   # decide DCA; TP rămâne deschis
+            (100, 104, 96, 100),   # atinge și DCA BUY, și TP SELL
+        ]
+        result = replay.run_replay(
+            bars, params, bar_minutes=1440,
+            execution=replay.ExecutionModel(intrabar_policy="worst_case"),
+        )
+        self.assertGreaterEqual(result["ambiguous_bars"], 1)
+        self.assertIn(result["intrabar_policy_selected"], {"buy_first", "sell_first"})
+        scenarios = result["intrabar_scenarios"]
+        self.assertNotEqual(
+            scenarios["buy_first"]["return_pct"],
+            scenarios["sell_first"]["return_pct"],
+        )
+
     def test_order_decided_at_close_fills_only_in_next_bar(self):
         params = _params()
         first = (100.0, 200.0, 1.0, 100.0)

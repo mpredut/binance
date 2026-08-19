@@ -11,7 +11,7 @@ import csv
 import datetime as dt
 import hashlib
 from pathlib import Path
-from typing import Iterable, Mapping
+from typing import Callable, Iterable, Mapping, Sequence
 
 
 REQUIRED_FIELDS = ("timestamp", "open", "high", "low", "close")
@@ -102,3 +102,40 @@ def dataset_metadata(records: Iterable[Mapping], *, interval_minutes: int | None
             rows[-1]["timestamp"], tz=dt.timezone.utc,
         ).isoformat(),
     }
+
+
+def align_previous_values(
+    target_timestamps: Sequence[int],
+    source_records: Iterable[Mapping],
+    *,
+    value_field: str = "close",
+    transform: Callable[[float], float] | None = None,
+) -> list[float]:
+    """Aliniază as-of fără lookahead: ultima valoare cu timestamp <= țintă."""
+    source = sorted(
+        (
+            int(record["timestamp"]),
+            float(record[value_field]),
+        )
+        for record in source_records
+    )
+    if not source:
+        raise ValueError("seria sursă pentru aliniere nu poate fi goală")
+    convert = transform or (lambda value: value)
+    result = []
+    source_index = 0
+    current: float | None = None
+    for timestamp in target_timestamps:
+        target = int(timestamp)
+        while source_index < len(source) and source[source_index][0] <= target:
+            current = convert(source[source_index][1])
+            source_index += 1
+        if current is None:
+            raise ValueError(
+                f"nu există valoare FX cunoscută la sau înainte de timestamp {target}; "
+                "extinde datasetul FX în trecut"
+            )
+        if current <= 0:
+            raise ValueError(f"valoare aliniată nepozitivă la timestamp {target}")
+        result.append(float(current))
+    return result

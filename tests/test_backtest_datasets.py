@@ -4,6 +4,7 @@ import unittest
 from pathlib import Path
 
 from offline.backtests.datasets import (
+    align_previous_values,
     dataset_metadata,
     load_dataset,
     save_dataset,
@@ -19,6 +20,18 @@ def _rows():
 
 
 class OhlcDatasetContractTest(unittest.TestCase):
+    def test_asof_alignment_never_uses_a_future_fx_value(self):
+        fx = [
+            {"timestamp": 10, "close": 0.20},
+            {"timestamp": 20, "close": 0.25},
+        ]
+        self.assertEqual(
+            align_previous_values([10, 19, 20, 30], fx),
+            [0.20, 0.20, 0.25, 0.25],
+        )
+        with self.assertRaisesRegex(ValueError, "extinde datasetul FX"):
+            align_previous_values([9], fx)
+
     def test_round_trip_is_canonical_and_hashed(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "bars.csv"

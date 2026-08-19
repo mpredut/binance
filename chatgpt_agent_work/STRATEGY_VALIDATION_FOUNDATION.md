@@ -27,6 +27,8 @@ aceeași perioadă pe care a fost aleasă. Înainte de schimbarea parametrilor c
   hash identice pentru toate venue-urile.
 - `offline/backtests/evaluation.py`: evaluarea segmentelor și agregarea walk-forward
   sunt comune; engine-ul financiar intră prin adaptor.
+- `offline/backtests/execution.py`: contract comun și explicit pentru spread,
+  slippage market, partial fills persistente și cele două ordini intrabar.
 - `kraken/replay.py`: pornește din stare explicită, ignoră orice `.state_REPLAY`,
   execută ordinul cel mai devreme în bara următoare și raportează metricile comune.
 - `212trading/replay.py`: rulează `212trading/strategy.py` live peste OHLC și
@@ -52,13 +54,13 @@ aceeași perioadă pe care a fost aleasă. Înainte de schimbarea parametrilor c
 
 ## Ce nu este încă suficient pentru promovare
 
-- OHLC nu spune ordinea intrabar high/low; barele în care s-ar putea umple ordine
-  opuse trebuie stresate cu ambele ordini posibile sau cu date mai granulare.
-- Slippage, spread variabil, partial-fill asincron, ordine respinse și latency nu sunt
-  încă modelate complet în replay-ul Kraken.
-- Replay-ul Trading212 modelează ordinele limită pe OHLC, dar nu poate reproduce
-  lichiditatea T212, programul exact al sesiunii, fill-uri parțiale asincrone sau FX
-  istoric fără un dataset separat de curs.
+- OHLC nu spune traseul exact high/low. Replay-ul rulează acum extremele BUY-first
+  și SELL-first, dar traseul tick-by-tick cere date mai granulare.
+- Spread-ul, slippage-ul market și partial fills pot fi stresate, dar nu sunt încă
+  calibrate din fill-urile reale; ordine respinse și latency rămân nemodelate.
+- Replay-ul Trading212 păstrează partial fill-urile și poate folosi FX istoric
+  as-of, dar nu poate reproduce lichiditatea T212, programul exact al sesiunii sau
+  latența fără date de execuție reale.
 - Istoricul Kraken obținut direct din API este scurt și ferestrele raportate anterior
   se suprapun. El poate genera ipoteze, nu dovadă robustă de promovare.
 - Ramura experimentală `kraken-trail-decay-v3` nu este îmbinată. Metricile ei inițiale

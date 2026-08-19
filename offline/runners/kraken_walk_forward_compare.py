@@ -124,7 +124,7 @@ def _load_datasets(report: dict) -> dict[int, tuple[list[dict], dict, int]]:
     return datasets
 
 
-def _candidate_windows(datasets: dict, params, fee_pct: float) -> list[dict]:
+def _candidate_windows(datasets: dict, params, fee_pct: float, execution) -> list[dict]:
     windows = []
     for interval, (records, sizes, warmup_bars) in sorted(datasets.items()):
         folds = walk_forward_splits(
@@ -136,6 +136,7 @@ def _candidate_windows(datasets: dict, params, fee_pct: float) -> list[dict]:
             warmup = records[max(0, fold.test.start - warmup_bars):fold.test.start]
             segment = baseline._segment_result(
                 records[fold.test], params, fee_pct, interval, warmup,
+                execution=execution,
             )
             metrics = segment["metrics"]
             windows.append({
@@ -274,12 +275,13 @@ def main() -> int:
         parser.error("candidate-set hype-240 cere un baseline care conține numai intervalul 240")
     base_params = baseline.StratParams(**source_report["strategy_params"])
     base_fee = float(source_report["fee_pct_per_leg"])
+    execution = baseline.ExecutionModel(**source_report.get("execution_model", {}))
 
     results = {}
     candidates = hype_240_candidates() if args.candidate_set == "hype-240" else default_candidates()
     for candidate in candidates:
         params = dataclasses.replace(base_params, **candidate.overrides)
-        windows = _candidate_windows(datasets, params, base_fee)
+        windows = _candidate_windows(datasets, params, base_fee, execution)
         results[candidate.name] = {
             "description": candidate.description,
             "overrides": candidate.overrides,
@@ -306,7 +308,7 @@ def main() -> int:
         fee = float(fee_text.strip())
         if fee < 0:
             parser.error("fee-ul nu poate fi negativ")
-        windows = _candidate_windows(datasets, base_params, fee)
+        windows = _candidate_windows(datasets, base_params, fee, execution)
         fee_stress[f"{fee:.2f}"] = {
             "summary": summarize_test_windows(windows),
             "windows": windows,
@@ -325,6 +327,7 @@ def main() -> int:
                 "mean_return_pct", "worst_return_pct", "worst_max_drawdown_pct",
             ],
             "window_weighting": "equal across all timeframe/fold TEST windows",
+            "execution_model": dataclasses.asdict(execution),
         },
         "candidates": results,
         "pareto_frontier": _pareto_names(results),

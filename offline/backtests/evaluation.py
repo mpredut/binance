@@ -1,20 +1,33 @@
 """Evaluator generic walk-forward pentru adaptoare de strategie.
 
 Strategia rămâne specifică venue-ului. Contractul comun este o funcție pură
-``replay(ohlc, warmup_ohlc) -> metrics``; astfel Kraken și Trading212 pot folosi
-propriul engine live fără să copieze logica de ferestre, buy-and-hold și agregare.
+``replay(ohlc, warmup_ohlc, context) -> metrics``; astfel Kraken și Trading212
+pot folosi propriul engine live fără să copieze logica de ferestre, buy-and-hold
+și agregare. Contextul păstrează timestamp-urile necesare FX-ului istoric.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from collections import Counter
+from dataclasses import dataclass
 from typing import Any
 
 from offline.backtests.walk_forward import summarize_test_windows, walk_forward_splits
 
 
 Ohlc = list[tuple[float, float, float, float]]
-ReplayFunction = Callable[[Ohlc, Ohlc], dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class ReplayContext:
+    """Identitatea temporală păstrată separat de tuplele OHLC ale strategiei."""
+
+    timestamps: tuple[int, ...]
+    warmup_timestamps: tuple[int, ...]
+
+
+ReplayFunction = Callable[[Ohlc, Ohlc, ReplayContext], dict[str, Any]]
 
 
 def automatic_window_sizes(sample_count: int) -> tuple[int, int, int, int]:
@@ -48,7 +61,14 @@ def evaluate_segment(
 ) -> dict:
     if not records:
         raise ValueError("segmentul de evaluare nu poate fi gol")
-    metrics = replay(to_ohlc(records), to_ohlc(warmup_records))
+    metrics = replay(
+        to_ohlc(records),
+        to_ohlc(warmup_records),
+        ReplayContext(
+            timestamps=tuple(int(row["timestamp"]) for row in records),
+            warmup_timestamps=tuple(int(row["timestamp"]) for row in warmup_records),
+        ),
+    )
     required = {"return_pct", "max_drawdown_pct", "cycles", "fills"}
     missing = required.difference(metrics)
     if missing:
@@ -119,6 +139,10 @@ def evaluate_walk_forward(
             "buy_hold_return_pct": test["buy_hold_return_pct"],
             "cycles": test["metrics"]["cycles"],
             "fills": test["metrics"]["fills"],
+            "ambiguous_bars": test["metrics"].get("ambiguous_bars", 0),
+            "intrabar_policy_selected": test["metrics"].get(
+                "intrabar_policy_selected"
+            ),
         })
 
     summary = summarize_test_windows(test_windows)
@@ -142,6 +166,13 @@ def evaluate_walk_forward(
             ) / len(test_windows),
             "total_cycles": summary["total_cycles"],
             "total_fills": summary["total_fills"],
+            "total_ambiguous_bars": sum(
+                int(window["ambiguous_bars"]) for window in test_windows
+            ),
+            "intrabar_policy_selected_counts": dict(Counter(
+                window["intrabar_policy_selected"] for window in test_windows
+                if window["intrabar_policy_selected"] is not None
+            )),
         },
     }
 

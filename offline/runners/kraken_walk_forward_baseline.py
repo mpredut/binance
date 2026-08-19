@@ -39,6 +39,7 @@ from offline.backtests.evaluation import (  # noqa: E402
     evaluate_walk_forward as _evaluate_walk_forward,
     iso_utc as _iso,
 )
+from offline.backtests.execution import ExecutionModel  # noqa: E402
 
 
 def fetch_closed_candles(pair: str, interval: int) -> list[dict]:
@@ -67,15 +68,16 @@ def fetch_closed_candles(pair: str, interval: int) -> list[dict]:
 
 
 def _segment_result(records: list[dict], params: StratParams, fee_pct: float,
-                    interval: int, warmup_records: list[dict] | tuple = ()) -> dict:
+                    interval: int, warmup_records: list[dict] | tuple = (),
+                    execution: ExecutionModel | None = None) -> dict:
     original_log = kraken_replay._strat.log
     kraken_replay._strat.log = lambda *_args, **_kwargs: None
     try:
         return _evaluate_segment(
             records,
-            lambda ohlc, warmup: kraken_replay.run_replay(
+            lambda ohlc, warmup, _context: kraken_replay.run_replay(
                 ohlc, params, fee_pct=fee_pct, bar_minutes=interval,
-                warmup_ohlc=warmup,
+                warmup_ohlc=warmup, execution=execution,
             ),
             warmup_records=warmup_records,
         )
@@ -85,15 +87,16 @@ def _segment_result(records: list[dict], params: StratParams, fee_pct: float,
 
 def evaluate_walk_forward(records: list[dict], params: StratParams, *, fee_pct: float,
                           interval: int, train_size: int, validation_size: int,
-                          test_size: int, step_size: int, warmup_bars: int = 0) -> dict:
+                          test_size: int, step_size: int, warmup_bars: int = 0,
+                          execution: ExecutionModel | None = None) -> dict:
     original_log = kraken_replay._strat.log
     kraken_replay._strat.log = lambda *_args, **_kwargs: None
     try:
         return _evaluate_walk_forward(
             records,
-            lambda ohlc, warmup: kraken_replay.run_replay(
+            lambda ohlc, warmup, _context: kraken_replay.run_replay(
                 ohlc, params, fee_pct=fee_pct, bar_minutes=interval,
-                warmup_ohlc=warmup,
+                warmup_ohlc=warmup, execution=execution,
             ),
             train_size=train_size,
             validation_size=validation_size,
@@ -130,6 +133,13 @@ def main() -> int:
     parser.add_argument("--pair", help="implicit KRAKEN_PAIR din configurația live")
     parser.add_argument("--intervals", type=_parse_intervals, default=[60, 240, 1440])
     parser.add_argument("--fee", type=float, default=0.26, help="fee per leg, procente")
+    parser.add_argument("--spread-bps", type=float, default=0.0)
+    parser.add_argument("--market-slippage-bps", type=float, default=0.0)
+    parser.add_argument("--partial-fill-ratio", type=float, default=1.0)
+    parser.add_argument(
+        "--intrabar-policy", choices=("buy_first", "sell_first", "worst_case"),
+        default="buy_first",
+    )
     parser.add_argument("--train", type=int, help="bare; implicit auto 45%% din istoric")
     parser.add_argument("--validation", type=int, help="bare; implicit auto 10%%")
     parser.add_argument("--test", type=int, help="bare; implicit auto 15%%")
@@ -158,6 +168,15 @@ def main() -> int:
         parser.error("dimensiunile walk-forward trebuie să fie pozitive")
     if args.warmup < 0:
         parser.error("--warmup nu poate fi negativ")
+    try:
+        execution = ExecutionModel(
+            spread_bps=args.spread_bps,
+            market_slippage_bps=args.market_slippage_bps,
+            partial_fill_ratio=args.partial_fill_ratio,
+            intrabar_policy=args.intrabar_policy,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
 
     # Aceeași ordine ca kraken_bot.py: .env are prioritate, config.env completează.
     load_dotenv(args.env_file)
@@ -182,6 +201,7 @@ def main() -> int:
         },
         "strategy_params": dataclasses.asdict(params),
         "fee_pct_per_leg": args.fee,
+        "execution_model": dataclasses.asdict(execution),
         "walk_forward": {
             "requested_sizes": (
                 {"train": args.train, "validation": args.validation,
@@ -218,6 +238,7 @@ def main() -> int:
             records, params, fee_pct=args.fee, interval=interval,
             train_size=train_size, validation_size=validation_size,
             test_size=test_size, step_size=step_size, warmup_bars=args.warmup,
+            execution=execution,
         )
         report["intervals"][str(interval)] = {
             "dataset": {
@@ -249,7 +270,8 @@ def main() -> int:
             f"mean={aggregate['mean_return_pct']:+.3f}% "
             f"worst={aggregate['worst_return_pct']:+.3f}% "
             f"worstDD={aggregate['worst_max_drawdown_pct']:.3f}% "
-            f"cycles={aggregate['total_cycles']} fills={aggregate['total_fills']}"
+            f"cycles={aggregate['total_cycles']} fills={aggregate['total_fills']} "
+            f"ambiguous={aggregate['total_ambiguous_bars']}"
         )
     return 0
 

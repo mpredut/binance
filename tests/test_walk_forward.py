@@ -68,8 +68,9 @@ class WalkForwardSplitsTest(unittest.TestCase):
         ]
         calls = []
 
-        def replay(_ohlc, warmup):
+        def replay(_ohlc, warmup, context):
             calls.append(len(warmup))
+            self.assertEqual(len(context.timestamps), len(_ohlc))
             return {
                 "return_pct": 1.0, "max_drawdown_pct": 2.0,
                 "cycles": 1, "fills": 2, "sortino": None,

@@ -54,6 +54,20 @@ A nu justifică promovarea, overlay-ul original amplifică riscul, iar B schimb�
 randament pe protecție. `overlay650t8` necesită confirmare Kraken/shadow deoarece a
 fost ales după explorarea aceluiași proxy.
 
+## Sensitivitate la execuție conservatoare
+
+Un scenariu exploratoriu, nu calibrat (`spread 20bps`, market slippage `30bps`,
+maximum 50% dintr-un ordin limită per bară, worst-case intrabar), schimbă base:
+
+- medie: `+0,777%` → `+0,260%`;
+- worst fold: `−9,123%` → `−9,485%`;
+- fill events: `212` → `327` (partial fill-urile sunt evenimente separate).
+
+Doar o bară TEST din cele 31 de ferestre a avut simultan BUY și SELL eligibile;
+degradarea provine predominant din spread și execuția în tranșe. Sub acest stres,
+`overlay650t8` rămâne peste base la medie (`+0,338%`), dar pierde 17/31 comparații;
+nu primește motiv suplimentar de promovare.
+
 ## Concluzie (aliniată cu revalidarea Codex 19 aug)
 - **Overlay original: respins** — motivul exact este **instabilitatea + riscul de
   coadă**, nu pierdere uniformă la medie (câștigă 15/31 comparații, dar tail-ul
