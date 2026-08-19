@@ -79,6 +79,16 @@ class StratParams:
     tp_trend_min_pct: float = 0.5     # (v1, nefolosit in v2) prag semnal trend din _shadow_prices.
     tp_trail_pct: float = 2.0         # v2: PESTE nivelul TP, ies la un pullback de acest %% de la
                                       # varf (trailing). Doar peste TP -> nu iesi niciodata in pierdere.
+    # --- TREND OVERLAY (combina strategii pe regim; EXPERIMENTAL, default OFF) -----
+    trend_overlay: bool = False       # True = in UPTREND confirmat, intra cu TOP-UP mare si
+                                      # CALARESTE (hold+trailing) in loc de DCA/TP; in range = clasic.
+    trend_sma_n: int = 30             # fereastra SMA (nr bare) pt semnalul de trend LUNG
+    trend_interval: int = 240         # minute/bara pt semnalul de trend (live: OHLC Kraken;
+                                      # backtest: barele fed-uite). 240=4h -> SMA(30)=~5 zile.
+    trend_confirm_bars: int = 3       # bare consecutive de uptrend ca sa confirme (anti-fals)
+    trend_topup: float = 2000.0       # cat cumpar la intrarea in trend (sume mai mari = prinde trendul)
+    trend_trail_pct: float = 5.0      # trailing-ul pozitiei de trend (pullback de la varf la care ies)
+    trend_exit_break: bool = False    # False=A (doar trailing); True=B (trailing SAU pret<SMA=trend rupt)
 
     @classmethod
     def from_env(cls) -> "StratParams":
@@ -107,6 +117,13 @@ class StratParams:
             tp_trend_hold      = os.environ.get("STRAT_TP_TREND_HOLD", "false").strip().lower() == "true",
             tp_trend_min_pct   = float_env("STRAT_TP_TREND_MIN_PCT") or 0.5,
             tp_trail_pct       = float_env("STRAT_TP_TRAIL_PCT") or 2.0,
+            trend_overlay      = os.environ.get("STRAT_TREND_OVERLAY", "false").strip().lower() == "true",
+            trend_sma_n        = int(float_env("STRAT_TREND_SMA_N") or 30),
+            trend_interval     = int(float_env("STRAT_TREND_INTERVAL") or 240),
+            trend_confirm_bars = int(float_env("STRAT_TREND_CONFIRM_BARS") or 3),
+            trend_topup        = float_env("STRAT_TREND_TOPUP") or 2000.0,
+            trend_trail_pct    = float_env("STRAT_TREND_TRAIL_PCT") or 5.0,
+            trend_exit_break   = os.environ.get("STRAT_TREND_EXIT_BREAK", "false").strip().lower() == "true",
         )
 
 
@@ -140,6 +157,9 @@ def _new_state() -> dict:
         "last_exit_kind": None,   # "TP"/"STOP"/... — cum s-a inchis ultimul ciclu (reintrare STOP-aware)
         "sl_low": None,           # minimul de pret dupa un stop-loss (pt reintrarea pe revenire)
         "trail_peak": None,       # varful urmarit dupa ce pretul a depasit nivelul TP
+        "trend_mode": False,      # overlay: suntem intr-o pozitie de trend (hold+trailing)?
+        "trend_peak": None,       # varful urmarit in modul trend
+        "trend_confirm_count": 0, # bare consecutive de uptrend (confirmare semnal)
         "orders": [],           # {txid, side, vol, price, amount, kind, ts}
     }
 
@@ -483,10 +503,89 @@ class Strategy:
             return self.p.reentry_drop_pct, f"fix (fallback, warm-up {len(self._shadow_prices)}/20)"
         return k_re * vol, f"adaptiv (vol_1h {vol:.2f}% x k={k_re})"
 
+    # -- TREND OVERLAY ---------------------------------------------------------
+    def _trend_closes(self) -> list:
+        """Seria de INCHIDERI pt semnalul de trend LUNG, ACELASI timescale live si backtest:
+        - BACKTEST (dry_run): barele fed-uite in step() (_shadow_prices = inchiderile lor).
+        - LIVE: OHLC Kraken pe trend_interval (fetch cache-uit 15min).
+        Rezolva gap-ul de cadenta: SMA(N) inseamna acelasi lucru in ambele (240m×30 = ~5 zile)."""
+        if self.dry_run:
+            return [p for _, p in self._shadow_prices]
+        try:
+            return self.client.ohlc_closes(self.pair, self.p.trend_interval)
+        except Exception as e:  # noqa: BLE001 — fara semnal -> pur si simplu nu intra in trend
+            log(f"  [STRAT] trend OHLC fetch esuat ({e}) — trend nedeterminat")
+            return []
+
+    def _trend_up_series(self, closes: list) -> bool:
+        """UPTREND CONFIRMAT: ultimele `trend_confirm_bars` bare au close > SMA(N) SI SMA(N)
+        in crestere. Determinist -> IDENTIC live/backtest (aceeasi serie de inchideri)."""
+        n = self.p.trend_sma_n
+        k = max(1, self.p.trend_confirm_bars)
+        if len(closes) < n + k:
+            return False
+        for j in range(k):
+            i = len(closes) - 1 - j
+            sma = sum(closes[i - n + 1:i + 1]) / n
+            sma_prev = sum(closes[i - n:i]) / n
+            if not (closes[i] > sma and sma > sma_prev):
+                return False
+        return True
+
+    def _uptrend_confirmed(self) -> bool:
+        return self._trend_up_series(self._trend_closes())
+
+    def _trend_sma(self) -> float | None:
+        """SMA(N) pe seria de trend — pt verificarea de trend-rupt (ExitB)."""
+        closes = self._trend_closes()
+        n = self.p.trend_sma_n
+        return sum(closes[-n:]) / n if len(closes) >= n else None
+
+    def _overlay_step(self, price: float) -> bool:
+        """Overlay de regim. True = a gestionat tick-ul (nu mai rula logica de range).
+        In UPTREND confirmat: TOP-UP mare + hold; iese pe trailing (A) sau trailing SAU
+        pret<SMA=trend rupt (B). In range (fara uptrend): False -> cade pe DCA/TP clasic."""
+        up = self._uptrend_confirmed()
+        if self.s.get("trend_mode"):
+            peak = max(self.s.get("trend_peak") or price, price)
+            self.s["trend_peak"] = peak
+            trail_stop = peak * (1 - self.p.trend_trail_pct / 100)
+            sma = self._trend_sma()
+            broke = self.p.trend_exit_break and sma is not None and price < sma
+            if (price <= trail_stop or broke) and self.s["qty"] > 1e-12:
+                exit_px = round(price * 0.999, self.price_dec)
+                sells = [o for o in self.s["orders"] if o["side"] == "sell"]
+                if not (len(sells) == 1 and abs(sells[0]["price"] - exit_px) / exit_px <= 0.001):
+                    while self._find_open("sell"):
+                        self._cancel_open("sell")
+                    self._place("sell", self._dust_safe_qty(self.s["qty"]), exit_px, kind="TP")
+                    log(f"  [STRAT] TREND EXIT ({'break' if broke else 'trailing'} "
+                        f"{self.p.trend_trail_pct}%) varf {peak:.{self.price_dec}f} -> IES la {exit_px}")
+            else:
+                while self._find_open("sell"):     # ride: nu vinde
+                    self._cancel_open("sell")
+            return True
+        if up and self.s["spent"] + self.p.trend_topup <= self.p.max_budget:
+            while self._find_open("buy"):          # anuleaza ordine range pendinte
+                self._cancel_open("buy")
+            while self._find_open("sell"):
+                self._cancel_open("sell")
+            self._place("buy", self._qty_for(self.p.trend_topup, price), price,
+                        kind="ENTRY", amount=self.p.trend_topup)
+            self.s["trend_mode"] = True
+            self.s["trend_peak"] = price
+            log(f"  [STRAT] TREND ENTER: top-up {self.p.trend_topup} {self.ccy} @ {price} "
+                f"(SMA{self.p.trend_sma_n} up, confirmat)")
+            return True
+        return False
+
     def step(self, price: float) -> None:
         held = self.s["qty"]
         entry_px = sr.entry_price(price, self.p.entry_discount_pct)   # = price*(1 - disc%)
         self._shadow_prices.append((time.time(), price))   # istoric pt sigma (observational)
+        # TREND OVERLAY: combina regim range (DCA/TP) cu regim trend (hold+trailing).
+        if self.p.trend_overlay and self._overlay_step(price):
+            return
 
         # adoptare in asteptare: NU cumpara o intrare noua — alocarea e pe drum
         if self.p.adopt_cost > 0 and not self.s.get("adopted") and held <= 1e-12:
