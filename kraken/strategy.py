@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from kraken_common import log, now_str, float_env, are_close
 from notify import notify
 from kraken_client import KrakenClient, KrakenError
+import strat_rules as sr   # reguli de decizie PARTAJATE cu backtest.py (aceleasi praguri)
 from market_data import get_price, pair_precision
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -338,8 +339,8 @@ class Strategy:
         avg = self._avg()
         if not avg:
             return False
-        loss_pct = (avg - price) / avg * 100   # long: pierdem cand pretul < pret mediu
-        if loss_pct >= self.p.stop_loss_pct:
+        loss_pct = (avg - price) / avg * 100   # long: pierdem cand pretul < pret mediu (pt log)
+        if sr.hit_stop(avg, price, self.p.stop_loss_pct):
             log(f"  🛑 [STRAT] STOP-LOSS: pierdere {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — VAND TOT (taie pierderea)")
             for o in list(self.s["orders"]):           # anuleaza toate ordinele pendinte (si DCA-urile)
                 if not self.dry_run and not str(o["txid"]).startswith("PAPER"):
@@ -450,7 +451,7 @@ class Strategy:
 
     def step(self, price: float) -> None:
         held = self.s["qty"]
-        disc = 1 - self.p.entry_discount_pct / 100
+        entry_px = sr.entry_price(price, self.p.entry_discount_pct)   # = price*(1 - disc%)
         self._shadow_prices.append((time.time(), price))   # istoric pt sigma (observational)
 
         # adoptare in asteptare: NU cumpara o intrare noua — alocarea e pe drum
@@ -472,7 +473,7 @@ class Strategy:
                 low = min(self.s.get("sl_low") or price, price)
                 self.s["sl_low"] = low
                 prag_bounce = low * (1 + self.p.reentry_sl_bounce_pct / 100)
-                if price < prag_bounce and not are_close(price, prag_bounce, self.p.reentry_tolerance_pct):
+                if sr.reentry_stop_blocked(price, low, self.p.reentry_sl_bounce_pct, self.p.reentry_tolerance_pct):
                     log(f"  [STRAT] reintrare dupa STOP blocata: pret {price} < prag revenire "
                         f"{prag_bounce:.{self.price_dec}f} (min {low}, +{self.p.reentry_sl_bounce_pct}%)")
                     return
@@ -486,7 +487,7 @@ class Strategy:
                     prag = lsp * (1 - drop_pct / 100)
                     # toleranta "aproape de prag" (botcore.are_close, determinist): pretul la
                     # tol% de prag conteaza ca atins — altfel ratam intrari la 2-3 centi de prag
-                    if price > prag and not are_close(price, prag, self.p.reentry_tolerance_pct):
+                    if sr.reentry_drop_blocked(price, lsp, drop_pct, self.p.reentry_tolerance_pct):
                         log(f"  [STRAT] reintrare blocata: pret {price} > prag {prag:.2f} [{drop_source}]"
                             f"{f' (tol {self.p.reentry_tolerance_pct}%)' if self.p.reentry_tolerance_pct else ''} "
                             f"(vandut la {lsp}, astept -{drop_pct:.2f}%)")
@@ -496,8 +497,8 @@ class Strategy:
             if self.s["spent"] + self.p.entry_amount > self.p.max_budget:
                 log(f"  [STRAT] plafon {self.p.max_budget} {self.ccy} atins — nu intru")
                 return
-            self._place("buy", self._qty_for(self.p.entry_amount, price * disc),
-                        price * disc, kind="ENTRY", amount=self.p.entry_amount)
+            self._place("buy", self._qty_for(self.p.entry_amount, entry_px),
+                        entry_px, kind="ENTRY", amount=self.p.entry_amount)
             return
 
         # STOP-LOSS: taie pierderea inainte de DCA/TP
@@ -518,9 +519,9 @@ class Strategy:
                     else min(rem, round(held * share / 100, self.vol_dec))
                 rem = round(rem - q, self.vol_dec)
                 if q > 0:
-                    desired.append((round(avg * (1 + pct / 100), self.price_dec), q))
+                    desired.append((round(sr.tp_price(avg, pct), self.price_dec), q))
             if self.ordermin and any(q < self.ordermin for _, q in desired):
-                desired = [(round(avg * (1 + tranches[0][0] / 100), self.price_dec), held)]
+                desired = [(round(sr.tp_price(avg, tranches[0][0]), self.price_dec), held)]
             sells = [o for o in self.s["orders"] if o["side"] == "sell"]
             ok = (len(sells) == len(desired) and
                   all(abs(o["price"] - p) / p <= 0.001 and abs(o["vol"] - q) <= 1e-9
@@ -532,18 +533,16 @@ class Strategy:
                 for p_, q_ in desired:
                     self._place("sell", q_, p_, kind="TP")
 
-        prag_dca = (self.s["last_buy_price"] * (1 - self.p.dca_drop_pct / 100)
-                    if self.s["last_buy_price"] else None)
         if (self.s["dca_buys"] < self.p.max_dca_buys
-                and prag_dca
-                # "aproape de prag" conteaza ca atins (are_close, aceeasi toleranta ca reintrarea)
-                and (price <= prag_dca or are_close(price, prag_dca, self.p.reentry_tolerance_pct))
+                and self.s["last_buy_price"]
+                # prag DCA + "aproape de prag" = atins (regula partajata cu backtest)
+                and sr.dca_price_hit(price, self.s["last_buy_price"], self.p.dca_drop_pct, self.p.reentry_tolerance_pct)
                 and self.s["spent"] + self.p.dca_amount <= self.p.max_budget
                 and not self._has_open("buy")):
             log(f"  [STRAT] dip {price} <= {self.s['last_buy_price']}×(1-{self.p.dca_drop_pct}%)"
                 f" (tol {self.p.reentry_tolerance_pct}%) — DCA")
-            self._place("buy", self._qty_for(self.p.dca_amount, price * disc),
-                        price * disc, kind="DCA", amount=self.p.dca_amount)
+            self._place("buy", self._qty_for(self.p.dca_amount, entry_px),
+                        entry_px, kind="DCA", amount=self.p.dca_amount)
 
     # -- bucla -----------------------------------------------------------------
     def run(self) -> None:

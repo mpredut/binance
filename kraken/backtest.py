@@ -18,16 +18,7 @@ import math
 import sys
 import urllib.request
 
-
-def _are_close(v1, v2, tol_pct):
-    """Aceeasi formula ca botcore.diff_percent/are_close (simetrica, pe media
-    absoluta) — determinista, fara sa importe botcore (backtest ruleaza izolat)."""
-    if tol_pct <= 0:
-        return False
-    denom = (abs(v1) + abs(v2)) / 2
-    if denom == 0:
-        return True
-    return abs(v1 - v2) / denom * 100 <= tol_pct
+import strat_rules as sr   # reguli de decizie PARTAJATE cu strategy.py (live)
 
 
 def fetch_candles(pair, interval):
@@ -57,7 +48,6 @@ def simulate(ohlc, P, reentry_arr=None, sl_bounce_pct=None):
     last_sell_price*(1-reentry_pct/100) inainte sa reintre; simulatorul reintra
     imediat). P["reentry_tolerance_pct"] (implicit 0 = fara toleranta) controleaza
     cat de "aproape de prag" conteaza ca atins (are_close, determinist)."""
-    disc, drop, tp, sl = P["disc"]/100, P["drop"]/100, P["tp"]/100, P["sl"]/100
     fee = P["fee"]/100
     reentry_tol = P.get("reentry_tolerance_pct", 0.0)
     qty = cost = spent = 0.0
@@ -88,9 +78,9 @@ def simulate(ohlc, P, reentry_arr=None, sl_bounce_pct=None):
                 last_sell_price = px; last_exit_kind = "TP"
                 qty = cost = spent = 0.0; dca = 0; last_open = None
                 rest_sell = None; rest_buy = None
-        if qty > 1e-9 and sl > 0:                       # STOP-LOSS pe close
+        if qty > 1e-9 and P["sl"] > 0:                  # STOP-LOSS pe close
             avg = cost/qty
-            if (avg - c)/avg >= sl:
+            if sr.hit_stop(avg, c, P["sl"]):
                 realized += (c-avg)*qty; fees += fee*qty*c
                 cycles += 1
                 last_sell_price = c; last_exit_kind = "STOP"; sl_low = c
@@ -102,26 +92,23 @@ def simulate(ohlc, P, reentry_arr=None, sl_bounce_pct=None):
                 if sl_bounce_pct and last_exit_kind == "STOP" and last_sell_price:
                     # STOP-aware: reintra pe REVENIRE (bounce de la minim), nu pe scadere
                     sl_low = c if sl_low is None else min(sl_low, c)
-                    prag_b = sl_low * (1 + sl_bounce_pct / 100)
-                    if c < prag_b and not _are_close(c, prag_b, reentry_tol):
+                    if sr.reentry_stop_blocked(c, sl_low, sl_bounce_pct, reentry_tol):
                         blocked = True
                         blocked_ticks += 1
                 elif reentry_arr is not None and last_sell_price:
                     r = reentry_arr[i]
                     reentry_pct = P.get("reentry_fallback", 0.0) if (isinstance(r, float) and math.isnan(r)) else r
-                    if reentry_pct > 0:
-                        prag = last_sell_price * (1 - reentry_pct / 100)
-                        if c > prag and not _are_close(c, prag, reentry_tol):
-                            blocked = True
-                            blocked_ticks += 1
+                    if sr.reentry_drop_blocked(c, last_sell_price, reentry_pct, reentry_tol):
+                        blocked = True
+                        blocked_ticks += 1
                 if not blocked:
-                    px = c*(1-disc); rest_buy = (px, round(P["entry"]/px, 8))
+                    px = sr.entry_price(c, P["disc"]); rest_buy = (px, round(P["entry"]/px, 8))
         else:
             avg = cost/qty
-            rest_sell = (avg*(1+tp), qty)
-            if (dca < P["maxdca"] and last_open and c <= last_open*(1-drop)
+            rest_sell = (sr.tp_price(avg, P["tp"]), qty)
+            if (dca < P["maxdca"] and last_open and sr.dca_price_hit(c, last_open, P["drop"], 0.0)
                     and spent + P["dca"] <= P["budget"] and rest_buy is None):
-                px = c*(1-disc); rest_buy = (px, round(P["dca"]/px, 8))
+                px = sr.entry_price(c, P["disc"]); rest_buy = (px, round(P["dca"]/px, 8))
         upnl = (c - cost/qty)*qty if qty > 1e-9 else 0
         eq = realized - fees + upnl; peak = max(peak, eq); maxdd = max(maxdd, peak - eq)
 
