@@ -42,17 +42,17 @@ class TrendFilterTest(unittest.TestCase):
         self._fake_cm({"gradient_recent": 100.0, "epsilon": 0.001})   # ar fi trend f. clar
         self.assertFalse(rtrade._trend_too_strong("TAOUSDC"))
 
-    def test_strong_trend_blocks(self):
-        self._fake_cm({"gradient_recent": 0.5, "epsilon": 0.1})       # 0.5 > 2*0.1=0.2
-        self.assertTrue(rtrade._trend_too_strong("TAOUSDC"))
-
-    def test_weak_trend_allows(self):
-        self._fake_cm({"gradient_recent": 0.15, "epsilon": 0.1})      # 0.15 < 0.2
-        self.assertFalse(rtrade._trend_too_strong("TAOUSDC"))
-
-    def test_none_dyn_fail_open(self):
-        self._fake_cm(None)                                           # trend indisponibil
-        self.assertFalse(rtrade._trend_too_strong("TAOUSDC"))
+    def test_snapshot_strength_cases(self):
+        cases = (
+            ("strong", {"gradient_recent": 0.5, "epsilon": 0.1}, True),
+            ("weak", {"gradient_recent": 0.15, "epsilon": 0.1}, False),
+            ("unavailable", None, False),
+            ("flat", {"gradient_recent": 0.0, "epsilon": 0.0}, False),
+        )
+        for label, snapshot, expected in cases:
+            with self.subTest(case=label):
+                self._fake_cm(snapshot)
+                self.assertEqual(rtrade._trend_too_strong("TAOUSDC"), expected)
 
     def test_exception_fail_open(self):
         m = types.ModuleType("cacheManager")
@@ -62,11 +62,6 @@ class TrendFilterTest(unittest.TestCase):
         m.get_short_trend_manager = boom
         sys.modules["cacheManager"] = m
         self.assertFalse(rtrade._trend_too_strong("TAOUSDC"))         # eroare -> nu blocheaza
-
-    def test_zero_epsilon_not_strong(self):
-        self._fake_cm({"gradient_recent": 0.0, "epsilon": 0.0})       # piata plata -> nu blocheaza
-        self.assertFalse(rtrade._trend_too_strong("TAOUSDC"))
-
 
 class FollowupForceTest(unittest.TestCase):
     """Followup (flip dupa fill): force=piata DOAR daca trendul nu e advers. Advers:
@@ -95,25 +90,18 @@ class FollowupForceTest(unittest.TestCase):
         m.get_short_trend_manager = lambda: Mgr()
         sys.modules["cacheManager"] = m
 
-    def test_sell_in_downtrend_patient(self):
-        self._fake_cm({"gradient_recent": -0.5, "epsilon": 0.1})      # declin clar
-        self.assertFalse(rtrade._followup_force("TAOUSDC", "SELL"))   # NU vinde la piata
-
-    def test_sell_in_uptrend_force(self):
-        self._fake_cm({"gradient_recent": 0.5, "epsilon": 0.1})       # urcus -> favorabil pt SELL
-        self.assertTrue(rtrade._followup_force("TAOUSDC", "SELL"))
-
-    def test_buy_in_uptrend_patient(self):
-        self._fake_cm({"gradient_recent": 0.5, "epsilon": 0.1})       # urcus clar
-        self.assertFalse(rtrade._followup_force("TAOUSDC", "BUY"))    # NU cumpara disperat la piata
-
-    def test_buy_in_downtrend_force(self):
-        self._fake_cm({"gradient_recent": -0.5, "epsilon": 0.1})      # declin -> favorabil pt BUY
-        self.assertTrue(rtrade._followup_force("TAOUSDC", "BUY"))
-
-    def test_weak_trend_forces(self):
-        self._fake_cm({"gradient_recent": 0.15, "epsilon": 0.1})      # slab -> flip imediat ok
-        self.assertTrue(rtrade._followup_force("TAOUSDC", "SELL"))
+    def test_directional_force_policy(self):
+        cases = (
+            ("sell-down", "SELL", -0.5, False),
+            ("sell-up", "SELL", 0.5, True),
+            ("buy-up", "BUY", 0.5, False),
+            ("buy-down", "BUY", -0.5, True),
+            ("weak-sell", "SELL", 0.15, True),
+        )
+        for label, side, gradient, expected in cases:
+            with self.subTest(case=label):
+                self._fake_cm({"gradient_recent": gradient, "epsilon": 0.1})
+                self.assertEqual(rtrade._followup_force("TAOUSDC", side), expected)
 
     def test_disabled_or_unavailable_forces(self):
         rtrade.RTRADE_TREND_FILTER_ENABLED = False

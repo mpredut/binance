@@ -19,37 +19,29 @@ class TestScanBacktestRanges(unittest.TestCase):
             f.write(content)
         self.addCleanup(lambda: os.path.exists(_TMP) and os.remove(_TMP))
 
-    def test_simple_annotation_ini_style(self):
-        self._write(
-            "# BACKTEST: 5.0, 6.0, 7.0, 8.0, 9.0\n"
-            "mt.gain              = 7.0\n"
+    def test_supported_assignment_styles(self):
+        cases = (
+            (
+                "ini",
+                "# BACKTEST: 5.0, 6.0, 7.0, 8.0, 9.0\nmt.gain = 7.0\n",
+                {"mt.gain": ["5.0", "6.0", "7.0", "8.0", "9.0"]},
+            ),
+            (
+                "env",
+                "# BACKTEST: 3, 4, 5.1, 6.5, 8\nTRADEALL_SLOPE_EXTREME_THRESHOLD=5.1\n",
+                {"TRADEALL_SLOPE_EXTREME_THRESHOLD": ["3", "4", "5.1", "6.5", "8"]},
+            ),
         )
-        self.assertEqual(scan_backtest_ranges(_TMP),
-                          {"mt.gain": ["5.0", "6.0", "7.0", "8.0", "9.0"]})
+        for label, content, expected in cases:
+            with self.subTest(style=label):
+                self._write(content)
+                self.assertEqual(scan_backtest_ranges(_TMP), expected)
 
-    def test_env_style_no_spaces(self):
-        self._write(
-            "# BACKTEST: 3, 4, 5.1, 6.5, 8\n"
-            "TRADEALL_SLOPE_EXTREME_THRESHOLD=5.1\n"
-        )
-        self.assertEqual(scan_backtest_ranges(_TMP),
-                          {"TRADEALL_SLOPE_EXTREME_THRESHOLD": ["3", "4", "5.1", "6.5", "8"]})
-
-    def test_blank_line_between_breaks_association(self):
-        self._write(
-            "# BACKTEST: 1, 2, 3\n"
-            "\n"
-            "mt.gain = 7.0\n"
-        )
-        self.assertEqual(scan_backtest_ranges(_TMP), {})
-
-    def test_other_comment_between_breaks_association(self):
-        self._write(
-            "# BACKTEST: 1, 2, 3\n"
-            "# alt comentariu explicativ\n"
-            "mt.gain = 7.0\n"
-        )
-        self.assertEqual(scan_backtest_ranges(_TMP), {})
+    def test_intervening_line_breaks_association(self):
+        for label, separator in (("blank", "\n"), ("comment", "# alt comentariu explicativ\n")):
+            with self.subTest(separator=label):
+                self._write("# BACKTEST: 1, 2, 3\n" + separator + "mt.gain = 7.0\n")
+                self.assertEqual(scan_backtest_ranges(_TMP), {})
 
     def test_multiple_annotations_in_same_file(self):
         self._write(
@@ -88,12 +80,16 @@ class TestScanBacktestRanges(unittest.TestCase):
         )
         self.assertEqual(scan_backtest_ranges(_TMP), {"SOME_KEY": ["3", "4", "5"]})
 
-    def test_missing_file_returns_empty(self):
-        self.assertEqual(scan_backtest_ranges("/tmp/does_not_exist_xyz123.conf"), {})
-
-    def test_no_annotations_returns_empty(self):
-        self._write("mt.gain = 7.0\nmt.lost = 3.3\n")
-        self.assertEqual(scan_backtest_ranges(_TMP), {})
+    def test_missing_or_unannotated_returns_empty(self):
+        cases = (
+            ("missing", "/tmp/does_not_exist_xyz123.conf", None),
+            ("unannotated", _TMP, "mt.gain = 7.0\nmt.lost = 3.3\n"),
+        )
+        for label, path, content in cases:
+            with self.subTest(case=label):
+                if content is not None:
+                    self._write(content)
+                self.assertEqual(scan_backtest_ranges(path), {})
 
 
 if __name__ == "__main__":

@@ -33,21 +33,15 @@ def _provider(fake):
 
 
 class MinOrderQtyCacheTest(unittest.TestCase):
-    def test_empty_lookup_not_cached_then_recovers(self):
-        # 1: fetch gol -> 0, NU se cache-uieste; 2: fetch OK -> 0.1, se cache-uieste
-        fake = _FakeClient([{}, {"ordermin": "0.1"}])
-        p = _provider(fake)
-        self.assertEqual(p.min_order_qty("HYPEUSD"), 0.0)
-        self.assertNotIn("HYPEUSD", p._minqty)            # esecul NU intra in cache
-        self.assertEqual(p.min_order_qty("HYPEUSD"), 0.1)  # reincercarea reuseste
-        self.assertEqual(p._minqty.get("HYPEUSD"), 0.1)    # succesul e cache-uit
-
-    def test_exception_lookup_not_cached(self):
-        fake = _FakeClient([RuntimeError("blip DNS"), {"ordermin": "0.1"}])
-        p = _provider(fake)
-        self.assertEqual(p.min_order_qty("HYPEUSD"), 0.0)
-        self.assertNotIn("HYPEUSD", p._minqty)
-        self.assertEqual(p.min_order_qty("HYPEUSD"), 0.1)
+    def test_failed_lookup_not_cached_then_recovers(self):
+        for label, first_response in (("empty", {}), ("exception", RuntimeError("blip DNS"))):
+            with self.subTest(case=label):
+                fake = _FakeClient([first_response, {"ordermin": "0.1"}])
+                p = _provider(fake)
+                self.assertEqual(p.min_order_qty("HYPEUSD"), 0.0)
+                self.assertNotIn("HYPEUSD", p._minqty)
+                self.assertEqual(p.min_order_qty("HYPEUSD"), 0.1)
+                self.assertEqual(p._minqty.get("HYPEUSD"), 0.1)
 
     def test_positive_cached_no_refetch(self):
         fake = _FakeClient([{"ordermin": "0.1"}])

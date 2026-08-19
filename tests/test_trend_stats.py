@@ -19,15 +19,12 @@ from priceAnalysis import detect_long_term_trend  # noqa: E402
 
 
 class TestMannKendall(unittest.TestCase):
-    def test_trend_crescator_semnificativ(self):
-        s, z, p = mann_kendall([100 + 0.5 * i for i in range(24)])
-        self.assertGreater(z, 0)
-        self.assertLess(p, 0.01)
-
-    def test_trend_descrescator_semnificativ(self):
-        s, z, p = mann_kendall([100 - 0.5 * i for i in range(24)])
-        self.assertLess(z, 0)
-        self.assertLess(p, 0.01)
+    def test_monotonic_trends_are_significant(self):
+        for label, delta, expected_sign in (("up", 0.5, 1), ("down", -0.5, -1)):
+            with self.subTest(direction=label):
+                _, z, p = mann_kendall([100 + delta * i for i in range(24)])
+                self.assertGreater(z * expected_sign, 0)
+                self.assertLess(p, 0.01)
 
     def test_zgomot_alb_nesemnificativ(self):
         rng = np.random.default_rng(42)
@@ -49,13 +46,12 @@ class TestHurst(unittest.TestCase):
             r[i] = phi * r[i - 1] + rng.normal(0, 0.01)
         return 100 * np.exp(np.cumsum(r))
 
-    def test_persistenta_da_h_mare(self):
-        h = hurst_rs(self._series(0.6))
-        self.assertGreater(h, 0.55)
-
-    def test_mean_reverting_da_h_mic(self):
-        h = hurst_rs(self._series(-0.6))
-        self.assertLess(h, 0.45)
+    def test_persistent_and_mean_reverting_regimes(self):
+        cases = (("persistent", 0.6, lambda h: h > 0.55),
+                 ("mean-reverting", -0.6, lambda h: h < 0.45))
+        for label, phi, predicate in cases:
+            with self.subTest(regime=label):
+                self.assertTrue(predicate(hurst_rs(self._series(phi))))
 
     def test_serie_scurta_da_none(self):
         self.assertIsNone(hurst_rs([100, 101, 102]))

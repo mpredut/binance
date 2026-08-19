@@ -50,23 +50,18 @@ class TestNoInlineCommentCorruption(unittest.TestCase):
                     value, f"[{name}] mt.{key} e prezent in instruments.conf dar "
                             f"param(cast=float) a intors None — probabil comentariu inline scapat")
 
-    def test_binance_btc_regression(self):
+    def test_budget_regressions(self):
         instruments = ic.load_instruments()
-        inst = instruments["BINANCE_BTC"]
-        self.assertEqual(inst.param("mt", "buy_budget", None, float), 250.0)
-        self.assertEqual(inst.param("mt", "max_budget", None, float), 3500.0)
-
-    def test_binance_tao_regression(self):
-        instruments = ic.load_instruments()
-        inst = instruments["BINANCE_TAO"]
-        self.assertEqual(inst.param("mt", "buy_budget", None, float), 250.0)
-        self.assertEqual(inst.param("mt", "max_budget", None, float), 3500.0)
-
-    def test_kraken_hype_regression_inline_comment_fix(self):
-        instruments = ic.load_instruments()
-        inst = instruments["KRAKEN_HYPE"]
-        self.assertEqual(inst.param("mt", "buy_budget", None, float), 200.0)
-        self.assertEqual(inst.param("mt", "max_budget", None, float), 5000.0)  # 30 iul: 700 -> 5000 (cerere user)
+        cases = {
+            "BINANCE_BTC": (250.0, 3500.0),
+            "BINANCE_TAO": (250.0, 3500.0),
+            "KRAKEN_HYPE": (200.0, 5000.0),  # 30 iul: 700 -> 5000 (cerere user)
+        }
+        for name, (buy_budget, max_budget) in cases.items():
+            with self.subTest(instrument=name):
+                inst = instruments[name]
+                self.assertEqual(inst.param("mt", "buy_budget", None, float), buy_budget)
+                self.assertEqual(inst.param("mt", "max_budget", None, float), max_budget)
 
 
 def _raw_param_presence():

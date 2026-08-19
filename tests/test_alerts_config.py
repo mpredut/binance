@@ -63,18 +63,17 @@ class TestResolve(unittest.TestCase):
     def setUp(self):
         self.ac = load_config(_tmp(SAMPLE))["alert_config"]
 
-    def test_per_moneda_castiga(self):
-        self.assertEqual(resolve(self.ac, "BTC", is_dynamic=False)["up_percent"], 6.0)
-
-    def test_moneda_normala_default(self):
-        self.assertEqual(resolve(self.ac, "SOL", is_dynamic=False)["up_percent"], 4.1)
-
-    def test_moneda_noua_dynamic(self):
-        self.assertEqual(resolve(self.ac, "FOONEW", is_dynamic=True)["down_percent"], 25.0)
-
-    def test_per_moneda_bate_si_dynamic(self):
-        # daca o moneda are prag propriu, conteaza chiar daca e marcata noua
-        self.assertEqual(resolve(self.ac, "BTC", is_dynamic=True)["up_percent"], 6.0)
+    def test_resolution_precedence(self):
+        cases = (
+            ("per-coin", "BTC", False, "up_percent", 6.0),
+            ("default", "SOL", False, "up_percent", 4.1),
+            ("dynamic", "FOONEW", True, "down_percent", 25.0),
+            # pragul per-moneda bate bucket-ul dynamic
+            ("per-coin-over-dynamic", "BTC", True, "up_percent", 6.0),
+        )
+        for label, symbol, dynamic, field, expected in cases:
+            with self.subTest(case=label):
+                self.assertEqual(resolve(self.ac, symbol, is_dynamic=dynamic)[field], expected)
 
 
 class TestLipsa(unittest.TestCase):

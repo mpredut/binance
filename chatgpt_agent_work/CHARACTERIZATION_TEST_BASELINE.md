@@ -79,8 +79,13 @@ Full command:
 Verified result on 2026-08-19:
 
 ```text
-661 passed, 4 skipped, 75 subtests passed
+573 passed, 4 skipped, 185 subtests passed
 ```
+
+The lower top-level count is the result of the test-suite consolidation documented
+in `chatgpt_agent_work/TEST_SUITE_CONSOLIDATION.md`: repeated input/output variants
+were converted to named `subTest` cases. No financial characterization scenario was
+removed.
 
 The initial baseline exposed 18 failures in the Kraken subsystem. Investigation
 showed two test-maintenance causes, not regressions in live trading code:

@@ -17,25 +17,18 @@ import shadow_signals as ss
 class TestKalmanTrendContinuous(unittest.TestCase):
     """Comportament de bază (neschimbat) pe o serie fără goluri: trend UP clar."""
 
-    def test_detects_clear_uptrend(self):
-        kf = ss.KalmanTrend()
-        ts = 1_000_000.0
-        price = 100.0
-        out = None
-        for _ in range(30):
-            ts += 1.0
-            price += 0.05          # ~0.05%/s * 60 = 3%/min, sigur peste prag
-            out = kf.update(ts, price, epsilon=0.01)
-        self.assertEqual(out["trend"], 1)
-
-    def test_flat_series_stays_flat(self):
-        kf = ss.KalmanTrend()
-        ts = 1_000_000.0
-        out = None
-        for _ in range(30):
-            ts += 1.0
-            out = kf.update(ts, 100.0, epsilon=0.01)
-        self.assertEqual(out["trend"], 0)
+    def test_continuous_series_direction(self):
+        for label, delta, expected in (("up", 0.05, 1), ("flat", 0.0, 0)):
+            with self.subTest(case=label):
+                kf = ss.KalmanTrend()
+                ts = 1_000_000.0
+                price = 100.0
+                out = None
+                for _ in range(30):
+                    ts += 1.0
+                    price += delta
+                    out = kf.update(ts, price, epsilon=0.01)
+                self.assertEqual(out["trend"], expected)
 
 
 class TestKalmanTrendGapReset(unittest.TestCase):
@@ -92,12 +85,10 @@ class TestKalmanTrendGapReset(unittest.TestCase):
 class TestVolAndThresholds(unittest.TestCase):
     """Sanity minim pe restul modulului — neschimbate de fix-ul de gap."""
 
-    def test_vol_1h_pct_warmup_returns_none(self):
+    def test_warmup_outputs_are_unavailable(self):
         self.assertIsNone(ss.vol_1h_pct([100.0] * 5, sample_rate_sec=1.0))
-
-    def test_adaptive_thresholds_none_in_warmup(self):
-        re, dca = ss.adaptive_thresholds(None)
-        self.assertIsNone(re)
+        reentry, dca = ss.adaptive_thresholds(None)
+        self.assertIsNone(reentry)
         self.assertIsNone(dca)
 
 

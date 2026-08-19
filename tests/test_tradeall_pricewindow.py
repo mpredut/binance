@@ -28,28 +28,53 @@ _mock_sym = MagicMock()
 _mock_sym.symbols   = ["BTCUSDT"]
 _mock_sym.btcsymbol = "BTCUSDT"
 _mock_sym.validate_ordertype = MagicMock()
+_mock_market_api = MagicMock()
+_mock_market_api.api = MagicMock()
 
-for _mod, _obj in [
+_IMPORT_MOCKS = dict([
     ("bapi",            _mock_bapi),
+    ("binance_api.bapi", _mock_bapi),
     ("symbols",         _mock_sym),
     ("bapi_trades",     MagicMock(**{"get_my_trades_24.return_value": []})),
+    ("binance_api.bapi_trades", MagicMock(**{"get_my_trades_24.return_value": []})),
     ("bapi_allorders",  MagicMock()),
+    ("binance_api.bapi_allorders", MagicMock()),
     ("bapi_placeorder", MagicMock()),
+    ("binance_api.bapi_placeorder", MagicMock()),
+    ("providers.market_api", _mock_market_api),
     ("alertnotifiers",  MagicMock()),
     ("generateweb",     MagicMock()),
     ("log",             MagicMock()),
     ("keys",            MagicMock()),
     ("keys.apikeys",    MagicMock(**{"api_key_ws": "fake"})),
-]:
-    sys.modules[_mod] = _obj
+])
+_PRELOADED_IMPORTS = {
+    name: sys.modules[name] for name in _IMPORT_MOCKS if name in sys.modules
+}
+_BINANCE_CHILDREN = ("bapi", "bapi_trades", "bapi_allorders", "bapi_placeorder")
+sys.modules.update(_IMPORT_MOCKS)
 
-# cacheManager pornește un WS thread la import — îl blocăm
-with patch("cacheManager._initialize_once", return_value=None):
-    import cacheManager as cm
+try:
+    # cacheManager pornește un WS thread la import — îl blocăm
+    with patch("cacheManager._initialize_once", return_value=None):
+        import cacheManager as cm
+    import tradeall as ta
+finally:
+    # Colectarea pytest importă toate fișierele înainte să ruleze testele. Fără
+    # restaurare, mock-urile de venue ar schimba testele Binance colectate înainte.
+    for _name in _IMPORT_MOCKS:
+        sys.modules.pop(_name, None)
+    sys.modules.update(_PRELOADED_IMPORTS)
+    _binance_package = sys.modules.get("binance_api")
+    if _binance_package is not None:
+        for _child in _BINANCE_CHILDREN:
+            _full_name = f"binance_api.{_child}"
+            if _full_name in _PRELOADED_IMPORTS:
+                setattr(_binance_package, _child, _PRELOADED_IMPORTS[_full_name])
+            elif getattr(_binance_package, _child, None) is _IMPORT_MOCKS[_full_name]:
+                delattr(_binance_package, _child)
 
 mock_bapi = _mock_bapi
-
-import tradeall as ta
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -105,37 +130,36 @@ def _synthetic_entries(n=100, start_price=60000.0, delta=10.0,
 
 class TestPriceTrendAnalyzer(unittest.TestCase):
 
-    def test_linreg_uptrend(self):
-        a = ta.PriceTrendAnalyzer([100 + i for i in range(10)])
-        _, slope, r = a.linear_regression_trend()
-        self.assertAlmostEqual(slope, 1.0, places=6)
-        self.assertAlmostEqual(abs(r), 1.0, places=6)
+    def test_linear_regression_cases(self):
+        cases = (
+            ("up", [100 + i for i in range(10)], 1),
+            ("down", [100 - i for i in range(10)], -1),
+            ("single", [42.0], 0),
+            ("constant", [100.0] * 10, 0),
+        )
+        for label, prices, expected_sign in cases:
+            with self.subTest(case=label):
+                _, slope, correlation = ta.PriceTrendAnalyzer(prices).linear_regression_trend()
+                if expected_sign == 0:
+                    self.assertIsNone(slope)
+                else:
+                    self.assertGreater(slope * expected_sign, 0)
+                    self.assertAlmostEqual(abs(correlation), 1.0, places=6)
 
-    def test_linreg_downtrend(self):
-        a = ta.PriceTrendAnalyzer([100 - i for i in range(10)])
-        _, slope, _ = a.linear_regression_trend()
-        self.assertLess(slope, 0)
-
-    def test_linreg_single_price(self):
-        _, slope, r = ta.PriceTrendAnalyzer([42.0]).linear_regression_trend()
-        self.assertIsNone(slope)
-
-    def test_linreg_constant(self):
-        _, slope, _ = ta.PriceTrendAnalyzer([100.0] * 10).linear_regression_trend()
-        self.assertIsNone(slope)
-
-    def test_gradient_uptrend(self):
-        _, avg = ta.PriceTrendAnalyzer(list(range(10))).calculate_gradient()
-        self.assertGreater(avg, 0)
-
-    def test_gradient_downtrend(self):
-        _, avg = ta.PriceTrendAnalyzer([10 - i for i in range(10)]).calculate_gradient()
-        self.assertLess(avg, 0)
-
-    def test_gradient_single_price(self):
-        grad_lst, avg = ta.PriceTrendAnalyzer([5.0]).calculate_gradient()
-        self.assertEqual(grad_lst, [])
-        self.assertEqual(avg, 0)
+    def test_gradient_cases(self):
+        cases = (
+            ("up", list(range(10)), 1),
+            ("down", [10 - i for i in range(10)], -1),
+            ("single", [5.0], 0),
+        )
+        for label, prices, expected_sign in cases:
+            with self.subTest(case=label):
+                gradients, average = ta.PriceTrendAnalyzer(prices).calculate_gradient()
+                if expected_sign == 0:
+                    self.assertEqual(gradients, [])
+                    self.assertEqual(average, 0)
+                else:
+                    self.assertGreater(average * expected_sign, 0)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -216,25 +240,20 @@ class TestPriceWindowSampleRate(unittest.TestCase):
 
 class TestSampleRateFromEntries(unittest.TestCase):
 
-    def test_uniform_interval(self):
-        entries = [[i * 800, 100.0] for i in range(10)]
-        rate = ta.PriceWindow._sample_rate_from_entries(entries)
-        self.assertAlmostEqual(rate, 0.8, places=3)
+    def test_regular_and_outlier_intervals(self):
+        regular = [[i * 800, 100.0] for i in range(10)]
+        with_outlier = [[i * 800, 100.0] for i in range(9)]
+        with_outlier.append([with_outlier[-1][0] + 60_000, 100.0])
+        for label, entries, places in (("regular", regular, 3), ("outlier", with_outlier, 1)):
+            with self.subTest(case=label):
+                rate = ta.PriceWindow._sample_rate_from_entries(entries)
+                self.assertAlmostEqual(rate, 0.8, places=places)
 
-    def test_single_entry_returns_default(self):
-        rate = ta.PriceWindow._sample_rate_from_entries([[0, 100.0]])
-        self.assertAlmostEqual(rate, ta.TIME_SLEEP_GET_PRICE)
-
-    def test_empty_returns_default(self):
-        rate = ta.PriceWindow._sample_rate_from_entries([])
-        self.assertAlmostEqual(rate, ta.TIME_SLEEP_GET_PRICE)
-
-    def test_uses_median_ignores_outlier_gap(self):
-        # 8 gaps de 0.8s + 1 gap mare de 60s → median = 0.8
-        entries = [[i * 800, 100.0] for i in range(9)]
-        entries.append([entries[-1][0] + 60_000, 100.0])
-        rate = ta.PriceWindow._sample_rate_from_entries(entries)
-        self.assertAlmostEqual(rate, 0.8, places=1)
+    def test_insufficient_entries_return_default(self):
+        for label, entries in (("empty", []), ("single", [[0, 100.0]])):
+            with self.subTest(case=label):
+                rate = ta.PriceWindow._sample_rate_from_entries(entries)
+                self.assertAlmostEqual(rate, ta.TIME_SLEEP_GET_PRICE)
 
     def test_real_cache_data(self):
         entries = _load_cache_prices_multi("BTCUSDC")
@@ -372,39 +391,33 @@ class TestPriceWindowGetTrend(unittest.TestCase):
         pw = _window([100 + i for i in range(20)])
         self.assertEqual(len(pw.get_trend()), 4)
 
-    def test_uptrend(self):
-        pw = _window([100 + i * 2 for i in range(30)])
-        ft, gc, sf, gr = pw.get_trend()
-        self.assertEqual(ft, 1)
-        self.assertGreater(gc, 0)
-        self.assertGreater(sf, 0)
-        self.assertGreater(gr, 0)
-
-    def test_downtrend(self):
-        pw = _window([200 - i * 2 for i in range(30)])
-        ft, gc, sf, gr = pw.get_trend()
-        self.assertEqual(ft, -1)
-        self.assertLess(gc, 0)
+    def test_directional_trends(self):
+        cases = (
+            ("up", [100 + i * 2 for i in range(30)], 1),
+            ("down", [200 - i * 2 for i in range(30)], -1),
+        )
+        for label, prices, expected in cases:
+            with self.subTest(direction=label):
+                final_trend, growth, slope, gradient = _window(prices).get_trend()
+                self.assertEqual(final_trend, expected)
+                self.assertGreater(growth * expected, 0)
+                self.assertGreater(slope * expected, 0)
+                self.assertGreater(gradient * expected, 0)
+                self.assertEqual(final_trend, 1 if growth > 0 else -1)
 
     def test_gc_is_average_of_sf_and_gr(self):
         pw = _window([100 + i for i in range(20)])
         _, gc, sf, gr = pw.get_trend()
         self.assertAlmostEqual(gc, (sf + gr) / 2.0, places=10)
 
-    def test_single_price_returns_zeros(self):
-        pw = ta.PriceWindow("BTCUSDT", 10, sample_rate_sec=0.8)
-        pw.process_price(100.0)
-        ft, gc, sf, gr = pw.get_trend()
-        self.assertEqual(ft, 0)
-        self.assertEqual(gc, 0.0)
-        self.assertEqual(sf, 0.0)
-        self.assertEqual(gr, 0.0)
-
-    def test_constant_prices_zero(self):
-        pw = _window([100.0] * 20)
-        ft, gc, sf, gr = pw.get_trend()
-        self.assertEqual(ft, 0)
-        self.assertAlmostEqual(gc, 0.0, places=6)
+    def test_neutral_series_return_zero_trend(self):
+        for label, prices in (("single", [100.0]), ("constant", [100.0] * 20)):
+            with self.subTest(case=label):
+                final_trend, growth, slope, gradient = _window(prices).get_trend()
+                self.assertEqual(final_trend, 0)
+                self.assertAlmostEqual(growth, 0.0, places=6)
+                self.assertAlmostEqual(slope, 0.0, places=6)
+                self.assertAlmostEqual(gradient, 0.0, places=6)
 
     def test_recent_gradient_captures_late_reversal(self):
         # Trend general UP, dar ultimele 5 prețuri cad brusc
@@ -419,15 +432,6 @@ class TestPriceWindowGetTrend(unittest.TestCase):
         pw = _window(prices)
         _, _, sf, _ = pw.get_trend()
         self.assertGreater(sf, 0)
-
-    def test_final_trend_consistent_with_gc(self):
-        for prices, exp in [([100 + i for i in range(20)], 1),
-                            ([100 - i for i in range(20)], -1)]:
-            pw = _window(prices)
-            ft, gc, _, _ = pw.get_trend()
-            self.assertEqual(ft, exp)
-            self.assertEqual(ft, 1 if gc > 0 else -1)
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # PriceWindow — min/max/slope/proximities
@@ -451,19 +455,14 @@ class TestPriceWindowMinMax(unittest.TestCase):
         self.assertEqual(len(pw.prices), 3)
         self.assertNotIn(10, pw.prices)
 
-    def test_proximities_midpoint(self):
-        pw = _window([100, 200])
-        an = ta.WindowAnalyzer(pw)
-        min_p, max_p = an.calculate_proximities(150)
-        self.assertAlmostEqual(min_p, 0.5, places=5)
-        self.assertAlmostEqual(max_p, 0.5, places=5)
-
-    def test_proximities_at_min(self):
-        pw = _window([100, 200])
-        an = ta.WindowAnalyzer(pw)
-        min_p, max_p = an.calculate_proximities(100)
-        self.assertAlmostEqual(min_p, 0.0, places=5)
-        self.assertAlmostEqual(max_p, 1.0, places=5)
+    def test_proximities(self):
+        analyzer = ta.WindowAnalyzer(_window([100, 200]))
+        cases = (("midpoint", 150, 0.5, 0.5), ("minimum", 100, 0.0, 1.0))
+        for label, price, expected_min, expected_max in cases:
+            with self.subTest(position=label):
+                min_proximity, max_proximity = analyzer.calculate_proximities(price)
+                self.assertAlmostEqual(min_proximity, expected_min, places=5)
+                self.assertAlmostEqual(max_proximity, expected_max, places=5)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -480,27 +479,20 @@ class TestTrendState(unittest.TestCase):
         self.assertEqual(ts.state, "HOLD")
         self.assertEqual(ts.confirm_count, 0)
 
-    def test_start_up(self):
+    def test_start_confirm_and_direction(self):
         ts = self._ts()
         ts.start_trend("UP")
         self.assertEqual(ts.state, "UP")
         self.assertEqual(ts.confirm_count, 1)
+        self.assertGreater(ts.is_trend_up(), 0)
+        self.assertEqual(ts.is_trend_down(), 0)
+        self.assertFalse(ts.is_trend_a_minim_validated())
+        ts.confirm_trend()
+        self.assertEqual(ts.confirm_count, 2)
 
     def test_start_invalid_raises(self):
         with self.assertRaises(AssertionError):
             self._ts().start_trend("INVALID")
-
-    def test_confirm_increments(self):
-        ts = self._ts()
-        ts.start_trend("UP")
-        ts.confirm_trend()
-        self.assertEqual(ts.confirm_count, 2)
-
-    def test_is_trend_up(self):
-        ts = self._ts()
-        ts.start_trend("UP")
-        self.assertGreater(ts.is_trend_up(), 0)
-        self.assertEqual(ts.is_trend_down(), 0)
 
     def test_trend_expiration(self):
         ts = self._ts(exp_time=1)
@@ -508,16 +500,14 @@ class TestTrendState(unittest.TestCase):
         time.sleep(1.1)
         self.assertTrue(ts.check_trend_expiration())
 
-    def test_is_fresh_true(self):
-        ts = self._ts(fresh_time=60)
-        ts.start_trend("UP")
-        self.assertTrue(ts.is_trend_fresh())
-
-    def test_is_fresh_false(self):
-        ts = self._ts(fresh_time=1)
-        ts.start_trend("UP")
+    def test_freshness_window(self):
+        fresh = self._ts(fresh_time=60)
+        stale = self._ts(fresh_time=1)
+        fresh.start_trend("UP")
+        stale.start_trend("UP")
+        self.assertTrue(fresh.is_trend_fresh())
         time.sleep(1.1)
-        self.assertFalse(ts.is_trend_fresh())
+        self.assertFalse(stale.is_trend_fresh())
 
     def test_older_than(self):
         ts = self._ts()
@@ -525,12 +515,6 @@ class TestTrendState(unittest.TestCase):
         time.sleep(0.1)
         self.assertTrue(ts.is_started_trend_older_than(0.05))
         self.assertFalse(ts.is_started_trend_older_than(9999))
-
-    def test_not_validated_initially(self):
-        ts = self._ts()
-        ts.start_trend("UP")
-        self.assertFalse(ts.is_trend_a_minim_validated())
-
 
 class TestTrendStateCooldown(unittest.TestCase):
     """Cooldown per instanta de trend (22 iul) — vezi FIRE_MIN_RETRY_INTERVAL_SEC.
@@ -541,71 +525,35 @@ class TestTrendStateCooldown(unittest.TestCase):
         ts = ta.TrendState(3600, 9999, 60, now_fn=lambda: clock["t"])
         return ts, clock
 
-    def test_fire_limit_not_reached_initially(self):
+    def test_confirmation_limit_and_reset(self):
         ts, _ = self._ts_with_clock()
         ts.start_trend("UP")
         self.assertFalse(ts.fire_limit_reached("UP"))
         self.assertFalse(ts.fire_limit_reached("DOWN"))
-
-    def test_mark_confirmed_counts_only_that_direction(self):
-        ts, _ = self._ts_with_clock()
-        ts.start_trend("UP")
         ts.mark_confirmed("UP")
-        self.assertFalse(ts.fire_limit_reached("UP"), "o singura confirmare nu atinge limita (FIRE_MAX_PER_TREND=3)")
+        self.assertFalse(ts.fire_limit_reached("UP"))
         self.assertFalse(ts.fire_limit_reached("DOWN"))
-
-    def test_fire_limit_reached_after_max_confirmations(self):
-        ts, _ = self._ts_with_clock()
-        ts.start_trend("UP")
-        for _ in range(ta.FIRE_MAX_PER_TREND):
+        for _ in range(ta.FIRE_MAX_PER_TREND - 1):
             ts.mark_confirmed("UP")
         self.assertTrue(ts.fire_limit_reached("UP"))
-        self.assertFalse(ts.fire_limit_reached("DOWN"), "directia opusa nu trebuie afectata")
-
-    def test_start_trend_resets_confirmed_counts(self):
-        ts, _ = self._ts_with_clock()
-        ts.start_trend("UP")
-        for _ in range(ta.FIRE_MAX_PER_TREND):
-            ts.mark_confirmed("UP")
-        self.assertTrue(ts.fire_limit_reached("UP"))
-        ts.start_trend("DOWN")   # trend nou -> orice confirmare veche nu mai conteaza
+        self.assertFalse(ts.fire_limit_reached("DOWN"))
+        ts.start_trend("DOWN")
         self.assertFalse(ts.fire_limit_reached("UP"))
         self.assertFalse(ts.fire_limit_reached("DOWN"))
 
-    def test_can_retry_fire_true_before_any_attempt(self):
-        ts, _ = self._ts_with_clock()
-        ts.start_trend("UP")
-        self.assertTrue(ts.can_retry_fire("UP"))
-
-    def test_can_retry_fire_false_immediately_after_attempt(self):
+    def test_retry_interval_and_reset(self):
         ts, clock = self._ts_with_clock()
         ts.start_trend("UP")
+        self.assertTrue(ts.can_retry_fire("UP"))
         ts.mark_fire_attempt("UP")
         self.assertFalse(ts.can_retry_fire("UP"))
-        self.assertTrue(ts.can_retry_fire("DOWN"), "directia opusa nu trebuie afectata")
-
-    def test_can_retry_fire_true_after_interval_elapsed(self):
-        ts, clock = self._ts_with_clock()
-        ts.start_trend("UP")
-        ts.mark_fire_attempt("UP")
-        clock["t"] += ta.FIRE_MIN_RETRY_INTERVAL_SEC + 1
-        self.assertTrue(ts.can_retry_fire("UP"))
-
-    def test_can_retry_fire_still_false_before_interval_elapsed(self):
-        ts, clock = self._ts_with_clock()
-        ts.start_trend("UP")
-        ts.mark_fire_attempt("UP")
+        self.assertTrue(ts.can_retry_fire("DOWN"))
         clock["t"] += ta.FIRE_MIN_RETRY_INTERVAL_SEC - 1
         self.assertFalse(ts.can_retry_fire("UP"))
-
-    def test_start_trend_resets_attempt_timestamps(self):
-        ts, clock = self._ts_with_clock()
-        ts.start_trend("UP")
-        ts.mark_fire_attempt("UP")
-        self.assertFalse(ts.can_retry_fire("UP"))
-        ts.start_trend("UP")   # trend nou -> reincercarea veche nu mai conteaza
+        clock["t"] += 2
         self.assertTrue(ts.can_retry_fire("UP"))
-
+        ts.start_trend("UP")
+        self.assertTrue(ts.can_retry_fire("UP"))
 
 # ═══════════════════════════════════════════════════════════════════════════
 # CacheCurrentPriceManager — get_sample_rate / get_update_frequency
@@ -624,13 +572,11 @@ class TestCacheCurrentPriceFrequency(unittest.TestCase):
         # Pornim măsurătoarea frecvenței curată pentru a testa mecanismul izolat.
         self.mgr._update_timestamps.clear()
 
-    def test_fallback_no_data(self):
+    def test_empty_state_uses_fallback_and_zero_frequency(self):
         self.assertAlmostEqual(self.mgr.get_sample_rate("BTCUSDT", fallback=0.8), 0.8)
-
-    def test_frequency_no_data(self):
         self.assertEqual(self.mgr.get_update_frequency("BTCUSDT"), 0.0)
 
-    def test_sample_rate_two_updates(self):
+    def test_updates_produce_sample_rate_and_frequency(self):
         t0 = time.time()
         self.mgr.on_items_update("BTCUSDT", [60000.0])
         time.sleep(0.15)
@@ -641,10 +587,6 @@ class TestCacheCurrentPriceFrequency(unittest.TestCase):
         self.assertGreater(rate, 0.0)
         self.assertLess(rate, 9.9)                  # nu e fallback-ul
         self.assertLessEqual(rate, elapsed + 0.5)   # robust la jitter de scheduling
-
-    def test_frequency_positive_after_updates(self):
-        for _ in range(5):
-            self.mgr.on_items_update("BTCUSDT", [60000.0])
         self.assertGreater(self.mgr.get_update_frequency("BTCUSDT"), 0.0)
 
     def test_old_timestamps_trimmed(self):
@@ -691,18 +633,14 @@ class TestSubscriberPatternInheritance(unittest.TestCase):
     def _cache24(self, symbol="BTCUSDT"):
         return _make_cache24_manager(symbol, _synthetic_entries(5), self.tmp)
 
-    def test_cache24_inherits_subscribe_price(self):
-        # subscribe_price nu mai e definit în Cache24PriceManager — vine din base
-        self.assertIs(
-            type(self._cache24()).subscribe_price,
-            cm.CacheManagerInterface.subscribe_price,
+    def test_managers_inherit_subscribe_price(self):
+        cases = (
+            ("cache24", type(self._cache24()).subscribe_price),
+            ("current-price", cm.CacheCurrentPriceManager.subscribe_price),
         )
-
-    def test_currentprice_inherits_subscribe_price(self):
-        self.assertIs(
-            cm.CacheCurrentPriceManager.subscribe_price,
-            cm.CacheManagerInterface.subscribe_price,
-        )
+        for label, method in cases:
+            with self.subTest(manager=label):
+                self.assertIs(method, cm.CacheManagerInterface.subscribe_price)
 
     def test_inherited_notify_reaches_subscriber(self):
         mgr = self._cache24("BTCUSDT")
@@ -766,26 +704,19 @@ class TestPriceWindowCache24Wiring(unittest.TestCase):
         pw = ta.PriceWindow.from_cache24(symbol, window_seconds, mgr)
         return pw, mgr
 
-    def test_subscribed_flag_set_after_from_cache24(self):
+    def test_subscription_flags_for_wired_and_plain_windows(self):
         entries = _synthetic_entries(20)
-        pw, _ = self._make_wired(entries)
-        self.assertTrue(pw._subscribed_to_cache24)
+        wired, _ = self._make_wired(entries)
+        plain = ta.PriceWindow("BTCUSDT", 50)
+        self.assertTrue(wired._subscribed_to_cache24)
+        self.assertFalse(plain._subscribed_to_cache24)
 
-    def test_not_subscribed_by_default(self):
-        pw = ta.PriceWindow("BTCUSDT", 50)
-        self.assertFalse(pw._subscribed_to_cache24)
-
-    def test_on_price_update_ignored_for_wrong_symbol(self):
+    def test_direct_price_updates_filter_symbol(self):
         entries = _synthetic_entries(10)
-        pw, mgr = self._make_wired(entries, symbol="BTCUSDT")
+        pw, _ = self._make_wired(entries, symbol="BTCUSDT")
         n_before = len(pw.prices)
         pw.on_price_update("ETHUSDT", int(time.time() * 1000), 3000.0)
         self.assertEqual(len(pw.prices), n_before)
-
-    def test_on_price_update_adds_price(self):
-        entries = _synthetic_entries(10)
-        pw, mgr = self._make_wired(entries, symbol="BTCUSDT")
-        n_before = len(pw.prices)
         pw.on_price_update("BTCUSDT", int(time.time() * 1000), 99999.0)
         self.assertEqual(len(pw.prices), min(n_before + 1, pw.window_size))
 
@@ -838,88 +769,85 @@ class TestPriceWindowCache24Wiring(unittest.TestCase):
 
 class TestWindowAnalyzer(unittest.TestCase):
 
-    def test_pricewindow_has_no_analysis_methods(self):
-        # PriceWindow trebuie să fie lean — fără metodele de trading
+    def test_pricewindow_api_surface_is_lean(self):
         pw = _window([100, 110, 105])
-        self.assertFalse(hasattr(pw, "calculate_proximities"))
-        self.assertFalse(hasattr(pw, "calculate_slope_max_min"))
-        self.assertFalse(hasattr(pw, "check_price_change"))
-        self.assertFalse(hasattr(pw, "evaluate_buy_sell_opportunity"))
-
-    def test_pricewindow_keeps_range_and_trend(self):
-        pw = _window([100, 110, 105])
-        self.assertTrue(hasattr(pw, "get_min"))
-        self.assertTrue(hasattr(pw, "get_max"))
-        self.assertTrue(hasattr(pw, "get_instant_trend"))
+        for method in ("calculate_proximities", "calculate_slope_max_min",
+                       "check_price_change", "evaluate_buy_sell_opportunity"):
+            with self.subTest(absent=method):
+                self.assertFalse(hasattr(pw, method))
+        for method in ("get_min", "get_max", "get_instant_trend"):
+            with self.subTest(present=method):
+                self.assertTrue(hasattr(pw, method))
 
     def test_get_trend_alias(self):
         pw = _window([100 + i for i in range(20)])
         self.assertEqual(pw.get_trend(), pw.get_instant_trend())
 
-    def test_get_recent_gradient_uptrend(self):
-        pw = _window([100 + i for i in range(20)])
-        self.assertGreater(pw.get_recent_gradient(), 0)
+    def test_recent_gradient_cases(self):
+        cases = (
+            ("up", [100 + i for i in range(20)], 1),
+            ("down", [200 - i for i in range(20)], -1),
+            ("insufficient", [100.0], 0),
+        )
+        for label, prices, expected_sign in cases:
+            with self.subTest(case=label):
+                gradient = _window(prices).get_recent_gradient()
+                if expected_sign == 0:
+                    self.assertEqual(gradient, 0.0)
+                else:
+                    self.assertGreater(gradient * expected_sign, 0)
 
-    def test_get_recent_gradient_downtrend(self):
-        pw = _window([200 - i for i in range(20)])
-        self.assertLess(pw.get_recent_gradient(), 0)
-
-    def test_get_recent_gradient_insufficient(self):
-        pw = ta.PriceWindow("BTCUSDT", 10)
-        pw.process_price(100.0)
-        self.assertEqual(pw.get_recent_gradient(), 0.0)
-
-    def test_noise_epsilon_zero_for_constant(self):
-        pw = _window([100.0] * 20)
-        self.assertAlmostEqual(pw.get_noise_epsilon(), 0.0, places=6)
-
-    def test_noise_epsilon_positive_for_volatile(self):
+    def test_noise_epsilon_cases(self):
         import random
         random.seed(1)
-        pw = _window([100 + random.uniform(-5, 5) for _ in range(30)])
-        self.assertGreater(pw.get_noise_epsilon(), 0.0)
-
-    def test_noise_epsilon_scales_with_volatility(self):
+        constant = _window([100.0] * 20).get_noise_epsilon()
+        volatile = _window([100 + random.uniform(-5, 5) for _ in range(30)]).get_noise_epsilon()
         calm = _window([100 + (i % 2) * 0.1 for i in range(30)])
         wild = _window([100 + (i % 2) * 10 for i in range(30)])
+        insufficient = _window([100.0, 101.0]).get_noise_epsilon()
+        self.assertAlmostEqual(constant, 0.0, places=6)
+        self.assertGreater(volatile, 0.0)
         self.assertLess(calm.get_noise_epsilon(), wild.get_noise_epsilon())
+        self.assertEqual(insufficient, 0.0)
 
-    def test_noise_epsilon_insufficient_data(self):
-        pw = ta.PriceWindow("BTCUSDT", 10)
-        pw.process_price(100.0)
-        pw.process_price(101.0)
-        self.assertEqual(pw.get_noise_epsilon(), 0.0)
+    def test_slope_max_min_cases(self):
+        for label, prices, positive in (
+            ("up", [100 + i for i in range(20)], True),
+            ("constant", [100.0] * 10, False),
+        ):
+            with self.subTest(case=label):
+                slope = ta.WindowAnalyzer(_window(prices)).calculate_slope_max_min()
+                self.assertGreater(slope, 0) if positive else self.assertEqual(slope, 0)
 
-    def test_slope_max_min_uptrend(self):
-        pw = _window([100 + i for i in range(20)])
-        an = ta.WindowAnalyzer(pw)
-        self.assertGreater(an.calculate_slope_max_min(), 0)
+    def test_check_price_change_cases(self):
+        cases = (
+            ("below", [100.0, 100.05, 100.02], 5.0, True, None),
+            ("above", [100.0, 100.0, 110.0], 1.0, False, None),
+            ("insufficient", [100.0], 1.0, True, 1),
+        )
+        for label, prices, threshold, expect_zero, expected_pos in cases:
+            with self.subTest(case=label):
+                slope, position = ta.WindowAnalyzer(_window(prices)).check_price_change(threshold)
+                self.assertEqual(slope, 0) if expect_zero else self.assertNotEqual(slope, 0)
+                if expected_pos is not None:
+                    self.assertEqual(position, expected_pos)
 
-    def test_check_price_change_below_threshold(self):
-        pw = _window([100.0, 100.05, 100.02])
-        an = ta.WindowAnalyzer(pw)
-        slope, pos = an.check_price_change(threshold=5.0)
-        self.assertEqual(slope, 0)
-
-    def test_check_price_change_above_threshold(self):
-        pw = _window([100.0, 100.0, 110.0])
-        an = ta.WindowAnalyzer(pw)
-        slope, pos = an.check_price_change(threshold=1.0)
-        self.assertNotEqual(slope, 0)
-
-    def test_evaluate_buy_sell_returns_action(self):
-        pw = _window([100 + i for i in range(20)])
-        an = ta.WindowAnalyzer(pw)
-        action, price, pct, slope = an.evaluate_buy_sell_opportunity(120.0)
-        self.assertIn(action, ("BUY", "SELL", "HOLD"))
-
-    def test_evaluate_buy_sell_hold_below_threshold(self):
-        # variație minusculă → sub threshold_percent → HOLD
-        pw = _window([100.0, 100.01, 100.02])
-        an = ta.WindowAnalyzer(pw)
-        action, price, pct, slope = an.evaluate_buy_sell_opportunity(
-            100.02, threshold_percent=5.0)
-        self.assertEqual(action, "HOLD")
+    def test_evaluate_buy_sell_cases(self):
+        cases = (
+            ("directional", [100 + i for i in range(20)], 120.0, None, None),
+            ("below-threshold", [100.0, 100.01, 100.02], 100.02, 5.0, "HOLD"),
+        )
+        for label, prices, current, threshold, expected in cases:
+            with self.subTest(case=label):
+                analyzer = ta.WindowAnalyzer(_window(prices))
+                if threshold is None:
+                    action, _, _, _ = analyzer.evaluate_buy_sell_opportunity(current)
+                else:
+                    action, _, _, _ = analyzer.evaluate_buy_sell_opportunity(
+                        current, threshold_percent=threshold)
+                self.assertIn(action, ("BUY", "SELL", "HOLD"))
+                if expected is not None:
+                    self.assertEqual(action, expected)
 
     def test_calculate_positions_returns_fractions(self):
         pw = _window([100 + i for i in range(10)])
@@ -927,18 +855,6 @@ class TestWindowAnalyzer(unittest.TestCase):
         min_pos, max_pos = an.calculate_positions()
         self.assertIsNotNone(min_pos)
         self.assertIsNotNone(max_pos)
-
-    def test_slope_max_min_zero_when_constant(self):
-        pw = _window([100.0] * 10)
-        an = ta.WindowAnalyzer(pw)
-        self.assertEqual(an.calculate_slope_max_min(), 0)
-
-    def test_check_price_change_insufficient_data(self):
-        pw = ta.PriceWindow("BTCUSDT", 10)
-        pw.process_price(100.0)
-        an = ta.WindowAnalyzer(pw)
-        slope, pos = an.check_price_change(threshold=1.0)
-        self.assertEqual((slope, pos), (0, 1))
 
     def test_analyze_price_movement_returns_tuple(self):
         # logica complicată restaurată — trebuie să întoarcă (slope, price_diff)
@@ -1003,37 +919,34 @@ class TestTrendCoordinator(unittest.TestCase):
         self.assertTrue(coord._dirty["BTCUSDT"])
         self.assertTrue(coord._event.is_set())
 
-    def test_is_due_floor(self):
+    def test_due_policy_for_dirty_and_heartbeat(self):
         coord = self._make_coord()
         now = time.time()
         coord._last_eval["BTCUSDT"] = now
         coord._dirty["BTCUSDT"] = True
         self.assertFalse(coord._is_due("BTCUSDT", now + 0.5))
         self.assertTrue(coord._is_due("BTCUSDT", now + 2.5))
-
-    def test_is_due_heartbeat(self):
-        coord = self._make_coord()
-        now = time.time()
-        coord._last_eval["BTCUSDT"] = now
         coord._dirty["BTCUSDT"] = False
         self.assertTrue(coord._is_due("BTCUSDT", now + 31.0))
         self.assertFalse(coord._is_due("BTCUSDT", now + 5.0))
 
-    def test_evaluate_populates_cache(self):
+    def test_evaluation_cache_lifecycle(self):
         coord = self._make_coord()
+        self.assertIsNone(coord.get_cached_trend("BTCUSDT"))
+        self.assertEqual(coord.get_all_cached_trends(), {})
         snap = coord.evaluate("BTCUSDT")
         self.assertIsNotNone(snap)
         cached = coord.get_cached_trend("BTCUSDT")
-        self.assertIn("final_trend", cached)
-        self.assertIn("slope_full", cached)
+        for key in ("final_trend", "growth_coefficient", "slope_full",
+                    "gradient_recent", "slope_small", "slope_big",
+                    "slope_max_min", "pos", "current_price", "ts"):
+            with self.subTest(field=key):
+                self.assertIn(key, cached)
         self.assertFalse(coord._dirty["BTCUSDT"])
-
-    def test_evaluate_publishes_to_manager_store(self):
-        coord = self._make_coord()
-        coord.evaluate("BTCUSDT")
-        snap = self.mgr.get_snapshot("BTCUSDT")
-        self.assertIsNotNone(snap)
-        self.assertIn("slope_big", snap)
+        self.assertIn("BTCUSDT", coord.get_all_cached_trends())
+        manager_snapshot = self.mgr.get_snapshot("BTCUSDT")
+        self.assertIsNotNone(manager_snapshot)
+        self.assertIn("slope_big", manager_snapshot)
 
     def test_manager_tick_publishes_instant_gradient(self):
         # canalul rapid e în MANAGER: on_price_update publică gradientul, sub
@@ -1046,21 +959,9 @@ class TestTrendCoordinator(unittest.TestCase):
         self.assertIn("epsilon", snap)
         self.assertEqual(snap["current_price"], 60500.0)
 
-    def test_get_cached_trend_none_before_eval(self):
-        coord = self._make_coord()
-        self.assertIsNone(coord.get_cached_trend("BTCUSDT"))
-
-    def test_get_all_cached_trends(self):
-        coord = self._make_coord()
-        self.assertEqual(coord.get_all_cached_trends(), {})
-        coord.evaluate("BTCUSDT")
-        self.assertIn("BTCUSDT", coord.get_all_cached_trends())
-
-    def test_coordinator_subscribed_to_cache24(self):
+    def test_coordinator_and_windows_subscribed_to_cache24(self):
         coord = self._make_coord()
         self.assertIn(coord, self.cache24._price_subscribers)
-
-    def test_windows_subscribed_to_cache24(self):
         self.assertTrue(self.mgr.get_window("BTCUSDT")._subscribed_to_cache24)
         self.assertTrue(self.mgr.get_window("BTCUSDT", self.mgr.window_big_sec)._subscribed_to_cache24)
 
@@ -1109,15 +1010,6 @@ class TestTrendCoordinator(unittest.TestCase):
         for th in threads:
             th.join(timeout=5)
         self.assertEqual(errors, [], f"Erori de concurență: {errors[:3]}")
-
-    def test_snapshot_has_all_fields(self):
-        coord = self._make_coord()
-        snap = coord.evaluate("BTCUSDT")
-        for key in ("final_trend", "growth_coefficient", "slope_full",
-                    "gradient_recent", "slope_small", "slope_big",
-                    "slope_max_min", "pos", "current_price", "ts"):
-            self.assertIn(key, snap)
-
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -19,27 +19,26 @@ class AddOrderRoundingTest(unittest.TestCase):
         c._private = lambda method, data: sent.update(data) or {"ok": True}
         return c, sent
 
-    def test_price_rounded_to_pair_decimals(self):
-        c, sent = self._client(2)
-        c.add_order("HYPEUSD", "sell", 1.23456789, 53.839 * 0.995, ordertype="limit")
-        self.assertEqual(sent["price"], "53.57")     # 53.569805 -> 2 zecimale
+    def test_limit_price_respects_pair_decimals(self):
+        cases = (
+            (2, "HYPEUSD", "sell", 1.23456789, 53.839 * 0.995, "53.57"),
+            (5, "XBTUSD", "buy", 1.0, 0.123456789, "0.12346"),
+        )
+        for decimals, pair, side, volume, price, expected in cases:
+            with self.subTest(pair=pair, decimals=decimals):
+                c, sent = self._client(decimals)
+                c.add_order(pair, side, volume, price, ordertype="limit")
+                self.assertEqual(sent["price"], expected)
 
-    def test_more_decimals_pair_kept(self):
-        c, sent = self._client(5)
-        c.add_order("XBTUSD", "buy", 1.0, 0.123456789, ordertype="limit")
-        self.assertEqual(sent["price"], "0.12346")   # rotunjit la 5
-
-    def test_price_decimals_fallback_2_when_info_missing(self):
-        c = KrakenClient.__new__(KrakenClient)
-        c.pair_info = lambda pair: None
-        self.assertEqual(c.price_decimals("WHATEVERUSD"), 2)
-
-    def test_price_decimals_fallback_on_exception(self):
-        c = KrakenClient.__new__(KrakenClient)
+    def test_price_decimals_fallback(self):
         def boom(pair):
             raise RuntimeError("API down")
-        c.pair_info = boom
-        self.assertEqual(c.price_decimals("X"), 2)   # nu arunca -> fallback prudent
+
+        for label, pair_info in (("missing", lambda pair: None), ("exception", boom)):
+            with self.subTest(case=label):
+                c = KrakenClient.__new__(KrakenClient)
+                c.pair_info = pair_info
+                self.assertEqual(c.price_decimals("WHATEVERUSD"), 2)
 
     def test_market_order_no_price_field(self):
         c, sent = self._client(2)

@@ -241,18 +241,17 @@ class TestCacheTradeManager(unittest.TestCase):
         api_mock = MagicMock()
         api_mock.client.get_my_trades.return_value = []
         fname = _tmp_file(self.tmp, "cache_trade.json")
-        return cm.CacheTradeManager(9999, ["BTC"], fname, api_client=api_mock)
+        with patch("binance_api.bapi_allorders.paginate_my_trades", return_value=[]):
+            return cm.CacheTradeManager(9999, ["BTC"], fname, api_client=api_mock)
 
-    def test_is_valid_trade_all_keys(self):
+    def test_trade_validation(self):
         mgr = self._make()
         valid = {'symbol': 'BTC', 'id': 1, 'orderId': 2, 'price': '100',
                  'qty': '1', 'time': 123, 'isBuyer': True}
-        self.assertTrue(mgr._is_valid_trade(valid))
-
-    def test_is_valid_trade_missing_key(self):
-        mgr = self._make()
         invalid = {'symbol': 'BTC', 'id': 1}
-        self.assertFalse(mgr._is_valid_trade(invalid))
+        for label, trade, expected in (("complete", valid, True), ("missing-key", invalid, False)):
+            with self.subTest(case=label):
+                self.assertEqual(mgr._is_valid_trade(trade), expected)
 
     def test_rebuild_fetchtime_returns_none(self):
         mgr = self._make()
@@ -274,18 +273,18 @@ class TestCacheOrderManager(unittest.TestCase):
     def _make(self):
         api_mock = MagicMock()
         fname = _tmp_file(self.tmp, "cache_order.json")
-        with patch.dict(sys.modules, {"bapi_allorders": MagicMock()}):
+        with patch("binance_api.bapi_allorders.get_filled_orders", return_value=[]):
             return cm.CacheOrderManager(9999, ["BTC"], fname, api_client=api_mock)
 
-    def test_is_valid_order_all_keys(self):
+    def test_order_validation(self):
         mgr = self._make()
         valid = {'orderId': 1, 'price': '100', 'quantity': '1',
                  'timestamp': 123, 'side': 'BUY'}
-        self.assertTrue(mgr._is_valid_trade(valid))
-
-    def test_is_valid_order_missing_key(self):
-        mgr = self._make()
-        self.assertFalse(mgr._is_valid_trade({'orderId': 1}))
+        for label, order, expected in (
+            ("complete", valid, True), ("missing-key", {'orderId': 1}, False)
+        ):
+            with self.subTest(case=label):
+                self.assertEqual(mgr._is_valid_trade(order), expected)
 
     def test_rebuild_fetchtime_returns_none(self):
         mgr = self._make()
@@ -541,17 +540,12 @@ class TestCacheAssetValueManager(unittest.TestCase):
         self.assertIn("timestamp", result[0])
         self.assertIn("datetime_local", result[0])
 
-    def test_get_remote_items_none_value_returns_empty(self):
-        mgr = self._make()
-        mgr.api_client.get_total_assets_value_usdt.return_value = None
-        result = mgr.get_remote_items("TOTAL", 0)
-        self.assertEqual(result, [])
-
-    def test_get_remote_items_zero_value_returns_empty(self):
-        mgr = self._make()
-        mgr.api_client.get_total_assets_value_usdt.return_value = 0
-        result = mgr.get_remote_items("TOTAL", 0)
-        self.assertEqual(result, [])
+    def test_get_remote_items_invalid_values_return_empty(self):
+        for value in (None, 0):
+            with self.subTest(value=value):
+                mgr = self._make()
+                mgr.api_client.get_total_assets_value_usdt.return_value = value
+                self.assertEqual(mgr.get_remote_items("TOTAL", 0), [])
 
     def test_append_mode_true(self):
         mgr = self._make()
@@ -583,18 +577,14 @@ class TestCacheCurrentPriceManager(unittest.TestCase):
 
     # ── on_items_update ───────────────────────────────────────────────────────
 
-    def test_on_items_update_stores_price(self):
+    def test_on_items_update_stores_price_and_marks_ws_event(self):
         mgr, _ = self._make()
+        before = time.time()
         mgr.on_items_update("BTC", [55000.0])
         with mgr.lock:
             entries = mgr.cache.get("BTC", [])
         self.assertTrue(entries)
         self.assertEqual(entries[0][1], 55000.0)
-
-    def test_on_items_update_updates_ws_timestamp(self):
-        mgr, _ = self._make()
-        before = time.time()
-        mgr.on_items_update("BTC", [1.0])
         self.assertGreaterEqual(mgr._ws_last_event_ts, before)
 
     def test_on_items_update_ignores_none_price(self):
@@ -618,13 +608,19 @@ class TestCacheCurrentPriceManager(unittest.TestCase):
 
     # ── get_price / get_price_value ───────────────────────────────────────────
 
-    def test_get_price_fresh_returns_cached(self):
+    def test_fresh_price_read_apis_use_cached_value(self):
         mgr, api_mock = self._make()
         mgr.on_items_update("BTC", [55000.0])
         api_mock.get_current_price.reset_mock()
         entry = mgr.get_price("BTC")
         self.assertIsNotNone(entry)
         self.assertEqual(entry[1], 55000.0)
+        self.assertEqual(len(entry), 2)
+        self.assertIsInstance(entry[0], int)
+        self.assertIsInstance(entry[1], float)
+        value = mgr.get_price_value("BTC")
+        self.assertIsInstance(value, float)
+        self.assertEqual(value, 55000.0)
         api_mock.get_current_price.assert_not_called()
 
     def test_get_price_stale_forces_http(self):
@@ -647,21 +643,6 @@ class TestCacheCurrentPriceManager(unittest.TestCase):
         api_mock.get_current_price.assert_called()
         self.assertEqual(entry[1], 70000.0)
 
-    def test_get_price_returns_timestamp_and_value(self):
-        mgr, _ = self._make()
-        mgr.on_items_update("BTC", [55000.0])
-        entry = mgr.get_price("BTC")
-        self.assertEqual(len(entry), 2)
-        self.assertIsInstance(entry[0], int)  # timestamp ms
-        self.assertIsInstance(entry[1], float)
-
-    def test_get_price_value_returns_float(self):
-        mgr, _ = self._make()
-        mgr.on_items_update("BTC", [55000.0])
-        val = mgr.get_price_value("BTC")
-        self.assertIsInstance(val, float)
-        self.assertEqual(val, 55000.0)
-
     def test_get_price_value_none_if_unavailable(self):
         mgr, api_mock = self._make()
         api_mock.get_current_price.return_value = None
@@ -672,25 +653,15 @@ class TestCacheCurrentPriceManager(unittest.TestCase):
 
     # ── subscribe_price / unsubscribe_price ───────────────────────────────────
 
-    def test_subscribe_adds_subscriber(self):
+    def test_subscriber_registration_lifecycle(self):
         mgr, _ = self._make()
         sub = MagicMock()
         mgr.subscribe_price(sub)
         with mgr.lock:
             self.assertIn(sub, mgr._price_subscribers)
-
-    def test_subscribe_no_duplicates(self):
-        mgr, _ = self._make()
-        sub = MagicMock()
-        mgr.subscribe_price(sub)
         mgr.subscribe_price(sub)
         with mgr.lock:
             self.assertEqual(mgr._price_subscribers.count(sub), 1)
-
-    def test_unsubscribe_removes_subscriber(self):
-        mgr, _ = self._make()
-        sub = MagicMock()
-        mgr.subscribe_price(sub)
         mgr.unsubscribe_price(sub)
         with mgr.lock:
             self.assertNotIn(sub, mgr._price_subscribers)
@@ -735,15 +706,12 @@ class TestCacheCurrentPriceManager(unittest.TestCase):
 
     # ── WS health ─────────────────────────────────────────────────────────────
 
-    def test_ws_healthy_when_recent_event(self):
+    def test_ws_health_from_event_age(self):
         mgr, _ = self._make()
-        mgr._ws_last_event_ts = time.time()
-        self.assertTrue(mgr._ws_is_healthy())
-
-    def test_ws_unhealthy_when_old_event(self):
-        mgr, _ = self._make()
-        mgr._ws_last_event_ts = 0.0
-        self.assertFalse(mgr._ws_is_healthy())
+        for label, timestamp, expected in (("recent", time.time(), True), ("old", 0.0, False)):
+            with self.subTest(case=label):
+                mgr._ws_last_event_ts = timestamp
+                self.assertEqual(mgr._ws_is_healthy(), expected)
 
     # ── persistență ──────────────────────────────────────────────────────────
 
@@ -773,43 +741,36 @@ class TestWsHealthFunctions(unittest.TestCase):
         cm._ws_last_event_ts = 0.0
         cm._ws_is_healthy = False
 
-    def test_mark_ws_available_true(self):
-        cm._mark_ws_available(True)
-        with cm._ws_health_lock:
-            self.assertTrue(cm._ws_available)
+    def test_mark_ws_available(self):
+        for available in (True, False):
+            with self.subTest(available=available):
+                cm._mark_ws_available(available)
+                with cm._ws_health_lock:
+                    self.assertEqual(cm._ws_available, available)
 
-    def test_mark_ws_available_false(self):
-        cm._mark_ws_available(False)
-        with cm._ws_health_lock:
-            self.assertFalse(cm._ws_available)
-
-    def test_mark_ws_event_received_sets_healthy(self):
+    def test_ws_event_and_unhealthy_lifecycle(self):
         cm._mark_ws_event_received()
         with cm._ws_health_lock:
             self.assertTrue(cm._ws_is_healthy)
             self.assertGreater(cm._ws_last_event_ts, 0)
-
-    def test_mark_ws_unhealthy(self):
-        cm._mark_ws_event_received()
         cm._mark_ws_unhealthy()
         with cm._ws_health_lock:
             self.assertFalse(cm._ws_is_healthy)
 
-    def test_should_poll_ws_only_mode_off(self):
-        cm.WS_ONLY_MODE = False
-        self.assertTrue(cm._should_poll_for_manager("CacheOrderManager"))
-
-    def test_should_poll_ws_only_mode_on_not_managed(self):
-        cm.WS_ONLY_MODE = True
-        # CacheSparsePriceManager nu e în lista managed → polling mereu
-        self.assertTrue(cm._should_poll_for_manager("CacheSparsePriceManager"))
-        cm.WS_ONLY_MODE = False
-
-    def test_should_poll_ws_only_mode_on_ws_unavailable(self):
-        cm.WS_ONLY_MODE = True
-        cm._ws_available = False
-        self.assertTrue(cm._should_poll_for_manager("CacheOrderManager"))
-        cm.WS_ONLY_MODE = False
+    def test_polling_fallback_policies(self):
+        cases = (
+            ("ws-mode-off", False, True, "CacheOrderManager"),
+            ("unmanaged", True, True, "CacheSparsePriceManager"),
+            ("ws-unavailable", True, False, "CacheOrderManager"),
+        )
+        try:
+            for label, ws_only, available, manager_name in cases:
+                with self.subTest(case=label):
+                    cm.WS_ONLY_MODE = ws_only
+                    cm._ws_available = available
+                    self.assertTrue(cm._should_poll_for_manager(manager_name))
+        finally:
+            cm.WS_ONLY_MODE = False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -836,52 +797,40 @@ class TestCacheFactory(unittest.TestCase):
             i2 = cm.CacheFactory.get("CurrentPrice", symbols=["BTC"])
         self.assertIs(i1, i2)
 
-    def test_price_returns_dict_per_symbol(self):
+    def test_price_factories_return_per_symbol_managers_and_filenames(self):
         cur_mock = MagicMock()
         cur_mock.get_price.return_value = [int(time.time() * 1000), 50000.0]
-        with patch("cacheManager.get_current_price_manager", return_value=cur_mock):
-            result = cm.CacheFactory.get("Price", symbols=["BTC", "ETH"])
-        self.assertIsInstance(result, dict)
-        self.assertIn("BTC", result)
-        self.assertIn("ETH", result)
+        cases = (
+            ("Price", ["BTC", "ETH"], "cache_price_BTC.json"),
+            ("Price24", ["BTC"], "cache_24price_BTC.json"),
+        )
+        for name, symbols, expected_filename in cases:
+            with self.subTest(factory=name):
+                cm.CacheFactory._instances.pop(name, None)
+                with patch("cacheManager.get_current_price_manager", return_value=cur_mock):
+                    result = cm.CacheFactory.get(name, symbols=symbols)
+                self.assertIsInstance(result, dict)
+                for symbol in symbols:
+                    self.assertIn(symbol, result)
+                self.assertIn(expected_filename, result["BTC"].filename)
 
-    def test_price24_returns_dict_per_symbol(self):
-        cur_mock = MagicMock()
-        cur_mock.get_price.return_value = [int(time.time() * 1000), 50000.0]
-        with patch("cacheManager.get_current_price_manager", return_value=cur_mock):
-            result = cm.CacheFactory.get("Price24", symbols=["BTC"])
-        self.assertIsInstance(result, dict)
-        self.assertIn("BTC", result)
-
-    def test_price_filename_per_symbol(self):
-        cur_mock = MagicMock()
-        cur_mock.get_price.return_value = [int(time.time() * 1000), 50000.0]
-        with patch("cacheManager.get_current_price_manager", return_value=cur_mock):
-            result = cm.CacheFactory.get("Price", symbols=["BTC"])
-        self.assertIn("cache_price_BTC.json", result["BTC"].filename)
-
-    def test_price24_filename_per_symbol(self):
-        cur_mock = MagicMock()
-        cur_mock.get_price.return_value = [int(time.time() * 1000), 50000.0]
-        with patch("cacheManager.get_current_price_manager", return_value=cur_mock):
-            result = cm.CacheFactory.get("Price24", symbols=["BTC"])
-        self.assertIn("cache_24price_BTC.json", result["BTC"].filename)
-
-    def test_correct_class_for_trade(self):
-        result = cm.CacheFactory.get("Trade", symbols=["BTC"])
-        self.assertIsInstance(result, cm.CacheTradeManager)
-
-    def test_correct_class_for_order(self):
-        result = cm.CacheFactory.get("Order", symbols=["BTC"])
-        self.assertIsInstance(result, cm.CacheOrderManager)
-
-    def test_correct_class_for_currentprice(self):
-        result = cm.CacheFactory.get("CurrentPrice", symbols=["BTC"])
-        self.assertIsInstance(result, cm.CacheCurrentPriceManager)
+    def test_factory_returns_expected_manager_classes(self):
+        cases = (
+            ("Trade", cm.CacheTradeManager),
+            ("Order", cm.CacheOrderManager),
+            ("CurrentPrice", cm.CacheCurrentPriceManager),
+        )
+        with patch("binance_api.bapi_allorders.paginate_my_trades", return_value=[]), \
+             patch("binance_api.bapi_allorders.get_filled_orders", return_value=[]):
+            for name, expected_class in cases:
+                with self.subTest(factory=name):
+                    result = cm.CacheFactory.get(name, symbols=["BTC"])
+                    self.assertIsInstance(result, expected_class)
 
     def test_get_cache_manager_delegates_to_factory(self):
-        r1 = cm.get_cache_manager("Trade", symbols=["BTC"])
-        r2 = cm.CacheFactory.get("Trade", symbols=["BTC"])
+        with patch("binance_api.bapi_allorders.paginate_my_trades", return_value=[]):
+            r1 = cm.get_cache_manager("Trade", symbols=["BTC"])
+            r2 = cm.CacheFactory.get("Trade", symbols=["BTC"])
         self.assertIs(r1, r2)
 
 
@@ -896,13 +845,10 @@ class TestGetCurrentPriceManagerSingleton(unittest.TestCase):
     def tearDown(self):
         cm._current_price_instance = None
 
-    def test_returns_cache_current_price_manager(self):
-        mgr = cm.get_current_price_manager(symbols=["BTC"])
-        self.assertIsInstance(mgr, cm.CacheCurrentPriceManager)
-
-    def test_same_instance_on_repeated_calls(self):
+    def test_returns_single_cache_current_price_manager(self):
         m1 = cm.get_current_price_manager(symbols=["BTC"])
         m2 = cm.get_current_price_manager(symbols=["BTC"])
+        self.assertIsInstance(m1, cm.CacheCurrentPriceManager)
         self.assertIs(m1, m2)
 
     def test_ws_manager_subscribed_if_provided(self):

@@ -14,15 +14,20 @@ import watchdogfor_anomaly as w
 
 
 class DevLogExclusionTest(unittest.TestCase):
-    def test_dev_logs_excluded(self):
-        for p in ("logs/backtest_cycle.log", "logs/refresh_dev.log",
-                  "logs/trigger_backtest_dev.log", "logs/backtest_pilot.log"):
-            self.assertTrue(w._is_dev_log(p), p)
-
-    def test_live_logs_kept(self):
-        for p in ("logs/monitortrades.log", "logs/tradeall.log",
-                  "kraken/kraken_bot.log", "hyperliquid/dn_bot.log"):
-            self.assertFalse(w._is_dev_log(p), p)
+    def test_dev_and_live_log_classification(self):
+        cases = (
+            (True, "logs/backtest_cycle.log"),
+            (True, "logs/refresh_dev.log"),
+            (True, "logs/trigger_backtest_dev.log"),
+            (True, "logs/backtest_pilot.log"),
+            (False, "logs/monitortrades.log"),
+            (False, "logs/tradeall.log"),
+            (False, "kraken/kraken_bot.log"),
+            (False, "hyperliquid/dn_bot.log"),
+        )
+        for expected, path in cases:
+            with self.subTest(path=path):
+                self.assertEqual(w._is_dev_log(path), expected)
 
 
 if __name__ == "__main__":
