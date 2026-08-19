@@ -8,10 +8,15 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import hashlib
 import json
 from pathlib import Path
+import sys
 import urllib.request
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))
+
+from offline.backtests.datasets import canonical_bytes, dataset_sha256
 
 
 API_URL = "https://api.hyperliquid.xyz/info"
@@ -119,16 +124,6 @@ def fetch_closed_candles(
     return normalize_closed_candles(payload, now_ms=end_ms)
 
 
-def _canonical_bytes(records: list[dict]) -> bytes:
-    lines = ["timestamp,open,high,low,close"]
-    for row in records:
-        lines.append(
-            f"{int(row['timestamp'])},{row['open']:.12g},{row['high']:.12g},"
-            f"{row['low']:.12g},{row['close']:.12g}"
-        )
-    return ("\n".join(lines) + "\n").encode("ascii")
-
-
 def _parse_intervals(value: str) -> list[int]:
     try:
         intervals = [int(part.strip()) for part in value.split(",") if part.strip()]
@@ -202,8 +197,8 @@ def main() -> int:
         if not records:
             raise RuntimeError(f"dataset gol pentru {coin} {interval}m")
         validate_continuity(records, interval)
-        raw = _canonical_bytes(records)
-        digest = hashlib.sha256(raw).hexdigest()
+        raw = canonical_bytes(records)
+        digest = dataset_sha256(records)
         path = output_dir / f"{stem}_{interval}m_hlspot_{digest[:12]}.csv"
         path.write_bytes(raw)
         manifest["datasets"][str(interval)] = {

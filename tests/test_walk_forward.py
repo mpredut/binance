@@ -1,5 +1,6 @@
 import unittest
 
+from offline.backtests.evaluation import evaluate_walk_forward
 from offline.backtests.walk_forward import summarize_test_windows, walk_forward_splits
 
 
@@ -59,6 +60,28 @@ class WalkForwardSplitsTest(unittest.TestCase):
         self.assertEqual(summary["mean_return_up_market_pct"], 2.0)
         self.assertEqual(summary["mean_return_down_market_pct"], -1.0)
         self.assertEqual(summary["total_fills"], 10)
+
+    def test_generic_evaluator_separates_signal_warmup_from_test_capital(self):
+        records = [
+            {"timestamp": index * 60, "open": 100, "high": 101, "low": 99, "close": 100 + index}
+            for index in range(20)
+        ]
+        calls = []
+
+        def replay(_ohlc, warmup):
+            calls.append(len(warmup))
+            return {
+                "return_pct": 1.0, "max_drawdown_pct": 2.0,
+                "cycles": 1, "fills": 2, "sortino": None,
+            }
+
+        result = evaluate_walk_forward(
+            records, replay, train_size=8, validation_size=3, test_size=2,
+            step_size=2, warmup_bars=4,
+        )
+        self.assertEqual(result["aggregate_test"]["fold_count"], 4)
+        self.assertIn(4, calls)
+        self.assertTrue(all(fold["test"]["bars"] == 2 for fold in result["folds"]))
 
 
 if __name__ == "__main__":

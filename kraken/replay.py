@@ -22,7 +22,8 @@ def _silent(*_a, **_k):
 
 
 def run_replay(ohlc, params, fee_pct: float = 0.26,
-               bar_minutes: float | None = None) -> dict:
+               bar_minutes: float | None = None,
+               warmup_ohlc=()) -> dict:
     """ohlc: lista de (open, high, low, close). params: StratParams. fee_pct: comision
     per leg (%). Intoarce metrici compatibile cu simulate(): realized/net/fees/total/
     final_upnl/cycles/wins/maxdd/open_qty."""
@@ -55,6 +56,12 @@ def run_replay(ohlc, params, fee_pct: float = 0.26,
             initial_state=_strat._new_state(),
             replay_mode=True,
         )
+        # Încălzește numai semnalele (SMA/vol/trend), fără poziție, ordine sau P&L.
+        # Astfel fiecare segment TEST rămâne financiar independent.
+        warmup_step = bar_minutes * 60 if bar_minutes else 1.0
+        for index, (_o, _h, _l, close) in enumerate(
+                warmup_ohlc, start=-len(warmup_ohlc)):
+            s._shadow_prices.append((index * warmup_step, float(close)))
         s._save = _silent                     # fara fisier de stare
         cycle0 = s.s.get("cycle", 1)
         wins = 0

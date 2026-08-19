@@ -25,6 +25,7 @@ import json
 import os
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from ipo_common import log, now_str, float_env, are_close
@@ -174,7 +175,11 @@ def _sell_pnl(avg: float, price: float, qty: float, fee_pct: float = FX_FEE_PCT)
 
 class Strategy:
     def __init__(self, client: T212Client, ticker: str, params: StratParams,
-                 dry_run: bool = True, desktop: bool = False):
+                 dry_run: bool = True, desktop: bool = False,
+                 initial_state: dict | None = None,
+                 fx_to_usd: float | None = None,
+                 clock: Callable[[], float] | None = None,
+                 trend_slope_provider: Callable[[str], float | None] | None = None):
         self.client = client
         self.ticker = ticker
         self.yahoo_sym = params.yahoo_sym or t212_to_yahoo(ticker)
@@ -182,10 +187,15 @@ class Strategy:
         self.dry_run = dry_run
         self.desktop = desktop
         self.ccy = params.currency
-        self.fx_to_usd = self._fx_to_usd(params.currency)
+        self._clock = clock or time.time
+        self._trend_slope_provider = trend_slope_provider or trend_slope_pct
+        self.fx_to_usd = self._fx_to_usd(params.currency) if fx_to_usd is None else fx_to_usd
         self.state_file = state_path_for(ticker)
-        self.s = self._load()
+        self.s = initial_state if initial_state is not None else self._load()
         self._paper_seq = 0
+
+    def _now(self) -> float:
+        return float(self._clock())
 
     # -- valuta ----------------------------------------------------------------
     def _fx_to_usd(self, currency: str) -> float:
@@ -263,12 +273,16 @@ class Strategy:
                    source="T212", price=price, desktop=self.desktop)
             self._cancel_open("SELL")     # avg s-a schimbat -> reasezam TP
         else:  # SELL
+            qty = min(qty, self.s["qty"])
             avg = self._avg_cost() or price
             gross, fee, net = _sell_pnl(avg, price, qty, self.p.fx_fee_pct)
             self.s["realized_pnl_usd"] += gross
             self.s["realized_net_usd"] += net
             self.s["fees_usd"] += fee
             self.s["qty"] -= qty
+            # Cost basis-ul aparține cantității rămase. Fără această reducere,
+            # un scale-out parțial umfla artificial media poziției reziduale.
+            self.s["cost_usd"] = max(0.0, self.s["cost_usd"] - avg * qty)
             log(f"  [STRAT] {tag}SELL FILLED {qty} @ {price:.2f} USD  "
                 f"brut={gross:+.2f}  fee={fee:.2f}  net={net:+.2f} USD")
             notify(title=f"{tag}{self.yahoo_sym} SELL {qty}@{price:.2f} N{net:+.2f}$",
@@ -276,6 +290,7 @@ class Strategy:
                          f"Ntot{self.s['realized_net_usd']:+.2f}$ | ciclu{self.s['cycle']} inchis"),
                    source="T212", price=price, desktop=self.desktop)
             if self.s["qty"] <= 1e-9:
+                was_sl = bool(self.s.get("sl_pending"))
                 pnl, net_tot, fees = (self.s["realized_pnl_usd"],
                                       self.s["realized_net_usd"], self.s["fees_usd"])
                 nxt = self.s.get("cycle", 1) + 1
@@ -285,6 +300,10 @@ class Strategy:
                 self.s["fees_usd"] = fees
                 self.s["cycle"] = nxt
                 self.s["last_sell_price"] = price   # regula de reintrare: nu recumpara mai sus
+                if was_sl and self.p.sl_rebuy_enabled:
+                    self.s["sl_rebuy"] = {"low": price, "sell_price": price}
+                    log(f"  🟢 [STRAT] re-buy pe recul ARMAT dupa stop-loss "
+                        f"(asteptam +{self.p.sl_rebuy_bounce_pct}% de la minim)")
                 log(f"  [STRAT] === ciclu inchis, reincep (ciclu {nxt}) ===")
 
     # -- plasare / anulare -----------------------------------------------------
@@ -298,19 +317,19 @@ class Strategy:
             log(f"  [STRAT] [PAPER] plasez BUY {kind} {qty} @ {limit:.2f} USD (~{amount:.0f} {self.ccy})")
             self.s["orders"].append({"id": f"PAPER-{self._paper_seq}", "side": "BUY", "qty": qty,
                                      "limit": round(limit, 2), "amount": amount, "kind": kind,
-                                     "ts": time.time()})
+                                     "ts": self._now()})
             return
         status, data = self.client.place_limit_order(self.ticker, qty, round(limit, 2), self.p.validity)
         if status in (200, 201):
             log(f"  [STRAT] BUY {kind} plasat id={data.get('id')} {qty} @ {limit:.2f}")
             self.s["orders"].append({"id": data.get("id"), "side": "BUY", "qty": qty,
                                      "limit": round(limit, 2), "amount": amount, "kind": kind,
-                                     "ts": time.time()})
+                                     "ts": self._now()})
         else:
             log(f"  ! [STRAT] BUY {kind} esuat HTTP {status}: {json.dumps(data)[:200]}")
             if "insufficient" in json.dumps(data).lower():
                 # cont fara cash liber: nu mai spama la fiecare tick — pauza 30 min
-                self.s["buy_backoff_until"] = time.time() + 1800
+                self.s["buy_backoff_until"] = self._now() + 1800
                 log("  [STRAT] fonduri insuficiente — pauza cumparari 30 min (alimenteaza contul)")
 
     def _place_sell(self, qty: float, limit: float, level: float | None = None, kind: str = "TP") -> bool:
@@ -320,13 +339,13 @@ class Strategy:
             log(f"  [STRAT] [PAPER] plasez SELL {kind}{tag} {qty:.2f} @ {limit:.2f} USD")
             self.s["orders"].append({"id": f"PAPER-{self._paper_seq}", "side": "SELL",
                                      "qty": round(qty, 2), "limit": round(limit, 2),
-                                     "kind": kind, "level": level, "ts": time.time()})
+                                     "kind": kind, "level": level, "ts": self._now()})
             return True
         status, data = self.client.place_limit_order(self.ticker, -abs(qty), round(limit, 2), self.p.validity)
         if status in (200, 201):
             log(f"  [STRAT] SELL {kind}{tag} plasat id={data.get('id')} {qty:.2f} @ {limit:.2f}")
             self.s["orders"].append({"id": data.get("id"), "side": "SELL", "qty": round(qty, 2),
-                                     "limit": round(limit, 2), "kind": kind, "level": level, "ts": time.time()})
+                                     "limit": round(limit, 2), "kind": kind, "level": level, "ts": self._now()})
             return True
         log(f"  ! [STRAT] SELL {kind}{tag} esuat HTTP {status}: {json.dumps(data)[:200]}")
         if status == 400 and "selling-equity-not-owned" in str(data):
@@ -340,7 +359,7 @@ class Strategy:
                 self.s["cost_usd"] = 0.0
                 self.s["spent_cash"] = 0.0
                 self.s["orders"] = []
-                self.s["locked_zero_until"] = time.time() + 300  # ignora adoptie stala 5 min
+                self.s["locked_zero_until"] = self._now() + 300  # ignora adoptie stala 5 min
                 self._save()
             else:
                 log(f"  ! [STRAT] selling-not-owned dar owned={_owned} (free<ordin) — NU resetez pozitia")
@@ -395,7 +414,7 @@ class Strategy:
                 open_sells.pop(lvl, None)
         # plaseaza nivelele lipsa; daca o transa esueaza persistent (ex. T212 min-opened-position
         # pe ultima dintr-o pozitie fractionara mica), BACKOFF 30 min in loc de retry la fiecare tick
-        now = time.time()
+        now = self._now()
         fails = self.s.setdefault("tp_fail_until", {})
         for lvl, (q, lim) in desired.items():
             if lvl in open_sells:
@@ -455,7 +474,7 @@ class Strategy:
         real = self._portfolio_position()
         if real is None:
             # Debounce: logam prima data si la fiecare 10 minute (nu la fiecare tick).
-            now = time.time()
+            now = self._now()
             last = getattr(self, "_pf_unavail_logged", 0)
             if now - last > 600:
                 log("  [STRAT] portofoliu indisponibil — sar reconcilierea (suprima repetatele 10 min)")
@@ -470,7 +489,7 @@ class Strategy:
         prev_avg = self._avg_cost() or real_avg
 
         # --- BUY executat: pozitia a crescut (sau adoptam o pozitie pre-existenta) ---
-        if real_qty > prev_qty + 1e-6 and time.time() < self.s.get("locked_zero_until", 0):
+        if real_qty > prev_qty + 1e-6 and self._now() < self.s.get("locked_zero_until", 0):
             log("  [STRAT] adoptie ignorata — portfolio stale (not-owned recent, lock activ)")
             return
         if real_qty > prev_qty + 1e-6:
@@ -528,7 +547,7 @@ class Strategy:
                     self.s.setdefault("tp_sold_levels", []).append(o["level"])  # transa executata
                 self._remove_order(o)        # nu mai e pending (executat sau anulat)
             elif (o["side"] == "BUY"
-                  and (time.time() - o.get("ts", 0)) / 60 > self.p.order_ttl_min
+                  and (self._now() - o.get("ts", 0)) / 60 > self.p.order_ttl_min
                   and price > o["limit"] * 1.003):
                 log(f"  [STRAT] BUY {o['id']} neexecutat, pret a urcat — anulez & reasez")
                 self.client.cancel_order(o["id"])
@@ -674,7 +693,7 @@ class Strategy:
         self._check_loss_alert(price)   # alerta pe adancirea pierderii (oricand detinem; nu vinde)
         disc = 1 - self.p.entry_discount_pct / 100
 
-        in_backoff = time.time() < self.s.get("buy_backoff_until", 0)
+        in_backoff = self._now() < self.s.get("buy_backoff_until", 0)
 
         if held <= 1e-9:
             if in_backoff:   # backoff dupa "insufficient funds": nu incerca cumparari cat contul e gol
@@ -741,11 +760,11 @@ class Strategy:
             # Yahoo) si re-loga la fiecare tick, toata noaptea (~4800 linii). Cand blocam,
             # tinem blocajul 5 min fara re-verificare — panta e pe bare de 5m oricum.
             if self.p.dca_trend_gate_pct > 0:
-                if time.time() < getattr(self, "_dca_gate_until", 0):
+                if self._now() < getattr(self, "_dca_gate_until", 0):
                     return   # blocat recent de trend — re-verificam abia dupa fereastra
-                slope = trend_slope_pct(self.yahoo_sym)
+                slope = self._trend_slope_provider(self.yahoo_sym)
                 if slope is not None and slope < -self.p.dca_trend_gate_pct:
-                    self._dca_gate_until = time.time() + 300
+                    self._dca_gate_until = self._now() + 300
                     log(f"  [STRAT] DCA BLOCAT de trend: panta {slope:+.3f}%/bara "
                         f"< -{self.p.dca_trend_gate_pct}% (downtrend) — re-verific in 5 min")
                     return

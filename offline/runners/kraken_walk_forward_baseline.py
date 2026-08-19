@@ -10,14 +10,11 @@ diagnostic de regim și nu aleg parametri.
 from __future__ import annotations
 
 import argparse
-import csv
 import dataclasses
 import datetime as dt
-import hashlib
 import json
 import os
 from pathlib import Path
-import statistics
 import sys
 import urllib.request
 
@@ -30,7 +27,18 @@ sys.path.insert(0, str(ROOT))
 from kraken_common import load_dotenv  # noqa: E402
 import replay as kraken_replay  # noqa: E402
 from strategy import StratParams  # noqa: E402
-from offline.backtests.walk_forward import walk_forward_splits  # noqa: E402
+from offline.backtests.datasets import (  # noqa: E402
+    dataset_sha256,
+    load_dataset as load_frozen_dataset,
+    save_dataset as save_frozen_dataset,
+    validate_dataset,
+)
+from offline.backtests.evaluation import (  # noqa: E402
+    automatic_window_sizes,
+    evaluate_segment as _evaluate_segment,
+    evaluate_walk_forward as _evaluate_walk_forward,
+    iso_utc as _iso,
+)
 
 
 def fetch_closed_candles(pair: str, interval: int) -> list[dict]:
@@ -58,136 +66,43 @@ def fetch_closed_candles(pair: str, interval: int) -> list[dict]:
     ]
 
 
-def _canonical_bytes(records: list[dict]) -> bytes:
-    lines = ["timestamp,open,high,low,close"]
-    for row in records:
-        lines.append(
-            f"{int(row['timestamp'])},{row['open']:.12g},{row['high']:.12g},"
-            f"{row['low']:.12g},{row['close']:.12g}"
-        )
-    return ("\n".join(lines) + "\n").encode("ascii")
-
-
-def dataset_sha256(records: list[dict]) -> str:
-    return hashlib.sha256(_canonical_bytes(records)).hexdigest()
-
-
-def save_frozen_dataset(records: list[dict], destination: Path) -> None:
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with destination.open("w", encoding="ascii", newline="") as handle:
-        handle.write(_canonical_bytes(records).decode("ascii"))
-
-
-def load_frozen_dataset(source: Path) -> list[dict]:
-    with source.open("r", encoding="ascii", newline="") as handle:
-        return [
-            {
-                "timestamp": int(row["timestamp"]),
-                "open": float(row["open"]),
-                "high": float(row["high"]),
-                "low": float(row["low"]),
-                "close": float(row["close"]),
-            }
-            for row in csv.DictReader(handle)
-        ]
-
-
-def _iso(timestamp: int) -> str:
-    return dt.datetime.fromtimestamp(timestamp, tz=dt.timezone.utc).isoformat()
-
-
-def _ohlc(records: list[dict]) -> list[tuple[float, float, float, float]]:
-    return [(row["open"], row["high"], row["low"], row["close"]) for row in records]
-
-
 def _segment_result(records: list[dict], params: StratParams, fee_pct: float,
-                    interval: int) -> dict:
+                    interval: int, warmup_records: list[dict] | tuple = ()) -> dict:
     original_log = kraken_replay._strat.log
     kraken_replay._strat.log = lambda *_args, **_kwargs: None
     try:
-        metrics = kraken_replay.run_replay(
-            _ohlc(records), params, fee_pct=fee_pct, bar_minutes=interval,
+        return _evaluate_segment(
+            records,
+            lambda ohlc, warmup: kraken_replay.run_replay(
+                ohlc, params, fee_pct=fee_pct, bar_minutes=interval,
+                warmup_ohlc=warmup,
+            ),
+            warmup_records=warmup_records,
         )
     finally:
         kraken_replay._strat.log = original_log
-    buy_hold_pct = (
-        (records[-1]["close"] / records[0]["close"] - 1.0) * 100.0
-        if records[0]["close"] > 0 else None
-    )
-    return {
-        "start_utc": _iso(records[0]["timestamp"]),
-        "end_utc": _iso(records[-1]["timestamp"]),
-        "bars": len(records),
-        "buy_hold_return_pct": buy_hold_pct,
-        "metrics": metrics,
-    }
-
-
-def _optional_min(values: list[float | None]) -> float | None:
-    present = [value for value in values if value is not None]
-    return min(present) if present else None
 
 
 def evaluate_walk_forward(records: list[dict], params: StratParams, *, fee_pct: float,
                           interval: int, train_size: int, validation_size: int,
-                          test_size: int, step_size: int) -> dict:
-    folds = walk_forward_splits(
-        len(records), train_size=train_size, validation_size=validation_size,
-        test_size=test_size, step_size=step_size,
-    )
-    if not folds:
-        raise ValueError(
-            f"date insuficiente: {len(records)} bare pentru "
-            f"train={train_size}, validation={validation_size}, test={test_size}"
+                          test_size: int, step_size: int, warmup_bars: int = 0) -> dict:
+    original_log = kraken_replay._strat.log
+    kraken_replay._strat.log = lambda *_args, **_kwargs: None
+    try:
+        return _evaluate_walk_forward(
+            records,
+            lambda ohlc, warmup: kraken_replay.run_replay(
+                ohlc, params, fee_pct=fee_pct, bar_minutes=interval,
+                warmup_ohlc=warmup,
+            ),
+            train_size=train_size,
+            validation_size=validation_size,
+            test_size=test_size,
+            step_size=step_size,
+            warmup_bars=warmup_bars,
         )
-
-    fold_results = []
-    for index, fold in enumerate(folds, start=1):
-        fold_results.append({
-            "fold": index,
-            "train": _segment_result(records[fold.train], params, fee_pct, interval),
-            "validation": _segment_result(
-                records[fold.validation], params, fee_pct, interval,
-            ),
-            "test": _segment_result(records[fold.test], params, fee_pct, interval),
-        })
-
-    tests = [fold["test"] for fold in fold_results]
-    returns = [fold["metrics"]["return_pct"] for fold in tests]
-    compounded = 100.0
-    for value in returns:
-        compounded *= 1.0 + value / 100.0
-    return {
-        "folds": fold_results,
-        "aggregate_test": {
-            "fold_count": len(tests),
-            "mean_return_pct": statistics.fmean(returns),
-            "median_return_pct": statistics.median(returns),
-            "worst_return_pct": min(returns),
-            "compounded_reset_return_pct": compounded - 100.0,
-            "worst_max_drawdown_pct": max(
-                fold["metrics"]["max_drawdown_pct"] for fold in tests
-            ),
-            "worst_sortino": _optional_min(
-                [fold["metrics"]["sortino"] for fold in tests]
-            ),
-            "mean_buy_hold_return_pct": statistics.fmean(
-                fold["buy_hold_return_pct"] for fold in tests
-            ),
-            "total_cycles": sum(fold["metrics"]["cycles"] for fold in tests),
-            "total_fills": sum(fold["metrics"]["fills"] for fold in tests),
-        },
-    }
-
-
-def automatic_window_sizes(sample_count: int) -> tuple[int, int, int, int]:
-    """Alege trei fold-uri aproximative, proporțional cu istoricul disponibil."""
-    if sample_count < 20:
-        raise ValueError("sunt necesare minimum 20 de bare pentru ferestre automate")
-    train = max(1, int(sample_count * 0.45))
-    validation = max(1, int(sample_count * 0.10))
-    test = max(1, int(sample_count * 0.15))
-    return train, validation, test, test
+    finally:
+        kraken_replay._strat.log = original_log
 
 
 def _parse_intervals(value: str) -> list[int]:
@@ -220,6 +135,10 @@ def main() -> int:
     parser.add_argument("--test", type=int, help="bare; implicit auto 15%%")
     parser.add_argument("--step", type=int, help="bare; implicit egal cu TEST")
     parser.add_argument(
+        "--warmup", type=int, default=0,
+        help="bare anterioare pentru semnale; nu poartă poziție/P&L în segment",
+    )
+    parser.add_argument(
         "--dataset", action="append", default=[], metavar="INTERVAL=CALE",
         help="folosește un CSV înghețat în loc de API; repetabil pentru fiecare interval",
     )
@@ -237,6 +156,8 @@ def main() -> int:
     if any(value is not None and value <= 0
            for value in (*explicit_windows, args.step)):
         parser.error("dimensiunile walk-forward trebuie să fie pozitive")
+    if args.warmup < 0:
+        parser.error("--warmup nu poate fi negativ")
 
     # Aceeași ordine ca kraken_bot.py: .env are prioritate, config.env completează.
     load_dotenv(args.env_file)
@@ -269,6 +190,7 @@ def main() -> int:
             ),
             "shuffle": False,
             "segment_state": "reset",
+            "signal_warmup_bars": args.warmup,
             "selection": "none; current live config is held fixed",
         },
         "intervals": {},
@@ -279,6 +201,7 @@ def main() -> int:
         records = load_frozen_dataset(source) if source else fetch_closed_candles(pair, interval)
         if not records:
             raise RuntimeError(f"dataset gol pentru {pair} {interval}m")
+        records = validate_dataset(records, interval_minutes=interval)
         digest = dataset_sha256(records)
         frozen_path = dataset_dir / f"{pair}_{interval}m_{digest[:12]}.csv"
         save_frozen_dataset(records, frozen_path)
@@ -294,7 +217,7 @@ def main() -> int:
         result = evaluate_walk_forward(
             records, params, fee_pct=args.fee, interval=interval,
             train_size=train_size, validation_size=validation_size,
-            test_size=test_size, step_size=step_size,
+            test_size=test_size, step_size=step_size, warmup_bars=args.warmup,
         )
         report["intervals"][str(interval)] = {
             "dataset": {

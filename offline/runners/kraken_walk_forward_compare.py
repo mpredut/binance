@@ -66,6 +66,36 @@ def default_candidates() -> list[Candidate]:
     ]
 
 
+def hype_240_candidates() -> list[Candidate]:
+    """Set preînregistrat pentru datasetul lung HYPE de 240m."""
+    return [
+        Candidate("live", "configurația live neschimbată", {}),
+        Candidate(
+            "overlay_orig", "overlay original: top-up 2000, trail 5%",
+            {"trend_overlay": True, "trend_topup": 2000.0,
+             "trend_trail_pct": 5.0, "trend_interval": 240},
+        ),
+        Candidate(
+            "overlay650t8", "overlay redus: top-up 650, trail 8%",
+            {"trend_overlay": True, "trend_topup": 650.0,
+             "trend_trail_pct": 8.0, "trend_interval": 240},
+        ),
+        Candidate(
+            "A_adaptive_trail", "trailing adaptiv k=2, clamp 1,5-8%",
+            {"tp_trail_adaptive": True, "tp_trail_k": 2.0,
+             "tp_trail_min": 1.5, "tp_trail_max": 8.0,
+             "tp_trail_vol_interval": 240},
+        ),
+        Candidate(
+            "B_dca_brake", "blochează DCA în downtrend confirmat",
+            {"dca_trend_brake": True, "dca_brake_min_pct": 1.5,
+             "trend_interval": 240},
+        ),
+        Candidate("tp_4", "prag TP 4%", {"takeprofit_pct": 4.0}),
+        Candidate("dca_drop_1_5", "DCA la scădere 1,5%", {"dca_drop_pct": 1.5}),
+    ]
+
+
 def _load_report(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as handle:
         report = json.load(handle)
@@ -74,7 +104,7 @@ def _load_report(path: Path) -> dict:
     return report
 
 
-def _load_datasets(report: dict) -> dict[int, tuple[list[dict], dict]]:
+def _load_datasets(report: dict) -> dict[int, tuple[list[dict], dict, int]]:
     datasets = {}
     for interval_text, section in report["intervals"].items():
         interval = int(interval_text)
@@ -86,21 +116,26 @@ def _load_datasets(report: dict) -> dict[int, tuple[list[dict], dict]]:
             raise ValueError(
                 f"hash dataset diferit pentru {interval}m: {actual_hash} != {expected_hash}"
             )
-        datasets[interval] = (records, section["window_sizes"])
+        datasets[interval] = (
+            records,
+            section["window_sizes"],
+            int(report.get("walk_forward", {}).get("signal_warmup_bars", 0)),
+        )
     return datasets
 
 
 def _candidate_windows(datasets: dict, params, fee_pct: float) -> list[dict]:
     windows = []
-    for interval, (records, sizes) in sorted(datasets.items()):
+    for interval, (records, sizes, warmup_bars) in sorted(datasets.items()):
         folds = walk_forward_splits(
             len(records), train_size=sizes["train"],
             validation_size=sizes["validation"], test_size=sizes["test"],
             step_size=sizes["step"],
         )
         for fold_index, fold in enumerate(folds, start=1):
+            warmup = records[max(0, fold.test.start - warmup_bars):fold.test.start]
             segment = baseline._segment_result(
-                records[fold.test], params, fee_pct, interval,
+                records[fold.test], params, fee_pct, interval, warmup,
             )
             metrics = segment["metrics"]
             windows.append({
@@ -227,16 +262,22 @@ def main() -> int:
         "--fee-stress", default="0.16,0.26,0.35,0.50",
         help="fee-uri per leg, procente",
     )
+    parser.add_argument(
+        "--candidate-set", choices=("standard", "hype-240"), default="standard",
+    )
     args = parser.parse_args()
 
     baseline_path = args.baseline_report.expanduser().resolve()
     source_report = _load_report(baseline_path)
     datasets = _load_datasets(source_report)
+    if args.candidate_set == "hype-240" and set(datasets) != {240}:
+        parser.error("candidate-set hype-240 cere un baseline care conține numai intervalul 240")
     base_params = baseline.StratParams(**source_report["strategy_params"])
     base_fee = float(source_report["fee_pct_per_leg"])
 
     results = {}
-    for candidate in default_candidates():
+    candidates = hype_240_candidates() if args.candidate_set == "hype-240" else default_candidates()
+    for candidate in candidates:
         params = dataclasses.replace(base_params, **candidate.overrides)
         windows = _candidate_windows(datasets, params, base_fee)
         results[candidate.name] = {
@@ -278,8 +319,7 @@ def main() -> int:
         "source_baseline_report": str(baseline_path),
         "method": {
             "candidate_style": (
-                "one-factor ablation plus one pre-registered two-factor confirmation; "
-                "no automatic selection"
+                f"pre-registered {args.candidate_set} candidate set; no automatic selection"
             ),
             "comparison_dimensions": [
                 "mean_return_pct", "worst_return_pct", "worst_max_drawdown_pct",

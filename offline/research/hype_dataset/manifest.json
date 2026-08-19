@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "frozen_at_utc": "2026-08-19T20:23:54+00:00",
+  "source": {
+    "venue": "Hyperliquid",
+    "market": "HYPE/USDC spot",
+    "api_coin": "@107",
+    "endpoint": "https://api.hyperliquid.xyz/info",
+    "fetcher": "offline/runners/fetch_hyperliquid_candles.py"
+  },
+  "purpose": "cross-venue robustness proxy for Kraken strategy replay",
+  "limitations": [
+    "not Kraken market or execution data",
+    "does not reproduce Kraken spread, queue position, latency, or fills",
+    "Hyperliquid exposes at most the most recent 5000 candles per market"
+  ],
+  "requested_lookback_days": null,
+  "datasets": {
+    "240": {
+      "file": "HYPEUSDC_240m_hlspot.csv",
+      "sha256": "87878bdf72337ca2a1b062bfeb275a06d8df965dbb113cb15060ba72ecdc0b0a",
+      "bars": 3772,
+      "start_utc": "2024-11-29T04:00:00+00:00",
+      "end_utc": "2026-08-19T16:00:00+00:00"
+    },
+    "1440": {
+      "file": "HYPEUSDC_1440m_hlspot.csv",
+      "sha256": "b8e79fc43817effe64d42d9aa9c28360d9d8f1a49686f06fe03b02bc499804bd",
+      "bars": 628,
+      "start_utc": "2024-11-29T00:00:00+00:00",
+      "end_utc": "2026-08-18T00:00:00+00:00"
+    }
+  }
+}

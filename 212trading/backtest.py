@@ -18,6 +18,9 @@ import json
 import sys
 import urllib.request
 
+from replay import run_replay
+from strategy import StratParams
+
 
 def fetch_candles(sym, rng, interval):
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range={rng}&interval={interval}"
@@ -39,60 +42,31 @@ def fetch_candles(sym, rng, interval):
 
 
 def simulate(ohlc, P):
-    disc, drop, tp, sl = P["disc"]/100, P["drop"]/100, P["tp"]/100, P["sl"]/100
-    fee = P["fee"]/100
-    qty = cost = spent = 0.0
-    dca = 0; last_open = None
-    realized = fees = 0.0
-    cycles = wins = 0
-    peak = eq = 0.0; maxdd = 0.0
-    rest_buy = None; rest_sell = None
+    """Compatibilitate CLI peste același ``Strategy.step`` folosit în live."""
+    params = StratParams.from_env({
+        "STRAT_CURRENCY": "USD",
+        "YAHOO_SYMBOL": str(P.get("sym") or "REPLAY"),
+        "STRAT_ENTRY": str(P["entry"]),
+        "STRAT_DCA": str(P["dca"]),
+        "STRAT_ENTRY_DISCOUNT_PCT": str(P["disc"]),
+        "STRAT_DCA_DROP_PCT": str(P["drop"]),
+        "STRAT_TAKEPROFIT_PCT": str(P["tp"]),
+        "STRAT_MAX_DCA_BUYS": str(P["maxdca"]),
+        "STRAT_MAX_BUDGET": str(P["budget"]),
+        "STRAT_FX_FEE_PCT": str(P["fee"]),
+        "STRAT_STOP_LOSS_PCT": str(P["sl"]),
+    })
+    return run_replay(
+        ohlc, params, bar_minutes=P.get("bar_minutes"), fx_to_usd=1.0,
+    )
 
-    for (o, h, l, c) in ohlc:
-        # 1. fill cumparare (limit sub piata -> fill daca bara coboara la el)
-        if rest_buy:
-            px, sz = rest_buy
-            if l <= px:
-                qty += sz; cost += sz*px; spent += sz*px; last_open = px
-                if qty > sz + 1e-9:
-                    dca += 1
-                fees += fee*sz*px
-                rest_buy = None; rest_sell = None
-        # 2. fill vanzare TP (limit peste piata -> fill daca bara urca la el)
-        if rest_sell and qty > 1e-9:
-            px, sz = rest_sell
-            if h >= px:
-                avg = cost/qty
-                realized += (px-avg)*sz; fees += fee*sz*px
-                cycles += 1; wins += 1 if px > avg else 0
-                qty = cost = spent = 0.0; dca = 0; last_open = None
-                rest_sell = None; rest_buy = None
-        # 3. STOP-LOSS pe close
-        if qty > 1e-9 and sl > 0:
-            avg = cost/qty
-            if (avg - c)/avg >= sl:
-                realized += (c-avg)*qty; fees += fee*qty*c
-                cycles += 1
-                qty = cost = spent = 0.0; dca = 0; last_open = None
-                rest_sell = None; rest_buy = None
-        # 4. decizii pe close
-        if qty <= 1e-9:
-            if rest_buy is None and spent + P["entry"] <= P["budget"]:
-                px = c*(1-disc); rest_buy = (px, round(P["entry"]/px, 6))
-        else:
-            avg = cost/qty
-            rest_sell = (avg*(1+tp), qty)
-            if (dca < P["maxdca"] and last_open and c <= last_open*(1-drop)
-                    and spent + P["dca"] <= P["budget"] and rest_buy is None):
-                px = c*(1-disc); rest_buy = (px, round(P["dca"]/px, 6))
-        # equity curve (realized + unrealized)
-        upnl = (c - cost/qty)*qty if qty > 1e-9 else 0
-        eq = realized - fees + upnl; peak = max(peak, eq); maxdd = max(maxdd, peak - eq)
 
-    final_upnl = (ohlc[-1][3] - cost/qty)*qty if qty > 1e-9 else 0.0
-    return {"realized": realized, "fees": fees, "net": realized - fees,
-            "total": realized - fees + final_upnl, "final_upnl": final_upnl,
-            "cycles": cycles, "wins": wins, "maxdd": maxdd, "open_qty": qty}
+def interval_minutes(value: str) -> int | None:
+    units = {"m": 1, "h": 60, "d": 1440}
+    try:
+        return int(value[:-1]) * units[value[-1].lower()]
+    except (KeyError, ValueError, IndexError):
+        return None
 
 
 def main() -> int:
@@ -114,7 +88,8 @@ def main() -> int:
     closes = [x[3] for x in ohlc]
     bh = (closes[-1] - closes[0]) / closes[0] * 100
     base = dict(entry=args.entry, dca=args.dca, disc=args.disc, drop=args.drop,
-                tp=args.tp, maxdca=args.maxdca, budget=args.budget, fee=args.fee, sl=args.sl)
+                tp=args.tp, maxdca=args.maxdca, budget=args.budget, fee=args.fee, sl=args.sl,
+                sym=args.sym, bar_minutes=interval_minutes(args.interval))
 
     if args.mode == "single":
         m = simulate(ohlc, base)
