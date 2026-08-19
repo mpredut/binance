@@ -121,7 +121,13 @@ class KrakenClient:
             url += "?" + urllib.parse.urlencode(params)
         status, body = http_get(url)
         result = self._parse(status, body)
-        if ttl:
+        # NU cache-ui un rezultat GOL: pt endpoint-urile publice (AssetPairs/Ticker) un
+        # {} inseamna intotdeauna un fetch tranzitoriu ratat, niciodata o stare valida.
+        # Daca l-am cache-ui (TTL AssetPairs=1h), pair_info intoarce None -> ordermin=0 ->
+        # gardul anti-'volume minimum not met' din monitortrades._place_guarded se
+        # dezactiveaza ~1h -> churn de ordine respinse pe praf (HYPE 0.0175 < min 0.1).
+        # _parse ridica deja pe eroare (nu se cache-uieste); asta prinde empty-SUCCESS-ul.
+        if ttl and result:
             _cache_put(method, params, ttl, result)
         return result
 

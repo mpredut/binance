@@ -1,0 +1,49 @@
+"""kraken_client._public: un rezultat GOL ({}) de la un endpoint public (AssetPairs/
+Ticker) NU se cache-uieste — e mereu un fetch tranzitoriu ratat, nu o stare valida.
+Daca s-ar cache-ui (TTL AssetPairs=1h), pair_info->None->ordermin=0 dezactiva gardul
+anti-'volume minimum not met' ~1h -> churn de ordine respinse pe praf (HYPE 0.0175<0.1)."""
+import os
+import sys
+import unittest
+from unittest import mock
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "kraken"))
+os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
+
+import kraken_client as kc
+
+
+EMPTY = (200, b'{"error":[],"result":{}}')
+FULL = (200, b'{"error":[],"result":{"HYPEUSD":{"ordermin":"0.1"}}}')
+
+
+class PublicCacheTest(unittest.TestCase):
+    def setUp(self):
+        kc._CACHE.clear()
+
+    def test_empty_not_cached_refetches_then_caches_full(self):
+        with mock.patch.object(kc, "http_get") as mget:
+            mget.side_effect = [EMPTY, FULL]
+            client = kc.KrakenClient()
+            r1 = client._public("AssetPairs", {"pair": "HYPEUSD"})
+            self.assertEqual(r1, {})                       # gol
+            r2 = client._public("AssetPairs", {"pair": "HYPEUSD"})
+            self.assertIn("HYPEUSD", r2)                   # a RE-FETCH-uit (gol necache-uit)
+            self.assertEqual(mget.call_count, 2)
+            # acum rezultatul plin E cache-uit -> fara fetch nou
+            r3 = client._public("AssetPairs", {"pair": "HYPEUSD"})
+            self.assertIn("HYPEUSD", r3)
+            self.assertEqual(mget.call_count, 2)
+
+    def test_pair_info_none_on_empty_then_recovers(self):
+        with mock.patch.object(kc, "http_get") as mget:
+            mget.side_effect = [EMPTY, FULL]
+            client = kc.KrakenClient()
+            self.assertIsNone(client.pair_info("HYPEUSD"))       # gol -> None
+            info = client.pair_info("HYPEUSD")                   # re-fetch -> plin
+            self.assertEqual(info.get("ordermin"), "0.1")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
