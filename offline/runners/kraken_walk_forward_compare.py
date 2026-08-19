@@ -2,8 +2,9 @@
 """Comparație robustă one-factor pentru configurația Kraken live.
 
 Consumă raportul și CSV-urile înghețate de ``kraken_walk_forward_baseline.py``.
-Nu caută combinații și nu schimbă live config: fiecare candidat modifică un
-singur mecanism, apoi este evaluat pe exact aceleași ferestre TEST.
+Nu caută combinații și nu schimbă live config: ablațiile modifică un singur
+mecanism. Singura combinație este o confirmare predefinită a celor două
+ablații fără pierderi, nu un grid căutat după rezultat.
 """
 from __future__ import annotations
 
@@ -56,6 +57,11 @@ def default_candidates() -> list[Candidate]:
         Candidate(
             "lower_sizing", "entry 500 + DCA 250 USD",
             {"entry_amount": 500.0, "dca_amount": 250.0},
+        ),
+        Candidate(
+            "confirm_dca_1_5_trail_2",
+            "confirmare: DCA 1,5% + trailing 2%",
+            {"dca_drop_pct": 1.5, "tp_trail_pct": 2.0},
         ),
     ]
 
@@ -271,7 +277,10 @@ def main() -> int:
         "generated_at_utc": generated_at.isoformat(),
         "source_baseline_report": str(baseline_path),
         "method": {
-            "candidate_style": "one-factor ablation; no automatic selection",
+            "candidate_style": (
+                "one-factor ablation plus one pre-registered two-factor confirmation; "
+                "no automatic selection"
+            ),
             "comparison_dimensions": [
                 "mean_return_pct", "worst_return_pct", "worst_max_drawdown_pct",
             ],
