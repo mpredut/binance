@@ -53,11 +53,24 @@ _LOG_GLOBS = ["logger/*.log", "logs/*.log", "212trading/*.log", "hyperliquid/*.l
 _MAX_READ_BYTES = int(os.environ.get("ANOMALY_MAX_READ_BYTES", str(4 * 1024 * 1024)))
 
 
+# Loguri DEV/backtest: tracebacks aici sunt de pe masina de test (pilot backtest pe
+# runner.py, sync dev) — NU probleme de flota LIVE. Excluse din scanare ca sa nu
+# alerteze fals "Verifica botii afectati" pentru esecuri de pe dev.
+_EXCLUDE_BASENAMES = {"backtest_cycle.log", "refresh_dev.log", "trigger_backtest_dev.log"}
+
+
+def _is_dev_log(path):
+    b = os.path.basename(path)
+    return b in _EXCLUDE_BASENAMES or b.startswith("backtest")
+
+
 def _active_logs():
     now = time.time()
     out = []
     for g in _LOG_GLOBS:
         for p in glob.glob(str(ROOT / g)):
+            if _is_dev_log(p):
+                continue
             try:
                 if (now - os.path.getmtime(p)) <= WINDOW_FILES_MIN * 60:
                     out.append(p)
