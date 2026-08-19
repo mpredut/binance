@@ -68,7 +68,7 @@ This baseline intentionally records that behaviour.  Whether it is desirable mus
 be decided as a separate product/risk change.  It must not be silently changed by
 the structural refactor.
 
-## Full-suite state at baseline
+## Full-suite state after Kraken reconciliation
 
 Full command:
 
@@ -76,25 +76,27 @@ Full command:
 .venv/bin/python -m pytest -q
 ```
 
-Observed result:
+Verified result on 2026-08-19:
 
 ```text
-633 passed, 4 skipped, 18 failed, 75 subtests passed
+661 passed, 4 skipped, 75 subtests passed
 ```
 
-The 18 existing failures are outside the new characterization file and are grouped
-in the Kraken subsystem:
+The initial baseline exposed 18 failures in the Kraken subsystem. Investigation
+showed two test-maintenance causes, not regressions in live trading code:
 
-- three Kraken trailing tests still expect the previous 15% HYPE threshold, while
-  current production code uses 18%;
-- five Kraken xStock adoption tests expect `_maybe_adopt` and `adopted` state that
-  are absent from the current strategy implementation;
-- ten Kraken re-entry tests construct `StratParams` with removed adoption/re-entry
-  fields and therefore fail during setup.
+- three trailing tests still expected the previous 15% HYPE threshold, while the
+  intentional production setting is 18%; their input prices and expectations now
+  exercise the current 18% boundary;
+- fifteen xStock/re-entry failures were collection-order dependent. T212, Kraken and
+  Hyperliquid all have top-level `strategy.py`, `market_data.py` and/or `notify.py`
+  modules. Tests could therefore reuse another venue's object from `sys.modules`.
+  Kraken tests now load the Kraken strategy under a unique test-only module name and
+  isolate the colliding transitive imports while the module graph is built.
 
-These failures represent code/test drift that existed when the baseline was added.
-Do not change production financial behaviour merely to make those stale expectations
-pass.  Reconcile them in a separate Kraken characterization task.
+No live strategy, order or risk code was changed during this reconciliation. The
+89-test financial characterization baseline and the complete repository suite both
+pass.
 
 ## Safety rules for future refactors
 

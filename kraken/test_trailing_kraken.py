@@ -40,9 +40,9 @@ class Base(unittest.TestCase):
 
 class TestLogica(unittest.TestCase):
     def test_should_sell(self):
-        self.assertTrue(should_sell(85, 100, 15))
-        self.assertFalse(should_sell(86, 100, 15))
-        self.assertFalse(should_sell(50, 0, 15))
+        self.assertTrue(should_sell(82, 100, 18))
+        self.assertFalse(should_sell(83, 100, 18))
+        self.assertFalse(should_sell(50, 0, 18))
 
 
 class TestTrailingKraken(Base):
@@ -55,11 +55,11 @@ class TestTrailingKraken(Base):
         import json
         self.assertEqual(json.load(open(self.sf))["HYPE"]["peak"], 65.0)
 
-    def test_crash_peste_15pct_vinde_liberul(self):
+    def test_crash_peste_18pct_vinde_liberul(self):
         c = FakeK(60.0, total=25.0, held=3.38)        # 21.62 liber
         ts = self.ts(c)
         ts.check_once()                                # varf 60
-        c.price = 50.0                                 # -16.7% (prag 15%)
+        c.price = 49.0                                 # -18.3% (prag HYPE 18%)
         ts.check_once()
         self.assertEqual(len(c.orders), 1)
         self.assertEqual(c.orders[0]["side"], "sell")
@@ -68,7 +68,7 @@ class TestTrailingKraken(Base):
     def test_cadere_mica_nu_vinde(self):
         c = FakeK(60.0)
         ts = self.ts(c); ts.check_once()
-        c.price = 56.0                                 # -6.7% < 15%
+        c.price = 56.0                                 # -6.7% < 18%
         ts.check_once()
         self.assertEqual(c.orders, [])
 
@@ -82,7 +82,7 @@ class TestTrailingKraken(Base):
     def test_varf_persista_peste_restart(self):
         c = FakeK(65.0)
         self.ts(c).check_once()
-        c.price = 55.0                                 # -15.4% de la 65
+        c.price = 53.0                                 # -18.5% de la 65
         self.ts(c).check_once()
         self.assertEqual(len(c.orders), 1)
 
@@ -110,7 +110,7 @@ class TestMinProfitKraken(Base):
         ts = self.ts(c, min_profit_pct=5.0)
         ts.check_once()                    # initial=60
         c.price = 64.0; ts.check_once()   # +6.7% > 5% -> trailing activ, peak=64
-        c.price = 53.0; ts.check_once()   # -17.2% de la peak 64 (prag HYPE 15%)
+        c.price = 52.0; ts.check_once()   # -18.8% de la peak 64 (prag HYPE 18%)
         self.assertEqual(len(c.orders), 1, "vinde dupa ce a trecut pragul de profit")
         self.assertEqual(c.orders[0]["side"], "sell")
 

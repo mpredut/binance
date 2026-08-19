@@ -9,17 +9,40 @@ FARA API real, FARA bani: client fals, notificari capturate, stare in fisiere te
 from __future__ import annotations
 
 import os
+import importlib.util
 import signal
 import sys
 import tempfile
 import time
 import unittest
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+KRAKEN_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, KRAKEN_DIR)
 
-import kraken_xstock_watch as xw  # noqa: E402
-import strategy            # noqa: E402
-from strategy import Strategy, StratParams, state_path_for  # noqa: E402
+# `strategy.py`, `market_data.py` and `notify.py` also exist in other venue
+# directories.  Temporarily hide already-collected variants while importing
+# the Kraken graph, then restore them so this test does not contaminate others.
+_COLLIDING_MODULES = ("market_data", "notify")
+_PRELOADED_MODULES = {
+    name: sys.modules.pop(name) for name in _COLLIDING_MODULES if name in sys.modules
+}
+try:
+    import kraken_xstock_watch as xw  # noqa: E402
+
+    _SPEC = importlib.util.spec_from_file_location(
+        "kraken_xstock_strategy_under_test", os.path.join(KRAKEN_DIR, "strategy.py")
+    )
+    strategy = importlib.util.module_from_spec(_SPEC)
+    sys.modules[_SPEC.name] = strategy
+    _SPEC.loader.exec_module(strategy)
+finally:
+    for _name in _COLLIDING_MODULES:
+        sys.modules.pop(_name, None)
+    sys.modules.update(_PRELOADED_MODULES)
+
+Strategy = strategy.Strategy
+StratParams = strategy.StratParams
+state_path_for = strategy.state_path_for
 
 
 class FakeKraken:
