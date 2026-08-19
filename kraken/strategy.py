@@ -71,6 +71,13 @@ class StratParams:
                                   # (4 aug: exact ce s-a intamplat — vandut 51.19, HYPE la 55.6,
                                   # prag reintrare 50.06 nu se mai atinge). 0 = dezactivat (regula veche).
     tp_tranches: list        # [(pct, cota%), ...] vanzare graduala; [] = TP clasic pe tot
+    # --- TP trend-aware (EXPERIMENTAL, default OFF) -------------------------------
+    tp_trend_hold: bool = False       # True = cat trendul scurt e UP, NU face TP (calaresc
+                                      # trendul); ies aproape de piata cand trendul se intoarce.
+                                      # Adreseaza "DCA+TP lasa mult pe masa in bull" (240m: +4% vs
+                                      # buy&hold +48%). OFF = comportament clasic (TP fix).
+    tp_trend_min_pct: float = 0.5     # prag: trend UP = media jumatatii recente > cea veche cu
+                                      # >= acest %% (peste zgomot). Din self._shadow_prices.
 
     @classmethod
     def from_env(cls) -> "StratParams":
@@ -96,6 +103,8 @@ class StratParams:
             reentry_adaptive   = os.environ.get("STRAT_REENTRY_ADAPTIVE", "false").strip().lower() == "true",
             reentry_sl_bounce_pct = float_env("STRAT_REENTRY_SL_BOUNCE_PCT") or 1.5,
             tp_tranches        = _parse_tranches(os.environ.get("STRAT_TP_TRANCHES", "")),
+            tp_trend_hold      = os.environ.get("STRAT_TP_TREND_HOLD", "false").strip().lower() == "true",
+            tp_trend_min_pct   = float_env("STRAT_TP_TREND_MIN_PCT") or 0.5,
         )
 
 
@@ -414,6 +423,21 @@ class Strategy:
             return None
         return std * math.sqrt(3600.0 / mean_dt) * 100.0
 
+    def _trend_up(self, min_pts: int = 20) -> bool:
+        """Trend scurt UP din istoricul propriu de preturi (self._shadow_prices):
+        media jumatatii RECENTE > media jumatatii VECHI cu >= tp_trend_min_pct%
+        (peste zgomot). Determinist -> IDENTIC in live si backtest (aceeasi serie de
+        preturi intra in step()). False la warm-up (<min_pts puncte)."""
+        pts = [p for _, p in self._shadow_prices]
+        if len(pts) < min_pts:
+            return False
+        half = len(pts) // 2
+        old = sum(pts[:half]) / half
+        new = sum(pts[half:]) / (len(pts) - half)
+        if old <= 0:
+            return False
+        return (new - old) / old * 100.0 >= self.p.tp_trend_min_pct
+
     def _shadow_reentry_line(self, price: float, lsp: float, prag_fix: float) -> None:
         try:
             k_re = float_env("SHADOW_K_REENTRY") or 2.0
@@ -506,9 +530,25 @@ class Strategy:
             return
 
         avg = self._avg()
-        if self.p.enable_takeprofit and avg:
+        if self.p.enable_takeprofit and avg and self.p.tp_trend_hold and self._trend_up():
+            # RIDE: trendul scurt e inca UP -> NU fac TP, anulez sell-urile pendinte, TIN
+            # pozitia sa prinda trendul (adreseaza "DCA+TP lasa mult pe masa in bull").
+            while self._find_open("sell"):
+                self._cancel_open("sell")
+            log(f"  [STRAT] trend UP -> TIN (calaresc, fara TP fix la +{self.p.takeprofit_pct}%)")
+        elif self.p.enable_takeprofit and avg and self.p.tp_trend_hold:
+            # trendul s-a intors -> IES aproape de piata (captureaza castigul de trend calarit)
+            exit_px = round(price * 0.999, self.price_dec)
+            sells = [o for o in self.s["orders"] if o["side"] == "sell"]
+            already = len(sells) == 1 and abs(sells[0]["price"] - exit_px) / exit_px <= 0.001
+            if not already:
+                while self._find_open("sell"):
+                    self._cancel_open("sell")
+                self._place("sell", self._dust_safe_qty(self.s["qty"]), exit_px, kind="TP")
+                log(f"  [STRAT] trend s-a intors -> IES la {exit_px} (calarit trendul)")
+        elif self.p.enable_takeprofit and avg:
             # TP in TRANSE (optional, STRAT_TP_TRANCHES="3:50,6:50"): vinde gradual.
-            # Fara tranче configurate = comportamentul clasic (un TP pe tot).
+            # Fara tranче configurate = comportamentul CLASIC (un TP pe tot) — DEFAULT.
             tranches = self.p.tp_tranches or [(self.p.takeprofit_pct, 100.0)]
             desired, rem = [], held
             for i, (pct, share) in enumerate(tranches):
