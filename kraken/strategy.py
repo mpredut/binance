@@ -96,6 +96,7 @@ class StratParams:
     tp_trail_k: float = 2.0           # multiplicatorul vol_1h pt trailing adaptiv
     tp_trail_min: float = 1.5         # clamp jos (%) — nu iesi pe zgomot infim
     tp_trail_max: float = 8.0         # clamp sus (%) — nu lasa profitul sa scape complet
+    tp_trail_vol_interval: int = 240  # minute/bara pentru volatilitate; fix în live/replay
     dca_trend_brake: bool = False     # B: in DOWNTREND confirmat, NU face DCA (nu prinde cutitul care
                                       # cade) — ataca direct maxDD, overlay care REDUCE risc.
     dca_brake_min_pct: float = 1.5    # panta minima (%) recent/vechi ca sa considere downtrend
@@ -138,6 +139,7 @@ class StratParams:
             tp_trail_k         = float_env("STRAT_TP_TRAIL_K") or 2.0,
             tp_trail_min       = float_env("STRAT_TP_TRAIL_MIN") or 1.5,
             tp_trail_max       = float_env("STRAT_TP_TRAIL_MAX") or 8.0,
+            tp_trail_vol_interval = int(float_env("STRAT_TP_TRAIL_VOL_INTERVAL") or 240),
             dca_trend_brake    = os.environ.get("STRAT_DCA_TREND_BRAKE", "false").strip().lower() == "true",
             dca_brake_min_pct  = float_env("STRAT_DCA_BRAKE_MIN_PCT") or 1.5,
         )
@@ -551,18 +553,44 @@ class Strategy:
         if not self.p.tp_trail_adaptive:
             return self.p.tp_trail_pct
         try:
-            vol = self._shadow_vol_1h()
-        except Exception:  # noqa: BLE001 — nu opreste trading-ul
+            vol = self._trail_vol_1h()
+        except Exception as e:  # noqa: BLE001 — nu opreste trading-ul
+            log(f"  [STRAT] trailing adaptiv: OHLC indisponibil ({e}) — fallback pe fix")
             vol = None
         if vol is None:
             return self.p.tp_trail_pct
         return max(self.p.tp_trail_min, min(self.p.tp_trail_max, self.p.tp_trail_k * vol))
 
+    def _trail_vol_1h(self) -> float | None:
+        """Volatilitate normalizată la 1h din aceeași cadență OHLC în live și replay.
+
+        Tick-urile live de 2 minute versus close-urile de 4h din backtest produceau
+        semnale diferite chiar după scalarea cu sqrt(t). Live citește bare Kraken
+        închise; replay-ul este validat separat să ruleze pe același interval.
+        """
+        if self.replay_mode:
+            closes = [price for _, price in self._shadow_prices]
+        else:
+            closes = self.client.ohlc_closes(self.pair, self.p.tp_trail_vol_interval)
+        closes = closes[-90:]
+        if len(closes) < 20:
+            return None
+        returns = [
+            math.log(current / previous)
+            for previous, current in zip(closes, closes[1:])
+            if previous > 0 and current > 0
+        ]
+        if len(returns) < 19:
+            return None
+        try:
+            std = statistics.stdev(returns)
+        except statistics.StatisticsError:
+            return None
+        return std * math.sqrt(60.0 / self.p.tp_trail_vol_interval) * 100.0
+
     def _trend_down(self, min_pts: int = 20) -> bool:
-        """B: downtrend scurt confirmat din istoricul propriu de preturi (simetric
-        cu _trend_up): media jumatatii RECENTE < media celei VECHI cu >= dca_brake_min_pct%.
-        Determinist -> identic live/backtest. False la warm-up (fail-safe: DCA normal)."""
-        pts = [p for _, p in self._shadow_prices]
+        """B: downtrend pe OHLC fix, identic ca scară temporală în live și replay."""
+        pts = self._trend_closes()[-90:]
         if len(pts) < min_pts:
             return False
         half = len(pts) // 2

@@ -28,11 +28,18 @@ def run_replay(ohlc, params, fee_pct: float = 0.26,
     final_upnl/cycles/wins/maxdd/open_qty."""
     if not ohlc:
         raise ValueError("ohlc nu poate fi gol")
-    if params.trend_overlay and (
+    if (params.trend_overlay or params.dca_trend_brake) and (
             bar_minutes is None or float(bar_minutes) != float(params.trend_interval)):
         raise ValueError(
-            "trend_overlay cere ca bar_minutes să fie egal cu trend_interval "
+            "trend_overlay/dca_trend_brake cere ca bar_minutes să fie egal cu trend_interval "
             f"({params.trend_interval} minute); resampling-ul nu este implementat"
+        )
+    if params.tp_trail_adaptive and (
+            bar_minutes is None
+            or float(bar_minutes) != float(params.tp_trail_vol_interval)):
+        raise ValueError(
+            "tp_trail_adaptive cere ca bar_minutes să fie egal cu "
+            f"tp_trail_vol_interval ({params.tp_trail_vol_interval} minute)"
         )
     if params.reentry_adaptive and bar_minutes is None:
         raise ValueError("reentry_adaptive cere bar_minutes pentru volatilitatea temporală")

@@ -126,6 +126,18 @@ class ReplayEngineTest(unittest.TestCase):
                 fee_pct=0.26, bar_minutes=60,
             )
 
+    def test_adaptive_features_require_their_configured_bar_interval(self):
+        with self.assertRaisesRegex(ValueError, "tp_trail_vol_interval"):
+            rp.run_replay(
+                _series(), _params(tp_trail_adaptive=True, tp_trail_vol_interval=240),
+                fee_pct=0.26, bar_minutes=60,
+            )
+        with self.assertRaisesRegex(ValueError, "trend_interval"):
+            rp.run_replay(
+                _series(), _params(dca_trend_brake=True, trend_interval=240),
+                fee_pct=0.26, bar_minutes=60,
+            )
+
     def test_adaptive_reentry_requires_bar_interval_for_time_scaling(self):
         with self.assertRaisesRegex(ValueError, "reentry_adaptive"):
             rp.run_replay(_series(), _params(reentry_adaptive=True), fee_pct=0.26)

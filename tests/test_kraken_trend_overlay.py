@@ -118,6 +118,51 @@ class TrendOverlayTest(unittest.TestCase):
         s.step(100.0, timestamp=14_400.0)
         self.assertEqual(s._shadow_prices[-1], (14_400.0, 100.0))
 
+    def test_adaptive_trail_uses_fixed_closed_ohlc_in_paper_live(self):
+        s = _make_strategy(
+            replay_mode=False,
+            trend_overlay=False,
+            tp_trail_adaptive=True,
+            tp_trail_vol_interval=240,
+        )
+        closes = [100.0 + (index % 3) for index in range(20)]
+        s.client.ohlc_closes.return_value = closes
+
+        self.assertIsNotNone(s._trail_vol_1h())
+        s.client.ohlc_closes.assert_called_once_with("TESTPAIR_OVERLAY", 240)
+
+    def test_adaptive_trail_clamps_and_falls_back_to_fixed(self):
+        s = _make_strategy(
+            replay_mode=True,
+            trend_overlay=False,
+            tp_trail_adaptive=True,
+            tp_trail_pct=3.0,
+            tp_trail_k=2.0,
+            tp_trail_min=1.5,
+            tp_trail_max=8.0,
+        )
+        with patch.object(s, "_trail_vol_1h", return_value=None):
+            self.assertEqual(s._effective_trail_pct(), 3.0)
+        with patch.object(s, "_trail_vol_1h", return_value=0.1):
+            self.assertEqual(s._effective_trail_pct(), 1.5)
+        with patch.object(s, "_trail_vol_1h", return_value=2.0):
+            self.assertEqual(s._effective_trail_pct(), 4.0)
+        with patch.object(s, "_trail_vol_1h", return_value=10.0):
+            self.assertEqual(s._effective_trail_pct(), 8.0)
+
+    def test_dca_brake_uses_fixed_ohlc_in_paper_live(self):
+        s = _make_strategy(
+            replay_mode=False,
+            trend_overlay=False,
+            dca_trend_brake=True,
+            dca_brake_min_pct=1.5,
+        )
+        s.client.ohlc_closes.return_value = [100.0 - index for index in range(20)]
+        s._shadow_prices.extend((float(index), 100.0 + index) for index in range(20))
+
+        self.assertTrue(s._trend_down())
+        s.client.ohlc_closes.assert_called_once_with("TESTPAIR_OVERLAY", 240)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
