@@ -102,6 +102,17 @@ class ReplayEngineTest(unittest.TestCase):
         self.assertEqual(two_bars["fills"], 1)
         self.assertGreater(two_bars["open_qty"], 0.0)
 
+    def test_overlay_requires_replay_bars_at_configured_trend_interval(self):
+        with self.assertRaisesRegex(ValueError, "trend_interval"):
+            rp.run_replay(
+                _series(), _params(trend_overlay=True, trend_interval=240),
+                fee_pct=0.26, bar_minutes=60,
+            )
+
+    def test_adaptive_reentry_requires_bar_interval_for_time_scaling(self):
+        with self.assertRaisesRegex(ValueError, "reentry_adaptive"):
+            rp.run_replay(_series(), _params(reentry_adaptive=True), fee_pct=0.26)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

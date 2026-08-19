@@ -28,6 +28,14 @@ def run_replay(ohlc, params, fee_pct: float = 0.26,
     final_upnl/cycles/wins/maxdd/open_qty."""
     if not ohlc:
         raise ValueError("ohlc nu poate fi gol")
+    if params.trend_overlay and (
+            bar_minutes is None or float(bar_minutes) != float(params.trend_interval)):
+        raise ValueError(
+            "trend_overlay cere ca bar_minutes să fie egal cu trend_interval "
+            f"({params.trend_interval} minute); resampling-ul nu este implementat"
+        )
+    if params.reentry_adaptive and bar_minutes is None:
+        raise ValueError("reentry_adaptive cere bar_minutes pentru volatilitatea temporală")
     client = MagicMock()
     client.pair_info.return_value = None      # precizie implicita (fara retea)
     orig_notify = _strat.notify
@@ -38,6 +46,7 @@ def run_replay(ohlc, params, fee_pct: float = 0.26,
             # Nu citi deloc un eventual .state_REPLAY rămas pe disc. Constructorul
             # live își păstrează comportamentul când initial_state nu este furnizat.
             initial_state=_strat._new_state(),
+            replay_mode=True,
         )
         s._save = _silent                     # fara fisier de stare
         cycle0 = s.s.get("cycle", 1)
@@ -49,7 +58,7 @@ def run_replay(ohlc, params, fee_pct: float = 0.26,
         initial_capital = float(params.max_budget)
         equity_curve = [initial_capital]
         exposure = []
-        for (_o, h, l, c) in ohlc:
+        for bar_index, (_o, h, l, c) in enumerate(ohlc):
             # --- FILL OHLC-aware: buy se umple daca low<=limita, sell daca high>=limita.
             #     Ordinea buy-apoi-sell (ca simulate). _apply_fill = contabilitatea LIVE.
             for order in list(s.s["orders"]):
@@ -81,7 +90,8 @@ def run_replay(ohlc, params, fee_pct: float = 0.26,
                         trade_pnls.append(s.s["realized_net"] - cycle_net_start)
                         cycle_net_start = s.s["realized_net"]
             # --- DECIZIA = step-ul LIVE (entry/DCA/TP/stop/reintrare) pe close ---
-            s.step(c)
+            replay_time = bar_index * bar_minutes * 60 if bar_minutes else bar_index
+            s.step(c, timestamp=replay_time)
             # --- equity mark-to-market pe close, pt drawdown ---
             qty = s.s["qty"]
             upnl = (c - s.s["cost"] / qty) * qty if qty > 1e-12 else 0.0

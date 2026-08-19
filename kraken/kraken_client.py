@@ -162,7 +162,9 @@ class KrakenClient:
         backtest-ul (care ruleaza pe aceleasi bare)."""
         res = self._public("OHLC", {"pair": pair, "interval": interval})
         key = next((k for k in res if k != "last"), None)
-        return [float(x[4]) for x in res[key]] if key else []
+        # Ultimul rând poate fi lumânarea încă în formare. Semnalul live trebuie
+        # să decidă numai pe bare închise, altfel poate oscila intra-bar.
+        return [float(x[4]) for x in res[key][:-1]] if key else []
 
     def last_price(self, pair: str) -> float | None:
         t = self.ticker(pair)

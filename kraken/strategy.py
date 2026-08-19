@@ -167,12 +167,16 @@ def _new_state() -> dict:
 class Strategy:
     def __init__(self, client: KrakenClient, pair: str, params: StratParams,
                  dry_run: bool = True, desktop: bool = False,
-                 initial_state: dict | None = None):
+                 initial_state: dict | None = None,
+                 replay_mode: bool = False):
         self.client = client
         self.pair = pair
         self.p = params
         self.ccy = params.currency
         self.dry_run = dry_run
+        # dry_run înseamnă și paper-live, nu doar backtest. Replay-ul trebuie
+        # identificat separat ca semnalul de trend să folosească barele injectate.
+        self.replay_mode = replay_mode
         self.desktop = desktop
         self.state_file = state_path_for(pair)
         self.s = initial_state if initial_state is not None else self._load()
@@ -325,6 +329,11 @@ class Strategy:
             self.s["spent"] += o.get("amount", vol * price)
             if o.get("kind") == "DCA":
                 self.s["dca_buys"] += 1
+            if o.get("kind") == "TREND_ENTRY":
+                # Ordin plasat != poziție de trend. Activăm modul numai după ce
+                # exchange-ul/replay-ul confirmă fill-ul.
+                self.s["trend_mode"] = True
+                self.s["trend_peak"] = price
             avg = self._avg()
             log(f"  [STRAT] {tag}BUY FILLED {vol} @ {price} {self.ccy} ({o.get('kind')})  "
                 f"qty={self.s['qty']:.8f} avg={avg:.{self.price_dec}f} fee={fee}")
@@ -506,10 +515,10 @@ class Strategy:
     # -- TREND OVERLAY ---------------------------------------------------------
     def _trend_closes(self) -> list:
         """Seria de INCHIDERI pt semnalul de trend LUNG, ACELASI timescale live si backtest:
-        - BACKTEST (dry_run): barele fed-uite in step() (_shadow_prices = inchiderile lor).
-        - LIVE: OHLC Kraken pe trend_interval (fetch cache-uit 15min).
+        - BACKTEST (replay_mode): barele fed-uite in step() (_shadow_prices = inchiderile lor).
+        - LIVE/PAPER-LIVE: OHLC Kraken pe trend_interval (fetch cache-uit 15min).
         Rezolva gap-ul de cadenta: SMA(N) inseamna acelasi lucru in ambele (240m×30 = ~5 zile)."""
-        if self.dry_run:
+        if self.replay_mode:
             return [p for _, p in self._shadow_prices]
         try:
             return self.client.ohlc_closes(self.pair, self.p.trend_interval)
@@ -532,25 +541,23 @@ class Strategy:
                 return False
         return True
 
-    def _uptrend_confirmed(self) -> bool:
-        return self._trend_up_series(self._trend_closes())
-
-    def _trend_sma(self) -> float | None:
-        """SMA(N) pe seria de trend — pt verificarea de trend-rupt (ExitB)."""
-        closes = self._trend_closes()
-        n = self.p.trend_sma_n
-        return sum(closes[-n:]) / n if len(closes) >= n else None
-
     def _overlay_step(self, price: float) -> bool:
         """Overlay de regim. True = a gestionat tick-ul (nu mai rula logica de range).
         In UPTREND confirmat: TOP-UP mare + hold; iese pe trailing (A) sau trailing SAU
         pret<SMA=trend rupt (B). In range (fara uptrend): False -> cade pe DCA/TP clasic."""
-        up = self._uptrend_confirmed()
+        closes = self._trend_closes()
+        up = self._trend_up_series(closes)
+        pending_trend_entry = next(
+            (o for o in self.s["orders"]
+             if o["side"] == "buy" and o.get("kind") == "TREND_ENTRY"),
+            None,
+        )
         if self.s.get("trend_mode"):
             peak = max(self.s.get("trend_peak") or price, price)
             self.s["trend_peak"] = peak
             trail_stop = peak * (1 - self.p.trend_trail_pct / 100)
-            sma = self._trend_sma()
+            n = self.p.trend_sma_n
+            sma = sum(closes[-n:]) / n if len(closes) >= n else None
             broke = self.p.trend_exit_break and sma is not None and price < sma
             if (price <= trail_stop or broke) and self.s["qty"] > 1e-12:
                 exit_px = round(price * 0.999, self.price_dec)
@@ -565,27 +572,32 @@ class Strategy:
                 while self._find_open("sell"):     # ride: nu vinde
                     self._cancel_open("sell")
             return True
+        if pending_trend_entry:
+            if up:
+                return True                         # așteaptă fill-ul top-up-ului
+            self._cancel_open("buy")                # semnal dispărut înainte de fill
+            log("  [STRAT] TREND ENTER anulat: semnalul a dispărut înainte de fill")
+            return False                            # revine la strategia range
         if up and self.s["spent"] + self.p.trend_topup <= self.p.max_budget:
             while self._find_open("buy"):          # anuleaza ordine range pendinte
                 self._cancel_open("buy")
             while self._find_open("sell"):
                 self._cancel_open("sell")
             self._place("buy", self._qty_for(self.p.trend_topup, price), price,
-                        kind="ENTRY", amount=self.p.trend_topup)
-            self.s["trend_mode"] = True
-            self.s["trend_peak"] = price
-            log(f"  [STRAT] TREND ENTER: top-up {self.p.trend_topup} {self.ccy} @ {price} "
+                        kind="TREND_ENTRY", amount=self.p.trend_topup)
+            log(f"  [STRAT] TREND ENTER pending: top-up {self.p.trend_topup} {self.ccy} @ {price} "
                 f"(SMA{self.p.trend_sma_n} up, confirmat)")
             return True
         return False
 
-    def step(self, price: float) -> None:
+    def step(self, price: float, timestamp: float | None = None) -> None:
         held = self.s["qty"]
         entry_px = sr.entry_price(price, self.p.entry_discount_pct)   # = price*(1 - disc%)
-        self._shadow_prices.append((time.time(), price))   # istoric pt sigma (observational)
-        # TREND OVERLAY: combina regim range (DCA/TP) cu regim trend (hold+trailing).
-        if self.p.trend_overlay and self._overlay_step(price):
-            return
+        # Live folosește ceasul real; replay-ul injectează timpul barei. Fără
+        # asta un backtest de sute de bare rulat într-o secundă produce o
+        # volatilitate orară absurdă și schimbă pragul adaptiv.
+        tick_time = time.time() if timestamp is None else float(timestamp)
+        self._shadow_prices.append((tick_time, price))
 
         # adoptare in asteptare: NU cumpara o intrare noua — alocarea e pe drum
         if self.p.adopt_cost > 0 and not self.s.get("adopted") and held <= 1e-12:
@@ -593,6 +605,15 @@ class Strategy:
             if not self.s.get("adopted"):
                 return
             held = self.s["qty"]
+
+        # STOP-LOSS-ul este invariantă de siguranță și are prioritate față de
+        # orice logică de regim, inclusiv hold/trailing din overlay.
+        if held > 1e-12 and self._check_stop_loss(price):
+            return
+
+        # TREND OVERLAY: combina regim range (DCA/TP) cu regim trend (hold+trailing).
+        if self.p.trend_overlay and self._overlay_step(price):
+            return
 
         if held <= 1e-12:
             if self._has_open("buy"):
@@ -632,10 +653,6 @@ class Strategy:
                 return
             self._place("buy", self._qty_for(self.p.entry_amount, entry_px),
                         entry_px, kind="ENTRY", amount=self.p.entry_amount)
-            return
-
-        # STOP-LOSS: taie pierderea inainte de DCA/TP
-        if self._check_stop_loss(price):
             return
 
         avg = self._avg()

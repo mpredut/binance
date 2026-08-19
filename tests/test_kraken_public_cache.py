@@ -44,6 +44,21 @@ class PublicCacheTest(unittest.TestCase):
             info = client.pair_info("HYPEUSD")                   # re-fetch -> plin
             self.assertEqual(info.get("ordermin"), "0.1")
 
+    def test_ohlc_closes_excludes_potentially_incomplete_last_candle(self):
+        response = {
+            "HYPEUSD": [
+                [1, "9", "11", "8", "10", "10", "1", 1],
+                [2, "10", "12", "9", "11", "11", "1", 1],
+                [3, "11", "99", "1", "42", "42", "1", 1],
+            ],
+            "last": 3,
+        }
+        client = kc.KrakenClient()
+        with mock.patch.object(client, "_public", return_value=response):
+            closes = client.ohlc_closes("HYPEUSD", 240)
+
+        self.assertEqual(closes, [10.0, 11.0])
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

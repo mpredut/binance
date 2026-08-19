@@ -50,5 +50,8 @@ logger/
 # (scrise cu `git add -f`), nu pe main. Vezi `offline/runners/`.
 backtest_proposals.json
 
+# Dataset-uri înghețate și rapoarte walk-forward generate local/dev.
+offline/results/
+
 # Artefacte generate de drawPriceLst (priceAnalysis.py savefig) — nu cod.
 plot_*.png

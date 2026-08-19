@@ -1,5 +1,6 @@
 import os, sys, time, threading, tempfile, unittest
 import multiprocessing as mp
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from lock import trade_cooldown as tc
@@ -33,10 +34,14 @@ class TestTradeCooldown(unittest.TestCase):
         self.assertTrue(tc.reserve_trade("BUY", "TAOUSDC", cooldown_sec=180)[0])
 
     def test_allowed_after_cooldown(self):
-        self.assertTrue(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=1)[0])
-        self.assertFalse(tc.reserve_trade("SELL", "BTCUSDC", cooldown_sec=1)[0])
-        time.sleep(1.1)
-        self.assertTrue(tc.reserve_trade("SELL", "BTCUSDC", cooldown_sec=1)[0])
+        # Ceas controlat, nu sleep real: evită flake la ajustări de wall-clock/NTP
+        # și testează exact semantica pragului (permis după expirare).
+        with mock.patch("lock.cooldown.time.time") as now:
+            now.return_value = 1_000.0
+            self.assertTrue(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=1)[0])
+            self.assertFalse(tc.reserve_trade("SELL", "BTCUSDC", cooldown_sec=1)[0])
+            now.return_value = 1_001.1
+            self.assertTrue(tc.reserve_trade("SELL", "BTCUSDC", cooldown_sec=1)[0])
 
     def test_release_unblocks(self):
         self.assertTrue(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)[0])

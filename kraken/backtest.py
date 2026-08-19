@@ -49,7 +49,9 @@ def fetch_candles(pair, interval):
     key = next((k for k in res if k != "last"), None)
     if not key:
         return []
-    return [(float(x[1]), float(x[2]), float(x[3]), float(x[4])) for x in res[key]]
+    # Ultima lumânare poate fi încă în formare; deciziile istorice se fac doar
+    # pe bare închise, la fel ca semnalul live și runner-ul walk-forward.
+    return [(float(x[1]), float(x[2]), float(x[3]), float(x[4])) for x in res[key][:-1]]
 
 
 def simulate(ohlc, P, reentry_arr=None, sl_bounce_pct=None):
