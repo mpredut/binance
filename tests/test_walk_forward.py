@@ -1,6 +1,6 @@
 import unittest
 
-from offline.backtests.walk_forward import walk_forward_splits
+from offline.backtests.walk_forward import summarize_test_windows, walk_forward_splits
 
 
 class WalkForwardSplitsTest(unittest.TestCase):
@@ -42,6 +42,23 @@ class WalkForwardSplitsTest(unittest.TestCase):
             walk_forward_splits(
                 20, train_size=8, validation_size=3, test_size=2, step_size=-1,
             )
+
+    def test_summary_preserves_worst_case_and_market_regimes(self):
+        summary = summarize_test_windows([
+            {"return_pct": 2.0, "max_drawdown_pct": 1.0,
+             "buy_hold_return_pct": 5.0, "cycles": 2, "fills": 4},
+            {"return_pct": -3.0, "max_drawdown_pct": 4.0,
+             "buy_hold_return_pct": -10.0, "cycles": 1, "fills": 5},
+            {"return_pct": 1.0, "max_drawdown_pct": 2.0,
+             "buy_hold_return_pct": -1.0, "cycles": 0, "fills": 1},
+        ])
+        self.assertEqual(summary["window_count"], 3)
+        self.assertEqual(summary["worst_return_pct"], -3.0)
+        self.assertEqual(summary["worst_max_drawdown_pct"], 4.0)
+        self.assertEqual(summary["positive_windows"], 2)
+        self.assertEqual(summary["mean_return_up_market_pct"], 2.0)
+        self.assertEqual(summary["mean_return_down_market_pct"], -1.0)
+        self.assertEqual(summary["total_fills"], 10)
 
 
 if __name__ == "__main__":
