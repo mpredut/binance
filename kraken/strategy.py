@@ -246,7 +246,10 @@ class Strategy:
             self.s["orders"].remove(o)
 
     # -- plasare ---------------------------------------------------------------
-    def _place(self, side: str, vol: float, price: float, kind: str, amount: float = 0.0) -> None:
+    def _place(self, side: str, vol: float, price: float, kind: str, amount: float = 0.0,
+               market: bool = False) -> None:
+        # market=True: iesire de piata (trailing/stop) — se executa imediat, NU ordin limita
+        # care poate rata o cadere brusca. In backtest se umple la open-ul barei urmatoare.
         vol = round(vol, self.vol_dec)
         price = round(price, self.price_dec)
         if vol <= 0 or (self.ordermin and vol < self.ordermin):
@@ -254,13 +257,14 @@ class Strategy:
             return
         if self.dry_run:
             self._paper_seq += 1
-            log(f"  [STRAT] [PAPER] {side.upper()} {kind} {vol} @ {price} {self.ccy}")
+            log(f"  [STRAT] [PAPER] {side.upper()} {kind}{' MKT' if market else ''} {vol} @ {price} {self.ccy}")
             self.s["orders"].append({"txid": f"PAPER-{self._paper_seq}", "side": side,
                                      "vol": vol, "price": price, "amount": amount,
-                                     "kind": kind, "ts": time.time()})
+                                     "kind": kind, "market": market, "ts": time.time()})
             return
         try:
-            res = self.client.add_order(self.pair, side, vol, price, ordertype="limit")
+            res = self.client.add_order(self.pair, side, vol, None if market else price,
+                                        ordertype="market" if market else "limit")
             txid = (res.get("txid") or ["?"])[0]
             log(f"  [STRAT] {side.upper()} {kind} plasat txid={txid} {vol} @ {price}")
             self.s["orders"].append({"txid": txid, "side": side, "vol": vol, "price": price,
@@ -398,7 +402,7 @@ class Strategy:
                         pass
                 self._remove(o)
             self._place("sell", self._dust_safe_qty(self.s["qty"]),
-                        round(price * 0.995, self.price_dec), kind="STOP")
+                        round(price * 0.995, self.price_dec), kind="STOP", market=True)
             notify(title=f"🛑 SL {self.pair} -{loss_pct:.1f}%",
                    body=f"pierdere {loss_pct:.1f}% ≥prag{self.p.stop_loss_pct}% — vand tot",
                    source="kraken", price=price, desktop=self.desktop)
@@ -565,7 +569,7 @@ class Strategy:
                 if not (len(sells) == 1 and abs(sells[0]["price"] - exit_px) / exit_px <= 0.001):
                     while self._find_open("sell"):
                         self._cancel_open("sell")
-                    self._place("sell", self._dust_safe_qty(self.s["qty"]), exit_px, kind="TP")
+                    self._place("sell", self._dust_safe_qty(self.s["qty"]), exit_px, kind="TP", market=True)
                     log(f"  [STRAT] TREND EXIT ({'break' if broke else 'trailing'} "
                         f"{self.p.trend_trail_pct}%) varf {peak:.{self.price_dec}f} -> IES la {exit_px}")
             else:
@@ -669,7 +673,7 @@ class Strategy:
                 self._cancel_open("sell")
             if price <= trail_stop:
                 exit_px = round(price * 0.999, self.price_dec)
-                self._place("sell", self._dust_safe_qty(self.s["qty"]), exit_px, kind="TP")
+                self._place("sell", self._dust_safe_qty(self.s["qty"]), exit_px, kind="TP", market=True)
                 log(f"  [STRAT] trailing: pullback {self.p.tp_trail_pct}% de la varf "
                     f"{peak:.{self.price_dec}f} -> IES la {exit_px} (calarit trendul)")
                 # Nu deschide un DCA contradictoriu in acelasi tick in care iesim.
