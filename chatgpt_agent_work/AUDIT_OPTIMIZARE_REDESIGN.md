@@ -28,7 +28,7 @@ Nu recomand o rescriere în microservicii. Pentru un singur host ar crește codu
 - `priceAnalysis.py`: 731 linii;
 - `monitortrades.py`: 654 linii;
 - strategiile T212 și Kraken: aproximativ 804 și 583 linii;
-- analiza AST a găsit puține clone exacte în codul activ; cele mari sunt în `old_trade/`.
+- analiza AST a găsit puține clone exacte în codul activ; cele mari sunt în `archive/old_trade/`.
 
 Rezultatul arată că simpla extragere a funcțiilor duplicate nu va produce reducerea dorită. Este necesară consolidarea responsabilităților.
 
@@ -52,15 +52,15 @@ offline/
   migrations/
 
 archive/
-  old_trade/
-  monitortrades_legacy.py
+  old_trade/                 # mutat ulterior în archive/old_trade/
+  monitortrades_legacy.py    # mutat ulterior în archive/
   obsolete scripts
 ```
 
 Candidați evidenți pentru mutare, după validarea importurilor și a operațiunilor:
 
-- `old_trade/`;
-- `monitortrades_legacy.py`;
+- `archive/old_trade/` (mutat din root);
+- `archive/monitortrades_legacy.py` (mutat din root);
 - `tradeall_observe.py`;
 - `tradeall_backtest.py`;
 - `sim/`;

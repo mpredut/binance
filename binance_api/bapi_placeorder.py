@@ -463,7 +463,7 @@ from decimal import Decimal, ROUND_DOWN
 # via PLACE_ORDER_MAX_WAIT_SEC in bapi_placeorder_config.env.
 # 30 iul: fee_percentage/wait_trend/max_wait_sec ELIMINATE ca parametri (erau
 # MOARTE — singurul apelant, place_order, nu le suprascria niciodata, nici un
-# alt apelant din tot repo-ul, inclusiv old_trade/). Citite direct din config.
+# alt apelant din tot repo-ul, inclusiv archive/old_trade/). Citite direct din config.
 def __place_order(order_type, symbol, price, qty=None, force=False, cancelorders=False, hours=PLACE_ORDER_HOURS):
 
     order_type = order_type.upper()
@@ -589,7 +589,7 @@ def _log_order_outcome(symbol, side, price, qty, outcome, refuse_reason, motivat
 
 
 # `pair` ramane in semnatura DOAR pt compatibilitate cu apelantii existenti
-# (tradeall.py, old_trade/trade3.py, trade5.py trec pair=True explicit) — dar
+# (tradeall.py, archive/old_trade/trade3.py, trade5.py trec pair=True explicit) — dar
 # e IGNORAT complet (era deja suprascris necontitionat cu False in corp, cod
 # mort de multa vreme). Nu sterge parametrul fara sa actualizezi si apelantii.
 def place_order_smart(order_type, symbol, price, qty=None, safeback_seconds=PLACE_ORDER_SAFEBACK_SEC, force=False, cancelorders=True, hours=PLACE_ORDER_HOURS, pair=None, motivation=None):

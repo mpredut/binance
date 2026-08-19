@@ -1,6 +1,6 @@
 import unittest
 
-from monitortrades_legacy import ProcentDistributor
+from archive.monitortrades_legacy import ProcentDistributor
 
 
 class TestProcentDistributor(unittest.TestCase):
@@ -58,4 +58,3 @@ class TestProcentDistributor(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

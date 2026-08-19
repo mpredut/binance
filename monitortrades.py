@@ -45,7 +45,7 @@ MT_SELL_SAFEBACK_HOURS = float(os.environ.get("MT_SELL_SAFEBACK_HOURS", "2"))
 MT_BUY_SAFEBACK_HOURS = float(os.environ.get("MT_BUY_SAFEBACK_HOURS", "48"))
 
 
-# Cod legacy mutat in monitortrades_legacy.py pe 16 iun 2026 (vanzare graduala,
+# Cod legacy mutat in archive/monitortrades_legacy.py (vanzare graduala,
 # ProcentDistributor/BuyTransaction, monitor_close_orders_by_age*, update_trades/
 # apply_sell_orders, monitor_trades/start_monitoring, test()). NU mai e folosit de
 # calea activa. Pastram doar `trades` gol: e referit de liniile COMENTATE din main()

@@ -36,7 +36,7 @@ Caracteristicile dominante sunt:
 
 ### Delimitare live vs research
 
-Directoarele `research/`, `sim/`, `old_trade/`, `tests/`, `forecast/` și scripturile de backtest nu fac parte din runtime-ul declarat în `procs.conf`. `forecast/` poate fi folosit ca analiză experimentală, dar nu tranzacționează în fluxul live principal.
+Directoarele `research/`, `sim/`, `archive/old_trade/`, `tests/`, `forecast/` și scripturile de backtest nu fac parte din runtime-ul declarat în `procs.conf`. `forecast/` poate fi folosit ca analiză experimentală, dar nu tranzacționează în fluxul live principal.
 
 ## 3. Design high-level
 

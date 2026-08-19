@@ -1,6 +1,6 @@
-# cod legacy mutat din monitortrades.py pe 16 iun 2026, pastrat ca referinta -- NU e importat/folosit
-# de calea activa. Botul live traieste integral in monitortrades.py. Singura referinta externa este
-# tests/testdistributor.py (test deja invechit fata de semnatura actuala a ProcentDistributor).
+# Cod legacy mutat din monitortrades.py pe 16 iun 2026 si arhivat ulterior aici.
+# NU este importat/folosit de calea activa. Botul live traieste integral in
+# monitortrades.py. Singura referinta externa este tests/testdistributor.py.
 # Importurile de mai jos exista doar ca fisierul sa fie parsabil/rulabil standalone ca referinta.
 
 import sys
