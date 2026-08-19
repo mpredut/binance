@@ -89,6 +89,16 @@ class StratParams:
     trend_topup: float = 2000.0       # cat cumpar la intrarea in trend (sume mai mari = prinde trendul)
     trend_trail_pct: float = 5.0      # trailing-ul pozitiei de trend (pullback de la varf la care ies)
     trend_exit_break: bool = False    # False=A (doar trailing); True=B (trailing SAU pret<SMA=trend rupt)
+    # --- ADAPTIV pe VOLATILITATE (redesign overlay: MODULARE, nu amplificare; default OFF) ---
+    tp_trail_adaptive: bool = False   # A: trailing-ul TP (tp_trail_pct) devine k×vol_1h — larg in
+                                      # trend volatil (calaresc mai mult), strans in chop. Fail-safe
+                                      # pe warm-up (fallback pe tp_trail_pct fix), ca reintrarea adaptiva.
+    tp_trail_k: float = 2.0           # multiplicatorul vol_1h pt trailing adaptiv
+    tp_trail_min: float = 1.5         # clamp jos (%) — nu iesi pe zgomot infim
+    tp_trail_max: float = 8.0         # clamp sus (%) — nu lasa profitul sa scape complet
+    dca_trend_brake: bool = False     # B: in DOWNTREND confirmat, NU face DCA (nu prinde cutitul care
+                                      # cade) — ataca direct maxDD, overlay care REDUCE risc.
+    dca_brake_min_pct: float = 1.5    # panta minima (%) recent/vechi ca sa considere downtrend
 
     @classmethod
     def from_env(cls) -> "StratParams":
@@ -124,6 +134,12 @@ class StratParams:
             trend_topup        = float_env("STRAT_TREND_TOPUP") or 2000.0,
             trend_trail_pct    = float_env("STRAT_TREND_TRAIL_PCT") or 5.0,
             trend_exit_break   = os.environ.get("STRAT_TREND_EXIT_BREAK", "false").strip().lower() == "true",
+            tp_trail_adaptive  = os.environ.get("STRAT_TP_TRAIL_ADAPTIVE", "false").strip().lower() == "true",
+            tp_trail_k         = float_env("STRAT_TP_TRAIL_K") or 2.0,
+            tp_trail_min       = float_env("STRAT_TP_TRAIL_MIN") or 1.5,
+            tp_trail_max       = float_env("STRAT_TP_TRAIL_MAX") or 8.0,
+            dca_trend_brake    = os.environ.get("STRAT_DCA_TREND_BRAKE", "false").strip().lower() == "true",
+            dca_brake_min_pct  = float_env("STRAT_DCA_BRAKE_MIN_PCT") or 1.5,
         )
 
 
@@ -526,6 +542,36 @@ class Strategy:
             return self.p.reentry_drop_pct, f"fix (fallback, warm-up {len(self._shadow_prices)}/20)"
         return k_re * vol, f"adaptiv (vol_1h {vol:.2f}% x k={k_re})"
 
+    def _effective_trail_pct(self) -> float:
+        """A: pullback-ul de trailing EFECTIV. Adaptiv (k×vol_1h, clamp) daca
+        tp_trail_adaptive; altfel tp_trail_pct fix. Fail-safe pe warm-up/eroare
+        (cade pe fix), ca gate-ul de reintrare adaptiva — nu altereaza trading-ul
+        cand semnalul lipseste. Ideea: ride mai LARG in trend volatil, mai STRANS
+        in chop, FARA a cumpara sus (defectul overlay-ului cu top-up)."""
+        if not self.p.tp_trail_adaptive:
+            return self.p.tp_trail_pct
+        try:
+            vol = self._shadow_vol_1h()
+        except Exception:  # noqa: BLE001 — nu opreste trading-ul
+            vol = None
+        if vol is None:
+            return self.p.tp_trail_pct
+        return max(self.p.tp_trail_min, min(self.p.tp_trail_max, self.p.tp_trail_k * vol))
+
+    def _trend_down(self, min_pts: int = 20) -> bool:
+        """B: downtrend scurt confirmat din istoricul propriu de preturi (simetric
+        cu _trend_up): media jumatatii RECENTE < media celei VECHI cu >= dca_brake_min_pct%.
+        Determinist -> identic live/backtest. False la warm-up (fail-safe: DCA normal)."""
+        pts = [p for _, p in self._shadow_prices]
+        if len(pts) < min_pts:
+            return False
+        half = len(pts) // 2
+        old = sum(pts[:half]) / half
+        new = sum(pts[half:]) / (len(pts) - half)
+        if old <= 0:
+            return False
+        return (new - old) / old * 100.0 <= -self.p.dca_brake_min_pct
+
     # -- TREND OVERLAY ---------------------------------------------------------
     def _trend_closes(self) -> list:
         """Seria de INCHIDERI pt semnalul de trend LUNG, ACELASI timescale live si backtest:
@@ -678,13 +724,14 @@ class Strategy:
             # TP; altfel varful s-ar reseta exact in pullback-ul pe care vrem sa-l vindem.
             peak = max(self.s.get("trail_peak") or price, price)
             self.s["trail_peak"] = peak
-            trail_stop = peak * (1 - self.p.tp_trail_pct / 100)
+            eff_trail = self._effective_trail_pct()   # A: adaptiv pe vol daca activat, altfel fix
+            trail_stop = peak * (1 - eff_trail / 100)
             while self._find_open("sell"):
                 self._cancel_open("sell")
             if price <= trail_stop:
                 exit_px = round(price * 0.999, self.price_dec)
                 self._place("sell", self._dust_safe_qty(self.s["qty"]), exit_px, kind="TP", market=True)
-                log(f"  [STRAT] trailing: pullback {self.p.tp_trail_pct}% de la varf "
+                log(f"  [STRAT] trailing: pullback {eff_trail:.2f}% de la varf "
                     f"{peak:.{self.price_dec}f} -> IES la {exit_px} (calarit trendul)")
                 # Nu deschide un DCA contradictoriu in acelasi tick in care iesim.
                 return
@@ -731,6 +778,7 @@ class Strategy:
                 # prag DCA + "aproape de prag" = atins (regula partajata cu backtest)
                 and sr.dca_price_hit(price, self.s["last_buy_price"], self.p.dca_drop_pct, self.p.reentry_tolerance_pct)
                 and self.s["spent"] + self.p.dca_amount <= self.p.max_budget
+                and not (self.p.dca_trend_brake and self._trend_down())  # B: frana DCA in downtrend
                 and not self._has_open("buy")):
             log(f"  [STRAT] dip {price} <= {self.s['last_buy_price']}×(1-{self.p.dca_drop_pct}%)"
                 f" (tol {self.p.reentry_tolerance_pct}%) — DCA")
