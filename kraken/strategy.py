@@ -71,6 +71,14 @@ class StratParams:
                                   # (4 aug: exact ce s-a intamplat — vandut 51.19, HYPE la 55.6,
                                   # prag reintrare 50.06 nu se mai atinge). 0 = dezactivat (regula veche).
     tp_tranches: list        # [(pct, cota%), ...] vanzare graduala; [] = TP clasic pe tot
+    # --- TP trend-aware (EXPERIMENTAL, default OFF) -------------------------------
+    tp_trend_hold: bool = False       # True = cat trendul scurt e UP, NU face TP (calaresc
+                                      # trendul); ies aproape de piata cand trendul se intoarce.
+                                      # Adreseaza "DCA+TP lasa mult pe masa in bull" (240m: +4% vs
+                                      # buy&hold +48%). OFF = comportament clasic (TP fix).
+    tp_trend_min_pct: float = 0.5     # (v1, nefolosit in v2) prag semnal trend din _shadow_prices.
+    tp_trail_pct: float = 2.0         # v2: PESTE nivelul TP, ies la un pullback de acest %% de la
+                                      # varf (trailing). Doar peste TP -> nu iesi niciodata in pierdere.
 
     @classmethod
     def from_env(cls) -> "StratParams":
@@ -96,6 +104,9 @@ class StratParams:
             reentry_adaptive   = os.environ.get("STRAT_REENTRY_ADAPTIVE", "false").strip().lower() == "true",
             reentry_sl_bounce_pct = float_env("STRAT_REENTRY_SL_BOUNCE_PCT") or 1.5,
             tp_tranches        = _parse_tranches(os.environ.get("STRAT_TP_TRANCHES", "")),
+            tp_trend_hold      = os.environ.get("STRAT_TP_TREND_HOLD", "false").strip().lower() == "true",
+            tp_trend_min_pct   = float_env("STRAT_TP_TREND_MIN_PCT") or 0.5,
+            tp_trail_pct       = float_env("STRAT_TP_TRAIL_PCT") or 2.0,
         )
 
 
@@ -414,6 +425,21 @@ class Strategy:
             return None
         return std * math.sqrt(3600.0 / mean_dt) * 100.0
 
+    def _trend_up(self, min_pts: int = 20) -> bool:
+        """Trend scurt UP din istoricul propriu de preturi (self._shadow_prices):
+        media jumatatii RECENTE > media jumatatii VECHI cu >= tp_trend_min_pct%
+        (peste zgomot). Determinist -> IDENTIC in live si backtest (aceeasi serie de
+        preturi intra in step()). False la warm-up (<min_pts puncte)."""
+        pts = [p for _, p in self._shadow_prices]
+        if len(pts) < min_pts:
+            return False
+        half = len(pts) // 2
+        old = sum(pts[:half]) / half
+        new = sum(pts[half:]) / (len(pts) - half)
+        if old <= 0:
+            return False
+        return (new - old) / old * 100.0 >= self.p.tp_trend_min_pct
+
     def _shadow_reentry_line(self, price: float, lsp: float, prag_fix: float) -> None:
         try:
             k_re = float_env("SHADOW_K_REENTRY") or 2.0
@@ -506,9 +532,35 @@ class Strategy:
             return
 
         avg = self._avg()
-        if self.p.enable_takeprofit and avg:
+        if (self.p.enable_takeprofit and avg and self.p.tp_trend_hold
+                and price >= sr.tp_price(avg, self.p.takeprofit_pct)):
+            # v2 TRAILING: PESTE nivelul TP (profit garantat) -> in loc sa vand fix, CALARESC:
+            # urmaresc varful si ies cand pretul scade tp_trail_pct% de la el. SUB TP nu intru
+            # aici -> comportament clasic; NICIODATA iesire in pierdere (bug-ul v1).
+            peak = max(self.s.get("trail_peak") or price, price)
+            self.s["trail_peak"] = peak
+            trail_stop = peak * (1 - self.p.tp_trail_pct / 100)
+            while self._find_open("sell"):
+                self._cancel_open("sell")
+            if price <= trail_stop:
+                exit_px = round(price * 0.999, self.price_dec)
+                self._place("sell", self._dust_safe_qty(self.s["qty"]), exit_px, kind="TP")
+                log(f"  [STRAT] trailing: pullback {self.p.tp_trail_pct}% de la varf "
+                    f"{peak:.{self.price_dec}f} -> IES la {exit_px} (calarit trendul)")
+            else:
+                log(f"  [STRAT] peste TP, CALARESC (varf {peak:.{self.price_dec}f}, "
+                    f"trail-stop {trail_stop:.{self.price_dec}f})")
+        elif self.p.enable_takeprofit and avg and self.p.tp_trend_hold:
+            # v2 SUB TP, ride ON: NU plasez TP fix (altfel se umple la TP si nu mai calaresc).
+            # Astept sa DEPASESC nivelul TP ca sa pornesc trailing-ul; anulez orice sell fix.
+            # Iesirea de siguranta ramane STOP-LOSS-ul (verificat mai sus in step()).
+            self.s["trail_peak"] = None
+            while self._find_open("sell"):
+                self._cancel_open("sell")
+        elif self.p.enable_takeprofit and avg:
+            self.s["trail_peak"] = None   # sub TP / mod clasic -> reset varf
             # TP in TRANSE (optional, STRAT_TP_TRANCHES="3:50,6:50"): vinde gradual.
-            # Fara tranче configurate = comportamentul clasic (un TP pe tot).
+            # Fara tranче configurate = comportamentul CLASIC (un TP pe tot) — DEFAULT.
             tranches = self.p.tp_tranches or [(self.p.takeprofit_pct, 100.0)]
             desired, rem = [], held
             for i, (pct, share) in enumerate(tranches):
