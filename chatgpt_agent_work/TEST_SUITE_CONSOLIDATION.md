@@ -33,6 +33,10 @@ The subtest increase is intentional: repeated methods became table-driven cases,
 pytest still reports the exact case that fails. The 89-test financial characterization
 baseline remains unchanged and passes independently.
 
+After this audit, the upstream Kraken Faza 2 rebase added two active replay tests. The
+current complete suite therefore has 576 top-level tests; the table above preserves the
+like-for-like consolidation measurement taken before those upstream additions.
+
 ## Refactored groups
 
 Twelve files were consolidated:
@@ -98,7 +102,7 @@ The repository contains manual/live diagnostics that pytest does not collect:
 - `212trading/test_sl_rebuy.py` (a standalone `main()` scenario);
 - `altele/test.py` and `altele/test2.py` (offline research scripts).
 
-They are excluded from the 574-node count. The nine WS files contain historical live
+They are excluded from the automated-suite count. The nine WS files contain historical live
 API experiments and should eventually move to `offline/manual/ws/` or be replaced by
 one explicit CLI diagnostic. They were not silently merged because some variants use
 different Binance websocket protocols and real credentials.
@@ -114,7 +118,7 @@ Financial baseline:
 Complete suite:
 
 ```text
-574 passed, 185 subtests passed
+576 passed, 185 subtests passed
 ```
 
 Remaining non-failing debt: 13 dependency/process warnings and background cache/trend
