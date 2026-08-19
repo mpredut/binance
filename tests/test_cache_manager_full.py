@@ -850,14 +850,17 @@ class TestGetCurrentPriceManagerSingleton(unittest.TestCase):
         cm._current_price_instance = None
 
     def test_returns_single_cache_current_price_manager(self):
-        m1 = cm.get_current_price_manager(symbols=["BTC"])
-        m2 = cm.get_current_price_manager(symbols=["BTC"])
+        # Testul caracterizează identitatea singleton-ului, nu polling-ul live.
+        m1 = cm.get_current_price_manager(symbols=["BTC"], start_sync=False)
+        m2 = cm.get_current_price_manager(symbols=["BTC"], start_sync=False)
         self.assertIsInstance(m1, cm.CacheCurrentPriceManager)
         self.assertIs(m1, m2)
 
     def test_ws_manager_subscribed_if_provided(self):
         ws = MagicMock()
-        mgr = cm.get_current_price_manager(ws_manager=ws, symbols=["BTC"])
+        mgr = cm.get_current_price_manager(
+            ws_manager=ws, symbols=["BTC"], start_sync=False,
+        )
         ws.subscribe.assert_called_once_with(mgr)
 
 

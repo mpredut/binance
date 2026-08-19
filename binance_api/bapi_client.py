@@ -20,6 +20,9 @@ TIME_RESYNC_INTERVAL_SEC = 5 * 60
 REQUEST_TIMEOUT_SEC = 10
 
 _resync_started = False
+_resync_thread = None
+_resync_stop_event = threading.Event()
+_resync_lock = threading.Lock()
 
 
 def _install_retry(cl):
@@ -59,17 +62,45 @@ def sync_time(safety_margin_ms=TIME_SAFETY_MARGIN_MS):
 
 def _start_periodic_resync():
     """Thread daemon care re-sincronizează periodic (ceasul WSL driftează în timp)."""
-    global _resync_started
-    if _resync_started:
-        return
-    _resync_started = True
+    global _resync_started, _resync_thread
+    with _resync_lock:
+        if _resync_thread is not None and _resync_thread.is_alive():
+            return
+        _resync_stop_event.clear()
+        _resync_started = True
 
-    def loop():
-        while True:
-            time.sleep(TIME_RESYNC_INTERVAL_SEC)
-            sync_time()
+        def loop():
+            while not _resync_stop_event.wait(TIME_RESYNC_INTERVAL_SEC):
+                sync_time()
 
-    threading.Thread(target=loop, name="BinanceTimeResync", daemon=True).start()
+        _resync_thread = threading.Thread(
+            target=loop,
+            name="BinanceTimeResync",
+            daemon=True,
+        )
+        _resync_thread.start()
+
+
+def stop_periodic_resync(timeout=2.0):
+    """Oprește workerul de resincronizare și așteaptă terminarea lui.
+
+    Este apelabil în mod repetat și permite testelor, proceselor batch și shutdown-ului
+    controlat să nu lase activitate Binance după încheierea execuției.
+    """
+    global _resync_started, _resync_thread
+    with _resync_lock:
+        thread = _resync_thread
+        _resync_stop_event.set()
+
+    if thread is not None and thread is not threading.current_thread():
+        thread.join(timeout=timeout)
+
+    with _resync_lock:
+        if _resync_thread is thread and (thread is None or not thread.is_alive()):
+            _resync_thread = None
+            _resync_started = False
+
+    return thread is None or not thread.is_alive()
 
 
 def getClient():

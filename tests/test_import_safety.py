@@ -20,6 +20,7 @@ class RuntimeImportSafetyTest(unittest.TestCase):
 
             binance.client.Client = ForbiddenClient
             import cacheManager
+            from binance_api import bapi_trades
 
             forbidden = {
                 "BinanceTimeResync", "CacheTradeManager", "CacheOrderManager",

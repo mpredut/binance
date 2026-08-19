@@ -8,6 +8,7 @@ import asyncio
 import threading
 import importlib
 import builtins
+import weakref
 from datetime import datetime, timedelta
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
@@ -118,6 +119,7 @@ def _should_poll_for_manager(cls_name):
         return (not _ws_available) or (not _ws_is_healthy)
 
 class CacheManagerInterface(ABC):
+    _live_instances = weakref.WeakSet()
     # ── Politică retenție/rotație pentru cache-uri append (verificată periodic) ──
     RETENTION_DAYS              = 730              # ~2 ani: șterge intrările mai vechi
     MAX_FILE_BYTES             = 1_000_000_000    # ~1 GB: peste asta → rotație
@@ -128,6 +130,7 @@ class CacheManagerInterface(ABC):
 
     def __init__(self, sync_ts, symbols, filename, append_mode = True, api_client=api,
                  append_persist=False):
+        self._live_instances.add(self)
         self.cls_name = self.__class__.__name__
 
         #self.enable_print = True
@@ -625,6 +628,12 @@ class CacheManagerInterface(ABC):
         if stopped:
             self.thread = None
         return stopped
+
+    @classmethod
+    def shutdown_all_instances(cls, timeout=5.0):
+        results = [manager.shutdown(timeout=timeout)
+                   for manager in list(cls._live_instances)]
+        return all(results) if results else True
     
     def enable_save_state_to_file(self):
         self.save_state = True
@@ -1287,9 +1296,11 @@ class CachePriceShortTrendManager:
     # Cache24 (24h), deci ≤ 24h. Numărul de sample-uri e calculat dinamic din rata reală.
     # Cea mai mică fereastră = "primary" (canalul rapid gradient_recent + get_instant_trend).
     WINDOW_SECONDS = [3.7 * 60, 2.5 * 60 * 60]   # [3.7 min momentum, 2.5 ore trend]
+    _live_instances = weakref.WeakSet()
 
     def __init__(self, symbols, filename="cache_instant_trend.json", writer=False,
                  window_seconds=None, thresholds=None):
+        self._live_instances.add(self)
         self.symbols = list(symbols)
         self.filename = u.cache_path(filename)   # → subfolderul cachedb/
         self.writer = writer   # doar writer-ul scrie fișierul (ex. procesul cacheManager.py)
@@ -1632,6 +1643,12 @@ class CachePriceShortTrendManager:
             self._flush_thread = None
             self._computing = False
         return stopped
+
+    @classmethod
+    def shutdown_all_instances(cls, timeout=5.0):
+        results = [manager.shutdown(timeout=timeout)
+                   for manager in list(cls._live_instances)]
+        return all(results) if results else True
 
     def prime_from_file(self):
         """Încarcă fișierul în memorie (date INIȚIALE la startup). Un reader poate
@@ -2319,3 +2336,5 @@ if __name__ == "__main__":
             _current_price_instance.shutdown()
         if _ws_bridge is not None:
             _ws_bridge.stop()
+        from binance_api import bapi_client
+        bapi_client.stop_periodic_resync()
