@@ -19,6 +19,23 @@ import sys
 import urllib.request
 
 import strat_rules as sr   # reguli de decizie PARTAJATE cu strategy.py (live)
+import dataclasses
+import replay as rp        # motor FAITHFUL = strategia LIVE peste OHLC (fidelitate 100%)
+from strategy import StratParams
+
+
+def _bt_params(base: dict, over: dict | None = None) -> "StratParams":
+    """StratParams din config-ul LIVE (STRAT_* env -> reintrare/tranche/toleranta REALE)
+    cu params-urile de backtest suprascrise. Asa motorul faithful testeaza EXACT strategia
+    de productie, nu default-uri. Presupune ca kraken/config.env e deja incarcat."""
+    p = StratParams.from_env()
+    fields = dict(entry_amount=base["entry"], dca_amount=base["dca"],
+                  entry_discount_pct=base["disc"], dca_drop_pct=base["drop"],
+                  takeprofit_pct=base["tp"], max_dca_buys=base["maxdca"],
+                  max_budget=base["budget"], stop_loss_pct=base["sl"])
+    if over:
+        fields.update(over)
+    return dataclasses.replace(p, **fields)
 
 
 def fetch_candles(pair, interval):
@@ -129,7 +146,18 @@ def main() -> int:
     ap.add_argument("--tp", type=float, default=1.9); ap.add_argument("--maxdca", type=int, default=10)
     ap.add_argument("--budget", type=float, default=1000); ap.add_argument("--fee", type=float, default=0.25)
     ap.add_argument("--sl", type=float, default=10.0, help="stop-loss %% (0=oprit)")
+    ap.add_argument("--fast", action="store_true",
+                    help="simulate() rapid (fill OHLC aproximativ, optimist pe stop) in loc de motorul LIVE faithful")
     args = ap.parse_args()
+
+    # incarca config-ul LIVE (STRAT_*) ca motorul faithful sa foloseasca reintrarea/
+    # tranche-urile/toleranta REALE de productie (nu default-uri). Fara efect pe --fast.
+    import os as _os
+    from kraken_common import load_dotenv as _load_dotenv
+    try:
+        _load_dotenv(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "config.env"))
+    except Exception:  # noqa: BLE001 — daca lipseste, from_env cade pe default-uri
+        pass
 
     try:
         ohlc = fetch_candles(args.pair, args.interval)
@@ -142,11 +170,12 @@ def main() -> int:
     base = dict(entry=args.entry, dca=args.dca, disc=args.disc, drop=args.drop,
                 tp=args.tp, maxdca=args.maxdca, budget=args.budget, fee=args.fee, sl=args.sl)
 
+    engine = "simulate (rapid)" if args.fast else "motor LIVE (faithful)"
     if args.mode == "single":
-        m = simulate(ohlc, base)
+        m = simulate(ohlc, base) if args.fast else rp.run_replay(ohlc, _bt_params(base), fee_pct=args.fee)
         tot = m["total"]/args.budget*100
         wr = 100*m["wins"]/m["cycles"] if m["cycles"] else 0
-        print(f"=== BACKTEST KRAKEN {args.pair} interval={args.interval}m ({len(ohlc)} bare) ===")
+        print(f"=== BACKTEST KRAKEN {args.pair} interval={args.interval}m ({len(ohlc)} bare) [{engine}] ===")
         print(f"  params: entry={args.entry} dca={args.dca} drop={args.drop}% tp={args.tp}% sl={args.sl}% fee={args.fee}%/leg")
         print(f"  TOTAL REAL: {tot:+.2f}% din buget  ⇐ realizat ${m['realized']:+.2f} + pozitie deschisa ${m['final_upnl']:+.2f} - fee ${m['fees']:.2f}")
         print(f"  (realizat singur: {m['net']/args.budget*100:+.2f}%)")
@@ -154,13 +183,13 @@ def main() -> int:
         print(f"  buy&hold: {bh:+.2f}%   pozitie la final: {m['open_qty']:.6f}")
         return 0
 
-    print(f"=== SWEEP {args.pair} interval={args.interval}m  (buy&hold {bh:+.1f}%) ===")
+    print(f"=== SWEEP {args.pair} interval={args.interval}m  (buy&hold {bh:+.1f}%) [{engine}] ===")
     rows = []
     for tp in (1.0, 1.5, 2.0, 3.0, 5.0):
         for drop in (1.0, 2.0, 3.0, 5.0):
             for sl in (8.0, 15.0):
                 P = dict(base); P["tp"] = tp; P["drop"] = drop; P["sl"] = sl
-                m = simulate(ohlc, P)
+                m = simulate(ohlc, P) if args.fast else rp.run_replay(ohlc, _bt_params(P), fee_pct=args.fee)
                 rows.append((m["total"]/args.budget*100, tp, drop, sl, m["cycles"], m["maxdd"]))
     rows.sort(reverse=True)
     print("  top 8 (total% | tp | drop | sl | cicluri | maxDD$):")
