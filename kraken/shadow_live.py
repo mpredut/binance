@@ -6,12 +6,12 @@ Strategy.step) peste ACELASI OHLC live descarcat de la Kraken, si logheaza P&L p
 comparativ. Scopul: forward-test intre configul de PRODUCTIE si 2 candidati shadow
 (pre-inregistrati din cercetare) inainte de a schimba ceva pe bani reali:
 
-  - current : configul LIVE exact (citit din config.env)                -> referinta
+  - current : configul LIVE exact (citit din .env apoi config.env)      -> referinta
   - tp4     : DOAR TAKEPROFIT 5.0 -> 4.0  (+0.13pp in cercetare, fara DD in plus)
   - dca15   : DOAR DCA_DROP 1.25 -> 1.5   (+0.08pp, candidat secundar)
 
-Determinist: dat OHLC-ul, rezultatul e reproductibil; pe masura ce fereastra Kraken
-aluneca inainte, snapshot-urile periodice construiesc un time-series forward al divergentei.
+Determinist: dat OHLC-ul, rezultatul e reproductibil. Barele forward închise sunt
+păstrate local, astfel încât fereastra ancorată crește și după limita Kraken de 720 bare.
 Ruleaza single-shot (pt cron) sau --loop. NU citeste/scrie starea botului live.
 
   ./myenv/bin/python kraken/shadow_live.py                 # snapshot 60m, append JSONL
@@ -37,32 +37,23 @@ sys.path.insert(0, HERE)
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
 CONFIG_ENV = os.path.join(HERE, "config.env")
+DEFAULT_ENV = os.path.join(HERE, ".env")
 LOG_DIR = os.path.join(ROOT, "logs", "shadow_live")
 
 
-def _load_config_env(path: str) -> None:
-    """Incarca STRAT_*/KRAKEN_PAIR din config.env in os.environ (fara a suprascrie ce
-    e deja setat), strip inline comments. Astfel 'current' = productia exact."""
-    if not os.path.exists(path):
-        return
-    with open(path, encoding="utf-8") as fh:
-        for raw in fh:
-            line = raw.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, val = line.split("=", 1)
-            key = key.strip()
-            if not (key.startswith("STRAT_") or key in ("KRAKEN_PAIR", "SYMBOL_LABEL")):
-                continue
-            val = val.split("#", 1)[0].strip()
-            os.environ.setdefault(key, val)
+def _load_runtime_config(env_path: str | None = None,
+                         config_path: str | None = None) -> None:
+    """Reproduce exact ordinea din kraken_bot: .env are prioritate, config completează."""
+    from kraken_common import load_dotenv
+    env_path = env_path or os.environ.get("ENV_FILE", DEFAULT_ENV)
+    config_path = config_path or os.path.join(os.path.dirname(env_path) or ".", "config.env")
+    load_dotenv(env_path)
+    load_dotenv(config_path)
 
 
 def _variants():
     import strategy as strat
     base = strat.StratParams.from_env()
-    # Nu vrem overlay in shadow-ul asta (comparam DCA/TP clasic); dezactivez explicit.
-    base = dataclasses.replace(base, trend_overlay=False)
     return {
         "current": base,
         "tp4": dataclasses.replace(base, takeprofit_pct=4.0),
@@ -93,6 +84,10 @@ def _anchor_path(pair: str, interval: int) -> str:
     return os.path.join(LOG_DIR, f"{pair}_{interval}m.anchor")
 
 
+def _history_path(pair: str, interval: int) -> str:
+    return os.path.join(LOG_DIR, f"{pair}_{interval}m.ohlc.json")
+
+
 def _get_anchor(pair: str, interval: int, default_ts: int) -> int:
     """Prima rulare fixeaza ancora = ultima bara inchisa (= forward-test de ACUM inainte).
     Rularile urmatoare o citesc, deci fereastra CRESTE, nu aluneca."""
@@ -104,6 +99,49 @@ def _get_anchor(pair: str, interval: int, default_ts: int) -> int:
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(str(default_ts))
     return default_ts
+
+
+def _load_history(pair: str, interval: int) -> list[tuple[int, float, float, float, float]]:
+    path = _history_path(pair, interval)
+    if not os.path.exists(path):
+        return []
+    with open(path, encoding="utf-8") as fh:
+        rows = json.load(fh)
+    return [(int(row[0]), *(float(value) for value in row[1:])) for row in rows]
+
+
+def _save_history(pair: str, interval: int, bars) -> None:
+    os.makedirs(LOG_DIR, exist_ok=True)
+    path = _history_path(pair, interval)
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as fh:
+        json.dump(bars, fh, separators=(",", ":"))
+        fh.write("\n")
+    os.replace(tmp_path, path)
+
+
+def _merge_forward_history(pair: str, interval: int, anchor: int, fetched):
+    """Unește barele păstrate cu fetch-ul curent și detectează pierderea de istoric."""
+    cached = [bar for bar in _load_history(pair, interval) if bar[0] >= anchor]
+    fetched = [bar for bar in fetched if bar[0] >= anchor]
+
+    if cached and fetched:
+        expected_step = interval * 60
+        if cached[-1][0] < fetched[0][0] - expected_step:
+            raise RuntimeError(
+                "istoricul forward are un gol mai mare decât un interval; "
+                "nu pot raporta o fereastră ancorată completă"
+            )
+
+    merged_by_ts = {bar[0]: bar for bar in cached}
+    merged_by_ts.update({bar[0]: bar for bar in fetched})
+    merged = [merged_by_ts[ts] for ts in sorted(merged_by_ts)]
+    if not merged or merged[0][0] != anchor:
+        raise RuntimeError(
+            f"ancora forward {anchor} nu mai este disponibilă în istoricul local/Kraken"
+        )
+    _save_history(pair, interval, merged)
+    return merged
 
 
 def _run_one(ohlc, params, interval, fee_pct):
@@ -134,10 +172,10 @@ def _eval_block(ohlc4, interval, fee_pct):
 def snapshot(pair: str, interval: int, fee_pct: float, quiet: bool = False) -> dict:
     bars = _fetch_with_ts(pair, interval)
     if not bars:
-        raise SystemExit(f"fetch({pair},{interval}) a intors gol")
+        raise RuntimeError(f"fetch({pair},{interval}) a intors gol")
     anchor = _get_anchor(pair, interval, bars[-1][0])
     full4 = [(o, h, l, c) for (_t, o, h, l, c) in bars]
-    fwd_bars = [b for b in bars if b[0] >= anchor]
+    fwd_bars = _merge_forward_history(pair, interval, anchor, bars)
     fwd4 = [(o, h, l, c) for (_t, o, h, l, c) in fwd_bars]
 
     def _bh(seg):
@@ -168,11 +206,11 @@ def _print_block(title: str, blk: dict) -> None:
     if not r:
         print("    (insuficiente bare — se acumuleaza)")
         return
-    cur = r["current"]["net_pct"]
-    print(f"    {'config':<9} {'net%':>8} {'total%':>8} {'maxDD%':>8} {'cicluri':>8}  vs current")
+    cur = r["current"]["total_pct"]
+    print(f"    {'config':<9} {'net%':>8} {'total%':>8} {'maxDD%':>8} {'cicluri':>8}  vs current total")
     for name in ("current", "tp4", "dca15"):
         x = r[name]
-        diff = "" if name == "current" else f"{x['net_pct'] - cur:+.2f}pp"
+        diff = "" if name == "current" else f"{x['total_pct'] - cur:+.2f}pp"
         print(f"    {name:<9} {x['net_pct']:>8.2f} {x['total_pct']:>8.2f} "
               f"{x['maxdd_pct']:>8.2f} {x['cycles']:>8}  {diff}")
 
@@ -190,27 +228,29 @@ def _append_jsonl(pair: str, interval: int, snap: dict) -> None:
         fh.write(json.dumps(snap) + "\n")
 
 
-def main() -> None:
+def main() -> int:
     ap = argparse.ArgumentParser(description="Shadow test live: current vs tp4 vs dca15 (read-only).")
     ap.add_argument("--interval", type=int, default=60, help="minute per bara (60/240/1440)")
     ap.add_argument("--fee", type=float, default=0.26, help="comision per leg %%")
-    ap.add_argument("--pair", default=None, help="implicit KRAKEN_PAIR din config.env")
+    ap.add_argument("--pair", default=None, help="implicit KRAKEN_PAIR din .env/config.env")
     ap.add_argument("--loop", type=float, default=0.0, help="minute intre rulari (0=single-shot)")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
 
-    _load_config_env(CONFIG_ENV)
+    _load_runtime_config()
     pair = args.pair or os.environ.get("KRAKEN_PAIR", "HYPEUSD")
 
     while True:
         try:
             snapshot(pair, args.interval, args.fee, quiet=args.quiet)
-        except Exception as e:  # shadow-ul nu trebuie sa moara pe un fetch ratat
+        except Exception as e:  # în loop, un fetch ratat nu oprește monitorizarea
             print(f"[shadow_live] eroare: {e}", file=sys.stderr)
+            if args.loop <= 0:
+                return 1
         if args.loop <= 0:
-            break
+            return 0
         time.sleep(args.loop * 60.0)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -291,9 +291,19 @@ class Strategy:
                 if o not in self.s["orders"]:
                     continue
                 if self.dry_run:
-                    if side == "buy" or price >= o["price"]:
+                    if o.get("market"):
+                        # În paper-live, un ordin MARKET trebuie executat la
+                        # prețul observat acum, inclusiv într-o cădere sub
+                        # prețul de referință al stopului/trailing-ului.
+                        fill_price = price
+                    elif ((side == "buy" and price <= o["price"])
+                          or (side == "sell" and price >= o["price"])):
+                        fill_price = o["price"]
+                    else:
+                        continue
+                    if o in self.s["orders"]:
                         self._remove(o)
-                        self._apply_fill(o, o["vol"], o["price"], fee=0.0)
+                        self._apply_fill(o, o["vol"], fill_price, fee=0.0)
                     continue
                 # REAL: QueryOrders merge si pt ordine inchise (fara 404)
                 try:

@@ -57,7 +57,10 @@ def _make_strategy(tmp_pair="TESTPAIR_REENTRY", **param_overrides):
     )
     defaults.update(param_overrides)
     params = strat.StratParams(**defaults)
-    return strat.Strategy(client, tmp_pair, params, dry_run=True)
+    return strat.Strategy(
+        client, tmp_pair, params, dry_run=True,
+        initial_state=strat._new_state(),
+    )
 
 
 class TestEffectiveReentryDropPct(unittest.TestCase):
@@ -221,6 +224,46 @@ class TestTrailingTakeProfit(unittest.TestCase):
 
         self.assertTrue(s._has_open("sell"))
         self.assertFalse(s._has_open("buy"))
+
+
+class TestPaperMarketReconciliation(unittest.TestCase):
+    def test_limit_buy_waits_until_observed_price_reaches_limit(self):
+        s = _make_strategy(entry_discount_pct=1.0)
+        with patch.object(strat, "notify"):
+            s.step(100.0)
+            order = s._find_open("buy")
+            self.assertEqual(order["price"], 99.0)
+
+            s.reconcile(101.0)
+            self.assertTrue(s._has_open("buy"))
+            self.assertEqual(s.s["qty"], 0.0)
+
+            s.reconcile(98.5)
+
+        self.assertFalse(s._has_open("buy"))
+        self.assertGreater(s.s["qty"], 0.0)
+        self.assertEqual(s.s["last_buy_price"], 99.0)
+
+    def test_stop_market_sell_fills_at_observed_price_during_drop(self):
+        s = _make_strategy(stop_loss_pct=10.0)
+        s.s.update({
+            "qty": 1.0, "cost": 100.0, "spent": 100.0,
+            "entry_price": 100.0, "last_buy_price": 100.0,
+        })
+
+        with patch.object(strat, "notify"):
+            s.step(80.0)
+            order = s._find_open("sell")
+            self.assertIsNotNone(order)
+            self.assertTrue(order["market"])
+            self.assertGreater(order["price"], 70.0)
+
+            s.reconcile(70.0)
+
+        self.assertFalse(s._has_open("sell"))
+        self.assertEqual(s.s["qty"], 0.0)
+        self.assertEqual(s.s["last_sell_price"], 70.0)
+        self.assertLess(s.s["realized_net"], 0.0)
 
 
 class TestFillAccounting(unittest.TestCase):

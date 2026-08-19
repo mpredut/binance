@@ -102,6 +102,23 @@ class ReplayEngineTest(unittest.TestCase):
         self.assertEqual(two_bars["fills"], 1)
         self.assertGreater(two_bars["open_qty"], 0.0)
 
+    def test_market_stop_fills_at_next_open_even_below_reference_price(self):
+        bars = [
+            (100.0, 101.0, 99.0, 100.0),  # plasează intrarea
+            (100.0, 101.0, 99.0, 100.0),  # umple intrarea
+            (80.0, 82.0, 78.0, 80.0),     # declanșează STOP MARKET
+            (70.0, 71.0, 69.0, 70.0),     # gap down: fill la open, nu așteaptă limita
+        ]
+
+        result = rp.run_replay(
+            bars, _params(stop_loss_pct=10.0), fee_pct=0.26, bar_minutes=60,
+        )
+
+        self.assertEqual(result["fills"], 2)
+        self.assertEqual(result["cycles"], 1)
+        self.assertEqual(result["open_qty"], 0.0)
+        self.assertLess(result["net"], 0.0)
+
     def test_overlay_requires_replay_bars_at_configured_trend_interval(self):
         with self.assertRaisesRegex(ValueError, "trend_interval"):
             rp.run_replay(
