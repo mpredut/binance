@@ -77,8 +77,17 @@ def run_replay(ohlc, params, fee_pct: float = 0.26,
                     continue
                 if order["side"] != "sell":
                     continue
-                if h >= order["price"]:
-                    vol, px = order["vol"], order["price"]
+                # SELL market (iesire trailing/stop) = se executa imediat, la open-ul barei
+                # (nu asteapta high>=limita — altfel nu iese intr-o cadere brusca). SELL limita
+                # (TP asezat deasupra) = fill doar daca high atinge limita.
+                if order.get("market"):
+                    fill_ok, px = True, _o
+                elif h >= order["price"]:
+                    fill_ok, px = True, order["price"]
+                else:
+                    fill_ok, px = False, None
+                if fill_ok:
+                    vol = order["vol"]
                     g0 = s.s["realized_gross"]
                     s._remove(order)
                     s._apply_fill(order, vol, px, fee=fee_pct / 100 * vol * px)
