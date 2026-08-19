@@ -139,13 +139,15 @@ def _new_state() -> dict:
         "last_sell_price": None,  # pretul ultimei vanzari (regula de reintrare)
         "last_exit_kind": None,   # "TP"/"STOP"/... — cum s-a inchis ultimul ciclu (reintrare STOP-aware)
         "sl_low": None,           # minimul de pret dupa un stop-loss (pt reintrarea pe revenire)
+        "trail_peak": None,       # varful urmarit dupa ce pretul a depasit nivelul TP
         "orders": [],           # {txid, side, vol, price, amount, kind, ts}
     }
 
 
 class Strategy:
     def __init__(self, client: KrakenClient, pair: str, params: StratParams,
-                 dry_run: bool = True, desktop: bool = False):
+                 dry_run: bool = True, desktop: bool = False,
+                 initial_state: dict | None = None):
         self.client = client
         self.pair = pair
         self.p = params
@@ -153,7 +155,7 @@ class Strategy:
         self.dry_run = dry_run
         self.desktop = desktop
         self.state_file = state_path_for(pair)
-        self.s = self._load()
+        self.s = initial_state if initial_state is not None else self._load()
         self._paper_seq = 0
         # SHADOW vol-adaptiv (observational, plan 17 iul): istoric mic de pret in
         # memorie (tick ~2min -> ~3h) pentru sigma; NU intra in state-file, se
@@ -291,6 +293,9 @@ class Strategy:
         tag = "[PAPER] " if self.dry_run else ""
         self.s["cycle_fees"] += fee
         self.s["fees_total"] += fee
+        # Orice fee este plătit o singură dată, chiar dacă poziția rămâne deschisă.
+        # Astfel P&L-ul net mark-to-market nu supraestimează pozițiile cu BUY executat.
+        self.s["realized_net"] -= fee
         if o["side"] == "buy":
             self.s["qty"] += vol
             self.s["cost"] += vol * price
@@ -311,10 +316,13 @@ class Strategy:
         else:  # sell
             avg = self._avg() or price
             gross = (price - avg) * vol
-            net = gross - self.s["cycle_fees"]   # scade fee-urile reale ale ciclului
+            net = gross - fee
             self.s["realized_gross"] += gross
-            self.s["realized_net"] += net
+            self.s["realized_net"] += gross
             self.s["qty"] -= vol
+            # La un SELL parțial se descarcă proporțional și cost basis-ul. Fără
+            # asta, costul întreg rămânea pe cantitatea redusă și media exploda.
+            self.s["cost"] = max(0.0, self.s["cost"] - avg * vol)
             # dust-ul lasat la vanzare (_dust_safe_qty) ar ramane altfel ca un
             # rest infim, permanent, in qty -> ciclul urmator crede ca INCA are
             # o pozitie deschisa si nu reintra niciodata. Praguim la 0 real.
@@ -532,11 +540,12 @@ class Strategy:
             return
 
         avg = self._avg()
+        trail_armed = self.s.get("trail_peak") is not None
         if (self.p.enable_takeprofit and avg and self.p.tp_trend_hold
-                and price >= sr.tp_price(avg, self.p.takeprofit_pct)):
-            # v2 TRAILING: PESTE nivelul TP (profit garantat) -> in loc sa vand fix, CALARESC:
-            # urmaresc varful si ies cand pretul scade tp_trail_pct% de la el. SUB TP nu intru
-            # aici -> comportament clasic; NICIODATA iesire in pierdere (bug-ul v1).
+                and (trail_armed or price >= sr.tp_price(avg, self.p.takeprofit_pct))):
+            # v2 TRAILING: se ARMEAZA la prima depasire a TP-ului si ramane armat pana
+            # la iesire. Evaluarea trebuie sa continue si daca pretul cade ulterior sub
+            # TP; altfel varful s-ar reseta exact in pullback-ul pe care vrem sa-l vindem.
             peak = max(self.s.get("trail_peak") or price, price)
             self.s["trail_peak"] = peak
             trail_stop = peak * (1 - self.p.tp_trail_pct / 100)
@@ -547,6 +556,8 @@ class Strategy:
                 self._place("sell", self._dust_safe_qty(self.s["qty"]), exit_px, kind="TP")
                 log(f"  [STRAT] trailing: pullback {self.p.tp_trail_pct}% de la varf "
                     f"{peak:.{self.price_dec}f} -> IES la {exit_px} (calarit trendul)")
+                # Nu deschide un DCA contradictoriu in acelasi tick in care iesim.
+                return
             else:
                 log(f"  [STRAT] peste TP, CALARESC (varf {peak:.{self.price_dec}f}, "
                     f"trail-stop {trail_stop:.{self.price_dec}f})")

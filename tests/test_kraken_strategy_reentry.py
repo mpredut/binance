@@ -17,7 +17,7 @@ import os
 import importlib.util
 import sys
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 KRAKEN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kraken")
 sys.path.insert(0, KRAKEN_DIR)
@@ -176,6 +176,78 @@ class TestStopAwareReentry(unittest.TestCase):
         self.assertFalse(s._has_open("buy"))
         s.step(97.0)                                  # 97.0 < 97.8 -> reintra
         self.assertTrue(s._has_open("buy"))
+
+
+class TestTrailingTakeProfit(unittest.TestCase):
+    """Trailing-ul rămâne armat după prima depășire a TP-ului."""
+
+    @staticmethod
+    def _positioned_strategy(**overrides):
+        params = dict(
+            takeprofit_pct=5.0,
+            tp_trend_hold=True,
+            tp_trail_pct=3.0,
+            dca_drop_pct=2.0,
+        )
+        params.update(overrides)
+        s = _make_strategy(**params)
+        s.s["qty"] = 1.0
+        s.s["cost"] = 100.0
+        s.s["spent"] = 100.0
+        s.s["entry_price"] = 100.0
+        s.s["last_buy_price"] = 100.0
+        return s
+
+    def test_pullback_below_tp_after_arming_still_exits(self):
+        s = self._positioned_strategy()
+
+        s.step(105.5)       # depășește TP=105 și armează trailing-ul
+        self.assertEqual(s.s["trail_peak"], 105.5)
+        self.assertFalse(s._has_open("sell"))
+
+        s.step(102.0)       # pullback 3.32%; este sub TP, dar trailing-ul e deja armat
+        sell = s._find_open("sell")
+        self.assertIsNotNone(sell, "trailing-ul armat trebuie să iasă și după căderea sub TP")
+        self.assertEqual(sell["kind"], "TP")
+
+    def test_trailing_exit_does_not_open_dca_in_same_tick(self):
+        s = self._positioned_strategy(dca_drop_pct=2.0)
+        s.step(105.5)
+        # Face pragul DCA eligibil simultan cu pullback-ul trailing. O ieșire și o
+        # cumpărare în același tick s-ar contrazice și ar crește expunerea accidental.
+        s.s["last_buy_price"] = 110.0
+
+        s.step(102.0)
+
+        self.assertTrue(s._has_open("sell"))
+        self.assertFalse(s._has_open("buy"))
+
+
+class TestFillAccounting(unittest.TestCase):
+    """Cost basis și fees rămân corecte când ieșirea se face în tranșe."""
+
+    def test_two_partial_sells_reduce_cost_and_charge_each_fee_once(self):
+        s = _make_strategy()
+        buy = {"side": "buy", "kind": "ENTRY", "amount": 200.0}
+        with patch.object(strat, "notify"):
+            s._apply_fill(buy, vol=2.0, price=100.0, fee=0.52)
+
+            self.assertAlmostEqual(s.s["qty"], 2.0)
+            self.assertAlmostEqual(s.s["cost"], 200.0)
+            self.assertAlmostEqual(s.s["realized_net"], -0.52)
+
+            sell = {"side": "sell", "kind": "TP"}
+            s._apply_fill(sell, vol=1.0, price=110.0, fee=0.286)
+            self.assertAlmostEqual(s.s["qty"], 1.0)
+            self.assertAlmostEqual(s.s["cost"], 100.0)
+            self.assertAlmostEqual(s._avg(), 100.0)
+
+            s._apply_fill(sell, vol=1.0, price=120.0, fee=0.312)
+            self.assertAlmostEqual(s.s["qty"], 0.0)
+            self.assertAlmostEqual(s.s["cost"], 0.0)
+            self.assertAlmostEqual(s.s["realized_gross"], 30.0)
+            self.assertAlmostEqual(s.s["fees_total"], 1.118)
+            self.assertAlmostEqual(s.s["realized_net"], 28.882)
 
 
 if __name__ == "__main__":
