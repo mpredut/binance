@@ -12,8 +12,8 @@ Criteriu de SCOATERE:  status in {CANCELED, EXPIRED, REJECTED, NEW}  SAU  price 
 Pastreaza: FILLED/PARTIALLY_FILLED si intrarile din REST (status None) cu price > 0.
 
 RULEAZA DOAR cu cacheManager OPRIT (altfel rescrie fisierul din memoria veche).
-  python3 altele/clean_order_cache.py --dry     # doar raporteaza
-  python3 altele/clean_order_cache.py           # curata (face .bak intai)
+  python3 offline/legacy_tools/clean_order_cache.py --dry
+  python3 offline/legacy_tools/clean_order_cache.py
 Idempotent.
 """
 import os
@@ -21,8 +21,8 @@ import sys
 import json
 import time
 
-# altele/ e la un nivel sub radacina repo -> dirname x2 pt radacina (NU altele/cachedb).
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# offline/legacy_tools/ este la două niveluri sub rădăcina repo-ului.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CACHE_DIR = os.environ.get("BINANCE_CACHE_DIR", os.path.join(REPO_ROOT, "cachedb"))
 ORDER_FILE = os.path.join(CACHE_DIR, "cache_order.json")
 

@@ -101,8 +101,7 @@ exclude = [
     "__pycache__*",
     "*.json",
     "plots*",
-    "altele*",
-    "sim*",
+    "offline*",
     "demon*",
     "media*",
     "systemd*",
@@ -123,8 +122,7 @@ exclude = '''
   | \.pytest_cache
   | cache_.*\.json
   | plots
-  | altele
-  | sim
+  | offline
 )/
 '''
 

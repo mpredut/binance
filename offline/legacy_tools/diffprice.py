@@ -1,3 +1,5 @@
+"""Experiment istoric manual; poate accesa API-ul real."""
+
 import os
 import time
 from datetime import datetime, timedelta

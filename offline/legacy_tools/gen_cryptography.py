@@ -1,3 +1,4 @@
+# Fragment istoric de shell pentru generarea cheilor; se rulează numai manual.
 python -c "
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, PrivateFormat, NoEncryption
@@ -18,4 +19,3 @@ print('Chei generate: ed25519_private.pem si ed25519_public.pem')
 print('Public key base64:')
 print(base64.b64encode(pub_bytes).decode())
 "
-

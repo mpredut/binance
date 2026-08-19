@@ -1,3 +1,5 @@
+"""Diagnostic WebSocket manual; poate accesa API-ul real."""
+
 import asyncio
 import asyncio
 import requests

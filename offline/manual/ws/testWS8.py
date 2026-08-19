@@ -1,3 +1,5 @@
+"""Diagnostic WebSocket manual; poate accesa API-ul real."""
+
 import nacl.signing
 import base64, time, json, asyncio, websockets
 from keys.apikeys import api_key_ws

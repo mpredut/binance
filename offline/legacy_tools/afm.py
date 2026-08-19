@@ -1,3 +1,5 @@
+"""Utilitar istoric manual; nu face parte din runtime."""
+
 from plyer import notification
 import requests
 import hashlib
@@ -56,4 +58,3 @@ if last_hash:
             exit
         elif not current_hash:
             print("Eroare la preluarea paginii. Reîncercăm...")
-

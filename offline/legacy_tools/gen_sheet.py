@@ -1,3 +1,5 @@
+"""Generator istoric de raport; nu face parte din runtime."""
+
 import pandas as pd
 
 from datetime import datetime
@@ -50,4 +52,3 @@ def genereaza_fisa_pontaj(luna, an):
 
 genereaza_fisa_pontaj(9, 2024)
 
- 

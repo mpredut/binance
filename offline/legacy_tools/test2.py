@@ -1,3 +1,5 @@
+"""Experiment offline istoric; nu este test automat."""
+
 import pandas as pd
 import requests
 import datetime
@@ -69,5 +71,4 @@ print(f"Număr de scăderi de 3% în 20 de minute: {count_drops_3}")
 print(f"Probabilitatea unei scăderi de 3% în 20 de minute: {probability_3:.2f}%")
 print(f"Număr de scăderi de 2% în 20 de minute: {count_drops_2}")
 print(f"Probabilitatea unei scăderi de 2% în 20 de minute: {probability_2:.2f}%")
-
 

@@ -1,3 +1,5 @@
+"""Diagnostic WebSocket manual; poate accesa API-ul real."""
+
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
 import base64, time, json, asyncio, websockets

@@ -96,16 +96,15 @@ functions used at runtime, preventing accidental API calls.
 
 ## Files named like tests but not collected
 
-The repository contains manual/live diagnostics that pytest does not collect:
+The repository contains manual/live diagnostics outside the automated suite:
 
-- `tests/ws/testWS.py` through `tests/ws/testWS8.py`;
+- `offline/manual/ws/testWS.py` through `offline/manual/ws/testWS8.py`;
 - `212trading/test_sl_rebuy.py` (a standalone `main()` scenario);
-- `altele/test.py` and `altele/test2.py` (offline research scripts).
+- `offline/legacy_tools/test.py` and `offline/legacy_tools/test2.py` (offline research scripts).
 
 They are excluded from the automated-suite count. The nine WS files contain historical live
-API experiments and should eventually move to `offline/manual/ws/` or be replaced by
-one explicit CLI diagnostic. They were not silently merged because some variants use
-different Binance websocket protocols and real credentials.
+API experiments. They remain separate because some variants use different Binance websocket
+protocols and real credentials; the directory README marks them as explicit manual tools.
 
 ## Verification
 

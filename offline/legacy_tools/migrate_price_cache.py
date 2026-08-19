@@ -18,9 +18,10 @@ import json
 import glob
 import time
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Fișierele de cache stau în cachedb/ (suprascris de BINANCE_CACHE_DIR sau --dir).
-CACHE_DIR = os.environ.get("BINANCE_CACHE_DIR", os.path.join(BASE_DIR, "cachedb"))
+# offline/legacy_tools/ este la două niveluri sub rădăcina repo-ului.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Fișierele de cache stau în <repo>/cachedb/ (suprascris de BINANCE_CACHE_DIR sau --dir).
+CACHE_DIR = os.environ.get("BINANCE_CACHE_DIR", os.path.join(REPO_ROOT, "cachedb"))
 
 
 def _atomic_write_lines(path, lines):

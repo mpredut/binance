@@ -1,6 +1,4 @@
-import os
-import shutil
-import json
+"""Utilitar istoric de mutare cache; operează pe căi relative la CWD."""
 
 import os
 import shutil

@@ -1,9 +1,9 @@
+"""Simulare manuală; nu face parte din runtime-ul live."""
+
 import numpy as np
 import matplotlib.pyplot as plt
 import random
-import random
 import time
-import matplotlib.pyplot as plt
 from collections import deque
 
 class PriceWindow:
@@ -129,4 +129,3 @@ try:
         time.sleep(7.5)  # Mic delay pentru a simula timp real
 except KeyboardInterrupt:
     print("Simulare oprită manual.")
-

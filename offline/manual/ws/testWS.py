@@ -1,3 +1,5 @@
+"""Diagnostic WebSocket manual; poate accesa API-ul real."""
+
 import bapi as api
 import websockets, asyncio, json
 

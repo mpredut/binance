@@ -1,3 +1,5 @@
+"""Simulare manuală; nu face parte din runtime-ul live."""
+
 import random
 import time
 import matplotlib.pyplot as plt
@@ -148,4 +150,3 @@ try:
         time.sleep(1.2)  # Mic delay pentru a simula timp real
 except KeyboardInterrupt:
     print("Simulare oprită manual.")
-

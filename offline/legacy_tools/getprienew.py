@@ -1,5 +1,7 @@
+"""Diagnostic istoric de preț; poate accesa API-ul real."""
+
 from binance.client import Client
-from binance.websockets import BinanceSocketManager
+from binance.streams import BinanceSocketManager
 from keys.apikeys import api_key, api_secret
 
 # Initialize the client
@@ -29,4 +31,3 @@ try:
 except KeyboardInterrupt:
     bm.stop_socket(conn_key)
     bm.close()
-

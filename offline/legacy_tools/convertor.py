@@ -1,3 +1,5 @@
+"""Convertor istoric manual; nu face parte din runtime."""
+
 import json
 
 def convert_price_cache(input_file: str, output_file: str, symbol: str):

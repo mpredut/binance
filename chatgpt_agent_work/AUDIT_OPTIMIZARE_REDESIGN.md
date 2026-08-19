@@ -36,6 +36,11 @@ Rezultatul arată că simpla extragere a funcțiilor duplicate nu va produce red
 
 ### 3.1 Separarea codului activ de codul istoric
 
+Stare curentă: `archive/` este separat, iar prima tranșă `offline/` este realizată
+pentru diagnosticele WebSocket manuale, simulări și fostul director generic `altele/`.
+Backtest-urile și `research/` rămân temporar pe loc deoarece automatizarea prod→dev
+le referă direct; mutarea lor trebuie făcută atomic cu actualizarea runnerelor.
+
 Categorii care trebuie marcate explicit:
 
 ```text
@@ -63,8 +68,9 @@ Candidați evidenți pentru mutare, după validarea importurilor și a operațiu
 - `archive/monitortrades_legacy.py` (mutat din root);
 - `tradeall_observe.py`;
 - `tradeall_backtest.py`;
-- `sim/`;
-- scripturile `altele/`;
+- `offline/simulations/` (mutat din `sim/`);
+- `offline/legacy_tools/` (mutat din `altele/`);
+- `offline/manual/ws/` (mutat din `tests/ws/`);
 - testele aflate în directoarele componentelor, mutate sub `tests/`;
 - backtest-urile locale din `kraken/`, `hyperliquid/` și `212trading/`.
 

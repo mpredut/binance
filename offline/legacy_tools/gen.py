@@ -1,3 +1,5 @@
+"""Generator istoric manual; nu face parte din runtime."""
+
 import numpy as np
 
 # Simulare de date
@@ -27,6 +29,5 @@ valori_ajustate =  valori_initiale * np.minimum(2, np.maximum(0, 1 + np.exp(-np.
 example_values_inverse_exp = [(valori_initiale[i], procente_asociate[i]*100, valori_ajustate[i]) for i in range(120)]
 for i in range(110):
     print(f"Valoare inițială: {example_values_inverse_exp[i][0]:.2f}, Procent asociat: {example_values_inverse_exp[i][1]:.1f}%, Valoare ajustată: {example_values_inverse_exp[i][2]:.2f}")
-
 
 
