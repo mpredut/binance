@@ -53,9 +53,18 @@ class TestFallbackThreadBehavior(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
         cm._current_price_instance = None
+        self.managers = []
 
     def tearDown(self):
+        for manager in self.managers:
+            manager.shutdown()
         cm._current_price_instance = None
+
+    def _manager(self, filename, sync_ts, api_mock):
+        manager = _make_mgr(filename, sync_ts, api_mock)
+        self.managers.append(manager)
+        manager.periodic_sync(save_state=False)
+        return manager
 
     # ── Test 1: cache-ul din fișier NU e suprascris imediat ──────────────────
 
@@ -68,7 +77,7 @@ class TestFallbackThreadBehavior(unittest.TestCase):
         api_mock = MagicMock()
         api_mock.get_current_price.return_value = 50000.0
 
-        mgr = _make_mgr(fname, sync_ts=9999, api_mock=api_mock)
+        mgr = self._manager(fname, sync_ts=9999, api_mock=api_mock)
 
         with mgr.lock:
             entries = mgr.cache.get("BTCUSDC", [])
@@ -91,7 +100,7 @@ class TestFallbackThreadBehavior(unittest.TestCase):
         api_mock = MagicMock()
         api_mock.get_current_price.return_value = 55000.0
 
-        mgr = _make_mgr(fname, sync_ts=1, api_mock=api_mock)
+        mgr = self._manager(fname, sync_ts=1, api_mock=api_mock)
         mgr._ws_last_event_ts = time.time()   # WS proaspăt
 
         time.sleep(2.5)   # 2 cicluri complete
@@ -109,7 +118,7 @@ class TestFallbackThreadBehavior(unittest.TestCase):
         api_mock = MagicMock()
         api_mock.get_current_price.return_value = 55000.0
 
-        mgr = _make_mgr(fname, sync_ts=1, api_mock=api_mock)
+        mgr = self._manager(fname, sync_ts=1, api_mock=api_mock)
         mgr._ws_last_event_ts = 0.0   # WS mort explicit
 
         time.sleep(2.5)
@@ -126,7 +135,7 @@ class TestFallbackThreadBehavior(unittest.TestCase):
         api_mock = MagicMock()
         api_mock.get_current_price.return_value = 55000.0
 
-        mgr = _make_mgr(fname, sync_ts=1, api_mock=api_mock)
+        mgr = self._manager(fname, sync_ts=1, api_mock=api_mock)
         mgr._ws_last_event_ts = 0.0   # WS mort → va polua
 
         time.sleep(1.5)
@@ -144,6 +153,13 @@ class TestFallbackThreadBehavior(unittest.TestCase):
             api_mock.get_current_price.call_count, 0,
             "Thread-ul continuă să polling după ce WS a revenit"
         )
+
+    def test_shutdown_stops_waiting_thread(self):
+        fname = _saved_file(self.tmp, price=55000.0)
+        manager = self._manager(fname, sync_ts=9999, api_mock=MagicMock())
+        self.assertTrue(manager.thread.is_alive())
+        self.assertTrue(manager.shutdown(timeout=1.0))
+        self.assertIsNone(manager.thread)
 
 
 if __name__ == "__main__":

@@ -150,6 +150,7 @@ class CacheManagerInterface(ABC):
         self.fetchtime_time_per_symbol = {}
 
         self.thread = None
+        self._stop_event = threading.Event()
         self.save_state = False
         # dacă True, bucla de sync doarme un interval înainte de prima iterație.
         # Respectă valoarea pre-setată de subclase ÎNAINTE de super().__init__
@@ -168,7 +169,6 @@ class CacheManagerInterface(ABC):
 
         # function calls here after all inint vars
         self.load_state()
-        self.periodic_sync(sync_ts, False)
 
     # ── Subscriber pattern (forward prețuri) ──────────────────────────────────
 
@@ -581,12 +581,14 @@ class CacheManagerInterface(ABC):
         if self.thread is not None and self.thread.is_alive():
             return self.thread  # thread deja pornit, returnează-l (citește sync_ts dinamic)
 
+        self._stop_event.clear()
+
         def run():
-            if self._first_sleep:
-                time.sleep(self.sync_ts)   # prima iterație după un interval (ex. CurrentPrice)
+            if self._first_sleep and self._stop_event.wait(self.sync_ts):
+                return   # prima iterație după un interval (ex. CurrentPrice)
             last_maint = time.time()
             last_resync = time.time()
-            while True:
+            while not self._stop_event.is_set():
                 try:
                     if self._should_poll():
                         self.query_remote_and_update_cache()
@@ -605,12 +607,24 @@ class CacheManagerInterface(ABC):
                         last_maint = time.time()
                 except Exception as _e:   # erori tranzitorii (retea/HTTP) NU mai omoara thread-ul de sync
                     builtins.print(f"[{self.cls_name}] eroare in bucla de sync (continui): {_e}")
-                time.sleep(self.sync_ts)
+                if self._stop_event.wait(self.sync_ts):
+                    break
 
         self.thread = threading.Thread(target=run, name=self.cls_name, daemon=True)
         self.thread.daemon = True  # Asigură că acest thread nu blochează închiderea procesului
         self.thread.start()
         return self.thread
+
+    def shutdown(self, timeout=5.0):
+        """Oprește determinist bucla de sync pornită prin periodic_sync()."""
+        self._stop_event.set()
+        thread = self.thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=timeout)
+        stopped = thread is None or not thread.is_alive()
+        if stopped:
+            self.thread = None
+        return stopped
     
     def enable_save_state_to_file(self):
         self.save_state = True
@@ -1200,7 +1214,8 @@ class CacheCurrentPriceManager(CacheManagerInterface):
 _current_price_instance: Optional[CacheCurrentPriceManager] = None
 _current_price_lock = threading.Lock()
 
-def get_current_price_manager(ws_manager=None, symbols=None, sync_ts=None) -> CacheCurrentPriceManager:
+def get_current_price_manager(ws_manager=None, symbols=None, sync_ts=None,
+                              start_sync=True) -> CacheCurrentPriceManager:
     """Returnează (și creează dacă e nevoie) singleton-ul CacheCurrentPriceManager.
 
     sync_ts : intervalul de polling în secunde.
@@ -1217,6 +1232,8 @@ def get_current_price_manager(ws_manager=None, symbols=None, sync_ts=None) -> Ca
             _current_price_instance.sync_ts = sync_ts   # actualizare live
         if ws_manager is not None:
             _current_price_instance.attach_ws_manager(ws_manager)
+        if start_sync:
+            _current_price_instance.periodic_sync(save_state=False)
         return _current_price_instance
     with _current_price_lock:
         if _current_price_instance is not None:
@@ -1224,6 +1241,8 @@ def get_current_price_manager(ws_manager=None, symbols=None, sync_ts=None) -> Ca
                 _current_price_instance.sync_ts = sync_ts
             if ws_manager is not None:
                 _current_price_instance.attach_ws_manager(ws_manager)
+            if start_sync:
+                _current_price_instance.periodic_sync(save_state=False)
             return _current_price_instance
         _syms = symbols if symbols is not None else sym.symbols
         _current_price_instance = CacheCurrentPriceManager(
@@ -1233,6 +1252,8 @@ def get_current_price_manager(ws_manager=None, symbols=None, sync_ts=None) -> Ca
             ws_manager  = ws_manager,
             api_client  = api,
         )
+        if start_sync:
+            _current_price_instance.periodic_sync(save_state=False)
     return _current_price_instance
 
 
@@ -1297,6 +1318,7 @@ class CachePriceShortTrendManager:
         self._computing = False
         self._full_eval_thread = None
         self._flush_thread = None
+        self._stop_event = threading.Event()
 
     # durate ferestrelor extreme (cea mai mică / cea mai mare), derivate din listă
     @property
@@ -1342,6 +1364,7 @@ class CachePriceShortTrendManager:
             if run_full_eval:
                 self._start_full_eval_loop()
             return
+        self._stop_event.clear()
         import pricewindow as pw
         if cache24_managers is None:
             cache24_managers = get_cache_manager("Price24")
@@ -1413,13 +1436,15 @@ class CachePriceShortTrendManager:
         if self._full_eval_thread is not None and self._full_eval_thread.is_alive():
             return
         def run():
-            while True:
+            while not self._stop_event.is_set():
                 for s in list(self.symbols):
+                    if self._stop_event.is_set():
+                        break
                     try:
                         self.evaluate_full(s)
                     except Exception as e:
                         print(f"[CachePriceShortTrendManager] evaluate_full {s}: {e}")
-                time.sleep(self.FULL_EVAL_INTERVAL_SEC)
+                self._stop_event.wait(self.FULL_EVAL_INTERVAL_SEC)
         self._full_eval_thread = threading.Thread(target=run, name="InstantTrendFullEval", daemon=True)
         self._full_eval_thread.start()
 
@@ -1583,13 +1608,30 @@ class CachePriceShortTrendManager:
         if self._flush_thread is not None and self._flush_thread.is_alive():
             return
         def run():
-            while True:
-                time.sleep(self.FLUSH_INTERVAL_SEC)
+            while not self._stop_event.wait(self.FLUSH_INTERVAL_SEC):
                 with self._lock:
                     if self._mem:
                         self._write_file()
         self._flush_thread = threading.Thread(target=run, name="InstantTrendFlush", daemon=True)
         self._flush_thread.start()
+
+    def shutdown(self, timeout=5.0):
+        """Oprește buclele de evaluare/flush și dezabonează sursele Cache24."""
+        self._stop_event.set()
+        for cache24 in (self._cache24_managers or {}).values():
+            unsubscribe = getattr(cache24, "unsubscribe_price", None)
+            if unsubscribe is not None:
+                unsubscribe(self)
+        for thread in (self._full_eval_thread, self._flush_thread):
+            if thread is not None and thread is not threading.current_thread():
+                thread.join(timeout=timeout)
+        stopped = all(thread is None or not thread.is_alive()
+                      for thread in (self._full_eval_thread, self._flush_thread))
+        if stopped:
+            self._full_eval_thread = None
+            self._flush_thread = None
+            self._computing = False
+        return stopped
 
     def prime_from_file(self):
         """Încarcă fișierul în memorie (date INIȚIALE la startup). Un reader poate
@@ -1877,7 +1919,8 @@ class CacheFactory:
                     + (f" (lipsesc: {sorted(missing)})" if missing else "")
                     + ". Singleton pe nume — folosește prima instanță.")
 
-        if name not in cls._instances:
+        created = name not in cls._instances
+        if created:
             config = cls._CONFIG[name]
             manager_class = config["class"]
             sync_ts = config["sync_ts"]()
@@ -1910,7 +1953,35 @@ class CacheFactory:
                     **extra_kwargs,
                 )
 
+            managers = (cls._instances[name].values()
+                        if isinstance(cls._instances[name], dict)
+                        else (cls._instances[name],))
+            for manager in managers:
+                manager.periodic_sync(sync_ts, False)
+
         return cls._instances[name]
+
+    @classmethod
+    def shutdown_all(cls, timeout=5.0):
+        """Oprește toate buclele de sync deținute de factory și golește registry-ul."""
+        managers = []
+        for value in cls._instances.values():
+            managers.extend(value.values() if isinstance(value, dict) else (value,))
+        results = [manager.shutdown(timeout=timeout) for manager in managers
+                   if hasattr(manager, "shutdown")]
+        cls._instances = {}
+        return all(results) if results else True
+
+    @classmethod
+    def remove(cls, name, timeout=5.0):
+        """Scoate controlat un singleton, oprind întâi thread-urile deținute."""
+        value = cls._instances.pop(name, None)
+        if value is None:
+            return True
+        managers = value.values() if isinstance(value, dict) else (value,)
+        results = [manager.shutdown(timeout=timeout) for manager in managers
+                   if hasattr(manager, "shutdown")]
+        return all(results) if results else True
         
 def get_cache_manager(name, symbols=None):
     return CacheFactory.get(name, symbols)
@@ -2115,6 +2186,21 @@ def _fetch_price_with_deadline(market_api, symbol, pool, deadline_sec=_NB_FETCH_
     return fut.result(timeout=deadline_sec)
 
 
+class _NonBinanceTrendPoller:
+    """Lifecycle handle pentru thread-ul și executorul poller-ului non-Binance."""
+    def __init__(self, thread, pool, stop_event):
+        self.thread = thread
+        self.pool = pool
+        self.stop_event = stop_event
+
+    def stop(self, timeout=5.0):
+        self.stop_event.set()
+        if self.thread is not threading.current_thread():
+            self.thread.join(timeout=timeout)
+        self.pool.shutdown(wait=False, cancel_futures=True)
+        return not self.thread.is_alive()
+
+
 def _start_nonbinance_trend_poller(cpm, symbols, interval_sec=20,
                                    fetch_deadline_sec=_NB_FETCH_DEADLINE_SEC):
     """Alimenteaza instant-trend pt simboluri FARA WS (non-Binance, ex HYPEUSD pe Kraken):
@@ -2129,10 +2215,13 @@ def _start_nonbinance_trend_poller(cpm, symbols, interval_sec=20,
     min — spre deosebire de vechiul comportament (inghet TACUT ore intregi)."""
     pool = _futures.ThreadPoolExecutor(
         max_workers=max(2, len(list(symbols))), thread_name_prefix="NBTrendFetch")
+    stop_event = threading.Event()
 
     def run():
-        while True:
+        while not stop_event.is_set():
             for s in list(symbols):
+                if stop_event.is_set():
+                    break
                 try:
                     p = _fetch_price_with_deadline(cpm.market_api, s, pool, fetch_deadline_sec)
                     if p is not None and float(p) > 0:
@@ -2142,15 +2231,17 @@ def _start_nonbinance_trend_poller(cpm, symbols, interval_sec=20,
                                    f"(deadline dur — probabil DNS/retea) — sar peste, reincerc ciclul urmator")
                 except Exception as _e:
                     builtins.print(f"[NB-trend] {s}: {_e}")
-            time.sleep(interval_sec)
+            stop_event.wait(interval_sec)
     t = threading.Thread(target=run, name="NonBinanceTrendPoller", daemon=True)
     t.start()
-    return t
+    return _NonBinanceTrendPoller(t, pool, stop_event)
 
 
 if __name__ == "__main__":
     _initialize_once()   # procesul dedicat de cache vrea WS + persistă în fișier
     threads = []
+    _nb_poller = None
+    _trend_mgr = None
 
     # Simboluri NON-Binance din instruments.conf (ex HYPEUSD pe Kraken) pt care vrem
     # instant-trend cache-uit. Binance ramane din sym.symbols (WS). Defensiv: orice
@@ -2208,7 +2299,7 @@ if __name__ == "__main__":
         _trend_mgr.start_computation(_trend_cache24, _trend_cpm, run_full_eval=True)
         print("⚙️ cacheManager: calcul trend complet pornit (cache_instant_trend.json).")
         if _nb_syms:   # WS-ul e doar Binance -> impinge manual preturile non-Binance in lant
-            _start_nonbinance_trend_poller(_trend_cpm, _nb_syms, interval_sec=20)
+            _nb_poller = _start_nonbinance_trend_poller(_trend_cpm, _nb_syms, interval_sec=20)
     except Exception as e:
         print(f"[cacheManager] Nu pot porni calculul de trend: {e}")
 
@@ -2219,3 +2310,12 @@ if __name__ == "__main__":
         print("Oprit manual.")
     finally:
         print("Cleanup / închidere resurse...")
+        if _nb_poller is not None:
+            _nb_poller.stop()
+        if _trend_mgr is not None:
+            _trend_mgr.shutdown()
+        CacheFactory.shutdown_all()
+        if _current_price_instance is not None:
+            _current_price_instance.shutdown()
+        if _ws_bridge is not None:
+            _ws_bridge.stop()

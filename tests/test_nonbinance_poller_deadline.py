@@ -42,7 +42,9 @@ class TestFetchDeadline(unittest.TestCase):
         self.pool = futures.ThreadPoolExecutor(max_workers=2)
 
     def tearDown(self):
-        self.pool.shutdown(wait=False)
+        if hasattr(self, "blocked_api"):
+            self.blocked_api.hang = False
+        self.pool.shutdown(wait=True, cancel_futures=True)
 
     def test_normal_fetch_returns_price(self):
         api = _FakeApi(hang=False, price=55.5)
@@ -51,6 +53,7 @@ class TestFetchDeadline(unittest.TestCase):
 
     def test_hung_fetch_raises_timeout_not_blocks(self):
         api = _FakeApi(hang=True)
+        self.blocked_api = api
         t0 = time.time()
         with self.assertRaises(futures.TimeoutError):
             cm._fetch_price_with_deadline(api, "HYPEUSD", self.pool, deadline_sec=1)
@@ -71,7 +74,9 @@ class TestFetchDeadline(unittest.TestCase):
 
         cpm = _Cpm()
         # interval mic + deadline scurt, ca sa observam timeout + recovery in test
-        cm._start_nonbinance_trend_poller(cpm, ["HYPEUSD"], interval_sec=0.3, fetch_deadline_sec=0.5)
+        poller = cm._start_nonbinance_trend_poller(
+            cpm, ["HYPEUSD"], interval_sec=0.3, fetch_deadline_sec=0.5)
+        self.addCleanup(poller.stop)
         time.sleep(2)            # timp in care fetch-ul e blocat -> timeout-uri, NU push
         self.assertEqual(pushed, [], "cat timp fetch-ul e blocat, nu trebuie sa impinga nimic")
         api.hang = False         # reteaua revine -> fetch-urile blocate se deblocheaza

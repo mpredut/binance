@@ -780,11 +780,11 @@ class TestCacheFactory(unittest.TestCase):
 
     def setUp(self):
         # reset singleton-uri
-        cm.CacheFactory._instances = {}
+        cm.CacheFactory.shutdown_all()
         cm._current_price_instance = None
 
     def tearDown(self):
-        cm.CacheFactory._instances = {}
+        cm.CacheFactory.shutdown_all()
         cm._current_price_instance = None
 
     def test_unknown_name_raises(self):
@@ -806,7 +806,7 @@ class TestCacheFactory(unittest.TestCase):
         )
         for name, symbols, expected_filename in cases:
             with self.subTest(factory=name):
-                cm.CacheFactory._instances.pop(name, None)
+                cm.CacheFactory.remove(name)
                 with patch("cacheManager.get_current_price_manager", return_value=cur_mock):
                     result = cm.CacheFactory.get(name, symbols=symbols)
                 self.assertIsInstance(result, dict)
@@ -840,9 +840,13 @@ class TestCacheFactory(unittest.TestCase):
 class TestGetCurrentPriceManagerSingleton(unittest.TestCase):
 
     def setUp(self):
+        if cm._current_price_instance is not None:
+            cm._current_price_instance.shutdown()
         cm._current_price_instance = None
 
     def tearDown(self):
+        if cm._current_price_instance is not None:
+            cm._current_price_instance.shutdown()
         cm._current_price_instance = None
 
     def test_returns_single_cache_current_price_manager(self):
@@ -883,10 +887,10 @@ class TestFactorySingletonWarning(unittest.TestCase):
     """Singleton pe nume: simbolurile diferite la apeluri ulterioare sunt ignorate."""
 
     def setUp(self):
-        cm.CacheFactory._instances.pop("AssetValue", None)
+        cm.CacheFactory.remove("AssetValue")
 
     def tearDown(self):
-        cm.CacheFactory._instances.pop("AssetValue", None)
+        cm.CacheFactory.remove("AssetValue")
 
     def test_same_instance_returned_and_warns(self):
         m1 = cm.get_cache_manager("AssetValue", symbols=["TOTAL"])

@@ -68,12 +68,15 @@ def main():
         sync_ts=args.sync_ts,
     )
 
+    caches = []
     for symbol in symbols:
         filename = os.path.join(CACHEDB_DIR, f"cache_24price_long_{symbol}.jsonl")
         cache = cm.Cache24LongPriceManager(sync_ts=args.save_every, symbols=[symbol], filename=filename)
         cache.KEEP_HOURS = keep_hours   # override per-instanta (suportat explicit in cod)
         cache.enable_save_state_to_file()   # implicit False la constructie — fara asta nu scrie pe disc
+        cache.periodic_sync(args.save_every, save_state=True)
         current_price_mgr.subscribe_price(cache)
+        caches.append(cache)
 
     print(f"[tradeall_price_archiver] pornit: {symbols} | retentie {args.months} luni "
           f"({keep_hours:.0f}h) | scriere pe disc la {args.save_every:.0f}s")
@@ -86,6 +89,11 @@ def main():
             time.sleep(60)
     except KeyboardInterrupt:
         print("\n[tradeall_price_archiver] oprit.")
+    finally:
+        for cache in caches:
+            cache.shutdown()
+        current_price_mgr.shutdown()
+        bapi_ws.bapi_ws_manager.stop()
 
 
 if __name__ == "__main__":

@@ -89,17 +89,15 @@ def update_price(symbol):
 
     cprice_time[symbol] = time.time()
     cprice_refresh_int[symbol] = 11
-    return cprice[symbol]
-
-for symbol in sym.symbols:
-    update_price(symbol)
+    return cprice.get(symbol)
 
 def get_current_price(symbol):
     global cprice
     global cprice_refresh_int
     try:     
-        if (cprice_time[symbol] + cprice_refresh_int[symbol] <= time.time()) :
-            update_price(symbol)
+        if (symbol not in cprice_time
+                or cprice_time[symbol] + cprice_refresh_int.get(symbol, 11) <= time.time()):
+            return update_price(symbol)
         _cprice  = cprice.get(symbol, None)
         if _cprice is None:
             print(f"get_current_price: Pretul pentru {symbol} nu este disponibil. Returning None.")

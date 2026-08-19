@@ -6,7 +6,7 @@ from binance.client import Client
 from binance.exceptions import BinanceAPIException
 
 ####MYLIB
-client = None
+_client = None
 
 # Marjă de siguranță: ținem timestamp-ul nostru puțin SUB timpul serverului ca să nu
 # declanșăm -1021 (timestamp ahead) nici la jitter; rămâne mult sub recvWindow (5s).
@@ -45,13 +45,13 @@ def sync_time(safety_margin_ms=TIME_SAFETY_MARGIN_MS):
     Corectează clock-skew-ul local (tipic în WSL) care cauzează
     APIError(-1021): 'Timestamp for this request was 1000ms ahead of server's time'.
     Endpoint public (neparafat) → nu depinde el însuși de timestamp."""
-    if client is None:
+    if _client is None:
         return None
     try:
-        server_ms = client.get_server_time()["serverTime"]
+        server_ms = _client.get_server_time()["serverTime"]
         local_ms = int(time.time() * 1000)
-        client.timestamp_offset = server_ms - local_ms - safety_margin_ms
-        return client.timestamp_offset
+        _client.timestamp_offset = server_ms - local_ms - safety_margin_ms
+        return _client.timestamp_offset
     except Exception as e:
         print(f"[bapi_client] sync_time failed: {e}")
         return None
@@ -73,14 +73,23 @@ def _start_periodic_resync():
 
 
 def getClient():
-    global client
-    if client is None:
+    global _client
+    if _client is None:
         from keys.apikeys import api_key, api_secret
-        client = Client(api_key, api_secret, requests_params={"timeout": REQUEST_TIMEOUT_SEC})
-        _install_retry(client)      # retry pe GET-uri (NU pe POST/ordere) la blip tranzitoriu
+        _client = Client(api_key, api_secret, requests_params={"timeout": REQUEST_TIMEOUT_SEC})
+        _install_retry(_client)      # retry pe GET-uri (NU pe POST/ordere) la blip tranzitoriu
         sync_time()                 # aliniere inițială la timpul serverului
         _start_periodic_resync()    # menținere în timp
-    return client
+    return _client
 
 
-getClient()
+class _LazyClientProxy:
+    """Păstrează API-ul `client.*`, dar construiește clientul la primul apel real."""
+    def __getattr__(self, name):
+        return getattr(getClient(), name)
+
+    def __setattr__(self, name, value):
+        setattr(getClient(), name, value)
+
+
+client = _LazyClientProxy()
