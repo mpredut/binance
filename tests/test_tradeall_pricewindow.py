@@ -88,17 +88,6 @@ def _window(prices, sample_rate=0.8, symbol="BTCUSDT"):
     return pw
 
 
-def _load_cache_prices_multi(symbol="BTCUSDC") -> list:
-    """Încarcă intrările [ts_ms, price] din cache_prices_multi.json."""
-    path = os.path.join(os.path.dirname(__file__), "..", "cache_prices_multi.json")
-    path = os.path.normpath(path)
-    if not os.path.exists(path):
-        return []
-    with open(path) as f:
-        data = json.load(f)
-    return data.get("items", {}).get(symbol, [])
-
-
 def _make_cache24_manager(symbol, entries, tmp_dir):
     """Creează un Cache24PriceManager pre-populat cu entries = [[ts_ms, price], ...]."""
     fname = os.path.join(tmp_dir, f"cache_24_{symbol}.json")
@@ -255,15 +244,6 @@ class TestSampleRateFromEntries(unittest.TestCase):
                 rate = ta.PriceWindow._sample_rate_from_entries(entries)
                 self.assertAlmostEqual(rate, ta.TIME_SLEEP_GET_PRICE)
 
-    def test_real_cache_data(self):
-        entries = _load_cache_prices_multi("BTCUSDC")
-        if len(entries) < 2:
-            self.skipTest("cache_prices_multi.json lipsă sau prea puțin date")
-        rate = ta.PriceWindow._sample_rate_from_entries(entries)
-        self.assertGreater(rate, 0)
-        self.assertLess(rate, 3600)   # ceva rezonabil
-
-
 # ═══════════════════════════════════════════════════════════════════════════
 # PriceWindow.from_cache24 — factory cu Cache24PriceManager
 # ═══════════════════════════════════════════════════════════════════════════
@@ -323,62 +303,23 @@ class TestPriceWindowFromCache24(unittest.TestCase):
         pw = self._make(entries, window_seconds=1.0)
         self.assertGreaterEqual(pw.window_size, 10)
 
-    # ── date reale din cache ────────────────────────────────────────────────
+    def test_small_window_detects_reversal_before_large_window(self):
+        """Scenariu determinist: trend lung UP, urmat de o inversare recentă DOWN."""
+        now_ms = int(time.time() * 1000)
+        prices = [100.0 + i for i in range(100)]
+        prices.extend(prices[-1] - i for i in range(1, 21))
+        entries = [[now_ms - (len(prices) - 1 - i) * 1000, price]
+                   for i, price in enumerate(prices)]
+        manager = _make_cache24_manager("BTCUSDC", entries, self.tmp)
 
-    def test_from_real_cache_prices_multi(self):
-        entries = _load_cache_prices_multi("BTCUSDC")
-        if len(entries) < 10:
-            self.skipTest("cache_prices_multi.json insuficient")
-        # Timestamp-urile din fișier pot fi vechi față de time.time().
-        # Înlocuim ts_ms cu valori recente păstrând intervalele originale.
-        base_ts = entries[0][0]
-        now_ms  = int(time.time() * 1000)
-        shifted = [[now_ms + (e[0] - base_ts), e[1]] for e in entries]
+        large = ta.PriceWindow.from_cache24("BTCUSDC", 119.0, manager)
+        small = ta.PriceWindow.from_cache24("BTCUSDC", 15.0, manager)
+        _, _, large_slope, _ = large.get_trend()
+        _, _, small_slope, _ = small.get_trend()
 
-        mgr = _make_cache24_manager("BTCUSDC", shifted, self.tmp)
-        span_sec = (shifted[-1][0] - shifted[0][0]) / 1000.0
-        pw = ta.PriceWindow.from_cache24("BTCUSDC", span_sec, mgr)
-        self.assertGreater(len(pw.prices), 0)
-        final_trend, gc, sf, gr = pw.get_trend()
-        self.assertIn(final_trend, (-1, 0, 1))
-        self.assertIsInstance(gc, float)
-
-    def _shift_entries_to_now(self, entries):
-        """Mută timestamp-urile la momentul curent păstrând intervalele."""
-        base_ts = entries[0][0]
-        now_ms  = int(time.time() * 1000)
-        return [[now_ms + (e[0] - base_ts), e[1]] for e in entries]
-
-    def test_real_data_recent_gradient_vs_full(self):
-        entries = _load_cache_prices_multi("BTCUSDC")
-        if len(entries) < 20:
-            self.skipTest("date insuficiente")
-        shifted = self._shift_entries_to_now(entries)
-        mgr = _make_cache24_manager("BTCUSDC", shifted, self.tmp)
-        span_sec = (shifted[-1][0] - shifted[0][0]) / 1000.0
-        pw = ta.PriceWindow.from_cache24("BTCUSDC", span_sec, mgr)
-        _, _, slope_full, gradient_recent = pw.get_trend()
-        self.assertIsInstance(slope_full, float)
-        self.assertIsInstance(gradient_recent, float)
-
-    def test_small_window_vs_large_window_real_data(self):
-        entries = _load_cache_prices_multi("BTCUSDC")
-        if len(entries) < 30:
-            self.skipTest("date insuficiente")
-        shifted   = self._shift_entries_to_now(entries)
-        mgr_full  = _make_cache24_manager("BTCUSDC", shifted, self.tmp)
-        span_full  = (shifted[-1][0] - shifted[0][0]) / 1000.0
-        span_small = min(300.0, span_full / 4)
-
-        pw_full  = ta.PriceWindow.from_cache24("BTCUSDC", span_full,  mgr_full)
-        pw_small = ta.PriceWindow.from_cache24("BTCUSDC", span_small, mgr_full)
-
-        _, _, sf_full,  _ = pw_full.get_trend()
-        _, _, sf_small, _ = pw_small.get_trend()
-
-        self.assertIsInstance(sf_full,  float)
-        self.assertIsInstance(sf_small, float)
-        self.assertLessEqual(len(pw_small.prices), len(pw_full.prices))
+        self.assertGreater(large_slope, 0)
+        self.assertLess(small_slope, 0)
+        self.assertLess(len(small.prices), len(large.prices))
 
 
 # ═══════════════════════════════════════════════════════════════════════════

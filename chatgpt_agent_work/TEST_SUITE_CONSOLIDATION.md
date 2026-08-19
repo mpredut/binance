@@ -21,12 +21,12 @@ The consolidation rule was deliberately narrow:
 
 | Metric | Before | After | Change |
 |---|---:|---:|---:|
-| Collected pytest nodes | 665 | 577 | -88 (-13.2%) |
-| Passing top-level tests | 661 | 573 | -88 |
-| Skipped tests | 4 | 4 | unchanged |
+| Collected pytest nodes | 665 | 574 | -91 (-13.7%) |
+| Passing top-level tests | 661 | 574 | -87 |
+| Skipped tests | 4 | 0 | -4 |
 | Passing subtests | 75 | 185 | +110 |
-| Tracked test-source lines | 11,620 | 11,398 | -222 |
-| `test_tradeall_pricewindow.py` nodes | 120 | 77 | -43 |
+| Tracked test-source lines | 11,620 | 11,360 | -260 |
+| `test_tradeall_pricewindow.py` nodes | 120 | 74 | -46 |
 | `test_cache_manager_full.py` nodes | 113 | 94 | -19 |
 
 The subtest increase is intentional: repeated methods became table-driven cases, so
@@ -51,6 +51,15 @@ Twelve files were consolidated:
   `test_trend_stats.py`.
 
 No live trading, strategy, risk or order code was changed.
+
+## Removed runtime-dependent skips
+
+The four skipped tests all depended on the unversioned runtime file
+`cache_prices_multi.json`, so they never ran in a clean clone or CI environment.
+Three asserted only result types and one repeated the deterministic sample-rate tests.
+They were removed. The useful behavior among them—short and long windows reacting
+differently to a recent reversal—is now covered by an always-active synthetic series
+that asserts a positive long-window slope and a negative short-window slope.
 
 ## Duplicate analysis
 
@@ -89,7 +98,7 @@ The repository contains manual/live diagnostics that pytest does not collect:
 - `212trading/test_sl_rebuy.py` (a standalone `main()` scenario);
 - `altele/test.py` and `altele/test2.py` (offline research scripts).
 
-They are excluded from the 577-node count. The nine WS files contain historical live
+They are excluded from the 574-node count. The nine WS files contain historical live
 API experiments and should eventually move to `offline/manual/ws/` or be replaced by
 one explicit CLI diagnostic. They were not silently merged because some variants use
 different Binance websocket protocols and real credentials.
@@ -105,7 +114,7 @@ Financial baseline:
 Complete suite:
 
 ```text
-573 passed, 4 skipped, 185 subtests passed
+574 passed, 185 subtests passed
 ```
 
 Remaining non-failing debt: 13 dependency/process warnings and background cache/trend

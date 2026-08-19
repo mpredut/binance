@@ -79,7 +79,7 @@ Full command:
 Verified result on 2026-08-19:
 
 ```text
-573 passed, 4 skipped, 185 subtests passed
+574 passed, 185 subtests passed
 ```
 
 The lower top-level count is the result of the test-suite consolidation documented
