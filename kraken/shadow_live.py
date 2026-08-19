@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """kraken/shadow_live.py — SHADOW TEST LIVE (read-only, ZERO ordine reale, NU atinge botul).
 
-Ruleaza 3 config-uri prin MOTORUL FAITHFUL (replay.run_replay = exact deciziile live
+Ruleaza config-uri prin MOTORUL FAITHFUL (replay.run_replay = exact deciziile live
 Strategy.step) peste ACELASI OHLC live descarcat de la Kraken, si logheaza P&L paper
 comparativ. Scopul: forward-test intre configul de PRODUCTIE si 2 candidati shadow
 (pre-inregistrati din cercetare) inainte de a schimba ceva pe bani reali:
@@ -9,6 +9,8 @@ comparativ. Scopul: forward-test intre configul de PRODUCTIE si 2 candidati shad
   - current : configul LIVE exact (citit din .env apoi config.env)      -> referinta
   - tp4     : DOAR TAKEPROFIT 5.0 -> 4.0  (+0.13pp in cercetare, fara DD in plus)
   - dca15   : DOAR DCA_DROP 1.25 -> 1.5   (+0.08pp, candidat secundar)
+  - overlay650t8 (doar 240m): overlay cu top-up 650 si trail 8%; candidat
+    EXPLORATORIU pentru forward, neaprobat pentru live
 
 Determinist: dat OHLC-ul, rezultatul e reproductibil. Barele forward închise sunt
 păstrate local, astfel încât fereastra ancorată crește și după limita Kraken de 720 bare.
@@ -51,10 +53,10 @@ def _load_runtime_config(env_path: str | None = None,
     load_dotenv(config_path)
 
 
-def _variants():
+def _variants(interval: int):
     import strategy as strat
     base = strat.StratParams.from_env()
-    return {
+    variants = {
         "current": base,
         "tp4": dataclasses.replace(base, takeprofit_pct=4.0),
         "dca15": dataclasses.replace(base, dca_drop_pct=1.5),
@@ -64,6 +66,17 @@ def _variants():
         "A_trail": dataclasses.replace(base, tp_trail_adaptive=True, tp_trail_k=2.0,
                                        tp_trail_min=1.5, tp_trail_max=8.0),
     }
+    # Overlay-ul folosește semnal OHLC de 240m; nu îl simulăm artificial pe 60m.
+    # Valorile sunt preînregistrate după analiza istorică și rămân fixe în forward.
+    if interval == base.trend_interval:
+        variants["overlay650t8"] = dataclasses.replace(
+            base,
+            trend_overlay=True,
+            trend_topup=650.0,
+            trend_trail_pct=8.0,
+            trend_exit_break=False,
+        )
+    return variants
 
 
 def _fetch_with_ts(pair: str, interval: int):
@@ -161,7 +174,7 @@ def _eval_block(ohlc4, interval, fee_pct):
     if len(ohlc4) < 2:
         return None
     rows = {}
-    for name, params in _variants().items():
+    for name, params in _variants(interval).items():
         budget = float(params.max_budget)
         m = _run_one(ohlc4, params, interval, fee_pct)
         rows[name] = {
@@ -213,8 +226,7 @@ def _print_block(title: str, blk: dict) -> None:
         return
     cur = r["current"]["total_pct"]
     print(f"    {'config':<9} {'net%':>8} {'total%':>8} {'maxDD%':>8} {'cicluri':>8}  vs current total")
-    for name in r:   # dinamic (current e primul din _variants) — nu hardcodam lista
-        x = r[name]
+    for name, x in r.items():
         diff = "" if name == "current" else f"{x['total_pct'] - cur:+.2f}pp"
         print(f"    {name:<9} {x['net_pct']:>8.2f} {x['total_pct']:>8.2f} "
               f"{x['maxdd_pct']:>8.2f} {x['cycles']:>8}  {diff}")
@@ -234,7 +246,9 @@ def _append_jsonl(pair: str, interval: int, snap: dict) -> None:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Shadow test live: current vs tp4 vs dca15 (read-only).")
+    ap = argparse.ArgumentParser(
+        description="Shadow test live: current vs candidați preînregistrați (read-only)."
+    )
     ap.add_argument("--interval", type=int, default=60, help="minute per bara (60/240/1440)")
     ap.add_argument("--fee", type=float, default=0.26, help="comision per leg %%")
     ap.add_argument("--pair", default=None, help="implicit KRAKEN_PAIR din .env/config.env")

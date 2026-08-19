@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import importlib.util
 import io
 import os
@@ -10,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +27,33 @@ SPEC.loader.exec_module(shadow)
 
 
 class ShadowLiveTest(unittest.TestCase):
+    def test_overlay_candidate_is_only_enabled_at_its_native_interval(self):
+        @dataclasses.dataclass(frozen=True)
+        class Params:
+            takeprofit_pct: float = 5.0
+            dca_drop_pct: float = 1.25
+            trend_interval: int = 240
+            trend_overlay: bool = False
+            trend_topup: float = 2000.0
+            trend_trail_pct: float = 5.0
+            trend_exit_break: bool = False
+
+        fake_strategy = SimpleNamespace(
+            StratParams=SimpleNamespace(from_env=lambda: Params()),
+        )
+        with patch.dict(sys.modules, {"strategy": fake_strategy}):
+            variants_60 = shadow._variants(60)
+            variants_240 = shadow._variants(240)
+
+        self.assertEqual(list(variants_60), ["current", "tp4", "dca15"])
+        self.assertEqual(
+            list(variants_240), ["current", "tp4", "dca15", "overlay650t8"],
+        )
+        candidate = variants_240["overlay650t8"]
+        self.assertTrue(candidate.trend_overlay)
+        self.assertEqual(candidate.trend_topup, 650.0)
+        self.assertEqual(candidate.trend_trail_pct, 8.0)
+
     def test_runtime_config_matches_live_precedence(self):
         with tempfile.TemporaryDirectory() as tmp:
             env_path = Path(tmp) / ".env"
