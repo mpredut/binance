@@ -105,6 +105,23 @@ class T212ReplayTest(unittest.TestCase):
         self.assertGreater(two["open_qty"], 0.0)
         self.assertAlmostEqual(two["net_pnl"], two["total"])
 
+    def test_market_stop_fills_at_next_open_and_slippage_is_adverse(self):
+        params = _params(STRAT_STOP_LOSS_PCT="20")
+        bars = [
+            (100, 101, 99, 100),  # decide ENTRY
+            (100, 101, 99, 100),  # fill ENTRY
+            (70, 71, 69, 70),     # decide STOP MARKET la close
+            (65, 66, 64, 65),     # fill STOP la open, chiar dupa gap
+        ]
+        base = replay.run_replay(bars, params, bar_minutes=1440)
+        stressed = replay.run_replay(
+            bars, params, bar_minutes=1440,
+            execution=replay.ExecutionModel(market_slippage_bps=100),
+        )
+        self.assertEqual(base["open_qty"], 0.0)
+        self.assertEqual(base["cycles"], 1)
+        self.assertLess(stressed["total"], base["total"])
+
     def test_partial_sell_reduces_remaining_cost_basis(self):
         params = _params()
         engine = strategy.Strategy(
@@ -320,6 +337,8 @@ class T212ExactFillReconciliationTest(unittest.TestCase):
 class _CancelClient:
     def __init__(self, cancel_result=False):
         self.cancel_result = cancel_result
+        self.limit_result = None
+        self.market_result = None
         self.cancel_calls = []
         self.place_calls = []
 
@@ -330,7 +349,15 @@ class _CancelClient:
         return self.cancel_result
 
     def place_limit_order(self, ticker, quantity, limit, validity):
-        self.place_calls.append((ticker, quantity, limit, validity))
+        self.place_calls.append(("limit", ticker, quantity, limit, validity))
+        if self.limit_result is not None:
+            return self.limit_result
+        return 200, {"id": f"NEW-{len(self.place_calls)}"}
+
+    def place_market_order(self, ticker, quantity, extended_hours=False):
+        self.place_calls.append(("market", ticker, quantity, extended_hours))
+        if self.market_result is not None:
+            return self.market_result
         return 200, {"id": f"NEW-{len(self.place_calls)}"}
 
 
@@ -394,8 +421,76 @@ class T212CancellationLifecycleTest(unittest.TestCase):
         with patch.object(strategy, "notify"):
             self.assertTrue(engine._check_stop_loss(70.0))
         self.assertEqual(len(client.place_calls), 1)
+        self.assertEqual(client.place_calls[0][0], "market")
         self.assertEqual(len(engine.s["orders"]), 1)
         self.assertEqual(engine.s["orders"][0]["kind"], "SL")
+        self.assertTrue(engine.s["orders"][0]["market"])
+
+    def test_trailing_exit_is_market_and_is_not_replaced_while_pending(self):
+        client = _CancelClient(True)
+        engine = self._engine(
+            client, STRAT_TRAIL_PCT="5", STRAT_TRAIL_MIN_PROFIT_PCT="0",
+        )
+        engine.s.update({
+            "qty": 1.0, "cost_usd": 100.0, "spent_cash": 100.0,
+            "pos_peak": 120.0, "tr_armed": True,
+        })
+
+        with patch.object(strategy, "notify"):
+            self.assertTrue(engine._check_trailing(110.0))
+            self.assertTrue(engine._check_trailing(105.0))
+
+        self.assertEqual(len(client.place_calls), 1)
+        self.assertEqual(client.place_calls[0][0], "market")
+        self.assertEqual(engine.s["orders"][0]["kind"], "TR")
+        self.assertTrue(engine.s["orders"][0]["market"])
+
+    def test_rejected_market_exit_does_not_arm_rebuy_or_claim_success(self):
+        for check, overrides, state in (
+            ("_check_stop_loss", {}, {}),
+            (
+                "_check_trailing",
+                {"STRAT_TRAIL_PCT": "5", "STRAT_TRAIL_MIN_PROFIT_PCT": "0"},
+                {"pos_peak": 120.0, "tr_armed": True},
+            ),
+        ):
+            with self.subTest(check=check):
+                client = _CancelClient(True)
+                client.market_result = (500, {"error": "rejected"})
+                engine = self._engine(client, **overrides)
+                engine.s.update({
+                    "qty": 1.0, "cost_usd": 100.0, "spent_cash": 100.0,
+                    **state,
+                })
+
+                with patch.object(strategy, "notify") as notify:
+                    self.assertTrue(getattr(engine, check)(70.0))
+
+                self.assertFalse(engine.s.get("sl_pending", False))
+                self.assertEqual(engine.s["orders"], [])
+                notify.assert_not_called()
+
+    def test_ambiguous_not_owned_error_never_erases_local_position(self):
+        client = _CancelClient(True)
+        client.limit_result = (400, {"code": "selling-equity-not-owned"})
+        engine = self._engine(client)
+        engine.s.update({
+            "qty": 1.0, "cost_usd": 100.0, "spent_cash": 100.0,
+        })
+
+        self.assertFalse(engine._place_sell(1.0, 110.0))
+
+        self.assertEqual(engine.s["qty"], 1.0)
+        self.assertEqual(engine.s["cost_usd"], 100.0)
+        self.assertEqual(engine.s["spent_cash"], 100.0)
+
+    def test_limit_orders_keep_the_profile_validity(self):
+        client = _CancelClient(True)
+        engine = self._engine(client)
+
+        self.assertTrue(engine._place_sell(1.0, 110.0))
+
+        self.assertEqual(client.place_calls[-1][-1], "GOOD_TILL_CANCEL")
 
 
 if __name__ == "__main__":

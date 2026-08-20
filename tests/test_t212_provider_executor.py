@@ -101,6 +101,29 @@ class T212ExecutorContractTest(unittest.TestCase):
         with self.assertRaisesRegex(ProviderError, "cantitate"):
             self.provider.submit_order("NVDA_US_EQ", "buy", 0.001, price=119.25)
 
+    def test_poarta_live_poate_fi_injectata_de_launcherul_autonom(self):
+        os.environ["T212_LIVE_ORDERS"] = "false"
+        explicit_live = T212Provider(client=self.fake, live_enabled=True)
+        self.assertEqual(
+            explicit_live.submit_order("NVDA_US_EQ", "buy", 0.5, price=119.25),
+            "712",
+        )
+
+        os.environ["T212_LIVE_ORDERS"] = "true"
+        explicit_paper = T212Provider(client=self.fake, live_enabled=False)
+        with self.assertRaisesRegex(ProviderError, "blocat"):
+            explicit_paper.submit_order("NVDA_US_EQ", "buy", 0.5, price=119.25)
+
+    def test_validitatea_limita_poate_fi_injectata_de_profil(self):
+        provider = T212Provider(
+            client=self.fake, live_enabled=True,
+            order_validity="GOOD_TILL_CANCEL",
+        )
+
+        provider.submit_order("NVDA_US_EQ", "buy", 0.5, price=119.25)
+
+        self.assertEqual(self.fake.calls[-1][-1], "GOOD_TILL_CANCEL")
+
     def test_submit_respins_sau_fara_id_este_eroare(self):
         for result in ((429, {"error": "rate limit"}), (200, {"status": "NEW"})):
             with self.subTest(result=result):

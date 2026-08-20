@@ -34,10 +34,13 @@ Motorul T212 păstrează local un ordin până când cererea de anulare este acc
 Dacă anularea eșuează, nu plasează repricing, scară TP sau ieșire STOP/trailing peste
 ordinul posibil activ; reîncearcă la următorul ciclu de reconciliere.
 
-Reconcilierea T212 refolosește `T212Provider.order_status`: cantitatea poziției rămâne
+Motorul T212 folosește `T212Provider` pentru întreg ciclul submit/status/cancel, dar își
+păstrează regulile financiare distincte și feed-ul Yahoo. Cantitatea poziției rămâne
 ancorată în portofoliu, iar prețul/P&L-ul se ia din fill-urile cumulative reale numai
 când delta ordinelor corespunde deltei portofoliului. Partial fill-urile sunt aplicate
 o singură dată; dacă statusul este temporar indisponibil, ordinul rămâne urmărit.
+STOP și trailing sunt ordine MARKET; replay-ul le umple la open-ul barei următoare și
+poate aplica spread/slippage advers.
 
 `providers/execution_audit.py` este un decorator strict observațional peste
 `StrategyExecutor`. Fiecare intenție live primește `intent_id`, păstrat în starea

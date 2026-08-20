@@ -729,9 +729,11 @@ Adaptorul generalizează mecanica ordinelor, nu strategia. Motorul autonom T212 
 feed-ul Yahoo, FX fee, take-profit ladder și regulile sale proprii; `ohlc_closes` din
 contractul generic întoarce momentan `[]` pentru T212.
 
-Motorul autonom refolosește adaptorul strict la reconciliere: delta cantității este
-confirmată de portfolio, iar prețul exact vine din fill-urile cumulative ale ordinului.
-Marcajele `applied_fill_*` previn reaplicarea unui partial fill la poll-ul următor.
+Motorul autonom folosește adaptorul strict pentru submit/status/cancel. Delta cantității
+este confirmată de portfolio, iar prețul exact vine din fill-urile cumulative ale
+ordinului. Marcajele `applied_fill_*` previn reaplicarea unui partial fill la poll-ul
+următor. TP/scara sunt LIMIT; STOP și trailing sunt MARKET și nu pot rămâne în urmă
+într-un gap descendent.
 
 ```text
 Strategy / spot_dca

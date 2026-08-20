@@ -46,8 +46,18 @@ def _live() -> bool:
 
 
 class T212Provider(MarketDataProvider):
-    def __init__(self):
-        self._cli = None
+    def __init__(self, client=None, live_enabled: Optional[bool] = None,
+                 order_validity: Optional[str] = None):
+        self._cli = client
+        # None pastreaza gate-ul istoric T212_LIVE_ORDERS. Launcherul autonom,
+        # care are deja STRAT_EXECUTE/dry_run per profil, injecteaza explicit bool.
+        self._live_enabled = live_enabled
+        # Profilurile autonome au istoric GOOD_TILL_CANCEL; contractul generic
+        # poate ramane configurat prin T212_ORDER_VALIDITY.
+        self._order_validity = order_validity
+
+    def _orders_live(self) -> bool:
+        return _live() if self._live_enabled is None else bool(self._live_enabled)
 
     @property
     def name(self) -> str:
@@ -170,13 +180,18 @@ class T212Provider(MarketDataProvider):
             raise ProviderError(f"pret T212 invalid: {price!r}") from e
         if not math.isfinite(price_f) or price_f <= 0:
             raise ProviderError(f"pret T212 invalid: {price!r}")
-        validity = os.environ.get("T212_ORDER_VALIDITY", "DAY").strip().upper() or "DAY"
+        configured = (
+            self._order_validity
+            if self._order_validity is not None
+            else os.environ.get("T212_ORDER_VALIDITY", "DAY")
+        )
+        validity = str(configured).strip().upper() or "DAY"
         if validity not in {"DAY", "GOOD_TILL_CANCEL"}:
             raise ProviderError(f"T212_ORDER_VALIDITY invalid: {validity!r}")
         return self._client().place_limit_order(symbol, signed, price_f, validity=validity)
 
     def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
-        if not _live():
+        if not self._orders_live():
             print(f"[T212][DRY] as plasa {side} {symbol} qty={qty} @ {price} "
                   f"(real off; seteaza T212_LIVE_ORDERS=true)")
             return None
@@ -202,7 +217,7 @@ class T212Provider(MarketDataProvider):
                      kind: Optional[str] = None) -> str:
         """Plasare stricta pentru motorul generic; nu ocoleste poarta live T212."""
         del kind  # tag de strategie, neacceptat de API-ul public T212 v0
-        if not _live():
+        if not self._orders_live():
             raise ProviderError("T212_LIVE_ORDERS nu este true; ordinul real este blocat")
         try:
             status, data = self._send_order(
@@ -281,7 +296,7 @@ class T212Provider(MarketDataProvider):
         )
 
     def cancel_order(self, symbol: str, order_id: str) -> None:
-        if not _live():
+        if not self._orders_live():
             raise ProviderError("T212_LIVE_ORDERS nu este true; anularea reala este blocata")
         try:
             if self._client().cancel_order(order_id):

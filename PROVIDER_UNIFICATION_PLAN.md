@@ -50,7 +50,9 @@ KrakenError`. Backtestul (`replay.py`) folosește `MagicMock` → aproape neatin
   testele importă modulul canonic, fără coliziuni între fișierele `strategy.py` ale venue-urilor.
 - **Faza 5c — fidelitate + audit** ✅ — T212 reconciliază prețurile cumulative reale,
   inclusiv partial fills; `AuditedStrategyExecutor` adaugă `intent_id` și jurnal JSONL
-  pentru submit/status/cancel fără să blocheze sau să modifice ordinele.
+  pentru submit/status/cancel fără să blocheze ordinele. Motorul autonom T212 folosește
+  acum același contract pentru întreg ciclul ordinului; STOP/trailing sunt MARKET și
+  replay-ul le modelează la open cu spread/slippage.
 - **Faza 6 (amânată; necesită redesign)** — NU rutează direct base v2 prin
   `MarketApi.place`. Dacă apare nevoie cross-strategy, se introduce separat un decorator
   intent-aware, în care STOP/trailing nu pot fi blocate de trend/cooldown/plafon.
