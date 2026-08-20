@@ -40,6 +40,7 @@ un sell vechi bloca re-intrarea după un crash (incident TAO iun 2026); redus la
   catastrofă; cumpără DOAR sub ultima vânzare (re-entry guard). Nu vinde în pierdere normală
   (riscul asumat: capital blocat pe scădere, exit la pierdere doar la −30%).
 - **Scale-out TP ladder** (`STRAT_TP_LADDER`, ex `11:33,20:33,30:34`): vinde în trepte la +11/+20/+30%.
+- **Exit-uri urgente:** stop-loss și trailing folosesc MARKET; TP/scara rămân LIMIT.
 - **Config generic** (`MAX_BUDGET` + `STRAT_ENTRY_PCT`/`STRAT_DCA_PCT`, `MAX_DCA_BUYS=auto`):
   schimbi bugetul → entry/DCA/contor scalează singure.
 - **FX:** cont T212 cu bază RON → ordinele rămân `currency=RON`, FX `STRAT_FX_FEE_PCT` (0.15%)/direcție

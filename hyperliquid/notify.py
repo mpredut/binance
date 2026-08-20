@@ -7,10 +7,6 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from alertnotifiers import notify as _notify  # noqa: E402
+from alertnotifiers import bind_notify  # noqa: E402
 
-
-def notify(title: str, body: str, source: str,
-           price: float | None = None, desktop: bool = False, email: bool = False) -> None:
-    symbol = os.environ.get("SYMBOL_LABEL") or os.environ.get("HL_COIN") or "HL"
-    _notify(title, body, source, symbol, price=price, desktop=desktop, email=email)
+notify = bind_notify(("SYMBOL_LABEL", "HL_COIN"), "HL")

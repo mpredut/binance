@@ -128,3 +128,16 @@ Verified result on 2026-08-19:
 
 Definitions, current limitations and the promotion gate are documented in
 `chatgpt_agent_work/STRATEGY_VALIDATION_FOUNDATION.md`.
+
+## Golden versus financial benchmark
+
+Golden/characterization answers: „aceleași intrări produc aceleași decizii și
+fill-uri după refactor?”. It intentionally preserves existing behaviour and is
+not evidence that the behaviour is profitable.
+
+The separate HYPE financial benchmark answers: „how much return and risk does a
+fixed profile produce on untouched temporal TEST windows under central and stress
+execution assumptions?”. Its versioned JSON is
+`offline/research/hype_dataset/financial_baseline_v1.json`; candidate promotion is
+blocked unless the improvement survives every scenario without worsening the
+tail-risk thresholds.

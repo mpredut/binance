@@ -1,0 +1,73 @@
+"""Contractul comun de persistenta pentru motoarele financiare."""
+
+import json
+import os
+import tempfile
+import unittest
+from unittest.mock import patch
+
+from strategies.state_store import JsonStateStore, StatePersistenceError
+
+
+def _defaults():
+    return {"cycle": 1, "qty": 0.0, "orders": []}
+
+
+class JsonStateStoreTest(unittest.TestCase):
+    def _store(self, path, *, fail_closed):
+        messages = []
+        store = JsonStateStore(
+            path, _defaults, label="TEST", logger=messages.append,
+            fail_closed=fail_closed,
+        )
+        return store, messages
+
+    def test_load_merges_schema_and_rejects_corruption_by_mode(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "state.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump({"qty": 2.5}, handle)
+            store, _messages = self._store(path, fail_closed=True)
+            self.assertEqual(store.load(), {"cycle": 1, "qty": 2.5, "orders": []})
+
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write('{"qty":')
+            with self.assertRaisesRegex(StatePersistenceError, "stare TEST invalida"):
+                store.load()
+
+            paper, messages = self._store(path, fail_closed=False)
+            self.assertEqual(paper.load(), _defaults())
+            self.assertIn("reset permis doar in PAPER", messages[-1])
+
+    def test_save_replaces_atomically_without_temporary_residue(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "state.json")
+            store, _messages = self._store(path, fail_closed=True)
+
+            self.assertTrue(store.save({"cycle": 2, "qty": 1.25, "orders": []}))
+
+            with open(path, encoding="utf-8") as handle:
+                self.assertEqual(json.load(handle)["qty"], 1.25)
+            self.assertEqual(os.listdir(directory), ["state.json"])
+
+    def test_failed_replace_cleans_temporary_and_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "state.json")
+            store, _messages = self._store(path, fail_closed=True)
+            with patch("strategies.state_store.os.replace", side_effect=OSError("disk")):
+                with self.assertRaisesRegex(StatePersistenceError, "persistenta"):
+                    store.save(_defaults())
+            self.assertEqual(os.listdir(directory), [])
+
+    def test_paper_save_failure_is_reported_without_raising(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "state.json")
+            store, messages = self._store(path, fail_closed=False)
+            with patch("strategies.state_store.os.replace", side_effect=OSError("disk")):
+                self.assertFalse(store.save(_defaults()))
+            self.assertIn("nu pot salva starea", messages[-1])
+            self.assertEqual(os.listdir(directory), [])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

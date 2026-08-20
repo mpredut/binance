@@ -8,7 +8,6 @@ regulile financiare raman o singura implementare pentru live si replay.
 
 from __future__ import annotations
 
-import json
 import math
 import os
 import statistics
@@ -17,29 +16,20 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Callable
 
-from alertnotifiers import notify as _shared_notify
+from alertnotifiers import bind_notify
 from botcore import are_close, float_env, log
+from providers.execution_audit import new_intent_id
 from providers.strategy_executor import ProviderError, StrategyExecutor
 
 from . import spot_dca_rules as sr
+from .state_store import JsonStateStore
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _LEGACY_STATE_DIR = os.path.join(_ROOT, "kraken")
 _DEFAULT_FEE_NOTE = "fee Kraken ~0.26% taker / ~0.16% maker per leg"
 
 
-def notify(title: str, body: str, source: str, price: float | None = None,
-           desktop: bool = False, email: bool = False) -> None:
-    """Notificator compatibil cu motorul vechi; poate fi inlocuit prin constructor."""
-    symbol = (
-        os.environ.get("SYMBOL_LABEL")
-        or os.environ.get("KRAKEN_PAIR")
-        or "CRYPTO"
-    )
-    _shared_notify(
-        title, body, source, symbol,
-        price=price, desktop=desktop, email=email,
-    )
+notify = bind_notify(("SYMBOL_LABEL", "KRAKEN_PAIR"), "CRYPTO")
 
 
 def state_path_for(pair: str, state_dir: str | None = None) -> str:
@@ -245,44 +235,19 @@ class Strategy:
         (self._notifier or notify)(**event)
 
     # -- persistenta -----------------------------------------------------------
+    def _store(self) -> JsonStateStore:
+        return JsonStateStore(
+            self.state_file, _new_state, label=self.venue_label,
+            logger=log, fail_closed=not self.dry_run,
+        )
+
     def _load(self) -> dict:
-        if os.path.exists(self.state_file):
-            try:
-                with open(self.state_file, "r", encoding="utf-8") as f:
-                    st = json.load(f)
-                if not isinstance(st, dict):
-                    raise ValueError("radacina JSON nu este obiect")
-                merged = _new_state()
-                merged.update(st)
-                log(f"  [STRAT] stare incarcata (ciclu {merged.get('cycle')}, qty {merged.get('qty')})")
-                return merged
-            except (OSError, TypeError, ValueError) as e:
-                message = f"stare {self.venue_label} invalida in {self.state_file}: {e}"
-                if not self.dry_run:
-                    # Fail closed: un restart "curat" ar putea cumpara din nou
-                    # peste o pozitie/un ordin real pe care tocmai l-am uitat.
-                    raise RuntimeError(message) from e
-                log(f"  ! [STRAT] {message}; reset permis doar in PAPER")
-        return _new_state()
+        return self._store().load()
 
     def _save(self) -> None:
-        tmp = f"{self.state_file}.tmp.{os.getpid()}"
-        try:
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self.s, f, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, self.state_file)
+        self._state_write_failed = True
+        if self._store().save(self.s):
             self._state_write_failed = False
-        except OSError as e:
-            log(f"  ! [STRAT] nu pot salva starea: {e}")
-            self._state_write_failed = True
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
-            if not self.dry_run:
-                raise RuntimeError(f"persistenta starii {self.venue_label} a esuat: {e}") from e
 
     # -- helperi ---------------------------------------------------------------
     def _avg(self) -> float | None:
@@ -332,14 +297,26 @@ class Strategy:
                                      "kind": kind, "market": market, "ts": time.time()})
             return True
         try:
-            txid = self.client.submit_order(
-                self.pair, side, vol, None if market else price,
-                market=market, kind=kind,
-            )
+            intent_id = new_intent_id(self.venue_label, self.pair, kind)
+            submit_with_intent = getattr(type(self.client), "submit_order_with_intent", None)
+            if callable(submit_with_intent):
+                txid = submit_with_intent(
+                    self.client, intent_id, self.pair, side, vol, None if market else price,
+                    market=market, kind=kind,
+                )
+            else:
+                txid = self.client.submit_order(
+                    self.pair, side, vol, None if market else price,
+                    market=market, kind=kind,
+                )
             log(f"  [STRAT] {side.upper()} {kind} plasat txid={txid} {vol} @ {price}")
             self.s["orders"].append({"txid": txid, "side": side, "vol": vol, "price": price,
                                      "amount": amount, "kind": kind, "market": market,
-                                     "ts": time.time()})
+                                     "intent_id": intent_id, "ts": time.time()})
+            # Inchide cat mai mult fereastra de crash dintre acceptarea la venue
+            # si snapshot-ul de la finalul tick-ului. In live, un order_id acceptat
+            # trebuie sa fie durabil inaintea oricarei alte decizii.
+            self._save()
             return True
         except ProviderError as e:
             log(f"  ! [STRAT] {side} {kind} esuat: {e}")
@@ -359,12 +336,22 @@ class Strategy:
         if o.get("cancel_requested"):
             return True
         try:
-            self.client.cancel_order(self.pair, o["txid"])
+            cancel_with_intent = getattr(type(self.client), "cancel_order_with_intent", None)
+            if callable(cancel_with_intent):
+                cancel_with_intent(
+                    self.client, o.get("intent_id") or f"legacy-{self.pair}-{o['txid']}",
+                    self.pair, o["txid"],
+                )
+            else:
+                self.client.cancel_order(self.pair, o["txid"])
         except ProviderError as e:
             log(f"  ! [STRAT] cancel esuat pentru {o['txid']}: {e} — ordinul ramane urmarit")
             return False
         o["cancel_requested"] = True
         o["cancel_ts"] = time.time()
+        # Pastreaza intentia de cancel peste restart; ordinul ramane urmarit pana
+        # cand statusul terminal confirma inclusiv orice fill concurent.
+        self._save()
         log(f"  [STRAT] cancel solicitat {o['side']} {o['txid']} — astept status terminal")
         return True
 
@@ -414,7 +401,14 @@ class Strategy:
                 # cat timp ordinul este open. Aplicam doar delta fata de ultima
                 # reconciliere salvata pe ordin.
                 try:
-                    status = self.client.order_status(self.pair, o["txid"])
+                    status_with_intent = getattr(type(self.client), "order_status_with_intent", None)
+                    if callable(status_with_intent):
+                        status = status_with_intent(
+                            self.client, o.get("intent_id") or f"legacy-{self.pair}-{o['txid']}",
+                            self.pair, o["txid"],
+                        )
+                    else:
+                        status = self.client.order_status(self.pair, o["txid"])
                 except ProviderError as e:
                     log(f"  ! [STRAT] status {o['txid']} esuat: {e} — pastrez ordinul")
                     continue

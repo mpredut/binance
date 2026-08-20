@@ -106,6 +106,12 @@ core/
 
 Wrapper-ele venue-urilor pot dispărea sau rămâne alias-uri de 2–5 linii pe durata migrării.
 
+Status 2026-08-20: nucleul era deja parțial consolidat în `botcore.py`. Transportul
+HTTP JSON/form/generic și parsing-ul `.env` folosesc acum câte o singură
+implementare, iar alegerea simbolului pentru notificări este generată de
+`alertnotifiers.bind_notify()`. Shim-urile venue-urilor păstrează importurile live
+existente fără copii ale mecanicii comune.
+
 Reducere estimată: 200–400 linii, plus comportament uniform.
 
 ## 4. Redesign recomandat al pipeline-ului de ordine
@@ -548,6 +554,8 @@ Reducere cumulată estimată: 15–25% din codul activ relevant.
 Status 2026-08-20: motorul spot DCA/trailing și regulile sale pure au fost mutate în
 `strategies/`; live Kraken și replay folosesc aceeași implementare. T212 și HL rămân
 intenționat motoare separate, deoarece regulile lor financiare nu sunt echivalente.
+Persistența Kraken/T212 folosește acum aceeași primitivă atomică și fail-closed;
+fișierele și schemele existente rămân compatibile.
 
 Reducere cumulată estimată: 20–30% din codul activ.
 

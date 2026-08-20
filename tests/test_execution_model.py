@@ -2,12 +2,23 @@ import unittest
 
 from offline.backtests.execution import (
     ExecutionModel,
+    FeeModel,
     choose_intrabar_scenario,
     split_order_fill,
 )
 
 
 class ExecutionModelTest(unittest.TestCase):
+    def test_fee_model_separates_limit_and_market_costs(self):
+        fees = FeeModel(limit_fee_pct=0.16, market_fee_pct=0.26)
+        self.assertEqual(fees.rate_pct(market=False), 0.16)
+        self.assertEqual(fees.rate_pct(market=True), 0.26)
+
+        for invalid in (-0.01, float("nan"), 100.0):
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(ValueError):
+                    FeeModel(limit_fee_pct=invalid, market_fee_pct=0.26)
+
     def test_spread_changes_limit_touch_and_market_slippage_is_adverse(self):
         plain = ExecutionModel()
         stressed = ExecutionModel(spread_bps=20, market_slippage_bps=30)

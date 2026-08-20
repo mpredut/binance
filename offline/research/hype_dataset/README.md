@@ -35,6 +35,25 @@ hash-ul, iar comparatorul îl reverifică înainte de evaluarea candidaților. C
 de mai jos au fost regenerate după fixurile de fill/warm-up, pe schema declarată
 mai sus. Raportul regenerat rămâne sursa de adevăr dacă engine-ul se schimbă.
 
+## Baseline financiar versionat
+
+`financial_baseline_v1.json` este baseline-ul cantitativ al configurației live
+curente. Folosește aceleași 31 ferestre TEST, dar separă fee maker/taker și rulează
+scenariile `central` și `stress` cu spread, slippage, partial fills și ordine
+intrabar worst-case. Raportul uman este în
+`chatgpt_agent_work/HYPE_FINANCIAL_BENCHMARK.md`.
+
+Acesta nu înlocuiește golden-ul: golden-ul detectează schimbări de decizie, iar
+baseline-ul financiar cuantifică efectul în randament, USD, drawdown, CVaR,
+expunere și regimuri bull/bear/sideways. Artefactul se verifică prin:
+
+```bash
+.venv/bin/python offline/runners/kraken_financial_benchmark.py \
+  --verify offline/research/hype_dataset/financial_baseline_v1.json \
+  --output /tmp/hype_financial_verify.json \
+  --markdown /tmp/hype_financial_verify.md
+```
+
 ## Rezultat reproductibil (31 ferestre OOS, warm-up 40, fee 0,26%/leg)
 
 BASE v2: medie **+0,777%**, cea mai slabă fereastră `−9,123%`, DD max `12,305%`.

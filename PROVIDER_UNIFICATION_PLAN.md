@@ -4,9 +4,10 @@
 de Kraken și să ruleze prin același contract pe orice venue compatibil, cu o singură
 suită de conformitate și fără a forța strategiile diferite T212/HL în același algoritm.
 
-**De ce B (nu adaptor):** mai puțin cod (nu apare o a 3-a abstracție), mai testabil (o
-suită parametrizată peste toți providerii), și base v2 poate intra pe `MarketApi.place`
-cu guardrail-urile agnostice (cooldown/plafon/trend-wait/jurnal) pe care azi nu le are.
+**De ce B (nu adaptor):** mai puțin cod (nu apare o a 3-a abstracție) și mai testabil
+(o suită parametrizată peste toți providerii). Motorul rămâne pe contractul strict
+`StrategyExecutor`; nu este rutat prin `MarketApi.place`, ale cărui guardrail-uri nu
+fac diferența între intrări și ieșirile urgente STOP/trailing.
 
 ## Contractul (sursa unică de adevăr)
 
@@ -47,8 +48,14 @@ KrakenError`. Backtestul (`replay.py`) folosește `MagicMock` → aproape neatin
   `strategies/spot_dca.py`; `kraken/strategy.py` este numai shim compatibil. Directorul
   de stare, notificatorul, sursa și eticheta venue-ului sunt injectabile. Replay-ul și
   testele importă modulul canonic, fără coliziuni între fișierele `strategy.py` ale venue-urilor.
-- **Faza 6 (opțional, separat)** — rutează base v2 prin `MarketApi.place` (guardrail-uri).
-  Schimbare de comportament → re-validare dedicată, NU în gate-ul de regresie.
+- **Faza 5c — fidelitate + audit** ✅ — T212 reconciliază prețurile cumulative reale,
+  inclusiv partial fills; `AuditedStrategyExecutor` adaugă `intent_id` și jurnal JSONL
+  pentru submit/status/cancel fără să blocheze ordinele. Motorul autonom T212 folosește
+  acum același contract pentru întreg ciclul ordinului; STOP/trailing sunt MARKET și
+  replay-ul le modelează la open cu spread/slippage.
+- **Faza 6 (amânată; necesită redesign)** — NU rutează direct base v2 prin
+  `MarketApi.place`. Dacă apare nevoie cross-strategy, se introduce separat un decorator
+  intent-aware, în care STOP/trailing nu pot fi blocate de trend/cooldown/plafon.
 
 **Prima valoare** (Kraken neschimbat + HL activabil) după Faza 3 ≈ **3–4 zile**.
 Golul real = `order_status` + `cancel` per venue.

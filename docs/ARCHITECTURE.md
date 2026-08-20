@@ -2,6 +2,51 @@
 
 Snapshot de design (mijloc 2026). Verifică specificul în cod.
 
+## Helper-e runtime comune
+
+`botcore.py` este sursa unică pentru `.env`, conversii numerice, single-instance,
+ceas/log și transportul HTTP stdlib (`GET`, JSON, form și metode generice).
+`kraken/kraken_common.py`, `hyperliquid/common.py` și
+`212trading/ipo_common.py` păstrează numai particularități reale de afișare sau
+runtime și re-exportă API-ul vechi pentru compatibilitate.
+
+`alertnotifiers.bind_notify()` centralizează alegerea simbolului din environment.
+Fișierele `notify.py` ale venue-urilor sunt shim-uri subțiri, necesare momentan
+pentru entrypoint-urile istorice; rutarea ntfy/email rămâne o singură implementare.
+
+## Engine comun, entrypoint-uri separate
+
+Separarea entrypoint-ului live de cel offline nu înseamnă două strategii:
+
+```text
+                         strategy engine comun
+                        /                      \
+live entrypoint ─► StrategyExecutor real   replay entrypoint ─► executor OHLC
+  config/secrete     ordine/reconciliere      dataset/hash       fill model/report
+  loop/heartbeat     state persistent         fără rețea privată  stare controlată
+```
+
+Motorul, regulile, parametrii și tranzițiile financiare trebuie importate din
+același modul. Se separă numai orchestration-ul și capabilitățile: procesul offline
+nu primește client cu drept de tranzacționare, iar procesul live nu conține selecție
+de dataset sau metrici de cercetare. Un renderer comun poate fi folosit de două
+entrypoint-uri subțiri live/offline fără duplicarea logicii.
+
+## Allocation ledger versus execution audit
+
+Cele două răspund la întrebări diferite și se corelează prin `intent_id`:
+
+- execution audit: cine a cerut ordinul, pe ce venue/simbol, de ce, ce status/fill a avut;
+- allocation ledger: ce capital/cantitate este deținută sau rezervată de fiecare
+  `account_ref + strategy_id + instrument`, ca două procese să nu cheltuiască sau
+  să vândă aceeași resursă.
+
+Ledger-ul nu înlocuiește balanța exchange-ului și nu conține secrete. Implementarea
+sigură este incrementală: întâi model + snapshot read-only, apoi rezervări atomice
+cu expirare, apoi integrarea unui singur venue în shadow și abia după validare un
+gate de blocare live. STOP/trailing trebuie să poată elibera risc chiar dacă o
+politică de intrare sau un plafon de cumpărare este atins.
+
 ## Facadă market/cont — decuplare de Binance
 `providers/market_api.py` = facadă care rutează pe **symbol** către provideri (scopul: trade-
 monitorul devine generic, nu doar Binance).
@@ -25,6 +70,28 @@ sunt injectabile, dar fallback-ul Kraken păstrează exact fișierul de stare ex
 
 T212 și Hyperliquid nu sunt alias-uri ale acestui motor: providerii lor satisfac
 contractul mecanic, însă strategiile financiare distincte rămân separate.
+
+`strategies/state_store.py` centralizează snapshot-urile financiare pentru motorul
+spot și T212. Scrierea este atomică (`fsync` urmat de `os.replace`); în mod real,
+starea coruptă sau nesalvabilă oprește deciziile, în timp ce PAPER poate porni curat.
+
+Motorul T212 păstrează local un ordin până când venue-ul raportează status terminal,
+inclusiv după acceptarea cererii de anulare. Dacă anularea eșuează sau este încă în curs,
+nu plasează repricing/scară TP peste ordinul posibil activ; STOP/trailing poate trimite
+ieșirea urgentă după acceptarea anulărilor, dar ambele ordine rămân reconciliate.
+
+Motorul T212 folosește `T212Provider` pentru întreg ciclul submit/status/cancel, dar își
+păstrează regulile financiare distincte și feed-ul Yahoo. Cantitatea poziției rămâne
+ancorată în portofoliu, iar prețul/P&L-ul se ia din fill-urile cumulative reale numai
+când delta ordinelor corespunde deltei portofoliului. Partial fill-urile sunt aplicate
+o singură dată; dacă statusul este temporar indisponibil, ordinul rămâne urmărit.
+STOP și trailing sunt ordine MARKET; replay-ul le umple la open-ul barei următoare și
+poate aplica spread/slippage advers.
+
+`providers/execution_audit.py` este un decorator strict observațional peste
+`StrategyExecutor`. Fiecare intenție live primește `intent_id`, păstrat în starea
+ordinului, iar submit/status/cancel sunt scrise JSONL în `logger/execution_audit/`.
+Eșecul auditului nu poate refuza și nu poate modifica un ordin.
 
 ### HYPE pe Hyperliquid (SPOT)
 `providers/hyperliquid_provider.py`:

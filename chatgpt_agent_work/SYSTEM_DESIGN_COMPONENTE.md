@@ -705,6 +705,9 @@ t212_bot process
 - take-profit ladder;
 - catastrophic stop loss;
 - pending-order awareness;
+- ordinul anulat rămâne în starea locală până la status terminal, astfel încât un
+  partial fill concurent cu anularea să fie contabilizat exact; repricing-ul și scara
+  TP nu suprapun ordinul aflat încă în anulare;
 - FX fee/account currency.
 
 ### Boundary
@@ -726,6 +729,27 @@ Adaptorul generalizează mecanica ordinelor, nu strategia. Motorul autonom T212 
 feed-ul Yahoo, FX fee, take-profit ladder și regulile sale proprii; `ohlc_closes` din
 contractul generic întoarce momentan `[]` pentru T212.
 
+Motorul autonom folosește adaptorul strict pentru submit/status/cancel. Delta cantității
+este confirmată de portfolio, iar prețul exact vine din fill-urile cumulative ale
+ordinului. Marcajele `applied_fill_*` previn reaplicarea unui partial fill la poll-ul
+următor. TP/scara sunt LIMIT; STOP și trailing sunt MARKET și nu pot rămâne în urmă
+într-un gap descendent. Submit-ul acceptat și intenția de cancel sunt persistate imediat,
+înaintea snapshot-ului obișnuit de la finalul tick-ului.
+
+```text
+Strategy / spot_dca
+  └── intent_id ─► AuditedStrategyExecutor ─► venue executor
+                       ├── submit_requested/accepted/rejected
+                       ├── order_status (doar la schimbare)
+                       └── cancel_requested/accepted/rejected
+                                      │
+                                      ▼
+                         execution_audit_YYYY-MM-DD.jsonl
+```
+
+Auditul este best-effort și nu conține politici de blocare. Rutarea directă a
+STOP/trailing prin guardrail-urile `Instrument.place` rămâne intenționat neimplementată.
+
 ### Motorul canonic spot DCA/trailing
 
 ```text
@@ -744,6 +768,23 @@ Kraken launcher / Replay / viitor launcher spot
 Directorul stării și notificatorul sunt injectabile. Fallback-ul implicit rămâne
 `kraken/.state_<PAIR>.json`, ca upgrade-ul codului live să nu creeze o stare nouă.
 `kraken/strategy.py` și `kraken/strat_rules.py` sunt shim-uri pentru comenzile vechi.
+
+### Persistența stării financiare
+
+```text
+spot_dca / T212 strategy
+          │ load/save
+          ▼
+ strategies/state_store.py
+   ├── merge cu schema implicită
+   ├── JSON temporar + flush + fsync
+   ├── os.replace atomic
+   └── REAL: fail-closed / PAPER: reset permis
+```
+
+Un fișier corupt nu mai poate arăta ca o poziție goală în T212 după restart. O eroare
+de scriere reală blochează următoarele decizii până când snapshot-ul curent poate fi
+salvat; calea și schema fișierelor existente nu se schimbă.
 
 ## 19. Componentă: `TrailingCore`
 

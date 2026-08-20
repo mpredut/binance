@@ -37,6 +37,7 @@ from strategies.spot_dca import Strategy, StratParams
 # clientul _BOT intr-un KrakenProvider (aceeasi conexiune/nonce) pt Strategy; comenzile
 # CLI (--balance/--find-pair/--price) folosesc in continuare clientul KrakenClient direct.
 from providers.kraken_provider import KrakenProvider  # noqa: E402
+from providers.execution_audit import AuditedStrategyExecutor  # noqa: E402
 
 POLL_SECONDS = 60
 
@@ -45,9 +46,9 @@ def _build_client() -> KrakenClient:
     return KrakenClient(os.environ.get("KRAKEN_API_KEY_BOT"), os.environ.get("KRAKEN_API_SECRET_BOT"))
 
 
-def _build_executor(client: KrakenClient) -> KrakenProvider:
-    """Impacheteaza clientul bot-ului in contractul StrategyExecutor pt Strategy."""
-    return KrakenProvider(client=client)
+def _build_executor(client: KrakenClient) -> AuditedStrategyExecutor:
+    """Executor strict Kraken, decorat doar observational cu audit JSONL."""
+    return AuditedStrategyExecutor(KrakenProvider(client=client), venue="Kraken")
 
 
 def main() -> int:

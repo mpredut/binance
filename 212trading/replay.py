@@ -155,6 +155,8 @@ def _run_once(
             )
 
             def eligible(order: dict) -> bool:
+                if order.get("market"):
+                    return True
                 return execution.limit_touched(
                     order["side"], high=high, low=low, limit=order["limit"],
                 )
@@ -173,15 +175,20 @@ def _run_once(
                         continue
                     if not eligible(order):
                         continue
+                    market = bool(order.get("market"))
                     fill_order, quantity, complete = split_order_fill(
                         order,
                         quantity_key="qty",
                         amount_key="amount" if side == "buy" else None,
                         ratio=execution.partial_fill_ratio,
+                        force_full=market,
                     )
                     if complete:
                         engine._remove_order(order)
-                    price = float(order["limit"])
+                    price = (
+                        execution.market_price(side, open_)
+                        if market else float(order["limit"])
+                    )
                     if side == "sell":
                         quantity = min(quantity, engine.s["qty"])
                         if quantity <= 1e-12:

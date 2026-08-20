@@ -409,6 +409,10 @@ Adaptoarele Binance și Kraken implementează numai asset discovery, balance, pr
 
 - Sistemul este **eventually consistent**, nu tranzacțional end-to-end.
 - Scrierea atomică previne fișiere JSON parțiale, dar nu rezolvă automat conflictele dintre doi writers.
+- `strategies/state_store.py` este primitiva comună pentru starea financiară Kraken și
+  T212: schema veche este completată la citire, scrierea folosește `fsync + os.replace`,
+  iar runtime-ul real refuză starea coruptă sau discul indisponibil. Resetarea la stare
+  goală este permisă numai în PAPER.
 - Unele resurse critice folosesc lock (`retry`, cooldown, process singleton); cache-urile generale se bazează mai mult pe un writer principal și `last-writer-wins`.
 - Restartul recuperează state-ul de strategie și cache-urile, apoi API polling/WS reconciliază cu exchange-ul.
 - Exchange-ul rămâne sursa finală de adevăr pentru balance, fills și open orders.

@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 from offline.backtests.execution import (
     ExecutionModel,
+    FeeModel,
     choose_intrabar_scenario,
     split_order_fill,
 )
@@ -48,16 +49,18 @@ def run_replay(
     bar_minutes: float | None = None,
     warmup_ohlc=(),
     execution: ExecutionModel | None = None,
+    fee_model: FeeModel | None = None,
 ) -> dict:
     """Rulează replay-ul; ipotezele implicite păstrează baseline-ul anterior."""
     _validate_replay(ohlc, params, bar_minutes)
     model = execution or ExecutionModel()
+    fees = fee_model or FeeModel(fee_pct, fee_pct)
     return choose_intrabar_scenario(
         model,
         lambda scenario: _run_once(
             ohlc,
             params,
-            fee_pct=fee_pct,
+            fee_model=fees,
             bar_minutes=bar_minutes,
             warmup_ohlc=warmup_ohlc,
             execution=scenario,
@@ -69,7 +72,7 @@ def _run_once(
     ohlc,
     params,
     *,
-    fee_pct: float,
+    fee_model: FeeModel,
     bar_minutes: float | None,
     warmup_ohlc,
     execution: ExecutionModel,
@@ -146,7 +149,7 @@ def _run_once(
                             continue
                         fill_order["vol"] = volume
                         gross_before = strategy.s["realized_gross"]
-                    fee = fee_pct / 100.0 * volume * price
+                    fee = fee_model.rate_pct(market=market) / 100.0 * volume * price
                     strategy._apply_fill(
                         fill_order, volume, price, fee=fee, final=complete,
                     )

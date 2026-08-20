@@ -330,3 +330,35 @@ def notify(title: str, body: str, source: str, symbol: str,
             subprocess.run(["notify-send", "-u", "critical", title, body], check=False)
         except (FileNotFoundError, OSError):
             pass
+
+
+def bind_notify(symbol_env_keys: tuple[str, ...], default_symbol: str):
+    """Leagă notificatorul comun de convenția de simbol a unui venue.
+
+    Wrapperul rezultat păstrează semnătura folosită de Kraken/HL/T212 și permite
+    un ``symbol`` explicit pentru procesele multi-activ. Fișierele venue-specific
+    rămân shim-uri de import, nu copii ale rezolvării simbolului.
+    """
+    if not symbol_env_keys:
+        raise ValueError("bind_notify cere cel puțin o cheie de mediu")
+
+    def bound_notify(
+        title: str,
+        body: str,
+        source: str,
+        price: Optional[float] = None,
+        desktop: bool = False,
+        symbol: Optional[str] = None,
+        email: bool = False,
+    ) -> None:
+        resolved = symbol or next(
+            (os.environ[key] for key in symbol_env_keys if os.environ.get(key)),
+            default_symbol,
+        )
+        notify(
+            title, body, source, resolved,
+            price=price, desktop=desktop, email=email,
+        )
+
+    bound_notify.__name__ = "notify"
+    return bound_notify

@@ -21,4 +21,7 @@ exec "$PYTHON_BIN" -m pytest -q \
   tests/test_kraken_trend_overlay.py \
   tests/test_kraken_replay.py \
   tests/test_backtest_metrics.py \
-  tests/test_walk_forward.py
+  tests/test_walk_forward.py \
+  tests/test_financial_benchmark.py \
+  tests/test_financial_baseline_artifact.py \
+  tests/test_promotion_gate.py
