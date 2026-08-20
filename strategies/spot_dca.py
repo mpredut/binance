@@ -101,6 +101,8 @@ class StratParams:
     dca_trend_brake: bool = False     # B: in DOWNTREND confirmat, NU face DCA (nu prinde cutitul care
                                       # cade) — ataca direct maxDD, overlay care REDUCE risc.
     dca_brake_min_pct: float = 1.5    # panta minima (%) recent/vechi ca sa considere downtrend
+    dca_spacing_growth_pct: float = 0.0  # crește pragul după fiecare DCA executat;
+                                         # 0 = comportamentul live byte-identical
 
     @classmethod
     def from_env(cls) -> "StratParams":
@@ -146,6 +148,9 @@ class StratParams:
             tp_trail_vol_interval = int(float_env("STRAT_TP_TRAIL_VOL_INTERVAL") or 240),
             dca_trend_brake    = os.environ.get("STRAT_DCA_TREND_BRAKE", "false").strip().lower() == "true",
             dca_brake_min_pct  = float_env("STRAT_DCA_BRAKE_MIN_PCT") or 1.5,
+            dca_spacing_growth_pct = max(
+                0.0, float_env("STRAT_DCA_SPACING_GROWTH_PCT") or 0.0,
+            ),
         )
 
 
@@ -954,15 +959,26 @@ class Strategy:
                     for p_, q_ in desired:
                         self._place("sell", q_, p_, kind="TP")
 
+        effective_dca_drop = sr.progressive_dca_drop_pct(
+            self.p.dca_drop_pct,
+            self.p.dca_spacing_growth_pct,
+            self.s["dca_buys"],
+        )
         if (self.s["dca_buys"] < self.p.max_dca_buys
                 and self.s["last_buy_price"]
                 # prag DCA + "aproape de prag" = atins (regula partajata cu backtest)
-                and sr.dca_price_hit(price, self.s["last_buy_price"], self.p.dca_drop_pct, self.p.reentry_tolerance_pct)
+                and sr.dca_price_hit(
+                    price, self.s["last_buy_price"], effective_dca_drop,
+                    self.p.reentry_tolerance_pct,
+                )
                 and self.s["spent"] + self.p.dca_amount <= self.p.max_budget
                 and not (self.p.dca_trend_brake and self._trend_down())  # B: frana DCA in downtrend
                 and not self._has_open("buy")):
-            log(f"  [STRAT] dip {price} <= {self.s['last_buy_price']}×(1-{self.p.dca_drop_pct}%)"
-                f" (tol {self.p.reentry_tolerance_pct}%) — DCA")
+            log(
+                f"  [STRAT] dip {price} <= {self.s['last_buy_price']}"
+                f"×(1-{effective_dca_drop}%) "
+                f"(tol {self.p.reentry_tolerance_pct}%) — DCA"
+            )
             self._place("buy", self._qty_for(self.p.dca_amount, entry_px),
                         entry_px, kind="DCA", amount=self.p.dca_amount)
 
@@ -974,6 +990,11 @@ class Strategy:
         log(f"      mod        : {mode}")
         log(f"      intrare    : {self.p.entry_amount} {self.ccy} @ market-{self.p.entry_discount_pct}%")
         log(f"      DCA        : {self.p.dca_amount} {self.ccy} la -{self.p.dca_drop_pct}% (max {self.p.max_dca_buys})")
+        if self.p.dca_spacing_growth_pct > 0:
+            log(
+                "      DCA growth : +"
+                f"{self.p.dca_spacing_growth_pct}pp după fiecare DCA executat"
+            )
         log(f"      take-profit: +{self.p.takeprofit_pct}%" if self.p.enable_takeprofit else "      take-profit: off")
         log(f"      PLAFON     : {self.p.max_budget} {self.ccy} / ciclu")
         if self.fee_note:

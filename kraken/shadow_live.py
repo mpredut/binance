@@ -3,12 +3,14 @@
 
 Ruleaza config-uri prin MOTORUL FAITHFUL (replay.run_replay = exact deciziile live
 Strategy.step) peste ACELASI OHLC live descarcat de la Kraken, si logheaza P&L paper
-comparativ. Scopul: forward-test intre configul de PRODUCTIE si 2 candidati shadow
+comparativ. Scopul: forward-test intre configul de PRODUCTIE si candidați shadow
 (pre-inregistrati din cercetare) inainte de a schimba ceva pe bani reali:
 
   - current : configul LIVE exact (citit din .env apoi config.env)      -> referinta
   - tp4     : DOAR TAKEPROFIT 5.0 -> 4.0  (+0.13pp in cercetare, fara DD in plus)
   - dca15   : DOAR DCA_DROP 1.25 -> 1.5   (+0.08pp, candidat secundar)
+  - dca_progressive025: primul DCA la 1.25%, apoi +0.25pp/treaptă;
+    candidat de risc, central neutru și mai bun sub stress în benchmark
   - overlay650t8 (doar 240m): overlay cu top-up 650 si trail 8%; candidat
     EXPLORATORIU pentru forward, neaprobat pentru live
 
@@ -25,6 +27,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import dataclasses
+import difflib
 import io
 import json
 import os
@@ -60,6 +63,9 @@ def _variants(interval: int):
         "current": base,
         "tp4": dataclasses.replace(base, takeprofit_pct=4.0),
         "dca15": dataclasses.replace(base, dca_drop_pct=1.5),
+        "dca_progressive025": dataclasses.replace(
+            base, dca_spacing_growth_pct=0.25,
+        ),
     }
     # A folosește OHLC fix pentru aceeași cadență live/replay; nu îl rulăm pe alt interval.
     if interval == base.tp_trail_vol_interval:
@@ -80,9 +86,8 @@ def _variants(interval: int):
             trend_trail_pct=8.0,
             trend_exit_break=False,
         )
-    # B: frana-DCA in downtrend confirmat. SINGURUL candidat care ramane pozitiv si sub
-    # executie conservatoare (+0.70pp cu cost real pe 628z) si reduce tail-ul/DD; semnul
-    # e insa config-dependent (Codex a vazut -0.56pp) -> forward-test dedicat, nu promovare.
+    # B: frana-DCA in downtrend confirmat. Reduce tail-ul/DD, dar benchmarkul financiar
+    # central/stress arată un sacrificiu consistent de randament -> doar observațional.
     # Foloseste semnalul de trend pe OHLC fix, ca A -> doar pe intervalul de trend.
     if interval == base.trend_interval:
         variants["B_dcabrake"] = dataclasses.replace(
@@ -176,21 +181,44 @@ def _merge_forward_history(pair: str, interval: int, anchor: int, fetched):
     return merged
 
 
-def _run_one(ohlc, params, interval, fee_pct):
+def _run_one(ohlc, params, interval, fee_pct, *, include_decision_trace=False):
     import replay as rp
     with contextlib.redirect_stdout(io.StringIO()):
-        m = rp.run_replay(ohlc, params, fee_pct=fee_pct, bar_minutes=interval)
+        m = rp.run_replay(
+            ohlc, params, fee_pct=fee_pct, bar_minutes=interval,
+            include_decision_trace=include_decision_trace,
+        )
     return m
 
 
-def _eval_block(ohlc4, interval, fee_pct):
-    """Ruleaza cele 3 config-uri pe o lista de 4-tuple (o,h,l,c). None daca <2 bare."""
+def _decision_distance(reference: list[dict], candidate: list[dict]) -> int:
+    """Numără evenimentele de ordin inserate/șterse/înlocuite față de current."""
+    def fingerprint(event):
+        return tuple(sorted(event.items()))
+
+    matcher = difflib.SequenceMatcher(
+        a=[fingerprint(event) for event in reference],
+        b=[fingerprint(event) for event in candidate],
+        autojunk=False,
+    )
+    return sum(
+        max(i2 - i1, j2 - j1)
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes()
+        if tag != "equal"
+    )
+
+
+def _eval_block(ohlc4, interval, fee_pct, *, include_decision_trace=False):
+    """Rulează toate variantele pe OHLC; întoarce None dacă sunt sub două bare."""
     if len(ohlc4) < 2:
         return None
     rows = {}
     for name, params in _variants(interval).items():
         budget = float(params.max_budget)
-        m = _run_one(ohlc4, params, interval, fee_pct)
+        m = _run_one(
+            ohlc4, params, interval, fee_pct,
+            include_decision_trace=include_decision_trace,
+        )
         rows[name] = {
             "net_pct": round(m["net"] / budget * 100.0, 4),
             "total_pct": round(m["total"] / budget * 100.0, 4),  # inclusiv upnl deschis
@@ -198,6 +226,15 @@ def _eval_block(ohlc4, interval, fee_pct):
             "cycles": m.get("cycles", 0),
             "open_qty": m.get("open_qty", 0.0),
         }
+        if include_decision_trace:
+            rows[name]["decision_trace"] = m.get("decision_trace", [])
+    if include_decision_trace:
+        reference = rows["current"]["decision_trace"]
+        for name, row in rows.items():
+            row["decision_divergences"] = (
+                0 if name == "current" else
+                _decision_distance(reference, row["decision_trace"])
+            )
     return rows
 
 
@@ -222,7 +259,9 @@ def snapshot(pair: str, interval: int, fee_pct: float, quiet: bool = False) -> d
         "window": {"bars": len(full4), "buyhold_pct": _bh(full4),
                    "configs": _eval_block(full4, interval, fee_pct)},
         "forward": {"bars": len(fwd4), "buyhold_pct": _bh(fwd4),
-                    "configs": _eval_block(fwd4, interval, fee_pct)},
+                    "configs": _eval_block(
+                        fwd4, interval, fee_pct, include_decision_trace=True,
+                    )},
     }
     if not quiet:
         _print(snap)
@@ -239,11 +278,15 @@ def _print_block(title: str, blk: dict) -> None:
         print("    (insuficiente bare — se acumuleaza)")
         return
     cur = r["current"]["total_pct"]
-    print(f"    {'config':<9} {'net%':>8} {'total%':>8} {'maxDD%':>8} {'cicluri':>8}  vs current total")
+    print(f"    {'config':<20} {'net%':>8} {'total%':>8} {'maxDD%':>8} "
+          f"{'cicluri':>8} {'Δdec':>6}  vs current total")
     for name, x in r.items():
         diff = "" if name == "current" else f"{x['total_pct'] - cur:+.2f}pp"
-        print(f"    {name:<9} {x['net_pct']:>8.2f} {x['total_pct']:>8.2f} "
-              f"{x['maxdd_pct']:>8.2f} {x['cycles']:>8}  {diff}")
+        divergences = x.get("decision_divergences")
+        divergence_text = "-" if divergences is None else str(divergences)
+        print(f"    {name:<20} {x['net_pct']:>8.2f} {x['total_pct']:>8.2f} "
+              f"{x['maxdd_pct']:>8.2f} {x['cycles']:>8} "
+              f"{divergence_text:>6}  {diff}")
 
 
 def _print(snap: dict) -> None:

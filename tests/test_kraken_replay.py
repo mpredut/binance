@@ -81,6 +81,20 @@ class ReplayEngineTest(unittest.TestCase):
         self.assertGreaterEqual(res["maxdd"], 0.0)
         self.assertAlmostEqual(res["net_pnl"], res["total"])
 
+    def test_decision_trace_is_explicitly_opt_in(self):
+        plain = rp.run_replay(_series(), _params(), fee_pct=0.26, bar_minutes=60)
+        traced = rp.run_replay(
+            _series(), _params(), fee_pct=0.26, bar_minutes=60,
+            include_decision_trace=True,
+        )
+
+        self.assertNotIn("decision_trace", plain)
+        self.assertTrue(traced["decision_trace"])
+        self.assertEqual(
+            set(traced["decision_trace"][0]),
+            {"bar", "side", "kind", "market", "price", "qty"},
+        )
+
     def test_no_state_file_written(self):
         before = set(os.listdir(os.path.join(ROOT, "kraken")))
         rp.run_replay(_series(), _params(), fee_pct=0.26)

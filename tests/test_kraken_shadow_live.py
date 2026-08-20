@@ -27,11 +27,26 @@ SPEC.loader.exec_module(shadow)
 
 
 class ShadowLiveTest(unittest.TestCase):
+    def test_decision_distance_counts_changed_order_events(self):
+        current = [
+            {"bar": 1, "side": "buy", "kind": "ENTRY"},
+            {"bar": 4, "side": "buy", "kind": "DCA"},
+        ]
+        candidate = [
+            {"bar": 1, "side": "buy", "kind": "ENTRY"},
+            {"bar": 5, "side": "buy", "kind": "DCA"},
+            {"bar": 9, "side": "sell", "kind": "TP"},
+        ]
+
+        self.assertEqual(shadow._decision_distance(current, current), 0)
+        self.assertEqual(shadow._decision_distance(current, candidate), 2)
+
     def test_overlay_candidate_is_only_enabled_at_its_native_interval(self):
         @dataclasses.dataclass(frozen=True)
         class Params:
             takeprofit_pct: float = 5.0
             dca_drop_pct: float = 1.25
+            dca_spacing_growth_pct: float = 0.0
             tp_trail_adaptive: bool = False
             tp_trail_k: float = 2.0
             tp_trail_min: float = 1.5
@@ -50,11 +65,19 @@ class ShadowLiveTest(unittest.TestCase):
             variants_60 = shadow._variants(60)
             variants_240 = shadow._variants(240)
 
-        self.assertEqual(list(variants_60), ["current", "tp4", "dca15"])
+        self.assertEqual(
+            list(variants_60),
+            ["current", "tp4", "dca15", "dca_progressive025"],
+        )
         self.assertEqual(
             list(variants_240),
-            ["current", "tp4", "dca15", "A_trail", "overlay650t8", "B_dcabrake"],
+            [
+                "current", "tp4", "dca15", "dca_progressive025", "A_trail",
+                "overlay650t8", "B_dcabrake",
+            ],
         )
+        progressive = variants_60["dca_progressive025"]
+        self.assertEqual(progressive.dca_spacing_growth_pct, 0.25)
         adaptive = variants_240["A_trail"]
         self.assertTrue(adaptive.tp_trail_adaptive)
         self.assertEqual(adaptive.tp_trail_vol_interval, 240)

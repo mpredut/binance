@@ -22,17 +22,14 @@ sys.path.insert(0, str(RUNNER_DIR))
 sys.path.insert(0, str(ROOT))
 
 import kraken_walk_forward_baseline as baseline  # noqa: E402
+from offline.backtests.hype_candidates import (  # noqa: E402
+    Candidate,
+    hype_240_candidates,
+)
 from offline.backtests.walk_forward import (  # noqa: E402
     summarize_test_windows,
     walk_forward_splits,
 )
-
-
-@dataclasses.dataclass(frozen=True)
-class Candidate:
-    name: str
-    description: str
-    overrides: dict
 
 
 def default_candidates() -> list[Candidate]:
@@ -63,36 +60,6 @@ def default_candidates() -> list[Candidate]:
             "confirmare: DCA 1,5% + trailing 2%",
             {"dca_drop_pct": 1.5, "tp_trail_pct": 2.0},
         ),
-    ]
-
-
-def hype_240_candidates() -> list[Candidate]:
-    """Set preînregistrat pentru datasetul lung HYPE de 240m."""
-    return [
-        Candidate("live", "configurația live neschimbată", {}),
-        Candidate(
-            "overlay_orig", "overlay original: top-up 2000, trail 5%",
-            {"trend_overlay": True, "trend_topup": 2000.0,
-             "trend_trail_pct": 5.0, "trend_interval": 240},
-        ),
-        Candidate(
-            "overlay650t8", "overlay redus: top-up 650, trail 8%",
-            {"trend_overlay": True, "trend_topup": 650.0,
-             "trend_trail_pct": 8.0, "trend_interval": 240},
-        ),
-        Candidate(
-            "A_adaptive_trail", "trailing adaptiv k=2, clamp 1,5-8%",
-            {"tp_trail_adaptive": True, "tp_trail_k": 2.0,
-             "tp_trail_min": 1.5, "tp_trail_max": 8.0,
-             "tp_trail_vol_interval": 240},
-        ),
-        Candidate(
-            "B_dca_brake", "blochează DCA în downtrend confirmat",
-            {"dca_trend_brake": True, "dca_brake_min_pct": 1.5,
-             "trend_interval": 240},
-        ),
-        Candidate("tp_4", "prag TP 4%", {"takeprofit_pct": 4.0}),
-        Candidate("dca_drop_1_5", "DCA la scădere 1,5%", {"dca_drop_pct": 1.5}),
     ]
 
 

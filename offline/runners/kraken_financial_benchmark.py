@@ -130,9 +130,14 @@ def _scenario_windows(records: list[dict], params: StratParams, scenario, *,
     return windows
 
 
-def build_report(args) -> dict:
+def build_report(
+    args,
+    *,
+    params: StratParams | None = None,
+    candidate_name: str | None = None,
+) -> dict:
     interval = 240
-    params = _load_params(args)
+    params = params or _load_params(args)
     records = validate_dataset(load_dataset(args.dataset), interval_minutes=interval)
     digest = dataset_sha256(records)
     manifest_info = _load_expected_dataset(args.manifest, interval)
@@ -163,7 +168,7 @@ def build_report(args) -> dict:
     report = {
         "schema_version": 1,
         "benchmark": "HYPE base-v2 financial OOS",
-        "candidate_name": args.name,
+        "candidate_name": candidate_name or args.name,
         "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "code": _git_state(),
         "strategy_params": dataclasses.asdict(params),
@@ -198,8 +203,9 @@ def build_report(args) -> dict:
             "every TEST window resets state and capital; sum_reset is not compounded live equity",
         ],
     }
-    if args.compare_to:
-        with args.compare_to.open(encoding="utf-8") as handle:
+    compare_to = getattr(args, "compare_to", None)
+    if compare_to:
+        with compare_to.open(encoding="utf-8") as handle:
             baseline = json.load(handle)
         report["promotion_gate"] = evaluate_promotion(baseline, report)
     return report
@@ -267,9 +273,13 @@ def markdown_report(report: dict) -> str:
 
 
 def _projection(report: dict) -> dict:
+    strategy_params = dict(report.get("strategy_params") or {})
+    # Câmpurile noi implicit oprite sunt compatibile cu artefactele baseline mai
+    # vechi; normalizarea evită regenerarea lor când deciziile sunt identice.
+    strategy_params.setdefault("dca_spacing_growth_pct", 0.0)
     return {
         "schema_version": report.get("schema_version"),
-        "strategy_params": report.get("strategy_params"),
+        "strategy_params": strategy_params,
         "initial_capital_usd": report.get("initial_capital_usd"),
         "dataset": {
             key: report.get("dataset", {}).get(key)

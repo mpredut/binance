@@ -42,6 +42,12 @@ class StratRulesTest(unittest.TestCase):
         self.assertFalse(sr.dca_price_hit(99.0, 100.0, 2.0, 0.0))   # peste prag, fara tol
         self.assertTrue(sr.dca_price_hit(98.04, 100.0, 2.0, 0.05))  # in toleranta 0.05%
 
+    def test_progressive_dca_spacing_is_safe_and_zero_preserves_live(self):
+        self.assertEqual(sr.progressive_dca_drop_pct(1.25, 0.0, 9), 1.25)
+        self.assertEqual(sr.progressive_dca_drop_pct(1.25, 0.25, 0), 1.25)
+        self.assertEqual(sr.progressive_dca_drop_pct(1.25, 0.25, 4), 2.25)
+        self.assertEqual(sr.progressive_dca_drop_pct(1.25, -1.0, 4), 1.25)
+
     def test_are_close_identic_cu_botcore(self):
         import botcore
         for a, b, tol in [(50.0, 50.75, 0.05), (65.93, 65.91, 0.05), (100.0, 98.0, 0.0),

@@ -68,3 +68,19 @@ def dca_price_hit(price: float, last_buy: float, drop_pct: float, tol_pct: float
         return False
     prag = last_buy * (1 - drop_pct / 100)
     return price <= prag or are_close(price, prag, tol_pct)
+
+
+def progressive_dca_drop_pct(
+    base_drop_pct: float,
+    growth_pct: float,
+    completed_dca_buys: int,
+) -> float:
+    """Distanța următorului DCA, mărită gradual după fiecare DCA executat.
+
+    ``growth_pct=0`` păstrează exact comportamentul live existent. Creșterea este
+    limitată la valori nenegative ca o configurare greșită să nu comprime treptele
+    și să accelereze expunerea într-o cădere.
+    """
+    growth = max(0.0, float(growth_pct))
+    completed = max(0, int(completed_dca_buys))
+    return max(0.0, float(base_drop_pct)) + growth * completed

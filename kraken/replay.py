@@ -50,6 +50,7 @@ def run_replay(
     warmup_ohlc=(),
     execution: ExecutionModel | None = None,
     fee_model: FeeModel | None = None,
+    include_decision_trace: bool = False,
 ) -> dict:
     """Rulează replay-ul; ipotezele implicite păstrează baseline-ul anterior."""
     _validate_replay(ohlc, params, bar_minutes)
@@ -64,6 +65,7 @@ def run_replay(
             bar_minutes=bar_minutes,
             warmup_ohlc=warmup_ohlc,
             execution=scenario,
+            include_decision_trace=include_decision_trace,
         ),
     )
 
@@ -76,6 +78,7 @@ def _run_once(
     bar_minutes: float | None,
     warmup_ohlc,
     execution: ExecutionModel,
+    include_decision_trace: bool,
 ) -> dict:
     client = MagicMock()
     # Strategia citeste precizia prin contractul agnostic (pair_precision). None ->
@@ -97,6 +100,27 @@ def _run_once(
                 warmup_ohlc, start=-len(warmup_ohlc)):
             strategy._shadow_prices.append((index * warmup_step, float(close)))
         strategy._save = _silent
+        decision_trace = []
+        current_bar = -1
+        original_place = strategy._place
+
+        def traced_place(side, vol, price, kind, amount=0.0, market=False):
+            accepted = original_place(
+                side, vol, price, kind, amount=amount, market=market,
+            )
+            if accepted and include_decision_trace:
+                decision_trace.append({
+                    "bar": current_bar,
+                    "side": side,
+                    "kind": kind,
+                    "market": bool(market),
+                    "price": round(float(price), 10),
+                    "qty": round(float(vol), 10),
+                })
+            return accepted
+
+        if include_decision_trace:
+            strategy._place = traced_place
         cycle0 = strategy.s.get("cycle", 1)
         wins = fill_count = ambiguous_bars = 0
         turnover_notional = 0.0
@@ -107,6 +131,7 @@ def _run_once(
         exposure = []
 
         for bar_index, (open_, high, low, close) in enumerate(ohlc):
+            current_bar = bar_index
             def eligible(order: dict) -> bool:
                 if order.get("market"):
                     return True
@@ -206,4 +231,6 @@ def _run_once(
         key: (round(value, 10) if isinstance(value, float) else value)
         for key, value in performance.items()
     })
+    if include_decision_trace:
+        result["decision_trace"] = decision_trace
     return result

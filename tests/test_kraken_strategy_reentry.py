@@ -209,6 +209,28 @@ class TestTrailingTakeProfit(unittest.TestCase):
         self.assertFalse(s._has_open("buy"))
 
 
+class TestProgressiveDcaSpacing(unittest.TestCase):
+    def test_completed_buys_widen_the_next_dca_threshold(self):
+        s = _make_strategy(
+            dca_drop_pct=2.0,
+            dca_spacing_growth_pct=0.5,
+            reentry_tolerance_pct=0.0,
+        )
+        s.s.update({
+            "qty": 1.0,
+            "cost": 100.0,
+            "spent": 100.0,
+            "entry_price": 100.0,
+            "last_buy_price": 100.0,
+            "dca_buys": 2,
+        })
+
+        s.step(97.5)  # prag progresiv = 2% + 2×0,5% = 3%; încă nu cumpără
+        self.assertFalse(s._has_open("buy"))
+        s.step(97.0)
+        self.assertTrue(s._has_open("buy"))
+
+
 class TestPaperMarketReconciliation(unittest.TestCase):
     def test_limit_buy_waits_until_observed_price_reaches_limit(self):
         s = _make_strategy(entry_discount_pct=1.0)
