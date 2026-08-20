@@ -28,7 +28,12 @@ KRAKEN_ACCOUNT_REF=kraken-main
 """)
     _write(root, "kraken/.env", "KRAKEN_LIVE_ORDERS=true\n")
     _write(root, "kraken/trailing.conf", "KRAKEN_TRAILING_ENABLED=true\n")
-    _write(root, "hyperliquid/config.env", "HL_COIN=HYPE\nSTRAT_EXECUTE=true\n")
+    _write(root, "hyperliquid/config.env", """
+HL_COIN=HYPE
+HL_SPOT_TOKEN=HYPE
+STRAT_EXECUTE=true
+HL_LIVE_ORDERS=true
+""")
     _write(root, "instruments.conf", """
 [KRAKEN_HYPE]
 provider=kraken
@@ -81,6 +86,18 @@ class OwnershipInventoryTest(unittest.TestCase):
             if item["venue"] == "kraken"
         )
         self.assertNotIn("kraken-trailing", overlap["owners"])
+
+    def test_running_scope_detects_owner_started_outside_manifest(self):
+        root = _fixture()
+        owners = build_inventory(root, commands=["python3 hl_dca_bot.py"])
+
+        spot = next(
+            owner for owner in owners
+            if owner.owner_id == "hyperliquid-spot-dca"
+        )
+        self.assertFalse(spot.configured)
+        self.assertTrue(spot.live_enabled)
+        self.assertTrue(spot.active(require_running=True))
 
     def test_explicit_monitortrades_account_removes_false_conflict(self):
         root = _fixture()

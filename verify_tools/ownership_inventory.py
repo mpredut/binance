@@ -46,11 +46,9 @@ class Owner:
     source: str
 
     def active(self, *, require_running: bool) -> bool:
-        return (
-            self.configured
-            and self.live_enabled
-            and (not require_running or self.running is True)
-        )
+        if require_running:
+            return self.live_enabled and self.running is True
+        return self.configured and self.live_enabled
 
 
 def _truthy(value, default: bool = False) -> bool:
@@ -154,6 +152,7 @@ def _record(
     *, owner_id: str, venue: str, account_ref: str, symbol: str,
     role: str, coordination: str, pattern: str | None, enabled: bool,
     source: str, commands: list[str] | None, base: str = "", quote: str = "",
+    configured: bool | None = None,
 ) -> Owner:
     base, quote = _split_symbol(symbol, base, quote)
     return Owner(
@@ -166,7 +165,7 @@ def _record(
         role=role,
         coordination=coordination,
         process_pattern=pattern,
-        configured=pattern is not None,
+        configured=pattern is not None if configured is None else configured,
         live_enabled=enabled,
         running=_running(pattern, commands),
         source=source,
@@ -186,11 +185,13 @@ def build_inventory(root: Path = ROOT, commands: list[str] | None = None) -> lis
 
     kraken_pair = kraken_env.get("KRAKEN_PAIR", "HYPEUSD").split("#", 1)[0].strip()
     kraken_ref = _account_ref(kraken_env, "kraken", "kraken-spot-dca")
-    kraken_bot = _pattern(patterns, "kraken_bot.py")
+    kraken_bot = "kraken_bot.py"
     owners.append(_record(
         owner_id="kraken-spot-dca", venue="kraken", account_ref=kraken_ref,
         symbol=kraken_pair, role="primary", coordination="spot-dca",
-        pattern=kraken_bot, enabled=_truthy(kraken_env.get("STRAT_EXECUTE")),
+        pattern=kraken_bot,
+        configured=_pattern(patterns, kraken_bot) is not None,
+        enabled=_truthy(kraken_env.get("STRAT_EXECUTE")),
         source="kraken/config.env", commands=commands,
     ))
 
@@ -202,7 +203,8 @@ def build_inventory(root: Path = ROOT, commands: list[str] | None = None) -> lis
         owner_id="kraken-trailing", venue="kraken",
         account_ref=_account_ref(kraken_env, "kraken", "kraken-trailing"),
         symbol=kraken_pair, role="protective", coordination="free-balance-only",
-        pattern=_pattern(patterns, "kraken/trailing_stop.py"),
+        pattern="kraken/trailing_stop.py",
+        configured=_pattern(patterns, "kraken/trailing_stop.py") is not None,
         enabled=_truthy(trailing_env.get("KRAKEN_TRAILING_ENABLED")),
         source="kraken/trailing.conf", commands=commands,
     ))
@@ -213,12 +215,32 @@ def build_inventory(root: Path = ROOT, commands: list[str] | None = None) -> lis
         account_ref=_account_ref(hl_env, "hyperliquid", "hyperliquid-dn"),
         symbol=dn_pair,
         base=dn_pair, quote="USDC", role="primary", coordination="delta-neutral",
-        pattern=_pattern(patterns, "dn_bot.py$"),
+        pattern="dn_bot.py$",
+        configured=_pattern(patterns, "dn_bot.py$") is not None,
         enabled=_truthy(hl_env.get("STRAT_EXECUTE")),
         source="hyperliquid/config.env", commands=commands,
     ))
 
-    monitor_pattern = _pattern(patterns, "monitortrades.py")
+    hl_token = (
+        hl_env.get("HL_SPOT_TOKEN") or hl_env.get("HL_COIN") or "HYPE"
+    ).strip()
+    owners.append(_record(
+        owner_id="hyperliquid-spot-dca", venue="hyperliquid",
+        account_ref=_account_ref(
+            hl_env, "hyperliquid", "hyperliquid-spot-dca",
+        ),
+        symbol=f"{hl_token}USDC", base=hl_token, quote="USDC",
+        role="primary", coordination="spot-dca", pattern="hl_dca_bot.py",
+        configured=_pattern(patterns, "hl_dca_bot.py") is not None,
+        enabled=(
+            _truthy(hl_env.get("STRAT_EXECUTE"))
+            and _truthy(hl_env.get("HL_LIVE_ORDERS"))
+        ),
+        source="hyperliquid/hl_dca_bot.py", commands=commands,
+    ))
+
+    monitor_pattern = "monitortrades.py"
+    monitor_configured = _pattern(patterns, monitor_pattern) is not None
     trade_enabled = _truthy(trade_settings.get("trade_enabled"))
     instruments_path = root / "instruments.conf"
     if instruments_path.exists():
@@ -258,11 +280,13 @@ def build_inventory(root: Path = ROOT, commands: list[str] | None = None) -> lis
                 coordination=(
                     "binance-order-pipeline" if venue == "binance" else "market-api"
                 ),
-                pattern=monitor_pattern, enabled=enabled,
+                pattern=monitor_pattern, configured=monitor_configured,
+                enabled=enabled,
                 source=f"instruments.conf[{section}]", commands=commands,
             ))
 
-    t212_pattern = _pattern(patterns, "t212_bot.py")
+    t212_pattern = "t212_bot.py"
+    t212_configured = _pattern(patterns, t212_pattern) is not None
     for path in sorted((root / "212trading").glob("config.*.env")):
         profile = path.name[len("config."):-len(".env")]
         profile_env = _env(path)
@@ -271,7 +295,7 @@ def build_inventory(root: Path = ROOT, commands: list[str] | None = None) -> lis
             owner_id=f"t212:{profile}", venue="t212",
             account_ref=_account_ref({**profile_env, **t212_env}, "t212"),
             symbol=symbol, role="primary", coordination="t212-bot",
-            pattern=t212_pattern,
+            pattern=t212_pattern, configured=t212_configured,
             enabled=(
                 _truthy(profile_env.get("STRAT_ENABLED"))
                 and _truthy(profile_env.get("STRAT_EXECUTE"))
@@ -288,7 +312,7 @@ def build_inventory(root: Path = ROOT, commands: list[str] | None = None) -> lis
         ("binance-trailing", "binance_api/trailing_stop.py", symbols, "protective"),
     )
     for owner_id, process, owned_symbols, role in binance_specs:
-        pattern = _pattern(patterns, process)
+        configured = _pattern(patterns, process) is not None
         enabled = True
         if owner_id == "binance-trailing":
             trailing = _env(root / "binance_api" / "trailing.conf", root / ".env")
@@ -297,7 +321,8 @@ def build_inventory(root: Path = ROOT, commands: list[str] | None = None) -> lis
             owners.append(_record(
                 owner_id=owner_id, venue="binance", account_ref=binance_ref,
                 symbol=symbol, role=role, coordination="binance-order-pipeline",
-                pattern=pattern, enabled=enabled, source=process, commands=commands,
+                pattern=process, configured=configured, enabled=enabled,
+                source=process, commands=commands,
             ))
 
     return sorted(owners, key=lambda item: (
