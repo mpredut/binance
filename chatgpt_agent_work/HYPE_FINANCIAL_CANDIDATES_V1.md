@@ -46,5 +46,7 @@ Baseline: central `+0,590%`, stress `+0,203%`.
 ```
 
 Runnerul nu schimbă configurația live. Promotion gate cere simultan în central și
-stress: minimum `+0,10pp` medie, tail și DD păstrate, minimum 20 ferestre și mai
-multe ferestre câștigate decât pierdute.
+stress: minimum `+0,10pp` medie, tail și DD păstrate, minimum 20 ferestre totale,
+minimum 10 ferestre active, mai multe câștiguri decât pierderi și sign-test exact
+pereche cu `p <= 0,10`. Candidații DCA de mai sus au numai 5–8 ferestre active;
+egalitățile numeroase nu mai pot fi interpretate ca robustețe.

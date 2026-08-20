@@ -33,7 +33,7 @@ class PromotionGateTest(unittest.TestCase):
         baseline = _report(returns=(0.0,) * 20)
         candidate = _report(
             mean=1.2, worst=-1.9, drawdown=3.8,
-            returns=(0.2,) * 12 + (-0.1,) * 8,
+            returns=(0.2,) * 16 + (-0.1,) * 4,
         )
 
         result = evaluate_promotion(baseline, candidate)
@@ -42,8 +42,26 @@ class PromotionGateTest(unittest.TestCase):
         self.assertTrue(result["scenarios"]["central"]["passed"])
         self.assertEqual(
             result["scenarios"]["stress"]["wins_ties_losses"],
-            {"wins": 12, "ties": 0, "losses": 8},
+            {"wins": 16, "ties": 0, "losses": 4},
         )
+        self.assertLessEqual(
+            result["scenarios"]["stress"]["one_sided_sign_pvalue"], 0.10,
+        )
+
+    def test_sparse_effect_fails_even_when_all_active_windows_win(self):
+        baseline = _report(returns=(0.0,) * 20)
+        candidate = _report(
+            mean=1.2, worst=-1.9, drawdown=3.8,
+            returns=(0.2,) * 6 + (0.0,) * 14,
+        )
+
+        result = evaluate_promotion(baseline, candidate)
+        central = result["scenarios"]["central"]
+
+        self.assertFalse(result["promote"])
+        self.assertEqual(central["active_windows"], 6)
+        self.assertFalse(central["checks"]["enough_active_windows"])
+        self.assertTrue(central["checks"]["sign_test_support"])
 
     def test_one_failed_stress_scenario_blocks_promotion(self):
         baseline = _report(returns=(0.0,) * 20)

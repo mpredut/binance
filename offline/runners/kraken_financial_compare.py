@@ -112,8 +112,8 @@ def markdown_report(report: dict) -> str:
         "Set preînregistrat; aceleași 31 ferestre OOS și aceleași costuri pentru toți.",
         "Niciun candidat nu este activat de acest runner.", "",
         "| Candidate | Scenario | Mean % | Δ mean pp | Worst % | Δ worst pp | "
-        "Δ DD pp | W/T/L | Gate |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---|",
+        "Δ DD pp | W/T/L | Active | Sign p | Gate |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for name, candidate in report["candidates"].items():
         for scenario_name, aggregate in candidate["scenarios"].items():
@@ -127,6 +127,8 @@ def markdown_report(report: dict) -> str:
                 f"{_fmt(gate['worst_return_delta_pp'], signed=True)} | "
                 f"{_fmt(gate['worst_drawdown_delta_pp'], signed=True)} | "
                 f"{wtl['wins']}/{wtl['ties']}/{wtl['losses']} | "
+                f"{gate['active_windows']} | "
+                f"{gate['one_sided_sign_pvalue']:.3f} | "
                 f"{'PASS' if gate['passed'] else 'FAIL'} |"
             )
     lines.extend([

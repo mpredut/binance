@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
+import math
 
 
 @dataclass(frozen=True)
@@ -11,6 +12,8 @@ class PromotionThresholds:
     max_worst_return_degradation_pp: float = 0.25
     max_drawdown_increase_pp: float = 0.25
     min_windows: int = 20
+    min_active_windows: int = 10
+    max_one_sided_sign_pvalue: float = 0.10
     require_more_wins_than_losses: bool = True
 
 
@@ -21,6 +24,16 @@ def _identity(report: dict) -> tuple:
         dataset.get("sha256"), dataset.get("bars"),
         walk.get("train"), walk.get("validation"), walk.get("test"),
         walk.get("step"), walk.get("warmup"),
+    )
+
+
+def _one_sided_sign_pvalue(wins: int, losses: int) -> float:
+    """P(X >= wins), X~Binomial(wins+losses, 0.5), ignorând egalitățile."""
+    active = wins + losses
+    if active == 0:
+        return 1.0
+    return sum(math.comb(active, value) for value in range(wins, active + 1)) / (
+        2 ** active
     )
 
 
@@ -56,6 +69,8 @@ def evaluate_promotion(
         wins = sum(delta > tolerance for delta in deltas)
         ties = sum(abs(delta) <= tolerance for delta in deltas)
         losses = sum(delta < -tolerance for delta in deltas)
+        active_windows = wins + losses
+        sign_pvalue = _one_sided_sign_pvalue(wins, losses)
         base_aggregate = base["aggregate"]
         candidate_aggregate = cand["aggregate"]
         mean_delta = (
@@ -72,6 +87,7 @@ def evaluate_promotion(
         )
         checks = {
             "enough_windows": len(deltas) >= limits.min_windows,
+            "enough_active_windows": active_windows >= limits.min_active_windows,
             "material_mean_improvement": mean_delta >= limits.min_mean_improvement_pp,
             "worst_return_preserved": (
                 worst_delta >= -limits.max_worst_return_degradation_pp
@@ -82,6 +98,9 @@ def evaluate_promotion(
             "pairwise_robust": (
                 wins > losses if limits.require_more_wins_than_losses else True
             ),
+            "sign_test_support": (
+                sign_pvalue <= limits.max_one_sided_sign_pvalue
+            ),
         }
         scenario_results[name] = {
             "passed": all(checks.values()),
@@ -90,6 +109,11 @@ def evaluate_promotion(
             "worst_return_delta_pp": worst_delta,
             "worst_drawdown_delta_pp": drawdown_delta,
             "wins_ties_losses": {"wins": wins, "ties": ties, "losses": losses},
+            "active_windows": active_windows,
+            "active_window_rate_pct": (
+                active_windows / len(deltas) * 100.0 if deltas else 0.0
+            ),
+            "one_sided_sign_pvalue": sign_pvalue,
         }
 
     return {

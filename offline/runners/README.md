@@ -89,9 +89,11 @@ Pentru un candidat, `--params-report` citește un obiect `strategy_params` și
   offline/results/hype_financial/candidate.json
 ```
 
-Gate-ul cere avantaj de medie de minimum `0,10pp`, mai multe ferestre câștigate
-decât pierdute și păstrarea worst-fold/DD în **ambele** scenarii. Valorile de cost
-sunt provizorii până la calibrarea din fill-uri Kraken reale.
+Gate-ul cere avantaj de medie de minimum `0,10pp`, minimum 10 ferestre în care
+candidatul chiar diferă de live, mai multe ferestre câștigate decât pierdute,
+sign-test exact pereche cu `p <= 0,10` și păstrarea worst-fold/DD în **ambele**
+scenarii. Egalitățile nu sunt tratate ca dovadă. Valorile de cost sunt provizorii
+până la calibrarea din fill-uri Kraken reale.
 
 Setul HYPE prioritar (`tp4`, `dca15`, A, B și `overlay650t8`) se rulează batch,
 fără grid search și fără modificarea configurației live:
