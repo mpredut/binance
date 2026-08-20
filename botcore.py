@@ -8,15 +8,17 @@ kraken/common.py, hyperliquid/common.py, 212trading/ipo_common.py. Fiecare dintr
 acelea re-exporta de aici (compat inapoi: `from common import log` ramane valid).
 
 NU includem `now_str()` — DIVERGE intentionat intre boti (212 pune si timezone ET,
-kraken/HL doar Bucuresti); ramane per-provider. La fel functiile HTTP specifice
-(http_post_form Kraken, http_post_json/http_request 212).
+kraken/HL doar Bucuresti); ramane per-provider. Transportul HTTP este însă comun;
+shim-urile venue-urilor doar re-exportă forma JSON/form de aici.
 """
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone, timedelta
 
@@ -47,12 +49,13 @@ def single_instance(name: str, lockdir: str = "/tmp") -> None:
     _LOCKS[name] = fd   # pastreaza referinta -> lock-ul ramane pana moare procesul
 
 
-def load_dotenv(path: str = ".env") -> None:
-    """Incarca KEY=VALUE dintr-un .env in os.environ (fara a suprascrie mediul real)."""
+def _dotenv_pairs(path: str) -> tuple[list[tuple[str, str]], bool]:
+    """Parsează o singură dată sintaxa comună; bool-ul indică o citire reușită."""
     if not os.path.exists(path):
-        return
+        return [], False
     try:
         with open(path, "r", encoding="utf-8") as f:
+            pairs = []
             for raw in f:
                 line = raw.strip()
                 if not line or line.startswith("#") or "=" not in line:
@@ -66,35 +69,31 @@ def load_dotenv(path: str = ".env") -> None:
                 if not (val.startswith('"') or val.startswith("'")):
                     val = val.split("#")[0].strip()
                 val = val.strip('"').strip("'")
-                if key and key not in os.environ:
-                    os.environ[key] = val
-        log(f"  .env incarcat din {path}")
+                pairs.append((key, val))
+        return pairs, True
     except OSError as e:
         log(f"  ! nu pot citi {path}: {e}")
+        return [], False
+
+
+def load_dotenv(path: str = ".env") -> None:
+    """Incarca KEY=VALUE dintr-un .env in os.environ (fara a suprascrie mediul real)."""
+    pairs, loaded = _dotenv_pairs(path)
+    if not loaded:
+        return
+    for key, value in pairs:
+        if key and key not in os.environ:
+            os.environ[key] = value
+    log(f"  .env incarcat din {path}")
 
 
 def parse_dotenv(path: str) -> dict:
     """Ca load_dotenv, dar RETURNEAZA un dict (nu atinge os.environ). Necesar cand rulam
     mai multe active in ACELASI proces: fiecare isi ia config-ul in dict separat."""
+    pairs, _loaded = _dotenv_pairs(path)
     out: dict[str, str] = {}
-    if not os.path.exists(path):
-        return out
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            for raw in f:
-                line = raw.strip()
-                if not line or line.startswith("#") or "=" not in line:
-                    continue
-                if line.startswith("export "):
-                    line = line[len("export "):]
-                key, _, val = line.partition("=")
-                key = key.strip()
-                val = val.strip()
-                if not (val.startswith('"') or val.startswith("'")):
-                    val = val.split("#")[0].strip()
-                out[key.strip()] = val.strip('"').strip("'") if key else val
-    except OSError as e:
-        log(f"  ! nu pot citi {path}: {e}")
+    for key, value in pairs:
+        out[key] = value
     return out
 
 
@@ -109,16 +108,63 @@ def float_env(key: str, env: dict | None = None) -> float | None:
         return None
 
 
-def http_get(url: str, headers: dict | None = None) -> tuple[int, bytes]:
-    req = urllib.request.Request(url, headers=headers or {})
+def http_request(
+    method: str,
+    url: str,
+    headers: dict | None = None,
+    payload: dict | None = None,
+    *,
+    form: dict | None = None,
+) -> tuple[int, bytes]:
+    """Transport HTTP stdlib comun, cu același contract ``(status, body)``.
+
+    ``payload`` este serializat JSON, iar ``form`` ca
+    ``application/x-www-form-urlencoded``. Cele două forme sunt mutual exclusive.
+    Erorile HTTP păstrează status/body; erorile de transport sunt fail-closed ca
+    ``(0, b"")``, exact ca helper-ele venue-urilor pe care le înlocuiește.
+    """
+    if payload is not None and form is not None:
+        raise ValueError("payload și form sunt mutual exclusive")
+
+    request_headers = dict(headers or {})
+    data = None
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        request_headers.setdefault("Content-Type", "application/json")
+    elif form is not None:
+        data = urllib.parse.urlencode(form).encode()
+        request_headers.setdefault(
+            "Content-Type", "application/x-www-form-urlencoded"
+        )
+
+    verb = method.upper()
+    req = urllib.request.Request(
+        url, data=data, headers=request_headers, method=verb,
+    )
     try:
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as r:
             return r.status, r.read()
     except urllib.error.HTTPError as e:
         return e.code, e.read()
     except Exception as e:  # noqa: BLE001
-        log(f"  ! eroare retea GET: {e}")
+        log(f"  ! eroare retea {verb}: {e}")
         return 0, b""
+
+
+def http_get(url: str, headers: dict | None = None) -> tuple[int, bytes]:
+    return http_request("GET", url, headers=headers)
+
+
+def http_post_json(
+    url: str, payload: dict, headers: dict | None = None,
+) -> tuple[int, bytes]:
+    return http_request("POST", url, headers=headers, payload=payload)
+
+
+def http_post_form(
+    url: str, data: dict, headers: dict | None = None,
+) -> tuple[int, bytes]:
+    return http_request("POST", url, headers=headers, form=data)
 
 
 # ── Comparatii "aproape egal" (procentual, DETERMINIST) ──────────────────────

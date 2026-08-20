@@ -16,7 +16,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Callable
 
-from alertnotifiers import notify as _shared_notify
+from alertnotifiers import bind_notify
 from botcore import are_close, float_env, log
 from providers.execution_audit import new_intent_id
 from providers.strategy_executor import ProviderError, StrategyExecutor
@@ -29,18 +29,7 @@ _LEGACY_STATE_DIR = os.path.join(_ROOT, "kraken")
 _DEFAULT_FEE_NOTE = "fee Kraken ~0.26% taker / ~0.16% maker per leg"
 
 
-def notify(title: str, body: str, source: str, price: float | None = None,
-           desktop: bool = False, email: bool = False) -> None:
-    """Notificator compatibil cu motorul vechi; poate fi inlocuit prin constructor."""
-    symbol = (
-        os.environ.get("SYMBOL_LABEL")
-        or os.environ.get("KRAKEN_PAIR")
-        or "CRYPTO"
-    )
-    _shared_notify(
-        title, body, source, symbol,
-        price=price, desktop=desktop, email=email,
-    )
+notify = bind_notify(("SYMBOL_LABEL", "KRAKEN_PAIR"), "CRYPTO")
 
 
 def state_path_for(pair: str, state_dir: str | None = None) -> str:

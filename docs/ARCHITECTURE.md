@@ -2,6 +2,51 @@
 
 Snapshot de design (mijloc 2026). Verifică specificul în cod.
 
+## Helper-e runtime comune
+
+`botcore.py` este sursa unică pentru `.env`, conversii numerice, single-instance,
+ceas/log și transportul HTTP stdlib (`GET`, JSON, form și metode generice).
+`kraken/kraken_common.py`, `hyperliquid/common.py` și
+`212trading/ipo_common.py` păstrează numai particularități reale de afișare sau
+runtime și re-exportă API-ul vechi pentru compatibilitate.
+
+`alertnotifiers.bind_notify()` centralizează alegerea simbolului din environment.
+Fișierele `notify.py` ale venue-urilor sunt shim-uri subțiri, necesare momentan
+pentru entrypoint-urile istorice; rutarea ntfy/email rămâne o singură implementare.
+
+## Engine comun, entrypoint-uri separate
+
+Separarea entrypoint-ului live de cel offline nu înseamnă două strategii:
+
+```text
+                         strategy engine comun
+                        /                      \
+live entrypoint ─► StrategyExecutor real   replay entrypoint ─► executor OHLC
+  config/secrete     ordine/reconciliere      dataset/hash       fill model/report
+  loop/heartbeat     state persistent         fără rețea privată  stare controlată
+```
+
+Motorul, regulile, parametrii și tranzițiile financiare trebuie importate din
+același modul. Se separă numai orchestration-ul și capabilitățile: procesul offline
+nu primește client cu drept de tranzacționare, iar procesul live nu conține selecție
+de dataset sau metrici de cercetare. Un renderer comun poate fi folosit de două
+entrypoint-uri subțiri live/offline fără duplicarea logicii.
+
+## Allocation ledger versus execution audit
+
+Cele două răspund la întrebări diferite și se corelează prin `intent_id`:
+
+- execution audit: cine a cerut ordinul, pe ce venue/simbol, de ce, ce status/fill a avut;
+- allocation ledger: ce capital/cantitate este deținută sau rezervată de fiecare
+  `account_ref + strategy_id + instrument`, ca două procese să nu cheltuiască sau
+  să vândă aceeași resursă.
+
+Ledger-ul nu înlocuiește balanța exchange-ului și nu conține secrete. Implementarea
+sigură este incrementală: întâi model + snapshot read-only, apoi rezervări atomice
+cu expirare, apoi integrarea unui singur venue în shadow și abia după validare un
+gate de blocare live. STOP/trailing trebuie să poată elibera risc chiar dacă o
+politică de intrare sau un plafon de cumpărare este atins.
+
 ## Facadă market/cont — decuplare de Binance
 `providers/market_api.py` = facadă care rutează pe **symbol** către provideri (scopul: trade-
 monitorul devine generic, nu doar Binance).

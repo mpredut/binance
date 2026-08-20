@@ -10,10 +10,6 @@ import sys
 
 # alertnotifiers.py e in radacina proiectului (parinte fata de kraken/)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from alertnotifiers import notify as _notify  # noqa: E402
+from alertnotifiers import bind_notify  # noqa: E402
 
-
-def notify(title: str, body: str, source: str,
-           price: float | None = None, desktop: bool = False, email: bool = False) -> None:
-    symbol = os.environ.get("SYMBOL_LABEL") or os.environ.get("KRAKEN_PAIR") or "CRYPTO"
-    _notify(title, body, source, symbol, price=price, desktop=desktop, email=email)
+notify = bind_notify(("SYMBOL_LABEL", "KRAKEN_PAIR"), "CRYPTO")

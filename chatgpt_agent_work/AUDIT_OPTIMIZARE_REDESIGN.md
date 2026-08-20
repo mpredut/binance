@@ -106,6 +106,12 @@ core/
 
 Wrapper-ele venue-urilor pot dispărea sau rămâne alias-uri de 2–5 linii pe durata migrării.
 
+Status 2026-08-20: nucleul era deja parțial consolidat în `botcore.py`. Transportul
+HTTP JSON/form/generic și parsing-ul `.env` folosesc acum câte o singură
+implementare, iar alegerea simbolului pentru notificări este generată de
+`alertnotifiers.bind_notify()`. Shim-urile venue-urilor păstrează importurile live
+existente fără copii ale mecanicii comune.
+
 Reducere estimată: 200–400 linii, plus comportament uniform.
 
 ## 4. Redesign recomandat al pipeline-ului de ordine
