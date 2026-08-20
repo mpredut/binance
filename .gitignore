@@ -27,6 +27,7 @@ myenv/
 # --- Date runtime / cache (cachedb/ + fisiere razlete) ---
 cachedb/
 *.json
+!offline/research/hype_dataset/financial_baseline_v1.json
 *.jsonl
 *.meta
 *.lock
