@@ -20,6 +20,7 @@ import time
 from typing import Optional, List
 
 from .market_api import MarketDataProvider, _normalize_order, env_value
+from .strategy_executor import OrderStatus, PairPrecision, ProviderError
 
 _KRAKEN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kraken")
 # Cache PARTAJAT de fills, produs de kraken/kraken_cachemanager.py (cross-proces).
@@ -229,3 +230,76 @@ class KrakenProvider(MarketDataProvider):
         except Exception as e:  # noqa: BLE001
             print(f"[Kraken] place_order {symbol}: {e}")
             return None
+
+    # ── CONTRACT StrategyExecutor (Faza 1: delegare la kraken_client) ───────────
+    # Semantica DIFERITA de place_order de mai sus: raw (fara gate KRAKEN_LIVE_ORDERS),
+    # intoarce order_id, RIDICA ProviderError la esec (reconcile-ul strategiei are nevoie
+    # sa stie de esecuri). Guvernat de dry_run-ul propriu al strategiei, nu de _live().
+    def submit_order(self, symbol: str, side: str, qty: float,
+                     price: Optional[float] = None, *, market: bool = False,
+                     kind: Optional[str] = None) -> str:
+        s = "buy" if (side or "").lower().startswith("b") else "sell"
+        ordertype = "market" if (market or price is None) else "limit"
+        try:
+            res = self._client().add_order(
+                symbol, s, qty, None if ordertype == "market" else price,
+                ordertype=ordertype, validate=False) or {}
+        except Exception as e:  # noqa: BLE001 — normalizeaza eroarea de venue
+            raise ProviderError(f"submit_order {symbol} {s}: {e}") from e
+        txids = res.get("txid") or []
+        if not txids:
+            raise ProviderError(f"submit_order {symbol}: raspuns fara txid ({res})")
+        return str(txids[0])
+
+    def order_status(self, symbol: str, order_id: str) -> OrderStatus:
+        try:
+            res = self._client().query_orders(order_id) or {}
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"order_status {order_id}: {e}") from e
+        info = res.get(order_id)
+        if info is None:
+            raise ProviderError(f"order_status: ordinul {order_id} nu a fost gasit")
+        return OrderStatus(
+            status=str(info.get("status", "")),
+            filled_qty=float(info.get("vol_exec") or 0.0),
+            cost=float(info.get("cost") or 0.0),
+            fee=float(info.get("fee") or 0.0),
+        )
+
+    def cancel_order_by_id(self, symbol: str, order_id: str) -> None:
+        """Anuleaza dupa id. Idempotent: un ordin deja inchis/inexistent = succes
+        (nu ridica). NB: nume `cancel_order_by_id`, nu `cancel_order` — MarketApi n-are
+        cancel, dar evitam orice ambiguitate viitoare; contractul cere `cancel_order`
+        (vezi metoda de alias mai jos)."""
+        try:
+            self._client().cancel_order(order_id)
+        except Exception as e:  # noqa: BLE001
+            msg = str(e).lower()
+            if "unknown order" in msg or "already" in msg:
+                return                       # idempotent: deja inchis/anulat
+            raise ProviderError(f"cancel_order {order_id}: {e}") from e
+
+    def cancel_order(self, symbol: str, order_id: str) -> None:  # contract StrategyExecutor
+        self.cancel_order_by_id(symbol, order_id)
+
+    def pair_precision(self, symbol: str) -> Optional[PairPrecision]:
+        try:
+            info = self._client().pair_info(symbol)
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"pair_precision {symbol}: {e}") from e
+        if not info:
+            return None                      # nelistat inca -> strategia cade pe implicit
+        try:
+            return PairPrecision(
+                price_decimals=int(info.get("pair_decimals", 2)),
+                volume_decimals=int(info.get("lot_decimals", 8)),
+                order_min=float(info.get("ordermin", 0) or 0.0),
+            )
+        except (TypeError, ValueError) as e:
+            raise ProviderError(f"pair_precision {symbol}: info malformat ({e})") from e
+
+    def ohlc_closes(self, symbol: str, interval_min: int) -> list:
+        try:
+            return self._client().ohlc_closes(symbol, interval_min)
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"ohlc_closes {symbol}: {e}") from e

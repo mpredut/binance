@@ -11,12 +11,17 @@ Contractul e verificabil static (typing.Protocol) fara sa forteze deocamdata vre
 provider existent sa se schimbe — Faza 0 nu cabla nimic, doar fixeaza tinta.
 
 Harta fata de KrakenClient (metoda veche -> metoda din contract):
-  add_order    -> place_order        (intoarce order_id; market cand price=None)
+  add_order    -> submit_order       (intoarce order_id; market cand price=None)
   query_orders -> order_status       (LIPSA azi in providers/: gol de umplut per venue)
   cancel_order -> cancel_order       (LIPSA azi in providers/: gol de umplut per venue)
   pair_info    -> pair_precision     (partial: min_order_qty exista; precizia lipseste)
   balance      -> free_balance       (exista la toti providerii)
   ohlc_closes  -> ohlc_closes        (mapabil pe get_price_history, atentie la cadenta)
+
+NB: metoda de plasare se numeste `submit_order`, NU `place_order` — providerii au deja un
+`place_order(symbol, side, price, qty)` pt MarketApi/tradeall (guarded, intoarce dict/None,
+gate KRAKEN_LIVE_ORDERS). Motorul de strategie cere alta semantica (raw, order_id, ridica
+ProviderError, guvernat de dry_run-ul propriu al strategiei) -> nume distinct, coexista.
 """
 from __future__ import annotations
 
@@ -54,9 +59,9 @@ class StrategyExecutor(Protocol):
     implementeaza (kraken_provider, hyperliquid_provider, binance, replay_provider)
     poate rula base v2. Semnaturile sunt agnostice de venue."""
 
-    def place_order(self, symbol: str, side: str, qty: float,
-                    price: Optional[float] = None, *, market: bool = False,
-                    kind: Optional[str] = None) -> str:
+    def submit_order(self, symbol: str, side: str, qty: float,
+                     price: Optional[float] = None, *, market: bool = False,
+                     kind: Optional[str] = None) -> str:
         """Plaseaza un ordin. `price=None` sau `market=True` => ordin de piata.
         Intoarce order_id-ul de venue (folosit apoi la order_status/cancel_order).
         Ridica ProviderError la esec."""
