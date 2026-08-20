@@ -56,12 +56,15 @@ _MAX_READ_BYTES = int(os.environ.get("ANOMALY_MAX_READ_BYTES", str(4 * 1024 * 10
 # Loguri DEV/backtest: tracebacks aici sunt de pe masina de test (pilot backtest pe
 # runner.py, sync dev) — NU probleme de flota LIVE. Excluse din scanare ca sa nu
 # alerteze fals "Verifica botii afectati" pentru esecuri de pe dev.
+# Include si logurile de test (unittest/pytest via runner.py, ex "python -m
+# unittest_<data>.log"): un esec de test in dezvoltare NU e un bot afectat.
 _EXCLUDE_BASENAMES = {"backtest_cycle.log", "refresh_dev.log", "trigger_backtest_dev.log"}
 
 
 def _is_dev_log(path):
     b = os.path.basename(path)
-    return b in _EXCLUDE_BASENAMES or b.startswith("backtest")
+    return (b in _EXCLUDE_BASENAMES or b.startswith("backtest")
+            or "unittest" in b or "pytest" in b)
 
 
 def _active_logs():
