@@ -28,7 +28,6 @@ from dataclasses import dataclass
 from kraken_common import log, now_str, float_env, are_close
 from notify import notify
 import strat_rules as sr   # reguli de decizie PARTAJATE cu backtest.py (aceleasi praguri)
-from market_data import get_price
 
 # Contract provider-agnostic (Calea B): strategy.py traieste in kraken/, contractul in
 # providers/. Adaugam repo-root la COADA sys.path (nu in fata) -> modulele locale kraken/
@@ -838,7 +837,7 @@ class Strategy:
         self._maybe_adopt()
         try:
             while True:
-                price = get_price(self.client, self.pair)
+                price = self.client.get_current_price(self.pair)
                 if price is None:
                     log("  [STRAT] pret indisponibil — reincerc")
                     time.sleep(self.p.check_minutes * 60)

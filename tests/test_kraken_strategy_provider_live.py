@@ -24,6 +24,9 @@ class FakeExecutor:
         self.next_status = OrderStatus("open", 0.0, 0.0, 0.0)
         self._seq = 0
 
+    def get_current_price(self, symbol):
+        return 60.0
+
     def submit_order(self, symbol, side, qty, price=None, *, market=False, kind=None):
         self._seq += 1
         self.calls.append(("submit_order", symbol, side, qty, price, market, kind))

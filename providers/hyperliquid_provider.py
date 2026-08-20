@@ -30,6 +30,7 @@ import time
 from typing import List, Optional
 
 from .market_api import MarketDataProvider, _normalize_order
+from .strategy_executor import OrderStatus, PairPrecision, ProviderError
 
 # Radacina repo-ului + dir-ul hyperliquid/ (pt importurile bare `common`, `hl_client`).
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # providers/ -> radacina
@@ -274,3 +275,113 @@ class HyperliquidProvider(MarketDataProvider):
         except Exception as e:  # noqa: BLE001
             print(f"[HL] place_order({side} {symbol}) esuat: {e}")
             return None
+
+    # ── CONTRACT StrategyExecutor (Faza 3: cablare API HL reala) ────────────────
+    # get_current_price / free_balance de mai sus satisfac deja contractul.
+    def _signer(self):
+        """Client HL cu cheie (semnare ordine/cancel). ProviderError daca lipseste cheia."""
+        if _HL_DIR not in sys.path:
+            sys.path.insert(0, _HL_DIR)
+        from hl_client import HLClient
+        secret = os.environ.get("HL_SECRET_KEY")
+        if not secret:
+            raise ProviderError("HL_SECRET_KEY lipsa — nu pot semna ordine HL")
+        mainnet = os.environ.get("HL_MAINNET", "true").strip().lower() != "false"
+        return HLClient(secret_key=secret,
+                        account_address=os.environ.get("HL_ACCOUNT_ADDRESS"), mainnet=mainnet)
+
+    def pair_precision(self, symbol: str):
+        c = self._hl()
+        if c is None:
+            return None
+        try:
+            szd = int(c.sz_decimals(self._token))
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"pair_precision({symbol}): {e}") from e
+        # HL spot: pretul admite (8 - szDecimals) zecimale (vezi _round_px in hl_client);
+        # volumul admite szDecimals. order_min nu e expus simplu -> 0 (gardul de notional
+        # ramane la nivelul strategiei/venue). base_asset = tokenul spot servit.
+        return PairPrecision(price_decimals=max(8 - szd, 0), volume_decimals=szd,
+                             order_min=0.0, base_asset=self._token)
+
+    def ohlc_closes(self, symbol: str, interval_min: int) -> list:
+        c = self._hl()
+        pair = self._pair()
+        if c is None or pair is None:
+            raise ProviderError(f"ohlc_closes({symbol}): client/pereche indisponibile")
+        iv = {1: "1m", 5: "5m", 15: "15m", 60: "1h", 240: "4h", 1440: "1d"}.get(int(interval_min), "1h")
+        lookback_h = max(1, int(90 * int(interval_min) / 60))   # ~90 bare, ca la Kraken
+        try:
+            candles = c.candles(pair, iv, lookback_h) or []
+            closes = [float(k.get("c")) for k in candles if k.get("c") is not None]
+            return closes[:-1] if closes else []                # exclude bara in formare
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"ohlc_closes({symbol}): {e}") from e
+
+    def submit_order(self, symbol: str, side: str, qty: float,
+                     price: Optional[float] = None, *, market: bool = False,
+                     kind: Optional[str] = None) -> str:
+        # SIGURANTA: ordine REALE pe HL doar cu HL_LIVE_ORDERS=true (co-mingling spot cu DN).
+        if os.environ.get(_LIVE_ENV, "false").strip().lower() != "true":
+            raise ProviderError(f"HL_LIVE_ORDERS=false — refuz ordin real pe HL ({side} {symbol})")
+        pair = self._pair()
+        if pair is None:
+            raise ProviderError(f"submit_order({symbol}): perechea spot indisponibila")
+        is_buy = (side or "").lower().startswith("b")
+        px = price
+        if market or px is None:
+            mid = self.get_current_price(symbol)
+            if not mid:
+                raise ProviderError(f"submit_order({symbol}) market: pret indisponibil")
+            px = mid * (1.05 if is_buy else 0.95)               # limita agresiva -> fill imediat
+        try:
+            signer = self._signer()
+            szd = signer.sz_decimals(self._token)
+            ok, oid, msg = signer.spot_order(pair, is_buy, float(qty), float(px), sz_decimals=szd)
+        except ProviderError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"submit_order({symbol}): {e}") from e
+        if not ok or oid is None:
+            raise ProviderError(f"submit_order({symbol}) respins: {msg}")
+        return str(oid)
+
+    def order_status(self, symbol: str, order_id: str):
+        c = self._hl()
+        pair = self._pair()
+        if c is None or pair is None:
+            raise ProviderError(f"order_status({order_id}): client/pereche indisponibile")
+        addr = os.environ.get("HL_ACCOUNT_ADDRESS")
+        if not addr:
+            raise ProviderError("order_status: HL_ACCOUNT_ADDRESS lipsa")
+        try:
+            oid = int(order_id)
+            for o in c.open_orders(pair):                       # inca deschis (resting)?
+                if int(o.get("oid", -1)) == oid:
+                    return OrderStatus("open", 0.0, 0.0, 0.0)
+            filled = cost = fee = 0.0                           # altfel: agrega fill-urile cu acest oid
+            found = False
+            for f in (c.info.user_fills(addr) or []):
+                if int(f.get("oid", -1)) != oid:
+                    continue
+                found = True
+                sz = float(f.get("sz") or 0.0)
+                filled += sz
+                cost += sz * float(f.get("px") or 0.0)
+                fee += float(f.get("fee") or 0.0)
+            if found:
+                return OrderStatus("closed", filled, cost, fee)
+            return OrderStatus("canceled", 0.0, 0.0, 0.0)       # nici deschis, nici in fills
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"order_status({order_id}): {e}") from e
+
+    def cancel_order(self, symbol: str, order_id: str) -> None:
+        pair = self._pair()
+        if pair is None:
+            raise ProviderError(f"cancel_order({order_id}): perechea indisponibila")
+        try:
+            self._signer().cancel(pair, int(order_id))          # False (deja inchis) = idempotent OK
+        except ProviderError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"cancel_order({order_id}): {e}") from e

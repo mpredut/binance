@@ -60,6 +60,10 @@ class StrategyExecutor(Protocol):
     implementeaza (kraken_provider, hyperliquid_provider, binance, replay_provider)
     poate rula base v2. Semnaturile sunt agnostice de venue."""
 
+    def get_current_price(self, symbol: str) -> Optional[float]:
+        """Pretul curent (last/mid) pt bucla de decizie. None daca indisponibil."""
+        ...
+
     def submit_order(self, symbol: str, side: str, qty: float,
                      price: Optional[float] = None, *, market: bool = False,
                      kind: Optional[str] = None) -> str:
