@@ -60,6 +60,16 @@ def load_dataset(source: Path) -> list[dict]:
         return [normalize_record(row) for row in reader]
 
 
+def merge_datasets(*datasets: Iterable[Mapping]) -> list[dict]:
+    """Unește ferestre OHLC suprapuse; sursa mai nouă câștigă la același timestamp."""
+    by_timestamp = {}
+    for records in datasets:
+        for record in records:
+            normalized = normalize_record(record)
+            by_timestamp[normalized["timestamp"]] = normalized
+    return validate_dataset(by_timestamp[timestamp] for timestamp in sorted(by_timestamp))
+
+
 def validate_dataset(records: Iterable[Mapping], *, interval_minutes: int | None = None) -> list[dict]:
     """Validează ordinea, cadența și invariantele OHLC; întoarce forma normalizată."""
     rows = [normalize_record(record) for record in records]

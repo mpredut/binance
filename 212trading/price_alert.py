@@ -17,24 +17,24 @@ import argparse
 import json
 import os
 import sys
-import urllib.request
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ipo_common import load_dotenv, log  # noqa: E402
-from market_data import get_price_usd  # noqa: E402
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(_HERE)
+sys.path.insert(0, _HERE)
+sys.path.insert(0, _ROOT)
+from ipo_common import load_dotenv, log  # noqa: E402
+from market_data import get_price_usd  # noqa: E402
+from alertnotifiers import AlertNotifier  # noqa: E402
 
 
 def push(topic: str, title: str, body: str) -> bool:
-    req = urllib.request.Request(f"https://ntfy.sh/{topic}", data=body.encode("utf-8"),
-                                 headers={"Title": title}, method="POST")
-    try:
-        urllib.request.urlopen(req, timeout=10)
-        return True
-    except Exception as e:  # noqa: BLE001
-        log(f"  ! ntfy esuat: {e}")
-        return False
+    alert = {
+        "type": "bot_event", "symbol": title.split(" ", 1)[0],
+        "name": title, "source": "price_alert", "body": body,
+    }
+    return AlertNotifier.send_phone_webhook_batch(
+        [alert], webhook_url=f"https://ntfy.sh/{topic}",
+    )
 
 
 def main() -> int:

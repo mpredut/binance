@@ -13,6 +13,9 @@ runtime și re-exportă API-ul vechi pentru compatibilitate.
 `alertnotifiers.bind_notify()` centralizează alegerea simbolului din environment.
 Fișierele `notify.py` ale venue-urilor sunt shim-uri subțiri, necesare momentan
 pentru entrypoint-urile istorice; rutarea ntfy/email rămâne o singură implementare.
+Aceeași componentă aplică deduplicare și bugete zilnice persistente cross-process
+(implicit ntfy 100 cu 20 rezervate urgențelor; email 40 cu 10 rezervate). Starea
+runtime este în `logs/notification_delivery_state.json` și se resetează zilnic UTC.
 
 ## Engine comun, entrypoint-uri separate
 

@@ -103,6 +103,7 @@ class BoundNotifierTest(unittest.TestCase):
         ):
             bound("title", "body", "source")
             self.assertEqual(shared.call_args.args[3], "LABEL")
+            self.assertIsNone(shared.call_args.kwargs["email"])
             bound("title", "body", "source", symbol="EXPLICIT")
             self.assertEqual(shared.call_args.args[3], "EXPLICIT")
 

@@ -38,7 +38,7 @@ if _price_topic:
 
 CMC_API_KEY = os.environ.get('CMC_API_KEY')
 TIME_INTERVAL_CLEANUP = 6 * 60 * 60  # 6 hours in seconds
-REQUIRED_ENV_VARS = ("CMC_API_KEY", "PHONE_ALERT_URL")
+REQUIRED_ENV_VARS = ("CMC_API_KEY",)
 ENABLED_SOURCES = ["coinmarketcap", "coingecko", "binance", "dexscreener"]
 
 def validate_required_env():
@@ -144,8 +144,6 @@ def new_coin_alerts_handler(alerts):
         alerts,
         enable_phone_webhook=True
     )
-
-    AlertNotifier.send([coin_info], enable_phone_webhook=True)
 
 def print_new_coin_status(cachePriceAll, new_coins_checker):
     print("\n" + "=" * 70)

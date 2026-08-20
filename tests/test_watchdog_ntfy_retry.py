@@ -3,6 +3,7 @@ respectand Retry-After, in loc sa piarda mesajul. Fara retry, un burst din flota
 la 'push ESUAT 429' si alerte nelivrate."""
 import os
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -13,21 +14,28 @@ import watchdog_common as wc
 
 
 class _Resp:
-    def __init__(self, status, headers=None):
+    def __init__(self, status, headers=None, text=""):
         self.status_code = status
         self.headers = headers or {}
+        self.text = text
 
 
 class SendNtfyRetryTest(unittest.TestCase):
     def setUp(self):
-        self._prev = os.environ.get("NTFY_TOPIC_ERROR")
-        os.environ["NTFY_TOPIC_ERROR"] = "testtopic"
+        self._env = mock.patch.dict(os.environ, {
+            "NTFY_TOPIC_ERROR": "testtopic",
+            "NTFY_DAILY_BUDGET": "100",
+            "NTFY_URGENT_RESERVE": "20",
+        }, clear=False)
+        self._env.start()
+        self._temporary = tempfile.TemporaryDirectory()
+        os.environ["NOTIFICATION_STATE_FILE"] = os.path.join(
+            self._temporary.name, "notifications.json",
+        )
 
     def tearDown(self):
-        if self._prev is None:
-            os.environ.pop("NTFY_TOPIC_ERROR", None)
-        else:
-            os.environ["NTFY_TOPIC_ERROR"] = self._prev
+        self._env.stop()
+        self._temporary.cleanup()
 
     def test_retry_on_429_then_success(self):
         with mock.patch("requests.post") as mpost, mock.patch("time.sleep") as msleep:
@@ -37,12 +45,14 @@ class SendNtfyRetryTest(unittest.TestCase):
         self.assertEqual(mpost.call_count, 2)     # a reincercat
         msleep.assert_called_once()               # a asteptat Retry-After
 
-    def test_429_persists_returns_false_bounded(self):
+    def test_daily_429_does_not_retry_and_blocks_following_attempts(self):
         with mock.patch("requests.post") as mpost, mock.patch("time.sleep"):
-            mpost.side_effect = [_Resp(429), _Resp(429)]
+            mpost.return_value = _Resp(429, text='{"code":42908,"error":"daily limit reached"}')
             ok = wc.send_ntfy("titlu", "mesaj")
+            blocked = wc.send_ntfy("alt titlu", "alt mesaj")
         self.assertFalse(ok)
-        self.assertEqual(mpost.call_count, 2)     # exact 1 retry, marginit
+        self.assertFalse(blocked)
+        self.assertEqual(mpost.call_count, 1)
 
     def test_success_first_try_no_sleep(self):
         with mock.patch("requests.post") as mpost, mock.patch("time.sleep") as msleep:

@@ -8,6 +8,7 @@ from offline.backtests.datasets import (
     dataset_metadata,
     drop_incomplete_last_bar,
     load_dataset,
+    merge_datasets,
     save_dataset,
     validate_dataset,
 )
@@ -85,6 +86,17 @@ class OhlcDatasetContractTest(unittest.TestCase):
             metadata = dataset_metadata(loaded, interval_minutes=60)
             self.assertEqual(metadata["bars"], 2)
             self.assertEqual(len(metadata["sha256"]), 64)
+
+    def test_merge_overlapping_windows_preserves_history_and_newer_value(self):
+        older = _rows()
+        newer = [
+            {**_rows()[1], "close": 12.5, "high": 13.5},
+            {"timestamp": 7200, "open": 12.5, "high": 14, "low": 12, "close": 13},
+        ]
+        merged = merge_datasets(older, newer)
+
+        self.assertEqual([row["timestamp"] for row in merged], [0, 3600, 7200])
+        self.assertEqual(merged[1]["close"], 12.5)
 
     def test_rejects_gap_duplicate_and_invalid_ohlc(self):
         with self.assertRaisesRegex(ValueError, "cadență"):

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "frozen_at_utc": "2026-08-20T16:43:16+00:00",
+  "frozen_at_utc": "2026-08-20T17:39:28+00:00",
   "source": {
     "provider": "Yahoo chart API",
     "rule": "exclude the full tail of candles that had not closed at fetch time"
@@ -30,11 +30,11 @@
       "profile": "spcx",
       "symbol": "SPCX",
       "interval": "5m",
-      "file": "spcx/datasets/SPCX_5m_ada3bbb43c6d.csv",
-      "sha256": "ada3bbb43c6d756499982a8cd39f7a9cb3f8fbea69b2024d309b17974c55ab48",
-      "bars": 1794,
-      "start_utc": "2026-07-20T16:40:00+00:00",
-      "end_utc": "2026-08-20T16:35:00+00:00"
+      "file": "spcx/datasets/SPCX_5m_1cfe20146366.csv",
+      "sha256": "1cfe20146366e72470f0794f5a3f9d309f8305446c002297273ff2b99707b36e",
+      "bars": 3276,
+      "start_utc": "2026-06-22T17:35:00+00:00",
+      "end_utc": "2026-08-20T17:30:00+00:00"
     }
   }
 }

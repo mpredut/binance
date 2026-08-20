@@ -12,9 +12,11 @@ import dataclasses
 import datetime as dt
 import json
 from pathlib import Path
+import re
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -31,10 +33,12 @@ from offline.backtests.datasets import (  # noqa: E402
     dataset_metadata,
     drop_incomplete_last_bar,
     load_dataset,
+    merge_datasets,
     save_dataset,
     validate_dataset,
 )
 from offline.backtests.evaluation import (  # noqa: E402
+    assess_decision_evidence,
     automatic_window_sizes,
     evaluate_walk_forward,
 )
@@ -68,9 +72,20 @@ def fx_quote(currency: str) -> tuple[str, bool]:
 
 
 def fetch_yahoo_candles(symbol: str, range_: str, interval: str) -> list[dict]:
+    query = {"range": range_, "interval": interval}
+    day_range = re.fullmatch(r"([1-9][0-9]*)d", range_.lower())
+    if day_range:
+        # Yahoo rotunjește uneori range=59d la o perioadă calendaristică mai mare
+        # și respinge 5m ca fiind >60d. period1/period2 păstrează exact fereastra.
+        end = int(time.time())
+        query = {
+            "period1": end - int(day_range.group(1)) * 24 * 60 * 60,
+            "period2": end,
+            "interval": interval,
+        }
     url = (
         "https://query1.finance.yahoo.com/v8/finance/chart/"
-        f"{symbol}?range={range_}&interval={interval}"
+        f"{urllib.parse.quote(symbol)}?{urllib.parse.urlencode(query)}"
     )
     request = urllib.request.Request(
         url, headers={"User-Agent": "binance-repo/t212-walk-forward"},
@@ -124,6 +139,10 @@ def main() -> int:
     parser.add_argument("--interval", default="1d", help="interval Yahoo: 5m, 1h, 1d")
     parser.add_argument("--dataset", type=Path, help="CSV înghețat în loc de Yahoo")
     parser.add_argument(
+        "--seed-dataset", type=Path,
+        help="istoric înghețat de unit cu fereastra Yahoo nouă (acumulare intraday)",
+    )
+    parser.add_argument(
         "--fx-to-usd", type=float,
         help="override FX fix; implicit se descarcă seria istorică pentru non-USD",
     )
@@ -161,6 +180,8 @@ def main() -> int:
         parser.error("profilul nu definește YAHOO_SYMBOL")
     if args.fx_to_usd is not None and args.fx_dataset is not None:
         parser.error("--fx-to-usd și --fx-dataset sunt alternative")
+    if args.dataset is not None and args.seed_dataset is not None:
+        parser.error("--dataset și --seed-dataset sunt alternative")
     if args.fx_to_usd is not None and args.fx_to_usd <= 0:
         parser.error("--fx-to-usd trebuie să fie pozitiv")
     try:
@@ -183,7 +204,17 @@ def main() -> int:
         parser.error("--warmup nu poate fi negativ")
 
     source = args.dataset.expanduser().resolve() if args.dataset else None
-    records = load_dataset(source) if source else fetch_yahoo_candles(symbol, args.range, args.interval)
+    seed_source = args.seed_dataset.expanduser().resolve() if args.seed_dataset else None
+    if source:
+        records = load_dataset(source)
+        source_label = str(source)
+    else:
+        fetched = fetch_yahoo_candles(symbol, args.range, args.interval)
+        records = merge_datasets(load_dataset(seed_source), fetched) if seed_source else fetched
+        source_label = (
+            f"Yahoo chart {args.range}/{args.interval} + seed {seed_source}"
+            if seed_source else f"Yahoo chart {args.range}/{args.interval}"
+        )
     records = validate_dataset(records)
     output_dir = args.output_dir.expanduser().resolve() / args.profile
 
@@ -258,6 +289,7 @@ def main() -> int:
         step_size=step,
         warmup_bars=warmup,
     )
+    evidence = assess_decision_evidence(records, result["aggregate_test"])
 
     generated_at = dt.datetime.now(tz=dt.timezone.utc)
     report = {
@@ -273,7 +305,7 @@ def main() -> int:
         "strategy_params": dataclasses.asdict(params),
         "fx_model": fx_metadata,
         "dataset": {
-            "source": str(source) if source else f"Yahoo chart {args.range}/{args.interval}",
+            "source": source_label,
             "frozen_file": str(frozen_path),
             **metadata,
         },
@@ -289,6 +321,7 @@ def main() -> int:
             "calendar_periods_per_year": periods_per_year(interval_minutes),
             **dataclasses.asdict(execution),
         },
+        "evidence_gate": evidence,
         **result,
     }
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -304,7 +337,8 @@ def main() -> int:
         f"worst={aggregate['worst_return_pct']:+.3f}% "
         f"worstDD={aggregate['worst_max_drawdown_pct']:.3f}% "
         f"cycles={aggregate['total_cycles']} fills={aggregate['total_fills']} "
-        f"ambiguous={aggregate['total_ambiguous_bars']}"
+        f"ambiguous={aggregate['total_ambiguous_bars']} "
+        f"evidence={evidence['verdict']}"
     )
     return 0
 

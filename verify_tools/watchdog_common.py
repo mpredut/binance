@@ -10,11 +10,21 @@ Variabile de mediu (din .env / config.env din radacina):
 """
 import os
 import json
-import smtplib
-from email.mime.text import MIMEText
 from pathlib import Path
+import sys
 
 ROOT = Path(__file__).resolve().parent.parent      # verify_tools/ -> radacina repo
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from alertnotifiers import AlertNotifier  # noqa: E402
+
+
+def _watchdog_event(title, message):
+    return {
+        "type": "bot_event", "symbol": "SYSTEM", "name": title,
+        "source": "watchdog", "body": message, "url": None,
+    }
 
 
 def load_env():
@@ -53,59 +63,17 @@ def send_ntfy(title, message):
     if not url:
         print("[watchdog] fara PHONE_ALERT_URL/NTFY_TOPIC — sar push-ul")
         return False
-    try:
-        import requests
-        import time as _time
-        # ntfy decodeaza Title ca UTF-8 -> trecem octetii UTF-8 prin latin-1, ca sa
-        # pastram caractere non-ASCII (emoji, simboluri) in titlu.
-        utf8_title = title.encode("utf-8").decode("latin-1")
-        # ntfy.sh (tier gratuit) da 429 la burst-uri (multe procese din flota alerteaza
-        # simultan) -> mesajul se PIERDEA. Retry o data, respectand Retry-After (plafonat
-        # la 8s ca sa nu blocam watchdog-ul cron */2).
-        r = None
-        for attempt in range(2):
-            if "ntfy.sh/" in url:
-                r = requests.post(url, data=message.encode("utf-8"),
-                                  headers={"Title": utf8_title, "Priority": "urgent",
-                                           "Tags": "warning"}, timeout=10)
-            else:
-                r = requests.post(url, json={"title": title, "message": message}, timeout=10)
-            if r.status_code != 429:
-                break
-            try:
-                wait = min(float(r.headers.get("Retry-After", 3) or 3), 8.0)
-            except (TypeError, ValueError):
-                wait = 3.0
-            print(f"[watchdog] push 429 (rate-limit ntfy) — reincerc dupa {wait:.0f}s")
-            _time.sleep(wait)
-        ok = r is not None and r.status_code < 400
-        code = r.status_code if r is not None else "?"
-        print(f"[watchdog] push {'OK' if ok else 'ESUAT ' + str(code)}")
-        return ok
-    except Exception as e:
-        print(f"[watchdog] push exceptie: {e}")
-        return False
+    ok = AlertNotifier.send_phone_webhook_batch([_watchdog_event(title, message)], webhook_url=url)
+    print(f"[watchdog] push {'OK' if ok else 'ESUAT'}")
+    return ok
 
 
 def send_email(subject, body):
-    user = os.environ.get("SMTP_USERNAME")
-    pwd = os.environ.get("SMTP_PASSWORD")
-    to = os.environ.get("ALERT_TO_EMAIL")
-    if not (user and pwd and to):
-        return False
-    try:
-        msg = MIMEText(body, "plain", "utf-8")
-        msg["From"], msg["To"], msg["Subject"] = user, to, subject
-        with smtplib.SMTP(os.environ.get("SMTP_SERVER", "smtp.gmail.com"),
-                          int(os.environ.get("SMTP_PORT", "587")), timeout=15) as s:
-            s.starttls()
-            s.login(user, pwd)
-            s.sendmail(user, [to], msg.as_string())
-        print("[watchdog] email trimis")
-        return True
-    except Exception as e:
-        print(f"[watchdog] email exceptie: {e}")
-        return False
+    ok = AlertNotifier.send_email_batch(
+        [_watchdog_event(subject, body)], subject=subject,
+    )
+    print(f"[watchdog] email {'trimis' if ok else 'omis/esuat'}")
+    return ok
 
 
 def alert(title, message):

@@ -30,6 +30,60 @@ class ReplayContext:
 ReplayFunction = Callable[[Ohlc, Ohlc, ReplayContext], dict[str, Any]]
 
 
+def assess_decision_evidence(
+    records: Sequence[dict], aggregate: dict[str, Any], *,
+    minimum_folds: int = 20, minimum_history_days: float = 90.0,
+    minimum_cycles: int = 3,
+) -> dict[str, Any]:
+    """Separă lipsa dovezii statistice de semnalele financiare nefavorabile.
+
+    Un worst-fold negativ nu devine automat motiv de optimizare: este un risk flag.
+    Un istoric/fold count/cycle count prea mic face rezultatul doar caracterizare,
+    indiferent dacă media este pozitivă.
+    """
+    if not records:
+        raise ValueError("evaluarea dovezii cere cel puțin o bară")
+    history_days = max(
+        0.0,
+        (int(records[-1]["timestamp"]) - int(records[0]["timestamp"])) / 86_400.0,
+    )
+    fold_count = int(aggregate.get("fold_count", 0))
+    cycles = int(aggregate.get("total_cycles", 0))
+    worst_return = float(aggregate.get("worst_return_pct", 0.0))
+    data_issues = []
+    if fold_count < minimum_folds:
+        data_issues.append(f"folds {fold_count} < {minimum_folds}")
+    if history_days < minimum_history_days:
+        data_issues.append(
+            f"history_days {history_days:.1f} < {minimum_history_days:.1f}"
+        )
+    if cycles < minimum_cycles:
+        data_issues.append(f"completed_cycles {cycles} < {minimum_cycles}")
+    risk_flags = []
+    if worst_return < 0:
+        risk_flags.append(f"negative_worst_fold {worst_return:+.3f}%")
+    if data_issues and risk_flags:
+        verdict = "characterization_only_with_risk_flags"
+    elif data_issues:
+        verdict = "characterization_only"
+    elif risk_flags:
+        verdict = "decision_grade_with_risk_flags"
+    else:
+        verdict = "decision_grade"
+    return {
+        "verdict": verdict,
+        "decision_grade_data": not data_issues,
+        "history_days": history_days,
+        "minimums": {
+            "folds": minimum_folds,
+            "history_days": minimum_history_days,
+            "completed_cycles": minimum_cycles,
+        },
+        "data_issues": data_issues,
+        "risk_flags": risk_flags,
+    }
+
+
 def automatic_window_sizes(sample_count: int) -> tuple[int, int, int, int]:
     """Trei fold-uri aproximative: 45% train, 10% validation, 15% test."""
     if sample_count < 20:

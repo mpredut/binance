@@ -824,7 +824,7 @@ Price alerts și new-coin discovery din surse publice. Nu este execution-critica
 
 ### `AlertNotifier`
 
-Rutează notificările în funcție de source/title/symbol către topic-uri ntfy, email și desktop. Erorile de notificare nu trebuie să oprească trading-ul.
+Rutează notificările în funcție de source/title/symbol către topic-uri ntfy, email și desktop. Politica de livrare este comună tuturor proceselor Python: deduplicare persistentă, buget zilnic per canal, rezervă pentru urgențe și circuit-breaker până la următoarea zi UTC când ntfy răspunde cu limită zilnică. Watchdog-urile reutilizează același transport; emailul este fallback unic la epuizarea ntfy, nu duplicare pentru fiecare mesaj suprimat. Erorile de notificare nu trebuie să oprească trading-ul.
 
 ### Logs
 

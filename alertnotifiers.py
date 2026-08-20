@@ -1,19 +1,196 @@
 # alert_notifiers.py
+from __future__ import annotations
+
 import requests
+import hashlib
+import json
 import os
 import smtplib
 import subprocess
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
 from typing import Any, Optional
 
 # Import your modules
 import log
+from lock import FileLock
 
 BASE_DIR = Path(__file__).resolve().parent
+
+_URGENT_MARKERS = (
+    "🛑", "🛡", "LICHID", "STOP-LOSS", "STOP_LOSS", "TRAILING", "ESUAT",
+    "MANUAL", "ERORI", "CATASTROF", "CRASH", "DISPARUT", "DEZECHILIBR",
+)
+_GUARD_MARKERS = (
+    "🛑", "🛡", "STOP-LOSS", "STOP_LOSS", "TRAILING", "LICHID", "CATASTROF", "CRASH",
+)
+_OPS_MARKERS = ("ESUAT", "ERORI", "MANUAL", "DISPARUT", "DEZECHILIBR")
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    try:
+        return max(0, int(os.environ.get(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
+def _delivery_state_path() -> Path:
+    configured = os.environ.get("NOTIFICATION_STATE_FILE")
+    return Path(configured).expanduser() if configured else BASE_DIR / "logs/notification_delivery_state.json"
+
+
+def _load_delivery_state(path: Path, today: str) -> dict:
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        state = {}
+    if state.get("date_utc") != today:
+        state = {"schema_version": 1, "date_utc": today, "channels": {}}
+    state.setdefault("channels", {})
+    return state
+
+
+def _save_delivery_state(path: Path, state: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(
+        json.dumps(state, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
+        encoding="utf-8",
+    )
+    os.replace(temporary, path)
+
+
+def _alert_identity(alert: Any) -> dict:
+    """Identitate stabilă: exclude timestamp-ul și prețurile care fluctuează la fiecare poll."""
+    if isinstance(alert, dict):
+        return {
+            key: alert.get(key)
+            for key in ("type", "symbol", "name", "source", "body", "url")
+        }
+    return {
+        "type": alert.__class__.__name__,
+        "symbol": getattr(alert, "symbol", None),
+        "alert_type": getattr(alert, "alert_type", None),
+        "threshold": getattr(alert, "threshold", None),
+    }
+
+
+def _delivery_fingerprint(alerts: list[Any]) -> str:
+    identities = sorted(
+        (json.dumps(_alert_identity(alert), sort_keys=True, default=str) for alert in alerts),
+    )
+    return hashlib.sha256("\n".join(identities).encode("utf-8")).hexdigest()
+
+
+def _alerts_are_urgent(alerts: list[Any]) -> bool:
+    for alert in alerts:
+        if not isinstance(alert, dict):
+            continue
+        title = str(alert.get("name") or alert.get("symbol") or "").upper()
+        source = str(alert.get("source") or "").lower()
+        if any(marker in title for marker in _URGENT_MARKERS) or "watchdog" in source:
+            return True
+    return False
+
+
+def _dedup_seconds(alerts: list[Any], urgent: bool) -> int:
+    titles = " ".join(
+        str(alert.get("name") or "").upper()
+        for alert in alerts if isinstance(alert, dict)
+    )
+    if "DISPONIBIL" in titles:
+        return _positive_int_env("NOTIFICATION_STARTUP_DEDUP_SECONDS", 6 * 60 * 60)
+    if urgent:
+        return _positive_int_env("NOTIFICATION_URGENT_DEDUP_SECONDS", 5 * 60)
+    if any(
+        not isinstance(alert, dict) or alert.get("type") == "new_coin_discovered"
+        for alert in alerts
+    ):
+        return _positive_int_env("NOTIFICATION_PRICE_DEDUP_SECONDS", 30 * 60)
+    return _positive_int_env("NOTIFICATION_DEDUP_SECONDS", 15 * 60)
+
+
+def _reserve_delivery(channel: str, alerts: list[Any], *, urgent: bool) -> tuple[bool, str, bool]:
+    """Rezervă atomic o livrare între procese.
+
+    Întoarce ``(allowed, reason, warn_once)``. Rezervarea este conservatoare: o
+    încercare de rețea consumă bugetul local, fiindcă un timeout poate apărea după
+    ce furnizorul a acceptat mesajul.
+    """
+    now = time.time()
+    today = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
+    path = _delivery_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fingerprint = _delivery_fingerprint(alerts)
+    budget = _positive_int_env(
+        "NTFY_DAILY_BUDGET" if channel == "ntfy" else "EMAIL_DAILY_BUDGET",
+        100 if channel == "ntfy" else 40,
+    )
+    reserve = min(
+        budget,
+        _positive_int_env(
+            "NTFY_URGENT_RESERVE" if channel == "ntfy" else "EMAIL_URGENT_RESERVE",
+            20 if channel == "ntfy" else 10,
+        ),
+    )
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with FileLock(lock_path):
+        state = _load_delivery_state(path, today)
+        channel_state = state["channels"].setdefault(
+            channel,
+            {"sent": 0, "last": {}, "blocked": False, "budget_warning_sent": False},
+        )
+        if channel_state.get("blocked"):
+            return False, "provider_daily_limit", False
+
+        last = channel_state.setdefault("last", {})
+        cutoff = now - 2 * 24 * 60 * 60
+        channel_state["last"] = {
+            key: value for key, value in last.items() if float(value) >= cutoff
+        }
+        previous = channel_state["last"].get(fingerprint)
+        if previous is not None and now - float(previous) < _dedup_seconds(alerts, urgent):
+            _save_delivery_state(path, state)
+            return False, "duplicate", False
+
+        sent = int(channel_state.get("sent", 0))
+        allowed_count = budget if urgent else max(0, budget - reserve)
+        if sent >= allowed_count:
+            warn = not bool(channel_state.get("budget_warning_sent"))
+            channel_state["budget_warning_sent"] = True
+            _save_delivery_state(path, state)
+            return False, "local_daily_budget", warn
+
+        channel_state["sent"] = sent + 1
+        channel_state["last"][fingerprint] = now
+        _save_delivery_state(path, state)
+        return True, "reserved", False
+
+
+def _mark_provider_daily_limit(channel: str) -> bool:
+    """Blochează canalul până la resetarea UTC și cere o singură alertă alternativă."""
+    now = time.time()
+    today = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
+    path = _delivery_state_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(path.with_suffix(path.suffix + ".lock")):
+        state = _load_delivery_state(path, today)
+        channel_state = state["channels"].setdefault(channel, {})
+        first = not bool(channel_state.get("budget_warning_sent"))
+        channel_state["blocked"] = True
+        channel_state["budget_warning_sent"] = True
+        _save_delivery_state(path, state)
+        return first
+
+
+def _is_provider_daily_limit(response: Any) -> bool:
+    if getattr(response, "status_code", None) != 429:
+        return False
+    body = str(getattr(response, "text", "") or "").lower()
+    return "42908" in body or "daily" in body
 
 
 class AlertNotifier:
@@ -150,7 +327,9 @@ class AlertNotifier:
             return False
 
     @staticmethod
-    def send_email_batch(alerts, email_config: Optional[dict] = None):
+    def send_email_batch(
+        alerts, email_config: Optional[dict] = None, subject: Optional[str] = None,
+    ):
         email_config = email_config or {}
         smtp_server = email_config.get("smtp_server") or os.environ.get("SMTP_SERVER", "smtp.gmail.com")
         smtp_port = int(email_config.get("smtp_port") or os.environ.get("SMTP_PORT", "587"))
@@ -166,8 +345,15 @@ class AlertNotifier:
             print("[Notifier] Email: SMTP_USERNAME, SMTP_PASSWORD, and ALERT_TO_EMAIL are required")
             return False
 
+        alerts = list(alerts)
+        urgent = _alerts_are_urgent(alerts)
+        allowed, reason, _warn = _reserve_delivery("email", alerts, urgent=urgent)
+        if not allowed:
+            print(f"[Notifier] Email omis de politica de livrare: {reason}")
+            return reason == "duplicate"
+
         symbols = ", ".join(AlertNotifier.alert_symbol(alert) for alert in alerts)
-        subject = f"CryptoAlerts: {len(alerts)} symbols ({symbols})"
+        subject = subject or f"CryptoAlerts: {len(alerts)} symbols ({symbols})"
         body = AlertNotifier.format_batch_message(alerts)
         msg = MIMEText(body, "plain", "utf-8")
         msg["From"] = smtp_username
@@ -198,6 +384,7 @@ class AlertNotifier:
             print("[Notifier] Phone webhook: PHONE_ALERT_URL or NTFY_TOPIC is missing")
             return False
 
+        alerts = list(alerts)
         symbols = ", ".join(AlertNotifier.alert_symbol(alert) for alert in alerts)
         # pt un SINGUR eveniment de bot: titlul = actiunea (name); altfel '(N): simboluri'
         if len(alerts) == 1 and isinstance(alerts[0], dict) and alerts[0].get("type") == "bot_event":
@@ -209,19 +396,43 @@ class AlertNotifier:
         tags = "chart_with_upwards_trend"
         payload = {"title": title, "message": message}
 
+        is_ntfy = "ntfy.sh/" in webhook_url
+        if is_ntfy:
+            urgent = _alerts_are_urgent(alerts)
+            allowed, reason, warn = _reserve_delivery("ntfy", alerts, urgent=urgent)
+            if not allowed:
+                print(f"[Notifier] ntfy omis de politica de livrare: {reason}")
+                if warn:
+                    AlertNotifier._send_budget_warning("ntfy", reason)
+                return reason == "duplicate"
+
         try:
-            if "ntfy.sh/" in webhook_url:
+            if is_ntfy:
                 # ntfy decodează Title ca UTF-8 → păstrăm simbolurile non-ASCII (ex. '小蝌蚪').
-                response = requests.post(
-                    webhook_url,
-                    data=message.encode("utf-8"),
-                    headers={
-                        "Title": AlertNotifier.utf8_header(title),
-                        "Priority": os.environ.get("NTFY_PRIORITY", "high"),
-                        "Tags": tags,
-                    },
-                    timeout=10,
-                )
+                response = None
+                for attempt in range(2):
+                    response = requests.post(
+                        webhook_url,
+                        data=message.encode("utf-8"),
+                        headers={
+                            "Title": AlertNotifier.utf8_header(title),
+                            "Priority": "urgent" if urgent else os.environ.get("NTFY_PRIORITY", "high"),
+                            "Tags": "warning" if urgent else tags,
+                        },
+                        timeout=10,
+                    )
+                    if response.status_code != 429 or _is_provider_daily_limit(response):
+                        break
+                    if attempt == 0:
+                        try:
+                            wait = min(float(response.headers.get("Retry-After", 3) or 3), 8.0)
+                        except (AttributeError, TypeError, ValueError):
+                            wait = 3.0
+                        print(f"[Notifier] ntfy 429 tranzitoriu; reincerc dupa {wait:.0f}s")
+                        time.sleep(wait)
+                if _is_provider_daily_limit(response):
+                    if _mark_provider_daily_limit("ntfy"):
+                        AlertNotifier._send_budget_warning("ntfy", "provider_daily_limit")
                 if response.status_code >= 400:
                     print(f"[Notifier] ntfy batch error: {response.status_code} {response.text}")
                     return False
@@ -237,6 +448,22 @@ class AlertNotifier:
         except Exception as e:
             print(f"[Notifier] Phone webhook batch exception: {e}")
             return False
+
+    @staticmethod
+    def _send_budget_warning(channel: str, reason: str) -> None:
+        """Fallback unic pe email; nu încearcă să compenseze fiecare mesaj suprimat."""
+        alert = {
+            "type": "bot_event", "symbol": "SYSTEM",
+            "name": f"ERORI LIMITA {channel.upper()}", "source": "notifier",
+            "body": (
+                f"Canalul {channel} a fost oprit pentru restul zilei UTC: {reason}. "
+                "Alertele urgente continuă pe celelalte canale disponibile."
+            ),
+            "added_at": datetime.now(),
+        }
+        AlertNotifier.send_email_batch(
+            [alert], subject=f"Trading alerts: limita {channel} atinsa",
+        )
 
 
     #Combined handler that sends alerts through multiple channels.    
@@ -254,12 +481,6 @@ class AlertNotifier:
             AlertNotifier.send_email_batch(alerts)
         if enable_phone_webhook:
             AlertNotifier.send_phone_webhook_batch(alerts)
-
-
-_URGENT_MARKERS = ("🛑", "🛡", "LICHID", "STOP-LOSS", "STOP_LOSS", "TRAILING", "ESUAT",
-                   "MANUAL", "ERORI", "CATASTROF", "CRASH", "DISPARUT", "DEZECHILIBR")
-_GUARD_MARKERS = ("🛑", "🛡", "STOP-LOSS", "STOP_LOSS", "TRAILING", "LICHID", "CATASTROF", "CRASH")
-_OPS_MARKERS = ("ESUAT", "ERORI", "MANUAL", "DISPARUT", "DEZECHILIBR")
 
 
 def _topic_for(title: str, source: str) -> Optional[str]:
@@ -349,7 +570,7 @@ def bind_notify(symbol_env_keys: tuple[str, ...], default_symbol: str):
         price: Optional[float] = None,
         desktop: bool = False,
         symbol: Optional[str] = None,
-        email: bool = False,
+        email: Optional[bool] = None,
     ) -> None:
         resolved = symbol or next(
             (os.environ[key] for key in symbol_env_keys if os.environ.get(key)),

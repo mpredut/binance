@@ -1,6 +1,6 @@
 import unittest
 
-from offline.backtests.evaluation import evaluate_walk_forward
+from offline.backtests.evaluation import assess_decision_evidence, evaluate_walk_forward
 from offline.backtests.walk_forward import summarize_test_windows, walk_forward_splits
 
 
@@ -83,6 +83,21 @@ class WalkForwardSplitsTest(unittest.TestCase):
         self.assertEqual(result["aggregate_test"]["fold_count"], 4)
         self.assertIn(4, calls)
         self.assertTrue(all(fold["test"]["bars"] == 2 for fold in result["folds"]))
+
+    def test_evidence_gate_separates_short_history_from_negative_worst_fold(self):
+        records = [
+            {"timestamp": index * 86_400, "open": 100, "high": 101,
+             "low": 99, "close": 100}
+            for index in range(60)
+        ]
+        evidence = assess_decision_evidence(records, {
+            "fold_count": 3, "total_cycles": 0, "worst_return_pct": -0.62,
+        })
+
+        self.assertEqual(evidence["verdict"], "characterization_only_with_risk_flags")
+        self.assertFalse(evidence["decision_grade_data"])
+        self.assertEqual(len(evidence["data_issues"]), 3)
+        self.assertEqual(evidence["risk_flags"], ["negative_worst_fold -0.620%"])
 
 
 if __name__ == "__main__":
