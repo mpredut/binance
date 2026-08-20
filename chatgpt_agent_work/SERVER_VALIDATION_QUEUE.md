@@ -21,8 +21,10 @@ Pregătită: 2026-08-20. Nu conține parole sau secrete.
   promovabil, `762 passed`, `235 subtests passed`;
 - nu s-a făcut deploy, restart sau schimbare de configurație/stare pe producție.
 
-Rămân de executat numai acumularea fill-urilor reale, repetarea calibrării și,
-după aprobare separată, merge/deploy al branch-ului validat.
+Branch-ul validat a fost fast-forward în `main` și împins pe remote la `f5ac673`.
+Rămân de executat numai preluarea/deploy-ul separat aprobat pe producție,
+validarea shadow după preluare, acumularea fill-urilor reale și repetarea
+calibrării. Niciuna dintre acestea nu blochează închiderea capitolului local.
 
 ## P0 — producție, numai citire înainte de orice deploy
 
@@ -79,9 +81,11 @@ MARKET conțin `reference_price`, în timp ce ordinul trimis providerului păstr
 nu poate separa mișcarea pieței, spread-ul și slippage-ul pur fără bid/ask/mid la
 decizie.
 
-## P1 — dev/backtest după sincronizarea codului
+## P1 — dev/backtest după sincronizarea codului — FINALIZAT
 
-Pe mașina dev, după confirmarea commitului dorit:
+Validat pe dev la `114c016`, apoi repetat local direct din `main` la `f5ac673`:
+baseline `VERIFY OK`, comparația fără candidat promovabil și suita completă
+`762 passed, 235 subtests passed`. Comenzile de reproducere rămân:
 
 ```bash
 cd /home/predut/binance

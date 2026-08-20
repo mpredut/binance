@@ -16,12 +16,13 @@ fac diferența între intrări și ieșirile urgente STOP/trailing.
 
 | KrakenClient (azi) | Contract agnostic | Stare în providers/ |
 |---|---|---|
-| `add_order`→txid | `place_order(...)->order_id` | ✅ există (toți) — de garantat order_id + market |
-| `query_orders(txid)` | `order_status(symbol,id)->OrderStatus` | ❌ **lipsește peste tot** |
-| `cancel_order(txid)` | `cancel_order(symbol,id)` | ❌ **lipsește din interfață** (kraken_client + bapi o au intern) |
-| `pair_info` | `pair_precision->PairPrecision` | ⚠️ parțial (doar `min_order_qty`) |
-| `balance` | `free_balance(asset)` | ✅ există (toți) |
-| `ohlc_closes` | `ohlc_closes(symbol,interval)` | ⚠️ mapabil pe `get_price_history` |
+| `add_order`→txid | `submit_order(...)->order_id` | ✅ Kraken/HL/Binance/T212 |
+| `query_orders(txid)` | `order_status(symbol,id)->OrderStatus` | ✅ Kraken/HL/Binance/T212 |
+| `cancel_order(txid)` | `cancel_order(symbol,id)` | ✅ Kraken/HL/Binance/T212 |
+| `pair_info` | `pair_precision->PairPrecision` | ✅ Kraken/HL/Binance/T212 |
+| `balance` | `free_balance(asset)` | ✅ Kraken/HL/Binance/T212 |
+| `ohlc_closes` | `ohlc_closes(symbol,interval)` | ✅ Kraken/HL/Binance/T212 |
+| ticker/quote | `get_current_price(symbol)` | ✅ Kraken/HL/Binance/T212 |
 
 Dimensiune reală în `strategy.py`: **8 call-site-uri** (`self.client.*`) + **6** `except
 KrakenError`. Backtestul (`replay.py`) folosește `MagicMock` → aproape neatins.
@@ -57,8 +58,13 @@ KrakenError`. Backtestul (`replay.py`) folosește `MagicMock` → aproape neatin
   `MarketApi.place`. Dacă apare nevoie cross-strategy, se introduce separat un decorator
   intent-aware, în care STOP/trailing nu pot fi blocate de trend/cooldown/plafon.
 
-**Prima valoare** (Kraken neschimbat + HL activabil) după Faza 3 ≈ **3–4 zile**.
-Golul real = `order_status` + `cancel` per venue.
+## Stare de închidere
+
+Fazele 0–5c sunt integrate în `main` la `f5ac673`, validate cu golden-ul
+byte-identical, benchmarkul financiar reproductibil și suita completă. Nu mai
+există un gol de contract pentru providerii Kraken, Hyperliquid, Binance sau
+Trading212. Faza 6 rămâne intenționat amânată și nu blochează închiderea
+refactorului provider-agnostic.
 
 ## Invariant de siguranță
 Gate-ul din Faza 2 = `tests/test_kraken_strategy_golden.py` trebuie să treacă **byte-identical**.
