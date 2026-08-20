@@ -91,6 +91,28 @@ class ProviderLivePathTest(unittest.TestCase):
         sub = [c for c in self.fake.calls if c[0] == "submit_order"][-1]
         self.assertTrue(sub[5])                  # market=True propagat
 
+    def test_audited_market_submit_receives_observational_reference_price(self):
+        class IntentExecutor(FakeExecutor):
+            def submit_order_with_intent(
+                self, intent_id, symbol, side, qty, price=None, *, market=False,
+                kind=None, reference_price=None,
+            ):
+                self._seq += 1
+                self.calls.append((
+                    "submit_with_intent", symbol, side, qty, price, market, kind,
+                    reference_price,
+                ))
+                return f"OID-{self._seq}"
+
+        executor = IntentExecutor()
+        strategy = _strategy(executor)
+        strategy._place("sell", 5.0, 59.0, kind="STOP", market=True)
+
+        call = next(item for item in executor.calls if item[0] == "submit_with_intent")
+        self.assertIsNone(call[4])
+        self.assertTrue(call[5])
+        self.assertEqual(call[7], 59.0)
+
     def test_place_ProviderError_nu_stocheaza_ordinul(self):
         def boom(*a, **k):
             raise ProviderError("Insufficient funds")

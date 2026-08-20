@@ -108,10 +108,12 @@ class AuditedStrategyExecutor:
 
     def submit_order_with_intent(self, intent_id: str, symbol: str, side: str, qty: float,
                                  price: Optional[float] = None, *, market: bool = False,
-                                 kind: Optional[str] = None) -> str:
+                                 kind: Optional[str] = None,
+                                 reference_price: Optional[float] = None) -> str:
         fields = {
             "side": str(side).lower(), "qty": qty, "price": price,
             "market": bool(market), "kind": kind,
+            "reference_price": reference_price,
         }
         self.audit.record("submit_requested", intent_id=intent_id, venue=self.name,
                           symbol=symbol, **fields)

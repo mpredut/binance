@@ -364,6 +364,7 @@ class Strategy:
             order_id = self.executor.submit_order_with_intent(
                 intent_id, self.ticker, "sell", qty,
                 None if market else round(limit, 2), market=market, kind=kind,
+                reference_price=round(limit, 2) if market else None,
             )
         except ProviderError as exc:
             message = str(exc)

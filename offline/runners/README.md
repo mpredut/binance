@@ -113,5 +113,7 @@ Auditul real poate fi agregat read-only înainte de calibrarea costurilor:
   --markdown /tmp/kraken_execution_calibration.md
 ```
 
-Raportul măsoară fee, latență, partial fills și fill-urile LIMIT. Nu pretinde că
-poate calcula spread sau slippage MARKET fără bid/ask/mid salvat la decizie.
+Raportul măsoară fee, latență, partial fills, abaterea fill-urilor LIMIT și, pentru
+ordinele MARKET noi, shortfall-ul total dintre prețul deciziei și fill. Acest
+shortfall include laolaltă mișcarea pieței, spread și slippage; raportul nu
+pretinde că le poate separa fără bid/ask/mid salvat la decizie.

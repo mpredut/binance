@@ -50,8 +50,12 @@ TRADING_PYTHON=/home/predut/binance/myenv/bin/python
 ```
 
 De colectat: număr ordine/fill-uri, fee bps limit/market, p50/p95 latență,
-partial-fill rate și abaterea fill-urilor LIMIT. Auditul actual nu poate calibra
-spread-ul sau slippage-ul MARKET deoarece nu conține bid/ask/mid la decizie.
+partial-fill rate, abaterea fill-urilor LIMIT și shortfall-ul decizie→fill pentru
+ordinele MARKET noi. După deploy, confirmă că evenimentele `submit_requested`
+MARKET conțin `reference_price`, în timp ce ordinul trimis providerului păstrează
+`price=null`. Shortfall-ul este costul total observat între decizie și fill; auditul
+nu poate separa mișcarea pieței, spread-ul și slippage-ul pur fără bid/ask/mid la
+decizie.
 
 ## P1 — dev/backtest după sincronizarea codului
 

@@ -83,12 +83,16 @@ class ExecutionAuditTest(unittest.TestCase):
         with self.assertRaisesRegex(ProviderError, "venue down"):
             self.wrapped.submit_order_with_intent(
                 "intent-error", "ABC", "sell", 1.0, market=True, kind="STOP",
+                reference_price=99.5,
             )
         rows = self._events()
         self.assertEqual([row["event"] for row in rows],
                          ["submit_requested", "submit_rejected"])
         self.assertEqual(rows[-1]["error_type"], "ProviderError")
         self.assertTrue(rows[-1]["market"])
+        self.assertEqual(rows[-1]["reference_price"], 99.5)
+        submit = [call for call in self.executor.calls if call[0] == "submit"]
+        self.assertEqual(submit, [("submit", "ABC", "sell", 1.0, None, True, "STOP")])
 
 
 if __name__ == "__main__":

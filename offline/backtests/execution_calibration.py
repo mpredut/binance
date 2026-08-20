@@ -81,6 +81,20 @@ def calibrate_execution_events(events: list[dict]) -> dict:
                 side = str(requested.get("side") or "").lower()
                 direction = 1.0 if side == "buy" else -1.0
                 deviation_bps = direction * (avg_fill / reference - 1.0) * 10_000
+        market_shortfall_bps = None
+        reference_price = requested.get("reference_price")
+        if (
+            bool(requested.get("market"))
+            and reference_price is not None
+            and avg_fill is not None
+        ):
+            reference = float(reference_price)
+            if reference > 0:
+                side = str(requested.get("side") or "").lower()
+                direction = 1.0 if side == "buy" else -1.0
+                market_shortfall_bps = (
+                    direction * (avg_fill / reference - 1.0) * 10_000
+                )
         latency = None
         if accepted is not None and first_fill is not None:
             latency = max(
@@ -104,6 +118,7 @@ def calibrate_execution_events(events: list[dict]) -> dict:
             "fee_bps": abs(fee) / cost * 10_000 if cost > 0 else None,
             "first_fill_latency_s": latency,
             "limit_fill_deviation_bps": deviation_bps,
+            "market_execution_shortfall_bps": market_shortfall_bps,
         })
 
     def summarize(selected: list[dict]) -> dict:
@@ -130,6 +145,10 @@ def calibrate_execution_events(events: list[dict]) -> dict:
                 order["limit_fill_deviation_bps"] for order in filled
                 if order["limit_fill_deviation_bps"] is not None
             ]),
+            "market_execution_shortfall_bps": distribution([
+                order["market_execution_shortfall_bps"] for order in filled
+                if order["market_execution_shortfall_bps"] is not None
+            ]),
         }
 
     market = [order for order in orders if order["market"]]
@@ -153,9 +172,14 @@ def calibrate_execution_events(events: list[dict]) -> dict:
                 not order["market"] and order["fee_bps"] is not None
                 for order in orders
             ),
+            "has_market_execution_shortfall_samples": any(
+                order["market_execution_shortfall_bps"] is not None
+                for order in orders
+            ),
             "can_calibrate_market_slippage": False,
             "market_slippage_blocker": (
-                "submit_requested nu conține quote/mid de referință pentru ordine MARKET"
+                "shortfall-ul decizie-fill include mișcarea pieței, spread și slippage; "
+                "auditul nu le poate separa fără bid/ask/mid la submit"
             ),
             "can_calibrate_spread": False,
             "spread_blocker": "auditul nu conține bid/ask la momentul deciziei",

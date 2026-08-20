@@ -21,9 +21,14 @@ class ExecutionCalibrationTest(unittest.TestCase):
                 "status": "closed", "filled_qty": 10, "cost": 990, "fee": 0.99,
             },
             {
+                "ts": 21, "event": "order_status", "intent_id": "limit-1",
+                "status": "settled", "filled_qty": 10, "cost": 990, "fee": 1.98,
+            },
+            {
                 "ts": 30, "event": "submit_requested", "intent_id": "market-1",
                 "venue": "Kraken", "symbol": "HYPEUSD", "side": "sell",
-                "qty": 5, "price": None, "market": True,
+                "qty": 5, "price": None, "reference_price": 102,
+                "market": True,
             },
             {"ts": 31, "event": "submit_accepted", "intent_id": "market-1"},
             {
@@ -37,7 +42,7 @@ class ExecutionCalibrationTest(unittest.TestCase):
         self.assertEqual(report["summary"]["all"]["orders"], 2)
         self.assertEqual(report["summary"]["all"]["filled"], 2)
         self.assertEqual(report["summary"]["limit"]["ever_partial"], 1)
-        self.assertAlmostEqual(report["summary"]["limit"]["fee_bps"]["p50"], 10.0)
+        self.assertAlmostEqual(report["summary"]["limit"]["fee_bps"]["p50"], 20.0)
         self.assertAlmostEqual(
             report["summary"]["market"]["fee_bps"]["p50"], 26.0,
         )
@@ -46,6 +51,15 @@ class ExecutionCalibrationTest(unittest.TestCase):
         )
         self.assertLess(
             report["summary"]["limit"]["limit_fill_deviation_bps"]["p50"], 0,
+        )
+        self.assertAlmostEqual(
+            report["summary"]["market"]
+            ["market_execution_shortfall_bps"]["p50"],
+            (1.0 - 100.0 / 102.0) * 10_000,
+        )
+        self.assertTrue(
+            report["calibration_readiness"]
+            ["has_market_execution_shortfall_samples"],
         )
         self.assertFalse(
             report["calibration_readiness"]["can_calibrate_market_slippage"],

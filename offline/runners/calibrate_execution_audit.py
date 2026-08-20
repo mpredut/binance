@@ -54,8 +54,8 @@ def markdown_report(report: dict, paths: list[Path]) -> str:
         "# Execution audit calibration", "",
         f"Fișiere: {len(paths)}", "",
         "| Tip | Orders | Filled | Partial | Fee p50 bps | Fee p95 bps | "
-        "Latency p50 s | Fill ratio p50 |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|",
+        "Latency p50 s | Fill ratio p50 | Shortfall p50 bps |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for name in ("all", "limit", "market"):
         item = report["summary"][name]
@@ -64,13 +64,17 @@ def markdown_report(report: dict, paths: list[Path]) -> str:
             f"{item['ever_partial']} | {_fmt(item['fee_bps']['p50'])} | "
             f"{_fmt(item['fee_bps']['p95'])} | "
             f"{_fmt(item['first_fill_latency_s']['p50'])} | "
-            f"{_fmt(item['final_fill_ratio']['p50'])} |"
+            f"{_fmt(item['final_fill_ratio']['p50'])} | "
+            f"{_fmt(item['market_execution_shortfall_bps']['p50'])} |"
         )
     ready = report["calibration_readiness"]
     lines.extend([
         "", "## Readiness", "",
         f"Filled orders: {ready['filled_orders']}/{ready['minimum_filled_orders']} minimum.",
-        "", "Market slippage: indisponibil — " + ready["market_slippage_blocker"] + ".",
+        "", "MARKET shortfall: disponibil după deploy când auditul conține "
+        "`reference_price`; nu este slippage pur.",
+        "", "Market slippage separat: indisponibil — "
+        + ready["market_slippage_blocker"] + ".",
         "", "Spread: indisponibil — " + ready["spread_blocker"] + ".", "",
         "Raportul este observațional și nu modifică automat scenariile de backtest.", "",
     ])

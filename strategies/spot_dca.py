@@ -308,6 +308,7 @@ class Strategy:
                 txid = submit_with_intent(
                     self.client, intent_id, self.pair, side, vol, None if market else price,
                     market=market, kind=kind,
+                    reference_price=price if market else None,
                 )
             else:
                 txid = self.client.submit_order(
