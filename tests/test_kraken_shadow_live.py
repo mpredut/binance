@@ -53,13 +53,15 @@ class ShadowLiveTest(unittest.TestCase):
         self.assertEqual(list(variants_60), ["current", "tp4", "dca15"])
         self.assertEqual(
             list(variants_240),
-            ["current", "tp4", "dca15", "A_trail", "overlay650t8"],
+            ["current", "tp4", "dca15", "A_trail", "overlay650t8", "B_dcabrake"],
         )
         adaptive = variants_240["A_trail"]
         self.assertTrue(adaptive.tp_trail_adaptive)
         self.assertEqual(adaptive.tp_trail_vol_interval, 240)
         candidate = variants_240["overlay650t8"]
         self.assertTrue(candidate.trend_overlay)
+        brake = variants_240["B_dcabrake"]
+        self.assertTrue(brake.dca_trend_brake)
         self.assertEqual(candidate.trend_topup, 650.0)
         self.assertEqual(candidate.trend_trail_pct, 8.0)
 
