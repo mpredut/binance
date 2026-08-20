@@ -2,7 +2,7 @@
 StrategyExecutor. Daca cineva adauga o metoda in contract dar uita un provider (sau
 schimba o semnatura), acest test pica -> nu ajunge base v2 sa crape pe acel venue.
 
-Parametrizat peste kraken / hyperliquid / binance. Instantiere fara retea (clientii sunt
+Parametrizat peste kraken / hyperliquid / binance / Trading212. Instantiere fara retea (clientii sunt
 lazy); verificam DOAR ca interfata exista si e apelabila, nu comportamentul (acela e in
 testele per-provider test_*_provider_executor.py)."""
 import os
@@ -17,6 +17,7 @@ from providers.strategy_executor import StrategyExecutor  # noqa: E402
 from providers.kraken_provider import KrakenProvider  # noqa: E402
 from providers.hyperliquid_provider import HyperliquidProvider  # noqa: E402
 from providers.market_api import BinanceProvider  # noqa: E402
+from providers.t212_provider import T212Provider  # noqa: E402
 
 # Metodele cerute de kraken/strategy.py (motorul base v2), agnostice de venue.
 CONTRACT_METHODS = (
@@ -30,6 +31,7 @@ def _providers():
         ("kraken", KrakenProvider()),
         ("hyperliquid", HyperliquidProvider(token="HYPE")),
         ("binance", BinanceProvider()),
+        ("trading212", T212Provider()),
     ]
 
 

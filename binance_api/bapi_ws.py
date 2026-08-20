@@ -32,7 +32,7 @@ import utils as u
 
 try:
     from keys.apikeys import api_key_ws
-except ModuleNotFoundError:
+except (ModuleNotFoundError, ImportError):
     # Importul modulelor read-only/test nu trebuie sa ceara secrete. Stream-ul
     # privat refuza pornirea mai jos daca cheia nu este disponibila.
     api_key_ws = os.environ.get("BINANCE_API_KEY_WS", "")

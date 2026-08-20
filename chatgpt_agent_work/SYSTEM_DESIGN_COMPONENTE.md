@@ -711,6 +711,21 @@ t212_bot process
 
 Botul T212 este independent de `Instrument`, pentru a evita două owners pentru aceeași poziție. Intrările T212 din `instruments.conf` sunt registry-only și dezactivate în `monitortrades`.
 
+### Adaptorul generic `T212Provider`
+
+```text
+StrategyExecutor
+  ├── submit_order ──► LIMIT / MARKET T212 (live gate separat)
+  ├── order_status ──► pending order ──404──► historical orders fallback
+  ├── cancel_order ──► confirmare sau status terminal idempotent
+  ├── pair_precision ─► mecanica actuală 2 zecimale / min 0.01
+  └── free_balance ──► portfolio, fail-closed la read indisponibil
+```
+
+Adaptorul generalizează mecanica ordinelor, nu strategia. Motorul autonom T212 păstrează
+feed-ul Yahoo, FX fee, take-profit ladder și regulile sale proprii; `ohlc_closes` din
+contractul generic întoarce momentan `[]` pentru T212.
+
 ## 19. Componentă: `TrailingCore`
 
 ### State per asset

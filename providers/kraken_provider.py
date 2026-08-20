@@ -19,7 +19,7 @@ import math
 import time
 from typing import Optional, List
 
-from .market_api import MarketDataProvider, _normalize_order, env_value
+from .base import MarketDataProvider, _normalize_order, env_value
 from .strategy_executor import OrderStatus, PairPrecision, ProviderError
 
 _KRAKEN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kraken")

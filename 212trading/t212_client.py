@@ -17,7 +17,12 @@ import os
 import threading
 import time
 
-from ipo_common import http_get, http_post_json, log
+try:
+    # Import ca pachet (provider generic / wheel instalat).
+    from .ipo_common import http_get, http_post_json, log
+except ImportError:
+    # Compatibilitate cu lansarea directa existenta: cd 212trading && python t212_bot.py.
+    from ipo_common import http_get, http_post_json, log
 
 LIVE_BASE = "https://live.trading212.com/api/v0"
 DEMO_BASE = "https://demo.trading212.com/api/v0"
@@ -115,23 +120,13 @@ class T212Client:
         return hits or None
 
     # -- ordine ----------------------------------------------------------------
-    def place_limit_order(
-        self,
-        ticker: str,
-        quantity: float,
-        limit_price: float,
-        validity: str = "DAY",
-    ) -> tuple[int, dict]:
-        """Plaseaza ordin LIMIT. Returneaza (http_status, payload_raspuns)."""
-        payload = {
-            "ticker":       ticker,
-            "quantity":     round(quantity, 2),   # pozitiv = BUY
-            "limitPrice":   round(limit_price, 2),
-            "timeValidity": validity,
-        }
+    def _place_order(self, endpoint: str, payload: dict) -> tuple[int, dict]:
+        """Transport comun pentru ordine. Nu face retry: endpoint-urile T212 de
+        plasare nu sunt idempotente, deci un retry dupa un raspuns pierdut ar
+        putea dubla ordinul."""
         log(f"  [ORDER] payload: {json.dumps(payload)}")
         status, body = http_post_json(
-            f"{self.base}/equity/orders/limit",
+            f"{self.base}/equity/orders/{endpoint}",
             payload=payload,
             headers=self._headers(),
         )
@@ -146,8 +141,107 @@ class T212Client:
             self._ord_cache = None
         return status, data
 
+    def place_limit_order(
+        self,
+        ticker: str,
+        quantity: float,
+        limit_price: float,
+        validity: str = "DAY",
+    ) -> tuple[int, dict]:
+        """Plaseaza ordin LIMIT. Returneaza (http_status, payload_raspuns)."""
+        return self._place_order("limit", {
+            "ticker": ticker,
+            "quantity": round(quantity, 2),   # pozitiv = BUY, negativ = SELL
+            "limitPrice": round(limit_price, 2),
+            "timeValidity": validity,
+        })
+
+    def place_market_order(
+        self,
+        ticker: str,
+        quantity: float,
+        extended_hours: bool = False,
+    ) -> tuple[int, dict]:
+        """Plaseaza ordin MARKET. Semnul cantitatii da directia, ca la LIMIT."""
+        return self._place_order("market", {
+            "ticker": ticker,
+            "quantity": round(quantity, 2),
+            "extendedHours": bool(extended_hours),
+        })
+
+    def get_historical_order(self, order_id) -> dict | None:
+        """Cauta ordinul terminal in prima pagina de istoric.
+
+        GET /equity/orders/{id} este orientat spre ordine pending; dupa fill/cancel
+        ordinul poate disparea de acolo. Ordinele tocmai inchise sunt in prima pagina
+        (maxim 50), suficient pentru reconcilierea imediata. Daca istoricul nu este
+        disponibil sau ordinul nu a devenit inca vizibil, intoarcem None iar adaptorul
+        strict va reincerca ulterior, fara sa presupuna un fill.
+        """
+        status, body = http_get(
+            f"{self.base}/equity/history/orders?limit=50",
+            headers=self._headers(),
+        )
+        if status != 200 or not body:
+            self._log_read_fail("istoric ordine", status)
+            return None
+        try:
+            payload = json.loads(body)
+        except ValueError:
+            self._log_read_fail("istoric ordine (JSON invalid)", status)
+            return None
+        items = payload.get("items", []) if isinstance(payload, dict) else payload
+        matches = []
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            order = item.get("order") if isinstance(item.get("order"), dict) else item
+            if str(order.get("id")) == str(order_id):
+                matches.append((order, item.get("fill")))
+        if not matches:
+            return None
+
+        # Schema oficiala istorica este {order, fill}; acelasi order poate avea
+        # mai multe fills. Intoarcem forma Order folosita de restul clientului,
+        # imbogatita cu executia agregata reala (nu limitPrice aproximativ).
+        result = dict(matches[0][0])
+        total_qty = total_cost = total_fee = 0.0
+        fee_currencies = set()
+        for _, fill in matches:
+            if not isinstance(fill, dict):
+                continue
+            try:
+                qty = abs(float(fill.get("quantity") or 0.0))
+                price = abs(float(fill.get("price") or 0.0))
+            except (TypeError, ValueError):
+                continue
+            total_qty += qty
+            total_cost += qty * price
+            wallet = fill.get("walletImpact")
+            taxes = wallet.get("taxes") if isinstance(wallet, dict) else []
+            for tax in taxes or []:
+                if not isinstance(tax, dict):
+                    continue
+                try:
+                    total_fee += abs(float(tax.get("quantity") or 0.0))
+                except (TypeError, ValueError):
+                    continue
+                currency = str(tax.get("currency") or "").strip().upper()
+                if currency:
+                    fee_currencies.add(currency)
+        if total_qty > 0:
+            result["filledQuantity"] = total_qty
+            result["filledValue"] = total_cost
+            result["fillPrice"] = total_cost / total_qty
+        result["fee"] = total_fee
+        if fee_currencies:
+            result["_feeCurrencies"] = sorted(fee_currencies)
+        return result
+
     def get_order_status(self, order_id) -> dict | None:
         status, body = http_get(f"{self.base}/equity/orders/{order_id}", headers=self._headers())
+        if status == 404:
+            return self.get_historical_order(order_id)
         if status != 200:
             self._log_read_fail("status ordin", status)
             return None
@@ -159,7 +253,10 @@ class T212Client:
 
     def cancel_order(self, order_id) -> bool:
         """Anuleaza un ordin dupa id. Returneaza True daca a fost acceptat."""
-        from ipo_common import http_request
+        try:
+            from .ipo_common import http_request
+        except ImportError:
+            from ipo_common import http_request
         status, _ = http_request("DELETE", f"{self.base}/equity/orders/{order_id}",
                                  headers=self._headers())
         ok = status in (200, 201, 204)

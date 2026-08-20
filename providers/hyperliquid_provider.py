@@ -29,7 +29,7 @@ import threading
 import time
 from typing import List, Optional
 
-from .market_api import MarketDataProvider, _normalize_order
+from .base import MarketDataProvider, _normalize_order
 from .strategy_executor import OrderStatus, PairPrecision, ProviderError
 
 # Radacina repo-ului + dir-ul hyperliquid/ (pt importurile bare `common`, `hl_client`).

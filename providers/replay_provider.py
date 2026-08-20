@@ -30,7 +30,7 @@ import os
 from typing import Dict, List, Optional, Tuple
 
 import utils
-from providers.market_api import MarketDataProvider
+from providers.base import MarketDataProvider
 
 # strip sufix de cotare -> asset de baza (BTCUSDC -> BTC). Centralizat in utils
 # (28 iul, era copiat aici + monitortrades + verify_tools).

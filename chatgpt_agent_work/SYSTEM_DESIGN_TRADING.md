@@ -261,14 +261,23 @@ Kill-switch-ul ține worker-ul viu, dar idle, pentru a evita flapping-ul supervi
 
 ## 6. Abstracția multi-provider
 
-### `MarketDataProvider`
+### `MarketDataProvider` și `StrategyExecutor`
 
-Contractul comun include:
+`providers/base.py` conține mecanica fără registry, astfel încât adaptoarele pot fi
+importate independent, fără ciclul provider → `market_api` → provider.
+
+Contractul `MarketDataProvider` include:
 
 - market data: `get_current_price`, `get_price_history`, `supports_symbol`;
 - cont: `free_balance`, `get_orders`, `get_trades`, `open_orders`;
 - execuție: `place_order`, plus hooks pentru mecanica și gardurile venue-ului;
 - normalizarea ordinelor la `{side, price, qty, timestamp_ms}`.
+
+Contractul strict `StrategyExecutor` acoperă execuția urmărită financiar:
+`submit_order`, `order_status`, `cancel_order`, `pair_precision`, `free_balance` și
+`ohlc_closes`. Kraken, Hyperliquid, Binance și Trading212 trec aceeași gardă de
+conformitate. Contractul comun nu obligă venue-urile să folosească aceeași strategie
+sau aceiași parametri.
 
 `MarketApi` deține registry-ul providerilor și poate ruta implicit după symbol. `Instrument` preferă rutarea explicită după numele providerului, evitând ambiguitatea când același activ există pe mai multe venue-uri.
 
@@ -287,7 +296,9 @@ Oferă API generic pentru preț, istoric, sold, ordine, trades și plasare. Para
 - **BinanceProvider** deleagă către modulele istorice `bapi`, `bapi_allorders`, `bapi_placeorder`. Declară că își aplică gardurile intern.
 - **KrakenProvider** folosește clientul Kraken și cache-ul separat de fills; ordinele live sunt gated.
 - **HyperliquidProvider** deservește HYPE spot, separă fills spot de fills perp și încarcă SDK-ul lazy. Ordinele sunt dry-run implicit.
-- **T212Provider** oferă integrarea generică, dar instrumentele T212 din `instruments.conf` sunt dezactivate ca să nu concureze cu botul autonom.
+- **T212Provider** implementează execuția strictă, status/partial fills, anularea și
+  precizia pe API-ul public T212. Citirile de portofoliu sunt fail-closed. Instrumentele
+  T212 din `instruments.conf` rămân dezactivate ca să nu concureze cu botul autonom.
 
 ## 7. Pipeline-ul ordinului și gardurile de risc
 
