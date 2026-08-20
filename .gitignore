@@ -57,3 +57,11 @@ offline/results/
 
 # Artefacte generate de drawPriceLst (priceAnalysis.py savefig) — nu cod.
 plot_*.png
+
+# --- Artefacte locale din root (nu cod / nu date de benchmark) ---
+/nohup.out
+/plots/
+/sell_recommendation.csv
+/commit
+/*.patch
+*:Zone.Identifier

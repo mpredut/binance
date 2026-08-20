@@ -1,11 +1,4 @@
-*.log
-logger
-plots
-keys
-apikeys.py
-sell_recommendation.csv
-index.html
-__pycache__
-old*
-myenv
-
+# Director exclusiv local: poate conține chei private, API keys și copii
+# decriptate. Singurul fișier permis în Git este chiar această regulă.
+*
+!.gitignore
