@@ -28,19 +28,22 @@ KrakenError`. Backtestul (`replay.py`) folosește `MagicMock` → aproape neatin
 
 ## Faze (fiecare cu gate)
 
-- **Faza 0 — Contract + plasă de regresie** ✅ *(acest commit)*
-  - `providers/strategy_executor.py` (contractul).
-  - `tests/test_kraken_strategy_golden.py` — GOLDEN: urma exactă de decizii (14 ordine,
-    hash `69fd0a50…`) + metrici base v2 pe HYPE. **Trebuie să treacă neschimbat după refactor.**
-- **Faza 1 — Kraken pe contract** *(~1 zi)*: implementezi cele 4 metode lipsă în
-  `kraken_provider` prin **delegare la `kraken_client`** (le are deja) + `KrakenError→ProviderError`.
-- **Faza 2 — Rewire `strategy.py`** *(~1 zi)* · **gate: golden pass + re-validare live Kraken**:
-  8 call-site → contract; 6 `except`→`ProviderError`; `kraken_bot._build_client`→provider;
-  `replay.py` o linie MagicMock. Kraken folosește `place_order` RAW (comportament identic).
-- **Faza 3 — Hyperliquid** *(~1–2 zile)* · **gate: paper + shadow**: `order_status`+`cancel_order`
-  reale (API HL le suportă) + `pair_precision`.
-- **Faza 4 — Binance** *(~1–2 zile)*: `order_status`, `cancel_order` (din `bapi`), precizie.
-- **Faza 5 — Consolidare** *(~0.5 zi)*: suită de conformitate parametrizată peste providerii.
+- **Faza 0 — Contract + plasă de regresie** ✅
+  - `providers/strategy_executor.py` (contractul: 7 metode + OrderStatus/PairPrecision/ProviderError).
+  - `tests/test_kraken_strategy_golden.py` — GOLDEN: urma exactă (14 ordine, hash `69fd0a50…`) +
+    metrici base v2 pe HYPE. **Trece neschimbat după tot refactorul.**
+- **Faza 1 — Kraken pe contract** ✅ — `kraken_provider` delegă la `kraken_client` +
+  `KrakenError→ProviderError`. 12 teste conformitate.
+- **Faza 2 — Rewire `strategy.py`** ✅ · **golden BYTE-IDENTICAL** — 8 call-site → contract;
+  6 `except`→`ProviderError`; `kraken_bot` injectează `KrakenProvider`; `get_current_price`
+  adăugat în contract (gap `run()` prins). Test nou de căi live.
+- **Faza 3 — Hyperliquid** ✅ — `submit_order`(gated `HL_LIVE_ORDERS`)/`order_status`(fills)/
+  `cancel_order`/`pair_precision`/`ohlc_closes` reale. 11 teste conformitate.
+- **Faza 4 — Binance** ✅ — `submit_order`/`order_status`(get_order)/`cancel_order`/
+  `pair_precision`(filters)/`ohlc_closes`(klines). 7 teste. NB: completitudine — Binance base v2
+  se suprapune cu tradeall; `order_status.fee=0` (aprox, refinabil din get_my_trades).
+- **Faza 5 — Consolidare** ✅ — `tests/test_provider_contract_conformance.py`: gardă unică
+  parametrizată (kraken/HL/binance toți satisfac `StrategyExecutor`).
 - **Faza 6 (opțional, separat)** — rutează base v2 prin `MarketApi.place` (guardrail-uri).
   Schimbare de comportament → re-validare dedicată, NU în gate-ul de regresie.
 

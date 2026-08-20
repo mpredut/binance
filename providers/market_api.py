@@ -24,6 +24,13 @@ from typing import List, Optional
 
 from binance_api import bapi as _bapi
 from binance_api import bapi_allorders as _allorders
+from .strategy_executor import OrderStatus, PairPrecision, ProviderError
+
+
+def _step_decimals(step: str) -> int:
+    """Nr de zecimale semnificative dintr-un stepSize/tickSize Binance (ex '0.00100000'->3)."""
+    s = str(step).rstrip("0")
+    return len(s.split(".")[1]) if "." in s and s.split(".", 1)[1] else 0
 
 
 def env_value(folder: str, key: str) -> Optional[str]:
@@ -285,6 +292,76 @@ class BinanceProvider(MarketDataProvider):
         # e acum mecanica-only, deci NU se dubleaza gardul. (Era True cat timp Binance
         # rula lantul propriu place_order_smart -> if_place_safe_order.)
         return False
+
+    # ── CONTRACT StrategyExecutor (Faza 4) ─────────────────────────────────────
+    # get_current_price / free_balance de mai sus satisfac deja contractul.
+    def pair_precision(self, symbol: str):
+        try:
+            info = _bapi.client.get_symbol_info(symbol)
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"pair_precision({symbol}): {e}") from e
+        if not info:
+            return None
+        price_dec = vol_dec = 0
+        omin = 0.0
+        for f in info.get("filters", []):
+            if f.get("filterType") == "PRICE_FILTER":
+                price_dec = _step_decimals(f.get("tickSize", "0"))
+            elif f.get("filterType") == "LOT_SIZE":
+                vol_dec = _step_decimals(f.get("stepSize", "0"))
+                omin = float(f.get("minQty", 0) or 0.0)
+        return PairPrecision(price_decimals=price_dec, volume_decimals=vol_dec,
+                             order_min=omin, base_asset=str(info.get("baseAsset", "")))
+
+    def ohlc_closes(self, symbol: str, interval_min: int) -> list:
+        iv = {1: "1m", 5: "5m", 15: "15m", 60: "1h", 240: "4h", 1440: "1d"}.get(int(interval_min), "1h")
+        try:
+            kl = _bapi.client.get_klines(symbol=symbol, interval=iv, limit=91)
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"ohlc_closes({symbol}): {e}") from e
+        closes = [float(k[4]) for k in (kl or [])]     # k[4] = close
+        return closes[:-1] if closes else []           # exclude bara in formare
+
+    def submit_order(self, symbol: str, side: str, qty: float,
+                     price: Optional[float] = None, *, market: bool = False,
+                     kind: Optional[str] = None) -> str:
+        order_type = "BUY" if (side or "").lower().startswith("b") else "SELL"
+        try:
+            if market or price is None:
+                fn = (_bapi.client.order_market_buy if order_type == "BUY"
+                      else _bapi.client.order_market_sell)
+                res = fn(symbol=symbol, quantity=qty)
+            else:
+                from binance_api import bapi_placeorder as _po
+                res = _po.place_order_mechanics(order_type, symbol, price, qty, force=False)
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"submit_order({symbol}): {e}") from e
+        oid = (res or {}).get("orderId")
+        if oid is None:
+            raise ProviderError(f"submit_order({symbol}): raspuns fara orderId ({res})")
+        return str(oid)
+
+    def order_status(self, symbol: str, order_id: str):
+        try:
+            o = _bapi.client.get_order(symbol=symbol, orderId=int(order_id))
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"order_status({order_id}): {e}") from e
+        st_map = {"FILLED": "closed", "CANCELED": "canceled", "EXPIRED": "expired",
+                  "REJECTED": "canceled", "NEW": "open", "PARTIALLY_FILLED": "open"}
+        # Comisionul nu vine in get_order (e in get_my_trades pe orderId) -> 0 aici; strategia
+        # Binance reala e tradeall, asta e completitudine. Refinare posibila: agrega fee din trades.
+        return OrderStatus(
+            status=st_map.get(o.get("status"), "open"),
+            filled_qty=float(o.get("executedQty") or 0.0),
+            cost=float(o.get("cummulativeQuoteQty") or 0.0),
+            fee=0.0,
+        )
+
+    def cancel_order(self, symbol: str, order_id: str) -> None:
+        try:
+            _bapi.cancel_order(symbol, int(order_id))   # bool; False (deja inchis) = idempotent OK
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(f"cancel_order({order_id}): {e}") from e
 
 
 class MarketApi:
