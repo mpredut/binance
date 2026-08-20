@@ -80,6 +80,16 @@ def _variants(interval: int):
             trend_trail_pct=8.0,
             trend_exit_break=False,
         )
+    # B: frana-DCA in downtrend confirmat. SINGURUL candidat care ramane pozitiv si sub
+    # executie conservatoare (+0.70pp cu cost real pe 628z) si reduce tail-ul/DD; semnul
+    # e insa config-dependent (Codex a vazut -0.56pp) -> forward-test dedicat, nu promovare.
+    # Foloseste semnalul de trend pe OHLC fix, ca A -> doar pe intervalul de trend.
+    if interval == base.trend_interval:
+        variants["B_dcabrake"] = dataclasses.replace(
+            base,
+            dca_trend_brake=True,
+            dca_brake_min_pct=1.5,
+        )
     return variants
 
 
