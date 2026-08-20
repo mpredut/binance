@@ -4,6 +4,7 @@ contractul StrategyExecutor: submit_order / order_status / cancel_order.
 GOLDEN-ul acopera deciziile (replay, dry_run); ASTA acopera exact partea pe care
 golden-ul NU o atinge: rewire-ul de la KrakenClient la contract in _place/reconcile/cancel.
 Provider FAKE (fara retea)."""
+import importlib.util
 import os
 import sys
 import unittest
@@ -13,7 +14,20 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "kraken"))
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
-import strategy as strat  # noqa: E402
+_COLLIDING = ("strategy", "market_data", "notify")
+_PRELOADED = {name: sys.modules.pop(name) for name in _COLLIDING if name in sys.modules}
+try:
+    _SPEC = importlib.util.spec_from_file_location(
+        "kraken_provider_live_strategy_under_test",
+        os.path.join(ROOT, "kraken", "strategy.py"),
+    )
+    strat = importlib.util.module_from_spec(_SPEC)
+    sys.modules[_SPEC.name] = strat
+    _SPEC.loader.exec_module(strat)
+finally:
+    for _name in _COLLIDING:
+        sys.modules.pop(_name, None)
+    sys.modules.update(_PRELOADED)
 from providers.strategy_executor import OrderStatus, PairPrecision, ProviderError  # noqa: E402
 
 
@@ -110,7 +124,9 @@ class ProviderLivePathTest(unittest.TestCase):
                                "amount": 60.0, "kind": "ENTRY", "ts": 0}]
         self.s._cancel_open("buy")
         self.assertIn(("cancel_order", "HYPEUSD", "OID-7"), self.fake.calls)
-        self.assertEqual(self.s.s["orders"], [])
+        # Ordinul ramane urmarit pana la status terminal, pentru a nu pierde
+        # un fill concurent cu anularea.
+        self.assertTrue(self.s.s["orders"][0]["cancel_requested"])
 
 
 if __name__ == "__main__":

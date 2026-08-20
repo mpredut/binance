@@ -356,22 +356,57 @@ class HyperliquidProvider(MarketDataProvider):
             raise ProviderError("order_status: HL_ACCOUNT_ADDRESS lipsa")
         try:
             oid = int(order_id)
-            for o in c.open_orders(pair):                       # inca deschis (resting)?
-                if int(o.get("oid", -1)) == oid:
-                    return OrderStatus("open", 0.0, 0.0, 0.0)
-            filled = cost = fee = 0.0                           # altfel: agrega fill-urile cu acest oid
-            found = False
+            query = getattr(c.info, "query_order_by_oid", None)
+            if not callable(query):
+                raise ProviderError(
+                    "SDK Hyperliquid prea vechi: lipseste query_order_by_oid"
+                )
+            raw_status = query(addr, oid) or {}
+            if raw_status.get("status") != "order":
+                raise ProviderError(
+                    f"order_status({order_id}): status nedeterminat ({raw_status})"
+                )
+            status_payload = raw_status.get("order") or {}
+            venue_status = str(status_payload.get("status") or "")
+            order_payload = status_payload.get("order") or {}
+
+            # user_fills este sursa cumulativa pentru cantitate/cost/fee. Il citim
+            # si cand ordinul este inca open, ca partial fills sa nu fie pierdute.
+            filled = cost = fee = 0.0
             for f in (c.info.user_fills(addr) or []):
                 if int(f.get("oid", -1)) != oid:
                     continue
-                found = True
                 sz = float(f.get("sz") or 0.0)
                 filled += sz
                 cost += sz * float(f.get("px") or 0.0)
                 fee += float(f.get("fee") or 0.0)
-            if found:
-                return OrderStatus("closed", filled, cost, fee)
-            return OrderStatus("canceled", 0.0, 0.0, 0.0)       # nici deschis, nici in fills
+            try:
+                original = float(order_payload.get("origSz") or 0.0)
+                remaining = float(order_payload.get("sz") or 0.0)
+            except (TypeError, ValueError) as e:
+                raise ProviderError(
+                    f"order_status({order_id}): dimensiuni ordin invalide"
+                ) from e
+            expected_filled = max(0.0, original - remaining)
+            tolerance = max(1e-12, original * 1e-9)
+            if expected_filled > filled + tolerance:
+                # Endpointul de status poate ajunge inaintea user_fills. Nu
+                # declarăm terminal un ordin pana nu putem contabiliza costul si fee-ul.
+                raise ProviderError(
+                    f"order_status({order_id}): fills incomplete "
+                    f"({filled} < {expected_filled})"
+                )
+            if venue_status == "open":
+                normalized = "open"
+            elif venue_status == "filled":
+                normalized = "closed"
+            else:
+                # Toate respingerile/anularile sunt terminale si nu trebuie
+                # confundate cu un ordin temporar absent din open_orders.
+                normalized = "canceled"
+            return OrderStatus(normalized, filled, cost, fee)
+        except ProviderError:
+            raise
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"order_status({order_id}): {e}") from e
 
@@ -380,7 +415,11 @@ class HyperliquidProvider(MarketDataProvider):
         if pair is None:
             raise ProviderError(f"cancel_order({order_id}): perechea indisponibila")
         try:
-            self._signer().cancel(pair, int(order_id))          # False (deja inchis) = idempotent OK
+            canceled = self._signer().cancel(pair, int(order_id))
+            if not canceled:
+                raise ProviderError(
+                    f"cancel_order({order_id}): venue-ul nu a confirmat anularea"
+                )
         except ProviderError:
             raise
         except Exception as e:  # noqa: BLE001

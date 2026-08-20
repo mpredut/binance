@@ -97,6 +97,11 @@ class KrakenExecutorContractTest(unittest.TestCase):
         self.fake.cancel_order = boom
         self.p.cancel_order("HYPEUSD", "GONE")         # NU trebuie sa ridice (idempotent)
 
+    def test_cancel_neconfirmat_ridica(self):
+        self.fake.cancel_order = lambda txid: {"count": 0}
+        with self.assertRaises(ProviderError):
+            self.p.cancel_order("HYPEUSD", "OABC-123")
+
     def test_pair_precision_mapare(self):
         pp = self.p.pair_precision("HYPEUSD")
         self.assertEqual(pp, PairPrecision(price_decimals=2, volume_decimals=8, order_min=0.1))

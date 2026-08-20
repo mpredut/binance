@@ -274,12 +274,22 @@ class KrakenProvider(MarketDataProvider):
         cancel, dar evitam orice ambiguitate viitoare; contractul cere `cancel_order`
         (vezi metoda de alias mai jos)."""
         try:
-            self._client().cancel_order(order_id)
+            result = self._client().cancel_order(order_id) or {}
         except Exception as e:  # noqa: BLE001
             msg = str(e).lower()
             if "unknown order" in msg or "already" in msg:
                 return                       # idempotent: deja inchis/anulat
             raise ProviderError(f"cancel_order {order_id}: {e}") from e
+        if "count" in result:
+            try:
+                if int(result["count"]) < 1:
+                    raise ProviderError(
+                        f"cancel_order {order_id}: Kraken nu a confirmat anularea"
+                    )
+            except (TypeError, ValueError) as e:
+                raise ProviderError(
+                    f"cancel_order {order_id}: raspuns invalid ({result})"
+                ) from e
 
     def cancel_order(self, symbol: str, order_id: str) -> None:  # contract StrategyExecutor
         self.cancel_order_by_id(symbol, order_id)

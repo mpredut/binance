@@ -150,7 +150,9 @@ def _run_once(
                         fill_order["vol"] = volume
                         gross_before = strategy.s["realized_gross"]
                     fee = fee_pct / 100.0 * volume * price
-                    strategy._apply_fill(fill_order, volume, price, fee=fee)
+                    strategy._apply_fill(
+                        fill_order, volume, price, fee=fee, final=complete,
+                    )
                     fill_count += 1
                     turnover_notional += volume * price
                     if side == "sell":

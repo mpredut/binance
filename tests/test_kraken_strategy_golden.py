@@ -15,6 +15,7 @@ refactor/provider-unify, Faza 0)."""
 import contextlib
 import csv
 import hashlib
+import importlib.util
 import io
 import os
 import sys
@@ -25,8 +26,23 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "kraken"))
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
-import replay as rp  # noqa: E402
-import strategy as strat  # noqa: E402
+# Venue-urile au module legacy cu aceleasi nume (`strategy`, `replay`,
+# `notify`). Incarcam graful Kraken sub un nume unic si restauram cache-ul,
+# astfel rezultatul nu depinde de ordinea in care pytest colecteaza fisierele.
+_COLLIDING = ("strategy", "replay", "market_data", "notify")
+_PRELOADED = {name: sys.modules.pop(name) for name in _COLLIDING if name in sys.modules}
+try:
+    _SPEC = importlib.util.spec_from_file_location(
+        "kraken_golden_replay_under_test", os.path.join(ROOT, "kraken", "replay.py")
+    )
+    rp = importlib.util.module_from_spec(_SPEC)
+    sys.modules[_SPEC.name] = rp
+    _SPEC.loader.exec_module(rp)
+    strat = rp._strat
+finally:
+    for _name in _COLLIDING:
+        sys.modules.pop(_name, None)
+    sys.modules.update(_PRELOADED)
 
 DATASET = os.path.join(ROOT, "offline", "research", "hype_dataset",
                        "HYPEUSDC_240m_hlspot.csv")

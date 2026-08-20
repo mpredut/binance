@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 import unittest
+from types import SimpleNamespace
 
 KRAKEN_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, KRAKEN_DIR)
@@ -62,6 +63,19 @@ class FakeKraken:
 
     def pair_info(self, pair):
         return {"base": "TSTX", "pair_decimals": 2, "lot_decimals": 6, "ordermin": "0.01"}
+
+    # Adapter minimal StrategyExecutor pentru testele motorului generic.
+    def pair_precision(self, pair):
+        info = self.pair_info(pair)
+        return SimpleNamespace(
+            price_decimals=info["pair_decimals"],
+            volume_decimals=info["lot_decimals"],
+            order_min=float(info["ordermin"]),
+            base_asset=info["base"],
+        )
+
+    def free_balance(self, asset):
+        return float(self.bal.get(asset, 0.0) or 0.0)
 
 
 class Base(unittest.TestCase):

@@ -17,7 +17,7 @@ from providers.strategy_executor import (  # noqa: E402
 
 class FakeClient:
     def get_symbol_info(self, symbol):
-        return {"baseAsset": "BTC", "filters": [
+        return {"baseAsset": "BTC", "quoteAsset": "USDC", "filters": [
             {"filterType": "PRICE_FILTER", "tickSize": "0.01000000"},
             {"filterType": "LOT_SIZE", "stepSize": "0.00100000", "minQty": "0.00100000"}]}
 
@@ -26,6 +26,12 @@ class FakeClient:
 
     def get_order(self, symbol, orderId):
         return {"status": "FILLED", "executedQty": "2.0", "cummulativeQuoteQty": "120.0"}
+
+    def get_my_trades(self, symbol, orderId):
+        return [{
+            "orderId": orderId, "price": "60", "commission": "0.12",
+            "commissionAsset": "USDC",
+        }]
 
     def order_market_buy(self, symbol, quantity):
         return {"orderId": 555}
@@ -38,10 +44,14 @@ class FakeBapi:
     def __init__(self):
         self.client = FakeClient()
         self.calls = []
+        self.cancel_result = True
+
+    def get_current_price(self, symbol):
+        return 600.0
 
     def cancel_order(self, symbol, order_id):
         self.calls.append((symbol, order_id))
-        return True
+        return self.cancel_result
 
 
 class BinanceExecutorContractTest(unittest.TestCase):
@@ -70,6 +80,7 @@ class BinanceExecutorContractTest(unittest.TestCase):
         self.assertEqual(st.status, "closed")
         self.assertAlmostEqual(st.filled_qty, 2.0)
         self.assertAlmostEqual(st.cost, 120.0)
+        self.assertAlmostEqual(st.fee, 0.12)
 
     def test_submit_order_market_intoarce_order_id(self):
         oid = self.p.submit_order("BTCUSDC", "buy", 0.01, price=None, market=True)
@@ -83,6 +94,11 @@ class BinanceExecutorContractTest(unittest.TestCase):
     def test_cancel_deleaga(self):
         self.p.cancel_order("BTCUSDC", "42")
         self.assertIn(("BTCUSDC", 42), self.fake.calls)
+
+    def test_cancel_neconfirmat_ridica(self):
+        self.fake.cancel_result = False
+        with self.assertRaises(ProviderError):
+            self.p.cancel_order("BTCUSDC", "42")
 
 
 if __name__ == "__main__":

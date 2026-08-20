@@ -14,16 +14,32 @@ from providers.strategy_executor import (  # noqa: E402
 
 
 class FakeInfo:
-    def __init__(self, fills):
+    def __init__(self, fills, status="open"):
         self._fills = fills
+        self._status = status
 
     def user_fills(self, addr):
         return self._fills
 
+    def query_order_by_oid(self, addr, oid):
+        if self._status == "unknownOid":
+            return {"status": "unknownOid"}
+        filled = sum(float(item.get("sz") or 0.0) for item in self._fills
+                     if int(item.get("oid", -1)) == oid)
+        original = max(1.0, filled)
+        remaining = 0.0 if self._status == "filled" else original - filled
+        return {
+            "status": "order",
+            "order": {
+                "status": self._status,
+                "order": {"origSz": str(original), "sz": str(remaining)},
+            },
+        }
+
 
 class FakeRead:
-    def __init__(self, fills=None, opens=None):
-        self.info = FakeInfo(fills or [])
+    def __init__(self, fills=None, opens=None, status="open"):
+        self.info = FakeInfo(fills or [], status=status)
         self._opens = opens or []
 
     def sz_decimals(self, coin):
@@ -110,28 +126,66 @@ class HLExecutorContractTest(unittest.TestCase):
             self.p.submit_order("HYPE", "buy", 1.0, price=60.0)
 
     def test_order_status_open(self):
-        self.p._client = FakeRead(opens=[{"oid": 999}])
+        self.p._client = FakeRead(status="open")
         st = self.p.order_status("HYPE", "999")
         self.assertEqual(st.status, "open")
 
+    def test_order_status_open_include_fill_partial(self):
+        self.p._client = FakeRead(
+            fills=[{"oid": 999, "sz": "0.4", "px": "60", "fee": "0.02"}],
+            status="open",
+        )
+        st = self.p.order_status("HYPE", "999")
+        self.assertEqual(st.status, "open")
+        self.assertAlmostEqual(st.filled_qty, 0.4)
+        self.assertAlmostEqual(st.cost, 24.0)
+        self.assertAlmostEqual(st.fee, 0.02)
+
     def test_order_status_closed_agrega_fills(self):
-        self.p._client = FakeRead(fills=[
-            {"oid": 5, "sz": "1.5", "px": "60", "fee": "0.1"},
-            {"oid": 5, "sz": "0.5", "px": "62", "fee": "0.05"},
-        ])
+        self.p._client = FakeRead(
+            fills=[
+                {"oid": 5, "sz": "1.5", "px": "60", "fee": "0.1"},
+                {"oid": 5, "sz": "0.5", "px": "62", "fee": "0.05"},
+            ],
+            status="filled",
+        )
         st = self.p.order_status("HYPE", "5")
         self.assertEqual(st.status, "closed")
         self.assertAlmostEqual(st.filled_qty, 2.0)
         self.assertAlmostEqual(st.cost, 1.5 * 60 + 0.5 * 62)
         self.assertAlmostEqual(st.fee, 0.15)
 
-    def test_order_status_canceled_daca_negasit(self):
-        st = self.p.order_status("HYPE", "77")     # nici deschis, nici in fills
+    def test_order_status_canceled_din_endpoint_dedicat(self):
+        self.p._client = FakeRead(status="canceled")
+        st = self.p.order_status("HYPE", "77")
         self.assertEqual(st.status, "canceled")
+
+    def test_order_status_necunoscut_ramane_nedeterminat(self):
+        self.p._client = FakeRead(status="unknownOid")
+        with self.assertRaises(ProviderError):
+            self.p.order_status("HYPE", "77")
+
+    def test_order_terminal_asteapta_fills_complete(self):
+        read = FakeRead(status="filled")
+        read.info.query_order_by_oid = lambda addr, oid: {
+            "status": "order",
+            "order": {
+                "status": "filled",
+                "order": {"origSz": "1", "sz": "0"},
+            },
+        }
+        self.p._client = read
+        with self.assertRaisesRegex(ProviderError, "fills incomplete"):
+            self.p.order_status("HYPE", "77")
 
     def test_cancel_deleaga_la_signer(self):
         self.p.cancel_order("HYPE", "5")
         self.assertIn(("cancel", "@107", 5), self.signer.calls)
+
+    def test_cancel_neconfirmat_ridica(self):
+        self.p._signer = lambda: FakeSigner(cancel_res=False)
+        with self.assertRaises(ProviderError):
+            self.p.cancel_order("HYPE", "5")
 
 
 if __name__ == "__main__":

@@ -20,6 +20,7 @@ BinanceAccountStream     (privat, user-data — execution reports)
 import asyncio
 import json
 import logging
+import os
 import threading
 import time
 import websockets
@@ -28,7 +29,13 @@ from typing import Dict, Optional, Set, Callable
 
 import symbols as sym
 import utils as u
-from keys.apikeys import api_key_ws
+
+try:
+    from keys.apikeys import api_key_ws
+except ModuleNotFoundError:
+    # Importul modulelor read-only/test nu trebuie sa ceara secrete. Stream-ul
+    # privat refuza pornirea mai jos daca cheia nu este disponibila.
+    api_key_ws = os.environ.get("BINANCE_API_KEY_WS", "")
 
 logger = logging.getLogger("binance.ws")
 
@@ -446,9 +453,9 @@ class BinanceAccountStream(BinanceWSBase):
         return "event", event
 
     async def _main(self) -> None:
-        if self._signing_key is None:
+        if self._signing_key is None or not api_key_ws:
             self._mark_available(False); self._mark_unhealthy()
-            logger.error("[WS] Cheia Ed25519 lipsește → fallback polling.")
+            logger.error("[WS] Cheia Ed25519/API lipsește → fallback polling.")
             return
         self._mark_available(True)
         await self._run_with_reconnect(self._connect_and_run)

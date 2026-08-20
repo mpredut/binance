@@ -22,9 +22,30 @@ import os
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
-from binance_api import bapi as _bapi
-from binance_api import bapi_allorders as _allorders
 from .strategy_executor import OrderStatus, PairPrecision, ProviderError
+
+
+# Importurile Binance ajung pana la websocket-uri si chei locale. Providerii
+# Kraken/HL trebuie sa poata fi importati intr-un checkout curat, fara secrete
+# Binance si fara efecte secundare. Variabilele raman patch-uibile in teste.
+_bapi = None
+_allorders = None
+
+
+def _get_bapi():
+    global _bapi
+    if _bapi is None:
+        from binance_api import bapi
+        _bapi = bapi
+    return _bapi
+
+
+def _get_allorders():
+    global _allorders
+    if _allorders is None:
+        from binance_api import bapi_allorders
+        _allorders = bapi_allorders
+    return _allorders
 
 
 def _step_decimals(step: str) -> int:
@@ -205,7 +226,7 @@ class BinanceProvider(MarketDataProvider):
         return "Binance"
 
     def get_current_price(self, symbol: str) -> Optional[float]:
-        return _bapi.get_current_price(symbol)
+        return _get_bapi().get_current_price(symbol)
 
     def get_price_history(self, symbol: str, lookback_h: float) -> Optional[List]:
         return None
@@ -224,7 +245,7 @@ class BinanceProvider(MarketDataProvider):
         # Mirror EXACT al buclei din monitortrades.get_available_qty (si trade_watch):
         # parcurge soldurile, intoarce 'free' pt asset, altfel 0.0. get_account_assets_
         # balances are deja try/except (intoarce [] la eroare) -> nu arunca aici.
-        for bal in (_bapi.get_account_assets_balances() or []):
+        for bal in (_get_bapi().get_account_assets_balances() or []):
             if bal.get("asset") == asset:
                 return float(bal.get("free", 0.0) or 0.0)
         return 0.0
@@ -232,7 +253,7 @@ class BinanceProvider(MarketDataProvider):
     def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:
         # bapi_allorders.get_trade_orders(order_type, symbol, max_age_seconds) — aceeasi
         # filtrare pe side+varsta ca pana acum; doar normalizam la forma comuna.
-        raw = _allorders.get_trade_orders(side, symbol, since_s) or []
+        raw = _get_allorders().get_trade_orders(side, symbol, since_s) or []
         return [_normalize_order(o) for o in raw]
 
     def place_order(self, symbol: str, side: str, price: float, qty: float, force: bool = False, **kwargs):
@@ -297,7 +318,7 @@ class BinanceProvider(MarketDataProvider):
     # get_current_price / free_balance de mai sus satisfac deja contractul.
     def pair_precision(self, symbol: str):
         try:
-            info = _bapi.client.get_symbol_info(symbol)
+            info = _get_bapi().client.get_symbol_info(symbol)
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"pair_precision({symbol}): {e}") from e
         if not info:
@@ -316,7 +337,7 @@ class BinanceProvider(MarketDataProvider):
     def ohlc_closes(self, symbol: str, interval_min: int) -> list:
         iv = {1: "1m", 5: "5m", 15: "15m", 60: "1h", 240: "4h", 1440: "1d"}.get(int(interval_min), "1h")
         try:
-            kl = _bapi.client.get_klines(symbol=symbol, interval=iv, limit=91)
+            kl = _get_bapi().client.get_klines(symbol=symbol, interval=iv, limit=91)
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"ohlc_closes({symbol}): {e}") from e
         closes = [float(k[4]) for k in (kl or [])]     # k[4] = close
@@ -328,8 +349,9 @@ class BinanceProvider(MarketDataProvider):
         order_type = "BUY" if (side or "").lower().startswith("b") else "SELL"
         try:
             if market or price is None:
-                fn = (_bapi.client.order_market_buy if order_type == "BUY"
-                      else _bapi.client.order_market_sell)
+                client = _get_bapi().client
+                fn = (client.order_market_buy if order_type == "BUY"
+                      else client.order_market_sell)
                 res = fn(symbol=symbol, quantity=qty)
             else:
                 from binance_api import bapi_placeorder as _po
@@ -341,25 +363,65 @@ class BinanceProvider(MarketDataProvider):
             raise ProviderError(f"submit_order({symbol}): raspuns fara orderId ({res})")
         return str(oid)
 
+    def _order_fee_quote(self, symbol: str, order_id: int) -> float:
+        """Comision cumulativ convertit in valuta de cotare a perechii.
+
+        Binance nu include fee-ul in get_order. Fara aceasta interogare motorul
+        generic ar supraestima sistematic P&L-ul si ar diferi de live.
+        """
+        client = _get_bapi().client
+        info = client.get_symbol_info(symbol) or {}
+        base = str(info.get("baseAsset") or "")
+        quote = str(info.get("quoteAsset") or "")
+        trades = client.get_my_trades(symbol=symbol, orderId=order_id) or []
+        total = 0.0
+        for trade in trades:
+            if int(trade.get("orderId", -1)) != order_id:
+                continue
+            commission = float(trade.get("commission") or 0.0)
+            asset = str(trade.get("commissionAsset") or quote)
+            price = float(trade.get("price") or 0.0)
+            if asset == quote:
+                total += commission
+            elif asset == base:
+                total += commission * price
+            else:
+                conversion = _get_bapi().get_current_price(f"{asset}{quote}")
+                if not conversion:
+                    raise ProviderError(
+                        f"order_status({order_id}): nu pot converti fee {asset}->{quote}"
+                    )
+                total += commission * float(conversion)
+        return total
+
     def order_status(self, symbol: str, order_id: str):
         try:
-            o = _bapi.client.get_order(symbol=symbol, orderId=int(order_id))
+            oid = int(order_id)
+            o = _get_bapi().client.get_order(symbol=symbol, orderId=oid)
+            executed_qty = float(o.get("executedQty") or 0.0)
+            fee = self._order_fee_quote(symbol, oid) if executed_qty > 0 else 0.0
+        except ProviderError:
+            raise
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"order_status({order_id}): {e}") from e
         st_map = {"FILLED": "closed", "CANCELED": "canceled", "EXPIRED": "expired",
                   "REJECTED": "canceled", "NEW": "open", "PARTIALLY_FILLED": "open"}
-        # Comisionul nu vine in get_order (e in get_my_trades pe orderId) -> 0 aici; strategia
-        # Binance reala e tradeall, asta e completitudine. Refinare posibila: agrega fee din trades.
         return OrderStatus(
             status=st_map.get(o.get("status"), "open"),
-            filled_qty=float(o.get("executedQty") or 0.0),
+            filled_qty=executed_qty,
             cost=float(o.get("cummulativeQuoteQty") or 0.0),
-            fee=0.0,
+            fee=fee,
         )
 
     def cancel_order(self, symbol: str, order_id: str) -> None:
         try:
-            _bapi.cancel_order(symbol, int(order_id))   # bool; False (deja inchis) = idempotent OK
+            canceled = _get_bapi().cancel_order(symbol, int(order_id))
+            if not canceled:
+                raise ProviderError(
+                    f"cancel_order({order_id}): venue-ul nu a confirmat anularea"
+                )
+        except ProviderError:
+            raise
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"cancel_order({order_id}): {e}") from e
 
