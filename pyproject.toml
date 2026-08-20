@@ -28,7 +28,6 @@ classifiers = [
 dependencies = [
     "python-binance>=1.0.0",
     "PyNaCl>=1.5.0",
-    "pynacl>=1.5.0",
     "websocket-client>=1.7.0",
     "websockets>=16.0",
     "requests>=2.31.0",
@@ -64,38 +63,47 @@ Repository = "https://github.com/mariusv/binance-trading-bot.git"
 
 [tool.setuptools]
 py-modules = [
-    "alert",
+    "alertnotifiers",
+    "alerts_config",
     "assetguardian",
-    "bapi",
-    "bapi_allorders",
-    "bapi_client",
-    "bapi_placeorder",
-    "bapi_trades",
-    "bapi_ws",
+    "botcore",
     "cacheManager",
+    "cachepaths",
     "cleanup",
     "config",
     "drawprices",
     "generateweb",
+    "instrument",
+    "instruments_config",
     "log",
+    "market_alerts",
     "monitororder",
     "monitortrades",
+    "new_coins_discovery",
     "news",
+    "order_guard",
+    "order_outcomes_log",
+    "order_retry",
+    "order_retry_worker",
     "priceAnalysis",
-    "priceprediction",
+    "pricechecker",
+    "pricefetcher",
+    "pricewindow",
     "rtrade",
-    "runtime_context",
     "server",
-    "shmutils",
+    "shadow_signals",
     "symbols",
     "tradeCacheManager",
     "tradeall",
+    "tradeall_observe",
+    "tradeall_price_archiver",
+    "trailing_core",
     "utils",
 ]
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["models*", "logger*"]
+include = ["binance_api*", "forecast*", "lock*", "providers*", "shmem*"]
 exclude = [
     "tests*",
     "__pycache__*",
