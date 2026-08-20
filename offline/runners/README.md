@@ -92,3 +92,26 @@ Pentru un candidat, `--params-report` citește un obiect `strategy_params` și
 Gate-ul cere avantaj de medie de minimum `0,10pp`, mai multe ferestre câștigate
 decât pierdute și păstrarea worst-fold/DD în **ambele** scenarii. Valorile de cost
 sunt provizorii până la calibrarea din fill-uri Kraken reale.
+
+Setul HYPE prioritar (`tp4`, `dca15`, A, B și `overlay650t8`) se rulează batch,
+fără grid search și fără modificarea configurației live:
+
+```bash
+.venv/bin/python offline/runners/kraken_financial_compare.py
+```
+
+Runnerul reproduce mai întâi baseline-ul live versionat și oprește comparația
+dacă acesta diferă. Apoi aplică promotion gate fiecărui candidat în scenariile
+central și stress.
+
+Auditul real poate fi agregat read-only înainte de calibrarea costurilor:
+
+```bash
+.venv/bin/python offline/runners/calibrate_execution_audit.py \
+  logger/execution_audit --venue Kraken \
+  --output /tmp/kraken_execution_calibration.json \
+  --markdown /tmp/kraken_execution_calibration.md
+```
+
+Raportul măsoară fee, latență, partial fills și fill-urile LIMIT. Nu pretinde că
+poate calcula spread sau slippage MARKET fără bid/ask/mid salvat la decizie.
