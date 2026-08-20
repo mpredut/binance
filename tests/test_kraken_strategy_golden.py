@@ -1,0 +1,115 @@
+"""GOLDEN REGRESSION — blocheaza comportamentul base v2 (kraken/strategy.py) INAINTE de
+refactorul provider-agnostic (Calea B: unificare pe MarketDataProvider).
+
+Ruleaza strategia LIVE prin motorul faithful (replay.run_replay) peste un slice
+DETERMINIST din dataset-ul HYPE inghetat si verifica:
+  1. URMA DE DECIZII exacta (fiecare ordin plasat: side/kind/pret/vol/market) — hash stabil.
+  2. METRICILE finale (net/realized/fees/cycles/...) — la 8 zecimale.
+
+Dupa refactor (rewire strategy.py de la KrakenClient la MarketDataProvider), ACEST TEST
+TREBUIE SA TREACA NESCHIMBAT — dovada ca deciziile base v2 sunt byte-identical. Daca
+pica, refactorul a schimbat comportamentul live (regresie) si trebuie oprit.
+
+Valorile golden au fost capturate pe HEAD-ul dinainte de refactor (branch
+refactor/provider-unify, Faza 0)."""
+import contextlib
+import csv
+import hashlib
+import io
+import os
+import sys
+import unittest
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "kraken"))
+os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
+
+import replay as rp  # noqa: E402
+import strategy as strat  # noqa: E402
+
+DATASET = os.path.join(ROOT, "offline", "research", "hype_dataset",
+                       "HYPEUSDC_240m_hlspot.csv")
+BARS = 800          # slice determinist
+BUDGET = 3900.0
+
+# --- GOLDEN (capturat pe branch refactor/provider-unify, Faza 0) -------------
+GOLDEN_ORDERS = 14
+GOLDEN_TRACE_HASH = "69fd0a5053d74c58"
+GOLDEN_METRICS = {
+    "realized": 1844.33939624,
+    "net": 1817.57411476,
+    "fees": 26.76528149,
+    "total": 1817.57411476,
+    "final_upnl": 0.0,
+    "cycles": 4,
+    "wins": 4,
+    "maxdd": 297.20377694,
+    "open_qty": 0.0,
+    "fills": 13,
+}
+
+
+def _base_v2_params():
+    return strat.StratParams(
+        currency="USD", entry_amount=650.0, entry_discount_pct=0.8,
+        dca_amount=325.0, dca_drop_pct=1.25, check_minutes=2.0,
+        takeprofit_pct=5.0, max_budget=BUDGET, max_dca_buys=10,
+        enable_takeprofit=True, order_ttl_min=10.0, stop_loss_pct=12.5,
+        adopt_cost=0.0, adopt_qty=0.0, reentry_drop_pct=2.2,
+        reentry_tolerance_pct=0.05, reentry_adaptive=False,
+        reentry_sl_bounce_pct=1.5, tp_tranches=[], tp_trend_hold=True,
+        tp_trail_pct=3.0,
+    )
+
+
+def _load_ohlc(n):
+    with open(DATASET, encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    return [(float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"]))
+            for r in rows][:n]
+
+
+class BaseV2GoldenTest(unittest.TestCase):
+    """Amprenta de referinta pt refactorul provider-agnostic."""
+
+    def _run_with_trace(self):
+        ohlc = _load_ohlc(BARS)
+        trace = []
+        orig_place = strat.Strategy._place
+
+        def _rec(self, side, vol, price, **kw):
+            trace.append((side, kw.get("kind"),
+                          None if price is None else round(price, 4),
+                          round(vol, 6), bool(kw.get("market"))))
+            return orig_place(self, side, vol, price, **kw)
+
+        strat.Strategy._place = _rec
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                metrics = rp.run_replay(ohlc, _base_v2_params(),
+                                        fee_pct=0.26, bar_minutes=240)
+        finally:
+            strat.Strategy._place = orig_place
+        return trace, metrics
+
+    def test_decision_trace_is_byte_identical(self):
+        trace, _ = self._run_with_trace()
+        self.assertEqual(len(trace), GOLDEN_ORDERS,
+                         "numarul de ordine plasate s-a schimbat -> regresie de comportament")
+        digest = hashlib.sha256(repr(trace).encode()).hexdigest()[:16]
+        self.assertEqual(digest, GOLDEN_TRACE_HASH,
+                         "urma exacta de decizii s-a schimbat -> refactorul a alterat base v2")
+
+    def test_final_metrics_match_golden(self):
+        _, m = self._run_with_trace()
+        for key, expected in GOLDEN_METRICS.items():
+            got = m.get(key)
+            if isinstance(expected, float):
+                self.assertAlmostEqual(got, expected, places=6, msg=f"metrica '{key}' difera")
+            else:
+                self.assertEqual(got, expected, f"metrica '{key}' difera")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
