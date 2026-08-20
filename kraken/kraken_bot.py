@@ -72,7 +72,10 @@ def main() -> int:
     ap.add_argument("--test-strategy", metavar="PAIR", help="Ruleaza strategia ACUM pe perechea data")
     args = ap.parse_args()
     if not any(getattr(args, a, None) for a in ("balance", "find_pair", "price", "test_strategy")):
-        single_instance("kraken_bot")   # o singura instanta (nu blocheaza query-urile de mai sus)
+        # O instanta PER PERECHE (multi-coin): HYPE, ADA, WIF... pot rula simultan, fiecare
+        # cu lock-ul propriu. (Inainte era cheie fixa 'kraken_bot' -> a 2-a pereche era blocata.)
+        _lock_pair = (args.pair or os.environ.get("KRAKEN_PAIR") or "default").strip()
+        single_instance(f"kraken_bot_{_lock_pair}")
 
     client = _build_client()
 
