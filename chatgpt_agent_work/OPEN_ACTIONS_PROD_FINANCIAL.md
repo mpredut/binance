@@ -11,42 +11,41 @@ Data consolidării: 2026-08-20
 - Niciun candidat existent nu este aprobat pentru bani reali.
 - Configurația live rămâne sursa de comparație; shadow nu schimbă ordinele live.
 
-## A. De rulat pe producție când revine accesul
+## A. Validare și deploy producție
 
-### P0 — pre-deploy, read-only
+### P0 — pre-deploy, read-only — FINALIZAT 2026-08-20
 
-1. Validează fingerprint-ul SSH cunoscut.
-2. Notează commitul, statusul worktree-ului și configurația efectivă.
-3. Rulează healthcheck-ul și inventariază procesele cu PID/PPID/start time/argumente.
-4. Verifică ultimele loguri Kraken/T212 și absența erorilor noi, restart loop-urilor
-   sau proceselor duplicate.
-5. Verifică pozițiile, ordinele deschise și continuitatea stării înainte de orice
-   restart. Fluctuația normală de P&L nu este incident operațional.
+- Fingerprintul ED25519 cunoscut a fost validat înainte de autentificare.
+- Worktree-ul era curat; healthcheck-ul și inventarul PID/stare/ordine au fost
+  verificate înainte de restart.
+- Nu existau traceback-uri, procese duplicate, restart loop sau stare coruptă.
 
-### P1 — deploy controlat, numai cu aprobare explicită
+### P1 — deploy controlat — FINALIZAT 2026-08-20
 
-1. Preia `main` numai dacă worktree-ul de producție este curat și commitul remote
-   este cel aprobat.
-2. Nu modifica parametrii live ai candidaților: spacing growth și volatility sizing
-   rămân implicit `OFF`.
-3. Nu șterge/recrea ancorele sau fișierele shadow 60m/240m.
-4. Repornește numai procesele care trebuie să încarce cod live nou și numai după
-   reconcilierea pozițiilor/ordinelor; confirmă exact numărul așteptat de procese.
-5. Monitorizează după restart heartbeat, reconciliere, ordine duplicate și erori
-   până la minimum un ciclu operațional relevant.
+- Producția rulează checkout curat `main@b65554e`.
+- Au fost repornite controlat numai HYPE și Trading212. ADA paper și TAO live nu
+  au fost atinse.
+- HYPE a încărcat ciclul 14 cu `qty=0`, `orders=0`; Trading212 a încărcat aceleași
+  trei profiluri, cantități și `0/1/2` ordine urmărite. Nu s-au creat duplicate.
+- Ambele procese sunt unice și au `PPID 1`; healthcheck-ul final este integral OK.
+- Parametrii live și ancorele shadow nu au fost modificați.
 
-### P2 — shadow și calibrarea execuției
+### P2 — shadow și calibrarea execuției — ÎN AȘTEPTARE DE DATE
 
-1. Confirmă că snapshoturile 60m/240m conțin `decision_trace` și
-   `decision_divergences` și că ancorele vechi au fost păstrate.
-2. Acumulează minimum 20 divergențe reale de decizie înainte de verdict forward;
-   snapshoturile identice nu contează drept dovezi independente.
-3. Confirmă în audit că ordinele MARKET au `reference_price` la intenție, dar
-   ajung la provider cu `price=null`.
-4. După minimum 20 ordine cu fill, rulează calibrarea read-only pentru fee,
-   latență, partial-fill rate, abaterea LIMIT și decision-to-fill shortfall.
-5. Actualizează scenariile central/stress numai din distribuțiile observate, apoi
-   regenerează baseline-ul și toți candidații pe aceleași costuri.
+- Ancorele originale 60m/240m sunt păstrate. Snapshoturile sunt proaspete și au
+  `decision_trace` plus `decision_divergences`.
+- Forward-ul are 22 bare la 60m și 7 bare la 240m, dar încă zero divergențe pentru
+  toți candidații; nu există dovadă forward activă.
+- Calibrarea read-only vede 11 ordine LIMIT, zero fill-uri și zero ordine MARKET:
+  sub pragul de minimum 20 fill-uri. Costurile central/stress rămân necalibrate.
+- Următorul pas se execută numai după acumularea datelor, nu prin tuning acum.
+
+Observații operaționale separate de deploy:
+
+- T212 a respins un DCA SPCX pentru fonduri insuficiente și a păstrat corect
+  backoff-ul de 30 minute peste restart; nu s-a creat ordin.
+- Canalul `ntfy` a răspuns `429` (cotă zilnică epuizată), deci notificările prin
+  acel canal sunt temporar degradate; bucla de tranzacționare a continuat normal.
 
 ## B. Priorități financiare locale
 
@@ -96,7 +95,9 @@ Propunerile nu mai sunt confirmate în ambele ferestre; configurația rămâne
 ## Ce nu mai merită prioritate acum
 
 - overlay-ul HYPE și candidatul `A_trail`: respinși OOS;
-- branch-ul vechi `kraken-trail-decay-v3`: metrici greșite și arhitectură depășită;
+- `trail-decay v3`, inclusiv portarea nouă de pe `feature/calmar-gate`: aproximativ
+  `+0,05pp` return, numai `+8%` Calmar și zero reducere DD; pică ambele gate-uri,
+  deci rămâne pe branch și nu intră în `main`;
 - tuning suplimentar pentru `dca_vol_m1` înaintea gate-ului defensiv;
 - rutarea STOP/trailing prin `MarketApi.place` (Faza 6);
 - refactorizări mari de cache sau entrypoint fără un defect/operație concretă.
