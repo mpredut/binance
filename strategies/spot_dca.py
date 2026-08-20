@@ -101,6 +101,11 @@ class StratParams:
     dca_trend_brake: bool = False     # B: in DOWNTREND confirmat, NU face DCA (nu prinde cutitul care
                                       # cade) — ataca direct maxDD, overlay care REDUCE risc.
     dca_brake_min_pct: float = 1.5    # panta minima (%) recent/vechi ca sa considere downtrend
+    # --- #2: SIZING DCA scalat pe VOLATILITATE (default OFF) ---
+    dca_vol_scale_k: float = 0.0      # 0=OFF. eff_dca = dca × (vol_ref/vol_1h)^k, clamp [0.3,3].
+                                      # k>0 = DCA MAI MIC in vol mare (defensiv, minimizeaza pierderea);
+                                      # k<0 = MAI MARE in vol (harvest agresiv). Fail-safe pe warm-up.
+    dca_vol_ref: float = 2.0          # vol_1h (%) de referinta pt scalare
 
     @classmethod
     def from_env(cls) -> "StratParams":
@@ -146,6 +151,8 @@ class StratParams:
             tp_trail_vol_interval = int(float_env("STRAT_TP_TRAIL_VOL_INTERVAL") or 240),
             dca_trend_brake    = os.environ.get("STRAT_DCA_TREND_BRAKE", "false").strip().lower() == "true",
             dca_brake_min_pct  = float_env("STRAT_DCA_BRAKE_MIN_PCT") or 1.5,
+            dca_vol_scale_k    = float_env("STRAT_DCA_VOL_SCALE_K") or 0.0,
+            dca_vol_ref        = float_env("STRAT_DCA_VOL_REF") or 2.0,
         )
 
 
@@ -621,6 +628,20 @@ class Strategy:
                    desktop=self.desktop)
 
     # -- SHADOW vol-adaptiv (doar observatie/log, nu decide nimic) --------------
+    def _effective_dca_amount(self) -> float:
+        """#2: marimea DCA scalata pe volatilitate. dca_vol_scale_k=0 -> fix (dca_amount).
+        Fail-safe pe warm-up/eroare (cade pe fix), ca reintrarea adaptiva."""
+        if not self.p.dca_vol_scale_k:
+            return self.p.dca_amount
+        try:
+            vol = self._shadow_vol_1h()
+        except Exception:  # noqa: BLE001
+            vol = None
+        if not vol or vol <= 0:
+            return self.p.dca_amount
+        scale = (self.p.dca_vol_ref / vol) ** self.p.dca_vol_scale_k
+        return self.p.dca_amount * max(0.3, min(3.0, scale))
+
     def _shadow_vol_1h(self) -> float | None:
         """Volatilitate 1h (%) din istoricul propriu de tick-uri. None = warm-up."""
         pts = list(self._shadow_prices)
@@ -954,17 +975,18 @@ class Strategy:
                     for p_, q_ in desired:
                         self._place("sell", q_, p_, kind="TP")
 
+        eff_dca = self._effective_dca_amount()   # #2: scalat pe vol daca activat, altfel fix
         if (self.s["dca_buys"] < self.p.max_dca_buys
                 and self.s["last_buy_price"]
                 # prag DCA + "aproape de prag" = atins (regula partajata cu backtest)
                 and sr.dca_price_hit(price, self.s["last_buy_price"], self.p.dca_drop_pct, self.p.reentry_tolerance_pct)
-                and self.s["spent"] + self.p.dca_amount <= self.p.max_budget
+                and self.s["spent"] + eff_dca <= self.p.max_budget
                 and not (self.p.dca_trend_brake and self._trend_down())  # B: frana DCA in downtrend
                 and not self._has_open("buy")):
             log(f"  [STRAT] dip {price} <= {self.s['last_buy_price']}×(1-{self.p.dca_drop_pct}%)"
-                f" (tol {self.p.reentry_tolerance_pct}%) — DCA")
-            self._place("buy", self._qty_for(self.p.dca_amount, entry_px),
-                        entry_px, kind="DCA", amount=self.p.dca_amount)
+                f" (tol {self.p.reentry_tolerance_pct}%) — DCA {eff_dca:.0f}")
+            self._place("buy", self._qty_for(eff_dca, entry_px),
+                        entry_px, kind="DCA", amount=eff_dca)
 
     # -- bucla -----------------------------------------------------------------
     def run(self) -> None:
