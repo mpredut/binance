@@ -32,6 +32,9 @@ from ipo_common import log, now_str, float_env, are_close
 from ipo_notify import notify
 from market_data import get_eur_usd, get_usd_ron, get_price_usd, t212_to_yahoo, trend_slope_pct
 from t212_client import T212Client
+from providers.execution_audit import ExecutionAudit, new_intent_id
+from providers.strategy_executor import ProviderError
+from providers.t212_provider import T212Provider
 from strategies.state_store import JsonStateStore
 
 FX_FEE_PCT = 0.15  # taxa conversie valutara T212, per directie
@@ -180,7 +183,8 @@ class Strategy:
                  initial_state: dict | None = None,
                  fx_to_usd: float | None = None,
                  clock: Callable[[], float] | None = None,
-                 trend_slope_provider: Callable[[str], float | None] | None = None):
+                 trend_slope_provider: Callable[[str], float | None] | None = None,
+                 execution_audit: ExecutionAudit | None = None):
         self.client = client
         self.ticker = ticker
         self.yahoo_sym = params.yahoo_sym or t212_to_yahoo(ticker)
@@ -190,6 +194,11 @@ class Strategy:
         self.ccy = params.currency
         self._clock = clock or time.time
         self._trend_slope_provider = trend_slope_provider or trend_slope_pct
+        self.execution_audit = execution_audit or ExecutionAudit()
+        # Refolosim adaptorul strict pentru status/fill. Strategia financiara T212
+        # ramane separata, dar nu mai dubleaza parsarea payload-urilor de executie.
+        self._status_provider = T212Provider()
+        self._status_provider._cli = client
         self.fx_to_usd = self._fx_to_usd(params.currency) if fx_to_usd is None else fx_to_usd
         self.state_file = state_path_for(ticker)
         self._state_write_failed = False
@@ -246,6 +255,23 @@ class Strategy:
             if o["side"] == side:
                 return o
         return None
+
+    def _audit(self, event: str, order: dict | None = None, **fields) -> None:
+        """Audit comun, strict observational; PAPER nu produce jurnal live."""
+        if self.dry_run:
+            return
+        order = order or {}
+        intent_id = order.get("intent_id") or fields.pop("intent_id", None)
+        order_id = order.get("id")
+        if not intent_id:
+            intent_id = f"legacy-t212-{self.ticker}-{order_id or 'unknown'}"
+        if order_id is not None:
+            fields.setdefault("order_id", str(order_id))
+        fields.setdefault("side", str(order.get("side") or "").lower() or None)
+        fields.setdefault("kind", order.get("kind"))
+        self.execution_audit.record(
+            event, intent_id=intent_id, venue="T212", symbol=self.ticker, **fields,
+        )
 
     # -- aplicare fill ---------------------------------------------------------
     def _apply_fill(self, order: dict, qty: float, price: float) -> None:
@@ -314,14 +340,38 @@ class Strategy:
                                      "limit": round(limit, 2), "amount": amount, "kind": kind,
                                      "ts": self._now()})
             return
-        status, data = self.client.place_limit_order(self.ticker, qty, round(limit, 2), self.p.validity)
+        intent_id = new_intent_id("T212", self.ticker, kind)
+        self._audit(
+            "submit_requested", intent_id=intent_id, side="buy", kind=kind,
+            qty=qty, price=round(limit, 2), market=False,
+        )
+        try:
+            status, data = self.client.place_limit_order(
+                self.ticker, qty, round(limit, 2), self.p.validity,
+            )
+        except Exception as exc:  # noqa: BLE001 - pastreaza comportamentul callerului
+            self._audit(
+                "submit_rejected", intent_id=intent_id, side="buy", kind=kind,
+                qty=qty, price=round(limit, 2), market=False,
+                error_type=exc.__class__.__name__, error=str(exc),
+            )
+            raise
         if status in (200, 201):
             log(f"  [STRAT] BUY {kind} plasat id={data.get('id')} {qty} @ {limit:.2f}")
-            self.s["orders"].append({"id": data.get("id"), "side": "BUY", "qty": qty,
-                                     "limit": round(limit, 2), "amount": amount, "kind": kind,
-                                     "ts": self._now()})
+            order = {"id": data.get("id"), "side": "BUY", "qty": qty,
+                     "limit": round(limit, 2), "amount": amount, "kind": kind,
+                     "intent_id": intent_id, "ts": self._now()}
+            self.s["orders"].append(order)
+            self._audit(
+                "submit_accepted", order, qty=qty, price=round(limit, 2), market=False,
+            )
         else:
             log(f"  ! [STRAT] BUY {kind} esuat HTTP {status}: {json.dumps(data)[:200]}")
+            self._audit(
+                "submit_rejected", intent_id=intent_id, side="buy", kind=kind,
+                qty=qty, price=round(limit, 2), market=False,
+                error_type="T212HttpError", error=f"HTTP {status}: {json.dumps(data)[:500]}",
+            )
             if "insufficient" in json.dumps(data).lower():
                 # cont fara cash liber: nu mai spama la fiecare tick — pauza 30 min
                 self.s["buy_backoff_until"] = self._now() + 1800
@@ -336,13 +386,39 @@ class Strategy:
                                      "qty": round(qty, 2), "limit": round(limit, 2),
                                      "kind": kind, "level": level, "ts": self._now()})
             return True
-        status, data = self.client.place_limit_order(self.ticker, -abs(qty), round(limit, 2), self.p.validity)
+        intent_id = new_intent_id("T212", self.ticker, kind)
+        self._audit(
+            "submit_requested", intent_id=intent_id, side="sell", kind=kind,
+            qty=qty, price=round(limit, 2), market=False,
+        )
+        try:
+            status, data = self.client.place_limit_order(
+                self.ticker, -abs(qty), round(limit, 2), self.p.validity,
+            )
+        except Exception as exc:  # noqa: BLE001
+            self._audit(
+                "submit_rejected", intent_id=intent_id, side="sell", kind=kind,
+                qty=qty, price=round(limit, 2), market=False,
+                error_type=exc.__class__.__name__, error=str(exc),
+            )
+            raise
         if status in (200, 201):
             log(f"  [STRAT] SELL {kind}{tag} plasat id={data.get('id')} {qty:.2f} @ {limit:.2f}")
-            self.s["orders"].append({"id": data.get("id"), "side": "SELL", "qty": round(qty, 2),
-                                     "limit": round(limit, 2), "kind": kind, "level": level, "ts": self._now()})
+            order = {"id": data.get("id"), "side": "SELL", "qty": round(qty, 2),
+                     "limit": round(limit, 2), "kind": kind, "level": level,
+                     "intent_id": intent_id, "ts": self._now()}
+            self.s["orders"].append(order)
+            self._audit(
+                "submit_accepted", order, qty=round(qty, 2),
+                price=round(limit, 2), market=False,
+            )
             return True
         log(f"  ! [STRAT] SELL {kind}{tag} esuat HTTP {status}: {json.dumps(data)[:200]}")
+        self._audit(
+            "submit_rejected", intent_id=intent_id, side="sell", kind=kind,
+            qty=qty, price=round(limit, 2), market=False,
+            error_type="T212HttpError", error=f"HTTP {status}: {json.dumps(data)[:500]}",
+        )
         if status == 400 and "selling-equity-not-owned" in str(data):
             # HARDENING: reseteaza la 0 DOAR daca owned e chiar ~0 (pozitie inchisa real),
             # NU si cand owned>0 (free < ordin din rezervari/transe) -> altfel ai sterge o pozitie reala
@@ -368,16 +444,22 @@ class Strategy:
 
     def _cancel_specific(self, o: dict) -> bool:
         if not self.dry_run and not str(o["id"]).startswith("PAPER"):
+            self._audit("cancel_requested", o)
             try:
                 accepted = self.client.cancel_order(o["id"])
             except Exception as exc:  # noqa: BLE001 — ordinul trebuie pastrat local
                 log(f"  ! [STRAT] cancel esuat pentru {o['id']}: {exc} — ordinul ramane urmarit")
+                self._audit(
+                    "cancel_rejected", o, error_type=exc.__class__.__name__, error=str(exc),
+                )
                 return False
             # Clientul real intoarce bool. None ramane acceptat pentru adaptoarele
             # legacy care anulau cu succes fara valoare de retur.
             if accepted is False:
                 log(f"  ! [STRAT] cancel neconfirmat pentru {o['id']} — ordinul ramane urmarit")
+                self._audit("cancel_rejected", o, error_type="CancelNotConfirmed")
                 return False
+            self._audit("cancel_accepted", o)
         self._remove_order(o)
         log(f"  [STRAT] anulat ordin {o.get('side', '?')} {o['id']}")
         return True
@@ -478,8 +560,78 @@ class Strategy:
         orders = self.client.list_active_orders()
         if orders is None:
             return None
-        return {o.get("id") for o in orders
+        return {str(o.get("id")) for o in orders
                 if str(o.get("ticker", "")).upper() == self.ticker.upper()}
+
+    def _tracked_order_status(self, order: dict, cache: dict[str, object]):
+        """Status strict, memorat pe durata unui singur reconcile."""
+        key = str(order.get("id"))
+        if key in cache:
+            return cache[key]
+        try:
+            status = self._status_provider.order_status(self.ticker, key)
+        except ProviderError as exc:
+            log(f"  ! [STRAT] status T212 {key} indisponibil: {exc} — pastrez ordinul")
+            self._audit(
+                "status_error", order, error_type=exc.__class__.__name__, error=str(exc),
+            )
+            cache[key] = None
+            return None
+        cache[key] = status
+        return status
+
+    def _exact_execution_price(self, side: str, position_delta: float,
+                               cache: dict[str, object]) -> float | None:
+        """Pret ponderat din deltele cumulative ale ordinelor urmarite.
+
+        Portofoliul ramane sursa de adevar pentru cantitate. Pretul ordinelor este
+        folosit numai cand suma deltelor corespunde schimbarii pozitiei.
+        """
+        rows = []
+        total_qty = total_cost = 0.0
+        for order in [o for o in self.s["orders"] if o.get("side") == side]:
+            status = self._tracked_order_status(order, cache)
+            if status is None:
+                continue
+            try:
+                cumulative_qty = float(status.filled_qty or 0.0)
+                cumulative_cost = float(status.cost or 0.0)
+                cumulative_fee = float(status.fee or 0.0)
+                applied_qty = float(order.get("applied_fill_qty") or 0.0)
+                applied_cost = float(order.get("applied_fill_cost") or 0.0)
+                applied_fee = float(order.get("applied_fill_fee") or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if cumulative_qty + 1e-9 < applied_qty or cumulative_cost + 1e-9 < applied_cost:
+                log(f"  ! [STRAT] fill T212 {order.get('id')} a regresat cumulativ — ignor")
+                continue
+            delta_qty = max(0.0, cumulative_qty - applied_qty)
+            delta_cost = max(0.0, cumulative_cost - applied_cost)
+            delta_fee = cumulative_fee - applied_fee
+            if delta_qty > 1e-9:
+                rows.append((order, cumulative_qty, cumulative_cost, cumulative_fee,
+                             delta_qty, delta_cost, delta_fee, status.status))
+                total_qty += delta_qty
+                total_cost += delta_cost
+
+        tolerance = max(0.011, abs(position_delta) * 1e-6)
+        if not rows or abs(total_qty - position_delta) > tolerance or total_cost <= 0:
+            if rows:
+                log(f"  ! [STRAT] fill-uri T212 {side} ({total_qty:.4f}) != delta portfolio "
+                    f"({position_delta:.4f}) — folosesc fallback-ul de portofoliu")
+            return None
+
+        for (order, cumulative_qty, cumulative_cost, cumulative_fee,
+             delta_qty, delta_cost, delta_fee, venue_status) in rows:
+            order["applied_fill_qty"] = cumulative_qty
+            order["applied_fill_cost"] = cumulative_cost
+            order["applied_fill_fee"] = cumulative_fee
+            self._audit(
+                "fill_reconciled", order, status=venue_status,
+                filled_qty=delta_qty, cost=delta_cost, fee=delta_fee,
+                price=(delta_cost / delta_qty if delta_qty > 0 else None),
+            )
+        return total_cost / total_qty
 
     def _reconcile_real(self, price: float) -> None:
         real = self._portfolio_position()
@@ -494,10 +646,11 @@ class Strategy:
         real_qty, real_avg = real
         active = self._active_order_ids()
         if active is None:
-            active = {o["id"] for o in self.s["orders"]}   # nu putem lista -> nu curatam
+            active = {str(o["id"]) for o in self.s["orders"]}  # nu putem lista -> nu curatam
 
         prev_qty = self.s["qty"]
         prev_avg = self._avg_cost() or real_avg
+        status_cache: dict[str, object] = {}
 
         # --- BUY executat: pozitia a crescut (sau adoptam o pozitie pre-existenta) ---
         if real_qty > prev_qty + 1e-6 and self._now() < self.s.get("locked_zero_until", 0):
@@ -505,9 +658,22 @@ class Strategy:
             return
         if real_qty > prev_qty + 1e-6:
             fq = real_qty - prev_qty
-            fp = ((real_avg * real_qty - prev_avg * prev_qty) / fq) if fq > 0 else real_avg
-            is_dca = prev_qty > 1e-9
-            is_adoption = prev_qty < 1e-9   # pozitie gasita in portfolio, nu plasata de noi
+            exact_price = self._exact_execution_price("BUY", fq, status_cache)
+            fp = exact_price or (
+                (real_avg * real_qty - prev_avg * prev_qty) / fq if fq > 0 else real_avg
+            )
+            source_order = next(
+                (o for o in self.s["orders"] if o.get("side") == "BUY"), None,
+            )
+            is_adoption = source_order is None and prev_qty < 1e-9
+            is_dca = bool(
+                source_order is not None
+                and source_order.get("kind") == "DCA"
+                and not source_order.get("dca_counted")
+            )
+            if is_dca:
+                # Un ordin partial DCA numara o singura cumparare, nu una per poll.
+                source_order["dca_counted"] = True
             self.s["last_buy_price"] = fp
             if self.s["entry_price"] is None:
                 self.s["entry_price"] = fp
@@ -516,7 +682,10 @@ class Strategy:
             self.s["qty"] = real_qty
             self.s["cost_usd"] = real_qty * real_avg
             self.s["spent_cash"] = round(real_qty * real_avg / self.fx_to_usd, 2)
-            kind_label = "ADOPTAT" if is_adoption else ("DCA" if is_dca else "ENTRY")
+            kind_label = (
+                "ADOPTAT" if is_adoption
+                else str((source_order or {}).get("kind") or ("DCA" if prev_qty > 1e-9 else "ENTRY"))
+            )
             log(f"  [STRAT] BUY EXECUTAT {fq:.4f} @ {fp:.2f} USD "
                 f"({kind_label})  qty={real_qty:.4f} avg={real_avg:.2f}")
             notify(title=f"{self.yahoo_sym} {'ADOPTAT' if is_adoption else 'BUY'} {fq:.4f}@a{real_avg:.2f}",
@@ -528,19 +697,22 @@ class Strategy:
         # --- SELL executat: pozitia a scazut ---
         elif real_qty < prev_qty - 1e-6:
             sold = prev_qty - real_qty
-            gross, fee, net = _sell_pnl(prev_avg, price, sold, self.p.fx_fee_pct)
+            exact_price = self._exact_execution_price("SELL", sold, status_cache)
+            sell_price = exact_price or price
+            gross, fee, net = _sell_pnl(prev_avg, sell_price, sold, self.p.fx_fee_pct)
             self.s["realized_pnl_usd"] += gross
             self.s["realized_net_usd"] += net
             self.s["fees_usd"] += fee
             self.s["qty"] = real_qty
             self.s["cost_usd"] = real_qty * real_avg
             self.s["spent_cash"] = round(real_qty * real_avg / self.fx_to_usd, 2)
-            self.s["last_sell_price"] = price   # garda profit: nu recumpara mai sus de ultima vanzare (calea REALA)
-            log(f"  [STRAT] SELL EXECUTAT {sold:.4f} @ ~{price:.2f} USD  "
+            self.s["last_sell_price"] = sell_price
+            approx = "" if exact_price is not None else "~"
+            log(f"  [STRAT] SELL EXECUTAT {sold:.4f} @ {approx}{sell_price:.2f} USD  "
                 f"brut={gross:+.2f}  fee={fee:.2f}  net={net:+.2f} USD")
-            notify(title=f"{self.yahoo_sym} SELL {sold:.4f}@~{price:.2f} N{net:+.2f}$",
+            notify(title=f"{self.yahoo_sym} SELL {sold:.4f}@{approx}{sell_price:.2f} N{net:+.2f}$",
                    body=f"a{prev_avg:.2f} · br{gross:+.2f} fee{fee:.2f} N{net:+.2f}$ | Ntot{self.s['realized_net_usd']:+.2f}$",
-                   source="T212", price=price, desktop=self.desktop)
+                   source="T212", price=sell_price, desktop=self.desktop)
 
         else:
             # pozitie neschimbata -> sincronizam valorile cu realitatea
@@ -553,10 +725,18 @@ class Strategy:
         for o in list(self.s["orders"]):
             if str(o["id"]).startswith("PAPER"):
                 continue
-            if o["id"] not in active:
-                if o["side"] == "SELL" and o.get("level") is not None:
-                    self.s.setdefault("tp_sold_levels", []).append(o["level"])  # transa executata
-                self._remove_order(o)        # nu mai e pending (executat sau anulat)
+            if str(o["id"]) not in active:
+                status = self._tracked_order_status(o, status_cache)
+                if status is None or status.status not in {"closed", "canceled", "expired"}:
+                    continue
+                if (o["side"] == "SELL" and o.get("level") is not None
+                        and float(status.filled_qty or 0.0) > 1e-9):
+                    self.s.setdefault("tp_sold_levels", []).append(o["level"])
+                self._audit(
+                    "order_status", o, status=status.status,
+                    filled_qty=status.filled_qty, cost=status.cost, fee=status.fee,
+                )
+                self._remove_order(o)
             elif (o["side"] == "BUY"
                   and (self._now() - o.get("ts", 0)) / 60 > self.p.order_ttl_min
                   and price > o["limit"] * 1.003):
@@ -568,15 +748,16 @@ class Strategy:
             pnl, net_tot, fees = (self.s["realized_pnl_usd"],
                                   self.s["realized_net_usd"], self.s["fees_usd"])
             was_sl = bool(self.s.get("sl_pending"))   # inchidere din stop-loss de catastrofa?
+            exit_price = self.s.get("last_sell_price") or price
             nxt = self.s.get("cycle", 1) + 1
             self.s = _new_state()
             self.s["realized_pnl_usd"] = pnl
             self.s["realized_net_usd"] = net_tot
             self.s["fees_usd"] = fees
             self.s["cycle"] = nxt
-            self.s["last_sell_price"] = price   # garda profit: dupa vanzare totala, reintra DOAR sub pretul vandut (calea REALA)
+            self.s["last_sell_price"] = exit_price
             if was_sl and self.p.sl_rebuy_enabled:   # catastrofa -> re-buy pe RECUL (nu sub-vanzare); prinde recuperarea
-                self.s["sl_rebuy"] = {"low": price, "sell_price": price}
+                self.s["sl_rebuy"] = {"low": exit_price, "sell_price": exit_price}
                 log(f"  🟢 [STRAT] re-buy pe recul ARMAT dupa stop-loss (asteptam +{self.p.sl_rebuy_bounce_pct}% de la minim)")
             log(f"  [STRAT] === ciclu inchis, reincep (ciclu {nxt}) ===")
 

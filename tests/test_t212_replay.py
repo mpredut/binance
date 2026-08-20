@@ -8,11 +8,12 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 T212_DIR = os.path.join(ROOT, "212trading")
 sys.path.insert(0, T212_DIR)
 sys.path.insert(0, ROOT)
+
+from providers.execution_audit import ExecutionAudit  # noqa: E402
 
 _COLLIDING = ("strategy", "market_data", "notify", "ipo_notify", "replay")
 _PRELOADED = {name: sys.modules.pop(name) for name in _COLLIDING if name in sys.modules}
@@ -201,6 +202,119 @@ class T212StatePersistenceTest(unittest.TestCase):
                             with self.assertRaisesRegex(RuntimeError, "persistenta"):
                                 engine._save()
                     self.assertTrue(engine._state_write_failed)
+
+
+class _FillClient:
+    def __init__(self):
+        self.portfolio = [{"ticker": "TEST_US_EQ", "quantity": 0.5, "averagePrice": 100.0}]
+        self.active = [{"id": "SELL-1", "ticker": "TEST_US_EQ"}]
+        self.status = {
+            "id": "SELL-1", "ticker": "TEST_US_EQ", "status": "PARTIALLY_FILLED",
+            "filledQuantity": 0.5, "filledValue": 55.0,
+        }
+
+    def get_portfolio(self):
+        return self.portfolio
+
+    def list_active_orders(self):
+        return self.active
+
+    def get_order_status(self, order_id):
+        return self.status
+
+
+class T212ExactFillReconciliationTest(unittest.TestCase):
+    def _engine(self, client, audit_dir):
+        state = strategy._new_state()
+        state.update({
+            "qty": 1.0, "cost_usd": 100.0, "spent_cash": 100.0,
+            "entry_price": 100.0, "last_buy_price": 100.0,
+            "orders": [{
+                "id": "SELL-1", "side": "SELL", "qty": 1.0,
+                "limit": 108.0, "kind": "TP", "level": None,
+                "intent_id": "t212-test-sell", "ts": 0.0,
+            }],
+        })
+        engine = strategy.Strategy(
+            client, "TEST_US_EQ", _params(STRAT_FX_FEE_PCT="0"), dry_run=False,
+            initial_state=state, fx_to_usd=1.0,
+            execution_audit=ExecutionAudit(audit_dir),
+        )
+        engine._save = lambda: None
+        return engine
+
+    def test_partial_and_terminal_sell_use_cumulative_fill_prices_not_poll_price(self):
+        client = _FillClient()
+        with tempfile.TemporaryDirectory() as audit_dir:
+            engine = self._engine(client, audit_dir)
+            with patch.object(strategy, "notify"):
+                engine._reconcile_real(150.0)  # poll-ul e deliberat departe de fill-ul 110
+
+            self.assertAlmostEqual(engine.s["qty"], 0.5)
+            self.assertAlmostEqual(engine.s["realized_pnl_usd"], 5.0)
+            self.assertAlmostEqual(engine.s["last_sell_price"], 110.0)
+            self.assertAlmostEqual(engine.s["orders"][0]["applied_fill_qty"], 0.5)
+
+            client.portfolio = [{"ticker": "TEST_US_EQ", "quantity": 0.0, "averagePrice": 0.0}]
+            client.active = []
+            client.status = {
+                "id": "SELL-1", "ticker": "TEST_US_EQ", "status": "FILLED",
+                "filledQuantity": 1.0, "filledValue": 112.0,
+            }
+            with patch.object(strategy, "notify"):
+                engine._reconcile_real(160.0)
+
+            # A doua jumatate s-a executat la 114; total brut = 5 + 7, nu la 150/160.
+            self.assertAlmostEqual(engine.s["realized_pnl_usd"], 12.0)
+            self.assertAlmostEqual(engine.s["last_sell_price"], 114.0)
+            self.assertEqual(engine.s["qty"], 0.0)
+
+    def test_canceled_unfilled_ladder_order_is_not_marked_as_sold(self):
+        client = _FillClient()
+        client.portfolio = [{"ticker": "TEST_US_EQ", "quantity": 1.0, "averagePrice": 100.0}]
+        client.active = []
+        client.status = {
+            "id": "SELL-1", "ticker": "TEST_US_EQ", "status": "CANCELLED",
+            "filledQuantity": 0.0, "filledValue": 0.0,
+        }
+        with tempfile.TemporaryDirectory() as audit_dir:
+            engine = self._engine(client, audit_dir)
+            engine.s["orders"][0]["level"] = 10.0
+            with patch.object(strategy, "notify"):
+                engine._reconcile_real(100.0)
+        self.assertEqual(engine.s["orders"], [])
+        self.assertEqual(engine.s["tp_sold_levels"], [])
+
+    def test_partial_dca_counts_one_buy_across_multiple_reconciliations(self):
+        client = _FillClient()
+        client.active = [{"id": "BUY-1", "ticker": "TEST_US_EQ"}]
+        client.portfolio = [{
+            "ticker": "TEST_US_EQ", "quantity": 1.5,
+            "averagePrice": 145.0 / 1.5,
+        }]
+        client.status = {
+            "id": "BUY-1", "ticker": "TEST_US_EQ", "status": "PARTIALLY_FILLED",
+            "filledQuantity": 0.5, "filledValue": 45.0,
+        }
+        with tempfile.TemporaryDirectory() as audit_dir:
+            engine = self._engine(client, audit_dir)
+            engine.s["orders"] = [{
+                "id": "BUY-1", "side": "BUY", "qty": 1.0,
+                "limit": 90.0, "amount": 90.0, "kind": "DCA",
+                "intent_id": "t212-test-dca", "ts": 0.0,
+            }]
+            with patch.object(strategy, "notify"):
+                engine._reconcile_real(90.0)
+            self.assertEqual(engine.s["dca_buys"], 1)
+
+            client.portfolio = [{
+                "ticker": "TEST_US_EQ", "quantity": 1.75,
+                "averagePrice": 167.5 / 1.75,
+            }]
+            client.status.update(filledQuantity=0.75, filledValue=67.5)
+            with patch.object(strategy, "notify"):
+                engine._reconcile_real(90.0)
+        self.assertEqual(engine.s["dca_buys"], 1)
 
 
 class _CancelClient:

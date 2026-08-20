@@ -729,6 +729,24 @@ Adaptorul generalizează mecanica ordinelor, nu strategia. Motorul autonom T212 
 feed-ul Yahoo, FX fee, take-profit ladder și regulile sale proprii; `ohlc_closes` din
 contractul generic întoarce momentan `[]` pentru T212.
 
+Motorul autonom refolosește adaptorul strict la reconciliere: delta cantității este
+confirmată de portfolio, iar prețul exact vine din fill-urile cumulative ale ordinului.
+Marcajele `applied_fill_*` previn reaplicarea unui partial fill la poll-ul următor.
+
+```text
+Strategy / spot_dca
+  └── intent_id ─► AuditedStrategyExecutor ─► venue executor
+                       ├── submit_requested/accepted/rejected
+                       ├── order_status (doar la schimbare)
+                       └── cancel_requested/accepted/rejected
+                                      │
+                                      ▼
+                         execution_audit_YYYY-MM-DD.jsonl
+```
+
+Auditul este best-effort și nu conține politici de blocare. Rutarea directă a
+STOP/trailing prin guardrail-urile `Instrument.place` rămâne intenționat neimplementată.
+
 ### Motorul canonic spot DCA/trailing
 
 ```text

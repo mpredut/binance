@@ -34,6 +34,16 @@ Motorul T212 păstrează local un ordin până când cererea de anulare este acc
 Dacă anularea eșuează, nu plasează repricing, scară TP sau ieșire STOP/trailing peste
 ordinul posibil activ; reîncearcă la următorul ciclu de reconciliere.
 
+Reconcilierea T212 refolosește `T212Provider.order_status`: cantitatea poziției rămâne
+ancorată în portofoliu, iar prețul/P&L-ul se ia din fill-urile cumulative reale numai
+când delta ordinelor corespunde deltei portofoliului. Partial fill-urile sunt aplicate
+o singură dată; dacă statusul este temporar indisponibil, ordinul rămâne urmărit.
+
+`providers/execution_audit.py` este un decorator strict observațional peste
+`StrategyExecutor`. Fiecare intenție live primește `intent_id`, păstrat în starea
+ordinului, iar submit/status/cancel sunt scrise JSONL în `logger/execution_audit/`.
+Eșecul auditului nu poate refuza și nu poate modifica un ordin.
+
 ### HYPE pe Hyperliquid (SPOT)
 `providers/hyperliquid_provider.py`:
 - preț/history **public** HL (perechea @index, ex `@107` = HYPE/USDC);

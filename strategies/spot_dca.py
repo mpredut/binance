@@ -18,6 +18,7 @@ from typing import Callable
 
 from alertnotifiers import notify as _shared_notify
 from botcore import are_close, float_env, log
+from providers.execution_audit import new_intent_id
 from providers.strategy_executor import ProviderError, StrategyExecutor
 
 from . import spot_dca_rules as sr
@@ -307,14 +308,22 @@ class Strategy:
                                      "kind": kind, "market": market, "ts": time.time()})
             return True
         try:
-            txid = self.client.submit_order(
-                self.pair, side, vol, None if market else price,
-                market=market, kind=kind,
-            )
+            intent_id = new_intent_id(self.venue_label, self.pair, kind)
+            submit_with_intent = getattr(type(self.client), "submit_order_with_intent", None)
+            if callable(submit_with_intent):
+                txid = submit_with_intent(
+                    self.client, intent_id, self.pair, side, vol, None if market else price,
+                    market=market, kind=kind,
+                )
+            else:
+                txid = self.client.submit_order(
+                    self.pair, side, vol, None if market else price,
+                    market=market, kind=kind,
+                )
             log(f"  [STRAT] {side.upper()} {kind} plasat txid={txid} {vol} @ {price}")
             self.s["orders"].append({"txid": txid, "side": side, "vol": vol, "price": price,
                                      "amount": amount, "kind": kind, "market": market,
-                                     "ts": time.time()})
+                                     "intent_id": intent_id, "ts": time.time()})
             return True
         except ProviderError as e:
             log(f"  ! [STRAT] {side} {kind} esuat: {e}")
@@ -334,7 +343,14 @@ class Strategy:
         if o.get("cancel_requested"):
             return True
         try:
-            self.client.cancel_order(self.pair, o["txid"])
+            cancel_with_intent = getattr(type(self.client), "cancel_order_with_intent", None)
+            if callable(cancel_with_intent):
+                cancel_with_intent(
+                    self.client, o.get("intent_id") or f"legacy-{self.pair}-{o['txid']}",
+                    self.pair, o["txid"],
+                )
+            else:
+                self.client.cancel_order(self.pair, o["txid"])
         except ProviderError as e:
             log(f"  ! [STRAT] cancel esuat pentru {o['txid']}: {e} — ordinul ramane urmarit")
             return False
@@ -389,7 +405,14 @@ class Strategy:
                 # cat timp ordinul este open. Aplicam doar delta fata de ultima
                 # reconciliere salvata pe ordin.
                 try:
-                    status = self.client.order_status(self.pair, o["txid"])
+                    status_with_intent = getattr(type(self.client), "order_status_with_intent", None)
+                    if callable(status_with_intent):
+                        status = status_with_intent(
+                            self.client, o.get("intent_id") or f"legacy-{self.pair}-{o['txid']}",
+                            self.pair, o["txid"],
+                        )
+                    else:
+                        status = self.client.order_status(self.pair, o["txid"])
                 except ProviderError as e:
                     log(f"  ! [STRAT] status {o['txid']} esuat: {e} — pastrez ordinul")
                     continue
