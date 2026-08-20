@@ -277,6 +277,9 @@ def _projection(report: dict) -> dict:
     # Câmpurile noi implicit oprite sunt compatibile cu artefactele baseline mai
     # vechi; normalizarea evită regenerarea lor când deciziile sunt identice.
     strategy_params.setdefault("dca_spacing_growth_pct", 0.0)
+    strategy_params.setdefault("dca_vol_scale_k", 0.0)
+    strategy_params.setdefault("dca_vol_ref", 2.0)
+    strategy_params.setdefault("dca_vol_interval", 240)
     return {
         "schema_version": report.get("schema_version"),
         "strategy_params": strategy_params,

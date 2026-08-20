@@ -16,8 +16,8 @@ class HypeCandidatesTest(unittest.TestCase):
         self.assertEqual(
             names,
             [
-                "live", "tp4", "dca15", "dca_progressive025", "A_trail",
-                "B_dcabrake", "overlay650t8",
+                "live", "tp4", "dca15", "dca_progressive025", "dca_vol_m1",
+                "A_trail", "B_dcabrake", "overlay650t8",
             ],
         )
 
@@ -32,6 +32,14 @@ class HypeCandidatesTest(unittest.TestCase):
         self.assertEqual(
             by_name["dca_progressive025"].overrides,
             {"dca_spacing_growth_pct": 0.25},
+        )
+        self.assertEqual(
+            by_name["dca_vol_m1"].overrides,
+            {
+                "dca_vol_scale_k": -1.0,
+                "dca_vol_ref": 2.0,
+                "dca_vol_interval": 240,
+            },
         )
 
     def test_walk_forward_registry_keeps_historical_report_names(self):

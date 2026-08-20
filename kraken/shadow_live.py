@@ -11,6 +11,8 @@ comparativ. Scopul: forward-test intre configul de PRODUCTIE si candidați shado
   - dca15   : DOAR DCA_DROP 1.25 -> 1.5   (+0.08pp, candidat secundar)
   - dca_progressive025: primul DCA la 1.25%, apoi +0.25pp/treaptă;
     candidat de risc, central neutru și mai bun sub stress în benchmark
+  - dca_vol_m1 (doar 240m): sumă DCA scalată cu volatilitatea OHLC; reduce
+    tail/DD, dar pierde majoritatea ferestrelor active și rămâne defensiv
   - overlay650t8 (doar 240m): overlay cu top-up 650 si trail 8%; candidat
     EXPLORATORIU pentru forward, neaprobat pentru live
 
@@ -75,6 +77,14 @@ def _variants(interval: int):
             tp_trail_k=2.0,
             tp_trail_min=1.5,
             tp_trail_max=8.0,
+        )
+    # Sizing-ul DCA folosește OHLC fix. Reduce tail-ul istoric, dar nu trece
+    # gate-ul de randament/pairwise, deci rămâne strict observațional.
+    if interval == base.dca_vol_interval:
+        variants["dca_vol_m1"] = dataclasses.replace(
+            base,
+            dca_vol_scale_k=-1.0,
+            dca_vol_ref=2.0,
         )
     # Overlay-ul folosește semnal OHLC de 240m; nu îl simulăm artificial pe 60m.
     # Valorile sunt preînregistrate după analiza istorică și rămân fixe în forward.

@@ -103,6 +103,12 @@ class StratParams:
     dca_brake_min_pct: float = 1.5    # panta minima (%) recent/vechi ca sa considere downtrend
     dca_spacing_growth_pct: float = 0.0  # crește pragul după fiecare DCA executat;
                                          # 0 = comportamentul live byte-identical
+    # --- #2: SIZING DCA scalat pe VOLATILITATE (default OFF) ---
+    dca_vol_scale_k: float = 0.0      # 0=OFF. eff_dca = dca × (vol_ref/vol_1h)^k, clamp [0.3,3].
+                                      # k>0 = DCA MAI MIC in vol mare (defensiv, minimizeaza pierderea);
+                                      # k<0 = MAI MARE in vol (harvest agresiv). Fail-safe pe warm-up.
+    dca_vol_ref: float = 2.0          # vol_1h (%) de referinta pt scalare
+    dca_vol_interval: int = 240       # cadență OHLC identică în live și replay
 
     @classmethod
     def from_env(cls) -> "StratParams":
@@ -151,6 +157,9 @@ class StratParams:
             dca_spacing_growth_pct = max(
                 0.0, float_env("STRAT_DCA_SPACING_GROWTH_PCT") or 0.0,
             ),
+            dca_vol_scale_k    = float_env("STRAT_DCA_VOL_SCALE_K") or 0.0,
+            dca_vol_ref        = float_env("STRAT_DCA_VOL_REF") or 2.0,
+            dca_vol_interval   = int(float_env("STRAT_DCA_VOL_INTERVAL") or 240),
         )
 
 
@@ -627,6 +636,34 @@ class Strategy:
                    desktop=self.desktop)
 
     # -- SHADOW vol-adaptiv (doar observatie/log, nu decide nimic) --------------
+    def _effective_dca_amount(self) -> float:
+        """#2: marimea DCA scalata pe volatilitate. dca_vol_scale_k=0 -> fix (dca_amount).
+        Fail-safe pe warm-up/eroare (cade pe fix), ca reintrarea adaptiva."""
+        scale_k = float(self.p.dca_vol_scale_k)
+        vol_ref = float(self.p.dca_vol_ref)
+        if not scale_k:
+            return self.p.dca_amount
+        if not math.isfinite(scale_k) or not math.isfinite(vol_ref) or vol_ref <= 0:
+            return self.p.dca_amount
+        try:
+            vol = self._dca_vol_1h()
+            if not vol or not math.isfinite(vol) or vol <= 0:
+                return self.p.dca_amount
+            scale = (vol_ref / vol) ** scale_k
+        except (ArithmeticError, TypeError, ValueError):
+            return self.p.dca_amount
+        if not math.isfinite(scale):
+            return self.p.dca_amount
+        return self.p.dca_amount * max(0.3, min(3.0, scale))
+
+    def _dca_vol_1h(self) -> float | None:
+        """Volatilitate DCA din OHLC la aceeași cadență în live și replay."""
+        if self.replay_mode:
+            closes = [price for _, price in self._shadow_prices]
+        else:
+            closes = self.client.ohlc_closes(self.pair, self.p.dca_vol_interval)
+        return self._hourly_vol_from_closes(closes, self.p.dca_vol_interval)
+
     def _shadow_vol_1h(self) -> float | None:
         """Volatilitate 1h (%) din istoricul propriu de tick-uri. None = warm-up."""
         pts = list(self._shadow_prices)
@@ -724,8 +761,17 @@ class Strategy:
             closes = [price for _, price in self._shadow_prices]
         else:
             closes = self.client.ohlc_closes(self.pair, self.p.tp_trail_vol_interval)
+        return self._hourly_vol_from_closes(
+            closes, self.p.tp_trail_vol_interval,
+        )
+
+    @staticmethod
+    def _hourly_vol_from_closes(
+        closes: list[float], interval_minutes: float,
+    ) -> float | None:
+        """Deviația log-return normalizată la o oră pentru o cadență fixă."""
         closes = closes[-90:]
-        if len(closes) < 20:
+        if len(closes) < 20 or interval_minutes <= 0:
             return None
         returns = [
             math.log(current / previous)
@@ -738,7 +784,7 @@ class Strategy:
             std = statistics.stdev(returns)
         except statistics.StatisticsError:
             return None
-        return std * math.sqrt(60.0 / self.p.tp_trail_vol_interval) * 100.0
+        return std * math.sqrt(60.0 / interval_minutes) * 100.0
 
     def _trend_down(self, min_pts: int = 20) -> bool:
         """B: downtrend pe OHLC fix, identic ca scară temporală în live și replay."""
@@ -965,6 +1011,7 @@ class Strategy:
             self.p.dca_spacing_growth_pct,
             self.s["dca_buys"],
         )
+        effective_dca_amount = self._effective_dca_amount()
         if (self.s["dca_buys"] < self.p.max_dca_buys
                 and self.s["last_buy_price"]
                 # prag DCA + "aproape de prag" = atins (regula partajata cu backtest)
@@ -972,16 +1019,19 @@ class Strategy:
                     price, self.s["last_buy_price"], effective_dca_drop,
                     self.p.reentry_tolerance_pct,
                 )
-                and self.s["spent"] + self.p.dca_amount <= self.p.max_budget
+                and self.s["spent"] + effective_dca_amount <= self.p.max_budget
                 and not (self.p.dca_trend_brake and self._trend_down())  # B: frana DCA in downtrend
                 and not self._has_open("buy")):
             log(
                 f"  [STRAT] dip {price} <= {self.s['last_buy_price']}"
                 f"×(1-{effective_dca_drop}%) "
-                f"(tol {self.p.reentry_tolerance_pct}%) — DCA"
+                f"(tol {self.p.reentry_tolerance_pct}%) — "
+                f"DCA {effective_dca_amount:.0f}"
             )
-            self._place("buy", self._qty_for(self.p.dca_amount, entry_px),
-                        entry_px, kind="DCA", amount=self.p.dca_amount)
+            self._place(
+                "buy", self._qty_for(effective_dca_amount, entry_px), entry_px,
+                kind="DCA", amount=effective_dca_amount,
+            )
 
     # -- bucla -----------------------------------------------------------------
     def run(self) -> None:
@@ -995,6 +1045,12 @@ class Strategy:
             log(
                 "      DCA growth : +"
                 f"{self.p.dca_spacing_growth_pct}pp după fiecare DCA executat"
+            )
+        if self.p.dca_vol_scale_k:
+            log(
+                f"      DCA vol    : k={self.p.dca_vol_scale_k}, "
+                f"referință={self.p.dca_vol_ref}%, "
+                f"OHLC={self.p.dca_vol_interval}m"
             )
         log(f"      take-profit: +{self.p.takeprofit_pct}%" if self.p.enable_takeprofit else "      take-profit: off")
         log(f"      PLAFON     : {self.p.max_budget} {self.ccy} / ciclu")

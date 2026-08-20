@@ -113,6 +113,45 @@ class ProviderLivePathTest(unittest.TestCase):
         self.assertTrue(call[5])
         self.assertEqual(call[7], 59.0)
 
+    def test_volatility_scaled_dca_amount_and_fail_safe(self):
+        fixed = _strategy(self.fake, dca_vol_scale_k=0.0)
+        self.assertEqual(fixed._effective_dca_amount(), 325.0)
+
+        aggressive = _strategy(
+            self.fake, dca_vol_scale_k=-1.0, dca_vol_ref=2.0,
+        )
+        aggressive._dca_vol_1h = lambda: 4.0
+        self.assertEqual(aggressive._effective_dca_amount(), 650.0)
+        aggressive._dca_vol_1h = lambda: 20.0
+        self.assertEqual(aggressive._effective_dca_amount(), 975.0)
+
+        defensive = _strategy(
+            self.fake, dca_vol_scale_k=1.0, dca_vol_ref=2.0,
+        )
+        defensive._dca_vol_1h = lambda: 4.0
+        self.assertEqual(defensive._effective_dca_amount(), 162.5)
+
+        for bad_reference in (-1.0, float("nan")):
+            invalid = _strategy(
+                self.fake, dca_vol_scale_k=-1.0,
+                dca_vol_ref=bad_reference,
+            )
+            invalid._dca_vol_1h = lambda: 4.0
+            self.assertEqual(invalid._effective_dca_amount(), 325.0)
+
+        aggressive._dca_vol_1h = lambda: None
+        self.assertEqual(aggressive._effective_dca_amount(), 325.0)
+
+    def test_dca_volatility_uses_closed_ohlc_in_live_mode(self):
+        strategy = _strategy(
+            self.fake, dca_vol_scale_k=-1.0, dca_vol_interval=240,
+        )
+        closes = [100.0 + (index % 3) for index in range(20)]
+        strategy.client.ohlc_closes = MagicMock(return_value=closes)
+
+        self.assertIsNotNone(strategy._dca_vol_1h())
+        strategy.client.ohlc_closes.assert_called_once_with("HYPEUSD", 240)
+
     def test_place_ProviderError_nu_stocheaza_ordinul(self):
         def boom(*a, **k):
             raise ProviderError("Insufficient funds")

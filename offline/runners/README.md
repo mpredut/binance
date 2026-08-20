@@ -95,8 +95,9 @@ sign-test exact pereche cu `p <= 0,10` și păstrarea worst-fold/DD în **ambele
 scenarii. Egalitățile nu sunt tratate ca dovadă. Valorile de cost sunt provizorii
 până la calibrarea din fill-uri Kraken reale.
 
-Setul HYPE prioritar (`tp4`, `dca15`, A, B și `overlay650t8`) se rulează batch,
-fără grid search și fără modificarea configurației live:
+Setul HYPE prioritar (`tp4`, `dca15`, spacing progresiv, sizing DCA pe
+volatilitate, A, B și `overlay650t8`) se rulează batch, fără grid search și fără
+modificarea configurației live:
 
 ```bash
 .venv/bin/python offline/runners/kraken_financial_compare.py

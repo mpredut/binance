@@ -196,6 +196,12 @@ class ReplayEngineTest(unittest.TestCase):
                 _series(), _params(dca_trend_brake=True, trend_interval=240),
                 fee_pct=0.26, bar_minutes=60,
             )
+        with self.assertRaisesRegex(ValueError, "dca_vol_interval"):
+            rp.run_replay(
+                _series(),
+                _params(dca_vol_scale_k=-1.0, dca_vol_interval=240),
+                fee_pct=0.26, bar_minutes=60,
+            )
 
     def test_adaptive_reentry_requires_bar_interval_for_time_scaling(self):
         with self.assertRaisesRegex(ValueError, "reentry_adaptive"):

@@ -85,9 +85,10 @@ explicată înainte de shadow/deploy.
 După ce branch-ul este mergeuit în `main` și codul este preluat pe producție:
 
 - nu modifica `STRAT_DCA_SPACING_GROWTH_PCT=0` pentru botul live;
+- nu modifica `STRAT_DCA_VOL_SCALE_K=0` pentru botul live;
 - nu reporni botul Kraken doar pentru shadow;
 - lasă cronurile 60m/240m existente să încarce automat candidatul
-  `dca_progressive025`;
+  `dca_progressive025` și, numai la 240m, `dca_vol_m1`;
 - confirmă în următorul snapshot câmpurile `decision_trace` și
   `decision_divergences`;
 - urmărește minimum 30 zile și minimum 20 divergențe de decizie față de `current`.

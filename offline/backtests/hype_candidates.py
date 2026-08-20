@@ -24,6 +24,18 @@ def _dca15(name: str) -> Candidate:
     return Candidate(name, "DCA la scădere 1,5%", {"dca_drop_pct": 1.5})
 
 
+def _dca_vol_m1(name: str) -> Candidate:
+    return Candidate(
+        name,
+        "mărime DCA scalată cu volatilitatea: k=-1, referință 2%",
+        {
+            "dca_vol_scale_k": -1.0,
+            "dca_vol_ref": 2.0,
+            "dca_vol_interval": 240,
+        },
+    )
+
+
 def _adaptive_trail(name: str) -> Candidate:
     return Candidate(
         name, "trailing adaptiv k=2, clamp 1,5-8%",
@@ -88,6 +100,7 @@ def financial_priority_candidates() -> list[Candidate]:
             "DCA 1,25% inițial, apoi +0,25pp după fiecare DCA executat",
             {"dca_spacing_growth_pct": 0.25},
         ),
+        _dca_vol_m1("dca_vol_m1"),
         _adaptive_trail("A_trail"),
         _dca_brake("B_dcabrake"),
         _overlay650t8(),

@@ -47,6 +47,9 @@ class ShadowLiveTest(unittest.TestCase):
             takeprofit_pct: float = 5.0
             dca_drop_pct: float = 1.25
             dca_spacing_growth_pct: float = 0.0
+            dca_vol_scale_k: float = 0.0
+            dca_vol_ref: float = 2.0
+            dca_vol_interval: int = 240
             tp_trail_adaptive: bool = False
             tp_trail_k: float = 2.0
             tp_trail_min: float = 1.5
@@ -73,7 +76,7 @@ class ShadowLiveTest(unittest.TestCase):
             list(variants_240),
             [
                 "current", "tp4", "dca15", "dca_progressive025", "A_trail",
-                "overlay650t8", "B_dcabrake",
+                "dca_vol_m1", "overlay650t8", "B_dcabrake",
             ],
         )
         progressive = variants_60["dca_progressive025"]
@@ -81,6 +84,9 @@ class ShadowLiveTest(unittest.TestCase):
         adaptive = variants_240["A_trail"]
         self.assertTrue(adaptive.tp_trail_adaptive)
         self.assertEqual(adaptive.tp_trail_vol_interval, 240)
+        vol_scaled = variants_240["dca_vol_m1"]
+        self.assertEqual(vol_scaled.dca_vol_scale_k, -1.0)
+        self.assertEqual(vol_scaled.dca_vol_ref, 2.0)
         candidate = variants_240["overlay650t8"]
         self.assertTrue(candidate.trend_overlay)
         brake = variants_240["B_dcabrake"]

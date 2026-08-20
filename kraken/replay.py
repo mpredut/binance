@@ -38,6 +38,13 @@ def _validate_replay(ohlc, params, bar_minutes: float | None) -> None:
             "tp_trail_adaptive cere ca bar_minutes să fie egal cu "
             f"tp_trail_vol_interval ({params.tp_trail_vol_interval} minute)"
         )
+    if params.dca_vol_scale_k and (
+            bar_minutes is None
+            or float(bar_minutes) != float(params.dca_vol_interval)):
+        raise ValueError(
+            "dca_vol_scale_k cere ca bar_minutes să fie egal cu "
+            f"dca_vol_interval ({params.dca_vol_interval} minute)"
+        )
     if params.reentry_adaptive and bar_minutes is None:
         raise ValueError("reentry_adaptive cere bar_minutes pentru volatilitatea temporală")
 
