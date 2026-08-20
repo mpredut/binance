@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "frozen_at_utc": "2026-08-20T16:43:16+00:00",
+  "source": {
+    "provider": "Yahoo chart API",
+    "rule": "exclude the full tail of candles that had not closed at fetch time"
+  },
+  "datasets": {
+    "nvda": {
+      "profile": "nvda",
+      "symbol": "NVDA",
+      "interval": "1d",
+      "file": "nvda/datasets/NVDA_1d_9e8cbd3c6ff5.csv",
+      "sha256": "9e8cbd3c6ff5a27ae137d7ad0bf690a173cb24d33e3a58d0fcb183c163524112",
+      "bars": 501,
+      "start_utc": "2024-08-20T13:30:00+00:00",
+      "end_utc": "2026-08-19T13:30:00+00:00"
+    },
+    "rgnt": {
+      "profile": "rgnt",
+      "symbol": "RGNT",
+      "interval": "1d",
+      "file": "rgnt/datasets/RGNT_1d_b67a2932ddd6.csv",
+      "sha256": "b67a2932ddd686af2ea90a5da45d876f1ebee64e0e1ba8c9fec1fc265bcbf7d9",
+      "bars": 176,
+      "start_utc": "2025-12-04T14:30:00+00:00",
+      "end_utc": "2026-08-19T13:30:00+00:00"
+    },
+    "spcx": {
+      "profile": "spcx",
+      "symbol": "SPCX",
+      "interval": "5m",
+      "file": "spcx/datasets/SPCX_5m_ada3bbb43c6d.csv",
+      "sha256": "ada3bbb43c6d756499982a8cd39f7a9cb3f8fbea69b2024d309b17974c55ab48",
+      "bars": 1794,
+      "start_utc": "2026-07-20T16:40:00+00:00",
+      "end_utc": "2026-08-20T16:35:00+00:00"
+    }
+  }
+}

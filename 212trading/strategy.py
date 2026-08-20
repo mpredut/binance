@@ -349,13 +349,17 @@ class Strategy:
 
     def _place_sell(self, qty: float, limit: float, level: float | None = None,
                     kind: str = "TP", *, market: bool = False) -> bool:
+        qty = round(float(qty), 2)
+        if qty <= 0:
+            log("  ! [STRAT] SELL qty 0 după rotunjire — păstrez dust-ul, nu trimit ordin")
+            return False
         tag = f"+{level:g}%" if level is not None else ""
         if self.dry_run:
             self._paper_seq += 1
             order_type = "MKT" if market else f"@ {limit:.2f}"
             log(f"  [STRAT] [PAPER] plasez SELL {kind}{tag} {qty:.2f} {order_type} USD")
             self.s["orders"].append({"id": f"PAPER-{self._paper_seq}", "side": "SELL",
-                                     "qty": round(qty, 2), "limit": round(limit, 2),
+                                     "qty": qty, "limit": round(limit, 2),
                                      "kind": kind, "level": level, "market": market,
                                      "ts": self._now()})
             return True

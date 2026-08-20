@@ -13,6 +13,7 @@ import datetime as dt
 import json
 from pathlib import Path
 import sys
+import time
 import urllib.error
 import urllib.request
 
@@ -28,6 +29,7 @@ from strategy import StratParams  # noqa: E402
 from offline.backtests.datasets import (  # noqa: E402
     align_previous_values,
     dataset_metadata,
+    drop_incomplete_last_bar,
     load_dataset,
     save_dataset,
     validate_dataset,
@@ -102,6 +104,16 @@ def fetch_yahoo_candles(symbol: str, range_: str, interval: str) -> list[dict]:
             "low": float(values[2]),
             "close": float(values[3]),
         })
+    regular = ((result.get("meta") or {}).get("currentTradingPeriod") or {}).get(
+        "regular"
+    ) or {}
+    records = drop_incomplete_last_bar(
+        records,
+        interval_minutes=parse_interval_minutes(interval),
+        now_timestamp=int(time.time()),
+        regular_session_start=regular.get("start"),
+        regular_session_end=regular.get("end"),
+    )
     return validate_dataset(records)
 
 

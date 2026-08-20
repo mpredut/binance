@@ -12,7 +12,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from offline.backtests.promotion import evaluate_promotion  # noqa: E402
+from offline.backtests.promotion import evaluate_dual_promotion  # noqa: E402
 
 
 def main() -> int:
@@ -25,17 +25,25 @@ def main() -> int:
         baseline = json.load(handle)
     with args.candidate.expanduser().resolve().open(encoding="utf-8") as handle:
         candidate = json.load(handle)
-    result = evaluate_promotion(baseline, candidate)
-    print("PROMOTE" if result["promote"] else "DO NOT PROMOTE")
-    for name, scenario in result["scenarios"].items():
+    result = evaluate_dual_promotion(baseline, candidate)
+    paths = "/".join(result["promotion_paths"])
+    print(f"PROMOTE {paths}" if paths else "DO NOT PROMOTE")
+    for name, scenario in result["return_gate"]["scenarios"].items():
         deltas = scenario["wins_ties_losses"]
+        risk = result["defensive_gate"]["scenarios"][name]
+        dd = risk["drawdown_wins_ties_losses"]
+        calmar = risk["median_calmar_improvement_ratio"]
+        calmar_text = f"{calmar * 100:+.1f}%" if calmar is not None else "n/a"
         print(
-            f"{name}: {'PASS' if scenario['passed'] else 'FAIL'} "
+            f"{name}: return={'PASS' if scenario['passed'] else 'FAIL'} "
+            f"defensive={'PASS' if risk['passed'] else 'FAIL'} "
             f"meanΔ={scenario['mean_return_delta_pp']:+.3f}pp "
             f"worstΔ={scenario['worst_return_delta_pp']:+.3f}pp "
             f"ddΔ={scenario['worst_drawdown_delta_pp']:+.3f}pp "
-            f"W/T/L={deltas['wins']}/{deltas['ties']}/{deltas['losses']}"
+            f"returnW/T/L={deltas['wins']}/{deltas['ties']}/{deltas['losses']} "
+            f"calmarΔ={calmar_text}"
         )
+        print(f"  ddW/T/L={dd['wins']}/{dd['ties']}/{dd['losses']}")
     if args.output:
         output = args.output.expanduser().resolve()
         output.parent.mkdir(parents=True, exist_ok=True)

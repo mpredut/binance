@@ -58,6 +58,15 @@ KrakenError`. Backtestul (`replay.py`) folosește `MagicMock` → aproape neatin
   `MarketApi.place`. Dacă apare nevoie cross-strategy, se introduce separat un decorator
   intent-aware, în care STOP/trailing nu pot fi blocate de trend/cooldown/plafon.
 
+  Reaudit 2026-08-20: decizia rămâne valabilă. `MarketApi.place()` este deja
+  calea guardată pentru tradeall/rtrade/trailing și returnează rezultatul unei
+  plasări punctuale. `spot_dca` cere în schimb lifecycle durabil
+  `submit/status/cancel`, `intent_id`, partial fills și ieșiri MARKET urgente.
+  Rutarea prin `place()` ar suprapune plafonul/cooldown/trend peste bugetul și
+  state machine-ul strategiei și ar putea bloca STOP/trailing. Auditul unificat
+  există deja prin `AuditedStrategyExecutor`; fără o cerință nouă de limită
+  globală cross-strategy, Faza 6 nu aduce valoare financiară sau operațională.
+
 ## Stare de închidere
 
 Fazele 0–5c sunt integrate în `main` la `f5ac673`, validate cu golden-ul

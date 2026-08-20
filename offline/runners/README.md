@@ -89,11 +89,15 @@ Pentru un candidat, `--params-report` citește un obiect `strategy_params` și
   offline/results/hype_financial/candidate.json
 ```
 
-Gate-ul cere avantaj de medie de minimum `0,10pp`, minimum 10 ferestre în care
-candidatul chiar diferă de live, mai multe ferestre câștigate decât pierdute,
-sign-test exact pereche cu `p <= 0,10` și păstrarea worst-fold/DD în **ambele**
-scenarii. Egalitățile nu sunt tratate ca dovadă. Valorile de cost sunt provizorii
-până la calibrarea din fill-uri Kraken reale.
+Gate-ul are două căi etichetate. `RETURN` cere avantaj de medie de minimum
+`0,10pp`, minimum 10 ferestre active, mai multe ferestre câștigate decât pierdute,
+sign-test exact cu `p <= 0,10` și păstrarea worst-fold/DD. `DEFENSIVE` cere return
+non-inferior, Calmar median calculat pe fold-uri mai bun cu minimum 15%, Sortino
+păstrat, worst-DD mai mic cu minimum `1pp`, CVaR mai bun, expunere necrescută și
+minimum 10 ferestre cu schimbare de DD susținută de sign-test. Un candidat este
+eligibil prin `RETURN` sau `DEFENSIVE`, dar păstrează eticheta și trece separat
+prin shadow. Egalitățile nu sunt dovezi. Valorile de cost sunt provizorii până
+la calibrarea din fill-uri Kraken reale.
 
 Setul HYPE prioritar (`tp4`, `dca15`, spacing progresiv, sizing DCA pe
 volatilitate, A, B și `overlay650t8`) se rulează batch, fără grid search și fără

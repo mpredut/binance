@@ -28,6 +28,7 @@ myenv/
 cachedb/
 *.json
 !offline/research/hype_dataset/financial_baseline_v1.json
+!offline/research/t212_dataset/manifest.json
 *.jsonl
 *.meta
 *.lock

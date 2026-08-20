@@ -31,7 +31,7 @@ from offline.backtests.financial_benchmark import (  # noqa: E402
     aggregate_financial_windows,
     default_scenarios,
 )
-from offline.backtests.promotion import evaluate_promotion  # noqa: E402
+from offline.backtests.promotion import evaluate_dual_promotion  # noqa: E402
 from offline.backtests.walk_forward import walk_forward_splits  # noqa: E402
 
 
@@ -207,7 +207,7 @@ def build_report(
     if compare_to:
         with compare_to.open(encoding="utf-8") as handle:
             baseline = json.load(handle)
-        report["promotion_gate"] = evaluate_promotion(baseline, report)
+        report["promotion_gate"] = evaluate_dual_promotion(baseline, report)
     return report
 
 
@@ -258,7 +258,8 @@ def markdown_report(report: dict) -> str:
             )
         lines.append("")
     if "promotion_gate" in report:
-        verdict = "PROMOTE" if report["promotion_gate"]["promote"] else "DO NOT PROMOTE"
+        paths = "/".join(report["promotion_gate"]["promotion_paths"])
+        verdict = f"PROMOTE {paths}" if paths else "DO NOT PROMOTE"
         lines.extend(["## Promotion gate", "", f"Verdict: **{verdict}**", ""])
     lines.extend([
         "## Interpretation", "",

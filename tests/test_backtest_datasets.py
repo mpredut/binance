@@ -6,6 +6,7 @@ from pathlib import Path
 from offline.backtests.datasets import (
     align_previous_values,
     dataset_metadata,
+    drop_incomplete_last_bar,
     load_dataset,
     save_dataset,
     validate_dataset,
@@ -20,6 +21,49 @@ def _rows():
 
 
 class OhlcDatasetContractTest(unittest.TestCase):
+    def test_drops_only_the_incomplete_intraday_bar(self):
+        rows = _rows()
+        self.assertEqual(
+            drop_incomplete_last_bar(
+                rows, interval_minutes=60, now_timestamp=7199,
+            ),
+            rows[:1],
+        )
+        self.assertEqual(
+            drop_incomplete_last_bar(
+                rows, interval_minutes=60, now_timestamp=7200,
+            ),
+            rows,
+        )
+
+    def test_drops_multiple_incomplete_yahoo_tail_rows(self):
+        rows = _rows() + [
+            {"timestamp": 3900, "open": 12, "high": 13, "low": 11, "close": 12},
+        ]
+        self.assertEqual(
+            drop_incomplete_last_bar(
+                rows, interval_minutes=60, now_timestamp=3700,
+            ),
+            rows[:1],
+        )
+
+    def test_daily_bar_uses_regular_session_end(self):
+        rows = [{"timestamp": 100, "open": 10, "high": 12, "low": 9, "close": 11}]
+        self.assertEqual(
+            drop_incomplete_last_bar(
+                rows, interval_minutes=1440, now_timestamp=150,
+                regular_session_start=100, regular_session_end=200,
+            ),
+            [],
+        )
+        self.assertEqual(
+            drop_incomplete_last_bar(
+                rows, interval_minutes=1440, now_timestamp=200,
+                regular_session_start=100, regular_session_end=200,
+            ),
+            rows,
+        )
+
     def test_asof_alignment_never_uses_a_future_fx_value(self):
         fx = [
             {"timestamp": 10, "close": 0.20},
@@ -57,6 +101,16 @@ class OhlcDatasetContractTest(unittest.TestCase):
         for interval, expected in manifest["datasets"].items():
             records = load_dataset(directory / expected["file"])
             actual = dataset_metadata(records, interval_minutes=int(interval))
+            for key in ("sha256", "bars", "start_utc", "end_utc"):
+                self.assertEqual(actual[key], expected[key])
+
+    def test_versioned_t212_manifest_matches_frozen_files(self):
+        root = Path(__file__).resolve().parents[1]
+        directory = root / "offline/research/t212_dataset"
+        manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+        for expected in manifest["datasets"].values():
+            records = load_dataset(directory / expected["file"])
+            actual = dataset_metadata(records)
             for key in ("sha256", "bars", "start_utc", "end_utc"):
                 self.assertEqual(actual[key], expected[key])
 

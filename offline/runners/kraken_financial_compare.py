@@ -25,7 +25,7 @@ import kraken_financial_benchmark as benchmark  # noqa: E402
 from offline.backtests.hype_candidates import (  # noqa: E402
     financial_priority_candidates,
 )
-from offline.backtests.promotion import evaluate_promotion  # noqa: E402
+from offline.backtests.promotion import evaluate_dual_promotion  # noqa: E402
 from strategies.spot_dca import StratParams  # noqa: E402
 
 
@@ -74,7 +74,7 @@ def build_comparison(args) -> dict:
                     "profilul live regenerat diferă de baseline-ul versionat"
                 )
             live_report = report
-        gate = evaluate_promotion(baseline_report, report)
+        gate = evaluate_dual_promotion(baseline_report, report)
         results[candidate.name] = {
             "description": candidate.description,
             "overrides": candidate.overrides,
@@ -112,13 +112,17 @@ def markdown_report(report: dict) -> str:
         "Set preînregistrat; aceleași 31 ferestre OOS și aceleași costuri pentru toți.",
         "Niciun candidat nu este activat de acest runner.", "",
         "| Candidate | Scenario | Mean % | Δ mean pp | Worst % | Δ worst pp | "
-        "Δ DD pp | W/T/L | Active | Sign p | Gate |",
+        "Δ DD pp | Return W/T/L | Calmar Δ | DD W/T/L | Return/Risk |",
         "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
     ]
     for name, candidate in report["candidates"].items():
         for scenario_name, aggregate in candidate["scenarios"].items():
-            gate = candidate["promotion_gate"]["scenarios"][scenario_name]
+            dual = candidate["promotion_gate"]
+            gate = dual["return_gate"]["scenarios"][scenario_name]
+            risk = dual["defensive_gate"]["scenarios"][scenario_name]
             wtl = gate["wins_ties_losses"]
+            dd_wtl = risk["drawdown_wins_ties_losses"]
+            calmar_delta = risk["median_calmar_improvement_ratio"]
             lines.append(
                 f"| `{name}` | `{scenario_name}` | "
                 f"{_fmt(aggregate['mean_return_pct'], signed=True)} | "
@@ -127,9 +131,10 @@ def markdown_report(report: dict) -> str:
                 f"{_fmt(gate['worst_return_delta_pp'], signed=True)} | "
                 f"{_fmt(gate['worst_drawdown_delta_pp'], signed=True)} | "
                 f"{wtl['wins']}/{wtl['ties']}/{wtl['losses']} | "
-                f"{gate['active_windows']} | "
-                f"{gate['one_sided_sign_pvalue']:.3f} | "
-                f"{'PASS' if gate['passed'] else 'FAIL'} |"
+                f"{_fmt(calmar_delta * 100.0, signed=True) + '%' if calmar_delta is not None else 'n/a'} | "
+                f"{dd_wtl['wins']}/{dd_wtl['ties']}/{dd_wtl['losses']} | "
+                f"{'PASS' if gate['passed'] else 'FAIL'}/"
+                f"{'PASS' if risk['passed'] else 'FAIL'} |"
             )
     lines.extend([
         "", "## Verdict", "",
@@ -197,7 +202,7 @@ def main() -> int:
         print(
             f"{name}: central={central['mean_return_pct']:+.3f}% "
             f"stress={stress['mean_return_pct']:+.3f}% "
-            f"gate={'PASS' if candidate['promotion_gate']['promote'] else 'FAIL'}"
+            f"gate={'/'.join(candidate['promotion_gate']['promotion_paths']) or 'FAIL'}"
         )
     return 0
 

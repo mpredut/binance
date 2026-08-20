@@ -138,6 +138,33 @@ class T212ReplayTest(unittest.TestCase):
         self.assertAlmostEqual(engine.s["cost_usd"], 100.0)
         self.assertAlmostEqual(engine._avg_cost(), 100.0)
 
+    def test_dust_sell_does_not_create_zero_quantity_order(self):
+        params = _params()
+        engine = strategy.Strategy(
+            MagicMock(), "TEST_US_EQ", params, dry_run=True,
+            initial_state=strategy._new_state(), fx_to_usd=1.0,
+        )
+
+        self.assertFalse(engine._place_sell(0.004, 110.0))
+        self.assertEqual(engine.s["orders"], [])
+
+    def test_partial_fill_worst_case_handles_fractional_dust(self):
+        params = _params(STRAT_ENTRY="1", STRAT_TAKEPROFIT_PCT="1")
+        bars = [
+            (100.0, 101.0, 99.0, 100.0),
+            (100.0, 102.0, 99.0, 101.0),
+            (101.0, 103.0, 100.0, 102.0),
+        ]
+
+        result = replay.run_replay(
+            bars, params, bar_minutes=1440,
+            execution=replay.ExecutionModel(
+                partial_fill_ratio=0.75, intrabar_policy="worst_case",
+            ),
+        )
+
+        self.assertGreaterEqual(result["fills"], 1)
+
     def test_paper_stop_arms_same_rebuy_as_real_path(self):
         params = _params(STRAT_SL_REBUY_ENABLED="true", STRAT_SL_REBUY_BOUNCE_PCT="1.2")
         engine = strategy.Strategy(

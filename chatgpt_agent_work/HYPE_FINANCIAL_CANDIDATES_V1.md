@@ -38,6 +38,11 @@ Baseline: central `+0,590%`, stress `+0,203%`.
 - Afirmația „Calmar +31%” provenea din raportul agregat return/worst-DD, nu din
   Calmar calculat pe fold-uri. Median Calmar scade `18,31→14,30` central și
   `14,87→11,42` stress; candidatul nu este superior risk-adjusted în ansamblu.
+- Gate-ul defensiv formalizat confirmă verdictul: Calmar median al `dca_vol_m1`
+  scade cu `21,9%` central și `23,2%` stress. `dca15` și
+  `dca_progressive025` au Calmar median neschimbat și numai 5–8 ferestre cu DD
+  diferit, sub minimum 10. Niciun candidat nu trece calea `RETURN` sau
+  `DEFENSIVE`.
 - `B` este prea brutal: protejează tail-ul, dar sacrifică randamentul.
 - `overlay650t8` are cea mai mare medie centrală și cel mai bun tail, însă pierde
   mai multe ferestre decât câștigă și nu atinge îmbunătățirea minimă în stress.

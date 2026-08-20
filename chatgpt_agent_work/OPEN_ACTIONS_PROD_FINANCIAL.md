@@ -5,7 +5,7 @@ Data consolidării: 2026-08-20
 ## Starea de la care continuăm
 
 - Codul provider-agnostic și fundația de validare sunt integrate în `main`.
-- Suita locală pe codul final: `762 passed`, `235 subtests passed`.
+- Suita locală pe codul final: `773 passed`, `235 subtests passed`.
 - Benchmark HYPE reproductibil: `VERIFY OK`.
 - Baseline HYPE: central `+0,590%`, stress `+0,203%`.
 - Niciun candidat existent nu este aprobat pentru bani reali.
@@ -50,7 +50,7 @@ Data consolidării: 2026-08-20
 
 ## B. Priorități financiare locale
 
-### F1 — două culoare de promovare
+### F1 — două culoare de promovare — FINALIZAT
 
 Extinde gate-ul actual fără să schimbi strategia live:
 
@@ -66,14 +66,15 @@ Candidat -> gate-uri comune -> RETURN gate ------> eligibil RETURN
 - Verdictul `OR` produce o etichetă (`RETURN` sau `DEFENSIVE`), nu o promovare live
   nediferențiată. Urmează obligatoriu shadow și aprobare explicită.
 
-Ordinea reevaluării:
+Rezultatul reevaluării:
 
-1. `dca15` — cel mai bun candidat one-factor pentru pista defensivă;
-2. `dca_progressive025` — neutru central, mai bun în stress;
-3. `dca_vol_m1` — control final, probabil respins deoarece median Calmar și Sortino
-   sunt mai slabe chiar dacă worst-fold/DD se îmbunătățesc.
+1. `dca15` — Calmar median neschimbat și numai 5–6 fold-uri DD active;
+2. `dca_progressive025` — 7–8 fold-uri DD active, tot sub prag;
+3. `dca_vol_m1` — respins: Calmar median `-21,9%/-23,2%` central/stress.
 
-### F2 — baseline Trading212
+Niciun candidat nu trece `RETURN` sau `DEFENSIVE`; live rămâne neschimbat.
+
+### F2 — baseline Trading212 — FINALIZAT CA FUNDAȚIE
 
 1. Îngheață dataseturile Yahoo per profil NVDA/RGNT/SPCX cu manifest și hash.
 2. Rulează configurația live exactă prin același engine live/replay.
@@ -82,15 +83,15 @@ Ordinea reevaluării:
    numai pentru un profil cu moneda contului diferită de moneda activului.
 5. Preînregistrează maximum câțiva candidați one-factor înaintea comparației.
 
-### F3 — propunerile Binance, după T212
+### F3 — propunerile Binance — REVALIDAT, FĂRĂ SCHIMBARE
 
-Revalidează pe codul și datele curente, fără promovare directă, ipotezele vechi:
+Ipotezele vechi au fost revalidate pe aproximativ 894.000 observații BTC:
 
-- `mt.gain`: `5,5 -> 5,0`;
-- `mt.maxage_days`: `10,5 -> 14`.
+- `mt.gain`: prima jumătate preferă `7,0`, a doua `5,0`;
+- `mt.maxage_days`: prima jumătate preferă `14`, a doua valoarea live `10,5`.
 
-Rezultatele existente provin dintr-un commit mai vechi și din numai două jumătăți
-de eșantion; au nevoie de walk-forward, costuri și gate-urile curente.
+Propunerile nu mai sunt confirmate în ambele ferestre; configurația rămâne
+`5,5` și `10,5`.
 
 ## Ce nu mai merită prioritate acum
 

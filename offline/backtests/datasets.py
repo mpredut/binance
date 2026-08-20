@@ -90,6 +90,40 @@ def validate_dataset(records: Iterable[Mapping], *, interval_minutes: int | None
     return rows
 
 
+def drop_incomplete_last_bar(
+    records: Iterable[Mapping],
+    *,
+    interval_minutes: int,
+    now_timestamp: int,
+    regular_session_start: int | None = None,
+    regular_session_end: int | None = None,
+) -> list[dict]:
+    """Elimină numai coada de lumânări Yahoo încă în formare.
+
+    Pentru intraday, timestamp-ul este începutul barei. Pentru bare zilnice,
+    Yahoo folosește începutul sesiunii, deci în timpul sesiunii comparăm cu
+    capătul ``regular`` furnizat în metadata răspunsului.
+    """
+    if interval_minutes <= 0:
+        raise ValueError("interval_minutes trebuie să fie pozitiv")
+    rows = [normalize_record(record) for record in records]
+    if not rows:
+        return rows
+    if interval_minutes >= 1440:
+        last_timestamp = int(rows[-1]["timestamp"])
+        in_open_session = (
+            regular_session_start is not None
+            and regular_session_end is not None
+            and int(regular_session_start) <= last_timestamp < int(regular_session_end)
+            and int(now_timestamp) < int(regular_session_end)
+        )
+        return rows[:-1] if in_open_session else rows
+    interval_seconds = interval_minutes * 60
+    while rows and int(rows[-1]["timestamp"]) + interval_seconds > int(now_timestamp):
+        rows.pop()
+    return rows
+
+
 def dataset_metadata(records: Iterable[Mapping], *, interval_minutes: int | None = None) -> dict:
     rows = validate_dataset(records, interval_minutes=interval_minutes)
     return {
