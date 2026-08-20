@@ -32,6 +32,7 @@ from ipo_common import log, now_str, float_env, are_close
 from ipo_notify import notify
 from market_data import get_eur_usd, get_usd_ron, get_price_usd, t212_to_yahoo, trend_slope_pct
 from t212_client import T212Client
+from strategies.state_store import JsonStateStore
 
 FX_FEE_PCT = 0.15  # taxa conversie valutara T212, per directie
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -191,6 +192,7 @@ class Strategy:
         self._trend_slope_provider = trend_slope_provider or trend_slope_pct
         self.fx_to_usd = self._fx_to_usd(params.currency) if fx_to_usd is None else fx_to_usd
         self.state_file = state_path_for(ticker)
+        self._state_write_failed = False
         self.s = initial_state if initial_state is not None else self._load()
         self._paper_seq = 0
 
@@ -214,26 +216,19 @@ class Strategy:
         return 1.0
 
     # -- persistenta -----------------------------------------------------------
+    def _store(self) -> JsonStateStore:
+        return JsonStateStore(
+            self.state_file, _new_state, label="T212",
+            logger=log, fail_closed=not self.dry_run,
+        )
+
     def _load(self) -> dict:
-        if os.path.exists(self.state_file):
-            try:
-                with open(self.state_file, "r", encoding="utf-8") as f:
-                    st = json.load(f)
-                # migrare: completeaza cheile noi lipsa (ex. net/fees din versiuni vechi)
-                merged = _new_state()
-                merged.update(st)
-                log(f"  [STRAT] stare incarcata (ciclu {merged.get('cycle')}, qty {merged.get('qty')})")
-                return merged
-            except (OSError, ValueError) as e:
-                log(f"  ! [STRAT] nu pot citi starea ({e}), pornesc curat")
-        return _new_state()
+        return self._store().load()
 
     def _save(self) -> None:
-        try:
-            with open(self.state_file, "w", encoding="utf-8") as f:
-                json.dump(self.s, f, indent=2)
-        except OSError as e:
-            log(f"  ! [STRAT] nu pot salva starea: {e}")
+        self._state_write_failed = True
+        if self._store().save(self.s):
+            self._state_write_failed = False
 
     # -- helperi ---------------------------------------------------------------
     def _avg_cost(self) -> float | None:
@@ -797,6 +792,10 @@ class Strategy:
                     time.sleep(self.p.check_minutes * 60)
                     continue
                 try:
+                    # Dupa o eroare de disc, nu mai luam decizii noi pana cand
+                    # snapshot-ul curent poate fi persistat din nou.
+                    if self._state_write_failed:
+                        self._save()
                     self.reconcile(price)
                     self.step(price)
                     self._save()

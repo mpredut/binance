@@ -8,7 +8,6 @@ regulile financiare raman o singura implementare pentru live si replay.
 
 from __future__ import annotations
 
-import json
 import math
 import os
 import statistics
@@ -22,6 +21,7 @@ from botcore import are_close, float_env, log
 from providers.strategy_executor import ProviderError, StrategyExecutor
 
 from . import spot_dca_rules as sr
+from .state_store import JsonStateStore
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _LEGACY_STATE_DIR = os.path.join(_ROOT, "kraken")
@@ -245,44 +245,19 @@ class Strategy:
         (self._notifier or notify)(**event)
 
     # -- persistenta -----------------------------------------------------------
+    def _store(self) -> JsonStateStore:
+        return JsonStateStore(
+            self.state_file, _new_state, label=self.venue_label,
+            logger=log, fail_closed=not self.dry_run,
+        )
+
     def _load(self) -> dict:
-        if os.path.exists(self.state_file):
-            try:
-                with open(self.state_file, "r", encoding="utf-8") as f:
-                    st = json.load(f)
-                if not isinstance(st, dict):
-                    raise ValueError("radacina JSON nu este obiect")
-                merged = _new_state()
-                merged.update(st)
-                log(f"  [STRAT] stare incarcata (ciclu {merged.get('cycle')}, qty {merged.get('qty')})")
-                return merged
-            except (OSError, TypeError, ValueError) as e:
-                message = f"stare {self.venue_label} invalida in {self.state_file}: {e}"
-                if not self.dry_run:
-                    # Fail closed: un restart "curat" ar putea cumpara din nou
-                    # peste o pozitie/un ordin real pe care tocmai l-am uitat.
-                    raise RuntimeError(message) from e
-                log(f"  ! [STRAT] {message}; reset permis doar in PAPER")
-        return _new_state()
+        return self._store().load()
 
     def _save(self) -> None:
-        tmp = f"{self.state_file}.tmp.{os.getpid()}"
-        try:
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self.s, f, indent=2)
-                f.flush()
-                os.fsync(f.fileno())
-            os.replace(tmp, self.state_file)
+        self._state_write_failed = True
+        if self._store().save(self.s):
             self._state_write_failed = False
-        except OSError as e:
-            log(f"  ! [STRAT] nu pot salva starea: {e}")
-            self._state_write_failed = True
-            try:
-                os.remove(tmp)
-            except OSError:
-                pass
-            if not self.dry_run:
-                raise RuntimeError(f"persistenta starii {self.venue_label} a esuat: {e}") from e
 
     # -- helperi ---------------------------------------------------------------
     def _avg(self) -> float | None:

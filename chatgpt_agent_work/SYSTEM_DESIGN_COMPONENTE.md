@@ -745,6 +745,23 @@ Directorul stării și notificatorul sunt injectabile. Fallback-ul implicit răm
 `kraken/.state_<PAIR>.json`, ca upgrade-ul codului live să nu creeze o stare nouă.
 `kraken/strategy.py` și `kraken/strat_rules.py` sunt shim-uri pentru comenzile vechi.
 
+### Persistența stării financiare
+
+```text
+spot_dca / T212 strategy
+          │ load/save
+          ▼
+ strategies/state_store.py
+   ├── merge cu schema implicită
+   ├── JSON temporar + flush + fsync
+   ├── os.replace atomic
+   └── REAL: fail-closed / PAPER: reset permis
+```
+
+Un fișier corupt nu mai poate arăta ca o poziție goală în T212 după restart. O eroare
+de scriere reală blochează următoarele decizii până când snapshot-ul curent poate fi
+salvat; calea și schema fișierelor existente nu se schimbă.
+
 ## 19. Componentă: `TrailingCore`
 
 ### State per asset

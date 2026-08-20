@@ -548,6 +548,8 @@ Reducere cumulată estimată: 15–25% din codul activ relevant.
 Status 2026-08-20: motorul spot DCA/trailing și regulile sale pure au fost mutate în
 `strategies/`; live Kraken și replay folosesc aceeași implementare. T212 și HL rămân
 intenționat motoare separate, deoarece regulile lor financiare nu sunt echivalente.
+Persistența Kraken/T212 folosește acum aceeași primitivă atomică și fail-closed;
+fișierele și schemele existente rămân compatibile.
 
 Reducere cumulată estimată: 20–30% din codul activ.
 

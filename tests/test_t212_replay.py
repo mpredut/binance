@@ -1,10 +1,12 @@
 """Trading212 replay rulează motorul live și păstrează contabilitatea parțială."""
 
 import importlib.util
+import json
 import os
 import sys
+import tempfile
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -140,6 +142,65 @@ class T212ReplayTest(unittest.TestCase):
         params = _params(STRAT_DCA_TREND_GATE_PCT="0.1")
         with self.assertRaisesRegex(ValueError, "5 minute"):
             replay.run_replay([(100, 101, 99, 100)], params, bar_minutes=1440)
+
+
+class T212StatePersistenceTest(unittest.TestCase):
+    @staticmethod
+    def _client():
+        return MagicMock()
+
+    def test_corrupt_state_fails_closed_live_but_may_reset_in_paper(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "state.json")
+            with open(path, "w", encoding="utf-8") as handle:
+                handle.write("not-json")
+            with patch.object(strategy, "state_path_for", return_value=path):
+                with self.assertRaisesRegex(RuntimeError, "stare T212 invalida"):
+                    strategy.Strategy(
+                        self._client(), "TEST_US_EQ", _params(), dry_run=False,
+                        fx_to_usd=1.0,
+                    )
+                paper = strategy.Strategy(
+                    self._client(), "TEST_US_EQ", _params(), dry_run=True,
+                    fx_to_usd=1.0,
+                )
+            self.assertEqual(paper.s, strategy._new_state())
+
+    def test_live_save_is_atomic(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "state.json")
+            engine = strategy.Strategy(
+                self._client(), "TEST_US_EQ", _params(), dry_run=False,
+                initial_state=strategy._new_state(), fx_to_usd=1.0,
+            )
+            engine.state_file = path
+            engine.s["qty"] = 1.25
+
+            engine._save()
+
+            with open(path, encoding="utf-8") as handle:
+                self.assertEqual(json.load(handle)["qty"], 1.25)
+            self.assertEqual(os.listdir(directory), ["state.json"])
+
+    def test_failed_save_marks_state_dirty_and_live_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = os.path.join(directory, "state.json")
+            for dry_run in (True, False):
+                with self.subTest(dry_run=dry_run):
+                    engine = strategy.Strategy(
+                        self._client(), "TEST_US_EQ", _params(), dry_run=dry_run,
+                        initial_state=strategy._new_state(), fx_to_usd=1.0,
+                    )
+                    engine.state_file = path
+                    with patch(
+                        "strategies.state_store.os.replace", side_effect=OSError("disk")
+                    ):
+                        if dry_run:
+                            engine._save()
+                        else:
+                            with self.assertRaisesRegex(RuntimeError, "persistenta"):
+                                engine._save()
+                    self.assertTrue(engine._state_write_failed)
 
 
 if __name__ == "__main__":

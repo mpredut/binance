@@ -26,6 +26,10 @@ sunt injectabile, dar fallback-ul Kraken păstrează exact fișierul de stare ex
 T212 și Hyperliquid nu sunt alias-uri ale acestui motor: providerii lor satisfac
 contractul mecanic, însă strategiile financiare distincte rămân separate.
 
+`strategies/state_store.py` centralizează snapshot-urile financiare pentru motorul
+spot și T212. Scrierea este atomică (`fsync` urmat de `os.replace`); în mod real,
+starea coruptă sau nesalvabilă oprește deciziile, în timp ce PAPER poate porni curat.
+
 ### HYPE pe Hyperliquid (SPOT)
 `providers/hyperliquid_provider.py`:
 - preț/history **public** HL (perechea @index, ex `@107` = HYPE/USDC);
