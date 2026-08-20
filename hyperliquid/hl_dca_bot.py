@@ -30,16 +30,21 @@ from providers.hyperliquid_provider import HyperliquidProvider
 
 
 def main() -> int:
+    # Configurația trebuie încărcată înainte de valorile implicite CLI și înainte
+    # de calculul modului PAPER/REAL. `.env` câștigă deoarece load_dotenv nu
+    # suprascrie variabile deja definite.
+    load_dotenv(os.path.join(_HERE, ".env"))
+    load_dotenv(os.path.join(_HERE, "config.env"))
+
     ap = argparse.ArgumentParser(description="base v2 (spot_dca) pe Hyperliquid HYPE.")
     ap.add_argument("--paper", action="store_true", help="Forteaza PAPER (fara bani)")
     ap.add_argument("--token", default=os.environ.get("HL_SPOT_TOKEN") or "HYPE")
     args = ap.parse_args()
 
-    load_dotenv(os.path.join(_HERE, ".env"))
-    load_dotenv(os.path.join(_HERE, "config.env"))
-
     token = (args.token or "HYPE").upper()
-    strat_dry = args.paper or not (os.environ.get("STRAT_EXECUTE", "false").lower() == "true")
+    strategy_enabled = os.environ.get("STRAT_EXECUTE", "false").lower() == "true"
+    venue_enabled = os.environ.get("HL_LIVE_ORDERS", "false").lower() == "true"
+    strat_dry = args.paper or not (strategy_enabled and venue_enabled)
     if not any(a in sys.argv for a in ()):  # (rezervat pt viitoare comenzi one-shot)
         single_instance(f"hl_dca_bot_{token}")   # o instanta per token (nu se bate cu dn/hl_bot)
 
