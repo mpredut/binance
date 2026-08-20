@@ -97,4 +97,3 @@ def evaluate_promotion(
         "thresholds": asdict(limits),
         "scenarios": scenario_results,
     }
-
