@@ -324,6 +324,10 @@ class Strategy:
             self.s["orders"].append({"txid": txid, "side": side, "vol": vol, "price": price,
                                      "amount": amount, "kind": kind, "market": market,
                                      "intent_id": intent_id, "ts": time.time()})
+            # Inchide cat mai mult fereastra de crash dintre acceptarea la venue
+            # si snapshot-ul de la finalul tick-ului. In live, un order_id acceptat
+            # trebuie sa fie durabil inaintea oricarei alte decizii.
+            self._save()
             return True
         except ProviderError as e:
             log(f"  ! [STRAT] {side} {kind} esuat: {e}")
@@ -356,6 +360,9 @@ class Strategy:
             return False
         o["cancel_requested"] = True
         o["cancel_ts"] = time.time()
+        # Pastreaza intentia de cancel peste restart; ordinul ramane urmarit pana
+        # cand statusul terminal confirma inclusiv orice fill concurent.
+        self._save()
         log(f"  [STRAT] cancel solicitat {o['side']} {o['txid']} — astept status terminal")
         return True
 

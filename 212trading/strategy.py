@@ -345,6 +345,7 @@ class Strategy:
             "limit": round(limit, 2), "amount": amount, "kind": kind,
             "intent_id": intent_id, "market": False, "ts": self._now(),
         })
+        self._save()
 
     def _place_sell(self, qty: float, limit: float, level: float | None = None,
                     kind: str = "TP", *, market: bool = False) -> bool:
@@ -394,6 +395,7 @@ class Strategy:
             "limit": round(limit, 2), "kind": kind, "level": level,
             "intent_id": intent_id, "market": market, "ts": self._now(),
         })
+        self._save()
         return True
 
     def _cancel_open(self, side: str) -> bool:
@@ -403,17 +405,24 @@ class Strategy:
         return self._cancel_specific(o)
 
     def _cancel_specific(self, o: dict) -> bool:
-        if not self.dry_run and not str(o["id"]).startswith("PAPER"):
-            try:
-                self.executor.cancel_order_with_intent(
-                    o.get("intent_id") or f"legacy-t212-{self.ticker}-{o['id']}",
-                    self.ticker, str(o["id"]),
-                )
-            except ProviderError as exc:
-                log(f"  ! [STRAT] cancel esuat pentru {o['id']}: {exc} — ordinul ramane urmarit")
-                return False
-        self._remove_order(o)
-        log(f"  [STRAT] anulat ordin {o.get('side', '?')} {o['id']}")
+        if self.dry_run or str(o["id"]).startswith("PAPER"):
+            self._remove_order(o)
+            log(f"  [STRAT] anulat ordin {o.get('side', '?')} {o['id']}")
+            return True
+        if o.get("cancel_requested"):
+            return True
+        try:
+            self.executor.cancel_order_with_intent(
+                o.get("intent_id") or f"legacy-t212-{self.ticker}-{o['id']}",
+                self.ticker, str(o["id"]),
+            )
+        except ProviderError as exc:
+            log(f"  ! [STRAT] cancel esuat pentru {o['id']}: {exc} — ordinul ramane urmarit")
+            return False
+        o["cancel_requested"] = True
+        o["cancel_ts"] = self._now()
+        self._save()
+        log(f"  [STRAT] cancel solicitat {o.get('side', '?')} {o['id']} — astept status terminal")
         return True
 
     def _cancel_all_orders(self) -> bool:
@@ -432,6 +441,8 @@ class Strategy:
         for o in [x for x in self.s["orders"] if x["side"] == "SELL" and x.get("level") is None]:
             if not self._cancel_specific(o):
                 return  # nu suprapune scara peste un SELL care poate fi inca activ
+            if o in self.s["orders"]:
+                return  # live: cererea e acceptata, dar asteptam statusul terminal
         sold = set(self.s.get("tp_sold_levels", []))
         remaining = [(lvl, frac) for (lvl, frac) in self.p.tp_ladder if lvl not in sold]
         total = sum(f for _, f in remaining)
@@ -455,7 +466,7 @@ class Strategy:
         for lvl, o in list(open_sells.items()):
             d = desired.get(lvl)
             if d is None or abs(o["limit"] - d[1]) / d[1] > 0.001 or abs(o["qty"] - d[0]) > 1e-6:
-                if self._cancel_specific(o):
+                if self._cancel_specific(o) and o not in self.s["orders"]:
                     open_sells.pop(lvl, None)
         # plaseaza nivelele lipsa; daca o transa esueaza persistent (ex. T212 min-opened-position
         # pe ultima dintr-o pozitie fractionara mica), BACKOFF 30 min in loc de retry la fiecare tick
@@ -881,7 +892,7 @@ class Strategy:
                 if sell is None:
                     self._place_sell(held, target)
                 elif abs(sell["limit"] - target) / target > 0.001 or abs(sell["qty"] - held) > 1e-6:
-                    if self._cancel_open("SELL"):
+                    if self._cancel_open("SELL") and sell not in self.s["orders"]:
                         self._place_sell(held, target)
 
         prag_dca = (self.s["last_buy_price"] * (1 - self.p.dca_drop_pct / 100)

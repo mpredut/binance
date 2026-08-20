@@ -229,6 +229,7 @@ class _FillClient:
             "id": "SELL-1", "ticker": "TEST_US_EQ", "status": "PARTIALLY_FILLED",
             "filledQuantity": 0.5, "filledValue": 55.0,
         }
+        self.cancel_calls = []
 
     def get_portfolio(self):
         return self.portfolio
@@ -238,6 +239,10 @@ class _FillClient:
 
     def get_order_status(self, order_id):
         return self.status
+
+    def cancel_order(self, order_id):
+        self.cancel_calls.append(order_id)
+        return True
 
 
 class T212ExactFillReconciliationTest(unittest.TestCase):
@@ -333,6 +338,41 @@ class T212ExactFillReconciliationTest(unittest.TestCase):
                 engine._reconcile_real(90.0)
         self.assertEqual(engine.s["dca_buys"], 1)
 
+    def test_fill_racing_with_accepted_cancel_is_still_reconciled_exactly(self):
+        client = _FillClient()
+        client.portfolio = [{
+            "ticker": "TEST_US_EQ", "quantity": 1.0, "averagePrice": 100.0,
+        }]
+        client.active = [{"id": "SELL-1", "ticker": "TEST_US_EQ"}]
+        client.status = {
+            "id": "SELL-1", "ticker": "TEST_US_EQ", "status": "CONFIRMED",
+            "filledQuantity": 0.0, "filledValue": 0.0,
+        }
+        with tempfile.TemporaryDirectory() as audit_dir:
+            engine = self._engine(client, audit_dir)
+            order = engine.s["orders"][0]
+
+            self.assertTrue(engine._cancel_specific(order))
+            self.assertIn(order, engine.s["orders"])
+
+            # O jumatate se executa chiar in cursa cu anularea. Statusul terminal
+            # trebuie citit inainte sa uitam ordinul, altfel P&L-ul ar folosi poll price.
+            client.portfolio = [{
+                "ticker": "TEST_US_EQ", "quantity": 0.5, "averagePrice": 100.0,
+            }]
+            client.active = []
+            client.status = {
+                "id": "SELL-1", "ticker": "TEST_US_EQ", "status": "CANCELLED",
+                "filledQuantity": 0.5, "filledValue": 55.0,
+            }
+            with patch.object(strategy, "notify"):
+                engine._reconcile_real(150.0)
+
+        self.assertEqual(engine.s["orders"], [])
+        self.assertAlmostEqual(engine.s["qty"], 0.5)
+        self.assertAlmostEqual(engine.s["realized_pnl_usd"], 5.0)
+        self.assertAlmostEqual(engine.s["last_sell_price"], 110.0)
+
 
 class _CancelClient:
     def __init__(self, cancel_result=False):
@@ -422,9 +462,48 @@ class T212CancellationLifecycleTest(unittest.TestCase):
             self.assertTrue(engine._check_stop_loss(70.0))
         self.assertEqual(len(client.place_calls), 1)
         self.assertEqual(client.place_calls[0][0], "market")
-        self.assertEqual(len(engine.s["orders"]), 1)
-        self.assertEqual(engine.s["orders"][0]["kind"], "SL")
-        self.assertTrue(engine.s["orders"][0]["market"])
+        self.assertEqual(len(engine.s["orders"]), 2)
+        self.assertTrue(old["cancel_requested"])
+        stop = next(o for o in engine.s["orders"] if o.get("kind") == "SL")
+        self.assertTrue(stop["market"])
+
+    def test_accepted_cancel_stays_tracked_and_is_not_submitted_twice(self):
+        client = _CancelClient(True)
+        engine = self._engine(client)
+        order = self._order()
+        engine.s["orders"] = [order]
+
+        self.assertTrue(engine._cancel_specific(order))
+        self.assertTrue(engine._cancel_specific(order))
+
+        self.assertEqual(engine.s["orders"], [order])
+        self.assertTrue(order["cancel_requested"])
+        self.assertEqual(client.cancel_calls, ["OLD-1"])
+
+    def test_ladder_waits_for_terminal_cancel_before_replacement(self):
+        client = _CancelClient(True)
+        engine = self._engine(client, STRAT_TP_LADDER="10:100")
+        old = self._order(level=10.0, qty=0.5, limit=109.0)
+        engine.s["orders"] = [old]
+
+        engine._manage_tp_ladder(held=1.0, avg=100.0)
+
+        self.assertTrue(old["cancel_requested"])
+        self.assertEqual(engine.s["orders"], [old])
+        self.assertEqual(client.place_calls, [])
+
+    def test_live_submit_and_cancel_are_persisted_immediately(self):
+        client = _CancelClient(True)
+        engine = self._engine(client)
+        engine._save = MagicMock()
+
+        self.assertTrue(engine._place_sell(1.0, 110.0))
+        engine._save.assert_called_once()
+
+        engine._save.reset_mock()
+        order = engine.s["orders"][0]
+        self.assertTrue(engine._cancel_specific(order))
+        engine._save.assert_called_once()
 
     def test_trailing_exit_is_market_and_is_not_replaced_while_pending(self):
         client = _CancelClient(True)

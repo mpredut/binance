@@ -30,9 +30,10 @@ contractul mecanic, însă strategiile financiare distincte rămân separate.
 spot și T212. Scrierea este atomică (`fsync` urmat de `os.replace`); în mod real,
 starea coruptă sau nesalvabilă oprește deciziile, în timp ce PAPER poate porni curat.
 
-Motorul T212 păstrează local un ordin până când cererea de anulare este acceptată.
-Dacă anularea eșuează, nu plasează repricing, scară TP sau ieșire STOP/trailing peste
-ordinul posibil activ; reîncearcă la următorul ciclu de reconciliere.
+Motorul T212 păstrează local un ordin până când venue-ul raportează status terminal,
+inclusiv după acceptarea cererii de anulare. Dacă anularea eșuează sau este încă în curs,
+nu plasează repricing/scară TP peste ordinul posibil activ; STOP/trailing poate trimite
+ieșirea urgentă după acceptarea anulărilor, dar ambele ordine rămân reconciliate.
 
 Motorul T212 folosește `T212Provider` pentru întreg ciclul submit/status/cancel, dar își
 păstrează regulile financiare distincte și feed-ul Yahoo. Cantitatea poziției rămâne

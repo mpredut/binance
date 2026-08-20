@@ -7,6 +7,7 @@ Provider FAKE (fara retea)."""
 import os
 import sys
 import unittest
+from unittest.mock import MagicMock
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -76,11 +77,13 @@ class ProviderLivePathTest(unittest.TestCase):
         self.assertEqual((self.s.price_dec, self.s.vol_dec), (2, 8))
 
     def test_place_cheama_submit_order_si_stocheaza_order_id(self):
+        self.s._save = MagicMock()
         self.s._place("buy", 1.0, 60.0, kind="ENTRY", amount=650.0)
         sub = [c for c in self.fake.calls if c[0] == "submit_order"]
         self.assertEqual(len(sub), 1)
         self.assertEqual(sub[0][1:4], ("HYPEUSD", "buy", 1.0))
         self.assertEqual(self.s.s["orders"][-1]["txid"], "OID-1")
+        self.s._save.assert_called_once()
 
     def test_place_market_propaga_flagul(self):
         self.s.s["qty"] = 5.0
@@ -105,6 +108,7 @@ class ProviderLivePathTest(unittest.TestCase):
         self.assertEqual(self.s.s["orders"], [])         # ordinul consumat
 
     def test_cancel_open_cheama_cancel_order(self):
+        self.s._save = MagicMock()
         self.s.s["orders"] = [{"txid": "OID-7", "side": "buy", "vol": 1.0, "price": 60.0,
                                "amount": 60.0, "kind": "ENTRY", "ts": 0}]
         self.s._cancel_open("buy")
@@ -112,6 +116,7 @@ class ProviderLivePathTest(unittest.TestCase):
         # Ordinul ramane urmarit pana la status terminal, pentru a nu pierde
         # un fill concurent cu anularea.
         self.assertTrue(self.s.s["orders"][0]["cancel_requested"])
+        self.s._save.assert_called_once()
 
 
 if __name__ == "__main__":

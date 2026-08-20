@@ -705,9 +705,9 @@ t212_bot process
 - take-profit ladder;
 - catastrophic stop loss;
 - pending-order awareness;
-- anularea nereușită păstrează ordinul în starea locală; repricing-ul, scara TP și
-  ieșirile STOP/trailing nu suprapun un ordin nou peste unul pe care T212 nu l-a
-  confirmat ca acceptat pentru anulare;
+- ordinul anulat rămâne în starea locală până la status terminal, astfel încât un
+  partial fill concurent cu anularea să fie contabilizat exact; repricing-ul și scara
+  TP nu suprapun ordinul aflat încă în anulare;
 - FX fee/account currency.
 
 ### Boundary
@@ -733,7 +733,8 @@ Motorul autonom folosește adaptorul strict pentru submit/status/cancel. Delta c
 este confirmată de portfolio, iar prețul exact vine din fill-urile cumulative ale
 ordinului. Marcajele `applied_fill_*` previn reaplicarea unui partial fill la poll-ul
 următor. TP/scara sunt LIMIT; STOP și trailing sunt MARKET și nu pot rămâne în urmă
-într-un gap descendent.
+într-un gap descendent. Submit-ul acceptat și intenția de cancel sunt persistate imediat,
+înaintea snapshot-ului obișnuit de la finalul tick-ului.
 
 ```text
 Strategy / spot_dca
