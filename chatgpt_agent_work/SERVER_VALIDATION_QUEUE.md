@@ -2,6 +2,28 @@
 
 Pregătită: 2026-08-20. Nu conține parole sau secrete.
 
+## Execuție 2026-08-20, 18:15–18:33 EEST
+
+- fingerprint-ul ED25519 prezentat de ambele servere a coincis cu cheia cunoscută;
+- producția avea checkout curat pe `8a48c83`; procesul HYPE pornise la 17:47,
+  înaintea commitului de la 18:14, deci încărcase `aa754a1`. Noul sizing este
+  implicit `OFF`, așadar deciziile live nu diferă;
+- healthcheck: toate componentele `ok`; un proces HYPE principal, un T212 și două
+  instanțe Kraken intenționat distincte (`ADAUSD --paper`, `TAOUSD`), toate PPID 1;
+- Kraken/T212 nu aveau `Traceback`, excepții critice sau stare coruptă în
+  ferestrele recente. Restartul HYPE de la 13:42 a păstrat coerent `qty=0`; lock-ul
+  a respins o a doua pornire concurentă;
+- ancorele shadow 60m/240m au rămas intacte. Forward-ul nu acumulase încă cicluri
+  sau divergențe utile;
+- auditul real conținea un singur ordin LIMIT TAOUSD: acceptat, observat `open`,
+  apoi anulat după TTL, fără fill. Calibrarea rămâne la `0/20` mostre necesare;
+- dev a fost testat pe `114c016`: baseline `VERIFY OK`, niciun candidat
+  promovabil, `762 passed`, `235 subtests passed`;
+- nu s-a făcut deploy, restart sau schimbare de configurație/stare pe producție.
+
+Rămân de executat numai acumularea fill-urilor reale, repetarea calibrării și,
+după aprobare separată, merge/deploy al branch-ului validat.
+
 ## P0 — producție, numai citire înainte de orice deploy
 
 1. Notează commitul, worktree-ul și procesele:
