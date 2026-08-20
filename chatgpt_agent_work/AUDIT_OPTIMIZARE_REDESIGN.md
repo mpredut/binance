@@ -568,6 +568,10 @@ Reducere cumulată estimată: 20–30% din codul activ.
 
 Această fază poate reduce cod suplimentar, dar valoarea principală este siguranța.
 
+Decizie 2026-08-20: amânat fără termen. Conturile sunt operațional izolate, iar
+suprapunerea monitortrades/Kraken este rară. Un inventar read-only al ownerilor și
+execution audit-ul oferă vizibilitate fără starea și gate-urile unui ledger.
+
 ## 15. Prioritizare
 
 | Prioritate | Schimbare | Reducere | Risc | Valoare |

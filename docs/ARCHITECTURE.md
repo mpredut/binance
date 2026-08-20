@@ -32,20 +32,29 @@ nu primește client cu drept de tranzacționare, iar procesul live nu conține s
 de dataset sau metrici de cercetare. Un renderer comun poate fi folosit de două
 entrypoint-uri subțiri live/offline fără duplicarea logicii.
 
-## Allocation ledger versus execution audit
+## Ownership inventory și execution audit
 
-Cele două răspund la întrebări diferite și se corelează prin `intent_id`:
+Sistemul nu folosește allocation ledger cât timp conturile sunt izolate și
+suprapunerile de execuție sunt rare. Două unelte read-only acoperă nevoia actuală:
 
 - execution audit: cine a cerut ordinul, pe ce venue/simbol, de ce, ce status/fill a avut;
-- allocation ledger: ce capital/cantitate este deținută sau rezervată de fiecare
-  `account_ref + strategy_id + instrument`, ca două procese să nu cheltuiască sau
-  să vândă aceeași resursă.
+- `verify_tools/ownership_inventory.py`: ce owner poate executa pe fiecare
+  `venue + account_ref + symbol` și unde există suprapuneri configurate/rulate.
 
-Ledger-ul nu înlocuiește balanța exchange-ului și nu conține secrete. Implementarea
-sigură este incrementală: întâi model + snapshot read-only, apoi rezervări atomice
-cu expirare, apoi integrarea unui singur venue în shadow și abia după validare un
-gate de blocare live. STOP/trailing trebuie să poată elibera risc chiar dacă o
-politică de intrare sau un plafon de cumpărare este atins.
+Inventarul nu citește și nu afișează chei, nu blochează ordine și nu schimbă live.
+Un `account_ref` explicit, nesensibil, poate fi setat per owner sau prin
+`ownership.account_ref` pe un instrument; fallback-ul este `<venue>:default`.
+Două strategii primary din același pipeline coordonat sunt doar `INFO`; două
+domenii de execuție independente pe aceeași cheie sunt `WARNING`.
+
+```bash
+.venv/bin/python verify_tools/ownership_inventory.py
+.venv/bin/python verify_tools/ownership_inventory.py --running
+.venv/bin/python verify_tools/ownership_inventory.py --running --json
+```
+
+Ledger-ul se reconsideră numai dacă devine intenționată tranzacționarea frecventă
+din mai multe procese independente pe aceeași balanță.
 
 ## Facadă market/cont — decuplare de Binance
 `providers/market_api.py` = facadă care rutează pe **symbol** către provideri (scopul: trade-
