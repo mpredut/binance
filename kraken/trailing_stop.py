@@ -196,6 +196,10 @@ class KrakenTrailing:
     # -- un pas / bucla --------------------------------------------------------
     def check_once(self) -> None:
         self.core.check_once()
+        # healthcheck.sh foloseste mtime-ul logului ca heartbeat. Cand nu exista
+        # balanta libera de protejat, core-ul iese intentionat fara alte mesaje;
+        # confirma explicit ca procesul a terminat totusi ciclul cu succes.
+        self.log("  [TRAIL-K] heartbeat")
 
     def run(self):
         mode = "⚠ ACTIV (vinde real)" if self.enabled else "DRY-RUN (doar logheaza)"

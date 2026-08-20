@@ -93,6 +93,16 @@ class TestTrailingKraken(Base):
         ts.check_once()
         self.assertEqual(c.orders, [])
 
+    def test_fara_balanta_libera_emite_heartbeat(self):
+        messages = []
+        c = FakeK(60.0, total=3.38, held=3.38)
+        ts = KrakenTrailing(c, log=messages.append, enabled=True, state_file=self.sf)
+
+        ts.check_once()
+
+        self.assertEqual(c.orders, [])
+        self.assertEqual(messages, ["  [TRAIL-K] heartbeat"])
+
 
 class TestMinProfitKraken(Base):
     """Prag minim de profit inainte sa se activeze trailing-ul (Kraken)."""
