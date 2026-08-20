@@ -38,7 +38,9 @@ index.html
 *.log
 *.log.[0-9]*
 .logrotate.state
-logs/shadow_live/
+# logs/ intreg = runtime (bot logs, shadow jsonl, arhive) — nu se versioneaza; pastram doar .gitkeep
+logs/*
+!logs/.gitkeep
 
 # --- Observabilitate tradeall (artefacte generate, nu cod) ---
 tradeall_live/
