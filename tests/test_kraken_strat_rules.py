@@ -1,4 +1,4 @@
-"""kraken/strat_rules.py — reguli pure partajate live<->backtest. Verifica formulele
+"""Regulile spot DCA pure, partajate live<->backtest. Verifica formulele
 + ca are_close e IDENTIC cu botcore.are_close (dovada ca refactorul din strategy.py
 NU schimba comportamentul LIVE)."""
 import os
@@ -6,11 +6,10 @@ import sys
 import unittest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(ROOT, "kraken"))
 sys.path.insert(0, ROOT)
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
-import strat_rules as sr
+from strategies import spot_dca_rules as sr
 
 
 class StratRulesTest(unittest.TestCase):

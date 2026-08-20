@@ -1,9 +1,8 @@
 # Unificare provider-agnostic a motorului de strategie (Calea B)
 
-**Scop:** `kraken/strategy.py` (base v2: DCA+TP+trailing, validat live pe HYPE) rulează azi
-DOAR pe Kraken — e cuplat de `KrakenClient` prin 6 metode și ocolește stratul agnostic
-`MarketApi`. Calea B îl **unifică pe `MarketDataProvider`** ca să ruleze pe orice venue
-(Kraken/Hyperliquid/Binance/Replay), cu o singură suită de teste de conformitate.
+**Scop:** motorul base v2 (DCA+TP+trailing, validat live pe HYPE) să fie independent
+de Kraken și să ruleze prin același contract pe orice venue compatibil, cu o singură
+suită de conformitate și fără a forța strategiile diferite T212/HL în același algoritm.
 
 **De ce B (nu adaptor):** mai puțin cod (nu apare o a 3-a abstracție), mai testabil (o
 suită parametrizată peste toți providerii), și base v2 poate intra pe `MarketApi.place`
@@ -43,7 +42,11 @@ KrakenError`. Backtestul (`replay.py`) folosește `MagicMock` → aproape neatin
   `pair_precision`(filters)/`ohlc_closes`(klines). 7 teste. NB: completitudine — Binance base v2
   se suprapune cu tradeall; `order_status.fee=0` (aprox, refinabil din get_my_trades).
 - **Faza 5 — Consolidare** ✅ — `tests/test_provider_contract_conformance.py`: gardă unică
-  parametrizată (kraken/HL/binance toți satisfac `StrategyExecutor`).
+  parametrizată (Kraken/HL/Binance/T212 satisfac `StrategyExecutor`).
+- **Faza 5b — Motor în namespace neutru** ✅ — implementarea este în
+  `strategies/spot_dca.py`; `kraken/strategy.py` este numai shim compatibil. Directorul
+  de stare, notificatorul, sursa și eticheta venue-ului sunt injectabile. Replay-ul și
+  testele importă modulul canonic, fără coliziuni între fișierele `strategy.py` ale venue-urilor.
 - **Faza 6 (opțional, separat)** — rutează base v2 prin `MarketApi.place` (guardrail-uri).
   Schimbare de comportament → re-validare dedicată, NU în gate-ul de regresie.
 

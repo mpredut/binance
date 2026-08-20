@@ -1,22 +1,8 @@
-"""CONTRACT provider-agnostic pt motorul de strategie (Calea B, Faza 0).
+"""Contractul provider-agnostic al motoarelor de strategie urmarite financiar.
 
-Defineste interfata MINIMA de care are nevoie `kraken/strategy.py` (base v2:
-DCA+TP+trailing) ca sa ruleze pe ORICE venue, nu doar Kraken. Azi strategia e
-cuplata de `KrakenClient` prin 6 metode; aici le abstractizam intr-un `Protocol`
-+ tipuri de retur explicite. `MarketDataProvider` (providers/market_api.py) va fi
-extins in Faza 1 ca sa satisfaca acest contract, iar `strategy.py` va fi rewire-uit
-in Faza 2 sa-l ceara (in loc de KrakenClient).
-
-Contractul e verificabil static (typing.Protocol) fara sa forteze deocamdata vreun
-provider existent sa se schimbe — Faza 0 nu cabla nimic, doar fixeaza tinta.
-
-Harta fata de KrakenClient (metoda veche -> metoda din contract):
-  add_order    -> submit_order       (intoarce order_id; market cand price=None)
-  query_orders -> order_status       (LIPSA azi in providers/: gol de umplut per venue)
-  cancel_order -> cancel_order       (LIPSA azi in providers/: gol de umplut per venue)
-  pair_info    -> pair_precision     (partial: min_order_qty exista; precizia lipseste)
-  balance      -> free_balance       (exista la toti providerii)
-  ohlc_closes  -> ohlc_closes        (mapabil pe get_price_history, atentie la cadenta)
+Interfata minima este consumata de ``strategies.spot_dca`` si implementata de
+providerii Kraken, Hyperliquid, Binance si Trading212. Tipurile explicite tin
+normalizarea venue-ului in adaptor si lasa motorul sa decida numai financiar.
 
 NB: metoda de plasare se numeste `submit_order`, NU `place_order` — providerii au deja un
 `place_order(symbol, side, price, qty)` pt MarketApi/tradeall (guarded, intoarce dict/None,
@@ -56,9 +42,7 @@ class PairPrecision:
 
 @runtime_checkable
 class StrategyExecutor(Protocol):
-    """Interfata MINIMA ceruta de kraken/strategy.py. Orice obiect care o
-    implementeaza (kraken_provider, hyperliquid_provider, binance, replay_provider)
-    poate rula base v2. Semnaturile sunt agnostice de venue."""
+    """Interfata minima ceruta de motorul spot DCA, agnostica de venue."""
 
     def get_current_price(self, symbol: str) -> Optional[float]:
         """Pretul curent (last/mid) pt bucla de decizie. None daca indisponibil."""

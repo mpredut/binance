@@ -726,6 +726,25 @@ Adaptorul generalizează mecanica ordinelor, nu strategia. Motorul autonom T212 
 feed-ul Yahoo, FX fee, take-profit ladder și regulile sale proprii; `ohlc_closes` din
 contractul generic întoarce momentan `[]` pentru T212.
 
+### Motorul canonic spot DCA/trailing
+
+```text
+Kraken launcher / Replay / viitor launcher spot
+                  │
+                  ▼
+       strategies/spot_dca.py
+          │ decizii financiare
+          ├──► strategies/spot_dca_rules.py (praguri pure)
+          └──► StrategyExecutor (ordine, status, sold, OHLC)
+                         │
+                         ▼
+                 providerul venue-ului
+```
+
+Directorul stării și notificatorul sunt injectabile. Fallback-ul implicit rămâne
+`kraken/.state_<PAIR>.json`, ca upgrade-ul codului live să nu creeze o stare nouă.
+`kraken/strategy.py` și `kraken/strat_rules.py` sunt shim-uri pentru comenzile vechi.
+
 ## 19. Componentă: `TrailingCore`
 
 ### State per asset

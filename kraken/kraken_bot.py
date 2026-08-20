@@ -23,18 +23,19 @@ import os
 import sys
 import time
 
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 from kraken_common import load_dotenv, log, now_str, float_env, single_instance
 from kraken_client import KrakenClient, KrakenError
 from market_data import get_price, pair_available
 from notify import notify
-from strategy import Strategy, StratParams
+from strategies.spot_dca import Strategy, StratParams
 
 # Provider-agnostic (Calea B): strategia cere contractul StrategyExecutor. Impachetam
 # clientul _BOT intr-un KrakenProvider (aceeasi conexiune/nonce) pt Strategy; comenzile
 # CLI (--balance/--find-pair/--price) folosesc in continuare clientul KrakenClient direct.
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if _ROOT not in sys.path:
-    sys.path.append(_ROOT)
 from providers.kraken_provider import KrakenProvider  # noqa: E402
 
 POLL_SECONDS = 60

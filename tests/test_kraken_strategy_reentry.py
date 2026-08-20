@@ -1,5 +1,5 @@
 """
-Teste pentru pragul de reintrare ADAPTIV din kraken/strategy.py (23 iul).
+Teste pentru pragul de reintrare ADAPTIV din motorul spot DCA (23 iul).
 
 Context: investigat in offline/research/kraken_adaptive_thresholds/ — pragul adaptiv
 (K_REENTRY * vol_1h) bate pragul fix pe date reale (HYPEUSD, ~30 zile: TOTAL
@@ -14,33 +14,16 @@ Acoperire:
   - Blocul de reintrare din step(): foloseste pragul EFECTIV (nu mereu cel fix).
 """
 import os
-import importlib.util
 import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
 KRAKEN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kraken")
-sys.path.insert(0, KRAKEN_DIR)
+ROOT = os.path.dirname(KRAKEN_DIR)
+sys.path.insert(0, ROOT)
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
-# `strategy.py`, `market_data.py` and `notify.py` also exist in other venue
-# directories.  Temporarily hide already-collected variants while importing
-# the Kraken graph, then restore them so this test does not contaminate others.
-_COLLIDING_MODULES = ("market_data", "notify")
-_PRELOADED_MODULES = {
-    name: sys.modules.pop(name) for name in _COLLIDING_MODULES if name in sys.modules
-}
-try:
-    _SPEC = importlib.util.spec_from_file_location(
-        "kraken_strategy_reentry_under_test", os.path.join(KRAKEN_DIR, "strategy.py")
-    )
-    strat = importlib.util.module_from_spec(_SPEC)
-    sys.modules[_SPEC.name] = strat
-    _SPEC.loader.exec_module(strat)
-finally:
-    for _name in _COLLIDING_MODULES:
-        sys.modules.pop(_name, None)
-    sys.modules.update(_PRELOADED_MODULES)
+from strategies import spot_dca as strat  # noqa: E402
 
 
 def _make_strategy(tmp_pair="TESTPAIR_REENTRY", **param_overrides):

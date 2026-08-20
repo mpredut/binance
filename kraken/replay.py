@@ -6,18 +6,15 @@ ambiguitatea intrabar, fără rețea, notificări sau stare persistentă.
 
 from __future__ import annotations
 
-import os
-import sys
 from unittest.mock import MagicMock
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import strategy as _strat
 from offline.backtests.execution import (
     ExecutionModel,
     choose_intrabar_scenario,
     split_order_fill,
 )
 from offline.backtests.metrics import calculate_performance_metrics
+from strategies import spot_dca as _strat
 
 
 def _silent(*_args, **_kwargs):

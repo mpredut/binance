@@ -545,6 +545,10 @@ Reducere cumulată estimată: 15–25% din codul activ relevant.
 - elimină copiile backtest/observe care dublează logica;
 - unifică persistence primitives.
 
+Status 2026-08-20: motorul spot DCA/trailing și regulile sale pure au fost mutate în
+`strategies/`; live Kraken și replay folosesc aceeași implementare. T212 și HL rămân
+intenționat motoare separate, deoarece regulile lor financiare nu sunt echivalente.
+
 Reducere cumulată estimată: 20–30% din codul activ.
 
 ### Faza 4 — allocation ledger

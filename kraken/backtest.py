@@ -15,13 +15,19 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 import urllib.request
 
-import strat_rules as sr   # reguli de decizie PARTAJATE cu strategy.py (live)
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+from strategies import spot_dca_rules as sr
+from strategies.spot_dca import StratParams
+
 import dataclasses
 import replay as rp        # motor FAITHFUL = strategia LIVE peste OHLC (fidelitate 100%)
-from strategy import StratParams
 
 
 def _bt_params(base: dict, over: dict | None = None) -> "StratParams":
@@ -63,7 +69,7 @@ def simulate(ohlc, P, reentry_arr=None, sl_bounce_pct=None):
     neschimbat): daca dat (secventa per-bara, NaN = foloseste P["reentry_fallback"]),
     activeaza bariera de reintrare dupa o inchidere de pozitie (TP/SL) — lipsea din
     versiunea originala (gasit in offline/research/kraken_adaptive_thresholds/, 23 iul:
-    strategia REALA, kraken/strategy.py step(), asteapta explicit sub
+    strategia REALA, strategies/spot_dca.py step(), asteapta explicit sub
     last_sell_price*(1-reentry_pct/100) inainte sa reintre; simulatorul reintra
     imediat). P["reentry_tolerance_pct"] (implicit 0 = fara toleranta) controleaza
     cat de "aproape de prag" conteaza ca atins (are_close, determinist)."""

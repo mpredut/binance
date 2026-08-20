@@ -4,7 +4,6 @@ Kraken raporteaza executia cumulativ prin QueryOrders.  Motorul live trebuie sa
 aplice numai delta noua si sa pastreze ordinul local pana cand exchange-ul il
 raporteaza terminal (closed/canceled/expired).
 """
-import importlib.util
 import json
 import os
 import sys
@@ -14,27 +13,10 @@ from unittest.mock import MagicMock, patch
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-KRAKEN_DIR = os.path.join(ROOT, "kraken")
-sys.path.insert(0, KRAKEN_DIR)
+sys.path.insert(0, ROOT)
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
-_COLLIDING_MODULES = ("market_data", "notify")
-_PRELOADED_MODULES = {
-    name: sys.modules.pop(name) for name in _COLLIDING_MODULES if name in sys.modules
-}
-try:
-    _SPEC = importlib.util.spec_from_file_location(
-        "kraken_live_reconciliation_under_test",
-        os.path.join(KRAKEN_DIR, "strategy.py"),
-    )
-    strat = importlib.util.module_from_spec(_SPEC)
-    sys.modules[_SPEC.name] = strat
-    _SPEC.loader.exec_module(strat)
-finally:
-    for _name in _COLLIDING_MODULES:
-        sys.modules.pop(_name, None)
-    sys.modules.update(_PRELOADED_MODULES)
-
+from strategies import spot_dca as strat  # noqa: E402
 from providers.strategy_executor import OrderStatus, ProviderError  # noqa: E402
 
 

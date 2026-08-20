@@ -279,6 +279,11 @@ Contractul strict `StrategyExecutor` acoperă execuția urmărită financiar:
 conformitate. Contractul comun nu obligă venue-urile să folosească aceeași strategie
 sau aceiași parametri.
 
+Motorul spot DCA/trailing este canonic în `strategies/spot_dca.py`. Launcherul Kraken
+injectează `KrakenProvider`; replay-ul injectează executorul său. Vechiul
+`kraken/strategy.py` este doar shim de compatibilitate, iar T212 și HL își păstrează
+motoarele financiare distincte.
+
 `MarketApi` deține registry-ul providerilor și poate ruta implicit după symbol. `Instrument` preferă rutarea explicită după numele providerului, evitând ambiguitatea când același activ există pe mai multe venue-uri.
 
 ### `Instrument`

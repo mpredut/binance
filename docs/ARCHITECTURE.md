@@ -15,6 +15,17 @@ monitorul devine generic, nu doar Binance).
   rămâne identic (BinanceProvider deleagă la `bapi`/`bapi_placeorder`).
 - Instrument generic + `instruments.conf` (rezolvare `provider_by_name`); BTC/TAO pe Binance neschimbate.
 
+## Motor spot DCA/trailing
+
+`strategies/spot_dca.py` conține decizia financiară base v2 și depinde numai de
+`StrategyExecutor`. Kraken injectează `KrakenProvider`, iar replay-ul injectează
+executorul offline; ambele rulează aceeași clasă. `kraken/strategy.py` rămâne shim
+pentru comenzile istorice. Directorul stării, notificatorul și eticheta venue-ului
+sunt injectabile, dar fallback-ul Kraken păstrează exact fișierul de stare existent.
+
+T212 și Hyperliquid nu sunt alias-uri ale acestui motor: providerii lor satisfac
+contractul mecanic, însă strategiile financiare distincte rămân separate.
+
 ### HYPE pe Hyperliquid (SPOT)
 `providers/hyperliquid_provider.py`:
 - preț/history **public** HL (perechea @index, ex `@107` = HYPE/USDC);
