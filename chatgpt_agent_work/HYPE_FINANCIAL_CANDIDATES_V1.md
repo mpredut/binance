@@ -20,6 +20,7 @@ OOS de 90 bare 4h, stare resetată pe fereastră și același motor ca live.
 | `B_dcabrake` | +0,161% | -0,428pp | +0,014% | -0,189pp | +1,293 / +1,406pp | -2,159 / -1,499pp | 4/13/14; 5/13/13 |
 | `overlay650t8` | +0,803% | +0,213pp | +0,280% | +0,077pp | +1,969 / +2,371pp | -3,005 / -2,973pp | 15/0/16; 14/0/17 |
 | `trail_profit_floor_sl18` | +1,043% | +0,453pp | +0,855% | +0,652pp | +2,014 / +2,722pp | +0,080 / +0,093pp | 5/24/2; 6/24/1 |
+| `trail_profit_floor_sl125` | +0,687% | +0,097pp | +0,318% | +0,115pp | ≈0 (CVaR neschimbat) | worst-DD neschimbat | — |
 
 Baseline: central `+0,590%`, stress `+0,203%`.
 
@@ -66,6 +67,18 @@ Baseline: central `+0,590%`, stress `+0,203%`.
 - Verdict: implementat și inclus în shadow 60m/240m, dar implicit OFF în live.
   Un ordin MARKET nu poate garanta profitul în timpul unui gap; floor-ul include
   bufferul intern de 0,1%, iar scenariul stress modelează slippage suplimentar.
+- `trail_profit_floor_sl125` (DECUPLARE, 21 aug): rulat pentru a separa contribuția
+  profit-floor-ului de cea a lărgirii stop-ului. Rezultat pe proxy 4h central:
+  floor-ul SINGUR (stop 12,5%) dă `+0,590→+0,687%` (**+0,097pp**), cu worst-return,
+  worst-DD și CVaR **identice cu live** — DAR expunerea crește `57,9→60,3%`. Adică
+  micul câștig e „stai mai mult în piață" (beta), nu alpha; de-aia pică gate-ul
+  risk-adjusted (`max_exposure_increase_pp=0`). Lărgirea stop-ului la `-18%` adaugă
+  restul: `+0,687→+1,043%` (**+0,356pp**, ~78% din câștigul total al lui `sl18`;
+  ~82% pe stress). Pe eșantionul 4h stopul larg chiar îmbunătățește worst-return
+  (`-8,78→-6,77%`) fiindcă lasă un dip să-și revină, dar pe 120m mărește worst-DD
+  la ~17% (risc de tail compensat, NU free lunch). Concluzie: headline-ul `+1,04%`
+  al lui `sl18` e înșelător — vedeta e relaxarea stop-ului (mai mult tail risk), nu
+  profit-floor-ul. Ambele rămân OFF/observaționale.
 
 ## Reproducere
 

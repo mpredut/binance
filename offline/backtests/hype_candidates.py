@@ -109,4 +109,10 @@ def financial_priority_candidates() -> list[Candidate]:
             "trailing soft la minimum +1% brut; hard stop MARKET la -18%",
             {"tp_trail_profit_floor_pct": 1.0, "stop_loss_pct": 18.0},
         ),
+        Candidate(
+            "trail_profit_floor_sl125",
+            "DECUPLAT: profit-floor +1% brut, dar hard stop la 12.5% (baseline) "
+            "— izoleaza upside-ul profit-floor de penalizarea de DD a stop-ului larg",
+            {"tp_trail_profit_floor_pct": 1.0},
+        ),
     ]

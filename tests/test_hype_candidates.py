@@ -18,7 +18,7 @@ class HypeCandidatesTest(unittest.TestCase):
             [
                 "live", "tp4", "dca15", "dca_progressive025", "dca_vol_m1",
                 "A_trail", "B_dcabrake", "overlay650t8",
-                "trail_profit_floor_sl18",
+                "trail_profit_floor_sl18", "trail_profit_floor_sl125",
             ],
         )
 
@@ -45,6 +45,11 @@ class HypeCandidatesTest(unittest.TestCase):
         self.assertEqual(
             by_name["trail_profit_floor_sl18"].overrides,
             {"tp_trail_profit_floor_pct": 1.0, "stop_loss_pct": 18.0},
+        )
+        # decuplat: doar profit-floor, fara override de stop (mosteneste 12.5 baseline)
+        self.assertEqual(
+            by_name["trail_profit_floor_sl125"].overrides,
+            {"tp_trail_profit_floor_pct": 1.0},
         )
 
     def test_walk_forward_registry_keeps_historical_report_names(self):

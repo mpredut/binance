@@ -74,15 +74,15 @@ class ShadowLiveTest(unittest.TestCase):
             list(variants_60),
             [
                 "current", "tp4", "dca15", "dca_progressive025",
-                "trail_profit_floor_sl18",
+                "trail_profit_floor_sl18", "trail_profit_floor_sl125",
             ],
         )
         self.assertEqual(
             list(variants_240),
             [
                 "current", "tp4", "dca15", "dca_progressive025",
-                "trail_profit_floor_sl18", "A_trail", "dca_vol_m1",
-                "overlay650t8", "B_dcabrake",
+                "trail_profit_floor_sl18", "trail_profit_floor_sl125",
+                "A_trail", "dca_vol_m1", "overlay650t8", "B_dcabrake",
             ],
         )
         progressive = variants_60["dca_progressive025"]
@@ -90,6 +90,11 @@ class ShadowLiveTest(unittest.TestCase):
         profit_floor = variants_60["trail_profit_floor_sl18"]
         self.assertEqual(profit_floor.tp_trail_profit_floor_pct, 1.0)
         self.assertEqual(profit_floor.stop_loss_pct, 18.0)
+        # decuplat: profit-floor cu stop-ul baseline (NU lărgit la 18)
+        floor_only = variants_60["trail_profit_floor_sl125"]
+        self.assertEqual(floor_only.tp_trail_profit_floor_pct, 1.0)
+        self.assertEqual(floor_only.stop_loss_pct, variants_60["current"].stop_loss_pct)
+        self.assertNotEqual(floor_only.stop_loss_pct, 18.0)
         adaptive = variants_240["A_trail"]
         self.assertTrue(adaptive.tp_trail_adaptive)
         self.assertEqual(adaptive.tp_trail_vol_interval, 240)

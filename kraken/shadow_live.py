@@ -13,6 +13,9 @@ comparativ. Scopul: forward-test intre configul de PRODUCTIE si candidați shado
     candidat de risc, central neutru și mai bun sub stress în benchmark
   - trail_profit_floor_sl18: trailing soft numai de la +1% brut în sus;
     sub prag așteaptă revenirea, iar hard stop-ul MARKET este lărgit la -18%
+  - trail_profit_floor_sl125: DECUPLAT — doar profit-floor, stop la 12.5%.
+    Izoleaza componenta profit-floor de lărgirea stop-ului (vezi doc: ~78% din
+    castigul lui sl18 vine din stop, nu din floor)
   - dca_vol_m1 (doar 240m): sumă DCA scalată cu volatilitatea OHLC; reduce
     tail/DD, dar pierde majoritatea ferestrelor active și rămâne defensiv
   - overlay650t8 (doar 240m): overlay cu top-up 650 si trail 8%; candidat
@@ -74,6 +77,13 @@ def _variants(interval: int):
             base,
             tp_trail_profit_floor_pct=1.0,
             stop_loss_pct=18.0,
+        ),
+        # DECUPLAT: doar profit-floor, stop la 12.5% (baseline). Benchmark 4h:
+        # arata ca ~78% din castigul lui sl18 vine din stop-ul larg (risc de tail),
+        # NU din profit-floor (care da doar +0.1pp, cu +2.4pp expunere). Observational.
+        "trail_profit_floor_sl125": dataclasses.replace(
+            base,
+            tp_trail_profit_floor_pct=1.0,
         ),
     }
     # A folosește OHLC fix pentru aceeași cadență live/replay; nu îl rulăm pe alt interval.
