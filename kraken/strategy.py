@@ -20,15 +20,23 @@ import json
 import math
 import os
 import statistics
+import sys
 import time
 from collections import deque
 from dataclasses import dataclass
 
 from kraken_common import log, now_str, float_env, are_close
 from notify import notify
-from kraken_client import KrakenClient, KrakenError
 import strat_rules as sr   # reguli de decizie PARTAJATE cu backtest.py (aceleasi praguri)
-from market_data import get_price, pair_precision
+from market_data import get_price
+
+# Contract provider-agnostic (Calea B): strategy.py traieste in kraken/, contractul in
+# providers/. Adaugam repo-root la COADA sys.path (nu in fata) -> modulele locale kraken/
+# (notify, kraken_common, ...) pastreaza prioritatea, providers devine importabil.
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.append(_ROOT)
+from providers.strategy_executor import ProviderError, StrategyExecutor  # noqa: E402
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -183,7 +191,7 @@ def _new_state() -> dict:
 
 
 class Strategy:
-    def __init__(self, client: KrakenClient, pair: str, params: StratParams,
+    def __init__(self, client: "StrategyExecutor", pair: str, params: StratParams,
                  dry_run: bool = True, desktop: bool = False,
                  initial_state: dict | None = None,
                  replay_mode: bool = False):
@@ -203,13 +211,15 @@ class Strategy:
         # memorie (tick ~2min -> ~3h) pentru sigma; NU intra in state-file, se
         # reconstruieste dupa restart (warm-up ~40min pana la >=20 puncte).
         self._shadow_prices = deque(maxlen=90)
-        # precizie pereche
+        # precizie pereche (prin contractul agnostic)
         self.price_dec, self.vol_dec, self.ordermin = 5, 8, 0.0
         try:
-            info = client.pair_info(pair)
-            if info:
-                self.price_dec, self.vol_dec, self.ordermin = pair_precision(info)
-        except KrakenError:
+            pp = client.pair_precision(pair)
+            if pp:
+                self.price_dec = pp.price_decimals
+                self.vol_dec = pp.volume_decimals
+                self.ordermin = pp.order_min
+        except ProviderError:
             log("  ! nu pot citi precizia perechii — folosesc valori implicite")
 
     # -- persistenta -----------------------------------------------------------
@@ -281,13 +291,13 @@ class Strategy:
                                      "kind": kind, "market": market, "ts": time.time()})
             return
         try:
-            res = self.client.add_order(self.pair, side, vol, None if market else price,
-                                        ordertype="market" if market else "limit")
-            txid = (res.get("txid") or ["?"])[0]
+            txid = self.client.submit_order(self.pair, side, vol,
+                                            None if market else price,
+                                            market=market, kind=kind)
             log(f"  [STRAT] {side.upper()} {kind} plasat txid={txid} {vol} @ {price}")
             self.s["orders"].append({"txid": txid, "side": side, "vol": vol, "price": price,
                                      "amount": amount, "kind": kind, "ts": time.time()})
-        except KrakenError as e:
+        except ProviderError as e:
             log(f"  ! [STRAT] {side} {kind} esuat: {e}")
 
     def _cancel_open(self, side: str) -> None:
@@ -296,8 +306,8 @@ class Strategy:
             return
         if not self.dry_run and not str(o["txid"]).startswith("PAPER"):
             try:
-                self.client.cancel_order(o["txid"])
-            except KrakenError as e:
+                self.client.cancel_order(self.pair, o["txid"])
+            except ProviderError as e:
                 log(f"  ! [STRAT] cancel esuat: {e}")
         self._remove(o)
         log(f"  [STRAT] anulat {side} {o['txid']}")
@@ -323,16 +333,17 @@ class Strategy:
                         self._remove(o)
                         self._apply_fill(o, o["vol"], fill_price, fee=0.0)
                     continue
-                # REAL: QueryOrders merge si pt ordine inchise (fara 404)
+                # REAL: order_status merge si pt ordine inchise (fara 404). O eroare de
+                # venue SAU un ordin de negasit -> sarim tick-ul asta (reincercam la urmatorul).
                 try:
-                    info = self.client.query_orders(o["txid"]).get(o["txid"], {})
-                except KrakenError:
+                    status = self.client.order_status(self.pair, o["txid"])
+                except ProviderError:
                     continue
-                st = info.get("status")
+                st = status.status
                 if st == "closed":
-                    vol = float(info.get("vol_exec") or o["vol"])
-                    cost = float(info.get("cost") or vol * o["price"])
-                    fee = float(info.get("fee") or 0.0)
+                    vol = status.filled_qty or o["vol"]
+                    cost = status.cost or vol * o["price"]
+                    fee = status.fee
                     fp = (cost / vol) if vol else o["price"]
                     self._remove(o)
                     self._apply_fill(o, vol, fp, fee=fee)
@@ -425,8 +436,8 @@ class Strategy:
             for o in list(self.s["orders"]):           # anuleaza toate ordinele pendinte (si DCA-urile)
                 if not self.dry_run and not str(o["txid"]).startswith("PAPER"):
                     try:
-                        self.client.cancel_order(o["txid"])
-                    except KrakenError:
+                        self.client.cancel_order(self.pair, o["txid"])
+                    except ProviderError:
                         pass
                 self._remove(o)
             self._place("sell", self._dust_safe_qty(self.s["qty"]),
@@ -450,10 +461,10 @@ class Strategy:
         qty = self.p.adopt_qty
         if qty <= 0:  # citeste cantitatea din balanta (activul de baza al perechii)
             try:
-                info = self.client.pair_info(self.pair) or {}
-                base = info.get("base", "")
-                qty = float(self.client.balance().get(base, 0) or 0)
-            except KrakenError as e:
+                pp = self.client.pair_precision(self.pair)
+                base = pp.base_asset if pp else ""
+                qty = float(self.client.free_balance(base) or 0.0)
+            except ProviderError as e:
                 log(f"  ! [STRAT] adopt: nu pot citi balanta ({e})")
                 return
         if qty <= 1e-12:

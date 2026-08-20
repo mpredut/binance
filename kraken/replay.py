@@ -78,7 +78,9 @@ def _run_once(
     execution: ExecutionModel,
 ) -> dict:
     client = MagicMock()
-    client.pair_info.return_value = None
+    # Strategia citeste precizia prin contractul agnostic (pair_precision). None ->
+    # foloseste precizia implicita (5,8,0.0), exact ca inainte (cand era pair_info=None).
+    client.pair_precision.return_value = None
     original_notify = _strat.notify
     _strat.notify = _silent
     try:

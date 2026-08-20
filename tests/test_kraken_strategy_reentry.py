@@ -44,10 +44,10 @@ finally:
 
 
 def _make_strategy(tmp_pair="TESTPAIR_REENTRY", **param_overrides):
-    """Strategy cu client mockuit (pair_info->None, foloseste precizia implicita)
+    """Strategy cu client mockuit (pair_precision->None, foloseste precizia implicita)
     si StratParams minimal — fara fisier de stare real (pair de test, nesalvat)."""
     client = MagicMock()
-    client.pair_info.return_value = None
+    client.pair_precision.return_value = None
     defaults = dict(
         currency="USD", entry_amount=100.0, entry_discount_pct=0.2, dca_amount=50.0,
         dca_drop_pct=2.0, check_minutes=2.0, takeprofit_pct=1.9, max_budget=1000.0,

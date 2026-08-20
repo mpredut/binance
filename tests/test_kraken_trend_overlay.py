@@ -35,7 +35,7 @@ finally:
 
 def _make_strategy(*, replay_mode=False, **overrides):
     client = MagicMock()
-    client.pair_info.return_value = None
+    client.pair_precision.return_value = None
     defaults = dict(
         currency="USD", entry_amount=100.0, entry_discount_pct=0.2,
         dca_amount=50.0, dca_drop_pct=2.0, check_minutes=2.0,

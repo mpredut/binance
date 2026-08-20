@@ -37,8 +37,10 @@ def _live() -> bool:
 
 
 class KrakenProvider(MarketDataProvider):
-    def __init__(self):
-        self._cli = None  # lazy
+    def __init__(self, client=None):
+        # client injectabil: kraken_bot ii da clientul propriu (_BOT) ca strategia sa
+        # foloseasca aceeasi conexiune/nonce; None => build lazy cu cheile _SPARE (flota).
+        self._cli = client
         self._minqty = {}  # cache symbol -> ordermin (din pair_info)
 
     @property
@@ -294,6 +296,7 @@ class KrakenProvider(MarketDataProvider):
                 price_decimals=int(info.get("pair_decimals", 2)),
                 volume_decimals=int(info.get("lot_decimals", 8)),
                 order_min=float(info.get("ordermin", 0) or 0.0),
+                base_asset=str(info.get("base", "")),
             )
         except (TypeError, ValueError) as e:
             raise ProviderError(f"pair_precision {symbol}: info malformat ({e})") from e

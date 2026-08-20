@@ -51,6 +51,7 @@ class PairPrecision:
     price_decimals: int
     volume_decimals: int
     order_min: float           # cantitatea minima (ordermin la Kraken)
+    base_asset: str = ""       # activul de baza al perechii (pt adoptia pozitiei existente)
 
 
 @runtime_checkable

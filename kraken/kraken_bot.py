@@ -29,11 +29,24 @@ from market_data import get_price, pair_available
 from notify import notify
 from strategy import Strategy, StratParams
 
+# Provider-agnostic (Calea B): strategia cere contractul StrategyExecutor. Impachetam
+# clientul _BOT intr-un KrakenProvider (aceeasi conexiune/nonce) pt Strategy; comenzile
+# CLI (--balance/--find-pair/--price) folosesc in continuare clientul KrakenClient direct.
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.append(_ROOT)
+from providers.kraken_provider import KrakenProvider  # noqa: E402
+
 POLL_SECONDS = 60
 
 
 def _build_client() -> KrakenClient:
     return KrakenClient(os.environ.get("KRAKEN_API_KEY_BOT"), os.environ.get("KRAKEN_API_SECRET_BOT"))
+
+
+def _build_executor(client: KrakenClient) -> KrakenProvider:
+    """Impacheteaza clientul bot-ului in contractul StrategyExecutor pt Strategy."""
+    return KrakenProvider(client=client)
 
 
 def main() -> int:
@@ -77,7 +90,7 @@ def main() -> int:
         return _cmd_balance(client)
     if args.test_strategy:
         log(f"[TEST] strategie pe {args.test_strategy}  {'PAPER' if strat_dry else '⚠ REAL'}")
-        Strategy(client, args.test_strategy, StratParams.from_env(),
+        Strategy(_build_executor(client), args.test_strategy, StratParams.from_env(),
                  dry_run=strat_dry, desktop=args.desktop).run()
         return 0
 
@@ -98,7 +111,7 @@ def main() -> int:
 
     # --- porneste strategia ---
     try:
-        Strategy(client, pair, StratParams.from_env(), dry_run=strat_dry,
+        Strategy(_build_executor(client), pair, StratParams.from_env(), dry_run=strat_dry,
                  desktop=args.desktop).run()
         return 0
     except KeyboardInterrupt:
