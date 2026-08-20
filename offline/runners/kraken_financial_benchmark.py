@@ -281,6 +281,7 @@ def _projection(report: dict) -> dict:
     strategy_params.setdefault("dca_vol_scale_k", 0.0)
     strategy_params.setdefault("dca_vol_ref", 2.0)
     strategy_params.setdefault("dca_vol_interval", 240)
+    strategy_params.setdefault("tp_trail_profit_floor_pct", 0.0)
     return {
         "schema_version": report.get("schema_version"),
         "strategy_params": strategy_params,

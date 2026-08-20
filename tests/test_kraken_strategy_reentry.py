@@ -208,6 +208,54 @@ class TestTrailingTakeProfit(unittest.TestCase):
         self.assertTrue(s._has_open("sell"))
         self.assertFalse(s._has_open("buy"))
 
+    def test_profit_floor_blocks_gap_exit_below_break_even(self):
+        s = self._positioned_strategy(
+            stop_loss_pct=12.5,
+            tp_trail_profit_floor_pct=1.0,
+        )
+        s.step(105.5)       # armează trailing-ul
+        s.step(95.0)        # gap sub break-even, dar încă deasupra hard stop-ului
+
+        self.assertIsNone(s._find_open("sell"))
+        self.assertFalse(s._has_open("buy"))
+
+    def test_profit_floor_exits_on_recovery_still_below_trail_stop(self):
+        s = self._positioned_strategy(
+            stop_loss_pct=12.5,
+            tp_trail_profit_floor_pct=1.0,
+        )
+        s.step(105.5)
+        s.step(95.0)
+        s.step(101.2)       # referința MARKET 101.10 >= floor; sub trail-stop 102.335
+        sell = s._find_open("sell")
+        self.assertIsNotNone(sell)
+        self.assertTrue(sell["market"])
+        self.assertEqual(sell["kind"], "TP")
+        self.assertGreaterEqual(sell["price"], 101.0)
+
+    def test_hard_stop_exits_market_after_profit_floor_block(self):
+        s = self._positioned_strategy(
+            stop_loss_pct=12.5,
+            tp_trail_profit_floor_pct=1.0,
+        )
+        s.step(105.5)
+        s.step(95.0)
+        self.assertIsNone(s._find_open("sell"))
+
+        s.step(87.0)        # sub avg*(1-12.5%): STOP MARKET indiferent de profit
+        sell = s._find_open("sell")
+        self.assertIsNotNone(sell)
+        self.assertTrue(sell["market"])
+        self.assertEqual(sell["kind"], "STOP")
+
+    def test_zero_profit_floor_preserves_market_trailing(self):
+        s = self._positioned_strategy(tp_trail_profit_floor_pct=0.0)
+        s.step(105.5)
+        s.step(95.0)
+        sell = s._find_open("sell")
+        self.assertIsNotNone(sell)
+        self.assertTrue(sell["market"])
+
 
 class TestProgressiveDcaSpacing(unittest.TestCase):
     def test_completed_buys_widen_the_next_dca_threshold(self):

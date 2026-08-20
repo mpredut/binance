@@ -2,6 +2,8 @@
 
 Data: 2026-08-20
 
+Actualizat: 2026-08-21 cu `trail_profit_floor_sl18`.
+
 ## Verdict
 
 Configurația live rămâne neschimbată. Niciun candidat nu trece gate-ul în
@@ -17,6 +19,7 @@ OOS de 90 bare 4h, stare resetată pe fereastră și același motor ca live.
 | `A_trail` | +0,409% | -0,181pp | +0,018% | -0,185pp | 0 / 0pp | 0 / 0pp | 11/12/8; 11/12/8 |
 | `B_dcabrake` | +0,161% | -0,428pp | +0,014% | -0,189pp | +1,293 / +1,406pp | -2,159 / -1,499pp | 4/13/14; 5/13/13 |
 | `overlay650t8` | +0,803% | +0,213pp | +0,280% | +0,077pp | +1,969 / +2,371pp | -3,005 / -2,973pp | 15/0/16; 14/0/17 |
+| `trail_profit_floor_sl18` | +1,043% | +0,453pp | +0,855% | +0,652pp | +2,014 / +2,722pp | +0,080 / +0,093pp | 5/24/2; 6/24/1 |
 
 Baseline: central `+0,590%`, stress `+0,203%`.
 
@@ -47,6 +50,22 @@ Baseline: central `+0,590%`, stress `+0,203%`.
 - `overlay650t8` are cea mai mare medie centrală și cel mai bun tail, însă pierde
   mai multe ferestre decât câștigă și nu atinge îmbunătățirea minimă în stress.
 - `A` rămâne respins.
+- `trail_profit_floor_sl18` separă două ieșiri: trailing-ul soft se execută
+  numai dacă referința MARKET este cel puțin `avg +1%`, iar hard stop-ul MARKET
+  are prioritate la `-18%`. Dacă trailing-ul este atins sub floor, motorul nu
+  lasă un LIMIT persistent; așteaptă și reevaluează fiecare tick. Un gap prin
+  `-18%` iese imediat prin hard stop.
+- Pe proxy-ul înghețat 4h, candidatul are medie și worst-fold mai bune, dar numai
+  7 ferestre active și nu trece testul pereche. Verificarea separată pe 60m (45
+  fold-uri) îmbunătățește central `-0,029→+0,114%` și worst
+  `-6,847→-2,512%`. Pe 120m îmbunătățește media `-0,262→-0,111%` și worst
+  `-10,630→-8,926%`, dar mărește worst drawdown `12,701→16,950%`.
+- Sensibilitatea a respins `-15%` (fragil pe 120m). `-20%` nu a redus drawdown-ul
+  măsurat față de `-18%` și ar permite o pierdere teoretică mai mare; de aceea
+  `-18%` este compromisul unic preînregistrat, nu un parametru optimizat fin.
+- Verdict: implementat și inclus în shadow 60m/240m, dar implicit OFF în live.
+  Un ordin MARKET nu poate garanta profitul în timpul unui gap; floor-ul include
+  bufferul intern de 0,1%, iar scenariul stress modelează slippage suplimentar.
 
 ## Reproducere
 

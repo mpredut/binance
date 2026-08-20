@@ -80,6 +80,9 @@ class StratParams:
     tp_trend_min_pct: float = 0.5     # (v1, nefolosit in v2) prag semnal trend din _shadow_prices.
     tp_trail_pct: float = 2.0         # v2: PESTE nivelul TP, ies la un pullback de acest %% de la
                                       # varf (trailing). Doar peste TP -> nu iesi niciodata in pierdere.
+    tp_trail_profit_floor_pct: float = 0.0  # 0=compatibil live. >0=trailing MARKET numai
+                                      # dacă referința ordinului este >=avg*(1+floor%);
+                                      # hard stop-ul rămâne MARKET și are prioritate.
     # --- TREND OVERLAY (combina strategii pe regim; EXPERIMENTAL, default OFF) -----
     trend_overlay: bool = False       # True = in UPTREND confirmat, intra cu TOP-UP mare si
                                       # CALARESTE (hold+trailing) in loc de DCA/TP; in range = clasic.
@@ -140,6 +143,9 @@ class StratParams:
             tp_trend_hold      = os.environ.get("STRAT_TP_TREND_HOLD", "false").strip().lower() == "true",
             tp_trend_min_pct   = float_env("STRAT_TP_TREND_MIN_PCT") or 0.5,
             tp_trail_pct       = float_env("STRAT_TP_TRAIL_PCT") or 2.0,
+            tp_trail_profit_floor_pct = max(
+                0.0, float_env("STRAT_TP_TRAIL_PROFIT_FLOOR_PCT") or 0.0,
+            ),
             trend_overlay      = os.environ.get("STRAT_TREND_OVERLAY", "false").strip().lower() == "true",
             trend_sma_n        = int(float_env("STRAT_TREND_SMA_N") or 30),
             trend_interval     = int(float_env("STRAT_TREND_INTERVAL") or 240),
@@ -597,6 +603,21 @@ class Strategy:
             return True
         return False
 
+    def _trail_profit_floor_price(self, avg: float) -> float | None:
+        """Prețul minim al ieșirii soft, rotunjit în sus la precizia venue-ului.
+
+        Pragul este intenționat brut și simplu. Configurația trebuie să includă
+        suficient buffer pentru fee-uri; benchmarkul central/stress măsoară apoi
+        profitul net cu fee-urile și fill-urile scenariului. ``0`` păstrează exact
+        trailing-ul MARKET existent.
+        """
+        pct = float(self.p.tp_trail_profit_floor_pct or 0.0)
+        if pct <= 0 or avg <= 0:
+            return None
+        raw = sr.tp_price(avg, pct)
+        scale = 10 ** self.price_dec
+        return math.ceil(raw * scale - 1e-12) / scale
+
     def _maybe_adopt(self) -> None:
         """Adopta o pozitie EXISTENTA din cont (ex. alocare IPO/xStock) in loc sa
         cumpere intrarea. Ruleaza o singura data, DOAR pe stare proaspata, ca sa
@@ -956,11 +977,21 @@ class Strategy:
             self.s["trail_peak"] = peak
             eff_trail = self._effective_trail_pct()   # A: adaptiv pe vol daca activat, altfel fix
             trail_stop = peak * (1 - eff_trail / 100)
+            # Aceeași referință conservatoare folosită la ordinul MARKET. Pragul
+            # se aplică ei, nu prețului brut observat, ca bufferul de 0,1% să nu
+            # transforme o ieșire exact la floor într-o pierdere implicită.
+            exit_px = round(price * 0.999, self.price_dec)
+            profit_floor = self._trail_profit_floor_price(avg)
+            if price <= trail_stop and profit_floor is not None and exit_px < profit_floor:
+                log(f"  [STRAT] trailing soft blocat: referința {exit_px:.{self.price_dec}f} sub pragul "
+                    f"profitabil {profit_floor:.{self.price_dec}f}; hard stop rămâne MARKET")
+                # Reevaluează la tickul următor. Nu lasă un ordin persistent și nu
+                # deschide un DCA contradictoriu în tickul în care trailing-ul a fost atins.
+                return
             if price <= trail_stop:
                 if not self._cancel_orders("sell", exclude_market=True):
                     log("  ! [STRAT] trailing exit amanat: un SELL nu a putut fi anulat")
                     return
-                exit_px = round(price * 0.999, self.price_dec)
                 if self._place("sell", self._dust_safe_qty(self.s["qty"]), exit_px,
                                kind="TP", market=True):
                     log(f"  [STRAT] trailing: pullback {eff_trail:.2f}% de la varf "

@@ -104,4 +104,9 @@ def financial_priority_candidates() -> list[Candidate]:
         _adaptive_trail("A_trail"),
         _dca_brake("B_dcabrake"),
         _overlay650t8(),
+        Candidate(
+            "trail_profit_floor_sl18",
+            "trailing soft la minimum +1% brut; hard stop MARKET la -18%",
+            {"tp_trail_profit_floor_pct": 1.0, "stop_loss_pct": 18.0},
+        ),
     ]

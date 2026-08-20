@@ -219,6 +219,20 @@ class KrakenConfigParsingTest(unittest.TestCase):
             params = strat.StratParams.from_env()
         self.assertEqual(params.reentry_sl_bounce_pct, 0.0)
 
+    def test_trailing_profit_floor_is_explicit_and_clamped_non_negative(self):
+        with patch.dict(
+            os.environ,
+            {"STRAT_TP_TRAIL_PROFIT_FLOOR_PCT": "1.0"},
+            clear=False,
+        ):
+            self.assertEqual(strat.StratParams.from_env().tp_trail_profit_floor_pct, 1.0)
+        with patch.dict(
+            os.environ,
+            {"STRAT_TP_TRAIL_PROFIT_FLOOR_PCT": "-2.0"},
+            clear=False,
+        ):
+            self.assertEqual(strat.StratParams.from_env().tp_trail_profit_floor_pct, 0.0)
+
 
 class KrakenStatePersistenceTest(unittest.TestCase):
     @staticmethod
