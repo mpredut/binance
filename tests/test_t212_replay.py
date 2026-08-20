@@ -203,5 +203,86 @@ class T212StatePersistenceTest(unittest.TestCase):
                     self.assertTrue(engine._state_write_failed)
 
 
+class _CancelClient:
+    def __init__(self, cancel_result=False):
+        self.cancel_result = cancel_result
+        self.cancel_calls = []
+        self.place_calls = []
+
+    def cancel_order(self, order_id):
+        self.cancel_calls.append(order_id)
+        if isinstance(self.cancel_result, Exception):
+            raise self.cancel_result
+        return self.cancel_result
+
+    def place_limit_order(self, ticker, quantity, limit, validity):
+        self.place_calls.append((ticker, quantity, limit, validity))
+        return 200, {"id": f"NEW-{len(self.place_calls)}"}
+
+
+class T212CancellationLifecycleTest(unittest.TestCase):
+    @staticmethod
+    def _engine(client, **param_overrides):
+        engine = strategy.Strategy(
+            client, "TEST_US_EQ", _params(**param_overrides), dry_run=False,
+            initial_state=strategy._new_state(), fx_to_usd=1.0,
+        )
+        engine._save = lambda: None
+        return engine
+
+    @staticmethod
+    def _order(**overrides):
+        order = {
+            "id": "OLD-1", "side": "SELL", "qty": 1.0,
+            "limit": 110.0, "kind": "TP", "ts": 0.0,
+        }
+        order.update(overrides)
+        return order
+
+    def test_failed_or_raised_cancel_keeps_order_tracked(self):
+        for result in (False, RuntimeError("timeout")):
+            with self.subTest(result=result):
+                client = _CancelClient(result)
+                engine = self._engine(client)
+                order = self._order()
+                engine.s["orders"] = [order]
+
+                self.assertFalse(engine._cancel_specific(order))
+                self.assertEqual(engine.s["orders"], [order])
+
+    def test_ladder_does_not_replace_an_order_whose_cancel_failed(self):
+        for old in (self._order(level=10.0), self._order()):
+            with self.subTest(order=old):
+                client = _CancelClient(False)
+                engine = self._engine(client, STRAT_TP_LADDER="10:100")
+                engine.s["orders"] = [old]
+
+                engine._manage_tp_ladder(held=1.0, avg=100.0)
+
+                self.assertEqual(engine.s["orders"], [old])
+                self.assertEqual(client.place_calls, [])
+
+    def test_stop_waits_for_confirmed_cancels_then_places_one_exit(self):
+        client = _CancelClient(False)
+        engine = self._engine(client)
+        old = self._order(side="BUY", kind="DCA", limit=90.0)
+        engine.s.update({
+            "qty": 1.0, "cost_usd": 100.0, "spent_cash": 100.0,
+            "orders": [old],
+        })
+
+        with patch.object(strategy, "notify"):
+            self.assertTrue(engine._check_stop_loss(70.0))
+        self.assertEqual(engine.s["orders"], [old])
+        self.assertEqual(client.place_calls, [])
+
+        client.cancel_result = True
+        with patch.object(strategy, "notify"):
+            self.assertTrue(engine._check_stop_loss(70.0))
+        self.assertEqual(len(client.place_calls), 1)
+        self.assertEqual(len(engine.s["orders"]), 1)
+        self.assertEqual(engine.s["orders"][0]["kind"], "SL")
+
+
 if __name__ == "__main__":
     unittest.main()

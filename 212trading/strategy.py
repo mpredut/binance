@@ -360,19 +360,34 @@ class Strategy:
                 log(f"  ! [STRAT] selling-not-owned dar owned={_owned} (free<ordin) — NU resetez pozitia")
         return False
 
-    def _cancel_open(self, side: str) -> None:
+    def _cancel_open(self, side: str) -> bool:
         o = self._find_open(side)
         if not o:
-            return
-        if not self.dry_run and not str(o["id"]).startswith("PAPER"):
-            self.client.cancel_order(o["id"])
-        self.s["orders"].remove(o)
-        log(f"  [STRAT] anulat ordin {side} {o['id']}")
+            return True
+        return self._cancel_specific(o)
 
-    def _cancel_specific(self, o: dict) -> None:
+    def _cancel_specific(self, o: dict) -> bool:
         if not self.dry_run and not str(o["id"]).startswith("PAPER"):
-            self.client.cancel_order(o["id"])
+            try:
+                accepted = self.client.cancel_order(o["id"])
+            except Exception as exc:  # noqa: BLE001 — ordinul trebuie pastrat local
+                log(f"  ! [STRAT] cancel esuat pentru {o['id']}: {exc} — ordinul ramane urmarit")
+                return False
+            # Clientul real intoarce bool. None ramane acceptat pentru adaptoarele
+            # legacy care anulau cu succes fara valoare de retur.
+            if accepted is False:
+                log(f"  ! [STRAT] cancel neconfirmat pentru {o['id']} — ordinul ramane urmarit")
+                return False
         self._remove_order(o)
+        log(f"  [STRAT] anulat ordin {o.get('side', '?')} {o['id']}")
+        return True
+
+    def _cancel_all_orders(self) -> bool:
+        success = True
+        for order in list(self.s["orders"]):
+            if not self._cancel_specific(order):
+                success = False
+        return success
 
     def _manage_tp_ladder(self, held: float, avg: float) -> None:
         """Scale-out: un ordin SELL per nivel din scara (nivel%, fractie), la avg*(1+nivel%).
@@ -381,7 +396,8 @@ class Strategy:
         masura ce transele se executa, si se re-aseaza cand avg se schimba (dupa DCA)."""
         # in mod scara, anuleaza orice SELL legacy fara nivel (ex. TP unic de dinainte de scara)
         for o in [x for x in self.s["orders"] if x["side"] == "SELL" and x.get("level") is None]:
-            self._cancel_specific(o)
+            if not self._cancel_specific(o):
+                return  # nu suprapune scara peste un SELL care poate fi inca activ
         sold = set(self.s.get("tp_sold_levels", []))
         remaining = [(lvl, frac) for (lvl, frac) in self.p.tp_ladder if lvl not in sold]
         total = sum(f for _, f in remaining)
@@ -405,8 +421,8 @@ class Strategy:
         for lvl, o in list(open_sells.items()):
             d = desired.get(lvl)
             if d is None or abs(o["limit"] - d[1]) / d[1] > 0.001 or abs(o["qty"] - d[0]) > 1e-6:
-                self._cancel_specific(o)
-                open_sells.pop(lvl, None)
+                if self._cancel_specific(o):
+                    open_sells.pop(lvl, None)
         # plaseaza nivelele lipsa; daca o transa esueaza persistent (ex. T212 min-opened-position
         # pe ultima dintr-o pozitie fractionara mica), BACKOFF 30 min in loc de retry la fiecare tick
         now = self._now()
@@ -545,8 +561,7 @@ class Strategy:
                   and (self._now() - o.get("ts", 0)) / 60 > self.p.order_ttl_min
                   and price > o["limit"] * 1.003):
                 log(f"  [STRAT] BUY {o['id']} neexecutat, pret a urcat — anulez & reasez")
-                self.client.cancel_order(o["id"])
-                self._remove_order(o)
+                self._cancel_specific(o)
 
         # --- ciclu inchis (am vandut tot) -> reincepe ---
         if real_qty <= 1e-9 and prev_qty > 1e-9:
@@ -599,10 +614,9 @@ class Strategy:
         # a cazut prag% de la peak -> vinde TOT (o data; re-plaseaza doar daca limita ramane in urma)
         tr = next((o for o in self.s["orders"] if o.get("kind") == "TR"), None)
         if tr is None or price < tr["limit"]:
-            for o in list(self.s["orders"]):    # anuleaza tot pendintele (DCA/TP/SL)
-                if not self.dry_run and not str(o["id"]).startswith("PAPER"):
-                    self.client.cancel_order(o["id"])
-                self._remove_order(o)
+            if not self._cancel_all_orders():
+                log("  ! [STRAT] TRAILING amanat: cel putin un ordin nu a putut fi anulat")
+                return True
             self._place_sell(self.s["qty"], round(price * 0.995, 2), kind="TR")  # agresiv -> fill sigur
             self.s["sl_pending"] = True         # armeaza re-buy pe recul (ca stop-loss-ul de catastrofa)
         if not self.s.get("tr_alerted"):
@@ -628,10 +642,9 @@ class Strategy:
         # ANTI-SPAM: plaseaza SL-ul O DATA; re-plaseaza DOAR daca limita a ramas in urma (pretul a cazut sub ea)
         sl = next((o for o in self.s["orders"] if o.get("kind") == "SL"), None)
         if sl is None or price < sl["limit"]:
-            for o in list(self.s["orders"]):           # anuleaza toate ordinele pendinte (si DCA/TP-urile)
-                if not self.dry_run and not str(o["id"]).startswith("PAPER"):
-                    self.client.cancel_order(o["id"])
-                self._remove_order(o)
+            if not self._cancel_all_orders():
+                log("  ! [STRAT] STOP amanat: cel putin un ordin nu a putut fi anulat")
+                return True
             self._place_sell(self.s["qty"], round(price * 0.995, 2), kind="SL")   # vinde agresiv -> fill sigur
             self.s["sl_pending"] = True         # marcheaza episodul: inchiderea ciclului = catastrofa -> armeaza re-buy pe recul
         if not self.s.get("sl_alerted"):           # notifica O SINGURA DATA per episod
@@ -736,8 +749,8 @@ class Strategy:
                 if sell is None:
                     self._place_sell(held, target)
                 elif abs(sell["limit"] - target) / target > 0.001 or abs(sell["qty"] - held) > 1e-6:
-                    self._cancel_open("SELL")
-                    self._place_sell(held, target)
+                    if self._cancel_open("SELL"):
+                        self._place_sell(held, target)
 
         prag_dca = (self.s["last_buy_price"] * (1 - self.p.dca_drop_pct / 100)
                     if self.s["last_buy_price"] else None)

@@ -705,6 +705,9 @@ t212_bot process
 - take-profit ladder;
 - catastrophic stop loss;
 - pending-order awareness;
+- anularea nereușită păstrează ordinul în starea locală; repricing-ul, scara TP și
+  ieșirile STOP/trailing nu suprapun un ordin nou peste unul pe care T212 nu l-a
+  confirmat ca acceptat pentru anulare;
 - FX fee/account currency.
 
 ### Boundary

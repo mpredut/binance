@@ -30,6 +30,10 @@ contractul mecanic, însă strategiile financiare distincte rămân separate.
 spot și T212. Scrierea este atomică (`fsync` urmat de `os.replace`); în mod real,
 starea coruptă sau nesalvabilă oprește deciziile, în timp ce PAPER poate porni curat.
 
+Motorul T212 păstrează local un ordin până când cererea de anulare este acceptată.
+Dacă anularea eșuează, nu plasează repricing, scară TP sau ieșire STOP/trailing peste
+ordinul posibil activ; reîncearcă la următorul ciclu de reconciliere.
+
 ### HYPE pe Hyperliquid (SPOT)
 `providers/hyperliquid_provider.py`:
 - preț/history **public** HL (perechea @index, ex `@107` = HYPE/USDC);
