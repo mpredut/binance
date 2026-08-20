@@ -16,6 +16,25 @@ _POLICIES = {"buy_first", "sell_first", "worst_case"}
 
 
 @dataclass(frozen=True)
+class FeeModel:
+    """Fee procentual per fill, separat pentru LIMIT și MARKET."""
+
+    limit_fee_pct: float
+    market_fee_pct: float
+
+    def __post_init__(self) -> None:
+        for name, value in (
+            ("limit_fee_pct", self.limit_fee_pct),
+            ("market_fee_pct", self.market_fee_pct),
+        ):
+            if not math.isfinite(value) or value < 0 or value >= 100:
+                raise ValueError(f"{name} trebuie să fie în intervalul [0, 100)")
+
+    def rate_pct(self, *, market: bool) -> float:
+        return self.market_fee_pct if market else self.limit_fee_pct
+
+
+@dataclass(frozen=True)
 class ExecutionModel:
     """Ipoteze de fill, exprimate explicit și serializabil."""
 

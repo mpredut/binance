@@ -144,6 +144,26 @@ class ReplayEngineTest(unittest.TestCase):
         )
         self.assertLess(stressed["return_pct"], plain["return_pct"])
 
+    def test_market_exit_uses_taker_fee_while_limits_use_maker_fee(self):
+        bars = [
+            (100.0, 101.0, 99.0, 100.0),
+            (100.0, 101.0, 99.0, 100.0),
+            (80.0, 82.0, 78.0, 80.0),
+            (70.0, 71.0, 69.0, 70.0),
+        ]
+        from offline.backtests.execution import FeeModel
+
+        uniform = rp.run_replay(
+            bars, _params(stop_loss_pct=10), fee_pct=0.16, bar_minutes=60,
+        )
+        maker_taker = rp.run_replay(
+            bars, _params(stop_loss_pct=10), fee_pct=0.16, bar_minutes=60,
+            fee_model=FeeModel(limit_fee_pct=0.16, market_fee_pct=0.40),
+        )
+
+        self.assertGreater(maker_taker["fees"], uniform["fees"])
+        self.assertLess(maker_taker["return_pct"], uniform["return_pct"])
+
     def test_overlay_requires_replay_bars_at_configured_trend_interval(self):
         with self.assertRaisesRegex(ValueError, "trend_interval"):
             rp.run_replay(

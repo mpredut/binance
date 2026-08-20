@@ -60,3 +60,35 @@ Aceleași opțiuni există pe ambele runnere:
 
 Comparatorul Kraken citește modelul din raportul baseline și îl aplică identic
 tuturor candidaților și scenariilor de fee.
+
+## Benchmark financiar HYPE și gate de promovare
+
+Golden-ul verifică dacă motorul ia aceleași decizii după un refactor. Benchmark-ul
+financiar măsoară separat randamentul și riscul OOS al unui profil fix în două
+scenarii de execuție. Nu actualiza golden-ul pentru a „accepta” un candidat și nu
+promova un candidat doar pentru că păstrează golden-ul.
+
+```bash
+.venv/bin/python offline/runners/kraken_financial_benchmark.py \
+  --output offline/research/hype_dataset/financial_baseline_v1.json \
+  --markdown chatgpt_agent_work/HYPE_FINANCIAL_BENCHMARK.md
+
+# Reproducere exactă a baseline-ului versionat
+.venv/bin/python offline/runners/kraken_financial_benchmark.py \
+  --verify offline/research/hype_dataset/financial_baseline_v1.json \
+  --output /tmp/hype_financial_verify.json \
+  --markdown /tmp/hype_financial_verify.md
+```
+
+Pentru un candidat, `--params-report` citește un obiect `strategy_params` și
+`--compare-to` atașează verdictul la raport. Gate-ul poate fi rulat și separat:
+
+```bash
+.venv/bin/python offline/runners/financial_promotion_gate.py \
+  offline/research/hype_dataset/financial_baseline_v1.json \
+  offline/results/hype_financial/candidate.json
+```
+
+Gate-ul cere avantaj de medie de minimum `0,10pp`, mai multe ferestre câștigate
+decât pierdute și păstrarea worst-fold/DD în **ambele** scenarii. Valorile de cost
+sunt provizorii până la calibrarea din fill-uri Kraken reale.

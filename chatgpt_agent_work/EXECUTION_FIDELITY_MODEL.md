@@ -34,6 +34,9 @@ Strategy.step(close) -> ordin
 - `intrabar_policy=worst_case`: rulează extremele deterministe BUY→SELL și
   SELL→BUY pe aceeași serie și păstrează randamentul mai slab. Este o limită
   conservatoare, nu reconstrucția traseului real tick-by-tick.
+- `FeeModel`: aplică fee-ul maker ordinelor LIMIT și fee-ul taker ordinelor MARKET.
+  Parametrul istoric unic `fee_pct` rămâne compatibil și setează ambele valori
+  identic, astfel încât golden-ul existent nu se schimbă.
 
 Valorile implicite (`0`, `0`, `1`, `buy_first`) păstrează baseline-urile istorice.
 
@@ -63,3 +66,16 @@ ferestre de la `+0,615%` la `+0,458%`.
 Aceste valori nu trebuie tratate ca spread/slippage real măsurat. Calibrarea
 corectă cere exportul ordinelor și fill-urilor reale pe venue și distribuții pe
 mărimea ordinului, oră și regim de volatilitate.
+
+## Benchmark financiar reproductibil
+
+`offline/runners/kraken_financial_benchmark.py` fixează configurația base v2,
+datasetul și cele 31 ferestre TEST fără suprapunere. Scenariul central folosește
+provizoriu fee LIMIT/MARKET `0,16%/0,26%`, spread `10bps`, slippage market `15bps`
+și fill LIMIT de maximum `75%` per bară. Stress folosește `0,26%/0,40%`, `20bps`,
+`30bps` și maximum `50%`. Ambele aleg worst-case intrabar.
+
+Gate-ul de promovare compară candidatul și base pe exact aceleași ferestre și
+scenarii. Un candidat trebuie să îmbunătățească media cu minimum `0,10pp`, să
+câștige mai multe perechi decât pierde și să nu degradeze worst-fold sau DD cu
+mai mult de `0,25pp`. Trecerea golden-ului singură nu spune nimic despre profit.
