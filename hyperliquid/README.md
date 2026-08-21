@@ -117,6 +117,17 @@ Niciun candidat nu a trecut gate-ul formal de promovare. `long_tp3_trail3` a
 în schema de 15 zile. Concluzia este **shadow/paper only** până la dovezi forward,
 nu modificare live.
 
+Forward-ul versionat rulează prin `hyperliquid/shadow_longterm.py`. Runnerul
+folosește numai candles publice HYPE spot, construiește `HLClient()` fără cheie
+și fără obiect `Exchange`, păstrează o ancoră separată și compară `current`,
+`long_tp3_trail3` și `reentry4`. Nu citește soldul/starea botului și nu poate
+plasa ordine. Pragul de reevaluare rămâne minimum 30 zile și 20 divergențe de
+decizie, nu 20 snapshoturi identice.
+
+```bash
+./myenv/bin/python hyperliquid/shadow_longterm.py
+```
+
 Rularea de confirmare a fost executată exclusiv pe hostul DEV `backtest`.
 Artefactul temporar curent este:
 
