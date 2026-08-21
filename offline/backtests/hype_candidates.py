@@ -93,6 +93,11 @@ def financial_priority_candidates() -> list[Candidate]:
     """Candidații care trec prin scenariile central/stress și promotion gate."""
     return [
         Candidate("live", "configurația live neschimbată", {}),
+        Candidate(
+            "reentry4",
+            "reintrare numai după recul de 4%; candidat HLC cross-venue shadow",
+            {"reentry_drop_pct": 4.0},
+        ),
         _tp4("tp4"),
         _dca15("dca15"),
         Candidate(

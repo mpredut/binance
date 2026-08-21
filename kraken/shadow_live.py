@@ -11,6 +11,8 @@ comparativ. Scopul: forward-test intre configul de PRODUCTIE si candidați shado
   - dca15   : DOAR DCA_DROP 1.25 -> 1.5   (+0.08pp, candidat secundar)
   - dca_progressive025: primul DCA la 1.25%, apoi +0.25pp/treaptă;
     candidat de risc, central neutru și mai bun sub stress în benchmark
+  - reentry4: după închiderea unui ciclu, așteaptă un recul de 4% înaintea
+    reintrării; candidat HLC selectat pe 31 ferestre și urmărit cross-venue
   - trail_profit_floor_sl18: trailing soft numai de la +1% brut în sus;
     sub prag așteaptă revenirea, iar hard stop-ul MARKET este lărgit la -18%
   - trail_profit_floor_sl125: DECUPLAT — doar profit-floor, stop la 12.5%.
@@ -73,6 +75,7 @@ def _variants(interval: int):
         "dca_progressive025": dataclasses.replace(
             base, dca_spacing_growth_pct=0.25,
         ),
+        "reentry4": dataclasses.replace(base, reentry_drop_pct=4.0),
         "trail_profit_floor_sl18": dataclasses.replace(
             base,
             tp_trail_profit_floor_pct=1.0,

@@ -16,7 +16,7 @@ class HypeCandidatesTest(unittest.TestCase):
         self.assertEqual(
             names,
             [
-                "live", "tp4", "dca15", "dca_progressive025", "dca_vol_m1",
+                "live", "reentry4", "tp4", "dca15", "dca_progressive025", "dca_vol_m1",
                 "A_trail", "B_dcabrake", "overlay650t8",
                 "trail_profit_floor_sl18", "trail_profit_floor_sl125",
             ],
@@ -29,6 +29,7 @@ class HypeCandidatesTest(unittest.TestCase):
         }
 
         self.assertEqual(by_name["tp4"].overrides, {"takeprofit_pct": 4.0})
+        self.assertEqual(by_name["reentry4"].overrides, {"reentry_drop_pct": 4.0})
         self.assertEqual(by_name["dca15"].overrides, {"dca_drop_pct": 1.5})
         self.assertEqual(
             by_name["dca_progressive025"].overrides,
