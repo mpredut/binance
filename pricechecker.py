@@ -1,4 +1,6 @@
 # pricechecker.py
+import copy
+import math
 import time
 import threading
 from datetime import datetime
@@ -74,7 +76,7 @@ class PriceAlert:
             "percent_change": self.percent_change,
             "threshold": self.threshold,
             "timestamp": self.timestamp,
-            "timestamp_readable": datetime.now().isoformat(),
+            "timestamp_readable": datetime.fromtimestamp(self.timestamp).isoformat(),
             "reference_time": self.reference_time,
             "url": self.url,
         }
@@ -91,7 +93,13 @@ class PriceChecker:
         self.cachePriceAll = cachePriceAll
         self.alert_callback = alert_callback or self._default_alert_handler
         # config din market_alerts.conf (cu per_coin) daca e dat; altfel hardcodul vechi
-        self.config = config or PRICE_ALERT_CONFIG.copy()
+        self.config = copy.deepcopy(PRICE_ALERT_CONFIG)
+        if config:
+            for key, value in config.items():
+                if key in ("default", "dynamic") and isinstance(value, dict):
+                    self.config[key].update(copy.deepcopy(value))
+                else:
+                    self.config[key] = copy.deepcopy(value)
 
         # Prevent spam: remember the last alert per symbol and alert type
         self._last_alert_time = defaultdict(float)
@@ -130,20 +138,38 @@ class PriceChecker:
 
     def _get_price_history_last_hours(self, symbol: str, hours: int) -> List[Dict]:
         """Retrieve the price history from the last 'hours' hours."""
-        history = self.cachePriceAll.get_price_history(symbol, limit=1000)
+        if hours <= 0:
+            return []
+        history_limit = max(1000, int(math.ceil(hours * 60)) + 2)
+        history = self.cachePriceAll.get_price_history(symbol, limit=history_limit)
 
         if not history:
             return []
 
         cutoff_time = (time.time() - hours * 3600) * 1000  # milliseconds
 
-        # Filter only entries from the last X hours
-        recent_history = [
-            entry for entry in history
-            if entry["timestamp"] >= cutoff_time
-        ]
+        recent_history = []
+        for entry in history:
+            if not isinstance(entry, dict):
+                continue
+            try:
+                timestamp = float(entry["timestamp"])
+                price = float(entry["price"])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if not math.isfinite(timestamp) or not math.isfinite(price) or price <= 0:
+                continue
+            if timestamp < 10_000_000_000:
+                timestamp *= 1000
+            if timestamp < cutoff_time:
+                continue
+            normalized = dict(entry)
+            normalized["timestamp"] = timestamp
+            normalized["price"] = price
+            normalized.setdefault("timestamp_readable", datetime.fromtimestamp(timestamp / 1000).strftime("%Y-%m-%d %H:%M:%S"))
+            recent_history.append(normalized)
 
-        return recent_history
+        return sorted(recent_history, key=lambda item: item["timestamp"])
 
     def _calculate_24h_stats(self, symbol: str) -> Dict:
         """
@@ -159,7 +185,11 @@ class PriceChecker:
             - has_data: True if enough data exists
         """
         current_price = self.cachePriceAll.get_latest_price(symbol)
-        if current_price is None:
+        try:
+            current_price = float(current_price)
+        except (TypeError, ValueError):
+            current_price = math.nan
+        if not math.isfinite(current_price) or current_price <= 0:
             return {"has_data": False, "error": "No current price available"}
 
         history = self._get_price_history_last_hours(symbol, self.config["lookback_hours"])
@@ -285,7 +315,7 @@ class PriceChecker:
         else:
             symbols = list(self.cachePriceAll.symbols)
 
-        for symbol in symbols:
+        for symbol in dict.fromkeys(symbols):
             try:
                 alerts = self.check_symbol(symbol)
                 all_alerts.extend(alerts)
@@ -301,6 +331,8 @@ class PriceChecker:
         Args:
             interval_seconds: How often to check (for example 60 seconds).
         """
+        if interval_seconds <= 0:
+            raise ValueError("interval_seconds must be greater than zero")
         if self._running:
             print("[Checker] Already running!")
             return
@@ -349,6 +381,6 @@ class PriceChecker:
 
 
 def start_price_alert_checker(cachePriceAll, alert_callback=None, check_interval_seconds=60, config=None):
-    Checker = PriceChecker(cachePriceAll, alert_callback=alert_callback, config=config)
-    Checker.start_monitoring(check_interval_seconds)
-    return Checker
+    checker = PriceChecker(cachePriceAll, alert_callback=alert_callback, config=config)
+    checker.start_monitoring(check_interval_seconds)
+    return checker
