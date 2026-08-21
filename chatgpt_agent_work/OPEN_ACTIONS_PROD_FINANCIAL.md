@@ -106,7 +106,7 @@ Propunerile nu mai sunt confirmate în ambele ferestre; configurația rămâne
   DEV și redeployat controlat; ordinul real este urmărit din starea HL izolată.
 - `config.env` versionat și override-urile locale descriu acum TP `5%`; `.env`
   păstrează precedență. Profilul efectiv verificat era TP `5%`, trend-hold și trailing
-  adaptiv `1,5–8%`, cu sizing `250/100`, DCA `-2%`, SL `7%`, plafon `5.000` (maximum efectiv
+  adaptiv `1,5–8%`, cu sizing `250/100`, DCA `-2%`, SL `7%`, plafon `10.000` (maximum efectiv
   `1.250` la limita curentă de 10 DCA).
 - Fee-urile folosite pentru spot au fost corectate conceptual la grila oficială:
   central `0,04% LIMIT / 0,07% MARKET`; stress `0,07% / 0,10%` plus spread,
