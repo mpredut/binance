@@ -31,7 +31,10 @@ from providers.hyperliquid_provider import HyperliquidProvider
 
 def state_dir_for(dry_run: bool) -> str:
     """Izolează starea HL de Kraken și separă PAPER de LIVE."""
-    return os.path.join(_HERE, ".paper_state") if dry_run else _HERE
+    state_dir = os.path.join(_HERE, ".paper_state") if dry_run else _HERE
+    if dry_run:
+        os.makedirs(state_dir, exist_ok=True)
+    return state_dir
 
 
 def main() -> int:
