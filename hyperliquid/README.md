@@ -50,7 +50,7 @@ valorile deja definite nu sunt suprascrise. Prin urmare:
 verificarea din 21 august 2026, parametrii nesensibili efectivi erau:
 
 ```text
-entry 250 USDC | DCA 850 USDC la -2% | plafon 10.000 USDC | SL 7%
+entry 1.000 USDC | DCA 600 USDC la -2% | plafon 10.000 USDC | SL 7%
 TP 5% | trend-hold activ | trailing adaptiv 1,5–8%
 ```
 
