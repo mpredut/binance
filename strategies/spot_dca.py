@@ -252,6 +252,11 @@ class Strategy:
 
     def _emit(self, **event) -> None:
         """Trimite un eveniment prin sink-ul venue-ului sau prin compatibilitatea veche."""
+        # Replay/backtest foloseste aceeasi strategie ca live, dar nu are voie sa
+        # produca efecte externe. ``dry_run`` nu este suficient: paper-live are
+        # nevoie in continuare de alerte reale.
+        if self.replay_mode:
+            return
         (self._notifier or notify)(**event)
 
     # -- persistenta -----------------------------------------------------------

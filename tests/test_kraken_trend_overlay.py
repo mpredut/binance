@@ -43,6 +43,31 @@ def _make_strategy(*, replay_mode=False, **overrides):
 
 
 class TrendOverlayTest(unittest.TestCase):
+    def test_replay_never_emits_external_notifications(self):
+        notifier = MagicMock()
+        s = _make_strategy(replay_mode=True)
+        s._notifier = notifier
+
+        s._emit(
+            title="SL TESTPAIR -20%", body="test paper",
+            source="kraken", symbol="TESTPAIR",
+        )
+
+        notifier.assert_not_called()
+
+    def test_paper_live_keeps_external_notifications(self):
+        notifier = MagicMock()
+        s = _make_strategy(replay_mode=False)
+        s._notifier = notifier
+        event = {
+            "title": "paper-live", "body": "test",
+            "source": "kraken", "symbol": "TESTPAIR",
+        }
+
+        s._emit(**event)
+
+        notifier.assert_called_once_with(**event)
+
     def test_topup_enters_trend_mode_only_after_fill(self):
         s = _make_strategy(replay_mode=True)
         s._shadow_prices.extend([(1.0, 100.0), (2.0, 101.0)])
