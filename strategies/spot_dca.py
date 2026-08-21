@@ -112,6 +112,11 @@ class StratParams:
                                       # k<0 = MAI MARE in vol (harvest agresiv). Fail-safe pe warm-up.
     dca_vol_ref: float = 2.0          # vol_1h (%) de referinta pt scalare
     dca_vol_interval: int = 240       # cadență OHLC identică în live și replay
+    # --- Sizing PROCENTUAL (optional; total_budget=0 sau alloc_pct=0 -> OFF, valorile fixe) ---
+    total_budget: float = 0.0   # bugetul TOTAL al venue-ului (ex. tot contul Kraken)
+    alloc_pct: float = 0.0      # % din total alocat ACESTEI monede (suma pe venue = 100)
+    entry_pct: float = 0.0      # entry = felia monedei (total × alloc%) × acest %
+    dca_pct: float = 0.0        # DCA   = felia monedei × acest %
 
     @classmethod
     def from_env(cls) -> "StratParams":
@@ -128,6 +133,10 @@ class StratParams:
             max_budget         = float_env("STRAT_MAX_BUDGET") or 500.0,
             # NU "or 10": zeroul explicit (= fara DCA, doar gestionare iesire) e valid
             max_dca_buys       = int(float_env("STRAT_MAX_DCA_BUYS")) if float_env("STRAT_MAX_DCA_BUYS") is not None else 10,
+            total_budget       = float_env("STRAT_TOTAL_BUDGET") or 0.0,
+            alloc_pct          = float_env("STRAT_ALLOC_PCT") or 0.0,
+            entry_pct          = float_env("STRAT_ENTRY_PCT") or 0.0,
+            dca_pct            = float_env("STRAT_DCA_PCT") or 0.0,
             enable_takeprofit  = (mode != "dca_only"),
             order_ttl_min      = float_env("STRAT_ORDER_TTL_MIN") or 10.0,
             stop_loss_pct      = float_env("STRAT_STOP_LOSS_PCT") or 0.0,
@@ -661,26 +670,50 @@ class Strategy:
                    source=f"{self.notification_source}-bot", price=self.p.adopt_cost,
                    desktop=self.desktop)
 
+    # -- Sizing PROCENTUAL (buget total × alocare; toate 0 -> fix) -------------
+    def _pct_sizing_on(self) -> bool:
+        return float(self.p.total_budget) > 0 and float(self.p.alloc_pct) > 0
+
+    def _alloc_budget(self) -> float:
+        """Felia acestei monede din bugetul total: total × alloc%."""
+        return float(self.p.total_budget) * float(self.p.alloc_pct) / 100.0
+
+    def _effective_entry_amount(self) -> float:
+        if self._pct_sizing_on() and float(self.p.entry_pct) > 0:
+            return self._alloc_budget() * float(self.p.entry_pct) / 100.0
+        return self.p.entry_amount
+
+    def _effective_max_budget(self) -> float:
+        if self._pct_sizing_on():
+            return self._alloc_budget()
+        return self.p.max_budget
+
+    def _base_dca_amount(self) -> float:
+        if self._pct_sizing_on() and float(self.p.dca_pct) > 0:
+            return self._alloc_budget() * float(self.p.dca_pct) / 100.0
+        return self.p.dca_amount
+
     # -- SHADOW vol-adaptiv (doar observatie/log, nu decide nimic) --------------
     def _effective_dca_amount(self) -> float:
-        """#2: marimea DCA scalata pe volatilitate. dca_vol_scale_k=0 -> fix (dca_amount).
-        Fail-safe pe warm-up/eroare (cade pe fix), ca reintrarea adaptiva."""
+        """Marimea DCA: baza (% din felie SAU fix) × scalare vol (#2, daca activata).
+        Fail-safe pe warm-up/eroare (cade pe baza), ca reintrarea adaptiva."""
+        base = self._base_dca_amount()
         scale_k = float(self.p.dca_vol_scale_k)
         vol_ref = float(self.p.dca_vol_ref)
         if not scale_k:
-            return self.p.dca_amount
+            return base
         if not math.isfinite(scale_k) or not math.isfinite(vol_ref) or vol_ref <= 0:
-            return self.p.dca_amount
+            return base
         try:
             vol = self._dca_vol_1h()
             if not vol or not math.isfinite(vol) or vol <= 0:
-                return self.p.dca_amount
+                return base
             scale = (vol_ref / vol) ** scale_k
         except (ArithmeticError, TypeError, ValueError):
-            return self.p.dca_amount
+            return base
         if not math.isfinite(scale):
-            return self.p.dca_amount
-        return self.p.dca_amount * max(0.3, min(3.0, scale))
+            return base
+        return base * max(0.3, min(3.0, scale))
 
     def _dca_vol_1h(self) -> float | None:
         """Volatilitate DCA din OHLC la aceeași cadență în live și replay."""
@@ -890,7 +923,7 @@ class Strategy:
             self._cancel_open("buy")                # semnal dispărut înainte de fill
             log("  [STRAT] TREND ENTER anulat: semnalul a dispărut înainte de fill")
             return False                            # revine la strategia range
-        if up and self.s["spent"] + self.p.trend_topup <= self.p.max_budget:
+        if up and self.s["spent"] + self.p.trend_topup <= self._effective_max_budget():
             self._cancel_orders("buy")              # anuleaza ordine range pendinte
             self._cancel_orders("sell")
             if self.s["orders"]:                    # REAL: asteapta confirmarile terminale
@@ -964,11 +997,13 @@ class Strategy:
                         if not self.p.reentry_adaptive:
                             self._shadow_reentry_line(price, lsp, prag)   # log comparativ DOAR cand fixul inca decide
                         return
-            if self.s["spent"] + self.p.entry_amount > self.p.max_budget:
-                log(f"  [STRAT] plafon {self.p.max_budget} {self.ccy} atins — nu intru")
+            entry_amt = self._effective_entry_amount()
+            budget = self._effective_max_budget()
+            if self.s["spent"] + entry_amt > budget:
+                log(f"  [STRAT] plafon {budget:.0f} {self.ccy} atins — nu intru")
                 return
-            self._place("buy", self._qty_for(self.p.entry_amount, entry_px),
-                        entry_px, kind="ENTRY", amount=self.p.entry_amount)
+            self._place("buy", self._qty_for(entry_amt, entry_px),
+                        entry_px, kind="ENTRY", amount=entry_amt)
             return
 
         avg = self._avg()
@@ -1055,7 +1090,7 @@ class Strategy:
                     price, self.s["last_buy_price"], effective_dca_drop,
                     self.p.reentry_tolerance_pct,
                 )
-                and self.s["spent"] + effective_dca_amount <= self.p.max_budget
+                and self.s["spent"] + effective_dca_amount <= self._effective_max_budget()
                 and not (self.p.dca_trend_brake and self._trend_down())  # B: frana DCA in downtrend
                 and not self._has_open("buy")):
             log(
@@ -1075,8 +1110,11 @@ class Strategy:
         log(f"  === STRATEGIE {self.venue_label.upper()} PORNITA ===")
         log(f"      pereche    : {self.pair}   {'[PAPER]' if self.dry_run else '⚠ REAL — BANI'}")
         log(f"      mod        : {mode}")
-        log(f"      intrare    : {self.p.entry_amount} {self.ccy} @ market-{self.p.entry_discount_pct}%")
-        log(f"      DCA        : {self.p.dca_amount} {self.ccy} la -{self.p.dca_drop_pct}% (max {self.p.max_dca_buys})")
+        log(f"      intrare    : {self._effective_entry_amount():.0f} {self.ccy} @ market-{self.p.entry_discount_pct}%")
+        log(f"      DCA        : {self._base_dca_amount():.0f} {self.ccy} la -{self.p.dca_drop_pct}% (max {self.p.max_dca_buys})")
+        if self._pct_sizing_on():
+            log(f"      SIZING %   : felie {self.p.alloc_pct}% × total {self.p.total_budget:.0f} "
+                f"= {self._alloc_budget():.0f} {self.ccy} (entry {self.p.entry_pct}%, DCA {self.p.dca_pct}%)")
         if self.p.dca_spacing_growth_pct > 0:
             log(
                 "      DCA growth : +"
@@ -1089,7 +1127,7 @@ class Strategy:
                 f"OHLC={self.p.dca_vol_interval}m"
             )
         log(f"      take-profit: +{self.p.takeprofit_pct}%" if self.p.enable_takeprofit else "      take-profit: off")
-        log(f"      PLAFON     : {self.p.max_budget} {self.ccy} / ciclu")
+        log(f"      PLAFON     : {self._effective_max_budget():.0f} {self.ccy} / ciclu")
         if self.fee_note:
             log(f"      ! {self.fee_note}; TP={self.p.takeprofit_pct}%")
         self._maybe_adopt()
