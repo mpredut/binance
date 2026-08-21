@@ -59,7 +59,25 @@ def priceLstFor(symbol: str) -> List[Tuple[int, float]]:
     return [(int(ts), float(p)) for ts, p in raw]
 
 
-_draw_fig = {}   # symbol -> (fig, ax), REFOLOSITE — vezi motivul in docstring
+_draw_fig = {}  # symbol -> (fig, ax), REFOLOSITE — vezi motivul in docstring
+
+
+def _draw_point_limit() -> int:
+    """Limita de puncte trimise rendererului; nu afectează calculul trendului."""
+    try:
+        return max(2, int(os.environ.get("PRICEANALYSIS_DRAW_MAX_POINTS", "5000")))
+    except (TypeError, ValueError):
+        return 5000
+
+
+def _bounded_plot_indices(length: int, max_points: Optional[int] = None) -> np.ndarray:
+    """Indici uniformi pentru plot, cu capetele păstrate și memorie plafonată."""
+    if length <= 0:
+        return np.empty(0, dtype=np.intp)
+    limit = _draw_point_limit() if max_points is None else max(2, int(max_points))
+    if length <= limit:
+        return np.arange(length, dtype=np.intp)
+    return np.linspace(0, length - 1, num=limit, dtype=np.intp)
 
 
 def drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_direction, duration_hours):
@@ -70,17 +88,31 @@ def drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_directio
     matplotlib/Agg: cache-urile interne de fonturi/randare (freetype) nu se
     elibereaza complet intre figuri noi succesive intr-o bucla lunga. Fix
     standard: O SINGURA figura/axa PERSISTENTA per simbol, golita (ax.clear())
-    si redesenata, in loc de creata+distrusa la fiecare ciclu."""
-    times = [datetime.fromtimestamp(ts) for ts in timestamps]
+    si redesenata, in loc de creata+distrusa la fiecare ciclu.
+
+    Calculul trendului folosește seria completă. Numai rendererul PNG primește un
+    eșantion uniform plafonat: Matplotlib construiește altfel zeci de mii de obiecte
+    datetime și copii de array la fiecare minut, iar allocatorul păstrează RSS-ul."""
+    timestamps = np.asarray(timestamps)
+    prices = np.asarray(prices)
+    plot_idx = _bounded_plot_indices(len(timestamps))
+    times = [datetime.fromtimestamp(float(timestamps[i])) for i in plot_idx]
 
     if symbol not in _draw_fig:
         _draw_fig[symbol] = plt.subplots(figsize=(12, 5))
     fig, ax = _draw_fig[symbol]
     ax.clear()
 
-    ax.plot(times, prices, label='Price', color='blue')
+    ax.plot(times, prices[plot_idx], label='Price', color='blue')
     for start, end in trend_block_indices:
-        ax.plot(times[start:end], prices[start:end], color='red', linewidth=2)
+        # Același eșantion global ține plafonat totalul de obiecte grafice chiar
+        # dacă blocurile de trend se suprapun.
+        block_idx = plot_idx[(plot_idx >= start) & (plot_idx < end)]
+        if block_idx.size < 2 and end > start:
+            block_idx = np.unique(np.array([start, end - 1], dtype=np.intp))
+        if block_idx.size:
+            block_times = [datetime.fromtimestamp(float(timestamps[i])) for i in block_idx]
+            ax.plot(block_times, prices[block_idx], color='red', linewidth=2)
 
     ax.set_xlabel('Time')
     ax.set_ylabel('Price')

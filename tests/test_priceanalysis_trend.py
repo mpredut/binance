@@ -63,5 +63,23 @@ class TestTimeBasedTrend(unittest.TestCase):
             self.assertTrue(0 <= lo < hi <= len(ts))
 
 
+class TestBoundedPlotIndices(unittest.TestCase):
+    def test_short_series_is_unchanged(self):
+        np.testing.assert_array_equal(
+            pa._bounded_plot_indices(4, max_points=5),
+            np.array([0, 1, 2, 3]),
+        )
+
+    def test_long_series_is_bounded_and_keeps_endpoints(self):
+        indices = pa._bounded_plot_indices(43_200, max_points=5_000)
+        self.assertEqual(len(indices), 5_000)
+        self.assertEqual(indices[0], 0)
+        self.assertEqual(indices[-1], 43_199)
+        self.assertTrue(np.all(np.diff(indices) > 0))
+
+    def test_empty_series(self):
+        self.assertEqual(pa._bounded_plot_indices(0, max_points=5_000).size, 0)
+
+
 if __name__ == "__main__":
     unittest.main()
