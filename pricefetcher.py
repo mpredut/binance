@@ -120,6 +120,7 @@ class BinancePricePlatform(PricePlatformInterface):
         except Exception as e:
             print(f"[BinancePlatform] Error loading symbols: {e}")
             self._fallback_symbols()
+            self._last_refresh = time.time()
     
     def _fallback_symbols(self):
         self._usdc_pairs = {"BTCUSDC", "ETHUSDC", "BNBUSDC"}
@@ -202,6 +203,7 @@ class HyperliquidPricePlatform(PricePlatformInterface):
         except Exception as e:
             print(f"[HyperliquidPlatform] Error loading symbols: {e}")
             self._supported_symbols = {"HYPE", "PURR", "BTC", "ETH", "SOL", "USDC"}
+            self._last_refresh = time.time()
     
     def refresh_symbols(self):
         if time.time() - self._last_refresh > self._refresh_interval:
@@ -432,17 +434,23 @@ class PricePlatformFactory:
         self._capabilities = all_symbols
 
     def get_price(self, symbol: str) -> Dict:
+        cached_platform = None
         if symbol in self._symbol_platform_cache:
             platform_name = self._symbol_platform_cache[symbol]
             for platform in self._platforms:
                 if platform.platform_name == platform_name:
+                    cached_platform = platform
                     price = platform.get_price(symbol)
                     if price is not None:
                         return {
                             "symbol": symbol, "price": price,
                             "platform": platform.platform_name, "timestamp": int(time.time())
                         }
+                    self._symbol_platform_cache.pop(symbol, None)
+                    break
         for platform in self._platforms:
+            if platform is cached_platform:
+                continue
             if platform.supports_symbol(symbol):
                 price = platform.get_price(symbol)
                 if price is not None:
@@ -514,8 +522,8 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
                                 self.active_symbols.add(symbol)
                                 self.symbols.append(symbol)
                                 self.original_symbols.append(symbol)
-            except:
-                pass
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                print(f"[Pricefetcher] Metadata cache ignored: {exc}")
     
     def _log_symbol_support(self):
         print(f"[Pricefetcher] Checking symbol support:")
@@ -553,9 +561,8 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
                             timestamp_ms = timestamp * 1000
                             print(f"[Pricefetcher][{symbol}] ${price:.4f} (source: {preferred_source} - preferred)")
                             return [[timestamp_ms, price]]
-                        else:
-                            print(f"[Pricefetcher][{symbol}] Error: preferred source {preferred_source} could not provide the price")
-                            return []
+                        print(f"[Pricefetcher][{symbol}] Preferred source {preferred_source} failed; trying fallback providers")
+                        break
             result = self.price_factory.get_price(symbol)
             price = result["price"]
             platform_used = result["platform"]
@@ -625,16 +632,21 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
         return None
 
     def get_price_history(self, symbol: str, limit: int = 100) -> List[Dict]:
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
+            return []
+        # Copiem doar referintele sub lock; conversia si formatarea se fac dupa,
+        # ca sync-ul de pret sa nu fie blocat de datetime/allocari.
         with self.lock:
-            entries = self.cache.get(symbol, [])[-limit:]
-            return [
-                {
-                    "timestamp": entry[0],  # ← MILISECUNDE (fără //1000)
-                    "timestamp_readable": datetime.fromtimestamp(entry[0] // 1000).strftime('%Y-%m-%d %H:%M:%S'),
-                    "price": entry[1]
-                }
-                for entry in entries
-            ]
+            entries = self.cache.get(symbol, ())[-limit:]
+
+        return [
+            {
+                "timestamp": entry[0],
+                "timestamp_readable": datetime.fromtimestamp(entry[0] / 1000).strftime("%Y-%m-%d %H:%M:%S"),
+                "price": entry[1],
+            }
+            for entry in entries
+        ]
         
     def cleanup_old_prices(self, retention_days: int = PRICE_HISTORY_RETENTION_DAYS):
         cutoff_timestamp = (time.time() - retention_days * 24 * 3600) * 1000
