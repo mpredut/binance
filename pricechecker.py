@@ -11,6 +11,16 @@ import log
 import utils as u
 from pricefetcher import get_base_symbol
 
+# Slug canonic CoinMarketCap pt simboluri majore. _all_listings e cheiat pe SIMBOL,
+# deci cand mai multe monede impart un simbol (ex. "BTC" = Bitcoin real DAR si un
+# token scam "Bitcoin AI"), ultima suprascrie -> slug gresit ("bitcoin-ai"). Acest
+# map forteaza slug-ul corect pt monedele care ne intereseaza (watchlist + majore).
+_CANONICAL_CMC_SLUG = {
+    "BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana", "ADA": "cardano",
+    "XRP": "xrp", "DOGE": "dogecoin", "TAO": "bittensor", "HYPE": "hyperliquid",
+    "PEPE": "pepe", "PURR": "purr-2", "WIF": "dogwifhat", "FLR": "flare-networks",
+}
+
 # Threshold configuration (can be adjusted at any time)
 PRICE_ALERT_CONFIG = {
     "default": {
@@ -98,7 +108,12 @@ class PriceChecker:
 
     def _build_cmc_url(self, symbol: str) -> str:
         try:
-            candidate_symbols = [symbol, get_base_symbol(symbol)]
+            base = get_base_symbol(symbol) or symbol
+            # Slug canonic hardcodat pt majore -> evita coliziunile de simbol din _all_listings.
+            canonical = _CANONICAL_CMC_SLUG.get((base or "").upper())
+            if canonical:
+                return f"https://coinmarketcap.com/currencies/{canonical}/"
+            candidate_symbols = [symbol, base]
             for candidate in candidate_symbols:
                 if not candidate:
                     continue
