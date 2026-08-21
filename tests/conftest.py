@@ -1,6 +1,7 @@
 """Global safety and cleanup for the test suite."""
 
 import os
+import tempfile
 import threading
 
 import pytest
@@ -10,6 +11,14 @@ import pytest
 # facute la import si nici subprocess-urile pornite de teste nu pot trimite
 # notificari reale catre ntfy/email/desktop.
 os.environ["DISABLE_EXTERNAL_NOTIFICATIONS"] = "1"
+
+# Unele teste construiesc motoarele live cu executori fake. Fara un director
+# separat, auditul implicit ajungea in logger/execution_audit si amesteca
+# TEST_US_EQ cu fill-urile reale folosite pentru calibrare.
+_execution_audit_tmp = tempfile.TemporaryDirectory(
+    prefix="binance-tests-execution-audit-",
+)
+os.environ["EXECUTION_AUDIT_DIR"] = _execution_audit_tmp.name
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -39,3 +48,4 @@ def _shutdown_runtime_threads_after_suite():
     leaked = sorted(thread.name for thread in threading.enumerate()
                     if thread.name in forbidden)
     assert not leaked, f"thread-uri runtime rămase după suită: {leaked}"
+    _execution_audit_tmp.cleanup()
