@@ -103,7 +103,8 @@ Propunerile nu mai sunt confirmate în ambele ferestre; configurația rămâne
 
 - `hl_dca_bot.py` este configurat REAL, dar oprit și absent din manifest. Incidentul
   `PAPER-1` din starea legacy Kraken este închis: fixul LIVE/PAPER a fost testat pe
-  DEV și redeployat controlat; ordinul real este urmărit din starea HL izolată.
+  DEV și redeployat controlat; ultimul ordin a fost anulat fără fill, iar contul
+  avea zero ordine și ~1.024 USDC liberi. Activarea cere minimum 7.000 USDC.
 - `config.env` versionat și override-urile locale descriu acum TP `5%`; `.env`
   păstrează precedență. Profilul efectiv verificat era TP `5%`, trend-hold și trailing
   adaptiv `1,5–8%`, cu sizing proporțional `1.000/600`, DCA `-2%`, SL `7%`, plafon `10.000`

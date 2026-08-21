@@ -10,8 +10,8 @@ activ în producție.
 - `hl_dca_bot.py` este în afara `procs.conf`, cu porțile REAL configurate, dar este
   oprit după ce preflight-ul a găsit numai ~1.024 USDC pentru sizingul de 7.000; nu
   este supravegheat și nu repornește automat;
-- incidentul `PAPER-1` din starea legacy Kraken a fost remediat și redeployat
-  controlat în 21 august; procesul reconciliază acum starea LIVE HL izolată;
+- incidentul `PAPER-1` din starea legacy Kraken a fost remediat și validat; starea
+  LIVE HL este izolată, iar ultimul ordin a fost anulat fără fill;
 - `dn_bot.py` și watcherul sunt opriți și comentați în manifest;
 - launcherul separă starea HL de Kraken și PAPER de LIVE; smoke-ul PAPER, testele
   de reconciliere și primele două tick-uri REAL au fost validate;
@@ -54,6 +54,10 @@ verificarea din 21 august 2026, parametrii nesensibili efectivi erau:
 entry 1.000 USDC | DCA 600 USDC la -2% | plafon 10.000 USDC | SL 7%
 TP 5% | trend-hold activ | trailing adaptiv 1,5–8%
 ```
+
+Cu `STRAT_MAX_DCA_BUYS=10`, expunerea maximă este `1.000 + 10×600 = 7.000 USDC`,
+nu plafonul nominal de 10.000. Snapshotul operațional avea ~1.023,68 USDC liberi și
+zero ordine; pentru activare sunt necesari minimum 7.000 USDC, recomandat 7.200.
 
 Nu deduce configurația live citind numai `config.env`. Pentru diagnostic, încarcă
 fișierele în aceeași ordine ca launcherul și afișează numai cheile nesensibile.

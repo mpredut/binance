@@ -12,7 +12,8 @@
   `binance_api/trailing_stop`. Sunt porniți din rolurile `bot` ale `procs.conf` și
   supravegheați de `healthcheck.sh --supervise` (cron */5).
 - **Hyperliquid**: `dn_bot`/watch sunt oprite și comentate în manifest. `hl_dca_bot`
-  este oprit până la finanțarea rezervei DCA și rămâne în afara `procs.conf`.
+  este oprit, are zero ordine și rămâne în afara `procs.conf`. Profilul pregătit
+  1.000/600/10.000 cere minimum 7.000 USDC; snapshotul avea ~1.024 USDC disponibili.
 - **Facadă market/cont**: `providers/market_api.py` rutează pe symbol către
   `BinanceProvider` / `HyperliquidProvider` / `kraken` / `t212`. `monitortrades` o folosește.
 
@@ -43,6 +44,14 @@ Citită de **toate**: `healthcheck.sh`, `flota_start.sh`, `bots_start.sh`, `depl
   active (`role=bot`) în ≤5 min.
 - Intrările HL comentate și `hl_dca_bot.py`, absent din `procs.conf`, **nu** repornesc.
 - Nu este necesară intervenție manuală pentru flota și boții declarați activi.
+
+### Activare HL după finanțare
+
+1. Confirmă minimum `7.000 USDC` liberi; recomandat `7.200` pentru fee/slippage.
+2. Confirmă zero ordine HYPE și un singur owner în `ownership_inventory.py --running`.
+3. Rulează testele și backtestul pe DEV după sincronizarea `cachedb`; nu pe PROD.
+4. Pornește controlat `hl_dca_bot.py`, apoi verifică PID-ul detașat, starea LIVE și
+   două tick-uri consecutive. Nu adăuga procesul în manifest fără decizie explicită.
 
 ## ⚠ CAPCANE & LECȚII (citește înainte să modifici)
 
