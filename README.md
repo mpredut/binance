@@ -86,9 +86,8 @@ Hyperliquid își păstrează logica proprie acolo unde modelul de execuție dif
 - `binance_api/trailing_stop.py` — disjunctor trailing/re-buy pentru Binance;
 - `hyperliquid/` — client și provider HYPE. `dn_bot` este dezactivat în
   `procs.conf`; `hl_dca_bot` rulează manual, în afara manifestului, cu porțile REAL
-  active. La auditul din 21 august era blocat de o stare PAPER legacy și nu avea
-  ordine deschise; remedierea versionată cere restart controlat și nu este activă
-  automat.
+  active. Redeploy-ul controlat din 21 august a activat starea HL izolată; procesul
+  reconciliază ordinul real de intrare fără a mai citi starea PAPER legacy Kraken.
 
 Kraken folosește namespace separat pentru cache-ul de tranzacții. Procesele Kraken
 care trimit cereri private trebuie să respecte politica de chei/nonce documentată în

@@ -9,11 +9,11 @@ activ în producție.
 
 - `hl_dca_bot.py` rulează manual, în afara `procs.conf`, cu `STRAT_EXECUTE` și
   `HL_LIVE_ORDERS` active; nu este supravegheat și nu repornește automat;
-- la auditul din 21 august 2026 avea zero ordine deschise și era blocat de ordinul
-  fictiv `PAPER-1` rămas dintr-o sesiune paper;
+- incidentul `PAPER-1` din starea legacy Kraken a fost remediat și redeployat
+  controlat în 21 august; procesul reconciliază acum starea LIVE HL izolată;
 - `dn_bot.py` și watcherul sunt opriți și comentați în manifest;
-- launcherul versionat separă acum starea HL de Kraken și PAPER de LIVE, dar
-  procesul curent folosește codul vechi până la un restart controlat;
+- launcherul separă starea HL de Kraken și PAPER de LIVE; smoke-ul PAPER, testele
+  de reconciliere și primele două tick-uri REAL au fost validate;
 - `monitortrades` pentru HYPE/Hyperliquid rămâne dezactivat prin instrument gate.
 
 Verificarea autoritativă este întotdeauna combinația dintre:
@@ -28,7 +28,7 @@ python3 verify_tools/ownership_inventory.py --running
 
 | Fișier | Piață | Motor | Stare |
 |---|---|---|---|
-| `hl_dca_bot.py` | HYPE/USDC spot | `strategies.spot_dca` (base v2) | rulează manual, REAL, blocat până la reconcilierea stării |
+| `hl_dca_bot.py` | HYPE/USDC spot | `strategies.spot_dca` (base v2) | rulează manual, REAL, stare izolată și reconciliată |
 | `hl_bot.py` | PERP long/short | `hyperliquid/strategy.py` | legacy, neînregistrat/nepornit |
 | `dn_bot.py` | spot long + perp short | `delta_neutral.py` | oprit explicit în manifest |
 | `providers/hyperliquid_provider.py` | spot | contract `StrategyExecutor` | adaptor importat lazy |

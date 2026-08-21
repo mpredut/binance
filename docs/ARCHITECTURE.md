@@ -117,10 +117,9 @@ Eșecul auditului nu poate refuza și nu poate modifica un ordin.
   `HL_LIVE_ORDERS` permite providerului să trimită ordine. Valorile pot fi suprascrise
   de `.env`; starea reală se stabilește din manifest + procese + environment, nu din
   `config.env` singur.
-- La auditul din 21 august 2026, `hl_dca_bot` rula manual în mod REAL, dar nu era
-  înscris în manifest și era blocat de ordinul fictiv `PAPER-1` importat din fallback-ul
-  legacy Kraken. Launcherul versionat izolează acum starea HL și separă PAPER de LIVE;
-  procesul existent folosește codul vechi până la un restart controlat.
+- La auditul din 21 august 2026, `hl_dca_bot` rula manual în mod REAL și nu era
+  înscris în manifest. Incidentul `PAPER-1`, importat din fallback-ul legacy Kraken,
+  a fost remediat și redeployat: launcherul izolează starea HL și separă PAPER de LIVE.
 - ⚠ **Co-mingling spot** (vezi [OPERATIONS.md](OPERATIONS.md) §3): dacă DN sau mai mulți
   owneri sunt reactivați, același sold HYPE spot poate fi vândut de motorul greșit.
 

@@ -101,9 +101,9 @@ Propunerile nu mai sunt confirmate în ambele ferestre; configurația rămâne
 
 ### F4 — Hyperliquid long-term — ANALIZAT, SHADOW ONLY
 
-- `hl_dca_bot.py` rulează manual în mod REAL, dar nu este în manifest. La audit avea
-  zero ordine deschise și era blocat de ordinul fictiv `PAPER-1`, citit greșit din
-  starea legacy Kraken. Fixul versionat separă starea HL LIVE/PAPER; cere restart controlat.
+- `hl_dca_bot.py` rulează manual în mod REAL, dar nu este în manifest. Incidentul
+  `PAPER-1` din starea legacy Kraken este închis: fixul LIVE/PAPER a fost testat pe
+  DEV și redeployat controlat; ordinul real este urmărit din starea HL izolată.
 - `config.env` versionat și override-urile locale descriu acum TP `5%`; `.env`
   păstrează precedență. Profilul efectiv verificat era TP `5%`, trend-hold și trailing
   adaptiv `1,5–8%`, cu sizing `50/30`, DCA `-2%`, SL `7%`, plafon `500`.
