@@ -16,6 +16,7 @@ import time
 import glob
 import tempfile
 import unittest
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
@@ -292,6 +293,62 @@ class InstrumentGuardsTestCase(unittest.TestCase):
 
         self.assertIsNotNone(order)
         self.assertEqual(calls, [(True, 2.7)])
+
+    # ── fidelitate financiara MARKET ──────────────────────────────────────────
+    def test_market_order_profit_guard_uses_current_price_not_ignored_target(self):
+        p = _FakeProvider(price=100.0)
+        # Ultimul BUY este referinta SELL. Tinta declarata 102 trece marja de
+        # 1.15%, dar MARKET s-ar executa la 100 si ar produce doar costuri.
+        p.seed_trade("BUY", age_sec=400.0, price=100.0)
+
+        order = self._inst(p).place("SELL", 102.0, 1.0, force=True, smart=False)
+
+        self.assertIsNone(order)
+        self.assertEqual(p.placed, [])
+        self.assertTrue(any("|refused|profit_guard|" in line for line in self._log_lines()))
+
+    def test_limit_order_keeps_profitable_target_price(self):
+        p = _FakeProvider(price=100.0)
+        p.seed_trade("BUY", age_sec=400.0, price=100.0)
+
+        order = self._inst(p).place("SELL", 102.0, 1.0, force=False, smart=False)
+
+        self.assertIsNotNone(order)
+        self.assertEqual(p.placed[0][2], 102.0)
+
+    def test_protective_market_bypass_remains_explicitly_allowed(self):
+        p = _FakeProvider(price=90.0)
+        p.seed_trade("BUY", age_sec=400.0, price=100.0)
+
+        order = self._inst(p).place(
+            "SELL", 102.0, 1.0, force=True, smart=False,
+            bypass_profit_guard=True)
+
+        self.assertIsNotNone(order)
+        self.assertTrue(p.placed[0][4]["force"])
+
+    def test_market_order_allowed_only_when_current_price_meets_margin(self):
+        p = _FakeProvider(price=102.0)
+        p.seed_trade("BUY", age_sec=400.0, price=100.0)
+
+        order = self._inst(p).place("SELL", 102.0, 1.0, force=True, smart=False)
+
+        self.assertIsNotNone(order)
+        self.assertTrue(p.placed[0][4]["force"])
+
+    def test_limit_repriced_after_trend_wait_is_revalidated(self):
+        class _Waited:
+            @staticmethod
+            def wait_for_favorable_entry(_side, _symbol):
+                return 1.0
+
+        p = _FakeProvider(price=100.0)
+        p.seed_trade("BUY", age_sec=400.0, price=100.0)
+        with patch("cacheManager.get_short_trend_manager", return_value=_Waited()):
+            order = self._inst(p).place("SELL", 102.0, 1.0, force=False, smart=False)
+
+        self.assertIsNone(order)
+        self.assertEqual(p.placed, [])
 
     # ── guards_internally (Binance-style) — sare TOT stratul agnostic ───────────
     def test_guards_internally_provider_bypasses_new_gates(self):

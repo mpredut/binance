@@ -132,6 +132,13 @@ class Instrument:
         retry_kwargs = dict(kwargs)
         retry_kwargs["bypass_profit_guard"] = bypass
         retry_kwargs["smart"] = smart
+        # Un ordin MARKET ignora pretul cerut de apelant. Retinem daca trebuie sa
+        # revalidam gardul chiar inainte de submit, la pretul executabil curent.
+        # Altfel un SELL cerut la +1% putea trece gardul, apoi `force=True` il
+        # executa imediat la piata sub marja validata (TOCTOU financiar).
+        is_market = bool(kwargs.get("force", False))
+        profit_margin = None
+        profit_window_ref = None
         try:
             # 0. AJUSTARE PRET + curatare ordine opuse (MECANICA venue, hook) — DOAR daca
             # smart, RULATA INAINTE de gardul de profit (ca gardul sa vada acelasi pret ca
@@ -150,15 +157,16 @@ class Instrument:
                 return None
 
             if not bypass:
-                margin = order_guard.margin_for(self._provider.name)
+                profit_margin = order_guard.margin_for(self._provider.name)
                 # tier 1: referinta min/max via hook-ul providerului. Default (Kraken/HL):
                 # fereastra per-venue din order_guard.conf; Binance: fereastra safeback_sec
                 # (Order-cache). Fereastra goala/dezactivata -> profit_guard cade pe
                 # last_opposite_fill.
-                window_ref = self._provider.profit_guard_window_ref(
+                profit_window_ref = self._provider.profit_guard_window_ref(
                     self.symbol, side_u, safeback_override)
-                ok = order_guard.profit_guard(self._provider, self.symbol, side_u, price, margin,
-                                              window_ref=window_ref)
+                ok = order_guard.profit_guard(
+                    self._provider, self.symbol, side_u, price, profit_margin,
+                    window_ref=profit_window_ref)
                 if not ok:
                     reason = "profit_guard"
                     return None
@@ -188,6 +196,7 @@ class Instrument:
             # in instruments.conf (cacheManager.py); indisponibil -> should_wait cade pe
             # False (nu asteapta), niciodata blocaj. Import LAZY: cacheManager -> market_api
             # ar inchide ciclul la nivel de modul.
+            waited = False
             try:
                 import cacheManager as cm
                 waited = cm.get_short_trend_manager().wait_for_favorable_entry(side_u, self.symbol)
@@ -198,6 +207,26 @@ class Instrument:
                         price = fresh
             except Exception as e:  # noqa: BLE001 — gate oportunist, esec -> trimite oricum
                 print(f"[{self.symbol}] {side_u} trend-wait indisponibil: {e}")
+
+            # Revalidare finala dupa orice asteptare/repricing. Pentru MARKET folosim
+            # obligatoriu cotatia curenta, nu pretul-limită decorativ primit de la
+            # apelant. `bypass_profit_guard` ramane calea explicita pentru iesiri de
+            # protectie care trebuie executate chiar si in pierdere.
+            if not bypass and (is_market or waited):
+                guard_price = price
+                if is_market:
+                    guard_price = self._provider.get_current_price(self.symbol)
+                    if guard_price is None or float(guard_price) <= 0:
+                        print(f"[{self.symbol}] {side_u} MARKET BLOCAT: pret curent indisponibil")
+                        reason = "market_price_unavailable"
+                        return None
+                    guard_price = float(guard_price)
+                ok = order_guard.profit_guard(
+                    self._provider, self.symbol, side_u, guard_price, profit_margin,
+                    window_ref=profit_window_ref)
+                if not ok:
+                    reason = "profit_guard"
+                    return None
 
             # 3. COOLDOWN anti-rapid-fire (agnostic, acelasi modul global ca Binance —
             # cheile sunt symbol-uri, deci fara coliziune intre venue-uri diferite).
