@@ -1,6 +1,6 @@
 # Restanțe active — producție și prioritate financiară
 
-Data consolidării: 2026-08-20
+Data consolidării: 2026-08-21
 
 ## Starea de la care continuăm
 
@@ -34,13 +34,20 @@ Data consolidării: 2026-08-20
 
 - Ancorele originale 60m/240m sunt păstrate. Snapshoturile sunt proaspete și au
   `decision_trace` plus `decision_divergences`.
-- Forward-ul are 22 bare la 60m și 7 bare la 240m, dar încă zero divergențe pentru
-  toți candidații; nu există dovadă forward activă.
-- Calibrarea read-only vede 11 ordine LIMIT, zero fill-uri și zero ordine MARKET:
-  sub pragul de minimum 20 fill-uri. Costurile central/stress rămân necalibrate.
+- Forward-ul are 43 bare la 60m și 12 bare la 240m, dar încă zero divergențe pentru
+  toți candidații; nu există încă dovadă forward activă.
+- Calibrarea read-only vede 27 ordine: 26 LIMIT și 1 MARKET. Există 3 fill-uri
+  din minimum 20 necesare; fee p50 este 30 bps, iar singurul MARKET are shortfall
+  3,149 bps. Eșantionul este încă insuficient, deci costurile central/stress rămân
+  necalibrate.
 - Următorul pas se execută numai după acumularea datelor, nu prin tuning acum.
 
 Observații operaționale separate de deploy:
+
+- Healthcheck-ul din 2026-08-21 este integral OK pentru cele 14 procese din manifest.
+- Inventarul runtime raportează `WARNING` pe `kraken:default/HYPEUSD`: motorul spot,
+  trailing-ul protector și `monitortrades` revendică același simbol. Nu este un defect
+  demonstrat, dar ownership-ul trebuie reverificat înaintea unei schimbări de execuție.
 
 - T212 a respins un DCA SPCX pentru fonduri insuficiente și a păstrat corect
   backoff-ul de 30 minute peste restart; nu s-a creat ordin.
