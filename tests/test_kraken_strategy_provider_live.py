@@ -210,5 +210,45 @@ class PercentageSizingTest(unittest.TestCase):
                 _strategy(FakeExecutor(), **overrides)
 
 
+class CorePercentageValidationTest(unittest.TestCase):
+    def test_valid_disabled_boundaries_remain_supported(self):
+        engine = _strategy(
+            FakeExecutor(), entry_discount_pct=0, stop_loss_pct=0,
+            enable_takeprofit=False, takeprofit_pct=0,
+        )
+        self.assertEqual(engine.p.entry_discount_pct, 0.0)
+        self.assertEqual(engine.p.stop_loss_pct, 0.0)
+        self.assertEqual(engine.p.takeprofit_pct, 0.0)
+
+    def test_order_percentages_reject_invalid_values(self):
+        invalid = (
+            ("entry_discount_pct", float("nan")),
+            ("entry_discount_pct", -0.01),
+            ("entry_discount_pct", 100.0),
+            ("dca_drop_pct", float("inf")),
+            ("dca_drop_pct", 0.0),
+            ("dca_drop_pct", -1.0),
+            ("takeprofit_pct", float("nan")),
+            ("takeprofit_pct", 0.0),
+            ("takeprofit_pct", -1.0),
+            ("stop_loss_pct", float("inf")),
+            ("stop_loss_pct", -1.0),
+        )
+        for field, value in invalid:
+            with self.subTest(field=field, value=value), self.assertRaises(ValueError):
+                _strategy(FakeExecutor(), **{field: value})
+
+    def test_numeric_values_are_normalized_to_float(self):
+        engine = _strategy(
+            FakeExecutor(), entry_discount_pct="0.8", dca_drop_pct="1.25",
+            takeprofit_pct="5", stop_loss_pct="12.5", trend_topup="650",
+        )
+        self.assertEqual(
+            (engine.p.entry_discount_pct, engine.p.dca_drop_pct,
+             engine.p.takeprofit_pct, engine.p.stop_loss_pct, engine.p.trend_topup),
+            (0.8, 1.25, 5.0, 12.5, 650.0),
+        )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -119,21 +119,48 @@ class StratParams:
     dca_pct: float = 0.0        # DCA   = felia monedei × acest %
 
     def __post_init__(self):
-        try:
-            trend_topup = float(self.trend_topup)
-        except (TypeError, ValueError) as exc:
-            raise ValueError("STRAT_TREND_TOPUP must be a finite positive number") from exc
-        if not math.isfinite(trend_topup) or trend_topup <= 0:
-            raise ValueError("STRAT_TREND_TOPUP must be a finite positive number")
+        def finite(name: str, value) -> float:
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"{name} must be finite") from exc
+            if not math.isfinite(parsed):
+                raise ValueError(f"{name} must be finite")
+            return parsed
 
-        values = (self.total_budget, self.alloc_pct, self.entry_pct, self.dca_pct)
+        self.trend_topup = finite("STRAT_TREND_TOPUP", self.trend_topup)
+        self.entry_discount_pct = finite("STRAT_ENTRY_DISCOUNT_PCT", self.entry_discount_pct)
+        self.dca_drop_pct = finite("STRAT_DCA_DROP_PCT", self.dca_drop_pct)
+        self.takeprofit_pct = finite("STRAT_TAKEPROFIT_PCT", self.takeprofit_pct)
+        self.stop_loss_pct = finite("STRAT_STOP_LOSS_PCT", self.stop_loss_pct)
+
+        if self.trend_topup <= 0:
+            raise ValueError("STRAT_TREND_TOPUP must be > 0")
+        if not 0 <= self.entry_discount_pct < 100:
+            raise ValueError("STRAT_ENTRY_DISCOUNT_PCT must be in [0, 100)")
+        if self.dca_drop_pct <= 0:
+            raise ValueError("STRAT_DCA_DROP_PCT must be > 0")
+        if self.takeprofit_pct < 0 or (self.enable_takeprofit and self.takeprofit_pct == 0):
+            raise ValueError("STRAT_TAKEPROFIT_PCT must be > 0 when take-profit is enabled")
+        if self.stop_loss_pct < 0:
+            raise ValueError("STRAT_STOP_LOSS_PCT must be >= 0")
+
+        percentage_names = (
+            "STRAT_TOTAL_BUDGET", "STRAT_ALLOC_PCT",
+            "STRAT_ENTRY_PCT", "STRAT_DCA_PCT",
+        )
+        values = tuple(
+            finite(name, value)
+            for name, value in zip(percentage_names, (
+                self.total_budget, self.alloc_pct, self.entry_pct, self.dca_pct,
+            ))
+        )
+        self.total_budget, self.alloc_pct, self.entry_pct, self.dca_pct = values
         if not any(value != 0 for value in values):
             return
-        if not all(math.isfinite(float(value)) for value in values):
-            raise ValueError("percentage sizing values must be finite")
         if self.total_budget <= 0:
             raise ValueError("STRAT_TOTAL_BUDGET must be > 0 when percentage sizing is configured")
-        for name, value in (("STRAT_ALLOC_PCT", self.alloc_pct), ("STRAT_ENTRY_PCT", self.entry_pct), ("STRAT_DCA_PCT", self.dca_pct)):
+        for name, value in zip(percentage_names[1:], values[1:]):
             if not 0 < value <= 100:
                 raise ValueError(f"{name} must be in (0, 100] when percentage sizing is configured")
 
