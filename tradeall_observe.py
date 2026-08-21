@@ -4,13 +4,13 @@ tradeall_observe.py — monitor SEPARAT, observational, pentru modelul de
 trend al tradeall. NU importa si NU porneste tradeall.py / bapi_placeorder.py
 — citeste doar fisiere text (pipe-delimited) din logger/ si cache_instant_trend.json.
 
-Mod LIVE (implicit), in bucla (implicit 5s):
+Mod LIVE (implicit), in bucla (implicit 2s):
   1. Esantioneaza pretul curent (cache_instant_trend.json) in propriul jurnal
      logger/tradeall_price_samples_YYYY-MM-DD.log (decuplat de tradeall).
   2. Citeste logger/tradeall_decisions_*.log (doar trend_start) si
      logger/order_outcomes_*.log (filtrat pe caller=tradeall.py).
   3. Reconstruieste regiunile de trend (start -> urmatorul start).
-  4. Redeseneaza, per simbol, doua PNG-uri (zi / saptamana) cu linia de pret,
+  4. Redeseneaza, per simbol, trei PNG-uri (live / zi / saptamana) cu linia de pret,
      fundal colorat dupa stare si markeri BUY/SELL (executat/refuzat).
   5. Scrie tradeall_live.html static (auto-refresh + toggle zi/saptamana).
 
@@ -24,10 +24,15 @@ Mod BACKTEST (randeaza rezultatele unui run offline/backtests/tradeall.py, A5):
     = tot intervalul reluat pana acum; scrie PNG-ul in acelasi folder)
 """
 import argparse
-import os
-import time
+import ctypes
+import gc
 import json
+import os
+import tempfile
+import time
+from collections import OrderedDict
 from datetime import datetime, timedelta
+from functools import wraps
 
 import matplotlib
 matplotlib.use("Agg")
@@ -52,6 +57,7 @@ SHADOW_COLOR = "#8250df"   # violet — semnalele shadow (Kalman), distinct de v
 STATE_COLORS = {"UP": "#1a7f37", "DOWN": "#cf222e", "HOLD": "#8c8c8c"}
 DAY_SECONDS = 24 * 3600
 WEEK_SECONDS = 7 * DAY_SECONDS
+MEMORY_TRIM_SECONDS = 300
 
 
 def _sanitize_field(value):
@@ -62,7 +68,9 @@ def _daily_log_path(prefix, date):
     return os.path.join(LOGGER_DIR, f"{prefix}{date.isoformat()}.log")
 
 
-_PIPE_LOG_CACHE = {}   # path -> (bytes_consumati, ncols, rows) — vezi docstring
+_PIPE_LOG_CACHE_MAX_FILES = 32
+_PIPE_LOG_CACHE = OrderedDict()
+# path -> (bytes_consumati, ncols, rows, device, inode, marime_observata, mtime_ns)
 
 
 def _read_pipe_log(path, ncols):
@@ -77,22 +85,42 @@ def _read_pipe_log(path, ncols):
     citire — zero I/O la apelurile urmatoare. Foloseste binary+seek (nu
     text-mode) ca sa nu depinda de subtilitati de encoding la offset."""
     try:
-        size = os.path.getsize(path)
+        stream = open(path, "rb")
     except OSError:
+        # Rotatia jurnalelor sterge fisierele vechi. Versiunea anterioara
+        # returna [], dar pastra toate randurile acelui fisier in memorie pentru
+        # tot restul vietii procesului.
+        _PIPE_LOG_CACHE.pop(path, None)
         return []
-    cached = _PIPE_LOG_CACHE.get(path)
-    if cached and cached[1] == ncols and cached[0] == size:
-        return cached[2]                       # neschimbat -> zero I/O
-    if cached and cached[1] == ncols and size >= cached[0]:
-        offset, rows = cached[0], list(cached[2])
-    else:
-        offset, rows = 0, []                   # fisier nou/trunchiat -> de la zero
-    try:
-        with open(path, "rb") as f:
-            f.seek(offset)
-            chunk = f.read()
-    except OSError:
-        return rows
+    with stream:
+        stat = os.fstat(stream.fileno())
+        cached = _PIPE_LOG_CACHE.get(path)
+        same_file = bool(
+            cached
+            and cached[1] == ncols
+            and cached[3:5] == (stat.st_dev, stat.st_ino)
+        )
+        unchanged = bool(
+            same_file
+            and cached[5] == stat.st_size
+            and cached[6] == stat.st_mtime_ns
+        )
+        if unchanged:
+            _PIPE_LOG_CACHE.move_to_end(path)
+            return cached[2]                   # neschimbat -> zero I/O
+
+        # Un rewrite la aceeasi marime sau o rotatie pe alt inode trebuie recitite.
+        same_size_rewrite = bool(same_file and cached[5] == stat.st_size)
+        if same_file and not same_size_rewrite and stat.st_size >= cached[0]:
+            offset, rows = cached[0], list(cached[2])
+        else:
+            offset, rows = 0, []               # fisier nou/trunchiat -> de la zero
+        try:
+            stream.seek(offset)
+            chunk = stream.read()
+            read_stat = os.fstat(stream.fileno())
+        except OSError:
+            return rows
     consumed = offset
     for raw in chunk.splitlines(keepends=True):
         if not raw.endswith(b"\n"):
@@ -102,7 +130,18 @@ def _read_pipe_log(path, ncols):
         if len(parts) != ncols:
             continue
         rows.append(parts)
-    _PIPE_LOG_CACHE[path] = (consumed, ncols, rows)
+    _PIPE_LOG_CACHE[path] = (
+        consumed,
+        ncols,
+        rows,
+        read_stat.st_dev,
+        read_stat.st_ino,
+        read_stat.st_size,
+        read_stat.st_mtime_ns,
+    )
+    _PIPE_LOG_CACHE.move_to_end(path)
+    while len(_PIPE_LOG_CACHE) > _PIPE_LOG_CACHE_MAX_FILES:
+        _PIPE_LOG_CACHE.popitem(last=False)
     return rows
 
 
@@ -112,6 +151,9 @@ def _log_dates(days_back):
 
 
 # ── Pas B: esantionare proprie de pret (nu atinge tradeall) ───────────────────
+
+_LAST_SAMPLED_TS = {}
+
 
 def sample_current_prices(symbols):
     if not os.path.exists(CACHE_TREND_PATH):
@@ -123,19 +165,34 @@ def sample_current_prices(symbols):
         print(f"[tradeall_observe] eroare citire cache_instant_trend.json: {e}")
         return
 
+    pending = []
+    for symbol in symbols:
+        entry = snapshot.get(symbol)
+        if not entry or "current_price" not in entry:
+            continue
+        try:
+            sample_ts = float(entry.get("ts", time.time()))
+        except (TypeError, ValueError):
+            continue
+        # Bucla ruleaza la 2s, dar sursa poate publica mai rar. Inainte scriam
+        # acelasi tick de mai multe ori, marind inutil jurnalul si cache-ul RAM.
+        if sample_ts <= _LAST_SAMPLED_TS.get(symbol, float("-inf")):
+            continue
+        pending.append((symbol, sample_ts, entry["current_price"]))
+    if not pending:
+        return
+
     os.makedirs(LOGGER_DIR, exist_ok=True)
     path = _daily_log_path(PRICE_SAMPLES_PREFIX, datetime.now().date())
     try:
         with open(path, "a", encoding="utf-8") as f:
-            for symbol in symbols:
-                entry = snapshot.get(symbol)
-                if not entry or "current_price" not in entry:
-                    continue
+            for symbol, sample_ts, current_price in pending:
                 # ts-ul SNAPSHOT-ului, nu ceasul nostru: daca sursa e inghetata
                 # (incident 19 iul: cacheManager mort, pret vechi de 27 min),
                 # esantionul cu timestamp CURENT dar pret VECHI s-ar intercala cu
                 # sursele vii si ar desena un "bloc" zimtat fals pe grafic.
-                f.write(f"{entry.get('ts', time.time())}|{_sanitize_field(symbol)}|{entry['current_price']}\n")
+                f.write(f"{sample_ts}|{_sanitize_field(symbol)}|{current_price}\n")
+                _LAST_SAMPLED_TS[symbol] = sample_ts
     except OSError as e:
         print(f"[tradeall_observe] eroare scriere esantioane pret: {e}")
 
@@ -209,7 +266,9 @@ def _load_history_jsonl_tail(symbol, max_bytes=4 * 1024 * 1024):
             size = f.tell()
             f.seek(max(0, size - max_bytes))
             data = f.read().decode("utf-8", errors="replace")
-        lines = data.split("\n")[1:]   # prima linie e probabil taiata de seek — o sarim
+        # Prima linie e taiata numai daca am pornit din mijlocul fisierului.
+        # Pentru fisiere <= max_bytes, versiunea veche pierdea primul record valid.
+        lines = data.split("\n")[1:] if size > max_bytes else data.split("\n")
         for line in lines:
             if not line.strip():
                 continue
@@ -228,10 +287,10 @@ def load_price_series_live(symbol, days_back, include_history=True):
     """Linia de pret pentru modul LIVE, din TOATE sursele deja existente,
     imbinata si sortata — graficul e plin din prima clipa, nu asteapta ca
     monitorul sa-si acumuleze propriile esantioane:
-      1. cachedb/cache_24price_long_{s}.jsonl — arhivatorul (dens, retentie lunga)
-      2. cachedb/cache_24price_{s}.json      — cache-ul live al flotei (dens, 24h)
-      3. cachedb/cache_price_{s}.jsonl       — istoricul lung (rar ~7min/tick, doar coada)
-      4. logger/tradeall_price_samples_*.log — esantioanele proprii (fallback/umplere)
+      1. cachedb/cache_price_{s}.jsonl       — istoricul lung (rar ~7min/tick, doar coada)
+      2. cachedb/cache_24price_long_{s}.jsonl — arhivatorul (dens, retentie lunga)
+      3. logger/tradeall_price_samples_*.log — esantioanele proprii (fallback/umplere)
+      4. cachedb/cache_24price_{s}.json      — cache-ul live al flotei (dens, 24h)
     Punctele dense au prioritate la coliziune de timestamp.
     include_history=False: sare peste istoricul lung (3) — ferestrele <=24h il
     au oricum acoperit de cache-urile dense; economiseste ~4MB de parsare/ciclu.
@@ -241,20 +300,14 @@ def load_price_series_live(symbol, days_back, include_history=True):
     # deseneaza un "bloc" zimtat fals. O galeata = un punct; prioritatea o dau
     # sursele dense (scrise ULTIMELE suprascriu galeata).
     points = {}
-    own_ts, own_px = load_price_samples(symbol, days_back)
-    for t, p in zip(own_ts, own_px):
-        points[int(t)] = p
+    # Intai sursele rare/arhivate, apoi cele live dense. Astfel un record vechi
+    # din arhiva nu mai poate suprascrie tick-ul curent din aceeasi secunda.
     if include_history:
         for entry in _load_history_jsonl_tail(symbol):
             try:
                 points[int(entry[0] / 1000.0)] = float(entry[1])
             except (TypeError, ValueError, IndexError):
                 continue
-    for entry in _load_cachedb_price_entries(f"cache_24price_{symbol}.json", symbol):
-        try:
-            points[int(entry[0] / 1000.0)] = float(entry[1])
-        except (TypeError, ValueError, IndexError):
-            continue
     # cache_24price_long_{symbol}.jsonl = arhiva NEMARGINITA a lui tradeall_price_archiver.py
     # (creste continuu spre 6 luni, ~23MB+ azi, format JSONL de la 21 iul) — parsarea
     # completa la FIECARE ciclu (2s) pt fereastra live era risipa pura: cache_24price_
@@ -268,6 +321,14 @@ def load_price_series_live(symbol, days_back, include_history=True):
                 points[int(entry[0] / 1000.0)] = float(entry[1])
             except (TypeError, ValueError, IndexError):
                 continue
+    own_ts, own_px = load_price_samples(symbol, days_back)
+    for t, p in zip(own_ts, own_px):
+        points[int(t)] = p
+    for entry in _load_cachedb_price_entries(f"cache_24price_{symbol}.json", symbol):
+        try:
+            points[int(entry[0] / 1000.0)] = float(entry[1])
+        except (TypeError, ValueError, IndexError):
+            continue
     ts_sorted = sorted(points)
     return ts_sorted, [points[t] for t in ts_sorted]
 
@@ -396,6 +457,98 @@ def load_backtest_order_events(directory, symbol):
 
 # ── Randare (Pas C) ────────────────────────────────────────────────────────
 
+def _close_new_figures(function):
+    """Garantie de cleanup inclusiv cand o randare esueaza inainte de save."""
+    @wraps(function)
+    def wrapped(*args, **kwargs):
+        existing = set(plt.get_fignums())
+        try:
+            return function(*args, **kwargs)
+        finally:
+            for figure_number in set(plt.get_fignums()) - existing:
+                plt.close(figure_number)
+
+    return wrapped
+
+
+def _save_figure_atomic(fig, out_path, **savefig_kwargs):
+    """Publica PNG-ul numai dupa ce randarea s-a terminat complet."""
+    directory = os.path.dirname(os.path.abspath(out_path))
+    os.makedirs(directory, exist_ok=True)
+    fd, temp_path = tempfile.mkstemp(prefix=".tradeall_observe_", suffix=".png", dir=directory)
+    os.close(fd)
+    try:
+        fig.savefig(temp_path, format="png", **savefig_kwargs)
+        os.replace(temp_path, out_path)
+    finally:
+        try:
+            os.unlink(temp_path)
+        except FileNotFoundError:
+            pass
+
+
+def _release_unused_memory():
+    """Elibereaza ciclurile Python si, pe glibc, arenele mari catre OS.
+
+    Este best-effort si ruleaza doar dupa randarea rara a saptamanii; nu este
+    necesar pentru corectitudine si ramane portabil pe platforme fara
+    ``malloc_trim``.
+    """
+    gc.collect()
+    try:
+        malloc_trim = ctypes.CDLL(None).malloc_trim
+    except (AttributeError, OSError):
+        return False
+    malloc_trim.argtypes = [ctypes.c_size_t]
+    malloc_trim.restype = ctypes.c_int
+    return bool(malloc_trim(0))
+
+
+def _plot_order_markers(ax, events, *, filled, max_annotated=25):
+    """Deseneaza ordinele in loturi, nu cate un PathCollection per ordin.
+
+    Un grafic saptamanal poate contine mii de refuzuri. Cate un ``scatter``
+    pentru fiecare rand crea mii de obiecte Matplotlib si ridica varful de RAM
+    la peste 1 GiB. Doua loturi (BUY/SELL) pastreaza aceiasi markeri vizuali.
+    """
+    sides = list(dict.fromkeys(["BUY", "SELL", *(e["side"] for e in events)]))
+    annotate = len(events) <= max_annotated
+    for side in sides:
+        group = [event for event in events if event["side"] == side]
+        if not group:
+            continue
+        marker = "^" if side == "BUY" else "v"
+        color = STATE_COLORS["UP"] if side == "BUY" else STATE_COLORS["DOWN"]
+        scatter_args = {
+            "marker": marker,
+            "s": 90,
+            "zorder": 5,
+        }
+        if filled:
+            scatter_args["color"] = color
+        else:
+            scatter_args.update(
+                facecolors="none", edgecolors=color, linewidths=1.5
+            )
+        ax.scatter(
+            [datetime.fromtimestamp(event["ts"]) for event in group],
+            [event["price"] for event in group],
+            **scatter_args,
+        )
+        if annotate:
+            y_offset = 6 if filled else -10
+            for event in group:
+                ax.annotate(
+                    event["reason"],
+                    (datetime.fromtimestamp(event["ts"]), event["price"]),
+                    fontsize=7,
+                    xytext=(4, y_offset),
+                    textcoords="offset points",
+                    color=color,
+                )
+
+
+@_close_new_figures
 def render_chart(symbol, window_label, window_start, window_end,
                   price_ts, price_vals, trend_events, order_events, out_path,
                   state_text=None, shadow_events=None):
@@ -481,23 +634,8 @@ def render_chart(symbol, window_label, window_start, window_end,
     # Markerii raman toti; caseta-sumar de mai jos tine oricum contorizarea completa.
     MAX_ANNOTATED = 25
 
-    for e in executed:
-        marker = "^" if e["side"] == "BUY" else "v"
-        color = STATE_COLORS["UP"] if e["side"] == "BUY" else STATE_COLORS["DOWN"]
-        ax.scatter(datetime.fromtimestamp(e["ts"]), e["price"], marker=marker,
-                   color=color, s=90, zorder=5)
-        if len(executed) <= MAX_ANNOTATED:
-            ax.annotate(e["reason"], (datetime.fromtimestamp(e["ts"]), e["price"]),
-                        fontsize=7, xytext=(4, 6), textcoords="offset points", color=color)
-
-    for e in refused:
-        marker = "^" if e["side"] == "BUY" else "v"
-        color = STATE_COLORS["UP"] if e["side"] == "BUY" else STATE_COLORS["DOWN"]
-        ax.scatter(datetime.fromtimestamp(e["ts"]), e["price"], marker=marker,
-                   facecolors="none", edgecolors=color, s=90, zorder=5, linewidths=1.5)
-        if len(refused) <= MAX_ANNOTATED:
-            ax.annotate(e["reason"], (datetime.fromtimestamp(e["ts"]), e["price"]),
-                        fontsize=7, xytext=(4, -10), textcoords="offset points", color=color)
+    _plot_order_markers(ax, executed, filled=True, max_annotated=MAX_ANNOTATED)
+    _plot_order_markers(ax, refused, filled=False, max_annotated=MAX_ANNOTATED)
 
     summary = (
         f"BUY  executat: {sum(1 for e in executed if e['side'] == 'BUY')}   "
@@ -527,8 +665,10 @@ def render_chart(symbol, window_label, window_start, window_end,
     plt.setp(ax.get_xticklabels(), rotation=30, ha="right")
     ax.legend(loc="lower left", fontsize=8)
     fig.subplots_adjust(left=0.065, right=0.985, top=0.92, bottom=0.16)
-    fig.savefig(out_path, dpi=110)
-    plt.close(fig)
+    try:
+        _save_figure_atomic(fig, out_path, dpi=110)
+    finally:
+        plt.close(fig)
 
 
 def format_state_text(entry, header):
@@ -589,6 +729,7 @@ def build_backtest_state_text(directory, symbol):
     return format_state_text(entry, f"ANALIZA SIMULATA ({sim_time})")
 
 
+@_close_new_figures
 def render_state_image(state_text, out_path):
     """Caseta de stare ca imagine SEPARATA (aratata pe grafic doar la hover, din HTML)."""
     fig = plt.figure(figsize=(4.6, 2.5))
@@ -597,20 +738,49 @@ def render_state_image(state_text, out_path):
     ax.axis("off")
     ax.text(0.04, 0.96, state_text, va="top", ha="left", fontsize=11, family="monospace",
             bbox=dict(boxstyle="round,pad=0.6", fc="#fffbe6", ec="#d4a017", alpha=0.97))
-    fig.savefig(out_path, dpi=110, transparent=True)
-    plt.close(fig)
+    try:
+        _save_figure_atomic(fig, out_path, dpi=110, transparent=True)
+    finally:
+        plt.close(fig)
+
+
+def render_symbol_charts_live(symbol, chart_specs, *, window_end=None):
+    """Randeaza una sau mai multe ferestre dintr-un singur snapshot de date.
+
+    ``chart_specs`` contine tuple ``(eticheta, secunde, cale_png)``. In ciclurile
+    in care ziua/saptamana sunt scadente, versiunea veche recitea si reconstruia
+    aceleasi jurnale/cache-uri de doua sau trei ori pentru acelasi simbol.
+    """
+    if not chart_specs:
+        return
+    window_end = time.time() if window_end is None else window_end
+    max_window = max(window_seconds for _, window_seconds, _ in chart_specs)
+    days_back = 9 if max_window > DAY_SECONDS else 2
+    include_history = max_window > DAY_SECONDS
+    price_ts, price_vals = load_price_series_live(
+        symbol, days_back, include_history=include_history
+    )
+    trend_events = load_trend_starts(symbol, days_back)
+    order_events = load_order_events(symbol, days_back)
+    shadow_events = load_shadow_events(symbol, days_back)
+    for window_label, window_seconds, out_path in chart_specs:
+        render_chart(
+            symbol,
+            window_label,
+            window_end - window_seconds,
+            window_end,
+            price_ts,
+            price_vals,
+            trend_events,
+            order_events,
+            out_path,
+            shadow_events=shadow_events,
+        )
 
 
 def render_symbol_chart_live(symbol, window_label, window_seconds, out_path):
-    window_end = time.time()
-    window_start = window_end - window_seconds
-    days_back = 9 if window_seconds > DAY_SECONDS else 2  # marja pt regiuni incepute inainte de fereastra
-    include_history = window_seconds > DAY_SECONDS   # istoricul lung doar pt saptamana
-    render_chart(symbol, window_label, window_start, window_end,
-                 *load_price_series_live(symbol, days_back, include_history=include_history),
-                 load_trend_starts(symbol, days_back),
-                 load_order_events(symbol, days_back), out_path,
-                 shadow_events=load_shadow_events(symbol, days_back))
+    """Compatibilitate pentru apelantii care cer o singura fereastra."""
+    render_symbol_charts_live(symbol, [(window_label, window_seconds, out_path)])
 
 
 def render_symbol_chart_backtest(symbol, directory, out_path, window_hours=None):
@@ -814,6 +984,7 @@ def main():
         print(f"[tradeall_observe] BACKTEST ({mode}): {directory} | simboluri: {symbols} | "
               f"randare la {args.interval}s")
         print(f"[tradeall_observe] deschide in browser: {html_path}")
+        last_memory_trim = 0.0
         try:
             while True:
                 for symbol in symbols:
@@ -827,6 +998,10 @@ def main():
                                                 os.path.join(directory, f"tradeall_live_{symbol}_state.png"))
                     except Exception as e:
                         print(f"[tradeall_observe] eroare randare {symbol}: {e}")
+                monotonic_now = time.monotonic()
+                if monotonic_now - last_memory_trim >= MEMORY_TRIM_SECONDS:
+                    _release_unused_memory()
+                    last_memory_trim = monotonic_now
                 time.sleep(args.interval)
         except KeyboardInterrupt:
             print("\n[tradeall_observe] oprit.")
@@ -840,32 +1015,55 @@ def main():
     # ESALONARE: live + starea analizei la FIECARE ciclu (senzatie de real-time);
     # ziua/saptamana mai rar — la scara lor, nimic vizibil nu se schimba in 3s,
     # iar randarea lor era ce facea ciclul sa dureze ~17s in loc de ~3s.
-    last_day = last_week = 0.0
+    last_day = last_week = last_memory_trim = 0.0
     try:
         while True:
             cycle_start = time.time()
             sample_current_prices(symbols)
+            due_day = cycle_start - last_day >= args.day_refresh
+            due_week = cycle_start - last_week >= args.week_refresh
             for symbol in symbols:
                 try:
-                    render_symbol_chart_live(symbol, f"LIVE ultimele {args.live_minutes:.0f} min",
-                                              args.live_minutes * 60,
-                                              os.path.join(LIVE_OUT_DIR, f"tradeall_live_{symbol}_live.png"))
+                    chart_specs = [
+                        (
+                            f"LIVE ultimele {args.live_minutes:.0f} min",
+                            args.live_minutes * 60,
+                            os.path.join(LIVE_OUT_DIR, f"tradeall_live_{symbol}_live.png"),
+                        )
+                    ]
+                    if due_day:
+                        chart_specs.append(
+                            (
+                                "ultimele 24h",
+                                DAY_SECONDS,
+                                os.path.join(LIVE_OUT_DIR, f"tradeall_live_{symbol}_ziua.png"),
+                            )
+                        )
+                    if due_week:
+                        chart_specs.append(
+                            (
+                                "ultimele 7 zile",
+                                WEEK_SECONDS,
+                                os.path.join(
+                                    LIVE_OUT_DIR, f"tradeall_live_{symbol}_saptamana.png"
+                                ),
+                            )
+                        )
+                    render_symbol_charts_live(symbol, chart_specs, window_end=cycle_start)
                     state_text = build_analysis_state_text(symbol)
                     if state_text:
                         render_state_image(state_text,
                                             os.path.join(LIVE_OUT_DIR, f"tradeall_live_{symbol}_state.png"))
-                    if cycle_start - last_day >= args.day_refresh:
-                        render_symbol_chart_live(symbol, "ultimele 24h", DAY_SECONDS,
-                                                  os.path.join(LIVE_OUT_DIR, f"tradeall_live_{symbol}_ziua.png"))
-                    if cycle_start - last_week >= args.week_refresh:
-                        render_symbol_chart_live(symbol, "ultimele 7 zile", WEEK_SECONDS,
-                                                  os.path.join(LIVE_OUT_DIR, f"tradeall_live_{symbol}_saptamana.png"))
                 except Exception as e:
                     print(f"[tradeall_observe] eroare randare {symbol}: {e}")
-            if cycle_start - last_day >= args.day_refresh:
+            if due_day:
                 last_day = cycle_start
-            if cycle_start - last_week >= args.week_refresh:
+            if due_week:
                 last_week = cycle_start
+            monotonic_now = time.monotonic()
+            if monotonic_now - last_memory_trim >= MEMORY_TRIM_SECONDS:
+                _release_unused_memory()
+                last_memory_trim = monotonic_now
             time.sleep(args.interval)
     except KeyboardInterrupt:
         print("\n[tradeall_observe] oprit.")
