@@ -40,7 +40,7 @@ class PriceAlertLinkTests(unittest.TestCase):
         alerts = checker.check_symbol("TAOUSDC")
 
         self.assertEqual(len(alerts), 1)
-        self.assertEqual(alerts[0].url, "https://coinmarketcap.com/currencies/tao/")
+        self.assertEqual(alerts[0].url, "https://coinmarketcap.com/currencies/bittensor/")
 
     def test_calculate_24h_stats_returns_min_and_max_readable_timestamps(self):
         now_ms = int(time.time() * 1000)
@@ -82,11 +82,11 @@ class PriceAlertLinkTests(unittest.TestCase):
             percent_change=11.11,
             threshold=5.0,
         )
-        alert.url = "https://coinmarketcap.com/currencies/tao/"
+        alert.url = "https://coinmarketcap.com/currencies/bittensor/"
 
         message = AlertNotifier.format_batch_message([alert])
 
-        self.assertIn("Link: https://coinmarketcap.com/currencies/tao/", message)
+        self.assertIn("Link: https://coinmarketcap.com/currencies/bittensor/", message)
 
 
 class TestNewCoinDictRobustness(unittest.TestCase):
