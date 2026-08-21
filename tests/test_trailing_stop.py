@@ -32,7 +32,10 @@ class FakePo:
         self.orders = []
     def place(self, symbol, side, price, qty, force=False, **kw):
         self.orders.append({"side": side, "symbol": symbol, "price": price,
-                            "qty": qty, "force": force})
+                            "qty": qty, "force": force,
+                            "bypass_profit_guard": bool(
+                                kw.get("bypass_profit_guard", False)
+                            )})
         return {"orderId": 1}
     def place_safe_order(self, side, symbol, price, qty, force=False, **kw):
         return self.place(symbol, side, price, qty, force=force, **kw)
@@ -86,6 +89,10 @@ class TestTrailing(Base):
         self.assertEqual(len(self.po.orders), 1)
         self.assertEqual(self.po.orders[0]["side"], "SELL")
         self.assertTrue(self.po.orders[0]["force"], "trebuie force=True ca sa ocoleasca weight-ul")
+        self.assertTrue(
+            self.po.orders[0]["bypass_profit_guard"],
+            "iesirea protectoare trebuie sa ocoleasca explicit profit guard",
+        )
 
     def test_cadere_mica_nu_vinde(self):
         api = FakeApi(250.0)

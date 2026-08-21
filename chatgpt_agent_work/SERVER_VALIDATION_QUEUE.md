@@ -79,7 +79,9 @@ ordinele MARKET noi. După deploy, confirmă că evenimentele `submit_requested`
 MARKET conțin `reference_price`, în timp ce ordinul trimis providerului păstrează
 `price=null`. Shortfall-ul este costul total observat între decizie și fill; auditul
 nu poate separa mișcarea pieței, spread-ul și slippage-ul pur fără bid/ask/mid la
-decizie.
+decizie. Secțiunea `Client order ID` trebuie să arate primul `submit_accepted` cu
+format valid și perechea client ID / venue order ID. Dacă afișează `PENDING`, nu
+plasa un ordin doar pentru test; repetă verificarea după următorul ordin natural.
 
 ## P1 — dev/backtest după sincronizarea codului — FINALIZAT
 

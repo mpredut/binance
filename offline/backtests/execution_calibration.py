@@ -2,7 +2,23 @@
 
 from __future__ import annotations
 
+import re
 import statistics
+
+
+_CLIENT_ORDER_ID_PATTERNS = {
+    "kraken": re.compile(r"[0-9a-f]{32}"),
+    "binance": re.compile(r"SD_[0-9a-f]{32}"),
+    "hyperliquid": re.compile(r"0x[0-9a-f]{32}"),
+}
+
+
+def _client_order_id_valid(venue: object, client_order_id: object) -> bool | None:
+    """Valideaza doar venue-urile cu suport; T212/necunoscut nu intra in gate."""
+    pattern = _CLIENT_ORDER_ID_PATTERNS.get(str(venue or "").strip().lower())
+    if pattern is None:
+        return None
+    return bool(pattern.fullmatch(str(client_order_id or "")))
 
 
 def _percentile(values: list[float], percentile: float) -> float | None:
@@ -102,12 +118,24 @@ def calibrate_execution_events(events: list[dict]) -> dict:
                 float(first_fill[0].get("ts") or 0.0)
                 - float(accepted.get("ts") or 0.0),
             )
+        client_order_id = None
+        if accepted is not None:
+            client_order_id = accepted.get("client_order_id")
+        if not client_order_id:
+            client_order_id = requested.get("client_order_id")
+        client_order_id_valid = _client_order_id_valid(
+            requested.get("venue"), client_order_id,
+        )
         orders.append({
             "intent_id": intent_id,
             "venue": requested.get("venue"),
             "symbol": requested.get("symbol"),
             "market": bool(requested.get("market")),
             "accepted": accepted is not None,
+            "accepted_ts": accepted.get("ts") if accepted is not None else None,
+            "order_id": accepted.get("order_id") if accepted is not None else None,
+            "client_order_id": client_order_id,
+            "client_order_id_valid": client_order_id_valid,
             "rejected": any(
                 event.get("event") == "submit_rejected" for event in history
             ),
@@ -154,6 +182,24 @@ def calibrate_execution_events(events: list[dict]) -> dict:
     market = [order for order in orders if order["market"]]
     limit = [order for order in orders if not order["market"]]
     filled_count = sum(order["filled_qty"] > 0 for order in orders)
+    supported_client_ids = [
+        order for order in orders
+        if order["accepted"] and order["client_order_id_valid"] is not None
+    ]
+    first_valid_by_venue = {}
+    for order in sorted(
+        supported_client_ids,
+        key=lambda item: float(item.get("accepted_ts") or 0.0),
+    ):
+        venue = str(order.get("venue") or "")
+        if order["client_order_id_valid"] and venue not in first_valid_by_venue:
+            first_valid_by_venue[venue] = {
+                "intent_id": order["intent_id"],
+                "symbol": order["symbol"],
+                "client_order_id": order["client_order_id"],
+                "order_id": order["order_id"],
+                "accepted_ts": order["accepted_ts"],
+            }
     return {
         "orders": orders,
         "summary": {
@@ -183,5 +229,24 @@ def calibrate_execution_events(events: list[dict]) -> dict:
             ),
             "can_calibrate_spread": False,
             "spread_blocker": "auditul nu conține bid/ask la momentul deciziei",
+        },
+        "client_order_id_validation": {
+            "supported_accepted_orders": len(supported_client_ids),
+            "with_client_order_id": sum(
+                bool(order["client_order_id"]) for order in supported_client_ids
+            ),
+            "valid_client_order_ids": sum(
+                order["client_order_id_valid"] is True
+                for order in supported_client_ids
+            ),
+            "invalid_client_order_ids": sum(
+                bool(order["client_order_id"])
+                and order["client_order_id_valid"] is False
+                for order in supported_client_ids
+            ),
+            "missing_client_order_ids": sum(
+                not order["client_order_id"] for order in supported_client_ids
+            ),
+            "first_valid_by_venue": first_valid_by_venue,
         },
     }

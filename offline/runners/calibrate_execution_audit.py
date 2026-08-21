@@ -68,6 +68,7 @@ def markdown_report(report: dict, paths: list[Path]) -> str:
             f"{_fmt(item['market_execution_shortfall_bps']['p50'])} |"
         )
     ready = report["calibration_readiness"]
+    client_ids = report["client_order_id_validation"]
     lines.extend([
         "", "## Readiness", "",
         f"Filled orders: {ready['filled_orders']}/{ready['minimum_filled_orders']} minimum.",
@@ -77,7 +78,31 @@ def markdown_report(report: dict, paths: list[Path]) -> str:
         + ready["market_slippage_blocker"] + ".",
         "", "Spread: indisponibil — " + ready["spread_blocker"] + ".", "",
         "Raportul este observațional și nu modifică automat scenariile de backtest.", "",
+        "## Client order ID", "",
+        f"Ordine acceptate pe venue-uri cu suport: "
+        f"{client_ids['supported_accepted_orders']}; "
+        f"ID prezent: {client_ids['with_client_order_id']}; "
+        f"valid: {client_ids['valid_client_order_ids']}; "
+        f"invalid: {client_ids['invalid_client_order_ids']}; "
+        f"lipsă: {client_ids['missing_client_order_ids']}.", "",
     ])
+    evidence = client_ids["first_valid_by_venue"]
+    if evidence:
+        lines.extend([
+            "| Venue | Symbol | Intent | Client order ID | Venue order ID |",
+            "|---|---|---|---|---|",
+        ])
+        for venue, item in sorted(evidence.items()):
+            lines.append(
+                f"| {venue} | {item['symbol']} | {item['intent_id']} | "
+                f"{item['client_order_id']} | {item['order_id']} |"
+            )
+        lines.extend(["", "Aceste dovezi provin din `submit_accepted`; raportul nu plasează ordine.", ""])
+    else:
+        lines.extend([
+            "PENDING: nu există încă un `submit_accepted` cu ID valid după deploy; "
+            "nu se plasează un ordin doar pentru această verificare.", "",
+        ])
     return "\n".join(lines)
 
 

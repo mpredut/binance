@@ -5,7 +5,7 @@ Data consolidării: 2026-08-21
 ## Starea de la care continuăm
 
 - Codul provider-agnostic și fundația de validare sunt integrate în `main`.
-- Suita locală pe codul final: `806 passed`, `235 subtests passed`.
+- Suita locală pe codul final: `812 passed`, `235 subtests passed`.
 - Benchmark HYPE reproductibil: `VERIFY OK`.
 - Baseline HYPE: central `+0,590%`, stress `+0,203%`.
 - Niciun candidat existent nu este aprobat pentru bani reali.
@@ -127,30 +127,28 @@ această coadă; P2 așteaptă minimum 20 de fill-uri pentru calibrare.
 
 ## D. Handoff pentru sesiunile viitoare — actualizat 2026-08-21
 
-### P0 — integrare Git, fără deploy implicit
+### P0 — integrare Git — FINALIZAT LOCAL 2026-08-21
 
-1. `origin/main@b266c2f` conține refactorul de threading `rtrade`, refactorul de
-   memorie `tradeall_observe` și documentația multi-venue.
-2. `origin/codex/backlog-7-9@fa643e8` este un singur commit peste acel `main` și
-   trebuie integrat: DNS închis/documentat plus propagarea `intent_id` către
-   identificatorii Kraken/Binance/Hyperliquid.
-3. Fixul `Validate market orders at executable price` este duplicat local în
-   `f8340bd` și `2d1f172`, dar nu este în `origin/main`. Se portează o singură
-   dată, preferabil commitul `f8340bd`; nu se copiază și părintele vechi de
-   threading, deoarece varianta mai bună `e3688f6` este deja în `main`.
-4. Combinația curată `origin/main + f8340bd + fa643e8` a fost construită temporar
-   și a trecut `811 passed`, `235 subtests passed`. Worktree-ul temporar a fost
-   eliminat; nicio ramură nu a fost modificată de această verificare.
+1. Fixul MARKET `f8340bd` a fost portat o singură dată peste `origin/main` ca
+   `4825557`; părintele vechi de threading nu a fost copiat.
+2. `origin/codex/backlog-7-9` a fost integrat complet prin merge-ul `d7098d9`,
+   păstrând refactorul nou `tradeall_observe` și documentația multi-venue.
+3. Integrarea finală plus verificările read-only trec `812 passed`,
+   `235 subtests passed`. Merge-ul în Git este separat de deploy/restart.
 
-### P1 — validare după integrare și înainte de orice restart
+### P1 — validarea punctului 2 — FINALIZAT LOCAL / LIVE PENDING
 
-1. Revizuiește explicit semantica fixului `f8340bd`: MARKET normal este validat
-   la prețul curent, iar o ieșire protectoare trebuie să folosească explicit
-   `bypass_profit_guard=True`. Testele acoperă ambele cazuri.
-2. Rulează suita completă pe commitul final din `main`, apoi separă deploy-ul de
-   merge. Pentru activarea client order ID, verifică primul ordin real Kraken/HL
-   în audit și în răspunsul venue-ului; nu plasa un ordin doar pentru test.
-3. Reconfirmă inventarul read-only pentru ownership-ul HYPE înaintea unei alte
+1. MARKET normal este revalidat la prețul curent după orice trend-wait. HARD-TP
+   din `monitortrades` rămâne pe această cale și nu primește bypass implicit.
+2. Trailing-ul protector Binance transmite explicit `bypass_profit_guard=True`;
+   testul verifică acum argumentul, nu doar `force=True`. STOP/trailing din
+   Kraken/HL/T212 folosesc executorul raw și nu intră în `Instrument.place`.
+3. Raportul read-only `calibrate_execution_audit.py` validează formatul și arată
+   prima pereche `client_order_id`/venue `order_id` dintr-un `submit_accepted`.
+   Auditul local actual nu conține încă un astfel de ordin și raportează corect
+   `PENDING`; nu s-a plasat un ordin doar pentru test.
+4. După un deploy aprobat separat, rulează raportul pe primul ordin apărut natural.
+   Reconfirmă și inventarul read-only pentru ownership-ul HYPE înaintea unei alte
    schimbări de execuție. Suprapunerea spot/trailing/monitortrades este cunoscută
    și nu cere ledger, dar trebuie să rămână explicită.
 
@@ -167,8 +165,8 @@ această coadă; P2 așteaptă minimum 20 de fill-uri pentru calibrare.
 
 ### P3 — igienă de ramuri după merge
 
-- `origin/codex/tradeall-observe-memory` și `codex/rtrade-refactor-main` sunt deja
-  conținute în `origin/main`; pot fi eliminate după confirmarea merge-ului final.
+- ramura remote `codex/tradeall-observe-memory` a fost eliminată după integrare;
+  ramura locală `codex/rtrade-refactor-main` este deja conținută în `main`;
 - ramurile locale `codex-rtrade-threading` și `main` conțin duplicatul `f8340bd` /
   `2d1f172`; nu se merge-uiesc integral peste `main`.
 - `codex/rtrade-pair-coordinator@2045672` adaugă aproximativ 1.100 linii și schimbă

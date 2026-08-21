@@ -65,6 +65,51 @@ class ExecutionCalibrationTest(unittest.TestCase):
             report["calibration_readiness"]["can_calibrate_market_slippage"],
         )
 
+    def test_validates_first_natural_client_order_id_without_placing_orders(self):
+        events = [
+            {
+                "ts": 10, "event": "submit_requested", "intent_id": "k-1",
+                "venue": "Kraken", "symbol": "HYPEUSD", "qty": 1,
+                "client_order_id": "0123456789abcdef0123456789abcdef",
+            },
+            {
+                "ts": 11, "event": "submit_accepted", "intent_id": "k-1",
+                "venue": "Kraken", "symbol": "HYPEUSD", "order_id": "K-7",
+                "client_order_id": "0123456789abcdef0123456789abcdef",
+            },
+            {
+                "ts": 20, "event": "submit_requested", "intent_id": "b-1",
+                "venue": "Binance", "symbol": "BTCUSDC", "qty": 1,
+                "client_order_id": "gresit",
+            },
+            {
+                "ts": 21, "event": "submit_accepted", "intent_id": "b-1",
+                "order_id": "B-7", "client_order_id": "gresit",
+            },
+            {
+                "ts": 30, "event": "submit_requested", "intent_id": "t-1",
+                "venue": "T212", "symbol": "NVDA_US_EQ", "qty": 1,
+            },
+            {
+                "ts": 31, "event": "submit_accepted", "intent_id": "t-1",
+                "order_id": "T-7",
+            },
+        ]
+
+        validation = calibrate_execution_events(events)[
+            "client_order_id_validation"
+        ]
+
+        self.assertEqual(validation["supported_accepted_orders"], 2)
+        self.assertEqual(validation["with_client_order_id"], 2)
+        self.assertEqual(validation["valid_client_order_ids"], 1)
+        self.assertEqual(validation["invalid_client_order_ids"], 1)
+        self.assertEqual(validation["missing_client_order_ids"], 0)
+        self.assertEqual(
+            validation["first_valid_by_venue"]["Kraken"]["order_id"], "K-7",
+        )
+        self.assertNotIn("T212", validation["first_valid_by_venue"])
+
 
 if __name__ == "__main__":
     unittest.main()
