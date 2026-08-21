@@ -80,8 +80,9 @@ executorul offline; ambele rulează aceeași clasă. `kraken/strategy.py` rămâ
 pentru comenzile istorice. Directorul stării, notificatorul și eticheta venue-ului
 sunt injectabile, dar fallback-ul Kraken păstrează exact fișierul de stare existent.
 
-T212 și Hyperliquid nu sunt alias-uri ale acestui motor: providerii lor satisfac
-contractul mecanic, însă strategiile financiare distincte rămân separate.
+`hl_dca_bot.py` injectează `HyperliquidProvider` în același motor `spot_dca`.
+T212, motorul PERP legacy și delta-neutral nu sunt alias-uri ale lui: providerii
+pot satisface același contract mecanic, dar strategiile financiare distincte rămân separate.
 
 `strategies/state_store.py` centralizează snapshot-urile financiare pentru motorul
 spot și T212. Scrierea este atomică (`fsync` urmat de `os.replace`); în mod real,
@@ -112,10 +113,14 @@ Eșecul auditului nu poate refuza și nu poate modifica un ordin.
   (`coin == @index`; fill-urile PERP `coin=HYPE` sunt EXCLUSE → DN-ul nu se amestecă);
 - refolosește `hyperliquid/hl_client.py` (SDK), cu **import LAZY** — fleet-ul NU pică dacă
   SDK-ul HL lipsește din venv-ul lui (Binance neafectat).
-- **Porți (default OFF):** `MT_HYPE_ENABLED` (HYPE în bucla `monitortrades`), `HL_LIVE_ORDERS`
-  (ordine reale; altfel doar `[HL][DRY]`).
-- ⚠ **Co-mingling spot DN** (vezi [OPERATIONS.md](OPERATIONS.md) §3): soldul spot HYPE e UNUL
-  pe wallet, partajat cu piciorul DN → de-aia ordinele reale HYPE stau OFF până la separare.
+- **Porți separate:** `MT_HYPE_ENABLED` revendică HYPE în `monitortrades`, iar
+  `HL_LIVE_ORDERS` permite providerului să trimită ordine. Valorile pot fi suprascrise
+  de `.env`; starea reală se stabilește din manifest + procese + environment, nu din
+  `config.env` singur.
+- La 21 august 2026 nu rulează niciun proces HL: DN este comentat în `procs.conf`, iar
+  `hl_dca_bot` nu este înscris. Poarta runtime poate fi `true` fără să existe un owner activ.
+- ⚠ **Co-mingling spot** (vezi [OPERATIONS.md](OPERATIONS.md) §3): dacă DN sau mai mulți
+  owneri sunt reactivați, același sold HYPE spot poate fi vândut de motorul greșit.
 
 ## Kraken multi-proces (cacheManager replicat)
 Pentru 2–3 procese de trading HYPE pe Kraken (același symbol `HYPEUSD`), pe UN singur cont:

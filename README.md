@@ -84,9 +84,9 @@ Hyperliquid își păstrează logica proprie acolo unde modelul de execuție dif
 - `212trading/` — un proces `t212_bot.py`, cu profiluri configurabile și stare
   persistentă pentru ordine, partial fills, anulare și repricing;
 - `binance_api/trailing_stop.py` — disjunctor trailing/re-buy pentru Binance;
-- `hyperliquid/` — client și provider HYPE. Strategia delta-neutral (`dn_bot`) este
-  **dezactivată în `procs.conf` din 20 august 2026** și nu trebuie repornită fără o
-  decizie explicită.
+- `hyperliquid/` — client și provider HYPE. `dn_bot` este dezactivat în
+  `procs.conf` din 20 august 2026, iar `hl_dca_bot` nu este înscris și nu rulează;
+  niciun proces HL nu se activează fără shadow, ownership și deploy aprobate.
 
 Kraken folosește namespace separat pentru cache-ul de tranzacții. Procesele Kraken
 care trimit cereri private trebuie să respecte politica de chei/nonce documentată în

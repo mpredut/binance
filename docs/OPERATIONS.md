@@ -4,13 +4,15 @@
 [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md).
 
 ## Arhitectură pe scurt
-- **Flota Binance** (7 procese): `cacheManager`, `assetguardian`, `priceAnalysis`,
-  `tradeall`, `monitortrades`, `rtrade`, `market_alerts`. Pornite + supravegheate de
-  `flota_start.sh`, care rulează sub **systemd `binance`** (enabled, `Restart=always`).
-- **Boți** (separați de flotă): `dn_bot` (delta-neutral HL) + `dn_bot --watch` (monitor
-  read-only), `kraken_cachemanager`, `kraken_bot`, `kraken_xstock_watch`, `t212_bot`,
-  `kraken/trailing_stop`, `binance_api/trailing_stop`. Porniți de `bots_start.sh`,
+- **Flota Binance** (8 procese): `cacheManager`, `assetguardian`, `priceAnalysis`,
+  `tradeall`, `monitortrades`, `rtrade`, `market_alerts`, `order_retry_worker`. Pornite
+  și supravegheate de `flota_start.sh`, sub **systemd `binance`**.
+- **Boți activi separați de flotă**: `kraken_cachemanager`, `kraken_bot`,
+  `kraken_xstock_watch`, `t212_bot`, `kraken/trailing_stop` și
+  `binance_api/trailing_stop`. Sunt porniți din rolurile `bot` ale `procs.conf` și
   supravegheați de `healthcheck.sh --supervise` (cron */5).
+- **Hyperliquid**: `dn_bot`/watch sunt oprite și comentate în manifest din
+  20 august 2026; `hl_dca_bot` există în cod, dar nu este în manifest și nu rulează.
 - **Facadă market/cont**: `providers/market_api.py` rutează pe symbol către
   `BinanceProvider` / `HyperliquidProvider` / `kraken` / `t212`. `monitortrades` o folosește.
 
@@ -25,7 +27,8 @@ Citită de **toate**: `healthcheck.sh`, `flota_start.sh`, `bots_start.sh`, `depl
   doar alertă (o ține flota_start). Backoff: max 3 reporniri/30 min, apoi crash-loop alert.
 - `--alert` — doar alertă, fără restart.
 - **Detecție dublă:** absență (`pgrep`) **și HANG** (proces viu dar `hb_log` nescris de
-  `hb_stale_s`). Heartbeat activat pt `dn_bot`/`dn_watch` (600s); restul = doar prezență.
+  `hb_stale_s`). Heartbeat-urile active sunt cele declarate pe fiecare linie din
+  manifest; intrările HL comentate nu sunt supravegheate și nu sunt repornite.
 
 ## Pornire / deploy / backup
 - **Pornire:** `flota_start.sh` (flotă, systemd) · `bots_start.sh` (boți).
@@ -36,8 +39,10 @@ Citită de **toate**: `healthcheck.sh`, `flota_start.sh`, `bots_start.sh`, `depl
 
 ## La REBOOT — totul revine singur
 - systemd `binance` (enabled) → `flota_start` → flota (după VPN/pia).
-- crontab persistă → `healthcheck --supervise` (*/5) pornește boții în ≤5 min.
-- Nimic manual.
+- crontab persistă → `healthcheck --supervise` (*/5) pornește procesele declarate
+  active (`role=bot`) în ≤5 min.
+- Intrările HL comentate și `hl_dca_bot.py`, absent din `procs.conf`, **nu** repornesc.
+- Nu este necesară intervenție manuală pentru flota și boții declarați activi.
 
 ## ⚠ CAPCANE & LECȚII (citește înainte să modifici)
 
@@ -51,15 +56,18 @@ scriptul iese → următoarea rulare dă „**deja ruleaza**" la infinit = supra
 - **Diagnostic:** `lsof /tmp/binance_supervise.lock` (sau `flota_start.lock`) → PID cu `8w`/`9w`.
 - **Deblocare imediată:** `rm /tmp/binance_supervise.lock` (următoarea rulare ia inode nou).
 
-### 2. Hang ≠ crash (dn_bot poate îngheța viu)
-`dn_bot` poate îngheța silențios (proces viu, fără tick). `pgrep` nu-l prinde →
-de-aia există **heartbeat pe mtime-ul logului** (`hb_log`/`hb_stale_s` în `procs.conf`).
+### 2. Hang ≠ crash (lecție păstrată din DN)
+Când era activ, `dn_bot` putea îngheța silențios (proces viu, fără tick), motiv pentru
+care simplul `pgrep` nu era suficient. Dacă DN se reintroduce vreodată, intrările din
+manifest trebuie să aibă din nou heartbeat pe `hb_log`/`hb_stale_s`; acum sunt comentate.
 
-### 3. ⚠ Co-mingling SPOT cu DN-ul (HYPE)
-Pe Hyperliquid soldul **spot e unul singur** pe wallet. Piciorul LONG spot al botului
-delta-neutral și HYPE-ul „monitortrades" sunt în **același sold**. Un SELL real de „tot
-ce e disponibil" ar **desface hedge-ul DN**. De-aia `monitortrades` pe HYPE rămâne cu
-`HL_LIVE_ORDERS` **off** (DRY) până se separă pozițiile (sub-cont/wallet sau tagging).
+### 3. ⚠ Co-mingling SPOT pe Hyperliquid
+Soldul HYPE spot este unic pe wallet. Dacă DN este repornit, piciorul lui LONG spot,
+`hl_dca_bot` și orice owner `monitortrades` ar vedea același sold; un SELL de „tot
+available” poate desface hedge-ul sau poziția altui motor. În prezent nu rulează niciun
+proces HL, dar înainte de activare trebuie demonstrat ownership exclusiv sau folosit un
+subcont/wallet separat. `STRAT_EXECUTE` și `HL_LIVE_ORDERS` sunt porți necesare, nu dovadă
+de ownership și nu aprobare de deploy.
 
 ### 4. Bitul de execuție se pierde la editări din Windows
 Editarea unui `.sh` din Windows/UNC îl resetează la `644` → cron-ul `./script.sh` dă
@@ -88,7 +96,8 @@ oprește serverul întâi. (Garda din `--supervise` refuză pornirea pe `/home/m
 ```bash
 ./healthcheck.sh --check                 # stare toate procesele (read-only)
 ./healthcheck.sh                         # raport complet (procese + conturi HL/Kraken/T212)
-( cd hyperliquid && ./myenv/bin/python dn_bot.py --status )   # delta DN, funding, lichidare
+ps -ef | grep -E '[h]l_dca_bot|[d]n_bot' # confirmă că HL este inactiv
+python3 verify_tools/ownership_inventory.py --running
 lsof /tmp/binance_supervise.lock         # cine ține lock-ul supervize (scurgere?)
 tail -n 5 logs/healthcheck.log           # ce a făcut supervizorul (cron)
 ```

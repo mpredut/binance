@@ -1,52 +1,159 @@
-# Hyperliquid bot — DCA + take-profit (perp long-only)
+# Hyperliquid — integrare, stare operațională și strategie HYPE
 
-Port al strategiei de la `212trading` / `kraken`, pe **Hyperliquid**.
-Aceeași logică: intră long la `market − x%`, mai cumpără pe scădere (DCA),
-vinde tot (reduce-only) la `preț_mediu × (1 + TP%)`, reia ciclul.
+Directorul conține trei capabilități distincte: providerul HYPE/USDC spot folosit
+de motorul comun `strategies/spot_dca`, motorul istoric PERP direcțional și motorul
+delta-neutral. Faptul că există cod și configurație nu înseamnă că un proces este
+activ în producție.
 
-## ⚠ Rulează cu Python-ul din venv-ul cu SDK
-SDK-ul oficial e instalat în `/home/mariusp/binance/.venv` (Python 3.14):
+## Starea producției — 21 august 2026
+
+- `hl_dca_bot.py` **nu rulează** și nu este declarat în `procs.conf`;
+- `dn_bot.py` și watcherul lui sunt opriți și comentați în `procs.conf` din
+  20 august 2026; nu se repornesc automat;
+- `monitortrades` pentru HYPE/Hyperliquid este dezactivat prin instrument gate;
+- nu există în prezent un owner activ care să plaseze ordine Hyperliquid;
+- activarea viitoare cere separat: manifest, shadow/paper, ownership verificat și
+  aprobare pentru ordine reale.
+
+Verificarea autoritativă este întotdeauna combinația dintre:
+
 ```bash
-cd hyperliquid
-/home/mariusp/binance/.venv/bin/python hl_bot.py --price       # public
-/home/mariusp/binance/.venv/bin/python hl_bot.py --paper       # paper
-# sau:  source ../.venv/bin/activate && python hl_bot.py
+rg -n 'hl_dca|dn_bot' procs.conf
+ps -ef | grep -E '[h]l_dca_bot|[d]n_bot'
+python3 verify_tools/ownership_inventory.py --running
 ```
 
-## Structura
-| Fișier | Rol |
-|--------|-----|
-| `common.py` | log, `.env` |
-| `hl_client.py` | wrapper peste SDK-ul Hyperliquid (Info=citiri, Exchange=ordine semnate) |
-| `market_data.py` | preț (all_mids) + disponibilitate monedă |
-| `notify.py` | ntfy + email (alertnotifiers) |
-| `strategy.py` | motor DCA + take-profit, P&L net |
-| `hl_bot.py` | entry point, config din `.env` |
-| `.env.example` | șablon |
+## Entry-pointuri
 
-## Autentificare (diferită de T212/Kraken)
-Hyperliquid NU folosește key/secret, ci **semnătură de wallet (EIP-712/ECDSA)**.
-Folosește un **agent / API wallet** (NU cheia principală):
-1. Pe Hyperliquid: **More → API → Generate** agent wallet → **Approve**.
-2. În `.env`:
-   - `HL_SECRET_KEY` = cheia privată a agentului (poate tranzacționa, NU retrage)
-   - `HL_ACCOUNT_ADDRESS` = adresa contului principal (cu USDC)
-
-## De ce PERP long-only
-- HYPE perp e cel mai **lichid** pe Hyperliquid (spot-ul folosește notație `@index`).
-- La **levier 1x long-only**, e cvasi-spot: lichidarea e foarte departe (preț → ~0).
-- `clearinghouseState` dă direct **mărimea poziției + prețul mediu** → reconciliere curată.
-- Risc suplimentar față de spot: **funding** (de obicei mic) și, teoretic, lichidare la levier mare → ține `HL_LEVERAGE=1`.
-
-## ✅ Avantaj: fee minuscul
-Fee Hyperliquid ~**0.045% taker / 0.015% maker** (vs 0.5% Kraken, 0.30% T212).
-Deci `STRAT_TAKEPROFIT_PCT` poate fi **strâns** (0.3–0.5%) și tot iese profit net.
-
-## Diferențe față de Kraken/T212
-| | T212 | Kraken | Hyperliquid |
+| Fișier | Piață | Motor | Stare |
 |---|---|---|---|
-| Auth | Basic | HMAC | **semnătură wallet (SDK)** |
-| Preț | Yahoo | Ticker | `all_mids` |
-| Poziție + avg | da (API) | nu (urmărim noi) | **da** (`entryPx`) |
-| Fee | 0.30% FX | ~0.5% rt | **~0.03–0.09% rt** |
-| Produs | acțiuni | spot crypto | **perp** (long-only aici) |
+| `hl_dca_bot.py` | HYPE/USDC spot | `strategies.spot_dca` (base v2) | disponibil, neînregistrat/nepornit |
+| `hl_bot.py` | PERP long/short | `hyperliquid/strategy.py` | legacy, neînregistrat/nepornit |
+| `dn_bot.py` | spot long + perp short | `delta_neutral.py` | oprit explicit în manifest |
+| `providers/hyperliquid_provider.py` | spot | contract `StrategyExecutor` | adaptor importat lazy |
+| `hl_client.py` | spot și perp | SDK Hyperliquid | wrapper pentru citiri/ordine |
+
+`hl_dca_bot.py` folosește același motor financiar live/replay ca botul Kraken;
+providerul schimbă venue-ul, nu regulile strategiei.
+
+## Configurație și precedență
+
+Launcherul încarcă mai întâi `hyperliquid/.env`, apoi `hyperliquid/config.env`, iar
+valorile deja definite nu sunt suprascrise. Prin urmare:
+
+```text
+.env local (runtime)  >  config.env versionat  >  valorile implicite din cod
+```
+
+`config.env` păstrează un profil fallback/scalper (`TP 0,5%`), dar acesta **nu este
+profilul efectiv local**. La verificarea din 21 august 2026, parametrii nesensibili
+efectivi erau:
+
+```text
+entry 50 USDC | DCA 30 USDC la -2% | plafon 500 USDC | SL 7%
+TP 5% | trend-hold activ | trailing adaptiv 1,5–8%
+```
+
+Nu deduce configurația live citind numai `config.env`. Pentru diagnostic, încarcă
+fișierele în aceeași ordine ca launcherul și afișează numai cheile nesensibile.
+Nu comite `.env` și nu afișa cheia agent-wallet.
+
+## Porți de siguranță
+
+Pentru `hl_dca_bot.py`, banii reali cer simultan:
+
+1. proces lansat fără `--paper`;
+2. `STRAT_EXECUTE=true`;
+3. `HL_LIVE_ORDERS=true`;
+4. cheie agent-wallet și cont valide;
+5. ownership fără conflict cu alt proces pe același sold HYPE spot.
+
+Lipsa oricărei porți păstrează PAPER sau face providerul să refuze ordinul. Aceste
+porți nu înlocuiesc aprobarea operațională și includerea explicită în manifest.
+
+## Fee spot și implicația pentru TP
+
+Spot și PERP au grile diferite. La tier-ul spot de bază, documentația oficială
+Hyperliquid indică aproximativ `0,040% maker` și `0,070% taker` per fill; valorile
+vechi `0,015%/0,045%` sunt pentru PERP și nu justifică un TP spot de `0,5%`.
+Tier-ul contului, staking-ul, builder fee-ul și tipul efectiv de fill pot schimba
+costul. Backtestul trebuie să modeleze separat LIMIT/MARKET și un scenariu stress.
+
+Sursă: <https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees>.
+
+## Analiza long-term HYPE — 21 august 2026
+
+Studiul offline a folosit datasetul înghețat HYPE/USDC spot Hyperliquid: 3.772
+bare de 4h (~628 zile), walk-forward OOS cu ferestre de 15/30/60 zile, stare
+resetată per TEST, fill-uri parțiale și ordine intrabar worst-case.
+
+Scenariul central a folosit fee `0,04% LIMIT / 0,07% MARKET`; stress a folosit
+`0,07% / 0,10%`, spread 20 bps, slippage market 30 bps și maximum 50% fill LIMIT
+per bară. Ipotezele de execuție sunt conservatoare, dar încă necalibrate din
+fill-uri reale Hyperliquid.
+
+Randamentul mediu în stress:
+
+| Variantă | 15 zile | 30 zile | 60 zile |
+|---|---:|---:|---:|
+| profil efectiv TP5 adaptiv | -0,114% | -0,192% | -0,542% |
+| fallback scalper TP0,5 | -1,266% | -2,422% | -4,390% |
+| TP2 clasic | -1,007% | -1,760% | -2,736% |
+| **TP3 + trend-hold + trail fix 3%** | **+0,098%** | **+0,094%** | **+0,289%** |
+| TP5 + trail fix 3% | -0,002% | -0,022% | -0,661% |
+| DCA fără TP | +0,413% | +0,967% | +2,970% |
+
+Candidatul preferat pentru **shadow**, nu pentru live, este `long_tp3_trail3`:
+aceleași sume și SL, TP armat la 3%, trend-hold activ și trailing fix 3%. A avut
+DD stress mai mic decât profilul efectiv la toate orizonturile. `DCA fără TP` a
+avut media cea mai mare, dar ~90% expunere, drawdown mai mare și dependență mai
+mare de regimul bull.
+
+Niciun candidat nu a trecut gate-ul formal de promovare. `long_tp3_trail3` a
+îmbunătățit media/tail/DD, dar nu a câștigat suficient de consistent fold-cu-fold
+în schema de 15 zile. Concluzia este **shadow/paper only** până la dovezi forward,
+nu modificare live.
+
+Artefactele temporare ale rulării sunt:
+
+```text
+/tmp/hl_strategy_analysis_20260821.json
+/tmp/hl_strategy_horizons_20260821.json
+```
+
+Acestea nu sunt versionate; cifrele și ipotezele durabile sunt păstrate aici și în
+`chatgpt_agent_work/OPEN_ACTIONS_PROD_FINANCIAL.md`.
+
+## Co-mingling și ownership
+
+Soldul HYPE spot este unic pe wallet. Dacă DN ar fi repornit, piciorul lui long
+spot ar împărți soldul cu `hl_dca_bot` sau `monitortrades`; un SELL de „tot
+available” ar putea desface hedge-ul. Înaintea oricărei activări, folosește un
+subcont/wallet separat sau demonstrează ownership exclusiv. Faptul că DN este acum
+oprit elimină conflictul runtime curent, nu riscul arhitectural la repornire.
+
+## Autentificare
+
+Hyperliquid folosește semnătură wallet EIP-712/ECDSA. Pentru automatizare se
+folosește un agent/API wallet aprobat, nu cheia principală:
+
+- `HL_SECRET_KEY` — cheia privată a agentului;
+- `HL_ACCOUNT_ADDRESS` — adresa contului principal.
+
+Secretele rămân exclusiv în `.env`, sunt excluse din Git și trebuie incluse în
+procedura de backup/disaster recovery.
+
+## Comenzi sigure
+
+```bash
+# import/provider, fără ordine (din rădăcina repo-ului)
+cd /home/predut/binance
+myenv/bin/python -m unittest -q tests.test_hyperliquid_provider_executor
+
+# launcher forțat PAPER; nu îl adăuga în manifest doar pentru test
+cd hyperliquid
+../myenv/bin/python hl_dca_bot.py --paper
+```
+
+Pornirea PAPER este tot un proces persistent; oprește-l controlat după verificare.
+Nu folosi comenzile de mai sus ca substitut pentru gate-ul de promovare.

@@ -16,7 +16,7 @@ lângă codul lor (convenție — sunt linkate mai jos).
   Kraken multi-proces (cacheManager partajat), trailing stop (core partajat + adaptoare).
 
 ## README de componentă (lângă cod)
-- [../hyperliquid/README.md](../hyperliquid/README.md) — Hyperliquid: delta-neutral (dn_bot) + provider HYPE.
+- [../hyperliquid/README.md](../hyperliquid/README.md) — Hyperliquid: procese inactive, porți runtime, provider spot și candidatul long-term shadow.
 - [../kraken/README.md](../kraken/README.md) — Kraken: boți (HYPE, xStock, trailing) + cachemanager.
 
 ## Hărți rapide (unde e ce)
