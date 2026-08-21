@@ -1,8 +1,15 @@
-"""Session-level cleanup for background services created by integration tests."""
+"""Global safety and cleanup for the test suite."""
 
+import os
 import threading
 
 import pytest
+
+
+# Setat la import, inainte de colectarea modulelor de test. Astfel nici apelurile
+# facute la import si nici subprocess-urile pornite de teste nu pot trimite
+# notificari reale catre ntfy/email/desktop.
+os.environ["DISABLE_EXTERNAL_NOTIFICATIONS"] = "1"
 
 
 @pytest.fixture(scope="session", autouse=True)

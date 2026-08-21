@@ -114,5 +114,20 @@ class BoundNotifierTest(unittest.TestCase):
             self.assertEqual(shared.call_args.args[3], "CRYPTO")
 
 
+class NotificationIsolationTest(unittest.TestCase):
+    def test_external_notification_kill_switch_blocks_all_delivery(self):
+        with patch.dict(os.environ, {"DISABLE_EXTERNAL_NOTIFICATIONS": "true"}, clear=False), \
+             patch.object(alertnotifiers.AlertNotifier, "send_phone_webhook_batch") as ntfy, \
+             patch.object(alertnotifiers.AlertNotifier, "send_email_batch") as email, \
+             patch.object(alertnotifiers.subprocess, "run") as desktop:
+            alertnotifiers.notify(
+                "STOP-LOSS test", "paper event", "pytest", "TSTX",
+                desktop=True, email=True,
+            )
+        ntfy.assert_not_called()
+        email.assert_not_called()
+        desktop.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

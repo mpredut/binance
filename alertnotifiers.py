@@ -519,6 +519,14 @@ def notify(title: str, body: str, source: str, symbol: str,
 
     Extras din wrapper-ele duplicate kraken/notify.py, hyperliquid/notify.py, 212trading/ipo_notify.py.
     """
+    # Testele si replay-urile offline pot exercita exact aceleasi cai ca live.
+    # Kill-switch-ul central previne orice efect extern chiar daca un test uita
+    # sa injecteze un notifier fake (ntfy/email/desktop/beep).
+    if os.environ.get("DISABLE_EXTERNAL_NOTIFICATIONS", "").strip().lower() in {
+        "1", "true", "yes", "on",
+    }:
+        return
+
     for _ in range(5):
         sys.stdout.write("\a")
         sys.stdout.flush()
