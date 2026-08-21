@@ -101,7 +101,7 @@ Propunerile nu mai sunt confirmate în ambele ferestre; configurația rămâne
 
 ### F4 — Hyperliquid long-term — ANALIZAT, SHADOW ONLY
 
-- `hl_dca_bot.py` rulează manual în mod REAL, dar nu este în manifest. Incidentul
+- `hl_dca_bot.py` este configurat REAL, dar oprit și absent din manifest. Incidentul
   `PAPER-1` din starea legacy Kraken este închis: fixul LIVE/PAPER a fost testat pe
   DEV și redeployat controlat; ordinul real este urmărit din starea HL izolată.
 - `config.env` versionat și override-urile locale descriu acum TP `5%`; `.env`

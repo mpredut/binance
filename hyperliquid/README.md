@@ -7,8 +7,9 @@ activ în producție.
 
 ## Starea producției — 21 august 2026
 
-- `hl_dca_bot.py` rulează manual, în afara `procs.conf`, cu `STRAT_EXECUTE` și
-  `HL_LIVE_ORDERS` active; nu este supravegheat și nu repornește automat;
+- `hl_dca_bot.py` este în afara `procs.conf`, cu porțile REAL configurate, dar este
+  oprit după ce preflight-ul a găsit numai ~1.024 USDC pentru sizingul de 7.000; nu
+  este supravegheat și nu repornește automat;
 - incidentul `PAPER-1` din starea legacy Kraken a fost remediat și redeployat
   controlat în 21 august; procesul reconciliază acum starea LIVE HL izolată;
 - `dn_bot.py` și watcherul sunt opriți și comentați în manifest;
@@ -28,7 +29,7 @@ python3 verify_tools/ownership_inventory.py --running
 
 | Fișier | Piață | Motor | Stare |
 |---|---|---|---|
-| `hl_dca_bot.py` | HYPE/USDC spot | `strategies.spot_dca` (base v2) | rulează manual, REAL, stare izolată și reconciliată |
+| `hl_dca_bot.py` | HYPE/USDC spot | `strategies.spot_dca` (base v2) | oprit până la finanțarea rezervei DCA |
 | `hl_bot.py` | PERP long/short | `hyperliquid/strategy.py` | legacy, neînregistrat/nepornit |
 | `dn_bot.py` | spot long + perp short | `delta_neutral.py` | oprit explicit în manifest |
 | `providers/hyperliquid_provider.py` | spot | contract `StrategyExecutor` | adaptor importat lazy |

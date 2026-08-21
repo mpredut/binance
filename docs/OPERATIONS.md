@@ -12,8 +12,7 @@
   `binance_api/trailing_stop`. Sunt porniți din rolurile `bot` ale `procs.conf` și
   supravegheați de `healthcheck.sh --supervise` (cron */5).
 - **Hyperliquid**: `dn_bot`/watch sunt oprite și comentate în manifest. `hl_dca_bot`
-  rulează manual, în afara `procs.conf`; healthcheck nu îl deține și rebootul nu îl
-  repornește.
+  este oprit până la finanțarea rezervei DCA și rămâne în afara `procs.conf`.
 - **Facadă market/cont**: `providers/market_api.py` rutează pe symbol către
   `BinanceProvider` / `HyperliquidProvider` / `kraken` / `t212`. `monitortrades` o folosește.
 
@@ -65,8 +64,7 @@ manifest trebuie să aibă din nou heartbeat pe `hb_log`/`hb_stale_s`; acum sunt
 ### 3. ⚠ Co-mingling SPOT pe Hyperliquid
 Soldul HYPE spot este unic pe wallet. Dacă DN este repornit, piciorul lui LONG spot,
 `hl_dca_bot` și orice owner `monitortrades` ar vedea același sold; un SELL de „tot
-available” poate desface hedge-ul sau poziția altui motor. Acum rulează manual
-`hl_dca_bot`; înaintea oricărui al doilea owner trebuie demonstrat ownership exclusiv
+available” poate desface hedge-ul sau poziția altui motor. La ultima verificare `hl_dca_bot` era oprit; înaintea oricărui al doilea owner trebuie demonstrat ownership exclusiv
 sau folosit un
 subcont/wallet separat. `STRAT_EXECUTE` și `HL_LIVE_ORDERS` sunt porți necesare, nu dovadă
 de ownership și nu aprobare de deploy.
