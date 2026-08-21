@@ -26,3 +26,22 @@ handler = RotatingFileHandler(
 
 logging.basicConfig(level=logging.WARNING, handlers=[handler])
 
+
+
+
+# 1. backup
+sudo cp /etc/systemd/resolved.conf /etc/systemd/resolved.conf.bak.$(date +%F)
+
+# 2. adauga serve-stale + cache sub [Resolve]
+sudo tee -a /etc/systemd/resolved.conf >/dev/null <<'EOF'
+Cache=yes
+StaleRetentionSec=4h
+EOF
+
+# 3. aplica
+sudo systemctl restart systemd-resolved
+
+# 4. VERIFICA (important dupa restart):
+resolvectl status | grep -A3 tun0        # tun0 tb sa aiba iar DNS 10.0.0.243
+getent hosts api.binance.com && echo "DNS OK"
+
