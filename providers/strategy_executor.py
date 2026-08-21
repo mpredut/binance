@@ -50,9 +50,12 @@ class StrategyExecutor(Protocol):
 
     def submit_order(self, symbol: str, side: str, qty: float,
                      price: Optional[float] = None, *, market: bool = False,
-                     kind: Optional[str] = None) -> str:
+                     kind: Optional[str] = None,
+                     client_order_id: Optional[str] = None) -> str:
         """Plaseaza un ordin. `price=None` sau `market=True` => ordin de piata.
         Intoarce order_id-ul de venue (folosit apoi la order_status/cancel_order).
+        `client_order_id` coreleaza intentia persistata cu ordinul de venue, acolo
+        unde API-ul il suporta; providerul il adapteaza formatului specific bursei.
         Ridica ProviderError la esec."""
         ...
 

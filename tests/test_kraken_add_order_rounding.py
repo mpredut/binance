@@ -45,6 +45,18 @@ class AddOrderRoundingTest(unittest.TestCase):
         c.add_order("HYPEUSD", "sell", 1.0, None, ordertype="market")
         self.assertNotIn("price", sent)
 
+    def test_client_order_id_is_validated_and_sent(self):
+        c, sent = self._client(2)
+        client_id = "0123456789ABCDEF0123456789ABCDEF"
+        c.add_order(
+            "HYPEUSD", "buy", 1.0, 60.0, ordertype="limit",
+            cl_ord_id=client_id,
+        )
+        self.assertEqual(sent["cl_ord_id"], client_id.lower())
+
+        with self.assertRaisesRegex(ValueError, "128 biti"):
+            c.add_order("HYPEUSD", "buy", 1.0, 60.0, cl_ord_id="prea-scurt")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

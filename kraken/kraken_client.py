@@ -18,6 +18,7 @@ import base64
 import hashlib
 import hmac
 import json
+import re
 import threading
 import time
 import urllib.parse
@@ -191,7 +192,8 @@ class KrakenClient:
         return 2
 
     def add_order(self, pair: str, side: str, volume: float, price: float | None = None,
-                  ordertype: str = "limit", validate: bool = False) -> dict:
+                  ordertype: str = "limit", validate: bool = False,
+                  cl_ord_id: str | None = None) -> dict:
         """Plaseaza ordin. side='buy'|'sell'. validate=True -> doar valideaza (nu plaseaza).
         Rotunjeste pretul la precizia REALA a perechii (pair_decimals) — protectie de
         MECANICA centralizata pt TOTI apelantii Kraken (trailing/bot/xstock), analog cu
@@ -206,6 +208,10 @@ class KrakenClient:
         if ordertype == "limit" and price is not None:
             price = round(float(price), self.price_decimals(pair))
             data["price"] = f"{price}"
+        if cl_ord_id is not None:
+            if not re.fullmatch(r"[0-9a-fA-F]{32}", str(cl_ord_id)):
+                raise ValueError("cl_ord_id Kraken trebuie sa fie UUID hex pe 128 biti")
+            data["cl_ord_id"] = str(cl_ord_id).lower()
         if validate:
             data["validate"] = "true"
         return self._private("AddOrder", data)

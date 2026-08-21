@@ -320,7 +320,8 @@ class HyperliquidProvider(MarketDataProvider):
 
     def submit_order(self, symbol: str, side: str, qty: float,
                      price: Optional[float] = None, *, market: bool = False,
-                     kind: Optional[str] = None) -> str:
+                     kind: Optional[str] = None,
+                     client_order_id: Optional[str] = None) -> str:
         # SIGURANTA: ordine REALE pe HL doar cu HL_LIVE_ORDERS=true (co-mingling spot cu DN).
         if os.environ.get(_LIVE_ENV, "false").strip().lower() != "true":
             raise ProviderError(f"HL_LIVE_ORDERS=false — refuz ordin real pe HL ({side} {symbol})")
@@ -337,7 +338,12 @@ class HyperliquidProvider(MarketDataProvider):
         try:
             signer = self._signer()
             szd = signer.sz_decimals(self._token)
-            ok, oid, msg = signer.spot_order(pair, is_buy, float(qty), float(px), sz_decimals=szd)
+            order_kwargs = {"sz_decimals": szd}
+            if client_order_id is not None:
+                order_kwargs["cloid"] = client_order_id
+            ok, oid, msg = signer.spot_order(
+                pair, is_buy, float(qty), float(px), **order_kwargs,
+            )
         except ProviderError:
             raise
         except Exception as e:  # noqa: BLE001

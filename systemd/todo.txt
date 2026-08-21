@@ -29,19 +29,41 @@ logging.basicConfig(level=logging.WARNING, handlers=[handler])
 
 
 
-# 1. backup
-sudo cp /etc/systemd/resolved.conf /etc/systemd/resolved.conf.bak.$(date +%F)
+# REFERINTA/ROLLBACK — taskul DNS 7 este inchis la 2026-08-21.
+# Nu executa aceste comenzi in afara unei ferestre explicite de mentenanta.
+# DNS / systemd-resolved — verificat read-only pe productie la 2026-08-21
+#
+# Starea observata:
+# - systemd 255 suporta StaleRetentionSec;
+# - Cache=yes si StaleRetentionSec=4h sunt active in /etc/systemd/resolved.conf;
+# - serviciul a fost repornit dupa modificare si a ramas activ, fara restart loop;
+# - tun0 foloseste DNS 10.0.0.243 si domeniul-route ~.;
+# - api.binance.com, api.kraken.com si github.com se rezolva prin tun0.
+#
+# LIMITA: 1.1.1.1 si 8.8.8.8 nu raspund pe portul 53 cat timp tunelul PIA este
+# activ. FallbackDNS public ajuta dupa schimbarea rutei/caderea tunelului, dar NU
+# acopera caderea lui 10.0.0.243 cu tun0 ramas activ. Cache-ul stale de 4h ramane
+# protectia efectiva pentru acel caz. Nu simula o cadere DNS pe productia live.
 
-# 2. adauga serve-stale + cache sub [Resolve]
-sudo tee -a /etc/systemd/resolved.conf >/dev/null <<'EOF'
+# Pentru o instalare viitoare foloseste un drop-in idempotent, nu `tee -a` in
+# resolved.conf (rularile repetate ar duplica optiunile):
+sudo install -d -m 0755 /etc/systemd/resolved.conf.d
+sudo tee /etc/systemd/resolved.conf.d/20-trading-cache.conf >/dev/null <<'EOF'
+[Resolve]
 Cache=yes
 StaleRetentionSec=4h
 EOF
 
-# 3. aplica
+# Verifica configuratia efectiva INAINTE de restart.
+systemd-analyze cat-config systemd/resolved.conf
+
+# Aplicarea necesita fereastra operationala si verificare imediata a VPN-ului.
 sudo systemctl restart systemd-resolved
+systemctl is-active systemd-resolved
+resolvectl status | grep -A6 'Link .* (tun0)'
+getent hosts api.binance.com
+getent hosts api.kraken.com
 
-# 4. VERIFICA (important dupa restart):
-resolvectl status | grep -A3 tun0        # tun0 tb sa aiba iar DNS 10.0.0.243
-getent hosts api.binance.com && echo "DNS OK"
-
+# Rollback pentru drop-in:
+sudo rm /etc/systemd/resolved.conf.d/20-trading-cache.conf
+sudo systemctl restart systemd-resolved

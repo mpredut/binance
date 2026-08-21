@@ -184,17 +184,24 @@ class BinanceProvider(MarketDataProvider):
 
     def submit_order(self, symbol: str, side: str, qty: float,
                      price: Optional[float] = None, *, market: bool = False,
-                     kind: Optional[str] = None) -> str:
+                     kind: Optional[str] = None,
+                     client_order_id: Optional[str] = None) -> str:
         order_type = "BUY" if (side or "").lower().startswith("b") else "SELL"
         try:
             if market or price is None:
                 client = _get_bapi().client
                 fn = (client.order_market_buy if order_type == "BUY"
                       else client.order_market_sell)
-                res = fn(symbol=symbol, quantity=qty)
+                kwargs = {"symbol": symbol, "quantity": qty}
+                if client_order_id is not None:
+                    kwargs["newClientOrderId"] = client_order_id
+                res = fn(**kwargs)
             else:
                 from binance_api import bapi_placeorder as _po
-                res = _po.place_order_mechanics(order_type, symbol, price, qty, force=False)
+                kwargs = {"force": False}
+                if client_order_id is not None:
+                    kwargs["client_order_id"] = client_order_id
+                res = _po.place_order_mechanics(order_type, symbol, price, qty, **kwargs)
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"submit_order({symbol}): {e}") from e
         oid = (res or {}).get("orderId")

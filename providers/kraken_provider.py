@@ -239,13 +239,17 @@ class KrakenProvider(MarketDataProvider):
     # sa stie de esecuri). Guvernat de dry_run-ul propriu al strategiei, nu de _live().
     def submit_order(self, symbol: str, side: str, qty: float,
                      price: Optional[float] = None, *, market: bool = False,
-                     kind: Optional[str] = None) -> str:
+                     kind: Optional[str] = None,
+                     client_order_id: Optional[str] = None) -> str:
         s = "buy" if (side or "").lower().startswith("b") else "sell"
         ordertype = "market" if (market or price is None) else "limit"
         try:
+            order_kwargs = {"ordertype": ordertype, "validate": False}
+            if client_order_id is not None:
+                order_kwargs["cl_ord_id"] = client_order_id
             res = self._client().add_order(
                 symbol, s, qty, None if ordertype == "market" else price,
-                ordertype=ordertype, validate=False) or {}
+                **order_kwargs) or {}
         except Exception as e:  # noqa: BLE001 — normalizeaza eroarea de venue
             raise ProviderError(f"submit_order {symbol} {s}: {e}") from e
         txids = res.get("txid") or []

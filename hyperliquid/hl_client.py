@@ -247,14 +247,22 @@ class HLClient:
             return []
 
     def spot_order(self, pair: str, is_buy: bool, sz: float, px: float,
-                   sz_decimals: int = 2) -> tuple[bool, int | None, str]:
+                   sz_decimals: int = 2,
+                   cloid: str | None = None) -> tuple[bool, int | None, str]:
         """Ordin LIMIT pe spot. pair = numele @index (ex @107)."""
         if not self.exchange:
             raise HLError("Fara agent wallet (HL_SECRET_KEY)")
         sz = round(sz, sz_decimals)
         px = _round_px(px, sz_decimals, is_perp=False)
         try:
-            res = self.exchange.order(pair, is_buy, sz, px, {"limit": {"tif": "Gtc"}})
+            kwargs = {}
+            if cloid is not None:
+                # SDK-ul oficial cere obiect Cloid, nu sirul hex brut.
+                from hyperliquid.utils.types import Cloid
+                kwargs["cloid"] = Cloid.from_str(cloid)
+            res = self.exchange.order(
+                pair, is_buy, sz, px, {"limit": {"tif": "Gtc"}}, **kwargs,
+            )
         except Exception as e:  # noqa: BLE001
             return False, None, str(e)
         if res.get("status") != "ok":

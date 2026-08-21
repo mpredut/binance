@@ -4,7 +4,11 @@ import os
 import tempfile
 import unittest
 
-from providers.execution_audit import AuditedStrategyExecutor, ExecutionAudit
+from providers.execution_audit import (
+    AuditedStrategyExecutor,
+    ExecutionAudit,
+    intent_client_order_id,
+)
 from providers.strategy_executor import OrderStatus, PairPrecision, ProviderError, StrategyExecutor
 
 
@@ -19,8 +23,11 @@ class _Executor:
     def get_current_price(self, symbol):
         return 100.0
 
-    def submit_order(self, symbol, side, qty, price=None, *, market=False, kind=None):
-        self.calls.append(("submit", symbol, side, qty, price, market, kind))
+    def submit_order(self, symbol, side, qty, price=None, *, market=False, kind=None,
+                     client_order_id=None):
+        self.calls.append((
+            "submit", symbol, side, qty, price, market, kind, client_order_id,
+        ))
         if self.submit_error:
             raise self.submit_error
         return "OID-7"
@@ -47,7 +54,7 @@ class ExecutionAuditTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.executor = _Executor()
         self.audit = ExecutionAudit(self.tmp.name, clock=lambda: 1_700_000_000.0)
-        self.wrapped = AuditedStrategyExecutor(self.executor, self.audit)
+        self.wrapped = AuditedStrategyExecutor(self.executor, self.audit, venue="Kraken")
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -77,6 +84,9 @@ class ExecutionAuditTest(unittest.TestCase):
         )
         self.assertEqual({row["intent_id"] for row in rows}, {"intent-fixed"})
         self.assertEqual(rows[2]["filled_qty"], 0.25)
+        client_id = intent_client_order_id("Kraken", "intent-fixed")
+        self.assertEqual(rows[0]["client_order_id"], client_id)
+        self.assertEqual(self.executor.calls[0][-1], client_id)
 
     def test_submit_error_is_audited_and_original_exception_is_preserved(self):
         self.executor.submit_error = ProviderError("venue down")
@@ -92,7 +102,27 @@ class ExecutionAuditTest(unittest.TestCase):
         self.assertTrue(rows[-1]["market"])
         self.assertEqual(rows[-1]["reference_price"], 99.5)
         submit = [call for call in self.executor.calls if call[0] == "submit"]
-        self.assertEqual(submit, [("submit", "ABC", "sell", 1.0, None, True, "STOP")])
+        self.assertEqual(len(submit), 1)
+        self.assertEqual(submit[0][1:7], ("ABC", "sell", 1.0, None, True, "STOP"))
+        self.assertEqual(
+            submit[0][-1], intent_client_order_id("Kraken", "intent-error"),
+        )
+
+    def test_client_order_id_formats_preserve_full_intent_uuid(self):
+        intent = "kraken-HYPEUSD-entry-0123456789abcdef0123456789abcdef"
+        self.assertEqual(
+            intent_client_order_id("Kraken", intent),
+            "0123456789abcdef0123456789abcdef",
+        )
+        self.assertEqual(
+            intent_client_order_id("Binance", intent),
+            "SD_0123456789abcdef0123456789abcdef",
+        )
+        self.assertEqual(
+            intent_client_order_id("Hyperliquid", intent),
+            "0x0123456789abcdef0123456789abcdef",
+        )
+        self.assertIsNone(intent_client_order_id("T212", intent))
 
 
 if __name__ == "__main__":

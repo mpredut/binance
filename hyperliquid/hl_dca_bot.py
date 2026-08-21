@@ -48,7 +48,11 @@ def main() -> int:
     if not any(a in sys.argv for a in ()):  # (rezervat pt viitoare comenzi one-shot)
         single_instance(f"hl_dca_bot_{token}")   # o instanta per token (nu se bate cu dn/hl_bot)
 
-    provider = HyperliquidProvider(token=token)
+    from providers.execution_audit import AuditedStrategyExecutor
+
+    provider = AuditedStrategyExecutor(
+        HyperliquidProvider(token=token), venue="Hyperliquid",
+    )
     log("=== HL base v2 bot (spot_dca) ===")
     log(f"    token      : {token} (HYPE spot pe Hyperliquid)")
     log(f"    executie   : {'PAPER (fara bani)' if strat_dry else '⚠ REAL — BANI ADEVARATI'}")

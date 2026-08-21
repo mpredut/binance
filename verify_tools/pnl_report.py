@@ -79,7 +79,8 @@ print("Fara comisioane Binance in realized (fill-urile API nu le expun aici); ~0
 # care fac schimb de inventar (tradeall cumpara TAO, rtrade vinde) net_qty arata cine
 # acumuleaza vs distribuie. Fereastra = ultimele ~1000 ordine (get_all_orders).
 def _bot(cid):
-    for p, n in (("RT_", "rtrade"), ("TA_", "tradeall"), ("MT", "monitortrades"),
+    for p, n in (("RT_", "rtrade"), ("TA_", "tradeall"), ("SD_", "spot_dca"),
+                 ("MT", "monitortrades"),
                  ("MO", "monitororder"), ("AG", "assetguardian"), ("SRV", "server")):
         if cid.startswith(p):
             return n

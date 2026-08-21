@@ -62,8 +62,8 @@ class FakeSigner:
     def sz_decimals(self, coin):
         return 2
 
-    def spot_order(self, pair, is_buy, sz, px, sz_decimals=2):
-        self.calls.append(("spot_order", pair, is_buy, sz, px))
+    def spot_order(self, pair, is_buy, sz, px, sz_decimals=2, cloid=None):
+        self.calls.append(("spot_order", pair, is_buy, sz, px, cloid))
         return self._o
 
     def cancel(self, pair, oid):
@@ -112,6 +112,14 @@ class HLExecutorContractTest(unittest.TestCase):
         oid = self.p.submit_order("HYPE", "buy", 1.0, price=60.0)
         self.assertEqual(oid, "12345")
         self.assertEqual(self.signer.calls[-1][:3], ("spot_order", "@107", True))
+
+    def test_submit_order_propaga_cloid(self):
+        os.environ["HL_LIVE_ORDERS"] = "true"
+        cloid = "0x0123456789abcdef0123456789abcdef"
+        self.p.submit_order(
+            "HYPE", "buy", 1.0, price=60.0, client_order_id=cloid,
+        )
+        self.assertEqual(self.signer.calls[-1][-1], cloid)
 
     def test_submit_order_market_incruciseaza_pretul(self):
         os.environ["HL_LIVE_ORDERS"] = "true"

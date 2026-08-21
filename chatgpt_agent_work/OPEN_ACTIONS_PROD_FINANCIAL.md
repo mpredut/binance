@@ -5,7 +5,7 @@ Data consolidării: 2026-08-21
 ## Starea de la care continuăm
 
 - Codul provider-agnostic și fundația de validare sunt integrate în `main`.
-- Suita locală pe codul final: `773 passed`, `235 subtests passed`.
+- Suita locală pe codul final: `806 passed`, `235 subtests passed`.
 - Benchmark HYPE reproductibil: `VERIFY OK`.
 - Baseline HYPE: central `+0,590%`, stress `+0,203%`.
 - Niciun candidat existent nu este aprobat pentru bani reali.
@@ -99,15 +99,31 @@ Ipotezele vechi au fost revalidate pe aproximativ 894.000 observații BTC:
 Propunerile nu mai sunt confirmate în ambele ferestre; configurația rămâne
 `5,5` și `10,5`.
 
+## C. Backlog tehnic închis la 2026-08-21
+
+- DNS: `Cache=yes` și `StaleRetentionSec=4h` sunt active. Limitarea resolverului
+  PIA este acceptată; nu adăugăm reconnect automat sau failure-drill pe producție.
+- Corelarea execuției: UUID-ul de 128 biți din `intent_id` ajunge în `cl_ord_id`
+  Kraken, `newClientOrderId` Binance și `cloid` Hyperliquid. T212 rămâne corelat
+  local, deoarece API-ul public nu oferă client order ID.
+- Separarea entrypointurilor `tradeall_observe` și consolidarea generică a
+  helperilor sunt închise fără implementare: nu reduc riscul sau codul măsurabil.
+
 ## Ce nu mai merită prioritate acum
 
+- plafon global cross-strategy: conturile/procesele curente nu împart capitalul;
+- Faza 6 / rutarea STOP și trailing prin `MarketApi.place`: ar putea bloca o
+  ieșire protectoare și ar schimba comportamentul financiar;
+- coordonatorul `rtrade` one-sided: este un motor nou, nu un refactor rapid;
 - overlay-ul HYPE și candidatul `A_trail`: respinși OOS;
 - `trail-decay v3`, inclusiv portarea nouă de pe `feature/calmar-gate`: aproximativ
-  `+0,05pp` return, numai `+8%` Calmar și zero reducere DD; pică ambele gate-uri,
-  deci rămâne pe branch și nu intră în `main`;
-- tuning suplimentar pentru `dca_vol_m1` înaintea gate-ului defensiv;
-- rutarea STOP/trailing prin `MarketApi.place` (Faza 6);
-- refactorizări mari de cache sau entrypoint fără un defect/operație concretă.
+  `+0,05pp` return, numai `+8%` Calmar și zero reducere DD; pică ambele gate-uri;
+- tuning suplimentar pentru `dca_vol_m1`, `mt.gain` sau `mt.maxage_days` înaintea
+  apariției unor date/regimuri noi;
+- refactorizări mari de cache, helperi sau entrypoint fără un defect concret.
+
+Allocation/risk ledger-ul rămâne exclus. Nu există un task tehnic mic rămas în
+această coadă; P2 așteaptă minimum 20 de fill-uri pentru calibrare.
 
 ## Definiția următoarei promovări
 
