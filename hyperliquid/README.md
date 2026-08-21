@@ -7,13 +7,14 @@ activ în producție.
 
 ## Starea producției — 21 august 2026
 
-- `hl_dca_bot.py` **nu rulează** și nu este declarat în `procs.conf`;
-- `dn_bot.py` și watcherul lui sunt opriți și comentați în `procs.conf` din
-  20 august 2026; nu se repornesc automat;
-- `monitortrades` pentru HYPE/Hyperliquid este dezactivat prin instrument gate;
-- nu există în prezent un owner activ care să plaseze ordine Hyperliquid;
-- activarea viitoare cere separat: manifest, shadow/paper, ownership verificat și
-  aprobare pentru ordine reale.
+- `hl_dca_bot.py` rulează manual, în afara `procs.conf`, cu `STRAT_EXECUTE` și
+  `HL_LIVE_ORDERS` active; nu este supravegheat și nu repornește automat;
+- la auditul din 21 august 2026 avea zero ordine deschise și era blocat de ordinul
+  fictiv `PAPER-1` rămas dintr-o sesiune paper;
+- `dn_bot.py` și watcherul sunt opriți și comentați în manifest;
+- launcherul versionat separă acum starea HL de Kraken și PAPER de LIVE, dar
+  procesul curent folosește codul vechi până la un restart controlat;
+- `monitortrades` pentru HYPE/Hyperliquid rămâne dezactivat prin instrument gate.
 
 Verificarea autoritativă este întotdeauna combinația dintre:
 
@@ -27,7 +28,7 @@ python3 verify_tools/ownership_inventory.py --running
 
 | Fișier | Piață | Motor | Stare |
 |---|---|---|---|
-| `hl_dca_bot.py` | HYPE/USDC spot | `strategies.spot_dca` (base v2) | disponibil, neînregistrat/nepornit |
+| `hl_dca_bot.py` | HYPE/USDC spot | `strategies.spot_dca` (base v2) | rulează manual, REAL, blocat până la reconcilierea stării |
 | `hl_bot.py` | PERP long/short | `hyperliquid/strategy.py` | legacy, neînregistrat/nepornit |
 | `dn_bot.py` | spot long + perp short | `delta_neutral.py` | oprit explicit în manifest |
 | `providers/hyperliquid_provider.py` | spot | contract `StrategyExecutor` | adaptor importat lazy |
@@ -45,9 +46,8 @@ valorile deja definite nu sunt suprascrise. Prin urmare:
 .env local (runtime)  >  config.env versionat  >  valorile implicite din cod
 ```
 
-`config.env` păstrează un profil fallback/scalper (`TP 0,5%`), dar acesta **nu este
-profilul efectiv local**. La verificarea din 21 august 2026, parametrii nesensibili
-efectivi erau:
+`config.env` și override-urile locale descriu acum profilul long-term TP5. La
+verificarea din 21 august 2026, parametrii nesensibili efectivi erau:
 
 ```text
 entry 50 USDC | DCA 30 USDC la -2% | plafon 500 USDC | SL 7%
@@ -96,32 +96,30 @@ Randamentul mediu în stress:
 
 | Variantă | 15 zile | 30 zile | 60 zile |
 |---|---:|---:|---:|
-| profil efectiv TP5 adaptiv | -0,114% | -0,192% | -0,542% |
-| fallback scalper TP0,5 | -1,266% | -2,422% | -4,390% |
-| TP2 clasic | -1,007% | -1,760% | -2,736% |
-| **TP3 + trend-hold + trail fix 3%** | **+0,098%** | **+0,094%** | **+0,289%** |
-| TP5 + trail fix 3% | -0,002% | -0,022% | -0,661% |
-| DCA fără TP | +0,413% | +0,967% | +2,970% |
+| profil efectiv TP5 adaptiv | -0,114% | -0,114% | +0,393% |
+| **TP3 + trend-hold + trail fix 3%** | **+0,098%** | **+0,464%** | **+1,069%** |
+| TP5 + trail fix 3% | -0,002% | +0,018% | +0,526% |
 
 Candidatul preferat pentru **shadow**, nu pentru live, este `long_tp3_trail3`:
 aceleași sume și SL, TP armat la 3%, trend-hold activ și trailing fix 3%. A avut
-DD stress mai mic decât profilul efectiv la toate orizonturile. `DCA fără TP` a
-avut media cea mai mare, dar ~90% expunere, drawdown mai mare și dependență mai
-mare de regimul bull.
+DD stress mai mic decât profilul efectiv la toate
+orizonturile (`5,74/8,78/8,82%` față de `6,41/9,49/10,09%`). Profilul agresiv
+TP5/trail3/SL10 a avut media cea mai mare, dar DD stress a urcat la `16,7%` pe
+60 de zile, deci nu este candidatul robust.
 
 Niciun candidat nu a trecut gate-ul formal de promovare. `long_tp3_trail3` a
 îmbunătățit media/tail/DD, dar nu a câștigat suficient de consistent fold-cu-fold
 în schema de 15 zile. Concluzia este **shadow/paper only** până la dovezi forward,
 nu modificare live.
 
-Artefactele temporare ale rulării sunt:
+Rularea de confirmare a fost executată exclusiv pe hostul DEV `backtest`.
+Artefactul temporar curent este:
 
 ```text
-/tmp/hl_strategy_analysis_20260821.json
-/tmp/hl_strategy_horizons_20260821.json
+/tmp/hl_dev_sweep_20260821.json
 ```
 
-Acestea nu sunt versionate; cifrele și ipotezele durabile sunt păstrate aici și în
+Artefactul nu este versionat; cifrele și ipotezele durabile sunt păstrate aici și în
 `chatgpt_agent_work/OPEN_ACTIONS_PROD_FINANCIAL.md`.
 
 ## Co-mingling și ownership

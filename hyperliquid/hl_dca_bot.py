@@ -29,6 +29,11 @@ from strategies.spot_dca import Strategy, StratParams
 from providers.hyperliquid_provider import HyperliquidProvider
 
 
+def state_dir_for(dry_run: bool) -> str:
+    """Izolează starea HL de Kraken și separă PAPER de LIVE."""
+    return os.path.join(_HERE, ".paper_state") if dry_run else _HERE
+
+
 def main() -> int:
     # Configurația trebuie încărcată înainte de valorile implicite CLI și înainte
     # de calculul modului PAPER/REAL. `.env` câștigă deoarece load_dotenv nu
@@ -57,7 +62,12 @@ def main() -> int:
     log(f"    token      : {token} (HYPE spot pe Hyperliquid)")
     log(f"    executie   : {'PAPER (fara bani)' if strat_dry else '⚠ REAL — BANI ADEVARATI'}")
     log("    motor      : strategies.spot_dca (IDENTIC cu kraken_bot)")
-    Strategy(provider, token, StratParams.from_env(), dry_run=strat_dry).run()
+    Strategy(
+        provider, token, StratParams.from_env(), dry_run=strat_dry,
+        state_dir=state_dir_for(strat_dry),
+        notification_source="hyperliquid", venue_label="Hyperliquid",
+        fee_note="fee HL spot base ~0.04% maker / ~0.07% taker per fill",
+    ).run()
     return 0
 
 

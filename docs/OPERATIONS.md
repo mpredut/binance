@@ -11,8 +11,9 @@
   `kraken_xstock_watch`, `t212_bot`, `kraken/trailing_stop` și
   `binance_api/trailing_stop`. Sunt porniți din rolurile `bot` ale `procs.conf` și
   supravegheați de `healthcheck.sh --supervise` (cron */5).
-- **Hyperliquid**: `dn_bot`/watch sunt oprite și comentate în manifest din
-  20 august 2026; `hl_dca_bot` există în cod, dar nu este în manifest și nu rulează.
+- **Hyperliquid**: `dn_bot`/watch sunt oprite și comentate în manifest. `hl_dca_bot`
+  rulează manual, în afara `procs.conf`; healthcheck nu îl deține și rebootul nu îl
+  repornește.
 - **Facadă market/cont**: `providers/market_api.py` rutează pe symbol către
   `BinanceProvider` / `HyperliquidProvider` / `kraken` / `t212`. `monitortrades` o folosește.
 
@@ -64,8 +65,9 @@ manifest trebuie să aibă din nou heartbeat pe `hb_log`/`hb_stale_s`; acum sunt
 ### 3. ⚠ Co-mingling SPOT pe Hyperliquid
 Soldul HYPE spot este unic pe wallet. Dacă DN este repornit, piciorul lui LONG spot,
 `hl_dca_bot` și orice owner `monitortrades` ar vedea același sold; un SELL de „tot
-available” poate desface hedge-ul sau poziția altui motor. În prezent nu rulează niciun
-proces HL, dar înainte de activare trebuie demonstrat ownership exclusiv sau folosit un
+available” poate desface hedge-ul sau poziția altui motor. Acum rulează manual
+`hl_dca_bot`; înaintea oricărui al doilea owner trebuie demonstrat ownership exclusiv
+sau folosit un
 subcont/wallet separat. `STRAT_EXECUTE` și `HL_LIVE_ORDERS` sunt porți necesare, nu dovadă
 de ownership și nu aprobare de deploy.
 
@@ -96,7 +98,7 @@ oprește serverul întâi. (Garda din `--supervise` refuză pornirea pe `/home/m
 ```bash
 ./healthcheck.sh --check                 # stare toate procesele (read-only)
 ./healthcheck.sh                         # raport complet (procese + conturi HL/Kraken/T212)
-ps -ef | grep -E '[h]l_dca_bot|[d]n_bot' # confirmă că HL este inactiv
+ps -ef | grep -E '[h]l_dca_bot|[d]n_bot' # procese HL, inclusiv cele din afara manifestului
 python3 verify_tools/ownership_inventory.py --running
 lsof /tmp/binance_supervise.lock         # cine ține lock-ul supervize (scurgere?)
 tail -n 5 logs/healthcheck.log           # ce a făcut supervizorul (cron)

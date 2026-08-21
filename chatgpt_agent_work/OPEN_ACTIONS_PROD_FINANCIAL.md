@@ -101,24 +101,23 @@ Propunerile nu mai sunt confirmate în ambele ferestre; configurația rămâne
 
 ### F4 — Hyperliquid long-term — ANALIZAT, SHADOW ONLY
 
-- Niciun proces Hyperliquid nu rulează: DN este comentat în `procs.conf`, iar
-  `hl_dca_bot.py` nu este în manifest. `HL_LIVE_ORDERS=true` în environment nu
-  pornește singur un owner și nu constituie aprobare live.
-- `config.env` versionat păstrează fallback-ul TP `0,5%`, dar `.env` local are
-  precedență; profilul efectiv verificat era TP `5%`, trend-hold și trailing
+- `hl_dca_bot.py` rulează manual în mod REAL, dar nu este în manifest. La audit avea
+  zero ordine deschise și era blocat de ordinul fictiv `PAPER-1`, citit greșit din
+  starea legacy Kraken. Fixul versionat separă starea HL LIVE/PAPER; cere restart controlat.
+- `config.env` versionat și override-urile locale descriu acum TP `5%`; `.env`
+  păstrează precedență. Profilul efectiv verificat era TP `5%`, trend-hold și trailing
   adaptiv `1,5–8%`, cu sizing `50/30`, DCA `-2%`, SL `7%`, plafon `500`.
 - Fee-urile folosite pentru spot au fost corectate conceptual la grila oficială:
   central `0,04% LIMIT / 0,07% MARKET`; stress `0,07% / 0,10%` plus spread,
   slippage și partial fills adverse. Valoarea veche `0,035%` nu descrie tier-ul
   spot de bază.
-- Pe datasetul înghețat HYPE/USDC (3.772 bare de 4h, ~628 zile), fallback-ul
-  TP `0,5%` a fost negativ în stress la 15/30/60 zile (`-1,266%/-2,422%/-4,390%`).
 - Candidatul preferat pentru shadow este `long_tp3_trail3`: TP armat la `3%`,
   trend-hold activ, trailing fix `3%`, restul sizingului neschimbat. Stress mean:
-  `+0,098%/+0,094%/+0,289%`; DD maxim `5,74%/8,78%/10,40%`.
-- DCA fără TP a avut return mediu mai mare, dar ~90% expunere și drawdown mai mare;
-  nu este ales. `long_tp3_trail3` nu trece gate-ul pairwise de promovare pe
-  ferestrele de 15 zile, deci nu se modifică `.env` și nu se pornește live.
+  `+0,098%/+0,464%/+1,069%`; DD maxim `5,74%/8,78%/8,82%`. Noua rulare a
+  fost executată pe hostul DEV `backtest`, cu ferestre 15/30/60 zile neîntrepătrunse.
+- `long_tp3_trail3` nu trece gate-ul pairwise de promovare pe
+  ferestrele de 15 zile (`12/4/15` în stress), deci nu se modifică `.env`. Profilul
+  agresiv TP5/trail3/SL10 a avut medii mai mari, dar DD stress `16,7%` la 60 zile.
 
 Următorul pas permis este numai un runner/candidat versionat pentru shadow PAPER,
 cu minimum 30 zile și dovezi forward înaintea unei noi decizii.
