@@ -16,6 +16,9 @@ from providers.strategy_executor import (  # noqa: E402
 
 
 class FakeClient:
+    def __init__(self):
+        self.order_calls = []
+
     def get_symbol_info(self, symbol):
         return {"baseAsset": "BTC", "quoteAsset": "USDC", "filters": [
             {"filterType": "PRICE_FILTER", "tickSize": "0.01000000"},
@@ -33,10 +36,12 @@ class FakeClient:
             "commissionAsset": "USDC",
         }]
 
-    def order_market_buy(self, symbol, quantity):
+    def order_market_buy(self, symbol, quantity, **kwargs):
+        self.order_calls.append(("buy", symbol, quantity, kwargs))
         return {"orderId": 555}
 
-    def order_market_sell(self, symbol, quantity):
+    def order_market_sell(self, symbol, quantity, **kwargs):
+        self.order_calls.append(("sell", symbol, quantity, kwargs))
         return {"orderId": 556}
 
 
@@ -86,8 +91,18 @@ class BinanceExecutorContractTest(unittest.TestCase):
         oid = self.p.submit_order("BTCUSDC", "buy", 0.01, price=None, market=True)
         self.assertEqual(oid, "555")
 
+    def test_submit_order_market_propaga_client_order_id(self):
+        client_id = "SD_0123456789abcdef0123456789abcdef"
+        self.p.submit_order(
+            "BTCUSDC", "buy", 0.01, market=True,
+            client_order_id=client_id,
+        )
+        self.assertEqual(
+            self.fake.client.order_calls[-1][-1]["newClientOrderId"], client_id,
+        )
+
     def test_submit_order_fara_orderId_ridica(self):
-        self.fake.client.order_market_buy = lambda symbol, quantity: {}
+        self.fake.client.order_market_buy = lambda symbol, quantity, **kwargs: {}
         with self.assertRaises(ProviderError):
             self.p.submit_order("BTCUSDC", "buy", 0.01, market=True)
 

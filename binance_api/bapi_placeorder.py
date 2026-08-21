@@ -182,7 +182,7 @@ def manage_quantity(order_type, symbol, required_qty=None, price_to_be_traded=No
 
 
            
-def place_BUY_order(symbol, price, qty):
+def place_BUY_order(symbol, price, qty, client_order_id=None):
     try:
         if not cfg.is_trade_enabled() :
             print(f"Trade is desabled!")
@@ -190,7 +190,7 @@ def place_BUY_order(symbol, price, qty):
 
         price = round(min(price, _fresh_price(symbol)), 2)
         qty = round(qty, 4)
-        client_order_id = rc.create_client_order_id()
+        client_order_id = client_order_id or rc.create_client_order_id()
         BUY_order = client.order_limit_buy(
             symbol=symbol,
             quantity=qty,
@@ -208,7 +208,7 @@ def place_BUY_order(symbol, price, qty):
         print(f"Eroare la plasarea ordinului de cumparare: {e}")
         return None
 
-def place_SELL_order(symbol, price, qty):
+def place_SELL_order(symbol, price, qty, client_order_id=None):
     try:
         if not cfg.is_trade_enabled() :
             print(f"Trade is disabled!")
@@ -216,7 +216,7 @@ def place_SELL_order(symbol, price, qty):
 
         price = round(max(price, _fresh_price(symbol)), 2)
         qty = round(qty, 4)
-        client_order_id = rc.create_client_order_id()
+        client_order_id = client_order_id or rc.create_client_order_id()
         SELL_order = client.order_limit_sell(
             symbol=symbol,
             quantity=qty,
@@ -264,14 +264,14 @@ def place_SELL_BUY_order(order_type, symbol, price, qty) :
         print(f"Eroare la plasarea ordinului de {order_type}, pret {price:.2f}")
     return order
 
-def place_BUY_order_at_market(symbol, qty):
+def place_BUY_order_at_market(symbol, qty, client_order_id=None):
     try:
         if not cfg.is_trade_enabled():
             print(f"Trade este dezactivat!")
             return None
 
         qty = round(qty, 4)  # Rotunjim cantitatea la 4 zecimale
-        client_order_id = rc.create_client_order_id()
+        client_order_id = client_order_id or rc.create_client_order_id()
         BUY_order = client.order_market_buy(
             symbol=symbol,
             quantity=qty,
@@ -289,14 +289,14 @@ def place_BUY_order_at_market(symbol, qty):
         return None
 
 
-def place_SELL_order_at_market(symbol, qty):
+def place_SELL_order_at_market(symbol, qty, client_order_id=None):
     try:
         if not cfg.is_trade_enabled():
             print(f"Trade este dezactivat!")
             return None
 
         qty = round(qty, 4)  # Rotunjim cantitatea la 4 zecimale
-        client_order_id = rc.create_client_order_id()
+        client_order_id = client_order_id or rc.create_client_order_id()
         SELL_order = client.order_market_sell(
             symbol=symbol,
             quantity=qty,
@@ -692,7 +692,8 @@ def adjust_price_and_cancel_opposite(order_type, symbol, price, cancel_opposite=
     return price
 
 
-def place_order_mechanics(order_type, symbol, price, qty, force=False):
+def place_order_mechanics(order_type, symbol, price, qty, force=False,
+                          client_order_id=None):
     """MECANICA de trimitere Binance (ex __place_order, DOAR partea de mecanica):
     clamp de fee/balanta reala, min-notional (100 USDC), rotunjire, dispatch
     limit/market. `qty` vine DEJA plafonat de weight (cap_quantity, in Instrument.place).
@@ -733,10 +734,18 @@ def place_order_mechanics(order_type, symbol, price, qty, force=False):
               f"{'market price' if force else f'price {price}'}")
         if order_type == 'SELL':
             price = round(max(price, current_price), 0)
-            return place_SELL_order_at_market(symbol, qty) if force else place_SELL_order(symbol, price, qty)
+            if force:
+                return (place_SELL_order_at_market(symbol, qty, client_order_id)
+                        if client_order_id else place_SELL_order_at_market(symbol, qty))
+            return (place_SELL_order(symbol, price, qty, client_order_id)
+                    if client_order_id else place_SELL_order(symbol, price, qty))
         elif order_type == 'BUY':
             price = round(min(price, current_price), 0)
-            return place_BUY_order_at_market(symbol, qty) if force else place_BUY_order(symbol, price, qty)
+            if force:
+                return (place_BUY_order_at_market(symbol, qty, client_order_id)
+                        if client_order_id else place_BUY_order_at_market(symbol, qty))
+            return (place_BUY_order(symbol, price, qty, client_order_id)
+                    if client_order_id else place_BUY_order(symbol, price, qty))
         print(f"Invalid order type: {order_type}")
         return None
     except BinanceAPIException as e:

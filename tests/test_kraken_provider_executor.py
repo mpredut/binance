@@ -17,8 +17,11 @@ class FakeClient:
     def __init__(self):
         self.calls = []
 
-    def add_order(self, pair, side, volume, price=None, ordertype="limit", validate=False):
-        self.calls.append(("add_order", pair, side, volume, price, ordertype, validate))
+    def add_order(self, pair, side, volume, price=None, ordertype="limit", validate=False,
+                  cl_ord_id=None):
+        self.calls.append((
+            "add_order", pair, side, volume, price, ordertype, validate, cl_ord_id,
+        ))
         return {"txid": ["OABC-123"], "descr": {}}
 
     def query_orders(self, txids):
@@ -54,7 +57,14 @@ class KrakenExecutorContractTest(unittest.TestCase):
         self.assertEqual(oid, "OABC-123")
         # a delegat corect: limit, pret pasat, validate=False
         self.assertEqual(self.fake.calls[-1],
-                         ("add_order", "HYPEUSD", "buy", 2.5, 60.0, "limit", False))
+                         ("add_order", "HYPEUSD", "buy", 2.5, 60.0, "limit", False, None))
+
+    def test_submit_order_propaga_client_order_id(self):
+        client_id = "0123456789abcdef0123456789abcdef"
+        self.p.submit_order(
+            "HYPEUSD", "buy", 2.5, price=60.0, client_order_id=client_id,
+        )
+        self.assertEqual(self.fake.calls[-1][-1], client_id)
 
     def test_submit_order_market_fara_pret(self):
         self.p.submit_order("HYPEUSD", "sell", 1.0, price=59.0, market=True)

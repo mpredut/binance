@@ -738,17 +738,24 @@ următor. TP/scara sunt LIMIT; STOP și trailing sunt MARKET și nu pot rămâne
 
 ```text
 Strategy / spot_dca
-  └── intent_id ─► AuditedStrategyExecutor ─► venue executor
+  └── intent_id ─► AuditedStrategyExecutor ─► encoder client_order_id
                        ├── submit_requested/accepted/rejected
                        ├── order_status (doar la schimbare)
                        └── cancel_requested/accepted/rejected
-                                      │
-                                      ▼
+                                      ├──► Kraken: cl_ord_id=<uuid128>
+                                      ├──► Binance: newClientOrderId=SD_<uuid128>
+                                      ├──► Hyperliquid: cloid=0x<uuid128>
+                                      └──► T212: corelare locala dupa venue order ID
+                                                   │
+                                                   ▼
                          execution_audit_YYYY-MM-DD.jsonl
 ```
 
 Auditul este best-effort și nu conține politici de blocare. Rutarea directă a
 STOP/trailing prin guardrail-urile `Instrument.place` rămâne intenționat neimplementată.
+Encoderul păstrează integral UUID-ul de 128 biți; pentru o intenție legacy fără
+UUID folosește un hash determinist. Astfel auditul poate fi corelat cu ordinul de
+venue și după restart, fără ledger sau stare globală nouă.
 
 ### Motorul canonic spot DCA/trailing
 

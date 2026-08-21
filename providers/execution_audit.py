@@ -6,6 +6,7 @@ ordin acceptat intr-un esec al strategiei.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -24,6 +25,7 @@ except ImportError:  # pragma: no cover - Windows/import tooling
 
 
 _WRITE_LOCK = threading.Lock()
+_UUID_HEX_SUFFIX = re.compile(r"([0-9a-fA-F]{32})$")
 
 
 def _slug(value: object) -> str:
@@ -35,6 +37,27 @@ def new_intent_id(venue: str, symbol: str, kind: Optional[str] = None) -> str:
     """ID unic creat inainte de submit si pastrat in starea strategiei."""
     prefix = "-".join((_slug(venue).lower(), _slug(symbol), _slug(kind or "order").lower()))
     return f"{prefix}-{uuid.uuid4().hex}"
+
+
+def intent_client_order_id(venue: str, intent_id: str) -> Optional[str]:
+    """Encodeaza intentia in formatul acceptat de venue, fara stare suplimentara.
+
+    UUID-ul de 128 biti ramane complet. Pentru intentiile legacy/non-standard se
+    foloseste un hash determinist, astfel incat aceeasi intentie produce acelasi
+    identificator si dupa restart.
+    """
+    raw = str(intent_id)
+    match = _UUID_HEX_SUFFIX.search(raw)
+    token = (match.group(1).lower() if match else
+             hashlib.blake2s(raw.encode("utf-8"), digest_size=16).hexdigest())
+    normalized_venue = _slug(venue).lower()
+    if normalized_venue == "kraken":
+        return token                         # cl_ord_id: UUID fara cratime
+    if normalized_venue == "binance":
+        return f"SD_{token}"                 # newClientOrderId: 35 <= 36 caractere
+    if normalized_venue == "hyperliquid":
+        return f"0x{token}"                  # cloid: uint128 hex
+    return None                              # T212/venue necunoscut: corelare locala
 
 
 class ExecutionAudit:
@@ -109,18 +132,22 @@ class AuditedStrategyExecutor:
     def submit_order_with_intent(self, intent_id: str, symbol: str, side: str, qty: float,
                                  price: Optional[float] = None, *, market: bool = False,
                                  kind: Optional[str] = None,
-                                 reference_price: Optional[float] = None) -> str:
+                                 reference_price: Optional[float] = None,
+                                 client_order_id: Optional[str] = None) -> str:
+        client_order_id = client_order_id or intent_client_order_id(self.name, intent_id)
         fields = {
             "side": str(side).lower(), "qty": qty, "price": price,
             "market": bool(market), "kind": kind,
             "reference_price": reference_price,
+            "client_order_id": client_order_id,
         }
         self.audit.record("submit_requested", intent_id=intent_id, venue=self.name,
                           symbol=symbol, **fields)
         try:
-            order_id = self._executor.submit_order(
-                symbol, side, qty, price, market=market, kind=kind,
-            )
+            submit_kwargs = {"market": market, "kind": kind}
+            if client_order_id is not None:
+                submit_kwargs["client_order_id"] = client_order_id
+            order_id = self._executor.submit_order(symbol, side, qty, price, **submit_kwargs)
         except Exception as exc:
             self.audit.record(
                 "submit_rejected", intent_id=intent_id, venue=self.name, symbol=symbol,
@@ -134,10 +161,11 @@ class AuditedStrategyExecutor:
 
     def submit_order(self, symbol: str, side: str, qty: float,
                      price: Optional[float] = None, *, market: bool = False,
-                     kind: Optional[str] = None) -> str:
+                     kind: Optional[str] = None,
+                     client_order_id: Optional[str] = None) -> str:
         return self.submit_order_with_intent(
             new_intent_id(self.name, symbol, kind), symbol, side, qty, price,
-            market=market, kind=kind,
+            market=market, kind=kind, client_order_id=client_order_id,
         )
 
     def order_status_with_intent(self, intent_id: str, symbol: str,

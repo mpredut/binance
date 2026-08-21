@@ -214,9 +214,12 @@ class T212Provider(MarketDataProvider):
     # ── CONTRACT StrategyExecutor ──────────────────────────────────────────────
     def submit_order(self, symbol: str, side: str, qty: float,
                      price: Optional[float] = None, *, market: bool = False,
-                     kind: Optional[str] = None) -> str:
+                     kind: Optional[str] = None,
+                     client_order_id: Optional[str] = None) -> str:
         """Plasare stricta pentru motorul generic; nu ocoleste poarta live T212."""
-        del kind  # tag de strategie, neacceptat de API-ul public T212 v0
+        # API-ul public T212 v0 nu accepta nici tag de strategie, nici client ID;
+        # corelarea ramane in ExecutionAudit dupa ID-ul returnat de venue.
+        del kind, client_order_id
         if not self._orders_live():
             raise ProviderError("T212_LIVE_ORDERS nu este true; ordinul real este blocat")
         try:

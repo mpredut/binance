@@ -65,6 +65,16 @@ class TestPlaceOrderMechanics(unittest.TestCase):
         self.assertEqual(order, {"orderId": 42})
         self.assertTrue(pbuy.called)
 
+    def test_client_order_id_reaches_limit_dispatch(self):
+        client_id = "SD_0123456789abcdef0123456789abcdef"
+        with patch.object(po.api, "get_current_price", return_value=100.0), \
+             patch.object(po.api, "get_asset_info", return_value=10.0), \
+             patch.object(po, "place_BUY_order", return_value={"orderId": 42}) as pbuy:
+            po.place_order_mechanics(
+                "BUY", SYMBOL, 100.0, 5.0, client_order_id=client_id,
+            )
+        pbuy.assert_called_once_with(SYMBOL, 100.0, 5.0, client_id)
+
     def test_sell_market_when_force(self):
         with patch.object(po.api, "get_current_price", return_value=100.0), \
              patch.object(po.api, "get_asset_info", return_value=10.0), \
