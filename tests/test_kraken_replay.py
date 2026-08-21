@@ -208,5 +208,23 @@ class ReplayEngineTest(unittest.TestCase):
             rp.run_replay(_series(), _params(reentry_adaptive=True), fee_pct=0.26)
 
 
+class PercentageSizingReplayTest(unittest.TestCase):
+    def test_equivalent_fixed_and_percentage_models_are_financially_identical(self):
+        fixed = _params()
+        percent = _params(
+            total_budget=1000.0, alloc_pct=50.0,
+            entry_pct=20.0, dca_pct=10.0,
+        )
+        fixed_result = rp.run_replay(
+            _series(), fixed, fee_pct=0.26, bar_minutes=60,
+            include_decision_trace=True,
+        )
+        percent_result = rp.run_replay(
+            _series(), percent, fee_pct=0.26, bar_minutes=60,
+            include_decision_trace=True,
+        )
+        self.assertEqual(percent_result, fixed_result)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

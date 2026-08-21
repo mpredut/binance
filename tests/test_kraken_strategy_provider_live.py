@@ -180,5 +180,35 @@ class ProviderLivePathTest(unittest.TestCase):
         self.s._save.assert_called_once()
 
 
+class PercentageSizingTest(unittest.TestCase):
+    def test_default_off_preserves_legacy_amounts_exactly(self):
+        engine = _strategy(FakeExecutor())
+        self.assertFalse(engine._pct_sizing_on())
+        self.assertEqual(engine._effective_entry_amount(), 650.0)
+        self.assertEqual(engine._base_dca_amount(), 325.0)
+        self.assertEqual(engine._effective_max_budget(), 3900.0)
+
+    def test_equivalent_percentages_preserve_hype_proportions(self):
+        engine = _strategy(
+            FakeExecutor(), total_budget=10_000.0, alloc_pct=39.0,
+            entry_pct=100.0 / 6.0, dca_pct=100.0 / 12.0,
+        )
+        self.assertTrue(engine._pct_sizing_on())
+        self.assertAlmostEqual(engine._effective_max_budget(), 3900.0)
+        self.assertAlmostEqual(engine._effective_entry_amount(), 650.0)
+        self.assertAlmostEqual(engine._base_dca_amount(), 325.0)
+
+    def test_partial_or_non_finite_percentage_config_fails_closed(self):
+        invalid = (
+            {"entry_pct": 10.0},
+            {"total_budget": 10_000.0, "alloc_pct": 39.0, "entry_pct": 0.0, "dca_pct": 8.0},
+            {"total_budget": 10_000.0, "alloc_pct": 101.0, "entry_pct": 10.0, "dca_pct": 8.0},
+            {"total_budget": float("nan"), "alloc_pct": 39.0, "entry_pct": 10.0, "dca_pct": 8.0},
+        )
+        for overrides in invalid:
+            with self.subTest(overrides=overrides), self.assertRaises(ValueError):
+                _strategy(FakeExecutor(), **overrides)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

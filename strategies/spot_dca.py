@@ -118,6 +118,33 @@ class StratParams:
     entry_pct: float = 0.0      # entry = felia monedei (total × alloc%) × acest %
     dca_pct: float = 0.0        # DCA   = felia monedei × acest %
 
+    def __post_init__(self):
+        values = (self.total_budget, self.alloc_pct, self.entry_pct, self.dca_pct)
+        if not any(value != 0 for value in values):
+            return
+        if not all(math.isfinite(float(value)) for value in values):
+            raise ValueError("percentage sizing values must be finite")
+        if self.total_budget <= 0:
+            raise ValueError("STRAT_TOTAL_BUDGET must be > 0 when percentage sizing is configured")
+        for name, value in (("STRAT_ALLOC_PCT", self.alloc_pct), ("STRAT_ENTRY_PCT", self.entry_pct), ("STRAT_DCA_PCT", self.dca_pct)):
+            if not 0 < value <= 100:
+                raise ValueError(f"{name} must be in (0, 100] when percentage sizing is configured")
+
+    def pct_sizing_on(self) -> bool:
+        return self.total_budget > 0
+
+    def allocated_budget(self) -> float:
+        return self.total_budget * self.alloc_pct / 100.0 if self.pct_sizing_on() else self.max_budget
+
+    def effective_entry_amount(self) -> float:
+        return self.allocated_budget() * self.entry_pct / 100.0 if self.pct_sizing_on() else self.entry_amount
+
+    def effective_dca_amount_base(self) -> float:
+        return self.allocated_budget() * self.dca_pct / 100.0 if self.pct_sizing_on() else self.dca_amount
+
+    def effective_max_budget(self) -> float:
+        return self.allocated_budget()
+
     @classmethod
     def from_env(cls) -> "StratParams":
         mode = os.environ.get("STRATEGY_MODE", "avg_tp").strip().lower()
@@ -672,26 +699,20 @@ class Strategy:
 
     # -- Sizing PROCENTUAL (buget total × alocare; toate 0 -> fix) -------------
     def _pct_sizing_on(self) -> bool:
-        return float(self.p.total_budget) > 0 and float(self.p.alloc_pct) > 0
+        return self.p.pct_sizing_on()
 
     def _alloc_budget(self) -> float:
         """Felia acestei monede din bugetul total: total × alloc%."""
-        return float(self.p.total_budget) * float(self.p.alloc_pct) / 100.0
+        return self.p.allocated_budget()
 
     def _effective_entry_amount(self) -> float:
-        if self._pct_sizing_on() and float(self.p.entry_pct) > 0:
-            return self._alloc_budget() * float(self.p.entry_pct) / 100.0
-        return self.p.entry_amount
+        return self.p.effective_entry_amount()
 
     def _effective_max_budget(self) -> float:
-        if self._pct_sizing_on():
-            return self._alloc_budget()
-        return self.p.max_budget
+        return self.p.effective_max_budget()
 
     def _base_dca_amount(self) -> float:
-        if self._pct_sizing_on() and float(self.p.dca_pct) > 0:
-            return self._alloc_budget() * float(self.p.dca_pct) / 100.0
-        return self.p.dca_amount
+        return self.p.effective_dca_amount_base()
 
     # -- SHADOW vol-adaptiv (doar observatie/log, nu decide nimic) --------------
     def _effective_dca_amount(self) -> float:

@@ -159,7 +159,7 @@ def build_report(
         scenarios[scenario.name] = {
             "assumptions": scenario.as_dict(),
             "aggregate": aggregate_financial_windows(
-                windows, initial_capital=params.max_budget,
+                windows, initial_capital=params.effective_max_budget(),
                 regime_threshold_pct=args.regime_threshold,
             ),
             "windows": windows,
@@ -172,7 +172,7 @@ def build_report(
         "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "code": _git_state(),
         "strategy_params": dataclasses.asdict(params),
-        "initial_capital_usd": params.max_budget,
+        "initial_capital_usd": params.effective_max_budget(),
         "dataset": {
             "file": _display_path(args.dataset),
             "manifest": _display_path(args.manifest),

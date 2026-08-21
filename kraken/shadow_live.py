@@ -244,7 +244,7 @@ def _eval_block(ohlc4, interval, fee_pct, *, include_decision_trace=False):
         return None
     rows = {}
     for name, params in _variants(interval).items():
-        budget = float(params.max_budget)
+        budget = float(params.effective_max_budget())
         m = _run_one(
             ohlc4, params, interval, fee_pct,
             include_decision_trace=include_decision_trace,

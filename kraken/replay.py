@@ -133,7 +133,7 @@ def _run_once(
         turnover_notional = 0.0
         trade_pnls = []
         cycle_net_start = strategy.s["realized_net"]
-        initial_capital = float(params.max_budget)
+        initial_capital = float(params.effective_max_budget())
         equity_curve = [initial_capital]
         exposure = []
 
