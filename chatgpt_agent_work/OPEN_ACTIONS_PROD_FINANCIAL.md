@@ -5,7 +5,7 @@ Data consolidării: 2026-08-21
 ## Starea de la care continuăm
 
 - Codul provider-agnostic și fundația de validare sunt integrate în `main`.
-- Suita locală pe codul final: `812 passed`, `235 subtests passed`.
+- Suita completă pe ultimul `main`: `817 passed`, `235 subtests passed`.
 - Benchmark HYPE reproductibil: `VERIFY OK`.
 - Baseline HYPE: central `+0,590%`, stress `+0,203%`.
 - Niciun candidat existent nu este aprobat pentru bani reali.
@@ -159,10 +159,10 @@ această coadă; P2 așteaptă minimum 20 de fill-uri pentru calibrare.
    `4825557`; părintele vechi de threading nu a fost copiat.
 2. `origin/codex/backlog-7-9` a fost integrat complet prin merge-ul `d7098d9`,
    păstrând refactorul nou `tradeall_observe` și documentația multi-venue.
-3. Integrarea finală plus verificările read-only trec `812 passed`,
-   `235 subtests passed`. Merge-ul în Git este separat de deploy/restart.
+3. Integrarea finală a trecut `812 passed`, iar revalidarea ulterioară a ultimului
+   `main@631f0ca` pe hostul DEV a trecut `817 passed`, `235 subtests passed`.
 
-### P1 — validarea punctului 2 — FINALIZAT LOCAL / LIVE PENDING
+### P1 — validarea punctului 2 — FINALIZAT LOCAL ȘI LIVE 2026-08-21
 
 1. MARKET normal este revalidat la prețul curent după orice trend-wait. HARD-TP
    din `monitortrades` rămâne pe această cale și nu primește bypass implicit.
@@ -171,12 +171,15 @@ această coadă; P2 așteaptă minimum 20 de fill-uri pentru calibrare.
    Kraken/HL/T212 folosesc executorul raw și nu intră în `Instrument.place`.
 3. Raportul read-only `calibrate_execution_audit.py` validează formatul și arată
    prima pereche `client_order_id`/venue `order_id` dintr-un `submit_accepted`.
-   Auditul local actual nu conține încă un astfel de ordin și raportează corect
-   `PENDING`; nu s-a plasat un ordin doar pentru test.
-4. După un deploy aprobat separat, rulează raportul pe primul ordin apărut natural.
-   Reconfirmă și inventarul read-only pentru ownership-ul HYPE înaintea unei alte
-   schimbări de execuție. Suprapunerea spot/trailing/monitortrades este cunoscută
-   și nu cere ledger, dar trebuie să rămână explicită.
+   Auditul live conține trei ordine Hyperliquid apărute natural: ID prezent și
+   valid `3/3`, invalid `0`, lipsă `0`. Nu s-a plasat un ordin numai pentru test.
+4. Flota și procesele Kraken HYPE/TAO/ADA plus trailing-urile Kraken/Binance au
+   fost repornite controlat pe codul nou. Healthcheck-ul final este integral OK,
+   fiecare proces verificat este unic, iar stările financiare au rămas identice;
+   vârful trailing TAO `233,3135` a fost păstrat peste restart.
+5. Inventarul read-only reconfirmă suprapunerea cunoscută pe HYPEUSD între motorul
+   spot, trailing-ul protector și `monitortrades`. Nu cere ledger, dar rămâne
+   explicită înaintea oricărei alte schimbări de execuție.
 
 ### P2 — în așteptare de dovezi financiare
 
