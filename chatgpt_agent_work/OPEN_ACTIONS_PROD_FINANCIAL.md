@@ -125,6 +125,58 @@ Propunerile nu mai sunt confirmate în ambele ferestre; configurația rămâne
 Allocation/risk ledger-ul rămâne exclus. Nu există un task tehnic mic rămas în
 această coadă; P2 așteaptă minimum 20 de fill-uri pentru calibrare.
 
+## D. Handoff pentru sesiunile viitoare — actualizat 2026-08-21
+
+### P0 — integrare Git, fără deploy implicit
+
+1. `origin/main@b266c2f` conține refactorul de threading `rtrade`, refactorul de
+   memorie `tradeall_observe` și documentația multi-venue.
+2. `origin/codex/backlog-7-9@fa643e8` este un singur commit peste acel `main` și
+   trebuie integrat: DNS închis/documentat plus propagarea `intent_id` către
+   identificatorii Kraken/Binance/Hyperliquid.
+3. Fixul `Validate market orders at executable price` este duplicat local în
+   `f8340bd` și `2d1f172`, dar nu este în `origin/main`. Se portează o singură
+   dată, preferabil commitul `f8340bd`; nu se copiază și părintele vechi de
+   threading, deoarece varianta mai bună `e3688f6` este deja în `main`.
+4. Combinația curată `origin/main + f8340bd + fa643e8` a fost construită temporar
+   și a trecut `811 passed`, `235 subtests passed`. Worktree-ul temporar a fost
+   eliminat; nicio ramură nu a fost modificată de această verificare.
+
+### P1 — validare după integrare și înainte de orice restart
+
+1. Revizuiește explicit semantica fixului `f8340bd`: MARKET normal este validat
+   la prețul curent, iar o ieșire protectoare trebuie să folosească explicit
+   `bypass_profit_guard=True`. Testele acoperă ambele cazuri.
+2. Rulează suita completă pe commitul final din `main`, apoi separă deploy-ul de
+   merge. Pentru activarea client order ID, verifică primul ordin real Kraken/HL
+   în audit și în răspunsul venue-ului; nu plasa un ordin doar pentru test.
+3. Reconfirmă inventarul read-only pentru ownership-ul HYPE înaintea unei alte
+   schimbări de execuție. Suprapunerea spot/trailing/monitortrades este cunoscută
+   și nu cere ledger, dar trebuie să rămână explicită.
+
+### P2 — în așteptare de dovezi financiare
+
+1. Calibrarea central/stress se reia la minimum 20 de fill-uri reale; ultima
+   măsurare avea 3. Până atunci nu se modifică ipotezele de fee/slippage.
+2. Shadow 60m/240m se reevaluează numai după divergențe active; ultima măsurare
+   avea 43/12 bare și zero divergențe.
+3. Candidații HYPE și parametrii Binance se rerulează numai pe date/regimuri noi,
+   prin aceleași gate-uri RETURN/DEFENSIVE. Niciun candidat curent nu este eligibil.
+4. Pentru T212 se adaugă FX istoric numai când apare un profil non-USD; profilurile
+   curente nu au nevoie de acest strat.
+
+### P3 — igienă de ramuri după merge
+
+- `origin/codex/tradeall-observe-memory` și `codex/rtrade-refactor-main` sunt deja
+  conținute în `origin/main`; pot fi eliminate după confirmarea merge-ului final.
+- ramurile locale `codex-rtrade-threading` și `main` conțin duplicatul `f8340bd` /
+  `2d1f172`; nu se merge-uiesc integral peste `main`.
+- `codex/rtrade-pair-coordinator@2045672` adaugă aproximativ 1.100 linii și schimbă
+  modelul financiar. Rămâne experiment OFF/abandonat până la o ipoteză și un
+  benchmark dedicate; nu este task de refactorizare.
+- `origin/backtest-proposals` rămâne ramură generată de rezultate, nu sursă de
+  cod pentru merge direct.
+
 ## Definiția următoarei promovări
 
 Un candidat poate ajunge live numai dacă trece gate-ul central și stress potrivit
