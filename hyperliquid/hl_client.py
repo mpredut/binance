@@ -47,11 +47,19 @@ def _force_timeout(api_obj, seconds: float = 30.0) -> None:
     keep-alive moarta (net taiat) ar bloca procesul LA NESFARSIT, fara eroare.
     Fortam timeout implicit pe sesiunea requests a obiectului API."""
     try:
+        # Hyperliquid SDK-ul curent apeleaza explicit
+        # ``session.post(..., timeout=self.timeout)``. Valoarea lui implicita
+        # este None, asa ca simplul ``setdefault`` de mai jos nu avea efect:
+        # cheia exista deja si requests ramanea fara deadline. Setam si
+        # atributul SDK-ului, iar wrapperul trateaza explicit timeout=None.
+        if getattr(api_obj, "timeout", None) is None:
+            api_obj.timeout = seconds
         sess = api_obj.session
         orig = sess.request
 
         def _req(*a, **kw):
-            kw.setdefault("timeout", seconds)
+            if kw.get("timeout") is None:
+                kw["timeout"] = seconds
             return orig(*a, **kw)
 
         sess.request = _req
