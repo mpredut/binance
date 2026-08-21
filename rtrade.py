@@ -15,6 +15,12 @@ import symbols as sym
 from binance_api import bapi as api
 from binance_api import bapi_placeorder as po   # pastrat pt WeightLimitBlock (dead-safe)
 from providers.market_api import api as mkt      # proxy unic guardat (Instrument.place)
+from strategies.rtrade_pair import (
+    OrderSnapshot as PairOrderSnapshot,
+    OrderTicket as PairOrderTicket,
+    PairCoordinator,
+    PairPolicy,
+)
 
 
 # 23 iul: incarca parametrii tunabili din rtrade_config.env (versionat, se
@@ -75,6 +81,89 @@ RTRADE_MAX_FAILURES = int(os.environ.get("RTRADE_MAX_FAILURES", "10"))
 RTRADE_TREND_FILTER_ENABLED = os.environ.get("RTRADE_TREND_FILTER_ENABLED", "true").strip().lower() == "true"
 RTRADE_TREND_FILTER_K = float(os.environ.get("RTRADE_TREND_FILTER_K", "2.0"))
 RTRADE_TREND_WINDOW_SEC = float(os.environ.get("RTRADE_TREND_WINDOW_SEC", "900"))
+
+# Coordonatorul nou este candidat financiar si ramane OFF pana la replay/walk-forward.
+# Cand este activ, un singur owner gestioneaza perechea si expunerea; calea veche cu
+# doi workeri ramane intacta sub kill-switch.
+RTRADE_PAIR_COORDINATOR_ENABLED = os.environ.get(
+    "RTRADE_PAIR_COORDINATOR_ENABLED", "false").strip().lower() == "true"
+RTRADE_PAIR_POLL_SEC = float(os.environ.get("RTRADE_PAIR_POLL_SEC", "1"))
+RTRADE_FAST_FILL_RATIO = float(os.environ.get("RTRADE_FAST_FILL_RATIO", "0.25"))
+RTRADE_MIN_EDGE_PCT = float(os.environ.get("RTRADE_MIN_EDGE_PCT", "0.0115"))
+RTRADE_SHOCK_HARD_STOP_PCT = float(os.environ.get(
+    "RTRADE_SHOCK_HARD_STOP_PCT", "0.04"))
+RTRADE_HARD_STOP_PCT = float(os.environ.get("RTRADE_HARD_STOP_PCT", "0.08"))
+
+
+class _LivePairVenue:
+    """Adaptorul subtire dintre coordonatorul pur si Binance-ul curent."""
+
+    def __init__(self, symbol):
+        self.symbol = symbol
+        self._known_tickets = []
+        provider_name = mkt.provider_name_for(symbol)
+        self.executor = mkt.provider_by_name(provider_name)
+        if self.executor is None:
+            raise RuntimeError(f"provider executor indisponibil pentru {symbol}")
+
+    def current_price(self):
+        return mkt.get_current_price(self.symbol)
+
+    def _ticket(self, order, side, requested_price, requested_qty, pair_id=None):
+        if not order or order.get("orderId") is None:
+            return None
+        actual_price = float(order.get("price") or requested_price)
+        actual_qty = float(order.get("origQty") or order.get("quantity") or requested_qty)
+        return PairOrderTicket(
+            order_id=str(order["orderId"]), side=side.upper(),
+            price=actual_price, qty=actual_qty, pair_id=pair_id)
+
+    def place_limit(self, side, price, qty, pair_id):
+        hours = (RTRADE_BUY_NORMAL_HOURS if side.upper() == "BUY"
+                 else RTRADE_SELL_NORMAL_HOURS)
+        order = mkt.place(
+            self.symbol, side, price, qty,
+            force=False, cancelorders=False, hours=hours, smart=False,
+            cooldown_pair_id=pair_id,
+            # Coordonatorul detine retry/reconcile; outbox-ul global nu trebuie sa
+            # recreeze ulterior un picior dintr-o pereche deja expirata.
+            is_retry=True, motivation="rtrade_pair_quote")
+        ticket = self._ticket(order, side, price, qty, pair_id=pair_id)
+        if ticket is not None:
+            self._known_tickets.append(ticket)
+        return ticket
+
+    def place_market_exit(self, side, qty, reason):
+        # Iesire de risc explicita: contractul raw al executorului nu este blocat de
+        # profit/cooldown-ul unei perechi inca active. Aceasta cale exista numai in
+        # coordonatorul opt-in si numai dupa pragul hard-stop.
+        order_id = self.executor.submit_order(
+            self.symbol, side, qty, price=None, market=True, kind=reason)
+        price = float(self.current_price() or 0.0)
+        ticket = PairOrderTicket(
+            order_id=str(order_id), side=side.upper(), price=price, qty=float(qty))
+        self._known_tickets.append(ticket)
+        return ticket
+
+    def order_status(self, order_id):
+        status = self.executor.order_status(self.symbol, str(order_id))
+        return PairOrderSnapshot(
+            status=status.status, filled_qty=status.filled_qty,
+            cost=status.cost, fee=status.fee)
+
+    def cancel(self, order_id):
+        try:
+            self.executor.cancel_order(self.symbol, str(order_id))
+            for ticket in getattr(self, "_known_tickets", []):
+                if ticket.order_id == str(order_id) and ticket.pair_id:
+                    from lock import trade_cooldown
+                    trade_cooldown.release_pair_leg(
+                        self.symbol, ticket.pair_id, ticket.side)
+                    break
+            return True
+        except Exception as exc:  # noqa: BLE001 — coordonatorul decide fail-closed
+            print(f"[{self.symbol}] pair cancel {order_id} esuat: {exc}")
+            return False
 
 
 def _trend_too_strong(symbol):
@@ -351,7 +440,43 @@ class TradingBot:
         wait((buy_future, sell_future))
         return buy_future.result(), sell_future.result()
 
+    def _run_coordinator_forever(self):
+        venue = _LivePairVenue(self.symbol)
+        policy = PairPolicy(
+            adjustment_fraction=self.DEFAULT_ADJUSTMENT_PERCENT,
+            quote_ttl_sec=WAIT_FOR_ORDER,
+            poll_sec=RTRADE_PAIR_POLL_SEC,
+            fast_fill_ratio=RTRADE_FAST_FILL_RATIO,
+            min_edge_fraction=RTRADE_MIN_EDGE_PCT,
+            shock_hard_stop_fraction=RTRADE_SHOCK_HARD_STOP_PCT,
+            hard_stop_fraction=RTRADE_HARD_STOP_PCT,
+        )
+        while True:
+            try:
+                current_price = venue.current_price()
+                if current_price is None:
+                    time.sleep(WAIT_FOR_ORDER)
+                    continue
+                if _trend_too_strong(self.symbol):
+                    time.sleep(WAIT_FOR_ORDER)
+                    continue
+                outcome = PairCoordinator(venue, self.qty, policy).run_cycle(current_price)
+                print(
+                    f"[{self.symbol}] pair={outcome.pair_id} phase={outcome.phase} "
+                    f"shock={outcome.shock} latency={outcome.fill_latency_sec} "
+                    f"buy={outcome.buy_qty:.6f} sell={outcome.sell_qty:.6f} "
+                    f"net={outcome.net_qty:.6f} cashflow={outcome.gross_pnl:.2f} "
+                    f"fees={outcome.fees:.2f} reason={outcome.reason}")
+                time.sleep(1)
+            except Exception as exc:  # noqa: BLE001 — fail closed + reconciliere veche
+                print(f"[{self.symbol}] pair coordinator error: {exc}")
+                api.cancel_recent_orders("SELL", self.symbol, WAIT_FOR_ORDER)
+                api.cancel_recent_orders("BUY", self.symbol, WAIT_FOR_ORDER)
+                time.sleep(1)
+
     def run(self):
+        if RTRADE_PAIR_COORDINATOR_ENABLED:
+            return self._run_coordinator_forever()
         # Exact doi workeri per bot, reutilizati intre runde. Operatiile BUY/SELL raman
         # concurente; se elimina doar churn-ul de Thread-uri si pierderea exceptiilor.
         prefix = f"rtrade-{self.symbol}"

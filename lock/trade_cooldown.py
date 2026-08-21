@@ -7,7 +7,9 @@ schimbăm chokepoint-ul `__place_order` din binance_api/bapi_placeorder.py.
 
 Împiedică plasarea a două ordine pe ACELAȘI simbol la mai puțin de `cooldown_sec`
 (implicit citit din trade_cooldown.conf → [cooldown] default_sec), indiferent de
-combinație (BUY/BUY, SELL/SELL, BUY/SELL). Sigur cross-PROCES și cross-THREAD (fcntl.flock).
+combinație (BUY/BUY, SELL/SELL, BUY/SELL). Excepția explicită `pair_id` permite
+exact un BUY și un SELL din aceeași pereche, fără să permită duplicate sau alt
+grup/proces. Sigur cross-PROCES și cross-THREAD (fcntl.flock).
 
 Flux la chokepoint (__place_order):
     with trade_slot(side, symbol) as slot:
@@ -55,9 +57,14 @@ def _cooldown():
     return _cd
 
 
-def reserve_trade(side, symbol, cooldown_sec=DEFAULT_COOLDOWN_SEC, client_order_id=None):
+def reserve_trade(side, symbol, cooldown_sec=DEFAULT_COOLDOWN_SEC, client_order_id=None,
+                  pair_id=None):
     """Verifică-și-rezervă ATOMIC dreptul de a plasa un ordin pe `symbol`.
-    (True, entry) → permis / (False, last_entry) → blocat (ordin în ultimele cooldown_sec)."""
+    `pair_id` permite cele două laturi unice ale aceleiași perechi."""
+    if pair_id:
+        return _cooldown().reserve_group_member(
+            symbol, cooldown_sec, pair_id, side,
+            side="PAIR", symbol=symbol, client_order_id=client_order_id)
     return _cooldown().reserve(symbol, cooldown_sec, side=side, symbol=symbol,
                                client_order_id=client_order_id, binance_order_id=None)
 
@@ -65,6 +72,12 @@ def reserve_trade(side, symbol, cooldown_sec=DEFAULT_COOLDOWN_SEC, client_order_
 def release_trade(symbol):
     """Anulează rezervarea pt `symbol` (ex. ordinul a EȘUAT) → nu mai blocăm cooldown-ul."""
     _cooldown().release(symbol)
+
+
+def release_pair_leg(symbol, pair_id, side):
+    """Elibereaza un picior confirmat numai dupa anularea lui reusita."""
+    return _cooldown().release_group_member(
+        symbol, pair_id, side, keep_group=True)
 
 
 def update_binance_order_id(symbol, order_id):
@@ -92,11 +105,18 @@ class _TradeReservation:
 
 
 @contextlib.contextmanager
-def trade_slot(side, symbol, cooldown_sec=DEFAULT_COOLDOWN_SEC, client_order_id=None):
-    """RAII / scope-based pentru cooldown (ca un guard C++) — vezi docstring-ul modulului."""
-    with _cooldown().slot(symbol, cooldown_sec, side=side, symbol=symbol,
-                          client_order_id=client_order_id, binance_order_id=None) as res:
-        yield _TradeReservation(res)
+def trade_slot(side, symbol, cooldown_sec=DEFAULT_COOLDOWN_SEC, client_order_id=None,
+               pair_id=None):
+    """RAII pentru cooldown exclusiv sau pentru un picior al unei perechi."""
+    if pair_id:
+        with _cooldown().group_slot(
+                symbol, cooldown_sec, pair_id, side,
+                side="PAIR", symbol=symbol, client_order_id=client_order_id) as res:
+            yield _TradeReservation(res)
+    else:
+        with _cooldown().slot(symbol, cooldown_sec, side=side, symbol=symbol,
+                              client_order_id=client_order_id, binance_order_id=None) as res:
+            yield _TradeReservation(res)
 
 
 def get_last_trade_age(symbol):

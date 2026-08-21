@@ -201,6 +201,25 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         self.assertIsNotNone(inst_a.place("BUY", 100.0, 1.0))
         self.assertIsNotNone(inst_b.place("BUY", 100.0, 1.0))   # alt symbol -> neafectat
 
+    def test_pair_id_allows_only_the_opposite_leg_through_cooldown(self):
+        p = _FakeProvider()
+        inst = self._inst(p)
+
+        buy = inst.place(
+            "BUY", 99.0, 1.0, smart=False,
+            cooldown_pair_id="pair-1", is_retry=True)
+        sell = inst.place(
+            "SELL", 101.0, 1.0, smart=False,
+            cooldown_pair_id="pair-1", is_retry=True)
+        duplicate = inst.place(
+            "SELL", 102.0, 1.0, smart=False,
+            cooldown_pair_id="pair-1", is_retry=True)
+
+        self.assertIsNotNone(buy)
+        self.assertIsNotNone(sell)
+        self.assertIsNone(duplicate)
+        self.assertEqual(len(p.placed), 2)
+
     def test_facade_place_routes_through_pipeline(self):
         # MarketApi.place() (proxy unic guardat, inlocuitorul lui place_order_smart):
         # construieste Instrument efemer + ruleaza pipeline-ul (cooldown blocheaza al 2-lea).

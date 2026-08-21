@@ -1,0 +1,379 @@
+"""Coordonator determinist pentru o pereche de cotatii rtrade.
+
+Modulul nu importa API-uri live. Venue-ul este injectat, astfel incat aceeasi
+masina de stari poate fi caracterizata cu fill-uri sintetice si apoi folosita de
+entrypoint-ul live. O singura instanta detine ambele order-id-uri si nu deschide
+o runda noua cat timp exista expunere din runda curenta.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+import math
+import time
+import uuid
+from typing import Callable, Optional, Protocol
+
+
+@dataclass
+class OrderTicket:
+    order_id: str
+    side: str
+    price: float
+    qty: float
+    active: bool = True
+    pair_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class OrderSnapshot:
+    status: str = "open"       # open|closed|canceled|expired
+    filled_qty: float = 0.0
+    cost: float = 0.0
+    fee: float = 0.0
+
+
+@dataclass(frozen=True)
+class PairPolicy:
+    adjustment_fraction: float
+    quote_ttl_sec: float = 32.0
+    poll_sec: float = 1.0
+    fast_fill_ratio: float = 0.25
+    min_edge_fraction: float = 0.0115
+    shock_hard_stop_fraction: float = 0.04
+    hard_stop_fraction: float = 0.08
+    price_decimals: int = 4
+
+    def __post_init__(self):
+        if not 0 < self.adjustment_fraction < 1:
+            raise ValueError("adjustment_fraction trebuie sa fie in (0, 1)")
+        if self.quote_ttl_sec <= 0 or self.poll_sec <= 0:
+            raise ValueError("quote_ttl_sec si poll_sec trebuie sa fie pozitive")
+        if not 0 < self.fast_fill_ratio <= 1:
+            raise ValueError("fast_fill_ratio trebuie sa fie in (0, 1]")
+        if not 0 <= self.min_edge_fraction < 1:
+            raise ValueError("min_edge_fraction trebuie sa fie in [0, 1)")
+        if not 0 < self.shock_hard_stop_fraction < 1:
+            raise ValueError("shock_hard_stop_fraction trebuie sa fie in (0, 1)")
+        if not self.shock_hard_stop_fraction <= self.hard_stop_fraction < 1:
+            raise ValueError(
+                "hard_stop_fraction trebuie sa fie >= shock_hard_stop_fraction si < 1")
+
+
+@dataclass(frozen=True)
+class PairOutcome:
+    phase: str
+    pair_id: str
+    terminal: bool
+    shock: bool = False
+    first_fill_side: Optional[str] = None
+    fill_latency_sec: Optional[float] = None
+    net_qty: float = 0.0
+    buy_qty: float = 0.0
+    sell_qty: float = 0.0
+    buy_avg: Optional[float] = None
+    sell_avg: Optional[float] = None
+    gross_pnl: float = 0.0
+    fees: float = 0.0
+    reason: Optional[str] = None
+
+
+class PairVenue(Protocol):
+    def current_price(self) -> Optional[float]: ...
+    def place_limit(self, side: str, price: float, qty: float,
+                    pair_id: str) -> Optional[OrderTicket]: ...
+    def place_market_exit(self, side: str, qty: float,
+                          reason: str) -> Optional[OrderTicket]: ...
+    def order_status(self, order_id: str) -> OrderSnapshot: ...
+    def cancel(self, order_id: str) -> bool: ...
+
+
+def quote_prices(mid: float, adjustment_fraction: float,
+                 decimals: int = 4) -> tuple[float, float]:
+    """Bid/ask simetrice fata de acelasi snapshot de piata."""
+    if mid <= 0:
+        raise ValueError("mid trebuie sa fie pozitiv")
+    return (
+        round(mid * (1 - adjustment_fraction), decimals),
+        round(mid * (1 + adjustment_fraction), decimals),
+    )
+
+
+def anchored_exit_price(exit_side: str, fill_price: float, current_price: float,
+                        adjustment_fraction: float, min_edge_fraction: float,
+                        decimals: int = 4) -> float:
+    """Tinta nu poate cobori sub cost+edge si nu poate urmari pierderea.
+
+    Formula edge este aceeasi cu gardul financiar:
+      SELL: (sell-buy)/sell >= edge  -> sell >= buy/(1-edge)
+      BUY:  (sell-buy)/sell >= edge  -> buy <= sell*(1-edge)
+    """
+    side = exit_side.upper()
+    if fill_price <= 0 or current_price <= 0:
+        raise ValueError("preturile trebuie sa fie pozitive")
+    if side == "SELL":
+        market_target = current_price * (1 + adjustment_fraction)
+        floor = fill_price / (1 - min_edge_fraction)
+        return round(max(market_target, floor), decimals)
+    if side == "BUY":
+        market_target = current_price * (1 - adjustment_fraction)
+        ceiling = fill_price * (1 - min_edge_fraction)
+        return round(min(market_target, ceiling), decimals)
+    raise ValueError("exit_side trebuie sa fie BUY sau SELL")
+
+
+class PairCoordinator:
+    """Masina de stari pentru o singura runda BUY+SELL."""
+
+    def __init__(self, venue: PairVenue, qty: float, policy: PairPolicy, *,
+                 clock: Callable[[], float] = time.monotonic,
+                 sleeper: Callable[[float], None] = time.sleep,
+                 pair_id_factory: Callable[[], str] = lambda: uuid.uuid4().hex):
+        self.venue = venue
+        self.qty = float(qty)
+        self.policy = policy
+        self.clock = clock
+        self.sleeper = sleeper
+        self.pair_id_factory = pair_id_factory
+        self.pair_id = ""
+        self.started_at = 0.0
+        self.first_fill_at: Optional[float] = None
+        self.first_fill_side: Optional[str] = None
+        self.shock = False
+        self.phase = "idle"
+        self.reason: Optional[str] = None
+        self.tickets: list[OrderTicket] = []
+        self.snapshots: dict[str, OrderSnapshot] = {}
+        self.stop_ticket: Optional[OrderTicket] = None
+
+    def start(self, mid: Optional[float] = None) -> PairOutcome:
+        if self.phase not in {"idle", "complete", "expired", "failed", "hard_stop"}:
+            raise RuntimeError("runda existenta nu este terminala")
+        mid = float(mid if mid is not None else (self.venue.current_price() or 0.0))
+        buy_price, sell_price = quote_prices(
+            mid, self.policy.adjustment_fraction, self.policy.price_decimals)
+        self.pair_id = self.pair_id_factory()
+        self.started_at = self.clock()
+        self.first_fill_at = None
+        self.first_fill_side = None
+        self.shock = False
+        self.reason = None
+        self.tickets = []
+        self.snapshots = {}
+        self.stop_ticket = None
+
+        buy = self.venue.place_limit("BUY", buy_price, self.qty, self.pair_id)
+        if buy is None:
+            self.phase = "failed"
+            self.reason = "buy_place_failed"
+            return self.outcome()
+        self.tickets.append(buy)
+
+        sell = self.venue.place_limit("SELL", sell_price, self.qty, self.pair_id)
+        if sell is None:
+            self._cancel(buy)
+            self.phase = "failed"
+            self.reason = "sell_place_failed"
+            return self.outcome()
+        self.tickets.append(sell)
+        self.phase = "quoting"
+        return self.outcome()
+
+    def _cancel(self, ticket: OrderTicket) -> bool:
+        if not ticket.active:
+            return True
+        ok = bool(self.venue.cancel(ticket.order_id))
+        if ok:
+            ticket.active = False
+        return ok
+
+    def _refresh(self) -> None:
+        for ticket in self.tickets:
+            snap = self.venue.order_status(ticket.order_id)
+            self.snapshots[ticket.order_id] = snap
+            if snap.status in {"closed", "canceled", "expired"}:
+                ticket.active = False
+
+    def _side_totals(self, side: str) -> tuple[float, float, float]:
+        qty = cost = fee = 0.0
+        for ticket in self.tickets:
+            if ticket.side.upper() != side.upper():
+                continue
+            snap = self.snapshots.get(ticket.order_id, OrderSnapshot())
+            qty += max(0.0, snap.filled_qty)
+            cost += max(0.0, snap.cost)
+            fee += max(0.0, snap.fee)
+        return qty, cost, fee
+
+    def _totals(self):
+        bq, bc, bf = self._side_totals("BUY")
+        sq, sc, sf = self._side_totals("SELL")
+        return bq, bc, bf, sq, sc, sf
+
+    def _record_first_fill(self, now: float, buy_qty: float, sell_qty: float) -> None:
+        if self.first_fill_at is not None or (buy_qty <= 0 and sell_qty <= 0):
+            return
+        self.first_fill_at = now
+        if buy_qty > 0 and sell_qty <= 0:
+            self.first_fill_side = "BUY"
+        elif sell_qty > 0 and buy_qty <= 0:
+            self.first_fill_side = "SELL"
+        else:
+            self.first_fill_side = "BOTH"
+        latency = max(0.0, now - self.started_at)
+        self.shock = latency <= self.policy.quote_ttl_sec * self.policy.fast_fill_ratio
+
+    def _active_ticket(self, side: str) -> Optional[OrderTicket]:
+        for ticket in reversed(self.tickets):
+            if ticket.side.upper() == side.upper() and ticket.active:
+                return ticket
+        return None
+
+    def _cancel_entry_remainder(self, exposure_side: str) -> None:
+        # Odata ce exista expunere, nu mai permitem aceleiasi laturi sa o mareasca.
+        entry_side = "BUY" if exposure_side == "LONG" else "SELL"
+        for ticket in self.tickets:
+            if ticket.side.upper() == entry_side and ticket.active:
+                self._cancel(ticket)
+
+    def _ensure_anchored_exit(self, exposure_side: str, net_qty: float,
+                              entry_avg: float, current: float) -> bool:
+        exit_side = "SELL" if exposure_side == "LONG" else "BUY"
+        target = anchored_exit_price(
+            exit_side, entry_avg, current,
+            self.policy.adjustment_fraction,
+            self.policy.min_edge_fraction,
+            self.policy.price_decimals,
+        )
+        ticket = self._active_ticket(exit_side)
+        remaining = 0.0
+        if ticket is not None:
+            filled = self.snapshots.get(ticket.order_id, OrderSnapshot()).filled_qty
+            remaining = max(0.0, ticket.qty - filled)
+        adequate_price = bool(ticket and (
+            (exit_side == "SELL" and ticket.price >= target) or
+            (exit_side == "BUY" and ticket.price <= target)))
+        adequate_qty = ticket is not None and math.isclose(
+            remaining, abs(net_qty), rel_tol=1e-6, abs_tol=1e-8)
+        if adequate_price and adequate_qty:
+            return True
+        if ticket is not None and not self._cancel(ticket):
+            self.reason = "exit_cancel_failed"
+            return False
+        replacement = self.venue.place_limit(
+            exit_side, target, abs(net_qty), self.pair_id)
+        if replacement is None:
+            self.reason = "exit_place_failed"
+            return False
+        self.tickets.append(replacement)
+        return True
+
+    def _submit_hard_stop(self, net_qty: float, entry_avg: float,
+                          current: float) -> bool:
+        if net_qty <= 0:
+            return False
+        stop_fraction = (self.policy.shock_hard_stop_fraction if self.shock
+                         else self.policy.hard_stop_fraction)
+        if current > entry_avg * (1 - stop_fraction):
+            return False
+        exit_ticket = self._active_ticket("SELL")
+        if exit_ticket is not None and not self._cancel(exit_ticket):
+            self.reason = "hard_stop_cancel_failed"
+            return False
+        market = self.venue.place_market_exit(
+            "SELL", net_qty,
+            reason=("fast_fill_hard_stop" if self.shock else "inventory_hard_stop"))
+        if market is None:
+            self.reason = "hard_stop_place_failed"
+            return False
+        self.tickets.append(market)
+        self.stop_ticket = market
+        self.phase = "stopping"
+        return True
+
+    def step(self, now: Optional[float] = None) -> PairOutcome:
+        if self.phase in {"complete", "expired", "failed", "hard_stop"}:
+            return self.outcome()
+        if self.phase == "idle":
+            raise RuntimeError("start() trebuie apelat inainte de step()")
+        now = self.clock() if now is None else float(now)
+        self._refresh()
+        bq, bc, _bf, sq, sc, _sf = self._totals()
+        self._record_first_fill(now, bq, sq)
+        net = bq - sq
+
+        if self.phase == "stopping":
+            if abs(net) <= 1e-8:
+                self.phase = "hard_stop"
+                self.reason = ("fast_fill_hard_stop" if self.shock
+                               else "inventory_hard_stop")
+            return self.outcome()
+
+        if bq > 0 or sq > 0:
+            if abs(net) <= 1e-8:
+                for ticket in self.tickets:
+                    self._cancel(ticket)
+                self.phase = "complete"
+                return self.outcome()
+
+            exposure_side = "LONG" if net > 0 else "SOLD"
+            self.phase = "exposed"
+            self._cancel_entry_remainder(exposure_side)
+            # Reconciliere dupa cancel: un ordin se poate umple in cursa cu anularea.
+            self._refresh()
+            bq, bc, _bf, sq, sc, _sf = self._totals()
+            net = bq - sq
+            if abs(net) <= 1e-8:
+                self.phase = "complete"
+                return self.outcome()
+            exposure_side = "LONG" if net > 0 else "SOLD"
+            entry_avg = (bc / bq) if exposure_side == "LONG" else (sc / sq)
+            current = float(self.venue.current_price() or 0.0)
+            if current <= 0:
+                self.reason = "current_price_unavailable"
+                return self.outcome()
+            if exposure_side == "LONG" and self._submit_hard_stop(net, entry_avg, current):
+                return self.outcome()
+            self._ensure_anchored_exit(exposure_side, net, entry_avg, current)
+            return self.outcome()
+
+        if now - self.started_at >= self.policy.quote_ttl_sec:
+            for ticket in self.tickets:
+                self._cancel(ticket)
+            # Ultima citire inchide cursa fill-vs-cancel.
+            self._refresh()
+            bq, _bc, _bf, sq, _sc, _sf = self._totals()
+            if bq > 0 or sq > 0:
+                return self.step(now=now)
+            self.phase = "expired"
+            self.reason = "quote_ttl"
+        return self.outcome()
+
+    def run_cycle(self, mid: Optional[float] = None) -> PairOutcome:
+        outcome = self.start(mid)
+        while not outcome.terminal:
+            self.sleeper(self.policy.poll_sec)
+            outcome = self.step()
+        return outcome
+
+    def outcome(self) -> PairOutcome:
+        bq, bc, bf, sq, sc, sf = self._totals()
+        buy_avg = bc / bq if bq > 0 else None
+        sell_avg = sc / sq if sq > 0 else None
+        latency = (self.first_fill_at - self.started_at
+                   if self.first_fill_at is not None else None)
+        return PairOutcome(
+            phase=self.phase,
+            pair_id=self.pair_id,
+            terminal=self.phase in {"complete", "expired", "failed", "hard_stop"},
+            shock=self.shock,
+            first_fill_side=self.first_fill_side,
+            fill_latency_sec=latency,
+            net_qty=bq - sq,
+            buy_qty=bq,
+            sell_qty=sq,
+            buy_avg=buy_avg,
+            sell_avg=sell_avg,
+            gross_pnl=sc - bc,
+            fees=bf + sf,
+            reason=self.reason,
+        )

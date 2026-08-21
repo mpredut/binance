@@ -2,6 +2,7 @@
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import rtrade
@@ -21,6 +22,58 @@ def _bot():
 
 
 class RTradeThreadingTest(unittest.TestCase):
+    def test_feature_flag_routes_to_single_coordinator_path(self):
+        bot = _bot()
+        with patch.object(rtrade, "RTRADE_PAIR_COORDINATOR_ENABLED", True), \
+             patch.object(bot, "_run_coordinator_forever", return_value="coordinated") as run:
+            self.assertEqual(bot.run(), "coordinated")
+        run.assert_called_once_with()
+
+    def test_live_pair_adapter_passes_pair_id_and_owns_retry(self):
+        executor = SimpleNamespace()
+        order = {"orderId": 7, "price": "99.36", "origQty": "0.8"}
+        with patch.object(rtrade.mkt, "provider_name_for", return_value="Binance"), \
+             patch.object(rtrade.mkt, "provider_by_name", return_value=executor), \
+             patch.object(rtrade.mkt, "place", return_value=order) as place:
+            venue = rtrade._LivePairVenue("TAOUSDC")
+            ticket = venue.place_limit("BUY", 99.36, 1.0, "pair-1")
+
+        self.assertEqual((ticket.order_id, ticket.qty, ticket.pair_id),
+                         ("7", 0.8, "pair-1"))
+        kwargs = place.call_args.kwargs
+        self.assertEqual(kwargs["cooldown_pair_id"], "pair-1")
+        self.assertTrue(kwargs["is_retry"])
+        self.assertFalse(kwargs["force"])
+        self.assertFalse(kwargs["smart"])
+
+    def test_live_pair_hard_stop_uses_explicit_raw_market_exit(self):
+        executor = SimpleNamespace(
+            submit_order=lambda *args, **kwargs: "M9")
+        with patch.object(rtrade.mkt, "provider_name_for", return_value="Binance"), \
+             patch.object(rtrade.mkt, "provider_by_name", return_value=executor), \
+             patch.object(rtrade.mkt, "get_current_price", return_value=90.0), \
+             patch.object(executor, "submit_order", wraps=executor.submit_order) as submit:
+            venue = rtrade._LivePairVenue("TAOUSDC")
+            ticket = venue.place_market_exit("SELL", 0.4, "fast_fill_hard_stop")
+
+        self.assertEqual(ticket.order_id, "M9")
+        submit.assert_called_once_with(
+            "TAOUSDC", "SELL", 0.4, price=None, market=True,
+            kind="fast_fill_hard_stop")
+
+    def test_live_pair_cancel_releases_only_its_cooldown_leg(self):
+        executor = SimpleNamespace(cancel_order=lambda *_args: None)
+        order = {"orderId": 7, "price": "99.36", "origQty": "1"}
+        with patch.object(rtrade.mkt, "provider_name_for", return_value="Binance"), \
+             patch.object(rtrade.mkt, "provider_by_name", return_value=executor), \
+             patch.object(rtrade.mkt, "place", return_value=order), \
+             patch("lock.trade_cooldown.release_pair_leg", return_value=True) as release:
+            venue = rtrade._LivePairVenue("TAOUSDC")
+            venue.place_limit("BUY", 99.36, 1.0, "pair-1")
+            self.assertTrue(venue.cancel("7"))
+
+        release.assert_called_once_with("TAOUSDC", "pair-1", "BUY")
+
     def test_pair_reuses_exactly_two_workers_between_rounds(self):
         bot = _bot()
         barrier = threading.Barrier(2)

@@ -102,6 +102,7 @@ class Instrument:
         # impiedica re-enqueue-ul (fara recursie infinita). Scos din kwargs (nu merge la provider).
         is_retry = bool(kwargs.pop("is_retry", False))
         bypass = bool(kwargs.pop("bypass_profit_guard", False))
+        cooldown_pair_id = kwargs.pop("cooldown_pair_id", None)
         side_u = side.upper()
         if self._provider.guards_internally():
             return self._provider.place_order(self.symbol, side, price, qty, **kwargs)
@@ -132,6 +133,8 @@ class Instrument:
         retry_kwargs = dict(kwargs)
         retry_kwargs["bypass_profit_guard"] = bypass
         retry_kwargs["smart"] = smart
+        if cooldown_pair_id:
+            retry_kwargs["cooldown_pair_id"] = cooldown_pair_id
         # Un ordin MARKET ignora pretul cerut de apelant. Retinem daca trebuie sa
         # revalidam gardul chiar inainte de submit, la pretul executabil curent.
         # Altfel un SELL cerut la +1% putea trece gardul, apoi `force=True` il
@@ -230,7 +233,8 @@ class Instrument:
 
             # 3. COOLDOWN anti-rapid-fire (agnostic, acelasi modul global ca Binance —
             # cheile sunt symbol-uri, deci fara coliziune intre venue-uri diferite).
-            with trade_cooldown.trade_slot(side_u, self.symbol) as slot:
+            with trade_cooldown.trade_slot(
+                    side_u, self.symbol, pair_id=cooldown_pair_id) as slot:
                 if not slot.allowed:
                     age = time.time() - slot.info.get("timestamp", 0)
                     print(f"[{self.symbol}] {side_u} BLOCAT de cooldown: ultim ordin "

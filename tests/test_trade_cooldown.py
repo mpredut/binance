@@ -122,6 +122,74 @@ class TestTradeCooldown(unittest.TestCase):
         self.assertIsNotNone(age)
         self.assertLess(age, 5)
 
+    # ─── pereche atomica BUY + SELL ──────────────────────────────────────────
+    def test_pair_allows_one_buy_and_one_sell_inside_same_cooldown(self):
+        with tc.trade_slot("BUY", "TAOUSDC", cooldown_sec=180,
+                           pair_id="pair-1") as buy:
+            self.assertTrue(buy.allowed)
+            buy.commit(101)
+        with tc.trade_slot("SELL", "TAOUSDC", cooldown_sec=180,
+                           pair_id="pair-1") as sell:
+            self.assertTrue(sell.allowed)
+            sell.commit(102)
+
+        state = tc._cooldown().get("TAOUSDC")
+        self.assertCountEqual(state["group_committed"], ["BUY", "SELL"])
+        self.assertEqual(state["group_results"]["BUY"]["binance_order_id"], 101)
+        self.assertEqual(state["group_results"]["SELL"]["binance_order_id"], 102)
+
+    def test_pair_blocks_duplicate_side_and_unrelated_group(self):
+        with tc.trade_slot("BUY", "TAOUSDC", cooldown_sec=180,
+                           pair_id="pair-1") as buy:
+            self.assertTrue(buy.allowed)
+            buy.commit(101)
+
+        with tc.trade_slot("BUY", "TAOUSDC", cooldown_sec=180,
+                           pair_id="pair-1") as duplicate:
+            self.assertFalse(duplicate.allowed)
+        with tc.trade_slot("SELL", "TAOUSDC", cooldown_sec=180,
+                           pair_id="pair-2") as outsider:
+            self.assertFalse(outsider.allowed)
+        self.assertFalse(
+            tc.reserve_trade("SELL", "TAOUSDC", cooldown_sec=180)[0],
+            "o ordine fara pair_id nu trebuie sa ocoleasca perechea activa")
+
+    def test_failed_second_leg_rolls_back_only_that_leg(self):
+        with tc.trade_slot("BUY", "TAOUSDC", cooldown_sec=180,
+                           pair_id="pair-1") as buy:
+            buy.commit(101)
+        with tc.trade_slot("SELL", "TAOUSDC", cooldown_sec=180,
+                           pair_id="pair-1") as sell:
+            self.assertTrue(sell.allowed)
+            # fara commit -> rollback numai SELL
+
+        state = tc._cooldown().get("TAOUSDC")
+        self.assertEqual(state["group_members"], ["BUY"])
+        self.assertEqual(state["group_committed"], ["BUY"])
+        with tc.trade_slot("SELL", "TAOUSDC", cooldown_sec=180,
+                           pair_id="pair-1") as retry:
+            self.assertTrue(retry.allowed)
+
+    def test_legacy_reservation_still_blocks_pair(self):
+        self.assertTrue(tc.reserve_trade("BUY", "TAOUSDC", cooldown_sec=180)[0])
+        with tc.trade_slot("SELL", "TAOUSDC", cooldown_sec=180,
+                           pair_id="pair-1") as leg:
+            self.assertFalse(leg.allowed)
+
+    def test_canceled_pair_leg_can_be_replaced_without_opening_other_groups(self):
+        with tc.trade_slot("SELL", "TAOUSDC", cooldown_sec=180,
+                           pair_id="pair-1") as sell:
+            sell.commit(102)
+        self.assertTrue(tc.release_pair_leg("TAOUSDC", "pair-1", "SELL"))
+
+        with tc.trade_slot("SELL", "TAOUSDC", cooldown_sec=180,
+                           pair_id="pair-2") as outsider:
+            self.assertFalse(outsider.allowed)
+        with tc.trade_slot("SELL", "TAOUSDC", cooldown_sec=180,
+                           pair_id="pair-1") as replacement:
+            self.assertTrue(replacement.allowed)
+            replacement.commit(103)
+
 
 if __name__ == "__main__":
     unittest.main()
