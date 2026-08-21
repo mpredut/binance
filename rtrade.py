@@ -4,6 +4,7 @@ import datetime
 import math
 from collections import deque
 import threading
+from concurrent.futures import ThreadPoolExecutor, wait
 
 
 # my imports
@@ -328,69 +329,73 @@ class TradingBot:
                     print(f"[{self.symbol}] Cancel SELL order failed. Maybe it was filled :-)? Moving to BUY ...")
                     print(f"[{self.symbol}] BUY disperat tot 3....")
                     mkt.place(self.symbol, "BUY", api.get_current_price(self.symbol) * (1 - RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
-                        force=True, cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
+                        force=_followup_force(self.symbol, "BUY"), cancelorders=True, hours=RTRADE_FOLLOWUP_HOURS)
                     return self.mark_sell_filled(self.filled_sell_price)
                 else:
                     print(f"[{self.symbol}] Cancel SELL order failed. Someone canceled it. Continuing sell...")
 
+    def _run_pair(self, executor, current_price):
+        """Ruleaza cele doua laturi concurent pe workerii persistenti ai botului.
+
+        Future.result() propaga exceptiile workerilor in bucla principala, unde exista
+        deja reconcilierea defensiva prin anularea ordinelor recente. Varianta veche
+        pornea doua Thread-uri la fiecare runda si pierdea exceptiile in stderr.
+        """
+        buy_future = executor.submit(
+            self.repetitive_buy, current_price, self.filled_sell_price)
+        sell_future = executor.submit(
+            self.repetitive_sell, current_price, self.filled_buy_price)
+        # Asteapta ambele laturi inainte sa propage o exceptie. Daca am apela
+        # buy_future.result() imediat, un BUY esuat rapid ar lasa SELL-ul vechi
+        # activ, iar bucla principala ar putea pune o runda noua peste el.
+        wait((buy_future, sell_future))
+        return buy_future.result(), sell_future.result()
+
     def run(self):
-        while True:
-            try:
-                current_price = api.get_current_price(self.symbol)
-                if current_price is None:
-                    print(f"[{self.symbol}] Failed to fetch current price. Retrying in {WAIT_FOR_ORDER} seconds...")
-                    time.sleep(WAIT_FOR_ORDER)
-                    continue
-                print(f"[{self.symbol}] Current price: {current_price:.2f}")
+        # Exact doi workeri per bot, reutilizati intre runde. Operatiile BUY/SELL raman
+        # concurente; se elimina doar churn-ul de Thread-uri si pierderea exceptiilor.
+        prefix = f"rtrade-{self.symbol}"
+        with ThreadPoolExecutor(max_workers=2, thread_name_prefix=prefix) as executor:
+            while True:
+                try:
+                    current_price = api.get_current_price(self.symbol)
+                    if current_price is None:
+                        print(f"[{self.symbol}] Failed to fetch current price. Retrying in {WAIT_FOR_ORDER} seconds...")
+                        time.sleep(WAIT_FOR_ORDER)
+                        continue
+                    print(f"[{self.symbol}] Current price: {current_price:.2f}")
 
-                # FILTRU DE TREND: daca activul trend-uieste clar, rtrade (spread-bot) sta
-                # deoparte tot ciclul (nu prinde cutitul). Reia la urmatoarea iteratie.
-                if _trend_too_strong(self.symbol):
-                    time.sleep(WAIT_FOR_ORDER)
-                    continue
+                    # FILTRU DE TREND: daca activul trend-uieste clar, rtrade (spread-bot) sta
+                    # deoparte tot ciclul (nu prinde cutitul). Reia la urmatoarea iteratie.
+                    if _trend_too_strong(self.symbol):
+                        time.sleep(WAIT_FOR_ORDER)
+                        continue
 
-                buy_result = [None]
-                sell_result = [None]
+                    buy_result, sell_result = self._run_pair(executor, current_price)
 
-                def run_buy():
-                    buy_result[0] = self.repetitive_buy(current_price, self.filled_sell_price)
+                    if not buy_result or not sell_result:
+                        continue
 
-                def run_sell():
-                    sell_result[0] = self.repetitive_sell(current_price, self.filled_buy_price)
+                    filled_buy_price = buy_result + RTRADE_ZERO_EPSILON  # avoid zero
+                    filled_sell_price = sell_result
 
-                t1 = threading.Thread(target=run_buy, name="run_buy")
-                t2 = threading.Thread(target=run_sell, name="run_sell")
+                    print(f"[{self.symbol}] Transaction complete: Bought at {filled_buy_price:.2f}, Sold at {filled_sell_price:.2f}")
+                    if filled_buy_price < filled_sell_price:
+                        print(f"[{self.symbol}] PROFIT: Profit ratio {filled_sell_price / filled_buy_price:.2f}")
+                    else:
+                        print(f"[{self.symbol}] LOSS: Loss ratio {filled_sell_price / filled_buy_price:.2f}")
 
-                t1.start()
-                t2.start()
+                    time.sleep(1)
 
-                t1.join()
-                t2.join()
-
-                if not buy_result[0] or not sell_result[0]:
-                    continue
-                    
-                filled_buy_price = buy_result[0] + RTRADE_ZERO_EPSILON  # avoid zero
-                filled_sell_price = sell_result[0]
-
-                print(f"[{self.symbol}] Transaction complete: Bought at {filled_buy_price:.2f}, Sold at {filled_sell_price:.2f}")
-                if filled_buy_price < filled_sell_price:
-                    print(f"[{self.symbol}] PROFIT: Profit ratio {filled_sell_price / filled_buy_price:.2f}")
-                else:
-                    print(f"[{self.symbol}] LOSS: Loss ratio {filled_sell_price / filled_buy_price:.2f}")
-
-                time.sleep(1)
-
-                # Reset pentru următoarea rundă
-                with self.lock:
-                    self.buy_filled = self.sell_filled = False
-            except Exception as e:
-                print(f"[{self.symbol}] Unexpected error: {e}")
-                #if self.buy_filled == self.sell_filled:
-                    #self.buy_filled = not self.sell_filled
-                api.cancel_recent_orders("SELL", self.symbol, WAIT_FOR_ORDER)
-                api.cancel_recent_orders("BUY", self.symbol, WAIT_FOR_ORDER)
-                time.sleep(1)
+                    # Reset pentru următoarea rundă
+                    with self.lock:
+                        self.buy_filled = self.sell_filled = False
+                except Exception as e:
+                    print(f"[{self.symbol}] Unexpected error: {e}")
+                    # Exceptiile workerilor ajung aici prin Future.result().
+                    api.cancel_recent_orders("SELL", self.symbol, WAIT_FOR_ORDER)
+                    api.cancel_recent_orders("BUY", self.symbol, WAIT_FOR_ORDER)
+                    time.sleep(1)
                 
                 
 _default_adj = round(u.calculate_difference_percent(60000, 60000 - 380) / 100, 4)

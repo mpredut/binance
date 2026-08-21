@@ -151,6 +151,29 @@ def claim(ids, now=None):
     return claimed
 
 
+def resolve(symbol, side):
+    """Elimina intentia pending satisfacuta de o plasare normala reusita.
+
+    Apelantii care reincearca local (de exemplu rtrade) pot reusi inaintea
+    workerului global. Fara aceasta confirmare, intentia veche ramanea in outbox
+    si putea produce ulterior un ordin suplimentar. Intoarce numarul de intrari
+    eliminate; operatia este atomica si idempotenta.
+    """
+    side_u = (side or "").upper()
+    _ensure_dir()
+    with FileLock(LOCK_FILE):
+        existing = _read_nolock()
+        remaining = [
+            rec for rec in existing
+            if not (rec.get("symbol") == symbol
+                    and (rec.get("side") or "").upper() == side_u)
+        ]
+        removed = len(existing) - len(remaining)
+        if removed:
+            _write_nolock(remaining)
+        return removed
+
+
 def _write_nolock(items):
     """Scrie coada FARA a lua lock-ul (apelantul il detine). Atomic: tmp + os.replace."""
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(QUEUE_FILE), suffix=".tmp")

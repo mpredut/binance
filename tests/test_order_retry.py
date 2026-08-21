@@ -137,6 +137,16 @@ class OrderRetryStoreTest(unittest.TestCase):
         self.assertEqual(oq.claim([]), [])
         self.assertEqual(len(oq.load_all()), 1)
 
+    def test_resolve_removes_only_matching_symbol_and_side(self):
+        oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0, now=1000.0)
+        oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=2.0, now=1001.0)
+        oq.enqueue("TAOUSDC", "BUY", 1.0, {}, requested_price=3.0, now=1002.0)
+
+        self.assertEqual(oq.resolve("BTCUSDC", "buy"), 1)
+        self.assertEqual(oq.resolve("BTCUSDC", "BUY"), 0)  # idempotent
+        remaining = {(r["symbol"], r["side"]) for r in oq.load_all()}
+        self.assertEqual(remaining, {("BTCUSDC", "SELL"), ("TAOUSDC", "BUY")})
+
     def test_reenqueue_preserves_created_ts(self):
         # workerul re-adauga un esec pastrand vechimea -> TTL nu se reseteaza la fiecare esec
         oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0,

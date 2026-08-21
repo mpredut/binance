@@ -167,8 +167,17 @@ class Instrument:
                 # HYPE-Kraken); Binance suprascrie cu apply_weight_limit (API real).
                 # Nu tranzactiona tot dintr-o data. Side-aware: SELL->balanta base,
                 # BUY->balanta quote/pret.
-                qty = self._provider.cap_quantity(self.symbol, side_u, price, qty,
-                                                  base=self.base, quote=self.quote)
+                # `cancelorders`/`hours` fac parte din politica bogata Binance:
+                # daca balanta e blocata in ordine vechi/outlier, manage_quantity le
+                # poate elibera. Rewire-ul generic le pastra in kwargs, dar nu le
+                # transmitea hook-ului si dezactiva silentios comportamentul cerut
+                # explicit de rtrade/monitororder.
+                qty = self._provider.cap_quantity(
+                    self.symbol, side_u, price, qty,
+                    base=self.base, quote=self.quote,
+                    cancelorders=bool(kwargs.get("cancelorders", False)),
+                    hours=float(kwargs.get("hours", 5) or 5),
+                )
                 if qty is None or qty <= 0:
                     print(f"[{self.symbol}] {side_u} qty 0 dupa weight -> skip")
                     reason = "qty_zero_after_weight"
@@ -218,11 +227,20 @@ class Instrument:
             _outcomes_log.log_order_outcome(
                 self.symbol, side_u, price, qty, "executed" if order else "refused",
                 None if order else reason, kwargs.get("motivation"), caller=caller)
-            # RE-PLASARE (30 iul): daca a esuat (order None) si NU e deja un retry, salveaza
-            # intentia in coada persistenta -> order_retry_worker o reia periodic la pret
-            # curent, trecand din nou prin pipeline. Decizie user: retry pt TOT ce esueaza
-            # (rafinam ulterior). Best-effort: orice eroare aici NU afecteaza returul.
-            if order is None and not is_retry:
+            # OUTBOX: o plasare normala reusita satisface orice intentie pending pe
+            # acelasi symbol+side. Este esential pt apelantii cu retry local (rtrade):
+            # altfel esecul initial ramane in coada si poate produce un ordin duplicat
+            # dupa ce retry-ul local a reusit deja. Workerul nu are nevoie de resolve:
+            # el face claim atomic inainte de plasare.
+            if order is not None and not is_retry:
+                try:
+                    import order_retry
+                    order_retry.resolve(self.symbol, side_u)
+                except Exception as _e:  # noqa: BLE001
+                    print(f"[{self.symbol}] {side_u} resolve retry esuat (ignor): {_e}")
+            # Daca a esuat si NU e deja un retry, salveaza intentia persistenta.
+            # Best-effort: orice eroare aici NU afecteaza returul.
+            elif order is None and not is_retry:
                 try:
                     import order_retry
                     if order_retry.RETRY_ENABLED:

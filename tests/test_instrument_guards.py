@@ -241,6 +241,19 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         self.assertIsNotNone(order)
         self.assertEqual(_oq.load_all(), [])   # succes -> nimic in coada
 
+    def test_success_resolves_stale_same_side_retry(self):
+        import order_retry as _oq
+        _oq.enqueue(SYMBOL, "BUY", 1.0, {}, requested_price=100.0, now=1000.0)
+        _oq.enqueue(SYMBOL, "SELL", 1.0, {}, requested_price=101.0, now=1001.0)
+
+        p = _FakeProvider()
+        order = self._inst(p).place("BUY", 100.0, 1.0)
+
+        self.assertIsNotNone(order)
+        remaining = _oq.load_all()
+        self.assertEqual(len(remaining), 1)
+        self.assertEqual(remaining[0]["side"], "SELL")
+
     def test_smart_flag_gates_price_adjust(self):
         # CORECTIE 30 iul: place_order_smart (SMART: cancel-opuse + nudge) vs place_safe_order
         # (SAFE: fara). smart=True cheama adjust_order_price; smart=False NU (pastreaza semantica
@@ -263,6 +276,22 @@ class InstrumentGuardsTestCase(unittest.TestCase):
                            base="ZZZFAKE2", quote="USD", api=MarketApi([p]))
         inst2.place("BUY", 100.0, 1.0, smart=False)
         self.assertEqual(calls, [], "smart=False NU trebuie sa cheme adjust_order_price")
+
+    def test_cancelorders_and_hours_reach_quantity_hook(self):
+        calls = []
+
+        class _QuantitySpyProvider(_FakeProvider):
+            def cap_quantity(self, symbol, side, price, qty, base=None, quote=None,
+                             cancelorders=False, hours=5):
+                calls.append((cancelorders, hours))
+                return qty
+
+        p = _QuantitySpyProvider()
+        order = self._inst(p).place(
+            "BUY", 100.0, 1.0, smart=False, cancelorders=True, hours=2.7)
+
+        self.assertIsNotNone(order)
+        self.assertEqual(calls, [(True, 2.7)])
 
     # ── guards_internally (Binance-style) — sare TOT stratul agnostic ───────────
     def test_guards_internally_provider_bypasses_new_gates(self):
