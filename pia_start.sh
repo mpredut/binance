@@ -20,7 +20,9 @@ vpn_healthy() {
 
 sleep 5
 
-piactl dedicatedip add /home/predut/piatoken.txt
+if ! piactl get region 2>/dev/null | grep -q "^dedicated-"; then
+    piactl dedicatedip add /home/predut/piatoken.txt || exit 1
+fi
 piactl set region dedicated-belgium-85.122.194.86
 piactl set requestportforward true
 piactl connect
@@ -29,7 +31,7 @@ echo "Astept asignarea IP..."
 sleep 2
 connected=0
 for attempt in $(seq 1 12); do
-    if piactl get pubip | grep -q '[0-9]'; then
+    if piactl get vpnip | grep -q '[0-9]'; then
         connected=1
         break
     fi
@@ -41,8 +43,8 @@ if [ "$connected" -ne 1 ]; then
     exit 1
 fi
 
-echo "VPN conectat cu IP:"
-piactl get pubip
+echo "VPN conectat cu IP dedicat:"
+piactl get vpnip
 
 sleep 2
 PORT=$(piactl get portforward)
