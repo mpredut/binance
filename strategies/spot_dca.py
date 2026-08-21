@@ -119,6 +119,13 @@ class StratParams:
     dca_pct: float = 0.0        # DCA   = felia monedei × acest %
 
     def __post_init__(self):
+        try:
+            trend_topup = float(self.trend_topup)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("STRAT_TREND_TOPUP must be a finite positive number") from exc
+        if not math.isfinite(trend_topup) or trend_topup <= 0:
+            raise ValueError("STRAT_TREND_TOPUP must be a finite positive number")
+
         values = (self.total_budget, self.alloc_pct, self.entry_pct, self.dca_pct)
         if not any(value != 0 for value in values):
             return

@@ -174,5 +174,13 @@ class TrendOverlayTest(unittest.TestCase):
         s.client.ohlc_closes.assert_called_once_with("TESTPAIR_OVERLAY", 240)
 
 
+    def test_trend_topup_rejects_non_finite_or_non_positive_sizing(self):
+        for invalid in (float("nan"), float("inf"), float("-inf"), 0.0, -1.0):
+            with self.subTest(trend_topup=invalid), self.assertRaisesRegex(
+                ValueError, "STRAT_TREND_TOPUP",
+            ):
+                _make_strategy(trend_topup=invalid)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
