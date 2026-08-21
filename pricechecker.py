@@ -6,6 +6,7 @@ import threading
 from datetime import datetime
 from typing import Dict, List, Optional, Callable
 from collections import defaultdict
+from operator import itemgetter
 from urllib.parse import quote
 
 # Import your existing modules
@@ -136,20 +137,16 @@ class PriceChecker:
         except Exception:
             return f"https://coinmarketcap.com/search/?q={quote(symbol)}"
 
-    def _get_price_history_last_hours(self, symbol: str, hours: int) -> List[Dict]:
-        """Retrieve the price history from the last 'hours' hours."""
+    def _get_price_history_last_hours(self, symbol: str, hours: float):
+        """Return compact validated (timestamp_ms, price, readable_time) tuples."""
         if hours <= 0:
             return []
         history_limit = max(1000, int(math.ceil(hours * 60)) + 2)
         history = self.cachePriceAll.get_price_history(symbol, limit=history_limit)
-
-        if not history:
-            return []
-
-        cutoff_time = (time.time() - hours * 3600) * 1000  # milliseconds
+        cutoff_time = (time.time() - hours * 3600) * 1000
 
         recent_history = []
-        for entry in history:
+        for entry in history or ():
             if not isinstance(entry, dict):
                 continue
             try:
@@ -161,29 +158,18 @@ class PriceChecker:
                 continue
             if timestamp < 10_000_000_000:
                 timestamp *= 1000
-            if timestamp < cutoff_time:
-                continue
-            normalized = dict(entry)
-            normalized["timestamp"] = timestamp
-            normalized["price"] = price
-            normalized.setdefault("timestamp_readable", datetime.fromtimestamp(timestamp / 1000).strftime("%Y-%m-%d %H:%M:%S"))
-            recent_history.append(normalized)
+            if timestamp >= cutoff_time:
+                recent_history.append((timestamp, price, entry.get("timestamp_readable")))
+        return recent_history
 
-        return sorted(recent_history, key=lambda item: item["timestamp"])
+
+    @staticmethod
+    def _readable_time(entry) -> str:
+        timestamp, _, readable = entry
+        return readable or datetime.fromtimestamp(timestamp / 1000).strftime("%Y-%m-%d %H:%M:%S")
 
     def _calculate_24h_stats(self, symbol: str) -> Dict:
-        """
-        Calculate the minimum, maximum, and changes for the last 24 hours.
-
-        Returns:
-            Dict with:
-            - min_price: minimum price in the last 24h
-            - max_price: maximum price in the last 24h
-            - current_price: current price
-            - up_from_min: percentage increase from the minimum
-            - down_from_max: percentage decrease from the maximum
-            - has_data: True if enough data exists
-        """
+        """Calculate price extremes and time bounds in one O(n) pass."""
         current_price = self.cachePriceAll.get_latest_price(symbol)
         try:
             current_price = float(current_price)
@@ -192,37 +178,36 @@ class PriceChecker:
         if not math.isfinite(current_price) or current_price <= 0:
             return {"has_data": False, "error": "No current price available"}
 
-        history = self._get_price_history_last_hours(symbol, self.config["lookback_hours"])
+        lookback_hours = self.config["lookback_hours"]
+        history = self._get_price_history_last_hours(symbol, lookback_hours)
+        count = len(history)
 
-        if len(history) < 2:
+        if count < 2:
             return {
                 "has_data": False,
-                "error": f"Insufficient data: only {len(history)} records in the last {self.config['lookback_hours']}h"
+                "error": f"Insufficient data: only {count} records in the last {lookback_hours}h",
             }
 
-        # Extract prices from history
-        min_entry = min(history, key=lambda entry: entry["price"])
-        max_entry = max(history, key=lambda entry: entry["price"])
-
-        min_price = min_entry["price"]
-        max_price = max_entry["price"]
-
-        # Calculate percentage changes
-        up_from_min = ((current_price - min_price) / min_price) * 100 if min_price > 0 else 0
-        down_from_max = ((current_price - max_price) / max_price) * 100 if max_price > 0 else 0
-
+        by_price = itemgetter(1)
+        by_time = itemgetter(0)
+        min_entry = min(history, key=by_price)
+        max_entry = max(history, key=by_price)
+        oldest_entry = min(history, key=by_time)
+        newest_entry = max(history, key=by_time)
+        min_price = min_entry[1]
+        max_price = max_entry[1]
         return {
             "has_data": True,
             "current_price": current_price,
             "min_price": min_price,
-            "min_price_timestamp_readable": min_entry.get("timestamp_readable"),
+            "min_price_timestamp_readable": self._readable_time(min_entry),
             "max_price": max_price,
-            "max_price_timestamp_readable": max_entry.get("timestamp_readable"),
-            "up_from_min": up_from_min,
-            "down_from_max": down_from_max,
-            "history_count": len(history),
-            "oldest_time": history[0]["timestamp_readable"] if history else None,
-            "newest_time": history[-1]["timestamp_readable"] if history else None
+            "max_price_timestamp_readable": self._readable_time(max_entry),
+            "up_from_min": ((current_price - min_price) / min_price) * 100,
+            "down_from_max": ((current_price - max_price) / max_price) * 100,
+            "history_count": count,
+            "oldest_time": self._readable_time(oldest_entry),
+            "newest_time": self._readable_time(newest_entry),
         }
 
     def _should_send_alert(self, symbol: str, alert_type: str) -> bool:
