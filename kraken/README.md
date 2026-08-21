@@ -54,3 +54,21 @@ Rulează două instanțe, fiecare cu perechea ei (state separat `.state_<PAIR>.j
 python3 kraken_bot.py --pair HYPEEUR &
 python3 kraken_bot.py --pair SPCXEUR &     # cand SPCX va exista
 ```
+
+## Experiment arhivat: trailing decay v3
+
+`kraken-trail-decay-v3` a testat un trailing take-profit care se îngusta liniar
+în timp: pornea de la `tp_trail_pct` și ajungea la `tp_trail_end_pct` după
+`tp_trail_decay_steps` bare. Intenția era să lase spațiu unui trend proaspăt,
+apoi să protejeze mai agresiv profitul pe măsură ce trendul îmbătrânește.
+
+Experimentul nu este promovat în strategia live. Implementarea era construită
+pe vechiul modul `kraken/strategy.py`, înainte ca motorul comun să fie mutat în
+`strategies/spot_dca.py`, și nu are o validare financiară suficientă pe datele
+istorice actuale. Metricile risk-adjusted introduse atunci (Sharpe/Sortino etc.)
+există acum în infrastructura comună de backtest.
+
+Pentru o retestare viitoare, decay-ul trebuie reimplementat în motorul comun,
+default OFF, cu parametri validați fail-closed și stare persistentă compatibilă.
+Promovarea se face numai după benchmark full pe DEV, walk-forward și stress
+fees/slippage, comparat cu trailing-ul fix curent și trecut prin promotion gate.
