@@ -38,8 +38,13 @@ class FakeInfo:
 
 
 class FakeRead:
-    def __init__(self, fills=None, opens=None, status="open"):
+    def __init__(self, fills=None, opens=None, status="open", balances=None):
         self.info = FakeInfo(fills or [], status=status)
+        self.info.spot_user_state = lambda addr: {
+            "balances": balances if balances is not None else [
+                {"coin": "USDC", "total": "10000", "hold": "0"},
+            ],
+        }
         self._opens = opens or []
 
     def sz_decimals(self, coin):
@@ -133,6 +138,22 @@ class HLExecutorContractTest(unittest.TestCase):
         with self.assertRaises(ProviderError):
             self.p.submit_order("HYPE", "buy", 1.0, price=60.0)
 
+    def test_buy_subfinantat_este_refuzat_inainte_de_signer(self):
+        os.environ["HL_LIVE_ORDERS"] = "true"
+        self.p._client = FakeRead(balances=[
+            {"coin": "USDC", "total": "10", "hold": "0"},
+        ])
+        with self.assertRaisesRegex(ProviderError, "sold USDC insuficient"):
+            self.p.submit_order("HYPE", "buy", 1.0, price=60.0, kind="DCA")
+        self.assertEqual(self.signer.calls, [])
+
+    def test_sell_nu_este_blocat_de_soldul_quote(self):
+        os.environ["HL_LIVE_ORDERS"] = "true"
+        self.p._client = FakeRead(balances=[])
+        self.assertEqual(
+            self.p.submit_order("HYPE", "sell", 1.0, price=60.0), "12345",
+        )
+
     def test_order_status_open(self):
         self.p._client = FakeRead(status="open")
         st = self.p.order_status("HYPE", "999")
@@ -162,6 +183,17 @@ class HLExecutorContractTest(unittest.TestCase):
         self.assertAlmostEqual(st.filled_qty, 2.0)
         self.assertAlmostEqual(st.cost, 1.5 * 60 + 0.5 * 62)
         self.assertAlmostEqual(st.fee, 0.15)
+
+    def test_order_status_converteste_fee_din_hype_in_usdc(self):
+        self.p._client = FakeRead(
+            fills=[{
+                "oid": 5, "sz": "2", "px": "75", "fee": "0.001",
+                "feeToken": "HYPE",
+            }],
+            status="filled",
+        )
+        st = self.p.order_status("HYPE", "5")
+        self.assertAlmostEqual(st.fee, 0.075)
 
     def test_order_status_canceled_din_endpoint_dedicat(self):
         self.p._client = FakeRead(status="canceled")

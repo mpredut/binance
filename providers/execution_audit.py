@@ -230,5 +230,15 @@ class AuditedStrategyExecutor:
     def free_balance(self, asset: str):
         return self._executor.free_balance(asset)
 
+    def preflight_order(self, symbol: str, side: str, qty: float,
+                        price=None, *, market: bool = False,
+                        kind: Optional[str] = None) -> None:
+        """Ruleaza gardul optional al venue-ului inainte de auditul de submit."""
+        preflight = getattr(self._executor, "preflight_order", None)
+        if callable(preflight):
+            preflight(
+                symbol, side, qty, price, market=market, kind=kind,
+            )
+
     def ohlc_closes(self, symbol: str, interval_min: int):
         return self._executor.ohlc_closes(symbol, interval_min)

@@ -393,6 +393,14 @@ class Strategy:
                                      "kind": kind, "market": market, "ts": time.time()})
             return True
         try:
+            # Venue-urile care pot accepta un BUY subfinantat si apoi anula
+            # restul (Hyperliquid) pot bloca intentia inainte de audit/submit.
+            preflight = getattr(type(self.client), "preflight_order", None)
+            if callable(preflight):
+                preflight(
+                    self.client, self.pair, side, vol, None if market else price,
+                    market=market, kind=kind,
+                )
             intent_id = new_intent_id(self.venue_label, self.pair, kind)
             submit_with_intent = getattr(type(self.client), "submit_order_with_intent", None)
             if callable(submit_with_intent):

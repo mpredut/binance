@@ -335,6 +335,9 @@ class HyperliquidProvider(MarketDataProvider):
             if not mid:
                 raise ProviderError(f"submit_order({symbol}) market: pret indisponibil")
             px = mid * (1.05 if is_buy else 0.95)               # limita agresiva -> fill imediat
+        self.preflight_order(
+            symbol, side, qty, px, market=market, kind=kind,
+        )
         try:
             signer = self._signer()
             szd = signer.sz_decimals(self._token)
@@ -351,6 +354,36 @@ class HyperliquidProvider(MarketDataProvider):
         if not ok or oid is None:
             raise ProviderError(f"submit_order({symbol}) respins: {msg}")
         return str(oid)
+
+    def preflight_order(self, symbol: str, side: str, qty: float,
+                        price: Optional[float] = None, *, market: bool = False,
+                        kind: Optional[str] = None) -> None:
+        """Refuza un BUY pe care soldul USDC liber nu-l poate finanta integral.
+
+        Hyperliquid poate accepta un ordin supradimensionat, executa doar soldul
+        disponibil si anula restul. Pentru DCA asta consuma o runda cu o fractiune
+        din suma intentionata. Verificarea se repeta in ``submit_order`` pentru a
+        inchide cursa dintre preflight-ul motorului si trimiterea efectiva.
+        """
+        if not (side or "").lower().startswith("b"):
+            return
+        if price is None:
+            mid = self.get_current_price(symbol)
+            if not mid:
+                raise ProviderError(f"preflight_order({symbol}): pret indisponibil")
+            price = mid * (1.05 if market else 1.0)
+        required = float(qty) * float(price)
+        available = self.free_balance("USDC")
+        if available is None:
+            raise ProviderError(
+                f"preflight_order({symbol}): soldul USDC nu poate fi confirmat"
+            )
+        tolerance = max(1e-9, required * 1e-12)
+        if float(available) + tolerance < required:
+            raise ProviderError(
+                f"preflight_order({symbol}) {kind or 'BUY'}: sold USDC insuficient "
+                f"({float(available):.8f} < {required:.8f}) — ordin netrimis"
+            )
 
     def order_status(self, symbol: str, order_id: str):
         c = self._hl()
@@ -383,9 +416,22 @@ class HyperliquidProvider(MarketDataProvider):
                 if int(f.get("oid", -1)) != oid:
                     continue
                 sz = float(f.get("sz") or 0.0)
+                fill_price = float(f.get("px") or 0.0)
                 filled += sz
-                cost += sz * float(f.get("px") or 0.0)
-                fee += float(f.get("fee") or 0.0)
+                cost += sz * fill_price
+                raw_fee = float(f.get("fee") or 0.0)
+                fee_token = str(f.get("feeToken") or "").upper()
+                # La BUY, HL taxeaza de regula in activul de baza (HYPE), iar
+                # la SELL in quote (USDC). Motorul contabilizeaza totul in quote,
+                # deci convertim fee-ul HYPE la pretul exact al fill-ului.
+                if fee_token == self._token:
+                    fee += raw_fee * fill_price
+                elif not fee_token or fee_token == "USDC":
+                    fee += raw_fee
+                else:
+                    raise ProviderError(
+                        f"order_status({order_id}): feeToken necunoscut {fee_token!r}"
+                    )
             try:
                 original = float(order_payload.get("origSz") or 0.0)
                 remaining = float(order_payload.get("sz") or 0.0)

@@ -23,6 +23,7 @@ class FakeExecutor:
         self.calls = []
         self.next_status = OrderStatus("open", 0.0, 0.0, 0.0)
         self._seq = 0
+        self.preflight_error = None
 
     def get_current_price(self, symbol):
         return 60.0
@@ -47,6 +48,11 @@ class FakeExecutor:
 
     def ohlc_closes(self, symbol, interval_min):
         return []
+
+    def preflight_order(self, symbol, side, qty, price=None, *, market=False, kind=None):
+        self.calls.append(("preflight_order", symbol, side, qty, price, market, kind))
+        if self.preflight_error:
+            raise self.preflight_error
 
 
 def _strategy(fake, **over):
@@ -158,6 +164,14 @@ class ProviderLivePathTest(unittest.TestCase):
         self.fake.submit_order = boom
         self.s._place("buy", 1.0, 60.0, kind="ENTRY", amount=650.0)
         self.assertEqual(self.s.s["orders"], [])   # esec -> niciun ordin stocat
+
+    def test_preflight_refuzat_nu_creeaza_intentie_sau_ordin(self):
+        self.fake.preflight_error = ProviderError("sold insuficient")
+        placed = self.s._place("buy", 10.0, 60.0, kind="DCA", amount=600.0)
+        self.assertFalse(placed)
+        self.assertTrue(any(c[0] == "preflight_order" for c in self.fake.calls))
+        self.assertFalse(any(c[0] == "submit_order" for c in self.fake.calls))
+        self.assertEqual(self.s.s["orders"], [])
 
     def test_reconcile_umple_pe_closed_prin_order_status(self):
         self.s.s["orders"] = [{"txid": "OID-9", "side": "buy", "vol": 2.0, "price": 60.0,
