@@ -360,10 +360,20 @@ class Strategy:
         repetate 'sell TP esuat' pe HYPEUSD). Lasam un praf: o unitate la
         penultima zecimala (ex. 5.1715916 -> 5.1715914, ~$0.00001 dust) —
         cost neglijabil, elimina blocarea permanenta la TP/stop-loss.
-        Acelasi calcul ca la _maybe_adopt (care avea deja fixul, dar doar
-        pt pozitii adoptate, nu si pt cele acumulate prin fill-uri proprii)."""
-        step = 10.0 ** -(max(self.vol_dec - 1, 1))
-        return round(int((qty - step) / step) * step, self.vol_dec)
+
+        Lasam UN tick de volum, nu o unitate la penultima zecimala. Diferenta
+        este esentiala pe venue-uri cu precizie mica: la 2 zecimale, regula
+        veche lasa 0.1 HYPE (~dolari) la fiecare ciclu, in loc de 0.01 HYPE.
+        """
+        # Pastreaza bufferul istoric de zece tick-uri la precizie mare
+        # (comportamentul Kraken/golden), dar nu-l amplifica la 0.1 unitati pe
+        # venue-uri cu numai doua zecimale precum Hyperliquid.
+        dust_decimals = self.vol_dec if self.vol_dec <= 2 else self.vol_dec - 1
+        step = 10.0 ** -max(dust_decimals, 1)
+        # Epsilon-ul evita ca 13.40/0.01 sa devina 1339.999999 si sa lase
+        # accidental doua tick-uri dupa floor.
+        ticks = math.floor((float(qty) + step * 1e-9) / step) - 1
+        return round(max(ticks, 0) * step, self.vol_dec)
 
     def _has_open(self, side: str) -> bool:
         return any(o["side"] == side for o in self.s["orders"])

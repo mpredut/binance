@@ -82,6 +82,10 @@ class ProviderLivePathTest(unittest.TestCase):
     def test_init_citeste_precizia_prin_contract(self):
         self.assertEqual((self.s.price_dec, self.s.vol_dec), (2, 8))
 
+    def test_dust_safe_lasa_un_singur_tick_la_precizie_mica(self):
+        self.s.vol_dec = 2
+        self.assertEqual(self.s._dust_safe_qty(13.4), 13.39)
+
     def test_place_cheama_submit_order_si_stocheaza_order_id(self):
         self.s._save = MagicMock()
         self.s._place("buy", 1.0, 60.0, kind="ENTRY", amount=650.0)
