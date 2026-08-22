@@ -8,6 +8,8 @@ scrise. Variantele sunt preînregistrate și rămân PAPER:
 * ``current``: configurația HLC efectivă;
 * ``long_tp3_trail3``: TP armat la 3%, trend-hold, trailing fix 3%;
 * ``reentry4``: configurația curentă, reintrare după recul de 4%.
+* ``trail_profit_floor_sl18``: trailing numai peste +1%, hard stop la -18%;
+* ``overlay650t8``: overlay de trend cu top-up 650 și trailing 8%.
 """
 from __future__ import annotations
 
@@ -53,6 +55,18 @@ def _variants(interval: int):
             tp_trail_pct=3.0,
         ),
         "reentry4": dataclasses.replace(base, reentry_drop_pct=4.0),
+        "trail_profit_floor_sl18": dataclasses.replace(
+            base,
+            tp_trail_profit_floor_pct=1.0,
+            stop_loss_pct=18.0,
+        ),
+        "overlay650t8": dataclasses.replace(
+            base,
+            trend_overlay=True,
+            trend_topup=650.0,
+            trend_trail_pct=8.0,
+            trend_exit_break=False,
+        ),
     }
     if interval != 240:
         raise ValueError("shadow_longterm acceptă numai intervalul nativ 240m")
