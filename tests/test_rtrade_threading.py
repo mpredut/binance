@@ -29,6 +29,42 @@ class RTradeThreadingTest(unittest.TestCase):
             self.assertEqual(bot.run(), "coordinated")
         run.assert_called_once_with()
 
+    def test_coordinator_starts_multiple_independent_rounds_on_same_symbol(self):
+        bot = _bot()
+        coordinators = []
+
+        class FakeCoordinator:
+            def __init__(self, *_args, **_kwargs):
+                self.pair_id = f"pair-{len(coordinators) + 1}"
+                self.steps = []
+                coordinators.append(self)
+
+            def start(self, _price):
+                return SimpleNamespace(
+                    terminal=False, pair_id=self.pair_id, phase="quoting",
+                    reason=None)
+
+            def step(self, now=None):
+                self.steps.append(now)
+                return SimpleNamespace(terminal=False)
+
+        venue = SimpleNamespace(current_price=lambda: 100.0)
+        with patch.object(rtrade, "_LivePairVenue", return_value=venue), \
+             patch.object(rtrade, "PairCoordinator", FakeCoordinator), \
+             patch.object(rtrade, "RTRADE_PAIR_MAX_ACTIVE_ROUNDS", 2), \
+             patch.object(rtrade, "RTRADE_PAIR_START_INTERVAL_SEC", 8), \
+             patch.object(rtrade, "RTRADE_PAIR_POLL_SEC", 1), \
+             patch.object(rtrade, "_trend_too_strong", return_value=False), \
+             patch.object(rtrade.time, "monotonic", side_effect=[0.0, 8.0, 16.0]), \
+             patch.object(rtrade.time, "sleep",
+                          side_effect=[None, None, KeyboardInterrupt]):
+            with self.assertRaises(KeyboardInterrupt):
+                bot._run_coordinator_forever()
+
+        self.assertEqual([c.pair_id for c in coordinators], ["pair-1", "pair-2"])
+        self.assertEqual(coordinators[0].steps, [8.0, 16.0])
+        self.assertEqual(coordinators[1].steps, [16.0])
+
     def test_live_pair_adapter_passes_pair_id_and_owns_retry(self):
         executor = SimpleNamespace()
         order = {"orderId": 7, "price": "99.36", "origQty": "0.8"}

@@ -25,7 +25,11 @@ un singur PairCoordinator
 - Duplicatele și alte procese/grupuri rămân blocate.
 - Dacă al doilea picior nu poate fi plasat, primul este anulat.
 - Fără fill până la TTL: ambele ordine sunt anulate și reconciliate încă o dată.
-- Un singur fill: nu se deschide altă rundă; ordinul opus devine exit.
+- Un singur fill: ordinul opus al acelei runde devine exit și rămâne urmărit.
+- Alte runde pot porni pe același simbol, fiecare cu `pair_id`, order-id-uri și
+  inventar separat, până la `RTRADE_PAIR_MAX_ACTIVE_ROUNDS`.
+- Rundele noi sunt distanțate de `RTRADE_PAIR_START_INTERVAL_SEC`, pentru a evita
+  burst-uri necontrolate și epuizarea limitelor venue-ului.
 - Exit-ul este ancorat în fill și în marja minimă de 1,15%, nu urmărește piața în pierdere.
 - Partial fill: remainder-ul de entry este anulat, iar exit-ul este redimensionat la net.
 - Fast fill: `latency <= 25% * TTL`; pentru LONG are stop 4%.

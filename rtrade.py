@@ -2,6 +2,7 @@ import os
 import time
 import datetime
 import math
+import uuid
 from collections import deque
 import threading
 from concurrent.futures import ThreadPoolExecutor, wait
@@ -88,6 +89,10 @@ RTRADE_TREND_WINDOW_SEC = float(os.environ.get("RTRADE_TREND_WINDOW_SEC", "900")
 RTRADE_PAIR_COORDINATOR_ENABLED = os.environ.get(
     "RTRADE_PAIR_COORDINATOR_ENABLED", "false").strip().lower() == "true"
 RTRADE_PAIR_POLL_SEC = float(os.environ.get("RTRADE_PAIR_POLL_SEC", "1"))
+RTRADE_PAIR_MAX_ACTIVE_ROUNDS = int(os.environ.get(
+    "RTRADE_PAIR_MAX_ACTIVE_ROUNDS", "4"))
+RTRADE_PAIR_START_INTERVAL_SEC = float(os.environ.get(
+    "RTRADE_PAIR_START_INTERVAL_SEC", "8"))
 RTRADE_FAST_FILL_RATIO = float(os.environ.get("RTRADE_FAST_FILL_RATIO", "0.25"))
 RTRADE_MIN_EDGE_PCT = float(os.environ.get("RTRADE_MIN_EDGE_PCT", "0.0115"))
 RTRADE_SHOCK_HARD_STOP_PCT = float(os.environ.get(
@@ -451,28 +456,61 @@ class TradingBot:
             shock_hard_stop_fraction=RTRADE_SHOCK_HARD_STOP_PCT,
             hard_stop_fraction=RTRADE_HARD_STOP_PCT,
         )
+        if RTRADE_PAIR_MAX_ACTIVE_ROUNDS < 1:
+            raise ValueError("RTRADE_PAIR_MAX_ACTIVE_ROUNDS trebuie sa fie >= 1")
+        if RTRADE_PAIR_START_INTERVAL_SEC <= 0:
+            raise ValueError("RTRADE_PAIR_START_INTERVAL_SEC trebuie sa fie > 0")
+
+        # Fiecare coordonator detine exclusiv order-id-urile si inventarul unei
+        # runde. O runda expusa continua sa-si urmareasca exit-ul, dar nu mai
+        # blocheaza lansarea altor runde pe acelasi simbol pana la limita setata.
+        active = []
+        last_start_at = float("-inf")
         while True:
             try:
-                current_price = venue.current_price()
-                if current_price is None:
-                    time.sleep(WAIT_FOR_ORDER)
-                    continue
-                if _trend_too_strong(self.symbol):
-                    time.sleep(WAIT_FOR_ORDER)
-                    continue
-                outcome = PairCoordinator(venue, self.qty, policy).run_cycle(current_price)
-                print(
-                    f"[{self.symbol}] pair={outcome.pair_id} phase={outcome.phase} "
-                    f"shock={outcome.shock} latency={outcome.fill_latency_sec} "
-                    f"buy={outcome.buy_qty:.6f} sell={outcome.sell_qty:.6f} "
-                    f"net={outcome.net_qty:.6f} cashflow={outcome.gross_pnl:.2f} "
-                    f"fees={outcome.fees:.2f} reason={outcome.reason}")
-                time.sleep(1)
-            except Exception as exc:  # noqa: BLE001 — fail closed + reconciliere veche
+                now = time.monotonic()
+                survivors = []
+                for coordinator in active:
+                    outcome = coordinator.step(now=now)
+                    if outcome.terminal:
+                        print(
+                            f"[{self.symbol}] pair={outcome.pair_id} "
+                            f"phase={outcome.phase} shock={outcome.shock} "
+                            f"latency={outcome.fill_latency_sec} "
+                            f"buy={outcome.buy_qty:.6f} sell={outcome.sell_qty:.6f} "
+                            f"net={outcome.net_qty:.6f} "
+                            f"cashflow={outcome.gross_pnl:.2f} "
+                            f"fees={outcome.fees:.2f} reason={outcome.reason}")
+                    else:
+                        survivors.append(coordinator)
+                active = survivors
+
+                can_start = (
+                    len(active) < RTRADE_PAIR_MAX_ACTIVE_ROUNDS
+                    and now - last_start_at >= RTRADE_PAIR_START_INTERVAL_SEC
+                )
+                if can_start and not _trend_too_strong(self.symbol):
+                    current_price = venue.current_price()
+                    if current_price is not None:
+                        coordinator = PairCoordinator(venue, self.qty, policy)
+                        outcome = coordinator.start(current_price)
+                        last_start_at = now
+                        if outcome.terminal:
+                            print(
+                                f"[{self.symbol}] pair={outcome.pair_id} "
+                                f"phase={outcome.phase} reason={outcome.reason}")
+                        else:
+                            active.append(coordinator)
+                            print(
+                                f"[{self.symbol}] pair={outcome.pair_id} started "
+                                f"active={len(active)}/"
+                                f"{RTRADE_PAIR_MAX_ACTIVE_ROUNDS}")
+                time.sleep(RTRADE_PAIR_POLL_SEC)
+            except Exception as exc:  # noqa: BLE001 — rundele raman pentru reconciliere
                 print(f"[{self.symbol}] pair coordinator error: {exc}")
-                api.cancel_recent_orders("SELL", self.symbol, WAIT_FOR_ORDER)
-                api.cancel_recent_orders("BUY", self.symbol, WAIT_FOR_ORDER)
-                time.sleep(1)
+                # Nu anulam global ordinele recente: intr-un registru multi-runda
+                # asta ar putea distruge picioarele valide ale altor pair_id-uri.
+                time.sleep(RTRADE_PAIR_POLL_SEC)
 
     def run(self):
         if RTRADE_PAIR_COORDINATOR_ENABLED:
