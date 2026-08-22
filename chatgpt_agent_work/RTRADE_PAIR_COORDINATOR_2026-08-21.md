@@ -1,6 +1,7 @@
 # rtrade pair coordinator — candidat financiar
 
-Status: implementat și testat, dar **OFF implicit** (`RTRADE_PAIR_COORDINATOR_ENABLED=false`).
+Status: implementat, testat și activat controlat (`RTRADE_PAIR_COORDINATOR_ENABLED=true`),
+cu maximum 4 runde active și minimum 8 secunde între lansări.
 
 ## Problema corectată structural
 
