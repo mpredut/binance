@@ -269,6 +269,7 @@ def _new_state() -> dict:
         "last_exit_kind": None,   # "TP"/"STOP"/... — cum s-a inchis ultimul ciclu (reintrare STOP-aware)
         "sl_low": None,           # minimul de pret dupa un stop-loss (pt reintrarea pe revenire)
         "trail_peak": None,       # varful urmarit dupa ce pretul a depasit nivelul TP
+        "trail_stop": None,       # floor-ul trailing ratcheteaza doar in sus, inclusiv cand vol se schimba
         "trend_mode": False,      # overlay: suntem intr-o pozitie de trend (hold+trailing)?
         "trend_peak": None,       # varful urmarit in modul trend
         "trend_confirm_count": 0, # bare consecutive de uptrend (confirmare semnal)
@@ -1071,7 +1072,14 @@ class Strategy:
             peak = max(self.s.get("trail_peak") or price, price)
             self.s["trail_peak"] = peak
             eff_trail = self._effective_trail_pct()   # A: adaptiv pe vol daca activat, altfel fix
-            trail_stop = peak * (1 - eff_trail / 100)
+            candidate_stop = peak * (1 - eff_trail / 100)
+            # Un trailing stop este o limita unidirectionala: volatilitatea poate
+            # largi distanta pentru varfuri VIITOARE, dar nu are voie sa dea inapoi
+            # profitul deja protejat. Inainte, o bara OHLC noua putea mari
+            # ``eff_trail`` si cobora pragul chiar cu acelasi ``trail_peak``.
+            previous_stop = self.s.get("trail_stop")
+            trail_stop = max(candidate_stop, previous_stop or candidate_stop)
+            self.s["trail_stop"] = trail_stop
             # Aceeași referință conservatoare folosită la ordinul MARKET. Pragul
             # se aplică ei, nu prețului brut observat, ca bufferul de 0,1% să nu
             # transforme o ieșire exact la floor într-o pierdere implicită.
@@ -1102,9 +1110,11 @@ class Strategy:
             # Astept sa DEPASESC nivelul TP ca sa pornesc trailing-ul; anulez orice sell fix.
             # Iesirea de siguranta ramane STOP-LOSS-ul (verificat mai sus in step()).
             self.s["trail_peak"] = None
+            self.s["trail_stop"] = None
             self._cancel_orders("sell", exclude_market=True)
         elif self.p.enable_takeprofit and avg:
             self.s["trail_peak"] = None   # sub TP / mod clasic -> reset varf
+            self.s["trail_stop"] = None
             # TP in TRANSE (optional, STRAT_TP_TRANCHES="3:50,6:50"): vinde gradual.
             # Fara tranче configurate = comportamentul CLASIC (un TP pe tot) — DEFAULT.
             tranches = self.p.tp_tranches or [(self.p.takeprofit_pct, 100.0)]

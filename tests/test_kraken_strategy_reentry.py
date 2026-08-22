@@ -208,6 +208,24 @@ class TestTrailingTakeProfit(unittest.TestCase):
         self.assertTrue(s._has_open("sell"))
         self.assertFalse(s._has_open("buy"))
 
+    def test_adaptive_trailing_floor_never_moves_down_when_volatility_widens(self):
+        s = self._positioned_strategy(tp_trail_adaptive=True)
+
+        with patch.object(s, "_effective_trail_pct", side_effect=[1.5, 3.0]):
+            s.step(106.0)      # floor initial: 104.41
+            protected = s.s["trail_stop"]
+            self.assertAlmostEqual(protected, 104.41)
+
+            # Volatilitatea creste si trailing-ul adaptiv s-ar largi la 3%.
+            # Floor-ul deja castigat nu trebuie coborat la 102.82.
+            s.step(104.0)
+
+        self.assertEqual(s.s["trail_stop"], protected)
+        sell = s._find_open("sell")
+        self.assertIsNotNone(sell, "floor-ul ratchetat trebuie sa declanseze iesirea")
+        self.assertTrue(sell["market"])
+        self.assertEqual(sell["kind"], "TP")
+
     def test_profit_floor_blocks_gap_exit_below_break_even(self):
         s = self._positioned_strategy(
             stop_loss_pct=12.5,
