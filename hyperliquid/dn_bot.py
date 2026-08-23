@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-dn_bot.py — bot DELTA-NEUTRAL (funding farming) pe Hyperliquid.
+dn_bot.py — DELTA-NEUTRAL funding-farming bot on Hyperliquid.
 
-Ruleaza cu python-ul din venv:
-    /home/mariusp/binance/.venv/bin/python dn_bot.py        # dupa .env
-    ...python dn_bot.py --paper                               # simulare
-    ...python dn_bot.py --funding                             # arata funding-ul curent
-    ...python dn_bot.py --status                              # picioarele + delta curenta
+Run with the virtual-environment Python:
+    /home/mariusp/binance/.venv/bin/python dn_bot.py        # use .env
+    ...python dn_bot.py --paper                               # simulation
+    ...python dn_bot.py --funding                             # show current funding
+    ...python dn_bot.py --status                              # show legs and current delta
 
-Necesita USDC in AMBELE conturi: SPOT (ca sa cumperi tokenul) si PERP (margine short).
+Requires USDC in BOTH SPOT for buying the token and PERP for short margin.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ def _cmd_status(client: HLClient, params: DNParams) -> int:
     upnl     = float(pos.get("unrealizedPnl") or 0)
     delta    = spot_qty + szi
     perp_notional = abs(szi) * perp_px
-    # funding real incasat (ultimele 7 zile)
+    # Actual funding received over the last seven days.
     earned = 0.0
     for ev in client.funding_history(int((time.time() - 7*86400) * 1000)):
         try: earned += float(ev.get("delta", {}).get("usdc") or 0)
@@ -63,8 +63,8 @@ def _cmd_status(client: HLClient, params: DNParams) -> int:
 
 
 def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = False) -> int:
-    """MONITOR read-only al pozitiei REALE: ZERO ordine, doar citiri + alerte.
-    Sigur de rulat in paralel cu botul de pe server (supraveghere redundanta)."""
+    """Read-only monitor of the REAL position: ZERO orders, only reads and alerts.
+    Safe to run alongside the server bot for redundant supervision."""
     from notify import notify
     log("=== MONITOR DN (read-only — nu plaseaza NICIUN ordin) ===")
     log(f"    coin={params.coin}  verifica la {params.check_minutes} min  alerte: lichidare<{params.liq_alert_pct}%, delta, funding negativ, pozitie disparuta")
@@ -84,7 +84,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
             delta_usd = abs(spot_qty + szi) * perp_px
             has_pos = abs(spot_qty) * perp_px > 5 or abs(szi) * perp_px > 5
 
-            # 1. pozitia a disparut (lichidata/inchisa)?
+            # 1. Did the position disappear through liquidation or closure?
             if not has_pos:
                 if armed["gone"]:
                     armed["gone"] = False
@@ -93,7 +93,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
                            source="dn-watch", desktop=desktop)
             else:
                 armed["gone"] = True
-                # 2. dezechilibru (delta) mare?
+                # 2. Is there a large delta imbalance?
                 if delta_usd > max(5.0, params.notional * params.rebalance_pct / 100):
                     if armed["delta"]:
                         armed["delta"] = False
@@ -102,7 +102,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
                                source="dn-watch", desktop=desktop)
                 else:
                     armed["delta"] = True
-                # 3. aproape de lichidare?
+                # 3. Is the short close to liquidation?
                 if liq > 0 and szi < 0 and perp_px > 0:
                     dist = (liq - perp_px) / perp_px * 100
                     if 0 < dist <= params.liq_alert_pct and armed["liq"]:
@@ -112,7 +112,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
                                source="dn-watch", desktop=desktop)
                     elif dist > params.liq_alert_pct * 1.5:
                         armed["liq"] = True
-                # 4. funding puternic negativ?
+                # 4. Is funding strongly negative?
                 if fhr is not None:
                     if fhr < params.exit_funding_hr and armed["fund"]:
                         armed["fund"] = False
@@ -126,7 +126,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
                 if fhr is not None else f"  [WATCH] spot={spot_qty:.4f} perp={szi:.4f} (funding indisponibil)")
         except KeyboardInterrupt:
             log("  [WATCH] oprit manual."); return 0
-        except Exception as e:  # noqa: BLE001 — monitorul nu moare la o eroare
+        except Exception as e:  # noqa: BLE001 — one error must not terminate the monitor
             errors += 1
             log(f"  ! [WATCH] eroare (#{errors}): {e!r} — continui")
         if once:
@@ -145,8 +145,8 @@ def main() -> int:
     for i, a in enumerate(sys.argv):
         if a == "--env-file" and i + 1 < len(sys.argv):
             env_file = sys.argv[i + 1]
-    load_dotenv(env_file)                                                      # secrete (gitignored)
-    load_dotenv(os.path.join(os.path.dirname(env_file) or ".", "config.env"))  # config versionat (comis)
+    load_dotenv(env_file)                                                      # gitignored secrets
+    load_dotenv(os.path.join(os.path.dirname(env_file) or ".", "config.env"))  # versioned configuration
 
     ap = argparse.ArgumentParser(description="Bot delta-neutral (funding) pe Hyperliquid.")
     ap.add_argument("--env-file", default=env_file)
@@ -163,22 +163,22 @@ def main() -> int:
                          "OPRESTE intai botul+watchdog (vezi dn_close.sh) ca sa nu se bata cu el.")
     args = ap.parse_args()
     if args.watch:
-        single_instance("dn_watch")            # watcher-ul e proces separat -> lock propriu
+        single_instance("dn_watch")            # separate watcher process uses its own lock
     elif not (args.once or args.status or args.close):
         single_instance("dn_bot")
 
     dry = args.paper or not (os.environ.get("STRAT_EXECUTE", "false").lower() == "true")
     need_wallet = not dry and not (args.funding or args.status or args.watch)
-    # REZILIENTA: fara net la pornire (DNS/conexiune), NU murim — reincercam in loop
+    # RESILIENCE: retry startup DNS/connection failures instead of terminating.
     while True:
         try:
             client = _client(need_wallet)
             break
         except HLError as e:
-            log(f"! {e}"); return 1          # eroare de CONFIG (chei lipsa) — nu retry
+            log(f"! {e}"); return 1          # missing-key configuration error: do not retry
         except KeyboardInterrupt:
             return 130
-        except Exception as e:  # noqa: BLE001 — net picat: reincearca
+        except Exception as e:  # noqa: BLE001 — retry after a network failure
             log(f"! conexiune esuata ({e.__class__.__name__}) — reincerc in 60s")
             time.sleep(60)
     params = DNParams.from_env(client)
@@ -192,8 +192,8 @@ def main() -> int:
     if args.watch:
         return _cmd_watch(client, params, desktop=False, once=args.once)
     if args.close:
-        # IESIRE one-shot: flat pe ambele picioare. legs() in REAL citeste soldurile
-        # reale; daca citirea esueaza -> NU inchidem orbeste. Foloseste _close existent.
+        # One-shot EXIT flattens both legs. In REAL mode, legs() reads actual balances;
+        # if reading fails, do not close blindly. Reuse the existing _close implementation.
         dn = DeltaNeutral(client, params, dry_run=dry, desktop=False)
         L = dn.legs()
         if L is None:

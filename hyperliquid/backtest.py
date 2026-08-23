@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-backtest.py — backtester COMPLET pentru strategia DCA + take-profit pe Hyperliquid.
+backtest.py — COMPLETE Hyperliquid DCA and take-profit strategy backtester.
 
-Reia strategia bar-cu-bar pe lumanari OHLC (1h):
-  * intrare LIMIT la market-/+discount (fill daca bara atinge pretul),
-  * DCA cand pretul merge contra cu drop%,
-  * take-profit la pret_mediu*(1±tp), reia ciclul,
-  * include FEE pe fiecare fill SI FUNDING (din istoricul real HL).
-  * poarta de semnal optionala (long doar pe up, short doar pe down).
+Replay the strategy bar by bar over one-hour OHLC candles:
+  * LIMIT entry at market-/+discount, filling when the bar touches price;
+  * DCA after price moves against the position by drop%;
+  * take profit at average_price*(1±tp), then restart the cycle;
+  * include per-fill FEES AND FUNDING from real HL history;
+  * optional signal gate allowing longs only on up and shorts only on down.
 
-Moduri:
-  single  — o rulare, raport detaliat
-  sweep   — incearca multe combinatii de TP/DROP si arata top-ul (tuning)
+Modes:
+  single — one run with a detailed report
+  sweep  — test many TP/DROP combinations and show the best for tuning
 
-Ruleaza cu venv-ul:
+Run with the virtual environment:
   /home/mariusp/binance/.venv/bin/python backtest.py --coin HYPE --days 45 --direction short
   ...backtest.py --mode sweep --coin HYPE --days 45 --direction short --signal analysis
 """
@@ -39,7 +39,7 @@ def _post(body):
 
 
 def fetch_funding(coin, start_ms):
-    """Istoric funding/ora pe coin: dict {ora_index_aprox: rate}. Aliniem dupa timp."""
+    """Return hourly coin funding history sorted for time alignment."""
     try:
         data = _post({"type": "fundingHistory", "coin": coin, "startTime": start_ms})
         return sorted(((int(d["time"]), float(d["fundingRate"])) for d in data), key=lambda x: x[0])
@@ -49,7 +49,7 @@ def fetch_funding(coin, start_ms):
 
 
 def funding_at(fund, t_ms):
-    """Rata de funding activa la momentul t_ms (cel mai recent <= t)."""
+    """Return the funding rate active at t_ms, using the most recent rate at or before t."""
     lo, hi = 0, len(fund)
     while lo < hi:
         mid = (lo + hi) // 2
@@ -61,10 +61,10 @@ def funding_at(fund, t_ms):
 
 
 def precompute_signal(closes, ts, source, fast, slow, band, win_h, step_h):
-    """Semnal cauzal per bara (folosind doar date pana la acea bara)."""
+    """Return a causal signal per bar using data available through that bar only."""
     out = ["neutral"] * len(closes)
     if source == "off":
-        return ["__any__"] * len(closes)         # poarta dezactivata
+        return ["__any__"] * len(closes)         # gate disabled
     for i in range(len(closes)):
         if source == "analysis":
             from price_analysis import detect_long_term_trend
@@ -79,7 +79,7 @@ def precompute_signal(closes, ts, source, fast, slow, band, win_h, step_h):
 
 
 def simulate(ohlc, ts, fund, sig, P, direction):
-    """Reia strategia. ohlc=[(o,h,l,c)], ts in ms. Returneaza metrici."""
+    """Replay the strategy over OHLC bars and millisecond timestamps; return metrics."""
     sign = 1 if direction == "long" else -1
     want = "up" if sign > 0 else "down"
     disc, drop, tp = P["disc"]/100, P["drop"]/100, P["tp"]/100
@@ -89,25 +89,25 @@ def simulate(ohlc, ts, fund, sig, P, direction):
     realized = fees = funding = 0.0
     eq = 0.0; peak = 0.0; maxdd = 0.0
     cycles = wins = 0
-    rest_buy = None    # (px, sz, kind) -> "open"
+    rest_buy = None    # (price, size, kind) -> open
     rest_sell = None   # (px, sz)
 
     for i in range(len(ohlc)):
         o, h, l, c = ohlc[i]
-        # funding pe pozitia detinuta (perp): short incaseaza fr>0, long plateste
+        # Funding on held perpetuals: shorts receive positive funding; longs pay it.
         if qty > 1e-12:
             f = funding_at(fund, ts[i]) * qty * c
             funding += (f if sign < 0 else -f)
-        # --- fill-uri (verifica ordinele active pe range-ul barei) ---
+        # --- fills: check active orders against the bar range ---
         if rest_buy:
             px, sz, _ = rest_buy
             hit = (l <= px) if sign > 0 else (h >= px)
             if hit:
                 qty += sz; cost += sz*px; spent += sz*px
                 last_open = px
-                if dca > 0 or qty > sz + 1e-9: dca += 1     # nu prima
+                if dca > 0 or qty > sz + 1e-9: dca += 1     # exclude the first entry
                 fees += P["fee"]/100 * sz*px
-                rest_buy = None; rest_sell = None            # avg schimbat -> reasezam TP
+                rest_buy = None; rest_sell = None            # average changed; replace TP
         if rest_sell and qty > 1e-12:
             px, sz = rest_sell
             hit = (h >= px) if sign > 0 else (l <= px)
@@ -119,7 +119,7 @@ def simulate(ohlc, ts, fund, sig, P, direction):
                 cycles += 1; wins += 1 if gross > 0 else 0
                 qty = cost = spent = 0.0; dca = 0; last_open = None
                 rest_sell = None; rest_buy = None
-        # --- decizii pe close ---
+        # --- decisions at close ---
         if qty <= 1e-12:
             if rest_buy is None and (sig[i] == want or sig[i] == "__any__"):
                 if spent + P["entry"] <= P["budget"]:
@@ -134,7 +134,7 @@ def simulate(ohlc, ts, fund, sig, P, direction):
                     and spent + P["dca"] <= P["budget"]):
                 px = c*(1 - sign*disc); sz = round(P["dca"]/px, 4)
                 rest_buy = (px, sz, "DCA")
-        # equity curve (realized + unrealized)
+        # Equity curve includes realized and unrealized results.
         upnl = sign*(c - cost/qty)*qty if qty > 1e-12 else 0
         e = realized + funding + upnl
         eq = e; peak = max(peak, eq); maxdd = max(maxdd, peak - eq)
@@ -147,7 +147,7 @@ def simulate(ohlc, ts, fund, sig, P, direction):
 
 def run(coin, ohlc, ts, fund, sig, P, direction, budget):
     m = simulate(ohlc, ts, fund, sig, P, direction)
-    total_pct = m["total"]/budget*100          # ADEVARATUL rezultat: realizat + funding + pozitie deschisa
+    total_pct = m["total"]/budget*100          # TRUE result: realized + funding + open position
     wr = 100*m["wins"]/m["cycles"] if m["cycles"] else 0
     return total_pct, m, wr
 
@@ -192,7 +192,7 @@ def main() -> int:
         log(f"  buy&hold: {bh:+.2f}%   pozitie deschisa la final: {m['open_qty']:.4f} ({'PIERZATOARE' if m['final_upnl']<-1 else 'ok'})")
         return 0
 
-    # sweep: tuning TP x DROP
+    # Sweep TP x DROP for tuning.
     log(f"=== SWEEP {args.coin} {args.days}z {args.direction} semnal={args.signal} (buy&hold {bh:+.1f}%) ===")
     results = []
     for tp in (0.5, 0.8, 1.0, 1.5, 2.0, 3.0):

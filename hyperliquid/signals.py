@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-signals.py — strat de SEMNAL decuplat de strategie.
+signals.py — SIGNAL layer decoupled from the strategy.
 
-Strategia citeste un semnal: {"trend": "up"|"down"|"neutral", "confidence": 0..1}.
-Sursa se alege cu SIGNAL_SOURCE:
-  * off     -> mereu neutral (strategia ignora trendul)
-  * builtin -> trend simplu din lumanari HL (media rapida vs media lenta)
-  * file    -> citeste dintr-un JSON pe care MODELUL TAU il scrie (LSTM/price-analysis)
+The strategy reads {"trend": "up"|"down"|"neutral", "confidence": 0..1}.
+SIGNAL_SOURCE selects:
+  * off: always neutral, so the strategy ignores trend
+  * builtin: simple HL candle trend from fast versus slow averages
+  * file: JSON written by an external LSTM/price-analysis model
 
-Format fisier extern (SIGNAL_FILE, implicit signal.json):
+External file format (SIGNAL_FILE, default signal.json):
   {"trend": "down", "confidence": 0.72, "ts": 1781000000}
-  - 'ts' = timestamp unix (secunde); daca semnalul e mai vechi de SIGNAL_MAX_AGE_MIN
-    e considerat expirat -> neutral (ca sa nu tranzactionezi pe predictie veche).
+  - 'ts' is a Unix timestamp in seconds. Signals older than SIGNAL_MAX_AGE_MIN expire
+    to neutral, preventing trades based on stale predictions.
 
-Asa, cand faci LSTM-ul: doar scrii signal.json la fiecare predictie, botul il consuma.
-REGULA: backtesteaza orice semnal inainte sa-i dai bani reali.
+An LSTM only needs to write signal.json after each prediction for the bot to consume.
+RULE: backtest every signal before assigning real money.
 """
 
 from __future__ import annotations
@@ -77,7 +77,7 @@ def get_signal(client, coin: str) -> dict:
     src = os.environ.get("SIGNAL_SOURCE", "off").strip().lower()
     if src == "builtin":
         return _builtin_trend(client, coin)
-    if src == "analysis":               # analiza ta portata (WMA/panta pe ferestre de timp)
+    if src == "analysis":               # ported WMA/time-window slope analysis
         from price_analysis import signal as analysis_signal
         return analysis_signal(client, coin)
     if src == "file":

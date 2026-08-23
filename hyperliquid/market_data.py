@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-market_data.py — pret + disponibilitate moneda pe Hyperliquid.
-Pretul vine din all_mids (public). "Disponibil" = moneda e in universul perp.
+market_data.py — Hyperliquid coin price and availability.
+Price comes from public all_mids; available means the coin is in the perpetual universe.
 """
 
 from __future__ import annotations
