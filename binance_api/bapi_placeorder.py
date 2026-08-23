@@ -150,38 +150,6 @@ def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
         print(f"apply_weight_limit: Error: {e}, order_type {order_type} and {symbol}")
         return required_qty
 
-def manage_quantity(order_type, symbol, required_qty=None, price_to_be_traded=None, cancelorders=False, hours=PLACE_ORDER_HOURS):
-    # required_qty=None -> _resolve_qty (in apply_weight_limit) foloseste maximul
-    # permis; required_qty rescris mai jos cu valoarea deja plafonata, deci restul
-    # functiei lucreaza mereu cu un numar real, niciodata None.
-
-    current_price = api.get_current_price(symbol)
-                
-    # 1. cat am efectiv disponibil
-    available_qty = api.get_asset_info(order_type, symbol, current_price)
-
-    # 2. aplicam limita de cash/weight
-    required_qty = apply_weight_limit(symbol, order_type, current_price, required_qty, available_qty)
-
-
-    if available_qty < required_qty:
-        print(f"Not enough available {symbol}. Available: {available_qty:.8f}, Required: {required_qty:.8f}")
-
-        freed_quantity = 0
-        if cancelorders:
-            freed_quantity = api.cancel_orders_old_or_outlier(
-                order_type, symbol, required_qty, hours=hours, price_difference_percentage=0.15
-            ) or 0
-
-        available_qty += freed_quantity
-
-        if available_qty < required_qty:
-            print(f"Still not enough quantity. Adjusting order quantity to {available_qty:.8f}")
-
-    return required_qty, available_qty
-
-
-           
 def place_BUY_order(symbol, price, qty, client_order_id=None):
     try:
         if not cfg.is_trade_enabled() :
@@ -433,114 +401,9 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
         return bool(bypass_profit_guard), (None if bypass_profit_guard else "guard_check_failed")
 
 
-def place_order(order_type, symbol, price, qty, force=False, cancelorders=False, hours=PLACE_ORDER_HOURS):
-    # fee_percentage NU mai e parametru (30 iul, dead — 0 apelanti in tot repo-ul
-    # au trecut vreodata altceva decat PLACE_ORDER_FEE_PCT); __place_order il
-    # citeste acum direct din config.
-    order = __place_order(order_type, symbol, price, qty, force, cancelorders, hours)
-
-    if order is None:
-        if force and order_type == 'BUY':
-            print("ULTRA DUBIOS!!!!")
-            #order = place_SELL_order_at_market(symbol.forcesellsymbol[symbol], symbol.quantities[symbol])
-            #time.sleep(0.2)
-            #order = __place_order(order_type, symbol, price, qty, force, cancelorders, hours)
-
-    return order
-         
-
 from decimal import Decimal, ROUND_DOWN
-# Gate-ul de trend e MEREU activ la acest nivel (ultimul, comun tuturor tipurilor
-# de ordin). Nu se mai expune în API-urile de mai sus.
-# 30 iul: max_wait_sec REDUS de la 3600.0 (1 ORA — hardcodat asa din prima zi a
-# mecanismului, 3 iun, niciodata schimbat) la 10.0 (ordinul secundelor, cerere
-# user). Motiv: cu valoarea veche, o intarziere REALA (trend inca nefavorabil)
-# putea bloca activ o ora intreaga per ordin — mult peste intentia "prinde
-# primul semn scurt de inversare". should_wait() intoarce acum False (nu
-# blocheaza deloc) daca trendul lipseste/e stale, deci riscul de blocaj pe
-# infrastructura cazuta e deja eliminat separat; asta scurteaza si cazul
-# "trend cunoscut, dar inca nefavorabil". Acum configurabil (nu mai hardcodat)
-# via PLACE_ORDER_MAX_WAIT_SEC in bapi_placeorder_config.env.
-# 30 iul: fee_percentage/wait_trend/max_wait_sec ELIMINATE ca parametri (erau
-# MOARTE — singurul apelant, place_order, nu le suprascria niciodata, nici un
-# alt apelant din tot repo-ul, inclusiv archive/old_trade/). Citite direct din config.
-def __place_order(order_type, symbol, price, qty=None, force=False, cancelorders=False, hours=PLACE_ORDER_HOURS):
-
-    order_type = order_type.upper()
-    qty = _resolve_qty(qty)   # None = fara cantitate ceruta -> maximul permis de algoritm (defense in depth)
-    sym.validate_params(order_type, symbol, price, qty)
-        
-    try:
-        print(f"Order Request {order_type} {symbol} qty {qty}, Price {price}")
-        qty, available_qty = manage_quantity(order_type, symbol, qty, price_to_be_traded=price, cancelorders=cancelorders, hours=hours)
-
-        if qty == 0.0:
-            raise WeightLimitBlock(f"{order_type} {symbol}: limita 24h atinsă — nu retry")
-
-        if available_qty <= 0:
-            print(f"No sufficient quantity available to place the {order_type} order.")
-            return None
-                
-        from providers.quantity import fee_cap_quantity
-        fee_cap = fee_cap_quantity(available_qty, PLACE_ORDER_FEE_PCT)
-        if qty > fee_cap:
-            print(f"Adjusting {order_type} order quantity from {qty:.8f} "
-                  f"to {fee_cap:.8f} to cover balance and fees")
-            qty = fee_cap
-
-        # Rotunjim cantitatea la 5 zecimale in jos
-        #qty = math.floor(qty * 10**5) / 10**5  # Rotunjire in jos la 5 zecimale
-        qty = round(qty, 4)
-        qty = float(Decimal(qty).quantize(Decimal('0.0001'), rounding=ROUND_DOWN))  # Rotunjit la 5 zecimale
-
-        current_price = api.get_current_price(symbol)
-        if qty * current_price < 100:
-            print(f"Value {qty * current_price} of {symbol} is too small to make sense to be traded :-) .by by!")
-            return None
-        
-        print(f"Trying to place {order_type} order of {symbol} for quantity {qty:.8f} at {'market price' if force else f'price {price}'}")
-
-        # GATE unic de întârziere oportunistă — chiar înainte de trimitere, ca să
-        # reacționăm ultra-rapid la inversarea trendului (flip-to-send minim).
-        # Acoperă toate tipurile: BUY/SELL × limit/market.
-        if _maybe_wait_trend(order_type, symbol):
-            current_price = _fresh_price(symbol)   # preț proaspăt după așteptare
-
-        # GATE anti rapid-fire (cross-proces + cross-thread), stil RAII: rezervarea se
-        # ELIBEREAZĂ AUTOMAT la ieșirea din `with` dacă nu facem commit (eșec/excepție/
-        # uitat) → fără blocaje fantomă, fără release manual. Lock-ul nu e ținut peste
-        # plasare → fără deadlock.
-        with trade_cooldown.trade_slot(order_type, symbol) as slot:
-            if not slot.allowed:
-                age = time.time() - slot.info.get("timestamp", 0)
-                print(f"[{order_type} {symbol}] BLOCAT de cooldown: ultim ordin "
-                      f"({slot.info.get('side')}) acum {age:.0f}s (< {trade_cooldown.DEFAULT_COOLDOWN_SEC}s)")
-                return None
-
-            if order_type == 'SELL':
-                price = round(max(price, current_price), 0)
-                order = place_SELL_order_at_market(symbol, qty) if force else place_SELL_order(symbol, price, qty)
-            elif order_type == 'BUY':
-                price = round(min(price, current_price), 0)
-                order = place_BUY_order_at_market(symbol, qty) if force else place_BUY_order(symbol, price, qty)
-            else:
-                print(f"Invalid order type: {order_type}")
-                return None                                  # fără commit → auto-release
-
-            if order:
-                slot.commit(order.get("orderId"))            # succes → cooldown rămâne activ
-            return order                                      # order None → auto-release
-
-    except BinanceAPIException as e:
-        print(f"Error placing {order_type.upper()} order: {e}")
-        return None                                           # with deja a eliberat (no commit)
-    #except Exception as e:
-    #    print(f"place_order: A aparut o eroare: {e}")
-    #    return None
 
 
-# fee_percentage NU mai e parametru (30 iul, dead — vezi place_order). max_daily_trades/
-# profit_percentage nu mai sunt trecute la if_place_safe_order — le citeste ea insasi.
 def _guarded_market_place(symbol, order_type, price, qty, **kwargs):
     """Import lazy pentru a evita ciclul bapi_placeorder <-> market_api.
 

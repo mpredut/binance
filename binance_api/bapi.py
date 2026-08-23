@@ -168,24 +168,6 @@ def get_account_assets_balances():
         return []
 
 
-def get_asset_info(order_type, symbol, price):
-    """
-    Returnează cantitatea disponibilă exprimată mereu în asset-ul de bază (qty).
-    - SELL: cantitatea de bază disponibilă (ex: BTC).
-    - BUY: cât din baza se poate cumpăra cu balanța de cotare (ex: USDC / preț curent).
-    """
-    try:
-        from providers.quantity import balance_cap_quantity
-        qty, _asset = balance_cap_quantity(
-            get_free_balance, symbol, order_type, price)
-        return float(qty or 0.0)
-
-    except Exception as e:
-        print(f"get_asset_info: Error: {e}, order_type {order_type} and {symbol}")
-        return 0.0
-
-    
-
 def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5, price_difference_percentage=0.1):
 
     order_type = order_type.upper()

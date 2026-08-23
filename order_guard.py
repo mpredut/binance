@@ -129,7 +129,7 @@ def weight_limit(provider, symbol, order_type, price, required_qty, base=None,
         weight = 0.03
     recent = provider.get_orders(symbol, order_type, 86400) or []      # acelasi side, ultimele 24h
     traded_value = sum(float(o.get("price", 0)) * float(o.get("qty", o.get("quantity", 0))) for o in recent)
-    # available (in BASE), side-aware ca apply_weight_limit Binance (get_asset_info(order_type)):
+    # available (in BASE), deja calculat side-aware de providers.quantity:
     #   SELL -> balanta de BASE pe care o ai de vandut;
     #   BUY  -> cat BASE poti cumpara cu balanta de QUOTE (free_balance mapeaza USD->ZUSD pe Kraken).
     if available_qty is not None:

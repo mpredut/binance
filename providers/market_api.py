@@ -128,19 +128,6 @@ class BinanceProvider(MarketDataProvider):
             ref = _po._last_opposite_fill_price_api(symbol, order_type)  # fallback API direct
         return ref
 
-    def cap_quantity(self, symbol: str, side: str, price: float, qty: float,
-                     base=None, quote=None, cancelorders: bool = False, hours: float = 5) -> float:
-        # PLAFON BOGAT Binance (30 iul, decizie user "pastreaza ca hook"): foloseste
-        # manage_quantity (apply_weight_limit pe statistici REALE API 24h + permisiuni
-        # priceAnalysis + balanta reala via get_asset_info), NU curba gauss agnostica.
-        # manage_quantity intoarce (qty_plafonat, available_qty); pt policy returnam qty-ul
-        # plafonat de weight — clampul de balanta/fee ramane MECANICA in place_order
-        # (BinanceProvider), unde traieste deja. Import LAZY (ciclu la nivel de modul).
-        from binance_api import bapi_placeorder as _po
-        capped_qty, _available = _po.manage_quantity(
-            side, symbol, qty, price_to_be_traded=price, cancelorders=cancelorders, hours=hours)
-        return capped_qty
-
     def policy_cap_quantity(self, symbol: str, side: str, price: float,
                             qty: float, available_qty: float, **kwargs) -> float:
         from binance_api import bapi_placeorder as _po

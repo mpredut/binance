@@ -178,11 +178,8 @@ class Instrument:
                 # HYPE-Kraken); Binance suprascrie cu apply_weight_limit (API real).
                 # Nu tranzactiona tot dintr-o data. Side-aware: SELL->balanta base,
                 # BUY->balanta quote/pret.
-                # `cancelorders`/`hours` fac parte din politica bogata Binance:
-                # daca balanta e blocata in ordine vechi/outlier, manage_quantity le
-                # poate elibera. Rewire-ul generic le pastra in kwargs, dar nu le
-                # transmitea hook-ului si dezactiva silentios comportamentul cerut
-                # explicit de rtrade/monitororder.
+                # `cancelorders`/`hours` raman metadate compatibile pentru hook-urile
+                # providerilor; decizia comuna nu reciteste si nu rezerva balanta.
                 decision = self._provider.quantity_decision(
                     self.symbol, side_u, price, qty,
                     base=self.base, quote=self.quote,

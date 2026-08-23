@@ -83,14 +83,6 @@ class MarketDataProvider(ABC):
     def min_order_qty(self, symbol: str) -> float:
         return 0.0
 
-    def cap_quantity(self, symbol: str, side: str, price: float, qty: float,
-                     base: Optional[str] = None, quote: Optional[str] = None,
-                     cancelorders: bool = False, hours: float = 5) -> float:
-        """Plafoneaza cantitatea prin politica agnostica implicita."""
-        import order_guard
-        return order_guard.weight_limit(self, symbol, side, price, qty,
-                                        base=base, quote=quote)
-
     def policy_cap_quantity(self, symbol: str, side: str, price: float,
                             qty: float, available_qty: float, **kwargs) -> float:
         import order_guard

@@ -658,7 +658,7 @@ print(f"[INFO] DEFAULT_ADJUSTMENT_PERCENT = {DEFAULT_ADJUSTMENT_PERCENT}")
 if __name__ == "__main__":
     # WS user-data bridge explicit: rtrade plasează ordine prin place_order_smart,
     # care verifică intern istoricul de orders/trades (guard-uri max_daily_trades,
-    # manage_quantity). WS ține acel cache proaspăt (altfel doar polling la 3 min).
+    # politica zilnică de cantitate). WS ține acel cache proaspăt (altfel doar polling la 3 min).
     import cacheManager as cm
     cm.enable_real_ws_event_sync()
 

@@ -121,12 +121,6 @@ class TestBinanceProviderHooks(unittest.TestCase):
         self.assertEqual(out, {"orderId": 5})
         f.assert_called_once_with("BUY", SYMBOL, 100.0, 5.0, force=True)
 
-    def test_cap_quantity_uses_manage_quantity(self):
-        with patch.object(po, "manage_quantity", return_value=(3.0, 8.0)) as f:
-            out = self.p.cap_quantity(SYMBOL, "BUY", 100.0, 5.0, base="BTC", quote="USDC")
-        self.assertEqual(out, 3.0)   # qty plafonat de weight, NU available
-        self.assertTrue(f.called)
-
     def test_profit_guard_window_ref_uses_safeback(self):
         import order_guard
         with patch.object(order_guard, "window_reference", return_value=123.0) as f:
