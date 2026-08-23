@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 """
-kraken_xstock_watch.py — watcher pt alocarea xStocks (ex. SPCX) pe Kraken.
+kraken_xstock_watch.py — watcher for xStocks allocations (for example, SPCX) on Kraken.
 
-Ce face, la fiecare verificare:
-  1. BALANTA (privat): detecteaza ORICE activ NOU aparut in cont (alocarea poate
-     veni sub orice cod — SPCXx, xSPCX...). Alerta speciala daca se potriveste
-     XSTOCK_REGEX, alerta informativa altfel.
-  2. PERECHI (public): detecteaza cand o pereche SPCX-like devine tranzactionabila
-     prin API -> alerta "LISTAT" + instructiuni de pornire a botului cu adoptare.
-  3. NIVELE DE PRET (dupa alocare, daca XSTOCK_ALLOC_PRICE e setat): alerta la
-     +XSTOCK_TP_ALERT_PCT% / -XSTOCK_SL_ALERT_PCT% fata de pretul alocarii.
-     Pret: perechea Kraken daca e listata, altfel subiacentul de pe Yahoo.
+What it does on every check:
+  1. BALANCE (private): detects ANY NEW asset that appears in the account (the
+     allocation may arrive under any symbol — SPCXx, xSPCX...). It sends a
+     dedicated alert when XSTOCK_REGEX matches and an informational alert otherwise.
+  2. PAIRS (public): detects when an SPCX-like pair becomes tradable through the
+     API -> "LISTED" alert plus instructions for starting the bot with adoption.
+  3. PRICE LEVELS (after allocation, if XSTOCK_ALLOC_PRICE is set): alerts at
+     +XSTOCK_TP_ALERT_PCT% / -XSTOCK_SL_ALERT_PCT% from the allocation price.
+     Price source: the Kraken pair when listed, otherwise the Yahoo underlying.
 
-  python3 kraken_xstock_watch.py            # bucla continua
-  python3 kraken_xstock_watch.py --once     # o singura verificare (test)
-  python3 kraken_xstock_watch.py --status   # arata snapshot-ul curent si iese
+  python3 kraken_xstock_watch.py            # continuous loop
+  python3 kraken_xstock_watch.py --once     # one check only (test)
+  python3 kraken_xstock_watch.py --status   # show the current snapshot and exit
 """
 
 from __future__ import annotations
@@ -36,12 +36,11 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def _state_file() -> str:
-    """Calea starii — configurabila (XSTOCK_STATE_FILE) ca sa poti rula mai multe
-    watchere in paralel (alte alocari/active), fiecare cu starea lui."""
+    """Return the configurable state path, allowing independent parallel watchers."""
     return os.environ.get("XSTOCK_STATE_FILE") or os.path.join(_HERE, "xstock_state.json")
 
 
-# -- stare -------------------------------------------------------------------
+# -- state -------------------------------------------------------------------
 def _load_state() -> dict:
     path = _state_file()
     if os.path.exists(path):
@@ -63,7 +62,7 @@ def _save_state(st: dict) -> None:
         log(f"  ! nu pot salva starea: {e}")
 
 
-# -- pret subiacent (Yahoo) cat timp perechea nu e pe API ---------------------
+# -- underlying price (Yahoo) until the pair appears on the API ---------------
 def yahoo_last(sym: str) -> float | None:
     url = f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}?range=1d&interval=5m"
     try:
@@ -77,9 +76,9 @@ def yahoo_last(sym: str) -> float | None:
         return None
 
 
-# -- verificari --------------------------------------------------------------
+# -- checks ------------------------------------------------------------------
 def check_balance(client: KrakenClient, st: dict, rx: str, desktop: bool) -> None:
-    """Activ NOU in cont = posibila alocare. Prima rulare = doar snapshot."""
+    """Treat a new account asset as a possible allocation; first run only snapshots."""
     try:
         bal = client.balance()
     except KrakenError as e:
@@ -111,9 +110,11 @@ def check_balance(client: KrakenClient, st: dict, rx: str, desktop: bool) -> Non
 
 def check_pairs(client: KrakenClient, st: dict, rx: str, desktop: bool,
                 quote: str = "") -> None:
-    """Perechea devine vizibila pe API-ul public = tranzactionabila programatic.
-    Daca mai multe perechi se potrivesc (ex. SPCXx/USD si SPCXx/EUR), o prefera
-    pe cea cu valuta de cotare `quote`."""
+    """Detect when a pair becomes programmatically tradable on the public API.
+
+    If several pairs match (for example, SPCXx/USD and SPCXx/EUR), prefer the
+    one whose quote currency matches ``quote``.
+    """
     try:
         pairs = client.asset_pairs()
     except KrakenError as e:
@@ -147,7 +148,7 @@ def check_pairs(client: KrakenClient, st: dict, rx: str, desktop: bool,
 
 def check_levels(client: KrakenClient, st: dict, alloc_price: float,
                  tp_pct: float, sl_pct: float, yahoo_sym: str, desktop: bool) -> None:
-    """Alerta o singura data la +tp% / -sl% fata de pretul alocarii."""
+    """Alert once at +tp% or -sl% relative to the allocation price."""
     if not st["allocated"] or alloc_price <= 0:
         return
     price = None
@@ -169,7 +170,7 @@ def check_levels(client: KrakenClient, st: dict, alloc_price: float,
                body=f"Valoare estimata: {qty * price:.0f} (alocat la {alloc_price}). "
                     f"Ia in calcul vanzarea partiala / pornirea botului cu adoptare.",
                source="xstock-watch", price=price, desktop=desktop)
-    tp2 = float_env("XSTOCK_TP2_ALERT_PCT") or 0.0   # transa 2 (vanzare manuala in transe)
+    tp2 = float_env("XSTOCK_TP2_ALERT_PCT") or 0.0   # second tranche (manual staged sale)
     if tp2 and not st.get("alerted_tp2") and chg >= tp2:
         st["alerted_tp2"] = True
         notify(title=f"📈📈 TRANSA 2: xStock {chg:+.1f}% ({price})",
@@ -183,7 +184,7 @@ def check_levels(client: KrakenClient, st: dict, alloc_price: float,
                source="xstock-watch", price=price, desktop=desktop)
 
 
-# -- pornire automata bot ------------------------------------------------------
+# -- automatic bot startup ----------------------------------------------------
 BOT_SCRIPT = os.path.join(_HERE, "kraken_bot.py")
 BOT_LOG = os.path.join(_HERE, "xstock_bot.log")
 
@@ -196,12 +197,12 @@ def _bot_alive(pid) -> bool:
     except (TypeError, ValueError):
         return False
     try:
-        # daca e copilul nostru si a murit, seceram zombie-ul (altfel kill 0 ar minti)
+        # Reap a dead child; otherwise kill(0) would incorrectly report it as alive.
         done, _ = os.waitpid(pid, os.WNOHANG)
         if done == pid:
             return False
     except (ChildProcessError, OSError):
-        pass  # nu e copilul nostru (ex. watcher repornit) — verificam cu kill 0
+        pass  # Not our child (for example, after watcher restart); check with kill(0).
     try:
         os.kill(pid, 0)
         return True
@@ -212,11 +213,14 @@ def _bot_alive(pid) -> bool:
 
 
 def maybe_start_bot(st: dict, alloc_price: float, desktop: bool) -> None:
-    """PORNESTE AUTOMAT kraken_bot cu adoptarea alocarii cand sunt indeplinite:
-    alocare in cont + pereche listata pe API + pret de alocare cunoscut.
-    Idempotent: tine PID-ul in stare; la restart nu dubleaza (verifica daca botul
-    traieste); daca botul a murit, il REPORNESTE (watchdog) — strategia isi reia
-    propria stare din state-file-ul per pereche, deci nu dubleaza pozitia."""
+    """Automatically start ``kraken_bot`` with allocation adoption when ready.
+
+    Startup requires an account allocation, an API-listed pair, and a known
+    allocation price. The operation is idempotent: the PID is persisted and
+    checked after restart. If the bot died, the watchdog restarts it; the
+    strategy resumes its per-pair state and therefore does not duplicate the
+    position.
+    """
     if os.environ.get("XSTOCK_AUTOSTART", "true").strip().lower() != "true":
         return
     if not (st["allocated"] and st["pair"]):
@@ -235,7 +239,7 @@ def maybe_start_bot(st: dict, alloc_price: float, desktop: bool) -> None:
     relaunch = st.get("bot_pid") is not None
     env = dict(os.environ)
     env["STRAT_ADOPT_COST"] = str(alloc_price)
-    # parametri reglati pt IPO volatil (suprascriu config.env DOAR pt instanta asta)
+    # Volatile-IPO tuning overrides config.env only for this bot instance.
     for src, dst in (("XSTOCK_BOT_TP_PCT", "STRAT_TAKEPROFIT_PCT"),
                      ("XSTOCK_BOT_DCA_DROP_PCT", "STRAT_DCA_DROP_PCT"),
                      ("XSTOCK_BOT_SL_PCT", "STRAT_STOP_LOSS_PCT"),
@@ -262,16 +266,19 @@ def maybe_start_bot(st: dict, alloc_price: float, desktop: bool) -> None:
            source="xstock-watch", price=alloc_price, desktop=desktop)
 
 
-# -- proba end-to-end ----------------------------------------------------------
+# -- end-to-end trial ---------------------------------------------------------
 def run_trial(client: KrakenClient, desktop: bool) -> int:
-    """PROBA completa pe API-ul REAL, cu bani ZERO: un activ EXISTENT din cont
-    (XSTOCK_TRIAL_ASSET, implicit ADA) e tratat ca alocare noua; perechea lui
-    reala e 'listarea'; botul porneste FORTAT pe PAPER; la final watchdog-ul e
-    verificat (kill -> repornire) si totul e curatat. Alerte reale cu [PROBA]."""
+    """Run a zero-money end-to-end trial against the real API.
+
+    An existing account asset (``XSTOCK_TRIAL_ASSET``, default ADA) is treated
+    as a new allocation and its real pair as the listing. The bot is forced
+    into paper mode, the watchdog is tested by killing and restarting it, and
+    trial state is removed afterward. Notifications are real and use [PROBA].
+    """
     global notify
     asset = os.environ.get("XSTOCK_TRIAL_ASSET", "ADA")
     quote = os.environ.get("XSTOCK_QUOTE", "USD")
-    os.environ["XSTOCK_BOT_PAPER"] = "true"                      # bani ZERO, garantat
+    os.environ["XSTOCK_BOT_PAPER"] = "true"                      # guaranteed zero-money mode
     os.environ["XSTOCK_AUTOSTART"] = "true"
     os.environ["XSTOCK_STATE_FILE"] = os.path.join(_HERE, "xstock_state_trial.json")
     if os.path.exists(_state_file()):
@@ -295,9 +302,9 @@ def run_trial(client: KrakenClient, desktop: bool) -> int:
         st["known_assets"] = {a: float(q) for a, q in bal.items()
                               if float(q) > 0 and a != asset}
         log(f"  [proba] cobai: {asset} — il scot din snapshot ca sa 'soseasca' acum")
-        check_balance(client, st, asset, desktop)                # 1. detectie alocare
+        check_balance(client, st, asset, desktop)                # 1. allocation detection
         verdict["alocare detectata"] = bool(st["allocated"])
-        check_pairs(client, st, asset, desktop, quote)           # 2. pereche listata
+        check_pairs(client, st, asset, desktop, quote)           # 2. listed pair
         verdict["pereche gasita"] = bool(st["pair"])
         trial_pair = st["pair"]
         alloc = client.last_price(st["pair"]) if st["pair"] else None
@@ -305,7 +312,7 @@ def run_trial(client: KrakenClient, desktop: bool) -> int:
             log("  ! fara pret pt pereche — proba esuata")
             return 1
         log(f"  [proba] pret de alocare simulat: {alloc} (pretul curent)")
-        maybe_start_bot(st, alloc, desktop)                      # 3. bot pornit PAPER
+        maybe_start_bot(st, alloc, desktop)                      # 3. bot started in paper mode
         bot_pid = st.get("bot_pid")
         verdict["bot pornit (PAPER)"] = _bot_alive(bot_pid)
         _save_state(st)
@@ -331,10 +338,10 @@ def run_trial(client: KrakenClient, desktop: bool) -> int:
             try:
                 os.kill(int(bot_pid), 15)
                 time.sleep(0.5)
-                _bot_alive(bot_pid)                              # seceram zombie-ul
+                _bot_alive(bot_pid)                              # reap the zombie process
             except (OSError, TypeError, ValueError):
                 pass
-        if trial_pair:                                           # stergem starea PAPER a botului
+        if trial_pair:                                           # remove the bot's paper state
             from strategy import state_path_for
             sp = state_path_for(trial_pair)
             if os.path.exists(sp):
@@ -401,11 +408,11 @@ def main() -> int:
             _save_state(st)
         except KeyboardInterrupt:
             return 0
-        except Exception as e:  # noqa: BLE001 — REZILIENTA: net picat/DNS -> reincerc, nu mor
+        except Exception as e:  # noqa: BLE001 — resilience: retry network/DNS failures
             log(f"  ! ciclu esuat ({e.__class__.__name__}: {e}) — reincerc la urmatorul")
         if args.once:
             return 0
-        beats += 1                       # puls keep-alive: un punct pe ciclu, vizibil in tail -f
+        beats += 1                       # keep-alive pulse: one tail-visible dot per cycle
         sys.stdout.write("." if beats % 60 else ".\n")
         sys.stdout.flush()
         time.sleep(args.interval * 60)
