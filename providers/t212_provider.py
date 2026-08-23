@@ -47,11 +47,11 @@ class T212Provider(MarketDataProvider):
     def __init__(self, client=None, live_enabled: Optional[bool] = None,
                  order_validity: Optional[str] = None):
         self._cli = client
-        # None pastreaza gate-ul istoric T212_LIVE_ORDERS. Launcherul autonom,
-        # care are deja STRAT_EXECUTE/dry_run per profil, injecteaza explicit bool.
+        # None preserves the historical T212_LIVE_ORDERS gate. The autonomous
+        # launcher injects an explicit bool from its per-profile execution policy.
         self._live_enabled = live_enabled
-        # Profilurile autonome au istoric GOOD_TILL_CANCEL; contractul generic
-        # poate ramane configurat prin T212_ORDER_VALIDITY.
+        # Autonomous profiles historically use GOOD_TILL_CANCEL; the generic
+        # contract remains configurable through T212_ORDER_VALIDITY.
         self._order_validity = order_validity
 
     def _orders_live(self) -> bool:
@@ -67,10 +67,10 @@ class T212Provider(MarketDataProvider):
     def _client(self):
         if self._cli is not None:
             return self._cli
-        # importlib accepta numele istoric al folderului; evitam mutatia globala
-        # sys.path si acelasi modul intra acum si in wheel-ul instalabil.
+        # importlib accepts the historical folder name without global sys.path
+        # mutation and also works in the installable wheel.
         T212Client = importlib.import_module("212trading.t212_client").T212Client
-        # Cheile din 212trading/.env (secrete gitignored). env-ul flotei are prioritate.
+        # Use gitignored 212trading credentials, with fleet environment precedence.
         key = os.environ.get("T212_API_KEY") or env_value(_T212_DIR, "T212_API_KEY")
         if not key:
             raise RuntimeError("Lipseste T212_API_KEY (212trading/.env sau env)")
@@ -80,7 +80,7 @@ class T212Provider(MarketDataProvider):
         return self._cli
 
     def _position(self, symbol: str, *, strict: bool = False) -> Optional[dict]:
-        """Pozitia din portofoliu pt ticker (sau None)."""
+        """Return the portfolio position for the ticker, or None."""
         try:
             port = self._client().get_portfolio()
             if port is None:
@@ -97,7 +97,7 @@ class T212Provider(MarketDataProvider):
             print(f"[T212] portfolio {symbol}: {e}")
             return None
 
-    # ── market-data ────────────────────────────────────────────────────────────
+    # -- Market data. ----------------------------------------------------------
     def get_current_price(self, symbol: str) -> Optional[float]:
         p = self._position(symbol)
         if not p:
@@ -108,11 +108,11 @@ class T212Provider(MarketDataProvider):
             return None
 
     def get_price_history(self, symbol: str, lookback_h: float) -> Optional[List]:
-        return None  # T212: fara istoric granular prin acest client
+        return None  # This client exposes no granular T212 history.
 
-    # ── cont ───────────────────────────────────────────────────────────────────
+    # -- Account. --------------------------------------------------------------
     def free_balance(self, asset: str) -> Optional[float]:
-        # Contract comun: eroarea devine None, niciodata zero legitim.
+        # Under the common contract, errors become None rather than a valid zero.
         try:
             p = self._position(asset, strict=True)
         except ProviderError as e:
@@ -129,12 +129,12 @@ class T212Provider(MarketDataProvider):
         return qty
 
     def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:
-        """Sintetizeaza pozitia ca UN buy la averagePrice (model portofoliu)."""
+        """Represent the portfolio position as one synthetic average-price buy."""
         want = (side or "").upper()
         if want == "SELL":
-            return []                         # nu modelam vanzari istorice
-        # Folosit de gardurile financiare: eroarea de cont trebuie sa blocheze
-        # ordinul, nu sa semene cu un portofoliu legitim gol.
+            return []                         # Historical sells are not modeled.
+        # Financial guards must block on account errors rather than mistake them
+        # for a legitimately empty portfolio.
         p = self._position(symbol, strict=True)
         if not p:
             return []
@@ -149,10 +149,10 @@ class T212Provider(MarketDataProvider):
             return []
         return [_normalize_order({
             "side": "BUY", "price": avg, "qty": qty,
-            "timestamp": int((time.time() - 2 * 3600) * 1000),  # in fereastra, nu "prea recent"
+            "timestamp": int((time.time() - 2 * 3600) * 1000),  # Inside the window, not too recent.
         })]
 
-    # ── plasare (DRY pana la T212_LIVE_ORDERS=true) ────────────────────────────
+    # -- Placement remains dry until T212_LIVE_ORDERS=true. --------------------
     @staticmethod
     def _signed_qty(side: str, qty: float) -> float:
         side_u = (side or "").strip().upper()
@@ -202,8 +202,8 @@ class T212Provider(MarketDataProvider):
                 symbol, side, qty, price, market=bool(kwargs.get("force", False)))
             if status not in (200, 201):
                 return None
-            # Instrument.place foloseste cheia comuna orderId pentru cooldown. Pastram
-            # si `id` nativ T212, dar expunem aliasul mecanic fara a schimba payload-ul.
+            # Instrument.place uses the common orderId key for cooldown. Preserve
+            # T212's native id while exposing the mechanical alias on a copied payload.
             if isinstance(data, dict) and data.get("id") is not None and "orderId" not in data:
                 data = dict(data)
                 data["orderId"] = str(data["id"])
@@ -212,14 +212,14 @@ class T212Provider(MarketDataProvider):
             print(f"[T212] place_order {symbol}: {e}")
             return None
 
-    # ── CONTRACT StrategyExecutor ──────────────────────────────────────────────
+    # -- StrategyExecutor contract. -------------------------------------------
     def submit_order(self, symbol: str, side: str, qty: float,
                      price: Optional[float] = None, *, market: bool = False,
                      kind: Optional[str] = None,
                      client_order_id: Optional[str] = None) -> str:
-        """Plasare stricta pentru motorul generic; nu ocoleste poarta live T212."""
-        # API-ul public T212 v0 nu accepta nici tag de strategie, nici client ID;
-        # corelarea ramane in ExecutionAudit dupa ID-ul returnat de venue.
+        """Place strictly for the generic engine without bypassing the live gate."""
+        # Public T212 v0 accepts neither strategy tags nor client IDs, so
+        # ExecutionAudit correlates using the venue-returned ID.
         del kind, client_order_id
         if not self._orders_live():
             raise ProviderError("T212_LIVE_ORDERS nu este true; ordinul real este blocat")
@@ -282,8 +282,8 @@ class T212Provider(MarketDataProvider):
             )
 
         if filled_qty > 0 and cost <= 0:
-            # Unele payload-uri vechi expun pretul de executie in loc de filledValue.
-            # Nu folosim limitPrice: nu este pretul real si ar falsifica P&L-ul.
+            # Some legacy payloads expose execution price instead of filledValue.
+            # Do not use limitPrice because it is not actual execution and distorts P&L.
             fill_price = raw.get("fillPrice", raw.get("averagePrice"))
             try:
                 cost = abs(float(fill_price)) * filled_qty
@@ -308,8 +308,8 @@ class T212Provider(MarketDataProvider):
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"cancel_order({order_id}): {e}") from e
 
-        # DELETE poate raspunde 404 daca ordinul s-a inchis intre decizie si anulare.
-        # Acceptam idempotent doar un status terminal confirmat, nu presupunem succes.
+        # DELETE may return 404 if the order closes between decision and cancellation.
+        # Accept idempotence only after confirming a terminal status.
         try:
             terminal = self.order_status(symbol, order_id).status
         except ProviderError as e:
@@ -324,8 +324,8 @@ class T212Provider(MarketDataProvider):
     def pair_precision(self, symbol: str) -> Optional[PairPrecision]:
         if not symbol:
             return None
-        # Clientul live rotunjeste deja pret/cantitate la doua zecimale. API-ul de
-        # metadata nu publica tickSize/minQty; contractul reflecta mecanica reala.
+        # The live client rounds price and quantity to two decimals. Metadata does
+        # not publish tickSize/minQty, so the contract reflects actual mechanics.
         return PairPrecision(
             price_decimals=_PRICE_DECIMALS,
             volume_decimals=_VOLUME_DECIMALS,
@@ -337,6 +337,6 @@ class T212Provider(MarketDataProvider):
         return _ORDER_MIN if symbol else 0.0
 
     def ohlc_closes(self, symbol: str, interval_min: int) -> list[float]:
-        # Feed-ul contului T212 nu ofera OHLC. Motorul T212 isi pastreaza feed-ul
-        # Yahoo si propria strategie; motorul generic trateaza [] ca semnal indisponibil.
+        # The T212 account feed exposes no OHLC. Its engine keeps the Yahoo feed and
+        # dedicated strategy; the generic engine treats [] as unavailable.
         return []
