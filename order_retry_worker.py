@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""order_retry_worker.py — READER-ul UNIC al cozii de re-plasare (outbox order_retry.py).
+"""order_retry_worker.py — the SINGLE READER of the order_retry.py replacement outbox.
 
-Model (varianta B): multi writeri (Instrument.place -> order_retry.enqueue pe esec) + UN
-SINGUR reader = acest proces. Parcurge coada, si pt fiecare ordin SCADENT (a trecut
-RETRY_INTERVAL_SEC de la ultima incercare) verifica GARDUL DE PRET (oq.price_gate_ok:
-pretul curent e in avantaj fata de cel cerut?) — daca NU, il lasa in coada fara sa-l
-numere ca incercare (asteapta sa revina pretul). Daca DA, il REIA prin mkt.place() la PRET
-CURENT, cu caller_owns_retry=True (ca sa NU se re-enqueue-ze). Succes -> scos din coada. Esec ->
-attempts++/last_attempt, ramane. Peste TTL (sau plafon incercari) -> scos + ALERTA
-(renuntare, interventie manuala).
+Model B uses multiple writers (Instrument.place -> order_retry.enqueue on failure) and
+ONE reader: this process. It scans the queue and, for every DUE order whose
+RETRY_INTERVAL_SEC has elapsed, checks oq.price_gate_ok to determine whether the current
+price is more favorable than the requested price. If not, the order remains queued
+without counting an attempt while it waits for price to recover. If favorable, the worker
+retries through mkt.place() at CURRENT PRICE with caller_owns_retry=True to prevent an
+automatic re-enqueue. Success removes the record. Failure increments attempts and
+last_attempt while retaining it. Exceeding TTL or the attempt limit removes it and sends
+an alert for manual intervention.
 
 ``process_once`` has an injectable market facade for tests. It still mutates the
 persistent queue and sends alerts. The claim-before-submit design prevents concurrent
@@ -34,19 +35,19 @@ WORKER_POLL_SEC = float(os.environ.get("RETRY_WORKER_POLL_SEC", "30"))
 
 
 def process_once(mkt, now=None):
-    """Un pas de golire a cozii. `mkt` = facada guardata (are get_current_price + place).
-    SCHEMA "scoate-inainte-de-plasare": selecteaza ordinele SCADENTE + favorabile (pret in
-    avantaj), le SCOATE din coada (claim atomic) INAINTE de a le plasa — ca sa nu fie
-    reincercate de nimeni cat timp sunt in curs — apoi le plaseaza la pret CURENT
-    (caller_owns_retry=True). Succes -> raman scoase. Esec -> RE-adaugate (pastrand vechimea +
-    attempts+1). Expirate -> scoase + alerta. A process exit after ``claim`` and before
-    re-enqueue loses the claimed record. Intoarce un dict de statistici."""
+    """Drain one queue step using guarded facade `mkt` (get_current_price + place).
+    The claim-before-place scheme selects DUE orders with favorable prices and atomically
+    removes them BEFORE placement, preventing another retry while they are in flight. It
+    then places them at CURRENT PRICE with caller_owns_retry=True. Successful records stay
+    removed; failed records are re-added with their original age and attempts+1. Expired
+    records are removed and alerted. A process exit after ``claim`` and before re-enqueue
+    loses the claimed record. Return processing statistics."""
     now = now if now is not None else time.time()
     snapshot = oq.load_all(now)
 
-    to_retry = []       # (rec, price) — scadente + favorabile la pret
+    to_retry = []       # (record, price): due and price-favorable
     expired = []
-    skipped_price = 0   # scadente dar cu pretul inca dezavantajos vs cel cerut
+    skipped_price = 0   # due, but current price is still worse than requested
     for r in snapshot:
         if oq.is_expired(r, now):
             expired.append(r)
@@ -60,26 +61,26 @@ def process_once(mkt, now=None):
             print(f"[order_retry] pret indisponibil {symbol} ({e}) — sar, ramane in coada")
             continue
         if price is None:
-            continue   # pret indisponibil -> lasa in coada, reincearca data viitoare
-        # GARD DE PRET: reia doar cand pretul curent e in AVANTAJ fata de cel cerut initial.
-        # Altfel lasa in coada (fara a numara ca incercare) — asteapta sa revina pretul,
-        # pana la TTL. Evita ghost-orders la preturi proaste + reduce churn-ul pe pipeline.
+            continue   # unavailable price: retain in queue and retry next time
+        # PRICE GUARD: retry only when current price is BETTER than originally requested.
+        # Otherwise retain the record without counting an attempt until price recovers or
+        # TTL expires. This prevents ghost orders at unfavorable prices and reduces churn.
         if not oq.price_gate_ok(r, price):
             skipped_price += 1
             continue
         to_retry.append((r, price))
 
-    # SCOATE din coada expiratele + cele de reincercat INAINTE de plasare (claim atomic).
+    # Atomically claim expired and retryable records by removing them BEFORE placement.
     oq.claim([r["id"] for r in expired] + [r["id"] for (r, _) in to_retry], now)
 
     for r in expired:
-        _alert_giveup(r, now)   # deja scoase din coada
+        _alert_giveup(r, now)   # already removed from the queue
 
     succeeded = 0
     for (r, price) in to_retry:
         symbol = r.get("symbol")
         kwargs = dict(r.get("place_kwargs") or {})
-        kwargs["caller_owns_retry"] = True  # workerul re-adauga explicit la esec
+        kwargs["caller_owns_retry"] = True  # the worker explicitly re-adds failures
         try:
             order = mkt.place(symbol, r.get("side"), price, r.get("qty"), **kwargs)
         except Exception as e:  # noqa: BLE001
@@ -89,9 +90,9 @@ def process_once(mkt, now=None):
             succeeded += 1
             print(f"[order_retry] RE-PLASAT cu succes {r.get('side')} {symbol} @ {price}")
         else:
-            # esec -> RE-adauga in coada, pastrand vechimea (created_ts) + attempts+1.
-            # Trece prin dedup (symbol+side): daca un plasator a re-cerut intre timp, se
-            # comaseaza intr-o singura intentie.
+            # On failure, re-add the record with its original created_ts and attempts+1.
+            # Deduplication by symbol+side merges any placement request made in the interim
+            # into a single intent.
             oq.enqueue(symbol, r.get("side"), r.get("qty"),
                        place_kwargs=r.get("place_kwargs"),
                        requested_price=r.get("requested_price"),
@@ -109,7 +110,7 @@ def process_once(mkt, now=None):
 
 
 def _alert_giveup(rec, now):
-    """Notificare la renuntare (TTL/plafon depasit) — interventie manuala."""
+    """Notify when TTL or the attempt cap is exceeded and manual action is required."""
     age_h = (now - float(rec.get("created_ts", now))) / 3600.0
     try:
         alert.notify(
@@ -136,10 +137,10 @@ def main():
 
     single_instance("order_retry_worker")
 
-    # Kill-switch: cand e dezactivat NU iesim (altfel flota_start ne tot reporneste
-    # = flapping + alerte pe telefon). Ramanem VII dar inactivi. Re-enable cere
-    # oricum un restart al procesului (RETRY_ENABLED e citit la import), deci idle-ul
-    # tine pana la urmatorul restart de flota, fara sa spameze supervizarea.
+    # When the kill switch is disabled, stay alive instead of exiting; otherwise
+    # flota_start repeatedly restarts the worker, causing flapping and phone alerts.
+    # Re-enabling already requires a process restart because RETRY_ENABLED is read at
+    # import, so remain idle until the next fleet restart without spamming supervision.
     if not oq.RETRY_ENABLED:
         print("[order_retry] RETRY_ENABLED=false — worker VIU dar inactiv (idle).")
         while True:
