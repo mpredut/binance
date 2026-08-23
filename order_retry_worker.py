@@ -6,7 +6,7 @@ SINGUR reader = acest proces. Parcurge coada, si pt fiecare ordin SCADENT (a tre
 RETRY_INTERVAL_SEC de la ultima incercare) verifica GARDUL DE PRET (oq.price_gate_ok:
 pretul curent e in avantaj fata de cel cerut?) — daca NU, il lasa in coada fara sa-l
 numere ca incercare (asteapta sa revina pretul). Daca DA, il REIA prin mkt.place() la PRET
-CURENT, cu is_retry=True (ca sa NU se re-enqueue-ze). Succes -> scos din coada. Esec ->
+CURENT, cu caller_owns_retry=True (ca sa NU se re-enqueue-ze). Succes -> scos din coada. Esec ->
 attempts++/last_attempt, ramane. Peste TTL (sau plafon incercari) -> scos + ALERTA
 (renuntare, interventie manuala).
 
@@ -34,7 +34,7 @@ def process_once(mkt, now=None):
     SCHEMA "scoate-inainte-de-plasare": selecteaza ordinele SCADENTE + favorabile (pret in
     avantaj), le SCOATE din coada (claim atomic) INAINTE de a le plasa — ca sa nu fie
     reincercate de nimeni cat timp sunt in curs — apoi le plaseaza la pret CURENT
-    (is_retry=True). Succes -> raman scoase. Esec -> RE-adaugate (pastrand vechimea +
+    (caller_owns_retry=True). Succes -> raman scoase. Esec -> RE-adaugate (pastrand vechimea +
     attempts+1). Expirate -> scoase + alerta. Intoarce un dict de statistici."""
     now = now if now is not None else time.time()
     snapshot = oq.load_all(now)
@@ -74,7 +74,7 @@ def process_once(mkt, now=None):
     for (r, price) in to_retry:
         symbol = r.get("symbol")
         kwargs = dict(r.get("place_kwargs") or {})
-        kwargs["is_retry"] = True   # NU re-enqueue automat din pipeline (o facem noi la esec)
+        kwargs["caller_owns_retry"] = True  # workerul re-adauga explicit la esec
         try:
             order = mkt.place(symbol, r.get("side"), price, r.get("qty"), **kwargs)
         except Exception as e:  # noqa: BLE001

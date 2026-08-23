@@ -44,9 +44,9 @@ class ProcessOnceTest(unittest.TestCase):
         stats = worker.process_once(mkt, now=1000.0 + 400)   # due (>300s)
         self.assertEqual(stats["succeeded"], 1)
         self.assertEqual(oq.load_all(), [])                  # scos dupa succes
-        # a fost reluat cu is_retry=True, la pret CURENT (63000), kwargs pastrate
+        # a fost reluat cu caller_owns_retry=True, la pret CURENT, kwargs pastrate
         self.assertEqual(len(mkt.calls), 1)
-        self.assertTrue(mkt.calls[0]["kw"]["is_retry"])
+        self.assertTrue(mkt.calls[0]["kw"]["caller_owns_retry"])
         self.assertEqual(mkt.calls[0]["price"], 63000.0)
         self.assertEqual(mkt.calls[0]["kw"]["smart"], False)
 

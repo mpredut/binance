@@ -211,6 +211,18 @@ class PairCoordinatorTest(unittest.TestCase):
         self.assertEqual(pair_id, "pair-1")
         self.assertGreater(replacement.price, 99.36)
 
+    def test_checkpoint_roundtrip_restores_owned_tickets(self):
+        venue = FakeVenue(current=100.0)
+        coordinator = _coordinator(venue)
+        coordinator.start(mid=100.0, pair_id="durable-pair")
+        state = coordinator.export_state()
+
+        restored = PairCoordinator.from_state(venue, coordinator.policy, state)
+
+        self.assertEqual(restored.pair_id, "durable-pair")
+        self.assertEqual(restored.phase, "quoting")
+        self.assertEqual([t.order_id for t in restored.tickets], ["L1", "L2"])
+
     def test_fast_buy_fill_hard_stop_exits_market_only_after_threshold(self):
         venue = FakeVenue(current=95.0)
         coordinator = _coordinator(

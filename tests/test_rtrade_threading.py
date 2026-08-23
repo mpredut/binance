@@ -18,6 +18,11 @@ def _bot():
     bot.buy_filled = False
     bot.sell_filled = False
     bot.lock = threading.Lock()
+    bot.pair_store = SimpleNamespace(
+        active=lambda _symbol: [],
+        begin=lambda *_args, **_kwargs: None,
+        checkpoint=lambda *_args, **_kwargs: None,
+    )
     return bot
 
 
@@ -40,7 +45,8 @@ class RTradeThreadingTest(unittest.TestCase):
                 self.steps = []
                 coordinators.append(self)
 
-            def start(self, _price):
+            def start(self, _price, pair_id=None):
+                self.pair_id = pair_id or self.pair_id
                 return SimpleNamespace(
                     terminal=False, pair_id=self.pair_id, phase="quoting",
                     reason=None)
@@ -63,7 +69,8 @@ class RTradeThreadingTest(unittest.TestCase):
             with self.assertRaises(KeyboardInterrupt):
                 bot._run_coordinator_forever()
 
-        self.assertEqual([c.pair_id for c in coordinators], ["pair-1", "pair-2"])
+        self.assertEqual(len({c.pair_id for c in coordinators}), 2)
+        self.assertTrue(all(len(c.pair_id) == 32 for c in coordinators))
         self.assertEqual([c.start_side for c in coordinators], ["BUY", "SELL"])
         self.assertEqual(coordinators[0].steps, [8.0, 16.0])
         self.assertEqual(coordinators[1].steps, [16.0])
@@ -76,7 +83,8 @@ class RTradeThreadingTest(unittest.TestCase):
             def __init__(self, *_args, **kwargs):
                 self.start_side = kwargs["start_side"]
 
-            def start(self, _price):
+            def start(self, _price, pair_id=None):
+                self.pair_id = pair_id or f"pair-{len(starts) + 1}"
                 starts.append(self.start_side)
                 return SimpleNamespace(
                     terminal=True,
@@ -128,9 +136,11 @@ class RTradeThreadingTest(unittest.TestCase):
                          ("7", 0.8, "pair-1"))
         kwargs = place.call_args.kwargs
         self.assertEqual(kwargs["cooldown_pair_id"], "pair-1")
-        self.assertTrue(kwargs["is_retry"])
+        self.assertTrue(kwargs["caller_owns_retry"])
         self.assertFalse(kwargs["force"])
         self.assertFalse(kwargs["smart"])
+        self.assertTrue(kwargs["client_order_id"].startswith("SD_"))
+        self.assertEqual(len(kwargs["client_order_id"]), 35)
 
     def test_live_pair_hard_stop_reconciles_and_uses_audited_market_exit(self):
         precision = SimpleNamespace(volume_decimals=3, order_min=0.001)

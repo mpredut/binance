@@ -17,9 +17,12 @@ import symbols as sym
 from binance_api import bapi as api
 from binance_api import bapi_placeorder as po   # pastrat pt WeightLimitBlock (dead-safe)
 from providers.market_api import api as mkt      # proxy unic guardat (Instrument.place)
-from providers.execution_audit import AuditedStrategyExecutor, new_intent_id
+from providers.execution_audit import (
+    AuditedStrategyExecutor, intent_client_order_id,
+)
 from providers.quantity import decide_quantity
 from market_regime import MarketRegimeDecision, MarketRegimeEvaluator
+from rtrade_pair_store import RTradePairStore
 from strategies.rtrade_pair import (
     OrderSnapshot as PairOrderSnapshot,
     OrderTicket as PairOrderTicket,
@@ -121,16 +124,18 @@ RTRADE_HARD_STOP_PCT = float(os.environ.get("RTRADE_HARD_STOP_PCT", "0.08"))
 class _LivePairVenue:
     """Adaptorul subtire dintre coordonatorul pur si Binance-ul curent."""
 
-    def __init__(self, symbol):
+    def __init__(self, symbol, pair_store=None):
         self.symbol = symbol
         self._known_tickets = []
         self._last_place_failures = {}
         provider_name = mkt.provider_name_for(symbol)
+        self.provider_name = provider_name
         self.executor = mkt.provider_by_name(provider_name)
         if self.executor is None:
             raise RuntimeError(f"provider executor indisponibil pentru {symbol}")
         self.audited_executor = AuditedStrategyExecutor(
             self.executor, venue=provider_name)
+        self.pair_store = pair_store
 
     def current_price(self):
         return mkt.get_current_price(self.symbol)
@@ -163,15 +168,24 @@ class _LivePairVenue:
                 return None
         hours = (RTRADE_BUY_NORMAL_HOURS if side.upper() == "BUY"
                  else RTRADE_SELL_NORMAL_HOURS)
+        intent_id = f"rtrade-{pair_id}-{side.lower()}-limit"
+        client_id = intent_client_order_id(self.provider_name, intent_id)
+        if self.pair_store is not None:
+            self.pair_store.intent(
+                pair_id, side, price, qty, client_id, kind="limit")
         order = mkt.place(
             self.symbol, side, price, qty,
             force=False, cancelorders=False, hours=hours, smart=False,
             cooldown_pair_id=pair_id,
             # Coordonatorul detine retry/reconcile; outbox-ul global nu trebuie sa
             # recreeze ulterior un picior dintr-o pereche deja expirata.
-            is_retry=True, motivation="rtrade_pair_quote")
+            caller_owns_retry=True, motivation="rtrade_pair_quote",
+            client_order_id=client_id)
         ticket = self._ticket(order, side, price, qty, pair_id=pair_id)
         if ticket is not None:
+            if self.pair_store is not None:
+                self.pair_store.accepted(
+                    pair_id, side, ticket.order_id, kind="limit")
             self._known_tickets.append(ticket)
         return ticket
 
@@ -226,16 +240,24 @@ class _LivePairVenue:
                       f"sub minim {precision.order_min}")
                 return None
         kind = f"rtrade:{reason}:{pair_id or 'unknown-pair'}"
-        intent_id = new_intent_id(self.audited_executor.name, self.symbol, kind)
+        intent_id = f"rtrade-{pair_id or 'unknown'}-{reason}-{side.lower()}"
+        client_id = intent_client_order_id(self.audited_executor.name, intent_id)
+        if self.pair_store is not None and pair_id:
+            self.pair_store.intent(
+                pair_id, side, None, final_qty, client_id, kind="hard_stop")
         self.audited_executor.preflight_order(
             self.symbol, side, final_qty, price=None, market=True, kind=kind)
         order_id = self.audited_executor.submit_order_with_intent(
             intent_id, self.symbol, side, final_qty, price=None,
-            market=True, kind=kind, reference_price=price)
+            market=True, kind=kind, reference_price=price,
+            client_order_id=client_id)
         ticket = PairOrderTicket(
             order_id=str(order_id), side=side, price=price, qty=final_qty,
             pair_id=pair_id)
         self._known_tickets.append(ticket)
+        if self.pair_store is not None and pair_id:
+            self.pair_store.accepted(
+                pair_id, side, ticket.order_id, kind="hard_stop")
         return ticket
 
     def order_status(self, order_id):
@@ -570,7 +592,8 @@ class TradingBot:
         return buy_future.result(), sell_future.result()
 
     def _run_coordinator_forever(self):
-        venue = _LivePairVenue(self.symbol)
+        pair_store = getattr(self, "pair_store", None) or RTradePairStore()
+        venue = _LivePairVenue(self.symbol, pair_store=pair_store)
         policy = PairPolicy(
             adjustment_fraction=self.DEFAULT_ADJUSTMENT_PERCENT,
             quote_ttl_sec=WAIT_FOR_ORDER,
@@ -601,6 +624,22 @@ class TradingBot:
         # runde. O runda expusa continua sa-si urmareasca exit-ul, dar nu mai
         # blocheaza lansarea altor runde pe acelasi simbol pana la limita setata.
         active = []
+        recovery_blocked = False
+        for record in pair_store.active(self.symbol):
+            state = record.get("state")
+            if not state:
+                print(f"[{self.symbol}] RECOVERY BLOCAT: pair={record.get('pair_id')} "
+                      "are intentie persistata fara checkpoint; nu pornesc runde noi")
+                recovery_blocked = True
+                continue
+            try:
+                coordinator = PairCoordinator.from_state(venue, policy, state)
+                active.append(coordinator)
+                print(f"[{self.symbol}] pair={coordinator.pair_id} adoptat "
+                      f"phase={coordinator.phase} tickets={len(coordinator.tickets)}")
+            except Exception as exc:
+                print(f"[{self.symbol}] RECOVERY BLOCAT: {exc}")
+                recovery_blocked = True
         last_start_at = float("-inf")
         next_direction = 0
         side_backoff_until = {"BUY": 0.0, "SELL": 0.0}
@@ -610,6 +649,11 @@ class TradingBot:
                 survivors = []
                 for coordinator in active:
                     outcome = coordinator.step(now=now)
+                    export_state = getattr(coordinator, "export_state", None)
+                    if callable(export_state):
+                        pair_store.checkpoint(
+                            coordinator.pair_id, export_state(),
+                            terminal=outcome.terminal)
                     if outcome.terminal:
                         print(
                             f"[{self.symbol}] pair={outcome.pair_id} "
@@ -624,6 +668,8 @@ class TradingBot:
                 active = survivors
 
                 can_start = (
+                    not recovery_blocked
+                    and
                     len(active) < RTRADE_PAIR_MAX_ACTIVE_ROUNDS
                     and now - last_start_at >= RTRADE_PAIR_START_INTERVAL_SEC
                 )
@@ -642,9 +688,18 @@ class TradingBot:
                             time.sleep(RTRADE_PAIR_POLL_SEC)
                             continue
                         round_qty = RTRADE_NOTIONAL_USDC / float(current_price)
+                        reserved_pair_id = uuid.uuid4().hex
+                        pair_store.begin(
+                            self.symbol, reserved_pair_id, start_side, round_qty)
                         coordinator = PairCoordinator(
                             venue, round_qty, policy, start_side=start_side)
-                        outcome = coordinator.start(current_price)
+                        outcome = coordinator.start(
+                            current_price, pair_id=reserved_pair_id)
+                        export_state = getattr(coordinator, "export_state", None)
+                        if callable(export_state):
+                            pair_store.checkpoint(
+                                coordinator.pair_id, export_state(),
+                                terminal=outcome.terminal)
                         last_start_at = now
                         if outcome.terminal:
                             failed_side, backoff_sec = _place_failure_backoff(

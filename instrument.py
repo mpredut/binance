@@ -98,9 +98,9 @@ class Instrument:
         # bypass_profit_guard=True (ex. disjunctor de crash) sare DOAR gardul de profit +
         # plafonul de weight (comportament PREEXISTENT, neschimbat) — la fel ca la Binance,
         # NU sare plafonul zilnic, cooldown-ul sau trend-wait-ul (raman active si la disjunctor).
-        # `is_retry` (30 iul): setat de order_retry_worker cand REIA un ordin din coada —
-        # impiedica re-enqueue-ul (fara recursie infinita). Scos din kwargs (nu merge la provider).
-        is_retry = bool(kwargs.pop("is_retry", False))
+        # Apelantul poate detine propriul lifecycle/retry (rtrade sau workerul
+        # outbox). In acest caz pipeline-ul nu atinge coada globala.
+        caller_owns_retry = bool(kwargs.pop("caller_owns_retry", False))
         bypass = bool(kwargs.pop("bypass_profit_guard", False))
         cooldown_pair_id = kwargs.pop("cooldown_pair_id", None)
         side_u = side.upper()
@@ -264,7 +264,7 @@ class Instrument:
             # altfel esecul initial ramane in coada si poate produce un ordin duplicat
             # dupa ce retry-ul local a reusit deja. Workerul nu are nevoie de resolve:
             # el face claim atomic inainte de plasare.
-            if order is not None and not is_retry:
+            if order is not None and not caller_owns_retry:
                 try:
                     import order_retry
                     order_retry.resolve(self.symbol, side_u)
@@ -272,7 +272,7 @@ class Instrument:
                     print(f"[{self.symbol}] {side_u} resolve retry esuat (ignor): {_e}")
             # Daca a esuat si NU e deja un retry, salveaza intentia persistenta.
             # Best-effort: orice eroare aici NU afecteaza returul.
-            elif order is None and not is_retry:
+            elif order is None and not caller_owns_retry:
                 try:
                     import order_retry
                     if order_retry.RETRY_ENABLED:

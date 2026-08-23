@@ -161,13 +161,14 @@ class PairCoordinator:
         self.snapshots: dict[str, OrderSnapshot] = {}
         self.stop_ticket: Optional[OrderTicket] = None
 
-    def start(self, mid: Optional[float] = None) -> PairOutcome:
+    def start(self, mid: Optional[float] = None,
+              pair_id: Optional[str] = None) -> PairOutcome:
         if self.phase not in {"idle", "complete", "expired", "failed", "hard_stop"}:
             raise RuntimeError("runda existenta nu este terminala")
         mid = float(mid if mid is not None else (self.venue.current_price() or 0.0))
         buy_price, sell_price = quote_prices(
             mid, self.policy.adjustment_fraction, self.policy.price_decimals)
-        self.pair_id = self.pair_id_factory()
+        self.pair_id = pair_id or self.pair_id_factory()
         self.started_at = self.clock()
         self.first_fill_at = None
         self.first_fill_side = None
@@ -198,6 +199,48 @@ class PairCoordinator:
         self.tickets.append(second)
         self.phase = "quoting"
         return self.outcome()
+
+    def export_state(self) -> dict:
+        """Checkpoint JSON-safe suficient pentru adoptie dupa restart."""
+        return {
+            "pair_id": self.pair_id, "qty": self.qty,
+            "start_side": self.start_side, "phase": self.phase,
+            "reason": self.reason, "shock": self.shock,
+            "elapsed_sec": max(0.0, self.clock() - self.started_at),
+            "first_fill_elapsed_sec": (
+                None if self.first_fill_at is None
+                else max(0.0, self.first_fill_at - self.started_at)),
+            "first_fill_side": self.first_fill_side,
+            "tickets": [vars(ticket).copy() for ticket in self.tickets],
+            "snapshots": {
+                str(order_id): vars(snapshot).copy()
+                for order_id, snapshot in self.snapshots.items()
+            },
+        }
+
+    @classmethod
+    def from_state(cls, venue, policy, state, *,
+                   clock=time.monotonic, sleeper=time.sleep):
+        required = {"pair_id", "qty", "start_side", "phase", "tickets"}
+        if not required.issubset(state or {}):
+            raise ValueError("checkpoint rtrade incomplet")
+        obj = cls(venue, state["qty"], policy, start_side=state["start_side"],
+                  clock=clock, sleeper=sleeper)
+        obj.pair_id = str(state["pair_id"])
+        obj.phase = str(state["phase"])
+        obj.reason = state.get("reason")
+        obj.shock = bool(state.get("shock", False))
+        obj.started_at = clock() - max(0.0, float(state.get("elapsed_sec", 0.0)))
+        ff_elapsed = state.get("first_fill_elapsed_sec")
+        obj.first_fill_at = (None if ff_elapsed is None
+                             else obj.started_at + max(0.0, float(ff_elapsed)))
+        obj.first_fill_side = state.get("first_fill_side")
+        obj.tickets = [OrderTicket(**ticket) for ticket in state.get("tickets", [])]
+        obj.snapshots = {
+            str(order_id): OrderSnapshot(**snapshot)
+            for order_id, snapshot in state.get("snapshots", {}).items()
+        }
+        return obj
 
     def _cancel(self, ticket: OrderTicket) -> bool:
         if not ticket.active:

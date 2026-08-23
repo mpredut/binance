@@ -254,7 +254,7 @@ Worker-ul:
 - verifică intervalul minim și price tolerance;
 - revendică înregistrările înainte de procesare;
 - obține prețul curent;
-- reapelează `Instrument.place(..., is_retry=True)`;
+- reapelează `Instrument.place(..., caller_owns_retry=True)`;
 - trece din nou prin toate gardurile și nu creează retry recursiv.
 
 Kill-switch-ul ține worker-ul viu, dar idle, pentru a evita flapping-ul supervizorului.

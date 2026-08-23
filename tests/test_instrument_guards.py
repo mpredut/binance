@@ -218,13 +218,13 @@ class InstrumentGuardsTestCase(unittest.TestCase):
 
         buy = inst.place(
             "BUY", 99.0, 1.0, smart=False,
-            cooldown_pair_id="pair-1", is_retry=True)
+            cooldown_pair_id="pair-1", caller_owns_retry=True)
         sell = inst.place(
             "SELL", 101.0, 1.0, smart=False,
-            cooldown_pair_id="pair-1", is_retry=True)
+            cooldown_pair_id="pair-1", caller_owns_retry=True)
         duplicate = inst.place(
             "SELL", 102.0, 1.0, smart=False,
-            cooldown_pair_id="pair-1", is_retry=True)
+            cooldown_pair_id="pair-1", caller_owns_retry=True)
 
         self.assertIsNotNone(buy)
         self.assertIsNotNone(sell)
@@ -260,7 +260,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         p = _FakeProvider()
         p.seed_trade("BUY", age_sec=5.0)   # refuz
         inst = self._inst(p)
-        order = inst.place("BUY", 100.0, 1.0, is_retry=True)   # e deja un retry
+        order = inst.place("BUY", 100.0, 1.0, caller_owns_retry=True)
         self.assertIsNone(order)
         self.assertEqual(_oq.load_all(), [])   # NU se re-enqueue-aza (fara recursie)
 

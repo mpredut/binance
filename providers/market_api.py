@@ -100,7 +100,11 @@ class BinanceProvider(MarketDataProvider):
         # kwargs (safeback_seconds/cancelorders/hours/pair/motivation) sunt consumati
         # de stratul agnostic; aici conteaza doar force (market vs limit).
         from binance_api import bapi_placeorder as _po
-        return _po.place_order_mechanics(side, symbol, price, qty, force=force)
+        mechanics_kwargs = {"force": force}
+        if kwargs.get("client_order_id") is not None:
+            mechanics_kwargs["client_order_id"] = kwargs["client_order_id"]
+        return _po.place_order_mechanics(
+            side, symbol, price, qty, **mechanics_kwargs)
 
     def adjust_order_price(self, symbol: str, side: str, price: float, cancel_opposite: bool = True) -> float:
         from binance_api import bapi_placeorder as _po
