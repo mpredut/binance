@@ -21,6 +21,7 @@
 set -euo pipefail
 
 RUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+set -a; source "$RUNNER_DIR/dev_backtest.env"; set +a
 REPO_ROOT="${BINANCE_REPO_ROOT:-$(cd "$RUNNER_DIR/../.." && pwd)}"
 DEV_HOST="${DEV_HOST:-192.168.0.138}"; DEV_PORT="${DEV_PORT:-32238}"; DEV_USER="${DEV_USER:-predut}"
 SSH="ssh -o BatchMode=yes -p $DEV_PORT"
@@ -29,7 +30,7 @@ echo "[trigger $(date '+%F %T')] 1/3 refresh dev (sync cod+date)"
 "$REPO_ROOT/offline/runners/refresh_dev.sh"
 
 echo "[trigger $(date '+%F %T')] 2/3 ruleaza ciclul de backtest pe dev"
-$SSH "$DEV_USER@$DEV_HOST" "PILOT_ONLY='${PILOT_ONLY:-}' ~/binance/offline/runners/run_backtest_cycle.sh"
+$SSH "$DEV_USER@$DEV_HOST" "PILOT_ONLY='${PILOT_ONLY:-}' ~/$DEV_PATH/offline/runners/run_backtest_cycle.sh"
 
 echo "[trigger $(date '+%F %T')] 3/3 aplica propunerile pe PROD (guardrail-uri: rate-limit/medie/audit)"
 cd "$REPO_ROOT" && ./myenv/bin/python offline/runners/apply_proposals.py

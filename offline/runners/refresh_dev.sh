@@ -10,6 +10,9 @@
 # Idempotent; sigur de pus pe cron pe prod.
 set -euo pipefail
 
+RUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+set -a; source "$RUNNER_DIR/dev_backtest.env"; set +a
+
 # MUTEX (4 aug): refresh_dev poate fi pornit CONCURENT — o data din cron-ul propriu (*/30,
 # deci si la 00:00/12:00) SI o data apelat de trigger_backtest_dev.sh (0 */12 = 00:00/12:00).
 # Doua `git pull --ff-only` simultane pe dev -> FETCH_HEAD scris de amandoua -> 'Cannot
@@ -25,12 +28,12 @@ DEV_HOST="${DEV_HOST:-192.168.0.138}"
 DEV_PORT="${DEV_PORT:-32238}"
 DEV_USER="${DEV_USER:-predut}"
 DEV_PATH="${DEV_PATH:-binance}"          # relativ la ~ pe dev
-RUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEV_CODE_BRANCH="${DEV_CODE_BRANCH:-main}"
 REPO_ROOT="${BINANCE_REPO_ROOT:-$(cd "$RUNNER_DIR/../.." && pwd)}"
 SSH="ssh -o BatchMode=yes -p $DEV_PORT"
 
 echo "[refresh_dev $(date '+%F %T')] cod: git pull --ff-only pe dev"
-$SSH "$DEV_USER@$DEV_HOST" "cd ~/$DEV_PATH && git pull --ff-only origin main" 2>&1 | sed 's/^/  /'
+$SSH "$DEV_USER@$DEV_HOST" "cd ~/$DEV_PATH && git pull --ff-only origin $DEV_CODE_BRANCH" 2>&1 | sed 's/^/  /'
 
 echo "[refresh_dev $(date '+%F %T')] date: rsync cachedb/ prod -> dev"
 # --exclude '*.tmp': cacheManager scrie atomic prin .tmp temporare care apar/dispar

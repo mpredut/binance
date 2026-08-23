@@ -1,10 +1,17 @@
-# Profil DEV / WSL
+# Profil DEV / backtest
 
-Audit la 2026-08-23: checkout-ul DEV este `/home/mariusp/binance`, branch
-`main`, remote `origin`, fără cron propriu și fără unități systemd Binance/PIA.
-Acesta este comportamentul intenționat: DEV/backtest nu pornește automat boti
-live și nu primește secrete PROD prin Git.
+Configurația autoritativă este `offline/runners/dev_backtest.env`: host
+`192.168.0.138:32238`, checkout `~/binance`, cod pe `main`, rezultate pe
+`backtest-proposals`.
 
-Refacere DEV: clonează `main`, creează `.venv`, instalează `requirements.txt` și
-restaurează numai datele de research/backtest necesare. Nu rula
-`systemd/install_prod.sh` în WSL DEV.
+DEV nu are nevoie de cron sau servicii live proprii. PROD orchestrează:
+
+- `refresh_dev.sh` la 30 minute: fast-forward `main` și rsync `cachedb/`;
+- `trigger_backtest_dev.sh` la 02:00 și 14:00;
+- DEV execută `run_backtest_cycle.sh` și publică pe `backtest-proposals`;
+- PROD aplică propunerile cu guardrail-urile din `apply_proposals.py`.
+
+Refacere DEV: clonează `main` în calea configurată, creează `myenv`, instalează
+`requirements.txt`, autorizează cheia SSH a PROD și verifică manual
+`run_backtest_cycle.sh`. Nu instala `systemd/install_prod.sh` pe DEV și nu copia
+cheile exchange PROD; sunt necesare numai datele `cachedb/` sincronizate.

@@ -10,9 +10,10 @@
 set -euo pipefail
 
 RUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+set -a; source "$RUNNER_DIR/dev_backtest.env"; set +a
 REPO_ROOT="${BINANCE_REPO_ROOT:-${ROOT:-$(cd "$RUNNER_DIR/../.." && pwd)}}"
 WT="${WT:-$(dirname "$REPO_ROOT")/binance-proposals}"
-BRANCH="backtest-proposals"
+BRANCH="${BACKTEST_PROPOSALS_BRANCH:-backtest-proposals}"
 SRC_FILE="$REPO_ROOT/backtest_proposals.json"
 
 [ -f "$SRC_FILE" ] || { echo "[publish] lipseste $SRC_FILE — ruleaza intai pilotul --propose"; exit 1; }
