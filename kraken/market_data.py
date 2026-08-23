@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-market_data.py — urmarirea pretului si disponibilitatii unei perechi pe Kraken.
+market_data.py — Kraken pair-price and availability tracking.
 
-Pe Kraken, pretul vine direct din endpoint-ul public Ticker (nu Yahoo).
-"Disponibil" (analog cu 'launched' la SPCX) = perechea exista in AssetPairs
-si are un pret valid. Pentru HYPE -> da; pentru un SPCX inca nelistat -> nu.
+Kraken prices come directly from the public Ticker endpoint rather than Yahoo.
+Available, analogous to SPCX launched, means the pair exists in AssetPairs and has
+a valid price. HYPE qualifies; an unlisted future pair does not.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from kraken_client import KrakenClient, KrakenError
 
 
 def get_price(client: KrakenClient, pair: str) -> float | None:
-    """Ultimul pret pentru pereche (ex HYPEUSD). None daca indisponibil."""
+    """Return the latest pair price, e.g. HYPEUSD, or None when unavailable."""
     try:
         return client.last_price(pair)
     except KrakenError as e:
@@ -23,9 +23,9 @@ def get_price(client: KrakenClient, pair: str) -> float | None:
 
 
 def pair_available(client: KrakenClient, pair: str) -> dict | None:
-    """Returneaza info-ul perechii daca e LISTATA si tranzactionabila pe Kraken, altfel None.
+    """Return pair metadata when LISTED and tradable on Kraken, otherwise None.
 
-    Folosit ca detector de 'lansare': cat timp perechea nu apare, botul asteapta.
+    Used as a launch detector; the bot waits while the pair is absent.
     """
     try:
         info = client.pair_info(pair)
@@ -33,7 +33,7 @@ def pair_available(client: KrakenClient, pair: str) -> dict | None:
         return None
     if not info:
         return None
-    # status 'online' = tranzactionabil. (Kraken: online/cancel_only/post_only/limit_only/reduce_only)
+    # Status 'online' means tradable; Kraken also reports cancel/post/limit/reduce-only.
     status = info.get("status", "online")
     if status not in ("online", "limit_only", "post_only"):
         log(f"  [market] {pair} listat dar status={status} (inca netranzactionabil)")
@@ -42,7 +42,7 @@ def pair_available(client: KrakenClient, pair: str) -> dict | None:
 
 
 def pair_precision(info: dict) -> tuple[int, int, float]:
-    """Din info-ul perechii: (zecimale_pret, zecimale_volum, ordin_minim)."""
+    """Return (price decimals, volume decimals, minimum order) from pair metadata."""
     price_dec = int(info.get("pair_decimals", 2))
     vol_dec = int(info.get("lot_decimals", 8))
     try:

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-notify.py — subtire peste notify() PARTAJAT din alertnotifiers.py (radacina).
-Doar rezolva simbolul specific Kraken si deleaga (logica comuna = in alertnotifiers).
+notify.py — thin wrapper over the SHARED notify() in root alertnotifiers.py.
+Resolve the Kraken-specific symbol and delegate all common logic.
 """
 from __future__ import annotations
 
 import os
 import sys
 
-# alertnotifiers.py e in radacina proiectului (parinte fata de kraken/)
+# alertnotifiers.py is in the repository root, the parent of kraken/.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from alertnotifiers import bind_notify  # noqa: E402
 

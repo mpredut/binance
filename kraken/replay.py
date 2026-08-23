@@ -1,7 +1,7 @@
-"""Replay care rulează strategia live Kraken peste OHLC istoric.
+"""Replay the live Kraken strategy over historical OHLC.
 
-Strategia decide ordinele. Harness-ul modelează separat fill-urile, costurile și
-ambiguitatea intrabar, fără rețea, notificări sau stare persistentă.
+The strategy decides orders. The harness separately models fills, costs, and intrabar
+ambiguity without network, notifications, or persistent state.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ def run_replay(
     fee_model: FeeModel | None = None,
     include_decision_trace: bool = False,
 ) -> dict:
-    """Rulează replay-ul; ipotezele implicite păstrează baseline-ul anterior."""
+    """Run replay with defaults that preserve the previous baseline."""
     _validate_replay(ohlc, params, bar_minutes)
     model = execution or ExecutionModel()
     fees = fee_model or FeeModel(fee_pct, fee_pct)
@@ -88,8 +88,8 @@ def _run_once(
     include_decision_trace: bool,
 ) -> dict:
     client = MagicMock()
-    # Strategia citeste precizia prin contractul agnostic (pair_precision). None ->
-    # foloseste precizia implicita (5,8,0.0), exact ca inainte (cand era pair_info=None).
+    # Strategy reads precision through the agnostic pair_precision contract. None uses
+    # the legacy default (5,8,0.0), matching the former pair_info=None behavior.
     client.pair_precision.return_value = None
     original_notify = _strat.notify
     _strat.notify = _silent

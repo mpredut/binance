@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-kraken_bot.py — watcher + auto-trade DCA/take-profit pe Kraken (Spot).
+kraken_bot.py — Kraken Spot watcher and DCA/take-profit auto-trader.
 
-Acelasi flux ca ipo.py (T212), dar pe Kraken. Perechea se configureaza in .env
-(KRAKEN_PAIR). Daca perechea nu e inca listata pe Kraken (ex un SPCX viitor),
-botul ASTEAPTA pana apare, apoi intra — identic cu logica SPCX de la T212.
+The same flow as T212 ipo.py, adapted to Kraken. KRAKEN_PAIR configures the pair in
+.env. If a future pair is not listed yet, the bot WAITS until it appears before entry,
+matching T212 SPCX logic.
 
-Comenzi:
-    python3 kraken_bot.py                 # ruleaza dupa .env
-    python3 kraken_bot.py --paper         # forteaza PAPER (fara bani)
-    python3 kraken_bot.py --pair HYPEEUR  # override pereche
-    python3 kraken_bot.py --find-pair hype  # cauta perechea exacta pe Kraken
-    python3 kraken_bot.py --price         # arata pretul curent
-    python3 kraken_bot.py --balance       # arata soldurile (necesita chei)
-    python3 kraken_bot.py --test-strategy HYPEEUR  # ruleaza strategia ACUM
+Commands:
+    python3 kraken_bot.py                 # run from .env
+    python3 kraken_bot.py --paper         # force PAPER without money
+    python3 kraken_bot.py --pair HYPEEUR  # override pair
+    python3 kraken_bot.py --find-pair hype  # find the exact Kraken pair
+    python3 kraken_bot.py --price         # show current price
+    python3 kraken_bot.py --balance       # show balances; requires credentials
+    python3 kraken_bot.py --test-strategy HYPEEUR  # run the strategy NOW
 """
 
 from __future__ import annotations
@@ -33,9 +33,9 @@ from market_data import get_price, pair_available
 from notify import notify
 from strategies.spot_dca import Strategy, StratParams
 
-# Provider-agnostic (Calea B): strategia cere contractul StrategyExecutor. Impachetam
-# clientul _BOT intr-un KrakenProvider (aceeasi conexiune/nonce) pt Strategy; comenzile
-# CLI (--balance/--find-pair/--price) folosesc in continuare clientul KrakenClient direct.
+# Provider-agnostic path B requires the StrategyExecutor contract. Wrap the _BOT client
+# in KrakenProvider so Strategy shares its connection/nonce. Balance/find/price CLI
+# commands continue using KrakenClient directly.
 from providers.kraken_provider import KrakenProvider  # noqa: E402
 from providers.execution_audit import AuditedStrategyExecutor  # noqa: E402
 
@@ -47,7 +47,7 @@ def _build_client() -> KrakenClient:
 
 
 def _build_executor(client: KrakenClient) -> AuditedStrategyExecutor:
-    """Executor strict Kraken, decorat doar observational cu audit JSONL."""
+    """Return a strict Kraken executor decorated only with observational JSONL audit."""
     return AuditedStrategyExecutor(KrakenProvider(client=client), venue="Kraken")
 
 
@@ -56,8 +56,8 @@ def main() -> int:
     for i, a in enumerate(sys.argv):
         if a == "--env-file" and i + 1 < len(sys.argv):
             env_file = sys.argv[i + 1]
-    load_dotenv(env_file)                                                      # secrete (gitignored)
-    load_dotenv(os.path.join(os.path.dirname(env_file) or ".", "config.env"))  # config versionat (comis)
+    load_dotenv(env_file)                                                      # gitignored secrets
+    load_dotenv(os.path.join(os.path.dirname(env_file) or ".", "config.env"))  # versioned configuration
 
     ap = argparse.ArgumentParser(description="Bot DCA+TP pe Kraken.")
     ap.add_argument("--env-file", default=env_file)
@@ -72,8 +72,8 @@ def main() -> int:
     ap.add_argument("--test-strategy", metavar="PAIR", help="Ruleaza strategia ACUM pe perechea data")
     args = ap.parse_args()
     if not any(getattr(args, a, None) for a in ("balance", "find_pair", "price", "test_strategy")):
-        # O instanta PER PERECHE (multi-coin): HYPE, ADA, WIF... pot rula simultan, fiecare
-        # cu lock-ul propriu. (Inainte era cheie fixa 'kraken_bot' -> a 2-a pereche era blocata.)
+        # Use one instance PER PAIR so HYPE, ADA, WIF, etc. can run concurrently with
+        # separate locks. The former fixed 'kraken_bot' key blocked a second pair.
         _lock_pair = (args.pair or os.environ.get("KRAKEN_PAIR") or "default").strip()
         single_instance(f"kraken_bot_{_lock_pair}")
 
@@ -84,7 +84,7 @@ def main() -> int:
     strat_dry   = args.paper or not (os.environ.get("STRAT_EXECUTE", "false").lower() == "true")
     interval    = max(args.interval, 15)
 
-    # --- comenzi one-shot ---
+    # --- one-shot commands ---
     if args.find_pair:
         return _cmd_find_pair(client, args.find_pair)
     if args.price:
@@ -109,12 +109,12 @@ def main() -> int:
     log(f"    executie     : {'PAPER (fara bani)' if strat_dry else '⚠ REAL — BANI ADEVARATI'}")
     log(f"    ntfy/email   : {os.environ.get('NTFY_TOPIC') or '-'} / {os.environ.get('ALERT_TO_EMAIL') or '-'}")
 
-    # --- asteapta pana perechea e LISTATA si tranzactionabila (analog 'launch') ---
+    # --- wait until the pair is LISTED and tradable, analogous to launch ---
     if not args.skip_wait:
         if not _wait_for_listing(client, pair, label, interval, args.desktop):
             return 130
 
-    # --- porneste strategia ---
+    # --- start the strategy ---
     try:
         Strategy(_build_executor(client), pair, StratParams.from_env(), dry_run=strat_dry,
                  desktop=args.desktop).run()
@@ -125,7 +125,7 @@ def main() -> int:
 
 
 def _wait_for_listing(client, pair, label, interval, desktop) -> bool:
-    # pre-flight: daca e deja listata, pornim imediat
+    # Preflight: start immediately if the pair is already listed.
     info = pair_available(client, pair)
     if info:
         log(f"  [verify] {pair} e LISTAT si tranzactionabil — pornesc.")
