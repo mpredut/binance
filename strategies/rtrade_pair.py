@@ -82,7 +82,8 @@ class PairVenue(Protocol):
     def place_limit(self, side: str, price: float, qty: float,
                     pair_id: str) -> Optional[OrderTicket]: ...
     def place_market_exit(self, side: str, qty: float,
-                          reason: str) -> Optional[OrderTicket]: ...
+                          reason: str,
+                          pair_id: Optional[str] = None) -> Optional[OrderTicket]: ...
     def order_status(self, order_id: str) -> OrderSnapshot: ...
     def cancel(self, order_id: str) -> bool: ...
 
@@ -305,7 +306,8 @@ class PairCoordinator:
             return False
         market = self.venue.place_market_exit(
             exit_side, abs(net_qty),
-            reason=("fast_fill_hard_stop" if self.shock else "inventory_hard_stop"))
+            reason=("fast_fill_hard_stop" if self.shock else "inventory_hard_stop"),
+            pair_id=self.pair_id)
         if market is None:
             self.reason = "hard_stop_place_failed"
             return False

@@ -37,11 +37,11 @@ class FakeVenue:
     def last_place_failure_reason(self, side):
         return self.failure_reasons.get(side.upper())
 
-    def place_market_exit(self, side, qty, reason):
+    def place_market_exit(self, side, qty, reason, pair_id=None):
         ticket = OrderTicket(
             order_id=f"M{len(self.orders) + 1}", side=side.upper(),
             price=self.current, qty=qty)
-        self.orders.append((ticket, "market"))
+        self.orders.append((ticket, pair_id or "market"))
         self.market_calls.append((side.upper(), qty, reason))
         self.statuses[ticket.order_id] = OrderSnapshot(
             status="closed", filled_qty=qty, cost=qty * self.current, fee=0.1)

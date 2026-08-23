@@ -64,10 +64,13 @@ def fee_cap_quantity(available_qty: float, fee_rate: float) -> float:
 
 
 def decide_quantity(provider, symbol: str, side: str, price: float,
-                    requested_qty: float, *, base: Optional[str] = None,
+                    requested_qty: Optional[float], *, base: Optional[str] = None,
                     quote: Optional[str] = None, cancelorders: bool = False,
-                    hours: float = 5) -> QuantityDecision:
-    requested = max(0.0, float(requested_qty))
+                    hours: float = 5,
+                    apply_policy: bool = True) -> QuantityDecision:
+    # Contractul SAFE istoric: None inseamna "maximum permis", nu lipsa
+    # validarii. Soldul, politica si fee-cap-ul stabilesc cantitatea finala.
+    requested = float("inf") if requested_qty is None else max(0.0, float(requested_qty))
     balance_cap, asset = balance_cap_quantity(
         provider.free_balance, symbol, side, price, base=base, quote=quote)
     if balance_cap is None:
@@ -76,13 +79,15 @@ def decide_quantity(provider, symbol: str, side: str, price: float,
     if balance_cap <= 0:
         return QuantityDecision(requested, 0.0, 0.0, 0.0, 0.0,
                                 "insufficient_funds", asset)
-    policy_cap = provider.policy_cap_quantity(
-        symbol, side, price, requested, balance_cap,
-        base=base, quote=quote, cancelorders=cancelorders, hours=hours)
-    if policy_cap is None:
-        return QuantityDecision(requested, balance_cap, None, None, 0.0,
-                                "policy_unavailable", asset)
-    policy_cap = max(0.0, float(policy_cap))
+    policy_cap = requested
+    if apply_policy:
+        policy_cap = provider.policy_cap_quantity(
+            symbol, side, price, requested, balance_cap,
+            base=base, quote=quote, cancelorders=cancelorders, hours=hours)
+        if policy_cap is None:
+            return QuantityDecision(requested, balance_cap, None, None, 0.0,
+                                    "policy_unavailable", asset)
+        policy_cap = max(0.0, float(policy_cap))
     fee_cap = max(0.0, float(provider.fee_cap_quantity(
         symbol, side, price, balance_cap)))
     final = min(requested, balance_cap, policy_cap, fee_cap)

@@ -48,6 +48,22 @@ class QuantityDecisionTest(unittest.TestCase):
         self.assertEqual(decision.policy_cap, 0.6)
         self.assertEqual(decision.final_qty, 0.6)
 
+    def test_none_means_maximum_allowed_by_balance_and_policy(self):
+        decision = decide_quantity(
+            Provider({"USDC": 500.0}, policy=3.0),
+            "TAOUSDC", "BUY", 100.0, None)
+        self.assertEqual(decision.balance_cap, 5.0)
+        self.assertEqual(decision.policy_cap, 3.0)
+        self.assertEqual(decision.final_qty, 3.0)
+
+    def test_risk_exit_skips_policy_but_keeps_balance_and_fee_caps(self):
+        provider = Provider({"TAO": 0.4}, policy=0.01)
+        provider.fee_cap_quantity = lambda *_args: 0.39
+        decision = decide_quantity(
+            provider, "TAOUSDC", "SELL", 100.0, 2.0,
+            apply_policy=False)
+        self.assertEqual(decision.final_qty, 0.39)
+
     def test_none_is_error_but_zero_is_real_insufficient_balance(self):
         unavailable = decide_quantity(
             Provider({"USDC": None}), "TAOUSDC", "BUY", 225, 1)

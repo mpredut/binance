@@ -132,20 +132,29 @@ class RTradeThreadingTest(unittest.TestCase):
         self.assertFalse(kwargs["force"])
         self.assertFalse(kwargs["smart"])
 
-    def test_live_pair_hard_stop_uses_explicit_raw_market_exit(self):
+    def test_live_pair_hard_stop_reconciles_and_uses_audited_market_exit(self):
+        precision = SimpleNamespace(volume_decimals=3, order_min=0.001)
         executor = SimpleNamespace(
+            name="Binance",
+            free_balance=lambda _asset: 0.4,
+            fee_cap_quantity=lambda *_args: 0.39,
+            pair_precision=lambda _symbol: precision,
+            preflight_order=lambda *args, **kwargs: None,
             submit_order=lambda *args, **kwargs: "M9")
         with patch.object(rtrade.mkt, "provider_name_for", return_value="Binance"), \
              patch.object(rtrade.mkt, "provider_by_name", return_value=executor), \
              patch.object(rtrade.mkt, "get_current_price", return_value=90.0), \
              patch.object(executor, "submit_order", wraps=executor.submit_order) as submit:
             venue = rtrade._LivePairVenue("TAOUSDC")
-            ticket = venue.place_market_exit("SELL", 0.4, "fast_fill_hard_stop")
+            ticket = venue.place_market_exit(
+                "SELL", 0.4, "fast_fill_hard_stop", pair_id="pair-9")
 
-        self.assertEqual(ticket.order_id, "M9")
-        submit.assert_called_once_with(
-            "TAOUSDC", "SELL", 0.4, price=None, market=True,
-            kind="fast_fill_hard_stop")
+        self.assertEqual((ticket.order_id, ticket.qty, ticket.pair_id),
+                         ("M9", 0.39, "pair-9"))
+        args, kwargs = submit.call_args
+        self.assertEqual(args[:4], ("TAOUSDC", "SELL", 0.39, None))
+        self.assertTrue(kwargs["market"])
+        self.assertIn("rtrade:fast_fill_hard_stop:pair-9", kwargs["kind"])
 
     def test_live_pair_cancel_releases_only_its_cooldown_leg(self):
         executor = SimpleNamespace(

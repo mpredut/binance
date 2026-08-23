@@ -5,6 +5,7 @@ import math
 import uuid
 from collections import deque
 import threading
+from decimal import Decimal, ROUND_DOWN
 from concurrent.futures import ThreadPoolExecutor, wait
 
 
@@ -16,6 +17,8 @@ import symbols as sym
 from binance_api import bapi as api
 from binance_api import bapi_placeorder as po   # pastrat pt WeightLimitBlock (dead-safe)
 from providers.market_api import api as mkt      # proxy unic guardat (Instrument.place)
+from providers.execution_audit import AuditedStrategyExecutor, new_intent_id
+from providers.quantity import decide_quantity
 from strategies.rtrade_pair import (
     OrderSnapshot as PairOrderSnapshot,
     OrderTicket as PairOrderTicket,
@@ -121,6 +124,8 @@ class _LivePairVenue:
         self.executor = mkt.provider_by_name(provider_name)
         if self.executor is None:
             raise RuntimeError(f"provider executor indisponibil pentru {symbol}")
+        self.audited_executor = AuditedStrategyExecutor(
+            self.executor, venue=provider_name)
 
     def current_price(self):
         return mkt.get_current_price(self.symbol)
@@ -168,15 +173,43 @@ class _LivePairVenue:
     def last_place_failure_reason(self, side):
         return self._last_place_failures.get(side.upper())
 
-    def place_market_exit(self, side, qty, reason):
-        # Iesire de risc explicita: contractul raw al executorului nu este blocat de
-        # profit/cooldown-ul unei perechi inca active. Aceasta cale exista numai in
-        # coordonatorul opt-in si numai dupa pragul hard-stop.
-        order_id = self.executor.submit_order(
-            self.symbol, side, qty, price=None, market=True, kind=reason)
+    def place_market_exit(self, side, qty, reason, pair_id=None):
+        """Iesire spot MARKET, rezervata reducerii unei expuneri hard-stop.
+
+        Ordinele normale raman pe mkt.place/place_safe_order. Iesirea de risc
+        sare profit/cooldown/weight, dar NU sare soldul, fee-cap-ul, precizia,
+        preflight-ul sau auditul cu client-order-id.
+        """
+        side = side.upper()
         price = float(self.current_price() or 0.0)
+        if price <= 0:
+            print(f"[{self.symbol}] {side} hard-stop BLOCAT: pret indisponibil")
+            return None
+        decision = decide_quantity(
+            self.executor, self.symbol, side, price, qty, apply_policy=False)
+        final_qty = float(decision.final_qty)
+        if final_qty <= 0:
+            print(f"[{self.symbol}] {side} hard-stop BLOCAT: "
+                  f"{decision.refuse_reason} asset={decision.balance_asset}")
+            return None
+        precision = self.audited_executor.pair_precision(self.symbol)
+        if precision is not None:
+            quantum = Decimal(1).scaleb(-int(precision.volume_decimals))
+            final_qty = float(Decimal(str(final_qty)).quantize(quantum, rounding=ROUND_DOWN))
+            if final_qty <= 0 or final_qty < float(precision.order_min or 0.0):
+                print(f"[{self.symbol}] {side} hard-stop BLOCAT: qty {final_qty} "
+                      f"sub minim {precision.order_min}")
+                return None
+        kind = f"rtrade:{reason}:{pair_id or 'unknown-pair'}"
+        intent_id = new_intent_id(self.audited_executor.name, self.symbol, kind)
+        self.audited_executor.preflight_order(
+            self.symbol, side, final_qty, price=None, market=True, kind=kind)
+        order_id = self.audited_executor.submit_order_with_intent(
+            intent_id, self.symbol, side, final_qty, price=None,
+            market=True, kind=kind, reference_price=price)
         ticket = PairOrderTicket(
-            order_id=str(order_id), side=side.upper(), price=price, qty=float(qty))
+            order_id=str(order_id), side=side, price=price, qty=final_qty,
+            pair_id=pair_id)
         self._known_tickets.append(ticket)
         return ticket
 
