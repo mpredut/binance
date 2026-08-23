@@ -1,18 +1,17 @@
-"""Cooldown — gate GENERIC „o operație pe <key> cel mult o dată la <ttl>s".
+"""Generic cooldown gate: at most one operation per key within its TTL.
 
-Verificare-și-rezervare ATOMICĂ (FileLock) + stare persistată pe disc + slot RAII.
-Reutilizabil pentru orice resursă (ordine de trade, alerte, sync-uri etc.), nu doar
-trading. Lock-ul NU e ținut peste operația propriu-zisă — doar peste reserve/release
-(microsecunde) → fără deadlock, fără I/O lung sub lock; ce persistă e starea, nu lock-ul.
+Atomic check-and-reserve uses ``FileLock``, disk state, and an RAII slot. The lock is
+held only around reserve/release, not the protected operation, avoiding long I/O or
+deadlocks under the lock. State persists; the lock does not.
 
     cd = Cooldown("trade", state_path=..., lock_path=...)
     with cd.slot("BTCUSDC", 180, side="BUY") as s:
-        if not s.allowed:                 # blocat de cooldown
+        if not s.allowed:                 # Blocked by cooldown.
             return
-        ...fă operația...
+        ...perform operation...
         if ok:
-            s.commit(order_id=123)        # succes → rezervarea RĂMÂNE (cooldown activ)
-        # altfel (eșec/excepție/uitat) → release AUTOMAT la ieșire (rollback)
+            s.commit(order_id=123)        # Success keeps the cooldown active.
+        # Otherwise exit automatically releases the reservation.
 """
 import os
 import json
@@ -27,9 +26,9 @@ from .file_lock import FileLock
 
 class Reservation:
     """Obiectul dat de `Cooldown.slot` (stil RAII / guard C++).
-    allowed=False → blocat de cooldown. commit(**fields) DOAR dacă operația a reușit
-    → rezervarea rămâne (cooldown activ) și scrie câmpurile extra. Fără commit, la
-    ieșirea din `with` rezervarea e anulată (rollback)."""
+    ``allowed=False`` means cooldown rejected the operation. Commit only after success;
+    it retains the reservation and stores extra fields. Exiting without commit rolls back.
+    """
 
     def __init__(self, cooldown, allowed, info, key):
         self._cd = cooldown
@@ -45,11 +44,10 @@ class Reservation:
 
 
 class GroupReservation:
-    """Rezervare pentru un singur membru al unui grup atomic.
+    """Reserve one member of an atomic group.
 
-    Permite, de exemplu, exact cate un BUY si un SELL din aceeasi pereche de
-    cotatii sa treaca prin acelasi cooldown pe simbol, fara sa permita duplicate
-    sau ordine provenite din alt proces/grup.
+    For example, this permits exactly one BUY and one SELL from the same quote pair
+    through a symbol cooldown while rejecting duplicates and other processes/groups.
     """
 
     def __init__(self, cooldown, allowed, info, key, group_id, member):
@@ -68,7 +66,7 @@ class GroupReservation:
 
 
 class Cooldown:
-    """Gate generic anti rapid-fire, cross-PROCES + cross-THREAD, persistat pe disc."""
+    """Generic disk-backed rapid-fire gate shared across processes and threads."""
 
     def __init__(self, name, state_path=None, lock_path=None, base_dir=None):
         self.name = name
@@ -76,7 +74,7 @@ class Cooldown:
         self.state_path = state_path or os.path.join(base, f"cooldown_{name}.json")
         self.lock_path = lock_path or os.path.join(base, f"cooldown_{name}.lock")
 
-    # ── stocare ──────────────────────────────────────────────────────────────
+    # ── Storage ──────────────────────────────────────────────────────────────
     def _read(self):
         try:
             with open(self.state_path) as f:
@@ -92,8 +90,11 @@ class Cooldown:
 
     # ── API ──────────────────────────────────────────────────────────────────
     def reserve(self, key, ttl, **meta):
-        """Verifică-și-rezervă ATOMIC dreptul de a opera pe `key`.
-        (True, entry) → permis (rezervat acum) / (False, last) → blocat (< ttl sec)."""
+        """Atomically check and reserve the right to operate on ``key``.
+
+        ``(True, entry)`` means newly reserved; ``(False, last)`` means blocked
+        because the prior reservation is younger than the TTL.
+        """
         with FileLock(self.lock_path):
             state = self._read()
             last = state.get(key)
@@ -114,12 +115,11 @@ class Cooldown:
             return True, entry
 
     def reserve_group_member(self, key, ttl, group_id, member, **meta):
-        """Rezerva atomic un membru unic al unui grup pe aceeasi cheie.
+        """Atomically reserve a unique group member for the same key.
 
-        Cat timp cooldown-ul este activ, numai alti membri ai ACELUIASI grup sunt
-        permisi. Acelasi membru de doua ori sau orice alt grup sunt blocate.
-        Formatul vechi al starii ramane compatibil si este tratat ca rezervare
-        exclusiva, deci nu poate fi ocolit de un grup nou.
+        While cooldown is active, only other members of the same group are allowed.
+        Repeating a member or using another group is rejected. Legacy state remains
+        compatible and exclusive, so a new group cannot bypass it.
         """
         group_id = str(group_id)
         member = str(member).upper()
@@ -188,7 +188,7 @@ class Cooldown:
             self._write(state)
 
     def rollback_group_member(self, key, group_id, member):
-        """Retrage numai membrul neconfirmat, fara a sterge celalalt picior."""
+        """Withdraw only the uncommitted member without removing the other leg."""
         group_id = str(group_id)
         member = str(member).upper()
         with FileLock(self.lock_path):
@@ -209,11 +209,11 @@ class Cooldown:
             self._write(state)
 
     def release_group_member(self, key, group_id, member, *, keep_group=True):
-        """Elibereaza explicit un membru confirmat dupa anularea operatiei lui.
+        """Explicitly release a committed member after its operation is canceled.
 
-        `keep_group=True` pastreaza markerul grupului pana expira TTL-ul: acelasi
-        coordonator poate inlocui piciorul, dar alt proces/grup nu poate profita de
-        fereastra foarte scurta dintre cancel si replace.
+        With ``keep_group=True``, retain the group marker until TTL expiry. The same
+        coordinator may replace the leg, but another process/group cannot exploit the
+        short interval between cancellation and replacement.
         """
         group_id = str(group_id)
         member = str(member).upper()
@@ -239,7 +239,7 @@ class Cooldown:
             return True
 
     def release(self, key):
-        """Anulează rezervarea pt `key` (ex. operația a EȘUAT) → nu mai blocăm ttl-ul."""
+        """Release a failed reservation so it no longer blocks the TTL."""
         with FileLock(self.lock_path):
             state = self._read()
             if key in state:
@@ -247,7 +247,7 @@ class Cooldown:
                 self._write(state)
 
     def update(self, key, **fields):
-        """Completează câmpuri pe rezervarea existentă (ex. id-ul rezultat)."""
+        """Add fields, such as a resulting ID, to an existing reservation."""
         with FileLock(self.lock_path):
             state = self._read()
             if key in state:
@@ -258,7 +258,7 @@ class Cooldown:
         return self._read().get(key)
 
     def last_age(self, key):
-        """Vârsta (secunde) a ultimei rezervări pe `key`, sau None."""
+        """Return the latest reservation age in seconds, or None."""
         last = self._read().get(key)
         if not last or not last.get("timestamp"):
             return None
@@ -266,19 +266,21 @@ class Cooldown:
 
     @contextlib.contextmanager
     def slot(self, key, ttl, **meta):
-        """RAII / scope-based: rezervă la intrare, rollback automat la ieșire fără commit.
-        Lock-ul fcntl NU e ținut peste corpul `with` (doar în reserve/release)."""
+        """Reserve on entry and roll back automatically when exiting without commit.
+
+        The ``fcntl`` lock is held only during reserve/release, not across the body.
+        """
         allowed, info = self.reserve(key, ttl, **meta)
         res = Reservation(self, allowed, info, key)
         try:
             yield res
         finally:
             if allowed and not res._committed:
-                self.release(key)                 # rollback: nimic făcut → nu blocăm
+                self.release(key)                 # No completed operation, so roll back.
 
     @contextlib.contextmanager
     def group_slot(self, key, ttl, group_id, member, **meta):
-        """RAII pentru un membru al unui grup; rollback-ul este per membru."""
+        """Provide per-member RAII and rollback for one group member."""
         allowed, info = self.reserve_group_member(
             key, ttl, group_id, member, **meta)
         res = GroupReservation(self, allowed, info, key, group_id, member)

@@ -17,14 +17,14 @@ from binance_api import bapi as api
 
 # Import the base classes from cacheManager
 from cacheManager import CacheManagerInterface, CacheFactory, _should_poll_for_manager
-# Facada market-data (Faza 2a). market_api -> binance_api.bapi (nu importa pricefetcher),
-# deci sigur. BinancePricePlatform foloseste facada ca client de pret.
+# Market-data facade. market_api imports binance_api.bapi without importing pricefetcher,
+# so this direction is safe. BinancePricePlatform uses the facade as its price client.
 import providers.market_api as _market_api
 from providers.quantity import resolve_assets
 
 
 # ============================================
-# Configurare globală
+# Global configuration.
 # ============================================
 
 PRICE_HISTORY_RETENTION_DAYS = 7
@@ -37,7 +37,7 @@ DEFAULT_SYMBOLS = ["BTC", "TAO", "HYPE"]
 
 
 # ============================================
-# Platforme specializate de pret
+# Specialized price platforms.
 # ============================================
 
 class PricePlatformInterface(ABC):
@@ -64,8 +64,8 @@ class PricePlatformInterface(ABC):
 
 class BinancePricePlatform(PricePlatformInterface):
     def __init__(self, api_client=None):
-        # Clientul de pret = facada market-data (Faza 2a). Pe perechile Binance
-        # rutarea ajunge la bapi → comportament identic. `self.api_client` ramane
+# The price client is the market-data facade. Binance pairs route to bapi with
+# identical behavior. ``self.api_client`` remains
         # un obiect cu .get_current_price(symbol=...), exact ca bapi.
         self.api_client = api_client or _market_api.api
         self._supported_symbols: Set[str] = set()
@@ -219,7 +219,7 @@ class HyperliquidPricePlatform(PricePlatformInterface):
 
 class CoinMarketCapPricePlatform(PricePlatformInterface):
     def __init__(self, api_key: Optional[str] = None):
-        # 🔧 CORECTAT: Definim api_key înainte de a-l folosi
+        # Define ``api_key`` before use.
         self.api_key = api_key or os.environ.get('CMC_API_KEY')
         self._base_url = "https://pro-api.coinmarketcap.com/v2/cryptocurrency/quotes/latest"
         self._supported_symbols: Set[str] = set()
@@ -347,11 +347,12 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
 
 
 class StockYahooPricePlatform(PricePlatformInterface):
-    """Stocks tokenizate (SPCX, NVDA, RGNT...) via Yahoo Finance — ULTIMUL RESORT.
-    Crypto e revendicat de Binance/Hyperliquid/CMC inainte; aici ajung doar tickerele
-    de actiuni (CMC nu le are, fiind stocks). Sursa = aceeasi ca T212/price_alert
-    (212trading/market_data). Prefera ultima bara intraday (mai proaspata decat meta,
-    care la SPCX poate fi statuta). Tickerele vin din STOCK_TICKERS (default 'SPCX')."""
+    """Fetch configured tokenized stocks from Yahoo Finance as a last resort.
+
+    Binance, Hyperliquid, and CMC claim crypto first, so only equity tickers reach this
+    platform. It shares the T212/price-alert data source and prefers the latest intraday
+    bar because metadata can be stale. Tickers come from ``STOCK_TICKERS`` (default SPCX).
+    """
     _YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
     _UA = {"User-Agent": "Mozilla/5.0 (pricefetcher)"}
 
@@ -367,7 +368,7 @@ class StockYahooPricePlatform(PricePlatformInterface):
         return self._symbols.copy()
 
     def supports_symbol(self, symbol: str) -> bool:
-        # DOAR tickerele configurate -> nu deturna crypto si nu face apel de retea aici
+        # Accept only configured tickers; do not divert crypto or make a network call here.
         return symbol.upper() in self._symbols
 
     def get_price(self, symbol: str) -> Optional[float]:
@@ -478,7 +479,7 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
         super().__init__(sync_ts, initial_symbols, filename, append_mode=True, api_client=api_client)
         self.active_symbols = set(initial_symbols)
         self.symbol_added_time: Dict[str, float] = {}
-        self.symbol_preferred_source: Dict[str, str] = {}  # ← TREBUIE SĂ EXISTE
+        self.symbol_preferred_source: Dict[str, str] = {}  # Required source preference state.
         self._load_symbol_metadata()
         self._log_symbol_support()
     
@@ -586,8 +587,8 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
             if symbol not in self.fetchtime_time_per_symbol:
                 self.fetchtime_time_per_symbol[symbol] = self.fallback_time_default
             print(f"[Pricefetcher] ✅ Symbol added: {symbol}")
-        # Preia prețul inițial al noului simbol și îl stochează (în afara lock-ului;
-        # update_cache_per_symbol își ia lock-ul intern).
+        # Fetch and store the new symbol's initial price outside this lock;
+        # ``update_cache_per_symbol`` acquires its own lock.
         items = self.get_remote_items(
             symbol, self.fetchtime_time_per_symbol.get(symbol, self.fallback_time_default))
         if items:
@@ -603,8 +604,8 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
             if symbol in self.original_symbols:
                 self.original_symbols.remove(symbol)
             self.active_symbols.discard(symbol)
-            # Curățăm și starea auxiliară, altfel cleanup_old_symbols (care
-            # iterează symbol_added_time) ar reîncerca la nesfârșit același simbol.
+            # Clear auxiliary state too; otherwise ``cleanup_old_symbols`` repeatedly
+            # revisits the same symbol through ``symbol_added_time``.
             self.symbol_added_time.pop(symbol, None)
             if hasattr(self, "symbol_preferred_source"):
                 self.symbol_preferred_source.pop(symbol, None)
@@ -622,8 +623,8 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
     def get_price_history(self, symbol: str, limit: int = 100) -> List[Dict]:
         if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
             return []
-        # Copiem doar referintele sub lock; conversia si formatarea se fac dupa,
-        # ca sync-ul de pret sa nu fie blocat de datetime/allocari.
+        # Copy only references under the lock. Convert and format afterward so datetime
+        # work and allocations do not block price synchronization.
         with self.lock:
             entries = self.cache.get(symbol, ())[-limit:]
 
@@ -740,7 +741,7 @@ def get_base_symbol(symbol: str) -> str:
 
 
 def create_cachePriceAll(cmc_api_key: Optional[str] = None, symbols=None, max_symbols=None):
-    # symbols/max_symbols din config (market_alerts.conf) daca sunt date; altfel hardcodul vechi
+    # Use symbols/max_symbols from market_alerts.conf when supplied; otherwise retain legacy defaults.
     all_symbols = []
     seen_bases = set()
     

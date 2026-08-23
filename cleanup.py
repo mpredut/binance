@@ -30,21 +30,21 @@ def monitor_and_cleanup(folder_path, max_file_age_days=30, max_file_size_mb=1024
     now = datetime.now()
     max_age = timedelta(days=max_file_age_days)
     
-    # Grupați fișierele după tip
+    # Group files by type.
     file_groups = {}
     for filename in os.listdir(folder_path):
         if filename.endswith(".log"):
-            file_type = filename.split("_")[0]  # Extrage tipul fișierului (ex: monitortrades, trade3)
+            file_type = filename.split("_")[0]  # Prefix identifies types such as monitortrades.
             file_path = os.path.join(folder_path, filename)
             file_groups.setdefault(file_type, []).append(file_path)
 
-    # Parcurge fiecare grup de fișiere
+    # Process each file group.
     for file_type, files in file_groups.items():
         files = sorted(files, key=lambda f: parse_date_from_filename(os.path.basename(f)) or now)
 
         for file_path in files:
             try:
-                # Șterge fișierele vechi
+                # Remove old files.
                 file_date = parse_date_from_filename(os.path.basename(file_path))
                 if file_date and now - file_date > max_age:
                     os.remove(file_path)
@@ -53,7 +53,7 @@ def monitor_and_cleanup(folder_path, max_file_age_days=30, max_file_size_mb=1024
                 else:
                     print(f"File: {file_path} is newer than {max_age.days} days")
 
-                # Șterge fișierele mari
+                # Remove oversized files.
                 file_size_mb = os.path.getsize(file_path) / (1024 ** 2)  # Convert to MB
                 if file_size_mb > max_file_size_mb:
                     os.remove(file_path)
@@ -64,10 +64,10 @@ def monitor_and_cleanup(folder_path, max_file_age_days=30, max_file_size_mb=1024
             except Exception as e:
                 print(f"Error processing file {file_path}: {e}")
 
-        # Verifică spațiul pe disc
+        # Check free disk space.
         if get_disk_space(folder_path) < min_free_space_mb:
             if files:
-                oldest_file = files[0]  # Cel mai vechi fișier din acest grup
+                oldest_file = files[0]  # Oldest file in this group.
                 try:
                     os.remove(oldest_file)
                     print(f"DELETED file to free space: {oldest_file}")

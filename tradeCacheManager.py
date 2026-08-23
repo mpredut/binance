@@ -1,5 +1,5 @@
-# ⚠️ COD MORT — modul NEIMPORTAT nicăieri (înlocuit de cacheManager.CacheTradeManager).
-# Păstrat ca referință. Nu rula direct.
+# Dead module with no importers, replaced by ``cacheManager.CacheTradeManager``.
+# Retained as a reference; do not run it directly.
 import json
 import os
 import time
@@ -39,7 +39,7 @@ class TradeCacheManager:
         return list(set(t.get("symbol") for t in self.trade_cache if "symbol" in t))
 
     def _rebuild_last_fetch_times(self):
-        # Deducem timpul ultimei interogări per simbol din cache
+        # Derive each symbol's most recent query time from cache.
         last_times = defaultdict(int)
         for trade in self.trade_cache:
             symbol = trade.get("symbol")
@@ -47,12 +47,12 @@ class TradeCacheManager:
             if time_ > last_times[symbol]:
                 last_times[symbol] = time_
 
-        # Offset de siguranță (60 sec)
+        # Sixty-second safety offset.
         for symbol in last_times:
             last_times[symbol] = max(0, last_times[symbol] - 60_000)
 
         if not last_times:
-            # Fallback: folosim data fișierului
+            # Fall back to the file timestamp.
             fallback_time = int(os.path.getmtime(self.filename) * 1000) - 60_000
             return {symbol: fallback_time for symbol in self.get_all_symbols_from_cache()}
         
@@ -78,13 +78,13 @@ class TradeCacheManager:
     
     def _get_my_trades(self, symbol, startTime):
         try:
-            # `startTime` e parametrul (înainte folosea `start_time` inexistent → NameError)
+            # ``startTime`` is the parameter; the former undefined name raised NameError.
             new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime)
         except Exception as e:
             print(f"[Eroare] Binance API pentru {symbol}: {e}")
             return
 
-        # Elimină duplicatele (după id dacă există, altfel după time + symbol)
+        # Deduplicate by ID when present, otherwise by time and symbol.
         existing_keys = set(
             (t.get("id"), t["symbol"]) for t in self.trade_cache if "id" in t
         )
@@ -102,7 +102,7 @@ class TradeCacheManager:
         return unique_new_trades
                 
     def update_symbol_from_binance(self, symbol):
-        # Timpul curent ca referință de endTime
+        # Use current time as the endTime reference.
         current_time = int(time.time() * 1000)
         start_time = self.last_fetch_time_per_symbol.get(symbol, 0)
 
@@ -123,9 +123,9 @@ def periodic_sync():
     cache_manager.update_all(sym.symbols)
     print(f"--- Sync completed ---")
     
-    # Planifică următoarea rulare
+    # Schedule the next run.
     t = threading.Timer(SYNC_INTERVAL_SEC, periodic_sync, args=())
-    t.daemon = True  # Asigură că acest thread nu blochează închiderea procesului
+    t.daemon = True  # Do not let this thread block process shutdown.
     t.start()
 
 

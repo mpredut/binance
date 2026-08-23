@@ -8,15 +8,15 @@ from binance.exceptions import BinanceAPIException
 ####MYLIB
 _client = None
 
-# Marjă de siguranță: ținem timestamp-ul nostru puțin SUB timpul serverului ca să nu
-# declanșăm -1021 (timestamp ahead) nici la jitter; rămâne mult sub recvWindow (5s).
+# Keep the local timestamp slightly behind server time so jitter cannot trigger Binance
+# -1021 timestamp-ahead errors while remaining well within the five-second receive window.
 TIME_SAFETY_MARGIN_MS = 1000
 TIME_RESYNC_INTERVAL_SEC = 5 * 60
 
-# Rezilienta la blip-uri DNS/retea (11 aug): un apel REST FARA timeout poate ATARNA la infinit
-# cand DNS-ul pica un moment -> bucla de update din cacheManager se blocheaza -> cache stale ->
-# watchdog reporneste cacheManager (vazut 8 aug 6am). Timeout scurt = esec RAPID (exceptie prinsa
-# de apelanti, bucla continua). REQUEST_TIMEOUT_SEC pe TOATE apelurile.
+# Resilience against brief DNS/network failures: a REST call without a timeout may hang
+# indefinitely, blocking cacheManager updates until the cache is stale and the watchdog
+# restarts the process. A short timeout fails quickly so callers can handle the exception
+# and continue their loops. Apply REQUEST_TIMEOUT_SEC to every request.
 REQUEST_TIMEOUT_SEC = 10
 
 _resync_started = False
@@ -26,11 +26,13 @@ _resync_lock = threading.Lock()
 
 
 def _install_retry(cl):
-    """Retry central pe blip-uri tranzitorii (DNS/conn/5xx/429) — DOAR pe metode idempotente
-    (GET/HEAD/...), NICIODATA pe POST (plasare ordine): daca un POST reuseste dar raspunsul se
-    pierde, un retry ar DUBLA ordinul (bani reali). allowed_methods NEsetat = default urllib3 =
-    doar idempotente, exclude POST. Impreuna cu timeout-ul: blip -> esec rapid + reincercare
-    interna pe GET-uri, nu hang."""
+    """Retry transient DNS/connection/5xx/429 failures on idempotent methods only.
+
+    Never retry POST order placement: if the request succeeds but its response is lost,
+    retrying could duplicate a real-money order. Leaving ``allowed_methods`` unset uses
+    urllib3's idempotent-method default and excludes POST. Together with the timeout, a
+    transient fault fails quickly and GET requests retry internally instead of hanging.
+    """
     try:
         from requests.adapters import HTTPAdapter
         from urllib3.util.retry import Retry
@@ -39,15 +41,16 @@ def _install_retry(cl):
         adapter = HTTPAdapter(max_retries=retry)
         cl.session.mount("https://", adapter)
         cl.session.mount("http://", adapter)
-    except Exception as e:  # noqa: BLE001 — daca esueaza, ramanem doar pe timeout (tot ajuta)
+    except Exception as e:  # noqa: BLE001 — a timeout still provides protection if setup fails.
         print(f"[bapi_client] _install_retry esuat (ignor, ramane timeout): {e}")
 
 
 def sync_time(safety_margin_ms=TIME_SAFETY_MARGIN_MS):
-    """Sincronizează `client.timestamp_offset` cu timpul serverului Binance.
-    Corectează clock-skew-ul local (tipic în WSL) care cauzează
+    """Synchronize ``client.timestamp_offset`` with Binance server time.
+
+    Correct local clock skew, commonly observed in WSL, which causes
     APIError(-1021): 'Timestamp for this request was 1000ms ahead of server's time'.
-    Endpoint public (neparafat) → nu depinde el însuși de timestamp."""
+    The unsigned public endpoint does not itself depend on the timestamp."""
     if _client is None:
         return None
     try:
@@ -61,7 +64,7 @@ def sync_time(safety_margin_ms=TIME_SAFETY_MARGIN_MS):
 
 
 def _start_periodic_resync():
-    """Thread daemon care re-sincronizează periodic (ceasul WSL driftează în timp)."""
+    """Periodically resynchronize from a daemon thread to compensate for WSL drift."""
     global _resync_started, _resync_thread
     with _resync_lock:
         if _resync_thread is not None and _resync_thread.is_alive():
@@ -82,10 +85,10 @@ def _start_periodic_resync():
 
 
 def stop_periodic_resync(timeout=2.0):
-    """Oprește workerul de resincronizare și așteaptă terminarea lui.
+    """Stop the resynchronization worker and wait for it to terminate.
 
-    Este apelabil în mod repetat și permite testelor, proceselor batch și shutdown-ului
-    controlat să nu lase activitate Binance după încheierea execuției.
+    Repeated calls are safe, allowing tests, batch processes, and controlled shutdowns
+    to leave no Binance activity after execution ends.
     """
     global _resync_started, _resync_thread
     with _resync_lock:
@@ -109,13 +112,13 @@ def getClient():
         from keys.apikeys import api_key, api_secret
         _client = Client(api_key, api_secret, requests_params={"timeout": REQUEST_TIMEOUT_SEC})
         _install_retry(_client)      # retry pe GET-uri (NU pe POST/ordere) la blip tranzitoriu
-        sync_time()                 # aliniere inițială la timpul serverului
-        _start_periodic_resync()    # menținere în timp
+        sync_time()                 # Initial server-time alignment.
+        _start_periodic_resync()    # Maintain alignment over time.
     return _client
 
 
 class _LazyClientProxy:
-    """Păstrează API-ul `client.*`, dar construiește clientul la primul apel real."""
+    """Preserve the ``client.*`` API while constructing the client on first real use."""
     def __getattr__(self, name):
         return getattr(getClient(), name)
 

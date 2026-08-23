@@ -64,7 +64,7 @@ def _save_delivery_state(path: Path, state: dict) -> None:
 
 
 def _alert_identity(alert: Any) -> dict:
-    """Identitate stabilă: exclude timestamp-ul și prețurile care fluctuează la fiecare poll."""
+    """Return stable identity excluding timestamps and prices that change each poll."""
     if isinstance(alert, dict):
         return {
             key: alert.get(key)
@@ -114,10 +114,10 @@ def _dedup_seconds(alerts: list[Any], urgent: bool) -> int:
 
 
 def _reserve_delivery(channel: str, alerts: list[Any], *, urgent: bool) -> tuple[bool, str, bool]:
-    """Rezervă atomic o livrare între procese.
+    """Atomically reserve one delivery across processes.
 
-    Întoarce ``(allowed, reason, warn_once)``. Rezervarea este conservatoare: o
-    încercare de rețea consumă bugetul local, fiindcă un timeout poate apărea după
+    Return ``(allowed, reason, warn_once)``. A network attempt conservatively consumes
+    local budget because a timeout can occur after
     ce furnizorul a acceptat mesajul.
     """
     now = time.time()
@@ -171,7 +171,7 @@ def _reserve_delivery(channel: str, alerts: list[Any], *, urgent: bool) -> tuple
 
 
 def _mark_provider_daily_limit(channel: str) -> bool:
-    """Blochează canalul până la resetarea UTC și cere o singură alertă alternativă."""
+    """Block the channel until UTC reset and request one alternate warning."""
     now = time.time()
     today = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
     path = _delivery_state_path()
@@ -220,16 +220,18 @@ class AlertNotifier:
 
     @staticmethod
     def alert_symbol(alert: Any) -> str:
-        """Simbolul, indiferent dacă alert e obiect PriceAlert sau dict (monedă nouă)."""
+        """Return the symbol from either a PriceAlert object or new-coin mapping."""
         if isinstance(alert, dict):
             return alert.get("symbol", "N/A")
         return getattr(alert, "symbol", "N/A")
 
     @staticmethod
     def utf8_header(value: str) -> str:
-        """Valoare de header HTTP care păstrează caractere non-ASCII (ex. simbol '小蝌蚪').
-        Header-ele sunt latin-1, dar ntfy decodează valoarea ca UTF-8 → trecem octeții
-        UTF-8 prin latin-1 (passthrough). Așa simbolurile non-ASCII ajung intacte."""
+        """Encode an HTTP header while preserving non-ASCII symbols.
+
+        Headers are Latin-1, while ntfy decodes this value as UTF-8, so pass UTF-8 bytes
+        through Latin-1 to preserve the original symbol.
+        """
         return value.encode("utf-8").decode("latin-1")
 
     @staticmethod
@@ -247,23 +249,25 @@ class AlertNotifier:
 
     @staticmethod
     def format_bot_event(alert: dict) -> str:
-        """Corp COMPACT pt evenimente de bot (trade/guard/...): detaliul · platforma · timestamp.
-        Numele (=actiunea) devine TITLUL ntfy. Platforma plain (se deduce). Timestamp scurt
-        FARA an ('MM-DD HH:MM')."""
+        """Build a compact bot-event body: detail, platform, and timestamp.
+
+        The event name (the action) becomes the ntfy title. The platform is plain text
+        because its meaning is implicit. Use the short timestamp format ``MM-DD HH:MM``.
+        """
         body = (alert.get("body") or "").strip()
         head = body or alert.get("name", alert.get("symbol", "?"))
         parts = [head, str(alert.get("source", "?"))]
         ts = alert.get("added_at")
         if ts is not None:
             try:
-                parts.append(ts.strftime("%m-%d %H:%M"))   # fara an
+                parts.append(ts.strftime("%m-%d %H:%M"))   # Omit the year.
             except Exception:  # noqa: BLE001
                 pass
         return " · ".join(parts)
 
     @staticmethod
     def format_batch_message(alerts) -> str:
-        # listează simbolurile separate prin virgulă pe prima linie
+        # List comma-separated symbols on the first line.
         #symbols = ", ".join(alert.symbol for alert in alerts)
         #lines = [f"({len(alerts)}): {symbols}",    "",]
         lines = []
@@ -386,7 +390,7 @@ class AlertNotifier:
 
         alerts = list(alerts)
         symbols = ", ".join(AlertNotifier.alert_symbol(alert) for alert in alerts)
-        # pt un SINGUR eveniment de bot: titlul = actiunea (name); altfel '(N): simboluri'
+        # For one bot event, use its action as the title; otherwise use ``(N): symbols``.
         if len(alerts) == 1 and isinstance(alerts[0], dict) and alerts[0].get("type") == "bot_event":
             title = alerts[0].get("name") or symbols
         else:
@@ -408,7 +412,7 @@ class AlertNotifier:
 
         try:
             if is_ntfy:
-                # ntfy decodează Title ca UTF-8 → păstrăm simbolurile non-ASCII (ex. '小蝌蚪').
+                # ntfy decodes Title as UTF-8, preserving non-ASCII symbols.
                 response = None
                 for attempt in range(2):
                     response = requests.post(
@@ -451,7 +455,7 @@ class AlertNotifier:
 
     @staticmethod
     def _send_budget_warning(channel: str, reason: str) -> None:
-        """Fallback unic pe email; nu încearcă să compenseze fiecare mesaj suprimat."""
+        """Send one email fallback rather than compensating for every suppressed message."""
         alert = {
             "type": "bot_event", "symbol": "SYSTEM",
             "name": f"ERORI LIMITA {channel.upper()}", "source": "notifier",
@@ -484,12 +488,15 @@ class AlertNotifier:
 
 
 def _topic_for(title: str, source: str) -> Optional[str]:
-    """Ruteaza notificarea pe topic-ul ntfy potrivit categoriei (title + source):
-      guard  = stop-loss/trailing/crash/lichidare (BANI in pericol)
-      error  = erori/esuat/manual/pozitie disparuta/watchdog (SISTEM)
-      price  = alerte de prag pret
-      trades = fill-uri, 'X disponibil', DN rutina (deschis/inchis/funding) — restul.
-    Citeste NTFY_TOPIC_<CAT>; fallback NTFY_TOPIC. Consistent cu email-ul (guard+error = urgent)."""
+    """Route a notification to the ntfy topic selected by title and source.
+
+    ``guard`` covers stop-loss, trailing, crash, and liquidation events where money is
+    at risk. ``error`` covers failures, manual action, missing positions, and watchdog
+    events. ``price`` covers price-threshold alerts. ``trades`` covers fills, available
+    balances, routine delta-neutral open/close/funding events, and everything else.
+    Read ``NTFY_TOPIC_<CATEGORY>`` and fall back to ``NTFY_TOPIC``. This matches the
+    email policy, where guard and error events are urgent.
+    """
     t = title.upper(); s = (source or "").lower()
     if any(m in t for m in _GUARD_MARKERS):
         cat = "GUARD"
@@ -498,30 +505,30 @@ def _topic_for(title: str, source: str) -> Optional[str]:
     elif "alert" in s or "prag" in t.lower() or "threshold" in t.lower():
         cat = "PRICE"
     else:
-        cat = "TRADES"       # include DN de rutina (deschis/inchis/funding) — fara topic separat.
+        cat = "TRADES"       # Include routine DN events; they do not have a separate topic.
     return os.environ.get(f"NTFY_TOPIC_{cat}") or os.environ.get("NTFY_TOPIC")
-# NOTA: fara 📉 (folosit si de alerta INFORMATIVA de pierdere '📉 SPCX -8%') si fara ⚠ singur
-# (prea larg). Trailing-ul e prins de cuvantul 'TRAILING'. Urgentele DN (⚠ ...) au si LICHID/
-# ERORI/MANUAL in titlu -> tot prinse. Vezi mai jos: overridezi cu email=True/False la nevoie.
+# Do not include 📉, which is also used by informational loss alerts such as ``📉 SPCX -8%``,
+# or a lone ⚠, which is too broad. ``TRAILING`` identifies trailing events. Urgent DN events
+# also include LICHID/ERORI/MANUAL in their titles. Override with email=True/False when needed.
 
 
 def notify(title: str, body: str, source: str, symbol: str,
            price: Optional[float] = None, desktop: bool = False,
            email: Optional[bool] = None) -> None:
-    """Wrapper PARTAJAT de notificare — folosit de flota (Binance) SI de kraken/HL/212.
-    Clopotel terminal + alerta pe ntfy (mereu) + email (DOAR daca email=True) + desktop, prin
-    AlertNotifier. `symbol` = eticheta activului, rezolvata de APELANT. O notificare esuata NU
-    intrerupe trading-ul (try/except). Foloseste print() ca sa mearga si pe flota (log.py
-    captureaza print) si pe boti (python3 -> stdout in .log-ul lor).
+    """Shared notification wrapper used by Binance, Kraken, HL, and T212 bots.
 
-    email=True DOAR pt URGENTE (stop-loss/trailing/crash/liq/erori) — informativele (fill-uri,
-    'X disponibil', alerte pret) merg doar pe ntfy, ca sa nu inunde email-ul.
+    Send a terminal bell, an ntfy alert, an optional email, and an optional desktop
+    notification through ``AlertNotifier``. The caller resolves ``symbol`` as the asset
+    label. Notification failures never interrupt trading. ``print`` works both in the
+    fleet, where log.py captures it, and in standalone bots whose stdout goes to their log.
 
-    Extras din wrapper-ele duplicate kraken/notify.py, hyperliquid/notify.py, 212trading/ipo_notify.py.
+    Set ``email=True`` only for urgent stop-loss, trailing, crash, liquidation, and error
+    events. Informational fills, available-balance messages, and price alerts use ntfy only
+    to avoid flooding email. This replaces the formerly duplicated venue wrappers.
     """
-    # Testele si replay-urile offline pot exercita exact aceleasi cai ca live.
-    # Kill-switch-ul central previne orice efect extern chiar daca un test uita
-    # sa injecteze un notifier fake (ntfy/email/desktop/beep).
+    # Tests and offline replays can exercise the same paths as live execution.
+    # This central kill switch prevents external effects if a test forgets to inject
+    # a fake ntfy/email/desktop/beep notifier.
     if os.environ.get("DISABLE_EXTERNAL_NOTIFICATIONS", "").strip().lower() in {
         "1", "true", "yes", "on",
     }:
@@ -532,22 +539,22 @@ def notify(title: str, body: str, source: str, symbol: str,
         sys.stdout.flush()
         time.sleep(0.2)
     alert = {
-        "type": "bot_event",          # eveniment de bot (trade/guard/etc.) — randare compacta,
-        "symbol": symbol,             # NU sablonul de 'moneda noua' (🆕/Added) care ramane pt discovery
-        "name": title,                # = actiunea (devine TITLUL ntfy)
+        "type": "bot_event",          # Bot trade/guard event with compact rendering.
+        "symbol": symbol,             # Do not use the new-coin discovery template.
+        "name": title,                # The action becomes the ntfy title.
         "source": source,
         "price": price,
-        "body": body,                 # detaliul compact (o linie) construit de apelant
+        "body": body,                 # Compact one-line detail built by the caller.
         "added_at": datetime.now(),
         "url": None,
     }
-    ntfy_topic = _topic_for(title, source)          # rutare pe topic dupa categorie
+    ntfy_topic = _topic_for(title, source)          # Route by category.
     ntfy_url = f"https://ntfy.sh/{ntfy_topic}" if ntfy_topic else None
     try:
         AlertNotifier.send_phone_webhook_batch([alert], webhook_url=ntfy_url)
     except Exception as e:  # noqa: BLE001
         print(f"  ! notify ntfy esuat: {e}")
-    if email is None:   # auto: email DOAR daca titlul are un marker de urgenta (nu la fill-uri/'disponibil'/pret)
+    if email is None:   # Automatic email requires an urgent marker; fills/balances/prices do not qualify.
         email = any(m in title.upper() for m in _URGENT_MARKERS)
     if email and os.environ.get("ALERT_TO_EMAIL"):
         try:
@@ -562,11 +569,11 @@ def notify(title: str, body: str, source: str, symbol: str,
 
 
 def bind_notify(symbol_env_keys: tuple[str, ...], default_symbol: str):
-    """Leagă notificatorul comun de convenția de simbol a unui venue.
+    """Bind the shared notifier to a venue's symbol convention.
 
-    Wrapperul rezultat păstrează semnătura folosită de Kraken/HL/T212 și permite
-    un ``symbol`` explicit pentru procesele multi-activ. Fișierele venue-specific
-    rămân shim-uri de import, nu copii ale rezolvării simbolului.
+    The wrapper preserves the Kraken/HL/T212 signature and accepts an explicit symbol
+    for multi-asset processes. Venue files remain import shims rather than duplicate
+    symbol-resolution implementations.
     """
     if not symbol_env_keys:
         raise ValueError("bind_notify cere cel puțin o cheie de mediu")

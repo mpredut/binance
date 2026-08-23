@@ -1,22 +1,21 @@
-"""trade_cooldown.py — gate anti rapid-fire pentru ORDINE (specializare peste lock.Cooldown).
+"""Trade-specific rapid-fire order gate built on ``lock.Cooldown``.
 
-Mecanismul generic (FileLock + Cooldown) trăiește în pachetul `lock/` și poate fi
-reutilizat pentru orice operație, nu doar trade. Aici păstrăm DOAR API-ul istoric
-(reserve_trade / trade_slot / release_trade / update_binance_order_id / ...) ca să nu
-schimbăm chokepoint-ul `__place_order` din binance_api/bapi_placeorder.py.
+The generic ``FileLock`` and ``Cooldown`` mechanism lives in ``lock`` and can protect
+any operation. This module retains the historical trade-specific API so the
+``bapi_placeorder.__place_order`` choke point remains unchanged.
 
-Împiedică plasarea a două ordine pe ACELAȘI simbol la mai puțin de `cooldown_sec`
-(implicit citit din trade_cooldown.conf → [cooldown] default_sec), indiferent de
-combinație (BUY/BUY, SELL/SELL, BUY/SELL). Excepția explicită `pair_id` permite
-exact un BUY și un SELL din aceeași pereche, fără să permită duplicate sau alt
-grup/proces. Sigur cross-PROCES și cross-THREAD (fcntl.flock).
+Prevent two orders on the same symbol within ``cooldown_sec`` for any side
+combination. The default comes from ``[cooldown] default_sec`` in
+``trade_cooldown.conf``. An explicit ``pair_id`` permits exactly one BUY and one SELL in the same
+pair without allowing duplicates from another group or process. It is process- and
+thread-safe through ``fcntl.flock``.
 
-Flux la chokepoint (__place_order):
+Flow at the ``__place_order`` choke point:
     with trade_slot(side, symbol) as slot:
-        if not slot.allowed: return None     # blocat de cooldown
-        order = ...plasează...
-        if order: slot.commit(order_id)       # succes → cooldown rămâne activ
-        # altfel (eșec/excepție/uitat) → release AUTOMAT la ieșire (rollback)
+        if not slot.allowed: return None     # Blocked by cooldown.
+        order = ...submit...
+        if order: slot.commit(order_id)       # Success keeps the cooldown active.
+        # Failure, exception, or omission releases automatically on exit.
 """
 import os
 import time
@@ -32,8 +31,7 @@ CONF_FILE = os.path.join(BASE_DIR, "trade_cooldown.conf")      # config text/ini
 
 
 def _load_cooldown_sec(fallback=20):
-    """Citește [cooldown] default_sec din trade_cooldown.conf (text/ini).
-    Fallback pe `fallback` dacă fișierul/cheia lipsesc sau sunt invalide."""
+    """Read ``[cooldown] default_sec`` and return ``fallback`` when invalid or absent."""
     try:
         cp = configparser.ConfigParser()
         if cp.read(CONF_FILE):
@@ -45,8 +43,8 @@ def _load_cooldown_sec(fallback=20):
 
 DEFAULT_COOLDOWN_SEC = _load_cooldown_sec()
 
-# Singleton lazy: respectă reasignarea STATE_FILE/LOCK_FILE (testele le suprascriu),
-# reconstruind Cooldown-ul doar dacă s-au schimbat căile.
+# Lazy singleton respects test overrides of state and lock paths, rebuilding only when
+# those paths change.
 _cd = None
 
 
@@ -59,8 +57,7 @@ def _cooldown():
 
 def reserve_trade(side, symbol, cooldown_sec=DEFAULT_COOLDOWN_SEC, client_order_id=None,
                   pair_id=None):
-    """Verifică-și-rezervă ATOMIC dreptul de a plasa un ordin pe `symbol`.
-    `pair_id` permite cele două laturi unice ale aceleiași perechi."""
+    """Atomically check and reserve placement rights for ``symbol``."""
     if pair_id:
         return _cooldown().reserve_group_member(
             symbol, cooldown_sec, pair_id, side,
@@ -70,24 +67,23 @@ def reserve_trade(side, symbol, cooldown_sec=DEFAULT_COOLDOWN_SEC, client_order_
 
 
 def release_trade(symbol):
-    """Anulează rezervarea pt `symbol` (ex. ordinul a EȘUAT) → nu mai blocăm cooldown-ul."""
+    """Release a failed symbol reservation so it no longer blocks cooldown."""
     _cooldown().release(symbol)
 
 
 def release_pair_leg(symbol, pair_id, side):
-    """Elibereaza un picior confirmat numai dupa anularea lui reusita."""
+    """Release a committed leg only after it is canceled successfully."""
     return _cooldown().release_group_member(
         symbol, pair_id, side, keep_group=True)
 
 
 def update_binance_order_id(symbol, order_id):
-    """Completează orderId-ul Binance după plasarea cu succes."""
+    """Attach the Binance order ID after successful placement."""
     _cooldown().update(symbol, binance_order_id=order_id)
 
 
 class _TradeReservation:
-    """Adaptor peste lock.Reservation: commit(order_id) POZIȚIONAL → binance_order_id
-    (păstrează semnătura așteptată de bapi_placeorder: `slot.commit(order.get("orderId"))`)."""
+    """Adapt positional ``commit(order_id)`` to the reservation's Binance ID field."""
 
     def __init__(self, res):
         self._res = res
@@ -107,7 +103,7 @@ class _TradeReservation:
 @contextlib.contextmanager
 def trade_slot(side, symbol, cooldown_sec=DEFAULT_COOLDOWN_SEC, client_order_id=None,
                pair_id=None):
-    """RAII pentru cooldown exclusiv sau pentru un picior al unei perechi."""
+    """Provide RAII for an exclusive cooldown or one leg of a pair."""
     if pair_id:
         with _cooldown().group_slot(
                 symbol, cooldown_sec, pair_id, side,
@@ -120,7 +116,7 @@ def trade_slot(side, symbol, cooldown_sec=DEFAULT_COOLDOWN_SEC, client_order_id=
 
 
 def get_last_trade_age(symbol):
-    """Vârsta (secunde) a ultimului ordin pe `symbol`, sau None dacă nu există."""
+    """Return the last symbol order's age in seconds, or None when absent."""
     return _cooldown().last_age(symbol)
 
 
