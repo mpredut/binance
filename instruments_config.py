@@ -1,18 +1,13 @@
 # instruments_config.py
-"""Loader pt `instruments.conf` -> dict[name, Instrument].
+"""Load ``instruments.conf`` into ``dict[str, Instrument]``.
 
-Registru CENTRAL, gandit multi-consumator (fiecare bot ar lua CORE + namespace-ul
-lui, ex. mt.* pt monitortrades). 23 iul: verificat prin grep — azi SINGURUL
-consumator real e monitortrades.py (load_for("mt")); tradeall.py si rtrade.py
-NU importa acest modul si instruments.conf nu are chei tradeall.*/rtrade.*.
-Namespace-urile lor raman doar design pt cand/daca vor migra aici.
+``monitortrades``, ``cacheManager``, and ``priceAnalysis`` currently read the ``mt``
+namespace. Verification tools also read it. ``tradeall`` and ``rtrade`` retain their
+own configuration files and do not import this loader.
 
-CORE per sectiune: provider, symbol, base, quote, enabled, isolation, market_hours.
-Orice alta cheie (ex. 'mt.gain', 'tradeall.budget') intra in `params` ca string;
-consumatorul o citeste tipat cu Instrument.param(consumer, key, cast=...).
-
-Lipsa fisierului -> {} (consumatorul cade pe valorile lui implicite). Behavior-preserving:
-pana cand un consumator chiar citeste de aici, nimic nu se schimba.
+Each section's core fields are ``provider``, ``symbol``, ``base``, ``quote``,
+``enabled``, ``isolation``, and ``market_hours``. Other values remain strings in
+``Instrument.params``. A missing file returns an empty mapping.
 """
 import os
 import configparser
@@ -35,7 +30,7 @@ def _as_bool(s, default=True) -> bool:
 
 
 def load_instruments(path: Optional[str] = None, api=None) -> Dict[str, Instrument]:
-    """Construieste instrumentele din config. Cheie = numele sectiunii (ex 'TAO_BINANCE')."""
+    """Build instruments keyed by configuration section name."""
     path = path or DEFAULT_PATH
     out: Dict[str, Instrument] = {}
     if not os.path.exists(path):

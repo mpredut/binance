@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-"""Verifica DOAR ca modulele importa curat (fara a porni nimic). Pt validarea
-refactor-urilor de importuri inainte de restart-ul flotei. Ruleaza cu venv-ul:
-  ~/binance/myenv/bin/python verify_imports.py
+"""Import selected fleet modules and report import-time failures.
+
+This does not invoke module entry points or start fleet loops, but ordinary Python
+import-time side effects in the selected modules still occur. Run it with the repository
+virtual environment before restarting the fleet.
 """
 import importlib
 import os

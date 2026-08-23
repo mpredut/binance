@@ -1,8 +1,7 @@
-"""Audit observational pentru ciclul de viata al ordinelor StrategyExecutor.
+"""Observational lifecycle audit for ``StrategyExecutor`` orders.
 
-Stratul nu decide daca un ordin este permis si nu modifica argumentele trimise
-providerului. Scrierea este best-effort: o eroare de disc nu poate transforma un
-ordin acceptat intr-un esec al strategiei.
+This layer neither authorizes an order nor changes the submitted financial values.
+Writes are best-effort, so an audit I/O failure does not change the executor result.
 """
 from __future__ import annotations
 
@@ -36,13 +35,13 @@ def _slug(value: object) -> str:
 
 
 def new_intent_id(venue: str, symbol: str, kind: Optional[str] = None) -> str:
-    """ID unic creat inainte de submit si pastrat in starea strategiei."""
+    """Create a unique intent ID before submission; callers persist it as needed."""
     prefix = "-".join((_slug(venue).lower(), _slug(symbol), _slug(kind or "order").lower()))
     return f"{prefix}-{uuid.uuid4().hex}"
 
 
 def intent_client_order_id(venue: str, intent_id: str) -> Optional[str]:
-    """Encodeaza intentia in formatul acceptat de venue, fara stare suplimentara.
+    """Encode an intent in the venue's client-ID format without additional state.
 
     UUID-ul de 128 biti ramane complet. Pentru intentiile legacy/non-standard se
     foloseste un hash determinist, astfel incat aceeasi intentie produce acelasi
@@ -63,7 +62,7 @@ def intent_client_order_id(venue: str, intent_id: str) -> Optional[str]:
 
 
 class ExecutionAudit:
-    """Writer JSONL comun pentru Kraken/T212/HL/Binance."""
+    """Best-effort JSONL writer shared by Kraken, T212, HL, and Binance."""
 
     def __init__(self, directory: Optional[str] = None,
                  clock: Callable[[], float] = time.time):
@@ -75,7 +74,11 @@ class ExecutionAudit:
 
     def record(self, event: str, *, intent_id: str, venue: str, symbol: str,
                **fields) -> bool:
-        """Adauga atomic un eveniment. False inseamna doar audit indisponibil."""
+        """Append one serialized event; return ``False`` when audit is unavailable.
+
+        The process lock and Linux ``flock`` prevent interleaved writers, but the
+        append is not fsynced and therefore is not a durability boundary.
+        """
         try:
             ts = float(self._clock())
             payload = {
@@ -108,7 +111,7 @@ class ExecutionAudit:
 
 
 class AuditedStrategyExecutor:
-    """Decorator behavior-neutral peste contractul strict StrategyExecutor."""
+    """Execution decorator that records lifecycle calls without changing decisions."""
 
     def __init__(self, executor, audit: Optional[ExecutionAudit] = None,
                  venue: Optional[str] = None):
@@ -242,7 +245,7 @@ class AuditedStrategyExecutor:
     def preflight_order(self, symbol: str, side: str, qty: float,
                         price=None, *, market: bool = False,
                         kind: Optional[str] = None) -> None:
-        """Ruleaza gardul optional al venue-ului inainte de auditul de submit."""
+        """Run the adapter's optional preflight before a submit is audited."""
         preflight = getattr(self._executor, "preflight_order", None)
         if callable(preflight):
             preflight(

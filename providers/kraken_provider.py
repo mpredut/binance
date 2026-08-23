@@ -1,16 +1,16 @@
 # kraken_provider.py
-"""KrakenProvider — market-data + cont SPOT Kraken, peste kraken/kraken_client.py.
+"""Kraken spot adapter backed by ``kraken/kraken_client.py``.
 
-Pt monitortrades GENERIC pe Kraken: xStocks (TSLAx...) si HYPE (Kraken NU are DN ->
-fara co-mingling cu hedge-ul). `symbol` = perechea NATIVA Kraken (ex 'HYPEUSD').
+Symbols are native Kraken pairs such as ``HYPEUSD``. ``supports_symbol`` deliberately
+returns false, so instruments must select this adapter explicitly and cannot collide
+with Hyperliquid's HYPE routing. Public prices work without credentials; account and
+execution methods require Kraken keys loaded lazily from the environment or Kraken
+configuration.
 
-EXPLICIT-ONLY: supports_symbol -> False. Providerul e raol DOAR prin descriptorul
-Instrument (provider="kraken" -> provider_by_name), NU prin rutarea pe sablon a facadei.
-Asa nu se bate cu HyperliquidProvider pe 'HYPE*' (HYPEUSD vs HYPEUSDC).
-
-Chei: KRAKEN_API_KEY / KRAKEN_API_SECRET (env). Pretul/istoricul merg si fara chei
-(public). Plasarea: DRY (add_order validate=True) pana la KRAKEN_LIVE_ORDERS=true.
-Import LAZY al clientului (sys.path pe kraken/), ca flota sa nu cada daca lipseste ceva.
+The legacy ``place_order`` path submits validation-only requests unless
+``KRAKEN_LIVE_ORDERS=true``. The StrategyExecutor ``submit_order`` path is intentionally
+strict and always sends a real request; its caller's dry-run policy is the controlling
+gate. Importing this module does not eagerly initialize the Kraken client.
 """
 import json
 import os

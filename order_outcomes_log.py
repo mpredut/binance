@@ -1,14 +1,12 @@
 # order_outcomes_log.py
-"""Jurnal FLEET-WIDE de incercari de plasare ordine — un rand pipe-delimited per
-incercare, INDIFERENT de provider (Binance, Kraken, Hyperliquid...). Observational:
-nu poate afecta returul apelantului (protejat de try/except la scriere).
+"""Fleet-wide log of order-submission attempts, one pipe-delimited row per call.
 
-Extras din binance_api/bapi_placeorder.py (30 iul) — inainte era invocat DOAR din
-place_order_smart (Binance), deci ordinele Kraken/HL erau invizibile in
-logger/order_outcomes_*.log. Acum reutilizat si de Instrument.place() (vezi
-instrument.py), pt orice provider care nu garda intern.
+The writer is observational and suppresses its own I/O errors. The legacy outcome
+value ``executed`` means that the provider returned a truthy submission payload; it
+does **not** prove that a limit order filled. Fill truth belongs to venue status and
+trade reconciliation, which this log does not perform.
 
-Format NESCHIMBAT (tradeall_observe.py citeste fisierele dupa acest tipar):
+The format is consumed by ``tradeall_observe.py``:
     ts|symbol|side|price|qty|outcome|refuse_reason|caller|motivation
 """
 import os
@@ -19,14 +17,16 @@ ORDER_OUTCOMES_LOG_DIR = "logger"
 
 
 def _sanitize_outcome_field(value):
-    """Elimina caractere care ar sparge formatul pipe-delimited."""
+    """Remove characters that would break the pipe-delimited record format."""
     return str(value).replace("|", "/").replace("\n", " ") if value is not None else ""
 
 
 def log_order_outcome(symbol, side, price, qty, outcome, refuse_reason, motivation, caller=None):
-    """caller: eticheta descriptiva a apelantului (ex. numele fisierului care a initiat
-    plasarea) — calculata de FIECARE call site (bapi_placeorder, Instrument.place), nu
-    aici, ca sa nu depindem de o adancime fixa de stack (diferita intre apelanti)."""
+    """Append one submission-attempt record.
+
+    ``caller`` is computed by each call site because stack depth differs between
+    the legacy Binance adapter and ``Instrument.place``.
+    """
     try:
         os.makedirs(ORDER_OUTCOMES_LOG_DIR, exist_ok=True)
         path = os.path.join(ORDER_OUTCOMES_LOG_DIR,

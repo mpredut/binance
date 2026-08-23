@@ -1,23 +1,30 @@
+"""Legacy CoinMarketCap/Binance comparison script.
+
+This module performs paid/public HTTP requests, sleeps, builds data frames, and
+prints reports immediately when imported; it is not a side-effect-free library.
+The request paths below do not set timeouts or call ``raise_for_status``.
+"""
+
 import time
 import requests
 import pandas as pd
 
-# Înlocuieste cu cheia ta API de la CoinMarketCap
+# Embedded CoinMarketCap credential used directly by this script.
 API_KEY_CMC = "4d587781-722b-40a3-83f0-2436d45942f7"
 url_cmc = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/listings/latest"
 
 
-# Setari pentru cererea API catre CoinMarketCap
+# Headers sent with every CoinMarketCap request.
 headers_cmc = {
     'Accepts': 'application/json',
     'X-CMC_PRO_API_KEY': API_KEY_CMC,
 }
 
-# Functie pentru obtinerea datelor de la CoinMarketCap
+# Fetch paginated CoinMarketCap listings until the response lacks data.
 def get_coinmarketcap_coins():
     coins = []
-    start = 1  # Pornim de la prima moneda
-    limit = 1000  # Maximul pe care îl putem cere per pagina
+    start = 1  # Start with the first listing.
+    limit = 1000  # Requested page size.
 
     while True:
         params_cmc = {
@@ -31,13 +38,13 @@ def get_coinmarketcap_coins():
         if data is None or 'data' not in data:
             break
 
-        # Procesam datele primite de la CoinMarketCap
+        # Convert the current response page to local rows.
         for coin in data['data']:
             name = coin['name']
             symbol = coin['symbol']
             launch_date = pd.to_datetime(coin['date_added'])
             price = coin['quote']['USD']['price']
-            website_slug = coin['slug']  # Aceasta poate fi utilizata pentru identificare suplimentara
+            website_slug = coin['slug']  # Retained as an additional identifier.
             change_24h = coin['quote']['USD']['percent_change_24h']
             change_7d = coin['quote']['USD']['percent_change_7d']
             coins.append({
@@ -50,30 +57,30 @@ def get_coinmarketcap_coins():
                 "change_7d": change_7d
             })
 
-        if not data['data']:  # Daca nu mai sunt date
+        if not data['data']:  # Stop after an empty page.
             break
-        start += limit  # Crestem pentru a aduce urmatoarea pagina
+        start += limit  # Advance to the next page.
 
     print(f"Am extras {len(coins)} monezi")
     return pd.DataFrame(coins)
 
-# Functie pentru obtinerea monedelor disponibile pe Binance cu preturi
+# Fetch all Binance ticker prices and strip every ``USDT`` substring from symbols.
 def get_binance_coins():
     url_binance = "https://api.binance.com/api/v3/ticker/price"
     response = requests.get(url_binance)
     data = response.json()
     
-    # Extragem simbolurile monedelor de pe Binance si preturile lor
+    # Build the symbol-to-price mapping returned to the comparison routine.
     binance_data = {}
     for coin in data:
-        symbol = coin['symbol'].replace('USDT', '')  # Simbolul fara USDT
+        symbol = coin['symbol'].replace('USDT', '')  # Current code is not suffix-specific.
         price = float(coin['price'])
         binance_data[symbol] = price
     return binance_data
 
-# Functie principala pentru a gasi monedele disponibile pe ambele platforme si a le sorta
+# Match both data sources by symbol and reject price differences of five percent or more.
 def find_common_coins_and_sort(topn, df_cmc, binance_data):
-    # Filtram monedele care sunt prezente atat pe CoinMarketCap cat si pe Binance
+    # Keep CoinMarketCap symbols that exist in the Binance-derived mapping.
     common_coins = []
     
     for index, row in df_cmc.iterrows():
@@ -82,7 +89,7 @@ def find_common_coins_and_sort(topn, df_cmc, binance_data):
         
         if symbol in binance_data:
             price_binance = binance_data[symbol]
-            # Compara pretul pentru a verifica similitudinea
+            # Use price proximity as a weak cross-source identity check.
             if abs(price_cmc - price_binance) / price_cmc < 0.05:  # Toleranta de 5%
                 common_coins.append({
                     "name": row['name'],
@@ -97,10 +104,9 @@ def find_common_coins_and_sort(topn, df_cmc, binance_data):
 
     df_common = pd.DataFrame(common_coins)
 
-    # Sortam monedele dupa data lansarii (cele mai noi primele)
+    # Produce the requested ranked views.
     df_sorted_new = df_common.sort_values(by="launch_date", ascending=False).head(topn)
     
-    # Sortam monedele dupa crestere/scadere în ultimele 7 zile si în ultimele 24 de ore
     df_sorted_greatest_increase_7d = df_common.sort_values(by="change_7d", ascending=False).head(topn)
     df_sorted_greatest_decrease_7d = df_common.sort_values(by="change_7d", ascending=True).head(topn)
     df_sorted_greatest_increase_24h = df_common.sort_values(by="change_24h", ascending=False).head(topn)
@@ -111,27 +117,27 @@ def find_common_coins_and_sort(topn, df_cmc, binance_data):
 
 
 
-# Convertim lista într-un DataFrame pandas
+# The executable report begins here and also runs on import.
 df_cmc = get_coinmarketcap_coins()
 binance_coins = get_binance_coins()
     
 
-# Sortam monedele dupa data lansarii (cele mai noi primele)
+# Rank the newest listings.
 nb = 100
 df_sorted_new = df_cmc.sort_values(by="launch_date", ascending=False).head(nb)
 
 print("Cea mai noua moneda lansata pe CoinMarketCap:")
-print(df_sorted_new.iloc[0])  # Accesam primul rand cu iloc
+print(df_sorted_new.iloc[0])  # Raises if the fetched data frame is empty.
 
-# Sortam monedele dupa crestere/scadere în ultimele 7 zile si în ultimele 24 de ore
+# Rank gains and losses over the two requested periods.
 df_sorted_greatest_increase_7d = df_cmc.sort_values(by="change_7d", ascending=False).head(10)
 df_sorted_greatest_decrease_7d = df_cmc.sort_values(by="change_7d", ascending=True).head(10)
 df_sorted_greatest_increase_24h = df_cmc.sort_values(by="change_24h", ascending=False).head(10)
 df_sorted_greatest_decrease_24h = df_cmc.sort_values(by="change_24h", ascending=True).head(10)
 
-# Afisam rezultatele
+# Print all report sections.
 print(f"Primele {nb} monede noi:")
-pd.set_option('display.max_rows', 100)  # Afisam pana la 100 de randuri
+pd.set_option('display.max_rows', 100)  # Display up to 100 rows.
 print(df_sorted_new)
 
 print("\nTop 10 cresteri pe 7 zile:")
@@ -147,7 +153,7 @@ print("\nTop 10 scaderi pe 24 de ore:")
 print(df_sorted_greatest_decrease_24h)
 
 ###########
-# Apelam functia si afisam rezultatele
+# Build and print the cross-source comparison.
 df_top_10_new, df_top_10_increase_7d, df_top_10_decrease_7d, df_top_10_increase_24h, df_top_10_decrease_24h = find_common_coins_and_sort(10, df_cmc, binance_coins)
 
 print("Primele 10 monede disponibile si pe CoinMarketCap, si pe Binance, sortate dupa noutate:")

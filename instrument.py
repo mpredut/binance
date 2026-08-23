@@ -1,20 +1,13 @@
 # instrument.py
-"""Descriptor de INSTRUMENT urmarit: encapsuleaza (provider + symbol + params).
+"""Explicit instrument descriptor: provider, symbol, assets, and parameters.
 
-SCOP: un singur lucru tranzactionat (BTC pe Binance, HYPE pe HL, TSLAx pe Kraken,
-TSLA pe T212...) devine UN obiect care ASCUNDE providerul. Consumatorii (monitortrades,
-tradeall, rtrade) itereaza o lista de Instrument si apeleaza operatii GENERICE —
-`price()`, `position`/`orders()`, `free()`, `place()` — fara sa stie/sa-i pese ce
-platforma e dedesubt. Asa acelasi activ poate trai pe mai multe venue-uri (doua
-instrumente, doua providere) si algoritmul ramane unul singur, generic.
+Consumers operate on ``Instrument`` instances instead of inferring a venue from a
+symbol. The provider name is resolved through ``MarketApi.provider_by_name`` so the
+same asset can be represented independently on multiple venues.
 
-Rutare EXPLICITA pe venue: instrumentul isi declara providerul dupa NUME
-(`provider="hyperliquid"`), rezolvat din registry-ul facadei (market_api.provider_by_name),
-in loc de ghicitul prin supports_symbol pe string-ul de symbol.
-
-NB: `free()` interogheaza soldul pe ASSET (base, ex. 'HYPE'), nu pe symbol, si merge
-DIRECT la providerul instrumentului (nu prin rutarea pe symbol a facadei) — deci e
-neambiguu chiar daca acelasi asset apare pe mai multe venue-uri.
+``free()`` queries the instrument provider with the base asset (or the full symbol
+when no base is configured). ``place()`` either delegates to an internally guarded
+provider or runs the shared policy pipeline before provider mechanics.
 """
 import os
 import sys
@@ -28,10 +21,10 @@ from lock import trade_cooldown
 
 
 class Instrument:
-    """Provider + symbol + params, cu operatii generice care delegheaza la provider.
+    """Provider-bound symbol with namespaced consumer parameters.
 
-    params: dict plat cu chei pe NAMESPACE de consumator, ex. {'mt.gain': '9.2',
-    'tradeall.budget': '...'}. Citeste-le tipat cu `param(consumer, key, default, cast)`.
+    ``params`` is a flat mapping such as ``{"mt.gain": "9.2"}``; use ``param``
+    for optional casting and defaults.
     """
 
     def __init__(self, name: str, symbol: str, provider: str,
@@ -289,7 +282,7 @@ class Instrument:
                     print(f"[{self.symbol}] {side_u} enqueue retry esuat (ignor): {_e}")
 
     def min_qty(self) -> float:
-        """Volumul minim de ordin al venue-ului pt symbol (0 = fara gard de volum)."""
+        """Return the venue minimum order quantity; ``0`` means no known minimum."""
         try:
             return float(self._provider.min_order_qty(self.symbol) or 0.0)
         except Exception:  # noqa: BLE001
@@ -298,8 +291,7 @@ class Instrument:
     # ── params namespaced (mt.* / tradeall.* / rtrade.*) ───────────────────────
     def param(self, consumer: str, key: str, default: Any = None,
               cast: Optional[Callable] = None) -> Any:
-        """Valoarea `consumer.key` (ex. param('mt','gain', cast=float)). default daca
-        lipseste sau cast esueaza."""
+        """Return ``consumer.key`` or ``default`` when missing or conversion fails."""
         v = self.params.get(f"{consumer}.{key}")
         if v is None:
             return default

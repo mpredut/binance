@@ -69,9 +69,9 @@ CONFIG_RESTART_WINDOW_H = float(os.environ.get("WATCHDOG_CONFIG_WINDOW_H", "6"))
 # pe toti. Config-uri partajate/secrete (config.env, .env) NU sunt aici deliberat
 # (prea larg pt auto-restart; o schimbare acolo ar cere restart de flota, decizie umana).
 _CONFIG_OWNERS = {
-    # instruments.conf: SINGURUL consumator real e monitortrades.py (load_for("mt"));
-    # tradeall.py/rtrade.py au propriile *_config.env (vezi header instruments.conf,
-    # verificat 23 iul prin grep) — deci NU le repornim la o schimbare mt.*.
+    # The restart map currently assigns instruments.conf only to monitortrades.
+    # cacheManager and priceAnalysis also read its ``mt`` namespace but are not
+    # restarted by this mapping. tradeall/rtrade use their own config files.
     "instruments.conf": ["monitortrades.py"],
     "monitortrades.conf": ["monitortrades.py"],
     "monitortrades_config.env": ["monitortrades.py"],

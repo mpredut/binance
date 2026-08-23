@@ -9,7 +9,7 @@ from typing import List, Dict, Optional, Set, Callable
 from abc import ABC, abstractmethod
 from collections import defaultdict
 
-# Import your existing modules
+# Repository integrations.
 import log
 import utils as u
 
@@ -17,14 +17,15 @@ import utils as u
 # Global configuration
 # ============================================
 
-# CoinMarketCap API key
+# Embedded default credential passed to CoinMarketCapSource unless callers override it.
 CMC_API_KEY = "4d587781-722b-40a3-83f0-2436d45942f7"
 
 # Discovery configuration
 NEW_COINS_AGE_DAYS = 3
 MAX_NEW_COINS_TO_TRACK = 15
 REFRESH_INTERVAL_SECONDS = 3600
-NEW_COIN_CLEANUP_MAX_AGE_DAYS = MAX_NEW_COINS_TO_TRACK * 2  # Double the monitoring window for cleanup
+# Historical formula: twice the maximum tracked-symbol count, interpreted as days.
+NEW_COIN_CLEANUP_MAX_AGE_DAYS = MAX_NEW_COINS_TO_TRACK * 2
 
 
 # Symbols excluded automatically

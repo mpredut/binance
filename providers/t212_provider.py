@@ -1,17 +1,15 @@
 # t212_provider.py
-"""T212Provider — stocks REALE pe Trading 212, peste 212trading/t212_client.py.
+"""Trading 212 equity adapter backed by ``212trading/t212_client.py``.
 
-T212 are model de PORTOFOLIU (pozitie cu averagePrice/quantity/currentPrice), nu istoric
-de ordine ca Binance/Kraken. Adaptam: pozitia detinuta = UN buy sintetic la averagePrice
--> monitortrades calculeaza la fel avg_buy + ultimul-buy si vinde pe castig.
+The portfolio API exposes a current position rather than Binance-style fill history.
+For the shared monitoring interface, ``get_orders`` represents a held position as one
+synthetic buy at its average price; this is not historical order data. Symbols are
+Trading 212 tickers and this explicit-only adapter must be selected by the instrument.
 
-EXPLICIT-ONLY: supports_symbol -> False (reachable doar prin Instrument provider="t212").
-`symbol` = tickerul T212 (ex 'TSLA_US_EQ' sau cum apare in portofoliu). free_balance pe
-acelasi ticker. Ore: actiuni reale = doar RTH (instrumentul are market_hours=rth; bucla
-poate sari cand piata e inchisa — currentPrice oricum lipseste atunci).
-
-Cheie: T212_API_KEY (+ optional T212_API_SECRET, T212_ENV=live|demo). Plasare: DRY pana
-la T212_LIVE_ORDERS=true. Import LAZY (sys.path pe 212trading/).
+Client construction and credential loading are lazy. The legacy ``place_order`` path
+is gated by ``T212_LIVE_ORDERS`` unless a launcher injects an explicit live flag, and
+the strict StrategyExecutor path uses the same gate. Market-hours enforcement belongs
+to the instrument/strategy loop; this provider itself requests regular-hours orders.
 """
 import os
 import time

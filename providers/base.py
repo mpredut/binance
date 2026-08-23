@@ -1,8 +1,4 @@
-"""Primitive comune providerilor, fara registry sau importuri de venue.
-
-Separarea acestui modul tine adaptoarele importabile independent si elimina ciclul
-provider -> market_api -> registry -> provider.
-"""
+"""Provider primitives with no registry or venue-module dependencies."""
 
 import os
 from abc import ABC, abstractmethod
@@ -10,7 +6,7 @@ from typing import List, Optional
 
 
 def env_value(folder: str, key: str) -> Optional[str]:
-    """Citeste o singura cheie din .env/config.env fara sa modifice os.environ."""
+    """Read one key from ``.env``/``config.env`` without mutating ``os.environ``."""
     for fname in (".env", "config.env"):
         path = os.path.join(folder, fname)
         if not os.path.exists(path):
@@ -30,7 +26,7 @@ def env_value(folder: str, key: str) -> Optional[str]:
 
 
 def normalize_order(order: dict) -> dict:
-    """Normalizeaza un ordin nativ la {side, price, qty, timestamp}."""
+    """Normalize a native order to ``side``, ``price``, ``qty``, and ``timestamp``."""
     return {
         "side": (order.get("side") or "").upper(),
         "price": float(order.get("price", 0.0) or 0.0),
@@ -39,12 +35,12 @@ def normalize_order(order: dict) -> dict:
     }
 
 
-# Alias temporar pentru importurile interne/externe existente.
+# Compatibility alias retained for existing internal and external imports.
 _normalize_order = normalize_order
 
 
 class MarketDataProvider(ABC):
-    """Interfata comuna de market-data, cont, ordine si guard hooks."""
+    """Shared market-data, account, order, and policy-hook interface."""
 
     @abstractmethod
     def get_current_price(self, symbol: str) -> Optional[float]:
@@ -63,7 +59,7 @@ class MarketDataProvider(ABC):
         ...
 
     def free_balance(self, asset: str) -> Optional[float]:
-        """Sold liber: 0.0 = sold real zero; None = citire indisponibila/eronata."""
+        """Return free balance: ``0.0`` is real zero; ``None`` means unavailable."""
         return None
 
     def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:

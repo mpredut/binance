@@ -10,8 +10,12 @@ CURENT, cu caller_owns_retry=True (ca sa NU se re-enqueue-ze). Succes -> scos di
 attempts++/last_attempt, ramane. Peste TTL (sau plafon incercari) -> scos + ALERTA
 (renuntare, interventie manuala).
 
-`process_once` e logica PURA (mkt injectabil) -> testabila fara retea. `main` = bucla +
-single-instance + supervizare (procs.conf). Kill-switch: RETRY_ENABLED=false (order_retry_config.env).
+``process_once`` has an injectable market facade for tests. It still mutates the
+persistent queue and sends alerts. The claim-before-submit design prevents concurrent
+retries but leaves a crash window in which a claimed intent can be lost.
+
+``main`` adds the single-instance loop and supervision. ``RETRY_ENABLED=false`` is
+the configured kill switch.
 """
 import os
 import sys
@@ -35,7 +39,8 @@ def process_once(mkt, now=None):
     avantaj), le SCOATE din coada (claim atomic) INAINTE de a le plasa — ca sa nu fie
     reincercate de nimeni cat timp sunt in curs — apoi le plaseaza la pret CURENT
     (caller_owns_retry=True). Succes -> raman scoase. Esec -> RE-adaugate (pastrand vechimea +
-    attempts+1). Expirate -> scoase + alerta. Intoarce un dict de statistici."""
+    attempts+1). Expirate -> scoase + alerta. A process exit after ``claim`` and before
+    re-enqueue loses the claimed record. Intoarce un dict de statistici."""
     now = now if now is not None else time.time()
     snapshot = oq.load_all(now)
 

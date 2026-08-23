@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-"""
-market_alerts.py — orchestrator alerte: monede noi (CoinMarketCap/CoinGecko) +
-praguri de pret pe watchlist. CONFIG-DRIVEN (fostul run_price_monitor.py).
+"""Run new-coin discovery and watch-list price alerts in one process.
 
-Tot ce era hardcodat (watchlist, praguri, intervale, surse, limite) vine acum din
-market_alerts.conf. Praguri PER-MONEDA + default + prag pt monede noi. Un singur
-proces, cache de pret comun (un singur buget API CoinMarketCap). Modulele de jos
-raman separate (new_coins_discovery vs pricechecker); aici e doar cablajul.
+``market_alerts.conf`` supplies the watch list, thresholds, scan intervals, sources,
+and limits. Importing this module loads environment files, validates required alert
+configuration, and prints notification-channel status; only ``main`` starts monitor
+threads. Coin discovery additionally requires ``ALERT_NEW_COIN=TRUE``.
 
-  python3 market_alerts.py
-  python3 market_alerts.py --config alt.conf
+Usage: ``python3 market_alerts.py [--config PATH] [--check]``.
 """
 from __future__ import annotations
 
@@ -165,7 +162,7 @@ def print_new_coin_status(cachePriceAll, new_coins_checker):
 
 
 def periodic_cleanup(cachePriceAll, new_coins_checker):
-    """Run cleanup every 6 hours."""
+    """Run price cleanup every six hours and coin cleanup when a monitor is supplied."""
     while True:
         print(f"sleeping for {TIME_INTERVAL_CLEANUP} hours before next cleanup...")
         time.sleep(TIME_INTERVAL_CLEANUP )
@@ -260,6 +257,9 @@ def main():
         cachePriceAll=cachePriceAll, alert_callback=alert_handler,
         check_interval_seconds=cfg["price_scan_seconds"], config=ac)
 
+    # The thread captures the arguments supplied here. Because ``None`` is passed before
+    # the optional coin monitor is constructed, this thread cleans price state only and
+    # never calls ``cleanup_old_new_coins`` on the later local variable.
     cleanup_thread = threading.Thread(target=periodic_cleanup, name="periodic_cleanup",
                                       args=(cachePriceAll, None), daemon=True)
     cleanup_thread.start()

@@ -1,25 +1,15 @@
-# hyperliquid_provider.py
-"""HyperliquidProvider — implementarea `MarketDataProvider` (facada market_api) pentru
-HYPE pe Hyperliquid SPOT. Faza 2b/3 a decuplarii de Binance.
+"""Hyperliquid spot adapter for HYPE market data, balances, fills, and orders.
 
-DELIMITARE STRICTA: acest provider citeste/scrie DOAR SPOT-ul HYPE (perechea @index
-TOKEN/USDC). NU atinge perp-ul si NU atinge botul DELTA-NEUTRAL (dn_bot/delta_neutral):
-- get_current_price / get_price_history -> pretul SPOT (perechea @index), public, fara cheie.
-- free_balance(HYPE/USDC) -> soldul SPOT HL (total - hold), NU perp/margine.
-- get_orders / get_trades -> DOAR fill-urile SPOT (coin == perechea @index); fill-urile
-  perp (coin == 'HYPE') sunt EXCLUSE, deci activitatea DN nu se amesteca aici.
+The adapter resolves the HYPE/USDC spot pair and excludes perpetual fills. Spot and
+perpetual activity may nevertheless share one wallet: HYPE held as the spot leg of a
+delta-neutral position appears in the same available balance. A live sell can therefore
+reduce that hedge. ``place_order`` is dry by default and becomes live only when
+``HL_LIVE_ORDERS=true``; the stricter ``submit_order`` contract has its own caller-level
+execution control.
 
-⚠ ATENTIE (co-mingling spot): pe Hyperliquid soldul SPOT e UNUL singur pe wallet. Daca
-botul delta-neutral tine un picior LONG spot in HYPE, acel HYPE apare in acelasi sold.
-=> Pentru CITIRE (dry-run) e doar o observatie. Pentru ORDINE REALE de SELL, vinderea
-'a tot ce e disponibil' ar putea desface piciorul spot al DN-ului. De aceea place_order
-e DRY implicit (vezi mai jos) si ordinele reale raman poarta finala, separata.
-
-IMPORT LAZY OBLIGATORIU: fleet-ul importa market_api (deci si acest modul) la pornire.
-SDK-ul Hyperliquid (`hyperliquid`, `eth_account`) poate LIPSI din venv-ul flotei (myenv
-pe server). De aceea modulul ASTA nu importa NIMIC din SDK la nivel de modul: clientul HL
-(hl_client din hyperliquid/) e creat LENES, in try/except, la prima folosire. Daca SDK-ul
-sau cheile lipsesc, metodele degradeaza curat (None/[]) -> Binance ramane neafectat.
+Hyperliquid SDK imports and client creation are lazy so importing the provider facade
+does not require the SDK or credentials. Unavailable read dependencies generally yield
+``None`` or an empty collection; strict execution methods raise ``ProviderError``.
 """
 from __future__ import annotations
 

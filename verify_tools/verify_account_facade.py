@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""verify_account_facade.py — dovada ca facada de CONT (Faza 3) intoarce EXACT aceleasi
-date ca accesul direct bapi/bapi_allorders, pt simbolurile live (TAO/BTC).
+"""Compare normalized facade results with legacy Binance access paths.
 
-Compara, in ACELASI proces (deci pe acelasi cache de ordine), pentru fiecare symbol:
-  - free_balance(base): facada (mkt.free_balance) vs bucla directa peste
-    get_account_assets_balances (exact ca monitortrades.get_available_qty / trade_watch)
-  - get_orders(symbol, side): facada NORMALIZATA vs apiorders.get_trade_orders direct
-    (numar de ordine + price/qty/timestamp/side pe fiecare ordin)
-  - avg_buy / net_qty (logica get_position_stats) calculate din AMBELE surse
+For each configured Binance symbol it compares:
+  - the facade's direct per-asset balance call with the legacy full-account loop;
+  - normalized facade orders with ``apiorders.get_trade_orders``;
+  - average buy and net quantity calculated from both order lists.
 
-Behavior-preserving inseamna: TOATE perechile trebuie sa fie identice. Iese cu cod !=0
-daca ceva difera. A se rula INAINTE de orice restart de flota:
+The two balance paths can differ when an API read fails: the per-asset path returns
+``None`` while the legacy full-account path collapses failure to an empty list and
+therefore ``0.0``. The command exits nonzero on any observed difference.
+
+Run before restarting the fleet:
   ~/binance/myenv/bin/python verify_account_facade.py
 """
 import os
@@ -29,7 +29,7 @@ base_of = utils.base_asset
 
 
 def free_direct(base):
-    """Identic cu bucla din monitortrades.get_available_qty (inainte de Faza 3)."""
+    """Legacy full-account loop; unavailable account data is indistinguishable from zero."""
     for b in (api.get_account_assets_balances() or []):
         if b.get("asset") == base:
             return float(b.get("free", 0.0) or 0.0)

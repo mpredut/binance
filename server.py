@@ -15,13 +15,14 @@ app = FastAPI()
 app.mount("/static", StaticFiles(directory="/static"), name="static")
 #app.mount("/files", StaticFiles(directory="/home/predut/binance"), name="files")
 
-# Configurare CORS
+# The service currently allows every origin, method, and header. This is a runtime
+# configuration fact, not an assertion that the policy is safe for public exposure.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Permite cereri de la toate originile
+    allow_origins=["*"],  # Accept requests from every origin.
     allow_credentials=True,
-    allow_methods=["*"],  # Permite toate metodele (GET, POST etc.)
-    allow_headers=["*"],  # Permite toate anteturile
+    allow_methods=["*"],  # Accept every HTTP method.
+    allow_headers=["*"],  # Accept every request header.
 )
 
 
@@ -30,7 +31,7 @@ from binance.exceptions import BinanceAPIException
 
 from keys.apikeys import api_key, api_secret
 
-# my imports
+# Local trading integrations.
 from binance_api import bapi as api
 from providers.market_api import api as mkt   # proxy unic guardat (Instrument.place)
 import log
@@ -50,7 +51,7 @@ def read_root():
         return Response(content="index.html not found", headers=headers, status_code=404)
 
     
-# Modele de date
+# Request payloads.
 class TradeRequest(BaseModel):
     symbol: str
     amount: float
@@ -58,12 +59,13 @@ class TradeRequest(BaseModel):
 class AlertRequest(BaseModel):
     symbol: str
     threshold: float
-    direction: str  # "up" sau "down"
+    direction: str  # Expected values are "up" or "down"; they are not validated here.
 
-# Funcționalități
+# Trading endpoints attempt a guarded submission. Their current response text does
+# not prove that an order was accepted or filled because the return value is ignored.
 @app.post("/trade/sell")
 async def sell(request: TradeRequest):
-    # Logica de vânzare prin Binance API
+    # Submit a guarded limit sell one percent above the current Binance price.
     print(f"Vândut {request.amount} din {request.symbol}")
     current_price = api.get_current_price(str(request.symbol))
     sell_price = current_price * (1 + 0.01 )
@@ -73,8 +75,7 @@ async def sell(request: TradeRequest):
 
 @app.post("/trade/buy")
 async def buy(request: TradeRequest):
-    # Logica de cumpărare prin Binance API
-     # Logica de vânzare prin Binance API
+    # Submit a guarded limit buy one percent below the current Binance price.
     print(f"Cumparat {request.amount} din {request.symbol}")
     current_price = api.get_current_price(str(request.symbol))
     sell_price = current_price * (1 - 0.01 )
@@ -84,13 +85,12 @@ async def buy(request: TradeRequest):
 
 @app.get("/status/get")
 async def get_status(symbol: str):
-    # Logica pentru a obține starea pieței
+    # Placeholder response; this endpoint does not inspect market or process state.
     return {"symbol": symbol, "status": "Stable"}
 
 @app.post("/alert/set")
 async def set_alert(request: AlertRequest):
-    # Logica pentru a seta alerta
+    # Placeholder response; this endpoint does not persist or schedule an alert.
     return {
         "message": f"Alertă setată pentru {request.symbol}: {request.direction} la {request.threshold}"
     }
-

@@ -1,27 +1,16 @@
 # providers/replay_provider.py
-"""ReplayMarketDataProvider — implementeaza MarketDataProvider peste date
-ISTORICE (cache_price_{symbol}.jsonl), pt backtest/replay
-(23 iul, offline/research/UNIFIED_BACKTEST_PLAN.md Faza 1). NU bate reteaua NICIODATA.
+"""Offline market-data provider and minimal simulated broker for replay tests.
 
-De ce exista: verificat in aceeasi sesiune ca `Instrument.__init__(api=...)` +
-`instruments_config.load_for(api=...)` accepta DEJA un `MarketDataProvider`
-injectat — monitortrades.py NU trebuie schimbat la liniile unde citeste
-pret/ordine (inst.price(), inst.orders(...)) ca sa ruleze pe replay, doar
-construit cu un `MarketApi([ReplayMarketDataProvider(...)])` in loc de cel live.
+Price series are supplied in memory, commonly after reading repository JSONL caches.
+The provider itself performs no network requests. Each symbol has an explicit cursor;
+``advance`` moves it and ``now`` reports the timestamp of the most recently advanced
+point rather than advancing an independent clock.
 
-Ceas: `now(symbol)` intoarce timestamp-ul ULTIMULUI pret citit prin
-get_current_price (nu un ceas separat care avanseaza independent) — timpul
-"vine din pretul obtinut", cerinta explicita din sesiune. Codul care are
-nevoie de "acum" (ex. monitortrades.monitor_price_and_trade(now_fn=...))
-primeste acest `now` ca now_fn, ca ambele sa avanseze IMPREUNA.
-
-Broker simulat MINIMAL (nu retea): place_order()/get_orders()/free_balance()
-tin cont intern de pozitie (qty/cost mediu) per symbol, suficient pt
-monitortrades.get_position_stats/get_relevant_trade/monitor_price_and_trade
-sa functioneze identic structural ca live. NU modeleaza limit-order-uri
-neexecutate (place_order() executa INSTANT, la pretul cerut) — simplificare
-deliberata pt Faza 1 (monitortrades plaseaza market-like azi oricum, prin
-place_order_smart cu safeback; fidelitatea de umplere e o rafinare de Faza 2).
+Orders execute immediately at the requested price and update an in-memory position.
+There is no pending-limit lifecycle, quote-currency cash ledger, slippage model, or
+venue reconciliation. ``guards_internally`` also bypasses the shared live-order guards.
+Consequently this adapter preserves the monitoring interface, not live execution
+fidelity, and its results must be treated as a simplified backtest.
 """
 from __future__ import annotations
 

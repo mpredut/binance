@@ -626,12 +626,13 @@ def render_chart(symbol, window_label, window_start, window_end,
                     xytext=(3, 8), textcoords="offset points", color=SHADOW_COLOR)
 
     visible_orders = [e for e in order_events if window_start <= e["ts"] <= window_end]
+    # ``executed`` is the legacy submission-outcome label. It means the provider
+    # returned a truthy payload, not that venue reconciliation confirmed a fill.
     executed = [e for e in visible_orders if e["outcome"] == "executed"]
     refused = [e for e in visible_orders if e["outcome"] == "refused"]
 
-    # Etichete text per-marker DOAR cand sunt putine — cu sute de refuzuri (ex. tradeall
-    # incearca BUY la fiecare tick si garda refuza), textul ar acoperi tot graficul.
-    # Markerii raman toti; caseta-sumar de mai jos tine oricum contorizarea completa.
+    # Limit marker annotations when attempts are dense. Filled marker styling below
+    # represents the legacy truthy-submission category, not a confirmed venue fill.
     MAX_ANNOTATED = 25
 
     _plot_order_markers(ax, executed, filled=True, max_annotated=MAX_ANNOTATED)

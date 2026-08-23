@@ -1,22 +1,22 @@
 # order_retry.py
-"""Coada persistenta (outbox) de RE-PLASARE a ordinelor esuate — AGNOSTICA de provider.
+"""Provider-agnostic persistent queue for retrying failed placement attempts.
 
-Model (varianta B, decizie user): MULTI WRITERI (orice proces care plaseaza, prin
-Instrument.place -> enqueue pe esec) + UN SINGUR READER (order_retry_worker.py) care
-reia. Store = un JSONL in cachedb/, protejat de un FileLock (cross-proces). Volumul e
-mic (esecurile-s rare), deci un lock global pe operatii e suficient.
+Any process calling ``Instrument.place`` may enqueue a rejected or failed attempt;
+``order_retry_worker.py`` is intended to be the single consumer. Records are stored
+as JSONL under ``cachedb`` and queue mutations are serialized with a cross-process
+file lock.
 
-Ce se salveaza: symbol/side/qty + place_kwargs (safeback/force/cancelorders/hours/smart/
-bypass_profit_guard/motivation) + INTENTIA DE PRET (requested_price = pretul cerut de
-apelant, ref_price = pretul de piata la esec) + id/created_ts/attempts/last_attempt_ts.
-Pretul NU se re-trimite ca valoare fixa — la retry se recalculeaza din pretul CURENT, dar
-DOAR daca acesta e in AVANTAJ fata de cel cerut (price_gate_ok). La enqueue se face DEDUP
-(o singura intentie pending per symbol+side+banda de pret) + plafon de coada. Astea fac un
-TTL lung sigur (intentie persistenta gardata pe pret, nu oarba pe timp). Vezi
-order_retry_config.env pt TTL/interval/toleranta-pret/dedup/plafon/kill-switch.
+Each record preserves the symbol, side, quantity, placement options, requested and
+reference prices, timestamps, and attempt count. A retry recalculates its placement
+from the current market price and proceeds only when ``price_gate_ok`` accepts that
+price. Deduplication retains one pending record per symbol and side, refreshing its
+target while preserving its original age.
 
-Fara dependinte grele (doar stdlib + lock.FileLock + botcore) -> importabil lazy din
-Instrument.place fara risc de ciclu.
+This is not a transactional outbox. Claiming removes a record before venue submission,
+so a worker crash in that interval can lose the intent. Also, queue admission reflects
+``Instrument.place`` failure, not a fresh evaluation of the strategy signal; the worker
+relies on the placement guards and the stored price constraint. Configuration lives in
+``order_retry_config.env``.
 """
 import os
 import json
@@ -73,14 +73,13 @@ def _read_nolock():
 
 def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_price=None,
             now=None, created_ts=None, attempts=0, last_attempt_ts=0.0):
-    """Adauga (sau REIMPROSPATEAZA) un ordin esuat in coada, sub lock. Dedup pe symbol+side:
-    o SINGURA intentie pending per symbol+side. La potrivire, intrarea existenta se
-    reimprospateaza cu ultima tinta (pret/qty/kwargs), pastrand cel mai VECHI created_ts
-    (pt TTL) si max(attempts) — deci FARA ladder de intrari pe acelasi side. Intoarce id-ul
-    (nou sau al intrarii existente); None daca RETRY_ENABLED False / plafon coada atins.
-    Captureaza INTENTIA DE PRET (requested_price + ref_price) pt gardul de pret la retry.
-    `created_ts`/`attempts`/`last_attempt_ts` permit workerului sa RE-adauge un ordin esuat
-    pastrandu-i vechimea + istoricul de incercari (nu reseteaza TTL la fiecare esec)."""
+    """Add or refresh a failed placement attempt while holding the queue lock.
+
+    With deduplication enabled, one record is retained per symbol and side. A match
+    receives the newest target price, quantity, and options while preserving the
+    oldest creation time and highest attempt counters. Returns the new or retained
+    record ID, or ``None`` when retries are disabled or the queue is full.
+    """
     if not RETRY_ENABLED:
         return None
     now = now if now is not None else time.time()
@@ -133,10 +132,12 @@ def load_all(now=None):
 
 
 def claim(ids, now=None):
-    """SCOATE din coada intrarile cu id in `ids` (atomic, sub lock) si le intoarce (cele
-    gasite). Folosit de worker: scoate ordinul din coada INAINTE de a-l plasa, ca sa nu fie
-    reincercat de nimeni cat timp e in curs de plasare. Ce esueaza -> re-adaugat via enqueue
-    (pastrand vechimea/attempts). Ce se plaseaza cu succes -> ramane scos."""
+    """Atomically remove and return entries whose IDs are claimed by the worker.
+
+    The worker claims before external submission to prevent concurrent retries and
+    re-enqueues an ordinary failure. A process crash after this removal and before
+    re-enqueue is not recoverable from this queue alone.
+    """
     ids = set(ids)
     if not ids:
         return []
@@ -175,7 +176,11 @@ def resolve(symbol, side):
 
 
 def _write_nolock(items):
-    """Scrie coada FARA a lua lock-ul (apelantul il detine). Atomic: tmp + os.replace."""
+    """Replace the queue file atomically while the caller holds the lock.
+
+    The temporary-file rename prevents partial-file visibility, but no directory or
+    file ``fsync`` is performed, so this is not a power-loss durability guarantee.
+    """
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(QUEUE_FILE), suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
