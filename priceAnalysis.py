@@ -8,28 +8,26 @@ import psutil
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 
-#for draw
+# Drawing dependencies.
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from datetime import datetime
 
-#my import
+# Local imports.
 import utils as u
 import symbols as sym
 
-# ─── COD MORT pastrat INTENTIONAT pt referinta (idee de reactivat/fixat) ──────
-# Abordare ALTERNATIVA de IPC pt trenduri: shared memory (multiprocessing) in
-# loc de fisierul JSON (priceanalysis.json) folosit acum. Fragmentele originale,
-# consolidate aici ca sa nu imprastie codul viu:
+# Intentionally retained dead code for reference: an alternative shared-memory
+# IPC approach for trends instead of the current priceanalysis.json file.
 #   from multiprocessing import shared_memory
 #   import shmutils as shmu
-#   shm = shmu.shmConnectForWrite(shmu.shmname)   # la pornire (in __main__)
-#   shmu.shmWrite(shm, all_trends)                # in bucla, dupa write_all_trends
-#   ... finally: shm.close(); shm.unlink()        # la oprire
+#   shm = shmu.shmConnectForWrite(shmu.shmname)   # At startup in __main__.
+#   shmu.shmWrite(shm, all_trends)                # In the loop after write_all_trends.
+#   ... finally: shm.close(); shm.unlink()        # At shutdown.
 # ──────────────────────────────────────────────────────────────────────────────
 
-# DEBUG trace (Zona 1/2/3 din get_trade_weight, tuning slope) — implicit OFF ca sa
-# nu polueze logul flotei. Activeaza cu PRICEANALYSIS_DEBUG=true la nevoie de tuning.
+# Debug tracing for weight zones and slope tuning is off by default to keep fleet
+# logs clean. Enable PRICEANALYSIS_DEBUG when tuning.
 _DEBUG = os.environ.get("PRICEANALYSIS_DEBUG", "").strip().lower() == "true"
 
 
@@ -43,7 +41,7 @@ price_cache_manager = None
 def build_price_cache_manager():
     global price_cache_manager
     import cacheManager as cm
-    price_cache_manager = cm.get_cache_manager("Price")  # dict per simbol
+    price_cache_manager = cm.get_cache_manager("Price")  # Dictionary keyed by symbol.
 
 def priceLstFor(symbol: str) -> List[Tuple[int, float]]:
 
@@ -59,7 +57,7 @@ def priceLstFor(symbol: str) -> List[Tuple[int, float]]:
     return [(int(ts), float(p)) for ts, p in raw]
 
 
-_draw_fig = {}  # symbol -> (fig, ax), REFOLOSITE — vezi motivul in docstring
+_draw_fig = {}  # Reused symbol-to-(figure, axis) mapping; see drawPriceLst.
 
 
 def _draw_point_limit() -> int:
@@ -81,14 +79,11 @@ def _bounded_plot_indices(length: int, max_points: Optional[int] = None) -> np.n
 
 
 def drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_direction, duration_hours):
-    """21 iul: plt.figure()+plt.close() la fiecare apel (chemat la fiecare
-    minut, per simbol, din getTrendLongTerm_fixed) LEAKA memorie — masurat
-    direct (RSS, nu doar tracemalloc care nu vede alocarile C): ~1.17MB/apel,
-    desi plt.close() se apela corect de fiecare data. E un gotcha cunoscut
-    matplotlib/Agg: cache-urile interne de fonturi/randare (freetype) nu se
-    elibereaza complet intre figuri noi succesive intr-o bucla lunga. Fix
-    standard: O SINGURA figura/axa PERSISTENTA per simbol, golita (ax.clear())
-    si redesenata, in loc de creata+distrusa la fiecare ciclu.
+    """Draw using one persistent figure and axis per symbol.
+
+    Creating and closing a figure every minute leaked about 1.17 MB RSS per call
+    because Matplotlib/Agg font and rendering caches survive repeated figures.
+    Clearing and redrawing one persistent figure avoids that allocator growth.
 
     Trend calculations use the complete series. Only the PNG renderer receives a
     bounded uniform sample; otherwise Matplotlib creates tens of thousands of datetime
@@ -159,7 +154,7 @@ def trend_wma(symbol: str, window_hours: int = 6):
     else:
         trend_direction = 'down'
 
-    # vizualizare
+    # Visualization.
     plt.figure(figsize=(12,5))
     plt.plot(timestamps, prices, label='Price', color='blue')
     plt.plot(timestamps, wma_prices, label=f'WMA {window_hours}h', color='red', linewidth=2)
@@ -173,9 +168,8 @@ def trend_wma(symbol: str, window_hours: int = 6):
 
 
 
-# ─── COD MORT pastrat INTENTIONAT pt referinta (idee de reactivat/fixat) ──────
-# Abordare ALTERNATIVA de trend: Holt’s Linear Trend (statsmodels Holt). Nu e
-# activa acum (folosim detect_long_term_trend), dar pastrata daca vrem s-o reluam.
+# Intentionally retained reference implementation for Holt's Linear Trend. The
+# active path uses detect_long_term_trend, but this may be resumed later.
 # from statsmodels.tsa.holtwinters import Holt
 # def trend_holt(symbol: str, smoothing_level: float = 0.3, smoothing_slope: float = 0.1, forecast_hours: int = 1):
     # data = priceLstFor(symbol)
@@ -189,7 +183,7 @@ def trend_wma(symbol: str, window_hours: int = 6):
     # points_per_hour = int(3600 / delta)
     # model = Holt(prices).fit(smoothing_level=smoothing_level, smoothing_slope=smoothing_slope, optimized=False)
     # fitted = model.fittedvalues
-    # forecast_points = forecast_hours * points_per_hour   # Forecast scurt pentru trend
+    # forecast_points = forecast_hours * points_per_hour   # Short trend forecast.
     # future = model.forecast(forecast_points)
     # trend_direction = 'up' if future[-1] > fitted[-1] else 'down'
     # return {'direction': trend_direction, 'fitted': fitted, 'forecast': future}
@@ -209,11 +203,9 @@ def slope_tolerance_per_(symbol, price,
 
 
 
-# ─── COD MORT pastrat INTENTIONAT pt referinta (idee de reactivat/fixat) ──────
-# getTrendLongTerm: abordarea VECHE de detectie a trendului (comparatie bloc-cu-bloc
-# de pante + medie trend_ref, toleranta relativa). SUPERSEDATA de
-# getTrendLongTerm_fixed (detect_long_term_trend: ferestre pe TIMP + Mann-Kendall +
-# toleranta la zgomot). Neapelata acum, pastrata ca abordare alternativa de referinta.
+# Intentionally retained legacy trend detection based on block-to-block slopes,
+# average reference slope, and relative tolerance. The active fixed path uses
+# time-based windows, Mann-Kendall, and noise tolerance.
 def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
                                 slope_tolerance: float = 0.0028, persistence_factor: float = 1.5,
                                 lookback_days=30, draw: bool = True) -> Optional[dict]:
@@ -233,10 +225,10 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
     prices = np.array(prices)
     
     delta = np.median(np.diff(timestamps))
-    points_per_hour = int(3600 / delta) # cate secunde am intr-o ora ditribuite per puncte de pret
-    window = points_per_hour * window_hours # numar de puncte per fereastra
+    points_per_hour = int(3600 / delta) # Price points per hour.
+    window = points_per_hour * window_hours # Points per window.
     window = min(window, len(prices))       # window size is never larger than the number of price points:
-    step = points_per_hour * step_hours     # numar de puncte per step
+    step = points_per_hour * step_hours     # Points per step.
     
     _dbg(f"[DEBUG] {symbol}: numar puncte={len(prices)}, window={window}, step={step}, delta(s)={delta}")
     _dbg(f"[DEBUG] {symbol}: numar de ferestre={len(prices)/window}, numar de pasi in price {len(prices)/step}")
@@ -401,10 +393,10 @@ def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
 
     cur, cur_idx = slope_h(t_end - window_sec, t_end + 1.0)
     if cur is None:
-        return None                                  # date recente insuficiente
+        return None                                  # Insufficient recent data.
     if mk_alpha:
-        # filtru Mann-Kendall: panta ferestrei CURENTE trebuie sa fie un trend
-        # SEMNIFICATIV statistic, nu zgomot — altfel nu raportam directie
+        # Mann-Kendall requires the current window's slope to be statistically
+        # significant rather than noise before reporting a direction.
         from forecast.trend_stats import mann_kendall
         _, _, p_mk = mann_kendall(prices[cur_idx[0]:cur_idx[1]])
         if p_mk > mk_alpha:
@@ -413,8 +405,8 @@ def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
 
     blocks = [cur_idx]
     consecutive, noise = 1, 0
-    confirm_lo = cur_idx[0]      # cel mai vechi punct care CONFIRMA directia curenta
-    confirm_pos = 0              # pozitia in blocks a ultimului bloc confirmant
+    confirm_lo = cur_idx[0]      # Oldest point confirming the current direction.
+    confirm_pos = 0              # Position of the last confirming block.
     t_ws = t_end - window_sec - step_sec
     while t_ws >= t_first:
         s, idx = slope_h(t_ws, t_ws + window_sec)
@@ -424,20 +416,19 @@ def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
             blocks.append(idx); consecutive += 1; noise = 0
             confirm_lo = idx[0]; confirm_pos = len(blocks) - 1
         elif noise < noise_tolerance:
-            noise += 1; blocks.append(idx)           # tentativ: poate trendul continua dincolo de zgomot
+            noise += 1; blocks.append(idx)           # Tentatively continue across tolerated noise.
         else:
-            break                                    # zgomot peste toleranta → trendul s-a terminat aici
+            break                                    # Excess noise ends the trend here.
         t_ws -= step_sec
 
-    # fara minim de blocuri CONFIRMATE in directia curenta nu exista trend coerent:
-    # un bounce de o zi contra unei scaderi de 4 zile NU e "trend UP de 4 zile".
+    # Require the minimum confirmed blocks in the current direction. A one-day
+    # bounce against a four-day decline is not a four-day upward trend.
     if consecutive < min_consecutive_blocks:
         return None
 
-    blocks = blocks[:confirm_pos + 1]                # coada de zgomot neconfirmata nu face parte din trend
-    # durata = intervalul CONFIRMAT + lag-ul de detectie (trendul incepe in realitate
-    # INAINTE ca detectorul sa-l confirme — corectie explicita, ex. ~2 zile).
-    # PLAFONAT la span-ul datelor: durata nu poate depasi cat istoric avem.
+    blocks = blocks[:confirm_pos + 1]                # Exclude unconfirmed trailing noise.
+    # Duration includes the confirmed interval plus detection lag because the real
+    # trend begins before confirmation. Clamp it to the available data span.
     confirmed_start = float(timestamps[confirm_lo])
     duration_seconds = (t_end - confirmed_start) + detection_lag_hours * 3600.0
     duration_seconds = min(duration_seconds, t_end - t_first)
@@ -456,16 +447,15 @@ def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
 
 def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int = 8,
                            min_consecutive_blocks: int = 3,
-                           noise_tolerance: int = 2,  # ← NOU: permite 2 blocuri zgomot
+                           noise_tolerance: int = 2,  # Allow two noise blocks.
                            lookback_days: int = 30,
                            draw: bool = True,
                            min_points_per_window: int = MIN_POINTS_PER_WINDOW,
                            detection_lag_hours: float = 48.0,
                            mk_alpha: float = 0.05) -> Optional[dict]:
-    # detection_lag_hours: trendul incepe in realitate INAINTE sa-l confirme
-    # detectorul — euristica ta empirica: ~2 zile. Explicit, nu ascuns in formula.
-    # mk_alpha: filtru Mann-Kendall pe fereastra curenta (trendul trebuie sa fie
-    # semnificativ statistic, nu zgomot); None = dezactivat.
+    # detection_lag_hours models the empirical delay between trend start and
+    # detector confirmation. mk_alpha requires current-window Mann-Kendall
+    # significance; None disables that filter.
     data: List[Tuple[int, float]] = priceLstFor(symbol)
     if len(data) < 2:
         return None
@@ -481,7 +471,7 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
         return None
     
     timestamps, prices = zip(*data)
-    timestamps = np.array(timestamps) / 1000      # ms → secunde
+    timestamps = np.array(timestamps) / 1000      # Milliseconds to seconds.
     prices = np.array(prices)
 
     # Use time-defined windows to tolerate uneven density while respecting gaps.
@@ -495,8 +485,8 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
         print(f"[{symbol}] Trend indeterminabil (date insuficiente, gap sau nesemnificativ MK).")
         return None
 
-    # regimul seriei (Hurst): persistent = trend-following favorizat;
-    # mean-reverting = trendurile mor repede (informativ, atasat rezultatului)
+    # Hurst regime is informational: persistence favors trend following, while
+    # mean reversion suggests trends decay quickly.
     from forecast.trend_stats import hurst_rs, hurst_regime
     h = hurst_rs(prices)
     res['hurst'] = h
@@ -568,10 +558,12 @@ def write_all_trends(all_trends, filename="priceanalysis.json"):
     
     
 def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=None, quant_seconds=3600*24, draw=False):
-    """T_quanta=None (implicit) = AUTO: T estimat EMPIRIC din istoricul monedei
-    (hibrid cu prior-ul 14, favorizand empiricul cand avem episoade destule),
-    specializat per simbol si tinut in cache pe disc (trend_survival.estimate_T).
-    Poti da explicit T_quanta=14 ca sa fortezi comportamentul vechi."""
+    """Use an empirical per-symbol T when ``T_quanta`` is None.
+
+    trend_survival.estimate_T blends history with a 14-day prior, favoring
+    empirical data when enough episodes exist, and caches it on disk. Passing 14
+    explicitly restores legacy behavior.
+    """
     import cacheManager as cm
     global last_timestamp
     global last_w
@@ -602,8 +594,8 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=No
     print(f"   Start trend:     {format_timestamp(trend["start_timestamp"])}")
     print(f"   Durată:          {format_duration(trend["duration_seconds"])} ({duration_days:.1f} zile)")
     timestamp = trend['timestamp']
-    # cheia memo include order_type (BUY/SELL au ponderi total diferite) si T
-    # (T-ul auto se poate schimba la reestimare — nu servim ponderi pt alt T)
+    # Include order type and T in the memo key because their weights differ and
+    # automatic T may change after re-estimation.
     memo_key = (symbol, order_type.upper(), T_quanta)
     if timestamp == last_timestamp.get(memo_key):
         cached_w = last_w.get(memo_key)
@@ -643,22 +635,22 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=No
         plt.legend()
         plt.show()
 
-    last_w[memo_key] = w        # w e deja slice de la current_pos
+    last_w[memo_key] = w        # w is already sliced from current position.
     last_timestamp[memo_key] = timestamp
-    return current_weight     # w[0] = ponderea pentru acum
+    return current_weight     # w[0] is the current weight.
 
 last_timestamp = {}
 last_w = {}
 
 
-#Zona 1: 0 → T          = gaussian (confident la mijloc, nesigur la capete)
+# Zone 1: 0 to T is Gaussian, confident in the middle and uncertain at endpoints.
 # Zone 2: T to T*(1+percentage) is an over-age but persistent trend; high weight (0.86).
 # Zone 3: above T*(1+percentage) is a very old trend; use a conservative weight (0.22).
 
-#ALINIAT (BUY+UP sau SELL+DOWN): gaussiana scalata la VARF=peak_weight
+# Aligned BUY+UP or SELL+DOWN scales the Gaussian peak to peak_weight.
 # Middle -> 0.95 (maximum allocation); endpoints -> about 0.17 (small allocation).
 
-#CONTRA-TREND (SELL+UP sau BUY+DOWN): inversul gaussienei GLOBALE
+# Countertrend SELL+UP or BUY+DOWN uses the inverse global Gaussian.
 # Middle -> 0.02 (do not trade); both endpoints -> about 0.13 to 0.15.
 
 def get_trade_weight(T, trend_len, trend, order_type,
@@ -684,21 +676,19 @@ def get_trade_weight(T, trend_len, trend, order_type,
         return np.array([0.0]), np.array([w_val])
 
     # Zone 1: Gaussian over the full T, sliced from the trend's current age.
-    # idx plafonat la T-1: la trend_len == T slice-ul nu mai e gol (cusatura cu Zona 2).
+    # Clamp index to T-1 so trend_len==T leaves a nonempty slice at the zone seam.
     idx = min(int(trend_len), T - 1)
     t_full, w_full = u.gaussian_weights_from_idx(T=T, idx=0)
     if len(w_full) == 0:
         _dbg(f"[DEBUG] Zona 1: gaussian_weights_from_idx a returnat gol. return [0.05]")
         return np.array([0.0]), np.array([0.05])
-    # utils normalizeaza ca DISTRIBUTIE (suma=1, varf ~0.11) — pt ponderi de trading
-    # scalam la VARF: mijlocul curbei = peak_weight, nu ~0.11 (bug-ul vechi de scara,
-    # care facea Zona 1 de 8-40x mai mica decat Zona 2)
-    w01_full = w_full / w_full.max()                  # 0..1, varful = 1
+    # utils normalizes a probability distribution. Rescale its peak to one for
+    # trading weights, avoiding the former 8-40x zone-scale mismatch.
+    w01_full = w_full / w_full.max()                  # 0..1 with a peak of one.
     if lindy_plateau:
-        # IPOTEZA (Marius) VALIDATA EMPIRIC (trend_survival.py pe BTC 700z + TAO 450z):
-        # P(trendul mai tine o zi | a tinut t zile) ramane ~0.65-0.75 si DUPA mijloc
-        # (efect Lindy), NU scade cum presupune coada dreapta a gaussienei.
-        # => dupa varf ne purtam ca la mijloc: PLAFON la varf, nu coborare.
+        # Empirical BTC and TAO survival data supports a Lindy plateau: conditional
+        # one-day survival remains roughly 0.65-0.75 after the midpoint. Hold the
+        # curve at its peak rather than following the Gaussian's declining tail.
         peak_i = int(np.argmax(w01_full))
         w01_full = w01_full.copy()
         w01_full[peak_i:] = 1.0
@@ -708,8 +698,8 @@ def get_trade_weight(T, trend_len, trend, order_type,
     if aligned:
         w_seq = w01 * peak_weight
     else:
-        # inversul curbei GLOBALE (nu al slice-ului — bug-ul vechi dadea 0.02 la
-        # capatul batran in loc de ~0.15): mijloc -> min_weight, capete -> max_against_trend
+        # Invert the global curve, not its slice: midpoint maps to min_weight and
+        # endpoints to max_against_trend.
         _dbg(f"[DEBUG] Order type {order_type} nu e aliniat cu trend {trend}, invers global, max_against_trend={max_against_trend}")
         w_seq = min_weight + (1.0 - w01) * (max_against_trend - min_weight)
 
@@ -718,15 +708,13 @@ def get_trade_weight(T, trend_len, trend, order_type,
     
     
     
-UPDATE_AND_REFRESH_TREND = 60*1 # un minut
+UPDATE_AND_REFRESH_TREND = 60*1 # One minute.
 if __name__ == "__main__":
     build_price_cache_manager()
     symbols = list(sym.symbols)
-    # Trend LUNG pt non-Binance (ex HYPEUSD pe Kraken) — GATED pe LONGTREND_NONBINANCE
-    # (default OFF -> weight_limit foloseste proxy BTC). Activarea (env=true + restart) baga
-    # HYPE in calculul de trend; semnificativ DUPA ce se acumuleaza ~lookback_days de istoric
-    # de pret HYPE. weight_limit comuta automat de pe proxy pe trendul HYPE cand apare. Asa e
-    # "acolo, gata de activat cand ai date suficiente".
+    # Gate long-term non-Binance trends behind LONGTREND_NONBINANCE. Default off
+    # keeps the BTC proxy. Once enabled and enough HYPE history accumulates,
+    # weight_limit automatically switches from proxy to the native HYPE trend.
     if os.environ.get("LONGTREND_NONBINANCE", "").strip().lower() == "true":
         try:
             from instruments_config import load_for
