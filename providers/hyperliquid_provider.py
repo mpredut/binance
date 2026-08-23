@@ -22,18 +22,17 @@ from typing import List, Optional
 from .base import MarketDataProvider, _normalize_order
 from .strategy_executor import OrderStatus, PairPrecision, ProviderError
 
-# Radacina repo-ului + dir-ul hyperliquid/ (pt importurile bare `common`, `hl_client`).
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # providers/ -> radacina
+# Repository root and hyperliquid directory for bare common/hl_client imports.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # providers/ -> root
 _HL_DIR = os.path.join(_REPO_ROOT, "hyperliquid")
 
-# Comuta plasarea de ordine REALE pe HL. Implicit DRY (doar logheaza intentia).
-# Poarta finala dupa ce dry-run-ul confirma SI dupa rezolvarea co-mingling-ului DN.
+# Enable real Hyperliquid orders. Default dry mode only logs intent. This is the
+# final gate after dry-run validation and resolution of delta-neutral co-mingling.
 _LIVE_ENV = "HL_LIVE_ORDERS"
 
 
 def _hype_symbol(symbol: str) -> bool:
-    """True pentru variantele symbolului HYPE pe care le serveste acest provider:
-    'HYPE', 'HYPEUSDC', 'HYPE/USDC', sau perechea @index rezolvata (ex '@107')."""
+    """Return whether this provider serves the given HYPE symbol variant."""
     if not symbol:
         return False
     s = symbol.upper()
@@ -41,16 +40,15 @@ def _hype_symbol(symbol: str) -> bool:
 
 
 class HyperliquidProvider(MarketDataProvider):
-    """Provider SPOT HYPE peste hl_client (SDK Hyperliquid). Vezi nota din modul:
-    constructorul NU atinge SDK-ul; totul e lazy + defensiv."""
+    """Provide HYPE spot access through the lazily loaded Hyperliquid SDK."""
 
-    #: tokenul SPOT servit (din HL_SPOT_TOKEN/HL_COIN, default HYPE).
+    #: Served spot token, defaulting to HYPE.
     def __init__(self, token: str = "HYPE"):
         self._token = (token or "HYPE").upper()
         self._lock = threading.Lock()
         self._client = None          # HLClient read-only (lazy)
-        self._client_tried = False   # ca sa nu reincercam la nesfarsit daca SDK lipseste
-        self._spot_pair: Optional[str] = None  # ex '@107' (memoizat)
+        self._client_tried = False   # Avoid endless retries when the SDK is absent.
+        self._spot_pair: Optional[str] = None  # Memoized, for example '@107'.
         self._env_loaded = False
 
     @property
@@ -58,14 +56,12 @@ class HyperliquidProvider(MarketDataProvider):
         return "Hyperliquid"
 
     def supports_symbol(self, symbol: str) -> bool:
-        # Revendica DOAR HYPE. Perechile Binance (BTCUSDC/TAOUSDC) si asset-urile bare
-        # (BTC/TAO/USDC) NU sunt revendicate -> raman pe BinanceProvider/default.
+        # Claim only HYPE, leaving Binance pairs and bare assets on the default.
         return _hype_symbol(symbol)
 
-    # ── infra lazy ─────────────────────────────────────────────────────────────
+    # -- Lazy infrastructure. --------------------------------------------------
     def _load_env(self) -> None:
-        """Incarca cheile/adresa HL din hyperliquid/.env + config.env (o singura data).
-        load_dotenv seteaza DOAR variabilele inca neprezente in os.environ (nu clobber)."""
+        """Load Hyperliquid keys and address once without overwriting environment."""
         if self._env_loaded:
             return
         self._env_loaded = True
@@ -75,12 +71,11 @@ class HyperliquidProvider(MarketDataProvider):
             from common import load_dotenv  # hyperliquid/common.py
             load_dotenv(os.path.join(_HL_DIR, ".env"))
             load_dotenv(os.path.join(_HL_DIR, "config.env"))
-        except Exception as e:  # noqa: BLE001 — fara .env mergem doar pe market-data public
+        except Exception as e:  # noqa: BLE001 — Without env files, use public data only.
             print(f"[HL] _load_env esuat: {e}")
 
     def _hl(self):
-        """Client HL read-only (secret=None). Lazy + memoizat. None daca SDK/conexiune
-        indisponibile (atunci metodele de cont degradeaza curat)."""
+        """Return a memoized read-only client, or None when unavailable."""
         if self._client is not None or self._client_tried:
             return self._client
         with self._lock:
@@ -94,7 +89,7 @@ class HyperliquidProvider(MarketDataProvider):
                 from hl_client import HLClient  # hyperliquid/hl_client.py (reutilizat)
                 mainnet = os.environ.get("HL_MAINNET", "true").strip().lower() != "false"
                 addr = os.environ.get("HL_ACCOUNT_ADDRESS")
-                # secret=None -> client de CITIRE (Info). Pretul/history nu cer nici adresa.
+                # secret=None creates a read-only Info client; public data needs no address.
                 self._client = HLClient(secret_key=None, account_address=addr, mainnet=mainnet)
             except Exception as e:  # noqa: BLE001
                 print(f"[HL] client indisponibil (SDK/conexiune): {e}")
@@ -102,7 +97,7 @@ class HyperliquidProvider(MarketDataProvider):
         return self._client
 
     def _pair(self) -> Optional[str]:
-        """Perechea SPOT @index (ex '@107' pt HYPE/USDC), memoizata."""
+        """Return the memoized spot @index pair for HYPE/USDC."""
         if self._spot_pair:
             return self._spot_pair
         c = self._hl()
@@ -114,7 +109,7 @@ class HyperliquidProvider(MarketDataProvider):
             print(f"[HL] resolve_spot_pair({self._token}) esuat: {e}")
         return self._spot_pair
 
-    # ── market-data (public, fara cheie) ─────────────────────────────────────────
+    # -- Public market data without a key. -------------------------------------
     def get_current_price(self, symbol: str) -> Optional[float]:
         c = self._hl()
         pair = self._pair()
@@ -127,9 +122,7 @@ class HyperliquidProvider(MarketDataProvider):
             return None
 
     def get_price_history(self, symbol: str, lookback_h: float) -> Optional[List]:
-        """Istoric SPOT granular pe ultimele `lookback_h` ore, ascendent dupa timp,
-        ca lista de {'timestamp'(ms), 'price'(close)}. Bonus pt backfill ferestre trend
-        (nu e inca wire-uit la cacheManager in faza asta)."""
+        """Return ascending granular spot closes over the last ``lookback_h`` hours."""
         c = self._hl()
         pair = self._pair()
         if c is None or pair is None:
@@ -152,10 +145,9 @@ class HyperliquidProvider(MarketDataProvider):
             print(f"[HL] get_price_history({symbol}) esuat: {e}")
             return None
 
-    # ── cont SPOT (citire) ───────────────────────────────────────────────────────
+    # -- Read-only spot account access. ----------------------------------------
     def free_balance(self, asset: str) -> Optional[float]:
-        """Soldul SPOT LIBER (disponibil) = total - hold (semantica 'free' ca la Binance).
-        Doar pentru asset-urile SPOT pe care le revendicam (HYPE; si USDC daca cerut explicit)."""
+        """Return available spot balance as total minus hold for supported assets."""
         c = self._hl()
         if c is None:
             return None
@@ -174,9 +166,10 @@ class HyperliquidProvider(MarketDataProvider):
             return None
 
     def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:
-        """Fill-urile SPOT (coin == perechea @index) din ultimele `since_s` secunde,
-        optional filtrate pe side ('BUY'/'SELL'), NORMALIZATE la {side,price,qty,timestamp(ms)}.
-        Fill-urile PERP (coin == 'HYPE') sunt EXCLUSE -> DN-ul nu se amesteca."""
+        """Return normalized recent spot fills, optionally filtered by side.
+
+        Exclude perpetual HYPE fills to avoid mixing delta-neutral activity.
+        """
         c = self._hl()
         pair = self._pair()
         if c is None or pair is None:
@@ -189,7 +182,7 @@ class HyperliquidProvider(MarketDataProvider):
             cutoff_ms = (time.time() - float(since_s)) * 1000.0
             out = []
             for f in (c.info.user_fills(addr) or []):
-                if f.get("coin") != pair:        # DOAR spot pair; exclude perp 'HYPE'
+                if f.get("coin") != pair:        # Spot pair only; exclude perpetual HYPE.
                     continue
                 t = f.get("time")
                 if t is None or float(t) < cutoff_ms:
@@ -210,7 +203,7 @@ class HyperliquidProvider(MarketDataProvider):
             return []
 
     def open_orders(self, symbol: str) -> List[dict]:
-        """Ordinele SPOT DESCHISE (resting) pt perechea @index, normalizate."""
+        """Return normalized resting spot orders for the resolved pair."""
         c = self._hl()
         pair = self._pair()
         if c is None or pair is None:
@@ -229,18 +222,20 @@ class HyperliquidProvider(MarketDataProvider):
             print(f"[HL] open_orders({symbol}) esuat: {e}")
             return []
 
-    # ── plasare ordine SPOT — DRY implicit (vezi nota co-mingling din modul) ──────
+    # -- Spot order placement, dry by default due to wallet co-mingling. --------
     def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
-        """Plaseaza ordin SPOT pe HL. DRY implicit: doar logheaza intentia si intoarce
-        None. Devine REAL doar daca HL_LIVE_ORDERS=true (poarta finala — DUPA dry-run SI
-        dupa ce co-mingling-ul DN e rezolvat, altfel un SELL ar putea desface piciorul DN)."""
+        """Place a spot order, remaining dry unless HL_LIVE_ORDERS is true.
+
+        Live mode is the final gate after dry-run validation and resolution of
+        delta-neutral wallet co-mingling, which could otherwise unwind its spot leg.
+        """
         side = (side or "").upper()
         live = os.environ.get(_LIVE_ENV, "false").strip().lower() == "true"
         if not live:
             print(f"[HL][DRY] as plasa {side} {symbol} qty={qty} @ {price} "
                   f"(real dezactivat; seteaza {_LIVE_ENV}=true pt ordine reale)")
             return None
-        # ── cale REALA (gated) ──────────────────────────────────────────────────
+        # -- Gated live path. ---------------------------------------------------
         pair = self._pair()
         if pair is None:
             print(f"[HL] place_order: perechea spot indisponibila pt {symbol}")
@@ -266,10 +261,10 @@ class HyperliquidProvider(MarketDataProvider):
             print(f"[HL] place_order({side} {symbol}) esuat: {e}")
             return None
 
-    # ── CONTRACT StrategyExecutor (Faza 3: cablare API HL reala) ────────────────
-    # get_current_price / free_balance de mai sus satisfac deja contractul.
+    # -- StrategyExecutor contract using the real Hyperliquid API. -------------
+    # get_current_price and free_balance already satisfy the contract.
     def _signer(self):
-        """Client HL cu cheie (semnare ordine/cancel). ProviderError daca lipseste cheia."""
+        """Return a signing client or raise ProviderError when its key is absent."""
         if _HL_DIR not in sys.path:
             sys.path.insert(0, _HL_DIR)
         from hl_client import HLClient
@@ -288,9 +283,9 @@ class HyperliquidProvider(MarketDataProvider):
             szd = int(c.sz_decimals(self._token))
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"pair_precision({symbol}): {e}") from e
-        # HL spot: pretul admite (8 - szDecimals) zecimale (vezi _round_px in hl_client);
-        # volumul admite szDecimals. order_min nu e expus simplu -> 0 (gardul de notional
-        # ramane la nivelul strategiei/venue). base_asset = tokenul spot servit.
+        # Spot price permits 8-szDecimals decimal places and volume permits
+        # szDecimals. No simple order minimum is exposed, so venue/strategy guards
+        # retain notional enforcement.
         return PairPrecision(price_decimals=max(8 - szd, 0), volume_decimals=szd,
                              order_min=0.0, base_asset=self._token)
 
@@ -300,11 +295,11 @@ class HyperliquidProvider(MarketDataProvider):
         if c is None or pair is None:
             raise ProviderError(f"ohlc_closes({symbol}): client/pereche indisponibile")
         iv = {1: "1m", 5: "5m", 15: "15m", 60: "1h", 240: "4h", 1440: "1d"}.get(int(interval_min), "1h")
-        lookback_h = max(1, int(90 * int(interval_min) / 60))   # ~90 bare, ca la Kraken
+        lookback_h = max(1, int(90 * int(interval_min) / 60))   # About 90 bars, as on Kraken.
         try:
             candles = c.candles(pair, iv, lookback_h) or []
             closes = [float(k.get("c")) for k in candles if k.get("c") is not None]
-            return closes[:-1] if closes else []                # exclude bara in formare
+            return closes[:-1] if closes else []                # Exclude the forming bar.
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"ohlc_closes({symbol}): {e}") from e
 
@@ -312,7 +307,7 @@ class HyperliquidProvider(MarketDataProvider):
                      price: Optional[float] = None, *, market: bool = False,
                      kind: Optional[str] = None,
                      client_order_id: Optional[str] = None) -> str:
-        # SIGURANTA: ordine REALE pe HL doar cu HL_LIVE_ORDERS=true (co-mingling spot cu DN).
+        # Safety: real orders require HL_LIVE_ORDERS due to spot/DN co-mingling.
         if os.environ.get(_LIVE_ENV, "false").strip().lower() != "true":
             raise ProviderError(f"HL_LIVE_ORDERS=false — refuz ordin real pe HL ({side} {symbol})")
         pair = self._pair()
@@ -324,7 +319,7 @@ class HyperliquidProvider(MarketDataProvider):
             mid = self.get_current_price(symbol)
             if not mid:
                 raise ProviderError(f"submit_order({symbol}) market: pret indisponibil")
-            px = mid * (1.05 if is_buy else 0.95)               # limita agresiva -> fill imediat
+            px = mid * (1.05 if is_buy else 0.95)               # Aggressive limit for immediate fill.
         self.preflight_order(
             symbol, side, qty, px, market=market, kind=kind,
         )
@@ -348,12 +343,11 @@ class HyperliquidProvider(MarketDataProvider):
     def preflight_order(self, symbol: str, side: str, qty: float,
                         price: Optional[float] = None, *, market: bool = False,
                         kind: Optional[str] = None) -> None:
-        """Refuza un BUY pe care soldul USDC liber nu-l poate finanta integral.
+        """Reject a BUY that free USDC cannot fund in full.
 
-        Hyperliquid poate accepta un ordin supradimensionat, executa doar soldul
-        disponibil si anula restul. Pentru DCA asta consuma o runda cu o fractiune
-        din suma intentionata. Verificarea se repeta in ``submit_order`` pentru a
-        inchide cursa dintre preflight-ul motorului si trimiterea efectiva.
+        Hyperliquid may partially execute an oversized order and cancel the rest,
+        consuming a DCA round for a fraction of its intended amount. submit_order
+        repeats this check to close the race after engine preflight.
         """
         if not (side or "").lower().startswith("b"):
             return
@@ -399,8 +393,8 @@ class HyperliquidProvider(MarketDataProvider):
             venue_status = str(status_payload.get("status") or "")
             order_payload = status_payload.get("order") or {}
 
-            # user_fills este sursa cumulativa pentru cantitate/cost/fee. Il citim
-            # si cand ordinul este inca open, ca partial fills sa nu fie pierdute.
+            # user_fills is the cumulative source for quantity, cost, and fee. Read
+            # it while an order is open so partial fills are not lost.
             filled = cost = fee = 0.0
             for f in (c.info.user_fills(addr) or []):
                 if int(f.get("oid", -1)) != oid:
@@ -411,9 +405,8 @@ class HyperliquidProvider(MarketDataProvider):
                 cost += sz * fill_price
                 raw_fee = float(f.get("fee") or 0.0)
                 fee_token = str(f.get("feeToken") or "").upper()
-                # La BUY, HL taxeaza de regula in activul de baza (HYPE), iar
-                # la SELL in quote (USDC). Motorul contabilizeaza totul in quote,
-                # deci convertim fee-ul HYPE la pretul exact al fill-ului.
+                # Hyperliquid usually charges BUY fees in base and SELL fees in
+                # quote. Convert base fees at the exact fill price for quote accounting.
                 if fee_token == self._token:
                     fee += raw_fee * fill_price
                 elif not fee_token or fee_token == "USDC":
@@ -432,8 +425,8 @@ class HyperliquidProvider(MarketDataProvider):
             expected_filled = max(0.0, original - remaining)
             tolerance = max(1e-12, original * 1e-9)
             if expected_filled > filled + tolerance:
-                # Endpointul de status poate ajunge inaintea user_fills. Nu
-                # declarăm terminal un ordin pana nu putem contabiliza costul si fee-ul.
+                # Status may arrive before user_fills. Do not declare a terminal
+                # order until cost and fee can be accounted for.
                 raise ProviderError(
                     f"order_status({order_id}): fills incomplete "
                     f"({filled} < {expected_filled})"
@@ -443,8 +436,8 @@ class HyperliquidProvider(MarketDataProvider):
             elif venue_status == "filled":
                 normalized = "closed"
             else:
-                # Toate respingerile/anularile sunt terminale si nu trebuie
-                # confundate cu un ordin temporar absent din open_orders.
+                # Every rejection or cancellation is terminal, not a temporarily
+                # missing open order.
                 normalized = "canceled"
             return OrderStatus(normalized, filled, cost, fee)
         except ProviderError:
