@@ -82,8 +82,7 @@ class T212ExecutorContractTest(unittest.TestCase):
         self.assertEqual(self.provider.ohlc_closes("NVDA_US_EQ", 240), [])
 
         self.fake.portfolio_result = None
-        with self.assertRaisesRegex(ProviderError, "indisponibil"):
-            self.provider.free_balance("NVDA_US_EQ")
+        self.assertIsNone(self.provider.free_balance("NVDA_US_EQ"))
 
     def test_submit_limit_market_si_poarta_live(self):
         oid = self.provider.submit_order("NVDA_US_EQ", "buy", 0.5, price=119.25)

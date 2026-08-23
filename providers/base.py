@@ -63,6 +63,7 @@ class MarketDataProvider(ABC):
         ...
 
     def free_balance(self, asset: str) -> Optional[float]:
+        """Sold liber: 0.0 = sold real zero; None = citire indisponibila/eronata."""
         return None
 
     def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:

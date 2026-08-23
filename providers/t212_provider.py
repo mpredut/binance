@@ -113,18 +113,21 @@ class T212Provider(MarketDataProvider):
         return None  # T212: fara istoric granular prin acest client
 
     # ── cont ───────────────────────────────────────────────────────────────────
-    def free_balance(self, asset: str) -> float:
-        # Contract strict: un read esuat NU devine sold zero (ar putea permite
-        # motorului sa dubleze o intrare crezand ca nu exista pozitie).
-        p = self._position(asset, strict=True)
+    def free_balance(self, asset: str) -> Optional[float]:
+        # Contract comun: eroarea devine None, niciodata zero legitim.
+        try:
+            p = self._position(asset, strict=True)
+        except ProviderError as e:
+            print(f"[T212] balance {asset}: {e}")
+            return None
         if not p:
             return 0.0
         try:
             qty = float(p.get("quantity") or 0.0)
-        except (TypeError, ValueError) as e:
-            raise ProviderError(f"portfolio({asset}): cantitate invalida") from e
+        except (TypeError, ValueError):
+            return None
         if not math.isfinite(qty) or qty < 0:
-            raise ProviderError(f"portfolio({asset}): cantitate invalida {qty!r}")
+            return None
         return qty
 
     def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:

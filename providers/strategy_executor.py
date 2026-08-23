@@ -74,8 +74,8 @@ class StrategyExecutor(Protocol):
         (inca) listata — strategia cade pe precizie implicita, ca azi."""
         ...
 
-    def free_balance(self, asset: str) -> float:
-        """Cantitatea LIBERA din activ (pt adoptia pozitiei existente)."""
+    def free_balance(self, asset: str) -> Optional[float]:
+        """Cantitatea LIBERA: 0.0 = zero real; None = citire indisponibila."""
         ...
 
     def ohlc_closes(self, symbol: str, interval_min: int) -> list[float]:
