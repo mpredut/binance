@@ -11,7 +11,7 @@
 set -euo pipefail
 
 RUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-set -a; source "$RUNNER_DIR/dev_backtest.env"; set +a
+source "$RUNNER_DIR/load_dev_backtest_env.sh"
 
 # MUTEX (4 aug): refresh_dev poate fi pornit CONCURENT — o data din cron-ul propriu (*/30,
 # deci si la 00:00/12:00) SI o data apelat de trigger_backtest_dev.sh (0 */12 = 00:00/12:00).
@@ -24,11 +24,6 @@ if ! flock -w 300 9; then
   exit 0
 fi
 
-DEV_HOST="${DEV_HOST:-192.168.0.138}"
-DEV_PORT="${DEV_PORT:-32238}"
-DEV_USER="${DEV_USER:-predut}"
-DEV_PATH="${DEV_PATH:-binance}"          # relativ la ~ pe dev
-DEV_CODE_BRANCH="${DEV_CODE_BRANCH:-main}"
 REPO_ROOT="${BINANCE_REPO_ROOT:-$(cd "$RUNNER_DIR/../.." && pwd)}"
 SSH="ssh -o BatchMode=yes -p $DEV_PORT"
 

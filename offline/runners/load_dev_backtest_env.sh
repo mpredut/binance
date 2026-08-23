@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Sursa unica pentru profilul DEV/backtest folosit de runnerele shell.
+
+RUNNER_DIR="${RUNNER_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+DEV_PROFILE="${DEV_BACKTEST_ENV:-$RUNNER_DIR/dev_backtest.env}"
+[ -r "$DEV_PROFILE" ] || { echo "Lipseste profilul DEV: $DEV_PROFILE" >&2; return 1; }
+
+set -a
+source "$DEV_PROFILE"
+set +a
+
+for name in DEV_HOST DEV_PORT DEV_USER DEV_PATH DEV_CODE_BRANCH BACKTEST_PROPOSALS_BRANCH; do
+  [ -n "${!name:-}" ] || { echo "Profil DEV invalid: lipseste $name" >&2; return 1; }
+done

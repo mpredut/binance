@@ -28,6 +28,7 @@ sys.path.insert(0, ROOT)
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
 from offline.research.monitortrades_backtest import scheduled_pilot as sp  # noqa: E402
+from botcore import parse_dotenv  # noqa: E402
 
 # Incarca .env + config.env ca notificarile (PHONE_ALERT_URL/NTFY_TOPIC din .env) sa
 # functioneze — apply ruleaza standalone, nu prin fleet (care le incarca la pornire).
@@ -38,7 +39,11 @@ try:
 except Exception:  # noqa: BLE001
     pass
 
-BRANCH = "backtest-proposals"
+_DEV_PROFILE = parse_dotenv(os.path.join(ROOT, "offline", "runners", "dev_backtest.env"))
+BRANCH = os.environ.get("BACKTEST_PROPOSALS_BRANCH") or _DEV_PROFILE.get(
+    "BACKTEST_PROPOSALS_BRANCH")
+if not BRANCH:
+    raise RuntimeError("Lipseste BACKTEST_PROPOSALS_BRANCH din dev_backtest.env")
 
 
 def _read_proposals():
@@ -67,7 +72,7 @@ def main():
 
     proposals = _read_proposals()
     if not proposals:
-        print("[apply] nicio propunere pe branch backtest-proposals — nimic de facut")
+        print(f"[apply] nicio propunere pe branch {BRANCH} — nimic de facut")
         return
 
     for p in proposals:

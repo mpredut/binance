@@ -9,7 +9,7 @@
 #
 # Folderul de secrete OGLINDESTE structura repo-ului (.env, hyperliquid/.env, keys/, ...).
 # Cale repo presupusa: aceeasi ca productia (~/binance, user predut). Daca difera,
-# editeaza systemd/*.service + crontab.txt inainte.
+# seteaza TRADING_ROOT si adapteaza profilul systemd/ daca este necesar.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 SECRETS="${1:-}"

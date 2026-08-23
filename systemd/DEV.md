@@ -1,8 +1,7 @@
 # Profil DEV / backtest
 
-Configurația autoritativă este `offline/runners/dev_backtest.env`: host
-`192.168.0.138:32238`, checkout `~/binance`, cod pe `main`, rezultate pe
-`backtest-proposals`.
+Configurația autoritativă este `offline/runners/dev_backtest.env`; hostul,
+portul, checkout-ul și branch-urile se citesc exclusiv de acolo.
 
 DEV nu are nevoie de cron sau servicii live proprii. PROD orchestrează:
 

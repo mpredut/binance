@@ -1,7 +1,7 @@
 # Disaster Recovery — refacerea completă a serverului de trading
 
 Tot ce e **versionat** (cod, manifest `procs.conf`, unit-uri systemd, `requirements.txt`,
-`crontab.txt`, scripturi) vine din git. Singurul lucru care **NU e în git** (și nu trebuie
+`systemd/crontab.prod.txt`, scripturi) vine din git. Singurul lucru care **NU e în git** (și nu trebuie
 să fie) sunt **secretele** — le ții într-un backup separat, off-machine.
 
 ## Ce e în git vs ce ții tu (off-machine)
@@ -11,7 +11,7 @@ să fie) sunt **secretele** — le ții într-un backup separat, off-machine.
 | cod + `procs.conf` + scripturi (flota_start, bots_start, healthcheck, restore.sh) | `.env` (root, hyperliquid, kraken, 212trading) |
 | `systemd/*.service` (binance, pia) | `keys/apikeys.py` (chei Binance) |
 | `requirements.txt` (dependințe venv) | `keys/ed25519_*.pem` (chei Kraken) |
-| `crontab.txt` (toate cronurile) | (opțional) stare boți: `.state_*.json`, `cachedb/` |
+| `systemd/crontab.prod.txt` + `systemd/install_prod.sh` | (opțional) stare boți: `.state_*.json`, `cachedb/` |
 
 ⚠ **`hyperliquid/.env` conține cheia agent-wallet HL** — pierderea ei = nu mai poți semna
 ordine HL. Backup-ul de secrete e CRITIC.
