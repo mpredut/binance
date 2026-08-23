@@ -1,9 +1,9 @@
-"""Coordonator determinist pentru o pereche de cotatii rtrade.
+"""Deterministic coordinator for a pair of rtrade quotes.
 
-Modulul nu importa API-uri live. Venue-ul este injectat, astfel incat aceeasi
-masina de stari poate fi caracterizata cu fill-uri sintetice si apoi folosita de
-entrypoint-ul live. O singura instanta detine ambele order-id-uri ale rundei;
-schedulerul exterior poate rula in paralel mai multe instante independente.
+The module imports no live APIs. Its venue is injected so the same state machine
+can be characterized with synthetic fills and then used by the live entry point.
+One instance owns both order IDs in a round; the outer scheduler may run multiple
+independent instances concurrently.
 """
 from __future__ import annotations
 
@@ -123,7 +123,7 @@ def _place_failure_reason(venue: PairVenue, side: str) -> str:
 
 def quote_prices(mid: float, adjustment_fraction: float,
                  decimals: int = 4) -> tuple[float, float]:
-    """Bid/ask simetrice fata de acelasi snapshot de piata."""
+    """Return bid/ask quotes symmetric around the same market snapshot."""
     if mid <= 0:
         raise ValueError("mid trebuie sa fie pozitiv")
     return (
@@ -135,9 +135,9 @@ def quote_prices(mid: float, adjustment_fraction: float,
 def anchored_exit_price(exit_side: str, fill_price: float, current_price: float,
                         adjustment_fraction: float, min_edge_fraction: float,
                         decimals: int = 4) -> float:
-    """Tinta nu poate cobori sub cost+edge si nu poate urmari pierderea.
+    """Anchor the target so it cannot fall below cost plus edge or chase a loss.
 
-    Formula edge este aceeasi cu gardul financiar:
+    The edge formula matches the financial guard:
       SELL: (sell-buy)/sell >= edge  -> sell >= buy/(1-edge)
       BUY:  (sell-buy)/sell >= edge  -> buy <= sell*(1-edge)
     """
@@ -156,7 +156,7 @@ def anchored_exit_price(exit_side: str, fill_price: float, current_price: float,
 
 
 class PairCoordinator:
-    """Masina de stari pentru o runda BUY+SELL, in oricare directie."""
+    """State machine for one BUY+SELL round in either direction."""
 
     def __init__(self, venue: PairVenue, qty: float, policy: PairPolicy, *,
                  start_side: str = "BUY",
@@ -227,7 +227,7 @@ class PairCoordinator:
         return self.outcome()
 
     def export_state(self) -> dict:
-        """Checkpoint JSON-safe suficient pentru adoptie dupa restart."""
+        """Return a JSON-safe checkpoint sufficient for adoption after restart."""
         return {
             "pair_id": self.pair_id, "qty": self.qty,
             "start_side": self.start_side, "phase": self.phase,
@@ -285,11 +285,11 @@ class PairCoordinator:
         self._compact_zero_fill_history()
 
     def _compact_zero_fill_history(self) -> None:
-        """Elimina ordinele terminale care nu au contribuit la inventar/P&L.
+        """Remove terminal orders that contributed no inventory or P&L.
 
-        Repricing-ul unei expuneri poate produce multe ordine anulate. Pastram
-        activele si orice ordin cu fill (necesare contabilitatii), dar nu lasam
-        anulările cu fill zero sa creasca memoria/checkpointul fara limita.
+        Repricing exposure can create many canceled orders. Retain active orders and
+        every filled order required for accounting, but prevent zero-fill cancellations
+        from growing memory and checkpoints without bound.
         """
         kept = []
         for ticket in self.tickets:
@@ -336,7 +336,7 @@ class PairCoordinator:
         return None
 
     def _cancel_entry_remainder(self, exposure_side: str) -> None:
-        # Odata ce exista expunere, nu mai permitem aceleiasi laturi sa o mareasca.
+        # Once exposure exists, prevent the same side from increasing it further.
         entry_side = "BUY" if exposure_side == "LONG" else "SELL"
         for ticket in self.tickets:
             if ticket.side.upper() == entry_side and ticket.active:
