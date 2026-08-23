@@ -111,7 +111,7 @@ def getClient():
     if _client is None:
         from keys.apikeys import api_key, api_secret
         _client = Client(api_key, api_secret, requests_params={"timeout": REQUEST_TIMEOUT_SEC})
-        _install_retry(_client)      # retry pe GET-uri (NU pe POST/ordere) la blip tranzitoriu
+        _install_retry(_client)      # Retry transient GET failures, never POST/order placement.
         sync_time()                 # Initial server-time alignment.
         _start_periodic_resync()    # Maintain alignment over time.
     return _client

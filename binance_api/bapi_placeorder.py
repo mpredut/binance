@@ -105,7 +105,7 @@ def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
     from . import bapi_allorders as apiorders
     required_qty = _resolve_qty(required_qty)
     try:
-        # weight din permisiuni
+        # Obtain the weight from permission analysis.
         weight = pa.get_weight_for_cash_permission_at_quant_time(symbol, order_type)
         if weight is None or math.isnan(weight):
             print("Weight is None, set it at default 0.03")
@@ -121,7 +121,7 @@ def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
         max_trade_value = total_value_reference * weight
         #max_trade_value = available_qty * price * weight
 
-        # 5. Cat mai pot tranzactiona in USDC
+        # 5. Calculate the remaining tradable quote value in USDC.
         remaining_trade_value = max(0, max_trade_value - traded_value)
 
         # Convert the maximum allowance to base-asset quantity.
@@ -234,7 +234,7 @@ def place_BUY_order_at_market(symbol, qty, client_order_id=None):
             print(f"Trade este dezactivat!")
             return None
 
-        qty = round(qty, 4)  # Rotunjim cantitatea la 4 zecimale
+        qty = round(qty, 4)  # Round quantity to four decimal places.
         client_order_id = client_order_id or rc.create_client_order_id()
         BUY_order = client.order_market_buy(
             symbol=symbol,
@@ -259,7 +259,7 @@ def place_SELL_order_at_market(symbol, qty, client_order_id=None):
             print(f"Trade este dezactivat!")
             return None
 
-        qty = round(qty, 4)  # Rotunjim cantitatea la 4 zecimale
+        qty = round(qty, 4)  # Round quantity to four decimal places.
         client_order_id = client_order_id or rc.create_client_order_id()
         SELL_order = client.order_market_sell(
             symbol=symbol,
@@ -344,7 +344,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
         if not ok:
             return False, reason
 
-        oposite_trades = apiorders.get_trade_orders(opposite_order_type, symbol, max_age_seconds=time_back_in_seconds) ## curent date
+        oposite_trades = apiorders.get_trade_orders(opposite_order_type, symbol, max_age_seconds=time_back_in_seconds)  # current data
         print(f"Am {len(oposite_trades)} trades de tip {opposite_order_type} pentru {backdays} zile. ")
 
         time_limit = float(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde

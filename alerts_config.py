@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-alerts_config.py — incarca market_alerts.conf (text simplu) pt monitorul de alerte.
+alerts_config.py — load the plain-text market_alerts.conf file for the alert monitor.
 
-Format pe linii (# = comentariu, si inline):
-    watch    = BTC, TAO, HYPE          # watchlist (monede urmarite mereu)
+Line-oriented format (# starts a full-line or inline comment):
+    watch    = BTC, TAO, HYPE          # watchlist (coins that are always monitored)
     sources  = coinmarketcap, coingecko
-    default  = 4.1 / 7.5               # prag implicit:  UP% / DOWN%
-    new_coin = 12 / 25                 # prag pt monede noi
-    BTC      = 6 / 10                  # prag PER-MONEDA (orice simbol)
-    cooldown_minutes = 30              # setari scalare (vezi _SETTING_KEYS)
+    default  = 4.1 / 7.5               # default threshold: UP% / DOWN%
+    new_coin = 12 / 25                 # threshold for new coins
+    BTC      = 6 / 10                  # PER-COIN threshold (any symbol)
+    cooldown_minutes = 30              # scalar settings (see _SETTING_KEYS)
 
-Lipsa fisierului SAU a unei chei => se folosesc valorile implicite de mai jos
-(deci un config scurt e valid; pui doar ce vrei sa schimbi).
+If the file or a key is absent, the defaults below are used. A short configuration
+is therefore valid and needs to contain only the desired overrides.
 """
 from __future__ import annotations
 
@@ -21,12 +21,12 @@ import os
 _DEFAULTS = {
     "watch": ["BTC", "TAO", "HYPE"],
     "sources": ["coinmarketcap", "coingecko"],
-    "discover_new_coins": True,   # no/false => doar watchlist, fara alerte de monede noi
+    "discover_new_coins": True,   # no/false => watchlist only; no new-coin alerts
     "max_monitored": 20,
     "max_new_coins": 15,
     "new_coins_scan_seconds": 3600,
     "price_scan_seconds": 60,
-    # alert_config = exact forma asteptata de PriceChecker (default/dynamic/cooldown/lookback) + per_coin
+    # Exact PriceChecker shape: default/dynamic/cooldown/lookback plus per_coin.
     "alert_config": {
         "default":  {"up_percent": 4.1, "down_percent": 7.5},
         "dynamic":  {"up_percent": 12.0, "down_percent": 25.0},
@@ -36,14 +36,14 @@ _DEFAULTS = {
     },
 }
 
-# cheie scalara -> (tip, unde merge: "ac" = in alert_config, "top" = la nivel de cfg)
+# Scalar key -> (type, destination: "ac" in alert_config or "top" in cfg).
 _SETTING_KEYS = {
     "cooldown_minutes": (int, "ac"), "lookback_hours": (int, "ac"),
     "max_monitored": (int, "top"), "max_new_coins": (int, "top"),
     "new_coins_scan_seconds": (int, "top"), "price_scan_seconds": (int, "top"),
 }
 _LIST_KEYS = {"watch": str.upper, "sources": str.lower}
-_BUCKET_ALIAS = {"default": "default", "new_coin": "dynamic"}  # 'new_coin' in conf -> 'dynamic' intern
+_BUCKET_ALIAS = {"default": "default", "new_coin": "dynamic"}  # conf new_coin -> internal dynamic
 
 
 def _pair(val: str) -> dict:
@@ -74,19 +74,19 @@ def load_config(path: str) -> dict:
                     typ, where = _SETTING_KEYS[key]
                     v = typ(float(val))
                     (ac if where == "ac" else cfg)[key] = v
-                elif "/" in val:                          # un prag UP/DOWN
+                elif "/" in val:                          # an UP/DOWN threshold
                     pair = _pair(val)
                     if key in _BUCKET_ALIAS:
                         ac[_BUCKET_ALIAS[key]] = pair
-                    else:                                 # orice alt nume = per-moneda
+                    else:                                 # every other name is a per-coin key
                         ac["per_coin"][key.upper()] = pair
             except ValueError:
-                pass  # linie malformata -> o ignoram, ramane default-ul
+                pass  # Ignore malformed lines and retain the default.
     return cfg
 
 
 def resolve(alert_config: dict, symbol: str, is_dynamic: bool) -> dict:
-    """Pragul pt o moneda: per_coin -> dynamic (daca e noua) -> default."""
+    """Resolve a coin threshold: per_coin, then dynamic for new coins, then default."""
     per = alert_config.get("per_coin", {})
     if symbol in per:
         return per[symbol]

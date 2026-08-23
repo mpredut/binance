@@ -32,8 +32,8 @@ import utils as u
 try:
     from keys.apikeys import api_key_ws
 except (ModuleNotFoundError, ImportError):
-    # Importul modulelor read-only/test nu trebuie sa ceara secrete. Stream-ul
-    # privat refuza pornirea mai jos daca cheia nu este disponibila.
+    # Read-only and test imports must not require secrets. The private stream
+    # refuses to start below when the key is unavailable.
     api_key_ws = os.environ.get("BINANCE_API_KEY_WS", "")
 
 logger = logging.getLogger("binance.ws")
@@ -42,7 +42,7 @@ logger = logging.getLogger("binance.ws")
 
 WS_BASE_URL      = "wss://stream.binance.com:9443/stream"   # market data
 WS_API_URL       = "wss://ws-api.binance.com:443/ws-api/v3"  # user-data (auth)
-WS_MAX_STREAMS   = 1024        # limita Binance per conexiune
+WS_MAX_STREAMS   = 1024        # Binance limit per connection
 WS_RECV_TIMEOUT  = 3.0         # TREBUIE < WS_STOP_TIMEOUT (market)
 WS_USERDATA_RECV_TIMEOUT = 30.0
 WS_STOP_TIMEOUT  = 8.0
@@ -66,7 +66,7 @@ class _Cmd:
 
 class BinanceWSBase:
     # Reset backoff only after a session remains stable for this duration.
-    # Previne reconnect-storm (login repetat) care ar putea lovi connection rate-limit-ul.
+    # Prevent repeated logins from causing a reconnect storm and hitting rate limits.
     STABLE_SESSION_SEC = 60.0
 
     def __init__(self):
@@ -77,7 +77,7 @@ class BinanceWSBase:
 
     # Thread lifecycle.
     def start(self, name: str = "BinanceWS", daemon: bool = True) -> "BinanceWSBase":
-        with self._start_lock:          # [F2] apeluri concurente de start() sunt safe
+        with self._start_lock:          # [F2] concurrent start() calls are safe
             if self.is_running:
                 logger.info("%s already running", name)
                 return self
@@ -111,13 +111,16 @@ class BinanceWSBase:
 
     # Generic reconnect loop.
     async def _main(self) -> None:
-        """Default: reconnect peste _connect_and_run. Subclasele pot suprascrie
-        when setup is required, such as creating an async queue in the correct loop."""
+        """Reconnect around ``_connect_and_run`` by default.
+
+        Subclasses may override this when setup must occur in the correct event
+        loop, such as creation of an asynchronous queue.
+        """
         await self._run_with_reconnect(self._connect_and_run)
 
     async def _run_with_reconnect(self, body: Callable) -> None:
-        # Reconectare cu backoff. Cheie anti rate-limit:
-        # Sleep for ``_retry_delay`` between every attempt, including clean disconnects,
+        # Reconnect with backoff. Sleep for ``_retry_delay`` between every attempt,
+        # including clean disconnects, as the rate-limit safeguard
         # to prevent reconnect storms. Reset backoff only after a stable session;
         # repeated flapping therefore increases the delay.
         while not self._stop_event.is_set():
@@ -151,7 +154,7 @@ class BinanceWSBase:
         """Run one complete connection; subclasses return or raise on disconnect."""
         raise NotImplementedError
 
-    # ─── Helpers comune ───────────────────────────────────────────────────────
+    # ─── Shared helpers ──────────────────────────────────────────────────────
     async def _interruptible_sleep(self, delay: float, step: float = 0.2) -> None:
         elapsed = 0.0
         while elapsed < delay and not self._stop_event.is_set():
@@ -173,8 +176,8 @@ class BinanceWSBase:
 
 class BinancePriceStream(BinanceWSBase):
     """
-    Stream de MARKET DATA (public): preturi live via Combined Stream — 1 thread,
-    1 WS, N simboluri multiplexate. Simetric cu BinanceAccountStream.
+    Public market-data stream: live prices through one Combined Stream thread,
+    one WebSocket, and N multiplexed symbols. Symmetric with BinanceAccountStream.
 
     Public API:
         start()/stop(), add_symbol(s)/remove_symbol(s), get_price(s),
@@ -198,7 +201,7 @@ class BinancePriceStream(BinanceWSBase):
         super().start(name=name, daemon=daemon)
         return self
 
-    # ─── Subscription management (observeri) ──────────────────────────────────
+    # ─── Subscription management (observers) ─────────────────────────────────
     def subscribe(self, subscriber) -> None:
         with self._lock:
             if subscriber not in self._subscribers:
@@ -256,8 +259,10 @@ class BinancePriceStream(BinanceWSBase):
             await self._session(ws)             # ``_run_with_reconnect`` manages backoff.
 
     async def _session(self, ws) -> None:
-        """recv_loop (date) + cmd_loop (subscribe/unsubscribe) concurente; la
-        when either task terminates, cancel both so ``_connect_and_run`` reconnects."""
+        """Run receive and command loops concurrently within one session.
+
+        When either task terminates, cancel both so ``_connect_and_run`` reconnects.
+        """
         recv_task = asyncio.create_task(self._recv_loop(ws))
         cmd_task  = asyncio.create_task(self._cmd_loop(ws))
         done, pending = await asyncio.wait(
@@ -308,7 +313,7 @@ class BinancePriceStream(BinanceWSBase):
         """{"stream": "btcusdc@ticker", "data": {"s": "BTCUSDC", "c": "65432.10", ...}}"""
         try:
             envelope = json.loads(raw)
-            if "result" in envelope:                    # ack la subscribe/unsubscribe
+            if "result" in envelope:                    # subscribe/unsubscribe acknowledgment
                 logger.debug("WS ack: %s", envelope)
                 return
             data   = envelope.get("data", envelope)
@@ -367,16 +372,16 @@ class BinancePriceStream(BinanceWSBase):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  User-data — WS-API cu session.logon (privat, execution reports)
+#  User data — private WS-API session.logon and execution reports
 # ══════════════════════════════════════════════════════════════════════════════
 
 class BinanceAccountStream(BinanceWSBase):
     """
     Authenticated user-data stream. Events are delivered through callbacks so the
     stream does not depend on ``cacheManager`` or create an import cycle:
-        on_event(payload)      — eveniment real (executionReport etc.)
-        on_available(bool)     — WS disponibil (cheie+lib prezente)
-        on_healthy()           — am primit un semnal viu (event/ping)
+        on_event(payload)      — real event (executionReport, etc.)
+        on_available(bool)     — WebSocket available (key and library present)
+        on_healthy()           — a live signal (event/ping) was received
         on_unhealthy()         — lost connection or expired watchdog
     """
 
