@@ -30,8 +30,8 @@ PRICE_HISTORY_RETENTION_DAYS = 7
 MAX_PRICE_HISTORY_PER_SYMBOL = 2000
 MAX_MONITORED_SYMBOLS = 20
 QUOTE_CURRENCY = "USDC"
-FALLBACK_QUOTE = "USDT"
-QUOTE_SUFFIXES = ("USDC", "USDT", "FDUSD", "BUSD", "TUSD", "EUR")
+FALLBACK_QUOTE = "USDC"
+QUOTE_SUFFIXES = ("USDC", "EUR")
 #DEFAULT_SYMBOLS = ["BTC", "ETH", "HYPE", "SOL", "BNB", "ADA", "DOGE", "XRP"]
 DEFAULT_SYMBOLS = ["BTC", "TAO", "HYPE"]
 
@@ -70,7 +70,6 @@ class BinancePricePlatform(PricePlatformInterface):
         self.api_client = api_client or _market_api.api
         self._supported_symbols: Set[str] = set()
         self._usdc_pairs: Set[str] = set()
-        self._usdt_pairs: Set[str] = set()
         self._symbol_mapping: Dict[str, str] = {}
         self._last_refresh = 0
         self._refresh_interval = 3600
@@ -87,7 +86,6 @@ class BinancePricePlatform(PricePlatformInterface):
             data = response.json()
             
             self._usdc_pairs.clear()
-            self._usdt_pairs.clear()
             self._supported_symbols.clear()
             self._symbol_mapping.clear()
             
@@ -108,13 +106,7 @@ class BinancePricePlatform(PricePlatformInterface):
                         self._symbol_mapping[base_asset] = symbol
                     self._symbol_mapping[symbol] = symbol
                 
-                elif quote_asset == "USDT":
-                    self._usdt_pairs.add(symbol)
-                    if base_asset not in self._symbol_mapping:
-                        self._symbol_mapping[base_asset] = symbol
-                    self._symbol_mapping[symbol] = symbol
-            
-            print(f"[BinancePlatform] USDC: {len(self._usdc_pairs)} pairs, USDT: {len(self._usdt_pairs)} pairs")
+            print(f"[BinancePlatform] USDC: {len(self._usdc_pairs)} pairs")
             self._last_refresh = time.time()
 
         except Exception as e:
@@ -124,11 +116,10 @@ class BinancePricePlatform(PricePlatformInterface):
     
     def _fallback_symbols(self):
         self._usdc_pairs = {"BTCUSDC", "ETHUSDC", "BNBUSDC"}
-        self._usdt_pairs = {"BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "ADAUSDT", "DOGEUSDT", "XRPUSDT"}
-        self._supported_symbols = self._usdc_pairs | self._usdt_pairs
+        self._supported_symbols = self._usdc_pairs
         self._symbol_mapping = {
             "BTC": "BTCUSDC", "ETH": "ETHUSDC", "BNB": "BNBUSDC",
-            "SOL": "SOLUSDT", "ADA": "ADAUSDT", "DOGE": "DOGEUSDT", "XRP": "XRPUSDT"
+            "SOL": "SOLUSDC", "ADA": "ADAUSDC", "DOGE": "DOGEUSDC", "XRP": "XRPUSDC"
         }
     
     def refresh_symbols(self):
@@ -145,10 +136,9 @@ class BinancePricePlatform(PricePlatformInterface):
             return True
         if symbol in self._symbol_mapping:
             return True
-        for quote in ["USDC", "USDT"]:
-            pair = f"{symbol}{quote}"
-            if pair in self._supported_symbols:
-                return True
+        pair = f"{symbol}USDC"
+        if pair in self._supported_symbols:
+            return True
         return False
     
     def get_price(self, symbol: str) -> Optional[float]:
@@ -159,8 +149,6 @@ class BinancePricePlatform(PricePlatformInterface):
                 trading_pair = self._symbol_mapping[symbol]
             elif f"{symbol}USDC" in self._supported_symbols:
                 trading_pair = f"{symbol}USDC"
-            elif f"{symbol}USDT" in self._supported_symbols:
-                trading_pair = f"{symbol}USDT"
             elif symbol in self._supported_symbols:
                 trading_pair = symbol
             

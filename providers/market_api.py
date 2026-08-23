@@ -71,23 +71,20 @@ class BinanceProvider(MarketDataProvider):
         return None
 
     def supports_symbol(self, symbol: str) -> bool:
-        # Perechile spot pe care le foloseste flota (USDC/USDT). Restul cad oricum
+        # Contul Binance operational foloseste exclusiv perechi USDC.
         # pe default = Binance in facada, deci ramane behavior-preserving.
         # EXCEPTIE: HYPE* e servit de HyperliquidProvider (HL spot), nu de Binance —
         # altfel claim-ul lacom pe *USDC ar fura HYPEUSDC inaintea providerului HL.
         if symbol.upper().startswith("HYPE"):
             return False
-        return symbol.endswith("USDC") or symbol.endswith("USDT")
+        return symbol.endswith("USDC")
 
     # ── CONT: aceleasi date ca azi, doar reimpachetate prin facada. ─────────────
     def free_balance(self, asset: str) -> Optional[float]:
         # Mirror EXACT al buclei din monitortrades.get_available_qty (si trade_watch):
         # parcurge soldurile, intoarce 'free' pt asset, altfel 0.0. get_account_assets_
         # balances are deja try/except (intoarce [] la eroare) -> nu arunca aici.
-        for bal in (_get_bapi().get_account_assets_balances() or []):
-            if bal.get("asset") == asset:
-                return float(bal.get("free", 0.0) or 0.0)
-        return 0.0
+        return _get_bapi().get_free_balance(asset)
 
     def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:
         # bapi_allorders.get_trade_orders(order_type, symbol, max_age_seconds) — aceeasi
@@ -143,6 +140,18 @@ class BinanceProvider(MarketDataProvider):
         capped_qty, _available = _po.manage_quantity(
             side, symbol, qty, price_to_be_traded=price, cancelorders=cancelorders, hours=hours)
         return capped_qty
+
+    def policy_cap_quantity(self, symbol: str, side: str, price: float,
+                            qty: float, available_qty: float, **kwargs) -> float:
+        from binance_api import bapi_placeorder as _po
+        return _po.apply_weight_limit(
+            symbol, side, price, qty, available_qty)
+
+    def fee_cap_quantity(self, symbol: str, side: str, price: float,
+                         available_qty: float) -> float:
+        from binance_api import bapi_placeorder as _po
+        from providers.quantity import fee_cap_quantity
+        return fee_cap_quantity(available_qty, _po.PLACE_ORDER_FEE_PCT)
 
     def guards_internally(self) -> bool:
         # 30 iul: FALSE — Binance trece acum prin pipeline-ul AGNOSTIC din

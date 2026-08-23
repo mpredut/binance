@@ -97,7 +97,8 @@ def window_reference(provider, symbol, order_type, window_s):
     return min(prices) if order_type.upper() == "BUY" else max(prices)
 
 
-def weight_limit(provider, symbol, order_type, price, required_qty, base=None, quote=None):
+def weight_limit(provider, symbol, order_type, price, required_qty, base=None,
+                 quote=None, available_qty=None):
     """Plafon de CANTITATE per ordin pe curba gauss (echivalentul agnostic al
     apply_weight_limit din bapi). Distribuie suma tranzactionabila proportional cu pozitia
     in trend -> nu vinzi/cumperi tot dintr-o data. AGNOSTIC: gauss-ul vine din priceAnalysis
@@ -131,7 +132,9 @@ def weight_limit(provider, symbol, order_type, price, required_qty, base=None, q
     # available (in BASE), side-aware ca apply_weight_limit Binance (get_asset_info(order_type)):
     #   SELL -> balanta de BASE pe care o ai de vandut;
     #   BUY  -> cat BASE poti cumpara cu balanta de QUOTE (free_balance mapeaza USD->ZUSD pe Kraken).
-    if order_type.upper() == "SELL":
+    if available_qty is not None:
+        available = float(available_qty)
+    elif order_type.upper() == "SELL":
         available = float(provider.free_balance(base or symbol) or 0.0)
     else:
         qbal = float(provider.free_balance(quote) or 0.0) if quote else 0.0

@@ -519,15 +519,15 @@ class TestCacheAssetValueManager(unittest.TestCase):
 
     def _make(self, total_value=1000.0):
         api_mock = MagicMock()
-        api_mock.get_total_assets_value_usdt.return_value = total_value
+        api_mock.get_total_assets_value_usdc.return_value = total_value
         fname = _tmp_file(self.tmp, "cache_asset_value.json")
         return cm.CacheAssetValueManager(9999, ["TOTAL"], fname, api_client=api_mock)
 
     def test_rebuild_fetchtime_from_timestamp_field(self):
         mgr = self._make()
         mgr.cache = {
-            "TOTAL": [{"timestamp": 200, "total_value_usdt": 1000.0},
-                      {"timestamp": 500, "total_value_usdt": 1100.0}]
+            "TOTAL": [{"timestamp": 200, "total_value_usdc": 1000.0},
+                      {"timestamp": 500, "total_value_usdc": 1100.0}]
         }
         result = mgr.rebuild_fetchtime_times()
         self.assertEqual(result["TOTAL"], max(0, 500 * 1000 - 60_000))
@@ -536,7 +536,7 @@ class TestCacheAssetValueManager(unittest.TestCase):
         mgr = self._make(total_value=2500.0)
         result = mgr.get_remote_items("TOTAL", 0)
         self.assertEqual(len(result), 1)
-        self.assertAlmostEqual(result[0]["total_value_usdt"], 2500.0)
+        self.assertAlmostEqual(result[0]["total_value_usdc"], 2500.0)
         self.assertIn("timestamp", result[0])
         self.assertIn("datetime_local", result[0])
 
@@ -544,7 +544,7 @@ class TestCacheAssetValueManager(unittest.TestCase):
         for value in (None, 0):
             with self.subTest(value=value):
                 mgr = self._make()
-                mgr.api_client.get_total_assets_value_usdt.return_value = value
+                mgr.api_client.get_total_assets_value_usdc.return_value = value
                 self.assertEqual(mgr.get_remote_items("TOTAL", 0), [])
 
     def test_append_mode_true(self):

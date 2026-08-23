@@ -410,8 +410,10 @@ def get_available_qty(symbol, api=None):
     Sursa de adevar pt 'vinde TOT ce ai disponibil', nu aproximarea din trade-uri.
     `api` = facada de cont (default singletonul `mkt`); injectabil pt alt provider/test."""
     api = api or mkt
-    base = u.base_asset(symbol)
     try:
+        if api is mkt:
+            return float(_as_instrument(symbol).free() or 0.0)
+        base = u.base_asset(symbol)
         return float(api.free_balance(base) or 0.0)
     except Exception as e:
         print(f"get_available_qty {symbol}: {e}")

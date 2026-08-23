@@ -301,8 +301,8 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         calls = []
 
         class _QuantitySpyProvider(_FakeProvider):
-            def cap_quantity(self, symbol, side, price, qty, base=None, quote=None,
-                             cancelorders=False, hours=5):
+            def policy_cap_quantity(self, symbol, side, price, qty, available_qty,
+                                    base=None, quote=None, cancelorders=False, hours=5):
                 calls.append((cancelorders, hours))
                 return qty
 

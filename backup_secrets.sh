@@ -20,8 +20,16 @@ LIST="$(git ls-files --others --ignored --exclude-standard \
 [ -n "$LIST" ] || { echo "❌ nimic de salvat (git ls-files gol?)"; exit 1; }
 
 rm -rf "$OUT"; mkdir -p "$OUT"
-printf '%s\n' "$LIST" | tar czf "$OUT.tar.gz" -C "$ROOT" -T -   # tarball "latest" (cale STABILA pt pull-ul Windows)
-tar xzf "$OUT.tar.gz" -C "$OUT"                                  # si ca folder (de copiat)
+printf '%s\n' "$LIST" | tar cf - -C "$ROOT" -T - | tar xf - -C "$OUT"
+
+# Date de masina aflate intentionat in afara repo-ului. Tokenul PIA este secret
+# si este necesar pentru refacerea dedicated IP pe o instalare noua.
+mkdir -p "$OUT/_machine"
+if [ -f /home/predut/piatoken.txt ]; then
+    install -m 0600 /home/predut/piatoken.txt "$OUT/_machine/piatoken.txt"
+fi
+
+tar czf "$OUT.tar.gz" -C "$OUT" .   # latest, cale stabila pt pull-ul Windows
 chmod -R go-rwx "$OUT" 2>/dev/null || true
 chmod 600 "$OUT.tar.gz"
 
@@ -32,7 +40,7 @@ DATED="$OUT-$(date +%Y%m%d).tar.gz"
 cp -p "$OUT.tar.gz" "$DATED" && chmod 600 "$DATED"
 ls -1t "$OUT"-????????.tar.gz 2>/dev/null | tail -n +"$((KEEP + 1))" | xargs -r rm -f
 
-N="$(printf '%s\n' "$LIST" | grep -c .)"
+N="$(find "$OUT" -type f | wc -l)"
 echo "=== backup COMPLET: $N fisiere (secrete + stare) ==="
 printf '%s\n' "$LIST" | sed 's/^/    /'
 echo "Folder : $OUT"

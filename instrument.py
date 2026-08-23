@@ -183,15 +183,17 @@ class Instrument:
                 # poate elibera. Rewire-ul generic le pastra in kwargs, dar nu le
                 # transmitea hook-ului si dezactiva silentios comportamentul cerut
                 # explicit de rtrade/monitororder.
-                qty = self._provider.cap_quantity(
+                decision = self._provider.quantity_decision(
                     self.symbol, side_u, price, qty,
                     base=self.base, quote=self.quote,
                     cancelorders=bool(kwargs.get("cancelorders", False)),
                     hours=float(kwargs.get("hours", 5) or 5),
                 )
-                if qty is None or qty <= 0:
-                    print(f"[{self.symbol}] {side_u} qty 0 dupa weight -> skip")
-                    reason = "qty_zero_after_weight"
+                qty = decision.final_qty
+                if qty <= 0:
+                    print(f"[{self.symbol}] {side_u} qty refuzat: "
+                          f"{decision.refuse_reason} asset={decision.balance_asset}")
+                    reason = decision.refuse_reason or "qty_zero_after_weight"
                     return None
 
             # 2. TREND-WAIT (agnostic, delay-nu-block — la fel ca Binance

@@ -125,7 +125,7 @@ def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
         max_trade_value = total_value_reference * weight
         #max_trade_value = available_qty * price * weight
 
-        # 5. Cât mai pot tranzacționa în quote asset (USDC, USDT etc.)
+        # 5. Cat mai pot tranzactiona in USDC
         remaining_trade_value = max(0, max_trade_value - traded_value)
 
         # qty maxim în în cantitate/baza (BTC, TAO etc.)
@@ -481,24 +481,12 @@ def __place_order(order_type, symbol, price, qty=None, force=False, cancelorders
             print(f"No sufficient quantity available to place the {order_type} order.")
             return None
                 
-        if order_type == 'SELL':      
-            print(f"available_qty {available_qty:.8f} versus requested {qty:.8f}")
-            
-            adjusted_qty = qty * (1 + PLACE_ORDER_FEE_PCT)
-
-            if available_qty < adjusted_qty:
-                print(f"Adjusting {order_type} order quantity from {qty:.8f} to {available_qty / (1 + PLACE_ORDER_FEE_PCT):.8f} to cover fees")
-                qty = available_qty / (1 + PLACE_ORDER_FEE_PCT)
-
-        elif order_type == 'BUY':
-            # in cazul unei comenzi de BUY, trebuie sa calculezi cantitatea necesara de USDT pentru achizitionare
-            total_usdt_needed = qty * price * (1 + PLACE_ORDER_FEE_PCT)
-
-            if available_qty * price < total_usdt_needed:
-                print(f"Not enough {symbol} available for {order_type}. You need {total_usdt_needed:.8f}, but you only have {available_qty:.8f} {symbol}.")
-                # Ajusteaza cantitatea pe care o poti cumpara cu USDT disponibili
-                qty = available_qty / (price * (1 + PLACE_ORDER_FEE_PCT))
-                print(f"Adjusting {order_type} order quantity to {qty:.8f} based on available {symbol}.")
+        from providers.quantity import fee_cap_quantity
+        fee_cap = fee_cap_quantity(available_qty, PLACE_ORDER_FEE_PCT)
+        if qty > fee_cap:
+            print(f"Adjusting {order_type} order quantity from {qty:.8f} "
+                  f"to {fee_cap:.8f} to cover balance and fees")
+            qty = fee_cap
 
         # Rotunjim cantitatea la 5 zecimale in jos
         #qty = math.floor(qty * 10**5) / 10**5  # Rotunjire in jos la 5 zecimale
@@ -703,24 +691,23 @@ def place_order_mechanics(order_type, symbol, price, qty, force=False,
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)
     try:
-        current_price = api.get_current_price(symbol)
-        available_qty = api.get_asset_info(order_type, symbol, current_price)
+        from providers.quantity import balance_cap_quantity, fee_cap_quantity
+        available_qty, _balance_asset = balance_cap_quantity(
+            api.get_free_balance, symbol, order_type, price)
+        if available_qty is None:
+            print(f"Balance unavailable for {order_type} {symbol}; order skipped.")
+            return None
         if available_qty <= 0:
             print(f"No sufficient quantity available to place the {order_type} order.")
             return None
 
-        # clamp de fee/balanta (MECANICA Binance, identic cu vechiul __place_order)
-        if order_type == 'SELL':
-            adjusted_qty = qty * (1 + PLACE_ORDER_FEE_PCT)
-            if available_qty < adjusted_qty:
-                print(f"Adjusting {order_type} qty from {qty:.8f} to "
-                      f"{available_qty / (1 + PLACE_ORDER_FEE_PCT):.8f} to cover fees")
-                qty = available_qty / (1 + PLACE_ORDER_FEE_PCT)
-        elif order_type == 'BUY':
-            total_usdt_needed = qty * price * (1 + PLACE_ORDER_FEE_PCT)
-            if available_qty * price < total_usdt_needed:
-                qty = available_qty / (price * (1 + PLACE_ORDER_FEE_PCT))
-                print(f"Adjusting {order_type} qty to {qty:.8f} based on available {symbol}.")
+        # Ultimul check ramane langa submit pentru cazul in care soldul s-a
+        # schimbat dupa planificare. available_qty este deja cantitate de baza.
+        fee_cap = fee_cap_quantity(available_qty, PLACE_ORDER_FEE_PCT)
+        if qty > fee_cap:
+            print(f"Adjusting {order_type} qty from {qty:.8f} to "
+                  f"{fee_cap:.8f} to cover balance and fees")
+            qty = fee_cap
 
         qty = round(qty, 4)
         qty = float(Decimal(qty).quantize(Decimal('0.0001'), rounding=ROUND_DOWN))

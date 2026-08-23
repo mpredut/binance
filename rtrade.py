@@ -34,8 +34,9 @@ _load_dotenv("rtrade_config.env")
 WAIT_FOR_ORDER = float(os.environ.get("RTRADE_WAIT_FOR_ORDER_SEC", "32"))
 MIN_adjustment_percent = float(os.environ.get("RTRADE_MIN_ADJUSTMENT_PCT", "0.01"))
 
-# Cantitatea tranzactionata per bot (vezi instantierea TradingBot mai jos).
-RTRADE_QTY = float(os.environ.get("RTRADE_QTY", "100"))
+# Bugetul per runda este exprimat explicit in moneda de cotare. Cantitatea de
+# TAO se calculeaza o singura data din pretul de start al rundei.
+RTRADE_NOTIONAL_USDC = float(os.environ.get("RTRADE_NOTIONAL_USDC", "500"))
 
 # Ghicit initial de spread (fractie) pt filled_buy_price/filled_sell_price la
 # pornire, inainte de primul ordin real executat.
@@ -134,20 +135,19 @@ class _LivePairVenue:
     def place_limit(self, side, price, qty, pair_id):
         side = side.upper()
         self._last_place_failures.pop(side, None)
-        base = u.base_asset(self.symbol)
-        quote = self.symbol[len(base):] if self.symbol.startswith(base) else None
-        required_asset = quote if side == "BUY" else base
+        from providers.quantity import balance_cap_quantity
+        available_qty, required_asset = balance_cap_quantity(
+            self.executor.free_balance, self.symbol, side, price)
         if required_asset:
-            available = self.executor.free_balance(required_asset)
             # Nu compara cu qty cerut: pipeline-ul comun cap_quantity + mecanica
             # providerului reduc deja ordinul la soldul permis. Backoff numai cand
             # activul necesar nu are deloc sold liber utilizabil.
-            if available is not None and float(available) <= 1e-12:
+            if available_qty is not None and float(available_qty) <= 1e-12:
                 self._last_place_failures[side] = (
                     f"{side.lower()}_insufficient_funds:{required_asset}")
                 print(
                     f"[{self.symbol}] {side} fonduri insuficiente: "
-                    f"disponibil={float(available):.8f} {required_asset}")
+                    f"disponibil=0.00000000 {required_asset}")
                 return None
         hours = (RTRADE_BUY_NORMAL_HOURS if side.upper() == "BUY"
                  else RTRADE_SELL_NORMAL_HOURS)
@@ -538,8 +538,9 @@ class TradingBot:
                         if start_side is None:
                             time.sleep(RTRADE_PAIR_POLL_SEC)
                             continue
+                        round_qty = RTRADE_NOTIONAL_USDC / float(current_price)
                         coordinator = PairCoordinator(
-                            venue, self.qty, policy, start_side=start_side)
+                            venue, round_qty, policy, start_side=start_side)
                         outcome = coordinator.start(current_price)
                         last_start_at = now
                         if outcome.terminal:
@@ -638,7 +639,12 @@ if __name__ == "__main__":
     import cacheManager as cm
     cm.enable_real_ws_event_sync()
 
-    bot = TradingBot(sym.taosymbol, RTRADE_QTY, DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
+    initial_price = float(api.get_current_price(sym.taosymbol) or 0.0)
+    if initial_price <= 0:
+        raise RuntimeError(f"Pret indisponibil pentru {sym.taosymbol}")
+    initial_qty = RTRADE_NOTIONAL_USDC / initial_price
+    bot = TradingBot(sym.taosymbol, initial_qty,
+                     DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
     #bot = TradingBot(sym.taosymbol, api.quantities[sym.taosymbol], DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
     bot.run()
 

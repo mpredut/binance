@@ -59,7 +59,7 @@ class TestAdjustPriceAndCancelOpposite(unittest.TestCase):
 class TestPlaceOrderMechanics(unittest.TestCase):
     def test_buy_dispatches_limit(self):
         with patch.object(po.api, "get_current_price", return_value=100.0), \
-             patch.object(po.api, "get_asset_info", return_value=10.0), \
+             patch.object(po.api, "get_free_balance", return_value=1000.0), \
              patch.object(po, "place_BUY_order", return_value={"orderId": 42}) as pbuy:
             order = po.place_order_mechanics("BUY", SYMBOL, 100.0, 5.0, force=False)
         self.assertEqual(order, {"orderId": 42})
@@ -68,7 +68,7 @@ class TestPlaceOrderMechanics(unittest.TestCase):
     def test_client_order_id_reaches_limit_dispatch(self):
         client_id = "SD_0123456789abcdef0123456789abcdef"
         with patch.object(po.api, "get_current_price", return_value=100.0), \
-             patch.object(po.api, "get_asset_info", return_value=10.0), \
+             patch.object(po.api, "get_free_balance", return_value=1000.0), \
              patch.object(po, "place_BUY_order", return_value={"orderId": 42}) as pbuy:
             po.place_order_mechanics(
                 "BUY", SYMBOL, 100.0, 5.0, client_order_id=client_id,
@@ -77,7 +77,7 @@ class TestPlaceOrderMechanics(unittest.TestCase):
 
     def test_sell_market_when_force(self):
         with patch.object(po.api, "get_current_price", return_value=100.0), \
-             patch.object(po.api, "get_asset_info", return_value=10.0), \
+             patch.object(po.api, "get_free_balance", return_value=10.0), \
              patch.object(po, "place_SELL_order_at_market", return_value={"orderId": 7}) as pmkt:
             order = po.place_order_mechanics("SELL", SYMBOL, 100.0, 5.0, force=True)
         self.assertEqual(order, {"orderId": 7})
@@ -86,7 +86,7 @@ class TestPlaceOrderMechanics(unittest.TestCase):
     def test_min_notional_rejected(self):
         # qty*price sub 100 -> refuz (None), fara dispatch
         with patch.object(po.api, "get_current_price", return_value=100.0), \
-             patch.object(po.api, "get_asset_info", return_value=10.0), \
+             patch.object(po.api, "get_free_balance", return_value=1000.0), \
              patch.object(po, "place_BUY_order", return_value={"orderId": 1}) as pbuy:
             order = po.place_order_mechanics("BUY", SYMBOL, 100.0, 0.5, force=False)  # 0.5*100=50 < 100
         self.assertIsNone(order)
@@ -94,7 +94,7 @@ class TestPlaceOrderMechanics(unittest.TestCase):
 
     def test_zero_available_returns_none(self):
         with patch.object(po.api, "get_current_price", return_value=100.0), \
-             patch.object(po.api, "get_asset_info", return_value=0.0), \
+             patch.object(po.api, "get_free_balance", return_value=0.0), \
              patch.object(po, "place_BUY_order") as pbuy:
             order = po.place_order_mechanics("BUY", SYMBOL, 100.0, 5.0)
         self.assertIsNone(order)

@@ -188,10 +188,23 @@ echo "All good. Supervizez procesele (repornesc orice cade). <ctrl c> = stop."
 SUPERVISE_INTERVAL=30
 while true; do
     for i in "${!scripts[@]}"; do
-        if ! kill -0 "${PIDS[$i]}" 2>/dev/null; then
+        pid="${PIDS[$i]}"
+        state=$(ps -o state= -p "$pid" 2>/dev/null | tr -d ' ')
+        # SIGSTOP/Ctrl-Z lasa PID-ul existent, iar kill -0 il considera sanatos.
+        # Incercam SIGCONT o data; daca ramane oprit, il inlocuim controlat.
+        if [[ "$state" == T* ]]; then
+            echo "♻ $(date '+%H:%M:%S') ${scripts[$i]} STOPPED (PID $pid) → SIGCONT"
+            kill -CONT "$pid" 2>/dev/null || true
+            sleep 2
+            state=$(ps -o state= -p "$pid" 2>/dev/null | tr -d ' ')
+        fi
+        if ! kill -0 "$pid" 2>/dev/null || [[ "$state" == T* ]] || [[ "$state" == Z* ]]; then
             script="${scripts[$i]}"
             log="${LOGS[$i]}"
-            echo "♻ $(date '+%H:%M:%S') $script a murit (PID ${PIDS[$i]}) → repornesc"
+            echo "♻ $(date '+%H:%M:%S') $script nesanatos (PID $pid, state=${state:-absent}) → repornesc"
+            kill "$pid" 2>/dev/null || true
+            sleep 1
+            kill -9 "$pid" 2>/dev/null || true
             cd "$SCRIPT_DIR" || exit 1
             nohup python "$script" >> "$log" 2>&1 9>&- &
             PIDS[$i]=$!

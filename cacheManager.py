@@ -1034,20 +1034,20 @@ class CacheAssetValueManager(CacheManagerInterface):
 
     def get_remote_items(self, symbol, startTime):
         try:
-            total_usdt = self.api_client.get_total_assets_value_usdt(use_cache=False)
+            total_usdc = self.api_client.get_total_assets_value_usdc(use_cache=False)
         except Exception as e:
             print(f"[{self.cls_name}][Eroare] Nu pot interoga valoarea totala: {e}")
             return []
 
-        if not isinstance(total_usdt, (int, float)) or total_usdt <= 0:
-            print(f"[{self.cls_name}][Eroare] Valoarea totala invalidă: {total_usdt}")
+        if not isinstance(total_usdc, (int, float)) or total_usdc <= 0:
+            print(f"[{self.cls_name}][Eroare] Valoarea totala invalidă: {total_usdc}")
             return []
             
         now_sec = int(time.time())
         snapshot = {
             "timestamp": now_sec,
             "datetime_local": datetime.now().isoformat(timespec="seconds"),
-            "total_value_usdt": round(float(total_usdt), 8),
+            "total_value_usdc": round(float(total_usdc), 8),
         }
         return [snapshot]
 

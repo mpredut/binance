@@ -23,6 +23,7 @@ sleep 5
 if ! piactl get region 2>/dev/null | grep -q "^dedicated-"; then
     piactl dedicatedip add /home/predut/piatoken.txt || exit 1
 fi
+piactl set protocol openvpn
 piactl set region dedicated-belgium-85.122.194.86
 piactl set requestportforward true
 piactl connect

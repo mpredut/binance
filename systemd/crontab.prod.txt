@@ -1,15 +1,19 @@
 # crontab.prod — snapshot al crontab-ului de pe masina PROD (trading).
 # Reproductibil: dupa un dezastru, restaureaza cu:  crontab systemd/crontab.prod.txt
-# Generat: 2026-07-28 20:42:55. Actualizeaza dupa orice modificare de crontab.
+# Sincronizat cu PROD: 2026-08-23.
 
-*/5 * * * * /home/predut/binance/healthcheck.sh --supervise >> /home/predut/binance/logs/healthcheck.log 2>&1
+*/3 * * * * /home/predut/binance/healthcheck.sh --supervise >> /home/predut/binance/logs/healthcheck.log 2>&1
 17 * * * * /home/predut/binance/rotate_logs.sh >/dev/null 2>&1
 */15 * * * * /usr/bin/python3 /home/predut/binance/212trading/price_alert.py RGNT --below 4 >> /home/predut/binance/212trading/price_alert.log 2>&1
 */15 * * * * cd /home/predut/binance && /home/predut/binance/myenv/bin/python verify_tools/check_cache_coherence.py >> /home/predut/binance/logs/cache_coherence.log 2>&1
 30 3 * * * cd /home/predut/binance && ./backup_secrets.sh >> /home/predut/binance/logs/backup_secrets.log 2>&1
 */15 * * * * /home/predut/binance/deadman_switch.sh >> /home/predut/binance/logs/deadman.log 2>&1
 23 2 * * * /home/predut/binance/logger_retention.sh >> /home/predut/binance/logs/logger_retention.log 2>&1
+*/30 * * * * /home/predut/binance/offline/runners/refresh_dev.sh >> /home/predut/binance/logs/refresh_dev.log 2>&1
+0 2,14 * * * /home/predut/binance/offline/runners/trigger_backtest_dev.sh >> /home/predut/binance/logs/backtest_cycle.log 2>&1
+7 * * * * /home/predut/binance/myenv/bin/python /home/predut/binance/kraken/shadow_live.py --interval 240 >> /home/predut/binance/logs/shadow_live.log 2>&1
+37 * * * * /home/predut/binance/myenv/bin/python /home/predut/binance/kraken/shadow_live.py --interval 60 >> /home/predut/binance/logs/shadow_live.log 2>&1
+*/20 * * * * /home/predut/binance/myenv/bin/python /home/predut/binance/verify_tools/portfolio_snapshot.py --alert --json >> /home/predut/binance/logs/portfolio_snapshot.jsonl 2>/dev/null
+27 * * * * /home/predut/binance/myenv/bin/python /home/predut/binance/hyperliquid/shadow_longterm.py --quiet >> /home/predut/binance/logs/hyperliquid_shadow.log 2>&1
 */2 * * * * cd /home/predut/binance && /home/predut/binance/myenv/bin/python /home/predut/binance/verify_tools/watchdogfor_cacheandconfig.py >> /home/predut/binance/logs/watchdog.log 2>&1
 */5 * * * * cd /home/predut/binance && /home/predut/binance/myenv/bin/python /home/predut/binance/verify_tools/watchdogfor_anomaly.py >> /home/predut/binance/logs/anomaly_watchdog.log 2>&1
-*/30 * * * * /home/predut/binance/offline/runners/refresh_dev.sh >> /home/predut/binance/logs/refresh_dev.log 2>&1
-0 */12 * * * /home/predut/binance/offline/runners/trigger_backtest_dev.sh >> /home/predut/binance/logs/backtest_cycle.log 2>&1

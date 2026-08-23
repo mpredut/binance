@@ -122,7 +122,7 @@ def _split_symbol(symbol: str, base: str = "", quote: str = "") -> tuple[str, st
     if base or quote:
         return base or symbol, quote
     upper = symbol.upper()
-    for candidate in ("USDC", "USDT", "USD", "EUR", "RON"):
+    for candidate in ("USDC", "USD", "EUR", "RON"):
         if upper.endswith(candidate) and len(upper) > len(candidate):
             return symbol[:-len(candidate)], candidate
     return symbol, ""

@@ -12,8 +12,8 @@ blocuri confirmate) si masoara:
   - distributia duratelor (mediana, P75, P90)
   - P_cont(t) = P(durata > t+1zi | durata > t)  — continuarea conditionata
 
-  python3 trend_survival.py --symbol BTCUSDT --days 700
-  python3 trend_survival.py --symbol TAOUSDT --days 400 --window 16
+  python3 trend_survival.py --symbol BTCUSDC --days 700
+  python3 trend_survival.py --symbol TAOUSDC --days 400 --window 16
 """
 
 from __future__ import annotations
@@ -177,10 +177,8 @@ def estimate_T(symbol: str, days: int = 540, window_h: int = 24, step_h: int = 8
     if ent and time.time() - ent.get("ts", 0) < ttl_days * 86400:
         return ent
 
-    # simbolul de date: incearca exact, apoi varianta USDT (istoric mai adanc)
+    # Simbolul de date foloseste exclusiv perechea USDC ceruta.
     candidates = [symbol]
-    if symbol.upper().endswith("USDC"):
-        candidates.append(symbol.upper().replace("USDC", "USDT"))
     ts = px = None
     used = None
     for sym in candidates:
@@ -227,7 +225,7 @@ def estimate_T(symbol: str, days: int = 540, window_h: int = 24, step_h: int = 8
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Supravietuirea empirica a trendurilor.")
-    ap.add_argument("--symbol", default="BTCUSDT")
+    ap.add_argument("--symbol", default="BTCUSDC")
     ap.add_argument("--days", type=int, default=700)
     ap.add_argument("--window", type=int, default=24, help="ore/fereastra (productie: 16)")
     ap.add_argument("--step", type=int, default=8)

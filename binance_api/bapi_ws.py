@@ -308,7 +308,7 @@ class BinancePriceStream(BinanceWSBase):
                 logger.error("Failed to send %s: %s", cmd["method"], e)
 
     def _process_message(self, raw: str) -> None:
-        """{"stream": "btcusdt@ticker", "data": {"s": "BTCUSDT", "c": "65432.10", ...}}"""
+        """{"stream": "btcusdc@ticker", "data": {"s": "BTCUSDC", "c": "65432.10", ...}}"""
         try:
             envelope = json.loads(raw)
             if "result" in envelope:                    # ack la subscribe/unsubscribe

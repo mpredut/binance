@@ -46,7 +46,7 @@ CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file
                           "cachedb", "cache_trade_kraken.json")
 LEDGER_LOOKBACK_S = float(os.environ.get("KRAKEN_CACHE_LOOKBACK_H", "336")) * 3600   # default 14 zile
 # active de cotare (USD-like) -> sufixul de symbol; restul (HYPE, BTC...) = base
-_QUOTE = {"ZUSD": "USD", "USD": "USD", "USDC": "USDC", "USDT": "USDT", "USDG": "USDG", "ZEUR": "EUR"}
+_QUOTE = {"ZUSD": "USD", "USD": "USD", "USDC": "USDC", "USDG": "USDG", "ZEUR": "EUR"}
 
 
 def _normalize(txid, tr):

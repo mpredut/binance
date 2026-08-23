@@ -123,23 +123,22 @@ def get_current_time():
 
 
 def split_symbol(symbol: str):
-    # Split symbol in base and quote/cotare. TAOUSDC -> (TAO, USDC) Work for sym end in USDT/USDC.   
-   if symbol.endswith("USDT"):
-        return symbol[:-4], "USDT"
-   elif symbol.endswith("USDC"):
-        return symbol[:-4], "USDC"
-   else:
-        raise ValueError(f"Simbol necunoscut: {symbol}")
+    # Split symbol in base si quote; Binance operational foloseste USDC.
+   from providers.quantity import resolve_assets
+   base, quote = resolve_assets(symbol)
+   if not quote:
+       raise ValueError(f"Simbol necunoscut: {symbol}")
+   return base, quote
 
 
-def get_free_balance(asset: str) -> float:
+def get_free_balance(asset: str):
     try:
         #  Returneaza balanta libera pentru un asset din Binance.
         asset_info = client.get_asset_balance(asset=asset)
-        return float(asset_info.get("free", 0))
+        return float((asset_info or {}).get("free", 0))
     except Exception as e:
         print(f"get_free_balance: Eroare pentru {asset}: {e}")
-        return 0.0
+        return None
 
 
 def get_account_assets_balances():
@@ -176,19 +175,10 @@ def get_asset_info(order_type, symbol, price):
     - BUY: cât din baza se poate cumpăra cu balanța de cotare (ex: USDC / preț curent).
     """
     try:
-        base, quote = split_symbol(symbol)
-
-        if order_type.upper() == "SELL":
-            return get_free_balance(base)
-
-        elif order_type.upper() == "BUY":
-            if not price:
-                print(f"get_asset_info: price is invalid ({price}), returning 0 qty for {symbol}")
-                return 0.0            
-            free_quote = get_free_balance(quote)
-            return free_quote / price
-
-        return 0.0
+        from providers.quantity import balance_cap_quantity
+        qty, _asset = balance_cap_quantity(
+            get_free_balance, symbol, order_type, price)
+        return float(qty or 0.0)
 
     except Exception as e:
         print(f"get_asset_info: Error: {e}, order_type {order_type} and {symbol}")
@@ -395,32 +385,20 @@ def _get_symbol_price_safe(symbol):
         return None
 
 
-def _convert_to_usdt(asset, amount):
+def _convert_to_usdc(asset, amount):
     if amount <= 0:
         return 0.0
-    if asset == "USDT":
-        return amount
     if asset == "USDC":
-        usdcusdt = _get_symbol_price_safe("USDCUSDT")
-        return amount * usdcusdt if usdcusdt else amount
+        return amount
 
-    direct_pairs = [f"{asset}USDT", f"{asset}USDC", f"{asset}BUSD"]
-    for pair in direct_pairs:
-        price = _get_symbol_price_safe(pair)
-        if price:
-            if pair.endswith("USDT"):
-                return amount * price
-            if pair.endswith("USDC"):
-                usdcusdt = _get_symbol_price_safe("USDCUSDT") or 1.0
-                return amount * price * usdcusdt
-            if pair.endswith("BUSD"):
-                busdusdt = _get_symbol_price_safe("BUSDUSDT") or 1.0
-                return amount * price * busdusdt
+    price = _get_symbol_price_safe(f"{asset}USDC")
+    if price:
+        return amount * price
 
     return 0.0
 
 
-def get_total_assets_value_usdt(use_cache=True, cache_ttl_seconds=ASSET_VALUE_CACHE_TTL_SECONDS):
+def get_total_assets_value_usdc(use_cache=True, cache_ttl_seconds=ASSET_VALUE_CACHE_TTL_SECONDS):
     now = time.time()
     if use_cache:
         with _asset_value_cache_lock:
@@ -433,9 +411,9 @@ def get_total_assets_value_usdt(use_cache=True, cache_ttl_seconds=ASSET_VALUE_CA
     total_value = 0.0
     try:
         for balance in get_account_assets_balances():
-            total_value += _convert_to_usdt(balance["asset"], balance["total"])
+            total_value += _convert_to_usdc(balance["asset"], balance["total"])
     except Exception as e:
-        print(f"Error: get_total_assets_value_usdt: Error calculating portfolio value: {e}")
+        print(f"Error: get_total_assets_value_usdc: Error calculating portfolio value: {e}")
         return None
 
     with _asset_value_cache_lock:
@@ -443,7 +421,7 @@ def get_total_assets_value_usdt(use_cache=True, cache_ttl_seconds=ASSET_VALUE_CA
             _asset_value_cache["value"] = total_value
             _asset_value_cache["timestamp"] = now
         else:
-            print(f"Error: get_total_assets_value_usdt: Total value can't be calculated")
+            print(f"Error: get_total_assets_value_usdc: Total value can't be calculated")
             return None
 
     return _asset_value_cache["value"]

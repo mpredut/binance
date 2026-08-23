@@ -13,7 +13,7 @@ taosymbol = 'TAOUSDC'
 # sym.symbols din tradeall etc.) NU trebuie sa-l atinga. E doar o eticheta de symbol
 # pe care monitortrades o paseaza facadei.
 hypesymbol = 'HYPEUSDC'
-#symbols = ["BTCUSDT", "BTCUSDC", "TAOUSDT", "TAOUSDC"]
+#symbols = ["BTCUSDC", "TAOUSDC"]
 symbols = ["BTCUSDC",  "TAOUSDC"]
 forcesellsymbol = ["TAOUSDC", "BTCUSDC"]
 def validate_ordertype(order_type):

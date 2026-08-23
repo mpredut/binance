@@ -91,6 +91,23 @@ class MarketDataProvider(ABC):
         return order_guard.weight_limit(self, symbol, side, price, qty,
                                         base=base, quote=quote)
 
+    def policy_cap_quantity(self, symbol: str, side: str, price: float,
+                            qty: float, available_qty: float, **kwargs) -> float:
+        import order_guard
+        return order_guard.weight_limit(
+            self, symbol, side, price, qty,
+            base=kwargs.get("base"), quote=kwargs.get("quote"),
+            available_qty=available_qty)
+
+    def fee_cap_quantity(self, symbol: str, side: str, price: float,
+                         available_qty: float) -> float:
+        return available_qty
+
+    def quantity_decision(self, symbol: str, side: str, price: float,
+                          qty: float, **kwargs):
+        from providers.quantity import decide_quantity
+        return decide_quantity(self, symbol, side, price, qty, **kwargs)
+
     def adjust_order_price(self, symbol: str, side: str, price: float,
                            cancel_opposite: bool = True) -> float:
         return price

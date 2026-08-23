@@ -315,7 +315,7 @@ def get_my_trades_simple(order_type, symbol, backdays=3, limit=1000):
 
 
 def test_get_my_trades():
-    symbol = 'BTCUSDT'
+    symbol = 'BTCUSDC'
     limit = 4
 
     for days_ago in range (0,20):

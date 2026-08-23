@@ -63,7 +63,7 @@ class TestBaseAsset(unittest.TestCase):
 
     def test_strips_known_quote_suffixes(self):
         self.assertEqual(_base_asset("BTCUSDC"), "BTC")
-        self.assertEqual(_base_asset("TAOUSDT"), "TAO")
+        self.assertEqual(_base_asset("TAOUSDC"), "TAO")
         self.assertEqual(_base_asset("HYPEUSD"), "HYPE")
 
     def test_symbol_without_known_suffix_unchanged(self):

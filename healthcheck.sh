@@ -17,10 +17,14 @@ HLPY="$ROOT/$VENV/bin/python"
 { [ -x "$HLPY" ] && "$HLPY" -c "import eth_account" 2>/dev/null; } || HLPY=python3
 now=$(date +%s)
 
-# Starea unei linii din manifest: ecou 'ok' | 'absent' | 'hung' (hung = viu dar heartbeat vechi).
+# Starea unei linii: ok | absent | stopped | zombie | hung.
 proc_state() {
     local pat="$1" dir="$2" hblog="$3" hbstale="$4"
-    pgrep -f "$pat" >/dev/null 2>&1 || { echo absent; return; }
+    local pids states
+    pids=$(pgrep -f "$pat") || { echo absent; return; }
+    states=$(ps -o state= -p "$(echo "$pids" | paste -sd, -)" 2>/dev/null | tr -d ' ')
+    echo "$states" | grep -q T && { echo stopped; return; }
+    echo "$states" | grep -q Z && { echo zombie; return; }
     if [ -n "$hblog" ] && [ -n "$hbstale" ]; then
         local lp="$hblog"; case "$hblog" in /*) ;; *) lp="$dir/$hblog";; esac
         if [ -f "$lp" ]; then

@@ -28,8 +28,8 @@ monede_empty = [
 
 # Lista inițială de monede (top 10)
 monede = [
-    {"nume": "BTCUSDT", "cantitate": 0.5, "watch": True},
-    {"nume": "TAOUSDT", "cantitate": 0.5, "watch": True}
+    {"nume": "BTCUSDC", "cantitate": 0.5, "watch": True},
+    {"nume": "TAOUSDC", "cantitate": 0.5, "watch": True}
 ]
 
 # Fișier pentru stocarea ultimei configurații

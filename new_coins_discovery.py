@@ -29,7 +29,7 @@ NEW_COIN_CLEANUP_MAX_AGE_DAYS = MAX_NEW_COINS_TO_TRACK * 2  # Double the monitor
 
 # Symbols excluded automatically
 EXCLUDED_SYMBOLS = {
-    "USDT", "USDC", "BUSD", "DAI", "TUSD", "USDP", "GUSD", "FDUSD",
+    "USDC", "BUSD", "DAI", "TUSD", "USDP", "GUSD", "FDUSD",
     "WBTC", "WETH", "stETH", "rETH", "LIDO", "STETH",
     "BTC", "ETH", "BNB", "SOL", "XRP", "ADA", "DOGE", "MATIC", "DOT"
 }
@@ -243,7 +243,7 @@ class BinanceNewListingsSource(NewCoinsSource):
                 base_asset = symbol_info.get('baseAsset')
                 quote_asset = symbol_info.get('quoteAsset')
                 status = symbol_info.get('status')
-                if quote_asset in ['USDT', 'USDC', 'BUSD', 'EUR'] and status == 'TRADING':
+                if quote_asset == 'USDC' and status == 'TRADING':
                     current_symbols.add(symbol)
                     symbol_details[symbol] = {"symbol": base_asset, "full_symbol": symbol, "quote": quote_asset}
             if self._historical_symbols:

@@ -81,18 +81,16 @@ def _get_value_minutes_ago_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_
 
     # Sortam cronologic, apoi alegem minimul dupa valoare.
     window_rows = sorted(window_rows, key=lambda r: int(r.get("timestamp", 0)))
-    chosen = min(window_rows, key=lambda r: float(r.get("total_value_usdt", float("inf"))))
+    chosen = min(window_rows, key=lambda r: float(
+        r.get("total_value_usdc", float("inf"))))
     print(f"[DEBUG] chosen MIN: {chosen}")
     return chosen
 
 
 def _get_sell_symbol_for_asset(asset):
-    # Prioritate: perechi deja folosite in proiect (sym.symbols).
-    preferred = [f"{asset}USDC", f"{asset}USDT", f"{asset}BUSD"]
-    for candidate in preferred:
-        if candidate in sym.symbols:
-            return candidate
-    return None
+    # Contul Binance operational foloseste exclusiv USDC drept quote/cash.
+    candidate = f"{asset}USDC"
+    return candidate if candidate in sym.symbols else None
 
 
 def sell_all_assets():
@@ -106,7 +104,7 @@ def sell_all_assets():
     # Extragem doar asset-urile de baza din sym.symbols (ex: BTCUSDC -> BTC)
     tracked_assets = {api.split_symbol(s)[0] for s in sym.symbols}
     
-    excluded_assets = {"USDT", "USDC", "BUSD"}
+    excluded_assets = {"USDC"}
     sell_count = 0
 
     for bal in balances:
@@ -153,18 +151,22 @@ def sell_all_assets():
 
 def buy_with_all_cash(buy_symbol=BUY_SYMBOL_DEFAULT, cash_ratio=BUY_USE_CASH_RATIO):
     try:
-        _, quote_asset = api.split_symbol(buy_symbol)
+        from providers.quantity import resolve_assets
+        _, quote_asset = resolve_assets(buy_symbol)
     except Exception as e:
         print(f"ERROR invalid buy symbol {buy_symbol}: {e}")
         return False
 
-    free_cash = api.get_free_balance(quote_asset)
+    free_cash = mkt.provider_by_name("binance").free_balance(quote_asset)
     current_price = api.get_current_price(buy_symbol)
     print(
         f"[DEBUG] buy check symbol={buy_symbol}, quote={quote_asset}, "
         f"free_cash={free_cash}, current_price={current_price}"
     )
 
+    if free_cash is None:
+        print(f" Cannot read {quote_asset} balance; skip buy fail-closed.")
+        return False
     if free_cash <= 0:
         print(f" No available {quote_asset} balance for buy.")
         return False
@@ -201,31 +203,31 @@ def evaluate_and_maybe_sell_or_buy(
     buy_symbol=BUY_SYMBOL_DEFAULT,
 ):
 
-    current_value = api.get_total_assets_value_usdt(use_cache=False)
+    current_value = api.get_total_assets_value_usdc(use_cache=False)
     if current_value is None or current_value <= 0:
         print(f"Error: evaluate_and_maybe_sell_or_buy: Current assets value can't be calculated")
         return False
 
-    print(f"[DEBUG] Current ASSETS value (USDT): {current_value}")
+    print(f"[DEBUG] Current ASSETS value (USDC): {current_value}")
     past_row = _get_value_minutes_ago_from_cache(minutes_back=minutes_back)
 
     if not past_row:
         print(f" No baseline in cache yet for last {minutes_back}m.")
         return False
 
-    past_value = float(past_row.get("total_value_usdt", 0.0))
+    past_value = float(past_row.get("total_value_usdc", 0.0))
     if past_value <= 0:
         print(" Invalid baseline value.")
         return False
 
     growth_percent = ((current_value - past_value) / past_value) * 100.0
     threshold_value = past_value * (1 + threshold_percent / 100.0)
-    print(f"Current ASSETS value: {current_value:.1f} USDT ")
-    print(f"Past    ASSETS value: {past_value:.1f} USDT, min_back={minutes_back:.4f}, "
+    print(f"Current ASSETS value: {current_value:.1f} USDC ")
+    print(f"Past    ASSETS value: {past_value:.1f} USDC, min_back={minutes_back:.4f}, "
           f"growth={growth_percent:.4f}%"
     )
     print(
-        f"[DEBUG] Trigger when ASSETS >= {threshold_value:.4f} USDT "
+        f"[DEBUG] Trigger when ASSETS >= {threshold_value:.4f} USDC "
         f"(threshold={threshold_percent}%)"
     )
 
