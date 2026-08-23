@@ -72,6 +72,22 @@ def _client_order_id(record_id, revision):
     return f"OR_{record_id[:24]}_{int(revision)}"
 
 
+def valid_record(rec):
+    """Return whether a persisted record is safe to evaluate or submit."""
+    try:
+        qty = float(rec.get("qty"))
+        created = float(rec.get("created_ts"))
+        revision = int(rec.get("revision", 0))
+    except (TypeError, ValueError, OverflowError):
+        return False
+    return bool(
+        rec.get("id") and rec.get("symbol") and
+        str(rec.get("side") or "").upper() in {"BUY", "SELL"} and
+        math.isfinite(qty) and qty > 0 and
+        math.isfinite(created) and created > 0 and revision >= 0
+    )
+
+
 def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_price=None,
             now=None, created_ts=None, attempts=0, last_attempt_ts=0.0):
     """Add or refresh a failed placement attempt while holding the queue lock.
@@ -175,9 +191,15 @@ def claim(ids, now=None, lease_sec=None):
                 continue
             if float(rec.get("claim_until", 0) or 0) > now:
                 continue
+            revision = int(rec.get("revision", 0))
+            placement = dict(rec.get("place_kwargs") or {})
+            placement.setdefault(
+                "client_order_id", _client_order_id(rec.get("id", ""), revision))
+            rec["place_kwargs"] = placement
+            rec["revision"] = revision
             rec["claim_token"] = token
             rec["claim_until"] = now + lease_sec
-            rec["claim_revision"] = int(rec.get("revision", 0))
+            rec["claim_revision"] = revision
             claimed.append(dict(rec))
         if claimed:
             _write_nolock(existing)

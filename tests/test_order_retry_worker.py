@@ -81,6 +81,18 @@ class ProcessOnceTest(unittest.TestCase):
         self.assertEqual(len(mkt.calls), 0)          # NU reincercat (expirat)
         self.assertEqual(len(alerts), 1)             # alerta de renuntare
 
+    def test_legacy_invalid_quantity_is_discarded_without_submit(self):
+        oq.rewrite([{
+            "id": "legacy", "symbol": "BTCUSDC", "side": "BUY", "qty": None,
+            "place_kwargs": {}, "requested_price": 100.0, "created_ts": 1000.0,
+            "attempts": 2, "last_attempt_ts": 0.0,
+        }])
+        mkt = FakeMkt(price=100.0)
+        stats = worker.process_once(mkt, now=1400.0)
+        self.assertEqual(stats["expired"], 1)
+        self.assertEqual(mkt.calls, [])
+        self.assertEqual(oq.load_all(), [])
+
     def test_price_none_leaves_in_queue(self):
         oq.enqueue("BTCUSDC", "BUY", 1.0, {}, now=1000.0)
         mkt = FakeMkt(price=None, succeed=True)

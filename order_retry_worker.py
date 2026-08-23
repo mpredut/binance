@@ -67,6 +67,9 @@ def process_once(mkt, now=None):
     expired = []
     skipped_price = 0   # due, but current price is still worse than requested
     for r in snapshot:
+        if not oq.valid_record(r):
+            expired.append(r)
+            continue
         if oq.is_expired(r, now):
             expired.append(r)
             continue

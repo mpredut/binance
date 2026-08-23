@@ -178,6 +178,18 @@ class OrderRetryStoreTest(unittest.TestCase):
         self.assertIsNone(oq.enqueue("BTCUSDC", "HOLD", 1.0, {}, now=1000.0))
         self.assertIsNone(oq.enqueue("", "BUY", 1.0, {}, now=1000.0))
 
+    def test_claim_migrates_legacy_record_to_deterministic_client_id(self):
+        oq.rewrite([{
+            "id": "a" * 32, "symbol": "BTCUSDC", "side": "SELL", "qty": 1.0,
+            "place_kwargs": {}, "requested_price": 100.0, "created_ts": 1000.0,
+            "attempts": 0, "last_attempt_ts": 0.0,
+        }])
+        rec = oq.claim(["a" * 32], now=1400.0)[0]
+        self.assertEqual(rec["place_kwargs"]["client_order_id"],
+                         "OR_" + "a" * 24 + "_0")
+        self.assertEqual(oq.load_all()[0]["place_kwargs"]["client_order_id"],
+                         rec["place_kwargs"]["client_order_id"])
+
     def test_claim_empty_noop(self):
         oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0, now=1000.0)
         self.assertEqual(oq.claim([]), [])
