@@ -6,15 +6,15 @@ import platform
 import numpy as np
 from datetime import datetime, timedelta
 
-import botcore   # sursa unica pt are_close/diff_percent (partajat flota + boti)
+import botcore   # single are_close/diff_percent source shared by fleet and bots
 
 
-# Sufixele de cotare cunoscute, in ordinea de verificare (primul care se
-# potriveste castiga). Centralizat 28 iul — era copiat in monitortrades,
-# providers/replay_provider, verify_tools/*.
+# Known quote suffixes in matching order; the first match wins. Centralized on
+# July 28 after previously being copied across monitortrades, replay_provider,
+# and verify_tools.
 def base_asset(symbol: str) -> str:
-    """Activul de baza al unui symbol de trading: strip primul sufix de cotare
-    cunoscut (BTCUSDC -> BTC). Symbol fara sufix cunoscut -> intors neschimbat."""
+    """Return a trading symbol's base asset by removing the first known quote suffix.
+    For example BTCUSDC becomes BTC; an unknown suffix leaves the symbol unchanged."""
     from providers.quantity import resolve_assets
     return resolve_assets(symbol)[0]
 
@@ -23,9 +23,9 @@ def beep(n):
     for _ in range(n):
         if platform.system() == 'Windows':
             import winsound
-            winsound.Beep(440, 500)  # frecventa de 440 Hz, durata de 500 ms
+            winsound.Beep(440, 500)  # 440 Hz frequency for 500 milliseconds
         else:
-            # Aici putem folosi o comanda de beep - nu  merge pt orice android
+            # Use a shell beep here; it does not work on every Android environment.
             os.system('echo "\007"')
         time.sleep(2)
 
@@ -39,7 +39,7 @@ def get_interval_time(valoare_prestabilita=97 * 79, marja_aleatoare=10):
     return interval
  
 def calculate_difference_percent(val1, val2):
-    """Delega la botcore.diff_percent (sursa unica flota+boti) — formula identica."""
+    """Delegate to the shared fleet/bot botcore.diff_percent formula."""
     return botcore.diff_percent(val1, val2)
 
     
@@ -57,33 +57,32 @@ def slope(val1, idx1, val2, idx2):
     
     return (val2 - val1) / (idx2 - idx1)
 
-#valorile sunt in jurul procentului ca interval
+# Values lie within an interval around the percentage.
 def are_difference_equal_with_aprox_proc(value1, value2, target_percent = 10.0):
-    """DEPRECATA (16 iul, zero apelanti in repo): foloseste botcore.diff_equals_percent.
-    Semantica: diferenta dintre valori este ≈ target_percent (nu 'valori apropiate').
-    Vechea implementare avea random.randint in banda de toleranta — eliminat.
-    Pastram tuplul (bool, iteration, tolerance) pt compatibilitate de semnatura.
-    Toleranta = target/4: mijlocul benzii vechi (crestea aleator intre target*0.01
-    si target*0.5) — determinist, aproximeaza comportamentul mediu de dinainte."""
+    """Deprecated July 16 with no repository callers; use botcore.diff_equals_percent.
+    Semantics ask whether the difference is near target_percent, not whether values are
+    close. The old randomized tolerance was removed. Retain the (bool, iteration,
+    tolerance) tuple for signature compatibility. target/4 deterministically approximates
+    the midpoint of the old random target*0.01 to target*0.5 band."""
     tolerance = target_percent * 0.25
     ok = botcore.diff_equals_percent(value1, value2, target_percent, tolerance)
     return ok, 0, tolerance
 
 
 def are_close_random(value1, value2, target_tolerance_percent=1.0):
-    """NEDETERMINISTA prin design (nume explicit!): banda de acceptare variaza
-    aleator in [tol*1.01, tol*1.5] — acelasi input poate da True SAU False.
-    NU folosi pentru decizii de trading; pastrata doar daca vrei vreodata
-    fuzz/jitter intentionat. Varianta predictibila: are_close (botcore)."""
+    """Intentionally nondeterministic as its explicit name indicates.
+    The acceptance band varies randomly in [tol*1.01, tol*1.5], so identical input can
+    return either result. Never use for trading decisions; retain only for intentional
+    fuzz/jitter. Use botcore.are_close for predictable behavior."""
     upper = target_tolerance_percent * (1.0 + 0.01 + random.random() * 0.49)
     return botcore.diff_percent(value1, value2) <= upper
    
 
-#valorile sunt aproximativ egale nu mai  mult decat procentul aproximativ
+# Values are approximately equal within the specified percentage.
 def are_close(value1, value2, target_tolerance_percent=1.0):
-    """Determinist (16 iul): delega la botcore.are_close — sursa unica flota+boti.
-    Vechea implementare avea random.randint in bucla de toleranta: acelasi input
-    putea da True SAU False in banda [tol*1.01, tol*1.5] — inacceptabil pt trading."""
+    """Deterministically delegate to the shared fleet/bot botcore.are_close.
+    The pre-July-16 implementation used random.randint and could return either result
+    for identical input in [tol*1.01, tol*1.5], which is unacceptable for trading."""
     return botcore.are_close(value1, value2, target_tolerance_percent)
     
     
@@ -117,9 +116,9 @@ def timeToHMS(timestamp_sec):
     # Convert seconds to days.
 def secondsToDays(max_age_seconds):
     # Seconds per day.
-    seconds_in_a_day = 86400  # 24 ore * 60 minute * 60 secunde
+    seconds_in_a_day = 86400  # 24 hours * 60 minutes * 60 seconds
     
-    # Calculam numarul de zile
+    # Calculate the number of days.
     days = max_age_seconds / seconds_in_a_day
     
     return days
@@ -127,9 +126,9 @@ def secondsToDays(max_age_seconds):
 # Convert seconds to hours.
 def secondsToHours(max_age_seconds):
     # Seconds per hour.
-    seconds_in_an_hour = 3600  # 60 minute * 60 secunde
+    seconds_in_an_hour = 3600  # 60 minutes * 60 seconds
     
-    # Calculam numarul de ore
+    # Calculate the number of hours.
     hours = max_age_seconds / seconds_in_an_hour
     
     return hours
@@ -137,9 +136,9 @@ def secondsToHours(max_age_seconds):
 # Convert seconds to minutes.
 def secondsToMinutes(max_age_seconds):
     # Seconds per minute.
-    seconds_in_a_minute = 60  # 60 secunde
+    seconds_in_a_minute = 60  # 60 seconds
     
-    # Calculam numarul de minute
+    # Calculate the number of minutes.
     minutes = max_age_seconds / seconds_in_a_minute
     
     return minutes
@@ -190,7 +189,7 @@ def gaussian_weights(T, idx: int):
     sigma = T / 4
 
     w_full = np.exp(-0.5 * ((t_full - mu) / sigma) ** 2)
-    w_full = w_full / w_full.sum()  # normalizare: suma = 1
+    w_full = w_full / w_full.sum()  # normalize to sum 1
     return t_full, w_full
 
     
@@ -207,7 +206,7 @@ def gaussian_weights_from_idx(T, idx: int):
     sigma = T / 4
 
     w_full = np.exp(-0.5 * ((t_full - mu) / sigma) ** 2)
-    w_full = w_full / w_full.sum()  # normalizare: suma = 1
+    w_full = w_full / w_full.sum()  # normalize to sum 1
     return t_full[idx:], w_full[idx:]
 
 
@@ -219,7 +218,7 @@ def gaussian_full_shifted(T, last_period, trend="down", steps=None):
     # Special case for an over-age trend.
     if remaining <= 1:
         if trend == "down":
-            # trend bearish persistent → vinde agresiv
+            # A persistent bearish trend sells aggressively.
             return np.array([0.0]), np.array([1.0])
         else:
             # Use conservative buying after an exhausted bullish trend.
@@ -241,7 +240,7 @@ def gaussian_full_shifted(T, last_period, trend="down", steps=None):
         w_normalized = w / w.max()
         w = 1 - w_normalized
         w_sum = w.sum()
-        if w_sum == 0:  # remaining==2 poate da suma 0
+        if w_sum == 0:  # remaining==2 can produce a zero sum
             return t, np.full(steps, 0.5)
         w = w / w_sum
     else:
@@ -283,10 +282,10 @@ def _sign_ed25519(signing_key, payload: str) -> str:
     return base64.b64encode(signed.signature).decode()
 
 
-# ─── COD MORT pastrat INTENTIONAT pt referinta (idee de reactivat/fixat) ──────
-# Semnare Ed25519 (WS Binance): incarcare cheie PEM + semnare payload. Neactiva
-# acum, dar pastrata daca vrem sa reactivam auth-ul Ed25519 (necesita pachetul
-# `cryptography`).
+# ─── DEAD CODE retained INTENTIONALLY as a possible reactivation/fix reference ─
+# Ed25519 signing for Binance WS: load a PEM key and sign a payload. Currently
+# inactive, but retained for potential Ed25519 authentication reactivation; requires
+# the `cryptography` package.
 # from cryptography.hazmat.primitives import serialization
 # from cryptography.hazmat.primitives.asymmetric import ed25519
 # import base64
@@ -295,10 +294,10 @@ def _sign_ed25519(signing_key, payload: str) -> str:
 #         with open("keys/ed25519_private.pem", "rb") as f:
 #             private_key = serialization.load_pem_private_key(f.read(), password=None)
 #         if not isinstance(private_key, ed25519.Ed25519PrivateKey):
-#             raise ValueError("Cheia nu este Ed25519")
+#             raise ValueError("The key is not Ed25519")
 #         return private_key
 #     except Exception as e:
-#         print(f"[cacheManager][WS] Eroare la incarcarea cheii Ed25519: {e}")
+#         print(f"[cacheManager][WS] Error loading the Ed25519 key: {e}")
 #         return None
 # def _sign_ed25519(signing_key, payload: str) -> str:
 #     return base64.b64encode(signing_key.sign(payload.encode())).decode()
