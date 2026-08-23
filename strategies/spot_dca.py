@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Motor spot DCA + take-profit/trailing, independent de venue.
+"""Venue-independent spot DCA engine with take-profit and trailing exits.
 
-Motorul ia toate datele si executa toate ordinele prin ``StrategyExecutor``.
-Launcherul venue-ului injecteaza providerul, directorul de stare si prezentarea;
-regulile financiare raman o singura implementare pentru live si replay.
+The engine receives all data and executes every order through ``StrategyExecutor``.
+Venue launchers inject the provider, state directory, and presentation details while
+live and replay share one implementation of the financial rules.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ notify = bind_notify(("SYMBOL_LABEL", "KRAKEN_PAIR"), "CRYPTO")
 
 
 def state_path_for(pair: str, state_dir: str | None = None) -> str:
-    """Returneaza calea starii; fallback-ul Kraken pastreaza upgrade-ul live compatibil."""
+    """Return the state path, retaining the Kraken fallback for live compatibility."""
     safe = "".join(c for c in pair if c.isalnum() or c in "._-")
     directory = state_dir or _LEGACY_STATE_DIR
     return os.path.join(directory, f".state_{safe}.json")
@@ -41,8 +41,8 @@ def state_path_for(pair: str, state_dir: str | None = None) -> str:
 
 @dataclass
 class StratParams:
-    currency: str          # valuta de cotare (EUR/USD) — doar pt afisare
-    entry_amount: float    # marimea intrarii in valuta de cotare
+    currency: str          # Quote currency used only for presentation.
+    entry_amount: float    # Entry size in quote currency.
     entry_discount_pct: float
     dca_amount: float
     dca_drop_pct: float
@@ -52,47 +52,30 @@ class StratParams:
     max_dca_buys: int
     enable_takeprofit: bool
     order_ttl_min: float
-    stop_loss_pct: float     # SIGURANTA: vinde tot daca pierderea >= acest % (0 = oprit)
-    adopt_cost: float        # >0 = ADOPTA pozitia existenta din cont la acest cost mediu (ex. alocare IPO/xStock)
-    adopt_qty: float         # cantitatea adoptata; 0 = citeste automat balanta activului de baza
-    reentry_drop_pct: float  # dupa TP, reintra DOAR daca pretul scade cu acest % sub pretul vandut (0 = imediat)
-    reentry_tolerance_pct: float  # "aproape de prag" conteaza ca atins: pret <= prag*(1+tol%) intra
-                                  # (15 iul: HYPE a ricosat la 65.93 vs prag 65.91 — 2 centi — si a ratat intrarea)
-    reentry_adaptive: bool   # 23 iul: prag de reintrare = K_REENTRY * vol_1h (nu procentul fix) —
-                             # investigat in offline/research/kraken_adaptive_thresholds/: adaptivul bate
-                             # fixul pe HYPEUSD (~30 zile, TOTAL +3.26% vs +2.20%), K=2.0 confirmat
-                             # optim printr-un sweep dedicat (K=1.5 si K=2.5 dau amandoua mai putin).
-                             # Fail-safe: cade pe reentry_drop_pct (fix) daca volatilitatea nu poate
-                             # fi calculata inca (warm-up <20 puncte de pret).
-    reentry_sl_bounce_pct: float  # dupa STOP-LOSS (NU dupa TP): reintra pe REVENIRE — cand pretul
-                                  # urca cu acest % de la minimul atins dupa vanzare. Regula
-                                  # veche (reintra doar SUB pretul vandut) e corecta dupa un TP
-                                  # (ai vandut sus, astepti sa cumperi mai jos), dar dupa un
-                                  # stop-loss lasa botul BLOCAT afara cand pretul isi revine
-                                  # (4 aug: exact ce s-a intamplat — vandut 51.19, HYPE la 55.6,
-                                  # prag reintrare 50.06 nu se mai atinge). 0 = dezactivat (regula veche).
-    tp_tranches: list        # [(pct, cota%), ...] vanzare graduala; [] = TP clasic pe tot
+    stop_loss_pct: float     # Sell everything at this loss percentage; zero disables it.
+    adopt_cost: float        # Positive value adopts an existing position at this average cost.
+    adopt_qty: float         # Adopted quantity; zero reads the base-asset balance automatically.
+    reentry_drop_pct: float  # After TP, reenter only this far below the sale price; zero is immediate.
+    reentry_tolerance_pct: float  # Treat prices within tolerance of the threshold as reached.
+    reentry_adaptive: bool   # Use volatility-based reentry, falling back to fixed during warm-up.
+    reentry_sl_bounce_pct: float  # After stop-loss, reenter on a bounce from the post-sale low.
+    tp_tranches: list        # Gradual ``(percentage, share)`` sales; empty means one full TP.
     # --- TP trend-aware (EXPERIMENTAL, default OFF) -------------------------------
-    tp_trend_hold: bool = False       # True = cat trendul scurt e UP, NU face TP (calaresc
-                                      # trendul); ies aproape de piata cand trendul se intoarce.
-                                      # Adreseaza "DCA+TP lasa mult pe masa in bull" (240m: +4% vs
-                                      # buy&hold +48%). OFF = comportament clasic (TP fix).
-    tp_trend_min_pct: float = 0.5     # (v1, nefolosit in v2) prag semnal trend din _shadow_prices.
-    tp_trail_pct: float = 2.0         # v2: PESTE nivelul TP, ies la un pullback de acest %% de la
-                                      # varf (trailing). Doar peste TP -> nu iesi niciodata in pierdere.
+    tp_trend_hold: bool = False       # Hold during a short uptrend and exit near market on reversal.
+    tp_trend_min_pct: float = 0.5     # Legacy v1 shadow-price trend threshold.
+    tp_trail_pct: float = 2.0         # Above TP, exit after this pullback from the peak.
     tp_trail_profit_floor_pct: float = 0.0  # 0=compatibil live. >0=trailing MARKET numai
                                       # when the order reference is >= average*(1+floor%);
                                       # the MARKET hard stop retains priority.
     # --- TREND OVERLAY (combina strategii pe regim; EXPERIMENTAL, default OFF) -----
-    trend_overlay: bool = False       # True = in UPTREND confirmat, intra cu TOP-UP mare si
-                                      # CALARESTE (hold+trailing) in loc de DCA/TP; in range = clasic.
-    trend_sma_n: int = 30             # fereastra SMA (nr bare) pt semnalul de trend LUNG
+    trend_overlay: bool = False       # Use top-up and trailing in confirmed uptrends; classic in ranges.
+    trend_sma_n: int = 30             # SMA bar count for the long-trend signal.
     trend_interval: int = 240         # minute/bara pt semnalul de trend (live: OHLC Kraken;
                                       # backtest: barele fed-uite). 240=4h -> SMA(30)=~5 zile.
     trend_confirm_bars: int = 3       # bare consecutive de uptrend ca sa confirme (anti-fals)
     trend_topup: float = 2000.0       # cat cumpar la intrarea in trend (sume mai mari = prinde trendul)
-    trend_trail_pct: float = 5.0      # trailing-ul pozitiei de trend (pullback de la varf la care ies)
-    trend_exit_break: bool = False    # False=A (doar trailing); True=B (trailing SAU pret<SMA=trend rupt)
+    trend_trail_pct: float = 5.0      # Trend-position exit pullback from peak.
+    trend_exit_break: bool = False    # False: trailing only; True: trailing or price below SMA.
     # --- ADAPTIV pe VOLATILITATE (redesign overlay: MODULARE, nu amplificare; default OFF) ---
     tp_trail_adaptive: bool = False   # A: trailing-ul TP (tp_trail_pct) devine k×vol_1h — larg in
                                       # trend volatil (calaresc mai mult), strans in chop. Fail-safe
@@ -101,11 +84,10 @@ class StratParams:
     tp_trail_min: float = 1.5         # clamp jos (%) — nu iesi pe zgomot infim
     tp_trail_max: float = 8.0         # clamp sus (%) — nu lasa profitul sa scape complet
     tp_trail_vol_interval: int = 240  # Minutes per volatility bar; fixed in live and replay.
-    dca_trend_brake: bool = False     # B: in DOWNTREND confirmat, NU face DCA (nu prinde cutitul care
-                                      # cade) — ataca direct maxDD, overlay care REDUCE risc.
-    dca_brake_min_pct: float = 1.5    # panta minima (%) recent/vechi ca sa considere downtrend
+    dca_trend_brake: bool = False     # Skip DCA in confirmed downtrends to reduce risk.
+    dca_brake_min_pct: float = 1.5    # Minimum recent/old slope percentage for downtrend.
     dca_spacing_growth_pct: float = 0.0  # Increase the threshold after every filled DCA;
-                                         # 0 = comportamentul live byte-identical
+                                         # Zero preserves byte-identical live behavior.
     # --- #2: SIZING DCA scalat pe VOLATILITATE (default OFF) ---
     dca_vol_scale_k: float = 0.0      # 0=OFF. eff_dca = dca × (vol_ref/vol_1h)^k, clamp [0.3,3].
                                       # k>0 = DCA MAI MIC in vol mare (defensiv, minimizeaza pierderea);
@@ -115,8 +97,8 @@ class StratParams:
     # --- Sizing PROCENTUAL (optional; total_budget=0 sau alloc_pct=0 -> OFF, valorile fixe) ---
     total_budget: float = 0.0   # bugetul TOTAL al venue-ului (ex. tot contul Kraken)
     alloc_pct: float = 0.0      # % din total alocat ACESTEI monede (suma pe venue = 100)
-    entry_pct: float = 0.0      # entry = felia monedei (total × alloc%) × acest %
-    dca_pct: float = 0.0        # DCA   = felia monedei × acest %
+    entry_pct: float = 0.0      # Entry is this percentage of the asset allocation.
+    dca_pct: float = 0.0        # DCA is this percentage of the asset allocation.
 
     def __post_init__(self):
         def finite(name: str, value) -> float:
@@ -192,7 +174,7 @@ class StratParams:
             check_minutes      = float_env("STRAT_CHECK_MINUTES") or 2.0,
             takeprofit_pct     = float_env("STRAT_TAKEPROFIT_PCT") or 1.0,
             max_budget         = float_env("STRAT_MAX_BUDGET") or 500.0,
-            # NU "or 10": zeroul explicit (= fara DCA, doar gestionare iesire) e valid
+            # Do not use ``or 10``: explicit zero validly disables DCA while managing exits.
             max_dca_buys       = int(float_env("STRAT_MAX_DCA_BUYS")) if float_env("STRAT_MAX_DCA_BUYS") is not None else 10,
             total_budget       = float_env("STRAT_TOTAL_BUDGET") or 0.0,
             alloc_pct          = float_env("STRAT_ALLOC_PCT") or 0.0,
@@ -206,8 +188,7 @@ class StratParams:
             reentry_drop_pct   = float_env("STRAT_REENTRY_DROP_PCT") or 0.0,
             reentry_tolerance_pct = float_env("STRAT_REENTRY_TOLERANCE_PCT") or 0.0,
             reentry_adaptive   = os.environ.get("STRAT_REENTRY_ADAPTIVE", "false").strip().lower() == "true",
-            # Zero este o valoare explicita valida: dezactiveaza reintrarea pe
-            # revenire dupa STOP si pastreaza regula clasica de reintrare.
+            # Explicit zero disables bounce reentry after STOP and retains the classic rule.
             reentry_sl_bounce_pct = 1.5 if reentry_sl_bounce is None else reentry_sl_bounce,
             tp_tranches        = _parse_tranches(os.environ.get("STRAT_TP_TRANCHES", "")),
             tp_trend_hold      = os.environ.get("STRAT_TP_TREND_HOLD", "false").strip().lower() == "true",
@@ -240,7 +221,7 @@ class StratParams:
 
 
 def _parse_tranches(spec: str) -> list:
-    """"3:50,6:50" -> [(3.0, 50.0), (6.0, 50.0)]; cotele trebuie sa dea 100."""
+    """Parse ``3:50,6:50`` into percentage/share pairs whose shares total 100."""
     out = []
     for part in spec.split(","):
         if ":" in part:
@@ -256,20 +237,20 @@ def _new_state() -> dict:
     return {
         "cycle": 1,
         "qty": 0.0,
-        "cost": 0.0,            # baza de cost in valuta de cotare
-        "spent": 0.0,           # desfasurat in ciclul curent (plafon)
+        "cost": 0.0,            # Cost basis in quote currency.
+        "spent": 0.0,           # Deployed in the current cycle, subject to its cap.
         "dca_buys": 0,
         "entry_price": None,
         "last_buy_price": None,
-        "cycle_fees": 0.0,      # fee real acumulat in ciclul curent
+        "cycle_fees": 0.0,      # Actual fees accumulated in the current cycle.
         "realized_gross": 0.0,
         "realized_net": 0.0,
         "fees_total": 0.0,
-        "last_sell_price": None,  # pretul ultimei vanzari (regula de reintrare)
-        "last_exit_kind": None,   # "TP"/"STOP"/... — cum s-a inchis ultimul ciclu (reintrare STOP-aware)
-        "sl_low": None,           # minimul de pret dupa un stop-loss (pt reintrarea pe revenire)
-        "trail_peak": None,       # varful urmarit dupa ce pretul a depasit nivelul TP
-        "trail_stop": None,       # floor-ul trailing ratcheteaza doar in sus, inclusiv cand vol se schimba
+        "last_sell_price": None,  # Latest sale price for reentry rules.
+        "last_exit_kind": None,   # TP/STOP/etc. for stop-aware reentry.
+        "sl_low": None,           # Post-stop low used for bounce reentry.
+        "trail_peak": None,       # Peak tracked after price exceeds TP.
+        "trail_stop": None,       # Trailing floor ratchets upward even as volatility changes.
         "trend_mode": False,      # overlay: suntem intr-o pozitie de trend (hold+trailing)?
         "trend_peak": None,       # varful urmarit in modul trend
         "trend_confirm_count": 0, # bare consecutive de uptrend (confirmare semnal)
@@ -298,19 +279,18 @@ class Strategy:
         self.notification_source = notification_source
         self.venue_label = venue_label
         self.fee_note = fee_note
-        # Apelul legacy cu un singur argument ramane intentionat: replay-urile
-        # existente pot inlocui state_path_for pentru a garanta zero I/O.
+        # Keep the legacy one-argument call so existing replays can replace
+        # state_path_for and guarantee zero I/O.
         self.state_file = (
             state_path_for(pair) if state_dir is None else state_path_for(pair, state_dir)
         )
         self._state_write_failed = False
         self.s = initial_state if initial_state is not None else self._load()
         self._paper_seq = 0
-        # SHADOW vol-adaptiv (observational, plan 17 iul): istoric mic de pret in
-        # memorie (tick ~2min -> ~3h) pentru sigma; NU intra in state-file, se
-        # reconstruieste dupa restart (warm-up ~40min pana la >=20 puncte).
+        # Observational adaptive-volatility shadow history stays in memory for sigma.
+        # It is rebuilt after restart and never enters persistent state.
         self._shadow_prices = deque(maxlen=90)
-        # precizie pereche, normalizata de provider
+        # Pair precision normalized by the provider.
         self.price_dec, self.vol_dec, self.ordermin = 5, 8, 0.0
         try:
             precision = client.pair_precision(pair)
@@ -322,15 +302,14 @@ class Strategy:
             log("  ! nu pot citi precizia perechii — folosesc valori implicite")
 
     def _emit(self, **event) -> None:
-        """Trimite un eveniment prin sink-ul venue-ului sau prin compatibilitatea veche."""
-        # Replay/backtest foloseste aceeasi strategie ca live, dar nu are voie sa
-        # produca efecte externe. ``dry_run`` nu este suficient: paper-live are
-        # nevoie in continuare de alerte reale.
+        """Send an event through the venue sink or legacy compatibility wrapper."""
+        # Replay shares live strategy logic but must not create external effects.
+        # ``dry_run`` alone is insufficient because paper-live still needs real alerts.
         if self.replay_mode:
             return
         (self._notifier or notify)(**event)
 
-    # -- persistenta -----------------------------------------------------------
+    # -- Persistence -----------------------------------------------------------
     def _store(self) -> JsonStateStore:
         return JsonStateStore(
             self.state_file, _new_state, label=self.venue_label,
@@ -345,7 +324,7 @@ class Strategy:
         if self._store().save(self.s):
             self._state_write_failed = False
 
-    # -- helperi ---------------------------------------------------------------
+    # -- Helpers ---------------------------------------------------------------
     def _avg(self) -> float | None:
         return self.s["cost"] / self.s["qty"] if self.s["qty"] > 1e-12 else None
 
@@ -353,25 +332,15 @@ class Strategy:
         return round(amount / price, self.vol_dec) if price > 0 else 0.0
 
     def _dust_safe_qty(self, qty: float) -> float:
-        """Un venue poate raporta balanta ROTUNJITA: vinderea intregii cantitati
-        poate depasi ledger-ul cu o zecimila -> 'EOrder:Insufficient funds',
-        la nesfarsit (bot-ul reincearca aceeasi cantitate in fiecare ciclu,
-        fara sa se corecteze singur — 21 iul, gasit ca sursa a 212 esecuri
-        repetate 'sell TP esuat' pe HYPEUSD). Lasam un praf: o unitate la
-        penultima zecimala (ex. 5.1715916 -> 5.1715914, ~$0.00001 dust) —
-        cost neglijabil, elimina blocarea permanenta la TP/stop-loss.
+        """Leave one volume tick to tolerate a venue's rounded balance.
 
-        Lasam UN tick de volum, nu o unitate la penultima zecimala. Diferenta
-        este esentiala pe venue-uri cu precizie mica: la 2 zecimale, regula
-        veche lasa 0.1 HYPE (~dolari) la fiecare ciclu, in loc de 0.01 HYPE.
+        Selling the full internally tracked quantity can exceed a rounded ledger and
+        cause permanent insufficient-funds retries. Preserve historical high-precision
+        behavior without magnifying dust on low-precision venues.
         """
-        # Pastreaza bufferul istoric de zece tick-uri la precizie mare
-        # (comportamentul Kraken/golden), dar nu-l amplifica la 0.1 unitati pe
-        # venue-uri cu numai doua zecimale precum Hyperliquid.
         dust_decimals = self.vol_dec if self.vol_dec <= 2 else self.vol_dec - 1
         step = 10.0 ** -max(dust_decimals, 1)
-        # Epsilon-ul evita ca 13.40/0.01 sa devina 1339.999999 si sa lase
-        # accidental doua tick-uri dupa floor.
+        # Epsilon prevents floating-point division from leaving two ticks after floor.
         ticks = math.floor((float(qty) + step * 1e-9) / step) - 1
         return round(max(ticks, 0) * step, self.vol_dec)
 
@@ -385,11 +354,11 @@ class Strategy:
         if o in self.s["orders"]:
             self.s["orders"].remove(o)
 
-    # -- plasare ---------------------------------------------------------------
+    # -- Placement -------------------------------------------------------------
     def _place(self, side: str, vol: float, price: float, kind: str, amount: float = 0.0,
                market: bool = False) -> bool:
-        # market=True: iesire de piata (trailing/stop) — se executa imediat, NU ordin limita
-        # care poate rata o cadere brusca. In backtest se umple la open-ul barei urmatoare.
+        # A market trailing/stop exit executes immediately instead of risking a missed
+        # sharp drop with a limit order. Backtests fill it at the next bar's open.
         vol = round(vol, self.vol_dec)
         price = round(price, self.price_dec)
         if vol <= 0 or (self.ordermin and vol < self.ordermin):
@@ -403,8 +372,8 @@ class Strategy:
                                      "kind": kind, "market": market, "ts": time.time()})
             return True
         try:
-            # Venue-urile care pot accepta un BUY subfinantat si apoi anula
-            # restul (Hyperliquid) pot bloca intentia inainte de audit/submit.
+            # Venues that might accept an underfunded BUY and cancel its remainder can
+            # reject the intent during preflight before audit/submission.
             preflight = getattr(type(self.client), "preflight_order", None)
             if callable(preflight):
                 preflight(
@@ -428,9 +397,8 @@ class Strategy:
             self.s["orders"].append({"txid": txid, "side": side, "vol": vol, "price": price,
                                      "amount": amount, "kind": kind, "market": market,
                                      "intent_id": intent_id, "ts": time.time()})
-            # Inchide cat mai mult fereastra de crash dintre acceptarea la venue
-            # si snapshot-ul de la finalul tick-ului. In live, un order_id acceptat
-            # trebuie sa fie durabil inaintea oricarei alte decizii.
+            # Minimize the crash window after venue acceptance. Persist an accepted live
+            # order ID before making any further decision.
             self._save()
             return True
         except ProviderError as e:
@@ -438,11 +406,10 @@ class Strategy:
             return False
 
     def _cancel_order(self, o: dict) -> bool:
-        """Solicita anularea fara sa uite ordinul inainte de confirmarea venue-ului.
+        """Request cancellation without forgetting the order before terminal confirmation.
 
-        O anulare acceptata nu spune daca ordinul a avut un fill concurent chiar
-        inainte de anulare. Il pastram pana cand providerul raporteaza o stare
-        terminala, ca reconcilierea sa poata aplica acel fill final.
+        An accepted request does not prove that no concurrent fill occurred. Retain the
+        order until the provider reports terminal state so reconciliation applies that fill.
         """
         if self.dry_run or str(o["txid"]).startswith("PAPER"):
             self._remove(o)
@@ -464,8 +431,7 @@ class Strategy:
             return False
         o["cancel_requested"] = True
         o["cancel_ts"] = time.time()
-        # Pastreaza intentia de cancel peste restart; ordinul ramane urmarit pana
-        # cand statusul terminal confirma inclusiv orice fill concurent.
+        # Persist cancellation intent across restart and track through terminal status.
         self._save()
         log(f"  [STRAT] cancel solicitat {o['side']} {o['txid']} — astept status terminal")
         return True
@@ -477,7 +443,7 @@ class Strategy:
         return self._cancel_order(o)
 
     def _cancel_orders(self, side: str | None = None, *, exclude_market: bool = False) -> bool:
-        """Solicita anularea ordinelor selectate; False daca oricare cerere esueaza."""
+        """Request cancellation of selected orders; return False if any request fails."""
         selected = [
             o for o in list(self.s["orders"])
             if (side is None or o["side"] == side)
@@ -491,7 +457,7 @@ class Strategy:
     def _has_pending_market_exit(self) -> bool:
         return any(o["side"] == "sell" and o.get("market") for o in self.s["orders"])
 
-    # -- reconciliere ----------------------------------------------------------
+    # -- Reconciliation --------------------------------------------------------
     def reconcile(self, price: float) -> None:
         for side in ("buy", "sell"):
             for o in [x for x in self.s["orders"] if x["side"] == side]:
@@ -511,9 +477,8 @@ class Strategy:
                         self._remove(o)
                         self._apply_fill(o, o["vol"], fill_price, fee=0.0)
                     continue
-                # REAL: providerul raporteaza qty/cost/fee CUMULATIV, inclusiv
-                # cat timp ordinul este open. Aplicam doar delta fata de ultima
-                # reconciliere salvata pe ordin.
+                # Providers report cumulative quantity, cost, and fee even while an order
+                # remains open. Apply only the delta since the saved reconciliation marker.
                 try:
                     status_with_intent = getattr(type(self.client), "order_status_with_intent", None)
                     if callable(status_with_intent):
@@ -548,11 +513,9 @@ class Strategy:
 
                 delta_vol = max(0.0, total_vol - applied_vol)
                 delta_cost = max(0.0, total_cost - applied_cost)
-                # Fee-ul este semnat: unele venue-uri raporteaza rebate maker
-                # negativ. Diferenta semnata pastreaza acel venit in P&L.
+                # Fees are signed because some venues report negative maker rebates.
                 delta_fee = total_fee - applied_fee
-                # Persistam markerii INAINTE de contabilizare: _apply_fill poate
-                # inchide ciclul si inlocui intreg state-ul la un SELL final.
+                # Persist markers before accounting because a final SELL may replace state.
                 o["applied_vol"] = total_vol
                 o["applied_cost"] = total_cost
                 o["applied_fee"] = total_fee
@@ -560,8 +523,7 @@ class Strategy:
                 if delta_vol > eps:
                     fill_order = dict(o)
                     if o["side"] == "buy":
-                        # `amount` este plafonul nominal al ordinului; un fill
-                        # partial consuma proportional din acel plafon.
+                        # ``amount`` is the order's nominal cap; partial fills consume it proportionally.
                         fill_order["amount"] = (
                             float(o.get("amount") or 0.0) * delta_vol / float(o["vol"])
                             if float(o["vol"]) > 0 else delta_cost
@@ -575,8 +537,7 @@ class Strategy:
                         fill_order, delta_vol, fill_price, fee=delta_fee, final=False,
                     )
                 elif abs(delta_fee) > eps:
-                    # Rar, fee-ul final poate aparea cu un poll dupa ultimul
-                    # volum. Il taxam fara sa simulam un fill de volum zero.
+                    # Charge a late final fee without simulating a zero-volume fill.
                     self.s["cycle_fees"] += delta_fee
                     self.s["fees_total"] += delta_fee
                     self.s["realized_net"] -= delta_fee
@@ -644,10 +605,9 @@ class Strategy:
                 self._finalize_cycle_if_flat(o, price)
 
     def _finalize_cycle_if_flat(self, o: dict, price: float) -> None:
-        """Inchide ciclul o singura data, numai dupa status terminal al iesirii."""
-        # Dust-ul lasat de _dust_safe_qty nu trebuie sa tina ciclul deschis.
-        # Aplicam pragul numai la un ordin terminal: un partial fill inca open
-        # poate avea legitim un rest foarte mic ce urmeaza sa fie executat.
+        """Close a cycle once, only after terminal exit status."""
+        # Dust left by _dust_safe_qty must not keep a cycle open. Apply the threshold
+        # only at terminal state because an open partial fill may validly retain dust.
         dust = 2 * 10.0 ** -(max(self.vol_dec - 1, 1))
         if abs(self.s["qty"]) < dust:
             self.s["qty"] = 0.0
@@ -661,27 +621,25 @@ class Strategy:
          self.s["fees_total"], self.s["cycle"]) = keep
         self.s["last_sell_price"] = price   # pt regula de reintrare (nu recumpara mai sus)
         self.s["last_exit_kind"] = o.get("kind")   # "TP"/"STOP" -> reintrare STOP-aware
-        self.s["sl_low"] = price            # minim initial pt reintrarea pe revenire dupa SL
+        self.s["sl_low"] = price            # Initial low for post-stop bounce reentry.
         log(f"  [STRAT] === ciclu inchis, reincep (ciclu {self.s['cycle']}) ===")
 
-    # -- decizie ---------------------------------------------------------------
+    # -- Decision logic --------------------------------------------------------
     def _check_stop_loss(self, price: float) -> bool:
-        """Inchide TOT daca pierderea nerealizata depaseste pragul (anti-runaway DCA)."""
+        """Close everything when unrealized loss crosses the anti-runaway threshold."""
         if self.p.stop_loss_pct <= 0:
             return False
         avg = self._avg()
         if not avg:
             return False
-        loss_pct = (avg - price) / avg * 100   # long: pierdem cand pretul < pret mediu (pt log)
+        loss_pct = (avg - price) / avg * 100   # A long position loses below average cost.
         if sr.hit_stop(avg, price, self.p.stop_loss_pct):
-            # Un exit MARKET deja trimis este in curs de reconciliere. Nu il
-            # anula si nu trimite inca unul la fiecare tick/API timeout.
+            # Reconcile an already submitted MARKET exit instead of canceling or duplicating it.
             if self._has_pending_market_exit():
                 return True
             log(f"  🛑 [STRAT] STOP-LOSS: pierdere {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — VAND TOT (taie pierderea)")
-            # Nu uitam niciun ordin daca anularea esueaza: un DCA/TP "fantoma"
-            # poate umple dupa iesire. Daca toate cancelarile sunt acceptate,
-            # trimitem exit-ul imediat; statusurile terminale se confirma ulterior.
+            # Retain orders after failed cancellation because a ghost DCA/TP can fill
+            # after exit. Submit exit only when all cancellations are accepted.
             if not self._cancel_orders():
                 log("  ! [STRAT] STOP amanat: cel putin un ordin nu a putut fi anulat")
                 return True
@@ -712,9 +670,10 @@ class Strategy:
         return math.ceil(raw * scale - 1e-12) / scale
 
     def _maybe_adopt(self) -> None:
-        """Adopta o pozitie EXISTENTA din cont (ex. alocare IPO/xStock) in loc sa
-        cumpere intrarea. Ruleaza o singura data, DOAR pe stare proaspata, ca sa
-        nu strice un ciclu in curs (ex. botul de HYPE)."""
+        """Adopt an existing account position instead of buying an entry.
+
+        Run once on fresh state only so an active cycle cannot be corrupted.
+        """
         if self.p.adopt_cost <= 0 or self.s.get("adopted"):
             return
         if (self.s["qty"] > 1e-12 or self.s["orders"]
@@ -722,7 +681,7 @@ class Strategy:
             log("  [STRAT] adopt: starea nu e proaspata — NU adopt (ciclu in curs)")
             return
         qty = self.p.adopt_qty
-        if qty <= 0:  # citeste cantitatea din balanta (activul de baza al perechii)
+        if qty <= 0:  # Read quantity from the pair's base-asset balance.
             try:
                 precision = self.client.pair_precision(self.pair)
                 base = precision.base_asset if precision else ""
@@ -749,12 +708,12 @@ class Strategy:
                    source=f"{self.notification_source}-bot", price=self.p.adopt_cost,
                    desktop=self.desktop)
 
-    # -- Sizing PROCENTUAL (buget total × alocare; toate 0 -> fix) -------------
+    # -- Percentage sizing; all-zero settings retain fixed sizing --------------
     def _pct_sizing_on(self) -> bool:
         return self.p.pct_sizing_on()
 
     def _alloc_budget(self) -> float:
-        """Felia acestei monede din bugetul total: total × alloc%."""
+        """Return this asset's allocation from the total budget."""
         return self.p.allocated_budget()
 
     def _effective_entry_amount(self) -> float:
@@ -766,10 +725,9 @@ class Strategy:
     def _base_dca_amount(self) -> float:
         return self.p.effective_dca_amount_base()
 
-    # -- SHADOW vol-adaptiv (doar observatie/log, nu decide nimic) --------------
+    # -- Adaptive-volatility shadow observation; does not decide ----------------
     def _effective_dca_amount(self) -> float:
-        """Marimea DCA: baza (% din felie SAU fix) × scalare vol (#2, daca activata).
-        Fail-safe pe warm-up/eroare (cade pe baza), ca reintrarea adaptiva."""
+        """Scale base DCA size by volatility when enabled, falling back during warm-up."""
         base = self._base_dca_amount()
         scale_k = float(self.p.dca_vol_scale_k)
         vol_ref = float(self.p.dca_vol_ref)
@@ -797,7 +755,7 @@ class Strategy:
         return self._hourly_vol_from_closes(closes, self.p.dca_vol_interval)
 
     def _shadow_vol_1h(self) -> float | None:
-        """Volatilitate 1h (%) din istoricul propriu de tick-uri. None = warm-up."""
+        """Return one-hour volatility from local tick history, or None during warm-up."""
         pts = list(self._shadow_prices)
         if len(pts) < 20:
             return None
@@ -816,10 +774,11 @@ class Strategy:
         return std * math.sqrt(3600.0 / mean_dt) * 100.0
 
     def _trend_up(self, min_pts: int = 20) -> bool:
-        """Trend scurt UP din istoricul propriu de preturi (self._shadow_prices):
-        media jumatatii RECENTE > media jumatatii VECHI cu >= tp_trend_min_pct%
-        (peste zgomot). Determinist -> IDENTIC in live si backtest (aceeasi serie de
-        preturi intra in step()). False la warm-up (<min_pts puncte)."""
+        """Detect a short uptrend from local price history.
+
+        The recent-half mean must exceed the old-half mean by ``tp_trend_min_pct``.
+        This deterministic rule is identical in live and replay and returns False during warm-up.
+        """
         pts = [p for _, p in self._shadow_prices]
         if len(pts) < min_pts:
             return False
@@ -846,19 +805,17 @@ class Strategy:
             log(f"  [SHADOW] eroare calcul ({e}) — ignor")
 
     def _effective_reentry_drop_pct(self) -> tuple[float, str]:
-        """Pragul de reintrare EFECTIV folosit la decizie: adaptiv (K_REENTRY *
-        vol_1h) daca reentry_adaptive e activat SI volatilitatea poate fi
-        calculata; altfel cade pe reentry_drop_pct (fix) — fail-safe, ca
-        gate-ul Kalman (nu opreste/altereaza trading-ul din cauza unui semnal
-        indisponibil). Investigat 22-23 iul (offline/research/kraken_adaptive_thresholds/,
-        vezi README.md): adaptiv bate fix pe HYPEUSD (TOTAL +3.26% vs +2.20%,
-        ~30 zile), K=2.0 confirmat optim printr-un sweep dedicat."""
+        """Return the effective adaptive or fixed reentry threshold.
+
+        Use ``K_REENTRY * one-hour volatility`` when enabled and available. Otherwise
+        fail safely to the fixed percentage so missing signals never stop trading.
+        """
         if not self.p.reentry_adaptive:
             return self.p.reentry_drop_pct, "fix"
         try:
             k_re = float_env("SHADOW_K_REENTRY") or 2.0
             vol = self._shadow_vol_1h()
-        except Exception as e:  # noqa: BLE001 — nu opreste trading-ul
+        except Exception as e:  # noqa: BLE001 — observational failure must not stop trading.
             log(f"  [REINTRARE-ADAPTIV] eroare calcul ({e}) — fallback pe fix")
             return self.p.reentry_drop_pct, "fix (fallback, eroare)"
         if vol is None:
@@ -866,16 +823,16 @@ class Strategy:
         return k_re * vol, f"adaptiv (vol_1h {vol:.2f}% x k={k_re})"
 
     def _effective_trail_pct(self) -> float:
-        """A: pullback-ul de trailing EFECTIV. Adaptiv (k×vol_1h, clamp) daca
-        tp_trail_adaptive; altfel tp_trail_pct fix. Fail-safe pe warm-up/eroare
-        (cade pe fix), ca gate-ul de reintrare adaptiva — nu altereaza trading-ul
-        cand semnalul lipseste. Ideea: ride mai LARG in trend volatil, mai STRANS
-        in chop, FARA a cumpara sus (defectul overlay-ului cu top-up)."""
+        """Return the clamped volatility-adaptive or fixed trailing pullback.
+
+        Warm-up and errors fall back to the fixed value. Volatile trends receive more
+        room while choppy markets receive tighter trailing without buying higher.
+        """
         if not self.p.tp_trail_adaptive:
             return self.p.tp_trail_pct
         try:
             vol = self._trail_vol_1h()
-        except Exception as e:  # noqa: BLE001 — nu opreste trading-ul
+        except Exception as e:  # noqa: BLE001 — observational failure must not stop trading.
             log(f"  [STRAT] trailing adaptiv: OHLC indisponibil ({e}) — fallback pe fix")
             vol = None
         if vol is None:
@@ -885,8 +842,8 @@ class Strategy:
     def _trail_vol_1h(self) -> float | None:
         """Return one-hour-normalized volatility at one OHLC cadence in live and replay.
 
-        Tick-urile live de 2 minute versus close-urile de 4h din backtest produceau
-        different signals even after square-root-of-time scaling. Live mode reads closed
+        Different live-tick and replay-bar cadences produced different signals even after
+        square-root-of-time scaling. Live mode reads closed
         provider bars; replay is separately validated against the same interval.
         """
         if self.replay_mode:
@@ -932,21 +889,21 @@ class Strategy:
 
     # -- TREND OVERLAY ---------------------------------------------------------
     def _trend_closes(self) -> list:
-        """Seria de INCHIDERI pt semnalul de trend LUNG, ACELASI timescale live si backtest:
-        - BACKTEST (replay_mode): barele fed-uite in step() (_shadow_prices = inchiderile lor).
-        - LIVE/PAPER-LIVE: OHLC provider pe trend_interval (fetch-ul poate fi cache-uit).
-        Rezolva gap-ul de cadenta: SMA(N) inseamna acelasi lucru in ambele (240m×30 = ~5 zile)."""
+        """Return long-trend closes at the same cadence in live and replay.
+
+        Replay uses injected bar closes; live and paper-live use provider OHLC at
+        ``trend_interval``. Thus SMA(N) has the same meaning in both modes.
+        """
         if self.replay_mode:
             return [p for _, p in self._shadow_prices]
         try:
             return self.client.ohlc_closes(self.pair, self.p.trend_interval)
-        except Exception as e:  # noqa: BLE001 — fara semnal -> pur si simplu nu intra in trend
+        except Exception as e:  # noqa: BLE001 — no signal simply means no trend entry.
             log(f"  [STRAT] trend OHLC fetch esuat ({e}) — trend nedeterminat")
             return []
 
     def _trend_up_series(self, closes: list) -> bool:
-        """UPTREND CONFIRMAT: ultimele `trend_confirm_bars` bare au close > SMA(N) SI SMA(N)
-        in crestere. Determinist -> IDENTIC live/backtest (aceeasi serie de inchideri)."""
+        """Confirm uptrend when recent closes exceed a rising SMA for the required bars."""
         n = self.p.trend_sma_n
         k = max(1, self.p.trend_confirm_bars)
         if len(closes) < n + k:
@@ -960,9 +917,11 @@ class Strategy:
         return True
 
     def _overlay_step(self, price: float) -> bool:
-        """Overlay de regim. True = a gestionat tick-ul (nu mai rula logica de range).
-        In UPTREND confirmat: TOP-UP mare + hold; iese pe trailing (A) sau trailing SAU
-        pret<SMA=trend rupt (B). In range (fara uptrend): False -> cade pe DCA/TP clasic."""
+        """Apply the regime overlay and return whether it handled the tick.
+
+        Confirmed uptrend uses top-up, hold, and trailing or SMA-break exit. A range
+        returns False so classic DCA/TP logic runs.
+        """
         closes = self._trend_closes()
         up = self._trend_up_series(closes)
         pending_trend_entry = next(
@@ -997,9 +956,9 @@ class Strategy:
             log("  [STRAT] TREND ENTER anulat: semnalul a dispărut înainte de fill")
             return False                            # revine la strategia range
         if up and self.s["spent"] + self.p.trend_topup <= self._effective_max_budget():
-            self._cancel_orders("buy")              # anuleaza ordine range pendinte
+            self._cancel_orders("buy")              # Cancel pending range orders.
             self._cancel_orders("sell")
-            if self.s["orders"]:                    # REAL: asteapta confirmarile terminale
+            if self.s["orders"]:                    # Live mode waits for terminal confirmations.
                 return True
             self._place("buy", self._qty_for(self.p.trend_topup, price), price,
                         kind="TREND_ENTRY", amount=self.p.trend_topup)
@@ -1017,7 +976,7 @@ class Strategy:
         tick_time = time.time() if timestamp is None else float(timestamp)
         self._shadow_prices.append((tick_time, price))
 
-        # adoptare in asteptare: NU cumpara o intrare noua — alocarea e pe drum
+        # While adoption is pending, do not buy a new entry; the allocation is in transit.
         if self.p.adopt_cost > 0 and not self.s.get("adopted") and held <= 1e-12:
             self._maybe_adopt()
             if not self.s.get("adopted"):
@@ -1028,24 +987,23 @@ class Strategy:
         # including overlay hold and trailing behavior.
         if held > 1e-12 and self._check_stop_loss(price):
             return
-        # Un exit MARKET trimis intr-un tick anterior trebuie reconciliat inainte
-        # de orice TP/DCA nou, chiar daca pretul a revenit intre timp.
+        # Reconcile a MARKET exit from an earlier tick before any new TP/DCA decision,
+        # even if price has recovered meanwhile.
         if self._has_pending_market_exit():
             return
 
-        # TREND OVERLAY: combina regim range (DCA/TP) cu regim trend (hold+trailing).
+        # Combine range DCA/TP with trend hold/trailing behavior.
         if self.p.trend_overlay and self._overlay_step(price):
             return
 
         if held <= 1e-12:
             if self._has_open("buy"):
                 return
-            # REGULA DE REINTRARE — STOP-aware (4 aug):
+            # Stop-aware reentry rule.
             lsp = self.s.get("last_sell_price")
             if self.s.get("last_exit_kind") == "STOP" and self.p.reentry_sl_bounce_pct > 0 and lsp:
-                # dupa un STOP-LOSS: reintra pe REVENIRE (bounce de la minimul de dupa vanzare),
-                # NU asteptand o scadere si mai jos (regula veche lasa botul blocat afara cand
-                # pretul isi revine — ex. vandut 51.19, HYPE la 55.6, prag vechi 50.06 de neatins).
+                # After stop-loss, reenter on a bounce from the post-sale low instead of
+                # waiting for a deeper drop that could leave the bot outside a recovery.
                 low = min(self.s.get("sl_low") or price, price)
                 self.s["sl_low"] = low
                 prag_bounce = low * (1 + self.p.reentry_sl_bounce_pct / 100)
@@ -1056,19 +1014,17 @@ class Strategy:
                 log(f"  [STRAT] reintrare dupa STOP: revenire atinsa (pret {price} >= "
                     f"{prag_bounce:.{self.price_dec}f}, min {low}) — reintru")
             else:
-                # dupa un TP (sau fara SL): nu recumpara mai sus decat ai vandut — asteapta
-                # o scadere reala sub pretul vandut (anti "vand la 60.64, recumpar la 61.1")
+                # After TP, do not repurchase above the sale price; wait for a real drop.
                 drop_pct, drop_source = self._effective_reentry_drop_pct()
                 if drop_pct > 0 and lsp:
                     prag = lsp * (1 - drop_pct / 100)
-                    # toleranta "aproape de prag" (botcore.are_close, determinist): pretul la
-                    # tol% de prag conteaza ca atins — altfel ratam intrari la 2-3 centi de prag
+                    # Deterministic tolerance treats a near-threshold price as reached.
                     if sr.reentry_drop_blocked(price, lsp, drop_pct, self.p.reentry_tolerance_pct):
                         log(f"  [STRAT] reintrare blocata: pret {price} > prag {prag:.2f} [{drop_source}]"
                             f"{f' (tol {self.p.reentry_tolerance_pct}%)' if self.p.reentry_tolerance_pct else ''} "
                             f"(vandut la {lsp}, astept -{drop_pct:.2f}%)")
                         if not self.p.reentry_adaptive:
-                            self._shadow_reentry_line(price, lsp, prag)   # log comparativ DOAR cand fixul inca decide
+                            self._shadow_reentry_line(price, lsp, prag)   # Compare only while fixed logic decides.
                         return
             entry_amt = self._effective_entry_amount()
             budget = self._effective_max_budget()
@@ -1083,17 +1039,14 @@ class Strategy:
         trail_armed = self.s.get("trail_peak") is not None
         if (self.p.enable_takeprofit and avg and self.p.tp_trend_hold
                 and (trail_armed or price >= sr.tp_price(avg, self.p.takeprofit_pct))):
-            # v2 TRAILING: se ARMEAZA la prima depasire a TP-ului si ramane armat pana
-            # la iesire. Evaluarea trebuie sa continue si daca pretul cade ulterior sub
-            # TP; altfel varful s-ar reseta exact in pullback-ul pe care vrem sa-l vindem.
+            # Arm trailing at the first TP crossing and keep it armed through exit, even
+            # if price later falls below TP, so the target pullback does not reset the peak.
             peak = max(self.s.get("trail_peak") or price, price)
             self.s["trail_peak"] = peak
-            eff_trail = self._effective_trail_pct()   # A: adaptiv pe vol daca activat, altfel fix
+            eff_trail = self._effective_trail_pct()   # Adaptive when enabled, otherwise fixed.
             candidate_stop = peak * (1 - eff_trail / 100)
-            # Un trailing stop este o limita unidirectionala: volatilitatea poate
-            # largi distanta pentru varfuri VIITOARE, dar nu are voie sa dea inapoi
-            # profitul deja protejat. Inainte, o bara OHLC noua putea mari
-            # ``eff_trail`` si cobora pragul chiar cu acelasi ``trail_peak``.
+            # A trailing stop ratchets one way: volatility may widen distance for future
+            # peaks but cannot surrender profit already protected by the current stop.
             previous_stop = self.s.get("trail_stop")
             trail_stop = max(candidate_stop, previous_stop or candidate_stop)
             self.s["trail_stop"] = trail_stop
@@ -1116,16 +1069,15 @@ class Strategy:
                                kind="TP", market=True):
                     log(f"  [STRAT] trailing: pullback {eff_trail:.2f}% de la varf "
                         f"{peak:.{self.price_dec}f} -> IES la {exit_px} (calarit trendul)")
-                # Nu deschide un DCA contradictoriu in acelasi tick in care iesim.
+                # Do not open a contradictory DCA on the exit tick.
                 return
             else:
                 self._cancel_orders("sell", exclude_market=True)
                 log(f"  [STRAT] peste TP, CALARESC (varf {peak:.{self.price_dec}f}, "
                     f"trail-stop {trail_stop:.{self.price_dec}f})")
         elif self.p.enable_takeprofit and avg and self.p.tp_trend_hold:
-            # v2 SUB TP, ride ON: NU plasez TP fix (altfel se umple la TP si nu mai calaresc).
-            # Astept sa DEPASESC nivelul TP ca sa pornesc trailing-ul; anulez orice sell fix.
-            # Iesirea de siguranta ramane STOP-LOSS-ul (verificat mai sus in step()).
+            # Below TP with ride enabled, do not place a fixed TP. Wait to cross TP and
+            # arm trailing; stop-loss remains the safety exit.
             self.s["trail_peak"] = None
             self.s["trail_stop"] = None
             self._cancel_orders("sell", exclude_market=True)
@@ -1133,13 +1085,13 @@ class Strategy:
             self.s["trail_peak"] = None   # sub TP / mod clasic -> reset varf
             self.s["trail_stop"] = None
             # TP in TRANSE (optional, STRAT_TP_TRANCHES="3:50,6:50"): vinde gradual.
-            # Fara tranче configurate = comportamentul CLASIC (un TP pe tot) — DEFAULT.
+            # No configured tranches means the classic one-order full TP default.
             tranches = self.p.tp_tranches or [(self.p.takeprofit_pct, 100.0)]
             desired, rem = [], held
             for i, (pct, share) in enumerate(tranches):
                 # ultima transa = vinde tot ce-a ramas -> risc de "Insufficient funds"
-                # (balanta reala de pe venue poate fi cu o zecimala mai mica decat
-                # held-ul urmarit intern) — acelasi praf ca la adoptie.
+                # Venue balance may be one decimal smaller than internally tracked holdings;
+                # leave the same dust buffer used during adoption.
                 q = self._dust_safe_qty(rem) if i == len(tranches) - 1 \
                     else min(rem, round(held * share / 100, self.vol_dec))
                 rem = round(rem - q, self.vol_dec)
@@ -1221,8 +1173,8 @@ class Strategy:
                     time.sleep(self.p.check_minutes * 60)
                     continue
                 try:
-                    # Dupa o eroare de disc, nu mai luam decizii noi pana cand
-                    # state-ul curent din memorie poate fi persistat din nou.
+                    # After a disk error, make no new decisions until current memory state
+                    # can be persisted again.
                     if self._state_write_failed:
                         self._save()
                     self.reconcile(price)
