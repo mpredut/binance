@@ -20,23 +20,20 @@ import log
 import utils as u
 import symbols as sym
 from binance_api import bapi as api
-# Facada market-data (Faza 2a). Import sigur: market_api -> binance_api.bapi (nu
-# importa cacheManager), deci nu inchide niciun ciclu. Pretul curent al lantului
-# de trend (CurrentPrice) trece prin acest singleton; trading-ul ramane pe bapi.
+# Safe market-data facade import: market_api imports binance_api.bapi without importing
+# cacheManager, so it does not close a cycle. The trend chain's current price passes
+# through this singleton while trading remains on bapi.
 import providers.market_api as _market_api
 
-# 30 iul: incarca parametrii tunabili din cachemanager_config.env (versionat,
-# se COMITE — fara secrete), acelasi tipar ca tradeall_config.env/
-# monitortrades_config.env/bapi_placeorder_config.env. botcore.load_dotenv NU
-# suprascrie variabile deja setate in mediul real, doar completeaza ce lipseste.
+# Load versioned, non-secret tuning parameters using the same pattern as the other
+# component env files. ``botcore.load_dotenv`` never overwrites variables already set
+# in the real environment; it only fills missing values.
 from botcore import load_dotenv as _load_dotenv
 _load_dotenv("cachemanager_config.env")
 
-# Limitele ferestrei DINAMICE (30 iul) — vezi
-# CachePriceShortTrendManager.get_instant_trend_for_window. Sub minim, prea
-# putine esantioane pt o panta cu sens; peste maxim, cost de calcul nejustificat
-# (si oricum plafonat de Cache24PriceManager.KEEP_HOURS=24h — nu poti cere un
-# orizont mai lung decat ce se pastreaza).
+# Dynamic-window bounds for ``get_instant_trend_for_window``. Values below the minimum
+# provide too few samples for a meaningful slope; values above the maximum add unjustified
+# cost and exceed the 24-hour history retained by Cache24PriceManager.
 CM_DYNAMIC_WINDOW_MIN_SEC = float(os.environ.get("CM_DYNAMIC_WINDOW_MIN_SEC", "14.0"))
 CM_DYNAMIC_WINDOW_MAX_SEC = float(os.environ.get("CM_DYNAMIC_WINDOW_MAX_SEC", "21600.0"))
 
@@ -51,12 +48,13 @@ CM_DYNAMIC_WINDOW_MAX_SEC = float(os.environ.get("CM_DYNAMIC_WINDOW_MAX_SEC", "2
 
 @contextlib.contextmanager
 def atomic_write(path):
-    """Context-manager pentru scriere atomică: dă un file handle pe un tmp UNIC,
-    iar la ieșirea cu succes face os.replace(tmp, path) (rename atomic). La eroare
-    șterge tmp-ul și re-ridică. Un cititor cross-process vede ori fișierul vechi,
-    ori cel nou complet — niciodată unul parțial. Folosit pt JSON și JSONL."""
-    # tmp UNIC (pid+thread) → scrieri concurente (alt thread/proces) nu se calcă pe
-    # același fișier temporar; os.replace rămâne atomic (last-writer-wins).
+    """Yield a unique temporary file handle and atomically replace ``path`` on success.
+
+    On failure, remove the temporary file and re-raise. Cross-process readers therefore
+    see either the old file or the complete new file, never a partial JSON/JSONL file.
+    """
+    # A process-and-thread-specific temporary name prevents concurrent writers from
+    # sharing a temporary file. ``os.replace`` remains atomic and last-writer-wins.
     tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
     f = open(tmp, "w")
     try:
@@ -73,7 +71,7 @@ def atomic_write(path):
 
 
 def atomic_write_json(path, obj, indent=None):
-    """Scriere atomică a unui JSON (vezi atomic_write). Ridică excepția la eroare."""
+    """Atomically write JSON through ``atomic_write`` and propagate failures."""
     with atomic_write(path) as f:
         json.dump(obj, f, indent=indent)
 
@@ -121,14 +119,14 @@ def _should_poll_for_manager(cls_name):
 
 class CacheManagerInterface(ABC):
     _live_instances = weakref.WeakSet()
-    # ── Politică retenție/rotație pentru cache-uri append (verificată periodic) ──
-    RETENTION_DAYS              = 730              # ~2 ani: șterge intrările mai vechi
-    MAX_FILE_BYTES             = 1_000_000_000    # ~1 GB: peste asta → rotație
-    RETENTION_CHECK_INTERVAL_SEC = 7 * 24 * 3600  # verificare săptămânală
-    ROTATE_KEEP_FRACTION       = 0.10             # la rotație păstrăm ultimele 10%
-    ROTATE_ARCHIVE_COUNT       = 2                # nu acumulam arhive de ~1GB indefinit
-    RESYNC_INTERVAL_SEC        = 10 * 60          # reconciliere mem↔fișier la 10 min
-    DEDUP_WINDOW               = 100             # dedup per-update doar față de ultimele N items
+    # ── Periodically enforced retention and rotation policy for append caches ──
+    RETENTION_DAYS              = 730              # Remove entries older than about two years.
+    MAX_FILE_BYTES             = 1_000_000_000    # Rotate above roughly one GB.
+    RETENTION_CHECK_INTERVAL_SEC = 7 * 24 * 3600  # Check weekly.
+    ROTATE_KEEP_FRACTION       = 0.10             # Keep the latest ten percent after rotation.
+    ROTATE_ARCHIVE_COUNT       = 2                # Do not accumulate one-GB archives indefinitely.
+    RESYNC_INTERVAL_SEC        = 10 * 60          # Reconcile memory and disk every ten minutes.
+    DEDUP_WINDOW               = 100             # Compare each update only with the latest N items.
 
     def __init__(self, sync_ts, symbols, filename, append_mode = True, api_client=api,
                  append_persist=False):
@@ -144,10 +142,10 @@ class CacheManagerInterface(ABC):
         self.filename = u.cache_path(filename)   # → subfolderul cachedb/
         self.append_mode = append_mode
         self.api_client = api_client
-        # Persistență prin APPEND (JSONL) — pentru cache-uri pur-append (Trade,
-        # AssetValue): scriem doar liniile NOI, nu rescriem tot fișierul.
+        # JSONL persistence for append-only Trade and AssetValue caches writes only
+        # new lines rather than rewriting the entire file.
         self.append_persist = append_persist
-        self._persisted_counts = {}   # symbol → câte items sunt deja pe disc
+        self._persisted_counts = {}   # Number of items already persisted per symbol.
 
         self.days_back = 30
 
@@ -157,16 +155,15 @@ class CacheManagerInterface(ABC):
         self.thread = None
         self._stop_event = threading.Event()
         self.save_state = False
-        # dacă True, bucla de sync doarme un interval înainte de prima iterație.
-        # Respectă valoarea pre-setată de subclase ÎNAINTE de super().__init__
-        # (thread-ul pornește în super → trebuie setat din timp).
+        # When true, sleep one interval before the first synchronization iteration.
+        # Preserve values subclasses set before ``super().__init__`` because the base
+        # initializer starts the thread.
         if not hasattr(self, "_first_sleep"):
             self._first_sleep = False
         self.lock = threading.RLock()
 
-        # Subscriber pattern comun — clasele derivate forward prețuri către
-        # alți manageri / PriceWindow prin _notify_price_subscribers().
-        # Init înainte de periodic_sync (thread-ul poate notifica imediat).
+        # Shared subscriber pattern forwards prices to other managers and PriceWindow.
+        # Initialize before periodic_sync because its thread may notify immediately.
         if not hasattr(self, "_price_subscribers"):
             self._price_subscribers = []
 
@@ -175,10 +172,10 @@ class CacheManagerInterface(ABC):
         # function calls here after all inint vars
         self.load_state()
 
-    # ── Subscriber pattern (forward prețuri) ──────────────────────────────────
+    # ── Subscriber pattern for forwarding prices ─────────────────────────────
 
     def subscribe_price(self, subscriber) -> None:
-        """Abonează un obiect care implementează on_price_update(symbol, ts_ms, price)."""
+        """Subscribe an object implementing ``on_price_update(symbol, ts_ms, price)``."""
         with self.lock:
             if subscriber not in self._price_subscribers:
                 self._price_subscribers.append(subscriber)
@@ -205,9 +202,11 @@ class CacheManagerInterface(ABC):
             return list(self.cache.keys())       
         
     def rebuild_fetchtime_times(self):
-        """Default: None → __rebuild_fetchtime_times deduce generic din timestamp-urile
-        item-urilor (dict 'time'/'timestamp' sau listă [ts, ...]). Subclasele pot
-        suprascrie dacă au o logică specifică."""
+        """Allow subclasses to provide custom fetch-time reconstruction.
+
+        Returning None lets ``__rebuild_fetchtime_times`` infer timestamps generically
+        from ``time``/``timestamp`` dictionaries or ``[timestamp, ...]`` lists.
+        """
         return None
     
     
@@ -217,23 +216,23 @@ class CacheManagerInterface(ABC):
             last_times_per_sym = defaultdict(int)
             for symbol, trades in self.cache.items():
                 for trade in trades:
-                    # Caută "time" sau "timestamp", dacă nu există -> 0
+                    # Use ``time`` or ``timestamp`` and fall back to zero.
                     #time_ = trade.get("time") or trade.get("timestamp") or 0
                     if isinstance(trade, dict):
                         time_ = trade.get("time") or trade.get("timestamp") or 0
                     elif isinstance(trade, list) and len(trade) > 0:
-                        time_ = trade[0]  # pentru format [timestamp_ms, price]
+                        time_ = trade[0]  # ``[timestamp_ms, price]`` format.
                     else:
                         time_ = 0
                     if time_ > last_times_per_sym[symbol]:
                         last_times_per_sym[symbol] = time_
-            # Offset de siguranță (60 sec)
+            # Apply a 60-second safety offset.
             for symbol in last_times_per_sym:
                 last_times_per_sym[symbol] = max(0, last_times_per_sym[symbol] - 60_000)                
         if not last_times_per_sym:
-            # Fallback: folosim data fișierului
+            # Fall back to the file modification time.
             fallback_time_file = 0
-            if os.path.exists(self.filename): #TODO is daca am date in fisier
+            if os.path.exists(self.filename): # TODO: distinguish an existing file with no data.
                 fallback_time_file = int(os.path.getmtime(self.filename) * 1000) - 60_000
             fallback_time = min(self.fallback_time_default, fallback_time_file)
             return {symbol: fallback_time for symbol in self.symbols}
@@ -255,7 +254,7 @@ class CacheManagerInterface(ABC):
                     with self.lock:
                         self.cache = data.get("items", {})
                         if not isinstance(self.cache, dict):
-                            # dacă fișierul avea format vechi (listă), transformăm în dict
+                            # Convert the legacy list format to a dictionary.
                             self.cache = {sym: item for sym, item in zip(self.symbols, self.cache)}
                             print(f"[{self.cls_name}][warning] self.cache is not Dict!!!!")    
                         
@@ -275,9 +274,9 @@ class CacheManagerInterface(ABC):
             self.save_state_to_file_if_enabled()
 
 
-    # ── Reziliență mem↔fișier: freshness + guard + resync ─────────────────────
+    # ── Memory/disk resilience: freshness, overwrite guard, and resync ────────
     def _mem_max_ts(self):
-        """Freshness memoriei: cel mai recent fetchtime (ms)."""
+        """Return memory freshness as the latest fetch time in milliseconds."""
         if not self.fetchtime_time_per_symbol:
             return 0
         try:
@@ -286,7 +285,7 @@ class CacheManagerInterface(ABC):
             return 0
 
     def _persisted_max_ts(self):
-        """Freshness fișierului din sidecar .meta (citire ieftină)."""
+        """Read file freshness cheaply from the ``.meta`` sidecar."""
         try:
             with open(self.filename + ".meta") as mf:
                 return json.load(mf).get("max_ts", 0)
@@ -294,7 +293,7 @@ class CacheManagerInterface(ABC):
             return 0
 
     def _write_meta(self):
-        """Sidecar mic cu freshness (max_ts) + fetchtime + counts. Atomic."""
+        """Atomically write a small freshness, fetch-time, and count sidecar."""
         try:
             atomic_write_json(self.filename + ".meta",
                               {"max_ts": self._mem_max_ts(),
@@ -305,13 +304,15 @@ class CacheManagerInterface(ABC):
             print(f"[{self.cls_name}][Eroare] meta {self.filename}: {e}")
 
     def save_state_to_file_if_enabled(self):
-        """Scrie DOAR dacă save_state e activat (writer). No-op pentru readeri."""
+        """Write only when state saving is enabled; readers perform no work."""
         if self.save_state:
             self.save_state_to_file()
 
     def save_state_to_file(self):
-        """Scrie EFECTIV pe disc (indiferent de save_state) — pentru writer/failover.
-        Are guard: NU suprascrie date mai NOI din fișier (alt proces între timp)."""
+        """Write to disk regardless of ``save_state`` for writers and failover.
+
+        Refuse to overwrite newer data another process has already persisted.
+        """
         if self._persisted_max_ts() > self._mem_max_ts():
             builtins.print(f"[{self.cls_name}][resync] fișier mai nou decât memoria → "
                            f"refuz suprascrierea cu date vechi ({self.filename})")
@@ -332,7 +333,7 @@ class CacheManagerInterface(ABC):
             print(f"[{self.cls_name}][Eroare] La salvarea fișierului cache {self.filename} / .tmp : {e}")
 
     def _reload_from_disk(self):
-        """Reîncarcă cache-ul din fișier (când fișierul e mai nou — alt proces)."""
+        """Reload the cache when another process has written a newer file."""
         if self.append_persist:
             self._load_jsonl()
             return
@@ -349,7 +350,7 @@ class CacheManagerInterface(ABC):
                 print(f"[{self.cls_name}][Eroare] reload {self.filename}: {e}")
 
     def resync_mem_file(self):
-        """Reconciliere periodică: fișier mai nou → reîncarc; memorie mai nouă → scriu."""
+        """Periodically reload newer disk state or persist newer memory state."""
         file_ts = self._persisted_max_ts()
         mem_ts = self._mem_max_ts()
         if file_ts > mem_ts:
@@ -358,16 +359,15 @@ class CacheManagerInterface(ABC):
         elif mem_ts > file_ts and self.save_state:
             self.save_state_to_file_if_enabled()
 
-    # ── Persistență APPEND (JSONL) pentru cache-uri pur-append ────────────────
+    # ── JSONL append persistence for append-only caches ──────────────────────
     def _save_jsonl_append(self):
-        """Scrie DOAR items-urile noi (delta de la ultimul flush), prin append.
-        Nu rescrie tot fișierul. (meta o scrie save_state_to_file_if_enabled)."""
+        """Append only items added since the last flush without rewriting the file."""
         try:
             with self.lock:
                 with open(self.filename, "a") as f:
                     for symbol, items in self.cache.items():
                         start = self._persisted_counts.get(symbol, 0)
-                        if start > len(items):   # cache a fost golit/scurtat → resync
+                        if start > len(items):   # The cache was cleared or shortened; resynchronize.
                             start = 0
                         for item in items[start:]:
                             f.write(json.dumps({"s": symbol, "i": item}) + "\n")
@@ -376,7 +376,7 @@ class CacheManagerInterface(ABC):
             print(f"[{self.cls_name}][Eroare] append JSONL {self.filename}: {e}")
 
     def _load_jsonl(self):
-        """Încarcă fișierul JSONL (toate liniile) → cache. fetchtime din sidecar."""
+        """Load every JSONL line into the cache and fetch times from the sidecar."""
         with self.lock:
             self.cache = {}
             if os.path.exists(self.filename):
@@ -389,7 +389,7 @@ class CacheManagerInterface(ABC):
                             rec = json.loads(line)
                             self.cache.setdefault(rec["s"], []).append(rec["i"])
                         except Exception:
-                            continue   # linie parțială/coruptă (crash la append) — o sărim
+                            continue   # Skip a partial or corrupt line left by an append crash.
             self._persisted_counts = {s: len(v) for s, v in self.cache.items()}
             metaf = self.filename + ".meta"
             if os.path.exists(metaf):
@@ -400,8 +400,10 @@ class CacheManagerInterface(ABC):
                     pass
 
     def compact_jsonl(self):
-        """Rescrie fișierul JSONL din memorie + ELIMINĂ DUPLICATELE (în memorie și pe
-        disc). Dedup complet aici (periodic) — ca să nu plătim costul la fiecare update."""
+        """Rewrite JSONL from memory after full in-memory and on-disk deduplication.
+
+        Perform this expensive complete pass periodically rather than on every update.
+        """
         if not self.append_persist:
             return
         try:
@@ -414,7 +416,7 @@ class CacheManagerInterface(ABC):
                         if k not in seen:
                             seen.add(k)
                             deduped.append(item)
-                    self.cache[symbol] = deduped   # dedup și în memorie
+                    self.cache[symbol] = deduped   # Keep memory deduplicated too.
                 with atomic_write(self.filename) as f:
                     for symbol, items in self.cache.items():
                         for item in items:
@@ -426,7 +428,7 @@ class CacheManagerInterface(ABC):
 
     @staticmethod
     def _entry_timestamp_ms(item):
-        """Timestamp (ms) al unei intrări — dict (time/timestamp) sau listă [ts, val]."""
+        """Extract an entry timestamp in milliseconds from a dictionary or list."""
         if isinstance(item, dict):
             return item.get("time") or item.get("timestamp") or 0
         if isinstance(item, (list, tuple)) and item:
@@ -434,19 +436,14 @@ class CacheManagerInterface(ABC):
         return 0
 
     def maintain_append_persist(self):
-        """Mentenanță periodică (săptămânal) pentru cache-uri append (append_mode=True):
-          1. PRUNE: șterge intrările mai vechi de RETENTION_DAYS — pt ORICE cache
-             append, nu doar JSONL (_entry_timestamp_ms e deja generic: dict cu
-             time/timestamp SAU [ts, val]).
-          2. ROTAȚIE pe mărime: doar pt JSONL (append_persist) — _rotate_keep_latest
-             foloseste compact_jsonl, specific formatului JSONL. Pt clasele cu JSON
-             complet (trade/order/asset_value), tinta MAX_FILE_BYTES (~1GB) e oricum
-             ireal de departe la ritmul lor de crestere (ani, nu zile) — retentia pe
-             TIMP (pasul 1) e cea care conteaza efectiv acolo.
-        21 iul: rulează acum pt orice append_mode=True (nu doar append_persist) —
-        gasit CacheTradeManager/CacheOrderManager/CacheAssetValueManager crescand
-        nemarginit, fara nicio retentie, pt ca inainte pasul asta rula DOAR pt
-        clasele JSONL."""
+        """Perform weekly maintenance for every append-mode cache.
+
+        First prune entries older than ``RETENTION_DAYS`` using the generic timestamp
+        extractor. Then rotate oversized JSONL files through ``_rotate_keep_latest``.
+        Full-JSON trade/order/asset caches grow slowly enough that time retention, not
+        the one-GB size threshold, is their effective bound. Applying this to every
+        append-mode cache prevents unbounded growth outside JSONL classes.
+        """
         if not self.append_mode:
             return
         # 1) prune time-based
@@ -463,8 +460,8 @@ class CacheManagerInterface(ABC):
             if self.append_persist:
                 self.compact_jsonl()
             else:
-                self.save_state_to_file()   # rescriere completa, normala pt clasele astea
-        # 2) rotație size-based — doar JSONL (vezi docstring)
+                self.save_state_to_file()   # A full rewrite is normal for these classes.
+        # Rotate by size only for JSONL; see the docstring.
         if not self.append_persist:
             return
         try:
@@ -474,12 +471,11 @@ class CacheManagerInterface(ABC):
             pass
 
     def _rotate_keep_latest(self):
-        """Arhivează fișierul curent și păstrează doar ultimele ROTATE_KEEP_FRACTION
-        înregistrări (per simbol) în fișierul cu numele curent."""
+        """Archive the current file and retain each symbol's latest configured fraction."""
         with self.lock:
             archive = f"{self.filename}.{int(time.time())}.archive"
             try:
-                os.replace(self.filename, archive)   # mută istoricul complet în arhivă
+                os.replace(self.filename, archive)   # Move complete history into the archive.
             except OSError as e:
                 builtins.print(f"[{self.cls_name}][maintain] arhivare eșuată: {e}")
                 return
@@ -487,7 +483,7 @@ class CacheManagerInterface(ABC):
                 keep_n = max(1, int(len(items) * self.ROTATE_KEEP_FRACTION))
                 self.cache[symbol] = items[-keep_n:]
             self._persisted_counts = {}
-            self.compact_jsonl()   # rescrie fișierul curent doar cu ce-am păstrat
+            self.compact_jsonl()   # Rewrite the current file with retained entries only.
             prefix = f"{self.filename}."
             archives = sorted(
                 (path for path in glob.glob(prefix + "*.archive")),
@@ -502,7 +498,7 @@ class CacheManagerInterface(ABC):
 
     @abstractmethod
     def get_remote_items(self, symbol, startTime):
-        """Metoda abstractă – trebuie implementată de clasele derivate."""
+        """Fetch remote items; subclasses must implement this method."""
         pass 
         
      
@@ -532,15 +528,15 @@ class CacheManagerInterface(ABC):
         #     cache_copy = list(self.cache.get(symbol, []))
         # new_items = self.filter_new_items(cache_copy, new_items)
 
-        with self.lock:  # 👈 scriere protejată
-            if self.append_mode:    # history mode (trade-uri) - # Pentru PriceOrders / Price / (Price)Trade , păstrăm toată lista de elemente   
+        with self.lock:  # Protected write.
+            if self.append_mode:    # History mode retains every PriceOrders/Price/Trade element.
                 #if isinstance(new_items, dict):
                 #    new_items = [new_items]
                 #elif not isinstance(new_items, list):
                 #    new_items = [new_items]                    
-                # Dedup DOAR față de fereastra recentă (polling re-aduce date suprapuse
-                # recente). Ieftin O(DEDUP_WINDOW) în loc de O(tot cache-ul) per update.
-                # Dedup-ul complet se face periodic în compact_jsonl.
+                # Polling returns overlapping recent data, so deduplicate against only the
+                # recent window. This is O(DEDUP_WINDOW) rather than O(entire cache); the
+                # periodic compact_jsonl pass performs complete deduplication.
                 cache_copy = list(self.cache.get(symbol, []))[-self.DEDUP_WINDOW:]
                 new_items = self.filter_new_items(cache_copy, new_items)
                 print(f"[{self.cls_name}][Info] {symbol}:  Din {count_new_items} pastrez doar {len(new_items)}")
@@ -556,9 +552,11 @@ class CacheManagerInterface(ABC):
         print(f"[{self.cls_name}][Info] {symbol}: Adăugate {len(new_items)} items noi.")
 
     def _persist_items(self, symbol, new_items):
-        """Pasul de persistare per simbol. Default: scrie în cache.
-        Subclasele pot suprascrie (ex. CacheCurrentPriceManager → _push_price
-        ca să înregistreze timestamp-ul și să notifice subscriberii)."""
+        """Persist one symbol to the cache by default.
+
+        Subclasses may override this, for example to record a timestamp and notify
+        subscribers through ``CacheCurrentPriceManager._push_price``.
+        """
         self.update_cache_per_symbol(symbol, new_items)
 
     def query_remote_and_update_cache(self):
@@ -581,56 +579,54 @@ class CacheManagerInterface(ABC):
         self.update_cache_per_symbol(symbol, items)
         
     def _should_poll(self):
-        """Decide dacă bucla de sync face poll la API. Suprascriabil de subclase:
-          - Cache24PriceManager → False (push-based: prețurile vin prin on_price_update)
-          - CacheCurrentPriceManager → doar când WS e mort (fallback)
-        Default: gating-ul global WS_ONLY_MODE."""
+        """Decide whether the synchronization loop polls the API.
+
+        Cache24PriceManager is push-only, while CacheCurrentPriceManager polls only when
+        WebSocket is unavailable. The default uses the global ``WS_ONLY_MODE`` gate.
+        """
         return _should_poll_for_manager(self.cls_name)
 
     def periodic_sync(self, sync_ts=None, save_state=True):
         if sync_ts is not None:
             self.sync_ts = sync_ts
-        self.save_state = save_state  # actualizează save_state indiferent
+        self.save_state = save_state  # Always update the state-saving preference.
 
         if self.thread is not None and self.thread.is_alive():
-            return self.thread  # thread deja pornit, returnează-l (citește sync_ts dinamic)
+            return self.thread  # Return the existing thread; it reads sync_ts dynamically.
 
         self._stop_event.clear()
 
         def run():
             if self._first_sleep and self._stop_event.wait(self.sync_ts):
-                return   # prima iterație după un interval (ex. CurrentPrice)
+                return   # Run the first iteration after one interval, as CurrentPrice requires.
             last_maint = time.time()
             last_resync = time.time()
             while not self._stop_event.is_set():
                 try:
                     if self._should_poll():
                         self.query_remote_and_update_cache()
-                    self.save_state_to_file_if_enabled()   # are guard anti-suprascriere date vechi
-                    # Reconciliere mem↔fișier periodică (la 10 min)
+                    self.save_state_to_file_if_enabled()   # Guards against overwriting newer data.
+                    # Periodically reconcile memory and disk.
                     if (time.time() - last_resync) > self.RESYNC_INTERVAL_SEC:
                         self.resync_mem_file()
                         last_resync = time.time()
-                    # Mentenanță retenție/rotație (append): săptămânal. Pt ORICE cache
-                    # append_mode=True (nu doar JSONL/append_persist) — 21 iul, gasit
-                    # CacheTradeManager/CacheOrderManager/CacheAssetValueManager fara
-                    # nicio retentie reala (append_mode=True dar append_persist=False,
-                    # deci RETENTION_DAYS din clasa de baza nu se aplica niciodata).
+                    # Run weekly retention/rotation for every append-mode cache, including
+                    # full-JSON managers that previously received no effective retention.
                     if self.append_mode and (time.time() - last_maint) > self.RETENTION_CHECK_INTERVAL_SEC:
                         self.maintain_append_persist()
                         last_maint = time.time()
-                except Exception as _e:   # erori tranzitorii (retea/HTTP) NU mai omoara thread-ul de sync
+                except Exception as _e:   # Transient network/HTTP errors must not kill synchronization.
                     builtins.print(f"[{self.cls_name}] eroare in bucla de sync (continui): {_e}")
                 if self._stop_event.wait(self.sync_ts):
                     break
 
         self.thread = threading.Thread(target=run, name=self.cls_name, daemon=True)
-        self.thread.daemon = True  # Asigură că acest thread nu blochează închiderea procesului
+        self.thread.daemon = True  # Do not let this thread block process shutdown.
         self.thread.start()
         return self.thread
 
     def shutdown(self, timeout=5.0):
-        """Oprește determinist bucla de sync pornită prin periodic_sync()."""
+        """Deterministically stop the synchronization loop started by ``periodic_sync``."""
         self._stop_event.set()
         thread = self.thread
         if thread is not None and thread is not threading.current_thread():
@@ -652,12 +648,12 @@ class CacheManagerInterface(ABC):
 
 
 # ###### 
-# ###### Implemetarile specifice pentru cache
+# ###### Cache-specific implementations
 # ###### 
 
 class CacheTradeManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
-        # creștere LENTĂ (doar la trade real) → full-rewrite e ok
+        # Slow growth from real trades makes full rewrites acceptable.
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
 
     def _is_valid_trade(self, trade):
@@ -671,8 +667,8 @@ class CacheTradeManager(CacheManagerInterface):
         current_time = int(time.time() * 1000)
         backdays = int((current_time - startTime) / (24 * 60 * 60 * 1000))
         
-        # clientul INJECTAT (self.api_client), paginat → nu trunchiem la 1000 când
-        # perioada are mai multe trade-uri.
+        # Paginate through the injected client so periods with more than 1,000 trades
+        # are not truncated.
         from binance_api import bapi_allorders as apiorders
         new_trades = apiorders.paginate_my_trades(self.api_client.client, symbol, startTime, limit=1000)
         #new_trades = apitrades.get_my_trades(order_type=None, symbol=symbol, backdays=backdays, limit=1000)
@@ -695,13 +691,14 @@ class CacheTradeManager(CacheManagerInterface):
         return unique_new_trades
 
     def last_opposite_fill_price(self, symbol, order_type):
-        """Pretul ULTIMEI executii OPUSE pe symbol — PERSISTENT, fara limita de timp.
-        BUY -> ultimul SELL executat; SELL -> ultimul BUY executat. None daca nu exista.
-        Citeste din cache-ul PROPRIU de fills (executii reale via WS) -> ZERO apel API,
-        fara zgomotul ordinelor anulate (spre deosebire de Order cache, care are price=0)."""
-        want_buyer = (order_type.upper() == "SELL")   # opusul unui SELL e un BUY (isBuyer=True)
+        """Return the latest opposite fill price without a time limit.
+
+        BUY uses the latest SELL and SELL uses the latest BUY. Read the manager's own
+        real WebSocket fill cache without an API call or noise from canceled orders.
+        """
+        want_buyer = (order_type.upper() == "SELL")   # The opposite of SELL is BUY.
         with self.lock:
-            for tr in reversed(self.cache.get(symbol, [])):   # append => ultimul e cel mai recent
+            for tr in reversed(self.cache.get(symbol, [])):   # Append order makes the last item newest.
                 if tr.get("isBuyer") == want_buyer:
                     return float(tr["price"])
         return None
@@ -747,19 +744,15 @@ class CacheOrderManager(CacheManagerInterface):
 
 
 class CacheSparsePriceManager(CacheManagerInterface):
-    """Istoric de pret RAR (cerere periodica la 7 min pt "care e pretul acum",
-    nu flux continuu de tick-uri) — 2 ani retentie, JSONL. Redenumit din
-    CachePriceManager (21 iul): numele vechi se confunda usor cu
-    Cache24PriceManager/Cache24LongPriceManager (dense, WS-push) si cu
-    CachePriceLongTrendManager (alta clasa, pt trend nu pret brut). "Sparse"
-    descrie trasatura STABILA (mecanismul de esantionare), spre deosebire de
-    o eticheta legata de retentie (care se schimba — "Long" ar fi fost si
-    inselator: cache-ul asta are de fapt retentia cea mai LUNGA dintre toate,
-    2 ani, mai mult decat "Cache24LongPriceManager"). Singurul consumator:
-    priceAnalysis.py (priceLstFor -> getTrendLongTerm_fixed -> apply_weight_limit)."""
+    """Store sparse seven-minute price samples for two years in JSONL.
+
+    Unlike dense WebSocket-pushed Cache24 managers, this periodically asks for the
+    current price. ``Sparse`` describes the stable sampling mechanism rather than the
+    mutable retention policy. priceAnalysis is its only consumer.
+    """
 
     def __init__(self, sync_ts, symbols, filename, api_client=api):
-        # pur-append, creștere CONTINUĂ (istoric preț la 7 min) → append JSONL
+        # Continuous append-only seven-minute history uses JSONL append persistence.
         super().__init__(sync_ts, symbols, filename, append_mode=True,
                          api_client=api, append_persist=True)
 
@@ -780,15 +773,9 @@ class CacheSparsePriceManager(CacheManagerInterface):
         return last_times
 
     def get_remote_items(self, symbol, startTime):
-        # 21 iul: foloseam get_price_value() (doar pretul, FARA timestamp-ul
-        # observatiei) si marcam intrarea cu time.time() ("acum") — daca reteaua
-        # era jos (incident 19 iul: VPN/DNS cazut), get_price_value intorcea
-        # oricum ultimul pret CUNOSCUT (inghetat), dar noi il inregistram in
-        # istoricul de 2 ani ca si cum ar fi fost observat chiar in acel
-        # moment. get_price() intoarce [timestamp_REAL_al_observatiei, pret] —
-        # daca pretul e inghetat, timestamp-ul ramane cel vechi (cinstit), nu
-        # unul fabricat-proaspat. Acelasi tipar de bug ca la sample_current_prices
-        # (tradeall_observe.py), reparat azi mai devreme.
+        # Preserve the observation timestamp supplied by get_price. Using only a cached
+        # value with ``time.time`` would record a stale price as freshly observed during
+        # a network outage, corrupting the long-term history.
         try:
             entry = get_current_price_manager().get_price(symbol)
         except Exception as e:
@@ -808,32 +795,28 @@ class CacheSparsePriceManager(CacheManagerInterface):
 
 
 class Cache24PriceManager(CacheManagerInterface):
-    """Colectează prețuri la granularitate maximă pe ultimele KEEP_HOURS ore.
+    """Collect maximum-granularity prices over the latest ``KEEP_HOURS``.
 
-    Nu face polling și nu se abonează direct la WS.
-    Primește fiecare update de preț prin on_price_update() de la
-    CacheCurrentPriceManager (subscribe_price).
-    get_remote_items e folosit doar la init (load inițial din fișier lipsă).
+    This manager neither polls nor subscribes directly to WebSocket. It receives every
+    update from CacheCurrentPriceManager and uses ``get_remote_items`` only during
+    initialization when the persisted file is missing.
     """
-    KEEP_HOURS = 24   # configurabil per instanță dacă e nevoie
+    KEEP_HOURS = 24   # May be configured per instance.
 
     def __init__(self, sync_ts, symbols, filename, api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
-        # Curata datele STRAINE incarcate dintr-un fisier vechi redundant (inainte de fix-ul
-        # de filtrare, fiecare cache_24price_X tinea toate monedele). Tine DOAR symbol-ul nostru.
+        # Remove unrelated symbols loaded from legacy redundant files that stored every coin.
         with self.lock:
             self.cache = {s: v for s, v in self.cache.items() if s in self.symbols}
 
-    # subscribe_price / unsubscribe_price / _notify_price_subscribers — moștenite
-    # din CacheManagerInterface.
+    # Inherit price subscription and notification methods from CacheManagerInterface.
 
-    # ── Callback de la CacheCurrentPriceManager ───────────────────────────────
+    # ── CacheCurrentPriceManager callback ────────────────────────────────────
 
     def on_price_update(self, symbol: str, ts_ms: int, price: float):
-        """Apelat de CacheCurrentPriceManager la fiecare preț nou (WS sau HTTP)."""
-        # FILTRU: managerul e PER-SYMBOL (symbols=[s]), dar CurrentPrice face BROADCAST cu TOATE
-        # symbolurile catre toti abonatii. Stocam DOAR symbol-ul nostru -> fiecare fisier
-        # cache_24price_X tine o singura moneda (nu redundant). Nu re-notificam nici ticks straini.
+        """Receive every new WebSocket or HTTP price from CacheCurrentPriceManager."""
+        # CurrentPrice broadcasts every symbol to every subscriber, while this manager is
+        # per-symbol. Store and forward only this instance's symbol.
         if symbol not in self.symbols:
             return
         if not self.fetchtime_time_per_symbol:
@@ -843,15 +826,12 @@ class Cache24PriceManager(CacheManagerInterface):
         self._notify_price_subscribers(symbol, ts_ms, price)
 
     def _trim_old_data(self, symbol):
-        """Elimina intrarile mai vechi de KEEP_HOURS. Apelat la FIECARE tick
-        (on_price_update) -> trebuie sa fie ieftin cand nu-i nimic de eliminat
-        (cazul normal la arhiva de 6 luni, unde nimic n-a expirat inca).
-        entries e append-only in ordine crescatoare de timp (on_price_update
-        adauga mereu un singur tick cu ts=acum) -> bisect gaseste primul index
-        NEexpirat in O(log n), fara sa copieze lista daca idx=0 (nimic expirat).
-        Inainte: list comprehension completa la fiecare tick -> O(n) mereu,
-        care crestea cu arhiva (21 iul: 72% CPU sustinut la ~20MB/simbol,
-        agravandu-se spre tinta de 6 luni)."""
+        """Remove entries older than ``KEEP_HOURS`` efficiently on every tick.
+
+        Entries are append-only and time-ordered, so bisect finds the first unexpired
+        index in O(log n) without copying when nothing expired. This avoids an O(n)
+        list comprehension on every tick as long archives grow.
+        """
         cutoff_ms = int((time.time() - self.KEEP_HOURS * 3600) * 1000)
         with self.lock:
             entries = self.cache.get(symbol)
@@ -862,16 +842,12 @@ class Cache24PriceManager(CacheManagerInterface):
                 self.cache[symbol] = entries[idx:]
 
     def get_recent_entries(self, symbol: str, last_seconds: float) -> list:
-        """Returnează intrările [ts_ms, price] din ultimele `last_seconds` secunde.
-        30 iul: bisect in loc de list comprehension completa (era O(n) pe TOT
-        bufferul, indiferent de last_seconds — cu KEEP_HOURS=24 asta poate fi zeci
-        de mii de intrari, la fiecare apel). entries e append-only, crescator dupa
-        ts (garantat de on_price_update) -> bisect gaseste cutoff-ul in O(log n),
-        slice-ul in sine costa O(k) (k = ce se returneaza), nu O(n). Aceeasi iesire,
-        doar mai rapid — folosit acum si de fereastra dinamica (vezi
-        CachePriceShortTrendManager.get_instant_trend_for_window), unde poate fi
-        apelat mult mai des decat la pornirea proceselor (from_cache24, o singura
-        data per fereastra fixa)."""
+        """Return ``[timestamp_ms, price]`` entries from the latest interval.
+
+        Time-ordered append-only entries let bisect find the cutoff in O(log n); copying
+        costs O(k) for returned entries instead of scanning the entire 24-hour buffer.
+        This matters for frequent dynamic-window queries.
+        """
         cutoff_ms = int((time.time() - last_seconds) * 1000)
         with self.lock:
             entries = self.cache.get(symbol, [])
@@ -893,13 +869,11 @@ class Cache24PriceManager(CacheManagerInterface):
         return last_times
 
     def get_remote_items(self, symbol, startTime):
-        """Folosit doar la init când fișierul lipsește.
-        21 iul: folosea get_price_value() (doar pretul, fara timestamp-ul
-        observatiei) + time.time() ("acum") — daca pretul era inghetat exact
-        la acel moment (retea jos), ar fi inregistrat o intrare fals-proaspata.
-        get_price() intoarce [timestamp_REAL, pret] — autorizat explicit sa
-        ating aceasta clasa pt acest fix punctual (acelasi bug, deja reparat
-        in CacheSparsePriceManager si Cache24LongPriceManager)."""
+        """Fetch initialization data only when the persisted file is missing.
+
+        Preserve the real observation timestamp from ``get_price`` so a cached value
+        during an outage is not recorded as falsely fresh.
+        """
         try:
             entry = get_current_price_manager().get_price(symbol)
             if not entry or entry[1] is None:
@@ -913,52 +887,37 @@ class Cache24PriceManager(CacheManagerInterface):
         return self.symbols
 
     def _should_poll(self):
-        # Push-based: prețurile vin EXCLUSIV prin on_price_update (de la CurrentPrice).
-        # Folosește base periodic_sync (doar save + resync + maintain), fără poll.
+        # Prices arrive exclusively through CurrentPrice's ``on_price_update`` callback.
+        # Base periodic_sync only saves, resynchronizes, and maintains; it does not poll.
         return False
 
 
 class Cache24LongPriceManager(Cache24PriceManager):
-    """Varianta DEDICATA arhivatorului (tradeall_price_archiver.py, retentie
-    6 luni) — persistenta JSONL (scriere incrementala) in loc de JSON complet
-    rescris la fiecare salvare. Clasa SEPARATA de Cache24PriceManager (cea
-    folosita de tradeall.py pt cache-urile LIVE de 24h) — zero linii schimbate
-    acolo, zero risc pt trading real. Mostenește neschimbat on_price_update/
-    KEEP_HOURS de la parinte; suprascrie doar ce tine de persistenta.
+    """Six-month archive variant using incremental JSONL persistence.
 
-    De ce: arhiva a ajuns la ~20MB/simbol, crescand spre cateva sute de MB la
-    tinta de 6 luni. Cache24PriceManager (parintele) rescrie tot fisierul din
-    memorie la fiecare salvare (60s) — cost care creste o data cu arhiva.
-    JSONL scrie doar tick-urile noi, cost constant indiferent de istoric.
+    This remains separate from the live 24-hour manager and inherits its price-update
+    behavior while overriding persistence only. JSONL appends new ticks at constant cost
+    instead of rewriting a growing archive every minute.
 
-    _trim_old_data (mostenit neschimbat de la parinte) elimina intrari VECHI
-    de la INCEPUTUL listei. JSONL-ul de baza (_save_jsonl_append) tine minte
-    doar CATE intrari a scris deja per simbol (_persisted_counts) — presupune
-    ca lista creste DOAR la coada, niciodata nu se scurteaza de la inceput.
-    Daca trim-ul ar elimina ceva fara ajustare, urmatoarea salvare ar DUPLICA
-    la coada intrarile ramase (crede ca-s inca nescrise). Suprascriem
-    _trim_old_data DOAR ca sa recompactam cand chiar se taie ceva (rar — nimic
-    nu-i mai vechi de 6 luni inca, deci in practica nu se intampla curand)."""
+    The base JSONL writer tracks how many entries it wrote and assumes the list grows only
+    at the tail. Trimming from the head would otherwise make retained entries appear new
+    and duplicate them, so this class compacts whenever trimming actually removes data.
+    """
 
     def __init__(self, sync_ts, symbols, filename, api_client=api):
-        # NU chemam super() (Cache24PriceManager.__init__): el nu expune
-        # append_persist si l-ar fixa la False INAINTE sa apuc sa-l setez eu —
-        # load_state() ruleaza in interiorul acelui __init__, prea devreme.
-        # Chemam bunicul (CacheManagerInterface) direct, cu append_persist=True
-        # din start (fara sa schimbam vreo linie in Cache24PriceManager).
+        # Call CacheManagerInterface directly because Cache24PriceManager does not expose
+        # append_persist and invokes load_state before this class could change it.
         CacheManagerInterface.__init__(self, sync_ts, symbols, filename,
                                         append_mode=True, api_client=api_client,
                                         append_persist=True)
-        # replicat manual din Cache24PriceManager.__init__ (curata simboluri straine
-        # dintr-un fisier vechi redundant — acelasi motiv, acelasi cod, doar copiat
-        # ca sa nu trebuiasca sa apelam super()).
+        # Mirror Cache24PriceManager's cleanup of unrelated symbols from legacy files.
         with self.lock:
             self.cache = {s: v for s, v in self.cache.items() if s in self.symbols}
 
     def _trim_old_data(self, symbol):
         with self.lock:
             before = len(self.cache.get(symbol, []))
-        super()._trim_old_data(symbol)   # logica de taiere neschimbata, mostenita
+        super()._trim_old_data(symbol)   # Use the inherited trimming logic unchanged.
         with self.lock:
             after = len(self.cache.get(symbol, []))
         if after < before:
@@ -966,21 +925,18 @@ class Cache24LongPriceManager(Cache24PriceManager):
             self._persisted_counts[symbol] = max(0, self._persisted_counts.get(symbol, before) - removed)
             self.compact_jsonl()
 
-    # get_remote_items: mostenit NESCHIMBAT de la Cache24PriceManager (21 iul —
-    # avea acelasi bug de timestamp fabricat; reparat direct in parinte, cu
-    # autorizare explicita, deci suprascrierea de-aici a devenit redundanta
-    # si a fost eliminata).
+    # Inherit get_remote_items from Cache24PriceManager, including real observation timestamps.
 
 
 class CachePriceLongTrendManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
         super().__init__(sync_ts, symbols, filename, append_mode=False)
 
-    # get_all_symbols_from_cache → moștenit din base (list(self.cache.keys()))
+    # Inherit get_all_symbols_from_cache from the base class.
 
     # def rebuild_fetchtime_times(self):
         # """
-        # Deducem timpul ultimei înregistrări per simbol din self.cache
+        # Infer each symbol's latest record time from self.cache.
         # """
         # last_times = defaultdict(int)
         # for price_trend in self.cache:
@@ -989,7 +945,7 @@ class CachePriceLongTrendManager(CacheManagerInterface):
             # if ts > last_times[symbol]:
                 # last_times[symbol] = ts
 
-        # # offset de siguranță (-60 secunde)
+        # Apply a negative 60-second safety offset.
         # for symbol in last_times:
             # last_times[symbol] = max(0, last_times[symbol] - 60_000)
 
@@ -1030,7 +986,7 @@ class CachePriceLongTrendManager(CacheManagerInterface):
 
 class CacheAssetValueManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
-        # creștere lentă (1 / 10 min) → full-rewrite e ok
+        # Slow growth at one sample per ten minutes makes full rewrites acceptable.
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
         changed = False
         with self.lock:
@@ -1075,39 +1031,32 @@ class CacheAssetValueManager(CacheManagerInterface):
 
 
 # ######
-# ###### CacheCurrentPriceManager — preț curent per simbol, WS-primary + HTTP fallback
+# ###### CacheCurrentPriceManager: per-symbol current price, WebSocket-first with HTTP fallback
 # ######
 
 class CacheCurrentPriceManager(CacheManagerInterface):
-    """
-    Menține CEL MAI RECENT preț per simbol, cu timestamp în ms.
-    Drop-in replacement pentru bapi.get_current_price().
+    """Maintain the latest timestamped price per symbol.
 
-    Sursa primară   : WebSocket (BinancePriceStream) via subscribe().
-    Fallback timer  : polling HTTP la fiecare SYNC_TS secunde, DOAR când WS
-                      e tăcut mai mult de WS_TIMEOUT_SEC.
-    Staleness check : get_price() forțează HTTP imediat dacă prețul e mai
-                      vechi de STALE_THRESHOLD_MS (indiferent de WS).
-
-    Cache semantics : append_mode=False — se păstrează doar ultima intrare
-                      per simbol: cache[symbol] = [[timestamp_ms, price]]
-    Fișier          : cache_currentprice.json  (un singur fișier, toți simbolii)
+    This is a drop-in replacement for ``bapi.get_current_price``. WebSocket is primary;
+    HTTP polling runs only after WebSocket has been silent beyond ``WS_TIMEOUT_SEC``.
+    ``get_price`` forces HTTP when the cached entry exceeds ``STALE_THRESHOLD_MS``.
+    Snapshot semantics retain one ``[[timestamp_ms, price]]`` entry per symbol in a
+    shared cache_currentprice.json file.
     """
 
-    WS_TIMEOUT_SEC     = 15      # WS considerat mort după 15s fără niciun event
-    STALE_THRESHOLD_MS = 5_000  # get_price() forțează HTTP dacă prețul e > 5s vechi
-    FREQ_WINDOW_SEC    = 60     # fereastra de măsurare a frecvenței update-urilor
+    WS_TIMEOUT_SEC     = 15      # Treat WebSocket as unavailable after 15 silent seconds.
+    STALE_THRESHOLD_MS = 5_000  # Force HTTP when a price is older than five seconds.
+    FREQ_WINDOW_SEC    = 60     # Window used to measure update frequency.
 
     def __init__(self, sync_ts, symbols, filename, ws_manager=None, api_client=api,
                  market_api=None):
         self._ws_manager        = ws_manager
-        self._ws_last_event_ts  = 0.0      # setat înainte de super() !
-        self._price_subscribers = []       # idem (base __init__ respectă hasattr)
-        self._update_timestamps: dict = defaultdict(deque)  # idem — înainte de super()
-        self._first_sleep       = True     # nu face fallback HTTP imediat (lasă WS să se conecteze)
-        # Facada market-data (Faza 2a). Default = singleton-ul global; injectabil în
-        # teste / Faza 2b. Setat ÎNAINTE de super() fiindcă base __init__ → load_state
-        # → get_remote_items îl folosește deja. Pe symbolurile Binance rutează la bapi.
+        self._ws_last_event_ts  = 0.0      # Set before the base initializer.
+        self._price_subscribers = []       # The base initializer preserves existing values.
+        self._update_timestamps: dict = defaultdict(deque)  # Also required before super().
+        self._first_sleep       = True     # Let WebSocket connect before HTTP fallback.
+        # The injectable market-data facade defaults to the global singleton. Set it before
+        # the base initializer because load_state may immediately call get_remote_items.
         self.market_api = market_api or _market_api.api
         super().__init__(sync_ts, symbols, filename, append_mode=False, api_client=api_client)
         if ws_manager is not None:
@@ -1118,10 +1067,9 @@ class CacheCurrentPriceManager(CacheManagerInterface):
     def _ws_is_healthy(self):
         return (time.time() - self._ws_last_event_ts) < self.WS_TIMEOUT_SEC
 
-    # subscribe_price / unsubscribe_price / _notify_price_subscribers — moștenite
-    # din CacheManagerInterface.
+    # Inherit price subscription and notification methods from CacheManagerInterface.
 
-    # ── WS callback (suprascrie metoda din interfață) ─────────────────────────
+    # ── WebSocket callback overriding the interface method ───────────────────
 
     def _record_price_timestamp(self, symbol: str) -> None:
         now = time.time()
@@ -1132,9 +1080,11 @@ class CacheCurrentPriceManager(CacheManagerInterface):
             dq.popleft()
 
     def _push_price(self, symbol: str, price: float) -> None:
-        """Injectează un preț în cache și notifică subscriberii.
-        Nu atinge _ws_last_event_ts — folosit de polling thread și get_price.
-        _ws_last_event_ts e actualizat DOAR de on_items_update (eveniment WS real)."""
+        """Insert a price and notify subscribers without changing WebSocket health.
+
+        The polling thread and get_price also use this path; only a real WebSocket event
+        in ``on_items_update`` updates ``_ws_last_event_ts``.
+        """
         ts_ms = int(time.time() * 1000)
         if not self.fetchtime_time_per_symbol:
             self.fetchtime_time_per_symbol = self._CacheManagerInterface__rebuild_fetchtime_times()
@@ -1143,17 +1093,17 @@ class CacheCurrentPriceManager(CacheManagerInterface):
         self._notify_price_subscribers(symbol, ts_ms, price)
 
     def on_items_update(self, symbol: str, items):
-        """Callback pentru evenimente WS reale — actualizează și health-ul WS."""
-        self._ws_last_event_ts = time.time()   # doar evenimentele WS reale
+        """Handle a real WebSocket event and update WebSocket health."""
+        self._ws_last_event_ts = time.time()   # Real WebSocket events only.
         price = items[0] if items else None
         if price is None:
             return
         self._push_price(symbol, price)
 
-    # ── CacheManagerInterface — metode abstracte ──────────────────────────────
+    # ── CacheManagerInterface abstract methods ───────────────────────────────
 
     def get_remote_items(self, symbol, startTime):
-        """Fetch preț curent via facada market-data (Binance → bapi.get_current_price)."""
+        """Fetch current price through the market-data facade."""
         try:
             price = self.market_api.get_current_price(symbol=symbol)
             if price is None:
@@ -1165,9 +1115,7 @@ class CacheCurrentPriceManager(CacheManagerInterface):
             return []
 
     def _persist_items(self, symbol, new_items):
-        """Override: în loc de scriere simplă în cache, folosim _push_price ca
-        să înregistrăm timestamp-ul (pt sample_rate) și să notificăm subscriberii.
-        new_items = [[ts_ms, price]]."""
+        """Record sample-rate timing and notify subscribers through ``_push_price``."""
         self._push_price(symbol, new_items[0][1])
 
     def rebuild_fetchtime_times(self):
@@ -1175,41 +1123,37 @@ class CacheCurrentPriceManager(CacheManagerInterface):
         for symbol in self.symbols:
             entries = self.cache.get(symbol, [])
             if entries:
-                last_times[symbol] = entries[0][0]   # snapshot: un singur entry
+                last_times[symbol] = entries[0][0]   # Snapshot contains one entry.
         return last_times
 
     def get_all_symbols_from_cache(self):
         return self.symbols
 
-    # ── Periodic sync — polling numai când WS e mort ──────────────────────────
+    # ── Periodic synchronization: poll only when WebSocket is unavailable ────
 
     def _should_poll(self):
-        # Fetch HTTP DOAR ca fallback, când WS e mort. query_remote_and_update_cache
-        # → _persist_items (override) propagă prin chain via _push_price.
+        # Fetch through HTTP only as a fallback. The overridden persistence path
+        # propagates results through ``_push_price``.
         return not self._ws_is_healthy()
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     def get_sample_rate(self, symbol: str, fallback: float = 1.0) -> float:
-        """Intervalul mediu în secunde între update-uri în ultimele FREQ_WINDOW_SEC secunde.
-        Returnează `fallback` dacă nu există suficiente măsurători."""
+        """Return the mean update interval, or ``fallback`` when samples are insufficient."""
         dq = self._update_timestamps.get(symbol)
         if not dq or len(dq) < 2:
             return fallback
         return (dq[-1] - dq[0]) / (len(dq) - 1)
 
     def get_update_frequency(self, symbol: str) -> float:
-        """Update-uri/secundă în ultimele FREQ_WINDOW_SEC secunde."""
+        """Return updates per second over the latest frequency window."""
         dq = self._update_timestamps.get(symbol)
         if not dq or len(dq) < 2:
             return 0.0
         return len(dq) / self.FREQ_WINDOW_SEC
 
     def get_price(self, symbol: str):
-        """
-        Returnează [timestamp_ms, price].
-        Forțează HTTP fetch dacă intrarea lipsește sau e mai veche de STALE_THRESHOLD_MS.
-        """
+        """Return ``[timestamp_ms, price]``, forcing HTTP when missing or stale."""
         with self.lock:
             entries = self.cache.get(symbol)
         last_ts = entries[0][0] if entries else 0
@@ -1226,14 +1170,12 @@ class CacheCurrentPriceManager(CacheManagerInterface):
         return entries[0] if entries else None
 
     def get_price_value(self, symbol: str) -> float:
-        """Returnează doar prețul ca float. Drop-in pentru bapi.get_current_price()."""
+        """Return only the float price as a drop-in for ``bapi.get_current_price``."""
         entry = self.get_price(symbol)
         return entry[1] if entry else None
 
     def attach_ws_manager(self, ws_manager) -> None:
-        """Conectează un BinancePriceStream ca sursă primară de preț.
-        ws_manager.subscribe(self) → on_items_update(symbol, [price]) la fiecare tick.
-        Idempotent (ws_manager.subscribe deduplichează)."""
+        """Attach BinancePriceStream as the idempotent primary price source."""
         if ws_manager is None:
             return
         self._ws_manager = ws_manager
@@ -1247,20 +1189,16 @@ _current_price_lock = threading.Lock()
 
 def get_current_price_manager(ws_manager=None, symbols=None, sync_ts=None,
                               start_sync=True) -> CacheCurrentPriceManager:
-    """Returnează (și creează dacă e nevoie) singleton-ul CacheCurrentPriceManager.
+    """Return or lazily create the CacheCurrentPriceManager singleton.
 
-    sync_ts : intervalul de polling în secunde.
-              - None (default): NU modifică sync_ts-ul existent. La prima creare
-                folosește CURRENTPRICE_SYNC_INTERVAL_SEC.
-              - valoare explicită: setează/actualizează live (thread-ul îl
-                citește dinamic la fiecare iterație).
-              IMPORTANT: apelurile interne (ex. Cache24PriceManager.get_remote_items)
-              trebuie să folosească None ca să nu suprascrie configurarea din main.
+    ``sync_ts=None`` preserves the current interval and uses the configured default on
+    first creation. An explicit value updates the live interval read by the thread.
+    Internal calls must pass None so they do not override main-process configuration.
     """
     global _current_price_instance
     if _current_price_instance is not None:
         if sync_ts is not None:
-            _current_price_instance.sync_ts = sync_ts   # actualizare live
+            _current_price_instance.sync_ts = sync_ts   # Live update.
         if ws_manager is not None:
             _current_price_instance.attach_ws_manager(ws_manager)
         if start_sync:
@@ -1289,34 +1227,24 @@ def get_current_price_manager(ws_manager=None, symbols=None, sync_ts=None,
 
 
 # ######
-# ###### CachePriceShortTrendManager — ferestre + trend calculat + cache cross-process
+# ###### CachePriceShortTrendManager: windows, calculated trend, and cross-process cache
 # ######
 
 class CachePriceShortTrendManager:
-    """Deține ferestrele de preț per simbol, calculează trendul instant și
-    cache-uiește snapshot-ul într-un fișier partajat ÎNTRE PROCESE.
+    """Calculate per-symbol instant trends and share snapshots across processes.
 
-    Writer (tradeall): start_computation() construiește ferestrele, se abonează
-      la Cache24 și la fiecare tick publică gradientul + epsilon (canal rapid).
-    Reader (rtrade, bapi_placeorder): folosește doar gate-ul, citind din fișier.
-
-    API de calcul : get_instant_trend(symbol), get_window/get_analyzer(symbol)
-    API store     : update_snapshot, get_snapshot, get_all_snapshots
-    API gate      : should_wait(side, symbol), wait_for_favorable_entry(...)
+    Writers build windows, subscribe to Cache24, and publish fast gradient/epsilon values.
+    Readers such as rtrade use only the gate backed by the shared file.
     """
-    EPSILON_K         = 1.0     # k * stddev(gradient) — prag de zgomot informat
-    FAVORABLE_REL_EPS = 1e-5    # fallback relativ la preț dacă lipsește epsilon
-    TREND_STALE_SEC   = 15.0    # snapshot mai vechi → nu mai întârziem
-    # Praguri (PROCENT) pentru check_price_change — per fereastră (small/big), ca în tradeall.
-    # Sunt procente, deci scale-invariante ca formulă; pot fi suprascrise per-simbol prin
-    # parametrul `thresholds` (vezi __init__), fiindcă volatilitatea diferă (BTC vs TAO).
+    EPSILON_K         = 1.0     # Informed noise threshold: k * stddev(gradient).
+    FAVORABLE_REL_EPS = 1e-5    # Price-relative fallback when epsilon is absent.
+    TREND_STALE_SEC   = 15.0    # Do not delay based on older snapshots.
+    # Percentage thresholds are scale-invariant and configurable per window or symbol.
     PRICE_CHANGE_THRESHOLD_SMALL = u.calculate_difference_percent(60000, 60000 - 310)
     PRICE_CHANGE_THRESHOLD_BIG   = u.calculate_difference_percent(97000, 95000 - 377)
-    FULL_EVAL_INTERVAL_SEC = 3.0   # cadența calculului GREU (metrici complete)
-    FLUSH_INTERVAL_SEC     = 0.5   # cadența scrierii pe fișier (doar writer-ul)
-    # Durate ferestre (secunde) — o LISTĂ de timpi. TOATE sunt slice-uri din ACELAȘI
-    # Cache24 (24h), deci ≤ 24h. Numărul de sample-uri e calculat dinamic din rata reală.
-    # Cea mai mică fereastră = "primary" (canalul rapid gradient_recent + get_instant_trend).
+    FULL_EVAL_INTERVAL_SEC = 3.0   # Cadence for expensive complete metrics.
+    FLUSH_INTERVAL_SEC     = 0.5   # Writer-only file flush cadence.
+    # Every window is a slice of the same 24-hour Cache24 buffer. The smallest is primary.
     WINDOW_SECONDS = [3.7 * 60, 2.5 * 60 * 60]   # [3.7 min momentum, 2.5 ore trend]
     _live_instances = weakref.WeakSet()
 
@@ -1325,35 +1253,29 @@ class CachePriceShortTrendManager:
         self._live_instances.add(self)
         self.symbols = list(symbols)
         self.filename = u.cache_path(filename)   # → subfolderul cachedb/
-        self.writer = writer   # doar writer-ul scrie fișierul (ex. procesul cacheManager.py)
-        # Listă de N timpi (secunde), sortată crescător → window_seconds[0] = primary.
+        self.writer = writer   # Only the writer process persists the file.
+        # Sort N window durations so index zero is primary.
         secs = list(window_seconds) if window_seconds else list(self.WINDOW_SECONDS)
         self.window_seconds = sorted(float(s) for s in secs)
-        # Praguri check_price_change — per FEREASTRĂ și (opțional) per SIMBOL. `thresholds`:
-        #   - callable(symbol, seconds) -> procent           (cel mai general)
-        #   - dict {seconds: procent}                         (per fereastră, toate simbolurile)
-        #   - dict {symbol: {seconds: procent}}               (per simbol + fereastră)
-        #   - None → default: small→PRICE_CHANGE_THRESHOLD_SMALL, restul→..._BIG
+        # Thresholds may be callable, keyed by window, keyed by symbol and window, or None.
         self._threshold_fn = self._build_threshold_fn(thresholds)
         self._mem = {}
         self._lock = threading.RLock()
         self._file_mtime = None
         self._file_cache = None
-        # stare writer (populate de start_computation): dict[symbol][secunde] -> PriceWindow / WindowAnalyzer
+        # Writer state populated by start_computation: symbol/window to analyzer objects.
         self.windows = {}
         self.analyzers = {}
         self.current_price_mgr = None
-        # dict[symbol] -> Cache24PriceManager, setat de start_computation() — sursa
-        # bufferului brut pt fereastra DINAMICA (get_instant_trend_for_window).
-        # None pana la start_computation() -> fereastra dinamica indisponibila in
-        # acest proces (safe: metodele care o folosesc cad pe "necunoscut", nu crapa).
+        # start_computation supplies raw Cache24 buffers for dynamic windows. Until then,
+        # dynamic windows are unavailable and safely return unknown.
         self._cache24_managers = None
         self._computing = False
         self._full_eval_thread = None
         self._flush_thread = None
         self._stop_event = threading.Event()
 
-    # durate ferestrelor extreme (cea mai mică / cea mai mare), derivate din listă
+    # Extreme window durations derived from the sorted list.
     @property
     def window_small_sec(self):
         return self.window_seconds[0]
@@ -1363,17 +1285,17 @@ class CachePriceShortTrendManager:
         return self.window_seconds[-1]
 
     def _build_threshold_fn(self, thresholds):
-        """Normalizează `thresholds` la o funcție (symbol, seconds) -> procent."""
+        """Normalize ``thresholds`` to a ``(symbol, seconds) -> percentage`` function."""
         if callable(thresholds):
             return thresholds
         small, big = self.window_seconds[0], self.window_seconds[-1]
 
         def per_window_default(sec):
-            # default clasic: cea mai mică fereastră → SMALL, restul → BIG
+            # The smallest window uses SMALL; all others use BIG.
             return self.PRICE_CHANGE_THRESHOLD_SMALL if float(sec) <= small else self.PRICE_CHANGE_THRESHOLD_BIG
 
         if isinstance(thresholds, dict):
-            # dict per-simbol {symbol: {sec: pct}} sau per-fereastră {sec: pct}
+            # Accept either per-symbol/per-window or direct per-window dictionaries.
             per_symbol = all(isinstance(v, dict) for v in thresholds.values()) and len(thresholds) > 0
             if per_symbol:
                 tbl = {sym: {float(k): v for k, v in d.items()} for sym, d in thresholds.items()}
@@ -1384,15 +1306,12 @@ class CachePriceShortTrendManager:
         return lambda sym, sec: per_window_default(sec)
 
     def threshold_for(self, symbol, seconds):
-        """Pragul (procent) pentru o fereastră a unui simbol."""
+        """Return the percentage threshold for one symbol window."""
         return self._threshold_fn(symbol, float(seconds))
 
-    # ── Writer: construiește ferestre + abonare la Cache24 ────────────────────
+    # ── Writer: build windows and subscribe to Cache24 ───────────────────────
     def start_computation(self, cache24_managers=None, current_price_mgr=None, run_full_eval=False):
-        """Construiește ferestrele + canalul rapid. Dacă run_full_eval=True,
-        pornește și bucla de calcul COMPLET (slope_small/big, pos, etc.) care
-        scrie snapshot-ul complet — folosit de procesul cacheManager.py ca
-        fișierul să fie menținut independent de tradeall."""
+        """Build windows and the fast channel, optionally starting full evaluation."""
         if self._computing:
             if run_full_eval:
                 self._start_full_eval_loop()
@@ -1404,7 +1323,7 @@ class CachePriceShortTrendManager:
         if current_price_mgr is None:
             current_price_mgr = get_current_price_manager()
         self.current_price_mgr = current_price_mgr
-        self._cache24_managers = cache24_managers   # pt fereastra dinamica (vezi __init__)
+        self._cache24_managers = cache24_managers   # Raw sources for dynamic windows.
         for s in self.symbols:
           try:
             c24 = cache24_managers[s]
@@ -1422,11 +1341,11 @@ class CachePriceShortTrendManager:
           except Exception as _e:
             builtins.print(f"[InstantTrend][{s}] setup esuat ({_e}) — sar peste, Binance neafectat")
         self._computing = True
-        self._start_flush_loop()        # I/O decuplat (scrie fișierul în fundal)
+        self._start_flush_loop()        # Decouple file I/O into a background thread.
         if run_full_eval:
             self._start_full_eval_loop()
 
-    # ── Calcul COMPLET (metrici) — scrie snapshot complet, FĂRĂ logică de trading ──
+    # ── Full metric calculation without trading logic ────────────────────────
     def evaluate_full(self, symbol):
         wins = self.windows.get(symbol)
         ans  = self.analyzers.get(symbol)
@@ -1439,7 +1358,7 @@ class CachePriceShortTrendManager:
         if self.current_price_mgr is not None:
             current_price = self.current_price_mgr.get_price_value(symbol)
 
-        # slope pentru fiecare fereastră din listă (N ferestre), keyed pe secunde
+        # Calculate slopes for every window, keyed by seconds.
         slopes = {}
         primary_pos = None
         for sec in self.window_seconds:
@@ -1448,16 +1367,16 @@ class CachePriceShortTrendManager:
             if sec == primary:
                 primary_pos = pos
 
-        # metrici detaliate doar din fereastra PRIMARY (cea mai mică)
+        # Detailed metrics come only from the smallest primary window.
         pwin, pan = wins[primary], ans[primary]
         gradient, gc, slope_full, gradient_recent = pwin.get_instant_trend()
-        # DOAR memorie (fără I/O); _flush_loop scrie fișierul în fundal.
+        # Update memory only; the flush loop writes in the background.
         self._set_mem(
             symbol,
             final_trend=gradient, growth_coefficient=gc,
             slope_full=slope_full, gradient_recent=gradient_recent,
-            slope_small=slopes[self.window_seconds[0]],     # cea mai mică
-            slope_big=slopes[self.window_seconds[-1]],      # cea mai mare
+            slope_small=slopes[self.window_seconds[0]],     # Smallest.
+            slope_big=slopes[self.window_seconds[-1]],      # Largest.
             slopes={f"{int(s)}": v for s, v in slopes.items()},
             slope_max_min=pan.calculate_slope_max_min(),
             pos=primary_pos, epsilon=pwin.get_noise_epsilon(self.EPSILON_K),
@@ -1481,24 +1400,15 @@ class CachePriceShortTrendManager:
         self._full_eval_thread = threading.Thread(target=run, name="InstantTrendFullEval", daemon=True)
         self._full_eval_thread.start()
 
-    # ── Subscriber Cache24 — canal RAPID (gradient + epsilon la fiecare tick) ──
+    # ── Fast Cache24 subscriber channel: gradient and epsilon on every tick ───
     def on_price_update(self, symbol, ts_ms, price):
-        win = self.get_window(symbol)   # fereastra PRIMARY
+        win = self.get_window(symbol)   # Primary window.
         if win is None:
             return
         try:
-            # Calea RAPIDĂ: doar gradient ieftin + memorie (zero I/O, zero calcul greu).
-            # 29 iul: NU mai scrie gradient_recent/final_trend — acele chei sunt acum
-            # scrise EXCLUSIV de evaluate_full() (calea lenta, formula bogata: regresie
-            # + gradient, aceeasi ca in tradeall.handle_symbol). Inainte, cele 2 cai
-            # scriau peste ACELEASI chei, fara nicio prioritate intre ele -> cursa reala,
-            # guvernata de timing de retea (nu de pret) intre tick-uri live si timer-ul
-            # de 3.0s -> masurat empiric (29 iul, pe arhiva istorica): 14.9% (BTC) / 21.0%
-            # (TAO) dintre tick-uri aveau semn DIFERIT intre cele 2 cai, iar calea rapida
-            # singura isi schimba semnul la 32-35% dintre tick-uri (fereastra prea mica/
-            # zgomotoasa pt un semnal de "trend"). Calea rapida ramane utila DOAR pt
-            # should_wait(fast=True), care chiar vrea latenta mica -> scrisa
-            # sub chei separate (_fast), niciodata suprascriind rezultatul caii lente.
+            # The fast path computes only a cheap gradient in memory. It writes separate
+            # ``_fast`` keys for low-latency gates and never overwrites richer full-evaluation
+            # results. Sharing keys previously created a network-timing race between paths.
             g = win.get_recent_gradient()
             eps = win.get_noise_epsilon(self.EPSILON_K)
             self._set_mem(symbol, gradient_recent_fast=g, epsilon=eps,
@@ -1509,12 +1419,12 @@ class CachePriceShortTrendManager:
 
     # ── API de calcul ─────────────────────────────────────────────────────────
     def get_window(self, symbol, seconds=None):
-        """Fereastra pentru `seconds` (None → primary = cea mai mică)."""
+        """Return the requested window, or the smallest primary window for None."""
         wins = self.windows.get(symbol) or {}
         return wins.get(float(seconds) if seconds is not None else self.window_seconds[0])
 
     def get_analyzer(self, symbol, seconds=None):
-        """Analyzer-ul pentru `seconds` (None → primary = cea mai mică)."""
+        """Return the requested analyzer, or the smallest primary analyzer for None."""
         ans = self.analyzers.get(symbol) or {}
         return ans.get(float(seconds) if seconds is not None else self.window_seconds[0])
 
@@ -1522,32 +1432,17 @@ class CachePriceShortTrendManager:
         win = self.get_window(symbol)
         return win.get_instant_trend() if win else None
 
-    # ── Fereastra DINAMICA (30 iul) ────────────────────────────────────────────
-    # Cerere user: "sa pot dinamic sa cer trend pe x minute", cu un range maxim,
-    # calculat DOAR pe fereastra ceruta (nu precalculat pe cele 2 fixe de mai sus),
-    # optimizat pt viteza. Sursa: bufferul BRUT (ts, pret) deja tinut de Cache24
-    # (pana la 24h, vezi Cache24PriceManager.KEEP_HOURS) — nu construim un buffer
-    # nou, refolosim ce exista deja live. get_recent_entries e acum O(log n + k)
-    # (bisect, vezi mai sus), deci costul e proportional cu fereastra CERUTA
-    # (k = cate esantioane intra in ea), nu cu tot bufferul de 24h.
+    # ── Dynamic window ────────────────────────────────────────────────────────
+    # Calculate only the requested horizon from Cache24's existing raw buffer. Bisect
+    # makes cost proportional to samples in that window rather than the full 24 hours.
     def get_instant_trend_for_window(self, symbol, window_seconds, now=None):
-        """Calculeaza trendul PE CERERE pe o fereastra arbitrara (secunde), in loc
-        de cele 2 fixe (window_seconds din constructor). Nu construieste un
-        PriceWindow (evita bookkeeping-ul incremental sorted_prices/deque, inutil
-        pt un calcul o-singura-data) — foloseste direct formula partajata
-        pw.instant_trend_from_prices() pe o felie din bufferul brut Cache24.
+        """Calculate trend on demand for an arbitrary window in seconds.
 
-        Returneaza un dict cu final_trend/growth_coefficient/slope_full/
-        gradient_recent/epsilon/n_samples/window_seconds, sau None daca:
-        - acest proces n-are Cache24 cablat (start_computation() nu a rulat aici —
-          normal pt un proces pur-cititor; vezi should_wait, care trateaza None
-          la fel ca "necunoscut" -> nu asteapta, executa imediat, NU cade);
-        - simbolul nu e urmarit de Cache24 in acest proces;
-        - prea putine esantioane in fereastra ceruta (< 3, nu poti calcula panta).
-
-        window_seconds e clamat silentios la [CM_DYNAMIC_WINDOW_MIN_SEC,
-        CM_DYNAMIC_WINDOW_MAX_SEC] — un apelant care cere 2 secunde sau 3 zile nu
-        crapa, primeste raspunsul la limita cea mai apropiata (cu print de avertizare)."""
+        Use the shared formula directly on a Cache24 slice without constructing a
+        PriceWindow. Return metrics or None when Cache24 is unavailable, the symbol is
+        not tracked, or fewer than three samples exist. Clamp requests to configured
+        bounds and report the adjusted horizon without raising.
+        """
         if self._cache24_managers is None:
             return None
         c24 = self._cache24_managers.get(symbol)
@@ -1567,12 +1462,12 @@ class CachePriceShortTrendManager:
             print(f"[get_instant_trend_for_window] {symbol}: get_recent_entries a esuat ({e})")
             return None
         if len(entries) < 3:
-            return None   # prea putine esantioane -> "necunoscut", nu o presupunere zgomotoasa
+            return None   # Too few samples means unknown, not a noisy assumption.
 
         now = now if now is not None else time.time()
         newest_ts_sec = entries[-1][0] / 1000.0
         if now - newest_ts_sec > self.TREND_STALE_SEC:
-            return None   # ultimul tick e prea vechi -> tratat ca stale, la fel ca fresh_snapshot()
+            return None   # Treat an old latest tick as stale, matching fresh_snapshot.
 
         import numpy as np
         import pricewindow as pw
@@ -1588,11 +1483,10 @@ class CachePriceShortTrendManager:
                     sample_rate_sec=sample_rate, ts=now)
 
     def is_trend_up_for_window(self, symbol, window_seconds, now=None):
-        """Varianta fereastra-configurabila a monitortrades.is_trend_up() — aceeasi
-        conditie (slope>0 sau slope==0 si gradient>0), calculata pe orice orizont
-        din [CM_DYNAMIC_WINDOW_MIN_SEC, CM_DYNAMIC_WINDOW_MAX_SEC], nu doar cel fix
-        (~3.7min) publicat azi in cache_instant_trend.json. False daca fereastra
-        dinamica e indisponibila (acelasi fallback neutru/sigur ca is_trend_up())."""
+        """Evaluate monitortrades' upward-trend condition over a configurable window.
+
+        Return False as the same neutral fallback when the dynamic window is unavailable.
+        """
         dyn = self.get_instant_trend_for_window(symbol, window_seconds, now=now)
         if dyn is None:
             return False
@@ -1600,7 +1494,7 @@ class CachePriceShortTrendManager:
         gradient = dyn["final_trend"]
         return slope > 0 or (slope == 0 and gradient > 0)
 
-    # ── Store cross-process (fișier JSON, atomic) ─────────────────────────────
+    # ── Atomic cross-process JSON store ──────────────────────────────────────
     def _write_file(self):
         try:
             atomic_write_json(self.filename, self._mem)
@@ -1608,8 +1502,8 @@ class CachePriceShortTrendManager:
             print(f"[CachePriceShortTrendManager] scriere {self.filename}: {e}")
 
     def _read_file(self):
-        # Citim mereu (fișier mic, citit ocazional de readeri) — corectitudine
-        # cross-process garantată, fără riscul de mtime cu rezoluție grosieră.
+        # Always read this small, infrequently accessed file to guarantee cross-process
+        # correctness without relying on coarse mtime resolution.
         try:
             with open(self.filename, "r") as f:
                 return json.load(f)
@@ -1617,8 +1511,7 @@ class CachePriceShortTrendManager:
             return {}
 
     def _set_mem(self, symbol, **fields):
-        """Merge câmpuri DOAR în memorie (fără I/O). Folosit de căile rapide
-        (on_price_update, evaluate_full); fișierul e scris de _flush_loop."""
+        """Merge fields in memory only; the flush loop owns file I/O."""
         with self._lock:
             snap = dict(self._mem.get(symbol) or self._read_file().get(symbol) or {})
             snap.update(fields)
@@ -1626,16 +1519,14 @@ class CachePriceShortTrendManager:
             self._mem[symbol] = snap
 
     def update_snapshot(self, symbol, **fields):
-        """Memorie + flush IMEDIAT pe fișier DOAR dacă e writer. Apelanții externi
-        (tradeall non-writer, teste) actualizează memoria fără a scrie fișierul."""
+        """Update memory and flush immediately only when this instance is the writer."""
         self._set_mem(symbol, **fields)
         if self.writer:
             with self._lock:
                 self._write_file()
 
     def _start_flush_loop(self):
-        """Thread SEPARAT care scrie memoria pe fișier la FLUSH_INTERVAL_SEC.
-        Decuplează I/O-ul de căile de calcul. Rulează DOAR la writer."""
+        """Run a writer-only thread that decouples periodic file I/O from calculation."""
         if not self.writer:
             return
         if self._flush_thread is not None and self._flush_thread.is_alive():
@@ -1649,7 +1540,7 @@ class CachePriceShortTrendManager:
         self._flush_thread.start()
 
     def shutdown(self, timeout=5.0):
-        """Oprește buclele de evaluare/flush și dezabonează sursele Cache24."""
+        """Stop evaluation and flush loops, then unsubscribe Cache24 sources."""
         self._stop_event.set()
         for cache24 in (self._cache24_managers or {}).values():
             unsubscribe = getattr(cache24, "unsubscribe_price", None)
@@ -1673,9 +1564,7 @@ class CachePriceShortTrendManager:
         return all(results) if results else True
 
     def prime_from_file(self):
-        """Încarcă fișierul în memorie (date INIȚIALE la startup). Un reader poate
-        apoi apela start_computation() ca să-și calculeze singur trendul instant
-        (on_price_update → _mem) și să țină gradientul proaspăt, fără să scrie fișierul."""
+        """Prime memory from startup data so a reader can calculate fresh trends locally."""
         data = self._read_file()
         with self._lock:
             for symbol, snap in data.items():
@@ -1684,15 +1573,14 @@ class CachePriceShortTrendManager:
         return len(self._mem)
 
     def get_snapshot(self, symbol):
-        """_mem dacă procesul calculează/amorsat; altfel fișierul (reader pur)."""
+        """Return local calculated/primed memory, or the file for a pure reader."""
         with self._lock:
             if symbol in self._mem:
                 return dict(self._mem[symbol])
         return self._read_file().get(symbol)
 
     def is_snapshot_fresh(self, symbol=None, max_age_sec=None):
-        """True dacă snapshot-ul (din _mem sau fișier) e mai nou de max_age_sec.
-        Permite unui reader să detecteze un writer MORT și să comute pe calcul propriu."""
+        """Return whether memory or file state is fresh enough to trust the writer."""
         max_age_sec = max_age_sec if max_age_sec is not None else self.TREND_STALE_SEC
         now = time.time()
         if symbol is not None:
@@ -1705,24 +1593,22 @@ class CachePriceShortTrendManager:
         return (now - latest) <= max_age_sec
 
     def become_writer(self):
-        """Promovează managerul la WRITER (failover: când fișierul e stale fiindcă
-        writer-ul a murit, un reader care deja calculează preia scrierea fișierului)."""
+        """Promote a calculating reader to writer when the previous writer is stale."""
         self.writer = True
         self._start_flush_loop()
 
     def get_snapshot_resilient(self, symbol, max_age_sec=None,
                                cache24_managers=None, current_price_mgr=None):
-        """Reader REZILIENT cu failover LAZY:
-          • dacă deja calculez → _mem (autoritar)
-          • altfel, dacă fișierul e PROASPĂT → îl folosesc (eficient, FĂRĂ recalcul)
-          • dacă fișierul e STALE (writer mort) → pornesc calcul propriu O SINGURĂ
-            DATĂ (lazy) + devin writer, apoi folosesc _mem.
-        Așa rulez autonom DOAR când nu mă pot baza pe fișier."""
+        """Read resiliently with lazy failover.
+
+        Use authoritative memory while calculating, otherwise use a fresh shared file.
+        If the file is stale, start local calculation once, become writer, and use memory.
+        """
         if self._computing:
             return self.get_snapshot(symbol)
         if self.is_snapshot_fresh(symbol, max_age_sec):
             return self._read_file().get(symbol)
-        # Fișier prea vechi → failover: preiau calculul (autonom de aici încolo).
+        # A stale file triggers autonomous local calculation and writer failover.
         builtins.print(f"[CachePriceShortTrendManager][WARN] fișier stale → "
                        f"failover la calcul propriu ({symbol})")
         self.prime_from_file()
@@ -1747,7 +1633,7 @@ class CachePriceShortTrendManager:
             except Exception:
                 pass
 
-    # ── API gate (întârziere oportunistă + epsilon informat) ──────────────────
+    # ── Opportunistic-delay gate with informed epsilon ───────────────────────
     def _epsilon(self, snap):
         eps = snap.get("epsilon")
         if eps is not None and eps > 0:
@@ -1756,12 +1642,10 @@ class CachePriceShortTrendManager:
         return price * self.FAVORABLE_REL_EPS
 
     def fresh_snapshot(self, symbol, now=None):
-        """Snapshot-ul lui `symbol` DOAR daca e proaspat (<=TREND_STALE_SEC) — None
-        altfel (fara snapshot SAU prea vechi). Punct UNIC de staleness-check (30 iul,
-        unificare is_trend_up/should_wait — foloseste-l direct, PUBLIC, e chemat si
-        din monitortrades.py): inainte, is_trend_up() din monitortrades.py NU avea
-        niciun staleness-check (bug documentat — folosea orice era in fisier,
-        oricat de vechi); acum ambele functii trec prin acelasi gard."""
+        """Return a symbol snapshot only when it is within ``TREND_STALE_SEC``.
+
+        This is the shared public staleness check used by both trend and wait decisions.
+        """
         snap = self.get_snapshot(symbol)
         if snap is None:
             return None
@@ -1772,42 +1656,20 @@ class CachePriceShortTrendManager:
 
     def should_wait(self, side, symbol, window_seconds=None, fast=False,
                      use_noise_gate=True, now=None):
-        """Nucleu UNIFICAT (30 iul) pt "ar trebui sa astept inainte sa execut o
-        intentie de BUY/SELL?" — SINGURUL loc unde traieste aceasta logica (30 iul:
-        eliminat is_favorable_to_wait, era doar un alias fara niciun apelant extern
-        real — vezi git log). True = ASTEAPTA.
+        """Decide whether to delay a BUY or SELL intent; True means wait.
 
-        Necunoscut/stale -> False (NU asteapta, executa imediat). CORECTAT 30 iul:
-        incercasem True (asteapta) intr-o trecere anterioara, motivat de "e oricum
-        plafonat de max_wait_sec" — dar user a semnalat corect riscul: daca
-        cacheManager.py cade (trendul devine stale), NU vrem ca ordinele sa ramana
-        blocate deloc, nici macar pana la un timeout mic. "Fara trend" != "asteapta
-        un trend" — inseamna "nu am pe ce sa ma bazez, execut fara intarziere".
-
-        window_seconds: None -> fereastra implicita PRECALCULATA (cea publicata
-        azi in cache_instant_trend.json, cea mai rapida — deja in memorie, zero
-        calcul suplimentar). Orice ALTA valoare (30 iul: implementat, era doar un
-        stub inainte — vezi CachePriceShortTrendManager.get_instant_trend_for_window)
-        -> calculata PE CERERE dintr-un buffer brut Cache24, clamata silentios la
-        [CM_DYNAMIC_WINDOW_MIN_SEC, CM_DYNAMIC_WINDOW_MAX_SEC]. Disponibila DOAR in
-        procesele care au rulat start_computation() (cacheManager.py, tradeall.py);
-        intr-un proces pur-cititor cade pe "necunoscut" -> False (nu asteapta),
-        NICIODATA nu crapa sau blocheaza un ordin din lipsa de infrastructura.
-        fast=True -> canalul RAPID (gradient_recent_fast, latenta mica) — se aplica
-        DOAR pt window_seconds=None; ignorat pt o fereastra custom (acolo se
-        foloseste mereu formula bogata, e literalmente ce calculeaza fereastra
-        dinamica). False (implicit) -> canalul BOGAT (growth_coefficient).
-        use_noise_gate: True (implicit, comportament VECHI neschimbat pt fostul
-        is_favorable_to_wait) -> zgomot (|g|<=eps) inseamna asteapta. Masurat
-        empiric (29 iul, backtest cu istoric real) ca aceasta regula STRICA
-        exact cazul "prinde primul semn slab de inversare" — apelanti noi pot
-        trece use_noise_gate=False."""
+        Unknown or stale data returns False and executes immediately, so a failed cache
+        cannot block orders. ``window_seconds=None`` uses the precomputed primary window;
+        another value calculates a bounded dynamic window where Cache24 is available.
+        ``fast`` selects low-latency keys only for the primary window. The optional noise
+        gate treats ``|gradient| <= epsilon`` as a reason to wait.
+        """
         side = side.upper()
 
         if window_seconds is not None and float(window_seconds) != self.window_seconds[0]:
             dyn = self.get_instant_trend_for_window(symbol, window_seconds, now=now)
             if dyn is None:
-                return False   # necunoscut (fara Cache24 in acest proces, sau prea putine date/stale)
+                return False   # Unknown because Cache24 is unavailable, insufficient, or stale.
             g = float(dyn["growth_coefficient"] or 0.0)
             if use_noise_gate and abs(g) <= dyn["epsilon"]:
                 return True
@@ -1819,7 +1681,7 @@ class CachePriceShortTrendManager:
 
         snap = self.fresh_snapshot(symbol, now=now)
         if snap is None:
-            return False   # necunoscut/stale -> NU asteapta, executa imediat
+            return False   # Unknown or stale data executes immediately.
         if fast:
             g = snap.get("gradient_recent_fast", snap.get("gradient_recent", 0.0))
         else:
@@ -1838,14 +1700,11 @@ class CachePriceShortTrendManager:
     def wait_for_favorable_entry(self, side, symbol, max_wait_sec=10.0,
                                  poll_sec=0.2, sleep_fn=time.sleep, mode="full",
                                  window_seconds=None):
-        """Blochează cât timp trendul e favorabil, până la max_wait_sec (implicit
-        10s — redus 30 iul de la 1h, cerere user: "ordinul secundelor nu
-        minutelor"). Apelantul real (bapi_placeorder.__place_order) transmite
-        mereu propria valoare explicit, deci acest implicit conteaza doar pt
-        apelanti directi (teste, alte scripturi). Heartbeat vizual (.) la ~1s.
-        window_seconds: forwardat la should_wait — None (implicit) foloseste
-        fereastra precalculata; orice alta valoare cere fereastra DINAMICA (vezi
-        get_instant_trend_for_window). Returnează secundele așteptate."""
+        """Wait while trend favors delay, bounded by ``max_wait_sec``.
+
+        Emit a visual heartbeat roughly once per second and return elapsed seconds.
+        Forward ``window_seconds`` to ``should_wait`` for primary or dynamic evaluation.
+        """
         deadline = time.time() + max_wait_sec
         waited = 0.0
         next_dot = 1.0
@@ -1865,13 +1724,14 @@ _short_trend_instance = None
 _short_trend_lock = threading.Lock()
 
 def get_short_trend_manager(symbols=None, filename="cache_instant_trend.json", writer=False):
-    """Singleton CachePriceShortTrendManager.
-    writer=True → procesul scrie fișierul (ex. cacheManager.py). Ceilalți (tradeall
-    care calculează pt logica lui, sau readerii) folosesc writer=False."""
+    """Return the CachePriceShortTrendManager singleton.
+
+    ``writer=True`` lets the process persist the file; calculators and readers use False.
+    """
     global _short_trend_instance
     if _short_trend_instance is not None:
         if writer:
-            _short_trend_instance.writer = True   # promovare la writer (idempotent)
+            _short_trend_instance.writer = True   # Idempotent writer promotion.
         return _short_trend_instance
     with _short_trend_lock:
         if _short_trend_instance is not None:
@@ -1890,8 +1750,8 @@ def get_short_trend_manager(symbols=None, filename="cache_instant_trend.json", w
 ORDER_SYNC_INTERVAL_SEC = 0.4 * 60   # 3 minute     
 TRADE_SYNC_INTERVAL_SEC = 3 * 60   # 3 minute
 PRICE_SYNC_INTERVAL_SEC = 7 * 60   # 7 minute
-PRICE24_SYNC_INTERVAL_SEC = 30         # fallback polling cand WS e inactiv
-CURRENTPRICE_SYNC_INTERVAL_SEC = 30   # idem pentru CacheCurrentPriceManager
+PRICE24_SYNC_INTERVAL_SEC = 30         # Fallback polling while WebSocket is inactive.
+CURRENTPRICE_SYNC_INTERVAL_SEC = 30   # Same policy for CacheCurrentPriceManager.
 PRICETREND_SYNC_INTERVAL_SEC = 10 * 60   # 10 minute
 ASSETVALUE_SYNC_INTERVAL_SEC = 10 * 60  # 10 minutes 
 # TODO: set this to 60 * 60  # 1 hour
@@ -1912,17 +1772,17 @@ class CacheFactory:
         },
         "Price": {
             "class": CacheSparsePriceManager,
-            "filename": None,  # dict per simbol
+            "filename": None,  # Dictionary per symbol.
             "sync_ts": lambda: PRICE_SYNC_INTERVAL_SEC,
         },
         "Price24": {
             "class": Cache24PriceManager,
-            "filename": None,  # dict per simbol
+            "filename": None,  # Dictionary per symbol.
             "sync_ts": lambda: PRICE24_SYNC_INTERVAL_SEC,
         },
         "CurrentPrice": {
             "class": CacheCurrentPriceManager,
-            "filename": "cache_currentprice.json",  # un singur fișier, toți simbolii
+            "filename": "cache_currentprice.json",  # One shared file for all symbols.
             "sync_ts": lambda: CURRENTPRICE_SYNC_INTERVAL_SEC,
         },
         "PriceLongTrend": {
@@ -1942,16 +1802,16 @@ class CacheFactory:
         if name not in cls._CONFIG:
             raise ValueError(f"Unknown cache type: {name}")
 
-        # Singleton pe NUME: prima creare fixează simbolurile. Dacă un apel
-        # ulterior cere alte simboluri, ele sunt IGNORATE → avertizăm explicit.
+        # This name-keyed singleton fixes symbols on first creation. Warn explicitly
+        # when a later call requests a different set that will be ignored.
         if name in cls._instances and symbols is not None:
             inst = cls._instances[name]
             existing = set(inst.keys()) if isinstance(inst, dict) else set(getattr(inst, "symbols", []))
             requested = set(symbols)
             if requested != existing:
                 missing = requested - existing
-                # builtins.print: modulul redefinește print ca no-op (loguri dezactivate),
-                # dar avertizarea asta trebuie să fie vizibilă.
+                # Use builtins.print so this warning remains visible if module logging
+                # replaces print with a no-op.
                 builtins.print(
                     f"[CacheFactory][WARN] '{name}' există deja cu simbolurile {sorted(existing)}; "
                     f"cererea pentru {sorted(requested)} e IGNORATĂ"
@@ -1971,7 +1831,7 @@ class CacheFactory:
                 symbols = ["TOTAL"] if name == "AssetValue" else sym.symbols
 
             if name in ("Price", "Price24"):
-                # Price = istoric (append JSONL); Price24 = bounded 24h (full-rewrite)
+                # Price is append-JSONL history; Price24 is a bounded full-rewrite cache.
                 prefix, ext = ("cache_price_", "jsonl") if name == "Price" else ("cache_24price_", "json")
                 cls._instances[name] = {
                     s: manager_class(
@@ -2002,7 +1862,7 @@ class CacheFactory:
 
     @classmethod
     def shutdown_all(cls, timeout=5.0):
-        """Oprește toate buclele de sync deținute de factory și golește registry-ul."""
+        """Stop every factory-owned synchronization loop and clear the registry."""
         managers = []
         for value in cls._instances.values():
             managers.extend(value.values() if isinstance(value, dict) else (value,))
@@ -2013,7 +1873,7 @@ class CacheFactory:
 
     @classmethod
     def remove(cls, name, timeout=5.0):
-        """Scoate controlat un singleton, oprind întâi thread-urile deținute."""
+        """Remove a singleton cleanly after stopping all threads it owns."""
         value = cls._instances.pop(name, None)
         if value is None:
             return True
@@ -2040,16 +1900,15 @@ def _upsert_order_from_execution_report(event):
 
     order_cache = get_cache_manager("Order")
 
-    # Order cache = DOAR ordine EXECUTATE (ca get_filled_orders). Ordinele NEexecutate
-    # (NEW) sau terminate fara fill (CANCELED/EXPIRED/REJECTED) NU se cacheaza: nu sunt
-    # tranzactii realizate si polueaza gardul de profit (anulatele veneau cu pret 0).
+    # Cache only executed orders, matching get_filled_orders. NEW or terminal orders
+    # without fills are not transactions and would pollute the profit guard with zero prices.
     if event.get("X") not in ("FILLED", "PARTIALLY_FILLED"):
         return
 
     order_item = {
         "orderId": event.get("i"),
-        # L = ultimul pret executat (>0 la fill); cade pe p (pretul ordinului) ca rezerva.
-        # NU "L or p": L vine "0.00000000" (string truthy) la ne-fill -> ar da mereu 0.
+        # L is the latest execution price and p is the order-price fallback. Convert L
+        # before fallback because the non-fill string ``0.00000000`` is truthy.
         "price": float(event.get("L") or 0) or float(event.get("p") or 0),
         "quantity": float(event.get("l") or event.get("q") or 0),
         "timestamp": int(event.get("T") or event.get("E") or int(time.time() * 1000)),
@@ -2100,7 +1959,7 @@ def _append_trade_from_execution_report(event):
 
 def _refresh_asset_value_from_ws_event():
     asset_cache = get_cache_manager("AssetValue", symbols=["TOTAL"])
-    items = asset_cache.get_remote_items("TOTAL", None)   # update_cache_per_symbol cere new_items
+    items = asset_cache.get_remote_items("TOTAL", None)   # update_cache_per_symbol expects new_items.
     if items:
         asset_cache.update_cache_per_symbol("TOTAL", items)
 
@@ -2114,7 +1973,7 @@ def _persist_ws_updated_caches(event_type):
 
 
 def _refresh_symbol_in_cache(manager, symbol):
-    """Reîmprospătează DOAR un simbol într-un manager (eficient pe event WS)."""
+    """Refresh only one manager symbol efficiently for a WebSocket event."""
     try:
         start_time = manager.fetchtime_time_per_symbol.get(symbol, manager.fallback_time_default)
         items = manager.get_remote_items(symbol, start_time)
@@ -2140,10 +1999,9 @@ def _handle_binance_ws_event(event):
                 f"symbol={symbol} orderId={event.get('i')} "
                 f"status={event.get('X')} execType={event.get('x')} side={event.get('S')}"
             )
-        # Derivăm Order + Trade DIRECT din payload-ul WS (ZERO apeluri REST) — evită
-        # rate-limit-ul Binance pe rafale de fill-uri și e instant. Re-fetch-ul REST
-        # rămâne doar ca fallback când lipsește simbolul (caz rar). Golurile de la
-        # eventuale deconectări WS sunt acoperite de polling-ul de fallback (WS unhealthy).
+        # Derive Order and Trade directly from the WebSocket payload without REST calls.
+        # REST remains a rare fallback for missing symbols, while fallback polling covers
+        # gaps created by WebSocket disconnections.
         if symbol:
             _upsert_order_from_execution_report(event)
             _append_trade_from_execution_report(event)
@@ -2167,15 +2025,15 @@ def enable_real_ws_event_sync():
     global _ws_bridge
     import sys
     if sys.modules.get("_cacheManager_initialized"):
-        # Deja pornit dintr-un import anterior
+        # Already started by an earlier import.
         if _ws_bridge is not None:
             return _ws_bridge
     with _ws_bridge_lock:
         if _ws_bridge is not None:
             return _ws_bridge
         from binance_api import bapi_ws
-        # Clasa de stream trăiește în bapi_ws; cacheManager doar cablează callback-urile
-        # de health (care driveează fallback-ul de polling via _should_poll).
+        # bapi_ws owns the stream class; cacheManager wires health callbacks that drive
+        # fallback polling through ``_should_poll``.
         _ws_bridge = bapi_ws.BinanceAccountStream(
             on_event=_handle_binance_ws_event,
             on_available=_mark_ws_available,
@@ -2195,38 +2053,29 @@ def _initialize_once():
     enable_real_ws_event_sync()
     print("⚙️ cacheManager: WS user-data bridge pornit (execution reports).")
 
-# WS user-data bridge e OPT-IN: NU mai pornește automat la import.
-# Procesele care vor execution reports în timp real (ex. procesul dedicat
-# cacheManager.py, sau tradeall) apelează explicit:
+# The user-data WebSocket bridge is opt-in and does not start during import. Processes
+# that need real-time execution reports enable it explicitly:
 #     import cacheManager as cm
-#     cm.enable_real_ws_event_sync()   # sau cm._initialize_once()
-# Readerii (monitortrades, assetguardian, ...) care doar citesc cache-uri
-# nu mai pornesc WS — se bazează pe polling.
+#     cm.enable_real_ws_event_sync()   # or cm._initialize_once()
+# Read-only consumers rely on polling and do not start WebSocket.
 
 
 import concurrent.futures as _futures
 
-# 28 iul: deadline dur pe fetch-ul de pret non-Binance. Incident HYPE: poller-ul
-# a inghetat 5.5h pt ca get_current_price (HL) s-a blocat pe un DNS getaddrinfo
-# — NEACOPERIT de read-timeout-ul din hl_client (requests timeout nu prinde
-# rezolvarea DNS). Fara eroare, fara loop -> HYPE stale ore intregi. Deadline-ul
-# dur (rularea fetch-ului intr-un worker separat + future.result(timeout)) face
-# ca ORICE blocare (DNS/connect/read) sa ridice TimeoutError in loc sa inghete
-# poller-ul; poller-ul logheaza si continua, auto-refacandu-se cand reteaua revine.
-_NB_FETCH_DEADLINE_SEC = 15   # < interval_sec (20): un fetch blocat nu prelungeste ciclul
+# A hard deadline protects non-Binance price polling from DNS/connect/read hangs that
+# request read timeouts may not cover. A separate worker and Future timeout keep the
+# poller alive and let it recover when the network returns.
+_NB_FETCH_DEADLINE_SEC = 15   # Shorter than the 20-second interval, so hangs do not extend a cycle.
 
 
 def _fetch_price_with_deadline(market_api, symbol, pool, deadline_sec=_NB_FETCH_DEADLINE_SEC):
-    """get_current_price(symbol) cu DEADLINE DUR. Ridica _futures.TimeoutError daca
-    fetch-ul se blocheaza peste deadline_sec (la orice nivel: DNS/connect/read),
-    in loc sa blocheze apelantul la nesfarsit. Worker-ul blocat se elibereaza cand
-    OS-ul deblocheaza in cele din urma getaddrinfo/socket-ul (hang tranzitoriu)."""
+    """Fetch current price with a hard deadline across DNS, connect, and read stages."""
     fut = pool.submit(market_api.get_current_price, symbol=symbol)
     return fut.result(timeout=deadline_sec)
 
 
 class _NonBinanceTrendPoller:
-    """Lifecycle handle pentru thread-ul și executorul poller-ului non-Binance."""
+    """Own the non-Binance poller's thread and executor lifecycle."""
     def __init__(self, thread, pool, stop_event):
         self.thread = thread
         self.pool = pool
@@ -2242,16 +2091,12 @@ class _NonBinanceTrendPoller:
 
 def _start_nonbinance_trend_poller(cpm, symbols, interval_sec=20,
                                    fetch_deadline_sec=_NB_FETCH_DEADLINE_SEC):
-    """Alimenteaza instant-trend pt simboluri FARA WS (non-Binance, ex HYPEUSD pe Kraken):
-    poll get_current_price prin facada -> _push_price in lantul CurrentPrice->Cache24->
-    InstantTrend. Toleranta per-simbol; Binance (WS) neafectat. Fetch cu deadline dur
-    (vezi _fetch_price_with_deadline) — un blocaj de retea NU poate ingheta poller-ul.
+    """Feed instant trends for non-WebSocket, non-Binance symbols.
 
-    Pool cu >=2 workeri: un fetch blocat ocupa un worker, dar poller-ul continua
-    (nu asteapta la nesfarsit). La un blocaj TRANZITORIU (DNS revine), worker-ul
-    se deblocheaza si totul se reia. La un blocaj PERMANENT, poller-ul logheaza
-    [NB-trend] la fiecare ciclu (vizibil) si watchdog-ul de cache alarmeaza la 20
-    min — spre deosebire de vechiul comportament (inghet TACUT ore intregi)."""
+    Poll through the facade and push into the CurrentPrice/Cache24/InstantTrend chain.
+    Per-symbol failures do not affect Binance. A hard deadline and at least two workers
+    keep one blocked fetch from freezing the poller; repeated failures remain visible.
+    """
     pool = _futures.ThreadPoolExecutor(
         max_workers=max(2, len(list(symbols))), thread_name_prefix="NBTrendFetch")
     stop_event = threading.Event()
@@ -2277,14 +2122,13 @@ def _start_nonbinance_trend_poller(cpm, symbols, interval_sec=20,
 
 
 if __name__ == "__main__":
-    _initialize_once()   # procesul dedicat de cache vrea WS + persistă în fișier
+    _initialize_once()   # The dedicated cache process enables WebSocket and persistence.
     threads = []
     _nb_poller = None
     _trend_mgr = None
 
-    # Simboluri NON-Binance din instruments.conf (ex HYPEUSD pe Kraken) pt care vrem
-    # instant-trend cache-uit. Binance ramane din sym.symbols (WS). Defensiv: orice
-    # eroare -> doar Binance (comportament neschimbat).
+    # Add non-Binance instruments that need cached instant trends. Binance symbols still
+    # come from sym.symbols through WebSocket; configuration errors fall back to Binance only.
     _nb_syms = []
     try:
         from instruments_config import load_for
@@ -2296,20 +2140,16 @@ if __name__ == "__main__":
         builtins.print(f"[cacheManager] instrumente non-Binance pt trend indisponibile: {_e}")
         _nb_syms = []
     _trend_syms = list(dict.fromkeys(list(sym.symbols) + _nb_syms))
-    # Price24 (dict per simbol) trebuie sa includa simbolurile non-Binance INAINTE de bucla
-    # generica, ca start_computation sa gaseasca cache24_managers[s] pt fiecare.
+    # Register non-Binance Price24 managers before the generic loop so trend computation
+    # can find a raw buffer for every symbol.
     if _nb_syms:
         CacheFactory.get("Price24", symbols=_trend_syms)
-        # CurrentPrice (instanta din CacheFactory, fara WS -> polling prin facada) extinsa cu
-        # non-Binance: poleste HYPEUSD via Kraken -> cache_currentprice.json devine COERENT
-        # (altfel doar instanta _trend_cpm avea HYPEUSD, in memorie, nepersistat in fisier).
+        # Extend the persisted CurrentPrice factory instance with non-Binance symbols
+        # polled through the facade, keeping cache_currentprice.json coherent.
         CacheFactory.get("CurrentPrice", symbols=_trend_syms)
         builtins.print(f"[cacheManager] instant-trend extins cu non-Binance: {_nb_syms}")
-        # Trend LUNG (gauss) pt non-Binance (ex HYPEUSD) — GATED pe LONGTREND_NONBINANCE
-        # (default OFF -> weight_limit foloseste proxy BTC). Activat: include istoricul de pret
-        # (Price) + long-trend pt HYPE -> incepe sa ACUMULEZE date ACUM; semnificativ dupa
-        # ~lookback_days. priceAnalysis (acelasi flag) calculeaza -> priceanalysis.json ->
-        # PriceLongTrend -> gauss HYPE. "Acolo, gata de activat cand ai date suficiente."
+        # LONGTREND_NONBINANCE optionally starts accumulating sparse history and long-trend
+        # data. It is disabled by default until enough lookback data exists.
         if os.environ.get("LONGTREND_NONBINANCE", "").strip().lower() == "true":
             CacheFactory.get("Price", symbols=_trend_syms)
             CacheFactory.get("PriceLongTrend", symbols=_trend_syms)
@@ -2317,27 +2157,26 @@ if __name__ == "__main__":
 
     for name, config in CacheFactory._CONFIG.items():
         cache = get_cache_manager(name)
-        interval = config["sync_ts"]()  # obținem intervalul de sincronizare
+        interval = config["sync_ts"]()  # Resolve the synchronization interval.
 
         if isinstance(cache, dict):
-            # Price / Price24 → dict per simbol
+            # Price and Price24 are dictionaries keyed by symbol.
             for manager in cache.values():
                 threads.append(manager.periodic_sync(interval))
         else:
             threads.append(cache.periodic_sync(interval))
 
-    # Lanț de trend: market-data WS → CurrentPrice → Cache24 → InstantTrend.
-    # Rulăm CALCULUL COMPLET aici → cache_instant_trend.json e menținut continuu,
-    # independent de tradeall (monitortrades/rtrade citesc de aici).
+    # Trend chain: market-data WebSocket to CurrentPrice, Cache24, and InstantTrend.
+    # Full calculation here keeps the shared snapshot current independently of tradeall.
     try:
         from binance_api import bapi_ws
         _trend_cpm = get_current_price_manager(
             ws_manager=bapi_ws.get_ws_manager(), symbols=_trend_syms, sync_ts=0.8)
         _trend_cache24 = CacheFactory.get("Price24")
-        _trend_mgr = get_short_trend_manager(symbols=_trend_syms, writer=True)   # singurul writer al fișierului
+        _trend_mgr = get_short_trend_manager(symbols=_trend_syms, writer=True)   # Sole file writer.
         _trend_mgr.start_computation(_trend_cache24, _trend_cpm, run_full_eval=True)
         print("⚙️ cacheManager: calcul trend complet pornit (cache_instant_trend.json).")
-        if _nb_syms:   # WS-ul e doar Binance -> impinge manual preturile non-Binance in lant
+        if _nb_syms:   # WebSocket covers Binance only; push other prices manually.
             _nb_poller = _start_nonbinance_trend_poller(_trend_cpm, _nb_syms, interval_sec=20)
     except Exception as e:
         print(f"[cacheManager] Nu pot porni calculul de trend: {e}")
