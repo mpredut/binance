@@ -88,6 +88,18 @@ class AssetGuardianTest(unittest.TestCase):
             ag._last_evaluation.update(drawdown=-8.5, pending_tier=False)
             self.assertEqual(ag._next_check_seconds(), ag.NEAR_TRIGGER_SECONDS)
 
+    def test_new_uncached_high_does_not_accelerate_drawdown_polling(self):
+        state = MemoryState()
+        with mock.patch.object(ag, "STATE", state):
+            ag._last_evaluation.update(drawdown=8.0, pending_tier=False)
+            self.assertEqual(ag._next_check_seconds(), ag.CHECK_INTERVAL_SECONDS)
+
+    def test_corrupt_completed_tiers_are_ignored(self):
+        state = MemoryState({"completed_tiers": ["bad", None, 7]})
+        with mock.patch.object(ag, "STATE", state):
+            ag._last_evaluation.update(drawdown=-8.5, pending_tier=False)
+            self.assertEqual(ag._next_check_seconds(), ag.NEAR_TRIGGER_SECONDS)
+
     def test_guardian_owns_retry_for_buy(self):
         provider = mock.Mock()
         provider.free_balance.return_value = 1000.0

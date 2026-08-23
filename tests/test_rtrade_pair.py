@@ -19,6 +19,7 @@ class FakeVenue:
         self.canceled = []
         self.market_calls = []
         self.fill_on_cancel = {}
+        self.cancel_fail = set()
         self.failure_reasons = {}
         self.allow_market = True
 
@@ -56,6 +57,8 @@ class FakeVenue:
 
     def cancel(self, order_id):
         self.canceled.append(order_id)
+        if order_id in self.cancel_fail:
+            return False
         if order_id in self.fill_on_cancel:
             qty, price = self.fill_on_cancel.pop(order_id)
             self.statuses[order_id] = OrderSnapshot(
@@ -93,6 +96,13 @@ class PricePolicyTest(unittest.TestCase):
         target = anchored_exit_price("BUY", 100.0, 110.0, 0.0064, 0.0115)
         self.assertEqual(target, 98.85)
         self.assertLess(target, 100.0)
+
+    def test_nonfinite_policy_and_quantity_fail_closed(self):
+        with self.assertRaises(ValueError):
+            PairPolicy(adjustment_fraction=float("nan"))
+        with self.assertRaises(ValueError):
+            PairCoordinator(FakeVenue(), qty=float("inf"),
+                            policy=PairPolicy(adjustment_fraction=0.0064))
 
 
 class PairCoordinatorTest(unittest.TestCase):
@@ -150,6 +160,37 @@ class PairCoordinatorTest(unittest.TestCase):
         self.assertCountEqual(venue.canceled, ["L1", "L2"])
         self.assertEqual(coordinator.tickets, [])
         self.assertEqual(coordinator.snapshots, {})
+
+    def test_ttl_does_not_terminalize_while_cancel_is_unconfirmed(self):
+        venue = FakeVenue()
+        coordinator = _coordinator(venue, quote_ttl_sec=32)
+        coordinator.start(mid=100.0)
+        venue.cancel_fail.add("L1")
+
+        pending = coordinator.step(now=33.0)
+
+        self.assertFalse(pending.terminal)
+        self.assertEqual(pending.reason, "quote_cancel_pending")
+        self.assertTrue(any(ticket.order_id == "L1" and ticket.active
+                            for ticket in coordinator.tickets))
+
+    def test_balanced_pair_waits_for_cancel_confirmation_before_complete(self):
+        venue = FakeVenue()
+        coordinator = _coordinator(venue)
+        coordinator.start(mid=100.0)
+        venue.fill("L1", 0.5, 99.36, status="open")
+        venue.fill("L2", 0.5, 100.64, status="open")
+        venue.cancel_fail.add("L1")
+
+        pending = coordinator.step(now=5.0)
+        self.assertFalse(pending.terminal)
+        self.assertEqual(pending.phase, "closing")
+        self.assertEqual(pending.reason, "balanced_cancel_pending")
+
+        venue.cancel_fail.clear()
+        complete = coordinator.step(now=6.0)
+        self.assertTrue(complete.terminal)
+        self.assertEqual(complete.phase, "complete")
 
     def test_fill_during_ttl_cancel_is_reconciled_as_exposure(self):
         venue = FakeVenue(current=99.36)

@@ -23,6 +23,14 @@ class OrderTicket:
     active: bool = True
     pair_id: Optional[str] = None
 
+    def __post_init__(self):
+        self.side = str(self.side).upper()
+        self.price = float(self.price)
+        self.qty = float(self.qty)
+        if (self.side not in {"BUY", "SELL"} or not math.isfinite(self.price)
+                or self.price <= 0 or not math.isfinite(self.qty) or self.qty <= 0):
+            raise ValueError("ticket rtrade invalid")
+
 
 @dataclass(frozen=True)
 class OrderSnapshot:
@@ -30,6 +38,13 @@ class OrderSnapshot:
     filled_qty: float = 0.0
     cost: float = 0.0
     fee: float = 0.0
+
+    def __post_init__(self):
+        if self.status not in {"open", "closed", "canceled", "expired"}:
+            raise ValueError(f"status ordin rtrade invalid: {self.status}")
+        if any(not math.isfinite(float(value)) or float(value) < 0
+               for value in (self.filled_qty, self.cost, self.fee)):
+            raise ValueError("snapshot financiar rtrade invalid")
 
 
 @dataclass(frozen=True)
@@ -44,6 +59,13 @@ class PairPolicy:
     price_decimals: int = 4
 
     def __post_init__(self):
+        numeric = (
+            self.adjustment_fraction, self.quote_ttl_sec, self.poll_sec,
+            self.fast_fill_ratio, self.min_edge_fraction,
+            self.shock_hard_stop_fraction, self.hard_stop_fraction,
+        )
+        if any(not math.isfinite(float(value)) for value in numeric):
+            raise ValueError("politica rtrade trebuie sa contina valori finite")
         if not 0 < self.adjustment_fraction < 1:
             raise ValueError("adjustment_fraction trebuie sa fie in (0, 1)")
         if self.quote_ttl_sec <= 0 or self.poll_sec <= 0:
@@ -143,6 +165,8 @@ class PairCoordinator:
                  pair_id_factory: Callable[[], str] = lambda: uuid.uuid4().hex):
         self.venue = venue
         self.qty = float(qty)
+        if not math.isfinite(self.qty) or self.qty <= 0:
+            raise ValueError("qty rtrade trebuie sa fie finit si pozitiv")
         self.policy = policy
         self.start_side = start_side.upper()
         if self.start_side not in {"BUY", "SELL"}:
@@ -166,6 +190,8 @@ class PairCoordinator:
         if self.phase not in {"idle", "complete", "expired", "failed", "hard_stop"}:
             raise RuntimeError("runda existenta nu este terminala")
         mid = float(mid if mid is not None else (self.venue.current_price() or 0.0))
+        if not math.isfinite(mid):
+            raise ValueError("mid rtrade trebuie sa fie finit")
         buy_price, sell_price = quote_prices(
             mid, self.policy.adjustment_fraction, self.policy.price_decimals)
         self.pair_id = pair_id or self.pair_id_factory()
@@ -316,6 +342,9 @@ class PairCoordinator:
             if ticket.side.upper() == entry_side and ticket.active:
                 self._cancel(ticket)
 
+    def _has_active_tickets(self) -> bool:
+        return any(ticket.active for ticket in self.tickets)
+
     def _ensure_anchored_exit(self, exposure_side: str, net_qty: float,
                               entry_avg: float, current: float) -> bool:
         exit_side = "SELL" if exposure_side == "LONG" else "BUY"
@@ -410,8 +439,19 @@ class PairCoordinator:
             if abs(net) <= 1e-8:
                 for ticket in self.tickets:
                     self._cancel(ticket)
-                self.phase = "complete"
-                return self.outcome()
+                # Cancelul poate concura cu un fill sau poate eșua. Confirmăm din
+                # exchange înainte de a declara runda terminală.
+                self._refresh()
+                bq, bc, _bf, sq, sc, _sf = self._totals()
+                net = bq - sq
+                if abs(net) <= 1e-8:
+                    if self._has_active_tickets():
+                        self.phase = "closing"
+                        self.reason = "balanced_cancel_pending"
+                        return self.outcome()
+                    self.phase = "complete"
+                    self.reason = None
+                    return self.outcome()
 
             exposure_side = "LONG" if net > 0 else "SOLD"
             self.phase = "exposed"
@@ -442,6 +482,9 @@ class PairCoordinator:
             bq, _bc, _bf, sq, _sc, _sf = self._totals()
             if bq > 0 or sq > 0:
                 return self.step(now=now)
+            if self._has_active_tickets():
+                self.reason = "quote_cancel_pending"
+                return self.outcome()
             self.phase = "expired"
             self.reason = "quote_ttl"
         return self.outcome()

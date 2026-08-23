@@ -335,7 +335,7 @@ def _campaign_tier(drawdown_abs, maximum_row, free_cash):
         }
         STATE.save(state)
 
-    completed = {float(value) for value in state.get("completed_tiers", [])}
+    completed = _completed_tier_values(state)
     for threshold, allocation in BUY_TIERS:
         if drawdown_abs >= threshold and threshold not in completed:
             return (threshold, allocation), state
@@ -343,7 +343,7 @@ def _campaign_tier(drawdown_abs, maximum_row, free_cash):
 
 
 def _complete_campaign_tier(state, threshold):
-    completed = {float(value) for value in state.get("completed_tiers", [])}
+    completed = _completed_tier_values(state)
     completed.add(float(threshold))
     state["completed_tiers"] = sorted(completed)
     STATE.save(state)
@@ -355,13 +355,22 @@ def _next_check_seconds():
         return CHECK_INTERVAL_SECONDS
     if _last_evaluation.get("pending_tier"):
         return min(CHECK_INTERVAL_SECONDS, ACTIVE_TRIGGER_SECONDS)
-    completed = {float(value) for value in STATE.load().get("completed_tiers", [])}
+    completed = _completed_tier_values(STATE.load())
     next_threshold = next((threshold for threshold, _ in BUY_TIERS
                            if threshold not in completed), None)
     if (next_threshold is not None
-            and next_threshold - abs(drawdown) <= NEAR_TRIGGER_DISTANCE_PCT):
+            and next_threshold - max(0.0, -drawdown) <= NEAR_TRIGGER_DISTANCE_PCT):
         return min(CHECK_INTERVAL_SECONDS, NEAR_TRIGGER_SECONDS)
     return CHECK_INTERVAL_SECONDS
+
+
+def _completed_tier_values(state):
+    completed = set()
+    for raw in state.get("completed_tiers", []):
+        value = _finite_float(raw, positive=True)
+        if value is not None:
+            completed.add(value)
+    return completed
 
 
 def evaluate_and_maybe_sell_or_buy(
@@ -400,7 +409,7 @@ def evaluate_and_maybe_sell_or_buy(
     growth_percent = ((current_value - minimum_value) / minimum_value) * 100.0
     drawdown_percent = ((current_value - maximum_value) / maximum_value) * 100.0
     _last_evaluation["drawdown"] = drawdown_percent
-    if abs(drawdown_percent) < RECOVERY_RESET_PERCENT and STATE.load():
+    if drawdown_percent > -RECOVERY_RESET_PERCENT and STATE.load():
         print(f" Drawdown recovered below {RECOVERY_RESET_PERCENT:.2f}%; rearm BUY campaign.")
         STATE.save({})
     threshold_value = minimum_value * (1 + threshold_percent / 100.0)
@@ -439,6 +448,10 @@ def evaluate_and_maybe_sell_or_buy(
         threshold, allocation = tier
         _last_evaluation["pending_tier"] = True
         initial_cash = _finite_float(campaign.get("initial_cash"), positive=True)
+        if initial_cash is None:
+            print(" Invalid campaign initial cash; reset staged BUY fail-closed.")
+            STATE.save({})
+            return False
         cash_amount = initial_cash * BUY_USE_CASH_RATIO * allocation
         print(f" BUY tier -{threshold:.2f}% allocation={allocation:.3f} "
               f"cash_target={cash_amount:.6f} USDC")
@@ -453,7 +466,7 @@ def evaluate_and_maybe_sell_or_buy(
 def run_forever():
     print(
         f" Started. check_interval={CHECK_INTERVAL_SECONDS}s, "
-        f"sell_threshold={TARGET_GROWTH_PERCENT}%, drop_buy_threshold={TARGET_DROP_PERCENT}%, "
+        f"sell_threshold={TARGET_GROWTH_PERCENT}%, buy_tiers={BUY_TIERS}, "
         f"minutes_back={ASSET_REFERENCE_MINUTES_BACK_DEFAULT}m, buy_symbol={BUY_SYMBOL_DEFAULT}"
     )
     while True:
