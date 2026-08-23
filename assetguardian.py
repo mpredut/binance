@@ -28,7 +28,7 @@ ASSET_REFERENCE_MINUTES_BACK_DEFAULT = float(os.environ.get("AG_REFERENCE_MINUTE
 BUY_SYMBOL_DEFAULT = sym.symbols[0] if sym.symbols else "BTCUSDC"
 BUY_USE_CASH_RATIO = float(os.environ.get("AG_BUY_USE_CASH_RATIO", "0.995"))
 BUY_TIERS_RAW = os.environ.get(
-    "AG_BUY_TIERS", f"{TARGET_DROP_PERCENT}:0.35,10:0.35,14:0.295")
+    "AG_BUY_TIERS", f"{TARGET_DROP_PERCENT}:0.35,10:0.35,14:0.30")
 RECOVERY_RESET_PERCENT = float(os.environ.get("AG_RECOVERY_RESET_PCT", "3.0"))
 NEAR_TRIGGER_SECONDS = float(os.environ.get("AG_NEAR_TRIGGER_SEC", "30"))
 ACTIVE_TRIGGER_SECONDS = float(os.environ.get("AG_ACTIVE_TRIGGER_SEC", "15"))
@@ -68,8 +68,8 @@ def _validate_config():
         raise ValueError("AG_BUY_TIERS trebuie sa contina prag:alocare pozitive")
     if len({threshold for threshold, _ in BUY_TIERS}) != len(BUY_TIERS):
         raise ValueError("AG_BUY_TIERS contine praguri duplicate")
-    if sum(allocation for _, allocation in BUY_TIERS) > BUY_USE_CASH_RATIO + 1e-12:
-        raise ValueError("suma alocarilor AG_BUY_TIERS depaseste AG_BUY_USE_CASH_RATIO")
+    if sum(allocation for _, allocation in BUY_TIERS) > 1.0 + 1e-12:
+        raise ValueError("suma ponderilor AG_BUY_TIERS depaseste 1")
     for value, name in (
             (RECOVERY_RESET_PERCENT, "AG_RECOVERY_RESET_PCT"),
             (NEAR_TRIGGER_SECONDS, "AG_NEAR_TRIGGER_SEC"),
@@ -439,7 +439,7 @@ def evaluate_and_maybe_sell_or_buy(
         threshold, allocation = tier
         _last_evaluation["pending_tier"] = True
         initial_cash = _finite_float(campaign.get("initial_cash"), positive=True)
-        cash_amount = initial_cash * allocation
+        cash_amount = initial_cash * BUY_USE_CASH_RATIO * allocation
         print(f" BUY tier -{threshold:.2f}% allocation={allocation:.3f} "
               f"cash_target={cash_amount:.6f} USDC")
         if buy_with_all_cash(buy_symbol=buy_symbol, cash_amount=cash_amount):

@@ -10,7 +10,8 @@ trailing stop. Guardianul implementează două semnale contrariene rare.
   încearcă SELL pentru activele urmărite. Pragul este intenționat practic dezactivat,
   deoarece testarea istorică a vânzării agresive a pierdut față de hold.
 - Drawdown buy în tranșe: la -7%/-10%/-14% față de maximul ultimelor 24h încearcă
-  să aloce 35%/35%/29,5% din USDC liber existent la începutul campaniei. Fiecare
+  să aloce 35%/35%/30% din bugetul total configurat (implicit 99,5% din USDC
+  liber existent la începutul campaniei). Fiecare
   tranșă acceptată este marcată persistent și nu se repetă în aceeași cădere.
   Campania se rearmează după recuperarea drawdown-ului sub 3%.
 
