@@ -64,39 +64,39 @@ class StratParams:
     tp_trend_hold: bool = False       # Hold during a short uptrend and exit near market on reversal.
     tp_trend_min_pct: float = 0.5     # Legacy v1 shadow-price trend threshold.
     tp_trail_pct: float = 2.0         # Above TP, exit after this pullback from the peak.
-    tp_trail_profit_floor_pct: float = 0.0  # 0=compatibil live. >0=trailing MARKET numai
+    tp_trail_profit_floor_pct: float = 0.0  # 0 preserves live compatibility; >0 allows MARKET trailing only
                                       # when the order reference is >= average*(1+floor%);
                                       # the MARKET hard stop retains priority.
-    # --- TREND OVERLAY (combina strategii pe regim; EXPERIMENTAL, default OFF) -----
+    # --- TREND OVERLAY (combine strategies by regime; EXPERIMENTAL, default OFF) ---
     trend_overlay: bool = False       # Use top-up and trailing in confirmed uptrends; classic in ranges.
     trend_sma_n: int = 30             # SMA bar count for the long-trend signal.
-    trend_interval: int = 240         # minute/bara pt semnalul de trend (live: OHLC Kraken;
-                                      # backtest: barele fed-uite). 240=4h -> SMA(30)=~5 zile.
-    trend_confirm_bars: int = 3       # bare consecutive de uptrend ca sa confirme (anti-fals)
-    trend_topup: float = 2000.0       # cat cumpar la intrarea in trend (sume mai mari = prinde trendul)
+    trend_interval: int = 240         # minutes per trend-signal bar (live: Kraken OHLC;
+                                      # backtest: injected bars). 240=4h -> SMA(30)=~5 days.
+    trend_confirm_bars: int = 3       # consecutive uptrend bars required to avoid false confirmation
+    trend_topup: float = 2000.0       # amount bought on trend entry; larger values capture more trend
     trend_trail_pct: float = 5.0      # Trend-position exit pullback from peak.
     trend_exit_break: bool = False    # False: trailing only; True: trailing or price below SMA.
-    # --- ADAPTIV pe VOLATILITATE (redesign overlay: MODULARE, nu amplificare; default OFF) ---
-    tp_trail_adaptive: bool = False   # A: trailing-ul TP (tp_trail_pct) devine k×vol_1h — larg in
-                                      # trend volatil (calaresc mai mult), strans in chop. Fail-safe
-                                      # pe warm-up (fallback pe tp_trail_pct fix), ca reintrarea adaptiva.
-    tp_trail_k: float = 2.0           # multiplicatorul vol_1h pt trailing adaptiv
-    tp_trail_min: float = 1.5         # clamp jos (%) — nu iesi pe zgomot infim
-    tp_trail_max: float = 8.0         # clamp sus (%) — nu lasa profitul sa scape complet
+    # --- VOLATILITY ADAPTIVE (overlay redesign: modulation, not amplification; default OFF) ---
+    tp_trail_adaptive: bool = False   # A: TP trailing becomes k×vol_1h: wide in volatile trends
+                                      # to ride longer, tight in chop. Warm-up safely falls back
+                                      # to fixed tp_trail_pct, like adaptive reentry.
+    tp_trail_k: float = 2.0           # vol_1h multiplier for adaptive trailing
+    tp_trail_min: float = 1.5         # lower clamp (%) avoids exits on negligible noise
+    tp_trail_max: float = 8.0         # upper clamp (%) prevents giving all profit back
     tp_trail_vol_interval: int = 240  # Minutes per volatility bar; fixed in live and replay.
     dca_trend_brake: bool = False     # Skip DCA in confirmed downtrends to reduce risk.
     dca_brake_min_pct: float = 1.5    # Minimum recent/old slope percentage for downtrend.
     dca_spacing_growth_pct: float = 0.0  # Increase the threshold after every filled DCA;
                                          # Zero preserves byte-identical live behavior.
-    # --- #2: SIZING DCA scalat pe VOLATILITATE (default OFF) ---
+    # --- #2: VOLATILITY-SCALED DCA SIZING (default OFF) ---
     dca_vol_scale_k: float = 0.0      # 0=OFF. eff_dca = dca × (vol_ref/vol_1h)^k, clamp [0.3,3].
-                                      # k>0 = DCA MAI MIC in vol mare (defensiv, minimizeaza pierderea);
-                                      # k<0 = MAI MARE in vol (harvest agresiv). Fail-safe pe warm-up.
-    dca_vol_ref: float = 2.0          # vol_1h (%) de referinta pt scalare
+                                      # k>0 means smaller DCA in high volatility (defensive);
+                                      # k<0 means larger DCA (aggressive harvesting). Safe warm-up fallback.
+    dca_vol_ref: float = 2.0          # reference vol_1h percentage for scaling
     dca_vol_interval: int = 240       # Identical OHLC cadence in live and replay.
-    # --- Sizing PROCENTUAL (optional; total_budget=0 sau alloc_pct=0 -> OFF, valorile fixe) ---
-    total_budget: float = 0.0   # bugetul TOTAL al venue-ului (ex. tot contul Kraken)
-    alloc_pct: float = 0.0      # % din total alocat ACESTEI monede (suma pe venue = 100)
+    # --- PERCENTAGE SIZING (optional; total_budget=0 or alloc_pct=0 keeps fixed values) ---
+    total_budget: float = 0.0   # venue's TOTAL budget, e.g. the whole Kraken account
+    alloc_pct: float = 0.0      # percentage allocated to THIS coin; venue allocations total 100
     entry_pct: float = 0.0      # Entry is this percentage of the asset allocation.
     dca_pct: float = 0.0        # DCA is this percentage of the asset allocation.
 
@@ -251,9 +251,9 @@ def _new_state() -> dict:
         "sl_low": None,           # Post-stop low used for bounce reentry.
         "trail_peak": None,       # Peak tracked after price exceeds TP.
         "trail_stop": None,       # Trailing floor ratchets upward even as volatility changes.
-        "trend_mode": False,      # overlay: suntem intr-o pozitie de trend (hold+trailing)?
-        "trend_peak": None,       # varful urmarit in modul trend
-        "trend_confirm_count": 0, # bare consecutive de uptrend (confirmare semnal)
+        "trend_mode": False,      # overlay: currently in a hold+trailing trend position
+        "trend_peak": None,       # peak tracked in trend mode
+        "trend_confirm_count": 0, # consecutive uptrend bars confirming the signal
         "orders": [],           # {txid, side, vol, price, amount, kind, ts}
     }
 
@@ -619,8 +619,8 @@ class Strategy:
         self.s = _new_state()
         (self.s["realized_gross"], self.s["realized_net"],
          self.s["fees_total"], self.s["cycle"]) = keep
-        self.s["last_sell_price"] = price   # pt regula de reintrare (nu recumpara mai sus)
-        self.s["last_exit_kind"] = o.get("kind")   # "TP"/"STOP" -> reintrare STOP-aware
+        self.s["last_sell_price"] = price   # reentry rule must not buy back higher
+        self.s["last_exit_kind"] = o.get("kind")   # TP/STOP enables stop-aware reentry
         self.s["sl_low"] = price            # Initial low for post-stop bounce reentry.
         log(f"  [STRAT] === ciclu inchis, reincep (ciclu {self.s['cycle']}) ===")
 
@@ -659,8 +659,7 @@ class Strategy:
 
         The threshold is intentionally gross and simple. Configuration must include
         enough fee buffer; central and stress benchmarks then measure net profit using
-        scenario fees and fills. ``0`` preserves exactly
-        trailing-ul MARKET existent.
+        scenario fees and fills. ``0`` exactly preserves the existing MARKET trailing.
         """
         pct = float(self.p.tp_trail_profit_floor_pct or 0.0)
         if pct <= 0 or avg <= 0:
@@ -1082,14 +1081,14 @@ class Strategy:
             self.s["trail_stop"] = None
             self._cancel_orders("sell", exclude_market=True)
         elif self.p.enable_takeprofit and avg:
-            self.s["trail_peak"] = None   # sub TP / mod clasic -> reset varf
+            self.s["trail_peak"] = None   # below TP/classic mode: reset peak
             self.s["trail_stop"] = None
-            # TP in TRANSE (optional, STRAT_TP_TRANCHES="3:50,6:50"): vinde gradual.
+            # Optional tranche TP (STRAT_TP_TRANCHES="3:50,6:50") sells gradually.
             # No configured tranches means the classic one-order full TP default.
             tranches = self.p.tp_tranches or [(self.p.takeprofit_pct, 100.0)]
             desired, rem = [], held
             for i, (pct, share) in enumerate(tranches):
-                # ultima transa = vinde tot ce-a ramas -> risc de "Insufficient funds"
+                # The final tranche sells the remainder, risking "Insufficient funds".
                 # Venue balance may be one decimal smaller than internally tracked holdings;
                 # leave the same dust buffer used during adoption.
                 q = self._dust_safe_qty(rem) if i == len(tranches) - 1 \
