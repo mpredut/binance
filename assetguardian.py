@@ -1,4 +1,5 @@
 import os
+import math
 import time
 
 from binance_api import bapi as api
@@ -29,17 +30,30 @@ BUY_USE_CASH_RATIO = float(os.environ.get("AG_BUY_USE_CASH_RATIO", "0.995"))
 
 
 def _validate_config():
-    if CHECK_INTERVAL_SECONDS <= 0:
+    if not math.isfinite(CHECK_INTERVAL_SECONDS) or CHECK_INTERVAL_SECONDS <= 0:
         raise ValueError("AG_CHECK_INTERVAL_SEC trebuie sa fie > 0")
-    if TARGET_GROWTH_PERCENT <= 0 or TARGET_DROP_PERCENT <= 0:
+    if (not math.isfinite(TARGET_GROWTH_PERCENT)
+            or not math.isfinite(TARGET_DROP_PERCENT)
+            or TARGET_GROWTH_PERCENT <= 0 or TARGET_DROP_PERCENT <= 0):
         raise ValueError("pragurile AG growth/drop trebuie sa fie > 0")
-    if ASSET_REFERENCE_MINUTES_BACK_DEFAULT <= 0:
+    if (not math.isfinite(ASSET_REFERENCE_MINUTES_BACK_DEFAULT)
+            or ASSET_REFERENCE_MINUTES_BACK_DEFAULT <= 0):
         raise ValueError("AG_REFERENCE_MINUTES_BACK trebuie sa fie > 0")
-    if not 0 < BUY_USE_CASH_RATIO <= 1:
+    if not math.isfinite(BUY_USE_CASH_RATIO) or not 0 < BUY_USE_CASH_RATIO <= 1:
         raise ValueError("AG_BUY_USE_CASH_RATIO trebuie sa fie in (0, 1]")
 
 
 _validate_config()
+
+
+def _finite_float(raw, *, positive=False):
+    try:
+        value = float(raw)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(value) or (positive and value <= 0):
+        return None
+    return value
 
 
 def _row_value_usdc(row):
@@ -47,18 +61,21 @@ def _row_value_usdc(row):
     raw = row.get("total_value_usdc")
     if raw is None:
         raw = row.get("total_value_usdt")
-    try:
-        value = float(raw)
-    except (TypeError, ValueError):
-        return None
-    return value if value > 0 else None
+    return _finite_float(raw, positive=True)
+
+
+def _row_timestamp(row):
+    return _finite_float(row.get("timestamp"), positive=True)
 
 def _read_cache_rows():
     try:
         manager = cm.get_cache_manager("AssetValue")
         manager.enable_save_state_to_file()
         # Citim direct din memoria managerului; fisierul poate fi in urma.
-        rows = manager.cache.get("TOTAL", [])
+        # Threadul CacheAssetValueManager poate adauga simultan un snapshot.
+        # Copia sub lock ofera fiecarei evaluari o vedere coerenta si scurta.
+        with manager.lock:
+            rows = list(manager.cache.get("TOTAL", []))
         print(f"[DEBUG] cache rows loaded: {len(rows)}")
         #if rows:
             #print("[DEBUG] dump cache TOTAL rows:")
@@ -76,6 +93,10 @@ def _get_window_extrema_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEF
         print("[DEBUG] no rows available in cache TOTAL.")
         return None
 
+    minutes_back = _finite_float(minutes_back, positive=True)
+    if minutes_back is None:
+        print(" Invalid cache window; skip evaluation.")
+        return None
     now_ts = int(time.time())
     target_ts = now_ts - int(minutes_back * 60)
     print(f"[DEBUG] window start for last {minutes_back}m: {target_ts}")
@@ -83,7 +104,9 @@ def _get_window_extrema_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEF
     # Folosim toate inregistrarile din ultimele `minutes_back` minute.
     window_rows = [
         r for r in rows
-        if target_ts <= int(r.get("timestamp", 0)) <= now_ts
+        if isinstance(r, dict)
+        and _row_timestamp(r) is not None
+        and target_ts <= _row_timestamp(r) <= now_ts
         and _row_value_usdc(r) is not None
     ]
     print(f"[DEBUG] candidate rows in window: {len(window_rows)}")
@@ -96,7 +119,7 @@ def _get_window_extrema_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEF
 
     last_printed_ts = None
     for idx, row in enumerate(window_rows, start=1):
-        current_ts = row["timestamp"]
+        current_ts = _row_timestamp(row)
 
         # primul row se afiseaza mereu
         if last_printed_ts is None:
@@ -111,7 +134,7 @@ def _get_window_extrema_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEF
 
 
     # Profitul se masoara fata de minim, drawdown-ul fata de maxim.
-    window_rows = sorted(window_rows, key=lambda r: int(r.get("timestamp", 0)))
+    window_rows = sorted(window_rows, key=_row_timestamp)
     minimum = min(window_rows, key=_row_value_usdc)
     maximum = max(window_rows, key=_row_value_usdc)
     print(f"[DEBUG] chosen MIN: {minimum}")
@@ -135,7 +158,7 @@ def sell_all_assets():
     balances = api.get_account_assets_balances()
     if not balances:
        print("No balances available for selling.")
-       return
+       return False
         
     print(f"[DEBUG] balances fetched: {len(balances)}")
   
@@ -151,9 +174,13 @@ def sell_all_assets():
             #print(f"[DEBUG] skip {asset}: not in sym.symbols")
             continue
 
-        qty = float(bal.get("free", 0.0))
-        total_qty = float(bal.get("total", 0.0))
-        locked_qty = float(bal.get("locked", 0.0))
+        qty = _finite_float(bal.get("free", 0.0))
+        total_qty = _finite_float(bal.get("total", 0.0))
+        locked_qty = _finite_float(bal.get("locked", 0.0))
+
+        if qty is None or total_qty is None or locked_qty is None:
+            print(f"[DEBUG] skip malformed balance row for asset={asset}")
+            continue
 
         print(
             f"[DEBUG] analyze asset={asset}, free={qty}, "
@@ -188,29 +215,33 @@ def sell_all_assets():
             print(f"ERROR selling {sell_symbol}: {e}")
 
     print(f" Finished sell_all_assets. Orders sent: {sell_count}")
+    return sell_count > 0
 
 
 def buy_with_all_cash(buy_symbol=BUY_SYMBOL_DEFAULT, cash_ratio=BUY_USE_CASH_RATIO):
     try:
         _, quote_asset = resolve_assets(buy_symbol)
+        cash_ratio = _finite_float(cash_ratio, positive=True)
+        if cash_ratio is None or cash_ratio > 1:
+            print(f" Invalid cash ratio for buy: {cash_ratio}")
+            return False
+        free_cash = _finite_float(
+            mkt.provider_by_name("binance").free_balance(quote_asset),
+            positive=True,
+        )
+        current_price = _finite_float(api.get_current_price(buy_symbol), positive=True)
     except Exception as e:
-        print(f"ERROR invalid buy symbol {buy_symbol}: {e}")
+        print(f"ERROR preparing buy for {buy_symbol}: {e}")
         return False
-
-    free_cash = mkt.provider_by_name("binance").free_balance(quote_asset)
-    current_price = api.get_current_price(buy_symbol)
     print(
         f"[DEBUG] buy check symbol={buy_symbol}, quote={quote_asset}, "
         f"free_cash={free_cash}, current_price={current_price}"
     )
 
     if free_cash is None:
-        print(f" Cannot read {quote_asset} balance; skip buy fail-closed.")
+        print(f" No valid available {quote_asset} balance; skip buy fail-closed.")
         return False
-    if free_cash <= 0:
-        print(f" No available {quote_asset} balance for buy.")
-        return False
-    if not current_price or current_price <= 0:
+    if current_price is None:
         print(f" Invalid current price for {buy_symbol}.")
         return False
 
@@ -283,8 +314,7 @@ def evaluate_and_maybe_sell_or_buy(
             f" Threshold reached ({growth_percent:.4f}% >= {threshold_percent}%). "
             "Selling all assets..."
         )
-        sell_all_assets()
-        return True
+        return sell_all_assets()
 
     if drawdown_percent <= -abs(drop_percent):
         print(

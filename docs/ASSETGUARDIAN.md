@@ -50,6 +50,9 @@ semnalul este calculat coerent și nu supraviețuiește artificial prin retry-ur
 
 - intervalul, pragurile, fereastra și cash ratio trebuie să fie valori valide;
 - baseline lipsă sau sold/preț indisponibil => fără ordin;
+- rândurile cache/balanță invalide, viitoare, `NaN` sau infinite sunt ignorate;
+- evaluarea citește atomic un snapshot al cache-ului, fără concurență cu threadul de sync;
 - maximum o evaluare per ciclu; fără stare de retry în memorie sau pe disc;
+- un trigger raportează succes numai dacă pipeline-ul a acceptat cel puțin un ordin;
 - toate cantitățile sunt reconciliate în pipeline-ul comun înainte de Binance;
 - logurile sunt gestionate de rotația comună a flotei.
