@@ -1,20 +1,14 @@
 #!/usr/bin/env python3
-"""
-delta_neutral.py — strategie MARKET-NEUTRAL pe Hyperliquid (funding farming).
+"""Market-neutral Hyperliquid funding-farming strategy.
 
-Idee: ții LONG pe SPOT + SHORT pe PERP, mărimi egale -> delta pe pret ~ 0.
-  * Daca HYPE urca: spot castiga = perp pierde (se anuleaza).
-  * Daca HYPE scade: spot pierde = perp castiga (se anuleaza).
-  * Castigul real = FUNDING-ul incasat fiind short pe perp (cand funding > 0)
-    minus fee-uri si eventuala drift de baza (basis).
+Hold equal long spot and short perpetual legs for near-zero price delta. Spot
+gains offset perpetual losses when HYPE rises, and vice versa when it falls. The
+intended return is positive funding received by the short, less fees, basis drift,
+and rebalancing cost. Funding can reverse and make the position pay rather than
+receive; opening and closing also require four orders per cycle.
 
-Straturi:
-  legs()      -> citeste cele doua picioare (spot_qty, perp_szi) + preturi + funding
-  decide()    -> pe baza funding-ului: deschide / tine / inchide
-  execute     -> _open / _rebalance / _close (face diff catre tinta)
-
-NU e „bani gratis": funding-ul se poate INVERSA (devii platitor), ai fee pe
-4 ordine/ciclu (2 deschidere + 2 inchidere) si cost de rebalansare. Castig mic, constant.
+``legs`` reads both legs, prices, and funding. Decision logic opens, holds, or
+closes based on funding, while _open/_rebalance/_close move toward target size.
 """
 
 from __future__ import annotations
@@ -31,34 +25,34 @@ from hl_client import HLClient, HLError
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 HL_FEE_PCT = float_env("HL_FEE_PCT") or 0.035
-MIN_ORDER_USD = 10.5          # Hyperliquid respinge ordine sub ~$10 — nu le mai trimitem
-_OLD_STATE = os.path.join(_HERE, ".state_dn.json")   # numele vechi (o singura moneda)
+MIN_ORDER_USD = 10.5          # Do not submit orders below Hyperliquid's ~$10 minimum.
+_OLD_STATE = os.path.join(_HERE, ".state_dn.json")   # Legacy single-coin state name.
 
 
 def state_path_for(coin: str) -> str:
-    """Stare per-moneda — poti rula DN pe mai multe monede in paralel."""
+    """Return a per-coin state path so multiple DN instances can run in parallel."""
     safe = "".join(c if c.isalnum() else "_" for c in coin)
     return os.path.join(_HERE, f".state_dn_{safe}.json")
 
 
 @dataclass
 class DNParams:
-    coin: str            # perp (ex HYPE)
-    spot_pair: str       # @index spot (ex @107)
-    spot_token: str      # tokenul spot (ex HYPE)
-    notional: float      # USDC per picior
-    entry_funding_hr: float  # deschide cand funding MEDIU >= asta
-    exit_funding_hr: float   # inchide cand funding MEDIU < asta (mai negativ -> histerezis, nu churn)
-    funding_window_h: float  # peste cate ore mediezi funding-ul (anti-zgomot, ignora citiri izolate)
-    min_hold_h: float        # nu inchide mai devreme de atat (lasa timpul sa lucreze pt funding)
-    rebalance_pct: float # toleranta delta (% din marime) inainte de rebalansare
+    coin: str            # Perpetual coin, for example HYPE.
+    spot_pair: str       # Spot @index, for example @107.
+    spot_token: str      # Spot token, for example HYPE.
+    notional: float      # USDC per leg.
+    entry_funding_hr: float  # Open when average funding reaches this value.
+    exit_funding_hr: float   # Close below this average, providing hysteresis.
+    funding_window_h: float  # Averaging window that rejects isolated noise.
+    min_hold_h: float        # Minimum hold before closing.
+    rebalance_pct: float # Delta tolerance as a percentage of size.
     check_minutes: float
     sz_decimals: int
-    liq_alert_pct: float # alerta cand pretul e la acest % de pretul de lichidare al short-ului
-    auto_protect: bool   # True = reduce automat pozitia cand se apropie lichidarea
-    reduce_pct: float    # cu cat % reduce ambele picioare la fiecare interventie
-    perp_leverage: int   # levier pe short (mic = margine multa = lichidare departe)
-    allow_scale_up: bool # True = creste pozitia VIE pana la 'notional' (cu garda de colateral)
+    liq_alert_pct: float # Alert within this percentage of short liquidation.
+    auto_protect: bool   # Automatically reduce near liquidation.
+    reduce_pct: float    # Percentage removed from both legs per intervention.
+    perp_leverage: int   # Low leverage leaves more margin and distant liquidation.
+    allow_scale_up: bool # Scale a live position toward notional with collateral guard.
 
     @classmethod
     def from_env(cls, client: HLClient | None = None) -> "DNParams":
@@ -69,12 +63,12 @@ class DNParams:
             except HLError: pass
         spot_token = os.environ.get("HL_SPOT_TOKEN", coin).strip()
         spot_pair = os.environ.get("HL_SPOT_PAIR", "").strip()
-        if not spot_pair and client is not None:       # gol = rezolva automat din spotMeta
+        if not spot_pair and client is not None:       # Empty resolves automatically from spotMeta.
             spot_pair = client.resolve_spot_pair(spot_token) or ""
             if spot_pair:
                 log(f"  [DN] pereche spot rezolvata automat: {spot_token} -> {spot_pair}")
         if not spot_pair:
-            spot_pair = "@107"                          # fallback istoric (HYPE/USDC)
+            spot_pair = "@107"                          # Historical HYPE/USDC fallback.
         return cls(
             coin        = coin,
             spot_pair   = spot_pair,
@@ -98,13 +92,13 @@ class DNParams:
 def _new_state() -> dict:
     return {"status": "flat", "target_sz": 0.0, "fees_paid": 0.0,
             "funding_accrued": 0.0, "opened_at": None, "opened_ts": None, "liq_alerted": False,
-            "funding_hist": [],   # [[ts, rate], ...] pt media pe fereastra
-            "orphan_count": 0,    # tick-uri consecutive cu un singur picior (anti-glitch)
-            "gone_count": 0,      # tick-uri consecutive cu AMBELE picioare disparute
-            "drift_count": 0,     # tick-uri consecutive cu drift mare (confirmare inainte de trade)
-            "order_fails": 0,     # ordine esuate consecutiv (alerta la 3)
-            "cooldown_until": 0,  # nu redeschide inainte de acest timestamp (anti-thrash)
-            "spot_qty": 0.0, "perp_szi": 0.0}   # spot_qty/perp_szi folosite doar in PAPER
+            "funding_hist": [],   # [[timestamp, rate], ...] for window averaging.
+            "orphan_count": 0,    # Consecutive one-leg ticks for glitch rejection.
+            "gone_count": 0,      # Consecutive ticks with both legs absent.
+            "drift_count": 0,     # Consecutive large-drift confirmations before trading.
+            "order_fails": 0,     # Consecutive order failures; alert at three.
+            "cooldown_until": 0,  # Do not reopen before this anti-thrash timestamp.
+            "spot_qty": 0.0, "perp_szi": 0.0}   # Used only in paper mode.
 
 
 class DeltaNeutral:
@@ -114,7 +108,7 @@ class DeltaNeutral:
         self.dry_run = dry_run
         self.desktop = desktop
         self.state_file = state_path_for(params.coin)
-        # migrare de la numele vechi (.state_dn.json, o singura moneda) — pastreaza starea
+        # Preserve state when migrating from the legacy single-coin filename.
         if not os.path.exists(self.state_file) and os.path.exists(_OLD_STATE):
             try:
                 os.rename(_OLD_STATE, self.state_file)
@@ -134,7 +128,7 @@ class DeltaNeutral:
 
     def _save(self):
         try:
-            tmp = self.state_file + ".tmp"   # scriere ATOMICA: crash la mijloc nu corupe starea
+            tmp = self.state_file + ".tmp"   # Atomic write prevents mid-write corruption.
             with open(tmp, "w") as f:
                 json.dump(self.s, f, indent=2)
             os.replace(tmp, self.state_file)
@@ -142,8 +136,7 @@ class DeltaNeutral:
             log(f"  ! [DN] nu pot salva: {e}")
 
     def _acquire_lock(self) -> bool:
-        """Lacat pe stare: A DOUA instanta pe aceeasi moneda refuza sa porneasca
-        (doua boturi ar dubla ordinele si s-ar bate pe rebalans)."""
+        """Lock state so a second same-coin instance refuses to start."""
         try:
             self._lock_fh = open(self.state_file + ".lock", "w")
             fcntl.flock(self._lock_fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -155,10 +148,12 @@ class DeltaNeutral:
                 pass
             return False
 
-    # -- stratul de citire: cele doua picioare ---------------------------------
+    # -- Read layer for both legs. ---------------------------------------------
     def legs(self) -> dict | None:
-        """Citeste preturi + cantitati. None daca ORICE citire esueaza — un 0 fals
-        la balanta/pozitie ar face rebalansarea sa deschida un picior dublu."""
+        """Read prices and quantities, returning None if any read fails.
+
+        A false zero balance or position could make rebalancing duplicate one leg.
+        """
         spot_px = self.client.spot_mid(self.p.spot_pair)
         perp_px = self.client.mid(self.p.coin)
         funding = self.client.funding_rate(self.p.coin)
@@ -170,7 +165,7 @@ class DeltaNeutral:
             try:
                 spot_qty = self.client.spot_balance_strict(self.p.spot_token)
                 perp_szi, _ = self.client.position_strict(self.p.coin)
-                self.s["spot_qty"] = spot_qty   # persista pozitia REALA in state (in live nu mai ramane 0 ca placeholder-ul de paper)
+                self.s["spot_qty"] = spot_qty   # Persist real live position rather than paper zero.
                 self.s["perp_szi"] = perp_szi
             except Exception as e:  # noqa: BLE001
                 log(f"  [DN] citirea contului a esuat ({e}) — sar peste tick (nu ghicesc)")
@@ -181,16 +176,16 @@ class DeltaNeutral:
     def _round(self, sz: float) -> float:
         return round(sz, self.p.sz_decimals)
 
-    # -- executie ---------------------------------------------------------------
+    # -- Execution. ------------------------------------------------------------
     def _skip_dust(self, sz: float, px: float, what: str) -> bool:
-        """HL respinge ordine sub ~$10 — nu le trimitem (evitam spam de respingeri)."""
+        """Skip sub-minimum orders to avoid repeated venue rejections."""
         if sz * px < MIN_ORDER_USD:
             log(f"  [DN] {what} {sz} (~${sz*px:.2f}) sub minimul HL — sar (dust)")
             return True
         return False
 
     def _record(self, ok: bool, sz: float, px: float):
-        """Contorizeaza esecurile consecutive de ordine; fee doar la succes."""
+        """Count consecutive failures and accrue fees only on success."""
         if ok:
             self.s["order_fails"] = 0
             self.s["fees_paid"] += (HL_FEE_PCT/100) * sz * px
@@ -247,7 +242,7 @@ class DeltaNeutral:
             self._record(ok, sz, px)
 
     def _cancel_open_orders(self):
-        """Best-effort: anuleaza ordinele ramase pe coin/pereche (curatenie la incident)."""
+        """Best-effort cancellation of remaining coin/pair orders after an incident."""
         if self.dry_run:
             return
         try:
@@ -258,10 +253,10 @@ class DeltaNeutral:
         except Exception as e:  # noqa: BLE001
             log(f"  ! [DN] curatenia ordinelor a esuat ({e}) — continui")
 
-    # -- actiuni de nivel inalt -------------------------------------------------
+    # -- High-level actions. ---------------------------------------------------
     def _open(self, L: dict):
         sz = self._round(self.p.notional / L["perp_px"])
-        # PREVENTIV: levier mic pe short -> margine multa -> lichidare foarte departe
+        # Low short leverage leaves ample margin and distant liquidation.
         if not self.dry_run and self.client.exchange:
             self.client.set_leverage(self.p.coin, self.p.perp_leverage)
         log(f"  [DN] >>> DESCHID delta-neutral: long {sz} SPOT + short {sz} PERP {self.p.coin} "
@@ -286,9 +281,11 @@ class DeltaNeutral:
         self.s = _new_state(); self.s["funding_accrued"] = keep_fund; self.s["fees_paid"] = keep_fee
 
     def _rebalance(self, L: dict):
-        """Aduce ambele picioare la target_sz (corecteaza fill-uri partiale / drift).
-        Un drift URIAS (>50% din tinta) e suspect (glitch de citire / fill masiv) —
-        cere confirmare pe 2 tick-uri consecutive inainte sa tranzactioneze."""
+        """Move both legs to target size, correcting partial fills and drift.
+
+        Drift above half the target is suspicious and requires confirmation on two
+        consecutive ticks before trading.
+        """
         tgt = self.s["target_sz"]; tol = tgt * self.p.rebalance_pct/100
         d_spot = tgt - L["spot_qty"]
         d_perp = tgt - abs(L["perp_szi"])
@@ -308,7 +305,7 @@ class DeltaNeutral:
         self.s["drift_count"] = 0
 
     def _go_flat(self, reason: str, cooldown_s: float = 3600):
-        """Marcheaza flat + cooldown (anti-thrash) pastrand contoarele de P&L."""
+        """Mark flat with an anti-thrash cooldown while preserving P&L counters."""
         keep_fund, keep_fee = self.s["funding_accrued"], self.s["fees_paid"]
         self.s = _new_state()
         self.s["funding_accrued"], self.s["fees_paid"] = keep_fund, keep_fee
@@ -316,9 +313,11 @@ class DeltaNeutral:
         log(f"  [DN] -> flat ({reason}); cooldown {cooldown_s/60:.0f} min inainte de o noua deschidere")
 
     def _check_legs_integrity(self, L: dict) -> bool:
-        """Picior disparut (lichidare short / vanzare manuala / glitch API).
-        Confirmare pe 2 tick-uri consecutive inainte de ORICE actiune — o citire
-        gresita nu tranzactioneaza. True = a tratat cazul, tick-ul se opreste aici."""
+        """Handle a missing leg from liquidation, manual action, or API glitch.
+
+        Require two consecutive confirmations before any action. Return True after
+        handling so the current tick stops.
+        """
         tgt = self.s["target_sz"]
         if tgt <= 0:
             self._go_flat("tinta zero", cooldown_s=0)
@@ -337,7 +336,7 @@ class DeltaNeutral:
                    source="dn", desktop=self.desktop)
             self._go_flat("ambele picioare disparute")
             return True
-        if spot_gone != perp_gone:                    # exact UNUL a disparut -> RISC DIRECTIONAL
+        if spot_gone != perp_gone:                    # Exactly one missing leg creates directional risk.
             self.s["orphan_count"] = self.s.get("orphan_count", 0) + 1
             if self.s["orphan_count"] < 2:
                 log("  [DN] un picior pare disparut — astept confirmarea (anti-glitch)")
@@ -364,9 +363,9 @@ class DeltaNeutral:
         self.s["gone_count"] = 0
         return False
 
-    # -- monitorizare + protectie lichidare (doar short-ul perp poate fi lichidat) --
+    # -- Liquidation monitoring and protection for the perpetual short. --------
     def _check_liq(self, L: dict) -> bool:
-        """Returneaza True daca a redus pozitia (ca sa sarim peste rebalans in acel tick)."""
+        """Return True after reducing the position so this tick skips rebalancing."""
         pos = self.client.position_full(self.p.coin)
         if not pos:
             return False
@@ -377,7 +376,7 @@ class DeltaNeutral:
         if liq <= 0:
             return False
         perp_px = L["perp_px"]
-        dist_pct = (liq - perp_px) / perp_px * 100   # short: lichidare DEASUPRA pretului
+        dist_pct = (liq - perp_px) / perp_px * 100   # Short liquidation is above price.
         if 0 < dist_pct <= self.p.liq_alert_pct:
             if not self.s.get("liq_alerted"):
                 self.s["liq_alerted"] = True
@@ -385,7 +384,7 @@ class DeltaNeutral:
                 notify(title=f"⚠ {self.p.coin}: short aproape de LICHIDARE!",
                        body=f"p{perp_px:.2f} liq{liq:.2f} (dist {dist_pct:.1f}%)",
                        source="dn", desktop=self.desktop)
-            # PREVENTIV: reduce automat ambele picioare -> scade short-ul -> lichidarea se departeaza
+            # Reduce both legs to shrink the short and move liquidation farther away.
             if self.p.auto_protect:
                 cut = self._round(abs(L["perp_szi"]) * self.p.reduce_pct / 100)
                 if cut > 0:
@@ -398,10 +397,10 @@ class DeltaNeutral:
                            source="dn", desktop=self.desktop)
                     return True
         elif dist_pct > self.p.liq_alert_pct * 1.5:
-            self.s["liq_alerted"] = False   # revenit la siguranta -> re-armeaza alerta
+            self.s["liq_alerted"] = False   # Re-arm after returning to safety.
         return False
 
-    # -- bucla ------------------------------------------------------------------
+    # -- Main loop. ------------------------------------------------------------
     def run(self):
         if not self._acquire_lock():
             log(f"  ! [DN] ALTA INSTANTA ruleaza deja pe {self.p.coin} — IES (anti-dublare)")
@@ -426,7 +425,7 @@ class DeltaNeutral:
                 self._save()
             except KeyboardInterrupt:
                 log("  [DN] oprit manual."); self._save(); return
-            except Exception as e:  # noqa: BLE001 — botul autonom NU moare la o exceptie
+            except Exception as e:  # noqa: BLE001 — Keep the autonomous bot alive.
                 errors += 1
                 log(f"  ! [DN] eroare neasteptata (#{errors} consecutiv): {e!r} — botul continua")
                 if errors == 3:
@@ -437,31 +436,33 @@ class DeltaNeutral:
                     self._save()
                 except Exception:  # noqa: BLE001
                     pass
-            # backoff exponential la erori (plafonat la 5 min), altfel ritmul normal
+            # Exponential error backoff capped at five minutes; otherwise normal cadence.
             time.sleep(min(self.p.check_minutes * 60 * (2 ** min(errors, 3)), 300))
 
     def _maybe_scale_up(self, L: dict) -> None:
-        """Creste pozitia VIE pana la 'notional' (DN_ALLOW_SCALE_UP). Bumpeaza target_sz
-        -> _rebalance cumpara diferenta pe AMBELE picioare (ramane neutru). Garda de
-        colateral: nu cumpara spot peste cat USDC liber ai (creste partial daca e cazul)."""
+        """Scale a live position toward notional while remaining neutral.
+
+        Raise target size so rebalancing adds both legs. The collateral guard limits
+        spot purchases to free USDC and scales partially when necessary.
+        """
         if not self.p.allow_scale_up:
             return
         cur_notional = self.s["target_sz"] * L["perp_px"]
         if cur_notional >= self.p.notional * 0.95:
-            return                                        # deja la tinta
+            return                                        # Already at target.
         want = self._round(self.p.notional / L["perp_px"])
         add = self._round(want - self.s["target_sz"])
         if add <= 0:
             return
         if not self.dry_run:
             try:
-                # USDC-ul SPOT cumpara piciorul long; marginea short-ului e acoperita
-                # de colateralul unificat. withdrawable() (perp) e adesea $0 desi ai
-                # USDC in spot -> verificam balanta SPOT, sursa corecta.
+                # Spot USDC funds the long while unified collateral covers short
+                # margin. Use the spot balance because perpetual withdrawable may
+                # report zero even when spot USDC exists.
                 free = self.client.spot_balance("USDC")
             except Exception as e:  # noqa: BLE001
                 log(f"  ! [DN] scale-up: nu pot citi colateralul ({e}) — amanat"); return
-            if free < add * L["spot_px"]:                 # nu-mi permit tot -> cresc partial
+            if free < add * L["spot_px"]:                 # Scale partially when full size is unaffordable.
                 aff = self._round((free * 0.95) / L["spot_px"])
                 if aff <= 0:
                     log(f"  [DN] scale-up dorit dar colateral insuficient (liber ${free:.0f})")
@@ -475,9 +476,9 @@ class DeltaNeutral:
                source="dn", desktop=self.desktop)
 
     def tick(self, L: dict) -> None:
-        """Un pas de decizie (extras ca sa fie testabil): deschide / tine / inchide / rebalanseaza."""
-        # RECONCILIERE: daca exista deja o pozitie pe cont (restart / state sters), o ADOPTAM
-        # -> nu deschidem din nou (anti-dublare).
+        """Run one testable decision step: open, hold, close, or rebalance."""
+        # Adopt an existing account position after restart or state loss rather
+        # than opening a duplicate.
         if not self.dry_run and self.s["status"] == "flat":
             sq, pq = abs(L["spot_qty"]), abs(L["perp_szi"])
             if sq > 1e-6 and pq > 1e-6:
@@ -488,10 +489,10 @@ class DeltaNeutral:
                 log(f"  [DN] adopt pozitie existenta: spot {L['spot_qty']} / perp {L['perp_szi']} "
                     f"-> status=open, target={self.s['target_sz']}")
         fhr = L["funding"]
-        delta = L["spot_qty"] + L["perp_szi"]       # ~0 cand e hedge-uit
+        delta = L["spot_qty"] + L["perp_szi"]       # Approximately zero when hedged.
         basis = (L["perp_px"] - L["spot_px"]) / L["spot_px"] * 100
 
-        # --- funding MEDIAT pe fereastra (ignora citiri izolate, anti-churn) ---
+        # Average funding across the window to ignore isolated readings and churn.
         now = time.time()
         hist = self.s.setdefault("funding_hist", [])
         hist.append([now, fhr])
@@ -506,14 +507,14 @@ class DeltaNeutral:
             else:
                 log(f"  [DN] funding mediu {avg_f*100:+.4f}%/ora < prag intrare — astept (flat)")
         else:
-            if self._check_legs_integrity(L):       # lichidare/inchidere manuala/glitch
+            if self._check_legs_integrity(L):       # Liquidation, manual close, or glitch.
                 return
             self.s["funding_accrued"] += fhr * abs(L["perp_szi"]) * L["perp_px"] * (self.p.check_minutes/60)
-            reduced = self._check_liq(L)            # protectie: alerta + reduce automat
+            reduced = self._check_liq(L)            # Alert and automatically reduce risk.
             if not reduced:
-                self._maybe_scale_up(L)             # creste pozitia la noul notional (bumpeaza target)
+                self._maybe_scale_up(L)             # Raise target toward the new notional.
             held_h = (now - (self.s.get("opened_ts") or now)) / 3600
-            # INCHIDE doar daca media e sub prag SI am tinut suficient (histerezis + timp minim)
+            # Close only below the average threshold after the minimum hold period.
             if avg_f < self.p.exit_funding_hr and held_h >= self.p.min_hold_h:
                 self._close(L, f"funding mediu {avg_f*100:.4f}%/ora sub prag, tinut {held_h:.1f}h")
             elif avg_f < self.p.exit_funding_hr:
