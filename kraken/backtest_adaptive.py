@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """
-backtest_adaptive.py — test de DECIZIE (nu doar statistic): pragul de DCA fix (--drop,
-azi 2.0% pe HYPEUSD) vs prag adaptiv pe volatilitate (K_DCA * vol_1h istoric — codul
-DEJA scris in shadow_signals.py, dar inca doar LOG in kraken/strategy.py, niciodata
-promovat) vs prag adaptiv pe volatilitate PREZISA de Chronos (zero-shot, vezi
-forecast/vol_chronos.py — a batut persistenta pe MAE si directie pe date reale).
+backtest_adaptive.py — decision test, not merely a statistical test: compare the
+fixed DCA threshold (--drop, currently 2.0% for HYPEUSD), the volatility-adaptive
+threshold (K_DCA * historical vol_1h, already implemented in shadow_signals.py but
+only logged by kraken/strategy.py), and a threshold based on volatility forecast by
+Chronos (zero-shot; see forecast/vol_chronos.py, which beat persistence on MAE and
+direction using real data).
 
-De ce exista scriptul asta: intrebarea care conteaza nu e "e predictia statistic mai
-buna decat baseline-ul" (deja raspuns: da, modest), ci "ar fi schimbat ceva in bani REALI
-daca il foloseam la reintrare/DCA". Refolosim EXACT motorul de simulare (DCA/TP/SL/fee/
-buget) din backtest.py, schimband DOAR sursa pragului de drop — ca sa izolam efectul.
+The relevant question is not whether the forecast is statistically better than the
+baseline (it is, modestly), but whether using it for re-entry/DCA would have changed
+real financial results. This reuses the exact simulation engine from backtest.py
+(DCA/TP/SL/fees/budget) and changes only the drop-threshold source to isolate its effect.
 
-Chronos ruleaza la cadenta REDUSA (--refresh ore, implicit 6h) — asa ar rula si live,
-intr-un proces separat (nu in kraken_bot), tocmai ca sa nu incarce memoria masinii care
-tine bot-ii reali (3.8GB RAM, deja aproape de swap — vezi nota din sesiune).
+Chronos runs at a reduced cadence (--refresh hours, default 6h), as it would live in
+a separate process rather than kraken_bot, to avoid burdening the memory-constrained
+machine that hosts the live bots.
 
   python3 backtest_adaptive.py --pair HYPEUSD --interval 60
 """
@@ -32,14 +33,13 @@ from backtest import fetch_candles  # noqa: E402
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(_ROOT, "forecast"))
 sys.path.insert(0, _ROOT)
-import shadow_signals as ss  # noqa: E402  (K_DCA, vol_1h_pct — refolosim FORMULA exacta)
+import shadow_signals as ss  # noqa: E402  (reuse the exact K_DCA/vol_1h_pct formula)
 
-WIN = 24            # ore trailing pt volatilitatea realizata (acelasi WIN ca in vol_chronos.py)
+WIN = 24            # trailing hours for realized volatility; same window as vol_chronos.py
 
 
 def trailing_vol_series(closes: list[float]) -> np.ndarray:
-    """vol_1h_pct la fiecare bara, folosind DOAR trecutul (cauzal) — formula exacta
-    din shadow_signals.vol_1h_pct (sample_rate_sec=3600, bare de 1h)."""
+    """Compute causal vol_1h_pct per bar using the exact shadow-signals formula."""
     out = np.full(len(closes), np.nan)
     for i in range(WIN, len(closes)):
         window = closes[i - WIN:i + 1]
@@ -49,9 +49,11 @@ def trailing_vol_series(closes: list[float]) -> np.ndarray:
 
 
 def chronos_forecast_series(vol_trail: np.ndarray, refresh: int, horizon: int) -> np.ndarray:
-    """Prognoza Chronos a lui vol_trail, actualizata DOAR la fiecare `refresh` ore
-    (cadenta redusa, ca intr-un daemon separat) — intre update-uri, ultima valoare
-    prezisa ramane (exact ca un fisier de semnal citit de bot intre doua rulari)."""
+    """Forecast trailing volatility with Chronos at the reduced refresh cadence.
+
+    Between refreshes, retain the last forecast just as a bot would retain a
+    signal read from a periodically updated file produced by a separate daemon.
+    """
     from chronos import ChronosPipeline
     import torch
     print("  incarc amazon/chronos-t5-tiny...")
@@ -74,8 +76,7 @@ def chronos_forecast_series(vol_trail: np.ndarray, refresh: int, horizon: int) -
 
 
 def simulate_variant(ohlc, P, drop_arr):
-    """Identic cu backtest.simulate(), dar `drop` e citit per-bara din drop_arr
-    (in loc de o constanta) — restul strategiei NEATINS."""
+    """Match ``backtest.simulate`` but read ``drop`` per bar from ``drop_arr``."""
     disc, tp, sl = P["disc"]/100, P["tp"]/100, P["sl"]/100
     fee = P["fee"]/100
     qty = cost = spent = 0.0

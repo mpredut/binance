@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-backtest_trail.py — compara TP FIX vs TP-TRAILING (calareste trendul) pe OHLC Kraken.
+backtest_trail.py — compare fixed TP with trend-following trailing TP on Kraken OHLC.
 
-Intrebarea: botul cu TP fix +5% vinde devreme si rateaza trendurile. Un TP-trailing
-(dupa ce intra in profit, vinde abia cand pretul scade X% de la varf) ar prinde mai
-mult? Testam ONEST: multi-pereche (nu doar HYPE, sa nu ne pacalim pe noroc) +
-walk-forward (segmente secventiale). TOTAL = realizat + pozitie deschisa, vs buy&hold.
+The question is whether a fixed +5% TP sells too early and misses trends, while a
+trailing TP (once profitable, sell only after price falls X% from its peak) captures
+more. The comparison uses multiple pairs rather than only HYPE, plus sequential
+walk-forward segments. TOTAL is realized P&L plus the open position, versus buy-and-hold.
 
   python3 backtest_trail.py                 # tabel compare pe mai multe perechi
   python3 backtest_trail.py --wf HYPEUSD     # walk-forward pe o pereche
@@ -18,7 +18,7 @@ import json
 import sys
 import urllib.request
 
-from backtest import fetch_candles, simulate  # refolosim fetch + TP-fix existent
+from backtest import fetch_candles, simulate  # reuse existing fetch and fixed-TP engine
 
 
 def fetch_with_time(pair, interval):
@@ -34,9 +34,12 @@ def fetch_with_time(pair, interval):
 
 
 def simulate_trail(ohlc, P):
-    """Identic cu simulate() din backtest.py, DOAR iesirea difera: dupa ce pretul
-    atinge profitul de activare 'tp'%, ARMEAZA trailing si vinde cand close-ul scade
-    'trail'% sub varful atins de la armare (calareste in loc sa vanda la +tp)."""
+    """Match ``backtest.simulate`` except for trailing exit behavior.
+
+    Once price reaches the ``tp`` activation profit, arm the trailing exit and
+    sell when the close falls ``trail`` percent below the post-activation peak,
+    following the trend instead of selling immediately at +tp.
+    """
     disc, drop, sl = P["disc"]/100, P["drop"]/100, P["sl"]/100
     act, trail = P["tp"]/100, P["trail"]/100
     fee = P["fee"]/100
@@ -49,7 +52,7 @@ def simulate_trail(ohlc, P):
     armed = False; peak_px = 0.0
 
     for (o, h, l, c) in ohlc:
-        if rest_buy:                                        # 1) buy in asteptare (pe low)
+        if rest_buy:                                        # 1) pending buy, filled on the low
             px, sz = rest_buy
             if l <= px:
                 qty += sz; cost += sz*px; spent += sz*px; last_open = px
@@ -57,7 +60,7 @@ def simulate_trail(ohlc, P):
                     dca += 1
                 fees += fee*sz*px
                 rest_buy = None
-        if qty > 1e-9:                                      # 2) iesire TRAILING
+        if qty > 1e-9:                                      # 2) trailing exit
             avg = cost/qty
             if not armed and c >= avg*(1+act):
                 armed = True; peak_px = c
@@ -68,14 +71,14 @@ def simulate_trail(ohlc, P):
                     cycles += 1; wins += 1 if c > avg else 0
                     qty = cost = spent = 0.0; dca = 0; last_open = None
                     armed = False; peak_px = 0.0
-        if qty > 1e-9 and sl > 0:                           # 3) stop-loss pe close
+        if qty > 1e-9 and sl > 0:                           # 3) stop-loss on the close
             avg = cost/qty
             if (avg - c)/avg >= sl:
                 realized += (c-avg)*qty; fees += fee*qty*c
                 cycles += 1
                 qty = cost = spent = 0.0; dca = 0; last_open = None
                 armed = False; peak_px = 0.0
-        if qty <= 1e-9:                                     # 4) plaseaza urmatorul ordin
+        if qty <= 1e-9:                                     # 4) place the next order
             if rest_buy is None and spent + P["entry"] <= P["budget"]:
                 px = c*(1-disc); rest_buy = (px, round(P["entry"]/px, 8))
         else:
@@ -147,8 +150,11 @@ def run_wf(pair, interval, segments=4):
 
 
 def run_intraday(pair, tz_offset=3):
-    """Pattern pe ora din zi: randament mediu (c-o)/o pe ora locala. Esantion mic
-    (~30 zile la 1h = ~30 obs/ora) -> tratam cu scepticism."""
+    """Report average (close-open)/open return by local hour.
+
+    The sample is small (~30 days at 1h, or ~30 observations per hour), so the
+    result should be treated skeptically.
+    """
     try:
         rows = fetch_with_time(pair, 60)
     except Exception as e:  # noqa: BLE001
@@ -170,7 +176,7 @@ def run_intraday(pair, tz_offset=3):
         bar = "#" * int(abs(avg)*20)
         sign = "+" if avg >= 0 else "-"
         print(f"{hr:>02}:00 {len(v):<5} {avg:>+13.3f}% {pos:>14.0f}%  {sign}{bar}")
-    # cumulativ pe fereastra de dimineata 6->12
+    # Aggregate the 06:00-12:00 morning window.
     morn = [x for hr in range(6, 13) for x in by_hour.get(hr, [])]
     rest = [x for hr in list(range(0, 6)) + list(range(13, 24)) for x in by_hour.get(hr, [])]
     if morn and rest:

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-backtest.py — backtester DCA + take-profit pentru Kraken (spot), pe OHLC Kraken.
+backtest.py — DCA + take-profit backtester for Kraken spot using Kraken OHLC data.
 
-Reia strategia bar-cu-bar (intrare la market-discount, DCA pe scadere, take-profit,
-STOP-LOSS), cu fee Kraken (~0.25%/leg taker). Raport ONEST: TOTAL include pozitia
-deschisa (mark-to-market), nu doar profitul realizat.
+It replays the strategy bar by bar (market-discount entry, DCA on declines,
+take-profit, and stop-loss), with Kraken fees (~0.25% per taker leg). The report
+is honest: TOTAL includes the mark-to-market open position, not just realized profit.
 
   python3 backtest.py --pair HYPEUSD --interval 60
   python3 backtest.py --mode sweep --pair HYPEUSD --interval 240
@@ -27,13 +27,16 @@ from strategies import spot_dca_rules as sr
 from strategies.spot_dca import StratParams
 
 import dataclasses
-import replay as rp        # motor FAITHFUL = strategia LIVE peste OHLC (fidelitate 100%)
+import replay as rp        # Faithful engine: the live strategy over OHLC data.
 
 
 def _bt_params(base: dict, over: dict | None = None) -> "StratParams":
-    """StratParams din config-ul LIVE (STRAT_* env -> reintrare/tranche/toleranta REALE)
-    cu params-urile de backtest suprascrise. Asa motorul faithful testeaza EXACT strategia
-    de productie, nu default-uri. Presupune ca kraken/config.env e deja incarcat."""
+    """Build ``StratParams`` from live configuration plus backtest overrides.
+
+    Live ``STRAT_*`` values preserve production re-entry, tranche, and tolerance
+    behavior, so the faithful engine tests the production strategy rather than
+    defaults. This assumes ``kraken/config.env`` has already been loaded.
+    """
     p = StratParams.from_env()
     fields = dict(entry_amount=base["entry"], dca_amount=base["dca"],
                   entry_discount_pct=base["disc"], dca_drop_pct=base["drop"],
@@ -55,24 +58,28 @@ def fetch_candles(pair, interval):
     key = next((k for k in res if k != "last"), None)
     if not key:
         return []
-    # Ultima lumânare poate fi încă în formare; deciziile istorice se fac doar
-    # pe bare închise, la fel ca semnalul live și runner-ul walk-forward.
+    # The final candle may still be forming; historical decisions use only closed
+    # bars, matching the live signal and walk-forward runner.
     return [(float(x[1]), float(x[2]), float(x[3]), float(x[4])) for x in res[key][:-1]]
 
 
 def simulate(ohlc, P, reentry_arr=None, sl_bounce_pct=None):
-    """Motor DCA+TP+SL. `sl_bounce_pct` OPTIONAL (default None = comportament VECHI): daca
-    dat, dupa un STOP-LOSS reintrarea e pe REVENIRE (pretul urca cu sl_bounce_pct% de la
-    minimul de dupa vanzare), NU pe scadere sub pretul vandut — reflecta fix-ul din
-    strategy.py (4 aug) care nu mai lasa botul blocat afara pe recuperare dupa SL.
-    `reentry_arr` OPTIONAL (default None = comportament VECHI,
-    neschimbat): daca dat (secventa per-bara, NaN = foloseste P["reentry_fallback"]),
-    activeaza bariera de reintrare dupa o inchidere de pozitie (TP/SL) — lipsea din
-    versiunea originala (gasit in offline/research/kraken_adaptive_thresholds/, 23 iul:
-    strategia REALA, strategies/spot_dca.py step(), asteapta explicit sub
-    last_sell_price*(1-reentry_pct/100) inainte sa reintre; simulatorul reintra
-    imediat). P["reentry_tolerance_pct"] (implicit 0 = fara toleranta) controleaza
-    cat de "aproape de prag" conteaza ca atins (are_close, determinist)."""
+    """Run the DCA, take-profit, and stop-loss simulation.
+
+    ``sl_bounce_pct`` is optional; ``None`` preserves the legacy behavior. When
+    provided, re-entry after a stop-loss waits for a rebound of that percentage
+    from the post-sale low instead of another decline below the sale price. This
+    mirrors the August 4 strategy fix that avoids remaining sidelined during a
+    recovery after a stop-loss.
+
+    ``reentry_arr`` is also optional and ``None`` preserves legacy behavior.
+    When supplied, it provides a per-bar threshold (NaN selects
+    ``P["reentry_fallback"]``) for the re-entry barrier after a TP/SL close. The
+    original simulator omitted the production strategy's explicit wait below
+    ``last_sell_price * (1 - reentry_pct / 100)``. The deterministic
+    ``P["reentry_tolerance_pct"]`` value (default zero) controls how close to the
+    threshold counts as reached.
+    """
     fee = P["fee"]/100
     reentry_tol = P.get("reentry_tolerance_pct", 0.0)
     qty = cost = spent = 0.0
@@ -82,7 +89,7 @@ def simulate(ohlc, P, reentry_arr=None, sl_bounce_pct=None):
     peak = eq = 0.0; maxdd = 0.0
     rest_buy = None; rest_sell = None
     last_sell_price = None
-    last_exit_kind = None; sl_low = None   # pt reintrarea STOP-aware (bounce de la minim)
+    last_exit_kind = None; sl_low = None   # stop-aware re-entry rebound reference
     blocked_ticks = 0
 
     for i, (o, h, l, c) in enumerate(ohlc):
@@ -115,7 +122,7 @@ def simulate(ohlc, P, reentry_arr=None, sl_bounce_pct=None):
             if rest_buy is None and spent + P["entry"] <= P["budget"]:
                 blocked = False
                 if sl_bounce_pct and last_exit_kind == "STOP" and last_sell_price:
-                    # STOP-aware: reintra pe REVENIRE (bounce de la minim), nu pe scadere
+                    # Stop-aware re-entry waits for a rebound from the low, not a decline.
                     sl_low = c if sl_low is None else min(sl_low, c)
                     if sr.reentry_stop_blocked(c, sl_low, sl_bounce_pct, reentry_tol):
                         blocked = True
@@ -158,13 +165,13 @@ def main() -> int:
                     help="simulate() rapid (fill OHLC aproximativ, optimist pe stop) in loc de motorul LIVE faithful")
     args = ap.parse_args()
 
-    # incarca config-ul LIVE (STRAT_*) ca motorul faithful sa foloseasca reintrarea/
-    # tranche-urile/toleranta REALE de productie (nu default-uri). Fara efect pe --fast.
+    # Load live STRAT_* configuration so the faithful engine uses production
+    # re-entry, tranche, and tolerance values. This does not affect --fast.
     import os as _os
     from kraken_common import load_dotenv as _load_dotenv
     try:
         _load_dotenv(_os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "config.env"))
-    except Exception:  # noqa: BLE001 — daca lipseste, from_env cade pe default-uri
+    except Exception:  # noqa: BLE001 — from_env falls back to defaults when absent
         pass
 
     try:
