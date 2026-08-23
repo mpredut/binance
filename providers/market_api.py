@@ -18,7 +18,11 @@ from typing import List, Optional
 
 from .base import MarketDataProvider, _normalize_order, env_value
 from .strategy_executor import OrderStatus, PairPrecision, ProviderError
-from market_regime import MarketRegimeDecision, MarketRegimeService
+from market_regime import (
+    CompositeMarketRegimeDecision,
+    MarketRegimeDecision,
+    MarketRegimeService,
+)
 
 
 # Importurile Binance ajung pana la websocket-uri si chei locale. Providerii
@@ -458,6 +462,39 @@ class MarketApi:
             provider, symbol, horizon=horizon, snapshot=snapshot,
             interval_min=interval_min, window_seconds=window_seconds,
             allow_fallback=allow_fallback)
+
+    def composite_market_regime(self, symbol: str, *, benchmarks=(),
+                                provider_name=None, use_case="balanced", weights=None,
+                                strength_threshold=None,
+                                allow_fallback=True) -> CompositeMarketRegimeDecision:
+        """Blend asset horizons with explicitly configured crypto benchmarks."""
+        service = self._regime_service
+        if strength_threshold is not None:
+            service = MarketRegimeService(
+                strength_threshold, cache_ttl_sec=service.cache_ttl_sec,
+                cache_max=service.cache_max)
+        asset_short = self.market_regime(
+            symbol, provider_name=provider_name, horizon="short",
+            strength_threshold=strength_threshold, allow_fallback=allow_fallback)
+        asset_long = self.market_regime(
+            symbol, provider_name=provider_name, horizon="long",
+            strength_threshold=strength_threshold, allow_fallback=allow_fallback)
+        context = []
+        for benchmark in tuple(benchmarks or ()):
+            benchmark = str(benchmark)
+            context.append((
+                benchmark,
+                self.market_regime(
+                    benchmark, provider_name=provider_name, horizon="short",
+                    strength_threshold=strength_threshold,
+                    allow_fallback=allow_fallback),
+                self.market_regime(
+                    benchmark, provider_name=provider_name, horizon="long",
+                    strength_threshold=strength_threshold,
+                    allow_fallback=allow_fallback),
+            ))
+        return service.compose(
+            asset_short, asset_long, context, use_case=use_case, weights=weights)
 
     def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
         # MECANICA-ONLY (dispatch la provider, FARA garduri) — NU folosi direct pt

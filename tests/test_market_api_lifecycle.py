@@ -29,7 +29,7 @@ class FakeProvider(MarketDataProvider):
         ]
 
     def ohlc_closes(self, symbol, interval_min):
-        return [10, 11, 12, 13, 14]
+        return list(range(10, 50))
 
 
 class MarketApiLifecycleTest(unittest.TestCase):
@@ -67,6 +67,13 @@ class MarketApiLifecycleTest(unittest.TestCase):
         self.assertEqual(decision.regime, "bull")
         self.assertEqual(decision.horizon, "short")
         self.assertEqual(decision.source, "ohlc:1m")
+
+    def test_composite_market_regime_supports_multiple_crypto_benchmarks(self):
+        decision = self.api.composite_market_regime(
+            "ABCUSD", benchmarks=("BTCUSD", "ETHUSD"))
+        self.assertTrue(decision.actionable)
+        self.assertEqual(decision.regime, "bull")
+        self.assertEqual(len(decision.components), 6)
 
     def test_latest_fill_rejects_nonfinite_inputs(self):
         with self.assertRaises(ValueError):

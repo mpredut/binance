@@ -83,6 +83,48 @@ class MarketRegimeEvaluatorTest(unittest.TestCase):
                          ("bull", "long", "ohlc:1440m"))
         self.assertTrue(decision.fallback_used)
 
+    def test_composite_uses_benchmark_as_context_not_asset_replacement(self):
+        service = MarketRegimeService()
+        bull = self.evaluator.evaluate({"gradient_recent": 0.6, "epsilon": 0.1})
+        bear = self.evaluator.evaluate({"gradient_recent": -0.6, "epsilon": 0.1})
+        unknown = self.evaluator.unknown()
+
+        decision = service.compose(bull, bull, (("BTC", bear, bear),))
+        self.assertTrue(decision.actionable)
+        self.assertTrue(decision.conflict)
+        self.assertEqual(decision.regime, "bull")
+
+        benchmark_only = service.compose(
+            unknown, unknown, (("BTC", bull, bull),))
+        self.assertFalse(benchmark_only.actionable)
+        self.assertEqual(benchmark_only.regime, "unknown")
+        self.assertLessEqual(benchmark_only.confidence, 0.2)
+
+    def test_composite_rejects_unsafe_weights(self):
+        decision = self.evaluator.evaluate({"gradient_recent": 0.6, "epsilon": 0.1})
+        with self.assertRaises(ValueError):
+            MarketRegimeService().compose(
+                decision, decision, weights={
+                    "asset_short": 1, "asset_long": 1,
+                    "benchmark_short": 0, "benchmark_long": 0,
+                })
+
+    def test_composite_profiles_detect_pullback_and_change_conviction(self):
+        bull = self.evaluator.evaluate({"gradient_recent": 0.6, "epsilon": 0.1})
+        bear = self.evaluator.evaluate({"gradient_recent": -0.6, "epsilon": 0.1})
+        service = MarketRegimeService()
+        execution = service.compose(bear, bull, use_case="execution")
+        risk = service.compose(bear, bull, use_case="risk")
+        self.assertEqual(execution.regime, "bear")
+        self.assertEqual(risk.regime, "bull")
+        self.assertEqual(risk.pattern, "bullish_pullback")
+        self.assertLess(risk.conviction, risk.confidence)
+
+    def test_composite_rejects_unknown_use_case(self):
+        bull = self.evaluator.evaluate({"gradient_recent": 0.6, "epsilon": 0.1})
+        with self.assertRaises(ValueError):
+            MarketRegimeService().compose(bull, bull, use_case="magic")
+
 
 if __name__ == "__main__":
     unittest.main()

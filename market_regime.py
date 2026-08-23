@@ -39,6 +39,22 @@ class MarketRegimeDecision:
                 (side == "SOLD" and self.regime == "bull"))
 
 
+@dataclass(frozen=True)
+class CompositeMarketRegimeDecision:
+    """Asset regime enriched by broader crypto context."""
+
+    regime: str
+    score: float
+    confidence: float
+    conviction: float
+    actionable: bool
+    conflict: bool
+    pattern: str
+    use_case: str
+    reason: str
+    components: tuple
+
+
 class MarketRegimeEvaluator:
     """Transforma un snapshot comun intr-o decizie determinista."""
 
@@ -101,6 +117,21 @@ class MarketRegimeHorizon(str, Enum):
 _HORIZON_SOURCES = {
     MarketRegimeHorizon.SHORT: ((1, 900.0), (5, 1800.0)),
     MarketRegimeHorizon.LONG: ((240, 7 * 86400.0), (1440, 30 * 86400.0)),
+}
+
+_COMPOSITE_PROFILES = {
+    "execution": {
+        "asset_short": 0.65, "asset_long": 0.25,
+        "benchmark_short": 0.05, "benchmark_long": 0.05,
+    },
+    "balanced": {
+        "asset_short": 0.45, "asset_long": 0.35,
+        "benchmark_short": 0.10, "benchmark_long": 0.10,
+    },
+    "risk": {
+        "asset_short": 0.25, "asset_long": 0.55,
+        "benchmark_short": 0.05, "benchmark_long": 0.15,
+    },
 }
 
 
@@ -169,6 +200,106 @@ class MarketRegimeService:
         return self._annotate(
             self.evaluator.unknown(f"all_sources_failed:{reason}"),
             horizon=parsed, source="none", fallback_used=len(attempts) > 1)
+
+    @staticmethod
+    def _signed_score(decision, strength_cap):
+        if not decision.fresh or decision.regime == "unknown":
+            return None
+        if decision.regime == "sideways":
+            return 0.0
+        strength = float(decision.strength or 0.0)
+        magnitude = min(strength, strength_cap) / strength_cap
+        return magnitude if decision.regime == "bull" else -magnitude
+
+    def compose(self, asset_short, asset_long, benchmarks=(), *,
+                use_case="balanced", weights=None, strength_cap=6.0,
+                directional_threshold=0.15):
+        """Combine asset horizons with optional benchmark context.
+
+        Benchmark-only data is never actionable. Missing components retain their
+        nominal weight as lost confidence instead of amplifying the remaining data.
+        """
+        use_case = str(use_case or "balanced").lower()
+        if use_case not in _COMPOSITE_PROFILES:
+            raise ValueError(f"unsupported composite use case: {use_case!r}")
+        raw_weights = weights or _COMPOSITE_PROFILES[use_case]
+        expected = {"asset_short", "asset_long", "benchmark_short", "benchmark_long"}
+        if set(raw_weights) != expected:
+            raise ValueError(f"composite weights must contain exactly {sorted(expected)}")
+        normalized = {name: float(value) for name, value in raw_weights.items()}
+        if (any(not math.isfinite(value) or value < 0 for value in normalized.values()) or
+                not math.isclose(sum(normalized.values()), 1.0, abs_tol=1e-9)):
+            raise ValueError("composite weights must be finite, non-negative, and sum to 1")
+        strength_cap = float(strength_cap)
+        directional_threshold = float(directional_threshold)
+        if (not math.isfinite(strength_cap) or strength_cap <= 0 or
+                not math.isfinite(directional_threshold) or
+                not 0 <= directional_threshold <= 1):
+            raise ValueError("invalid composite strength cap or threshold")
+
+        benchmark_pairs = tuple(benchmarks or ())
+        components = []
+        weighted_score = confidence = 0.0
+        asset_scores = []
+        benchmark_scores = []
+
+        def add(label, decision, weight, bucket):
+            nonlocal weighted_score, confidence
+            score = self._signed_score(decision, strength_cap)
+            components.append((label, decision.regime, decision.source, score))
+            if score is not None:
+                weighted_score += weight * score
+                confidence += weight
+                bucket.append(score)
+
+        add("asset_short", asset_short, normalized["asset_short"], asset_scores)
+        add("asset_long", asset_long, normalized["asset_long"], asset_scores)
+        count = len(benchmark_pairs)
+        for name, short, long in benchmark_pairs:
+            add(f"{name}_short", short,
+                normalized["benchmark_short"] / max(1, count), benchmark_scores)
+            add(f"{name}_long", long,
+                normalized["benchmark_long"] / max(1, count), benchmark_scores)
+
+        actionable = bool(asset_scores)
+        asset_conflict = len(asset_scores) > 1 and min(asset_scores) < 0 < max(asset_scores)
+        asset_mean = sum(asset_scores) / len(asset_scores) if asset_scores else 0.0
+        benchmark_mean = (sum(benchmark_scores) / len(benchmark_scores)
+                          if benchmark_scores else 0.0)
+        market_conflict = bool(asset_scores and benchmark_scores and
+                               asset_mean * benchmark_mean < 0)
+        conflict = asset_conflict or market_conflict
+        if not actionable:
+            regime, pattern, reason = (
+                "unknown", "insufficient_asset_data", "asset_signal_unavailable")
+        elif weighted_score > directional_threshold:
+            regime, reason = "bull", "positive_composite"
+            if len(asset_scores) > 1 and asset_scores[0] < 0 < asset_scores[1]:
+                pattern = "bullish_pullback"
+            elif market_conflict:
+                pattern = "asset_bull_market_headwind"
+            else:
+                pattern = "aligned_bull"
+        elif weighted_score < -directional_threshold:
+            regime, reason = "bear", "negative_composite"
+            if len(asset_scores) > 1 and asset_scores[1] < 0 < asset_scores[0]:
+                pattern = "bearish_rebound"
+            elif market_conflict:
+                pattern = "asset_bear_market_tailwind"
+            else:
+                pattern = "aligned_bear"
+        else:
+            regime, reason = "sideways", ("conflicting_components" if conflict
+                                           else "below_composite_threshold")
+            pattern = "mixed" if conflict else "neutral"
+        conviction = min(1.0, abs(weighted_score) * confidence)
+        if conflict:
+            conviction *= 0.75
+        return CompositeMarketRegimeDecision(
+            regime=regime, score=weighted_score, confidence=min(1.0, confidence),
+            conviction=conviction, actionable=actionable, conflict=conflict,
+            pattern=pattern, use_case=use_case, reason=reason,
+            components=tuple(components))
 
     def evaluate_provider(self, provider, symbol: str, *, interval_min=1,
                           window_seconds=900.0) -> MarketRegimeDecision:
