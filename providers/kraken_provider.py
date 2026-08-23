@@ -23,13 +23,13 @@ from .base import MarketDataProvider, _normalize_order, env_value
 from .strategy_executor import OrderStatus, PairPrecision, ProviderError
 
 _KRAKEN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kraken")
-# Cache PARTAJAT de fills, produs de kraken/kraken_cachemanager.py (cross-proces).
+# Shared cross-process fill cache produced by kraken_cachemanager.py.
 _KRAKEN_CACHE_FILE = os.path.join(os.path.dirname(_KRAKEN_DIR), "cachedb", "cache_trade_kraken.json")
-_CACHE_MAX_STALE_S = 30.0   # peste asta -> cachemanager probabil oprit -> fallback TradesHistory
+_CACHE_MAX_STALE_S = 30.0   # Beyond this, assume cachemanager stopped and use TradesHistory.
 
 
 def _live() -> bool:
-    # os.environ are prioritate; fallback pe kraken/.env (la fel ca cheile API).
+    # os.environ takes precedence, with kraken/.env as the API-key-style fallback.
     v = os.environ.get("KRAKEN_LIVE_ORDERS")
     if v is None:
         v = env_value(_KRAKEN_DIR, "KRAKEN_LIVE_ORDERS")
@@ -38,39 +38,35 @@ def _live() -> bool:
 
 class KrakenProvider(MarketDataProvider):
     def __init__(self, client=None):
-        # client injectabil: kraken_bot ii da clientul propriu (_BOT) ca strategia sa
-        # foloseasca aceeasi conexiune/nonce; None => build lazy cu cheile _SPARE (flota).
+        # kraken_bot can inject its _BOT client to share connection and nonce.
+        # None lazily builds a fleet client using the _SPARE credentials.
         self._cli = client
-        self._minqty = {}  # cache symbol -> ordermin (din pair_info)
+        self._minqty = {}  # Cache symbol-to-ordermin from pair_info.
 
     @property
     def name(self) -> str:
         return "Kraken"
 
     def supports_symbol(self, symbol: str) -> bool:
-        # EXPLICIT-ONLY: nu revendica nimic prin sablon; reachable doar prin Instrument.
+        # Explicit-only: claim no pattern and remain reachable only through Instrument.
         return False
 
-    # ── client lazy ────────────────────────────────────────────────────────────
+    # -- Lazy client. ----------------------------------------------------------
     def _client(self):
         if self._cli is not None:
             return self._cli
-        # Import LAZY: kraken/ in fata pe sys.path (sa gaseasca kraken_client + kraken_common),
-        # apoi RESTAURAM sys.path ca alti provideri sa nu fie afectati. kraken/ foloseste
-        # 'kraken_common' (nume UNIC) -> nu mai e coliziune cu hyperliquid/common.py, deci nu mai
-        # e nevoie de dansul de evacuare a lui 'common' (vezi refactor botcore + kraken_common).
+        # Put kraken first on sys.path for lazy client imports, then restore the
+        # path so other providers are unaffected. The unique kraken_common name
+        # avoids collision with hyperliquid/common.py.
         saved_path = list(sys.path)
         try:
             sys.path.insert(0, _KRAKEN_DIR)
             from kraken_client import KrakenClient  # noqa: import lazy
         finally:
-            sys.path[:] = saved_path                  # restaureaza ordinea (alti provideri neafectati)
-        # Cheile din kraken/.env (NU din env-ul flotei). env-ul are prioritate daca e setat.
-        # kraken/.env NU defineste KRAKEN_API_KEY simplu, doar variantele cu sufix
-        # (_BOT/_TRAIL/_CACHE/_SPARE). Flota e un consumator concurent distinct de
-        # kraken_bot (_BOT) / trailing (_TRAIL) / cachemanager (_CACHE), deci foloseste
-        # perechea dedicata _SPARE -> secventa de nonce proprie (fara ciocniri). Fallback
-        # pe KRAKEN_API_KEY simplu, apoi pe _BOT, ca sa nu ramana orb daca _SPARE lipseste.
+            sys.path[:] = saved_path                  # Restore order for other providers.
+        # Read Kraken-specific credentials, with environment variables taking
+        # precedence. The fleet is a distinct concurrent consumer and prefers
+        # _SPARE for its own nonce sequence, then falls back to plain and _BOT keys.
         api_key = (os.environ.get("KRAKEN_API_KEY")
                    or env_value(_KRAKEN_DIR, "KRAKEN_API_KEY")
                    or env_value(_KRAKEN_DIR, "KRAKEN_API_KEY_SPARE")
@@ -80,9 +76,8 @@ class KrakenProvider(MarketDataProvider):
                       or env_value(_KRAKEN_DIR, "KRAKEN_API_SECRET_SPARE")
                       or env_value(_KRAKEN_DIR, "KRAKEN_API_SECRET_BOT"))
         cli = KrakenClient(api_key, api_secret)
-        # Cacheaza DOAR daca avem chei. Altfel (kraken/.env lipsa/incomplet la primul apel)
-        # NU cacheza un client ORB -> reincearca sa citeasca cheile la urmatorul tick, deci
-        # se auto-vindeca daca apar cheile, FARA restart (fixul simptomului "pornit fara chei").
+        # Cache only a credentialed client. When keys are initially absent, retry
+        # loading them on the next tick so the process can recover without restart.
         if api_key and api_secret:
             self._cli = cli
         else:
@@ -90,7 +85,7 @@ class KrakenProvider(MarketDataProvider):
                   " -> citirile de cont (balance/orders) vor esua; NU cachez, reincerc la urmatorul tick.")
         return cli
 
-    # ── market-data (public, fara chei) ────────────────────────────────────────
+    # -- Public market data without keys. --------------------------------------
     def get_current_price(self, symbol: str) -> Optional[float]:
         try:
             return self._client().last_price(symbol)
@@ -99,13 +94,13 @@ class KrakenProvider(MarketDataProvider):
             return None
 
     def min_order_qty(self, symbol: str) -> float:
-        """Volumul minim (ordermin) al perechii, din pair_info (public). Cache-uit
-        DOAR pe succes (valoare pozitiva). Un fetch esuat (blip DNS/AssetPairs gol ->
-        ordermin=0) NU se mai cache-uieste: altfel 0-ul cache-uit dezactiva permanent
-        gardul anti-'volume minimum not met' din _place_guarded -> churn de ordine
-        respinse pe praf (ex HYPE 0.0175 < min 0.1). La 0 reincercam data urmatoare."""
+        """Return public pair minimum volume, caching only a positive result.
+
+        Do not cache zero from a failed lookup, because that would permanently
+        disable minimum-volume protection and cause repeated dust rejections.
+        """
         cached = self._minqty.get(symbol)
-        if cached:  # doar valori POZITIVE sunt in cache (0/absent -> reincearca)
+        if cached:  # Only positive values are cached; zero or absent retries.
             return cached
         mn = 0.0
         try:
@@ -114,14 +109,14 @@ class KrakenProvider(MarketDataProvider):
         except Exception as e:  # noqa: BLE001
             print(f"[Kraken] ordermin {symbol}: {e}")
         if mn > 0:
-            self._minqty[symbol] = mn   # cache-uieste NUMAI lookup-ul reusit
+            self._minqty[symbol] = mn   # Cache only a successful lookup.
         return mn
 
     def get_price_history(self, symbol: str, lookback_h: float) -> Optional[List]:
-        """OHLC public -> [{timestamp(ms), price=close}] ascendent."""
+        """Return ascending public OHLC closes as timestamp/price mappings."""
         try:
             cli = self._client()
-            # alege intervalul (minute) ca sa incapa ~<=720 puncte
+            # Choose a minute interval that fits roughly 720 points or fewer.
             interval = max(1, int(math.ceil((lookback_h * 60.0) / 720.0)))
             res = cli._public("OHLC", {"pair": symbol, "interval": interval})
             rows = next((v for k, v in res.items() if k != "last"), None)
@@ -139,7 +134,7 @@ class KrakenProvider(MarketDataProvider):
             print(f"[Kraken] history {symbol}: {e}")
             return None
 
-    # ── cont (chei) ────────────────────────────────────────────────────────────
+    # -- Credentialed account access. -----------------------------------------
     def free_balance(self, asset: str) -> Optional[float]:
         try:
             bal = self._client().balance() or {}
@@ -152,12 +147,14 @@ class KrakenProvider(MarketDataProvider):
             return None
 
     def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:
-        """Tranzactii proprii pt pereche, filtrat pe side+varsta. Sursa: cache PARTAJAT
-        (kraken_cachemanager, cross-proces) daca e PROASPAT -> 1 fetch / N procese + vedere
-        comuna pt gard; altfel TradesHistory direct (fallback, sigur si fara cachemanager)."""
+        """Return own pair fills filtered by side and age.
+
+        Prefer the fresh shared cross-process cache for one fetch across processes
+        and a common guard view; otherwise fall back safely to TradesHistory.
+        """
         try:
             rows = self._fills_from_cache(symbol)
-            if rows is None:                                  # cache lipsa/vechi -> API direct
+            if rows is None:                                  # Missing or stale cache: direct API.
                 rows = self._fills_from_api(symbol)
             cutoff_ms = (time.time() - since_s) * 1000.0
             want = (side or "").upper()
@@ -174,8 +171,7 @@ class KrakenProvider(MarketDataProvider):
             return []
 
     def _fills_from_cache(self, symbol: str):
-        """Fills pt symbol din cache-ul PARTAJAT (kraken_cachemanager). None daca fisierul
-        lipseste / e prea vechi (cachemanager oprit) / n-are symbol -> get_orders cade pe API."""
+        """Read symbol fills from the shared cache, or return None for API fallback."""
         try:
             with open(_KRAKEN_CACHE_FILE) as f:
                 data = json.load(f)
@@ -188,7 +184,7 @@ class KrakenProvider(MarketDataProvider):
         if key is None:
             return None
         if (time.time() * 1000.0 - float(ft.get(key, 0))) > _CACHE_MAX_STALE_S * 1000.0:
-            return None                                       # stale -> cachemanager probabil mort
+            return None                                       # Stale cachemanager data.
         return [{
             "side": "BUY" if t.get("isBuyer") else "SELL",
             "price": t.get("price"), "qty": t.get("qty"),
@@ -196,7 +192,7 @@ class KrakenProvider(MarketDataProvider):
         } for t in items[key]]
 
     def _fills_from_api(self, symbol: str):
-        """Fallback: TradesHistory direct (comportamentul de dinainte de cachemanager)."""
+        """Fall back to direct TradesHistory, matching pre-cachemanager behavior."""
         cli = self._client()
         res = cli._private("TradesHistory")
         trades = (res or {}).get("trades", {}) or {}
@@ -213,7 +209,7 @@ class KrakenProvider(MarketDataProvider):
             })
         return rows
 
-    # ── plasare (DRY pana la KRAKEN_LIVE_ORDERS=true) ──────────────────────────
+    # -- Placement remains dry until KRAKEN_LIVE_ORDERS=true. ------------------
     def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
         live = _live()
         s = (side or "").lower()
@@ -221,7 +217,7 @@ class KrakenProvider(MarketDataProvider):
         if not live:
             print(f"[Kraken][DRY] as plasa {side} {symbol} qty={qty} @ {price} "
                   f"(real off; seteaza KRAKEN_LIVE_ORDERS=true)")
-            try:                                 # validare server-side fara plasare
+            try:                                 # Server-side validation without placement.
                 return self._client().add_order(symbol, s, qty, price, ordertype="limit", validate=True)
             except Exception as e:  # noqa: BLE001
                 print(f"[Kraken][DRY] validate {symbol}: {e}")
@@ -233,10 +229,10 @@ class KrakenProvider(MarketDataProvider):
             print(f"[Kraken] place_order {symbol}: {e}")
             return None
 
-    # ── CONTRACT StrategyExecutor (Faza 1: delegare la kraken_client) ───────────
-    # Semantica DIFERITA de place_order de mai sus: raw (fara gate KRAKEN_LIVE_ORDERS),
-    # intoarce order_id, RIDICA ProviderError la esec (reconcile-ul strategiei are nevoie
-    # sa stie de esecuri). Guvernat de dry_run-ul propriu al strategiei, nu de _live().
+    # -- StrategyExecutor contract delegated to kraken_client. -----------------
+    # Unlike place_order, this raw method has no KRAKEN_LIVE_ORDERS gate, returns
+    # an order id, and raises ProviderError so strategy reconciliation sees failure.
+    # The strategy's own dry_run setting governs it.
     def submit_order(self, symbol: str, side: str, qty: float,
                      price: Optional[float] = None, *, market: bool = False,
                      kind: Optional[str] = None,
@@ -250,7 +246,7 @@ class KrakenProvider(MarketDataProvider):
             res = self._client().add_order(
                 symbol, s, qty, None if ordertype == "market" else price,
                 **order_kwargs) or {}
-        except Exception as e:  # noqa: BLE001 — normalizeaza eroarea de venue
+        except Exception as e:  # noqa: BLE001 — Normalize venue errors.
             raise ProviderError(f"submit_order {symbol} {s}: {e}") from e
         txids = res.get("txid") or []
         if not txids:
@@ -273,16 +269,17 @@ class KrakenProvider(MarketDataProvider):
         )
 
     def cancel_order_by_id(self, symbol: str, order_id: str) -> None:
-        """Anuleaza dupa id. Idempotent: un ordin deja inchis/inexistent = succes
-        (nu ridica). NB: nume `cancel_order_by_id`, nu `cancel_order` — MarketApi n-are
-        cancel, dar evitam orice ambiguitate viitoare; contractul cere `cancel_order`
-        (vezi metoda de alias mai jos)."""
+        """Cancel by id, treating an already closed or missing order as success.
+
+        The explicit method name avoids future ambiguity; cancel_order below is the
+        StrategyExecutor contract alias.
+        """
         try:
             result = self._client().cancel_order(order_id) or {}
         except Exception as e:  # noqa: BLE001
             msg = str(e).lower()
             if "unknown order" in msg or "already" in msg:
-                return                       # idempotent: deja inchis/anulat
+                return                       # Idempotent: already closed or canceled.
             raise ProviderError(f"cancel_order {order_id}: {e}") from e
         if "count" in result:
             try:
@@ -304,7 +301,7 @@ class KrakenProvider(MarketDataProvider):
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"pair_precision {symbol}: {e}") from e
         if not info:
-            return None                      # nelistat inca -> strategia cade pe implicit
+            return None                      # Not listed yet; strategy uses its default.
         try:
             return PairPrecision(
                 price_decimals=int(info.get("pair_decimals", 2)),
