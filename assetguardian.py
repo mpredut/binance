@@ -27,6 +27,32 @@ ASSET_REFERENCE_MINUTES_BACK_DEFAULT = float(os.environ.get("AG_REFERENCE_MINUTE
 BUY_SYMBOL_DEFAULT = sym.symbols[0] if sym.symbols else "BTCUSDC"
 BUY_USE_CASH_RATIO = float(os.environ.get("AG_BUY_USE_CASH_RATIO", "0.995"))
 
+
+def _validate_config():
+    if CHECK_INTERVAL_SECONDS <= 0:
+        raise ValueError("AG_CHECK_INTERVAL_SEC trebuie sa fie > 0")
+    if TARGET_GROWTH_PERCENT <= 0 or TARGET_DROP_PERCENT <= 0:
+        raise ValueError("pragurile AG growth/drop trebuie sa fie > 0")
+    if ASSET_REFERENCE_MINUTES_BACK_DEFAULT <= 0:
+        raise ValueError("AG_REFERENCE_MINUTES_BACK trebuie sa fie > 0")
+    if not 0 < BUY_USE_CASH_RATIO <= 1:
+        raise ValueError("AG_BUY_USE_CASH_RATIO trebuie sa fie in (0, 1]")
+
+
+_validate_config()
+
+
+def _row_value_usdc(row):
+    """Valoare normalizata USDC; accepta cheia istorica USDT doar la citire."""
+    raw = row.get("total_value_usdc")
+    if raw is None:
+        raw = row.get("total_value_usdt")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
 def _read_cache_rows():
     try:
         manager = cm.get_cache_manager("AssetValue")
@@ -44,7 +70,7 @@ def _read_cache_rows():
         return []
 
 
-def _get_value_minutes_ago_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT):
+def _get_window_extrema_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT):
     rows = _read_cache_rows()
     if not rows:
         print("[DEBUG] no rows available in cache TOTAL.")
@@ -55,7 +81,11 @@ def _get_value_minutes_ago_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_
     print(f"[DEBUG] window start for last {minutes_back}m: {target_ts}")
 
     # Folosim toate inregistrarile din ultimele `minutes_back` minute.
-    window_rows = [r for r in rows if target_ts <= int(r.get("timestamp", 0)) <= now_ts]
+    window_rows = [
+        r for r in rows
+        if target_ts <= int(r.get("timestamp", 0)) <= now_ts
+        and _row_value_usdc(r) is not None
+    ]
     print(f"[DEBUG] candidate rows in window: {len(window_rows)}")
     if not window_rows:
         return None
@@ -80,12 +110,19 @@ def _get_value_minutes_ago_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_
             last_printed_ts = current_ts
 
 
-    # Sortam cronologic, apoi alegem minimul dupa valoare.
+    # Profitul se masoara fata de minim, drawdown-ul fata de maxim.
     window_rows = sorted(window_rows, key=lambda r: int(r.get("timestamp", 0)))
-    chosen = min(window_rows, key=lambda r: float(
-        r.get("total_value_usdc", float("inf"))))
-    print(f"[DEBUG] chosen MIN: {chosen}")
-    return chosen
+    minimum = min(window_rows, key=_row_value_usdc)
+    maximum = max(window_rows, key=_row_value_usdc)
+    print(f"[DEBUG] chosen MIN: {minimum}")
+    print(f"[DEBUG] chosen MAX: {maximum}")
+    return minimum, maximum
+
+
+def _get_value_minutes_ago_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT):
+    """Compatibilitate pentru consumatorii vechi: intoarce minimul ferestrei."""
+    extrema = _get_window_extrema_from_cache(minutes_back)
+    return extrema[0] if extrema else None
 
 
 def _get_sell_symbol_for_asset(asset):
@@ -138,7 +175,10 @@ def sell_all_assets():
 
         try:
             current_price = api.get_current_price(sell_symbol)
-            order = mkt.place(sell_symbol, "SELL", current_price, qty, force=False, smart=False)
+            order = mkt.place(
+                sell_symbol, "SELL", current_price, qty,
+                force=False, smart=False, caller_owns_retry=True,
+                motivation="assetguardian_growth_exit")
             if order:
                 sell_count += 1
                 print(f" SELL safe-order sent: {sell_symbol} qty={qty}")
@@ -185,7 +225,10 @@ def buy_with_all_cash(buy_symbol=BUY_SYMBOL_DEFAULT, cash_ratio=BUY_USE_CASH_RAT
         f"({cash_ratio*100:.2f}% of free cash), qty={qty:.8f}"
     )
     try:
-        order = mkt.place(buy_symbol, "BUY", current_price, qty, force=False, smart=False)
+        order = mkt.place(
+            buy_symbol, "BUY", current_price, qty,
+            force=False, smart=False, caller_owns_retry=True,
+            motivation="assetguardian_drawdown_buy")
         if order:
             print(f" BUY safe-order sent: {buy_symbol}, qty={qty:.8f}")
             return True
@@ -209,22 +252,26 @@ def evaluate_and_maybe_sell_or_buy(
         return False
 
     print(f"[DEBUG] Current ASSETS value (USDC): {current_value}")
-    past_row = _get_value_minutes_ago_from_cache(minutes_back=minutes_back)
+    extrema = _get_window_extrema_from_cache(minutes_back=minutes_back)
 
-    if not past_row:
+    if not extrema:
         print(f" No baseline in cache yet for last {minutes_back}m.")
         return False
 
-    past_value = float(past_row.get("total_value_usdc", 0.0))
-    if past_value <= 0:
+    minimum_row, maximum_row = extrema
+    minimum_value = _row_value_usdc(minimum_row)
+    maximum_value = _row_value_usdc(maximum_row)
+    if not minimum_value or not maximum_value:
         print(" Invalid baseline value.")
         return False
 
-    growth_percent = ((current_value - past_value) / past_value) * 100.0
-    threshold_value = past_value * (1 + threshold_percent / 100.0)
+    growth_percent = ((current_value - minimum_value) / minimum_value) * 100.0
+    drawdown_percent = ((current_value - maximum_value) / maximum_value) * 100.0
+    threshold_value = minimum_value * (1 + threshold_percent / 100.0)
     print(f"Current ASSETS value: {current_value:.1f} USDC ")
-    print(f"Past    ASSETS value: {past_value:.1f} USDC, min_back={minutes_back:.4f}, "
-          f"growth={growth_percent:.4f}%"
+    print(f"Window MIN/MAX: {minimum_value:.1f}/{maximum_value:.1f} USDC, "
+          f"minutes_back={minutes_back:.4f}, growth_from_min={growth_percent:.4f}%, "
+          f"drawdown_from_max={drawdown_percent:.4f}%"
     )
     print(
         f"[DEBUG] Trigger when ASSETS >= {threshold_value:.4f} USDC "
@@ -239,9 +286,10 @@ def evaluate_and_maybe_sell_or_buy(
         sell_all_assets()
         return True
 
-    if growth_percent <= -abs(drop_percent):
+    if drawdown_percent <= -abs(drop_percent):
         print(
-            f" Drop threshold reached ({growth_percent:.4f}% <= -{abs(drop_percent):.4f}%). "
+            f" Drawdown threshold reached ({drawdown_percent:.4f}% "
+            f"<= -{abs(drop_percent):.4f}%). "
             "Buying with all available cash..."
         )
         #trimite alerta pe telefon - popup ca ceva este in neregula

@@ -1032,6 +1032,17 @@ class CacheAssetValueManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
         # creștere lentă (1 / 10 min) → full-rewrite e ok
         super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
+        changed = False
+        with self.lock:
+            for items in self.cache.values():
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    if "total_value_usdc" not in item and "total_value_usdt" in item:
+                        item["total_value_usdc"] = item.pop("total_value_usdt")
+                        changed = True
+        if changed:
+            self.save_state_to_file()
 
     def rebuild_fetchtime_times(self):
         last_times = {}
