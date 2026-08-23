@@ -65,6 +65,8 @@ class MarketApiLifecycleTest(unittest.TestCase):
         decision = self.api.market_regime(
             "ABCUSD", interval_min=1, window_seconds=300)
         self.assertEqual(decision.regime, "bull")
+        self.assertEqual(decision.horizon, "short")
+        self.assertEqual(decision.source, "ohlc:1m")
 
     def test_latest_fill_rejects_nonfinite_inputs(self):
         with self.assertRaises(ValueError):

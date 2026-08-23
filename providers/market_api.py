@@ -443,25 +443,21 @@ class MarketApi:
             raise ProviderError(f"{provider.name}: cancel_order is unsupported")
         method(symbol, str(order_id))
 
-    def market_regime(self, symbol: str, *, provider_name=None, interval_min=1,
-                      window_seconds=900.0, snapshot=None,
-                      strength_threshold=None) -> MarketRegimeDecision:
-        """Clasificare comună bull/bear/sideways/unknown.
-
-        `snapshot` păstrează compatibilitatea cu trendul rapid existent; fără el,
-        serviciul citește OHLC de la providerul rutat sau explicit.
-        """
+    def market_regime(self, symbol: str, *, provider_name=None, horizon="short",
+                      interval_min=None, window_seconds=None, snapshot=None,
+                      strength_threshold=None,
+                      allow_fallback=True) -> MarketRegimeDecision:
+        """Return a common regime with explicit horizon and source fallback."""
         service = self._regime_service
         if strength_threshold is not None:
             service = MarketRegimeService(
                 strength_threshold, cache_ttl_sec=service.cache_ttl_sec,
                 cache_max=service.cache_max)
-        if snapshot is not None:
-            return service.evaluate_snapshot(snapshot)
         provider = self._provider_explicit_or_routed(symbol, provider_name)
-        return service.evaluate_provider(
-            provider, symbol, interval_min=interval_min,
-            window_seconds=window_seconds)
+        return service.resolve(
+            provider, symbol, horizon=horizon, snapshot=snapshot,
+            interval_min=interval_min, window_seconds=window_seconds,
+            allow_fallback=allow_fallback)
 
     def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
         # MECANICA-ONLY (dispatch la provider, FARA garduri) — NU folosi direct pt

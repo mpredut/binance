@@ -57,6 +57,32 @@ class MarketRegimeEvaluatorTest(unittest.TestCase):
         self.assertEqual(decision.regime, "unknown")
         self.assertEqual(decision.reason, "source_error:RuntimeError")
 
+    def test_short_falls_back_from_snapshot_to_same_provider_ohlc(self):
+        class Provider:
+            name = "Binance"
+            def ohlc_closes(self, _symbol, interval):
+                return [100, 101, 102, 103] if interval == 1 else []
+
+        decision = MarketRegimeService().resolve(
+            Provider(), "TAOUSDC", horizon="short", snapshot={})
+        self.assertEqual((decision.regime, decision.horizon, decision.source),
+                         ("bull", "short", "ohlc:1m"))
+        self.assertTrue(decision.fallback_used)
+
+    def test_long_uses_daily_fallback_when_four_hour_source_fails(self):
+        class Provider:
+            name = "Kraken"
+            def ohlc_closes(self, _symbol, interval):
+                if interval == 240:
+                    raise RuntimeError("4h unavailable")
+                return list(range(100, 130))
+
+        decision = MarketRegimeService().resolve(
+            Provider(), "HYPEUSD", horizon="long")
+        self.assertEqual((decision.regime, decision.horizon, decision.source),
+                         ("bull", "long", "ohlc:1440m"))
+        self.assertTrue(decision.fallback_used)
+
 
 if __name__ == "__main__":
     unittest.main()

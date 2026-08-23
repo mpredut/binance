@@ -6,7 +6,8 @@ market/limit). Modulul nu importa Binance, Kraken, Hyperliquid sau cacheManager.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from enum import Enum
 import math
 import threading
 import time
@@ -24,6 +25,9 @@ class MarketRegimeDecision:
     reason: str
     n_samples: Optional[int] = None
     window_seconds: Optional[float] = None
+    horizon: str = "unspecified"
+    source: str = "unknown"
+    fallback_used: bool = False
 
     @property
     def directional(self) -> bool:
@@ -78,6 +82,28 @@ class MarketRegimeEvaluator:
         )
 
 
+class MarketRegimeHorizon(str, Enum):
+    """Decision horizon; execution policy remains owned by each strategy."""
+
+    SHORT = "short"
+    LONG = "long"
+
+    @classmethod
+    def parse(cls, value) -> "MarketRegimeHorizon":
+        if isinstance(value, cls):
+            return value
+        try:
+            return cls(str(value or cls.SHORT.value).lower())
+        except ValueError as exc:
+            raise ValueError(f"unsupported market-regime horizon: {value!r}") from exc
+
+
+_HORIZON_SOURCES = {
+    MarketRegimeHorizon.SHORT: ((1, 900.0), (5, 1800.0)),
+    MarketRegimeHorizon.LONG: ((240, 7 * 86400.0), (1440, 30 * 86400.0)),
+}
+
+
 class MarketRegimeService:
     """Construiește aceeași decizie din snapshot sau OHLC-ul oricărui provider.
 
@@ -99,6 +125,50 @@ class MarketRegimeService:
 
     def evaluate_snapshot(self, snapshot: Optional[Mapping]) -> MarketRegimeDecision:
         return self.evaluator.evaluate(snapshot)
+
+    @staticmethod
+    def _annotate(decision, *, horizon, source, fallback_used=False):
+        return replace(decision, horizon=horizon.value, source=str(source),
+                       fallback_used=bool(fallback_used))
+
+    def resolve(self, provider, symbol: str, *, horizon="short", snapshot=None,
+                interval_min=None, window_seconds=None, allow_fallback=True):
+        """Resolve a regime from ordered, same-venue sources.
+
+        A valid snapshot is preferred. Unknown/invalid primary data falls back to
+        completed OHLC candles for the requested horizon. Sources are never mixed
+        across venues implicitly.
+        """
+        parsed = MarketRegimeHorizon.parse(horizon)
+        attempts = []
+        if snapshot is not None:
+            decision = self._annotate(
+                self.evaluate_snapshot(snapshot), horizon=parsed, source="snapshot")
+            attempts.append(decision)
+            if decision.fresh or not allow_fallback:
+                return decision
+
+        configured = _HORIZON_SOURCES[parsed]
+        if interval_min is not None or window_seconds is not None:
+            primary = (int(interval_min or configured[0][0]),
+                       float(window_seconds or configured[0][1]))
+            configured = (primary,) + tuple(item for item in configured if item != primary)
+        if not allow_fallback:
+            configured = configured[:1]
+
+        for index, (interval, window) in enumerate(configured):
+            decision = self._annotate(
+                self.evaluate_provider(provider, symbol, interval_min=interval,
+                                       window_seconds=window),
+                horizon=parsed, source=f"ohlc:{interval}m",
+                fallback_used=bool(attempts or index))
+            attempts.append(decision)
+            if decision.fresh:
+                return decision
+        reason = ",".join(f"{item.source}={item.reason}" for item in attempts)
+        return self._annotate(
+            self.evaluator.unknown(f"all_sources_failed:{reason}"),
+            horizon=parsed, source="none", fallback_used=len(attempts) > 1)
 
     def evaluate_provider(self, provider, symbol: str, *, interval_min=1,
                           window_seconds=900.0) -> MarketRegimeDecision:

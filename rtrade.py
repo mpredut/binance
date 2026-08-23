@@ -91,6 +91,8 @@ RTRADE_MAX_FAILURES = int(os.environ.get("RTRADE_MAX_FAILURES", "10"))
 RTRADE_TREND_FILTER_ENABLED = os.environ.get("RTRADE_TREND_FILTER_ENABLED", "true").strip().lower() == "true"
 RTRADE_TREND_FILTER_K = float(os.environ.get("RTRADE_TREND_FILTER_K", "2.0"))
 RTRADE_TREND_WINDOW_SEC = float(os.environ.get("RTRADE_TREND_WINDOW_SEC", "900"))
+RTRADE_TREND_OHLC_FALLBACK_ENABLED = os.environ.get(
+    "RTRADE_TREND_OHLC_FALLBACK_ENABLED", "false").strip().lower() == "true"
 RTRADE_DYNAMIC_MARKET_EXIT_MODE = os.environ.get(
     "RTRADE_DYNAMIC_MARKET_EXIT_MODE", "shadow").strip().lower()
 RTRADE_EMERGENCY_HARD_STOP_PCT = float(os.environ.get(
@@ -304,18 +306,21 @@ def _market_regime_decision(symbol) -> MarketRegimeDecision:
     """Adapteaza sursa cache existenta la evaluatorul comun provider-neutral."""
     if not RTRADE_TREND_FILTER_ENABLED:
         return mkt.market_regime(
-            symbol, snapshot={}, strength_threshold=RTRADE_TREND_FILTER_K)
+            symbol, horizon="short", snapshot={},
+            strength_threshold=RTRADE_TREND_FILTER_K, allow_fallback=False)
     try:
         import cacheManager as cm
         dyn = cm.get_short_trend_manager().get_instant_trend_for_window(
             symbol, RTRADE_TREND_WINDOW_SEC)
     except Exception as exc:
         return mkt.market_regime(
-            symbol, snapshot={},
-            strength_threshold=RTRADE_TREND_FILTER_K)
+            symbol, horizon="short", snapshot={},
+            strength_threshold=RTRADE_TREND_FILTER_K,
+            allow_fallback=RTRADE_TREND_OHLC_FALLBACK_ENABLED)
     return mkt.market_regime(
-        symbol, snapshot=dyn or {},
-        strength_threshold=RTRADE_TREND_FILTER_K)
+        symbol, horizon="short", snapshot=dyn or {},
+        strength_threshold=RTRADE_TREND_FILTER_K,
+        allow_fallback=RTRADE_TREND_OHLC_FALLBACK_ENABLED)
 
 
 def _order_fully_filled(symbol, order_id):
