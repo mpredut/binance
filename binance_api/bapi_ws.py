@@ -1,20 +1,19 @@
 """
-Binance WebSocket — infrastructură comună + două stream-uri
-===========================================================
+Binance WebSocket — shared infrastructure and two streams
+==========================================================
 
 BinanceWSBase
-    Nucleul comun (thread + asyncio loop, reconnect cu backoff, stop curat,
-    sleep întreruptibil). Subclasele implementează doar `_connect_and_run`.
+    Shared thread and asyncio loop, reconnect backoff, clean shutdown, and
+    interruptible sleep. Subclasses implement only ``_connect_and_run``.
 
 BinancePriceStream       (public, market data)
-    Combined Stream: 1 WS · 1 thread · N simboluri (ticker), subscribe dinamic.
-    (alias vechi: BinanceWebSocketManager)
+    Combined stream: one socket, one thread, N ticker symbols, dynamic subscriptions.
+    Historical alias: ``BinanceWebSocketManager``.
     URL: wss://stream.binance.com:9443/stream?streams=btcusdt@ticker/...
 
-BinanceAccountStream     (privat, user-data — execution reports)
-    WS-API cu session.logon (Ed25519) + keepalive; livrează evenimentele prin
-    callback-uri (on_event/on_available/on_healthy/on_unhealthy), deci nu
-    depinde de cacheManager (fără import circular).
+BinanceAccountStream     (private user-data execution reports)
+    WS-API with Ed25519 ``session.logon`` and keepalive. Events are delivered through
+    callbacks, avoiding a dependency on ``cacheManager`` and its import cycle.
 """
 
 import asyncio
@@ -62,11 +61,11 @@ class _Cmd:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  Bază comună: thread + asyncio + reconnect cu backoff + stop curat
+# Shared base: thread, asyncio, reconnect backoff, and clean shutdown.
 # ══════════════════════════════════════════════════════════════════════════════
 
 class BinanceWSBase:
-    # Sesiune considerată „stabilă" → resetăm backoff-ul doar dacă a rezistat atât.
+    # Reset backoff only after a session remains stable for this duration.
     # Previne reconnect-storm (login repetat) care ar putea lovi connection rate-limit-ul.
     STABLE_SESSION_SEC = 60.0
 
@@ -76,7 +75,7 @@ class BinanceWSBase:
         self._retry_delay = WS_RETRY_INITIAL
         self._start_lock = threading.Lock()
 
-    # ─── Ciclu de viață thread ────────────────────────────────────────────────
+    # Thread lifecycle.
     def start(self, name: str = "BinanceWS", daemon: bool = True) -> "BinanceWSBase":
         with self._start_lock:          # [F2] apeluri concurente de start() sunt safe
             if self.is_running:
@@ -110,23 +109,22 @@ class BinanceWSBase:
         finally:
             logger.info("WS thread exited")
 
-    # ─── Buclă generică de reconnect ──────────────────────────────────────────
+    # Generic reconnect loop.
     async def _main(self) -> None:
         """Default: reconnect peste _connect_and_run. Subclasele pot suprascrie
-        dacă au nevoie de setup (ex. crearea cozii async în loop-ul corect)."""
+        when setup is required, such as creating an async queue in the correct loop."""
         await self._run_with_reconnect(self._connect_and_run)
 
     async def _run_with_reconnect(self, body: Callable) -> None:
         # Reconectare cu backoff. Cheie anti rate-limit:
-        #  - între ORICE două încercări dormim _retry_delay (chiar și la disconnect
-        #    „curat", fără excepție) → fără storm de reconectări instant;
-        #  - backoff-ul se resetează DOAR după o sesiune stabilă (>= STABLE_SESSION_SEC),
-        #    nu la fiecare conectare → flapping-ul crește delay-ul.
+        # Sleep for ``_retry_delay`` between every attempt, including clean disconnects,
+        # to prevent reconnect storms. Reset backoff only after a stable session;
+        # repeated flapping therefore increases the delay.
         while not self._stop_event.is_set():
             t0 = time.time()
             exc = None
             try:
-                await body()                          # întoarce/ridică la sfârșitul sesiunii
+                await body()                          # Return or raise when the session ends.
             except Exception as e:
                 exc = e
                 if self._is_shutdown_error(e):
@@ -136,7 +134,7 @@ class BinanceWSBase:
             if self._stop_event.is_set():
                 break
             if time.time() - t0 >= self.STABLE_SESSION_SEC:
-                self._reset_backoff()                 # sesiune stabilă → reluăm de la delay mic
+                self._reset_backoff()                 # A stable session restores the short delay.
             logger.info("WS reconnect în %.1fs", self._retry_delay)
             await self._interruptible_sleep(self._retry_delay)
             self._retry_delay = min(self._retry_delay * 2, WS_RETRY_MAX)
@@ -146,12 +144,11 @@ class BinanceWSBase:
         self._retry_delay = WS_RETRY_INITIAL
 
     def _on_session_end(self, exc: Optional[Exception]) -> None:
-        """Hook la sfârșitul unei sesiuni (exc=None dacă s-a încheiat curat).
-        Subclasele pot reacționa (ex. user-data marchează WS unhealthy)."""
+        """Handle session completion; ``exc`` is None after a clean termination."""
         pass
 
     async def _connect_and_run(self) -> None:
-        """O conexiune completă (subclasa implementează). Ridică la disconnect."""
+        """Run one complete connection; subclasses return or raise on disconnect."""
         raise NotImplementedError
 
     # ─── Helpers comune ───────────────────────────────────────────────────────
@@ -197,7 +194,7 @@ class BinancePriceStream(BinanceWSBase):
                 self._subscribed.add(s.upper())
 
     def start(self, name: str = "BinanceWS", daemon: bool = False) -> "BinancePriceStream":
-        # market manager rulează ca thread NON-daemon (ca varianta originală)
+        # Preserve the original non-daemon market-manager thread behavior.
         super().start(name=name, daemon=daemon)
         return self
 
@@ -235,12 +232,12 @@ class BinancePriceStream(BinanceWSBase):
 
     # ─── Async core ───────────────────────────────────────────────────────────
     async def _main(self) -> None:
-        self._cmd_queue = asyncio.Queue()   # trebuie creat în loop-ul în care e folosit
+        self._cmd_queue = asyncio.Queue()   # Create it in the event loop that uses it.
         await self._run_with_reconnect(self._connect_and_run)
 
     async def _connect_and_run(self) -> None:
-        # Așteptarea de simboluri se face AICI (nu ca „sesiune") ca să nu penalizeze
-        # backoff-ul: _connect_and_run întoarce doar după o sesiune reală de conexiune.
+        # Wait for symbols here rather than treating the wait as a session. This avoids
+        # increasing backoff before a real connection session occurs.
         while not self._stop_event.is_set():
             with self._lock:
                 current_symbols = set(self._subscribed)
@@ -256,11 +253,11 @@ class BinancePriceStream(BinanceWSBase):
             close_timeout=WS_CLOSE_TIMEOUT,
         ) as ws:
             logger.info("Connected. Streams active: %d", len(current_symbols))
-            await self._session(ws)             # backoff-ul îl gestionează _run_with_reconnect
+            await self._session(ws)             # ``_run_with_reconnect`` manages backoff.
 
     async def _session(self, ws) -> None:
         """recv_loop (date) + cmd_loop (subscribe/unsubscribe) concurente; la
-        terminarea oricăreia le anulăm pe ambele → _connect_and_run reconectează."""
+        when either task terminates, cancel both so ``_connect_and_run`` reconnects."""
         recv_task = asyncio.create_task(self._recv_loop(ws))
         cmd_task  = asyncio.create_task(self._cmd_loop(ws))
         done, pending = await asyncio.wait(
@@ -375,12 +372,12 @@ class BinancePriceStream(BinanceWSBase):
 
 class BinanceAccountStream(BinanceWSBase):
     """
-    Stream autentificat de user-data. Livrează evenimentele prin callback-uri,
-    ca să NU depindă de cacheManager (fără import circular):
+    Authenticated user-data stream. Events are delivered through callbacks so the
+    stream does not depend on ``cacheManager`` or create an import cycle:
         on_event(payload)      — eveniment real (executionReport etc.)
         on_available(bool)     — WS disponibil (cheie+lib prezente)
         on_healthy()           — am primit un semnal viu (event/ping)
-        on_unhealthy()         — conexiune pierdută / watchdog expirat
+        on_unhealthy()         — lost connection or expired watchdog
     """
 
     def __init__(self, on_event: Callable,
@@ -403,7 +400,7 @@ class BinanceAccountStream(BinanceWSBase):
         self._available = False
         self._healthy = False
 
-    # ─── stare health locală + propagare prin callback-uri ────────────────────
+    # Local health state and callback propagation.
     def _mark_available(self, value: bool) -> None:
         with self._health_lock:
             self._available = value
@@ -429,9 +426,9 @@ class BinanceAccountStream(BinanceWSBase):
         return self
 
     def stop(self, timeout: float = WS_STOP_TIMEOUT) -> bool:
-        ok = super().stop(timeout=timeout)              # setează _stop_event + join run-thread
+        ok = super().stop(timeout=timeout)              # Set stop event and join run thread.
         if self._watchdog_thread and self._watchdog_thread.is_alive():
-            self._watchdog_thread.join(timeout=timeout)  # oprire curată și a watchdog-ului
+            self._watchdog_thread.join(timeout=timeout)  # Stop the watchdog cleanly too.
         return ok
 
     # ─── logon semnat (login + keepalive) ─────────────────────────────────────
@@ -445,7 +442,7 @@ class BinanceAccountStream(BinanceWSBase):
 
     @staticmethod
     def _classify(event: dict):
-        """(kind, payload): 'ping' / 'response' (comandă) / 'event' (despachetat)."""
+        """Return ``(kind, payload)`` for ping, command response, or unpacked event."""
         if "id" in event:
             return ("ping" if event.get("id") == "ping" else "response"), event
         if "event" in event:
@@ -467,10 +464,10 @@ class BinanceAccountStream(BinanceWSBase):
             await ws.send(self._signed_logon_msg("login"))
             resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
             if resp.get("status") != 200:
-                raise RuntimeError(f"login eșuat: {resp}")     # → backoff în bază
+                raise RuntimeError(f"login eșuat: {resp}")     # The base reconnect loop applies backoff.
             logger.info("[WS] ✅ Login OK")
-            # NU resetăm backoff aici: reset-ul se face în _run_with_reconnect doar
-            # dacă sesiunea rezistă (anti reconnect-storm → connection rate-limit).
+            # Do not reset backoff here. The reconnect loop does so only after a stable
+            # session, protecting the connection rate limit from reconnect storms.
 
             await ws.send(json.dumps({"id": "sub", "method": "userDataStream.subscribe"}))
             self._mark_event()
@@ -506,7 +503,7 @@ class BinanceAccountStream(BinanceWSBase):
                 self.on_event(payload)
 
     def _on_session_end(self, exc: Optional[Exception]) -> None:
-        # la orice cădere de sesiune (exc != None) marcăm WS unhealthy → fallback polling
+        # Mark every failed session unhealthy so polling becomes the fallback.
         if exc is not None:
             self._mark_unhealthy()
 
@@ -522,7 +519,7 @@ class BinanceAccountStream(BinanceWSBase):
             self._stop_event.wait(5)
 
 
-# Alias-uri de compatibilitate (nume anterioare folosite în cod/teste).
+# Compatibility aliases retained for earlier code and tests.
 BinanceWebSocketManager = BinancePriceStream   # nume generic original
 BinanceMarketStream     = BinancePriceStream   # nume intermediar
 BinanceUserDataStream   = BinanceAccountStream  # termenul oficial Binance pt user-data
@@ -530,11 +527,11 @@ BinanceUserDataStream   = BinanceAccountStream  # termenul oficial Binance pt us
 
 # ─── Entry point market data (singleton partajat, start LAZY) ──────────────────
 
-bapi_ws_manager = BinancePriceStream(symbols=sym.symbols)   # fără socket la import
+bapi_ws_manager = BinancePriceStream(symbols=sym.symbols)   # Importing does not open a socket.
 
 
 def get_ws_manager() -> BinancePriceStream:
-    """Întoarce stream-ul de market data, pornindu-l la prima cerere (start lazy)."""
+    """Return the market-data stream, starting it lazily on the first request."""
     if not bapi_ws_manager.is_running:
         bapi_ws_manager.start()
     return bapi_ws_manager

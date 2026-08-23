@@ -81,8 +81,8 @@ class StratParams:
     tp_trail_pct: float = 2.0         # v2: PESTE nivelul TP, ies la un pullback de acest %% de la
                                       # varf (trailing). Doar peste TP -> nu iesi niciodata in pierdere.
     tp_trail_profit_floor_pct: float = 0.0  # 0=compatibil live. >0=trailing MARKET numai
-                                      # dacă referința ordinului este >=avg*(1+floor%);
-                                      # hard stop-ul rămâne MARKET și are prioritate.
+                                      # when the order reference is >= average*(1+floor%);
+                                      # the MARKET hard stop retains priority.
     # --- TREND OVERLAY (combina strategii pe regim; EXPERIMENTAL, default OFF) -----
     trend_overlay: bool = False       # True = in UPTREND confirmat, intra cu TOP-UP mare si
                                       # CALARESTE (hold+trailing) in loc de DCA/TP; in range = clasic.
@@ -100,18 +100,18 @@ class StratParams:
     tp_trail_k: float = 2.0           # multiplicatorul vol_1h pt trailing adaptiv
     tp_trail_min: float = 1.5         # clamp jos (%) — nu iesi pe zgomot infim
     tp_trail_max: float = 8.0         # clamp sus (%) — nu lasa profitul sa scape complet
-    tp_trail_vol_interval: int = 240  # minute/bara pentru volatilitate; fix în live/replay
+    tp_trail_vol_interval: int = 240  # Minutes per volatility bar; fixed in live and replay.
     dca_trend_brake: bool = False     # B: in DOWNTREND confirmat, NU face DCA (nu prinde cutitul care
                                       # cade) — ataca direct maxDD, overlay care REDUCE risc.
     dca_brake_min_pct: float = 1.5    # panta minima (%) recent/vechi ca sa considere downtrend
-    dca_spacing_growth_pct: float = 0.0  # crește pragul după fiecare DCA executat;
+    dca_spacing_growth_pct: float = 0.0  # Increase the threshold after every filled DCA;
                                          # 0 = comportamentul live byte-identical
     # --- #2: SIZING DCA scalat pe VOLATILITATE (default OFF) ---
     dca_vol_scale_k: float = 0.0      # 0=OFF. eff_dca = dca × (vol_ref/vol_1h)^k, clamp [0.3,3].
                                       # k>0 = DCA MAI MIC in vol mare (defensiv, minimizeaza pierderea);
                                       # k<0 = MAI MARE in vol (harvest agresiv). Fail-safe pe warm-up.
     dca_vol_ref: float = 2.0          # vol_1h (%) de referinta pt scalare
-    dca_vol_interval: int = 240       # cadență OHLC identică în live și replay
+    dca_vol_interval: int = 240       # Identical OHLC cadence in live and replay.
     # --- Sizing PROCENTUAL (optional; total_budget=0 sau alloc_pct=0 -> OFF, valorile fixe) ---
     total_budget: float = 0.0   # bugetul TOTAL al venue-ului (ex. tot contul Kraken)
     alloc_pct: float = 0.0      # % din total alocat ACESTEI monede (suma pe venue = 100)
@@ -290,8 +290,8 @@ class Strategy:
         self.p = params
         self.ccy = params.currency
         self.dry_run = dry_run
-        # dry_run înseamnă și paper-live, nu doar backtest. Replay-ul trebuie
-        # identificat separat ca semnalul de trend să folosească barele injectate.
+        # ``dry_run`` includes paper-live, not only backtests. Replay must be identified
+        # separately so the trend signal uses injected bars.
         self.replay_mode = replay_mode
         self.desktop = desktop
         self._notifier = notifier
@@ -499,9 +499,8 @@ class Strategy:
                     continue
                 if self.dry_run:
                     if o.get("market"):
-                        # În paper-live, un ordin MARKET trebuie executat la
-                        # prețul observat acum, inclusiv într-o cădere sub
-                        # prețul de referință al stopului/trailing-ului.
+                        # In paper-live, a MARKET order fills at the currently observed
+                        # price, including a drop below the stop/trailing reference.
                         fill_price = price
                     elif ((side == "buy" and price <= o["price"])
                           or (side == "sell" and price >= o["price"])):
@@ -600,8 +599,8 @@ class Strategy:
         tag = "[PAPER] " if self.dry_run else ""
         self.s["cycle_fees"] += fee
         self.s["fees_total"] += fee
-        # Orice fee este plătit o singură dată, chiar dacă poziția rămâne deschisă.
-        # Astfel P&L-ul net mark-to-market nu supraestimează pozițiile cu BUY executat.
+        # Charge every fee once even while the position remains open. This prevents net
+        # mark-to-market P&L from overstating positions with a filled BUY.
         self.s["realized_net"] -= fee
         if o["side"] == "buy":
             self.s["qty"] += vol
@@ -613,8 +612,8 @@ class Strategy:
             if o.get("kind") == "DCA":
                 self.s["dca_buys"] += 1
             if o.get("kind") == "TREND_ENTRY":
-                # Ordin plasat != poziție de trend. Activăm modul numai după ce
-                # exchange-ul/replay-ul confirmă fill-ul.
+                # A submitted order is not a trend position. Enable the mode only after
+                # the venue or replay confirms the fill.
                 self.s["trend_mode"] = True
                 self.s["trend_peak"] = price
             avg = self._avg()
@@ -632,8 +631,8 @@ class Strategy:
             self.s["realized_gross"] += gross
             self.s["realized_net"] += gross
             self.s["qty"] -= vol
-            # La un SELL parțial se descarcă proporțional și cost basis-ul. Fără
-            # asta, costul întreg rămânea pe cantitatea redusă și media exploda.
+            # A partial SELL releases cost basis proportionally. Otherwise the full cost
+            # remains assigned to the reduced quantity and distorts the average.
             self.s["cost"] = max(0.0, self.s["cost"] - avg * vol)
             log(f"  [STRAT] {tag}SELL FILLED {vol} @ {price} {self.ccy}  "
                 f"brut={gross:+.4f} fee_ciclu={self.s['cycle_fees']:.4f} net={net:+.4f}")
@@ -698,11 +697,11 @@ class Strategy:
         return False
 
     def _trail_profit_floor_price(self, avg: float) -> float | None:
-        """Prețul minim al ieșirii soft, rotunjit în sus la precizia venue-ului.
+        """Return the minimum soft-exit price, rounded up to venue precision.
 
-        Pragul este intenționat brut și simplu. Configurația trebuie să includă
-        suficient buffer pentru fee-uri; benchmarkul central/stress măsoară apoi
-        profitul net cu fee-urile și fill-urile scenariului. ``0`` păstrează exact
+        The threshold is intentionally gross and simple. Configuration must include
+        enough fee buffer; central and stress benchmarks then measure net profit using
+        scenario fees and fills. ``0`` preserves exactly
         trailing-ul MARKET existent.
         """
         pct = float(self.p.tp_trail_profit_floor_pct or 0.0)
@@ -790,7 +789,7 @@ class Strategy:
         return base * max(0.3, min(3.0, scale))
 
     def _dca_vol_1h(self) -> float | None:
-        """Volatilitate DCA din OHLC la aceeași cadență în live și replay."""
+        """Return DCA volatility from OHLC at the same cadence in live and replay."""
         if self.replay_mode:
             closes = [price for _, price in self._shadow_prices]
         else:
@@ -884,11 +883,11 @@ class Strategy:
         return max(self.p.tp_trail_min, min(self.p.tp_trail_max, self.p.tp_trail_k * vol))
 
     def _trail_vol_1h(self) -> float | None:
-        """Volatilitate normalizată la 1h din aceeași cadență OHLC în live și replay.
+        """Return one-hour-normalized volatility at one OHLC cadence in live and replay.
 
         Tick-urile live de 2 minute versus close-urile de 4h din backtest produceau
-        semnale diferite chiar după scalarea cu sqrt(t). Live citește barele providerului
-        închise; replay-ul este validat separat să ruleze pe același interval.
+        different signals even after square-root-of-time scaling. Live mode reads closed
+        provider bars; replay is separately validated against the same interval.
         """
         if self.replay_mode:
             closes = [price for _, price in self._shadow_prices]
@@ -902,7 +901,7 @@ class Strategy:
     def _hourly_vol_from_closes(
         closes: list[float], interval_minutes: float,
     ) -> float | None:
-        """Deviația log-return normalizată la o oră pentru o cadență fixă."""
+        """Return log-return deviation normalized to one hour for a fixed cadence."""
         closes = closes[-90:]
         if len(closes) < 20 or interval_minutes <= 0:
             return None
@@ -920,7 +919,7 @@ class Strategy:
         return std * math.sqrt(60.0 / interval_minutes) * 100.0
 
     def _trend_down(self, min_pts: int = 20) -> bool:
-        """B: downtrend pe OHLC fix, identic ca scară temporală în live și replay."""
+        """Detect the fixed-OHLC downtrend on the same time scale in live and replay."""
         pts = self._trend_closes()[-90:]
         if len(pts) < min_pts:
             return False
@@ -993,8 +992,8 @@ class Strategy:
             return True
         if pending_trend_entry:
             if up:
-                return True                         # așteaptă fill-ul top-up-ului
-            self._cancel_open("buy")                # semnal dispărut înainte de fill
+                return True                         # Wait for the top-up fill.
+            self._cancel_open("buy")                # Signal disappeared before fill.
             log("  [STRAT] TREND ENTER anulat: semnalul a dispărut înainte de fill")
             return False                            # revine la strategia range
         if up and self.s["spent"] + self.p.trend_topup <= self._effective_max_budget():
@@ -1012,9 +1011,9 @@ class Strategy:
     def step(self, price: float, timestamp: float | None = None) -> None:
         held = self.s["qty"]
         entry_px = sr.entry_price(price, self.p.entry_discount_pct)   # = price*(1 - disc%)
-        # Live folosește ceasul real; replay-ul injectează timpul barei. Fără
-        # asta un backtest de sute de bare rulat într-o secundă produce o
-        # volatilitate orară absurdă și schimbă pragul adaptiv.
+        # Live uses wall time while replay injects bar time. Without this distinction, a
+        # backtest processing hundreds of bars per second produces meaningless hourly
+        # volatility and changes the adaptive threshold.
         tick_time = time.time() if timestamp is None else float(timestamp)
         self._shadow_prices.append((tick_time, price))
 
@@ -1025,8 +1024,8 @@ class Strategy:
                 return
             held = self.s["qty"]
 
-        # STOP-LOSS-ul este invariantă de siguranță și are prioritate față de
-        # orice logică de regim, inclusiv hold/trailing din overlay.
+        # STOP-LOSS is a safety invariant and takes priority over all regime logic,
+        # including overlay hold and trailing behavior.
         if held > 1e-12 and self._check_stop_loss(price):
             return
         # Un exit MARKET trimis intr-un tick anterior trebuie reconciliat inainte
@@ -1098,16 +1097,16 @@ class Strategy:
             previous_stop = self.s.get("trail_stop")
             trail_stop = max(candidate_stop, previous_stop or candidate_stop)
             self.s["trail_stop"] = trail_stop
-            # Aceeași referință conservatoare folosită la ordinul MARKET. Pragul
-            # se aplică ei, nu prețului brut observat, ca bufferul de 0,1% să nu
-            # transforme o ieșire exact la floor într-o pierdere implicită.
+            # Use the same conservative reference as the MARKET order. Apply the floor
+            # to that reference rather than the raw observed price so the 0.1% buffer
+            # cannot turn an exit exactly at the floor into an implicit loss.
             exit_px = round(price * 0.999, self.price_dec)
             profit_floor = self._trail_profit_floor_price(avg)
             if price <= trail_stop and profit_floor is not None and exit_px < profit_floor:
                 log(f"  [STRAT] trailing soft blocat: referința {exit_px:.{self.price_dec}f} sub pragul "
                     f"profitabil {profit_floor:.{self.price_dec}f}; hard stop rămâne MARKET")
-                # Reevaluează la tickul următor. Nu lasă un ordin persistent și nu
-                # deschide un DCA contradictoriu în tickul în care trailing-ul a fost atins.
+                # Re-evaluate on the next tick. Leave no persistent order and do not open
+                # a contradictory DCA on the tick that triggered trailing.
                 return
             if price <= trail_stop:
                 if not self._cancel_orders("sell", exclude_market=True):

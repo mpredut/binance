@@ -54,7 +54,7 @@ def priceLstFor(symbol: str) -> List[Tuple[int, float]]:
     if manager is None:
         return []
 
-    # obține lista curentă din cache pentru simbol
+    # Read the symbol's current cached series.
     raw = manager.cache.get(symbol, [])
     return [(int(ts), float(p)) for ts, p in raw]
 
@@ -63,7 +63,7 @@ _draw_fig = {}  # symbol -> (fig, ax), REFOLOSITE — vezi motivul in docstring
 
 
 def _draw_point_limit() -> int:
-    """Limita de puncte trimise rendererului; nu afectează calculul trendului."""
+    """Return the renderer point limit; it does not affect trend calculations."""
     try:
         return max(2, int(os.environ.get("PRICEANALYSIS_DRAW_MAX_POINTS", "5000")))
     except (TypeError, ValueError):
@@ -71,7 +71,7 @@ def _draw_point_limit() -> int:
 
 
 def _bounded_plot_indices(length: int, max_points: Optional[int] = None) -> np.ndarray:
-    """Indici uniformi pentru plot, cu capetele păstrate și memorie plafonată."""
+    """Return uniform plot indices with retained endpoints and bounded memory."""
     if length <= 0:
         return np.empty(0, dtype=np.intp)
     limit = _draw_point_limit() if max_points is None else max(2, int(max_points))
@@ -90,9 +90,9 @@ def drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_directio
     standard: O SINGURA figura/axa PERSISTENTA per simbol, golita (ax.clear())
     si redesenata, in loc de creata+distrusa la fiecare ciclu.
 
-    Calculul trendului folosește seria completă. Numai rendererul PNG primește un
-    eșantion uniform plafonat: Matplotlib construiește altfel zeci de mii de obiecte
-    datetime și copii de array la fiecare minut, iar allocatorul păstrează RSS-ul."""
+    Trend calculations use the complete series. Only the PNG renderer receives a
+    bounded uniform sample; otherwise Matplotlib creates tens of thousands of datetime
+    objects and array copies every minute, and the allocator retains their RSS."""
     timestamps = np.asarray(timestamps)
     prices = np.asarray(prices)
     plot_idx = _bounded_plot_indices(len(timestamps))
@@ -105,8 +105,8 @@ def drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_directio
 
     ax.plot(times, prices[plot_idx], label='Price', color='blue')
     for start, end in trend_block_indices:
-        # Același eșantion global ține plafonat totalul de obiecte grafice chiar
-        # dacă blocurile de trend se suprapun.
+        # Reuse the global sample to bound the total number of plot objects even when
+        # trend blocks overlap.
         block_idx = plot_idx[(plot_idx >= start) & (plot_idx < end)]
         if block_idx.size < 2 and end > start:
             block_idx = np.unique(np.array([start, end - 1], dtype=np.intp))
@@ -127,8 +127,7 @@ def drawPriceLst(timestamps, prices, trend_block_indices, symbol, trend_directio
 
 def weighted_moving_average(prices: np.ndarray, window: int) -> np.ndarray:
     """
-    Calculează media mobilă ponderată.
-    Cele mai recente valori au greutăți mai mari.
+    Calculate the weighted moving average, giving newer values greater weight.
     """
     wma = np.zeros_like(prices)
     weights = np.arange(1, window + 1)
@@ -137,7 +136,7 @@ def weighted_moving_average(prices: np.ndarray, window: int) -> np.ndarray:
     return wma
 
 
-# Medie mobilă ponderată (Weighted Moving Average – WMA)
+# Weighted moving average (WMA).
 def trend_wma(symbol: str, window_hours: int = 6):
     data = priceLstFor(symbol)
     if len(data) < 2:
@@ -154,7 +153,7 @@ def trend_wma(symbol: str, window_hours: int = 6):
 
     wma_prices = weighted_moving_average(prices, window)
 
-    # direcția trendului: comparăm ultimul preț WMA cu cel anterior
+    # Determine direction by comparing the newest WMA with its predecessor.
     if wma_prices[-1] > wma_prices[-2]:
         trend_direction = 'up'
     else:
@@ -224,13 +223,13 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
         return None
     data = sorted(data, key=lambda x: x[0])
     
-    # Filtrează ultimele N zile
+    # Select the last N days.
     cutoff_timestamp = time.time() - (lookback_days * 86400)
     data = [(ts, p) for ts, p in data if ts/1000 > cutoff_timestamp]
     
     
     timestamps, prices = zip(*data)
-    timestamps = np.array(timestamps) / 1000  # conversie din ms în secunde
+    timestamps = np.array(timestamps) / 1000  # Convert milliseconds to seconds.
     prices = np.array(prices)
     
     delta = np.median(np.diff(timestamps))
@@ -287,9 +286,9 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
                 continue
             avg_slope = sum_slope / len(trend_block_indices)
             _dbg(f"[DEBUG] trendul curent difera {slope_h}. Se compara cu trend_ref_slope_h={trend_ref_slope_h} si avg_slope={avg_slope}")
-            if abs(slope_h - trend_ref_slope_h) >= relative_tolerance: # diferență semificativa fata de trend start
+            if abs(slope_h - trend_ref_slope_h) >= relative_tolerance: # Significant difference from the starting trend.
                 continue_trend = False;
-            if abs(slope_h - avg_slope) >= relative_tolerance:  # diferență mare fata de medie
+            if abs(slope_h - avg_slope) >= relative_tolerance:  # Large difference from the mean.
                 continue_trend = False;
         else:
             continue_trend = True
@@ -301,7 +300,7 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
                 print(f"CONTINUE ... ")
             else : # medie sau ceva 
                 
-                #w = 1 w < 1 => media veche contează mai puțin decât un singur număr nou 
+                # w < 1 makes the previous mean count less than one new observation.
                 #trend_ref_slope_h = (w * trend_ref_slope_h + slope_h) / (w + 1)              
                 trend_ref_slope_h =  (trend_ref_slope_h * trend_ref_count + slope_h) / (trend_ref_count + 1);
                 trend_ref_count += 1
@@ -343,7 +342,7 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
             
 
 def format_duration(seconds):
-    """Convertește secunde în format citibil: Xd Yh Zm"""
+    """Convert seconds to the human-readable ``Xd Yh Zm`` format."""
     days = int(seconds // 86400)
     hours = int((seconds % 86400) // 3600)
     minutes = int((seconds % 3600) // 60)
@@ -360,11 +359,11 @@ def format_duration(seconds):
 
 
 def format_timestamp(ts):
-    """Convertește timestamp în format citibil"""
+    """Convert a timestamp to a human-readable representation."""
     return datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
 
 
-# Minim de puncte într-o fereastră ca slope-ul să fie credibil; sub el = gap.
+# Minimum points required for a credible window slope; fewer points constitute a gap.
 MIN_POINTS_PER_WINDOW = 4
 
 
@@ -372,14 +371,13 @@ def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
                            min_consecutive_blocks=3, noise_tolerance=2,
                            min_points_per_window=MIN_POINTS_PER_WINDOW,
                            detection_lag_hours=0.0, mk_alpha=None):
-    """Detectează trendul pe ferestre definite în TIMP (nu în număr de puncte),
-    deci robust la densitate neuniformă și găuri — fără să modifice datele brute.
+    """Detect trends in time-defined windows rather than point-count windows.
 
-    timestamps: secunde, sortate crescător. Fereastra acoperă [t, t+window_hours];
-    pasul e step_hours reali. O fereastră cu < min_points_per_window puncte = gap
-    și OPREȘTE trendul acolo (nu inventăm date peste gol).
+    ``timestamps`` are ascending seconds. Each window covers ``[t, t+window_hours]``
+    and advances by real ``step_hours``. A window below ``min_points_per_window`` is a
+    gap and terminates the trend rather than inventing observations across the gap.
 
-    Întoarce dict {direction, start_timestamp, duration_seconds,
+    Return ``{direction, start_timestamp, duration_seconds,
     estimated_future_hours, current_slope_h, blocks(perechi de indici pt desen)} sau None.
     """
     timestamps = np.asarray(timestamps, dtype=float)
@@ -392,7 +390,7 @@ def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
     step_sec = step_hours * 3600.0
 
     def slope_h(t_lo, t_hi):
-        """slope/oră pe punctele din [t_lo, t_hi) + (lo, hi) indici; None dacă gap."""
+        """Return hourly slope and index bounds for ``[t_lo,t_hi)``, or None for a gap."""
         lo = int(np.searchsorted(timestamps, t_lo, "left"))
         hi = int(np.searchsorted(timestamps, t_hi, "left"))
         if hi - lo < min_points_per_window:
@@ -421,7 +419,7 @@ def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
     while t_ws >= t_first:
         s, idx = slope_h(t_ws, t_ws + window_sec)
         if s is None:
-            break                                    # gap → nu confirmăm peste gol
+            break                                    # Do not confirm a trend across a gap.
         if np.sign(s) == current_sign:
             blocks.append(idx); consecutive += 1; noise = 0
             confirm_lo = idx[0]; confirm_pos = len(blocks) - 1
@@ -474,7 +472,7 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
 
     data = sorted(data, key=lambda x: x[0])
     
-    # Filtrează ultimele N zile
+    # Select the last N days.
     cutoff_timestamp = time.time() - (lookback_days * 86400)
     data = [(ts, p) for ts, p in data if ts/1000 > cutoff_timestamp]
     
@@ -486,7 +484,7 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
     timestamps = np.array(timestamps) / 1000      # ms → secunde
     prices = np.array(prices)
 
-    # Calcul pe ferestre definite în TIMP (robust la densitate neuniformă + găuri).
+    # Use time-defined windows to tolerate uneven density while respecting gaps.
     res = detect_long_term_trend(
         timestamps, prices, window_hours=window_hours, step_hours=step_hours,
         min_consecutive_blocks=min_consecutive_blocks, noise_tolerance=noise_tolerance,
@@ -527,9 +525,9 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
         'estimated_future_hours': res['estimated_future_hours'],
     }
 
-# Și pentru write_all_trends, adaugă formatare:
+# Persist all trend results with human-readable output.
 def write_all_trends(all_trends, filename="priceanalysis.json"):
-    """Scrie rezultatele în JSON + afișare human-readable"""
+    """Write results as JSON and display a human-readable summary."""
     
     print("\n" + "="*80)
     print("SUMAR TRENDURI".center(80))
@@ -631,7 +629,7 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=No
         print(f"[{symbol}] w gol, return None")
         return None
 
-    current_weight = float(w[0])  # ← w[0] e deja ponderea curentă (slice)
+    current_weight = float(w[0])  # The slice's first value is the current weight.
 
     if np.isnan(current_weight) or current_weight <= 0:
         print(f"[{symbol}] Pondere invalidă: {current_weight}, return None")
@@ -654,14 +652,14 @@ last_w = {}
 
 
 #Zona 1: 0 → T          = gaussian (confident la mijloc, nesigur la capete)
-#Zona 2: T → T*(1+proc) = trend depășit dar persistent → pondere mare (0.86)
-#Zona 3: > T*(1+proc)   = trend foarte bătrân → poate fi orice → conservator (0.22)
+# Zone 2: T to T*(1+percentage) is an over-age but persistent trend; high weight (0.86).
+# Zone 3: above T*(1+percentage) is a very old trend; use a conservative weight (0.22).
 
 #ALINIAT (BUY+UP sau SELL+DOWN): gaussiana scalata la VARF=peak_weight
-#mijloc → 0.95 (tranzacționezi maxim)   capete → ~0.17 (tranzacționezi puțin)
+# Middle -> 0.95 (maximum allocation); endpoints -> about 0.17 (small allocation).
 
 #CONTRA-TREND (SELL+UP sau BUY+DOWN): inversul gaussienei GLOBALE
-#mijloc → 0.02 (nu tranzacționezi)      AMBELE capete → ~0.13-0.15
+# Middle -> 0.02 (do not trade); both endpoints -> about 0.13 to 0.15.
 
 def get_trade_weight(T, trend_len, trend, order_type,
                      exceed_percent=0.4, max_against_trend=0.15,
@@ -673,19 +671,19 @@ def get_trade_weight(T, trend_len, trend, order_type,
 
     T_extended = T * (1 + exceed_percent)
 
-    # ZONA 2: trend depășit dar persistent → momentum puternic in directia lui
+    # Zone 2: an over-age but persistent trend has strong aligned momentum.
     if T < trend_len <= T_extended:
         w_val = 0.86 if aligned else max_against_trend
         _dbg(f"[DEBUG] Zona 2: trend_len={trend_len:.2f} depășește T={T} dar e sub T_extended={T_extended}. Aligned={aligned}, return {w_val}  ")
         return np.array([0.0]), np.array([w_val])
 
-    # ZONA 3: trend foarte bătrân → conservator IN AMBELE directii
+    # Zone 3: use conservative weights in both directions for a very old trend.
     if trend_len > T_extended:
         w_val = 0.22 if aligned else max_against_trend
         _dbg(f"[DEBUG] Zona 3: trend_len={trend_len:.2f} e peste T_extended={T_extended}. Aligned={aligned}, return {w_val} ")
         return np.array([0.0]), np.array([w_val])
 
-    # ZONA 1: gaussiana pe T întreg, slice de la vârsta curentă a trendului.
+    # Zone 1: Gaussian over the full T, sliced from the trend's current age.
     # idx plafonat la T-1: la trend_len == T slice-ul nu mai e gol (cusatura cu Zona 2).
     idx = min(int(trend_len), T - 1)
     t_full, w_full = u.gaussian_weights_from_idx(T=T, idx=0)
@@ -749,7 +747,7 @@ if __name__ == "__main__":
                                             window_hours=16,
                                             step_hours=8,
                                             min_consecutive_blocks=3,
-                                            noise_tolerance=2,  # ← permite 2 blocuri UP în trendul DOWN
+                                            noise_tolerance=2,  # Allow two UP blocks within a DOWN trend.
                                             lookback_days=30,
                                             draw=True)
             write_all_trends(all_trends);
