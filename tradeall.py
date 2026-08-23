@@ -7,14 +7,14 @@ import threading
 from binance.exceptions import BinanceAPIException
 from collections import deque
 
-#my imports
+# Local imports.
 import log
 import alertnotifiers as alert
 import utils as u
 import symbols as sym
 from binance_api import bapi as api
-from binance_api import bapi_placeorder as po   # pastrat pt _log_order_outcome (KALMAN gate)
-from providers.market_api import api as mkt      # proxy unic guardat (Instrument.place)
+from binance_api import bapi_placeorder as po   # Retained for _log_order_outcome (Kalman gate).
+from providers.market_api import api as mkt      # Single guarded proxy (Instrument.place).
 
 from binance_api import bapi_trades as apitrades
 from binance_api import bapi_allorders as apiorders
@@ -33,65 +33,60 @@ from pricewindow import (PriceTrendAnalyzer, PriceWindow, WindowAnalyzer,
                          RECENT_GRADIENT_SECONDS,
                          WINDOW_SECONDS_SMALL, WINDOW_SECONDS_BIG)
 
-# 23 iul: incarca parametrii tunabili din tradeall_config.env (versionat, se
-# COMITE — fara secrete) INAINTE de a citi orice os.environ.get(...) de mai jos.
-# botcore.load_dotenv NU suprascrie variabile deja setate in mediul real (ex.
-# systemd EnvironmentFile), doar completeaza ce lipseste — sigur de adaugat
-# fara sa schimbe ce era deja configurat altfel.
+# July 23: load tunable parameters from the versioned, secret-free
+# tradeall_config.env before reading any environment variables below.
+# botcore.load_dotenv does not overwrite variables already set by the real
+# environment (for example, a systemd EnvironmentFile); it only fills gaps.
 from botcore import load_dotenv as _load_dotenv
 _load_dotenv("tradeall_config.env")
 
 
 TIME_SLEEP_GET_PRICE = 0.8       # Nominal price-collection sleep interval in seconds.
-EXP_TIME_BUY_ORDER = (2.6 * 60) * 60 # dupa 1.6 ore
+EXP_TIME_BUY_ORDER = (2.6 * 60) * 60 # After 2.6 hours.
 EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
 TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
-# am voie 6 ordere per perioada de expirare care este 2.6 ore. deaceea am impartit la 6
+# Allow six orders per 2.6-hour expiration period, hence the division by six.
 TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + EXP_TIME_SELL_ORDER/ 6 + 4*79  # seconds to sleep for order placement
 
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
-# 23 iul: parametrii de mai jos erau constante hardcodate direct in cod —
-# scoase acum in variabile de mediu (config.env, sectiunea "tradeall.py"), cu
-# valori implicite IDENTICE cu ce rula pana acum (zero schimbare de comportament
-# daca nu se seteaza explicit env-ul). Cerere user: inventariat + externalizat
-# tot ce e parametru/multiplicator/prag, un bot pe rand, cu teste complete.
+# July 23: the parameters below were hard-coded constants. They now come from
+# environment variables (the tradeall.py section of config.env), with defaults
+# identical to the previous behavior unless explicitly configured.
 TREND_TO_BE_OLD_SECONDS = float(os.environ.get("TRADEALL_TREND_OLD_HOURS", "1.9")) * 3600
-# valorile de mai jos erau calculate din u.calculate_difference_percent(60000, 60000-310)
-# si (97000, 95000-377) — pastrate ca procente directe, cu suficiente zecimale
-# cat sa reproduca EXACT rezultatul acelor apeluri (0.518...% / 2.481...%).
+# These values were calculated by u.calculate_difference_percent(60000, 60000-310)
+# and (97000, 95000-377). They are stored as direct percentages with enough
+# precision to reproduce those calls exactly (0.518...% / 2.481...%).
 PRICE_CHANGE_THRESHOLD_EUR = float(os.environ.get("TRADEALL_PRICE_CHANGE_THRESHOLD_PCT", "0.5180048459"))
 PRICE_CHANGE_THRESHOLD_BIG_EUR = float(os.environ.get("TRADEALL_PRICE_CHANGE_THRESHOLD_BIG_PCT", "2.4809130428"))
 
 # TrendState.is_trend_a_minim_validated/is_trend_consistent_validated/is_trend_uniform_confirmed
-# — pragurile de "cat de validat" trebuie sa fie un trend inainte sa fie considerat
-# de incredere (vezi metodele TrendState de mai jos).
+# These thresholds specify how thoroughly a trend must be validated before it is
+# considered reliable; see the TrendState methods below.
 TREND_MIN_VALIDATED_SECONDS = float(os.environ.get("TRADEALL_TREND_MIN_VALIDATED_SEC", "30"))
 TREND_MIN_VALIDATED_CONFIRMS = int(os.environ.get("TRADEALL_TREND_MIN_VALIDATED_CONFIRMS", "3"))
-TREND_CONSISTENT_CONFIRMS = int(os.environ.get("TRADEALL_TREND_CONSISTENT_CONFIRMS", "24"))  # era 8*3
+TREND_CONSISTENT_CONFIRMS = int(os.environ.get("TRADEALL_TREND_CONSISTENT_CONFIRMS", "24"))  # Previously 8*3.
 TREND_UNIFORM_RATE_THRESHOLD = float(os.environ.get("TRADEALL_TREND_UNIFORM_RATE", "0.08"))
-# logic(): pragul de "panta extrema" (4 aparitii, simetrice UP/DOWN) care ocoleste
-# validarea normala si trateaza trendul ca deja "vechi" pt scopul acelor blocuri.
+# logic(): the extreme-slope threshold used at four symmetric UP/DOWN sites. It
+# bypasses normal validation and treats the trend as old for those branches.
 SLOPE_EXTREME_THRESHOLD = float(os.environ.get("TRADEALL_SLOPE_EXTREME_THRESHOLD", "5.1"))
 
-# 22 iul: cooldown per instanta de trend (investigat pe date reale, 21-22 iul,
-# 7 experimente in offline/research/tradeall_trigger_gate/) — logic() nu avea niciun
-# "fire o singura data": refirerea se intampla la FIECARE evaluare cat timp
-# trend_state ramane validat, chiar daca nimic nou nu s-a intamplat (gasit pe
-# TAO: 186 BUY/0 SELL dintr-un singur trend). Testat: cooldown-ul REDUCE
-# tranzactiile la cateva pe simbol si transforma un rezultat sub buy&hold
-# (-57.56$) intr-unul care il bate (-1.0$) — FARA sa schimbe deloc conditiile
-# de start/confirmare de mai jos.
-# 22 iul (update user): permite pana la FIRE_MAX_PER_TREND executii CONFIRMATE
-# (nu doar 1) per directie per instanta de trend, cu minim FIRE_MIN_RETRY_INTERVAL_SEC
-# intre orice doua incercari (reusite SAU respinse) — 6 min (redus de la 30 min).
+# July 22: per-trend cooldown, based on real July 21-22 data and seven experiments
+# in offline/research/tradeall_trigger_gate/. logic() previously fired on every
+# evaluation while trend_state remained validated, even without a new event
+# (TAO produced 186 BUY and zero SELL actions from one trend). Testing showed the
+# cooldown reduces trades to a few per symbol and improves the result from
+# -$57.56 (below buy-and-hold) to -$1.00 without changing start/confirmation rules.
+# The updated behavior permits up to FIRE_MAX_PER_TREND confirmed executions per
+# direction and trend, with FIRE_MIN_RETRY_INTERVAL_SEC between any two attempts,
+# whether accepted or rejected. The interval is six minutes, reduced from 30.
 FIRE_MIN_RETRY_INTERVAL_SEC = float(os.environ.get("TRADEALL_FIRE_MIN_RETRY_MINUTES", "6")) * 60
 FIRE_MAX_PER_TREND = int(os.environ.get("TRADEALL_FIRE_MAX_PER_TREND", "3"))
 
-# 30 iul: safeback_seconds pt _fire_order (3 aparitii identice in logic(), era
-# hardcodat local `d=14; h=24; d*h*3600+60` de fiecare data) — fereastra (ZILE) in
-# care place_safe_order/if_place_safe_order cauta tranzactiile PROPRII (plafon
-# zilnic + referinta gardei de profit, vezi order_guard.py/bapi_placeorder.py).
+# July 30: safeback_seconds for _fire_order. The same local expression previously
+# appeared three times in logic(). This day-based window controls how far
+# place_safe_order/if_place_safe_order searches own trades for the daily cap and
+# profit-guard reference; see order_guard.py and bapi_placeorder.py.
 FIRE_SAFEBACK_DAYS = float(os.environ.get("TRADEALL_FIRE_SAFEBACK_DAYS", "14"))
 FIRE_SAFEBACK_SEC = FIRE_SAFEBACK_DAYS * 24 * 3600 + 60
 
@@ -99,14 +94,16 @@ DECISIONS_LOG_DIR = "logger"
 
 
 def _sanitize_field(value):
-    """Elimina caractere care ar sparge formatul pipe-delimited (A3)."""
+    """Remove characters that would break the pipe-delimited format (A3)."""
     return str(value).replace("|", "/").replace("\n", " ")
 
 
 def log_decision(symbol, event, **fields):
-    """Jurnal CONDENSAT (doar trend_start): un rand pipe-delimited per
-    tranzitie reala de trend, rotit zilnic ca restul din logger/.
-    Observational — nu influenteaza logica de trading."""
+    """Write one condensed, pipe-delimited row per real trend transition.
+
+    Only ``trend_start`` is recorded. The file rotates daily like other logger/
+    output and is observational, so it does not affect trading logic.
+    """
     try:
         os.makedirs(DECISIONS_LOG_DIR, exist_ok=True)
         path = os.path.join(DECISIONS_LOG_DIR,
@@ -121,30 +118,27 @@ def log_decision(symbol, event, **fields):
         print(f"[log_decision] eroare scriere jurnal decizii: {e}")
 
 
-# ── KALMAN GATE (aprobat 19 iul): Kalman decide daca ordinele modelului actual
-# ajung la bani reali. Moduri (env KALMAN_GATE_MODE, citit la fiecare ordin):
-#   strict     BUY doar pe kalman UP, SELL doar pe kalman DOWN (default, aprobat)
-#   permissive blocheaza DOAR contra-trend (BUY pe DOWN / SELL pe UP)
-#   off        gate dezactivat (comportamentul dinainte)
-# FAIL-OPEN: daca shadow-ul lipseste/e vechi (>5 min), ordinul TRECE (gate-ul
-# nu are voie sa opreasca tradingul din cauza unei defectiuni de semnal).
-_shadow_ref = None                      # setat de TrendCoordinator.__init__
-GATE_OUTCOME_LOG = None                 # backtestul il redirectioneaza (nu scrie in jurnalul live)
+# Kalman gate (approved July 19): determine whether model orders reach real funds.
+# KALMAN_GATE_MODE is read for each order. ``strict`` allows BUY only on Kalman UP
+# and SELL only on DOWN; ``permissive`` blocks only countertrend orders; ``off``
+# restores the previous behavior. Fail open when the shadow signal is missing or
+# older than five minutes so a signal failure cannot stop trading.
+_shadow_ref = None                      # Set by TrendCoordinator.__init__.
+GATE_OUTCOME_LOG = None                 # Backtests redirect this away from the live log.
 GATE_STALE_SEC = 300
 
 
-# Mod per simbol (env KALMAN_GATE_MODE_<SIMBOL> > env global > acest dict > strict).
-# TAO permissive (A/B 4 zile): kalman e aproape mereu FLAT pe TAO (zgomot cuantizat
-# la 0.1$ -> incertitudine mare) — un veto strict pe un semnal neinformativ ar opri
-# complet BUY-urile TAO; permissive blocheaza doar contra-trend (DOWN confirmat).
+# Per-symbol mode precedence: KALMAN_GATE_MODE_<SYMBOL>, global environment mode,
+# this mapping, then strict. A four-day A/B test found TAO's Kalman signal almost
+# always FLAT because $0.10 quantization creates high uncertainty. Strict mode
+# would suppress all TAO buys, so permissive blocks only a confirmed DOWN signal.
 GATE_MODE_DEFAULTS = {"TAOUSDC": "permissive"}
 
-# KALMAN-PRIMAR (19 iul, pe cifre A/B 4 zile: BTC net +6.62$ vs 0$ model actual
-# si -3.97$ buy&hold): Kalman INITIAZA ordine la tranzitii, DOAR pe simbolurile
-# de mai jos. Iesirile raman pe mecanismele existente ale flotei (monitortrades/
-# trailing/profit-guard); ordinele trec prin _fire_order => TOATE garzile
-# (weight-limit, buget zilnic, cooldown, profit-guard) + gate-ul raman active.
-# Env: KALMAN_PRIMARY_SYMBOLS="BTCUSDC,TAOUSDC" sau "" (dezactivat).
+# Primary Kalman (July 19): in a four-day A/B test BTC returned +$6.62 versus $0
+# for the current model and -$3.97 buy-and-hold. Kalman initiates transition
+# orders only for the symbols below. Existing monitortrades/trailing/profit-guard
+# mechanisms still handle exits, and _fire_order retains every safety guard.
+# Set KALMAN_PRIMARY_SYMBOLS to a comma-separated list or empty to disable it.
 KALMAN_PRIMARY_SYMBOLS = set(
     s.strip() for s in os.environ.get("KALMAN_PRIMARY_SYMBOLS", "BTCUSDC").split(",") if s.strip())
 
@@ -160,7 +154,7 @@ def _kalman_gate_blocks(symbol, action):
     except Exception:
         return False, mode, None
     if trend is None or age > GATE_STALE_SEC:
-        return False, mode, None        # fail-open pe semnal absent/vechi
+        return False, mode, None        # Fail open on an absent or stale signal.
     wanted = 1 if action == "BUY" else -1
     if mode == "permissive":
         return trend == -wanted, mode, trend
@@ -168,11 +162,14 @@ def _kalman_gate_blocks(symbol, action):
 
 
 def _fire_order(symbol, action, price, reason, **kwargs):
-    """Wrapper peste proxy-ul unic guardat (30 iul: mkt.place, era po.place_order_smart)
-    — executarea/refuzul se jurnalizeaza centralizat (order_outcomes, via Instrument.place).
-    KALMAN GATE: ordinul pleaca spre executie DOAR daca trece de gate.
-    NU se da cantitate (21 iul, model uniform) — qty=None foloseste maximul permis de
-    ``QuantityDecision`` using Binance policy clamped to the real balance."""
+    """Submit an order through the single guarded proxy.
+
+    Since July 30 this uses ``mkt.place`` instead of ``po.place_order_smart``;
+    Instrument.place centrally records execution or refusal in order_outcomes.
+    The Kalman gate must pass before execution. No explicit quantity is supplied:
+    ``qty=None`` uses the QuantityDecision maximum under Binance policy, clamped
+    to the real balance.
+    """
     blocked, mode, trend = _kalman_gate_blocks(symbol, action)
     if blocked:
         print(f"[KALMAN-GATE] {action} {symbol} BLOCAT (kalman_trend={trend}, mode={mode}, motiv={reason})")
@@ -186,12 +183,11 @@ def _fire_order(symbol, action, price, reason, **kwargs):
     return mkt.place(symbol, action, price, None, motivation=reason, **kwargs)
 
 
-# 30 iul: track_and_place_order() NU mai e apelata nicaieri (0 apelanti in tot
-# repo-ul, verificat cu grep) — superseded de _fire_order()/place_order_smart(qty=None),
-# vezi docstring-ul lui _fire_order ("vechiul api.quantities[symbol] era doar un
-# placeholder numeric arbitrar"). Lasata COMENTATA (nu stearsa, cerere user — poate
-# avea idei de logica utile: price_step diferentiat BUY/SELL, num_orders configurabil,
-# alertnotifiers.check_alert pe fiecare plasare) in loc de eliminata complet.
+# July 30: track_and_place_order() has no callers anywhere in the repository. It
+# was superseded by _fire_order()/place_order_smart(qty=None); see _fire_order's
+# docstring. The old implementation remains commented out because it may contain
+# useful ideas such as side-specific price steps, configurable order counts, and
+# alertnotifiers.check_alert on every placement.
 #
 # def track_and_place_order(action, symbol, count, proposed_price, current_price, order_ids=None):
 #     quantity = api.quantities[symbol]
@@ -263,18 +259,16 @@ class TrendState:
         self.start_time = None
         self.end_time = None
         self.last_confirmation_time = None
-        self.max_duration_seconds = max_duration_seconds    # Nefolosit - Durata maxima permisa pentru un trend
+        self.max_duration_seconds = max_duration_seconds    # Unused maximum permitted trend duration.
         self.confirm_count = 0
-        self.expiration_trend_time = expiration_trend_time  # Pragul de timp Intre confirmari (In secunde)
-        self.fresh_trend_time = fresh_trend_time            # Pragul pentru a fi considerat fresh
-        self._now = now_fn   # ceasul real implicit; backtester-ul injecteaza timpul tick-ului replay-uit (A5)
-        # Cooldown per instanta de trend (22 iul, vezi FIRE_MIN_RETRY_INTERVAL_SEC
-        # si FIRE_MAX_PER_TREND): _confirmed_count_{up,down} = cate executii REUSITE
-        # (nu doar incercate) s-au facut pe acest trend, per directie — pana la
-        # FIRE_MAX_PER_TREND, apoi se opreste pana la un trend nou. _last_attempt_*
-        # = ultima incercare (reusita SAU respinsa) -> orice reincercare (fie ea o
-        # noua executie in limita, fie o respingere de gate/weight-limit/buget)
-        # asteapta minim FIRE_MIN_RETRY_INTERVAL_SEC fata de precedenta.
+        self.expiration_trend_time = expiration_trend_time  # Maximum seconds between confirmations.
+        self.fresh_trend_time = fresh_trend_time            # Freshness threshold.
+        self._now = now_fn   # Real clock by default; replay injects each tick's time (A5).
+        # Per-trend cooldown: _confirmed_count_{up,down} counts successful, not
+        # merely attempted, executions in each direction. Stop at
+        # FIRE_MAX_PER_TREND until a new trend. _last_attempt_* records the last
+        # accepted or rejected attempt, and every retry must wait at least
+        # FIRE_MIN_RETRY_INTERVAL_SEC.
         self._confirmed_count_up = 0
         self._confirmed_count_down = 0
         self._last_attempt_up_ts = None
@@ -355,19 +349,19 @@ class TrendState:
                 and self.confirm_count > TREND_MIN_VALIDATED_CONFIRMS)
 
     def is_trend_consistent_validated(self) :
-         #14 de confirmari per minut * 3 minute ->defapt 6 confirmari per minut
+         # Originally 14 confirmations per minute * 3; effectively six per minute.
         return self.confirm_count > TREND_CONSISTENT_CONFIRMS and self.is_trend_uniform_confirmed()
 
     def is_trend_uniform_confirmed(self):
         if not self.is_trend_a_minim_validated() :
             return False
 
-        trend_duration = self.get_started_trend_time() #self.get_confirmed_trend_duration()
+        trend_duration = self.get_started_trend_time() # self.get_confirmed_trend_duration()
         if trend_duration == 0:
             return False
         rate = self.confirm_count * 2.5 * TIME_SLEEP_GET_PRICE / trend_duration
         print(f"uniform rate is {rate} <> {TREND_UNIFORM_RATE_THRESHOLD}")
-        #10 confirmari per 1.5 minute
+        # Ten confirmations per 1.5 minutes.
         return rate > TREND_UNIFORM_RATE_THRESHOLD
 
     def is_started_trend_older_than(self, old_trend_time):
@@ -420,8 +414,8 @@ class TrendState:
 
 
 def logic_small(win, enable, symbol, gradient, slope, trend_state, current_price) :
-    # 30 iul: d/h/proposed_price erau MOARTE (definite, niciodata folosite in corp) —
-    # sterse (gasite in trecere, la extragerea lui FIRE_SAFEBACK_SEC din logic()).
+    # July 30: removed dead d/h/proposed_price locals discovered while extracting
+    # FIRE_SAFEBACK_SEC from logic().
     print(f" SE ACTIVEAZA DUPA 3.5 la slope: gradient={gradient}, slope={slope}")
     if gradient < 0 and slope < -3.5:
         if enable:
@@ -437,11 +431,13 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
     proposed_price = current_price
 
     def _fire_once(direction, action, reason):
-        """Cooldown per instanta de trend (22 iul) — vezi FIRE_MIN_RETRY_INTERVAL_SEC
-        si FIRE_MAX_PER_TREND. "Confirmat" = executie REALA (returul lui _fire_order
-        nu e None), nu doar incercare — o respingere de gate/weight-limit/buget NU
-        blocheaza definitiv, doar impune un interval minim pana la reincercare.
-        Pana la FIRE_MAX_PER_TREND executii CONFIRMATE per directie per trend."""
+        """Enforce the per-trend cooldown and confirmed-execution limit.
+
+        A confirmed action is a real execution (``_fire_order`` returns non-None),
+        not merely an attempt. Gate, weight-limit, or budget rejection imposes the
+        retry interval but does not block the trend permanently. Permit up to
+        FIRE_MAX_PER_TREND confirmed executions per direction and trend.
+        """
         if trend_state.fire_limit_reached(direction):
             return
         if not trend_state.can_retry_fire(direction):
@@ -457,43 +453,43 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
 
     #todo adjust safeback_seconds
     if gradient > 0 and slope < 0 :
-        # Confirmam un trend de crestere
+        # Confirm an upward trend.
         print(f"DIFERENTA MARE {win} DOWN!")
         proposed_price = current_price # * (1 - 0.01)
         if trend_state.is_trend_up():
-            count = trend_state.confirm_trend() # Confirmam ca trendul de crestere continua
+            count = trend_state.confirm_trend() # Confirm that the upward trend continues.
             if trend_state.is_trend_uniform_confirmed() and trend_state.is_trend_fresh():
                 _fire_once("UP", "BUY", "trend_confirmed_up")
                 print(f"place_order_smart BUY")
         else:
-            prev_confirm_count = trend_state.confirm_count  # cat a "prins" trendul anterior (near-miss)
-            old_trend = trend_state.start_trend('UP')  # Incepem un trend nou de crestere
+            prev_confirm_count = trend_state.confirm_count  # Strength of the previous near-miss trend.
+            old_trend = trend_state.start_trend('UP')  # Start a new upward trend.
             log_decision(symbol, "trend_start", state="UP", old_state=old_trend, price=current_price,
                          prev_confirm_count=prev_confirm_count)
 
     if gradient < 0 and slope > 0 :
-        # Confirmam un trend de scadere
+        # Confirm a downward trend.
         print(f"DIFERENTA MARE {win} UP!")
         proposed_price = current_price #  * (1 + 0.01)
         if trend_state.is_trend_down():
-            count = trend_state.confirm_trend() # Confirmam ca trendul de scadere continua
+            count = trend_state.confirm_trend() # Confirm that the downward trend continues.
             if trend_state.is_trend_uniform_confirmed() and trend_state.is_trend_fresh() :
                 _fire_once("DOWN", "SELL", "trend_confirmed_down")
                 print(f"place_order_smart SELL")
         else:
-            prev_confirm_count = trend_state.confirm_count  # cat a "prins" trendul anterior (near-miss)
-            old_trend = trend_state.start_trend('DOWN')  # Incepem un trend nou de scadere
+            prev_confirm_count = trend_state.confirm_count  # Strength of the previous near-miss trend.
+            old_trend = trend_state.start_trend('DOWN')  # Start a new downward trend.
             log_decision(symbol, "trend_start", state="DOWN", old_state=old_trend, price=current_price,
                          prev_confirm_count=prev_confirm_count)
 
     proposed_price = current_price
-    #18 de confirmari per minut * 3 minute ->defapt 6 confirmari per minut
+    # Originally 18 confirmations per minute * 3; effectively six per minute.
     if slope <= 0 and trend_state.is_trend_up():
         if (trend_state.is_trend_consistent_validated()
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE BUY ALL {win} .... ")
             _fire_once("UP", "BUY", "consistent_or_old_up")
-    #18 de confirmari per minut * 3 minute
+    # Eighteen confirmations per minute for three minutes.
     if slope >= 0 and trend_state.is_trend_down():
         if (trend_state.is_trend_consistent_validated()
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
@@ -501,14 +497,14 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
             _fire_once("DOWN", "SELL", "consistent_or_old_down")
                     
     #
-    #new case
+    # New case.
     #
     if slope <= -SLOPE_EXTREME_THRESHOLD and trend_state.is_trend_up():
         if (trend_state.is_trend_consistent_validated()
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 2: BUY ALL {win} .... ")
             _fire_once("UP", "BUY", "slope<=-5.1_up")
-    #18 de confirmari per minut * 3 minute
+    # Eighteen confirmations per minute for three minutes.
     if slope >= SLOPE_EXTREME_THRESHOLD and trend_state.is_trend_down():
         if (trend_state.is_trend_consistent_validated()
         or trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
@@ -516,21 +512,21 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
             _fire_once("DOWN", "SELL", "slope>=5.1_down")
                                                                                                                                                                  
     #
-    #new case
+    # New case.
     #
     if slope <= -SLOPE_EXTREME_THRESHOLD and trend_state.is_trend_down():
         if (trend_state.is_trend_consistent_validated()
         and trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 3: BUY ALL {win} .... ")
             _fire_once("UP", "BUY", "slope<=-5.1_and_old_down")
-    #18 de confirmari per minut * 3 minute
+    # Eighteen confirmations per minute for three minutes.
     if slope >= SLOPE_EXTREME_THRESHOLD and trend_state.is_trend_up():
         if (trend_state.is_trend_consistent_validated()
         and trend_state.is_started_trend_older_than(TREND_TO_BE_OLD_SECONDS)) :
             print(f"ATENTIE 3: SELL ALL {win} .... ")
             _fire_once("DOWN", "SELL", "slope>=5.1_and_old_up")
    
-#todo ia acceleratiea pe timp scurt get minute 1-3 si daca e mare cumpara!   
+# TODO: measure short-term acceleration over one to three minutes and buy when high.
 
 
 # Function to handle the price logic for a specific currency.
@@ -600,18 +596,21 @@ def handle_symbol(symbol, current_price, price_window, price_window_big,
 #
 # The WS-to-Cache24 source updates windows autonomously. Each tick marks a symbol dirty;
 # evaluation occurs only after ``MIN_EVAL_INTERVAL_SEC`` has elapsed.
-#       - SAU a trecut ≥ MAX_EVAL_INTERVAL_SEC        (heartbeat: nu prea rar)
+#       - or MAX_EVAL_INTERVAL_SEC has elapsed (heartbeat prevents sparse evaluation)
 # Cached lookup is O(1), and the single-threaded loop prevents reentrant placement.
 # ════════════════════════════════════════════════════════════════════════════
 
-MIN_EVAL_INTERVAL_SEC = 1.5    # floor: cel mult o evaluare la 1.5s per simbol
+MIN_EVAL_INTERVAL_SEC = 1.5    # Floor: at most one evaluation per symbol every 1.5 seconds.
 MAX_EVAL_INTERVAL_SEC = 30.0   # Heartbeat ceiling: evaluate at least every 30 seconds.
 
 
 class TrendCoordinator:
-    """Bucla de EVALUARE TRADING (event-driven + heartbeat). Ferestrele, calculul
-    trend state and cross-process cache live in ``CachePriceShortTrendManager``. This
-    coordinator consumes them and makes ``handle_symbol``/``logic`` decisions."""
+    """Coordinate event-driven trading evaluation with a heartbeat.
+
+    ``CachePriceShortTrendManager`` owns the windows, trend-state calculations,
+    and cross-process cache. This coordinator consumes them and makes
+    ``handle_symbol``/``logic`` decisions.
+    """
     def __init__(self, symbols, instant_mgr, current_price_mgr, cache24_managers=None,
                  min_interval=MIN_EVAL_INTERVAL_SEC, max_interval=MAX_EVAL_INTERVAL_SEC):
         self.symbols = list(symbols)
@@ -625,19 +624,17 @@ class TrendCoordinator:
         self._dirty = {s: True for s in self.symbols}      # Force an initial evaluation.
         self._last_eval = {s: 0.0 for s in self.symbols}
 
-        # shadow_signals (plan 17 iul): Kalman trend + vol adaptiv. 23 iul: DOAR vol
-        # adaptiv (vol_1h_pct/adapt_reentry_pct/adapt_dca_pct) a ramas observational
-        # azi — tradeall nu are mecanism de reentry/DCA care sa le consume, sunt
-        # afisate doar in monitor. Kalman trend NU mai e shadow: promovat la bani
-        # reali pe 19 iul (KALMAN_GATE_MODE gateaza toate ordinele + KALMAN-PRIMAR
-        # initiaza BUY/SELL direct pe simbolurile din KALMAN_PRIMARY_SYMBOLS, vezi
-        # mai jos). Un bug aici NU are voie sa opreasca trading-ul -> instantiere + apel guarded.
+        # shadow_signals originally combined a Kalman trend and adaptive volatility.
+        # Only adaptive values remain observational because tradeall has no
+        # reentry/DCA consumer. The Kalman trend moved to real trading on July 19:
+        # KALMAN_GATE_MODE gates every order and primary Kalman starts orders for
+        # KALMAN_PRIMARY_SYMBOLS. Guard setup and calls so a failure cannot stop trading.
         try:
             import shadow_signals
             self._shadow = shadow_signals.ShadowSet(
                 state_path=os.path.join("cachedb", "shadow_state.json"))
             global _shadow_ref
-            _shadow_ref = self._shadow   # gate-ul din _fire_order consulta acest semnal
+            _shadow_ref = self._shadow   # _fire_order's gate reads this signal.
             print(f"[KALMAN-GATE] activ, mode={os.environ.get('KALMAN_GATE_MODE', 'strict')}")
         except Exception as _e:  # noqa: BLE001
             print(f"[TrendCoordinator] shadow_signals indisponibil (continui fara): {_e}")
@@ -651,7 +648,7 @@ class TrendCoordinator:
             self.trend_states_big[symbol] = TrendState(max_duration_seconds=3 * 60 * 60,
                                                        expiration_trend_time=2.7 * 60, fresh_trend_time=3.7 * 60)
             # Windows and the fast channel live in ``instant_mgr``; subscribe here.
-            # Cache24 DOAR pentru semnalul de evaluare (dirty + event).
+            # Use Cache24 only for its evaluation signal (dirty flag and event).
             if cache24_managers is not None:
                 cache24_managers[symbol].subscribe_price(self)
 
@@ -663,7 +660,7 @@ class TrendCoordinator:
             self._dirty[symbol] = True
         self._event.set()
 
-    # ── Decizie: simbolul trebuie evaluat acum? ───────────────────────────────
+    # -- Decide whether the symbol is due for evaluation. ----------------------
     def _is_due(self, symbol, now):
         elapsed = now - self._last_eval[symbol]
         if elapsed >= self.max_interval:          # heartbeat
@@ -690,11 +687,10 @@ class TrendCoordinator:
         # Merge the complete snapshot into the cross-process store. Remove ``symbol``
         # because it is already supplied positionally.
         fields = {k: v for k, v in snapshot.items() if k != "symbol"}
-        # shadow_signals.update(): scrie cheile in snapshot (monitor). ATENTIE: NU mai
-        # e "doar observational" azi — kalman_trend de mai jos alimenteaza KALMAN-PRIMAR
-        # (initiaza ordine reale) si gate-ul din _fire_order (blocheaza ordine reale).
-        # Doar vol_1h_pct/adapt_reentry_pct/adapt_dca_pct raman pur observationale
-        # (niciun consumator in tradeall). Guarded — un bug aici nu poate opri evaluarea.
+        # shadow_signals.update() writes monitor snapshot fields. kalman_trend is no
+        # longer observational: it drives primary Kalman orders and _fire_order's
+        # real-order gate. Only the adaptive volatility/reentry/DCA fields remain
+        # observational. Guard this path so a failure cannot stop evaluation.
         if self._shadow is not None:
             try:
                 win = self.instant_mgr.get_window(symbol)
@@ -710,9 +706,8 @@ class TrendCoordinator:
                     big_sample_rate=win_big.sample_rate_sec,
                 )
                 fields.update(shadow_fields)
-                # KALMAN-PRIMAR: la tranzitie de trend, initiaza ordin (doar simbolurile
-                # activate; garzile + gate-ul din _fire_order raman singurele care decid
-                # daca banii chiar se misca).
+                # Primary Kalman starts an order on a trend transition for enabled
+                # symbols. _fire_order's guards and gate still decide whether funds move.
                 new_ktrend = shadow_fields.get("kalman_trend")
                 if (symbol in KALMAN_PRIMARY_SYMBOLS and prev_ktrend is not None
                         and new_ktrend != prev_ktrend):
@@ -766,12 +761,12 @@ if __name__ == "__main__":
 
     order_ids = []
 
-    # Chain de pret: WebSocket market-data → CacheCurrentPrice → Cache24 → PriceWindow.
-    # IMPORTANT: creem singleton-ul CacheCurrentPrice INAINTE de Cache24 cu sync_ts
-    # corect (altfel Cache24.get_remote_items l-ar crea intern cu sync_ts=30).
+    # Price chain: WebSocket market data -> CacheCurrentPrice -> Cache24 -> PriceWindow.
+    # Create CacheCurrentPrice before Cache24 with the correct sync_ts; otherwise
+    # Cache24.get_remote_items creates it internally with sync_ts=30.
     import cacheManager as cm
     from binance_api import bapi_ws
-    # WS user-data bridge e opt-in; tradeall vrea execution reports (fill-uri).
+    # The user-data WebSocket bridge is opt-in; tradeall needs execution reports.
     cm.enable_real_ws_event_sync()
     current_price_mgr = cm.get_current_price_manager(
         ws_manager=bapi_ws.get_ws_manager(),
