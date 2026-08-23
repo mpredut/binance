@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-t212_bot.py — bot UNIFICAT Trading 212: UN proces, mai multe active.
+t212_bot.py — UNIFIED Trading 212 bot: ONE process, multiple assets.
 
-Inlocuieste `ipo.py --profile X` (cate un proces per activ). Descopera toate
-fisierele config.<activ>.env, porneste cate un THREAD pentru fiecare:
-  * IZOLAT — eroarea unui activ nu-i omoara pe ceilalti (try/except + reincearca);
-  * UN singur client T212 cu throttle comun -> mai putine 429 (rate-limit);
-  * config per activ luat din FISIER, nu din linia de comanda.
+Replaces `ipo.py --profile X`, which used one process per asset. It discovers every
+config.<asset>.env file and starts one THREAD for each:
+  * ISOLATED: one asset's error cannot terminate the others; it catches and retries;
+  * ONE T212 client with shared throttling reduces rate-limit 429 responses;
+  * each asset's configuration comes from a FILE rather than the command line.
 
-Adaugi un activ = creezi config.<activ>.env (fara cod nou, fara proces/cron nou).
-Scoti un activ = redenumesti fisierul (ex. config.nvda.env.off).
+Add an asset by creating config.<asset>.env, without new code/process/cron entries.
+Remove one by renaming the file, for example config.nvda.env.off.
 
-  python3 t212_bot.py                # ruleaza toate config.*.env (REAL daca STRAT_EXECUTE=true)
-  python3 t212_bot.py --paper        # forteaza PAPER pe toate (test sigur)
-  python3 t212_bot.py --only nvda    # doar un activ (debug)
-  python3 t212_bot.py --skip-wait    # sari peste asteptarea lansarii (porneste direct)
-  python3 t212_bot.py --list         # arata ce active ar porni, fara sa porneasca
+  python3 t212_bot.py                # run every config.*.env; REAL if STRAT_EXECUTE=true
+  python3 t212_bot.py --paper        # force safe PAPER mode for all assets
+  python3 t212_bot.py --only nvda    # run one asset for debugging
+  python3 t212_bot.py --skip-wait    # bypass launch waiting and start directly
+  python3 t212_bot.py --list         # show assets without starting them
 """
 from __future__ import annotations
 
@@ -39,7 +39,7 @@ STOP = threading.Event()
 
 
 def discover_assets(cfg_dir: str) -> list[tuple[str, str]]:
-    """Toate config.<activ>.env din director -> [(nume, cale), ...] sortate.
+    """Return sorted config.<asset>.env files as [(name, path), ...].
     config.nvda.env -> ('nvda', '.../config.nvda.env')."""
     out = []
     for p in sorted(glob.glob(os.path.join(cfg_dir, "config.*.env"))):
@@ -49,8 +49,8 @@ def discover_assets(cfg_dir: str) -> list[tuple[str, str]]:
 
 
 def verify_isin(client: T212Client, ticker: str, expected_isin: str) -> bool:
-    """False DOAR la nepotrivire dovedita de ISIN (instrument gresit). Altfel True
-    (best-effort: daca metadata lipseste, continui pe ticker-ul explicit)."""
+    """Return False only for a proven ISIN mismatch identifying the wrong instrument.
+    Otherwise return True best-effort and continue with the explicit ticker if metadata is absent."""
     if not expected_isin:
         return True
     instruments = client.list_instruments()
@@ -68,8 +68,8 @@ def verify_isin(client: T212Client, ticker: str, expected_isin: str) -> bool:
 
 
 def run_asset(name: str, cfg: dict, client: T212Client, force_paper: bool, skip_wait: bool) -> None:
-    """Ciclul de viata al unui activ, in thread-ul lui. Izolat: prinde orice eroare
-    si reincearca (nu omoara procesul / ceilalti boti)."""
+    """Run an asset lifecycle in its isolated thread, catching and retrying errors
+    without terminating the process or other bots."""
     ticker = (cfg.get("T212_TICKER") or "").strip()
     label = cfg.get("SYMBOL_LABEL") or cfg.get("YAHOO_SYMBOL") or ticker or name
     yahoo = (cfg.get("YAHOO_SYMBOL") or "").strip() or (ticker.split("_")[0] if ticker else "")
@@ -90,7 +90,7 @@ def run_asset(name: str, cfg: dict, client: T212Client, force_paper: bool, skip_
     while not STOP.is_set():
         try:
             if not verify_isin(client, ticker, isin):
-                return  # config gresit -> nu reincerca orbeste
+                return  # invalid configuration: do not retry blindly
             if not skip_wait:
                 ok = wait_for_launch(
                     yahoo, label, interval, stop=STOP,
@@ -99,14 +99,14 @@ def run_asset(name: str, cfg: dict, client: T212Client, force_paper: bool, skip_
                         body=f"{label} tranzactionabil pe {m.get('exchange')} @ {m.get('price')}",
                         price=m.get("price"), symbol=label))
                 if not ok:
-                    return  # STOP cerut
+                    return  # stop requested
                 if not verify_isin(client, ticker, isin):
                     return
-            # blocheaza in bucla proprie a strategiei (self-healing pe erori interne);
-            # revine doar la oprire neasteptata -> reincercam de la verificare.
+            # Block in the strategy's self-healing loop. It returns only after an
+            # unexpected stop, at which point verification and startup are retried.
             Strategy(client, ticker, StratParams.from_env(cfg), dry_run=strat_dry).run()
             return
-        except Exception as e:  # noqa: BLE001 — REZILIENTA: un activ nu poate dobori procesul
+        except Exception as e:  # noqa: BLE001 — resilience: one asset cannot terminate the process
             log(f"  ! [{label}] eroare ciclu ({e.__class__.__name__}: {e}) — reincerc in 60s")
             STOP.wait(60)
     log(f"  ⏹ [{label}] oprit")
@@ -121,11 +121,11 @@ def main() -> int:
     ap.add_argument("--env-file", default=os.path.join(_HERE, ".env"))
     args = ap.parse_args()
     if not args.list:
-        single_instance("t212_bot")   # o singura instanta -> previne dubla-tranzactionare
+        single_instance("t212_bot")   # one instance prevents duplicate trading
 
-    # Secrete PARTAJATE din root binance/.env (NTFY/SMTP/etc., comune flotei) + secrete
-    # SPECIFICE T212 din folderul propriu (212trading/.env). Specificul se incarca ULTIMUL
-    # (prioritate la suprapuneri). Asa cheile T212 stau in folderul lor, nu in root.
+    # Load SHARED fleet secrets (NTFY/SMTP/etc.) from root binance/.env, then T212-SPECIFIC
+    # secrets from 212trading/.env. Specific values load LAST and win overlaps, keeping
+    # T212 credentials in their own directory rather than the repository root.
     load_dotenv(os.path.join(os.path.dirname(_HERE), ".env"))  # shared (root)
     load_dotenv(args.env_file)                                 # specific (212trading/.env)
     cfg_dir = os.path.dirname(args.env_file) or _HERE
@@ -153,7 +153,7 @@ def main() -> int:
                         env=os.environ.get("T212_ENV", "live").strip().lower())
 
     log(f"=== t212_bot: {len(assets)} active intr-UN proces ({'PAPER fortat' if args.paper else 'config'}) ===")
-    client.list_instruments()  # incalzeste cache-ul O DATA -> threadurile nu mai fac apelul greu
+    client.list_instruments()  # warm the cache ONCE so threads avoid the expensive call
     signal.signal(signal.SIGTERM, lambda *_: STOP.set())
     threads = []
     for name, path in assets:
@@ -162,7 +162,7 @@ def main() -> int:
                              args=(name, cfg, client, args.paper, args.skip_wait))
         t.start()
         threads.append(t)
-        time.sleep(0.5)  # decaleaza pornirile (sa nu loveasca API-ul simultan)
+        time.sleep(0.5)  # stagger startup to avoid simultaneous API calls
 
     try:
         while not STOP.is_set() and any(t.is_alive() for t in threads):
