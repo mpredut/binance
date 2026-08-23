@@ -1,28 +1,10 @@
 #!/usr/bin/env python3
-"""
-watchdogfor_cacheandconfig.py — DOUA responsabilitati intr-un singur watchdog:
+"""Watch cache freshness and configuration changes in one short cron task.
 
-1. CACHE: verifică prospețimea TUTUROR cache-urilor (cachedb/cache_*.json) și
-   alarmează / (optional) repornește cacheManager dacă vreunul s-a învechit
-   (cacheManager/priceAnalysis murite silențios).
-2. CONFIG (check_configs_once): detectează schimbări de CONȚINUT în fișierele de
-   config (instruments.conf etc.) și repornește procesul proprietar — inclusiv la
-   editări manuale. Respawn-safe prin healthcheck.sh --supervise (procs.conf).
-   Kill-switch WATCHDOG_CONFIG_RESTART (implicit off, activat din config.env).
-
-Rulează ca task scurt din cron (la fiecare 2 min), independent de flotă.
-(fost watchdogfor_cache.py — redenumit 28 iul cand a primit si config-watch.)
-
-Semnal de prospețime per fișier: max(fetchtime din cache, mtime fișier). Dacă vârsta
-depășește pragul (per-cache sau WATCHDOG_STALE_MINUTES) → alertă (ntfy + email), cu cooldown.
-(fost price_monitor_watchdog.py, care verifica un singur cache)
-
-Variabile de mediu (din .env / config.env din rădăcină):
-  PHONE_ALERT_URL / NTFY_TOPIC   — canal push
-  SMTP_USERNAME / SMTP_PASSWORD / ALERT_TO_EMAIL — email (opțional)
-  WATCHDOG_STALE_MINUTES      (default 20; cache-urile lente au prag mai mare)
-  WATCHDOG_COOLDOWN_MINUTES   (default 60)
-  BINANCE_CACHE_DIR           (default <radacina>/cachedb)
+Cache checks alert and may restart cacheManager when a cache becomes stale. Config checks
+hash file contents and restart owner processes after real edits, guarded by an opt-in kill
+switch. healthcheck supervision makes restarts respawn-safe. Per-cache thresholds and alert
+cooldown distinguish fast, slow, and event-driven data sources.
 """
 import os
 import sys
@@ -33,41 +15,31 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import watchdog_common as wc       # infrastructura partajata: env, ntfy/email, state
 
-_ROOT = wc.ROOT                                   # verify_tools/ -> rădăcina repo
+_ROOT = wc.ROOT                                   # Repository root above verify_tools.
 wc.load_env()
 
-# Cache-urile stau in subfolderul cachedb/ (BINANCE_CACHE_DIR il poate suprascrie).
+# Caches live in cachedb unless BINANCE_CACHE_DIR overrides it.
 _CACHE_DIR = Path(os.environ.get("BINANCE_CACHE_DIR", _ROOT / "cachedb"))
 STATE_FILE = _ROOT / ".watchdog_state.json"
 STALE_MINUTES = float(os.environ.get("WATCHDOG_STALE_MINUTES", "20"))
 COOLDOWN_MINUTES = float(os.environ.get("WATCHDOG_COOLDOWN_MINUTES", "60"))
 
-# 28 iul: AUTO-RESTART (cerere user, dupa incidentul HYPE care a cerut restart manual).
-# Cand un cache de pret RAPID (prag default, scris de cacheManager) e stale = flota
-# chiar are o problema reala -> watchdog-ul reporneste cacheManager singur (supervisor-ul
-# flota_start il respawneaza in ~30s), pe langa alerta. Guardrail-uri contra buclelor:
-# cooldown intre restarturi + plafon per fereastra (peste care se OPRESTE si cere
-# interventie manuala). Kill-switch: WATCHDOG_AUTO_RESTART=false.
+# Auto-restart applies only when a fast cache written by cacheManager is genuinely stale.
+# Cooldown and a rolling-window cap prevent loops; exceeding them requires manual action.
 AUTO_RESTART = os.environ.get("WATCHDOG_AUTO_RESTART", "false").strip().lower() in ("1", "true", "yes", "on", "da")
 AUTO_RESTART_COOLDOWN_MIN = float(os.environ.get("WATCHDOG_AUTO_RESTART_COOLDOWN_MIN", "15"))
 AUTO_RESTART_MAX = int(os.environ.get("WATCHDOG_AUTO_RESTART_MAX", "3"))
 AUTO_RESTART_WINDOW_H = float(os.environ.get("WATCHDOG_AUTO_RESTART_WINDOW_H", "6"))
-AUTO_RESTART_TARGET = "python cacheManager.py"   # pattern pgrep/pkill; flota_start respawneaza
+AUTO_RESTART_TARGET = "python cacheManager.py"   # pgrep/pkill pattern; fleet supervision respawns it.
 
-# ── CONFIG-WATCH: reporneste procesul proprietar cand un fisier de config s-a
-# schimbat. Detectie pe HASH de CONTINUT (nu mtime — o atingere fara schimbare
-# reala nu declanseaza reporniri false). Prinde SI editari manuale (azi trebuie
-# sa-ti amintesti sa repornesti dupa ce editezi un config). Toate procesele-tinta
-# sunt in procs.conf => respawn-safe prin healthcheck.sh --supervise (cron */5).
-# Kill-switch: WATCHDOG_CONFIG_RESTART (implicit false; activat din config.env).
+# Config watch restarts an owner only after a content-hash change, avoiding false restarts
+# from touching a file. Targets in procs.conf are respawn-safe under healthcheck supervision.
 CONFIG_RESTART = os.environ.get("WATCHDOG_CONFIG_RESTART", "false").strip().lower() in ("1", "true", "yes", "on", "da")
 CONFIG_RESTART_COOLDOWN_MIN = float(os.environ.get("WATCHDOG_CONFIG_COOLDOWN_MIN", "5"))
 CONFIG_RESTART_MAX = int(os.environ.get("WATCHDOG_CONFIG_MAX", "5"))
 CONFIG_RESTART_WINDOW_H = float(os.environ.get("WATCHDOG_CONFIG_WINDOW_H", "6"))
-# config (relativ la radacina) -> procese proprietare (pattern pkill -f). Un config
-# cu mai multi consumatori (instruments.conf: monitortrades SI tradeall) -> repornim
-# pe toti. Config-uri partajate/secrete (config.env, .env) NU sunt aici deliberat
-# (prea larg pt auto-restart; o schimbare acolo ar cere restart de flota, decizie umana).
+# Map root-relative configs to owner-process kill patterns. Shared secret/global configs
+# are deliberately excluded because restarting the whole fleet requires a human decision.
 _CONFIG_OWNERS = {
     # The restart map currently assigns instruments.conf only to monitortrades.
     # cacheManager and priceAnalysis also read its ``mt`` namespace but are not
@@ -80,131 +52,84 @@ _CONFIG_OWNERS = {
     "assetguardian_config.env": ["assetguardian.py"],
 }
 
-# Praguri per-cache (min): cele lente (trend lung, valoare activ) se actualizeaza rar.
-# Cache-urile de order/trade sunt EVENT-DRIVEN: cacheManager le rescrie DOAR cand apare
-# un order/trade nou pe exchange. Intr-o perioada linistita (fara fill-uri) mtime-ul lor
-# imbatraneste natural peste 20 min -> fals pozitiv. Nu ascund o cadere reala a flotei:
-# daca flota moare, cache-urile RAPIDE de pret (cache_currentprice prag 20, cache_asset_value
-# prag 60) declanseaza alarma oricum. Le dau prag mare, doar ca plasa de siguranta pt un
-# cache cu adevarat blocat (>24h fara nimic e suspect chiar si intr-o piata moarta).
+# Slow caches update rarely, while order/trade caches update only on exchange events.
+# Give event-driven caches large thresholds to avoid quiet-market false positives; fast
+# price caches still detect fleet failure promptly.
 _STALE_OVERRIDES = {
-    # 28 iul: 90 -> 1440 (24h). Vechea valoare de 90 min CONTRAZICEA filosofia
-    # documentata mai sus pt cache-urile lente ("prag mare, plasa de siguranta,
-    # >24h suspect"). cache_price_long_trend.json e scris DOAR cand
-    # detect_long_term_trend() gaseste un trend Mann-Kendall SEMNIFICATIV
-    # (priceAnalysis.py:461 — altfel "indeterminabil", nu scrie nimic). Intr-o
-    # piata choppy/laterala unde MK nu e semnificativ, continutul imbatraneste
-    # legitim ore intregi -> 90 min declansa alarme false constante (alarm
-    # fatigue = risc sa ascunda o alarma REALA). Daca priceAnalysis chiar moare,
-    # cache_currentprice (prag 20) alarmeaza oricum in <20 min.
+    # Long-trend writes only for a significant Mann-Kendall result. A sideways market can
+    # legitimately leave it unchanged for hours, so use a 24-hour safety-net threshold.
     "cache_price_long_trend.json": 1440,
     "cache_asset_value.json": 60,
     "cache_T_trend.json": 11520,   # T empiric per moneda: recalc la 7 zile -> prag 8 zile
-    # Event-driven (continut nou DOAR la order/trade nou): sub semantica pe
-    # CONTINUT (19 iul), perioadele linistite >24h sunt legitime (masurat: 33h
-    # fara fill-uri cu toate BUY-urile refuzate de weight-limit) -> prag 72h.
+    # Event-driven content may legitimately remain unchanged for days; use 72 hours.
     "cache_order.json": 4320,
     "cache_trade.json": 4320,
     "cache_trade_kraken.json": 4320,
-    # 30 iul: cache_prices_multi.json NU e scris de cacheManager.py — e scris de
-    # market_alerts.py (CacheAllPriceFetcherManager), pe o cadenta ~5:03-5:04 min
-    # (nu ~1s ca restul cache-urilor "fast price"). Era clasificat gresit ca
-    # fast-price (prag 5 min strans + declansator de auto-restart cacheManager) —
-    # pragul de 5 min era mai MIC decat cadenta lui normala, deci alarma fals-
-    # pozitiv la fiecare ciclu, si chiar si cand alarma era corecta, restart-ul
-    # tinta cacheManager.py, care n-are nicio legatura cu acest fisier (restart
-    # inutil, irosea plafonul de 3/6h pe alarme false). Gasit live 30 iul: 2 din
-    # cele 3 restart-uri dintr-o fereastra de 6h au fost exact aici, inainte sa
-    # loveasca plafonul pe un al treilea eveniment (posibil real, cache_currentprice).
-    # Prag 8 min (marja ~3 min peste cadenta reala) — doar alarma, FARA restart
-    # (vezi eliminarea din _is_fast_price_cache mai jos).
+    # market_alerts, not cacheManager, writes cache_prices_multi about every five minutes.
+    # Give it an eight-minute alert-only threshold and never restart cacheManager for it.
     "cache_prices_multi.json": 8,
 }
 
-# 28 iul: gating pe "flota vie" pt cache-urile EVENT-DRIVEN (fill-uri order/trade).
-# Motiv: frecventa de update a acestora e determinata de PIATA (cand apare un fill),
-# NU de sanatatea flotei — masurat 28 iul: BTC 8 zile FARA fill (pozitie vanduta pe
-# 19 iul, piata in scadere, kalman fara intrari valide), TOATE cache-urile de pret
-# proaspete (0-5 min). Pragul de 72h declansa deci alarme false. Filosofia deja
-# documentata mai sus o spune: "daca flota moare, cache-urile RAPIDE de pret
-# declanseaza alarma oricum" — deci fill-cache-urile NU trebuie sa detecteze
-# independent moartea flotei. Regula: daca un cache "fleet-alive" (pret rapid) e
-# PROASPAT, flota e demonstrabil vie -> staleness pe order/trade e benigna
-# (doar "n-au fost fill-uri"), NU alarma. Fail-safe: daca NU putem confirma flota
-# vie (toate cache-urile de pret stale = flota chiar moarta), alarma TRECE normal.
-# PLAFON DUR: peste 30 zile alarmeaza oricum, chiar cu flota vie — atunci
-# fill-tracking-ul insusi (WS event sync) e probabil rupt, nu doar piata linistita.
+# A fresh fast cache proves the fleet is alive, so stale event-driven fill caches then
+# mean only that no fills occurred. Suppress those alerts until a hard 30-day ceiling,
+# after which fill tracking itself is suspect. Without proof of life, fail safe and alert.
 _EVENT_DRIVEN_CACHES = {"cache_order.json", "cache_trade.json", "cache_trade_kraken.json"}
 _FLEET_ALIVE_CACHES = {"cache_prices_multi.json", "cache_currentprice.json", "cache_instant_trend.json"}
-_EVENT_DRIVEN_HARD_CEILING_MIN = 43200   # 30 zile: peste asta fill-tracking suspect chiar si cu flota vie
+_EVENT_DRIVEN_HARD_CEILING_MIN = 43200   # Fill tracking is suspect after 30 days even if fleet is alive.
 
-# 28 iul: prag DEDICAT, mai STRANS, pt cache-urile de pret cu adevarat RAPIDE
-# (~1s cadenta: WS Binance / poller non-Binance). Pragul general de 20 min era
-# dimensionat pt cel mai LENT cache "rapid" (arhiva sparse cache_price_*.jsonl,
-# ~7 min) -> mult prea larg pt cele de 1s. Un stall de 5 min pe un cache de 1s
-# = ~300 update-uri ratate = problema reala (nu un blip). Astea sunt SI singurele
-# care declanseaza auto-restart-ul: cacheManager e cel care le scrie, deci
-# staleness-ul lor = cacheManager rupt = restart-ul chiar ajuta. Arhiva sparse
-# (.jsonl) ramane pe pragul general (are nevoie de marja).
+# Truly fast one-second price caches use a tighter threshold. Only these trigger automatic
+# cacheManager restart because that process writes them. Sparse JSONL history keeps the
+# general threshold and additional margin.
 _FAST_PRICE_THRESHOLD_MIN = float(os.environ.get("WATCHDOG_FAST_PRICE_MINUTES", "5"))
 
 
 def _is_fast_price_cache(name):
-    """True pt cache-urile de pret RAPIDE (~1s), scrise chiar de cacheManager.py:
-    cele care primesc prag strans SI declanseaza auto-restart-ul lui cacheManager.
-    Exclude .jsonl (arhiva sparse ~7min / arhivator ~60s) care raman pe pragul
-    general. cache_prices_multi.json NU e aici (30 iul) — e scris de
-    market_alerts.py (cadenta ~5min, nu ~1s), deci restart-ul cacheManager n-ar
-    ajuta niciodata la staleness-ul lui; are prag propriu in _STALE_OVERRIDES
-    (alarma DOAR, fara restart)."""
+    """Return whether cacheManager writes this fast cache at roughly one-second cadence.
+
+    These receive a tight threshold and may trigger restart. Exclude slower JSONL archives
+    and cache_prices_multi, which has its own alert-only threshold.
+    """
     if name in ("cache_currentprice.json", "cache_instant_trend.json"):
         return True
-    if name.startswith("cache_24price_") and name.endswith(".json"):   # per-simbol, WS/poll ~1-20s
+    if name.startswith("cache_24price_") and name.endswith(".json"):   # Per-symbol WebSocket/poll cache.
         return True
     return False
 
 
 def _threshold_for(name):
-    """Pragul de staleness (min) pt un cache: fast-price -> prag strans; altfel
-    override-ul lui slow/event-driven; altfel default."""
+    """Return the fast, overridden slow/event-driven, or default stale threshold."""
     if _is_fast_price_cache(name):
         return _FAST_PRICE_THRESHOLD_MIN
     return _STALE_OVERRIDES.get(name, STALE_MINUTES)
 
 
 def _cache_files():
-    """Toate cache_*.json SI cache_*.jsonl din cachedb/ (exclude .bak/.tmp/.meta).
-    21 iul: cache_24price_long_*.jsonl (arhivatorul) devenise invizibil aici
-    dupa migrarea la JSONL — glob-ul verifica DOAR .json, deci watchdog-ul nu
-    mai alerta nici macar cand arhivatorul sta oprit zile intregi."""
+    """List tracked JSON and JSONL cache files, excluding backups, temporaries, and metadata."""
     patterns = ("cache_*.json", "cache_*.jsonl")
     files = {p for pat in patterns for p in _CACHE_DIR.glob(pat)}
     return sorted(p for p in files if not p.name.endswith((".bak", ".tmp", ".meta")))
 
 
 def _normalize_ts_seconds(value):
-    """fetchtime poate fi în ms (>1e12) sau secunde → întoarce secunde (float)."""
+    """Normalize millisecond or second fetch timestamps to float seconds."""
     if not isinstance(value, (int, float)) or value <= 0:
         return 0.0
     return value / 1000.0 if value > 1e12 else float(value)
 
 
 def cache_freshness_seconds(path):
-    """Cel mai recent semnal de prospețime (epoch secunde), din CONTINUT:
-    fetchtime sau campurile "ts" per simbol. mtime e DOAR fallback cand
-    continutul nu are niciun timestamp — NU se combina cu max(): cacheManager
-    salveaza periodic si date INGHETATE (incident 19 iul: DNS cazut, preturi
-    vechi de 27 min, dar mtime proaspat la fiecare save -> watchdog orb).
-    Întoarce (freshness_sec, detalii) sau (0, motiv) dacă lipsește/e corupt."""
+    """Read the newest content freshness timestamp and its source.
+
+    Use fetch time or per-symbol ``ts``. Fall back to mtime only when content has no
+    timestamp, because periodically saving frozen data must not make it appear fresh.
+    Return zero with a reason for missing or corrupt files.
+    """
     p = Path(path)
     if not p.exists():
         return 0.0, f"fișierul {p.name} nu există"
     newest = 0.0
     if p.name.endswith(".jsonl"):
-        # 21 iul: json.load() pe un fisier JSONL (linie-cu-linie, nu UN obiect)
-        # arunca eroare -> raporta gresit "cache corupt" (freshness=0, alarma
-        # falsa la fiecare rulare). Citim doar COADA (fisierul poate fi zeci
-        # de MB) si luam ts-ul din ULTIMA linie completa.
+        # Read only the tail of potentially large JSONL and use its latest complete line.
         try:
             with open(p, "rb") as f:
                 f.seek(0, 2)
@@ -220,7 +145,7 @@ def cache_freshness_seconds(path):
                         newest = _normalize_ts_seconds(ts)
                         break
                 except (json.JSONDecodeError, TypeError, IndexError):
-                    continue   # posibil linia taiata de seek — incercam pe cea de dinainte
+                    continue   # seek may cut a line; try the preceding complete line.
         except OSError as e:
             return 0.0, f"cache corupt: {e}"
     else:
@@ -230,7 +155,7 @@ def cache_freshness_seconds(path):
                 for v in data.get("fetchtime", {}).values():
                     newest = max(newest, _normalize_ts_seconds(v))
                 if newest == 0.0:
-                    # fara fetchtime (ex. cache_instant_trend): cauta "ts" per simbol
+                    # Without fetch times, search each symbol's ``ts`` field.
                     for v in data.values():
                         if isinstance(v, dict):
                             newest = max(newest, _normalize_ts_seconds(v.get("ts", 0)))
@@ -245,15 +170,14 @@ def cache_freshness_seconds(path):
 
 
 def _do_restart(target=AUTO_RESTART_TARGET):
-    """Omoara procesul-tinta (cacheManager); supervisor-ul flota_start il respawneaza.
-    Izolat pt testare (se poate mock-ui). Intoarce True daca pkill a rulat fara eroare."""
+    """Kill the target for fleet supervision to respawn; isolated for testing."""
     import subprocess
     subprocess.run(["pkill", "-f", target], timeout=10, check=False)
     return True
 
 
 def _config_hash(path):
-    """SHA-256 al CONTINUTULUI (nu mtime). None daca fisierul lipseste."""
+    """Return the content SHA-256, or None when the file is absent."""
     import hashlib
     try:
         with open(path, "rb") as f:
@@ -263,12 +187,12 @@ def _config_hash(path):
 
 
 def check_configs_once(now=None):
-    """Detecteaza schimbari de CONTINUT in fisierele de config (_CONFIG_OWNERS) si
-    reporneste procesele proprietare (respawn-safe prin procs.conf). Prima vedere a
-    unui fisier = doar baseline (nu reporneste). Debounce: hash-ul se actualizeaza pe
-    loc, deci o schimbare declanseaza O SINGURA data. Guardrail-uri: cooldown + plafon
-    (ca la auto-restart de cache) + kill-switch CONFIG_RESTART. Intoarce lista de
-    procese repornite."""
+    """Restart config owners after debounced content changes.
+
+    First observation establishes a baseline. Updating hashes immediately makes each
+    change fire once. A kill switch, cooldown, and rolling cap guard restarts.
+    Return the restarted process patterns.
+    """
     now = now if now is not None else time.time()
     state = wc.load_state(STATE_FILE)
     hashes = state.setdefault("config_hashes", {})
@@ -279,7 +203,7 @@ def check_configs_once(now=None):
         if h is None:
             continue
         prev = hashes.get(name)
-        hashes[name] = h                      # actualizeaza mereu (baseline / debounce)
+        hashes[name] = h                      # Always update for baseline and debounce.
         if prev is not None and h != prev:
             changed.append(name)
 
@@ -323,15 +247,10 @@ def check_configs_once(now=None):
 
 
 def _maybe_auto_restart(stale, now, state):
-    """Daca AUTO_RESTART e activat SI un cache de pret RAPID (nu unul din
-    _STALE_OVERRIDES = slow/event-driven) e stale, reporneste cacheManager — cu
-    cooldown + plafon per fereastra. Intoarce (restarted: bool, note: str).
-    Modifica state['auto_restart_history'] cand reporneste."""
+    """Restart cacheManager for stale fast caches subject to cooldown and rolling cap."""
     if not AUTO_RESTART:
         return False, ""
-    # Doar cache-urile de pret RAPIDE (scrise de cacheManager, ~1s) declanseaza.
-    # Cele slow/event-driven (long-trend, asset_value, fill-uri) SI arhiva sparse
-    # (.jsonl, alt proces / cadenta lenta) NU justifica un restart al cacheManager.
+    # Only fast caches written by cacheManager justify restarting that process.
     critical = [name for (name, _age, _thr, _det) in stale if _is_fast_price_cache(name)]
     if not critical:
         return False, ""
@@ -348,17 +267,16 @@ def _maybe_auto_restart(stale, now, state):
         state["auto_restart_history"] = hist
         return True, (f"🔁 cacheManager REPORNIT automat (cache stale: {', '.join(critical)}). "
                       f"Restart {len(hist)}/{AUTO_RESTART_MAX} in fereastra de {AUTO_RESTART_WINDOW_H:.0f}h.")
-    except Exception as e:  # noqa: BLE001 — un restart esuat nu trebuie sa opreasca alerta
+    except Exception as e:  # noqa: BLE001 — restart failure must not suppress the alert.
         return False, f"auto-restart ESUAT ({e}) — reporneste MANUAL flota"
 
 
 def check_once(now=None):
-    """Verifică TOATE cache_*.json din cachedb/. Alertă dacă vreunul e stale (peste
-    pragul lui) și nu suntem în cooldown. Întoarce True dacă a trimis alertă."""
+    """Check every cache and return whether a non-cooled-down stale alert was sent."""
     now = now if now is not None else time.time()
     files = _cache_files()
     stale = []
-    fleet_alive = False   # True daca un cache "fleet-alive" (pret rapid) e proaspat
+    fleet_alive = False   # A fresh fast cache proves fleet liveness.
     if not files:
         stale.append(("(niciun cache_*.json)", float("inf"), STALE_MINUTES,
                       f"{_CACHE_DIR} gol sau lipsește"))
@@ -371,11 +289,8 @@ def check_once(now=None):
         if age_min > thr:
             stale.append((p.name, age_min, thr, detail))
 
-    # Gating flota-vie: daca flota e demonstrabil vie (un cache de pret rapid e
-    # proaspat), staleness pe cache-urile EVENT-DRIVEN (fill-uri) e benigna
-    # (doar "n-au fost fill-uri") si NU se alarmeaza — pana la plafonul dur, peste
-    # care fill-tracking-ul insusi e suspect. Fail-safe: daca flota NU e confirmata
-    # vie, nu se suprima nimic. Vezi nota de la _EVENT_DRIVEN_CACHES.
+    # With proven fleet liveness, suppress benign event-cache staleness until its hard
+    # ceiling. Without that proof, suppress nothing.
     if fleet_alive:
         suppressed = [s for s in stale
                       if s[0] in _EVENT_DRIVEN_CACHES and s[1] < _EVENT_DRIVEN_HARD_CEILING_MIN]
@@ -390,18 +305,17 @@ def check_once(now=None):
 
     state = wc.load_state(STATE_FILE)
 
-    # AUTO-RESTART: independent de cooldown-ul de ALERTA (are guardrail-urile lui).
-    # Modifica state['auto_restart_history'] daca reporneste efectiv.
+    # Auto-restart has its own guardrails and is independent of alert cooldown.
     restarted, restart_note = _maybe_auto_restart(stale, now, state)
     if restart_note:
         print(f"[watchdog] {restart_note}")
 
-    # Cooldown de alerta: nu re-alarma prea des. DAR un restart efectiv trece peste
-    # cooldown (eveniment important — user-ul trebuie sa stie ca s-a repornit).
+    # Alert cooldown prevents repetition, but an actual restart bypasses it because the
+    # operator must know that a process restarted.
     last = state.get("last_alert_ts", 0)
     if (now - last) < COOLDOWN_MINUTES * 60 and not restarted:
         print(f"[watchdog] STALE ({', '.join(s[0] for s in stale)}) dar în cooldown — nu re-alarmez")
-        wc.save_state(STATE_FILE, state)   # persista auto_restart_history chiar si fara alerta
+        wc.save_state(STATE_FILE, state)   # Persist restart history even without an alert.
         return False
 
     lines = []
@@ -421,9 +335,8 @@ def check_once(now=None):
 
 
 if __name__ == "__main__":
-    # Config-watch intai (isi salveaza starea cu config_hashes/istoric), apoi cache.
-    # Cele doua ating chei DISJUNCTE din STATE_FILE, iar check_once salveaza doar la
-    # staleness -> config_hashes persista corect intre rulari.
+    # Run config watch first. The checks use disjoint state keys so hashes and histories
+    # persist correctly across invocations.
     check_configs_once()
     sent = check_once()
     sys.exit(2 if sent else 0)
