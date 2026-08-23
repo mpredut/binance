@@ -323,9 +323,9 @@ class RTradeThreadingTest(unittest.TestCase):
         bot = _bot()
         first_order = {"orderId": 7, "price": "101.0"}
         with patch.object(rtrade.api, "get_current_price", return_value=100.0), \
-             patch.object(rtrade.api, "check_order_filled", side_effect=[False, True]), \
-             patch.object(rtrade.api, "check_order_filled_by_time", return_value=None), \
-             patch.object(rtrade.api, "cancel_order", return_value=False), \
+             patch.object(rtrade, "_order_fully_filled", side_effect=[False, True]), \
+             patch.object(rtrade.mkt, "latest_fill_price", return_value=None), \
+             patch.object(rtrade, "_cancel_order_confirmed", return_value=False), \
              patch.object(rtrade.mkt, "place", side_effect=[first_order, {"orderId": 8}]) as place, \
              patch.object(rtrade, "_followup_force", return_value=False) as policy, \
              patch.object(rtrade.time, "sleep", return_value=None):

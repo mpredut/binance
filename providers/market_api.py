@@ -1,27 +1,24 @@
 # market_api.py
-"""Facada market-data (pret + history) — Faza 2a a decuplarii de Binance.
+"""Multi-venue facade for market data, account reads, and order mechanics.
 
-SCOP: trademonitorul devine GENERIC (sa ruleze in special pe HYPE/Hyperliquid).
-Aici e DOAR fundatia, BEHAVIOR-PRESERVING pentru Binance: facada ruteaza pe symbol
-catre providerul potrivit, iar default-ul (cand nimeni nu revendica symbolul) e
-primul provider = Binance. Astfel symbolurile Binance ajung exact la bapi ca azi.
+Symbol routing selects the first provider that claims a symbol and falls back to
+the first configured provider, Binance. ``Instrument`` uses the name registry for
+explicit venue routing when a symbol alone is ambiguous.
 
-DELIMITARE: facada acopera market-data (pret curent + istoric granular) si — din
-Faza 3 — CITIREA starii de cont (sold liber + istoric ordine/tranzactii), NORMALIZATA
-la o forma comuna. Din Faza 2b acopera si PLASAREA de ordine (place_order), rutata pe
-symbol: BinanceProvider -> bapi_placeorder.place_order_smart (IDENTIC ca azi), iar
-HyperliquidProvider -> spot HL (DRY implicit). RAMANE in afara facadei stream-ul WS de cont.
+``place_order`` dispatches directly to adapter mechanics and live-order gates.
+``place`` constructs an ``Instrument`` and runs the shared policy pipeline before
+those mechanics. Account WebSocket streams remain outside this facade.
 
-CAPCANA import circular: `pricefetcher` importa `cacheManager`, iar `cacheManager`
-importa `market_api`. Deci market_api NU are voie sa importe pricefetcher/cacheManager
-(ar inchide ciclul). BinanceProvider wrapeaza DIRECT `binance_api.bapi` si
-`binance_api.bapi_allorders` — ambele importa cacheManager doar LAZY (in functii), nu
-la nivel de modul, deci e sigur (nu se inchide ciclul prin market_api).
+Imports of Binance modules are lazy because ``cacheManager`` imports this module;
+eagerly importing modules that lead back to ``cacheManager`` would create a cycle.
 """
+import math
+import time
 from typing import List, Optional
 
 from .base import MarketDataProvider, _normalize_order, env_value
 from .strategy_executor import OrderStatus, PairPrecision, ProviderError
+from market_regime import MarketRegimeDecision, MarketRegimeService
 
 
 # Importurile Binance ajung pana la websocket-uri si chei locale. Providerii
@@ -54,10 +51,10 @@ def _step_decimals(step: str) -> int:
 
 
 class BinanceProvider(MarketDataProvider):
-    """Wrapeaza binance_api.bapi pentru market-data. Default-ul flotei azi.
+    """Adapt Binance market data, account reads, and execution mechanics.
 
-    get_current_price -> bapi.get_current_price (acelasi comportament ca pana acum).
-    get_price_history  -> None (Binance n-are history granular prin acest API).
+    ``get_price_history`` is intentionally unavailable through this adapter; strict
+    strategy execution obtains completed OHLC closes through ``ohlc_closes``.
     """
 
     @property
@@ -81,9 +78,8 @@ class BinanceProvider(MarketDataProvider):
 
     # ── CONT: aceleasi date ca azi, doar reimpachetate prin facada. ─────────────
     def free_balance(self, asset: str) -> Optional[float]:
-        # Mirror EXACT al buclei din monitortrades.get_available_qty (si trade_watch):
-        # parcurge soldurile, intoarce 'free' pt asset, altfel 0.0. get_account_assets_
-        # balances are deja try/except (intoarce [] la eroare) -> nu arunca aici.
+        # Delegate to Binance's direct per-asset balance query. It returns ``0.0``
+        # for an absent asset and ``None`` when the API read fails.
         return _get_bapi().get_free_balance(asset)
 
     def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:
@@ -312,6 +308,15 @@ class MarketApi:
         # pt descriptorul Instrument, in loc de ghicitul prin supports_symbol. Aditiv —
         # nu schimba rutarea pe symbol de mai jos.
         self._by_name: dict = {p.name.lower(): p for p in self._providers}
+        self._regime_service = MarketRegimeService()
+
+    def _provider_explicit_or_routed(self, symbol: str, provider_name=None):
+        if provider_name is None:
+            return self._provider_for(symbol)
+        provider = self.provider_by_name(provider_name)
+        if provider is None:
+            raise ValueError(f"Provider necunoscut: {provider_name!r}")
+        return provider
 
     def _provider_for(self, symbol: str) -> MarketDataProvider:
         provider = self._route.get(symbol)
@@ -355,11 +360,108 @@ class MarketApi:
     def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:
         return self._provider_for(symbol).get_orders(symbol, side, since_s)
 
-    def get_trades(self, symbol: str, since_s: float) -> List[dict]:
-        return self._provider_for(symbol).get_trades(symbol, since_s)
+    def get_trades(self, symbol: str, since_s: float, *,
+                   provider_name=None) -> List[dict]:
+        provider = self._provider_explicit_or_routed(symbol, provider_name)
+        return provider.get_trades(symbol, since_s)
+
+    def latest_fill_price(self, symbol: str, side: str, since_s: float, *,
+                          provider_name=None, min_notional=None,
+                          max_notional=None) -> Optional[float]:
+        """Return the newest normalized fill without a Binance-specific API."""
+        side = str(side).upper()
+        if side not in {"BUY", "SELL"}:
+            raise ValueError("side must be BUY or SELL")
+        since_s = float(since_s)
+        if not math.isfinite(since_s) or since_s <= 0:
+            raise ValueError("since_s must be finite and positive")
+        min_value = None if min_notional is None else float(min_notional)
+        max_value = None if max_notional is None else float(max_notional)
+        if min_value is not None and (not math.isfinite(min_value) or min_value < 0):
+            raise ValueError("min_notional must be finite and non-negative")
+        if max_value is not None and (not math.isfinite(max_value) or max_value < 0):
+            raise ValueError("max_notional must be finite and non-negative")
+        if min_value is not None and max_value is not None and min_value > max_value:
+            raise ValueError("min_notional cannot exceed max_notional")
+        now_ms = time.time() * 1000.0
+        cutoff_ms = now_ms - since_s * 1000.0
+        candidates = []
+        for trade in self.get_trades(
+                symbol, since_s, provider_name=provider_name) or []:
+            if str(trade.get("side") or "").upper() != side:
+                continue
+            try:
+                timestamp = float(trade.get("timestamp") or 0.0)
+                if 0 < timestamp < 10_000_000_000:  # secunde -> milisecunde
+                    timestamp *= 1000.0
+                price = float(trade.get("price") or 0.0)
+                qty = float(trade.get("qty", trade.get("quantity", 0.0)) or 0.0)
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if (not all(math.isfinite(value) for value in (timestamp, price, qty)) or
+                    timestamp < cutoff_ms or timestamp > now_ms + 60_000 or
+                    price <= 0 or qty <= 0):
+                continue
+            notional = price * qty
+            if not math.isfinite(notional):
+                continue
+            if min_value is not None and notional < min_value:
+                continue
+            if max_value is not None and notional > max_value:
+                continue
+            candidates.append((timestamp, price))
+        return max(candidates)[1] if candidates else None
 
     def open_orders(self, symbol: str) -> List[dict]:
         return self._provider_for(symbol).open_orders(symbol)
+
+    def order_status(self, symbol: str, order_id: str, *,
+                     provider_name=None) -> OrderStatus:
+        """Return venue-neutral status; lookup failures remain fail-closed."""
+        provider = self._provider_explicit_or_routed(symbol, provider_name)
+        method = getattr(provider, "order_status", None)
+        if not callable(method):
+            raise ProviderError(f"{provider.name}: order_status is unsupported")
+        try:
+            status = method(symbol, str(order_id))
+        except ProviderError:
+            raise
+        except Exception as exc:
+            raise ProviderError(
+                f"{provider.name}: invalid order status for {order_id}: {exc}"
+            ) from exc
+        if not isinstance(status, OrderStatus):
+            raise ProviderError(
+                f"{provider.name}: order_status returned {type(status).__name__}")
+        return status
+
+    def cancel_order(self, symbol: str, order_id: str, *, provider_name=None) -> None:
+        """Cancel through the provider-neutral adapter contract."""
+        provider = self._provider_explicit_or_routed(symbol, provider_name)
+        method = getattr(provider, "cancel_order", None)
+        if not callable(method):
+            raise ProviderError(f"{provider.name}: cancel_order is unsupported")
+        method(symbol, str(order_id))
+
+    def market_regime(self, symbol: str, *, provider_name=None, interval_min=1,
+                      window_seconds=900.0, snapshot=None,
+                      strength_threshold=None) -> MarketRegimeDecision:
+        """Clasificare comună bull/bear/sideways/unknown.
+
+        `snapshot` păstrează compatibilitatea cu trendul rapid existent; fără el,
+        serviciul citește OHLC de la providerul rutat sau explicit.
+        """
+        service = self._regime_service
+        if strength_threshold is not None:
+            service = MarketRegimeService(
+                strength_threshold, cache_ttl_sec=service.cache_ttl_sec,
+                cache_max=service.cache_max)
+        if snapshot is not None:
+            return service.evaluate_snapshot(snapshot)
+        provider = self._provider_explicit_or_routed(symbol, provider_name)
+        return service.evaluate_provider(
+            provider, symbol, interval_min=interval_min,
+            window_seconds=window_seconds)
 
     def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
         # MECANICA-ONLY (dispatch la provider, FARA garduri) — NU folosi direct pt

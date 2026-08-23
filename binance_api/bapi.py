@@ -311,11 +311,12 @@ def cancel_recent_orders(order_type, symbol, max_age_seconds):
 
 
 def check_order_filled(order_id, symbol):
+    """Adaptor legacy; codul nou folosește market_api.order_status()."""
     try:
         if not order_id:
             return False
-        order = client.get_order(symbol=symbol, orderId=order_id)
-        return order['status'] == 'FILLED'
+        from providers.market_api import api as market_api
+        return market_api.order_status(symbol, str(order_id)).fully_filled
     except Exception as e:
         print(f"Eroare la verificarea starii ordinului: {e}")
         return False
@@ -323,31 +324,11 @@ def check_order_filled(order_id, symbol):
 
 
 def check_order_filled_by_time(order_type, symbol, time_back_in_seconds, pret_min=None, pret_max=None):
-    #import bapi_trades as apitrades
-    from . import bapi_allorders as apiorders
-
-    backdays = math.ceil(time_back_in_seconds / 86400)
-    #trades = apitrades.get_my_trades(order_type, symbol, backdays=backdays, limit=1000)
-    #trades = apitrades.get_trade_orders(order_type, symbol, max_age_seconds=time_back_in_seconds)
-    trades = apiorders.get_trade_orders(order_type, symbol, max_age_seconds=time_back_in_seconds)
-    time_limit = int(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
-
-                
-    # Filtram tranzactiile in functie de timp si optional in functie de pret total
-    tranzactii_recente = [
-        trade for trade in trades
-        if trade['timestamp'] >= time_limit and
-           (pret_min is None or float(trade['price']) * float(trade['qty']) >= pret_min) and
-           (pret_max is None or float(trade['price']) * float(trade['qty']) <= pret_max)
-    ]
-
-    if tranzactii_recente:
-        # Gasim cea mai recenta tranzactie (dupa timp)
-        tranzactia_recenta = max(tranzactii_recente, key=lambda trade: trade['timestamp'])
-        return float(tranzactia_recenta['price'])
-
-    print(f"[DEBUG] Nicio tranzactie recenta pentru simbolul {symbol}. in ultimele {time_back_in_seconds} secunde ")
-    return None
+    """Adaptor legacy; delegă descoperirea fill-ului către fațada comună."""
+    from providers.market_api import api as market_api
+    return market_api.latest_fill_price(
+        symbol, order_type, time_back_in_seconds,
+        min_notional=pret_min, max_notional=pret_max)
 
 
 # ---------------- Portfolio value query API ----------------

@@ -8,6 +8,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+import threading
+import time
+from collections import OrderedDict
 from typing import Mapping, Optional
 
 
@@ -73,3 +76,87 @@ class MarketRegimeEvaluator:
             n_samples=(int(samples) if samples is not None else None),
             window_seconds=(float(window) if window is not None else None),
         )
+
+
+class MarketRegimeService:
+    """Construiește aceeași decizie din snapshot sau OHLC-ul oricărui provider.
+
+    Cache-ul mic evită ca mai mulți boți să lovească același endpoint OHLC în
+    aceeași secundă. Providerul rămâne sursa datelor; strategia rămâne proprietara
+    deciziei financiare.
+    """
+
+    def __init__(self, strength_threshold: float = 2.0, *, cache_ttl_sec=30.0,
+                 cache_max=256, clock=time.monotonic):
+        self.evaluator = MarketRegimeEvaluator(strength_threshold)
+        self.cache_ttl_sec = float(cache_ttl_sec)
+        self.cache_max = max(1, int(cache_max))
+        self.clock = clock
+        if not math.isfinite(self.cache_ttl_sec) or self.cache_ttl_sec < 0:
+            raise ValueError("cache_ttl_sec trebuie sa fie finit si >= 0")
+        self._cache = OrderedDict()
+        self._lock = threading.Lock()
+
+    def evaluate_snapshot(self, snapshot: Optional[Mapping]) -> MarketRegimeDecision:
+        return self.evaluator.evaluate(snapshot)
+
+    def evaluate_provider(self, provider, symbol: str, *, interval_min=1,
+                          window_seconds=900.0) -> MarketRegimeDecision:
+        interval_min = int(interval_min)
+        window_seconds = float(window_seconds)
+        if interval_min <= 0 or not math.isfinite(window_seconds) or window_seconds <= 0:
+            raise ValueError("intervalul si fereastra regimului trebuie sa fie pozitive")
+        key = (str(getattr(provider, "name", "unknown")).lower(),
+               str(symbol), interval_min, window_seconds)
+        now = self.clock()
+        with self._lock:
+            cached = self._cache.get(key)
+            if cached and now - cached[0] <= self.cache_ttl_sec:
+                self._cache.move_to_end(key)
+                return cached[1]
+        try:
+            closes = provider.ohlc_closes(symbol, interval_min) or []
+            decision = self.evaluate_closes(
+                closes, interval_min=interval_min, window_seconds=window_seconds)
+        except Exception as exc:  # date indisponibile => unknown explicit, nu trade orb
+            decision = self.evaluator.unknown(
+                f"source_error:{exc.__class__.__name__}")
+        with self._lock:
+            self._cache[key] = (now, decision)
+            self._cache.move_to_end(key)
+            while len(self._cache) > self.cache_max:
+                self._cache.popitem(last=False)
+        return decision
+
+    def evaluate_closes(self, closes, *, interval_min=1,
+                        window_seconds=900.0) -> MarketRegimeDecision:
+        needed = max(3, int(math.ceil(float(window_seconds) / (int(interval_min) * 60))))
+        try:
+            values = [float(value) for value in list(closes)[-needed:]]
+        except (TypeError, ValueError, OverflowError):
+            return self.evaluator.unknown("invalid_ohlc")
+        if len(values) < 3:
+            return self.evaluator.unknown("insufficient_samples")
+        if any(not math.isfinite(value) or value <= 0 for value in values):
+            return self.evaluator.unknown("non_finite_ohlc")
+
+        base = values[0]
+        y = [value / base - 1.0 for value in values]
+        n = len(y)
+        x_mean = (n - 1) / 2.0
+        y_mean = sum(y) / n
+        sxx = sum((i - x_mean) ** 2 for i in range(n))
+        slope = sum((i - x_mean) * (value - y_mean)
+                    for i, value in enumerate(y)) / sxx
+        intercept = y_mean - slope * x_mean
+        residual_sq = sum(
+            (value - (intercept + slope * i)) ** 2
+            for i, value in enumerate(y))
+        slope_error = math.sqrt(max(0.0, residual_sq) / max(1, n - 2) / sxx)
+        epsilon = max(slope_error, 1e-12)
+        return self.evaluator.evaluate({
+            "gradient_recent": slope,
+            "epsilon": epsilon,
+            "n_samples": n,
+            "window_seconds": float(window_seconds),
+        })

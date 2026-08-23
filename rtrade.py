@@ -22,7 +22,7 @@ from binance_api import bapi_placeorder as po   # pastrat pt WeightLimitBlock (d
 from providers.market_api import api as mkt      # proxy unic guardat (Instrument.place)
 from providers.execution_audit import AuditedStrategyExecutor
 from providers.quantity import decide_quantity
-from market_regime import MarketRegimeDecision, MarketRegimeEvaluator
+from market_regime import MarketRegimeDecision
 from rtrade_pair_store import RTradePairStore, rtrade_client_order_id
 from strategies.rtrade_pair import (
     OrderSnapshot as PairOrderSnapshot,
@@ -292,35 +292,50 @@ def _trend_too_strong(symbol):
     indisponibil/eroare -> False (nu blocheaza, la fel ca trend-wait din pipeline)."""
     if not RTRADE_TREND_FILTER_ENABLED:
         return False
-    try:
-        import cacheManager as cm
-        dyn = cm.get_short_trend_manager().get_instant_trend_for_window(symbol, RTRADE_TREND_WINDOW_SEC)
-    except Exception as e:  # noqa: BLE001 — gate oportunist, esec -> nu blocam tranzactionarea
-        print(f"[{symbol}] rtrade trend-filter indisponibil ({e}) -> nu blochez")
-        return False
-    if not dyn:
-        return False
-    grad = abs(float(dyn.get("gradient_recent", 0.0) or 0.0))
-    eps = abs(float(dyn.get("epsilon", 0.0) or 0.0))
-    strong = eps > 0 and grad > RTRADE_TREND_FILTER_K * eps
-    if strong:
-        print(f"[{symbol}] rtrade STA DEOPARTE: trend clar (|grad|={grad:.4g} > "
-              f"{RTRADE_TREND_FILTER_K}xeps={RTRADE_TREND_FILTER_K * eps:.4g}, fereastra {RTRADE_TREND_WINDOW_SEC:.0f}s)")
-    return strong
+    decision = _market_regime_decision(symbol)
+    if decision.directional:
+        print(f"[{symbol}] rtrade STA DEOPARTE: regim {decision.regime} "
+              f"strength={decision.strength} reason={decision.reason} "
+              f"fereastra={RTRADE_TREND_WINDOW_SEC:.0f}s")
+    return decision.directional
 
 
 def _market_regime_decision(symbol) -> MarketRegimeDecision:
     """Adapteaza sursa cache existenta la evaluatorul comun provider-neutral."""
-    evaluator = MarketRegimeEvaluator(RTRADE_TREND_FILTER_K)
     if not RTRADE_TREND_FILTER_ENABLED:
-        return evaluator.unknown("disabled")
+        return mkt.market_regime(
+            symbol, snapshot={}, strength_threshold=RTRADE_TREND_FILTER_K)
     try:
         import cacheManager as cm
         dyn = cm.get_short_trend_manager().get_instant_trend_for_window(
             symbol, RTRADE_TREND_WINDOW_SEC)
     except Exception as exc:
-        return evaluator.unknown(f"source_error:{exc.__class__.__name__}")
-    return evaluator.evaluate(dyn)
+        return mkt.market_regime(
+            symbol, snapshot={},
+            strength_threshold=RTRADE_TREND_FILTER_K)
+    return mkt.market_regime(
+        symbol, snapshot=dyn or {},
+        strength_threshold=RTRADE_TREND_FILTER_K)
+
+
+def _order_fully_filled(symbol, order_id):
+    """Compatibilitate pentru bucla veche, prin statusul provider-neutral."""
+    if not order_id:
+        return False
+    try:
+        return mkt.order_status(symbol, str(order_id)).fully_filled
+    except Exception as exc:
+        print(f"[{symbol}] status ordin {order_id} indisponibil: {exc}")
+        return False
+
+
+def _cancel_order_confirmed(symbol, order_id):
+    try:
+        mkt.cancel_order(symbol, str(order_id))
+        return True
+    except Exception as exc:
+        print(f"[{symbol}] cancel ordin {order_id} neconfirmat: {exc}")
+        return False
 
 
 def _place_failure_backoff(reason):
@@ -354,21 +369,15 @@ def _followup_force(symbol, side):
     epuizeaza (disperat), rtrade NU vinde la piata / nu cumpara disperat impotriva trendului."""
     if not RTRADE_TREND_FILTER_ENABLED:
         return True
-    try:
-        import cacheManager as cm
-        dyn = cm.get_short_trend_manager().get_instant_trend_for_window(symbol, RTRADE_TREND_WINDOW_SEC)
-    except Exception:  # noqa: BLE001 — indisponibil -> comportament vechi (force)
-        return True
-    if not dyn:
-        return True
-    grad = float(dyn.get("gradient_recent", 0.0) or 0.0)
-    eps = abs(float(dyn.get("epsilon", 0.0) or 0.0))
-    if eps <= 0 or abs(grad) <= RTRADE_TREND_FILTER_K * eps:
+    decision = _market_regime_decision(symbol)
+    if not decision.directional:
         return True   # trend slab/plat -> flip imediat e ok
     su = (side or "").upper()
-    adverse = (su == "SELL" and grad < 0) or (su == "BUY" and grad > 0)
+    exposure = "LONG" if su == "SELL" else "SOLD"
+    adverse = decision.adverse_to(exposure)
     if adverse:
-        print(f"[{symbol}] followup {su}: trend ADVERS (grad={grad:.4g}) -> limita rabdatoare, NU piata")
+        print(f"[{symbol}] followup {su}: regim {decision.regime} ADVERS "
+              "-> limita rabdatoare, NU piata")
         return False
     return True
 
@@ -463,7 +472,7 @@ class TradingBot:
             order_id = buy_order['orderId']
             self.filled_buy_price = round(float(buy_order['price']), 4)
             
-            if api.check_order_filled(order_id, self.symbol):
+            if _order_fully_filled(self.symbol, order_id):
                 print(f"[{self.symbol}] BUY order filled at {self.filled_buy_price:.2f}")
                 print(f"[{self.symbol}] SELL disperat tot 1....")
                 mkt.place(self.symbol, "SELL", api.get_current_price(self.symbol) * (1 + RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
@@ -471,7 +480,8 @@ class TradingBot:
                 return self.mark_buy_filled(self.filled_buy_price)
 
 
-            filled_buy_price = api.check_order_filled_by_time("BUY", self.symbol, time_back_in_seconds=WAIT_FOR_ORDER)
+            filled_buy_price = mkt.latest_fill_price(
+                self.symbol, "BUY", WAIT_FOR_ORDER)
             if filled_buy_price is not None:
                 print(f"[{self.symbol}] BUY order may have been filled :-) at {filled_buy_price:.2f}")
                 print(f"[{self.symbol}] SELL disperat tot 2 ....")
@@ -485,8 +495,8 @@ class TradingBot:
                 adjustment_percent = RTRADE_BAD_DAY_MULTIPLIER * self.DEFAULT_ADJUSTMENT_PERCENT
             # if arrived here it means
             # current order was not filled , so try cancel and retry in the loop
-            if not api.cancel_order(self.symbol, order_id):
-                if api.check_order_filled(order_id, self.symbol):
+            if not _cancel_order_confirmed(self.symbol, order_id):
+                if _order_fully_filled(self.symbol, order_id):
                     print(f"[{self.symbol}] Cancel BUY order failed. Maybe it was filled :-)? Moving to SELL ...")
                     print(f"[{self.symbol}] SELL disperat tot 3 ....")
                     mkt.place(self.symbol, "SELL", api.get_current_price(self.symbol) * (1 + RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
@@ -547,7 +557,7 @@ class TradingBot:
             order_id = sell_order['orderId']
             self.filled_sell_price = round(float(sell_order['price']), 4)
 
-            if api.check_order_filled(order_id, self.symbol):
+            if _order_fully_filled(self.symbol, order_id):
                 print(f"[{self.symbol}] SELL order filled at {self.filled_sell_price:.2f}")
                 print(f"[{self.symbol}] BUY disperat tot 1....")
                 mkt.place(self.symbol, "BUY", api.get_current_price(self.symbol) * (1 - RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,
@@ -555,7 +565,8 @@ class TradingBot:
                 return self.mark_sell_filled(self.filled_sell_price)
 
 
-            filled_sell_price = api.check_order_filled_by_time("SELL", self.symbol, time_back_in_seconds=WAIT_FOR_ORDER)
+            filled_sell_price = mkt.latest_fill_price(
+                self.symbol, "SELL", WAIT_FOR_ORDER)
             if filled_sell_price is not None:
                 print(f"[{self.symbol}] SELL order may have been filled :-) at {filled_sell_price:.2f}")
                 print(f"[{self.symbol}] BUY disperat tot 2....")
@@ -569,8 +580,8 @@ class TradingBot:
                 adjustment_percent = RTRADE_BAD_DAY_MULTIPLIER * self.DEFAULT_ADJUSTMENT_PERCENT
             # if arrived here it means
             # current order was not filled , so try cancel and retry in the loop
-            if not api.cancel_order(self.symbol, order_id):
-                if api.check_order_filled(order_id, self.symbol):
+            if not _cancel_order_confirmed(self.symbol, order_id):
+                if _order_fully_filled(self.symbol, order_id):
                     print(f"[{self.symbol}] Cancel SELL order failed. Maybe it was filled :-)? Moving to BUY ...")
                     print(f"[{self.symbol}] BUY disperat tot 3....")
                     mkt.place(self.symbol, "BUY", api.get_current_price(self.symbol) * (1 - RTRADE_FOLLOWUP_OFFSET_PCT), self.qty,

@@ -1,39 +1,65 @@
-"""Contractul provider-agnostic al motoarelor de strategie urmarite financiar.
+"""Provider-neutral execution contract used by financially tracked strategies.
 
-Interfata minima este consumata de ``strategies.spot_dca`` si implementata de
-providerii Kraken, Hyperliquid, Binance si Trading212. Tipurile explicite tin
-normalizarea venue-ului in adaptor si lasa motorul sa decida numai financiar.
+``strategies.spot_dca`` consumes this interface. Venue adapters normalize native
+responses into the explicit types below so the strategy engine can operate on one
+order lifecycle model.
 
-NB: metoda de plasare se numeste `submit_order`, NU `place_order` — providerii au deja un
-`place_order(symbol, side, price, qty)` pt MarketApi/tradeall (guarded, intoarce dict/None,
-gate KRAKEN_LIVE_ORDERS). Motorul de strategie cere alta semantica (raw, order_id, ridica
-ProviderError, guvernat de dry_run-ul propriu al strategiei) -> nume distinct, coexista.
+``submit_order`` is intentionally distinct from ``MarketDataProvider.place_order``.
+The former returns a venue order ID or raises ``ProviderError``; the latter is the
+mechanical/legacy facade entry point and may return a native payload or ``None``.
+Each adapter still applies its configured live-order gate.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Optional, Protocol, runtime_checkable
 
 
 class ProviderError(Exception):
-    """Eroare agnostica de venue. Fiecare provider mapeaza eroarea lui nativa
-    (KrakenError, erori HL/Binance) in asta, ca strategia sa prinda UN singur tip
-    (inlocuieste cele 6 `except KrakenError` din strategy.py)."""
+    """Venue-neutral error raised by strict strategy-execution adapters."""
 
 
 @dataclass(frozen=True)
 class OrderStatus:
-    """Rezultatul interogarii unui ordin dupa id (inlocuieste dict-ul de la
-    Kraken query_orders). `status` normalizat: 'open'|'closed'|'canceled'|'expired'."""
+    """Normalized order result: ``open``, ``closed``, ``canceled``, or ``expired``."""
     status: str
     filled_qty: float          # cantitatea executata (vol_exec la Kraken)
     cost: float                # notional executat (pt pretul mediu: cost/filled_qty)
     fee: float                 # comisionul real raportat de venue
 
+    def __post_init__(self):
+        if self.status not in {"open", "closed", "canceled", "expired"}:
+            raise ValueError(f"unnormalized order status: {self.status!r}")
+        for name, raw in (("filled_qty", self.filled_qty),
+                          ("cost", self.cost), ("fee", self.fee)):
+            value = float(raw)
+            # A negative fee is valid when the venue pays a maker rebate.
+            if not math.isfinite(value) or (name != "fee" and value < 0):
+                raise ValueError(f"invalid {name} in OrderStatus: {raw!r}")
+            object.__setattr__(self, name, value)
+
+    @property
+    def terminal(self) -> bool:
+        return self.status in {"closed", "canceled", "expired"}
+
+    @property
+    def fully_filled(self) -> bool:
+        """The venue confirmed a complete fill, not merely order acceptance."""
+        return self.status == "closed"
+
+    @property
+    def has_fill(self) -> bool:
+        return self.filled_qty > 0
+
+    @property
+    def partially_filled(self) -> bool:
+        return self.has_fill and not self.fully_filled
+
 
 @dataclass(frozen=True)
 class PairPrecision:
-    """Metadatele de precizie/limita ale perechii (inlocuieste pair_info)."""
+    """Normalized price, volume, and minimum-quantity metadata for a pair."""
     price_decimals: int
     volume_decimals: int
     order_min: float           # cantitatea minima (ordermin la Kraken)
@@ -42,44 +68,44 @@ class PairPrecision:
 
 @runtime_checkable
 class StrategyExecutor(Protocol):
-    """Interfata minima ceruta de motorul spot DCA, agnostica de venue."""
+    """Minimum venue-neutral interface required by the spot-DCA engine."""
 
     def get_current_price(self, symbol: str) -> Optional[float]:
-        """Pretul curent (last/mid) pt bucla de decizie. None daca indisponibil."""
+        """Return the current last/mid price, or ``None`` when unavailable."""
         ...
 
     def submit_order(self, symbol: str, side: str, qty: float,
                      price: Optional[float] = None, *, market: bool = False,
                      kind: Optional[str] = None,
                      client_order_id: Optional[str] = None) -> str:
-        """Plaseaza un ordin. `price=None` sau `market=True` => ordin de piata.
-        Intoarce order_id-ul de venue (folosit apoi la order_status/cancel_order).
-        `client_order_id` coreleaza intentia persistata cu ordinul de venue, acolo
-        unde API-ul il suporta; providerul il adapteaza formatului specific bursei.
-        Ridica ProviderError la esec."""
+        """Submit an order and return its venue ID.
+
+        ``price=None`` or ``market=True`` requests a market order.
+        ``client_order_id`` carries the persisted intent when the venue supports it.
+        Raise ``ProviderError`` when submission cannot be confirmed.
+        """
         ...
 
     def order_status(self, symbol: str, order_id: str) -> OrderStatus:
-        """Starea unui ordin dupa id — pt detectia fill-ului in reconcile().
-        Ridica ProviderError daca interogarea esueaza."""
+        """Return normalized status and cumulative fills, or raise ``ProviderError``."""
         ...
 
     def cancel_order(self, symbol: str, order_id: str) -> None:
-        """Anuleaza un ordin dupa id. Ridica ProviderError la esec (dar NU daca
-        ordinul e deja inchis/inexistent — acela e succes idempotent)."""
+        """Request cancellation by venue ID or raise ``ProviderError``.
+
+        Adapters are not uniformly idempotent for already-terminal or unknown orders;
+        callers must reconcile status when cancellation is ambiguous.
+        """
         ...
 
     def pair_precision(self, symbol: str) -> Optional[PairPrecision]:
-        """Precizia pret/volum + cantitatea minima. None daca perechea nu e
-        (inca) listata — strategia cade pe precizie implicita, ca azi."""
+        """Return pair precision and minimum quantity, or ``None`` if unavailable."""
         ...
 
     def free_balance(self, asset: str) -> Optional[float]:
-        """Cantitatea LIBERA: 0.0 = zero real; None = citire indisponibila."""
+        """Return free quantity: ``0.0`` is real zero; ``None`` means unavailable."""
         ...
 
     def ohlc_closes(self, symbol: str, interval_min: int) -> list[float]:
-        """Inchiderile barelor pe `interval_min` (semnal trend/vol). Exclude bara
-        in formare. Lista goala daca datele nu-s disponibile (fara semnal ->
-        strategia pur si simplu nu intra in regimul de trend)."""
+        """Return completed-bar closes for ``interval_min``; empty means unavailable."""
         ...

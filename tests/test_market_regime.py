@@ -1,6 +1,6 @@
 import unittest
 
-from market_regime import MarketRegimeEvaluator
+from market_regime import MarketRegimeEvaluator, MarketRegimeService
 
 
 class MarketRegimeEvaluatorTest(unittest.TestCase):
@@ -33,6 +33,29 @@ class MarketRegimeEvaluatorTest(unittest.TestCase):
         invalid = self.evaluator.evaluate({"gradient_recent": "bad", "epsilon": 1})
         self.assertEqual((invalid.regime, invalid.fresh, invalid.reason),
                          ("unknown", False, "invalid_signal"))
+
+    def test_common_service_derives_regime_from_provider_ohlc(self):
+        class Provider:
+            name = "Kraken"
+            def ohlc_closes(self, _symbol, _interval):
+                return [100, 101, 102, 103, 104, 105]
+
+        service = MarketRegimeService(2.0, cache_ttl_sec=30)
+        decision = service.evaluate_provider(
+            Provider(), "HYPEUSD", interval_min=1, window_seconds=360)
+        self.assertEqual(decision.regime, "bull")
+        self.assertEqual(decision.n_samples, 6)
+
+    def test_common_service_is_bounded_and_unknown_on_provider_error(self):
+        class Provider:
+            name = "Hyperliquid"
+            def ohlc_closes(self, _symbol, _interval):
+                raise RuntimeError("offline")
+
+        service = MarketRegimeService(cache_max=1)
+        decision = service.evaluate_provider(Provider(), "HYPE", interval_min=1)
+        self.assertEqual(decision.regime, "unknown")
+        self.assertEqual(decision.reason, "source_error:RuntimeError")
 
 
 if __name__ == "__main__":
