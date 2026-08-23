@@ -904,7 +904,12 @@ class Cache24LongPriceManager(Cache24PriceManager):
     and duplicate them, so this class compacts whenever trimming actually removes data.
     """
 
+    LONG_TRIM_INTERVAL_SEC = 24 * 3600
+
     def __init__(self, sync_ts, symbols, filename, api_client=api):
+        # Long archives must not rewrite the entire JSONL whenever a single oldest
+        # tick expires.  Initialize the maintenance clock before callbacks can run.
+        self._last_long_trim = 0.0
         # Call CacheManagerInterface directly because Cache24PriceManager does not expose
         # append_persist and invokes load_state before this class could change it.
         CacheManagerInterface.__init__(self, sync_ts, symbols, filename,
@@ -915,6 +920,10 @@ class Cache24LongPriceManager(Cache24PriceManager):
             self.cache = {s: v for s, v in self.cache.items() if s in self.symbols}
 
     def _trim_old_data(self, symbol):
+        now = time.monotonic()
+        if now - self._last_long_trim < self.LONG_TRIM_INTERVAL_SEC:
+            return
+        self._last_long_trim = now
         with self.lock:
             before = len(self.cache.get(symbol, []))
         super()._trim_old_data(symbol)   # Use the inherited trimming logic unchanged.

@@ -28,8 +28,12 @@ Apoi, dupa ce s-a acumulat destul istoric dens:
         --cache24-file cachedb/cache_24price_long_BTCUSDC.jsonl
 """
 import argparse
+import math
 import os
+import re
+import signal
 import sys
+import threading
 import time
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -37,8 +41,43 @@ sys.path.insert(0, ROOT)
 
 import cacheManager as cm
 from binance_api import bapi_ws
+from botcore import single_instance
 
 CACHEDB_DIR = os.path.join(ROOT, "cachedb")
+_SYMBOL_RE = re.compile(r"^[A-Z0-9]{3,24}$")
+
+
+def _positive_finite(value, name, *, minimum=0.001):
+    value = float(value)
+    if not math.isfinite(value) or value < minimum:
+        raise ValueError(f"{name} trebuie sa fie finit si >= {minimum}")
+    return value
+
+
+def _symbols(raw):
+    values = []
+    for item in str(raw).split(","):
+        symbol = item.strip().upper()
+        if not symbol:
+            continue
+        if not _SYMBOL_RE.fullmatch(symbol):
+            raise ValueError(f"simbol invalid: {symbol!r}")
+        if symbol not in values:
+            values.append(symbol)
+    if not values:
+        raise ValueError("lista de simboluri nu poate fi goala")
+    return values
+
+
+def _shutdown(caches, current_price_mgr, ws_module=bapi_ws):
+    """Stop producers, flush every pending tick, then close shared resources."""
+    for cache in caches:
+        current_price_mgr.unsubscribe_price(cache)
+    for cache in caches:
+        cache.shutdown()
+        cache.save_state_to_file()
+    current_price_mgr.shutdown()
+    ws_module.bapi_ws_manager.stop()
 
 
 def main():
@@ -58,42 +97,57 @@ def main():
                          "(19.6MB BTC) de ~75x/minut -> 72%% CPU sustinut, crescand pe masura ce "
                          "arhiva creste spre 6 luni.")
     args = p.parse_args()
-    symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
-    keep_hours = args.months * 30 * 24
+    try:
+        symbols = _symbols(args.symbols)
+        months = _positive_finite(args.months, "--months")
+        sync_ts = _positive_finite(args.sync_ts, "--sync-ts", minimum=0.1)
+        save_every = _positive_finite(args.save_every, "--save-every", minimum=1.0)
+    except (TypeError, ValueError) as exc:
+        p.error(str(exc))
+    keep_hours = months * 30 * 24
+
+    single_instance("tradeall_price_archiver")
+    stop_event = threading.Event()
+
+    def request_stop(signum, _frame):
+        print(f"[tradeall_price_archiver] semnal {signum}; flush si oprire...", flush=True)
+        stop_event.set()
+
+    signal.signal(signal.SIGTERM, request_stop)
+    signal.signal(signal.SIGINT, request_stop)
 
     os.makedirs(CACHEDB_DIR, exist_ok=True)
     cm.enable_real_ws_event_sync()
     current_price_mgr = cm.get_current_price_manager(
         ws_manager=bapi_ws.get_ws_manager(),
-        sync_ts=args.sync_ts,
+        sync_ts=sync_ts,
     )
 
     caches = []
     for symbol in symbols:
         filename = os.path.join(CACHEDB_DIR, f"cache_24price_long_{symbol}.jsonl")
-        cache = cm.Cache24LongPriceManager(sync_ts=args.save_every, symbols=[symbol], filename=filename)
+        cache = cm.Cache24LongPriceManager(sync_ts=save_every, symbols=[symbol], filename=filename)
         cache.KEEP_HOURS = keep_hours   # per-instance override explicitly supported by the class
+        cache.RETENTION_DAYS = keep_hours / 24.0
         cache.enable_save_state_to_file()   # defaults to False; required for disk writes
-        cache.periodic_sync(args.save_every, save_state=True)
+        cache.periodic_sync(save_every, save_state=True)
         current_price_mgr.subscribe_price(cache)
         caches.append(cache)
 
-    print(f"[tradeall_price_archiver] pornit: {symbols} | retentie {args.months} luni "
-          f"({keep_hours:.0f}h) | scriere pe disc la {args.save_every:.0f}s")
+    print(f"[tradeall_price_archiver] pornit: {symbols} | retentie {months} luni "
+          f"({keep_hours:.0f}h) | scriere pe disc la {save_every:.0f}s", flush=True)
     print("[tradeall_price_archiver] scriu in cachedb/cache_24price_long_<symbol>.jsonl "
           "(separat de cache-ul live 24h al tradeall.py)")
     print("[tradeall_price_archiver] Ctrl+C opreste.")
 
     try:
-        while True:
-            time.sleep(60)
+        while not stop_event.wait(60):
+            print("[tradeall_price_archiver] heartbeat", flush=True)
     except KeyboardInterrupt:
-        print("\n[tradeall_price_archiver] oprit.")
+        stop_event.set()
     finally:
-        for cache in caches:
-            cache.shutdown()
-        current_price_mgr.shutdown()
-        bapi_ws.bapi_ws_manager.stop()
+        _shutdown(caches, current_price_mgr)
+        print("\n[tradeall_price_archiver] oprit dupa flush.", flush=True)
 
 
 if __name__ == "__main__":

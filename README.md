@@ -58,8 +58,11 @@ să nu poată tranzacționa simultan.
 | `market_alerts.py` | alerte de piață cu cooldown și watchlist configurabil |
 | `order_retry_worker.py` | consumator unic al cozii persistente de ordine eșuate |
 
-`tradeall_observe.py` și `tradeall_price_archiver.py` sunt procese auxiliare de
-observare/arhivare și nu fac parte din manifestul flotei supravegheate.
+`tradeall_observe.py` este un proces auxiliar de observare. Arhivarul dens
+`tradeall_price_archiver.py` face parte din manifestul flotei supravegheate: la
+restart încarcă JSONL-ul existent și continuă append-ul, iar la SIGTERM face flush.
+O întrerupere lasă însă un gol nerecuperabil la rezoluția WebSocket, motiv pentru
+care watchdog-ul îl repornește rapid.
 
 ### 3. Strategii și execuție
 
