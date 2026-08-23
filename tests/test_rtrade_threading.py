@@ -68,6 +68,53 @@ class RTradeThreadingTest(unittest.TestCase):
         self.assertEqual(coordinators[0].steps, [8.0, 16.0])
         self.assertEqual(coordinators[1].steps, [16.0])
 
+    def test_coordinator_backs_off_each_side_after_generic_place_failure(self):
+        bot = _bot()
+        starts = []
+
+        class FailingCoordinator:
+            def __init__(self, *_args, **kwargs):
+                self.start_side = kwargs["start_side"]
+
+            def start(self, _price):
+                starts.append(self.start_side)
+                return SimpleNamespace(
+                    terminal=True,
+                    pair_id=f"pair-{len(starts)}",
+                    phase="failed",
+                    reason=f"{self.start_side.lower()}_place_failed",
+                )
+
+        venue = SimpleNamespace(current_price=lambda: 100.0)
+        with patch.object(rtrade, "_LivePairVenue", return_value=venue), \
+             patch.object(rtrade, "PairCoordinator", FailingCoordinator), \
+             patch.object(rtrade, "RTRADE_PAIR_MAX_ACTIVE_ROUNDS", 2), \
+             patch.object(rtrade, "RTRADE_PAIR_START_INTERVAL_SEC", 8), \
+             patch.object(rtrade, "RTRADE_PAIR_DIRECTIONS", ("BUY", "SELL")), \
+             patch.object(rtrade, "RTRADE_PAIR_POLL_SEC", 1), \
+             patch.object(rtrade, "RTRADE_PLACE_FAILURE_BACKOFF_SEC", 180), \
+             patch.object(rtrade, "_trend_too_strong", return_value=False), \
+             patch.object(rtrade.time, "monotonic", side_effect=[0.0, 8.0, 16.0]), \
+             patch.object(rtrade.time, "sleep",
+                          side_effect=[None, None, KeyboardInterrupt]):
+            with self.assertRaises(KeyboardInterrupt):
+                bot._run_coordinator_forever()
+
+        self.assertEqual(starts, ["BUY", "SELL"])
+
+    def test_place_failure_backoff_preserves_funds_specific_duration(self):
+        with patch.object(rtrade, "RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC", 181), \
+             patch.object(rtrade, "RTRADE_PLACE_FAILURE_BACKOFF_SEC", 37):
+            self.assertEqual(
+                rtrade._place_failure_backoff("buy_insufficient_funds:USDC"),
+                ("BUY", 181),
+            )
+            self.assertEqual(
+                rtrade._place_failure_backoff("sell_place_failed"),
+                ("SELL", 37),
+            )
+            self.assertEqual(rtrade._place_failure_backoff("other"), (None, 0.0))
+
     def test_live_pair_adapter_passes_pair_id_and_owns_retry(self):
         executor = SimpleNamespace(free_balance=lambda _asset: 1000.0)
         order = {"orderId": 7, "price": "99.36", "origQty": "0.8"}

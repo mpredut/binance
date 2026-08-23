@@ -101,6 +101,8 @@ RTRADE_PAIR_DIRECTIONS = tuple(
 )
 RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC = float(os.environ.get(
     "RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC", "180"))
+RTRADE_PLACE_FAILURE_BACKOFF_SEC = float(os.environ.get(
+    "RTRADE_PLACE_FAILURE_BACKOFF_SEC", "180"))
 RTRADE_FAST_FILL_RATIO = float(os.environ.get("RTRADE_FAST_FILL_RATIO", "0.25"))
 RTRADE_MIN_EDGE_PCT = float(os.environ.get("RTRADE_MIN_EDGE_PCT", "0.0115"))
 RTRADE_SHOCK_HARD_STOP_PCT = float(os.environ.get(
@@ -220,6 +222,28 @@ def _trend_too_strong(symbol):
         print(f"[{symbol}] rtrade STA DEOPARTE: trend clar (|grad|={grad:.4g} > "
               f"{RTRADE_TREND_FILTER_K}xeps={RTRADE_TREND_FILTER_K * eps:.4g}, fereastra {RTRADE_TREND_WINDOW_SEC:.0f}s)")
     return strong
+
+
+def _place_failure_backoff(reason):
+    """Intoarce (side, secunde) pentru un esec terminal de plasare.
+
+    Fondurile complet absente au motiv explicit. Orice alt ``*_place_failed``
+    (gard de pret, min-notional, weight-limit, API refuzat) trebuie de asemenea
+    rarit: altfel coordonatorul creeaza un pair_id nou la fiecare interval de
+    start si poate transforma o eroare tranzitorie intr-o bucla de ordine.
+    """
+    reason = str(reason or "").strip().lower()
+    marker = "_insufficient_funds:"
+    if marker in reason:
+        side = reason.split(marker, 1)[0].upper()
+        if side in {"BUY", "SELL"}:
+            return side, RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC
+    suffix = "_place_failed"
+    if reason.endswith(suffix):
+        side = reason[:-len(suffix)].upper()
+        if side in {"BUY", "SELL"}:
+            return side, RTRADE_PLACE_FAILURE_BACKOFF_SEC
+    return None, 0.0
 
 
 def _followup_force(symbol, side):
@@ -493,6 +517,8 @@ class TradingBot:
             raise ValueError("RTRADE_PAIR_DIRECTIONS accepta numai BUY,SELL")
         if RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC <= 0:
             raise ValueError("RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC trebuie sa fie > 0")
+        if RTRADE_PLACE_FAILURE_BACKOFF_SEC <= 0:
+            raise ValueError("RTRADE_PLACE_FAILURE_BACKOFF_SEC trebuie sa fie > 0")
 
         # Fiecare coordonator detine exclusiv order-id-urile si inventarul unei
         # runde. O runda expusa continua sa-si urmareasca exit-ul, dar nu mai
@@ -500,7 +526,7 @@ class TradingBot:
         active = []
         last_start_at = float("-inf")
         next_direction = 0
-        funds_backoff_until = {"BUY": 0.0, "SELL": 0.0}
+        side_backoff_until = {"BUY": 0.0, "SELL": 0.0}
         while True:
             try:
                 now = time.monotonic()
@@ -532,7 +558,7 @@ class TradingBot:
                             candidate = RTRADE_PAIR_DIRECTIONS[next_direction]
                             next_direction = (
                                 next_direction + 1) % len(RTRADE_PAIR_DIRECTIONS)
-                            if now >= funds_backoff_until[candidate]:
+                            if now >= side_backoff_until[candidate]:
                                 start_side = candidate
                                 break
                         if start_side is None:
@@ -544,17 +570,14 @@ class TradingBot:
                         outcome = coordinator.start(current_price)
                         last_start_at = now
                         if outcome.terminal:
-                            reason = outcome.reason or ""
-                            marker = "_insufficient_funds:"
-                            if marker in reason:
-                                failed_side = reason.split(marker, 1)[0].upper()
-                                if failed_side in funds_backoff_until:
-                                    funds_backoff_until[failed_side] = (
-                                        now + RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC)
-                                    print(
-                                        f"[{self.symbol}] {failed_side} backoff "
-                                        f"{RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC:.0f}s "
-                                        f"din cauza fondurilor insuficiente")
+                            failed_side, backoff_sec = _place_failure_backoff(
+                                outcome.reason)
+                            if failed_side in side_backoff_until:
+                                side_backoff_until[failed_side] = now + backoff_sec
+                                print(
+                                    f"[{self.symbol}] {failed_side} backoff "
+                                    f"{backoff_sec:.0f}s dupa esec de plasare "
+                                    f"({outcome.reason})")
                             print(
                                 f"[{self.symbol}] pair={outcome.pair_id} "
                                 f"direction={start_side}-first "
