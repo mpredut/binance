@@ -112,5 +112,43 @@ class FollowupForceTest(unittest.TestCase):
         self.assertTrue(rtrade._followup_force("TAOUSDC", "SELL"))    # indisponibil -> force (fail-open)
 
 
+class MarketRegimeTest(unittest.TestCase):
+    def setUp(self):
+        self._en = rtrade.RTRADE_TREND_FILTER_ENABLED
+        self._k = rtrade.RTRADE_TREND_FILTER_K
+        self._cm = sys.modules.get("cacheManager")
+        rtrade.RTRADE_TREND_FILTER_ENABLED = True
+        rtrade.RTRADE_TREND_FILTER_K = 2.0
+
+    def tearDown(self):
+        rtrade.RTRADE_TREND_FILTER_ENABLED = self._en
+        rtrade.RTRADE_TREND_FILTER_K = self._k
+        if self._cm is not None:
+            sys.modules["cacheManager"] = self._cm
+        else:
+            sys.modules.pop("cacheManager", None)
+
+    def _fake_cm(self, dyn):
+        m = types.ModuleType("cacheManager")
+        class Mgr:
+            def get_instant_trend_for_window(self, _sym, _window):
+                return dyn
+        m.get_short_trend_manager = lambda: Mgr()
+        sys.modules["cacheManager"] = m
+
+    def test_regimes_use_signed_gradient_and_adaptive_noise(self):
+        for gradient, expected in ((0.5, "bull"), (-0.5, "bear"),
+                                   (0.15, "sideways")):
+            with self.subTest(expected=expected):
+                self._fake_cm({"gradient_recent": gradient, "epsilon": 0.1})
+                self.assertEqual(
+                    rtrade._market_regime_decision("TAOUSDC").regime, expected)
+
+    def test_missing_signal_is_unknown(self):
+        self._fake_cm(None)
+        self.assertEqual(
+            rtrade._market_regime_decision("TAOUSDC").regime, "unknown")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

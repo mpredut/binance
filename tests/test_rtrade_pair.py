@@ -20,6 +20,7 @@ class FakeVenue:
         self.market_calls = []
         self.fill_on_cancel = {}
         self.failure_reasons = {}
+        self.allow_market = True
 
     def current_price(self):
         return self.current
@@ -46,6 +47,9 @@ class FakeVenue:
         self.statuses[ticket.order_id] = OrderSnapshot(
             status="closed", filled_qty=qty, cost=qty * self.current, fee=0.1)
         return ticket
+
+    def market_exit_allowed(self, exposure_side, loss_fraction, reason):
+        return self.allow_market
 
     def order_status(self, order_id):
         return self.statuses[order_id]
@@ -254,6 +258,23 @@ class PairCoordinatorTest(unittest.TestCase):
             venue.market_calls, [("SELL", 1.0, "inventory_hard_stop")])
         self.assertEqual(finished.phase, "hard_stop")
         self.assertEqual(finished.reason, "inventory_hard_stop")
+
+    def test_dynamic_policy_keeps_anchored_limit_when_market_not_justified(self):
+        venue = FakeVenue(current=90.0)
+        venue.allow_market = False
+        coordinator = _coordinator(
+            venue, quote_ttl_sec=32, fast_fill_ratio=0.25,
+            shock_hard_stop_fraction=0.04, hard_stop_fraction=0.08)
+        coordinator.start(mid=100.0)
+        venue.fill("L1", 1.0, 99.36)
+
+        outcome = coordinator.step(now=20.0)
+
+        self.assertEqual(outcome.phase, "exposed")
+        self.assertEqual(outcome.reason, "market_exit_waiting_for_trend")
+        self.assertEqual(venue.market_calls, [])
+        self.assertTrue(any(ticket.side == "SELL" and ticket.active
+                            for ticket, _pair in venue.orders))
 
     def test_fast_sell_fill_has_symmetric_market_buy_hard_stop(self):
         venue = FakeVenue(current=105.0)

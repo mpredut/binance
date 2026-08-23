@@ -84,6 +84,8 @@ class PairVenue(Protocol):
     def place_market_exit(self, side: str, qty: float,
                           reason: str,
                           pair_id: Optional[str] = None) -> Optional[OrderTicket]: ...
+    def market_exit_allowed(self, exposure_side: str, loss_fraction: float,
+                            reason: str) -> bool: ...
     def order_status(self, order_id: str) -> OrderSnapshot: ...
     def cancel(self, order_id: str) -> bool: ...
 
@@ -299,6 +301,16 @@ class PairCoordinator:
         )
         if not breached:
             return False
+        loss_fraction = (
+            max(0.0, (entry_avg - current) / entry_avg)
+            if exposure_side == "LONG"
+            else max(0.0, (current - entry_avg) / entry_avg)
+        )
+        reason = "fast_fill_hard_stop" if self.shock else "inventory_hard_stop"
+        allow = getattr(self.venue, "market_exit_allowed", None)
+        if callable(allow) and not allow(exposure_side, loss_fraction, reason):
+            self.reason = "market_exit_waiting_for_trend"
+            return False
         exit_side = "SELL" if exposure_side == "LONG" else "BUY"
         exit_ticket = self._active_ticket(exit_side)
         if exit_ticket is not None and not self._cancel(exit_ticket):
@@ -306,7 +318,7 @@ class PairCoordinator:
             return False
         market = self.venue.place_market_exit(
             exit_side, abs(net_qty),
-            reason=("fast_fill_hard_stop" if self.shock else "inventory_hard_stop"),
+            reason=reason,
             pair_id=self.pair_id)
         if market is None:
             self.reason = "hard_stop_place_failed"

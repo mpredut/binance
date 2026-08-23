@@ -19,6 +19,7 @@ from binance_api import bapi_placeorder as po   # pastrat pt WeightLimitBlock (d
 from providers.market_api import api as mkt      # proxy unic guardat (Instrument.place)
 from providers.execution_audit import AuditedStrategyExecutor, new_intent_id
 from providers.quantity import decide_quantity
+from market_regime import MarketRegimeDecision, MarketRegimeEvaluator
 from strategies.rtrade_pair import (
     OrderSnapshot as PairOrderSnapshot,
     OrderTicket as PairOrderTicket,
@@ -86,6 +87,10 @@ RTRADE_MAX_FAILURES = int(os.environ.get("RTRADE_MAX_FAILURES", "10"))
 RTRADE_TREND_FILTER_ENABLED = os.environ.get("RTRADE_TREND_FILTER_ENABLED", "true").strip().lower() == "true"
 RTRADE_TREND_FILTER_K = float(os.environ.get("RTRADE_TREND_FILTER_K", "2.0"))
 RTRADE_TREND_WINDOW_SEC = float(os.environ.get("RTRADE_TREND_WINDOW_SEC", "900"))
+RTRADE_DYNAMIC_MARKET_EXIT_MODE = os.environ.get(
+    "RTRADE_DYNAMIC_MARKET_EXIT_MODE", "shadow").strip().lower()
+RTRADE_EMERGENCY_HARD_STOP_PCT = float(os.environ.get(
+    "RTRADE_EMERGENCY_HARD_STOP_PCT", "0.12"))
 
 # Coordonatorul nou este candidat financiar si ramane OFF pana la replay/walk-forward.
 # Cand este activ, un singur owner gestioneaza perechea si expunerea; calea veche cu
@@ -173,6 +178,26 @@ class _LivePairVenue:
     def last_place_failure_reason(self, side):
         return self._last_place_failures.get(side.upper())
 
+    def market_exit_allowed(self, exposure_side, loss_fraction, reason):
+        """Decide daca hard-stop-ul normal are confirmare de trend pentru MARKET.
+
+        ``shadow`` doar observa; ``live`` aplica decizia. Pragul emergency ramane
+        obligatoriu indiferent de trend, ca un semnal stale sa nu lase risc nelimitat.
+        """
+        emergency = loss_fraction >= RTRADE_EMERGENCY_HARD_STOP_PCT
+        decision = _market_regime_decision(self.symbol)
+        adverse = decision.adverse_to(exposure_side)
+        justified = adverse or emergency
+        print(
+            f"[{self.symbol}] dynamic-market-exit mode={RTRADE_DYNAMIC_MARKET_EXIT_MODE} "
+            f"exposure={exposure_side} regime={decision.regime} "
+            f"strength={decision.strength} signal_reason={decision.reason} "
+            f"loss={loss_fraction:.4%} emergency={emergency} "
+            f"would_market={justified} reason={reason}")
+        if RTRADE_DYNAMIC_MARKET_EXIT_MODE in {"off", "shadow"}:
+            return True
+        return justified
+
     def place_market_exit(self, side, qty, reason, pair_id=None):
         """Iesire spot MARKET, rezervata reducerii unei expuneri hard-stop.
 
@@ -255,6 +280,20 @@ def _trend_too_strong(symbol):
         print(f"[{symbol}] rtrade STA DEOPARTE: trend clar (|grad|={grad:.4g} > "
               f"{RTRADE_TREND_FILTER_K}xeps={RTRADE_TREND_FILTER_K * eps:.4g}, fereastra {RTRADE_TREND_WINDOW_SEC:.0f}s)")
     return strong
+
+
+def _market_regime_decision(symbol) -> MarketRegimeDecision:
+    """Adapteaza sursa cache existenta la evaluatorul comun provider-neutral."""
+    evaluator = MarketRegimeEvaluator(RTRADE_TREND_FILTER_K)
+    if not RTRADE_TREND_FILTER_ENABLED:
+        return evaluator.unknown("disabled")
+    try:
+        import cacheManager as cm
+        dyn = cm.get_short_trend_manager().get_instant_trend_for_window(
+            symbol, RTRADE_TREND_WINDOW_SEC)
+    except Exception as exc:
+        return evaluator.unknown(f"source_error:{exc.__class__.__name__}")
+    return evaluator.evaluate(dyn)
 
 
 def _place_failure_backoff(reason):
@@ -552,6 +591,11 @@ class TradingBot:
             raise ValueError("RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC trebuie sa fie > 0")
         if RTRADE_PLACE_FAILURE_BACKOFF_SEC <= 0:
             raise ValueError("RTRADE_PLACE_FAILURE_BACKOFF_SEC trebuie sa fie > 0")
+        if RTRADE_DYNAMIC_MARKET_EXIT_MODE not in {"off", "shadow", "live"}:
+            raise ValueError("RTRADE_DYNAMIC_MARKET_EXIT_MODE: off|shadow|live")
+        if not RTRADE_HARD_STOP_PCT <= RTRADE_EMERGENCY_HARD_STOP_PCT < 1:
+            raise ValueError(
+                "RTRADE_EMERGENCY_HARD_STOP_PCT trebuie sa fie >= hard-stop si < 1")
 
         # Fiecare coordonator detine exclusiv order-id-urile si inventarul unei
         # runde. O runda expusa continua sa-si urmareasca exit-ul, dar nu mai
