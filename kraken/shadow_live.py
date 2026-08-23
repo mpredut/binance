@@ -1,35 +1,34 @@
 #!/usr/bin/env python3
-"""kraken/shadow_live.py — SHADOW TEST LIVE (read-only, ZERO ordine reale, NU atinge botul).
+"""kraken/shadow_live.py — LIVE SHADOW TEST (read-only, ZERO real orders, bot-isolated).
 
-Ruleaza config-uri prin MOTORUL FAITHFUL (replay.run_replay = exact deciziile live
-Strategy.step) peste ACELASI OHLC live descarcat de la Kraken, si logheaza P&L paper
-comparativ. Scopul: forward-test intre configul de PRODUCTIE si candidați shadow
-(pre-inregistrati din cercetare) inainte de a schimba ceva pe bani reali:
+Run configurations through the faithful engine: replay.run_replay makes the same
+decisions as live Strategy.step over the SAME live OHLC downloaded from Kraken, and log
+comparative paper P&L. This forward-tests the PRODUCTION configuration against shadow
+candidates preregistered from research before risking real money:
 
-  - current : configul LIVE exact (citit din .env apoi config.env)      -> referinta
-  - tp4     : DOAR TAKEPROFIT 5.0 -> 4.0  (+0.13pp in cercetare, fara DD in plus)
-  - dca15   : DOAR DCA_DROP 1.25 -> 1.5   (+0.08pp, candidat secundar)
-  - dca_progressive025: primul DCA la 1.25%, apoi +0.25pp/treaptă;
-    candidat de risc, central neutru și mai bun sub stress în benchmark
-  - reentry4: după închiderea unui ciclu, așteaptă un recul de 4% înaintea
-    reintrării; candidat HLC selectat pe 31 ferestre și urmărit cross-venue
-  - trail_profit_floor_sl18: trailing soft numai de la +1% brut în sus;
-    sub prag așteaptă revenirea, iar hard stop-ul MARKET este lărgit la -18%
-  - trail_profit_floor_sl125: DECUPLAT — doar profit-floor, stop la 12.5%.
-    Izoleaza componenta profit-floor de lărgirea stop-ului (vezi doc: ~78% din
-    castigul lui sl18 vine din stop, nu din floor)
-  - dca_vol_m1 (doar 240m): sumă DCA scalată cu volatilitatea OHLC; reduce
-    tail/DD, dar pierde majoritatea ferestrelor active și rămâne defensiv
-  - overlay650t8 (doar 240m): overlay cu top-up 650 si trail 8%; candidat
-    EXPLORATORIU pentru forward, neaprobat pentru live
+  - current: exact LIVE configuration loaded from .env and then config.env; reference
+  - tp4: only TAKEPROFIT changes 5.0 -> 4.0 (+0.13pp in research, no added drawdown)
+  - dca15: only DCA_DROP changes 1.25 -> 1.5 (+0.08pp, secondary candidate)
+  - dca_progressive025: first DCA at 1.25%, then +0.25pp per level; a risk candidate
+    that was neutral centrally and better under benchmark stress
+  - reentry4: after closing a cycle, wait for a 4% pullback before re-entry; an HLC
+    candidate selected over 31 windows and tracked across venues
+  - trail_profit_floor_sl18: soft trailing starts only above +1% gross; below that floor
+    it waits for recovery, while the MARKET hard stop widens to -18%
+  - trail_profit_floor_sl125: DECOUPLED profit-floor only, with the 12.5% baseline stop;
+    isolates the floor from stop widening (~78% of sl18's gain came from the stop)
+  - dca_vol_m1 (240m only): volatility-scaled DCA amount reduces tail risk/drawdown but
+    loses most active windows and remains defensive
+  - overlay650t8 (240m only): 650 top-up with an 8% trail; an EXPLORATORY forward
+    candidate not approved for live use
 
-Determinist: dat OHLC-ul, rezultatul e reproductibil. Barele forward închise sunt
-păstrate local, astfel încât fereastra ancorată crește și după limita Kraken de 720 bare.
-Ruleaza single-shot (pt cron) sau --loop. NU citeste/scrie starea botului live.
+Given the same OHLC, results are deterministic and reproducible. Closed forward bars are
+stored locally so the anchored window continues growing beyond Kraken's 720-bar limit.
+Run once for cron or with --loop. Never read or write live bot state.
 
-  ./myenv/bin/python kraken/shadow_live.py                 # snapshot 60m, append JSONL
-  ./myenv/bin/python kraken/shadow_live.py --interval 240  # bare de 4h
-  ./myenv/bin/python kraken/shadow_live.py --loop 60       # re-ruleaza la 60 min
+  ./myenv/bin/python kraken/shadow_live.py                 # 60m snapshot, append JSONL
+  ./myenv/bin/python kraken/shadow_live.py --interval 240  # 4h bars
+  ./myenv/bin/python kraken/shadow_live.py --loop 60       # rerun every 60 minutes
 """
 from __future__ import annotations
 
@@ -57,7 +56,7 @@ LOG_DIR = os.path.join(ROOT, "logs", "shadow_live")
 
 def _load_runtime_config(env_path: str | None = None,
                          config_path: str | None = None) -> None:
-    """Reproduce exact ordinea din kraken_bot: .env are prioritate, config completează."""
+    """Reproduce kraken_bot load order exactly: .env takes priority, config fills gaps."""
     from kraken_common import load_dotenv
     env_path = env_path or os.environ.get("ENV_FILE", DEFAULT_ENV)
     config_path = config_path or os.path.join(os.path.dirname(env_path) or ".", "config.env")
@@ -81,15 +80,15 @@ def _variants(interval: int):
             tp_trail_profit_floor_pct=1.0,
             stop_loss_pct=18.0,
         ),
-        # DECUPLAT: doar profit-floor, stop la 12.5% (baseline). Benchmark 4h:
-        # arata ca ~78% din castigul lui sl18 vine din stop-ul larg (risc de tail),
-        # NU din profit-floor (care da doar +0.1pp, cu +2.4pp expunere). Observational.
+        # DECOUPLED: profit-floor only with the 12.5% baseline stop. The 4h benchmark
+        # shows ~78% of sl18's gain comes from the wide stop and its tail risk, NOT the
+        # profit floor, which adds only +0.1pp with +2.4pp exposure. Observational only.
         "trail_profit_floor_sl125": dataclasses.replace(
             base,
             tp_trail_profit_floor_pct=1.0,
         ),
     }
-    # A folosește OHLC fix pentru aceeași cadență live/replay; nu îl rulăm pe alt interval.
+    # A uses fixed OHLC so live/replay cadence matches; do not run it at another interval.
     if interval == base.tp_trail_vol_interval:
         variants["A_trail"] = dataclasses.replace(
             base,
@@ -98,16 +97,16 @@ def _variants(interval: int):
             tp_trail_min=1.5,
             tp_trail_max=8.0,
         )
-    # Sizing-ul DCA folosește OHLC fix. Reduce tail-ul istoric, dar nu trece
-    # gate-ul de randament/pairwise, deci rămâne strict observațional.
+    # DCA sizing uses fixed OHLC. It reduces historical tail risk but fails the
+    # return/pairwise gate, so it remains strictly observational.
     if interval == base.dca_vol_interval:
         variants["dca_vol_m1"] = dataclasses.replace(
             base,
             dca_vol_scale_k=-1.0,
             dca_vol_ref=2.0,
         )
-    # Overlay-ul folosește semnal OHLC de 240m; nu îl simulăm artificial pe 60m.
-    # Valorile sunt preînregistrate după analiza istorică și rămân fixe în forward.
+    # The overlay uses a 240m OHLC signal; do not simulate it artificially at 60m.
+    # Values were preregistered after historical analysis and remain fixed forward.
     if interval == base.trend_interval:
         variants["overlay650t8"] = dataclasses.replace(
             base,
@@ -116,9 +115,9 @@ def _variants(interval: int):
             trend_trail_pct=8.0,
             trend_exit_break=False,
         )
-    # B: frana-DCA in downtrend confirmat. Reduce tail-ul/DD, dar benchmarkul financiar
-    # central/stress arată un sacrificiu consistent de randament -> doar observațional.
-    # Foloseste semnalul de trend pe OHLC fix, ca A -> doar pe intervalul de trend.
+    # B: DCA brake during a confirmed downtrend. It reduces tail risk/drawdown, but central
+    # and stress financial benchmarks consistently sacrifice returns; observational only.
+    # Like A, it uses the fixed-OHLC trend signal and runs only at the trend interval.
     if interval == base.trend_interval:
         variants["B_dcabrake"] = dataclasses.replace(
             base,
@@ -129,8 +128,8 @@ def _variants(interval: int):
 
 
 def _fetch_with_ts(pair: str, interval: int):
-    """Ca backtest.fetch_candles dar PASTREAZA timestamp-ul (pt ancorare forward).
-    Intoarce [(ts_sec, open, high, low, close), ...], exclude ultima bara in formare."""
+    """Fetch candles like backtest.fetch_candles while retaining timestamps for anchoring.
+    Return [(ts_sec, open, high, low, close), ...], excluding the forming final bar."""
     import json as _json
     import urllib.request
     url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval={interval}"
@@ -156,8 +155,8 @@ def _history_path(pair: str, interval: int) -> str:
 
 
 def _get_anchor(pair: str, interval: int, default_ts: int) -> int:
-    """Prima rulare fixeaza ancora = ultima bara inchisa (= forward-test de ACUM inainte).
-    Rularile urmatoare o citesc, deci fereastra CRESTE, nu aluneca."""
+    """On first run, anchor at the latest closed bar to begin forward testing now.
+    Subsequent runs reuse it, so the window grows instead of sliding."""
     path = _anchor_path(pair, interval)
     if os.path.exists(path):
         with open(path, encoding="utf-8") as fh:
@@ -188,7 +187,7 @@ def _save_history(pair: str, interval: int, bars) -> None:
 
 
 def _merge_forward_history(pair: str, interval: int, anchor: int, fetched):
-    """Unește barele păstrate cu fetch-ul curent și detectează pierderea de istoric."""
+    """Merge retained bars with the current fetch and detect missing history."""
     cached = [bar for bar in _load_history(pair, interval) if bar[0] >= anchor]
     fetched = [bar for bar in fetched if bar[0] >= anchor]
 
@@ -222,7 +221,7 @@ def _run_one(ohlc, params, interval, fee_pct, *, include_decision_trace=False):
 
 
 def _decision_distance(reference: list[dict], candidate: list[dict]) -> int:
-    """Numără evenimentele de ordin inserate/șterse/înlocuite față de current."""
+    """Count order events inserted, deleted, or replaced relative to current."""
     def fingerprint(event):
         return tuple(sorted(event.items()))
 
@@ -239,7 +238,7 @@ def _decision_distance(reference: list[dict], candidate: list[dict]) -> int:
 
 
 def _eval_block(ohlc4, interval, fee_pct, *, include_decision_trace=False):
-    """Rulează toate variantele pe OHLC; întoarce None dacă sunt sub două bare."""
+    """Run every variant over OHLC, returning None when fewer than two bars exist."""
     if len(ohlc4) < 2:
         return None
     rows = {}
@@ -251,7 +250,7 @@ def _eval_block(ohlc4, interval, fee_pct, *, include_decision_trace=False):
         )
         rows[name] = {
             "net_pct": round(m["net"] / budget * 100.0, 4),
-            "total_pct": round(m["total"] / budget * 100.0, 4),  # inclusiv upnl deschis
+            "total_pct": round(m["total"] / budget * 100.0, 4),  # includes open unrealized PnL
             "maxdd_pct": round(m.get("max_drawdown_pct") or 0.0, 4),
             "cycles": m.get("cycles", 0),
             "open_qty": m.get("open_qty", 0.0),
@@ -349,7 +348,7 @@ def main() -> int:
     while True:
         try:
             snapshot(pair, args.interval, args.fee, quiet=args.quiet)
-        except Exception as e:  # în loop, un fetch ratat nu oprește monitorizarea
+        except Exception as e:  # in loop mode, one failed fetch does not stop monitoring
             print(f"[shadow_live] eroare: {e}", file=sys.stderr)
             if args.loop <= 0:
                 return 1
