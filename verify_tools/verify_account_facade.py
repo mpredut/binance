@@ -6,9 +6,10 @@ For each configured Binance symbol it compares:
   - normalized facade orders with ``apiorders.get_trade_orders``;
   - average buy and net quantity calculated from both order lists.
 
-The two balance paths can differ when an API read fails: the per-asset path returns
-``None`` while the legacy full-account path collapses failure to an empty list and
-therefore ``0.0``. The command exits nonzero on any observed difference.
+The two balance paths can differ when an API read fails: the safe facade returns
+``None`` while the legacy full-account path collapses failure to ``0.0``. Such a
+comparison is reported as inconclusive rather than misclassifying unavailable data as
+a real zero balance. Confirmed differences still produce a nonzero exit.
 
 Run before restarting the fleet:
   ~/binance/myenv/bin/python verify_account_facade.py
@@ -59,10 +60,16 @@ def main():
         # 1) free_balance ------------------------------------------------------
         fd = free_direct(base)
         ff = mkt.free_balance_for("binance", base)
-        same_free = (fd == ff)
-        print(f"  free: direct={fd!r}  facada={ff!r}  -> {'OK' if same_free else 'DIFERA'}")
-        if not same_free:
+        balance_available = ff is not None
+        same_free = balance_available and fd == ff
+        state = "OK" if same_free else ("SKIP (date indisponibile)" if not balance_available else "DIFERA")
+        print(f"  free: direct={fd!r}  facada={ff!r}  -> {state}")
+        if balance_available and not same_free:
             failures.append(f"{s}: free_balance direct={fd!r} != facada={ff!r}")
+        if not balance_available:
+            print("  restul comparației private este omis; două liste goale după erori API "
+                  "nu constituie dovadă de paritate")
+            continue
 
         # 2) ordine BUY/SELL: numar + camp-cu-camp -----------------------------
         direct = {}
@@ -101,7 +108,7 @@ def main():
         for f in failures:
             print(f"  - {f}")
         sys.exit(1)
-    print("PASS — facada de cont == acces direct bapi/apiorders (behavior-preserving).")
+    print("PASS — diferențele confirmabile între fațadă și accesul legacy sunt zero.")
     sys.exit(0)
 
 

@@ -3,6 +3,12 @@
 Internal audit artifact. This document is a plan only; it does not authorize code,
 configuration, process, deployment, or live-order changes.
 
+Status snapshot (2026-08-23): B07's immediate correctness fixes are deployed on
+`main@42ee397`: guarded refusal handling, unavailable-balance semantics, the global
+recent-trade gate, finite input checks, post-trade BUY cap, own-ledger SELL cap and
+caller-owned strategy retry. Durable hard-TP lifecycle/cooldown reconciliation remains
+open and belongs with B01/B02; it is not a quick follow-up.
+
 ## Audit basis and invariants
 
 - Scope: active Binance fleet, Binance API adapter, shared execution and persistence

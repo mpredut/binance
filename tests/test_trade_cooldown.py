@@ -7,7 +7,7 @@ from lock import trade_cooldown as tc
 
 
 def _proc_attempt(state_file, lock_file, q):
-    # rulează în proces copil (fork): folosește aceleași fișiere de stare/lock
+    # Runs in a spawned child and uses the same state/lock files.
     tc.STATE_FILE = state_file
     tc.LOCK_FILE = lock_file
     ok, _ = tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)
@@ -71,9 +71,9 @@ class TestTradeCooldown(unittest.TestCase):
         self.assertEqual(sum(1 for r in results if r), 1)   # un singur câștigător
 
     def test_concurrent_processes_single_winner(self):
-        # 10 PROCESE (fork) lansează simultan pe ACELAȘI simbol → exact UNUL trece.
-        # Dovedește mutual-exclusion-ul fcntl.flock cross-PROCES (nu doar cross-thread).
-        ctx = mp.get_context("fork")
+        # Spawn avoids forking the suite's background threads on Python 3.14 while
+        # preserving the cross-process flock contract under test.
+        ctx = mp.get_context("spawn")
         q = ctx.Queue()
         procs = [ctx.Process(target=_proc_attempt, args=(tc.STATE_FILE, tc.LOCK_FILE, q))
                  for _ in range(10)]
@@ -82,6 +82,8 @@ class TestTradeCooldown(unittest.TestCase):
         for p in procs:
             p.join(timeout=10)
         results = [q.get() for _ in range(10)]
+        q.close()
+        q.join_thread()
         self.assertEqual(sum(1 for r in results if r), 1)   # un singur câștigător
 
     # ─── RAII / trade_slot ────────────────────────────────────────────────────

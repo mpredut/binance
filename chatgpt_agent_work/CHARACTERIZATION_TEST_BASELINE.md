@@ -18,7 +18,7 @@ mechanical refactor.
 - BUY versus SELL;
 - final price and quantity;
 - full versus fractional exit;
-- force/pair/safeback flags;
+- force/safeback, explicit guard bypass and retry-ownership flags;
 - retry enqueue/dequeue behaviour;
 - cooldown and concurrency behaviour;
 - persistence across trailing-stop restart.
@@ -36,7 +36,7 @@ mechanical refactor.
   tests/test_trailing_stop.py
 ```
 
-Result on 2026-08-19:
+Original result on 2026-08-19:
 
 ```text
 89 passed
@@ -50,12 +50,19 @@ Result on 2026-08-19:
 2. hard-TP fraction, `force=True`, and early return after a successful hard-TP;
 3. normal take-profit selling the entire free balance;
 4. UP trend blocking normal take-profit;
-5. loss exit selling the entire free balance with `pair=True`;
+5. loss exit using explicit `bypass_profit_guard=True` and caller-owned retry;
 6. buyback quantity calculated as `buy_budget / current_price`;
 7. buyback price using the configured fixed offset;
 8. maximum-exposure gate based on `free_qty * current_price`;
 9. average BUY reference changing the sell decision;
-10. venue minimum-quantity interaction with hard-TP.
+10. venue minimum-quantity interaction with hard-TP;
+11. refusal is not reported as a submitted order and does not start hard-TP cooldown;
+12. unavailable balance remains distinct from a real zero balance;
+13. NaN/infinite prices and invalid hard-TP fractions cannot reach execution;
+14. the global recent-trade gate blocks both sides;
+15. own-ledger exits cannot sell unattributed free holdings;
+16. BUY exposure caps include the proposed order, not only current holdings;
+17. loss exits traverse the real common guard pipeline.
 
 ## Characterized surprising behaviour
 
@@ -68,7 +75,7 @@ This baseline intentionally records that behaviour.  Whether it is desirable mus
 be decided as a separate product/risk change.  It must not be silently changed by
 the structural refactor.
 
-## Full-suite state after Kraken reconciliation
+## Current verified state
 
 Full command:
 
@@ -76,10 +83,10 @@ Full command:
 .venv/bin/python -m pytest -q
 ```
 
-Verified result on 2026-08-19:
+Verified on 2026-08-23 after monitortrades hardening:
 
 ```text
-591 passed, 185 subtests passed
+948 passed, 273 subtests passed
 ```
 
 The lower top-level count is the result of the test-suite consolidation documented
@@ -105,7 +112,7 @@ pass.
 
 ## Safety rules for future refactors
 
-1. Run the 89-test baseline before and after every risk/execution refactor.
+1. Run the baseline command above before and after every risk/execution refactor.
 2. No baseline test may access a real API or runtime state file.
 3. A changed assertion requires an explicit financial-behaviour decision.
 4. Bug fixes get a separate desired-behaviour test and commit.

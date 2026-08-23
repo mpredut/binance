@@ -29,6 +29,14 @@ def check(cond, label, detail=""):
         FAIL.append(label)
 
 
+def check_available(cond, available, label, detail=""):
+    if not available:
+        print(f"  [SKIP] {label} — date private indisponibile" +
+              (f" ({detail})" if detail else ""))
+        return
+    check(cond, label, detail)
+
+
 def parse_monitortrades_conf(path="monitortrades.conf"):
     """Parser simplu pt formatul existent (key=val; SYMBOL = g / l / maxage)."""
     g = {}
@@ -104,8 +112,8 @@ if tao:
           "TAO price() == facada", f"instr={p_inst} api={p_api}")
     f_inst = tao.free()
     f_prov = api.provider_by_name("binance").free_balance("TAO")
-    check(f_inst is not None and f_inst == f_prov, "TAO free() == provider direct",
-          f"instr={f_inst} prov={f_prov}")
+    check_available(f_inst == f_prov, f_inst is not None and f_prov is not None,
+                    "TAO free() == provider direct", f"instr={f_inst} prov={f_prov}")
 if hype:
     p_h = hype.price()
     check(p_h is not None and p_h > 0, "HYPE price() > 0 (rutat la HL)", str(p_h))

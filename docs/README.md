@@ -8,6 +8,8 @@ lângă codul lor (convenție — sunt linkate mai jos).
   **capcane & lecții** (lock-leak fd, hang vs crash, co-mingling DN, bit execuție, quoting) + diagnostic.
 - [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) — refacere completă pe VM nou (sămânța DR,
   backup secrete, restore.sh), backup periodic, ce e/nu e în git.
+- [VERIFICATION_STATUS.md](VERIFICATION_STATUS.md) — ultima verificare reproductibilă,
+  limitările mediului local și suprapunerile intenționate de ownership.
 
 ## Design & strategie (de ce-uri durabile)
 - [STRATEGY.md](STRATEGY.md) — logica de trading: detecție trend (lag +48h, curbă de
