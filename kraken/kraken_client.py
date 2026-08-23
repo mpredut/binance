@@ -37,6 +37,7 @@ API_URL = "https://api.kraken.com"
 # Nu acopera cross-PROCES (fiecare proces are cache propriu); TTL-ul margineste decalajul.
 _CACHE = {}                       # (method, params_key) -> (expiry_ts, result)
 _CACHE_LOCK = threading.Lock()
+_CACHE_MAX = 1024
 _READ_TTL = {                     # secunde; metodele NElistate NU se cacheaza (ex. QueryOrders)
     "Ticker": 3.0, "AssetPairs": 3600.0, "OHLC": 900.0,   # OHLC pt semnalul de trend lung (15min)
     "Balance": 15.0, "TradesHistory": 20.0, "ClosedOrders": 20.0, "OpenOrders": 5.0,
@@ -51,15 +52,24 @@ def _params_key(params: dict) -> tuple:
 
 def _cache_get(method: str, params: dict):
     with _CACHE_LOCK:
-        hit = _CACHE.get((method, _params_key(params)))
-    if hit and hit[0] > time.time():
-        return True, hit[1]
+        now = time.time()
+        key = (method, _params_key(params))
+        hit = _CACHE.get(key)
+        if hit and hit[0] > now:
+            return True, hit[1]
+        _CACHE.pop(key, None)
     return False, None
 
 
 def _cache_put(method: str, params: dict, ttl: float, result) -> None:
     with _CACHE_LOCK:
-        _CACHE[(method, _params_key(params))] = (time.time() + ttl, result)
+        now = time.time()
+        for key in [key for key, value in _CACHE.items() if value[0] <= now]:
+            _CACHE.pop(key, None)
+        if len(_CACHE) >= _CACHE_MAX:
+            oldest = min(_CACHE, key=lambda key: _CACHE[key][0])
+            _CACHE.pop(oldest, None)
+        _CACHE[(method, _params_key(params))] = (now + ttl, result)
 
 
 def _cache_invalidate(methods) -> None:

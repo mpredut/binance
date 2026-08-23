@@ -59,6 +59,17 @@ class PublicCacheTest(unittest.TestCase):
 
         self.assertEqual(closes, [10.0, 11.0])
 
+    def test_cache_prunes_expired_and_enforces_hard_cap(self):
+        with mock.patch.object(kc, "_CACHE_MAX", 2), \
+             mock.patch.object(kc.time, "time", return_value=100.0):
+            kc._CACHE[("Ticker", (("pair", "OLD"),))] = (99.0, {"old": 1})
+            kc._cache_put("Ticker", {"pair": "A"}, 3.0, {"a": 1})
+            kc._cache_put("Ticker", {"pair": "B"}, 4.0, {"b": 1})
+            kc._cache_put("Ticker", {"pair": "C"}, 5.0, {"c": 1})
+        self.assertEqual(len(kc._CACHE), 2)
+        self.assertNotIn(("Ticker", (("pair", "OLD"),)), kc._CACHE)
+        self.assertNotIn(("Ticker", (("pair", "A"),)), kc._CACHE)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

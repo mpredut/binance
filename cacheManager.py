@@ -1,5 +1,6 @@
 import bisect
 import json
+import glob
 import os
 import contextlib
 import time
@@ -125,6 +126,7 @@ class CacheManagerInterface(ABC):
     MAX_FILE_BYTES             = 1_000_000_000    # ~1 GB: peste asta → rotație
     RETENTION_CHECK_INTERVAL_SEC = 7 * 24 * 3600  # verificare săptămânală
     ROTATE_KEEP_FRACTION       = 0.10             # la rotație păstrăm ultimele 10%
+    ROTATE_ARCHIVE_COUNT       = 2                # nu acumulam arhive de ~1GB indefinit
     RESYNC_INTERVAL_SEC        = 10 * 60          # reconciliere mem↔fișier la 10 min
     DEDUP_WINDOW               = 100             # dedup per-update doar față de ultimele N items
 
@@ -486,6 +488,15 @@ class CacheManagerInterface(ABC):
                 self.cache[symbol] = items[-keep_n:]
             self._persisted_counts = {}
             self.compact_jsonl()   # rescrie fișierul curent doar cu ce-am păstrat
+            prefix = f"{self.filename}."
+            archives = sorted(
+                (path for path in glob.glob(prefix + "*.archive")),
+                key=lambda path: os.path.getmtime(path), reverse=True)
+            for old_archive in archives[self.ROTATE_ARCHIVE_COUNT:]:
+                try:
+                    os.remove(old_archive)
+                except OSError:
+                    pass
         builtins.print(f"[{self.cls_name}][maintain] ROTAȚIE: arhivat → {archive}, "
                        f"păstrat ultimele {int(self.ROTATE_KEEP_FRACTION*100)}%")
 

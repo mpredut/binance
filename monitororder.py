@@ -1,6 +1,7 @@
 import time
 import datetime
 import random
+from collections import OrderedDict
 
 ####Binance
 from binance.client import Client
@@ -18,9 +19,29 @@ from providers.market_api import api as mkt   # proxy unic guardat (Instrument.p
 # 
 MAX_PROC = 0.77
 monitor_interval = 3.7
-initial_prices = {}  # Dictionar pentru a retine preturile initiale ale ordinelor
-initial_sell_prices = {}  # Dictionar pentru a retine preturile initiale ale ordinelor de vanzare
-initial_buy_prices = {}  # Dictionar pentru a retine preturile initiale ale ordinelor de cumparare
+MAX_TRACKED_ORDER_IDS = 10_000
+MAX_FAILED_ORDERS = 500
+initial_prices = OrderedDict()
+initial_sell_prices = OrderedDict()
+initial_buy_prices = OrderedDict()
+
+
+def _remember_initial_price(cache, order_id, price):
+    cache[order_id] = price
+    cache.move_to_end(order_id)
+    while len(cache) > MAX_TRACKED_ORDER_IDS:
+        cache.popitem(last=False)
+
+
+def _remember_failed_order(failed_orders, record):
+    key = (record["symbol"], record["order_type"])
+    failed_orders[:] = [
+        item for item in failed_orders
+        if (item["symbol"], item["order_type"]) != key
+    ]
+    failed_orders.append(record)
+    if len(failed_orders) > MAX_FAILED_ORDERS:
+        del failed_orders[:-MAX_FAILED_ORDERS]
 
 import time
 
@@ -52,7 +73,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
             continue
 
         if order_id not in initial_prices:
-            initial_prices[order_id] = price
+            _remember_initial_price(initial_prices, order_id, price)
 
         difference_percent = abs(current_price - price) / price * 100
         print(f"{order_type.capitalize()} price {price}, current price {current_price} difference: {difference_percent:.2f}%, Order ID {order_id}")
@@ -90,12 +111,13 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
                     'price': new_price,
                     'quantity': quantity
                 }
-                initial_prices[new_order['orderId']] = initial_prices.pop(order_id)  # Pastram pretul initial
+                _remember_initial_price(
+                    initial_prices, new_order['orderId'], initial_prices.pop(order_id))
                 print(f"Updated order from {price} to {new_price}. New ID: {new_order['orderId']}")
             else:
                 # Save fail order
                 print(f"Eroare la plasarea noului ordin de {order_type}.")
-                failed_orders.append({
+                _remember_failed_order(failed_orders, {
                     'order_type': order_type,
                     'symbol': symbol,
                     'price': new_price,
