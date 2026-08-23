@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
 """
-kraken_cachemanager.py — cache PARTAJAT cross-proces de fills Kraken (HYPE multi-proces).
+kraken_cachemanager.py — cross-process SHARED Kraken fill cache for multi-process HYPE trading.
 
-DE CE: 2-3 procese tranzactioneaza HYPE pe ACELASI cont Kraken. Daca fiecare isi citeste
-singur TradesHistory: (1) gardul de profit e ORB cross-proces (procesul B nu vede sell-ul
-tocmai pus de A pana-i expira cache-ul TTL) -> ar putea cumpara peste sell-ul lui A; si
-(2) lovesti rate-limit-ul Kraken (numarat per CHEIE/cont). Solutia (modelul cacheManager
-Binance): UN proces tine fills-urile intr-un FISIER COMUN; toate procesele de trading
-CITESC de acolo (via KrakenProvider). Asa: vedere comuna -> gard corect cross-proces +
-un singur fetcher -> rate-limit minim.
+WHY: two or three processes trade HYPE on the SAME Kraken account. If each reads
+TradesHistory independently, the profit guard is blind across processes until TTL expiry,
+so process B might buy above process A's recent sell. The combined traffic can also hit
+Kraken's per-key/account rate limit. Following the Binance cacheManager model, ONE process
+stores fills in a COMMON file and every trading process reads it through KrakenProvider.
+This provides a shared view for correct cross-process guards and minimizes API fetches.
 
-Doua moduri (KRAKEN_CACHE_MODE):
-  poll (DEFAULT) = poller REST (TradesHistory la POLL_INTERVAL). Decalaj ~POLL_INTERVAL.
-  ws             = WebSocket `ownTrades` real-time (zero-lag) pt scalping SUB 5s.
-                   Cod COMPLET, ready, dar NEACTIV implicit. Necesita `pip install
-                   websocket-client`. Il pornesti cu KRAKEN_CACHE_MODE=ws in env.
+Two KRAKEN_CACHE_MODE values:
+  poll (DEFAULT) = REST Ledgers poller at POLL_INTERVAL, with similar propagation lag.
+  ws             = real-time, zero-lag `ownTrades` WebSocket for sub-five-second scalping.
+                   The implementation is complete but disabled by default. It requires
+                   `websocket-client` and KRAKEN_CACHE_MODE=ws in the environment.
 
-Cheie: perechea DEDICATA _CACHE (KRAKEN_API_KEY_CACHE/_SECRET_CACHE) -> secventa de nonce proprie,
-separata de procesele de trading. Fallback pe cheia _BOT daca _CACHE lipseste.
+Credentials: the dedicated _CACHE pair has its own nonce sequence, separate from trading
+processes. Fall back to _BOT credentials when _CACHE is absent.
 
-Format fisier = COMPATIBIL cu cache_trade.json Binance: {"items": {symbol: [trade]}, "fetchtime"}
-cu trade = {symbol,id,orderId,price,qty,time,isBuyer} -> KrakenProvider il citeste cu aceeasi logica.
+The file format is compatible with Binance cache_trade.json: {"items": {symbol: [trade]},
+"fetchtime"}, where trade contains symbol,id,orderId,price,qty,time,isBuyer. KrakenProvider
+therefore reads it with the same logic.
 
-Ruleaza:  cd kraken && python kraken_cachemanager.py
+Run: cd kraken && python kraken_cachemanager.py
 """
 import os
 import sys
@@ -33,31 +33,31 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from kraken_common import load_dotenv, log, single_instance
 from kraken_client import KrakenClient
 
-# ── config (din env, cu default-uri) ─────────────────────────────────────────
+# ── configuration from environment with defaults ─────────────────────────────
 PAIRS = [p for p in os.environ.get("KRAKEN_CACHE_PAIRS", "HYPEUSD").split(",") if p]
-POLL_INTERVAL = float(os.environ.get("KRAKEN_CACHE_POLL_S", "30"))   # Ledgers e GREU si TOATE procesele Kraken
-                                                                     # impart contorul de cont -> 5s = rate-limit; 30s e
-                                                                     # suficient pt gardul de profit (sub-5s = modul ws)
-POLL_BACKOFF_INIT = float(os.environ.get("KRAKEN_CACHE_BACKOFF_INIT_S", "10"))   # prima pauza dupa eroare
-POLL_BACKOFF_MAX = float(os.environ.get("KRAKEN_CACHE_BACKOFF_MAX_S", "120"))    # max 2 min (sub pragul watchdog 20 min)
+POLL_INTERVAL = float(os.environ.get("KRAKEN_CACHE_POLL_S", "30"))   # Ledgers is expensive and all Kraken processes
+                                                                     # share the account counter: 5s hits rate limits;
+                                                                     # 30s suffices for the guard; use WS below 5s
+POLL_BACKOFF_INIT = float(os.environ.get("KRAKEN_CACHE_BACKOFF_INIT_S", "10"))   # first pause after error
+POLL_BACKOFF_MAX = float(os.environ.get("KRAKEN_CACHE_BACKOFF_MAX_S", "120"))    # max 2 min, below 20-min watchdog limit
 MODE = os.environ.get("KRAKEN_CACHE_MODE", "poll").strip().lower()   # poll | ws
-WS_URL = "wss://ws-auth.kraken.com/"      # endpoint AUTENTIFICAT (canalul privat ownTrades)
+WS_URL = "wss://ws-auth.kraken.com/"      # authenticated endpoint for private ownTrades
 CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                           "cachedb", "cache_trade_kraken.json")
-LEDGER_LOOKBACK_S = float(os.environ.get("KRAKEN_CACHE_LOOKBACK_H", "336")) * 3600   # default 14 zile
-# active de cotare (USD-like) -> sufixul de symbol; restul (HYPE, BTC...) = base
+LEDGER_LOOKBACK_S = float(os.environ.get("KRAKEN_CACHE_LOOKBACK_H", "336")) * 3600   # default 14 days
+# USD-like quote assets map to symbol suffixes; all others (HYPE, BTC, etc.) are base assets.
 _QUOTE = {"ZUSD": "USD", "USD": "USD", "USDC": "USDC", "USDG": "USDG", "ZEUR": "EUR"}
 
 
 def _normalize(txid, tr):
-    """O tranzactie din TradesHistory / ownTrades Kraken -> forma comuna (ca trade-urile Binance)."""
+    """Normalize a Kraken TradesHistory/ownTrades transaction to the Binance-compatible form."""
     return {
         "symbol": tr.get("pair"),
         "id": str(txid),
         "orderId": tr.get("ordertxid"),
         "price": tr.get("price"),
         "qty": tr.get("vol"),
-        "time": int(float(tr.get("time", 0)) * 1000),   # Kraken da secunde float -> ms
+        "time": int(float(tr.get("time", 0)) * 1000),   # Kraken float seconds -> milliseconds
         "isBuyer": (tr.get("type") == "buy"),
     }
 
@@ -67,21 +67,21 @@ def _atomic_write(path, obj):
     tmp = path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(obj, f, indent=1)
-    os.replace(tmp, path)            # atomic: cititorii nu vad fisier pe jumatate scris
+    os.replace(tmp, path)            # atomic: readers never see a partially written file
 
 
 def _ledger_to_fills(ledger):
-    """Grupeaza intrarile Ledgers pe refid -> fills {symbol,id,orderId,price,qty,time,isBuyer}.
-    UNIFICA spot (type=trade) + instant-buy/convert (type=receive/spend): fiecare are un leg
-    BASE (HYPE) + un leg QUOTE (USD-like), acelasi refid. Ignora staking/deposit/withdrawal
-    (un singur leg). Pretul = |quote| / |base|; isBuyer = primit base (>0)."""
+    """Group Ledgers entries by refid into normalized fills.
+    Unify spot trades with instant-buy/convert receive/spend records: each has one BASE
+    leg and one USD-like QUOTE leg sharing a refid. Ignore single-leg staking, deposits,
+    and withdrawals. Price is |quote| / |base|; receiving base means isBuyer=True."""
     by_ref = {}
     for x in ledger.values():
         by_ref.setdefault(x.get("refid"), []).append(x)
     fills = []
     for refid, legs in by_ref.items():
         if len(legs) < 2:
-            continue                                      # un singur leg -> staking/deposit, nu trade
+            continue                                      # one leg means staking/deposit, not a trade
         quote = next((l for l in legs if str(l.get("asset", "")).upper() in _QUOTE), None)
         base = next((l for l in legs if l is not quote and str(l.get("asset", "")).upper() not in _QUOTE), None)
         if not quote or not base or str(base.get("type")) not in ("trade", "receive", "spend"):
@@ -97,15 +97,15 @@ def _ledger_to_fills(ledger):
             "id": str(refid), "orderId": str(refid),
             "price": abs(qa) / abs(ba), "qty": abs(ba),
             "time": int(float(base.get("time", 0)) * 1000),
-            "isBuyer": ba > 0,                            # primit base = cumparare
+            "isBuyer": ba > 0,                            # receiving base means a purchase
         })
     return fills
 
 
 def _fetch_rest_into(client, cache):
-    """Un fetch LEDGERS (UNIFICAT: spot + instant-buy/convert) -> umple cache pe symbol.
-    Folosit de poll SI de seed-ul WS. Sursa unica de adevar pt ORICE executie — TradesHistory
-    spot NU vede instant-buy-urile (vezi incidentul 06:47: cumparare instant invizibila acolo)."""
+    """Fetch unified Ledgers data (spot + instant-buy/convert) into the per-symbol cache.
+    Used by both polling and the initial WS seed. Ledgers is the source of truth for every
+    execution because spot TradesHistory does not include instant buys."""
     res = client._private("Ledgers", {"start": int(time.time() - LEDGER_LOOKBACK_S)}, fresh=True)
     fills = _ledger_to_fills((res or {}).get("ledger", {}) or {})
     by_sym = {}
@@ -114,14 +114,14 @@ def _fetch_rest_into(client, cache):
             continue
         by_sym.setdefault(f["symbol"], []).append(f)
     for sym, lst in by_sym.items():
-        lst.sort(key=lambda t: t["time"])                # crescator -> ultimul = cel mai recent
+        lst.sort(key=lambda t: t["time"])                # ascending, so the last item is newest
         cache["items"][sym] = lst
         cache["fetchtime"][sym] = int(time.time() * 1000)
 
 
 def poll_loop(client):
-    """V1 (default): la fiecare POLL_INTERVAL ia Ledgers, scrie fisierul.
-    Backoff exponential la eroare (rate-limit/nonce) -> nu mai bate Kraken la infinit."""
+    """Default V1 loop: fetch Ledgers and write the file every POLL_INTERVAL.
+    Exponential backoff on rate-limit/nonce errors avoids repeatedly hammering Kraken."""
     cache = {"items": {}, "fetchtime": {}}
     backoff = POLL_BACKOFF_INIT
     while True:
@@ -130,7 +130,7 @@ def poll_loop(client):
             _atomic_write(CACHE_FILE, cache)
             log(f"[kraken_cache][poll] {sum(len(v) for v in cache['items'].values())} fills "
                 f"pt {list(cache['items'].keys())}")
-            backoff = POLL_BACKOFF_INIT   # reset dupa succes
+            backoff = POLL_BACKOFF_INIT   # reset after success
             time.sleep(POLL_INTERVAL)
         except Exception as e:
             log(f"[kraken_cache][poll] eroare (backoff {backoff:.0f}s): {e}")
@@ -138,23 +138,23 @@ def poll_loop(client):
             backoff = min(backoff * 2, POLL_BACKOFF_MAX)
 
 
-# ── WS `ownTrades` (real-time, ZERO-LAG) — COMPLET, ready, NEACTIV implicit ───
-# Activare: KRAKEN_CACHE_MODE=ws. Necesita `pip install websocket-client`.
+# ── Real-time ZERO-LAG `ownTrades` WS; complete but disabled by default ────────
+# Enable with KRAKEN_CACHE_MODE=ws; requires `websocket-client`.
 def _ws_token(client):
-    """Token efemer pt WS privat (valabil ~15 min; il reiei la fiecare reconnect)."""
+    """Return a short-lived private-WS token, refreshed on every reconnect."""
     return client._private("GetWebSocketsToken", fresh=True)["token"]
 
 
 def ws_loop(client):
-    """Real-time: subscribe ownTrades (DOAR spot!) -> scrie fisierul la FIECARE fill (zero-lag).
-    Seed initial din Ledgers (unificat, prinde si instant-buy-urile EXISTENTE) + reconnect automat.
-    LIMITARE: instant-buy-urile NOI in timpul WS nu vin pe ownTrades (sunt off-orderbook) -> cand
-    activezi WS, adauga un re-poll Ledgers periodic (ex 30s) ca sa le prinzi si pe alea."""
-    import websocket  # lazy: doar in modul WS, ca poll-ul sa mearga fara dependenta
+    """Subscribe to spot-only ownTrades and write every fill with zero lag.
+    Seed from unified Ledgers, including existing instant buys, and reconnect automatically.
+    Limitation: new off-orderbook instant buys do not appear on ownTrades. A WS deployment
+    therefore also needs periodic Ledgers polling, for example every 30 seconds."""
+    import websocket  # lazy so poll mode works without the dependency
 
     cache = {"items": {}, "fetchtime": {}}
     try:
-        _fetch_rest_into(client, cache)      # snapshot initial
+        _fetch_rest_into(client, cache)      # initial snapshot
         _atomic_write(CACHE_FILE, cache)
     except Exception as e:
         log(f"[kraken_cache][ws] seed REST esuat: {e}")
@@ -190,7 +190,7 @@ def ws_loop(client):
                     cache["fetchtime"][n["symbol"]] = int(time.time() * 1000)
                     changed = True
         if changed:
-            _atomic_write(CACHE_FILE, cache)             # scriere INSTANT la fill -> zero-lag
+            _atomic_write(CACHE_FILE, cache)             # immediate fill write for zero lag
 
     def on_error(ws, err):
         log(f"[kraken_cache][ws] error: {err}")
@@ -199,7 +199,7 @@ def ws_loop(client):
         try:
             ws = websocket.WebSocketApp(WS_URL, on_open=on_open,
                                         on_message=on_message, on_error=on_error)
-            ws.run_forever(ping_interval=20, ping_timeout=10)   # reconnect la deconectare
+            ws.run_forever(ping_interval=20, ping_timeout=10)   # reconnect after disconnection
         except Exception as e:
             log(f"[kraken_cache][ws] run_forever: {e}")
         log("[kraken_cache][ws] deconectat; reconnect in 5s")
@@ -207,12 +207,12 @@ def ws_loop(client):
 
 
 def main():
-    single_instance("kraken_cachemanager")   # o singura instanta (un singur fetcher -> rate-limit minim)
+    single_instance("kraken_cachemanager")   # one instance/fetcher minimizes rate-limit usage
     load_dotenv(".env")
     load_dotenv("config.env")
-    # Cheia DEDICATA a cachemanager-ului (_CACHE) -> secventa de nonce PROPRIE, separata
-    # de procesele de trading (_BOT/_TRAIL). Asa nu se ciocnesc nonce-urile (Kraken cere
-    # nonce strict crescator per cheie). Fallback pe cheia _BOT daca _CACHE lipseste.
+    # The cache manager's dedicated _CACHE key has its own nonce sequence, separate from
+    # _BOT/_TRAIL trading processes. Kraken requires strictly increasing nonces per key,
+    # so this avoids collisions. Fall back to _BOT if _CACHE is absent.
     key = os.environ.get("KRAKEN_API_KEY_CACHE") or os.environ.get("KRAKEN_API_KEY_BOT")
     secret = os.environ.get("KRAKEN_API_SECRET_CACHE") or os.environ.get("KRAKEN_API_SECRET_BOT")
     used_ws_key = bool(os.environ.get("KRAKEN_API_KEY_CACHE") and os.environ.get("KRAKEN_API_SECRET_CACHE"))
@@ -222,7 +222,7 @@ def main():
     log(f"[kraken_cache] start: mode={MODE} cheie={'_CACHE dedicata' if used_ws_key else '_BOT (fallback)'} "
         f"pairs={PAIRS} poll={POLL_INTERVAL}s -> {CACHE_FILE}")
     if MODE == "ws":
-        ws_loop(client)        # real-time (necesita websocket-client)
+        ws_loop(client)        # real-time; requires websocket-client
     else:
         poll_loop(client)      # REST (default)
 
