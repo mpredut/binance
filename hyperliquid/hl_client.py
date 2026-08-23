@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-hl_client.py — client Hyperliquid peste SDK-ul oficial.
+hl_client.py — Hyperliquid client built on the official SDK.
 
-Citiri (Info, fara semnatura): preturi, pozitii, ordine deschise, sold.
-Tranzactionare (Exchange, semnatura EIP-712 cu agent wallet): plasare/anulare ordine.
+Reads (unsigned Info API): prices, positions, open orders, and balances.
+Trading (Exchange API, EIP-712 agent-wallet signature): place and cancel orders.
 
-Model: PERP long-only (HYPE perp e lichid). La levier mic (1x) e cvasi-spot,
-lichidarea e foarte departe. "buy" = deschide/mareste long; "TP" = reduce long.
+Model: long-only perpetuals; the HYPE perpetual is liquid. At low 1x leverage it
+behaves approximately like spot with a distant liquidation price. "buy" opens or
+increases a long position, while "TP" reduces it.
 
-Necesita rularea cu python-ul din venv-ul cu SDK:
+Run with the Python interpreter from the SDK virtual environment:
     /home/mariusp/binance/.venv/bin/python hl_bot.py
 """
 
@@ -34,24 +35,24 @@ class HLError(Exception):
 
 
 def _round_px(px: float, sz_decimals: int, is_perp: bool = True) -> float:
-    """Pretul HL: max 5 cifre semnificative si max (6/8 - szDecimals) zecimale."""
+    """Round an HL price to 5 significant figures and at most (6/8 - szDecimals) decimals."""
     if px <= 0:
         return px
     max_dec = (6 if is_perp else 8) - sz_decimals
-    px = float(f"{px:.5g}")           # 5 cifre semnificative
+    px = float(f"{px:.5g}")           # five significant figures
     return round(px, max(max_dec, 0))
 
 
 def _force_timeout(api_obj, seconds: float = 30.0) -> None:
-    """SDK-ul HL (requests) NU seteaza read-timeout: o cerere pe o conexiune
-    keep-alive moarta (net taiat) ar bloca procesul LA NESFARSIT, fara eroare.
-    Fortam timeout implicit pe sesiunea requests a obiectului API."""
+    """Force a default timeout on the API object's requests session.
+    The HL SDK does not set a read timeout, so a request on a dead keep-alive
+    connection could otherwise block the process indefinitely without an error."""
     try:
-        # Hyperliquid SDK-ul curent apeleaza explicit
-        # ``session.post(..., timeout=self.timeout)``. Valoarea lui implicita
-        # este None, asa ca simplul ``setdefault`` de mai jos nu avea efect:
-        # cheia exista deja si requests ramanea fara deadline. Setam si
-        # atributul SDK-ului, iar wrapperul trateaza explicit timeout=None.
+        # The current Hyperliquid SDK explicitly calls
+        # ``session.post(..., timeout=self.timeout)``. Its default is None, so a
+        # simple setdefault had no effect because the key already existed and
+        # requests remained deadline-free. Set the SDK attribute as well, and
+        # have the wrapper explicitly replace timeout=None.
         if getattr(api_obj, "timeout", None) is None:
             api_obj.timeout = seconds
         sess = api_obj.session
@@ -63,7 +64,7 @@ def _force_timeout(api_obj, seconds: float = 30.0) -> None:
             return orig(*a, **kw)
 
         sess.request = _req
-    except Exception:  # noqa: BLE001 — daca SDK-ul isi schimba interna, nu blocam pornirea
+    except Exception:  # noqa: BLE001 — do not block startup if SDK internals change
         pass
 
 
@@ -75,10 +76,11 @@ class HLClient:
                           f"(ruleaza cu python-ul din .venv)")
         self.base = constants.MAINNET_API_URL if mainnet else constants.TESTNET_API_URL
         self.info = Info(self.base, skip_ws=True)
-        # REZILIENTA: SDK-ul nu pune read-timeout. Pe CITIRI (info: mid/spot_mid/
-        # position/funding) fail-fast la 10s — in panele HL (502/504) apelurile de 30s
-        # inlantuite depaseau fereastra de heartbeat (600s dn_bot) -> healthcheck il
-        # declara HUNG si-l omora. 10s = pica repede, bucla isi bate heartbeat-ul.
+        # RESILIENCE: the SDK has no read timeout. Fail Info reads (mid/spot_mid/
+        # position/funding) after 10 seconds. During HL 502/504 incidents, chained
+        # 30-second calls exceeded dn_bot's 600-second heartbeat window, causing the
+        # health check to declare it hung and terminate it. Ten seconds fails quickly
+        # enough for the loop to refresh its heartbeat.
         _force_timeout(self.info, seconds=10)
         self.address = account_address
         self.exchange = None
@@ -89,7 +91,7 @@ class HLClient:
             _force_timeout(self.exchange)
         self._meta_cache: dict[str, dict] = {}
 
-    # ----- meta / preturi ------------------------------------------------------
+    # ----- metadata / prices --------------------------------------------------
     def _meta(self) -> dict:
         if not self._meta_cache:
             for a in self.info.meta().get("universe", []):
@@ -114,16 +116,16 @@ class HLClient:
             log(f"  ! mid({coin}) esuat: {e}")
             return None
 
-    # ----- cont (read-only, doar adresa) --------------------------------------
+    # ----- account (read-only, address only) ----------------------------------
     def _user_state(self) -> dict:
         if not self.address:
             raise HLError("HL_ACCOUNT_ADDRESS lipsa")
         return self.info.user_state(self.address)
 
     def position_strict(self, coin: str) -> tuple[float, float]:
-        """Ca position(), dar RIDICA exceptia la eroare API — pt cod care trebuie
-        sa distinga 'nu am pozitie' (0) de 'nu stiu' (ex. delta-neutral, unde un
-        0 fals ar duce la deschiderea unui picior dublu)."""
+        """Return position data while propagating API errors.
+        Use when code must distinguish no position (0) from unknown state, such as
+        delta-neutral logic where a false zero could open a duplicate leg."""
         for ap in self._user_state().get("assetPositions", []):
             p = ap.get("position", {})
             if p.get("coin") == coin:
@@ -131,8 +133,8 @@ class HLClient:
         return 0.0, 0.0
 
     def position(self, coin: str) -> tuple[float, float]:
-        """(szi, entryPx) pentru coin. szi>0 = long. (0,0) daca nu exista pozitie
-        SAU la eroare API (logata)."""
+        """Return (szi, entryPx) for a coin, where szi>0 is long.
+        Return (0, 0) when no position exists or after a logged API error."""
         try:
             return self.position_strict(coin)
         except HLError:
@@ -157,10 +159,10 @@ class HLClient:
             return []
         return [o for o in oo if coin is None or o.get("coin") == coin]
 
-    # ----- SPOT + funding (citiri) --------------------------------------------
+    # ----- SPOT + funding reads -----------------------------------------------
     def resolve_spot_pair(self, token: str) -> str | None:
-        """Gaseste automat perechea spot TOKEN/USDC (@index) din spotMeta —
-        generic pt orice token (HYPE -> @107, USOL -> @156, PURR -> PURR/USDC)."""
+        """Resolve a TOKEN/USDC spot pair (@index) from spotMeta for any token,
+        such as HYPE -> @107, USOL -> @156, or PURR -> PURR/USDC."""
         try:
             m = self.info.spot_meta()
             tokens = {t.get("name"): t.get("index") for t in m.get("tokens", [])}
@@ -175,7 +177,7 @@ class HLClient:
         return None
 
     def spot_mid(self, pair: str) -> float | None:
-        """Pret spot pentru perechea @index (ex @107 = HYPE/USDC)."""
+        """Return the spot price for an @index pair, e.g. @107 = HYPE/USDC."""
         try:
             v = self.info.all_mids().get(pair)
             return float(v) if v is not None else None
@@ -184,7 +186,7 @@ class HLClient:
             return None
 
     def spot_balance_strict(self, token: str) -> float:
-        """Ca spot_balance(), dar RIDICA exceptia la eroare API (vezi position_strict)."""
+        """Return spot balance while propagating API errors; see position_strict."""
         if not self.address:
             raise HLError("HL_ACCOUNT_ADDRESS lipsa")
         for b in self.info.spot_user_state(self.address).get("balances", []):
@@ -193,8 +195,8 @@ class HLClient:
         return 0.0
 
     def spot_balance(self, token: str) -> float:
-        """Cantitatea detinuta din token-ul spot (ex 'HYPE', 'USDC').
-        0.0 daca nu exista SAU la eroare API (logata)."""
+        """Return the held quantity of a spot token such as HYPE or USDC.
+        Return 0.0 when absent or after a logged API error."""
         try:
             return self.spot_balance_strict(token)
         except Exception as e:  # noqa: BLE001
@@ -202,7 +204,7 @@ class HLClient:
         return 0.0
 
     def funding_rate(self, coin: str) -> float | None:
-        """Rata de funding curenta (pe ora) a perp-ului. Pozitiv = long platesc short."""
+        """Return the current hourly perpetual funding rate; positive means longs pay shorts."""
         try:
             meta, ctxs = self.info.meta_and_asset_ctxs()
             for i, a in enumerate(meta["universe"]):
@@ -213,7 +215,7 @@ class HLClient:
         return None
 
     def position_full(self, coin: str) -> dict | None:
-        """Pozitia perp completa: szi, entryPx, liquidationPx, unrealizedPnl, marginUsed..."""
+        """Return the complete perpetual position including szi, entryPx, liquidationPx, and PnL."""
         try:
             for ap in self._user_state().get("assetPositions", []):
                 p = ap.get("position", {})
@@ -224,7 +226,7 @@ class HLClient:
         return None
 
     def margin_summary(self) -> dict:
-        """Valoarea contului perp + margine folosita + retragibil."""
+        """Return perpetual account value, used margin, and withdrawable balance."""
         try:
             st = self._user_state()
             ms = st.get("marginSummary", {})
@@ -235,7 +237,7 @@ class HLClient:
             return {}
 
     def funding_history(self, start_ms: int) -> list[dict]:
-        """Istoricul platilor de funding (real incasat/platit) de la start_ms incoace."""
+        """Return actual funding payments received or paid since start_ms."""
         if not self.address:
             return []
         try:
@@ -245,7 +247,7 @@ class HLClient:
             return []
 
     def candles(self, coin: str, interval: str = "1h", lookback_hours: int = 60) -> list[dict]:
-        """Lumanari OHLCV (pentru indicatori de trend)."""
+        """Return OHLCV candles for trend indicators."""
         end = int(time.time() * 1000)
         start = end - lookback_hours * 3600 * 1000
         try:
@@ -257,7 +259,7 @@ class HLClient:
     def spot_order(self, pair: str, is_buy: bool, sz: float, px: float,
                    sz_decimals: int = 2,
                    cloid: str | None = None) -> tuple[bool, int | None, str]:
-        """Ordin LIMIT pe spot. pair = numele @index (ex @107)."""
+        """Place a spot LIMIT order; pair is the @index name such as @107."""
         if not self.exchange:
             raise HLError("Fara agent wallet (HL_SECRET_KEY)")
         sz = round(sz, sz_decimals)
@@ -265,7 +267,7 @@ class HLClient:
         try:
             kwargs = {}
             if cloid is not None:
-                # SDK-ul oficial cere obiect Cloid, nu sirul hex brut.
+                # The official SDK requires a Cloid object rather than a raw hex string.
                 from hyperliquid.utils.types import Cloid
                 kwargs["cloid"] = Cloid.from_str(cloid)
             res = self.exchange.order(
@@ -284,7 +286,7 @@ class HLClient:
             return False, None, st["error"]
         return True, None, str(st)
 
-    # ----- tranzactionare (semnat) --------------------------------------------
+    # ----- signed trading -----------------------------------------------------
     def set_leverage(self, coin: str, leverage: int) -> None:
         if not self.exchange:
             return
@@ -296,7 +298,7 @@ class HLClient:
 
     def place_limit(self, coin: str, is_buy: bool, sz: float, px: float,
                     reduce_only: bool = False) -> tuple[bool, int | None, str]:
-        """Plaseaza ordin LIMIT GTC. Returneaza (ok, oid, mesaj)."""
+        """Place a GTC LIMIT order and return (ok, oid, message)."""
         if not self.exchange:
             raise HLError("Fara agent wallet (HL_SECRET_KEY) — nu pot plasa ordine")
         sz = round(sz, self.sz_decimals(coin))
