@@ -21,14 +21,17 @@ from typing import Dict, List, Optional, Tuple
 import utils
 from providers.base import MarketDataProvider
 
-# strip sufix de cotare -> asset de baza (BTCUSDC -> BTC). Centralizat in utils
-# (28 iul, era copiat aici + monitortrades + verify_tools).
+# Strip the quote suffix to obtain the base asset (BTCUSDC -> BTC). This was
+# centralized in utils on July 28 after being duplicated here and elsewhere.
 _base_asset = utils.base_asset
 
 
 def load_price_series(path: str, symbol: str) -> List[Tuple[float, float]]:
-    """Citeste cache_price_{symbol}.jsonl (format {"s":symbol,"i":[ts_ms,price]})
-    -> lista (ts_sec, price) ASCENDENTA dupa timp. [] daca fisierul lipseste."""
+    """Read a symbol JSONL cache into ascending (timestamp_seconds, price) pairs.
+
+    The expected record shape is ``{"s": symbol, "i": [timestamp_ms, price]}``.
+    Return an empty list when the file is absent.
+    """
     out: List[Tuple[float, float]] = []
     if not os.path.exists(path):
         return out
@@ -50,9 +53,11 @@ def load_price_series(path: str, symbol: str) -> List[Tuple[float, float]]:
 
 
 class ReplayMarketDataProvider(MarketDataProvider):
-    """Serveste market-data + cont SIMULAT pt (potential) mai multe simboluri
-    simultan, fiecare cu propriul cursor — un backtest tipic are un provider
-    per rulare, folosit de toate Instrument-ele acelei rulari."""
+    """Serve market data and a simulated account for one or more symbols.
+
+    Each symbol owns its cursor. A typical backtest creates one provider per run
+    and shares it among every Instrument in that run.
+    """
 
     def __init__(self, price_series: Dict[str, List[Tuple[float, float]]],
                  fee_pct: float = 0.1):
@@ -61,7 +66,7 @@ class ReplayMarketDataProvider(MarketDataProvider):
         self._last_ts: Dict[str, float] = {}
         self._fee_pct = fee_pct
         self._orders: Dict[str, List[dict]] = {s: [] for s in price_series}
-        self._positions: Dict[str, Tuple[float, float]] = {}   # symbol -> (qty, cost_total)
+        self._positions: Dict[str, Tuple[float, float]] = {}   # symbol -> (quantity, total cost)
 
     @property
     def name(self) -> str:
@@ -70,16 +75,18 @@ class ReplayMarketDataProvider(MarketDataProvider):
     def supports_symbol(self, symbol: str) -> bool:
         return symbol in self._series
 
-    # ── avansare ceas: apelata de driver-ul de backtest, NU de codul botului ──
+    # ── Clock advancement: called by the backtest driver, not bot code ───────
     def advance(self, symbol: str, steps: int = 1) -> Optional[float]:
-        """Muta cursorul simbolului cu `steps` pasi inainte; intoarce noul pret
-        curent, sau None daca seria s-a terminat (nu mai avanseaza dincolo)."""
+        """Advance a symbol cursor by ``steps`` and return its new current price.
+
+        Return ``None`` when the series has ended and do not advance beyond it.
+        """
         series = self._series.get(symbol)
         if not series:
             return None
         new_idx = min(self._cursor[symbol] + steps, len(series))
         if new_idx == self._cursor[symbol] and new_idx >= len(series):
-            return None   # deja la capat, nimic de avansat
+            return None   # Already at the end; nothing to advance.
         self._cursor[symbol] = new_idx
         if new_idx == 0:
             return None
@@ -91,14 +98,16 @@ class ReplayMarketDataProvider(MarketDataProvider):
         return self._cursor.get(symbol, 0) < len(self._series.get(symbol, []))
 
     def now(self, symbol: Optional[str] = None) -> float:
-        """Timpul "curent" al replay-ului = timestamp-ul ULTIMULUI pret citit
-        (nu un ceas separat) — fara `symbol`, cel mai recent dintre toate cele
-        avansate pana acum (0.0 daca niciunul inca)."""
+        """Return the timestamp of the most recently read replay price.
+
+        This is not an independent clock. Without ``symbol``, return the latest
+        timestamp among all advanced symbols, or 0.0 before any advancement.
+        """
         if symbol is not None:
             return self._last_ts.get(symbol, 0.0)
         return max(self._last_ts.values(), default=0.0)
 
-    # ── market-data ──────────────────────────────────────────────────────────
+    # ── Market data ─────────────────────────────────────────────────────────
     def get_current_price(self, symbol: str) -> Optional[float]:
         series = self._series.get(symbol)
         idx = self._cursor.get(symbol, 0)
@@ -115,9 +124,9 @@ class ReplayMarketDataProvider(MarketDataProvider):
         return [{"timestamp": int(ts * 1000), "price": p}
                 for ts, p in series[:idx] if ts >= cutoff]
 
-    # ── cont (broker simulat, fara retea) ───────────────────────────────────
+    # ── Simulated offline broker account ────────────────────────────────────
     def free_balance(self, asset: str) -> Optional[float]:
-        # cauta simbolul ale carui pozitii au acest asset ca baza (BTCUSDC -> BTC)
+        # Find the symbol whose position uses this asset as its base (BTCUSDC -> BTC).
         for symbol in self._series:
             if _base_asset(symbol) == asset:
                 qty, _cost = self._positions.get(symbol, (0.0, 0.0))
@@ -134,13 +143,19 @@ class ReplayMarketDataProvider(MarketDataProvider):
         return out
 
     def position(self, symbol: str) -> Tuple[float, float]:
-        """(qty, cost_total) al pozitiei curente simulate pt `symbol` — accesor
-        public pt driver-ele de backtest (nu citi self._positions direct)."""
+        """Return (quantity, total_cost) for the current simulated position.
+
+        This is the public accessor for backtest drivers; they should not read
+        ``self._positions`` directly.
+        """
         return self._positions.get(symbol, (0.0, 0.0))
 
     def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
-        """Executie INSTANTA la pretul cerut (simplificare Faza 1 — vezi docstring
-        modulului). Actualizeaza pozitia (qty/cost mediu) si istoricul de ordine."""
+        """Execute immediately at the requested price as the phase-one simplification.
+
+        Update position quantity/average cost and order history. See the module
+        documentation for fidelity limitations.
+        """
         side = side.upper()
         price = float(price)
         qty = float(qty)
@@ -163,9 +178,8 @@ class ReplayMarketDataProvider(MarketDataProvider):
         return {"orderId": -1, "backtest": True}
 
     def guards_internally(self) -> bool:
-        # True (simplificare DELIBERATA Faza 1): gardul agnostic (order_guard.py) are
-        # propriile praguri/ferestre CONFIGURATE per nume de venue (order_guard.conf) —
-        # "Replay" n-ar avea o intrare acolo, deci ar cadea pe un comportament neclar/
-        # fail-closed. Rafinarea (simuland si order_guard) ramane pt o iteratie viitoare;
-        # azi place_order() executa direct, fara acel strat suplimentar.
+        # Deliberate phase-one simplification: order_guard.py uses thresholds and
+        # windows configured per venue name. Replay has no entry and would fall into
+        # ambiguous/fail-closed behavior. A future iteration may simulate that guard;
+        # currently place_order executes directly without the additional layer.
         return True

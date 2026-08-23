@@ -57,7 +57,7 @@ def balance_cap_quantity(free_balance: Callable[[str], Optional[float]],
 
 
 def fee_cap_quantity(available_qty: float, fee_rate: float) -> float:
-    """Returneaza plafonul in cantitate de baza dupa rezerva de comision."""
+    """Return the base-quantity cap after reserving for fees."""
     available = max(0.0, float(available_qty))
     fee = max(0.0, float(fee_rate))
     return available / (1.0 + fee)
@@ -68,8 +68,8 @@ def decide_quantity(provider, symbol: str, side: str, price: float,
                     quote: Optional[str] = None, cancelorders: bool = False,
                     hours: float = 5,
                     apply_policy: bool = True) -> QuantityDecision:
-    # Contractul SAFE istoric: None inseamna "maximum permis", nu lipsa
-    # validarii. Soldul, politica si fee-cap-ul stabilesc cantitatea finala.
+    # Historical safe contract: None means "maximum permitted", not missing
+    # validation. Balance, policy, and the fee cap determine final quantity.
     requested = float("inf") if requested_qty is None else max(0.0, float(requested_qty))
     balance_cap, asset = balance_cap_quantity(
         provider.free_balance, symbol, side, price, base=base, quote=quote)

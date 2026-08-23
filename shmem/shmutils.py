@@ -27,7 +27,7 @@ def shmConnectForWrite(name):
         try:
             shm = shared_memory.SharedMemory(name=name)
         except FileNotFoundError:
-            # cazul în care între timp s-a șters segmentul
+            # The segment was deleted between the two attempts.
             shm = shared_memory.SharedMemory(name=name, create=True, size=BUF_SIZE)
     print(f"Conectat la shared memory {name} for write!")
     return shm
@@ -41,7 +41,7 @@ def shmRead(shm):
     try:            
         length = int.from_bytes(shm.buf[:4], "little")
         if length == 0:
-            return None  # nimic scris încă
+            return None  # Nothing has been written yet.
         raw = bytes(shm.buf[4:4+length])
         
         return json.loads(raw.decode("utf-8"))
@@ -63,9 +63,8 @@ def shmWrite(shm, data: dict):
         print(f"json dump encoded fail !!!!")
         return 
     try:
-        # scriem lungimea mesajului în primii 4 bytes (int pe 4 bytes)
+        # Store message length as a four-byte integer in the first four bytes.
         shm.buf[:4] = len(payload).to_bytes(4, "little")
         shm.buf[4:4+len(payload)] = payload
     except :
         print(f"SHM is DEAD and fail !!!!")
-   

@@ -8,10 +8,10 @@ from binance_api.bapi_client import client
 
 btcsymbol = 'BTCUSDC'
 taosymbol = 'TAOUSDC'
-# HYPE = SPOT Hyperliquid, rutat prin facada market_api la HyperliquidProvider.
-# INTENTIONAT NU e in `symbols` (lista Binance): codul Binance (validate_*, bucle pe
-# sym.symbols din tradeall etc.) NU trebuie sa-l atinga. E doar o eticheta de symbol
-# pe care monitortrades o paseaza facadei.
+# HYPE is Hyperliquid spot, routed through the market_api facade to
+# HyperliquidProvider. It is intentionally absent from ``symbols`` (the Binance
+# list): Binance validation and loops must never process it. It is only a symbol
+# label that monitortrades passes to the facade.
 hypesymbol = 'HYPEUSDC'
 #symbols = ["BTCUSDC", "TAOUSDC"]
 symbols = ["BTCUSDC",  "TAOUSDC"]
@@ -46,7 +46,7 @@ def get_binance_symbols(keysearch):
         exchange_info = client.get_exchange_info()
         print(f"Number of symbols on Binance: {len(exchange_info['symbols'])}")
 
-        symbols = [s['symbol'] for s in exchange_info['symbols']]  # Extragem doar simbolul
+        symbols = [s['symbol'] for s in exchange_info['symbols']]  # Extract symbols only.
         if keysearch:
             matching_symbols = [symbol for symbol in symbols if keysearch.upper() in symbol]
             print(f"Symbols containing '{keysearch}': {matching_symbols}")
@@ -67,7 +67,7 @@ def get_quantity_precision(symbol):
                 return precision
     except BinanceAPIException as e:
         print(f"Eroare la obtinerea preciziei cantitatii: {e}")
-    return 8  # Valoare implicita
+    return 8  # Default value.
 
 
 def validate_binance_api_keys():

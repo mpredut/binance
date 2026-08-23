@@ -18,7 +18,7 @@ from typing import Callable, Optional
 
 from .strategy_executor import OrderStatus
 
-try:  # Linux live: serializare intre procese; fallback sigur per proces.
+try:  # Linux live: cross-process serialization; safe per-process fallback.
     import fcntl
 except ImportError:  # pragma: no cover - Windows/import tooling
     fcntl = None
@@ -43,9 +43,8 @@ def new_intent_id(venue: str, symbol: str, kind: Optional[str] = None) -> str:
 def intent_client_order_id(venue: str, intent_id: str) -> Optional[str]:
     """Encode an intent in the venue's client-ID format without additional state.
 
-    UUID-ul de 128 biti ramane complet. Pentru intentiile legacy/non-standard se
-    foloseste un hash determinist, astfel incat aceeasi intentie produce acelasi
-    identificator si dupa restart.
+    Preserve the complete 128-bit UUID. Legacy/nonstandard intents use a
+    deterministic hash so the same intent produces the same identifier after restart.
     """
     raw = str(intent_id)
     match = _UUID_HEX_SUFFIX.search(raw)
@@ -53,12 +52,12 @@ def intent_client_order_id(venue: str, intent_id: str) -> Optional[str]:
              hashlib.blake2s(raw.encode("utf-8"), digest_size=16).hexdigest())
     normalized_venue = _slug(venue).lower()
     if normalized_venue == "kraken":
-        return token                         # cl_ord_id: UUID fara cratime
+        return token                         # cl_ord_id: UUID without hyphens
     if normalized_venue == "binance":
-        return f"SD_{token}"                 # newClientOrderId: 35 <= 36 caractere
+        return f"SD_{token}"                 # newClientOrderId: 35 <= 36 characters
     if normalized_venue == "hyperliquid":
-        return f"0x{token}"                  # cloid: uint128 hex
-    return None                              # T212/venue necunoscut: corelare locala
+        return f"0x{token}"                  # cloid: uint128 hexadecimal
+    return None                              # T212/unknown venue: local correlation
 
 
 class ExecutionAudit:
