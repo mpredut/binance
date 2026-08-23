@@ -19,10 +19,10 @@ def get_cache_for_symbol(symbol: str) -> List[Tuple[int, float]]:
 
 
 def to_series(cache_pairs: List[Tuple[int, float]]):
-    """Transformă perechi [timestamp_ms, price] în numpy arrays sortate cronologic."""
+    """Convert [timestamp_ms, price] pairs to chronologically sorted NumPy arrays."""
     if not cache_pairs:
         return np.array([]), np.array([]), []
-    # sortare cronologică
+    # Chronological ordering.
     cache_pairs = sorted(cache_pairs, key=lambda x: x[0])
     ts = np.array([int(x[0]) for x in cache_pairs], dtype=np.int64)
     prices = np.array([float(x[1]) for x in cache_pairs], dtype=np.float64)
@@ -34,11 +34,11 @@ def ensure_dir(path: str):
         os.makedirs(path)
 
 def min_max_scale(arr: np.ndarray):
-    """Scalează în [0,1] fără sklearn; returnează (scaled, min, max)."""
+    """Scale to [0, 1] without sklearn and return (scaled, minimum, maximum)."""
     vmin = float(np.min(arr))
     vmax = float(np.max(arr))
     if vmax == vmin:
-        # serie constantă -> totul devine 0.5 ca să evităm diviziunea la zero
+        # Map a constant series to 0.5 to avoid division by zero.
         return np.full_like(arr, 0.5), vmin, vmax
     scaled = (arr - vmin) / (vmax - vmin)
     return scaled, vmin, vmax
@@ -50,7 +50,7 @@ def min_max_inverse(arr_scaled: np.ndarray, vmin: float, vmax: float):
 
 
 # ==========================
-# 3) PLOT ISTORIC
+# 3) HISTORICAL PLOT
 # ==========================
 
 def plot_history(symbol: str, dt, prices: np.ndarray, outdir="plots"):
@@ -65,25 +65,27 @@ def plot_history(symbol: str, dt, prices: np.ndarray, outdir="plots"):
     plt.tight_layout()
     fname = os.path.join(outdir, f"history_{symbol}.png")
     plt.savefig(fname, dpi=150)
-    plt.show()   # 👈 afiseaza pe ecran
+    plt.show()   # Display on screen.
     plt.close()
     return fname
 
 
 # ==========================
-# 4) REGRESIE LINIARĂ (np.polyfit)
+# 4) LINEAR REGRESSION (np.polyfit)
 # ==========================
 
 def forecast_linear(ts_ms: np.ndarray, prices: np.ndarray, horizon: int = 20):
     """
-    Regresie pe index-ul punctelor (nu pe timp în ms, ca să fie stabil numeric).
-    Dacă vrei pe timp real, poți normaliza ms la zile/ore și folosi aceleași formule.
+    Regress on point indices rather than millisecond time for numeric stability.
+
+    For real elapsed time, normalize milliseconds to days or hours and use the
+    same formulas.
     """
     n = len(prices)
     x = np.arange(n, dtype=np.float64)
     # fit y ~ a*x + b
     a, b = np.polyfit(x, prices, 1)
-    # predicții pentru pașii următori
+    # Predictions for the following steps.
     x_future = np.arange(n, n + horizon, dtype=np.float64)
     y_future = a * x_future + b
     return y_future
@@ -109,7 +111,7 @@ def plot_with_linear(symbol: str, dt, prices: np.ndarray, lin_forecast: np.ndarr
     plt.tight_layout()
     fname = os.path.join(outdir, f"forecast_linear_{symbol}.png")
     plt.savefig(fname, dpi=150)
-    plt.show()   # 👈 afiseaza pe ecran
+    plt.show()   # Display on screen.
     plt.close()
     return fname
 
@@ -125,7 +127,7 @@ def make_sequences(series: np.ndarray, window: int):
         y.append(series[i])
     X = np.array(X)
     y = np.array(y)
-    # reshape la (samples, timesteps, features)
+    # Reshape to (samples, timesteps, features).
     X = X.reshape((X.shape[0], X.shape[1], 1))
     return X, y
 
@@ -141,8 +143,9 @@ def try_import_tf():
 def forecast_lstm(prices: np.ndarray, window: int = 20, epochs: int = 50, batch_size: int = 16,
                   horizon: int = 20, verbose: int = 0):
     """
-    Întoarce (predicții, info_text). Dacă TensorFlow lipsește sau seria e prea scurtă,
-    întoarce (None, motiv).
+    Return (predictions, info_text).
+
+    If TensorFlow is unavailable or the series is too short, return (None, reason).
     """
     ok, tf_or_err, Sequential, LSTM, Dense = try_import_tf()
     if not ok:
@@ -151,10 +154,10 @@ def forecast_lstm(prices: np.ndarray, window: int = 20, epochs: int = 50, batch_
     if len(prices) < window + 5:
         return None, f"Seria e prea scurtă pentru LSTM (minim ~{window+5} puncte)."
 
-    # scalare [0,1]
+    # Scale to [0, 1].
     scaled, vmin, vmax = min_max_scale(prices)
     X, y = make_sequences(scaled, window)
-    # împărțire train/val simplă
+    # Simple training/validation split.
     split = max(window, int(0.8 * len(X)))
     X_train, y_train = X[:split], y[:split]
     X_val, y_val = X[split:], y[split:]
@@ -167,13 +170,13 @@ def forecast_lstm(prices: np.ndarray, window: int = 20, epochs: int = 50, batch_
               validation_data=(X_val, y_val) if len(X_val) else None,
               epochs=epochs, batch_size=batch_size, verbose=verbose)
 
-    # forecast iterativ pe orizontul cerut
+    # Iterative forecast over the requested horizon.
     last_window = scaled[-window:].reshape(1, window, 1)
     preds_scaled = []
     for _ in range(horizon):
         pred = model.predict(last_window, verbose=0)[0, 0]
         preds_scaled.append(pred)
-        # slide window
+        # Slide the window.
         last_window = np.concatenate([last_window[:, 1:, :], pred.reshape(1, 1, 1)], axis=1)
 
     preds = min_max_inverse(np.array(preds_scaled), vmin, vmax)
@@ -206,13 +209,13 @@ def plot_with_lstm(symbol: str, dt, prices: np.ndarray, lstm_forecast: Optional[
     plt.tight_layout()
     fname = os.path.join(outdir, f"forecast_lstm_{symbol}.png")
     plt.savefig(fname, dpi=150)
-    plt.show()   # 👈 afiseaza pe ecran
+    plt.show()   # Display on screen.
     plt.close()
     return fname
 
 
 # ==========================
-# 6) PIPELINE PE TOATE SYMBOLOURILE
+# 6) PIPELINE FOR ALL SYMBOLS
 # ==========================
 
 def run_for_symbols(symbols: List[str],
@@ -239,11 +242,11 @@ def run_for_symbols(symbols: List[str],
         hist_path = plot_history(symbol, dt, prices, outdir=outdir)
 
         print(f" regresie:{symbol} ")
-        # Regresie
+        # Linear regression.
         lin_pred = forecast_linear(ts, prices, horizon=horizon)
         lin_path = plot_with_linear(symbol, dt, prices, lin_pred, outdir=outdir)
 
-        # LSTM (dacă posibil)
+        # LSTM, when available.
         print(f" forecast_lstm :{symbol} ")
         lstm_pred, info = forecast_lstm(prices,
                                         window=lstm_window,
@@ -273,18 +276,18 @@ if __name__ == "__main__":
    
     symbols = sym.symbols
 
-    # 2) rulezi pipeline-ul
+    # 2) Run the pipeline.
     res = run_for_symbols(
         symbols,
         outdir="plots",
-        horizon=20,       # câte puncte viitoare să estimezi
-        lstm_window=10,   # fereastra pentru LSTM (alege 20-60 dacă ai serii mai lungi)
-        lstm_epochs=50,   # crește pentru acuratețe (și timp mai mare)
+        horizon=20,       # number of future points to estimate
+        lstm_window=10,   # LSTM window; use 20-60 for longer series
+        lstm_epochs=50,   # increase for accuracy at the cost of runtime
         lstm_batch=16,
         lstm_verbose=0
     )
 
-    # 3) (opțional) salvezi un raport JSON cu rezultatele
+    # 3) Optionally save a JSON report of the results.
     with open("forecast_results.json", "w", encoding="utf-8") as f:
         json.dump(res, f, ensure_ascii=False, indent=2)
     print("\nImaginile au fost salvate în folderul ./plots și rezumatul în forecast_results.json")

@@ -1,38 +1,37 @@
 import os
 import json
 
-# Lista inițială de monede (top 10)
-
-#monede = [
-#    {"nume": "BTCUSDT", "cantitate": 0.5, "watch": True},
-#    {"nume": "TAOUSDT", "cantitate": 0.5, "watch": True},
-#    {"nume": "ETHUSDT", "cantitate": 1.5, "watch": False},
-#    {"nume": "BNBUSDT", "cantitate": 3.0, "watch": False},
-#    {"nume": "SOLUSDT", "cantitate": 4.0, "watch": False},
-#    {"nume": "ADAUSDT", "cantitate": 6.0, "watch": False},
-#    {"nume": "DOGEUSDT", "cantitate": 7.0, "watch": False},
-#    {"nume": "DOTUSDT", "cantitate": 9.0, "watch": False},
-#    {"nume": "LTCUSDT", "cantitate": 10.0, "watch": False}
-#    {"nume": "ETHUSDT", "cantitate": 1.5, "watch": False}
+# Initial coin list (top 10).
+# coins = [
+#    {"name": "BTCUSDT", "quantity": 0.5, "watch": True},
+#    {"name": "TAOUSDT", "quantity": 0.5, "watch": True},
+#    {"name": "ETHUSDT", "quantity": 1.5, "watch": False},
+#    {"name": "BNBUSDT", "quantity": 3.0, "watch": False},
+#    {"name": "SOLUSDT", "quantity": 4.0, "watch": False},
+#    {"name": "ADAUSDT", "quantity": 6.0, "watch": False},
+#    {"name": "DOGEUSDT", "quantity": 7.0, "watch": False},
+#    {"name": "DOTUSDT", "quantity": 9.0, "watch": False},
+#    {"name": "LTCUSDT", "quantity": 10.0, "watch": False}
+#    {"name": "ETHUSDT", "quantity": 1.5, "watch": False}
 #]
  
-# monede = [
-    # {"nume": "BTCUSDT", "cantitate": 0.5, "watch": True},
-    # {"nume": "TAOUSDT", "cantitate": 0.5, "watch": True},
-    # {"nume": "ETHUSDT", "cantitate": 1.5, "watch": False}
+# coins = [
+    # {"name": "BTCUSDT", "quantity": 0.5, "watch": True},
+    # {"name": "TAOUSDT", "quantity": 0.5, "watch": True},
+    # {"name": "ETHUSDT", "quantity": 1.5, "watch": False}
 # ]
 
 monede_empty = [
 ]
 
 
-# Lista inițială de monede (top 10)
+# Initial coin list (top 10).
 monede = [
     {"nume": "BTCUSDC", "cantitate": 0.5, "watch": True},
     {"nume": "TAOUSDC", "cantitate": 0.5, "watch": True}
 ]
 
-# Fișier pentru stocarea ultimei configurații
+# File that stores the latest configuration.
 CONFIG_FILE = "last_watch_config.json"
 
 def citeste_config_anterioara():
@@ -54,23 +53,23 @@ def trebuie_sa_scoata_sunet():
     watch_list_actuala = [moneda["nume"] for moneda in monede if moneda["watch"]]
     
     if watch_list_actuala != watch_list_anterioara:
-        # Lista s-a schimbat, resetăm contorul și scoatem sunet
+        # The list changed; reset the counter and play the sound.
         config_nou = {"watch_list": watch_list_actuala, "repeat_count": 1}
         salveaza_config_actuala(config_nou)
         return True
     elif repeat_count < 3:
-        # Lista e aceeași, dar putem reda sunet de încă 3 ori
+        # The list is unchanged, but the sound may play up to three more times.
         config_nou = {"watch_list": watch_list_actuala, "repeat_count": repeat_count + 1}
         salveaza_config_actuala(config_nou)
         return True
     else:
-        # Lista e aceeași și am depășit limita de 3 sunete
+        # The list is unchanged and the three-sound limit has been exceeded.
         return False
 
 def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-194-86.ngrok-free.app/"):
     sunet_activ = trebuie_sa_scoata_sunet()
     
-    # Stilizare CSS minimală
+    # Minimal CSS styling.
     stil_css = """
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
@@ -84,7 +83,7 @@ def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-19
     </style>
     """
 
-    # Conținutul principal HTML
+    # Main HTML content.
     html = f"""
     <!DOCTYPE html>
     <html lang="en">
@@ -162,12 +161,12 @@ def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-19
     """
     return html
 
-# salvare
+# Save output.
 def salveaza_html(html, nume_fisier="index.html"):
     with open(nume_fisier, "w", encoding="utf-8") as f:
         f.write(html)
     print(f"Fișierul {nume_fisier} a fost generat cu succes!")
 
-# Generare și salvare
+# Generate and save.
 html_content = genereaza_html(monede)
 salveaza_html(html_content, "index.html")
