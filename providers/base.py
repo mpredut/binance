@@ -88,7 +88,6 @@ class MarketDataProvider(ABC):
         import order_guard
         return order_guard.weight_limit(
             self, symbol, side, price, qty,
-            base=kwargs.get("base"), quote=kwargs.get("quote"),
             available_qty=available_qty)
 
     def fee_cap_quantity(self, symbol: str, side: str, price: float,

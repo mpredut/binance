@@ -1,5 +1,8 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
+import order_guard
 from providers.base import MarketDataProvider
 from providers.quantity import (
     balance_cap_quantity,
@@ -55,6 +58,17 @@ class QuantityDecisionTest(unittest.TestCase):
 
     def test_fee_cap_operates_on_base_quantity(self):
         self.assertAlmostEqual(fee_cap_quantity(2.0, 0.01), 2.0 / 1.01)
+
+    def test_weight_limit_uses_precomputed_balance_without_refetch(self):
+        provider = Provider({"USDC": 500})
+        provider.free_balance = lambda _asset: self.fail("balanta nu trebuie recitita")
+        fake_pa = SimpleNamespace(
+            get_weight_for_cash_permission_at_quant_time=lambda *_: 0.5)
+        with patch.dict("sys.modules", {"priceAnalysis": fake_pa}):
+            qty = order_guard.weight_limit(
+                provider, "TAOUSDC", "BUY", 100.0, 5.0,
+                available_qty=5.0)
+        self.assertEqual(qty, 2.5)
 
 
 if __name__ == "__main__":
