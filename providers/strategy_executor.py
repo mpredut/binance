@@ -24,9 +24,9 @@ class ProviderError(Exception):
 class OrderStatus:
     """Normalized order result: ``open``, ``closed``, ``canceled``, or ``expired``."""
     status: str
-    filled_qty: float          # cantitatea executata (vol_exec la Kraken)
-    cost: float                # notional executat (pt pretul mediu: cost/filled_qty)
-    fee: float                 # comisionul real raportat de venue
+    filled_qty: float          # Executed quantity (Kraken ``vol_exec``).
+    cost: float                # Executed notional; average price is cost / filled_qty.
+    fee: float                 # Actual fee reported by the venue.
 
     def __post_init__(self):
         if self.status not in {"open", "closed", "canceled", "expired"}:
@@ -62,8 +62,8 @@ class PairPrecision:
     """Normalized price, volume, and minimum-quantity metadata for a pair."""
     price_decimals: int
     volume_decimals: int
-    order_min: float           # cantitatea minima (ordermin la Kraken)
-    base_asset: str = ""       # activul de baza al perechii (pt adoptia pozitiei existente)
+    order_min: float           # Minimum quantity (Kraken ``ordermin``).
+    base_asset: str = ""       # Pair base asset, used when adopting an existing position.
 
 
 @runtime_checkable

@@ -18,17 +18,17 @@ import time
 from alerts_config import load_config
 from pricechecker import start_price_alert_checker
 from pricefetcher import create_cachePriceAll
-# -- Cod de alerte mutat din fostul run_price_monitor.py (acum UN singur modul) --
+# Alert orchestration formerly lived in ``run_price_monitor.py``.
 from pathlib import Path
 from dotenv import load_dotenv
 from new_coins_discovery import create_new_coins_checker, NewCoinsMonitor, NewCoinsFactory, MAX_NEW_COINS_TO_TRACK
 from alertnotifiers import AlertNotifier
 
-load_dotenv()                                                # secrete comune (gitignored)
-load_dotenv(Path(__file__).resolve().parent / "config.env")  # config versionat (comis)
+load_dotenv()                                                # Shared untracked secrets.
+load_dotenv(Path(__file__).resolve().parent / "config.env")  # Versioned configuration.
 
-# market_alerts = categoria PRICE -> ruteaza push-urile pe topic-ul dedicat (daca e setat).
-# Overridez PHONE_ALERT_URL (are precedenta in send_phone_webhook_batch) pt acest proces.
+# Route price alerts to their dedicated topic when configured. PHONE_ALERT_URL has
+# precedence in the batch notifier, so this process overrides it locally.
 _price_topic = os.environ.get("NTFY_TOPIC_PRICE")
 if _price_topic:
     os.environ["PHONE_ALERT_URL"] = f"https://ntfy.sh/{_price_topic}"
@@ -136,7 +136,7 @@ def new_coin_alerts_handler(alerts):
 
     print("=" * 70)
 
-    # trimite UN SINGUR mesaj pentru toate monedele
+    # Send one notification containing the whole coin batch.
     AlertNotifier.send(
         alerts,
         enable_phone_webhook=True

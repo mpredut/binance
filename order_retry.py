@@ -33,16 +33,11 @@ RETRY_ENABLED = os.environ.get("RETRY_ENABLED", "true").strip().lower() == "true
 RETRY_INTERVAL_SEC = float(os.environ.get("RETRY_INTERVAL_SEC", "300"))
 RETRY_TTL_SEC = float(os.environ.get("RETRY_TTL_SEC", str(24 * 3600)))
 RETRY_MAX_ATTEMPTS = int(float(os.environ.get("RETRY_MAX_ATTEMPTS", "0")))
-# Gard de PRET la retry (31 iul): reia un ordin DOAR cand pretul curent e in AVANTAJ fata
-# de cel CERUT initial (SELL: current >= cerut*(1-tol) — astepti sa urce; BUY: current <=
-# cerut*(1+tol) — astepti sa scada). Transforma retry-ul din "orb pe timp" in "conditionat
-# de pret" -> fara ghost-orders la preturi dezavantajoase + un TTL lung devine sigur.
+# Retry only at an equal or more favorable current price than the original request.
 RETRY_PRICE_TOL = float(os.environ.get("RETRY_PRICE_TOL", "0.002"))
-# Dedup la enqueue: o SINGURA intentie pending per symbol+side. La re-enqueue al aceleiasi
-# intentii se REIMPROSPATEAZA tinta (pret/qty), NU se acumuleaza intrari (fara "ladder" de
-# preturi care s-ar declansa toate deodata cand pretul trece prin niveluri).
+# Deduplication retains one pending record per symbol and side and refreshes its target.
 RETRY_DEDUP = os.environ.get("RETRY_DEDUP", "true").strip().lower() == "true"
-# Plafon DUR pe dimensiunea cozii (centura de siguranta). 0 = fara plafon.
+# Hard queue-size bound; zero disables the bound.
 RETRY_MAX_QUEUE = int(float(os.environ.get("RETRY_MAX_QUEUE", "500")))
 
 _ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -55,7 +50,7 @@ def _ensure_dir():
 
 
 def _read_nolock():
-    """Citeste coada FARA a lua lock-ul (apelantul il detine deja). Linii corupte -> sarite."""
+    """Read the queue while the caller holds the lock; skip malformed lines."""
     if not os.path.exists(QUEUE_FILE):
         return []
     items = []
@@ -103,8 +98,7 @@ def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_pric
         if RETRY_DEDUP:
             for e in existing:
                 if e.get("symbol") == symbol and (e.get("side") or "").upper() == side_u:
-                    # o SINGURA intentie per symbol+side -> reimprospateaza tinta, pastreaza
-                    # vechimea (min created_ts) + istoricul (max attempts). Fara ladder.
+                    # Refresh one symbol/side target while preserving age and attempts.
                     e["requested_price"] = requested_price
                     e["ref_price"] = ref_price
                     e["qty"] = qty
@@ -153,12 +147,10 @@ def claim(ids, now=None):
 
 
 def resolve(symbol, side):
-    """Elimina intentia pending satisfacuta de o plasare normala reusita.
+    """Atomically remove pending records satisfied by a normal successful placement.
 
-    Apelantii care reincearca local (de exemplu rtrade) pot reusi inaintea
-    workerului global. Fara aceasta confirmare, intentia veche ramanea in outbox
-    si putea produce ulterior un ordin suplimentar. Intoarce numarul de intrari
-    eliminate; operatia este atomica si idempotenta.
+    Local retry callers can succeed before the global worker. Removing the old record
+    prevents a later duplicate order. Returns the number of removed records.
     """
     side_u = (side or "").upper()
     _ensure_dir()
@@ -194,14 +186,14 @@ def _write_nolock(items):
 
 
 def rewrite(items):
-    """Rescrie coada cu `items` (atomic, sub lock)."""
+    """Replace the queue with ``items`` atomically while holding the lock."""
     _ensure_dir()
     with FileLock(LOCK_FILE):
         _write_nolock(items)
 
 
 def is_expired(rec, now=None):
-    """True daca ordinul si-a depasit TTL (renunta) SAU plafonul dur de incercari."""
+    """Return true after the record exceeds its TTL or hard attempt limit."""
     now = now if now is not None else time.time()
     if now - float(rec.get("created_ts", 0)) > RETRY_TTL_SEC:
         return True
@@ -211,20 +203,18 @@ def is_expired(rec, now=None):
 
 
 def is_due(rec, now=None):
-    """True daca a trecut destul (RETRY_INTERVAL_SEC) de la ultima incercare — sau, pt un
-    ordin INCA neincercat (last_attempt_ts=0), de la CREARE (prima reincercare abia dupa
-    un interval de la esec, NU imediat -> evita spam de re-esecuri pe refuzuri de gard)."""
+    """Return true once the retry interval has elapsed since creation or last attempt."""
     now = now if now is not None else time.time()
     base = max(float(rec.get("last_attempt_ts", 0)), float(rec.get("created_ts", 0)))
     return (now - base) >= RETRY_INTERVAL_SEC
 
 
 def price_gate_ok(rec, current_price, tol=None):
-    """True daca e MOMENTUL sa reincercam din perspectiva PRETULUI: pretul curent e in
-    AVANTAJ fata de cel CERUT initial. SELL: current >= cerut*(1-tol) (astepti sa urce
-    inapoi); BUY: current <= cerut*(1+tol) (astepti sa scada). Pret curent None -> False
-    (nu putem decide). Fara pret cerut capturat (intrare veche/anormala/market-order) ->
-    False, CONSERVATOR: NU reluam orb pe bani reali; intrarea ramane inerta pana la TTL."""
+    """Return whether the current price is favorable relative to the stored request.
+
+    SELL requires ``current >= requested*(1-tol)`` and BUY requires
+    ``current <= requested*(1+tol)``. Missing or invalid prices fail closed.
+    """
     if current_price is None:
         return False
     req = rec.get("requested_price")
