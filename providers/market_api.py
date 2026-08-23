@@ -94,12 +94,9 @@ class BinanceProvider(MarketDataProvider):
 
     def place_order(self, symbol: str, side: str, price: float, qty: float, force: bool = False, **kwargs):
         # 30 iul: MECANICA-ONLY (fee/balanta + min-notional + dispatch). Protectia
-        # (plafon zilnic, gard profit, weight, trend-wait, cooldown, jurnal) e rulata
-        # de Instrument.place() ca strat AGNOSTIC, prin hook-uri (adjust_order_price,
-        # profit_guard_window_ref, cap_quantity). guards_internally()=False acum, deci
-        # Binance trece prin pipeline-ul agnostic ca oricare provider — NU se mai
-        # dubleaza cu place_order_smart (care ramane doar pt apelantii directi
-        # inca ne-rewire-uiti: rtrade/tradeall/monitororder/... — vezi Task rewire).
+        # (plafon zilnic, gard profit, cantitate, trend-wait, cooldown, jurnal) e rulata
+        # de Instrument.place() ca strat AGNOSTIC, prin hook-uri provider-neutral.
+        # guards_internally()=False, deci Binance trece prin acelasi pipeline.
         # kwargs (safeback_seconds/cancelorders/hours/pair/motivation) sunt consumati
         # de stratul agnostic; aici conteaza doar force (market vs limit).
         from binance_api import bapi_placeorder as _po
@@ -142,9 +139,9 @@ class BinanceProvider(MarketDataProvider):
 
     def guards_internally(self) -> bool:
         # 30 iul: FALSE — Binance trece acum prin pipeline-ul AGNOSTIC din
-        # Instrument.place() (plafon zilnic, gard profit, weight via cap_quantity,
+        # Instrument.place() (plafon zilnic, gard profit, QuantityDecision,
         # trend-wait, cooldown, jurnal), cu hook-urile care-i pastreaza mecanica
-        # bogata (adjust_order_price, profit_guard_window_ref, cap_quantity). place_order
+        # bogata (adjust_order_price, profit_guard_window_ref, policy cap). place_order
         # e acum mecanica-only, deci NU se dubleaza gardul. (Era True cat timp Binance
         # rula lantul propriu place_order_smart -> if_place_safe_order.)
         return False

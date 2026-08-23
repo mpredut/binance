@@ -141,7 +141,7 @@ class _LivePairVenue:
         available_qty, required_asset = balance_cap_quantity(
             self.executor.free_balance, self.symbol, side, price)
         if required_asset:
-            # Nu compara cu qty cerut: pipeline-ul comun cap_quantity + mecanica
+            # Nu compara cu qty cerut: pipeline-ul comun QuantityDecision + mecanica
             # providerului reduc deja ordinul la soldul permis. Backoff numai cand
             # activul necesar nu are deloc sold liber utilizabil.
             if available_qty is not None and float(available_qty) <= 1e-12:

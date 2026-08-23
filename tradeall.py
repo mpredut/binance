@@ -172,7 +172,7 @@ def _fire_order(symbol, action, price, reason, **kwargs):
     — executarea/refuzul se jurnalizeaza centralizat (order_outcomes, via Instrument.place).
     KALMAN GATE: ordinul pleaca spre executie DOAR daca trece de gate.
     NU se da cantitate (21 iul, model uniform) — qty=None foloseste maximul permis de
-    cap_quantity (Binance: apply_weight_limit API + clamp pe balanta reala)."""
+    QuantityDecision (policy Binance + clamp pe balanța reală)."""
     blocked, mode, trend = _kalman_gate_blocks(symbol, action)
     if blocked:
         print(f"[KALMAN-GATE] {action} {symbol} BLOCAT (kalman_trend={trend}, mode={mode}, motiv={reason})")
@@ -795,4 +795,3 @@ if __name__ == "__main__":
         cache24_managers=cache24_managers,
     )
     coordinator.run()
-

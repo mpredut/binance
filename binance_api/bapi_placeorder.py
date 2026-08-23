@@ -484,8 +484,8 @@ def place_order_smart(order_type, symbol, price, qty=None, safeback_seconds=PLAC
 # mecanica specific-Binance (ajustare pret + curatare ordine opuse; clamp de
 # fee/balanta + min-notional + dispatch limit/market). PROTECTIA (plafon zilnic,
 # gard profit, weight, trend-wait, cooldown, jurnal) traieste in stratul AGNOSTIC
-# (Instrument.place + order_guard) — NU aici. Vechiul lant place_order_smart ramane
-# (apelanti directi) pana la rewiring; aceste functii sunt varianta noua, curata.
+# (Instrument.place + order_guard) — NU aici. API-urile legacy sunt acum adaptoare
+# subtiri catre acelasi pipeline; aceste functii raman mecanica venue-ului.
 # ============================================================================
 
 def adjust_price_and_cancel_opposite(order_type, symbol, price, cancel_opposite=True):
@@ -521,7 +521,7 @@ def place_order_mechanics(order_type, symbol, price, qty, force=False,
                           client_order_id=None):
     """MECANICA de trimitere Binance (ex __place_order, DOAR partea de mecanica):
     clamp de fee/balanta reala, min-notional (100 USDC), rotunjire, dispatch
-    limit/market. `qty` vine DEJA plafonat de weight (cap_quantity, in Instrument.place).
+    limit/market. `qty` vine DEJA din QuantityDecision (Instrument.place).
     NU face weight/trend-wait/cooldown/garduri — acelea sunt in stratul agnostic.
     Intoarce order dict sau None. Cooldown-ul (RAII) e tinut de Instrument.place in
     jurul acestui apel."""
