@@ -92,6 +92,32 @@ class BinanceProvider(MarketDataProvider):
         raw = _get_allorders().get_trade_orders(side, symbol, since_s) or []
         return [_normalize_order(o) for o in raw]
 
+    def open_orders(self, symbol: str) -> List[dict]:
+        try:
+            raw = _get_bapi().client.get_open_orders(symbol=symbol) or []
+        except Exception as exc:
+            raise ProviderError(f"open_orders({symbol}): {exc}") from exc
+        return [{
+            "orderId": str(order.get("orderId")),
+            "clientOrderId": order.get("clientOrderId"),
+            "side": str(order.get("side") or "").upper(),
+            "price": float(order.get("price") or 0.0),
+            "origQty": float(order.get("origQty") or 0.0),
+            "executedQty": float(order.get("executedQty") or 0.0),
+            "status": str(order.get("status") or "NEW"),
+        } for order in raw]
+
+    def order_by_client_id(self, symbol: str, client_order_id: str):
+        try:
+            return _get_bapi().client.get_order(
+                symbol=symbol, origClientOrderId=client_order_id)
+        except Exception as exc:
+            # Binance -2013 = ordin inexistent; celelalte erori raman fail-closed.
+            if getattr(exc, "code", None) == -2013:
+                return None
+            raise ProviderError(
+                f"order_by_client_id({symbol},{client_order_id}): {exc}") from exc
+
     def place_order(self, symbol: str, side: str, price: float, qty: float, force: bool = False, **kwargs):
         # 30 iul: MECANICA-ONLY (fee/balanta + min-notional + dispatch). Protectia
         # (plafon zilnic, gard profit, cantitate, trend-wait, cooldown, jurnal) e rulata

@@ -18,6 +18,7 @@ from providers.strategy_executor import (  # noqa: E402
 class FakeClient:
     def __init__(self):
         self.order_calls = []
+        self.open = []
 
     def get_symbol_info(self, symbol):
         return {"baseAsset": "BTC", "quoteAsset": "USDC", "filters": [
@@ -27,8 +28,17 @@ class FakeClient:
     def get_klines(self, symbol, interval, limit):
         return [[0, "1", "1", "1", "10"], [0, "1", "1", "1", "11"], [0, "1", "1", "1", "12"]]
 
-    def get_order(self, symbol, orderId):
+    def get_order(self, symbol, orderId=None, origClientOrderId=None):
+        if origClientOrderId is not None:
+            return {
+                "orderId": 77, "clientOrderId": origClientOrderId,
+                "side": "BUY", "price": "60", "origQty": "2",
+                "executedQty": "0", "status": "NEW",
+            }
         return {"status": "FILLED", "executedQty": "2.0", "cummulativeQuoteQty": "120.0"}
+
+    def get_open_orders(self, symbol):
+        return list(self.open)
 
     def get_my_trades(self, symbol, orderId):
         return [{
@@ -114,6 +124,23 @@ class BinanceExecutorContractTest(unittest.TestCase):
         self.fake.cancel_result = False
         with self.assertRaises(ProviderError):
             self.p.cancel_order("BTCUSDC", "42")
+
+    def test_open_orders_pastreaza_identitatea_pentru_recovery(self):
+        self.fake.client.open = [{
+            "orderId": 77, "clientOrderId": "RT_abc", "side": "buy",
+            "price": "60", "origQty": "2", "executedQty": "0.5",
+            "status": "PARTIALLY_FILLED",
+        }]
+        self.assertEqual(self.p.open_orders("BTCUSDC"), [{
+            "orderId": "77", "clientOrderId": "RT_abc", "side": "BUY",
+            "price": 60.0, "origQty": 2.0, "executedQty": 0.5,
+            "status": "PARTIALLY_FILLED",
+        }])
+
+    def test_lookup_dupa_client_order_id(self):
+        order = self.p.order_by_client_id("BTCUSDC", "RT_abc")
+        self.assertEqual(order["orderId"], 77)
+        self.assertEqual(order["clientOrderId"], "RT_abc")
 
 
 if __name__ == "__main__":

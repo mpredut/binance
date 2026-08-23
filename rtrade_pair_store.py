@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import tempfile
 import time
@@ -9,11 +10,17 @@ import time
 from lock import FileLock
 
 
+def rtrade_client_order_id(pair_id, side, kind="limit"):
+    raw = f"{pair_id}:{str(side).upper()}:{kind}".encode("utf-8")
+    return "RT_" + hashlib.blake2s(raw, digest_size=16).hexdigest()
+
+
 class RTradePairStore:
-    def __init__(self, path=None):
+    def __init__(self, path=None, terminal_retention=200):
         root = os.path.dirname(os.path.abspath(__file__))
         self.path = path or os.path.join(root, "cachedb", "rtrade_pairs.json")
         self.lock_path = self.path + ".lock"
+        self.terminal_retention = max(0, int(terminal_retention))
 
     def _read(self):
         try:
@@ -42,8 +49,19 @@ class RTradePairStore:
             data.setdefault("version", 1)
             data.setdefault("pairs", {})
             result = fn(data["pairs"])
-            self._write(data)
+            if result is not False:
+                self._prune_terminal(data["pairs"])
+                self._write(data)
             return result
+
+    def _prune_terminal(self, pairs):
+        terminal = sorted(
+            (rec for rec in pairs.values() if rec.get("terminal")),
+            key=lambda rec: float(rec.get("updated_ts", 0)), reverse=True)
+        keep = {rec.get("pair_id") for rec in terminal[:self.terminal_retention]}
+        for pair_id, rec in list(pairs.items()):
+            if rec.get("terminal") and pair_id not in keep:
+                del pairs[pair_id]
 
     def begin(self, symbol, pair_id, start_side, qty):
         now = time.time()
@@ -55,16 +73,32 @@ class RTradePairStore:
             }
         self.mutate(op)
 
-    def intent(self, pair_id, side, price, qty, client_order_id, kind="limit"):
+    def intent(self, pair_id, side, price, qty, client_order_id, kind="limit",
+               symbol=None, start_side=None):
         def op(pairs):
-            rec = pairs[pair_id]
+            now = time.time()
+            rec = pairs.get(pair_id)
+            if rec is None:
+                if not symbol:
+                    raise KeyError(f"pair necunoscut: {pair_id}")
+                rec = pairs[pair_id] = {
+                    "symbol": symbol, "pair_id": pair_id,
+                    "start_side": (start_side or side).upper(),
+                    "qty": float(qty), "phase": "reserved", "terminal": False,
+                    "intents": {}, "state": None,
+                    "created_ts": now, "updated_ts": now,
+                }
             key = f"{kind}:{side.upper()}"
-            rec["intents"][key] = {
+            value = {
                 "side": side.upper(), "price": price, "qty": float(qty),
                 "client_order_id": client_order_id, "kind": kind,
                 "order_id": None,
             }
-            rec["updated_ts"] = time.time()
+            if rec["intents"].get(key) == value:
+                return False
+            rec["intents"][key] = value
+            rec["updated_ts"] = now
+            return True
         self.mutate(op)
 
     def accepted(self, pair_id, side, order_id, kind="limit"):
@@ -81,6 +115,22 @@ class RTradePairStore:
             rec["phase"] = state.get("phase")
             rec["terminal"] = bool(terminal)
             rec["updated_ts"] = time.time()
+        self.mutate(op)
+
+    def checkpoint_many(self, checkpoints):
+        """Un singur lock+fsync pentru toate rundele procesate in acel tick."""
+        checkpoints = list(checkpoints)
+        if not checkpoints:
+            return
+        def op(pairs):
+            now = time.time()
+            for pair_id, state, terminal in checkpoints:
+                rec = pairs[pair_id]
+                rec["state"] = state
+                rec["phase"] = state.get("phase")
+                rec["terminal"] = bool(terminal)
+                rec["updated_ts"] = now
+            return True
         self.mutate(op)
 
     def active(self, symbol):

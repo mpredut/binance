@@ -2,10 +2,19 @@ import os
 import tempfile
 import unittest
 
-from rtrade_pair_store import RTradePairStore
+from rtrade_pair_store import RTradePairStore, rtrade_client_order_id
 
 
 class RTradePairStoreTest(unittest.TestCase):
+    def test_client_order_id_este_stabil_si_specific_rtrade(self):
+        first = rtrade_client_order_id("pair-1", "buy")
+        self.assertEqual(first, rtrade_client_order_id("pair-1", "BUY"))
+        self.assertTrue(first.startswith("RT_"))
+        self.assertEqual(len(first), 35)
+        self.assertNotEqual(first, rtrade_client_order_id("pair-1", "SELL"))
+        self.assertNotEqual(
+            first, rtrade_client_order_id("pair-1", "BUY", "hard_stop"))
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.store = RTradePairStore(os.path.join(self.tmp.name, "pairs.json"))
@@ -33,6 +42,37 @@ class RTradePairStoreTest(unittest.TestCase):
             "pair-2", {"pair_id": "pair-2", "phase": "complete", "tickets": []},
             terminal=True)
         self.assertEqual(self.store.active("TAOUSDC"), [])
+
+    def test_intent_can_atomically_create_pair_without_separate_begin(self):
+        self.store.intent(
+            "pair-3", "BUY", 100.0, 1.0, "SD_atomic", kind="limit",
+            symbol="TAOUSDC", start_side="BUY")
+        rec = self.store.active("TAOUSDC")[0]
+        self.assertEqual(rec["pair_id"], "pair-3")
+        self.assertEqual(rec["intents"]["limit:BUY"]["client_order_id"],
+                         "SD_atomic")
+
+    def test_checkpoint_many_updates_rounds_in_one_transaction(self):
+        for pair_id in ("p1", "p2"):
+            self.store.begin("TAOUSDC", pair_id, "BUY", 1.0)
+        self.store.checkpoint_many([
+            ("p1", {"phase": "quoting"}, False),
+            ("p2", {"phase": "complete"}, True),
+        ])
+        active = self.store.active("TAOUSDC")
+        self.assertEqual([rec["pair_id"] for rec in active], ["p1"])
+
+    def test_terminal_history_is_bounded(self):
+        store = RTradePairStore(
+            os.path.join(self.tmp.name, "bounded.json"), terminal_retention=2)
+        for i in range(4):
+            pair_id = f"t{i}"
+            store.begin("TAOUSDC", pair_id, "BUY", 1.0)
+            store.checkpoint(pair_id, {"phase": "complete"}, terminal=True)
+        import json
+        with open(store.path, encoding="utf-8") as handle:
+            pairs = json.load(handle)["pairs"]
+        self.assertEqual(len(pairs), 2)
 
 
 if __name__ == "__main__":

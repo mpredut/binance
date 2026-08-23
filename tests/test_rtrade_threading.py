@@ -5,7 +5,7 @@ import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import rtrade
 
@@ -24,11 +24,31 @@ def _bot():
         active=lambda _symbol: [],
         begin=lambda *_args, **_kwargs: None,
         checkpoint=lambda *_args, **_kwargs: None,
+        checkpoint_many=lambda *_args, **_kwargs: None,
     )
     return bot
 
 
 class RTradeThreadingTest(unittest.TestCase):
+    def test_startup_anuleaza_automat_ordinul_rtrade_orfan(self):
+        bot = _bot()
+        canceled = []
+        executor = SimpleNamespace(
+            open_orders=Mock(side_effect=[[
+                {"orderId": "91", "clientOrderId": "RT_orphan"}
+            ], []]),
+            cancel_order=lambda symbol, order_id: canceled.append(
+                (symbol, order_id)),
+        )
+        venue = SimpleNamespace(current_price=lambda: None, executor=executor)
+        with patch.object(rtrade, "_LivePairVenue", return_value=venue), \
+             patch.object(rtrade.time, "sleep", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                bot._run_coordinator_forever()
+
+        self.assertEqual(canceled, [("TAOUSDC", "91")])
+        self.assertEqual(executor.open_orders.call_count, 2)
+
     def test_feature_flag_routes_to_single_coordinator_path(self):
         bot = _bot()
         with patch.object(rtrade, "RTRADE_PAIR_COORDINATOR_ENABLED", True), \
@@ -57,7 +77,9 @@ class RTradeThreadingTest(unittest.TestCase):
                 self.steps.append(now)
                 return SimpleNamespace(terminal=False)
 
-        venue = SimpleNamespace(current_price=lambda: 100.0)
+        venue = SimpleNamespace(
+            current_price=lambda: 100.0,
+            executor=SimpleNamespace(open_orders=lambda _symbol: []))
         with patch.object(rtrade, "_LivePairVenue", return_value=venue), \
              patch.object(rtrade, "PairCoordinator", FakeCoordinator), \
              patch.object(rtrade, "RTRADE_PAIR_MAX_ACTIVE_ROUNDS", 2), \
@@ -95,7 +117,9 @@ class RTradeThreadingTest(unittest.TestCase):
                     reason=f"{self.start_side.lower()}_place_failed",
                 )
 
-        venue = SimpleNamespace(current_price=lambda: 100.0)
+        venue = SimpleNamespace(
+            current_price=lambda: 100.0,
+            executor=SimpleNamespace(open_orders=lambda _symbol: []))
         with patch.object(rtrade, "_LivePairVenue", return_value=venue), \
              patch.object(rtrade, "PairCoordinator", FailingCoordinator), \
              patch.object(rtrade, "RTRADE_PAIR_MAX_ACTIVE_ROUNDS", 2), \
@@ -141,7 +165,7 @@ class RTradeThreadingTest(unittest.TestCase):
         self.assertTrue(kwargs["caller_owns_retry"])
         self.assertFalse(kwargs["force"])
         self.assertFalse(kwargs["smart"])
-        self.assertTrue(kwargs["client_order_id"].startswith("SD_"))
+        self.assertTrue(kwargs["client_order_id"].startswith("RT_"))
         self.assertEqual(len(kwargs["client_order_id"]), 35)
 
     def test_live_pair_hard_stop_reconciles_and_uses_audited_market_exit(self):

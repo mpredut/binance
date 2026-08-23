@@ -17,12 +17,10 @@ import symbols as sym
 from binance_api import bapi as api
 from binance_api import bapi_placeorder as po   # pastrat pt WeightLimitBlock (dead-safe)
 from providers.market_api import api as mkt      # proxy unic guardat (Instrument.place)
-from providers.execution_audit import (
-    AuditedStrategyExecutor, intent_client_order_id,
-)
+from providers.execution_audit import AuditedStrategyExecutor
 from providers.quantity import decide_quantity
 from market_regime import MarketRegimeDecision, MarketRegimeEvaluator
-from rtrade_pair_store import RTradePairStore
+from rtrade_pair_store import RTradePairStore, rtrade_client_order_id
 from strategies.rtrade_pair import (
     OrderSnapshot as PairOrderSnapshot,
     OrderTicket as PairOrderTicket,
@@ -168,11 +166,11 @@ class _LivePairVenue:
                 return None
         hours = (RTRADE_BUY_NORMAL_HOURS if side.upper() == "BUY"
                  else RTRADE_SELL_NORMAL_HOURS)
-        intent_id = f"rtrade-{pair_id}-{side.lower()}-limit"
-        client_id = intent_client_order_id(self.provider_name, intent_id)
+        client_id = rtrade_client_order_id(pair_id, side, "limit")
         if self.pair_store is not None:
             self.pair_store.intent(
-                pair_id, side, price, qty, client_id, kind="limit")
+                pair_id, side, price, qty, client_id, kind="limit",
+                symbol=self.symbol, start_side=side)
         order = mkt.place(
             self.symbol, side, price, qty,
             force=False, cancelorders=False, hours=hours, smart=False,
@@ -241,10 +239,12 @@ class _LivePairVenue:
                 return None
         kind = f"rtrade:{reason}:{pair_id or 'unknown-pair'}"
         intent_id = f"rtrade-{pair_id or 'unknown'}-{reason}-{side.lower()}"
-        client_id = intent_client_order_id(self.audited_executor.name, intent_id)
+        client_id = rtrade_client_order_id(
+            pair_id or "unknown", side, "hard_stop")
         if self.pair_store is not None and pair_id:
             self.pair_store.intent(
-                pair_id, side, None, final_qty, client_id, kind="hard_stop")
+                pair_id, side, None, final_qty, client_id, kind="hard_stop",
+                symbol=self.symbol)
         self.audited_executor.preflight_order(
             self.symbol, side, final_qty, price=None, market=True, kind=kind)
         order_id = self.audited_executor.submit_order_with_intent(
@@ -628,10 +628,83 @@ class TradingBot:
         for record in pair_store.active(self.symbol):
             state = record.get("state")
             if not state:
-                print(f"[{self.symbol}] RECOVERY BLOCAT: pair={record.get('pair_id')} "
-                      "are intentie persistata fara checkpoint; nu pornesc runde noi")
-                recovery_blocked = True
-                continue
+                try:
+                    tickets = []
+                    snapshots = {}
+                    for intent in record.get("intents", {}).values():
+                        order = venue.executor.order_by_client_id(
+                            self.symbol, intent["client_order_id"])
+                        if not order:
+                            # Intentia a fost fsync-uit-a inainte de submit. Daca
+                            # procesul a murit exact in acea fereastra, retrimiterea
+                            # cu acelasi clientOrderId este idempotenta la Binance.
+                            # Pipeline-ul normal pastreaza toate guard-urile si
+                            # reconcilierea de cantitate.
+                            if intent.get("kind", "limit") != "limit":
+                                continue
+                            ticket = venue.place_limit(
+                                intent["side"], float(intent["price"]),
+                                float(intent["qty"]), record["pair_id"])
+                            if ticket is None:
+                                # Daca submit-ul a ajuns la venue, dar raspunsul
+                                # s-a pierdut/SDK-ul a intors None, ordinul poate
+                                # exista totusi. Reconciliem inca o data inainte
+                                # sa declaram intentia neplasata.
+                                order = venue.executor.order_by_client_id(
+                                    self.symbol, intent["client_order_id"])
+                                if not order:
+                                    continue
+                            else:
+                                order = venue.executor.order_by_client_id(
+                                    self.symbol, intent["client_order_id"])
+                            if not order:
+                                # Unele implementari provider nu expun imediat
+                                # lookup-ul dupa client id; ticket-ul confirmat este
+                                # suficient pentru reconstructia aceleiasi runde.
+                                order = {
+                                    "orderId": ticket.order_id,
+                                    "price": ticket.price,
+                                    "origQty": ticket.qty,
+                                }
+                        order_id = str(order["orderId"])
+                        pair_store.accepted(
+                            record["pair_id"], intent["side"], order_id,
+                            kind=intent.get("kind", "limit"))
+                        snap = venue.order_status(order_id)
+                        snapshots[order_id] = vars(snap).copy()
+                        tickets.append({
+                            "order_id": order_id, "side": intent["side"],
+                            "price": float(order.get("price") or intent.get("price") or 0),
+                            "qty": float(order.get("origQty") or intent["qty"]),
+                            "active": snap.status not in {"closed", "canceled", "expired"},
+                            "pair_id": record["pair_id"],
+                        })
+                    if not tickets:
+                        terminal_state = {
+                            "pair_id": record["pair_id"], "qty": record["qty"],
+                            "start_side": record["start_side"], "phase": "failed",
+                            "reason": "recovery_intent_not_submitted", "shock": False,
+                            "elapsed_sec": 0, "first_fill_elapsed_sec": None,
+                            "first_fill_side": None, "tickets": [], "snapshots": {},
+                        }
+                        pair_store.checkpoint(
+                            record["pair_id"], terminal_state, terminal=True)
+                        print(f"[{self.symbol}] pair={record['pair_id']} recovery: "
+                              "intentia nu a putut fi plasata; inchisa controlat")
+                        continue
+                    state = {
+                        "pair_id": record["pair_id"], "qty": record["qty"],
+                        "start_side": record["start_side"], "phase": "quoting",
+                        "reason": "recovered_by_client_order_id", "shock": False,
+                        "elapsed_sec": max(0.0, time.time() - record["created_ts"]),
+                        "first_fill_elapsed_sec": None, "first_fill_side": None,
+                        "tickets": tickets, "snapshots": snapshots,
+                    }
+                    pair_store.checkpoint(record["pair_id"], state, terminal=False)
+                except Exception as exc:
+                    print(f"[{self.symbol}] RECOVERY BLOCAT: pair={record.get('pair_id')} {exc}")
+                    recovery_blocked = True
+                    continue
             try:
                 coordinator = PairCoordinator.from_state(venue, policy, state)
                 active.append(coordinator)
@@ -640,6 +713,42 @@ class TradingBot:
             except Exception as exc:
                 print(f"[{self.symbol}] RECOVERY BLOCAT: {exc}")
                 recovery_blocked = True
+
+        try:
+            known_client_ids = {
+                intent.get("client_order_id")
+                for rec in pair_store.active(self.symbol)
+                for intent in rec.get("intents", {}).values()
+            }
+            orphan_orders = [
+                order for order in venue.executor.open_orders(self.symbol)
+                if str(order.get("clientOrderId") or "").startswith("RT_")
+                and order.get("clientOrderId") not in known_client_ids
+            ]
+            for order in orphan_orders:
+                order_id = str(order["orderId"])
+                client_id = order.get("clientOrderId")
+                # Un ordin RT_ fara intentie locala nu poate fi asociat sigur
+                # unei runde (ID-ul este hash-uit). Il anulam, nu inventam stare.
+                venue.executor.cancel_order(self.symbol, order_id)
+                print(f"[{self.symbol}] recovery: ordin RT_ orfan anulat "
+                      f"order_id={order_id} client_id={client_id}")
+            if orphan_orders:
+                remaining = {
+                    str(order.get("orderId"))
+                    for order in venue.executor.open_orders(self.symbol)
+                }
+                not_canceled = [
+                    str(order["orderId"]) for order in orphan_orders
+                    if str(order["orderId"]) in remaining
+                ]
+                if not_canceled:
+                    print(f"[{self.symbol}] RECOVERY BLOCAT: anulare neconfirmata "
+                          f"pentru ordinele RT_ {not_canceled}")
+                    recovery_blocked = True
+        except Exception as exc:
+            print(f"[{self.symbol}] RECOVERY BLOCAT: inventar exchange indisponibil ({exc})")
+            recovery_blocked = True
         last_start_at = float("-inf")
         next_direction = 0
         side_backoff_until = {"BUY": 0.0, "SELL": 0.0}
@@ -647,13 +756,13 @@ class TradingBot:
             try:
                 now = time.monotonic()
                 survivors = []
+                checkpoints = []
                 for coordinator in active:
                     outcome = coordinator.step(now=now)
                     export_state = getattr(coordinator, "export_state", None)
                     if callable(export_state):
-                        pair_store.checkpoint(
-                            coordinator.pair_id, export_state(),
-                            terminal=outcome.terminal)
+                        checkpoints.append((
+                            coordinator.pair_id, export_state(), outcome.terminal))
                     if outcome.terminal:
                         print(
                             f"[{self.symbol}] pair={outcome.pair_id} "
@@ -665,6 +774,7 @@ class TradingBot:
                             f"fees={outcome.fees:.2f} reason={outcome.reason}")
                     else:
                         survivors.append(coordinator)
+                pair_store.checkpoint_many(checkpoints)
                 active = survivors
 
                 can_start = (
@@ -689,8 +799,6 @@ class TradingBot:
                             continue
                         round_qty = RTRADE_NOTIONAL_USDC / float(current_price)
                         reserved_pair_id = uuid.uuid4().hex
-                        pair_store.begin(
-                            self.symbol, reserved_pair_id, start_side, round_qty)
                         coordinator = PairCoordinator(
                             venue, round_qty, policy, start_side=start_side)
                         outcome = coordinator.start(
