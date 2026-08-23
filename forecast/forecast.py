@@ -1,30 +1,28 @@
 #!/usr/bin/env python3
 """
-forecast.py — modul NOU, PARALEL: estimarea trendului si a pretului VIITOR (test).
+forecast.py — NEW PARALLEL module for experimental FUTURE trend and price estimation.
 
-Ruleaza ALATURI de analiza existenta (nu tranzactioneaza, nu o inlocuieste):
-produce forecast.json + raport walk-forward ONEST (acuratete masurata pe date
-nevazute, comparata cu baseline-ul "trendul persista" = Lindy).
+Runs ALONGSIDE existing analysis without trading or replacing it. Produces forecast.json
+and an honest walk-forward report measured on unseen data against the Lindy baseline
+that assumes the current trend persists.
 
-Modele (toate disponibile fara dependente noi, sklearn e deja in venv):
-  * lindy  — baseline: semnul ultimelor 24h persista (de batut!)
-  * logit  — regresie logistica pe feature-uri (scalate)
-  * boost  — HistGradientBoosting (gradient boosting modern; la volumul asta de
-             date bate de regula LSTM-ul si nu cere GPU/tensorflow)
-LSTM: exista priceprediction.py (Keras), dar tensorflow NU e instalat in venv;
-boosting-ul e punctul de pornire corect — LSTM se poate adauga ulterior daca
-bate boosting-ul pe walk-forward, nu invers.
+Models, all available without new dependencies because sklearn is already installed:
+  * lindy: baseline that the latest 24-hour sign persists
+  * logit: logistic regression over scaled features
+  * boost: HistGradientBoosting, which generally beats LSTM at this data volume without GPU
+priceprediction.py contains a Keras LSTM, but TensorFlow is not installed. Boosting is the
+correct starting point; add LSTM only if it later beats boosting walk-forward.
 
-Feature-uri pe lumanari 1h: randamente multi-orizont, volatilitate, Z-ul
-Mann-Kendall (taria trendului), Hurst (regimul), RSI, raport semnal/zgomot.
-Tinta: directia si amplitudinea miscarii pe urmatoarele 24h.
+One-hour candle features include multi-horizon returns, volatility, Mann-Kendall Z
+for trend strength, Hurst regime, RSI, and signal-to-noise. Targets are direction and
+magnitude over the next 24 hours.
 
-  python3 forecast.py --symbol TAOUSDC --days 400 --eval        # raport onest
+  python3 forecast.py --symbol TAOUSDC --days 400 --eval        # honest report
   python3 forecast.py --symbol TAOUSDC --forecast               # -> forecast.json
-  python3 forecast.py --symbol TAOUSDC --forecast --loop 60     # la fiecare ora
+  python3 forecast.py --symbol TAOUSDC --forecast --loop 60     # every hour
 
-forecast.json e compatibil cu formatul signal.json al botului Hyperliquid
-(trend/confidence/ts) — acelasi fisier poate alimenta SIGNAL_SOURCE=file.
+forecast.json is compatible with the Hyperliquid bot's signal.json format
+(trend/confidence/ts), so the same file can feed SIGNAL_SOURCE=file.
 """
 
 from __future__ import annotations
@@ -37,13 +35,13 @@ import time
 
 import numpy as np
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # forecast/ -> rădăcina repo
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # forecast/ -> repository root
 sys.path.insert(0, _ROOT)
 from trend_survival import fetch_klines  # noqa: E402
 from trend_stats import mann_kendall, hurst_rs  # noqa: E402
 
 HORIZON_H = 24
-WARMUP = 240            # ore de istoric necesare pt feature-uri (Hurst pe 240h)
+WARMUP = 240            # history hours required for features; Hurst uses 240h
 
 FEATURES = ["r1", "r4", "r8", "r24", "r72", "vol24", "vol72", "mk_z", "hurst", "rsi", "snr24"]
 
@@ -61,7 +59,7 @@ def _feat_row(i: int, logp: np.ndarray, px: np.ndarray) -> list[float]:
     d = np.diff(px[i - 14:i + 1])
     up, dn = d[d > 0].sum(), -d[d < 0].sum()
     rsi = 100.0 * up / (up + dn) if up + dn > 0 else 50.0
-    snr24 = r24 / (vol24 * np.sqrt(24) + 1e-12)        # cat din miscare e semnal vs zgomot
+    snr24 = r24 / (vol24 * np.sqrt(24) + 1e-12)        # signal contribution relative to noise
     return [r1, r4, r8, r24, r72, vol24, vol72, mk_z, h, rsi, snr24]
 
 
@@ -77,7 +75,7 @@ def build_dataset(px: np.ndarray):
 
 
 def walk_forward(X, y_dir, y_mag, train_frac=0.7, refit_every=168):
-    """Antreneaza pe trecut, prezice pe viitor NEVAZUT, refit saptamanal."""
+    """Train on the past, predict the UNSEEN future, and refit weekly."""
     from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
     from sklearn.linear_model import LogisticRegression
     from sklearn.pipeline import make_pipeline
@@ -100,7 +98,7 @@ def walk_forward(X, y_dir, y_mag, train_frac=0.7, refit_every=168):
         acc["boost"] += list(clf.predict(X[sl]) == y_dir[sl])
         pm = reg.predict(X[sl])
         mag_err += list(np.abs(pm - y_mag[sl]))
-        mag_base += list(np.abs(y_mag[sl]))             # baseline: prezice 0 miscare
+        mag_base += list(np.abs(y_mag[sl]))             # baseline predicts zero movement
         i = j
     return {m: float(np.mean(v)) for m, v in acc.items()} | {
         "n_test": len(acc["boost"]),
@@ -110,9 +108,9 @@ def walk_forward(X, y_dir, y_mag, train_frac=0.7, refit_every=168):
 
 
 def live_forecast(px: np.ndarray, X, y_dir, y_mag, rep: dict, symbol: str) -> dict:
-    """Antreneaza pe TOT istoricul si prognozeaza de la ultima lumanare.
-    Foloseste modelul care a CASTIGAT pe walk-forward (nu pe cel mai sofisticat
-    din oficiu) — pe datele actuale logit-ul bate de regula boosting-ul."""
+    """Train on ALL history and forecast from the latest candle.
+    Use the model that WON walk-forward rather than assuming the more sophisticated
+    model is better; logit generally beats boosting on the current data."""
     from sklearn.ensemble import HistGradientBoostingClassifier, HistGradientBoostingRegressor
     from sklearn.linear_model import LogisticRegression
     from sklearn.pipeline import make_pipeline
@@ -130,14 +128,14 @@ def live_forecast(px: np.ndarray, X, y_dir, y_mag, rep: dict, symbol: str) -> di
     move = float(reg.predict(row)[0])
     best_acc = max(rep["boost"], rep["logit"]) if rep else None
     return {
-        # compatibil cu signal.json (botul HL): trend / confidence / ts
+        # Compatible with the HL bot's signal.json: trend / confidence / ts.
         "trend": "up" if proba_up >= 0.5 else "down",
         "confidence": round(abs(proba_up - 0.5) * 2, 2),
         "ts": time.time(),
-        # extra, pt evaluare si transparenta
+        # Additional evaluation and transparency fields.
         "symbol": symbol, "horizon_h": HORIZON_H,
         "proba_up": round(proba_up, 3),
-        "expected_move_pct": round(move * 100, 2),   # ATENTIE: MAE-ul e peste baseline — orientativ
+        "expected_move_pct": round(move * 100, 2),   # Caution: MAE exceeds baseline; indicative only
         "model": "boost" if use_boost else "logit",
         "walkforward_accuracy": round(best_acc, 3) if best_acc else None,
         "baseline_accuracy": round(rep["lindy"], 3) if rep else None,

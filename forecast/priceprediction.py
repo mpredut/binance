@@ -12,7 +12,7 @@ class PricePrediction:
         self.window_size = int(window_size)
         self.model = self.build_lstm_model()
         self.scaler = MinMaxScaler(feature_range=(0, 1))
-        self.trained = False  # Marcare dacă modelul a fost antrenat sau nu
+        self.trained = False  # Track whether the model has been trained.
 
     def build_lstm_model(self):
         model = Sequential()
@@ -25,7 +25,7 @@ class PricePrediction:
         self.prices.append(price)
         if len(self.prices) < self.window_size:
             return
-        # Antrenăm modelul dacă nu a fost antrenat încă
+        # Train the model if it has not been trained yet.
 		#if not self.trained:
 		#	self.train_lstm_model()
 		#	self.trained = True
@@ -41,7 +41,7 @@ class PricePrediction:
         if len(prices) < self.window_size:
             return
         self.prices = prices
-        # Antrenăm modelul dacă nu a fost antrenat încă
+        # Train the model if it has not been trained yet.
 		#if not self.trained:
 		#	self.train_lstm_model()
 		#	self.trained = True
@@ -67,7 +67,7 @@ class PricePrediction:
 
     def prepare_data(self):
         prices_array = np.array(self.prices).reshape(-1, 1)
-        self.scaler.fit(prices_array)  # Resetează scalerul pe toate datele istorice
+        self.scaler.fit(prices_array)  # Reset the scaler across all historical data.
         prices_scaled = self.scaler.transform(prices_array)
 
         X, y = [], []
@@ -81,12 +81,12 @@ class PricePrediction:
     
     
     def train_lstm_model(self):
-        # Pregătim datele pentru antrenare
+        # Prepare training data.
         X, y = self.prepare_data()
         if X.size == 0 or y.size == 0:
             print("Insufficient data to train the model.")
         return
-        # Antrenăm modelul LSTM
+        # Train the LSTM model.
         self.model.fit(X, y, epochs=100, verbose=1)
         ##print("Modelul LSTM a fost antrenat cu succes!")
 
@@ -94,14 +94,14 @@ class PricePrediction:
         if self.trained == False:
             return None
             
-        # Folosim ultima secvență de prețuri pentru predicție
+        # Use the latest price sequence for prediction.
         last_prices = np.array(self.prices).reshape(-1, 1)
         last_prices_scaled = self.scaler.transform(last_prices).reshape(1, self.window_size, 1)
         
-        # Realizăm predicția
+        # Make the prediction.
         predicted_price_scaled = self.model.predict(last_prices_scaled)
         
-        # Rescalăm valoarea prezisă înapoi la intervalul original
+        # Scale the prediction back to the original range.
         predicted_price = self.scaler.inverse_transform(predicted_price_scaled)
         return predicted_price[0][0]
 
@@ -111,24 +111,24 @@ class PricePrediction:
         if not self.trained:
             return None
         
-        # Folosim toate datele de preț pentru predicție
+        # Use all price data for prediction.
         all_prices = np.array(self.prices).reshape(-1, 1)
         all_prices_scaled = self.scaler.transform(all_prices)
         
-        # Selectăm ultimul segment de lungime `window_size` din istoric pentru predicție
+        # Select the latest `window_size` segment from history for prediction.
         input_sequence = all_prices_scaled[-self.window_size:].reshape(1, self.window_size, 1)
         
-        # Realizăm predicția
+        # Make the prediction.
         predicted_price_scaled = self.model.predict(input_sequence)
         
-        # Rescalăm valoarea prezisă înapoi la intervalul original
+        # Scale the prediction back to the original range.
         predicted_price = self.scaler.inverse_transform(predicted_price_scaled)
         return predicted_price[0][0]
 
 
-# Exemplu de utilizare:
+# Usage example:
 #price_window = PriceWindow(window_size=10)
 
-# Simulăm adăugarea de prețuri secvențiale și rularea LSTM
+# Simulate adding sequential prices and running the LSTM.
 #for price in [100, 102, 105, 108, 110, 115, 117, 120, 125, 130, 135]:
     #price_window.process_price(price)
