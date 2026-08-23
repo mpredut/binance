@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-strategy.py — motor DCA + take-profit pe Hyperliquid (PERP), LONG sau SHORT.
+strategy.py — Hyperliquid perpetual DCA and take-profit engine for LONG or SHORT positions.
 
-Generalizat pe directie (HL_DIRECTION = long | short):
-  * LONG : intra cumparand sub piata; DCA cand pretul SCADE; TP cand pretul URCA.
-  * SHORT: intra vanzand peste piata; DCA cand pretul URCA;  TP cand pretul SCADE.
+Generalized by direction (HL_DIRECTION = long | short):
+  * LONG: enter by buying below market, DCA as price FALLS, and take profit as price RISES.
+  * SHORT: enter by selling above market, DCA as price RISES, and take profit as price FALLS.
 
-Convensie cu semn: sign = +1 (long) / -1 (short).
-  open_px  = price * (1 - sign * discount)       (intrare/DCA)
-  tp_px    = avg   * (1 + sign * takeprofit)      (inchidere, reduce-only)
-  DCA cand : sign * (price - last_open) <= -drop  (pretul a mers CONTRA noua)
+Sign convention: sign = +1 (long) / -1 (short).
+  open_px  = price * (1 - sign * discount)       (entry/DCA)
+  tp_px    = avg   * (1 + sign * takeprofit)      (reduce-only close)
+  DCA when : sign * (price - last_open) <= -drop  (price moved AGAINST the position)
   profit   = sign * (price - avg) * qty
 
-Pozitia + pretul mediu vin din clearinghouseState (szi semnat, entryPx).
-Fee HL minuscul -> TP poate fi strans. Levier din HL_LEVERAGE (1 = cvasi-spot).
+Position and average price come from clearinghouseState (signed szi and entryPx).
+HL fees are small enough for a tight take profit. HL_LEVERAGE=1 approximates spot.
 """
 
 from __future__ import annotations
@@ -52,10 +52,10 @@ class StratParams:
     max_dca_buys: int
     enable_takeprofit: bool
     order_ttl_min: float
-    signal_gate: bool        # True = intra DOAR daca semnalul (trend/predictie) e in favoarea directiei
-    stop_loss_pct: float     # inchide tot daca pierderea nerealizata depaseste acest % (0 = oprit)
-    reentry_tolerance_pct: float  # "aproape de prag" conteaza ca atins la DCA (are_close, determinist)
-                                  # — 0 = dezactivat (comportament vechi, exact). Vezi kraken/212trading.
+    signal_gate: bool        # enter only when the trend/prediction favors the direction
+    stop_loss_pct: float     # close all when unrealized loss exceeds this percentage; 0 disables
+    reentry_tolerance_pct: float  # deterministically treat near-threshold as DCA hit via are_close
+                                  # 0 preserves the exact legacy behavior; see kraken/212trading
 
     @classmethod
     def from_env(cls) -> "StratParams":
@@ -102,8 +102,8 @@ class Strategy:
         self.desktop = desktop
         self.leverage = leverage
         self.sign = 1 if params.direction == "long" else -1
-        self.open_side = "buy" if self.sign > 0 else "sell"     # deschide/mareste pozitia
-        self.close_side = "sell" if self.sign > 0 else "buy"    # reduce (reduce-only)
+        self.open_side = "buy" if self.sign > 0 else "sell"     # open or increase the position
+        self.close_side = "sell" if self.sign > 0 else "buy"    # reduce-only close
         self.state_file = state_path_for(coin, params.direction)
         self.s = self._load()
         self._paper_seq = 0
@@ -113,7 +113,7 @@ class Strategy:
         except HLError:
             pass
 
-    # -- persistenta -----------------------------------------------------------
+    # -- persistence -----------------------------------------------------------
     def _load(self) -> dict:
         if os.path.exists(self.state_file):
             try:
@@ -133,7 +133,7 @@ class Strategy:
         except OSError as e:
             log(f"  ! [STRAT] nu pot salva: {e}")
 
-    # -- helperi ---------------------------------------------------------------
+    # -- helpers ---------------------------------------------------------------
     def _avg(self) -> float | None:
         return self.s["cost"] / self.s["qty"] if self.s["qty"] > 1e-12 else None
 
@@ -150,7 +150,7 @@ class Strategy:
         if o in self.s["orders"]:
             self.s["orders"].remove(o)
 
-    # -- plasare ---------------------------------------------------------------
+    # -- placement -------------------------------------------------------------
     def _place(self, role: str, sz: float, px: float, kind: str, amount: float = 0.0) -> None:
         sz = round(sz, self.sz_dec)
         if sz <= 0:
@@ -180,7 +180,7 @@ class Strategy:
         self._remove(o)
         log(f"  [STRAT] anulat close {o['oid']}")
 
-    # -- reconciliere ----------------------------------------------------------
+    # -- reconciliation --------------------------------------------------------
     def reconcile(self, price: float) -> None:
         if self.dry_run:
             self._reconcile_paper(price)
@@ -192,7 +192,7 @@ class Strategy:
             for o in [x for x in self.s["orders"] if x["role"] == role]:
                 if o not in self.s["orders"]:
                     continue
-                # open: umple instant; close: umple cand pretul a atins targetul (cu semn)
+                # Paper opens fill immediately; closes fill when signed price reaches target.
                 if role == "open" or self.sign * (price - o["px"]) >= 0:
                     self._remove(o)
                     if role == "open":
@@ -209,11 +209,11 @@ class Strategy:
         active = {o.get("oid") for o in self.client.open_orders(self.coin)}
         prev = self.s["qty"]
 
-        if qty_now > prev + 1e-9:        # s-a deschis/marit pozitia
+        if qty_now > prev + 1e-9:        # position opened or increased
             fp = entry if entry > 0 else price
             self._apply_open(qty_now - prev, fp, round((qty_now - prev) * fp, 2), None,
                              real_qty=qty_now, real_avg=entry)
-        elif qty_now < prev - 1e-9:      # s-a redus (TP)
+        elif qty_now < prev - 1e-9:      # position reduced by take profit
             self._apply_close(self._avg() or entry or price, price, prev - qty_now,
                               real_qty=qty_now, real_avg=entry)
         else:
@@ -247,7 +247,7 @@ class Strategy:
         notify(title=f"{tag}{self.coin} OPEN {self.p.direction} {fq:.2f}@{fp:.2f}",
                body=f"{'DCA' if is_dca else 'ENTRY'} | q{self.s['qty']:.2f} a{avg:.2f}",
                source="hyperliquid", price=fp, desktop=self.desktop)
-        self._cancel_close()   # avg schimbat -> reasezam TP
+        self._cancel_close()   # average changed; replace the take-profit order
 
     def _apply_close(self, avg, price, sz, real_qty=None, real_avg=None):
         gross = self.sign * (price - avg) * sz
@@ -270,21 +270,21 @@ class Strategy:
             log(f"  [STRAT] === ciclu inchis, reincep (ciclu {self.s['cycle']}) ===")
 
     def _check_stop_loss(self, price: float) -> bool:
-        """Inchide TOT daca pierderea nerealizata depaseste pragul (evita acumularea de pierzatori)."""
+        """Close the entire position when unrealized loss exceeds the configured threshold."""
         if self.p.stop_loss_pct <= 0:
             return False
         avg = self._avg()
         if not avg:
             return False
-        loss_pct = -self.sign * (price - avg) / avg * 100   # pozitiv cand pierdem
+        loss_pct = -self.sign * (price - avg) / avg * 100   # positive while losing
         if loss_pct >= self.p.stop_loss_pct:
             log(f"  🛑 [STRAT] STOP-LOSS: pierdere {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — INCHID tot (taie pierderea)")
-            # anuleaza TOATE ordinele pendinte (inclusiv DCA-uri) ca sa nu se reumple pozitia
+            # Cancel every pending order, including DCA, so the position cannot refill.
             for o in list(self.s["orders"]):
                 if not self.dry_run and not str(o["oid"]).startswith("PAPER"):
                     self.client.cancel(self.coin, o["oid"])
                 self._remove(o)
-            agg = price * (1 - self.sign * 0.005)           # pret agresiv -> fill sigur
+            agg = price * (1 - self.sign * 0.005)           # aggressive price for reliable fill
             self._place("close", self.s["qty"], agg, "STOP")
             notify(title=f"🛑 SL {self.coin} -{loss_pct:.1f}%",
                    body=f"pierdere {loss_pct:.1f}% ≥prag{self.p.stop_loss_pct}% — inchis pozitia",
@@ -292,16 +292,16 @@ class Strategy:
             return True
         return False
 
-    # -- decizie ---------------------------------------------------------------
+    # -- decision --------------------------------------------------------------
     def step(self, price: float) -> None:
         held = self.s["qty"]
         d = self.p.entry_discount_pct / 100
         if held <= 1e-12:
             if self._open_pending(): return
-            # POARTA DE SEMNAL: nu intra contra trendului/predictiei
+            # SIGNAL GATE: do not enter against the trend or prediction.
             if self.p.signal_gate:
                 sig = get_signal(self.client, self.coin)
-                want = "up" if self.sign > 0 else "down"   # long vrea trend up; short vrea down
+                want = "up" if self.sign > 0 else "down"   # long requires up; short requires down
                 if sig["trend"] != want:
                     log(f"  [STRAT] semnal={sig['trend']} (conf {sig['confidence']}, {sig['source']}) "
                         f"!= {want} pt {self.p.direction} — NU intru (astept trend favorabil)")
@@ -312,7 +312,7 @@ class Strategy:
             px = price * (1 - self.sign * d)
             self._place("open", self._sz_for(self.p.entry_amount, px), px, "ENTRY", self.p.entry_amount)
             return
-        # STOP-LOSS: taie pierderea daca pozitia merge prea mult contra (anti-runaway DCA)
+        # STOP-LOSS: cap losses when the position moves too far against us, preventing runaway DCA.
         if self._check_stop_loss(price):
             return
         avg = self._avg()
@@ -323,13 +323,13 @@ class Strategy:
                 self._place("close", held, target, "TP")
             elif abs(o["px"]-target)/target > 0.001 or abs(o["sz"]-held) > 1e-9:
                 self._cancel_close(); self._place("close", held, target, "TP")
-        # DCA: pretul a mers CONTRA pozitiei cu drop%. Compar PRETUL cu un prag de
-        # PRET (nu procentul cu procentul — are_close e relativ la magnitudinea
-        # valorilor comparate, corect doar intre doua preturi, la fel ca in
-        # kraken/212strategy.py). toleranta = "aproape de prag" conteaza ca atins
-        # (STRAT_REENTRY_TOLERANCE_PCT, implicit 0 = comportament vechi, exact).
+        # DCA after price moves drop% AGAINST the position. Compare PRICE with a PRICE
+        # threshold, not a percentage with a percentage: are_close is relative to the
+        # magnitude of compared values and is correct only between two prices, matching
+        # kraken/212strategy.py. The tolerance treats near-threshold as reached;
+        # STRAT_REENTRY_TOLERANCE_PCT=0 preserves exact legacy behavior.
         lop = self.s["last_open_price"]
-        moved = self.sign * (price - lop) / lop if lop else 0   # doar pt log
+        moved = self.sign * (price - lop) / lop if lop else 0   # logging only
         prag_dca = lop * (1 - self.sign * self.p.dca_drop_pct / 100) if lop else None
         dca_hit = prag_dca is not None and (
             self.sign * (prag_dca - price) >= 0
@@ -343,7 +343,7 @@ class Strategy:
             log(f"  [STRAT] pret contra ({moved*100:.2f}%) — DCA")
             self._place("open", self._sz_for(self.p.dca_amount, px), px, "DCA", self.p.dca_amount)
 
-    # -- bucla -----------------------------------------------------------------
+    # -- loop ------------------------------------------------------------------
     def run(self) -> None:
         mode = "avg_tp" if self.p.enable_takeprofit else "dca_only"
         if not self.dry_run and self.client.exchange:
