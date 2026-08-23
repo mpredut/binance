@@ -32,7 +32,7 @@ def beep(n):
 
 
 def get_interval_time(valoare_prestabilita=97 * 79, marja_aleatoare=10):
-    # Generarea unei valori aleatoare în intervalul [-marja_aleatoare, marja_aleatoare]
+    # Generate a random value in ``[-random_margin, random_margin]``.
     valoare_aleatoare = random.uniform(-marja_aleatoare, marja_aleatoare)
     interval = abs(valoare_prestabilita + valoare_aleatoare)
     
@@ -90,33 +90,33 @@ def are_close(value1, value2, target_tolerance_percent=1.0):
     from datetime import datetime
 
 def timestampToTime(timestamp_ms):
-    # Convertim timpul din milisecunde în secunde
+    # Convert milliseconds to seconds.
     timestamp_sec = timestamp_ms / 1000.0
     
-    # Convertim în format datetime
+    # Convert to datetime.
     human_readable_time = datetime.fromtimestamp(timestamp_sec)
     
-    # Returnam timpul ca string în format citibil
+    # Return a human-readable timestamp.
     return human_readable_time.strftime('%Y-%m-%d %H:%M:%S')
 
 
 def timeMsToHMS(timestamp_ms):
-    # Convertim timpul din milisecunde în secunde
+    # Convert milliseconds to seconds.
     timestamp_sec = timestamp_ms / 1000.0
     
-    # Convertim în format datetime
+    # Convert to datetime.
     human_readable_time = datetime.fromtimestamp(timestamp_sec)
     
-    # Returnăm timpul ca string în format oră, minut și secundă
+    # Return an hours, minutes, and seconds string.
     return human_readable_time.strftime('%H:%M:%S')
 
 def timeToHMS(timestamp_sec):
     human_readable_time = datetime.fromtimestamp(timestamp_sec)
     return human_readable_time.strftime('%H:%M:%S')
     
-    # Functia care converteste secunde în zile
+    # Convert seconds to days.
 def secondsToDays(max_age_seconds):
-    # Definim numarul de secunde într-o zi
+    # Seconds per day.
     seconds_in_a_day = 86400  # 24 ore * 60 minute * 60 secunde
     
     # Calculam numarul de zile
@@ -124,9 +124,9 @@ def secondsToDays(max_age_seconds):
     
     return days
 
-# Functia care converteste secunde în ore
+# Convert seconds to hours.
 def secondsToHours(max_age_seconds):
-    # Definim numarul de secunde într-o ora
+    # Seconds per hour.
     seconds_in_an_hour = 3600  # 60 minute * 60 secunde
     
     # Calculam numarul de ore
@@ -134,9 +134,9 @@ def secondsToHours(max_age_seconds):
     
     return hours
 
-# Functia care converteste secunde în minute
+# Convert seconds to minutes.
 def secondsToMinutes(max_age_seconds):
-    # Definim numarul de secunde într-un minut
+    # Seconds per minute.
     seconds_in_a_minute = 60  # 60 secunde
     
     # Calculam numarul de minute
@@ -179,14 +179,12 @@ def decrese_value_by_increment_exp(increment_factor, value, coeficient=0.05):
 
 def gaussian_weights(T, idx: int):
     """
-    Returnează:
-        t = axa pozițiilor [idx .. T-1]
-        w = ponderile gaussiene pentru fiecare poziție
+    Return ``t`` as the position axis ``[idx..T-1]`` and ``w`` as its Gaussian weights.
     """
     if idx >= T:
         return np.array([]), np.array([])
 
-    # gaussiana pe întreg spațiul T
+    # Gaussian over the complete T domain.
     t_full = np.linspace(0, T - 1, T)
     mu = (T - 1) / 2
     sigma = T / 4
@@ -198,14 +196,12 @@ def gaussian_weights(T, idx: int):
     
 def gaussian_weights_from_idx(T, idx: int):
     """
-    Returnează:
-        t = axa pozițiilor [idx .. T-1]
-        w = ponderile gaussiene pentru fiecare poziție
+    Return ``t`` as the position axis ``[idx..T-1]`` and ``w`` as its Gaussian weights.
     """
     if idx >= T:
         return np.array([]), np.array([])
 
-    # gaussiana pe întreg spațiul T
+    # Gaussian over the complete T domain.
     t_full = np.linspace(0, T - 1, T)
     mu = (T - 1) / 2
     sigma = T / 4
@@ -220,13 +216,13 @@ def gaussian_weights_from_idx(T, idx: int):
 def gaussian_full_shifted(T, last_period, trend="down", steps=None):
     remaining = T - last_period
     
-    # trend depășit - caz special
+    # Special case for an over-age trend.
     if remaining <= 1:
         if trend == "down":
             # trend bearish persistent → vinde agresiv
             return np.array([0.0]), np.array([1.0])
         else:
-            # trend bullish epuizat → cumpără conservator
+            # Use conservative buying after an exhausted bullish trend.
             return np.array([0.0]), np.array([0.1])
 
     remaining = int(remaining)
@@ -328,9 +324,10 @@ CACHE_DIR = os.environ.get(
 
 
 def cache_path(name):
-    """Întoarce calea fișierului de cache în `cachedb/`.
-    Dacă `name` are deja o cale (absolut sau conține un separator de directoare),
-    e returnat ca atare → nu stricăm căi explicite (teste, migrare, etc.)."""
+    """Return the cache path under ``cachedb``.
+
+    Preserve ``name`` when it is absolute or already contains a directory separator.
+    """
     if not name:
         return name
     if os.path.isabs(name) or os.sep in name or (os.altsep and os.altsep in name):

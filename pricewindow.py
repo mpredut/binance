@@ -1,14 +1,10 @@
 """
-pricewindow — primitive de fereastră de preț + analiză de trend.
+Price-window primitives and trend analysis.
 
-Extras din tradeall.py ca să fie reutilizabil (tradeall, CachePriceShortTrendManager,
-teste) fără logica de trading.
+Extracted from ``tradeall`` for reuse without trading decisions.
 
-Conține:
-  - PriceTrendAnalyzer : regresie liniară / polinomială / EMA / gradient
-  - PriceWindow        : fereastră glisantă (lean) + range (min/max) + trend instant
-                         + epsilon de zgomot informat din volatilitate
-  - WindowAnalyzer     : metrici de trading derivate dintr-un PriceWindow
+Contains ``PriceTrendAnalyzer`` regression/EMA/gradient calculations, a lean sliding
+``PriceWindow`` with volatility-informed noise epsilon, and composed trading metrics.
 """
 import threading
 from collections import deque
@@ -22,8 +18,8 @@ from sklearn.linear_model import LinearRegression
 import utils as u
 
 # ── Constante window ─────────────────────────────────────────────────────────
-DEFAULT_SAMPLE_RATE_SEC = 0.8     # rata nominală de sampling (fallback)
-RECENT_GRADIENT_SECONDS = 60.0    # fereastra de momentum recent (în secunde) — ~1 minut
+DEFAULT_SAMPLE_RATE_SEC = 0.8     # Nominal fallback sampling rate.
+RECENT_GRADIENT_SECONDS = 60.0    # Recent-momentum window in seconds.
 WINDOW_SECONDS_SMALL = 3.7 * 60          # 3.7 minute
 WINDOW_SECONDS_BIG   = 2.5 * 60 * 60     # 2.5 ore
 
@@ -77,16 +73,14 @@ class PriceTrendAnalyzer:
 
 
 def instant_trend_from_prices(prices, sample_rate_sec):
-    """Formula EXACTA din PriceWindow.get_instant_trend(), aplicata direct pe o
-    listă de prețuri + rata de eșantionare — fără să construiești un PriceWindow
-    întreg (evită bookkeeping-ul incremental sorted_prices/deque din process_price,
-    inutil pentru un calcul o-singură-dată pe o felie brută). Sursă UNICĂ a
-    formulei (30 iul, extrasă din duplicarea PriceWindow.get_instant_trend() /
+    """Apply the exact ``PriceWindow.get_instant_trend`` formula directly to a
+    price list and sampling rate without constructing a complete window. This avoids
+    incremental deque bookkeeping for a one-shot raw slice and is the single source of
+    the formula extracted from ``PriceWindow.get_instant_trend`` and
     offline/research/monitortrades_backtest/replay_trend_source._instant_trend_from_slice)
-    — orice consumator de ferestre AD-HOC (cacheManager fereastră dinamică,
-    backtest replay) delegă aici.
+    All ad-hoc dynamic-cache and replay windows delegate here.
 
-    Returnează (final_trend, growth_coefficient, slope_full, gradient_recent)."""
+    Return ``(final_trend, growth_coefficient, slope_full, gradient_recent)``."""
     if len(prices) < 2:
         return 0, 0.0, 0.0, 0.0
     analyzer = PriceTrendAnalyzer(list(prices))
@@ -110,12 +104,12 @@ class PriceWindow:
         self.symbol = symbol
         self.window_size = int(window_size)
         self.sample_rate_sec = sample_rate_sec if sample_rate_sec is not None else DEFAULT_SAMPLE_RATE_SEC
-        # Durata țintă (secunde). Dacă e setată, set_sample_rate redimensionează
-        # fereastra ca să acopere mereu această durată, indiferent de rata reală.
+        # When set, target duration resizes with the observed sampling rate so the
+        # window continues to cover the same elapsed time.
         self.window_seconds = window_seconds
         self._subscribed_to_cache24 = False
-        # Lock: WS/Cache24 actualizează fereastra pe alt thread decât cel care
-        # evaluează. Protejează prices/sorted_prices la mutație ȘI la iterare.
+        # WS/Cache24 updates on a different thread from evaluation. Protect mutation
+        # and iteration of both price collections.
         self._lock = threading.RLock()
         self.prices = deque(maxlen=self.window_size)
         self.sorted_prices = []
@@ -126,12 +120,11 @@ class PriceWindow:
 
     @property
     def recent_n(self) -> int:
-        """Numărul de sample-uri recente corespunzând RECENT_GRADIENT_SECONDS."""
+        """Return the sample count corresponding to ``RECENT_GRADIENT_SECONDS``."""
         return max(2, int(RECENT_GRADIENT_SECONDS / self.sample_rate_sec))
 
     def set_sample_rate(self, rate):
-        """Actualizează rata reală de sampling. Dacă window_seconds e setat,
-        redimensionează fereastra (deque maxlen) ca să acopere mereu durata țintă."""
+        """Update observed sampling rate and resize a duration-based window."""
         if rate is None or rate <= 0:
             return
         self.sample_rate_sec = rate
@@ -146,7 +139,7 @@ class PriceWindow:
                 self.sorted_prices = sorted(self.prices)
 
     def on_price_update(self, symbol: str, ts_ms: int, price: float) -> None:
-        """Callback de la Cache24PriceManager — actualizează fereastra automat."""
+        """Update the window from a ``Cache24PriceManager`` callback."""
         if symbol != self.symbol:
             return
         self.process_price(price)
@@ -170,8 +163,7 @@ class PriceWindow:
 
     @classmethod
     def from_cache24(cls, symbol: str, window_seconds: float, cache24) -> "PriceWindow":
-        """Construiește un PriceWindow din ultimele `window_seconds` secunde din
-        Cache24PriceManager și se abonează la update-uri viitoare automat."""
+        """Build a window from recent Cache24 data and subscribe to future updates."""
         entries = cache24.get_recent_entries(symbol, last_seconds=window_seconds)
 
         sample_rate = cls._sample_rate_from_entries(entries)
@@ -255,7 +247,7 @@ class PriceWindow:
 
     def get_recent_gradient(self) -> float:
         """Doar momentumul recent (media np.gradient pe ultimele recent_n sample-uri).
-        Ieftin și tăcut — pentru semnalul rapid per-tick (gate buy/sell)."""
+        This inexpensive silent path supplies the fast per-tick buy/sell gate."""
         with self._lock:
             prices = list(self.prices)
         if len(prices) < 2:
@@ -269,7 +261,7 @@ class PriceWindow:
     def get_noise_epsilon(self, k: float = 1.0) -> float:
         """Prag de zgomot INFORMAT din volatilitatea ferestrei:
         epsilon = k * stddev(np.gradient(prices)).
-        Adaptiv per simbol și în timp — distinge mișcarea reală de zgomot."""
+        It adapts by symbol and over time to distinguish real movement from noise."""
         with self._lock:
             prices = list(self.prices)
         if len(prices) < 3:
@@ -278,9 +270,10 @@ class PriceWindow:
         return float(k * np.std(grad))
 
     def get_instant_trend(self):
-        """Returnează (final_trend, growth_coefficient, slope_full, gradient_recent).
-        30 iul: deleagă la instant_trend_from_prices() (sursa unică a formulei) —
-        aceeași ieșire ca înainte, doar fără duplicarea codului."""
+        """Return ``(final_trend, growth_coefficient, slope_full, gradient_recent)``.
+
+        Delegate to the single formula in ``instant_trend_from_prices``.
+        """
         with self._lock:
             prices_snapshot = list(self.prices)
         final_trend, growth_coefficient, slope_full, gradient_recent = instant_trend_from_prices(
@@ -299,7 +292,7 @@ class PriceWindow:
 
 
 class WindowAnalyzer:
-    """Metrici de trading derivate dintr-un PriceWindow (compoziție)."""
+    """Trading metrics composed from a ``PriceWindow``."""
     def __init__(self, window: "PriceWindow"):
         self.window = window
 
@@ -354,7 +347,7 @@ class WindowAnalyzer:
 
     def _analyze_price_movement(self, min_price, min_index, max_price, max_index,
                                 newest_price, newest_index, price_diff):
-        # Logica complicată veche — păstrată pentru evoluții viitoare.
+        # Retain the earlier complex logic for possible future development.
         price_diff_min = u.calculate_difference_percent(min_price, newest_price)
         price_diff_max = u.calculate_difference_percent(max_price, newest_price)
         grow = price_diff_max < price_diff_min
@@ -365,7 +358,7 @@ class WindowAnalyzer:
         print(f"retun1 {slope_max_min}, {price_diff}")
         return slope_max_min, price_diff
 
-        # ── cod neatins (păstrat intenționat din varianta veche) ──
+        # Intentionally preserved legacy code below.
         diff_min_max_close = u.are_close(price_diff_max, price_diff_min, 1.0)
         if diff_min_max_close:
             if min_index < max_index:

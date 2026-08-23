@@ -42,7 +42,7 @@ from botcore import load_dotenv as _load_dotenv
 _load_dotenv("tradeall_config.env")
 
 
-TIME_SLEEP_GET_PRICE = 0.8       # seconds to sleep for price collection — valoare nominală
+TIME_SLEEP_GET_PRICE = 0.8       # Nominal price-collection sleep interval in seconds.
 EXP_TIME_BUY_ORDER = (2.6 * 60) * 60 # dupa 1.6 ore
 EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
 TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
@@ -172,7 +172,7 @@ def _fire_order(symbol, action, price, reason, **kwargs):
     — executarea/refuzul se jurnalizeaza centralizat (order_outcomes, via Instrument.place).
     KALMAN GATE: ordinul pleaca spre executie DOAR daca trece de gate.
     NU se da cantitate (21 iul, model uniform) — qty=None foloseste maximul permis de
-    QuantityDecision (policy Binance + clamp pe balanța reală)."""
+    ``QuantityDecision`` using Binance policy clamped to the real balance."""
     blocked, mode, trend = _kalman_gate_blocks(symbol, action)
     if blocked:
         print(f"[KALMAN-GATE] {action} {symbol} BLOCAT (kalman_trend={trend}, mode={mode}, motiv={reason})")
@@ -414,9 +414,8 @@ class TrendState:
   
 
 
-# NOTĂ: sell_recommendation.csv a fost eliminat. Semnalele de trend
-# (slope/pos/gradient/tick/min/max) sunt publicate în CachePriceShortTrendManager
-# (snapshot per simbol) și citite cross-process de monitortrades etc.
+# ``sell_recommendation.csv`` was removed. Trend signals are published as per-symbol
+# snapshots by ``CachePriceShortTrendManager`` for cross-process consumers.
 
 
 
@@ -535,14 +534,14 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
 
 
 # Function to handle the price logic for a specific currency.
-# Ferestrele se actualizează autonom (abonate la Cache24); aici doar evaluăm.
-# Returnează un snapshot al trendului care va fi pus în cache de TrendCoordinator.
+# Windows update autonomously through Cache24 subscriptions; this path only evaluates.
+# Return the trend snapshot that ``TrendCoordinator`` will cache.
 def handle_symbol(symbol, current_price, price_window, price_window_big,
                   analyzer, analyzer_big, trend_state, trend_state_big):
 
     count = 0
 
-    # Actualizare rata reală de sampling din CacheCurrentPriceManager
+    # Refresh the observed sampling rate from ``CacheCurrentPriceManager``.
     try:
         import cacheManager as cm
         actual_rate = cm.get_current_price_manager().get_sample_rate(
@@ -579,9 +578,8 @@ def handle_symbol(symbol, current_price, price_window, price_window_big,
         if moneda["nume"] == symbol:
             moneda["watch"] = True if slope_big != 0 else False
 
-    # Snapshot pentru cache cross-process. monitortrades folosește efectiv doar
-    # slope_small (→slope) și final_trend (→gradient) prin is_trend_up; restul
-    # sunt metrici de trend pentru alți consumatori / gate-ul de buy/sell.
+    # Cross-process snapshot. ``monitortrades`` consumes only ``slope_small`` and
+    # ``final_trend`` through ``is_trend_up``; other fields serve other consumers.
     return {
         "symbol": symbol,
         "final_trend": gradient,
@@ -600,23 +598,20 @@ def handle_symbol(symbol, current_price, price_window, price_window_big,
 # ════════════════════════════════════════════════════════════════════════════
 # TrendCoordinator — event-driven + heartbeat.
 #
-# Sursa de preț (WS → Cache24) actualizează ferestrele autonom. Coordinatorul:
-#   • primește semnal la fiecare tick (on_price_update → dirty + event)
-#   • evaluează un simbol DOAR când e "due":
-#       - dirty ȘI a trecut ≥ MIN_EVAL_INTERVAL_SEC  (floor: nu prea des)
+# The WS-to-Cache24 source updates windows autonomously. Each tick marks a symbol dirty;
+# evaluation occurs only after ``MIN_EVAL_INTERVAL_SEC`` has elapsed.
 #       - SAU a trecut ≥ MAX_EVAL_INTERVAL_SEC        (heartbeat: nu prea rar)
-#   • cache-uiește rezultatul → get_cached_trend(symbol) e O(1) pentru API buy/sell
-# Single-threaded loop → fără reentranță pe plasarea ordinelor.
+# Cached lookup is O(1), and the single-threaded loop prevents reentrant placement.
 # ════════════════════════════════════════════════════════════════════════════
 
 MIN_EVAL_INTERVAL_SEC = 1.5    # floor: cel mult o evaluare la 1.5s per simbol
-MAX_EVAL_INTERVAL_SEC = 30.0   # ceiling/heartbeat: cel puțin o evaluare la 30s
+MAX_EVAL_INTERVAL_SEC = 30.0   # Heartbeat ceiling: evaluate at least every 30 seconds.
 
 
 class TrendCoordinator:
     """Bucla de EVALUARE TRADING (event-driven + heartbeat). Ferestrele, calculul
-    de trend și cache-ul cross-process stau în CachePriceShortTrendManager; aici doar
-    consumăm (windows/analyzers/trend) și luăm decizii (handle_symbol/logic)."""
+    trend state and cross-process cache live in ``CachePriceShortTrendManager``. This
+    coordinator consumes them and makes ``handle_symbol``/``logic`` decisions."""
     def __init__(self, symbols, instant_mgr, current_price_mgr, cache24_managers=None,
                  min_interval=MIN_EVAL_INTERVAL_SEC, max_interval=MAX_EVAL_INTERVAL_SEC):
         self.symbols = list(symbols)
@@ -627,7 +622,7 @@ class TrendCoordinator:
 
         self._event = threading.Event()
         self._lock = threading.Lock()
-        self._dirty = {s: True for s in self.symbols}      # forțăm o primă evaluare
+        self._dirty = {s: True for s in self.symbols}      # Force an initial evaluation.
         self._last_eval = {s: 0.0 for s in self.symbols}
 
         # shadow_signals (plan 17 iul): Kalman trend + vol adaptiv. 23 iul: DOAR vol
@@ -655,12 +650,12 @@ class TrendCoordinator:
                                                    expiration_trend_time=2.7 * 60, fresh_trend_time=3.7 * 60)
             self.trend_states_big[symbol] = TrendState(max_duration_seconds=3 * 60 * 60,
                                                        expiration_trend_time=2.7 * 60, fresh_trend_time=3.7 * 60)
-            # Ferestrele + canalul rapid sunt în instant_mgr; aici ne abonăm la
+            # Windows and the fast channel live in ``instant_mgr``; subscribe here.
             # Cache24 DOAR pentru semnalul de evaluare (dirty + event).
             if cache24_managers is not None:
                 cache24_managers[symbol].subscribe_price(self)
 
-    # ── Semnal de la Cache24 (subscriber) — trezește evaluarea ────────────────
+    # Cache24 subscriber signal wakes evaluation.
     def on_price_update(self, symbol: str, ts_ms: int, price: float) -> None:
         with self._lock:
             if symbol not in self._dirty:
@@ -692,8 +687,8 @@ class TrendCoordinator:
         with self._lock:
             self._dirty[symbol] = False
             self._last_eval[symbol] = time.time()
-        # Publică snapshot-ul complet (merge) în store-ul cross-process.
-        # snapshot conține deja cheia "symbol" → o scoatem (e arg pozițional).
+        # Merge the complete snapshot into the cross-process store. Remove ``symbol``
+        # because it is already supplied positionally.
         fields = {k: v for k, v in snapshot.items() if k != "symbol"}
         # shadow_signals.update(): scrie cheile in snapshot (monitor). ATENTIE: NU mai
         # e "doar observational" azi — kalman_trend de mai jos alimenteaza KALMAN-PRIMAR
@@ -742,7 +737,7 @@ class TrendCoordinator:
     def get_all_cached_trends(self):
         return self.instant_mgr.get_all_snapshots()
 
-    # ── Bucla principală event-driven + heartbeat ─────────────────────────────
+    # Main event-driven loop and heartbeat.
     def run(self):
         while True:
             self._event.wait(timeout=self.max_interval)
@@ -784,7 +779,7 @@ if __name__ == "__main__":
     )
     cache24_managers = cm.CacheFactory.get("Price24")   # dict {symbol: Cache24PriceManager}
 
-    # Managerul de trend: deține ferestrele, calculează trendul, cache cross-process.
+    # Trend manager owns windows, calculations, and the cross-process cache.
     instant_mgr = cm.get_short_trend_manager()
     instant_mgr.start_computation(cache24_managers, current_price_mgr)
 

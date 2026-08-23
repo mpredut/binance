@@ -17,14 +17,14 @@ import symbols as sym
 #######
 
 ####fixed
-# ⚠️ COD MORT — nefolosit (niciun apelant). Păstrat ca referință. Vezi get_filled_orders.
+# Dead code with no callers, retained as a reference; see ``get_filled_orders``.
 def get_filled_orders_bed(order_type, symbol, backdays=3, limit=1000):
     try:
         # Validare simbol
         sym.validate_symbols(symbol)
         sym.validate_ordertype(order_type)
 
-        # Validare order_type doar dacă nu e None
+        # Validate order type only when supplied.
         if order_type is not None:
             order_type = order_type.upper()
 
@@ -49,8 +49,8 @@ def get_filled_orders_bed(order_type, symbol, backdays=3, limit=1000):
                 print(f"[Eroare Binance] {symbol}: {api_err}")
                 orders = []
 
-            # NOTĂ: un singur get_all_orders/interval e plafonat la `limit` (1000) →
-            # dacă un interval are > 1000 ordine, se trunchiază (ar trebui paginat pe orderId).
+            # One request is capped at ``limit``. Larger intervals are truncated because
+            # this path does not paginate by order ID.
             print(f"{len(orders)} orders retrieved for interval {interval_ms/(60*60*1000):.0f}h")
 
             filtered_orders = [
@@ -64,7 +64,7 @@ def get_filled_orders_bed(order_type, symbol, backdays=3, limit=1000):
                 for order in orders
                 if order.get('status') == 'FILLED'
                 and (
-                    order_type is None  # dacă None → acceptă orice
+                    order_type is None  # None accepts every side.
                     or order.get('side', '').upper() == order_type
                 )
             ]
@@ -86,10 +86,11 @@ from collections import defaultdict
 
 
 def paginate_my_trades(api_client, symbol, start_time_ms, limit=1000):
-    """Aduce TOATE trade-urile din [start_time_ms, acum], paginat — Binance întoarce
-    max `limit` (1000) pe cerere. Prima pagină pe startTime, apoi pe fromId
-    (id-ul ultimului trade + 1), până când o pagină vine cu < limit (ultima).
-    Așa nu pierdem trade-uri când în perioadă sunt > 1000 înregistrări."""
+    """Fetch every fill from ``start_time_ms`` through now using pagination.
+
+    The first page uses ``startTime`` and later pages use the previous final fill ID
+    plus one until a short page arrives.
+    """
     out = []
     from_id = None
     while True:
@@ -109,9 +110,9 @@ def paginate_my_trades(api_client, symbol, start_time_ms, limit=1000):
         if not batch:
             break
         out.extend(batch)
-        if len(batch) < limit:          # ultima pagină
+        if len(batch) < limit:          # Final page.
             break
-        from_id = batch[-1]["id"] + 1   # următoarea pagină de la id-ul următor
+        from_id = batch[-1]["id"] + 1   # Continue from the next fill ID.
         time.sleep(0.2)                 # politicos cu rate-limit-ul
     return out
 
@@ -123,7 +124,7 @@ def get_filled_orders(order_type, symbol, startTime, limit=1000):
 
         end_time = int(time.time() * 1000)  # ms
 
-        # paginat → nu trunchiem la 1000 când perioada are mai multe trade-uri
+        # Pagination prevents truncation above 1,000 fills.
         trades = paginate_my_trades(client, symbol, startTime, limit)
 
         filtered = [
@@ -181,8 +182,8 @@ def get_filled_orders(order_type, symbol, startTime, limit=1000):
 
 
 def get_recent_filled_orders(order_type, symbol, max_age_seconds):
-    # max_age_seconds = DURATĂ → startTime ABSOLUT (ms) = acum - durată.
-    # (înainte se pasa durata direct ca startTime → fetch din ~1970, trades greșite)
+    # Convert duration to an absolute millisecond start time. Passing duration directly
+    # would query from approximately 1970 and return incorrect data.
     start_time_ms = int(time.time() * 1000) - int(max_age_seconds * 1000)
     all_filled_orders = get_filled_orders(order_type, symbol, start_time_ms)
     recent_filled_orders = []
@@ -209,7 +210,7 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
     sym.validate_ordertype(order_type)
     sym.validate_symbols(symbol)
 
-    if not cache_order_manager.cache:  # dacă e None sau gol
+    if not cache_order_manager.cache:  # Handles both None and an empty cache.
         return []
         
     # extrage lista pentru simbol
@@ -225,9 +226,9 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
         {
             'orderId': order.get('orderId'),
             'price': float(order.get('price', 0)),
-            'quantity': float(order.get('quantity', 0)),  # atenție: aici e 'quantity', nu 'origQty'
-            'qty': float(order.get('quantity', 0)),       # alias: consumatorii folosesc și 'qty' (ca la trades)
-            'timestamp': order.get('timestamp'),  # deja în ms în cache
+            'quantity': float(order.get('quantity', 0)),  # This cache uses ``quantity``, not ``origQty``.
+            'qty': float(order.get('quantity', 0)),       # Fill-compatible consumer alias.
+            'timestamp': order.get('timestamp'),          # Already milliseconds in cache.
             'side': order.get('side', '').upper()
         }
         for order in orders_for_symbol
