@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-market_data.py — date de piata via Yahoo Finance (pret, curs FX, detectie tranzactionare reala).
+market_data.py — Yahoo Finance market data: prices, FX rates, and real-trading detection.
 """
 
 from __future__ import annotations
@@ -15,14 +15,14 @@ _UA = {"User-Agent": "Mozilla/5.0 (ipo-watch)"}
 
 
 def t212_to_yahoo(t212_ticker: str) -> str:
-    """NVDA_US_EQ -> NVDA  (pentru cautare pret pe Yahoo)."""
+    """Convert NVDA_US_EQ to NVDA for Yahoo price lookup."""
     return t212_ticker.split("_")[0]
 
 
 def _chart(sym: str, rng: str = "1d", interval: str = "5m"):
-    """Returneaza (meta, bars) de pe Yahoo chart. bars = [(ts, close, volume), ...]
-    cu close ne-null. Seria intraday e mai PROASPATA decat meta — la o listare noua
-    meta poate ramane statuta (ex SPCX: vol=0/pret vechi desi se tranzactioneaza)."""
+    """Return (meta, bars) from Yahoo chart data; bars contain non-null closes.
+    The intraday series is fresher than metadata. For a new listing, metadata can remain
+    stale, e.g. SPCX volume=0 and an old price despite active trading."""
     status, body = http_get(YAHOO_CHART.format(sym=sym) + f"?range={rng}&interval={interval}",
                             headers=_UA)
     if status != 200 or not body:
@@ -45,8 +45,8 @@ def _chart(sym: str, rng: str = "1d", interval: str = "5m"):
 
 
 def get_price_usd(sym: str) -> float | None:
-    """Pret curent (NVDA, SPCX, USDRON=X...). Prefera ultima bara din serie
-    (mai proaspata) si cade pe meta.regularMarketPrice doar daca seria lipseste."""
+    """Return current price for NVDA, SPCX, USDRON=X, etc.
+    Prefer the fresher final series bar and use regularMarketPrice only if absent."""
     meta, bars = _chart(sym)
     if bars:
         return bars[-1][1]
@@ -56,10 +56,9 @@ def get_price_usd(sym: str) -> float | None:
 
 
 def trend_slope_pct(sym: str, bars: int = 12) -> float | None:
-    """Panta trendului pe termen scurt: regresie liniara (OLS) pe ultimele `bars` inchideri
-    din chart-ul Yahoo (5m), normalizata ca % din pret PE BARA. Negativ = downtrend.
-    Intoarce None daca nu-s destule date. Folosit ca GATE la DCA (ca Binance/Kraken:
-    nu arunca capital intr-un cutit in cadere)."""
+    """Return short-term OLS trend slope over the last `bars` five-minute closes.
+    Normalize as price percentage PER BAR; negative means downtrend. Return None with
+    insufficient data. Used as a DCA gate like Binance/Kraken to avoid falling markets."""
     _, bars_rows = _chart(sym)
     closes = [c for (_, c, _) in bars_rows][-bars:]
     if len(closes) < max(4, bars // 2):
@@ -72,11 +71,11 @@ def trend_slope_pct(sym: str, bars: int = 12) -> float | None:
     if denom == 0 or my == 0:
         return None
     slope = sum((xs[i] - mx) * (closes[i] - my) for i in range(n)) / denom
-    return slope / my * 100.0     # % din pret pe bara (5m)
+    return slope / my * 100.0     # percentage of price per five-minute bar
 
 
 def get_usd_ron() -> float:
-    """Curs USD/RON curent. Fallback 4.65 daca feed-ul nu raspunde."""
+    """Return current USD/RON, falling back to 4.65 when the feed is unavailable."""
     rate = get_price_usd("USDRON=X")
     if rate and rate > 1:
         return rate
@@ -85,7 +84,7 @@ def get_usd_ron() -> float:
 
 
 def get_eur_usd() -> float:
-    """Curs EUR->USD curent (cati USD intr-un EUR). Fallback 1.08."""
+    """Return current EUR->USD (USD per EUR), falling back to 1.08."""
     rate = get_price_usd("EURUSD=X")
     if rate and rate > 0.5:
         return rate
@@ -94,10 +93,10 @@ def get_eur_usd() -> float:
 
 
 def check_market(sym: str) -> dict | None:
-    """Returneaza dict cu 'trading'=True DOAR daca simbolul se tranzactioneaza cu adevarat.
+    """Return metadata with trading=True only when the symbol is actually trading.
 
-    Evita falsul pozitiv cu placeholder-ul de IPO (pret fix, volum 0):
-    cere volum > 0, ultima tranzactie recenta (<15 min) si o stare de piata activa.
+    Avoid false positives from fixed-price, zero-volume IPO placeholders by requiring
+    positive volume, a recent trade within 15 minutes, and an active market state.
     """
     meta, bars = _chart(sym)
     if meta is None and not bars:
@@ -116,12 +115,12 @@ def check_market(sym: str) -> dict | None:
         except (TypeError, ValueError):
             pass
 
-    # --- semnale din SERIA intraday (robuste la meta statuta) ---
+    # --- intraday SERIES signals robust to stale metadata ---
     series_age = series_vol = None
     series_price = None
     series_moved = False
     if bars:
-        recent = bars[-6:]                       # ~ultimele 30 min
+        recent = bars[-6:]                       # approximately the last 30 minutes
         series_age = time.time() - float(bars[-1][0])
         series_price = bars[-1][1]
         series_vol = sum(v for _, _, v in recent if v) or 0
@@ -132,10 +131,10 @@ def check_market(sym: str) -> dict | None:
     fresh_series = series_age is not None and series_age < 20 * 60
     live_state = state in ("REGULAR", "PRE", "PREPRE", "POST", "POSTPOST")
 
-    # 'launched' = a tranzactionat cu adevarat. Acum: volum pe meta SAU serie
-    # intraday proaspata cu tranzactionare reala (volum recent sau pret in miscare).
-    # Asa prinde SPCX-ul (meta statuta vol=0, dar seria avea bare live la 164) si
-    # NU se pacaleste de placeholder-ul pre-IPO (fara serie / serie plata).
+    # 'launched' means actual prior trading: metadata volume OR a fresh intraday series
+    # showing recent volume or price movement. This detects SPCX despite stale zero-volume
+    # metadata when its series contains live bars, without mistaking a missing or flat
+    # pre-IPO placeholder series for a launch.
     launched = (bool(price) and meta_vol > 0) or \
                (fresh_series and ((series_vol or 0) > 0 or series_moved))
     really_trading = launched and (fresh_meta or fresh_series) and (live_state or series_moved)
@@ -146,13 +145,13 @@ def check_market(sym: str) -> dict | None:
         age_min = round(eff_age / 60, 1)
 
     return {
-        "price":    series_price or price,   # prefera pretul din serie (mai proaspat)
+        "price":    series_price or price,   # prefer the fresher series price
         "currency": meta.get("currency"),
         "exchange": meta.get("exchangeName") or meta.get("fullExchangeName"),
         "volume":   meta_vol or (series_vol or 0),
         "state":    state or "?",
         "age_min":  age_min,
         "name":     meta.get("longName") or meta.get("shortName") or "",
-        "trading":  really_trading,   # se tranzactioneaza ACUM
-        "launched": launched,         # a inceput sa se tranzactioneze
+        "trading":  really_trading,   # trading NOW
+        "launched": launched,         # has begun trading
     }
