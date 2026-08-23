@@ -34,7 +34,7 @@ def signal_handler(sig, frame):
     print("Shutting down...")
     bapi_ws.bapi_ws_manager.stop()
     
-    # Apelare handler implicit pentru SIGINT
+    # Invoke the default SIGINT handler.
     #signal.default_int_handler(sig, frame)
     sys.exit(0)
 
@@ -106,14 +106,14 @@ def get_current_price(symbol):
     except BinanceAPIException as e:
         print(f"Eroare la obtinerea pretului curent de la Binance API: {e}")
         print(f"Folosesc pretul obtinut prin websocket, {symbol}: {cprice.get(symbol, 'N/A')}")
-        _cprice = cprice.get(symbol, None)  # Returnam None daca simbolul nu exista
+        _cprice = cprice.get(symbol, None)  # Return None when the symbol is absent.
         if _cprice is None:
             print(f"get_current_price: Pretul pentru {symbol} nu este disponibil prin WebSocket. Returning None.")
         return _cprice
 #    except Exception as e:
-#        print(f"get_current_price: A aparut o eroare neasteptata: {e}")
-#        print(f"Folosesc pretul obtinut prin websocket, {symbol}: {cprice.get(symbol, 'N/A')}")
-#        return cprice.get(symbol, None)  # Returnam None daca simbolul nu exista
+#        print(f"get_current_price: An unexpected error occurred: {e}")
+#        print(f"Using the WebSocket price for {symbol}: {cprice.get(symbol, 'N/A')}")
+#        return cprice.get(symbol, None)  # Return None when the symbol is absent.
 
 currenttime = time.time()       
 def get_current_time():
@@ -123,7 +123,7 @@ def get_current_time():
 
 
 def split_symbol(symbol: str):
-    # Split symbol in base si quote; Binance operational foloseste USDC.
+    # Split the symbol into base and quote; operational Binance pairs use USDC.
    from providers.quantity import resolve_assets
    base, quote = resolve_assets(symbol)
    if not quote:
@@ -133,7 +133,7 @@ def split_symbol(symbol: str):
 
 def get_free_balance(asset: str):
     try:
-        #  Returneaza balanta libera pentru un asset din Binance.
+        # Return the free Binance balance for an asset.
         asset_info = client.get_asset_balance(asset=asset)
         return float((asset_info or {}).get("free", 0))
     except Exception as e:
@@ -174,16 +174,16 @@ def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5,
     sym.validate_params(order_type, symbol, 1, required_quantity)
     
     open_orders = get_open_orders(order_type, symbol)
-    available_qty = 0  # Initial nu ai nicio cantitate disponibila
+    available_qty = 0  # Initially no quantity is available.
     current_price = get_current_price(symbol)
     if open_orders:
-        # Sorteaza ordinele descrescator pentru SELL sau crescator pentru BUY
+        # Sort SELL orders descending and BUY orders ascending.
         sorted_orders = sorted(
             open_orders.items(),
             key=lambda x: (x[1]['price'] if order_type == 'BUY' else -x[1]['price'])
         )
 
-        # Timpul limita (cutoff) pentru ordinele recente
+        # Cutoff time for recent orders.
         cutoff_time = datetime.now().timestamp() - timedelta(hours=hours).total_seconds()
 
         for order_id, order_info in sorted_orders:
@@ -192,7 +192,7 @@ def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5,
                 cancel = True
             else:
                 price_diff_percentage = abs(float(order_info['price']) - current_price) / current_price * 100
-                if price_diff_percentage >= price_difference_percentage * 100:  # Convertim 0.1 in 10%
+                if price_diff_percentage >= price_difference_percentage * 100:  # Convert 0.1 to 10%.
                     cancel = True
 
             if cancel:
@@ -311,7 +311,7 @@ def cancel_recent_orders(order_type, symbol, max_age_seconds):
 
 
 def check_order_filled(order_id, symbol):
-    """Adaptor legacy; codul nou folosește market_api.order_status()."""
+    """Legacy adapter; new code uses market_api.order_status()."""
     try:
         if not order_id:
             return False
@@ -324,7 +324,7 @@ def check_order_filled(order_id, symbol):
 
 
 def check_order_filled_by_time(order_type, symbol, time_back_in_seconds, pret_min=None, pret_max=None):
-    """Adaptor legacy; delegă descoperirea fill-ului către fațada comună."""
+    """Legacy adapter that delegates fill discovery to the shared facade."""
     from providers.market_api import api as market_api
     return market_api.latest_fill_price(
         symbol, order_type, time_back_in_seconds,
