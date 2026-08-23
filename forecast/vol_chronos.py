@@ -1,25 +1,24 @@
 #!/usr/bin/env python3
 """
-vol_chronos.py — test onest: poate un model de fundatie zero-shot (Chronos, Amazon)
-sa prezica NIVELUL VIITOR de volatilitate mai bine decat persistenta simpla?
+vol_chronos.py — honest test of whether Amazon's zero-shot Chronos foundation model
+predicts the FUTURE volatility LEVEL better than simple persistence.
 
-De ce volatilitate si nu pret: clustering-ul de volatilitate (perioadele calme/agitate
-se succed in blocuri, efect GARCH) e un fenomen mult mai robust decat directia
-pretului (aproape random walk pe orizonturi lichide — vezi forecast.py: pe BTC modelele
-antrenate nu bat baseline-ul acolo). Chronos e ZERO-SHOT (nu se antreneaza pe datele
-tale — doar inference), deci riscul de overfitting e mult mai mic decat la boosting-ul
-din forecast.py.
+Why volatility instead of price: volatility clustering, where calm and turbulent periods
+occur in blocks as in GARCH, is more robust than price direction, which is close to a
+random walk on liquid horizons. In forecast.py, trained BTC models do not beat that
+baseline. Chronos is ZERO-SHOT inference without training on this data, reducing
+overfitting risk relative to forecast.py boosting.
 
-Serie tinta: volatilitate realizata TRAILING pe fereastra de --win ore (std log-returns),
-calculata la fiecare ora. Intrebare: dat fiind istoricul acestei serii pana la ora i,
-cat va fi ea peste --horizon ore? Comparat cu baseline "ramane la fel" (persistenta —
-acelasi baseline "lindy" folosit si in forecast.py).
+Target series: TRAILING realized volatility over --win hours, as standard deviation of
+log returns calculated hourly. Given its history through hour i, predict its value after
+--horizon hours and compare with the unchanged-value persistence baseline, matching the
+Lindy baseline used in forecast.py.
 
-Daca bate baseline-ul onest, urmatorul pas ar fi inlocuirea/completarea lui vol_1h_pct
-din shadow_signals.py cu predictia asta (pragurile adaptive K_REENTRY/K_DCA ar folosi
-volatilitatea VIITOARE estimata, nu doar cea trecuta).
+If it honestly beats baseline, a later step could replace or supplement shadow_signals.py
+vol_1h_pct so adaptive K_REENTRY/K_DCA thresholds use estimated FUTURE volatility rather
+than only historical volatility.
 
-Rulare:
+Run:
   python3 vol_chronos.py --symbol TAOUSDC --days 400 --horizon 24 --win 24 --eval
   python3 vol_chronos.py --symbol BTCUSDC --days 400 --horizon 24 --win 24 --eval
 """
@@ -34,20 +33,20 @@ import time
 import numpy as np
 import torch
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # forecast/ -> radacina repo
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # forecast/ -> repository root
 sys.path.insert(0, _ROOT)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from trend_survival import fetch_klines  # noqa: E402
 
-MODEL_NAME = "amazon/chronos-t5-tiny"   # 8M param, cel mai mic — CPU-friendly
-MAX_CONTEXT = 512                       # ore de istoric date modelului per predictie (plafon)
-BATCH = 8                               # cate ferestre de test batch-uim intr-un apel
-                                         # (masina are doar 3.8GB RAM si ruleaza boti live —
-                                         # batch mare (32) a dus la swap si kill; 8 e sigur)
+MODEL_NAME = "amazon/chronos-t5-tiny"   # smallest 8M-parameter model; CPU-friendly
+MAX_CONTEXT = 512                       # maximum history hours supplied per prediction
+BATCH = 8                               # test windows batched per call
+                                         # The 3.8GB machine also runs live bots; batch 32
+                                         # caused swapping and termination, while 8 is safe.
 
 
 def realized_vol_series(px: np.ndarray, win: int) -> np.ndarray:
-    """rv[i] = std al log-returns pe fereastra TRAILING [i-win, i]. NaN unde nu-i istoric."""
+    """Return trailing [i-win, i] log-return standard deviation, with NaN before history."""
     logp = np.log(px)
     r = np.diff(logp)
     rv = np.full(len(px), np.nan)
@@ -63,9 +62,9 @@ def _load_pipeline():
 
 
 def walk_forward_vol(rv: np.ndarray, horizon: int, warmup: int, stride: int):
-    """Pt fiecare ora de test i (cu pas stride, ca sa fie fezabil pe CPU): da modelului
-    rv[:i+1] (plafonat la MAX_CONTEXT) si cere predictia la +horizon ore. Compara cu
-    baseline (persistenta: rv[i]) si cu adevarul (rv[i+horizon])."""
+    """For each test hour i sampled by stride, give the model rv[:i+1] capped at
+    MAX_CONTEXT and request a +horizon-hour prediction. Compare against persistence
+    rv[i] and actual rv[i+horizon]."""
     pipe = _load_pipeline()
     n = len(rv)
     idxs = list(range(warmup, n - horizon, stride))
@@ -75,8 +74,8 @@ def walk_forward_vol(rv: np.ndarray, horizon: int, warmup: int, stride: int):
         chunk = idxs[b:b + BATCH]
         contexts = [torch.tensor(rv[max(0, i + 1 - MAX_CONTEXT):i + 1], dtype=torch.float32)
                     for i in chunk]
-        # prediction_length = horizon; luam MEDIANA peste sample-uri si peste orizont
-        # (ne intereseaza nivelul de volatilitate PE FEREASTRA viitoare, nu un punct exact)
+        # prediction_length=horizon; take the median across samples and horizon because
+        # the future-window volatility level matters, not one exact point.
         forecast = pipe.predict(contexts, prediction_length=horizon)
         for k, i in enumerate(chunk):
             path = forecast[k].numpy()                 # [num_samples, horizon]
@@ -90,7 +89,7 @@ def walk_forward_vol(rv: np.ndarray, horizon: int, warmup: int, stride: int):
     preds, bases, actuals = map(np.array, (preds, bases, actuals))
     mae_model = float(np.mean(np.abs(preds - actuals)))
     mae_base = float(np.mean(np.abs(bases - actuals)))
-    # acuratete de DIRECTIE: creste/scade volatilitatea fata de nivelul curent?
+    # DIRECTION accuracy: does volatility rise or fall from the current level?
     dir_actual = (actuals - bases) > 0
     dir_pred = (preds - bases) > 0
     dir_acc = float(np.mean(dir_actual == dir_pred))
@@ -118,7 +117,7 @@ def main() -> int:
     ts, px = fetch_klines(args.symbol, args.days)
     print(f"[{args.symbol}] {len(px)} lumanari 1h")
     rv = realized_vol_series(px, args.win)
-    warmup = args.win + MAX_CONTEXT // 4     # putin istoric minim inainte sa incepem testul
+    warmup = args.win + MAX_CONTEXT // 4     # minimum history before testing begins
     if args.eval:
         rep = walk_forward_vol(rv, args.horizon, warmup, args.stride)
         print(f"  test pe {rep['n_test']} ferestre (stride={args.stride}h), "

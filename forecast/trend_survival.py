@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
-trend_survival.py — analiza EMPIRICA a duratelor de trend (curba de supravietuire).
+trend_survival.py — EMPIRICAL analysis of trend durations using a survival curve.
 
-Valideaza ipoteza lui Marius: "un trend care a ajuns la jumatatea gaussienei
-tinde sa continue mult in afara ei" = hazard descrescator (efect Lindy):
-P(trendul mai tine o zi | a tinut deja t zile) NU scade dupa mijlocul vietii.
+Validate Marius's hypothesis that a trend reaching the Gaussian midpoint tends to
+continue well beyond it, corresponding to decreasing hazard (the Lindy effect):
+P(trend lasts another day | it already lasted t days) does not fall after midlife.
 
-Extrage episoadele de trend din istoric cu ACEEASI definitie ca detectorul de
-productie (pante pe ferestre de timp, pas 8h, toleranta la zgomot 2, minim 3
-blocuri confirmate) si masoara:
-  - distributia duratelor (mediana, P75, P90)
-  - P_cont(t) = P(durata > t+1zi | durata > t)  — continuarea conditionata
+Extract historical trend episodes with the SAME definition as the production detector:
+time-window slopes, eight-hour steps, noise tolerance 2, and at least three confirmed
+blocks. Measure duration distribution (median, P75, P90) and conditional continuation
+P_cont(t) = P(duration > t+1 day | duration > t).
 
   python3 trend_survival.py --symbol BTCUSDC --days 700
   python3 trend_survival.py --symbol TAOUSDC --days 400 --window 16
@@ -28,7 +27,7 @@ import numpy as np
 
 
 def fetch_klines(symbol: str, days: int, interval: str = "1h") -> tuple[np.ndarray, np.ndarray]:
-    """Istoric Binance paginat (1000 lumanari/cerere)."""
+    """Return paginated Binance history with 1,000 candles per request."""
     end = int(time.time() * 1000)
     start = end - days * 86400 * 1000
     ts, px = [], []
@@ -49,7 +48,7 @@ def fetch_klines(symbol: str, days: int, interval: str = "1h") -> tuple[np.ndarr
 
 
 def block_slopes(ts, px, window_h, step_h):
-    """Panta (semnul) pe fiecare fereastra [t-window, t], pas step_h. -> (t_end_bloc, semn)"""
+    """Return slope signs for each [t-window, t] window stepped by step_h."""
     out_t, out_s = [], []
     w, s = window_h * 3600.0, step_h * 3600.0
     t = ts[0] + w
@@ -65,7 +64,7 @@ def block_slopes(ts, px, window_h, step_h):
 
 
 def episodes(bt, bs, window_h, noise_tolerance=2, min_confirm=3):
-    """Episoade de trend (aceeasi semantica cu detectorul): durate in ore."""
+    """Return trend episodes in hours using the detector's semantics."""
     eps = []
     i = 0
     n = len(bs)
@@ -86,8 +85,8 @@ def episodes(bt, bs, window_h, noise_tolerance=2, min_confirm=3):
         if confirms >= min_confirm:
             eps.append({"dir": "up" if sign > 0 else "down",
                         "dur_h": (last_confirm - start) / 3600.0})
-        # reluam de la primul bloc de dupa ultima confirmare (zgomotul apartine
-        # episodului urmator)
+        # Resume at the first block after the latest confirmation; noise belongs to
+        # the following episode.
         nxt = int(np.searchsorted(bt, last_confirm, "right"))
         i = max(nxt, i + 1)
     return eps
@@ -117,7 +116,7 @@ def survival_report(durs_h: list[float], label: str, t_grid_days, horizon_h=24.0
 
 
 def verdict(cont: dict, mid: float) -> str:
-    """Compara continuarea TANAR (t < mid) vs BATRAN (t >= mid)."""
+    """Compare YOUNG (t < mid) and OLD (t >= mid) trend continuation."""
     young = [p for t, p in cont.items() if t < mid]
     old = [p for t, p in cont.items() if t >= mid]
     if not young or not old:
@@ -130,24 +129,23 @@ def verdict(cont: dict, mid: float) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Estimarea EMPIRICA + HIBRIDA a orizontului T (in loc de T=14 hardcodat)
+# EMPIRICAL + HYBRID estimation of horizon T instead of hard-coded T=14
 # ---------------------------------------------------------------------------
 import os
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # forecast/ -> radacina repo
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # forecast/ -> repository root
 T_CACHE_FILE = os.path.join(_ROOT, "cachedb", "cache_T_trend.json")
 
 
 def hybrid_T(dur_hours, prior_T=14.0, k=30.0, t_min=4, t_max=30) -> dict:
-    """T hibrid: empiric (favorizat cand avem date) amestecat cu prior-ul.
+    """Return hybrid T by combining favored empirical data with the prior.
 
-    Calibrare: varful gaussienei (T/2) trebuie sa pice la varsta TIPICA a unui
-    trend -> T_emp = max(P90, 2*mediana) al duratelor reale (varful ~ mediana,
-    capatul Zonei 1 ~ P90: doar ~10% din trenduri traiesc dincolo -> Zona 2 =
-    decila de top, "depasit dar persistent").
+    Calibrate the Gaussian peak T/2 to a TYPICAL trend age. Set T_emp to
+    max(P90, 2*median) of real durations: the peak approximates the median and the end
+    of Zone 1 approximates P90, leaving the persistent top decile in Zone 2.
 
-    Hibrid: T = w*T_emp + (1-w)*prior,  w = n/(n+k)  — cu putine episoade
-    ramanem aproape de prior; cu n>=100 domina empiricul (cum a cerut Marius).
+    Hybrid formula: T = w*T_emp + (1-w)*prior, w=n/(n+k). Few episodes remain near
+    the prior; empirical evidence dominates at n>=100.
     """
     n = len(dur_hours)
     if n == 0:
@@ -164,9 +162,9 @@ def hybrid_T(dur_hours, prior_T=14.0, k=30.0, t_min=4, t_max=30) -> dict:
 
 def estimate_T(symbol: str, days: int = 540, window_h: int = 24, step_h: int = 8,
                prior_T: float = 14.0, ttl_days: float = 7.0) -> dict:
-    """T pentru un simbol, SPECIALIZAT pe moneda: estimat empiric din istoric,
-    hibridizat cu prior-ul, tinut in cache pe disc (recalculat dupa ttl_days).
-    Cade inapoi pe cache-ul vechi sau pe prior daca reteaua/datele lipsesc."""
+    """Estimate a coin-specialized T empirically from a symbol's history.
+    Blend with the prior and cache on disk until ttl_days. Fall back to stale cache or
+    the prior when network/data is unavailable."""
     cache = {}
     try:
         with open(T_CACHE_FILE) as f:
@@ -177,7 +175,7 @@ def estimate_T(symbol: str, days: int = 540, window_h: int = 24, step_h: int = 8
     if ent and time.time() - ent.get("ts", 0) < ttl_days * 86400:
         return ent
 
-    # Simbolul de date foloseste exclusiv perechea USDC ceruta.
+    # Use only the explicitly requested USDC data pair.
     candidates = [symbol]
     ts = px = None
     used = None
@@ -191,7 +189,7 @@ def estimate_T(symbol: str, days: int = 540, window_h: int = 24, step_h: int = 8
             continue
     if used is None:
         if ent:
-            return ent                                  # cache vechi > nimic
+            return ent                                  # stale cache is better than no estimate
         return {"T": int(round(prior_T)), "n": 0, "w": 0.0, "source_symbol": None,
                 "median_d": None, "p90_d": None, "T_emp": None, "ts": 0}
 
@@ -199,8 +197,8 @@ def estimate_T(symbol: str, days: int = 540, window_h: int = 24, step_h: int = 8
     eps = episodes(bt, bs, window_h)
     durs = [e["dur_h"] for e in eps]
     res = hybrid_T(durs, prior_T=prior_T)
-    # curba de continuare empirica per moneda: P(mai tine 1 zi | a tinut t zile)
-    # — restul din "curba de supravietuire": disponibila pt ponderi viitoare
+    # Per-coin empirical continuation curve: P(last one more day | already lasted t days).
+    # Retain the remaining survival curve for future weighting.
     d = np.asarray(durs, dtype=float)
     p_cont = {}
     for t_days in range(1, 15):
