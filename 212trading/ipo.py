@@ -4,26 +4,26 @@
 # dependencies = []
 # ///
 """
-ipo.py — watcher + auto-trade generic pe Trading 212 (orice simbol din .env).
+ipo.py — generic Trading 212 watcher and auto-trader for any symbol configured in .env.
 
-Instrumentul se configureaza in .env (NU mai e hardcodat SPCX):
-    T212_TICKER=NVDA_US_EQ     instrumentul exact pe T212 (obligatoriu)
-    YAHOO_SYMBOL=NVDA          simbol Yahoo pt pret (optional; derivat din T212_TICKER)
-    SYMBOL_LABEL=NVIDIA        eticheta pt afisare/notificari (optional)
-    WAIT_FOR_LAUNCH=false      false = se tranzactioneaza deja; true = IPO (asteapta lansarea)
-    EXPECTED_ISIN=US67066G1040 optional: refuza daca ISIN-ul nu se potriveste
+Configure the instrument in .env; SPCX is no longer hard-coded:
+    T212_TICKER=NVDA_US_EQ     exact required T212 instrument
+    YAHOO_SYMBOL=NVDA          optional Yahoo price symbol, derived from T212_TICKER
+    SYMBOL_LABEL=NVIDIA        optional display/notification label
+    WAIT_FOR_LAUNCH=false      false for existing trading; true waits for an IPO launch
+    EXPECTED_ISIN=US67066G1040 optional; reject an ISIN mismatch
 
-Doua moduri de tranzactionare (dupa lansare / imediat):
-    STRAT_ENABLED=true   -> strategie DCA + take-profit (vezi strategy.py)
-    STRAT_ENABLED=false  -> un singur ordin LIMIT (vezi ORDER_* / order_manager.py)
+Two trading modes after launch or immediately:
+    STRAT_ENABLED=true   -> DCA + take-profit strategy; see strategy.py
+    STRAT_ENABLED=false  -> one LIMIT order; see ORDER_* and order_manager.py
 
-Comenzi:
-    python3 ipo.py                          # ruleaza dupa config-ul din .env
-    python3 ipo.py --paper                  # forteaza PAPER (test sigur, fara bani)
-    python3 ipo.py --symbol NVDA_US_EQ      # override instrument pt aceasta rulare
-    python3 ipo.py --test-notify all        # testeaza notificarile
-    python3 ipo.py --test-order NVDA_US_EQ  # testeaza un singur ordin
-    python3 ipo.py --find-ticker nvidia     # gaseste ticker-ul exact in T212
+Commands:
+    python3 ipo.py                          # run using .env configuration
+    python3 ipo.py --paper                  # force safe PAPER mode
+    python3 ipo.py --symbol NVDA_US_EQ      # override the instrument for this run
+    python3 ipo.py --test-notify all        # test notifications
+    python3 ipo.py --test-order NVDA_US_EQ  # test one order
+    python3 ipo.py --find-ticker nvidia     # find the exact T212 ticker
 """
 
 from __future__ import annotations
@@ -44,10 +44,10 @@ POLL_SECONDS = 60
 
 
 # ---------------------------------------------------------------------------
-# Helperi
+# Helpers
 # ---------------------------------------------------------------------------
 def in_market_window() -> bool:
-    """True intre ~9:00 si ~16:30 ET, zile lucratoare."""
+    """Return True between approximately 09:00 and 16:30 ET on weekdays."""
     from datetime import datetime
     n = datetime.now(ET)
     if n.weekday() >= 5:
@@ -57,8 +57,8 @@ def in_market_window() -> bool:
 
 
 def verify_instrument(client: T212Client, ticker: str, expected_isin: str) -> bool:
-    """Verificare best-effort: daca EXPECTED_ISIN e setat, confirma ca ticker-ul
-    are acel ISIN. Returneaza False DOAR la nepotrivire dovedita (instrument gresit)."""
+    """Best-effort verification that a configured EXPECTED_ISIN matches the ticker.
+    Return False only for a proven mismatch identifying the wrong instrument."""
     if not expected_isin:
         return True
     instruments = client.list_instruments()
@@ -80,7 +80,7 @@ def verify_instrument(client: T212Client, ticker: str, expected_isin: str) -> bo
 
 
 # ---------------------------------------------------------------------------
-# Pornire tranzactionare (strategie sau ordin unic)
+# Start trading through the strategy or a single order
 # ---------------------------------------------------------------------------
 def start_trading(client, t212_ticker, label, strat_enabled, strat_dry,
                   order_price, order_qty, order_budget_ron, order_validity,
@@ -116,8 +116,8 @@ def main() -> int:
             env_file = sys.argv[i + 1]
         if a in ("--profile", "-p") and i + 1 < len(sys.argv):
             profile = sys.argv[i + 1]
-    load_dotenv(env_file)                                   # secrete comune (gitignored)
-    if profile:                                            # config pe profil (comis): config.<profil>.env
+    load_dotenv(env_file)                                   # shared gitignored secrets
+    if profile:                                            # versioned per-profile config: config.<profile>.env
         cfg_dir = os.path.dirname(env_file) or "."
         cfg = os.path.join(cfg_dir, f"config.{profile}.env")
         if not os.path.exists(cfg):
@@ -152,7 +152,7 @@ def main() -> int:
                     help="Cauta instrument in T212 dupa nume/simbol")
     args = ap.parse_args()
 
-    # --- config din .env ---
+    # --- .env configuration ---
     t212_key    = os.environ.get("T212_API_KEY")
     t212_secret = os.environ.get("T212_API_SECRET")
     t212_env    = os.environ.get("T212_ENV", "live").strip().lower()
@@ -161,13 +161,13 @@ def main() -> int:
         return 1
     client = T212Client(t212_key, t212_secret, env=t212_env)
 
-    # instrument generic
+    # Generic instrument.
     t212_ticker  = (args.symbol or os.environ.get("T212_TICKER") or "").strip()
     yahoo_symbol = os.environ.get("YAHOO_SYMBOL") or (t212_to_yahoo(t212_ticker) if t212_ticker else "")
     label        = os.environ.get("SYMBOL_LABEL") or yahoo_symbol or t212_ticker
     expected_isin = os.environ.get("EXPECTED_ISIN", "").strip()
 
-    # strategie / ordin
+    # Strategy / order.
     strat_enabled = os.environ.get("STRAT_ENABLED", "false").strip().lower() == "true"
     strat_dry     = args.paper or not (os.environ.get("STRAT_EXECUTE", "false").lower() == "true")
     order_price      = float_env("ORDER_PRICE")
@@ -179,7 +179,7 @@ def main() -> int:
                                           os.environ.get("ORDER_EXECUTE", "false").lower() == "true")
     interval         = max(args.interval, 30)
 
-    # --- comenzi one-shot ---
+    # --- one-shot commands ---
     if args.find_ticker:
         return _cmd_find_ticker(client, args.find_ticker)
     if args.test_notify:
@@ -205,21 +205,21 @@ def main() -> int:
     log(f"    lansare      : verific pana {label} e lansat (deja-listat: imediat; IPO: la deschidere)")
     log(f"    ntfy/email   : {os.environ.get('NTFY_TOPIC') or '-'} / {os.environ.get('ALERT_TO_EMAIL') or '-'}")
 
-    # --- PRE-FLIGHT: confirma instrumentul la PORNIRE (prinde erorile de config imediat,
-    #     nu dupa zile de asteptare pana la lansare). ISIN gresit -> opreste acum.
-    #     Daca tickerul nu e inca in metadata (IPO neinceput), doar avertizeaza si continua.
+    # --- PRE-FLIGHT: verify the instrument at STARTUP so configuration errors are caught
+    #     immediately, not after waiting days for launch. Stop now on a wrong ISIN.
+    #     If an unlaunched IPO ticker is not in metadata yet, warn and continue.
     log("    pre-flight: verific instrumentul pe T212...")
     if not verify_instrument(client, t212_ticker, expected_isin):
         return 1
 
-    # --- Mecanism IDENTIC pentru ORICE simbol: astept pana instrumentul e LANSAT
-    #     (are volum real). NVDA -> trece imediat; SPCX -> asteapta lansarea reala.
-    #     --skip-wait sare peste (de urgenta).
+    # --- IDENTICAL mechanism for EVERY symbol: wait until the instrument has LAUNCHED
+    #     with real volume. NVDA passes immediately; SPCX waits for its actual launch.
+    #     --skip-wait provides an emergency bypass.
     if not args.skip_wait:
         if not _wait_for_launch(args, yahoo_symbol, label, interval):
-            return 130  # intrerupt
+            return 130  # interrupted
 
-    # --- verificare FINALA dupa lansare (prinde reutilizarea de ticker), apoi tranzactioneaza ---
+    # --- FINAL post-launch verification catches ticker reuse before trading ---
     if not verify_instrument(client, t212_ticker, expected_isin):
         return 1
 
@@ -233,7 +233,7 @@ def main() -> int:
 
 
 def _wait_for_launch(args, yahoo_symbol, label, interval) -> bool:
-    """Asteapta pana cand simbolul se tranzactioneaza cu adevarat. False daca intrerupt."""
+    """Wait until the symbol is actually trading; return False if interrupted."""
     log(f"    Astept lansarea {label}... (Ctrl+C ca sa opresc)")
     try:
         while True:
@@ -241,9 +241,9 @@ def _wait_for_launch(args, yahoo_symbol, label, interval) -> bool:
                 time.sleep(min(interval * 5, 600))
                 continue
             m = check_market(yahoo_symbol)
-            # 'launched' = instrumentul a tranzactionat real (are volum), chiar daca
-            # piata e inchisa acum. Asa, o actiune deja listata (NVDA) porneste imediat,
-            # iar un placeholder de IPO (SPCX, volum 0) e asteptat pana se deschide.
+            # 'launched' means the instrument has traded with real volume, even if its
+            # market is currently closed. Existing NVDA starts immediately, while a
+            # zero-volume SPCX IPO placeholder waits for actual trading to begin.
             if m and m.get("launched"):
                 ts = now_str()
                 now_open = "se tranzactioneaza ACUM" if m.get("trading") else f"piata {m.get('state')}"
@@ -270,7 +270,7 @@ def _wait_for_launch(args, yahoo_symbol, label, interval) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Comenzi one-shot
+# One-shot commands
 # ---------------------------------------------------------------------------
 def _cmd_find_ticker(client: T212Client, query: str) -> int:
     log(f"[FIND] Caut '{query}' in instrumentele T212...")
