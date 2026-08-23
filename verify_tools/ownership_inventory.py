@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from botcore import parse_dotenv  # noqa: E402
+from providers.quantity import resolve_assets  # noqa: E402
 
 
 _TRUE = {"1", "yes", "true", "on", "da"}
@@ -119,13 +120,9 @@ def _running(pattern: str | None, commands: list[str] | None) -> bool | None:
 
 
 def _split_symbol(symbol: str, base: str = "", quote: str = "") -> tuple[str, str]:
-    if base or quote:
-        return base or symbol, quote
-    upper = symbol.upper()
-    for candidate in ("USDC", "USD", "EUR", "RON"):
-        if upper.endswith(candidate) and len(upper) > len(candidate):
-            return symbol[:-len(candidate)], candidate
-    return symbol, ""
+    resolved_base, resolved_quote = resolve_assets(
+        symbol, base=base or None, quote=quote or None)
+    return resolved_base, resolved_quote or ""
 
 
 def _python_symbols(root: Path) -> tuple[list[str], str]:

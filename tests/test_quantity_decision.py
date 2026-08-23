@@ -26,6 +26,11 @@ class QuantityDecisionTest(unittest.TestCase):
         self.assertEqual(resolve_assets("TAOUSDC"), ("TAO", "USDC"))
         self.assertEqual(resolve_assets("BTCUSDC"), ("BTC", "USDC"))
 
+    def test_resolver_covers_non_usdc_inventory_quotes_without_usdt(self):
+        self.assertEqual(resolve_assets("TLVRON"), ("TLV", "RON"))
+        self.assertEqual(resolve_assets("HYPEUSD"), ("HYPE", "USD"))
+        self.assertEqual(resolve_assets("TAOUSDT"), ("TAOUSDT", None))
+
     def test_buy_converts_quote_balance_to_base_quantity(self):
         cap, asset = balance_cap_quantity(
             lambda a: {"USDC": 450}[a], "TAOUSDC", "BUY", 225)

@@ -6,7 +6,7 @@ import math
 from typing import Callable, Optional
 
 
-QUOTE_SUFFIXES = ("USDC", "EUR", "BTC", "ETH", "USD")
+QUOTE_SUFFIXES = ("USDC", "EUR", "RON", "BTC", "ETH", "USD")
 
 
 @dataclass(frozen=True)

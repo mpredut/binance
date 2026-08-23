@@ -20,6 +20,7 @@ from cacheManager import CacheManagerInterface, CacheFactory, _should_poll_for_m
 # Facada market-data (Faza 2a). market_api -> binance_api.bapi (nu importa pricefetcher),
 # deci sigur. BinancePricePlatform foloseste facada ca client de pret.
 import providers.market_api as _market_api
+from providers.quantity import resolve_assets
 
 
 # ============================================
@@ -31,7 +32,6 @@ MAX_PRICE_HISTORY_PER_SYMBOL = 2000
 MAX_MONITORED_SYMBOLS = 20
 QUOTE_CURRENCY = "USDC"
 FALLBACK_QUOTE = "USDC"
-QUOTE_SUFFIXES = ("USDC", "EUR")
 #DEFAULT_SYMBOLS = ["BTC", "ETH", "HYPE", "SOL", "BNB", "ADA", "DOGE", "XRP"]
 DEFAULT_SYMBOLS = ["BTC", "TAO", "HYPE"]
 
@@ -736,10 +736,7 @@ def is_valid_symbol_for_monitoring(symbol: str) -> bool:
 
 
 def get_base_symbol(symbol: str) -> str:
-    for quote in QUOTE_SUFFIXES:
-        if symbol.endswith(quote) and len(symbol) > len(quote):
-            return symbol[:-len(quote)]
-    return symbol
+    return resolve_assets(symbol)[0]
 
 
 def create_cachePriceAll(cmc_api_key: Optional[str] = None, symbols=None, max_symbols=None):

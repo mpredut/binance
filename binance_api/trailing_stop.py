@@ -43,6 +43,8 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # binance_a
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)   # ruleaza si ca script (python binance_api/trailing_stop.py)
 
+from providers.quantity import resolve_assets
+
 from trailing_core import TrailingCore, should_sell  # noqa: E402  (should_sell reexportat pt teste/compat)
 from botcore import load_dotenv, single_instance  # noqa: E402  (parser KEY=VALUE + single-instance comun)
 
@@ -144,7 +146,7 @@ class TrailingStop:
     # == contract ADAPTOR pt TrailingCore =====================================
     def assets(self):
         for symbol in self.sym.symbols:
-            asset = self.api.split_symbol(symbol)[0]
+            asset = resolve_assets(symbol)[0]
             yield (symbol, asset, symbol, self.trail_pct_for(symbol))  # key=pair=symbol pe Binance
 
     def begin_tick(self) -> bool:

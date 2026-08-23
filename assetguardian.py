@@ -4,6 +4,7 @@ import time
 from binance_api import bapi as api
 from binance_api import bapi_placeorder as po
 from providers.market_api import api as mkt   # proxy unic guardat (Instrument.place)
+from providers.quantity import resolve_assets
 import cacheManager as cm
 import symbols as sym
 
@@ -102,7 +103,7 @@ def sell_all_assets():
     print(f"[DEBUG] balances fetched: {len(balances)}")
   
     # Extragem doar asset-urile de baza din sym.symbols (ex: BTCUSDC -> BTC)
-    tracked_assets = {api.split_symbol(s)[0] for s in sym.symbols}
+    tracked_assets = {resolve_assets(s)[0] for s in sym.symbols}
     
     excluded_assets = {"USDC"}
     sell_count = 0
@@ -151,7 +152,6 @@ def sell_all_assets():
 
 def buy_with_all_cash(buy_symbol=BUY_SYMBOL_DEFAULT, cash_ratio=BUY_USE_CASH_RATIO):
     try:
-        from providers.quantity import resolve_assets
         _, quote_asset = resolve_assets(buy_symbol)
     except Exception as e:
         print(f"ERROR invalid buy symbol {buy_symbol}: {e}")
