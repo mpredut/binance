@@ -2,8 +2,8 @@
 
 Modulul nu importa API-uri live. Venue-ul este injectat, astfel incat aceeasi
 masina de stari poate fi caracterizata cu fill-uri sintetice si apoi folosita de
-entrypoint-ul live. O singura instanta detine ambele order-id-uri si nu deschide
-o runda noua cat timp exista expunere din runda curenta.
+entrypoint-ul live. O singura instanta detine ambele order-id-uri ale rundei;
+schedulerul exterior poate rula in paralel mai multe instante independente.
 """
 from __future__ import annotations
 
@@ -122,15 +122,19 @@ def anchored_exit_price(exit_side: str, fill_price: float, current_price: float,
 
 
 class PairCoordinator:
-    """Masina de stari pentru o singura runda BUY+SELL."""
+    """Masina de stari pentru o runda BUY+SELL, in oricare directie."""
 
     def __init__(self, venue: PairVenue, qty: float, policy: PairPolicy, *,
+                 start_side: str = "BUY",
                  clock: Callable[[], float] = time.monotonic,
                  sleeper: Callable[[float], None] = time.sleep,
                  pair_id_factory: Callable[[], str] = lambda: uuid.uuid4().hex):
         self.venue = venue
         self.qty = float(qty)
         self.policy = policy
+        self.start_side = start_side.upper()
+        if self.start_side not in {"BUY", "SELL"}:
+            raise ValueError("start_side trebuie sa fie BUY sau SELL")
         self.clock = clock
         self.sleeper = sleeper
         self.pair_id_factory = pair_id_factory
@@ -161,20 +165,25 @@ class PairCoordinator:
         self.snapshots = {}
         self.stop_ticket = None
 
-        buy = self.venue.place_limit("BUY", buy_price, self.qty, self.pair_id)
-        if buy is None:
+        prices = {"BUY": buy_price, "SELL": sell_price}
+        first_side = self.start_side
+        second_side = "SELL" if first_side == "BUY" else "BUY"
+        first = self.venue.place_limit(
+            first_side, prices[first_side], self.qty, self.pair_id)
+        if first is None:
             self.phase = "failed"
-            self.reason = "buy_place_failed"
+            self.reason = f"{first_side.lower()}_place_failed"
             return self.outcome()
-        self.tickets.append(buy)
+        self.tickets.append(first)
 
-        sell = self.venue.place_limit("SELL", sell_price, self.qty, self.pair_id)
-        if sell is None:
-            self._cancel(buy)
+        second = self.venue.place_limit(
+            second_side, prices[second_side], self.qty, self.pair_id)
+        if second is None:
+            self._cancel(first)
             self.phase = "failed"
-            self.reason = "sell_place_failed"
+            self.reason = f"{second_side.lower()}_place_failed"
             return self.outcome()
-        self.tickets.append(sell)
+        self.tickets.append(second)
         self.phase = "quoting"
         return self.outcome()
 
@@ -267,20 +276,26 @@ class PairCoordinator:
         self.tickets.append(replacement)
         return True
 
-    def _submit_hard_stop(self, net_qty: float, entry_avg: float,
-                          current: float) -> bool:
-        if net_qty <= 0:
+    def _submit_hard_stop(self, exposure_side: str, net_qty: float,
+                          entry_avg: float, current: float) -> bool:
+        if abs(net_qty) <= 1e-8:
             return False
         stop_fraction = (self.policy.shock_hard_stop_fraction if self.shock
                          else self.policy.hard_stop_fraction)
-        if current > entry_avg * (1 - stop_fraction):
+        breached = (
+            current <= entry_avg * (1 - stop_fraction)
+            if exposure_side == "LONG"
+            else current >= entry_avg * (1 + stop_fraction)
+        )
+        if not breached:
             return False
-        exit_ticket = self._active_ticket("SELL")
+        exit_side = "SELL" if exposure_side == "LONG" else "BUY"
+        exit_ticket = self._active_ticket(exit_side)
         if exit_ticket is not None and not self._cancel(exit_ticket):
             self.reason = "hard_stop_cancel_failed"
             return False
         market = self.venue.place_market_exit(
-            "SELL", net_qty,
+            exit_side, abs(net_qty),
             reason=("fast_fill_hard_stop" if self.shock else "inventory_hard_stop"))
         if market is None:
             self.reason = "hard_stop_place_failed"
@@ -331,7 +346,7 @@ class PairCoordinator:
             if current <= 0:
                 self.reason = "current_price_unavailable"
                 return self.outcome()
-            if exposure_side == "LONG" and self._submit_hard_stop(net, entry_avg, current):
+            if self._submit_hard_stop(exposure_side, net, entry_avg, current):
                 return self.outcome()
             self._ensure_anchored_exit(exposure_side, net, entry_avg, current)
             return self.outcome()

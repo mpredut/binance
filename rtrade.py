@@ -93,6 +93,11 @@ RTRADE_PAIR_MAX_ACTIVE_ROUNDS = int(os.environ.get(
     "RTRADE_PAIR_MAX_ACTIVE_ROUNDS", "4"))
 RTRADE_PAIR_START_INTERVAL_SEC = float(os.environ.get(
     "RTRADE_PAIR_START_INTERVAL_SEC", "8"))
+RTRADE_PAIR_DIRECTIONS = tuple(
+    side.strip().upper()
+    for side in os.environ.get("RTRADE_PAIR_DIRECTIONS", "BUY,SELL").split(",")
+    if side.strip()
+)
 RTRADE_FAST_FILL_RATIO = float(os.environ.get("RTRADE_FAST_FILL_RATIO", "0.25"))
 RTRADE_MIN_EDGE_PCT = float(os.environ.get("RTRADE_MIN_EDGE_PCT", "0.0115"))
 RTRADE_SHOCK_HARD_STOP_PCT = float(os.environ.get(
@@ -460,12 +465,16 @@ class TradingBot:
             raise ValueError("RTRADE_PAIR_MAX_ACTIVE_ROUNDS trebuie sa fie >= 1")
         if RTRADE_PAIR_START_INTERVAL_SEC <= 0:
             raise ValueError("RTRADE_PAIR_START_INTERVAL_SEC trebuie sa fie > 0")
+        if (not RTRADE_PAIR_DIRECTIONS
+                or any(side not in {"BUY", "SELL"} for side in RTRADE_PAIR_DIRECTIONS)):
+            raise ValueError("RTRADE_PAIR_DIRECTIONS accepta numai BUY,SELL")
 
         # Fiecare coordonator detine exclusiv order-id-urile si inventarul unei
         # runde. O runda expusa continua sa-si urmareasca exit-ul, dar nu mai
         # blocheaza lansarea altor runde pe acelasi simbol pana la limita setata.
         active = []
         last_start_at = float("-inf")
+        next_direction = 0
         while True:
             try:
                 now = time.monotonic()
@@ -492,17 +501,22 @@ class TradingBot:
                 if can_start and not _trend_too_strong(self.symbol):
                     current_price = venue.current_price()
                     if current_price is not None:
-                        coordinator = PairCoordinator(venue, self.qty, policy)
+                        start_side = RTRADE_PAIR_DIRECTIONS[next_direction]
+                        next_direction = (next_direction + 1) % len(RTRADE_PAIR_DIRECTIONS)
+                        coordinator = PairCoordinator(
+                            venue, self.qty, policy, start_side=start_side)
                         outcome = coordinator.start(current_price)
                         last_start_at = now
                         if outcome.terminal:
                             print(
                                 f"[{self.symbol}] pair={outcome.pair_id} "
+                                f"direction={start_side}-first "
                                 f"phase={outcome.phase} reason={outcome.reason}")
                         else:
                             active.append(coordinator)
                             print(
                                 f"[{self.symbol}] pair={outcome.pair_id} started "
+                                f"direction={start_side}-first "
                                 f"active={len(active)}/"
                                 f"{RTRADE_PAIR_MAX_ACTIVE_ROUNDS}")
                 time.sleep(RTRADE_PAIR_POLL_SEC)

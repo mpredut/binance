@@ -64,10 +64,10 @@ class FakeVenue:
             status=status, filled_qty=qty, cost=qty * price, fee=fee)
 
 
-def _coordinator(venue, **policy_overrides):
+def _coordinator(venue, *, start_side="BUY", **policy_overrides):
     policy = PairPolicy(adjustment_fraction=0.0064, **policy_overrides)
     return PairCoordinator(
-        venue, qty=1.0, policy=policy,
+        venue, qty=1.0, policy=policy, start_side=start_side,
         clock=lambda: 0.0, sleeper=lambda _seconds: None,
         pair_id_factory=lambda: "pair-1")
 
@@ -104,6 +104,23 @@ class PairCoordinatorTest(unittest.TestCase):
         self.assertTrue(outcome.terminal)
         self.assertEqual(outcome.reason, "sell_place_failed")
         self.assertEqual(venue.canceled, ["L1"])
+
+    def test_sell_first_places_both_legs_in_reverse_order(self):
+        venue = FakeVenue()
+        outcome = _coordinator(venue, start_side="SELL").start(mid=100.0)
+
+        self.assertEqual(outcome.phase, "quoting")
+        self.assertEqual(
+            [(t.side, t.price, pair) for t, pair in venue.orders],
+            [("SELL", 100.64, "pair-1"), ("BUY", 99.36, "pair-1")])
+
+    def test_sell_first_failure_does_not_attempt_buy(self):
+        venue = FakeVenue(fail_side="SELL")
+        outcome = _coordinator(venue, start_side="SELL").start(mid=100.0)
+
+        self.assertTrue(outcome.terminal)
+        self.assertEqual(outcome.reason, "sell_place_failed")
+        self.assertEqual(venue.orders, [])
 
     def test_no_fill_until_ttl_cancels_both(self):
         venue = FakeVenue()
@@ -225,6 +242,22 @@ class PairCoordinatorTest(unittest.TestCase):
             venue.market_calls, [("SELL", 1.0, "inventory_hard_stop")])
         self.assertEqual(finished.phase, "hard_stop")
         self.assertEqual(finished.reason, "inventory_hard_stop")
+
+    def test_fast_sell_fill_has_symmetric_market_buy_hard_stop(self):
+        venue = FakeVenue(current=105.0)
+        coordinator = _coordinator(
+            venue, start_side="SELL", quote_ttl_sec=32, fast_fill_ratio=0.25,
+            shock_hard_stop_fraction=0.04)
+        coordinator.start(mid=100.0)
+        venue.fill("L1", 1.0, 100.64)
+
+        submitted = coordinator.step(now=5.0)
+        finished = coordinator.step(now=6.0)
+
+        self.assertEqual(submitted.phase, "stopping")
+        self.assertEqual(venue.market_calls, [("BUY", 1.0, "fast_fill_hard_stop")])
+        self.assertEqual(finished.phase, "hard_stop")
+        self.assertAlmostEqual(finished.net_qty, 0.0)
 
 
 if __name__ == "__main__":

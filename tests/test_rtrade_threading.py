@@ -34,8 +34,9 @@ class RTradeThreadingTest(unittest.TestCase):
         coordinators = []
 
         class FakeCoordinator:
-            def __init__(self, *_args, **_kwargs):
+            def __init__(self, *_args, **kwargs):
                 self.pair_id = f"pair-{len(coordinators) + 1}"
+                self.start_side = kwargs.get("start_side")
                 self.steps = []
                 coordinators.append(self)
 
@@ -53,6 +54,7 @@ class RTradeThreadingTest(unittest.TestCase):
              patch.object(rtrade, "PairCoordinator", FakeCoordinator), \
              patch.object(rtrade, "RTRADE_PAIR_MAX_ACTIVE_ROUNDS", 2), \
              patch.object(rtrade, "RTRADE_PAIR_START_INTERVAL_SEC", 8), \
+             patch.object(rtrade, "RTRADE_PAIR_DIRECTIONS", ("BUY", "SELL")), \
              patch.object(rtrade, "RTRADE_PAIR_POLL_SEC", 1), \
              patch.object(rtrade, "_trend_too_strong", return_value=False), \
              patch.object(rtrade.time, "monotonic", side_effect=[0.0, 8.0, 16.0]), \
@@ -62,6 +64,7 @@ class RTradeThreadingTest(unittest.TestCase):
                 bot._run_coordinator_forever()
 
         self.assertEqual([c.pair_id for c in coordinators], ["pair-1", "pair-2"])
+        self.assertEqual([c.start_side for c in coordinators], ["BUY", "SELL"])
         self.assertEqual(coordinators[0].steps, [8.0, 16.0])
         self.assertEqual(coordinators[1].steps, [16.0])
 
