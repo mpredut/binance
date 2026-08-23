@@ -25,7 +25,7 @@ class OrderRetryStoreTest(unittest.TestCase):
         oq.RETRY_MAX_QUEUE = 500
 
     def test_enqueue_and_load(self):
-        i = oq.enqueue("BTCUSDC", "BUY", None,
+        i = oq.enqueue("BTCUSDC", "BUY", 1.0,
                        {"safeback_seconds": 999, "force": False, "smart": False}, now=1000.0)
         self.assertIsNotNone(i)
         items = oq.load_all()
@@ -33,7 +33,7 @@ class OrderRetryStoreTest(unittest.TestCase):
         r = items[0]
         self.assertEqual(r["symbol"], "BTCUSDC")
         self.assertEqual(r["side"], "BUY")
-        self.assertIsNone(r["qty"])
+        self.assertEqual(r["qty"], 1.0)
         self.assertEqual(r["place_kwargs"]["safeback_seconds"], 999)
         self.assertEqual(r["attempts"], 0)
         self.assertNotIn("price", r)   # pretul NU se salveaza ca valoare de trimis
@@ -55,6 +55,16 @@ class OrderRetryStoreTest(unittest.TestCase):
         self.assertEqual(items[0]["requested_price"], 63100.0)   # tinta reimprospatata
         self.assertEqual(items[0]["qty"], 2.0)
         self.assertEqual(items[0]["created_ts"], 1000.0)         # vechimea PASTRATA (min)
+        self.assertNotEqual(items[0]["place_kwargs"]["client_order_id"],
+                            f"OR_{a[:24]}_0")
+
+    def test_client_order_id_is_stable_for_one_revision(self):
+        rid = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=100.0, now=1000.0)
+        rec = oq.load_all()[0]
+        self.assertEqual(rec["place_kwargs"]["client_order_id"], f"OR_{rid[:24]}_0")
+        claimed = oq.claim([rid], now=1400.0)[0]
+        self.assertEqual(claimed["place_kwargs"]["client_order_id"],
+                         rec["place_kwargs"]["client_order_id"])
 
     def test_dedup_collapses_ladder_any_distance(self):
         # chiar la preturi MULT diferite (fostul "ladder") -> tot o singura intentie/side
@@ -102,6 +112,9 @@ class OrderRetryStoreTest(unittest.TestCase):
         # fara requested_price capturat (intrare veche/anormala) -> conservator, NU reia orb
         self.assertFalse(oq.price_gate_ok({"side": "SELL"}, 50.0))
         self.assertFalse(oq.price_gate_ok({"side": "BUY", "requested_price": 0}, 50.0))
+        self.assertFalse(oq.price_gate_ok({"side": "HOLD", "requested_price": 50}, 50.0))
+        self.assertFalse(oq.price_gate_ok(
+            {"side": "BUY", "requested_price": 50}, float("nan")))
 
     def test_enqueue_disabled_returns_none(self):
         oq.RETRY_ENABLED = False
@@ -122,15 +135,48 @@ class OrderRetryStoreTest(unittest.TestCase):
         self.assertEqual(len(rem), 1)
         self.assertEqual(rem[0]["symbol"], "TAOUSDC")
 
-    def test_claim_removes_and_returns(self):
+    def test_claim_leases_and_returns_without_removing(self):
         a = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0, now=1000.0)
         oq.enqueue("TAOUSDC", "SELL", 2.0, {}, requested_price=2.0, now=1001.0)
         claimed = oq.claim([a])
         self.assertEqual(len(claimed), 1)
         self.assertEqual(claimed[0]["id"], a)
         rem = oq.load_all()
-        self.assertEqual(len(rem), 1)             # scos din coada
-        self.assertEqual(rem[0]["symbol"], "TAOUSDC")
+        self.assertEqual(len(rem), 2)
+        leased = next(r for r in rem if r["id"] == a)
+        self.assertTrue(leased["claim_token"])
+        self.assertGreater(leased["claim_until"], time.time())
+
+    def test_claim_failure_releases_and_increments(self):
+        rid = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0, now=1000.0)
+        claimed = oq.claim([rid], now=1400.0)[0]
+        self.assertTrue(oq.complete_claim(claimed, "failure", now=1401.0))
+        rec = oq.load_all()[0]
+        self.assertEqual(rec["attempts"], 1)
+        self.assertEqual(rec["last_attempt_ts"], 1401.0)
+        self.assertNotIn("claim_token", rec)
+
+    def test_claim_survives_crash_and_becomes_due_after_lease(self):
+        rid = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0, now=1000.0)
+        oq.claim([rid], now=1400.0, lease_sec=120.0)
+        rec = oq.load_all()[0]
+        self.assertFalse(oq.is_due(rec, now=1519.0))
+        self.assertTrue(oq.is_due(rec, now=1521.0))
+
+    def test_success_does_not_delete_newer_refresh(self):
+        rid = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=100.0, now=1000.0)
+        claimed = oq.claim([rid], now=1400.0)[0]
+        oq.enqueue("BTCUSDC", "BUY", 2.0, {}, requested_price=90.0, now=1401.0)
+        oq.complete_claim(claimed, "success", now=1402.0)
+        rec = oq.load_all()[0]
+        self.assertEqual(rec["qty"], 2.0)
+        self.assertEqual(rec["requested_price"], 90.0)
+        self.assertNotIn("claim_token", rec)
+
+    def test_invalid_intent_is_not_enqueued(self):
+        self.assertIsNone(oq.enqueue("BTCUSDC", "BUY", None, {}, now=1000.0))
+        self.assertIsNone(oq.enqueue("BTCUSDC", "HOLD", 1.0, {}, now=1000.0))
+        self.assertIsNone(oq.enqueue("", "BUY", 1.0, {}, now=1000.0))
 
     def test_claim_empty_noop(self):
         oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0, now=1000.0)

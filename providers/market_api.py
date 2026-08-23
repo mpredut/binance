@@ -407,6 +407,19 @@ class MarketApi:
     def open_orders(self, symbol: str) -> List[dict]:
         return self._provider_for(symbol).open_orders(symbol)
 
+    def order_by_client_id(self, symbol: str, client_order_id: str, *,
+                           provider_name=None):
+        """Return a native order found by deterministic client ID, or ``None``.
+
+        This narrow recovery hook lets persistent callers reconcile an ambiguous
+        submit without guessing from balances or submitting a duplicate.
+        """
+        provider = self._provider_explicit_or_routed(symbol, provider_name)
+        method = getattr(provider, "order_by_client_id", None)
+        if not callable(method):
+            raise ProviderError(f"{provider.name}: order_by_client_id is unsupported")
+        return method(symbol, str(client_order_id))
+
     def order_status(self, symbol: str, order_id: str, *,
                      provider_name=None) -> OrderStatus:
         """Return venue-neutral status; lookup failures remain fail-closed."""

@@ -12,14 +12,14 @@ from the current market price and proceeds only when ``price_gate_ok`` accepts t
 price. Deduplication retains one pending record per symbol and side, refreshing its
 target while preserving its original age.
 
-This is not a transactional outbox. Claiming removes a record before venue submission,
-so a worker crash in that interval can lose the intent. Also, queue admission reflects
-``Instrument.place`` failure, not a fresh evaluation of the strategy signal; the worker
-relies on the placement guards and the stored price constraint. Configuration lives in
-``order_retry_config.env``.
+Claims are durable leases: a worker crash leaves the record unavailable only until the
+lease expires. Queue admission still reflects ``Instrument.place`` failure, not a fresh
+evaluation of the originating strategy signal; the worker relies on placement guards and
+the stored price constraint. Configuration lives in ``order_retry_config.env``.
 """
 import os
 import json
+import math
 import time
 import uuid
 import tempfile
@@ -39,6 +39,7 @@ RETRY_PRICE_TOL = float(os.environ.get("RETRY_PRICE_TOL", "0.002"))
 RETRY_DEDUP = os.environ.get("RETRY_DEDUP", "true").strip().lower() == "true"
 # Hard queue-size bound; zero disables the bound.
 RETRY_MAX_QUEUE = int(float(os.environ.get("RETRY_MAX_QUEUE", "500")))
+RETRY_CLAIM_LEASE_SEC = float(os.environ.get("RETRY_CLAIM_LEASE_SEC", "120"))
 
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 QUEUE_FILE = os.path.join(_ROOT, "cachedb", "order_retry_queue.jsonl")
@@ -66,6 +67,11 @@ def _read_nolock():
     return items
 
 
+def _client_order_id(record_id, revision):
+    """Return a Binance-compatible stable ID for one queued intent revision."""
+    return f"OR_{record_id[:24]}_{int(revision)}"
+
+
 def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_price=None,
             now=None, created_ts=None, attempts=0, last_attempt_ts=0.0):
     """Add or refresh a failed placement attempt while holding the queue lock.
@@ -79,18 +85,39 @@ def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_pric
         return None
     now = now if now is not None else time.time()
     side_u = (side or "").upper()
-    cts = float(created_ts) if created_ts is not None else now
+    try:
+        qty = float(qty)
+        now = float(now)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if (not symbol or side_u not in {"BUY", "SELL"} or
+            not math.isfinite(qty) or qty <= 0 or
+            not math.isfinite(now) or now <= 0):
+        return None
+    try:
+        cts = float(created_ts) if created_ts is not None else now
+        attempts = int(attempts)
+        last_attempt_ts = float(last_attempt_ts)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if (not math.isfinite(cts) or cts <= 0 or not math.isfinite(last_attempt_ts) or
+            attempts < 0):
+        return None
+    record_id = uuid.uuid4().hex
+    placement = dict(place_kwargs or {})
+    placement.setdefault("client_order_id", _client_order_id(record_id, 0))
     rec = {
-        "id": uuid.uuid4().hex,
+        "id": record_id,
         "symbol": symbol,
         "side": side_u,
         "qty": qty,
-        "place_kwargs": dict(place_kwargs or {}),
+        "place_kwargs": placement,
         "requested_price": requested_price,
         "ref_price": ref_price,
         "created_ts": cts,
-        "attempts": int(attempts),
-        "last_attempt_ts": float(last_attempt_ts),
+        "attempts": attempts,
+        "last_attempt_ts": last_attempt_ts,
+        "revision": 0,
     }
     _ensure_dir()
     with FileLock(LOCK_FILE):
@@ -102,19 +129,23 @@ def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_pric
                     e["requested_price"] = requested_price
                     e["ref_price"] = ref_price
                     e["qty"] = qty
-                    e["place_kwargs"] = dict(place_kwargs or {})
+                    revision = int(e.get("revision", 0)) + 1
+                    refreshed_kwargs = dict(place_kwargs or {})
+                    refreshed_kwargs.setdefault(
+                        "client_order_id", _client_order_id(e.get("id", record_id), revision))
+                    e["place_kwargs"] = refreshed_kwargs
                     e["created_ts"] = min(float(e.get("created_ts", cts)), cts)
                     e["attempts"] = max(int(e.get("attempts", 0)), int(attempts))
                     e["last_attempt_ts"] = max(float(e.get("last_attempt_ts", 0)),
                                                float(last_attempt_ts))
+                    e["revision"] = revision
                     _write_nolock(existing)
                     return e.get("id")
         if RETRY_MAX_QUEUE > 0 and len(existing) >= RETRY_MAX_QUEUE:
             print(f"[order_retry] coada plina ({len(existing)}/{RETRY_MAX_QUEUE}) "
                   f"— NU adaug {side_u} {symbol}")
             return None
-        with open(QUEUE_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(rec) + "\n")
+        _write_nolock(existing + [rec])
     return rec["id"]
 
 
@@ -125,25 +156,84 @@ def load_all(now=None):
         return _read_nolock()
 
 
-def claim(ids, now=None):
-    """Atomically remove and return entries whose IDs are claimed by the worker.
-
-    The worker claims before external submission to prevent concurrent retries and
-    re-enqueues an ordinary failure. A process crash after this removal and before
-    re-enqueue is not recoverable from this queue alone.
-    """
+def claim(ids, now=None, lease_sec=None):
+    """Lease entries without removing them, making crash recovery deterministic."""
     ids = set(ids)
     if not ids:
         return []
     _ensure_dir()
+    now = float(time.time() if now is None else now)
+    lease_sec = float(RETRY_CLAIM_LEASE_SEC if lease_sec is None else lease_sec)
+    if not math.isfinite(lease_sec) or lease_sec <= 0:
+        raise ValueError("claim lease must be finite and positive")
     claimed = []
+    token = uuid.uuid4().hex
     with FileLock(LOCK_FILE):
         existing = _read_nolock()
-        remaining = [r for r in existing if r.get("id") not in ids]
-        claimed = [r for r in existing if r.get("id") in ids]
+        for rec in existing:
+            if rec.get("id") not in ids:
+                continue
+            if float(rec.get("claim_until", 0) or 0) > now:
+                continue
+            rec["claim_token"] = token
+            rec["claim_until"] = now + lease_sec
+            rec["claim_revision"] = int(rec.get("revision", 0))
+            claimed.append(dict(rec))
         if claimed:
-            _write_nolock(remaining)
+            _write_nolock(existing)
     return claimed
+
+
+def complete_claim(claimed, outcome, now=None):
+    """Finalize one leased record as success, failure, or release.
+
+    A successful placement removes only the exact revision that was submitted. If a
+    writer refreshed the intent while it was leased, that newer revision remains due.
+    Failure increments attempts in place. Release simply clears the lease.
+    """
+    if outcome not in {"success", "failure", "release"}:
+        raise ValueError(f"invalid claim outcome: {outcome}")
+    now = float(time.time() if now is None else now)
+    changed = False
+    _ensure_dir()
+    with FileLock(LOCK_FILE):
+        existing = _read_nolock()
+        remaining = []
+        for rec in existing:
+            matches = (rec.get("id") == claimed.get("id") and
+                       rec.get("claim_token") == claimed.get("claim_token"))
+            if not matches:
+                remaining.append(rec)
+                continue
+            changed = True
+            same_revision = int(rec.get("revision", 0)) == int(
+                claimed.get("claim_revision", 0))
+            if outcome == "success" and same_revision:
+                continue
+            if outcome == "failure" and same_revision:
+                rec["attempts"] = max(int(rec.get("attempts", 0)),
+                                      int(claimed.get("attempts", 0))) + 1
+                rec["last_attempt_ts"] = now
+            for key in ("claim_token", "claim_until", "claim_revision"):
+                rec.pop(key, None)
+            remaining.append(rec)
+        if changed:
+            _write_nolock(remaining)
+    return changed
+
+
+def discard(ids):
+    """Atomically remove records by ID without submitting them (expiry/give-up)."""
+    ids = set(ids)
+    if not ids:
+        return []
+    _ensure_dir()
+    with FileLock(LOCK_FILE):
+        existing = _read_nolock()
+        removed = [rec for rec in existing if rec.get("id") in ids]
+        if removed:
+            _write_nolock([rec for rec in existing if rec.get("id") not in ids])
+        return removed
 
 
 def resolve(symbol, side):
@@ -170,15 +260,26 @@ def resolve(symbol, side):
 def _write_nolock(items):
     """Replace the queue file atomically while the caller holds the lock.
 
-    The temporary-file rename prevents partial-file visibility, but no directory or
-    file ``fsync`` is performed, so this is not a power-loss durability guarantee.
+    The temporary file and parent directory are fsynced around the atomic rename so a
+    successful mutation survives an ordinary process crash and is power-loss resilient
+    on filesystems that honor those primitives.
     """
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(QUEUE_FILE), suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             for rec in items:
                 f.write(json.dumps(rec) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, QUEUE_FILE)
+        try:
+            dfd = os.open(os.path.dirname(QUEUE_FILE), os.O_RDONLY)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
+        except OSError:
+            pass
     except Exception:
         if os.path.exists(tmp):
             os.remove(tmp)
@@ -194,19 +295,33 @@ def rewrite(items):
 
 def is_expired(rec, now=None):
     """Return true after the record exceeds its TTL or hard attempt limit."""
-    now = now if now is not None else time.time()
-    if now - float(rec.get("created_ts", 0)) > RETRY_TTL_SEC:
+    try:
+        now = float(time.time() if now is None else now)
+        claim_until = float(rec.get("claim_until", 0) or 0)
+        created = float(rec.get("created_ts", 0))
+        attempts = int(rec.get("attempts", 0))
+    except (TypeError, ValueError, OverflowError):
         return True
-    if RETRY_MAX_ATTEMPTS > 0 and int(rec.get("attempts", 0)) >= RETRY_MAX_ATTEMPTS:
+    if not all(math.isfinite(v) for v in (now, claim_until, created)) or created <= 0:
         return True
-    return False
+    if claim_until > now:
+        return False
+    return ((now - created) > RETRY_TTL_SEC or
+            (RETRY_MAX_ATTEMPTS > 0 and attempts >= RETRY_MAX_ATTEMPTS))
 
 
 def is_due(rec, now=None):
     """Return true once the retry interval has elapsed since creation or last attempt."""
-    now = now if now is not None else time.time()
-    base = max(float(rec.get("last_attempt_ts", 0)), float(rec.get("created_ts", 0)))
-    return (now - base) >= RETRY_INTERVAL_SEC
+    try:
+        now = float(time.time() if now is None else now)
+        claim_until = float(rec.get("claim_until", 0) or 0)
+        base = max(float(rec.get("last_attempt_ts", 0)),
+                   float(rec.get("created_ts", 0)))
+    except (TypeError, ValueError, OverflowError):
+        return False
+    if not all(math.isfinite(v) for v in (now, claim_until, base)):
+        return False
+    return claim_until <= now and (now - base) >= RETRY_INTERVAL_SEC
 
 
 def price_gate_ok(rec, current_price, tol=None):
@@ -221,15 +336,18 @@ def price_gate_ok(rec, current_price, tol=None):
     if req is None:
         return False
     try:
+        current_price = float(current_price)
         req = float(req)
-    except (TypeError, ValueError):
+        tol = float(RETRY_PRICE_TOL if tol is None else tol)
+    except (TypeError, ValueError, OverflowError):
         return False
-    if req <= 0:
+    if (not math.isfinite(current_price) or current_price <= 0 or
+            not math.isfinite(req) or req <= 0 or
+            not math.isfinite(tol) or tol < 0):
         return False
-    tol = RETRY_PRICE_TOL if tol is None else tol
     side = (rec.get("side") or "").upper()
     if side == "SELL":
         return current_price >= req * (1.0 - tol)
     if side == "BUY":
         return current_price <= req * (1.0 + tol)
-    return True
+    return False

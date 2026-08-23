@@ -38,7 +38,7 @@ class ProcessOnceTest(unittest.TestCase):
         oq.RETRY_MAX_QUEUE = 500
 
     def test_success_removes_from_queue(self):
-        oq.enqueue("BTCUSDC", "BUY", None, {"safeback_seconds": 9, "smart": False},
+        oq.enqueue("BTCUSDC", "BUY", 1.0, {"safeback_seconds": 9, "smart": False},
                    requested_price=63000.0, now=1000.0)   # BUY: pret curent <= cerut -> gate ok
         mkt = FakeMkt(price=63000.0, succeed=True)
         stats = worker.process_once(mkt, now=1000.0 + 400)   # due (>300s)
@@ -51,7 +51,7 @@ class ProcessOnceTest(unittest.TestCase):
         self.assertEqual(mkt.calls[0]["kw"]["smart"], False)
 
     def test_failure_keeps_and_increments_attempts(self):
-        oq.enqueue("BTCUSDC", "BUY", None, {}, requested_price=100.0, now=1000.0)
+        oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=100.0, now=1000.0)
         mkt = FakeMkt(succeed=False)   # price=100 default, BUY gate ok (100<=100)
         worker.process_once(mkt, now=1000.0 + 400)
         q = oq.load_all()
@@ -60,14 +60,14 @@ class ProcessOnceTest(unittest.TestCase):
         self.assertAlmostEqual(q[0]["last_attempt_ts"], 1000.0 + 400)
 
     def test_not_due_skipped(self):
-        oq.enqueue("BTCUSDC", "BUY", None, {}, now=1000.0)
+        oq.enqueue("BTCUSDC", "BUY", 1.0, {}, now=1000.0)
         mkt = FakeMkt(succeed=True)
         stats = worker.process_once(mkt, now=1000.0 + 100)   # < interval 300 -> nu e scadent
         self.assertEqual(stats["attempted"], 0)
         self.assertEqual(len(oq.load_all()), 1)              # ramane
 
     def test_expired_dropped_and_alerted(self):
-        oq.enqueue("BTCUSDC", "BUY", None, {}, now=1000.0)
+        oq.enqueue("BTCUSDC", "BUY", 1.0, {}, now=1000.0)
         mkt = FakeMkt(succeed=True)
         alerts = []
         orig = worker.alert.notify
@@ -82,7 +82,7 @@ class ProcessOnceTest(unittest.TestCase):
         self.assertEqual(len(alerts), 1)             # alerta de renuntare
 
     def test_price_none_leaves_in_queue(self):
-        oq.enqueue("BTCUSDC", "BUY", None, {}, now=1000.0)
+        oq.enqueue("BTCUSDC", "BUY", 1.0, {}, now=1000.0)
         mkt = FakeMkt(price=None, succeed=True)
         stats = worker.process_once(mkt, now=1000.0 + 400)
         self.assertEqual(stats["attempted"], 0)
@@ -110,21 +110,67 @@ class ProcessOnceTest(unittest.TestCase):
         self.assertEqual(mkt.calls[0]["price"], 101.0)   # reluat la pret CURENT
         self.assertEqual(oq.load_all(), [])
 
-    def test_removed_from_queue_before_place(self):
-        # cerinta user: intrarea e SCOASA din coada INAINTE de plasare (nu poate fi reincercata
-        # de nimeni cat timp e in curs). Verificam ca in timpul lui place(), coada e goala.
+    def test_leased_in_queue_during_place_and_not_due(self):
         oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=100.0, now=1000.0)
         seen = {}
 
         class CheckMkt(FakeMkt):
             def place(self, symbol, side, price, qty, **kw):
-                seen["in_queue_during_place"] = len(oq.load_all())
+                queued = oq.load_all()
+                seen["in_queue_during_place"] = len(queued)
+                seen["due_during_place"] = oq.is_due(queued[0], now=1400.0)
                 return super().place(symbol, side, price, qty, **kw)
 
         mkt = CheckMkt(price=100.0, succeed=True)
         worker.process_once(mkt, now=1000.0 + 400)
-        self.assertEqual(seen["in_queue_during_place"], 0)   # scoasa INAINTE de plasare
-        self.assertEqual(oq.load_all(), [])                  # succes -> ramane scoasa
+        self.assertEqual(seen["in_queue_during_place"], 1)
+        self.assertFalse(seen["due_during_place"])
+        self.assertEqual(oq.load_all(), [])
+
+    def test_truthy_response_without_order_id_is_failure(self):
+        oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=100.0, now=1000.0)
+
+        class AmbiguousMkt(FakeMkt):
+            def place(self, *args, **kwargs):
+                return {"status": "unknown"}
+
+        stats = worker.process_once(AmbiguousMkt(price=100.0), now=1400.0)
+        self.assertEqual(stats["succeeded"], 0)
+        self.assertEqual(oq.load_all()[0]["attempts"], 1)
+
+    def test_existing_client_order_is_reconciled_without_resubmit(self):
+        oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=100.0, now=1000.0)
+
+        class ReconcileMkt(FakeMkt):
+            def order_by_client_id(self, symbol, client_order_id):
+                return {"orderId": 77, "status": "FILLED", "clientOrderId": client_order_id}
+
+        mkt = ReconcileMkt(price=100.0)
+        stats = worker.process_once(mkt, now=1400.0)
+        self.assertEqual(stats["reconciled"], 1)
+        self.assertEqual(stats["succeeded"], 1)
+        self.assertEqual(mkt.calls, [])
+        self.assertEqual(oq.load_all(), [])
+
+    def test_ambiguous_submit_is_reconciled_after_response_loss(self):
+        oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=100.0, now=1000.0)
+
+        class LostResponseMkt(FakeMkt):
+            def __init__(self):
+                super().__init__(price=100.0, succeed=False)
+                self.lookups = 0
+
+            def order_by_client_id(self, symbol, client_order_id):
+                self.lookups += 1
+                if self.lookups == 1:
+                    return None
+                return {"orderId": 88, "status": "NEW", "clientOrderId": client_order_id}
+
+        mkt = LostResponseMkt()
+        stats = worker.process_once(mkt, now=1400.0)
+        self.assertEqual(len(mkt.calls), 1)
+        self.assertEqual(stats["reconciled"], 1)
+        self.assertEqual(oq.load_all(), [])
 
     def test_failure_reenqueues_preserving_age(self):
         oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=100.0, now=1000.0)

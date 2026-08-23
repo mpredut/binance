@@ -284,6 +284,14 @@ Plan:
 - Revalidate strategy validity and exchange truth immediately before submission.
 - Keep the worker disabled until these properties and migration behavior are proven.
 
+Status snapshot (2026-08-23): crash-safe leased claims, fsync-backed queue mutation,
+finite input validation, deterministic client-order IDs per revision, and Binance
+pre/post-submit reconciliation are implemented. A concurrent refresh cannot be deleted
+by completion of an older revision. The operator explicitly enabled the worker; common
+price/profit/balance/trend/cooldown guards are re-evaluated. Owner/strategy/intent-ID
+deduplication and reconstruction of the originating strategy signal remain open, so the
+generic queue must not be used by caller-owned state machines such as rtrade.
+
 ### B13. One normalized order/fill history API
 
 Affected: `bapi_allorders.py`, `bapi_trades.py`, cache managers, Binance provider,

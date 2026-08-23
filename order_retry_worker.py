@@ -7,13 +7,13 @@ RETRY_INTERVAL_SEC has elapsed, checks oq.price_gate_ok to determine whether the
 price is more favorable than the requested price. If not, the order remains queued
 without counting an attempt while it waits for price to recover. If favorable, the worker
 retries through mkt.place() at CURRENT PRICE with caller_owns_retry=True to prevent an
-automatic re-enqueue. Success removes the record. Failure increments attempts and
-last_attempt while retaining it. Exceeding TTL or the attempt limit removes it and sends
-an alert for manual intervention.
+automatic re-enqueue. Success removes the leased revision. Failure increments attempts
+and releases the lease while retaining it. Exceeding TTL or the attempt limit removes it
+and sends an alert for manual intervention.
 
 ``process_once`` has an injectable market facade for tests. It still mutates the
-persistent queue and sends alerts. The claim-before-submit design prevents concurrent
-retries but leaves a crash window in which a claimed intent can be lost.
+persistent queue and sends alerts. Claiming uses a durable lease, so a crash leaves the
+intent recoverable after the lease expires instead of deleting it before submission.
 
 ``main`` adds the single-instance loop and supervision. ``RETRY_ENABLED=false`` is
 the configured kill switch.
@@ -34,14 +34,32 @@ from botcore import single_instance
 WORKER_POLL_SEC = float(os.environ.get("RETRY_WORKER_POLL_SEC", "30"))
 
 
+def _accepted_order(order):
+    return isinstance(order, dict) and order.get("orderId") not in (None, "")
+
+
+def _reconcile_client_order(mkt, symbol, client_order_id):
+    """Return an accepted venue order, or None when absent/unsupported/ambiguous."""
+    lookup = getattr(mkt, "order_by_client_id", None)
+    if not callable(lookup) or not client_order_id:
+        return None
+    try:
+        order = lookup(symbol, client_order_id)
+    except Exception as exc:  # noqa: BLE001 — unsupported/unavailable stays fail closed.
+        print(f"[order_retry] reconciliere indisponibila {symbol}/{client_order_id}: {exc}")
+        return None
+    if not isinstance(order, dict):
+        return None
+    status = str(order.get("status") or "").upper()
+    return order if status in {"NEW", "PARTIALLY_FILLED", "FILLED"} else None
+
+
 def process_once(mkt, now=None):
     """Drain one queue step using guarded facade `mkt` (get_current_price + place).
-    The claim-before-place scheme selects DUE orders with favorable prices and atomically
-    removes them BEFORE placement, preventing another retry while they are in flight. It
-    then places them at CURRENT PRICE with caller_owns_retry=True. Successful records stay
-    removed; failed records are re-added with their original age and attempts+1. Expired
-    records are removed and alerted. A process exit after ``claim`` and before re-enqueue
-    loses the claimed record. Return processing statistics."""
+    Due records are leased before placement, preventing another retry while they are in
+    flight without deleting crash-recovery state. They are placed at CURRENT PRICE with
+    caller_owns_retry=True. Accepted revisions are removed; failures are released with
+    attempts+1. Return processing statistics."""
     now = now if now is not None else time.time()
     snapshot = oq.load_all(now)
 
@@ -70,40 +88,63 @@ def process_once(mkt, now=None):
             continue
         to_retry.append((r, price))
 
-    # Atomically claim expired and retryable records by removing them BEFORE placement.
-    oq.claim([r["id"] for r in expired] + [r["id"] for (r, _) in to_retry], now)
+    # Expired work is never submitted. Retryable work remains persisted under a lease.
+    expired = oq.discard([r["id"] for r in expired])
+    prices = {r["id"]: price for r, price in to_retry}
+    claimed = oq.claim([r["id"] for (r, _) in to_retry], now)
 
     for r in expired:
         _alert_giveup(r, now)   # already removed from the queue
 
     succeeded = 0
-    for (r, price) in to_retry:
+    reconciled = 0
+    attempted = 0
+    for r in claimed:
+        price = prices.get(r.get("id"))
+        # A concurrent writer may refresh the requested price before the lease is
+        # acquired. Recheck the leased revision and release without an attempt if the
+        # captured market price is no longer favorable.
+        if not oq.price_gate_ok(r, price):
+            oq.complete_claim(r, "release", now)
+            skipped_price += 1
+            continue
+        attempted += 1
         symbol = r.get("symbol")
         kwargs = dict(r.get("place_kwargs") or {})
         kwargs["caller_owns_retry"] = True  # the worker explicitly re-adds failures
+        client_order_id = kwargs.get("client_order_id")
+        existing_order = _reconcile_client_order(
+            mkt, symbol, client_order_id)
+        if existing_order is not None:
+            succeeded += 1
+            reconciled += 1
+            oq.complete_claim(r, "success", now)
+            print(f"[order_retry] RECONCILIAT {r.get('side')} {symbol} "
+                  f"orderId={existing_order.get('orderId')}")
+            continue
         try:
             order = mkt.place(symbol, r.get("side"), price, r.get("qty"), **kwargs)
         except Exception as e:  # noqa: BLE001
             print(f"[order_retry] retry {r.get('side')} {symbol} a aruncat ({e}) — tratez ca esec")
             order = None
-        if order:
+        accepted = _accepted_order(order)
+        if not accepted:
+            recovered = _reconcile_client_order(mkt, symbol, client_order_id)
+            if recovered is not None:
+                order = recovered
+                accepted = True
+                reconciled += 1
+        if accepted:
             succeeded += 1
-            print(f"[order_retry] RE-PLASAT cu succes {r.get('side')} {symbol} @ {price}")
+            oq.complete_claim(r, "success", now)
+            print(f"[order_retry] ACCEPTAT {r.get('side')} {symbol} @ {price} "
+                  f"orderId={order.get('orderId')}")
         else:
-            # On failure, re-add the record with its original created_ts and attempts+1.
-            # Deduplication by symbol+side merges any placement request made in the interim
-            # into a single intent.
-            oq.enqueue(symbol, r.get("side"), r.get("qty"),
-                       place_kwargs=r.get("place_kwargs"),
-                       requested_price=r.get("requested_price"),
-                       ref_price=r.get("ref_price"),
-                       now=now,
-                       created_ts=r.get("created_ts"),
-                       attempts=int(r.get("attempts", 0)) + 1,
-                       last_attempt_ts=now)
+            oq.complete_claim(r, "failure", now)
 
-    return {"attempted": len(to_retry),
+    return {"attempted": attempted,
             "succeeded": succeeded,
+            "reconciled": reconciled,
             "expired": len(expired),
             "skipped_price": skipped_price,
             "remaining": len(oq.load_all(now))}
