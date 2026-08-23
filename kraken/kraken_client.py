@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-kraken_client.py — client REST minimalist pentru Kraken (Spot).
+kraken_client.py — minimal REST client for Kraken Spot.
 
-Public  (fara chei):  ticker, asset_pairs, pair_info
-Private (cu chei):    balance, add_order, cancel_order, query_orders, open_orders
+Public (no credentials): ticker, asset_pairs, pair_info
+Private (credentials required): balance, add_order, cancel_order, query_orders, open_orders
 
-Autentificare Kraken (diferita de T212):
-    API-Key  : cheia publica (header)
-    API-Sign : HMAC-SHA512 peste  urlpath + SHA256(nonce + postdata),
-               cu secretul (base64) drept cheie, rezultat base64.
-Vezi self-test-ul de la finalul fisierului (validat pe vectorul din docs Kraken).
+Kraken authentication (different from T212):
+    API-Key  : public key in the header
+    API-Sign : HMAC-SHA512 over urlpath + SHA256(nonce + postdata),
+               keyed by the base64 secret and returned as base64.
+See the self-test at the end of the file, validated against Kraken's documentation vector.
 """
 
 from __future__ import annotations
@@ -27,19 +27,20 @@ from kraken_common import http_get, http_post_form, log
 
 API_URL = "https://api.kraken.com"
 
-# ─── Cache TTL partajat (per-proces) pt call-urile de CITIRE ──────────────────
-# Kraken numara apelurile API pe cheie (rate-limit). Mai multi consumatori (monitortrades
-# via provider, kraken_bot, trailing, xstock_watch) + gardul de profit (TradesHistory la
-# fiecare plasare, de 2x: window + last_opposite_fill) lovesc des aceleasi endpointuri.
-# Cache-uim citirile cu TTL scurt, PARTAJAT intre TOATE instantele KrakenClient din proces.
-# Metodele de SCRIERE (AddOrder/CancelOrder) INVALIDEAZA starea de cont -> gardul/boturile
-# vad IMEDIAT propria tranzactie (zero fereastra de staleness pe actiunile proprii).
-# Nu acopera cross-PROCES (fiecare proces are cache propriu); TTL-ul margineste decalajul.
+# ─── Per-process shared TTL cache for READ calls ──────────────────────────────
+# Kraken rate-limits API calls per key. Multiple consumers (monitortrades through the
+# provider, kraken_bot, trailing, and xstock_watch), plus the profit guard's two
+# TradesHistory queries per placement (window + last_opposite_fill), repeatedly hit
+# the same endpoints. Cache reads briefly and SHARE them across every KrakenClient
+# instance in the process. WRITE methods (AddOrder/CancelOrder) INVALIDATE account
+# state so guards and bots see their own transaction immediately, with no staleness
+# window for local actions. This is not cross-process; each process has its own cache,
+# and the TTL bounds the resulting lag.
 _CACHE = {}                       # (method, params_key) -> (expiry_ts, result)
 _CACHE_LOCK = threading.Lock()
 _CACHE_MAX = 1024
-_READ_TTL = {                     # secunde; metodele NElistate NU se cacheaza (ex. QueryOrders)
-    "Ticker": 3.0, "AssetPairs": 3600.0, "OHLC": 900.0,   # OHLC pt semnalul de trend lung (15min)
+_READ_TTL = {                     # seconds; unlisted methods are not cached (e.g. QueryOrders)
+    "Ticker": 3.0, "AssetPairs": 3600.0, "OHLC": 900.0,   # OHLC for the long-trend signal (15 min)
     "Balance": 15.0, "TradesHistory": 20.0, "ClosedOrders": 20.0, "OpenOrders": 5.0,
 }
 _WRITE_METHODS = ("AddOrder", "CancelOrder", "CancelAll")
@@ -87,7 +88,7 @@ class KrakenClient:
         self.api_key = api_key or ""
         self.api_secret = api_secret or ""
 
-    # ----- semnatura -----------------------------------------------------------
+    # ----- signature -----------------------------------------------------------
     @staticmethod
     def _signature(urlpath: str, data: dict, secret: str) -> str:
         postdata = urllib.parse.urlencode(data)
@@ -101,12 +102,12 @@ class KrakenClient:
             raise KrakenError("Lipsesc cheile Kraken (verifica KRAKEN_API_KEY_BOT/_TRAIL/_CACHE in kraken/.env)")
         data = dict(data or {})
         ttl = _READ_TTL.get(method)
-        if ttl and not fresh:                       # citire cache-uibila -> serveste din cache daca e proaspat
+        if ttl and not fresh:                       # serve a cacheable read from a fresh cache entry
             ok, val = _cache_get(method, data)
             if ok:
                 return val
         urlpath = f"/0/private/{method}"
-        # nonce in nanosecunde: maxim monoton, depaseste orice nonce (ms/us) folosit anterior pe cheie
+        # A nanosecond nonce is monotonic at maximum resolution and exceeds prior ms/us nonces on the key.
         data["nonce"] = str(time.time_ns())
         headers = {
             "API-Key": self.api_key,
@@ -116,7 +117,7 @@ class KrakenClient:
         result = self._parse(status, body)
         if ttl:
             _cache_put(method, data, ttl, result)
-        if method in _WRITE_METHODS:                # AddOrder/CancelOrder -> starea de cont s-a schimbat
+        if method in _WRITE_METHODS:                # AddOrder/CancelOrder changed account state
             _cache_invalidate(_INVALIDATE_ON_WRITE)
         return result
 
@@ -132,12 +133,12 @@ class KrakenClient:
             url += "?" + urllib.parse.urlencode(params)
         status, body = http_get(url)
         result = self._parse(status, body)
-        # NU cache-ui un rezultat GOL: pt endpoint-urile publice (AssetPairs/Ticker) un
-        # {} inseamna intotdeauna un fetch tranzitoriu ratat, niciodata o stare valida.
-        # Daca l-am cache-ui (TTL AssetPairs=1h), pair_info intoarce None -> ordermin=0 ->
-        # gardul anti-'volume minimum not met' din monitortrades._place_guarded se
-        # dezactiveaza ~1h -> churn de ordine respinse pe praf (HYPE 0.0175 < min 0.1).
-        # _parse ridica deja pe eroare (nu se cache-uieste); asta prinde empty-SUCCESS-ul.
+        # Never cache an EMPTY result. For public endpoints (AssetPairs/Ticker), {}
+        # always means a transient failed fetch, never valid state. Caching it for the
+        # one-hour AssetPairs TTL would make pair_info return None and ordermin become 0,
+        # disabling monitortrades._place_guarded's 'volume minimum not met' protection
+        # for about an hour and causing rejected dust-order churn (HYPE 0.0175 < min 0.1).
+        # _parse already raises on reported errors; this catches an empty success response.
         if ttl and result:
             _cache_put(method, params, ttl, result)
         return result
@@ -157,7 +158,7 @@ class KrakenClient:
         return self._public("AssetPairs")
 
     def pair_info(self, pair: str) -> dict | None:
-        """Info pereche: precizie pret/volum, ordin minim. None daca nu exista."""
+        """Return pair price/volume precision and minimum order, or None if absent."""
         res = self._public("AssetPairs", {"pair": pair})
         if not res:
             return None
@@ -168,47 +169,47 @@ class KrakenClient:
         return next(iter(res.values())) if res else None
 
     def ohlc_closes(self, pair: str, interval: int) -> list:
-        """Preturile de INCHIDERE OHLC (cache-uit 15min) pt semnalul de trend LUNG al
-        overlay-ului. interval in minute (60=1h, 240=4h, 1440=1z). Acelasi timescale ca
-        backtest-ul (care ruleaza pe aceleasi bare)."""
+        """Return OHLC closing prices, cached for 15 minutes, for the overlay's
+        LONG-trend signal. Interval is in minutes (60=1h, 240=4h, 1440=1d), matching
+        the backtest time scale and bars."""
         res = self._public("OHLC", {"pair": pair, "interval": interval})
         key = next((k for k in res if k != "last"), None)
-        # Ultimul rând poate fi lumânarea încă în formare. Semnalul live trebuie
-        # să decidă numai pe bare închise, altfel poate oscila intra-bar.
+        # The last row may be a candle still forming. The live signal must decide only
+        # on closed bars; otherwise it can oscillate intrabar.
         return [float(x[4]) for x in res[key][:-1]] if key else []
 
     def last_price(self, pair: str) -> float | None:
         t = self.ticker(pair)
         try:
-            return float(t["c"][0]) if t else None      # 'c' = ultima tranzactie [pret, vol]
+            return float(t["c"][0]) if t else None      # 'c' = latest trade [price, volume]
         except (KeyError, IndexError, TypeError, ValueError):
             return None
 
     # ----- PRIVATE -------------------------------------------------------------
     def balance(self) -> dict:
-        """Solduri pe active. {asset: cantitate}."""
+        """Return asset balances as {asset: quantity}."""
         return self._private("Balance")
 
     def price_decimals(self, pair: str) -> int:
-        """Zecimalele de PRET permise de Kraken pt pereche (pair_decimals din AssetPairs,
-        cache 1h). Default prudent 2 daca info-ul lipseste — Kraken accepta mereu MAI PUTINE
-        zecimale, niciodata mai multe (ex. HYPE/USD = 2)."""
+        """Return Kraken's allowed PRICE decimals for the pair from AssetPairs,
+        cached for one hour. Conservatively default to 2 when metadata is missing;
+        Kraken accepts fewer decimals but never more (e.g. HYPE/USD = 2)."""
         try:
             info = self.pair_info(pair)
             if info and info.get("pair_decimals") is not None:
                 return int(info["pair_decimals"])
-        except Exception:  # noqa: BLE001 — orice esec -> fallback prudent, nu blocam ordinul
+        except Exception:  # noqa: BLE001 — conservatively fall back without blocking the order
             pass
         return 2
 
     def add_order(self, pair: str, side: str, volume: float, price: float | None = None,
                   ordertype: str = "limit", validate: bool = False,
                   cl_ord_id: str | None = None) -> dict:
-        """Plaseaza ordin. side='buy'|'sell'. validate=True -> doar valideaza (nu plaseaza).
-        Rotunjeste pretul la precizia REALA a perechii (pair_decimals) — protectie de
-        MECANICA centralizata pt TOTI apelantii Kraken (trailing/bot/xstock), analog cu
-        place_order_mechanics pe Binance. Fara asta, un pret cu prea multe zecimale e respins
-        de Kraken ('price can only be specified up to N decimals') si ordinul esueaza."""
+        """Place an order with side='buy'|'sell'; validate=True validates without placing.
+        Round price to the pair's actual pair_decimals precision. This centralizes
+        mechanical protection for every Kraken caller (trailing/bot/xstock), analogous
+        to Binance place_order_mechanics. Without it, Kraken rejects excess precision
+        with 'price can only be specified up to N decimals' and the order fails."""
         data = {
             "pair": pair,
             "type": side,
@@ -230,7 +231,7 @@ class KrakenClient:
         return self._private("CancelOrder", {"txid": txid})
 
     def query_orders(self, txids: str) -> dict:
-        """Status ordine dupa txid (merge si pt cele inchise — fara 404 ca la T212)."""
+        """Return order status by txid, including closed orders without T212-style 404s."""
         return self._private("QueryOrders", {"txid": txids})
 
     def open_orders(self) -> dict:
@@ -238,7 +239,7 @@ class KrakenClient:
 
 
 # ---------------------------------------------------------------------------
-# Self-test semnatura (vectorul din documentatia Kraken) — ruleaza:
+# Signature self-test using the vector from Kraken documentation; run:
 #   python3 kraken_client.py
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
