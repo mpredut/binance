@@ -8,8 +8,8 @@ import threading
 from decimal import Decimal, ROUND_DOWN
 from concurrent.futures import ThreadPoolExecutor, wait
 
-# Politica financiara si invariantele operationale sunt documentate in
-# docs/RTRADE.md. Configuratia efectiva ramane rtrade_config.env.
+# Financial policy and operational invariants are documented in docs/RTRADE.md.
+# Effective configuration remains in rtrade_config.env.
 
 
 # my imports
@@ -18,8 +18,8 @@ import alertnotifiers as alert
 import utils as u
 import symbols as sym
 from binance_api import bapi as api
-from binance_api import bapi_placeorder as po   # pastrat pt WeightLimitBlock (dead-safe)
-from providers.market_api import api as mkt      # proxy unic guardat (Instrument.place)
+from binance_api import bapi_placeorder as po   # Retained for the dead-safe WeightLimitBlock path.
+from providers.market_api import api as mkt      # Single guarded Instrument.place proxy.
 from providers.execution_audit import AuditedStrategyExecutor
 from providers.quantity import decide_quantity
 from market_regime import MarketRegimeDecision
@@ -32,62 +32,57 @@ from strategies.rtrade_pair import (
 )
 
 
-# 23 iul: incarca parametrii tunabili din rtrade_config.env (versionat, se
-# COMITE — fara secrete) INAINTE de a citi orice os.environ.get(...) de mai jos.
-# botcore.load_dotenv NU suprascrie variabile deja setate in mediul real.
+# Load versioned, non-secret tuning parameters before reading the environment below.
+# ``botcore.load_dotenv`` does not overwrite variables already set in the real environment.
 from botcore import load_dotenv as _load_dotenv
 _load_dotenv("rtrade_config.env")
 
-# Intervalul de timp între încercările de anulare și recreere a ordinului (în secunde)
+# Seconds between cancel-and-recreate attempts.
 WAIT_FOR_ORDER = float(os.environ.get("RTRADE_WAIT_FOR_ORDER_SEC", "32"))
 MIN_adjustment_percent = float(os.environ.get("RTRADE_MIN_ADJUSTMENT_PCT", "0.01"))
 
-# Bugetul per runda este exprimat explicit in moneda de cotare. Cantitatea de
-# TAO se calculeaza o singura data din pretul de start al rundei.
+# Express each round's budget in quote currency. Calculate TAO quantity once from
+# the round's starting price.
 RTRADE_NOTIONAL_USDC = float(os.environ.get("RTRADE_NOTIONAL_USDC", "500"))
 
-# Ghicit initial de spread (fractie) pt filled_buy_price/filled_sell_price la
-# pornire, inainte de primul ordin real executat.
+# Initial fractional spread estimate for filled prices before the first real fill.
 RTRADE_INITIAL_SPREAD_PCT = float(os.environ.get("RTRADE_INITIAL_SPREAD_PCT", "0.1"))
 
-# Rata de "relaxare" a adjustment_percent cand partea opusa e deja umpluta.
-# ASIMETRIC intre BUY si SELL — pastrat exact ca in cod (nu se unifica).
+# Relaxation rate for adjustment_percent after the opposite side fills.
+# BUY and SELL are intentionally asymmetric.
 RTRADE_BUY_DECAY_PCT = float(os.environ.get("RTRADE_BUY_DECAY_PCT", "0.005"))
 RTRADE_SELL_DECAY_PCT = float(os.environ.get("RTRADE_SELL_DECAY_PCT", "0.01"))
 
-# Baza ferestrei "hours" (impartita la failure_count) pt calea disperata
-# (partea opusa deja umpluta). ASIMETRIC intre BUY (0.3) si SELL (0.23).
+# Base hours window, divided by failure_count, for the desperate path after the
+# opposite side fills. BUY (0.3) and SELL (0.23) are intentionally asymmetric.
 RTRADE_BUY_DESPERATE_HOURS_BASE = float(os.environ.get("RTRADE_BUY_DESPERATE_HOURS_BASE", "0.3"))
 RTRADE_SELL_DESPERATE_HOURS_BASE = float(os.environ.get("RTRADE_SELL_DESPERATE_HOURS_BASE", "0.23"))
 
-# safeback_seconds pt calea disperata (1h + 60s), comun BUY/SELL.
+# Shared BUY/SELL lookback for the desperate path (one hour plus 60 seconds).
 RTRADE_DESPERATE_SAFEBACK_SEC = float(os.environ.get("RTRADE_DESPERATE_SAFEBACK_SEC", str(1 * 3600 + 60)))
 
-# "hours" pt calea normala (nimic disperat inca). ASIMETRIC — BUY asteapta mai
-# mult (16h) decat SELL (12h).
+# Hours for the normal path before desperation. BUY waits longer than SELL.
 RTRADE_BUY_NORMAL_HOURS = float(os.environ.get("RTRADE_BUY_NORMAL_HOURS", "16"))
 RTRADE_SELL_NORMAL_HOURS = float(os.environ.get("RTRADE_SELL_NORMAL_HOURS", "12"))
 
-# Ofset de pret (fractie) pt ordinul de urmarire "disperat" imediat dupa ce
-# partea opusa s-a umplut (SELL la +X% dupa BUY umplut / BUY la -X% dupa SELL
-# umplut) si fereastra "hours" a acelui ordin de urmarire. Comun ambelor directii.
+# Fractional price offset and hours window for the desperate follow-up immediately
+# after the opposite side fills. Shared by both directions.
 RTRADE_FOLLOWUP_OFFSET_PCT = float(os.environ.get("RTRADE_FOLLOWUP_OFFSET_PCT", "0.01"))
 RTRADE_FOLLOWUP_HOURS = float(os.environ.get("RTRADE_FOLLOWUP_HOURS", "2.7"))
 
-# Toleranta are_close pt detectia "zi proasta" (pretul a trecut de referinta) si
-# multiplicatorul aplicat lui adjustment_percent in acel caz. Comun ambelor directii.
+# ``are_close`` tolerance for detecting a bad day when price crosses the reference,
+# plus the adjustment multiplier used then. Shared by both directions.
 RTRADE_BAD_DAY_TOLERANCE_PCT = float(os.environ.get("RTRADE_BAD_DAY_TOLERANCE_PCT", "0.1"))
 RTRADE_BAD_DAY_MULTIPLIER = float(os.environ.get("RTRADE_BAD_DAY_MULTIPLIER", "1.7"))
 
-# Epsilon ca sa evite diviziunea la zero in calculul ratei profit/pierdere.
+# Epsilon preventing division by zero in profit/loss ratio calculations.
 RTRADE_ZERO_EPSILON = float(os.environ.get("RTRADE_ZERO_EPSILON", "0.0001"))
 
-# Numarul maxim de esecuri acceptate inainte sa renunte la un ordin BUY/SELL.
+# Maximum failures accepted before abandoning a BUY or SELL order.
 RTRADE_MAX_FAILURES = int(os.environ.get("RTRADE_MAX_FAILURES", "10"))
-# FILTRU DE TREND (11 aug): rtrade e un bot de spread -> pierde in trend CLAR (selectie
-# adversa: in declin BUY-ul se umple, SELL-ul de flip nu, ajunge sa vanda desperat in pierdere;
-# vazut pe TAO). Sta deoparte cand |gradient_recent| > K*epsilon (epsilon = podeaua de zgomot,
-# auto-calibrata pe volatilitate din cacheManager) pe o fereastra scurta. Kill-switch + prag.
+# Trend filter: this spread bot suffers adverse selection in a clear trend. It stays
+# idle when ``|gradient_recent| > K * epsilon`` over a short window, where epsilon is
+# the volatility-calibrated cacheManager noise floor. Controlled by a kill switch and threshold.
 RTRADE_TREND_FILTER_ENABLED = os.environ.get("RTRADE_TREND_FILTER_ENABLED", "true").strip().lower() == "true"
 RTRADE_TREND_FILTER_K = float(os.environ.get("RTRADE_TREND_FILTER_K", "2.0"))
 RTRADE_TREND_WINDOW_SEC = float(os.environ.get("RTRADE_TREND_WINDOW_SEC", "900"))
@@ -98,9 +93,8 @@ RTRADE_DYNAMIC_MARKET_EXIT_MODE = os.environ.get(
 RTRADE_EMERGENCY_HARD_STOP_PCT = float(os.environ.get(
     "RTRADE_EMERGENCY_HARD_STOP_PCT", "0.12"))
 
-# Coordonatorul nou este candidat financiar si ramane OFF pana la replay/walk-forward.
-# Cand este activ, un singur owner gestioneaza perechea si expunerea; calea veche cu
-# doi workeri ramane intacta sub kill-switch.
+# The new coordinator remains disabled until replay/walk-forward validation. When enabled,
+# one owner manages the pair and exposure; the legacy two-worker path remains behind the switch.
 RTRADE_PAIR_COORDINATOR_ENABLED = os.environ.get(
     "RTRADE_PAIR_COORDINATOR_ENABLED", "false").strip().lower() == "true"
 RTRADE_PAIR_POLL_SEC = float(os.environ.get("RTRADE_PAIR_POLL_SEC", "1"))
@@ -125,12 +119,12 @@ RTRADE_HARD_STOP_PCT = float(os.environ.get("RTRADE_HARD_STOP_PCT", "0.08"))
 
 
 class _LivePairVenue:
-    """Adaptorul subtire dintre coordonatorul pur si Binance-ul curent."""
+    """Thin adapter between the pure coordinator and the current Binance venue."""
 
     def __init__(self, symbol, pair_store=None):
         self.symbol = symbol
-        # Folosit numai pentru eliberarea cooldown-ului la cancel. Rundele isi
-        # pastreaza separat starea financiara; aici este suficient un LRU mic.
+        # Used only to release cooldown on cancellation. Rounds retain their own
+        # financial state, so a small LRU is sufficient here.
         self._known_tickets = deque(maxlen=max(32, RTRADE_PAIR_MAX_ACTIVE_ROUNDS * 8))
         self._last_place_failures = {}
         provider_name = mkt.provider_name_for(symbol)
@@ -161,9 +155,9 @@ class _LivePairVenue:
         available_qty, required_asset = balance_cap_quantity(
             self.executor.free_balance, self.symbol, side, price)
         if required_asset:
-            # Nu compara cu qty cerut: pipeline-ul comun QuantityDecision + mecanica
-            # providerului reduc deja ordinul la soldul permis. Backoff numai cand
-            # activul necesar nu are deloc sold liber utilizabil.
+            # Do not compare against requested quantity: QuantityDecision and venue
+            # mechanics already cap it to available balance. Back off only when the
+            # required asset has no usable free balance.
             if available_qty is not None and float(available_qty) <= 1e-12:
                 self._last_place_failures[side] = (
                     f"{side.lower()}_insufficient_funds:{required_asset}")
@@ -182,8 +176,8 @@ class _LivePairVenue:
             self.symbol, side, price, qty,
             force=False, cancelorders=False, hours=hours, smart=False,
             cooldown_pair_id=pair_id,
-            # Coordonatorul detine retry/reconcile; outbox-ul global nu trebuie sa
-            # recreeze ulterior un picior dintr-o pereche deja expirata.
+            # The coordinator owns retry/reconciliation. The global outbox must not
+            # later recreate a leg from an expired pair.
             caller_owns_retry=True, motivation="rtrade_pair_quote",
             client_order_id=client_id)
         ticket = self._ticket(order, side, price, qty, pair_id=pair_id)
@@ -198,10 +192,10 @@ class _LivePairVenue:
         return self._last_place_failures.get(side.upper())
 
     def market_exit_allowed(self, exposure_side, loss_fraction, reason):
-        """Decide daca hard-stop-ul normal are confirmare de trend pentru MARKET.
+        """Decide whether a normal hard stop has trend confirmation for MARKET.
 
-        ``shadow`` doar observa; ``live`` aplica decizia. Pragul emergency ramane
-        obligatoriu indiferent de trend, ca un semnal stale sa nu lase risc nelimitat.
+        ``shadow`` only observes; ``live`` applies the decision. The emergency threshold
+        remains mandatory regardless of trend so a stale signal cannot leave unlimited risk.
         """
         emergency = loss_fraction >= RTRADE_EMERGENCY_HARD_STOP_PCT
         decision = _market_regime_decision(self.symbol)
@@ -283,15 +277,17 @@ class _LivePairVenue:
                         self.symbol, ticket.pair_id, ticket.side)
                     break
             return True
-        except Exception as exc:  # noqa: BLE001 — coordonatorul decide fail-closed
+        except Exception as exc:  # noqa: BLE001 — the coordinator decides how to fail closed.
             print(f"[{self.symbol}] pair cancel {order_id} esuat: {exc}")
             return False
 
 
 def _trend_too_strong(symbol):
-    """True daca `symbol` trend-uieste CLAR (|gradient_recent| > K*epsilon) -> rtrade (spread-bot)
-    sta deoparte, sa nu fie prins de selectia adversa a trendului. Fail-OPEN: trend
-    indisponibil/eroare -> False (nu blocheaza, la fel ca trend-wait din pipeline)."""
+    """Return whether a clear trend should keep the spread bot idle.
+
+    A clear trend means ``|gradient_recent| > K * epsilon`` and risks adverse selection.
+    Missing or failed trend data fails open, matching the pipeline's trend wait.
+    """
     if not RTRADE_TREND_FILTER_ENABLED:
         return False
     decision = _market_regime_decision(symbol)
@@ -303,7 +299,7 @@ def _trend_too_strong(symbol):
 
 
 def _market_regime_decision(symbol) -> MarketRegimeDecision:
-    """Adapteaza sursa cache existenta la evaluatorul comun provider-neutral."""
+    """Adapt the existing cache source to the provider-neutral regime evaluator."""
     if not RTRADE_TREND_FILTER_ENABLED:
         return mkt.market_regime(
             symbol, horizon="short", snapshot={},
@@ -324,7 +320,7 @@ def _market_regime_decision(symbol) -> MarketRegimeDecision:
 
 
 def _order_fully_filled(symbol, order_id):
-    """Compatibilitate pentru bucla veche, prin statusul provider-neutral."""
+    """Support the legacy loop through provider-neutral order status."""
     if not order_id:
         return False
     try:
@@ -344,12 +340,11 @@ def _cancel_order_confirmed(symbol, order_id):
 
 
 def _place_failure_backoff(reason):
-    """Intoarce (side, secunde) pentru un esec terminal de plasare.
+    """Return ``(side, seconds)`` for a terminal placement failure.
 
-    Fondurile complet absente au motiv explicit. Orice alt ``*_place_failed``
-    (gard de pret, min-notional, weight-limit, API refuzat) trebuie de asemenea
-    rarit: altfel coordonatorul creeaza un pair_id nou la fiecare interval de
-    start si poate transforma o eroare tranzitorie intr-o bucla de ordine.
+    Completely absent funds have an explicit reason. Other ``*_place_failed`` cases,
+    including price guards, minimum notional, weight limits, and API refusal, also need
+    throttling so transient errors cannot become an order loop with a new pair ID each time.
     """
     reason = str(reason or "").strip().lower()
     marker = "_insufficient_funds:"
@@ -366,17 +361,18 @@ def _place_failure_backoff(reason):
 
 
 def _followup_force(symbol, side):
-    """Pt ordinul de flip (followup) dupa un fill: FORCE (piata, flip imediat) DOAR daca
-    trendul NU e ADVERS. Advers = SELL intr-un DECLIN clar (ar vinde jos) sau BUY intr-un
-    URCUS clar (ar cumpara sus). Advers -> intoarce False = limita RABDATOARE la pretul de
-    flip (se umple cand pretul revine, nu dumpeaza la piata). Trend slab/plat/favorabil sau
-    indisponibil, ori kill-switch off -> True (piata, ca inainte). Astfel, chiar si cand se
-    epuizeaza (disperat), rtrade NU vinde la piata / nu cumpara disperat impotriva trendului."""
+    """Choose MARKET force for a post-fill flip only when trend is not adverse.
+
+    Selling into a clear decline or buying into a clear rise is adverse, so return False
+    and leave a patient limit at the flip price. Weak, flat, favorable, or unavailable
+    trend data retains immediate market behavior. This prevents desperate execution
+    against the trend.
+    """
     if not RTRADE_TREND_FILTER_ENABLED:
         return True
     decision = _market_regime_decision(symbol)
     if not decision.directional:
-        return True   # trend slab/plat -> flip imediat e ok
+        return True   # A weak or flat trend permits an immediate flip.
     su = (side or "").upper()
     exposure = "LONG" if su == "SELL" else "SOLD"
     adverse = decision.adverse_to(exposure)
@@ -391,14 +387,14 @@ class TradingBot:
     def __init__(self, symbol, qty, DEFAULT_ADJUSTMENT_PERCENT):
         self.symbol = symbol
         self.qty = qty
-        self.transaction_state = "COMPLETED"  # Starea inițială
+        self.transaction_state = "COMPLETED"  # Initial state.
         current_price = api.get_current_price(symbol)
         self.filled_buy_price = round(current_price * (1 - RTRADE_INITIAL_SPREAD_PCT), 4)
         self.filled_sell_price = round(current_price * (1 + RTRADE_INITIAL_SPREAD_PCT), 4)
         self.buy_filled = False
         self.sell_filled = False
         self.DEFAULT_ADJUSTMENT_PERCENT = DEFAULT_ADJUSTMENT_PERCENT
-        self.lock = threading.Lock()  # Lock pentru sincronizare
+        self.lock = threading.Lock()  # Synchronization lock.
 
     @property
     def is_buy_filled(self):
@@ -428,8 +424,8 @@ class TradingBot:
         
     def repetitive_buy(self, current_price, filled_sell_price):
         adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
-        failure_count = 1  # Adaugăm un contor pentru numărul de eșecuri
-        max_failures = RTRADE_MAX_FAILURES  # Definim numărul maxim de eșecuri acceptabile
+        failure_count = 1  # Count placement failures.
+        max_failures = RTRADE_MAX_FAILURES  # Maximum accepted failures.
 
         while True:
 
@@ -448,7 +444,7 @@ class TradingBot:
             buy_order = None
             h = RTRADE_BUY_DESPERATE_HOURS_BASE / failure_count
             try:
-                if self.is_sell_filled: # sunt disperat
+                if self.is_sell_filled: # Desperate follow-up path.
                     if adjustment_percent == MIN_adjustment_percent:
                         print(f"[{self.symbol}] sunt disperat!")
                         buy_order = mkt.place(self.symbol, "BUY", target_buy_price, self.qty,
@@ -513,8 +509,8 @@ class TradingBot:
 
     def repetitive_sell(self, current_price, filled_buy_price):
         adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
-        failure_count = 1  # Adaugăm un contor pentru numărul de eșecuri
-        max_failures = RTRADE_MAX_FAILURES  # Definim numărul maxim de eșecuri acceptabile
+        failure_count = 1  # Count placement failures.
+        max_failures = RTRADE_MAX_FAILURES  # Maximum accepted failures.
 
         while True:
 
@@ -533,7 +529,7 @@ class TradingBot:
             sell_order = None
             h = RTRADE_SELL_DESPERATE_HOURS_BASE / failure_count
             try:
-                if self.is_buy_filled: # sunt disperat
+                if self.is_buy_filled: # Desperate follow-up path.
                     if adjustment_percent == MIN_adjustment_percent:
                         print(f"[{self.symbol}] sunt disperat!")
                         sell_order = mkt.place(self.symbol, "SELL", target_sell_price, self.qty,
@@ -596,19 +592,19 @@ class TradingBot:
                     print(f"[{self.symbol}] Cancel SELL order failed. Someone canceled it. Continuing sell...")
 
     def _run_pair(self, executor, current_price):
-        """Ruleaza cele doua laturi concurent pe workerii persistenti ai botului.
+        """Run both sides concurrently on the bot's persistent workers.
 
-        Future.result() propaga exceptiile workerilor in bucla principala, unde exista
-        deja reconcilierea defensiva prin anularea ordinelor recente. Varianta veche
-        pornea doua Thread-uri la fiecare runda si pierdea exceptiile in stderr.
+        ``Future.result`` propagates worker exceptions to the main loop, which already
+        performs defensive reconciliation by canceling recent orders. The old version
+        created two threads per round and lost their exceptions on stderr.
         """
         buy_future = executor.submit(
             self.repetitive_buy, current_price, self.filled_sell_price)
         sell_future = executor.submit(
             self.repetitive_sell, current_price, self.filled_buy_price)
-        # Asteapta ambele laturi inainte sa propage o exceptie. Daca am apela
-        # buy_future.result() imediat, un BUY esuat rapid ar lasa SELL-ul vechi
-        # activ, iar bucla principala ar putea pune o runda noua peste el.
+        # Wait for both sides before propagating an exception. Resolving BUY immediately
+        # could leave the old SELL active after a fast BUY failure while the main loop
+        # starts another round over it.
         wait((buy_future, sell_future))
         return buy_future.result(), sell_future.result()
 
@@ -641,9 +637,9 @@ class TradingBot:
             raise ValueError(
                 "RTRADE_EMERGENCY_HARD_STOP_PCT trebuie sa fie >= hard-stop si < 1")
 
-        # Fiecare coordonator detine exclusiv order-id-urile si inventarul unei
-        # runde. O runda expusa continua sa-si urmareasca exit-ul, dar nu mai
-        # blocheaza lansarea altor runde pe acelasi simbol pana la limita setata.
+        # Each coordinator exclusively owns one round's order IDs and inventory. An
+        # exposed round continues managing its exit without blocking other rounds up
+        # to the configured per-symbol limit.
         active = []
         recovery_blocked = False
         for record in pair_store.active(self.symbol):
@@ -656,21 +652,19 @@ class TradingBot:
                         order = venue.executor.order_by_client_id(
                             self.symbol, intent["client_order_id"])
                         if not order:
-                            # Intentia a fost fsync-uit-a inainte de submit. Daca
-                            # procesul a murit exact in acea fereastra, retrimiterea
-                            # cu acelasi clientOrderId este idempotenta la Binance.
-                            # Pipeline-ul normal pastreaza toate guard-urile si
-                            # reconcilierea de cantitate.
+                            # The intent was fsynced before submission. If the process
+                            # died in that window, resubmitting the same clientOrderId is
+                            # idempotent at Binance. The normal pipeline retains every
+                            # guard and quantity reconciliation.
                             if intent.get("kind", "limit") != "limit":
                                 continue
                             ticket = venue.place_limit(
                                 intent["side"], float(intent["price"]),
                                 float(intent["qty"]), record["pair_id"])
                             if ticket is None:
-                                # Daca submit-ul a ajuns la venue, dar raspunsul
-                                # s-a pierdut/SDK-ul a intors None, ordinul poate
-                                # exista totusi. Reconciliem inca o data inainte
-                                # sa declaram intentia neplasata.
+                                # Submission may have reached the venue despite a lost
+                                # response or None from the SDK. Reconcile once more before
+                                # declaring that the intent was not placed.
                                 order = venue.executor.order_by_client_id(
                                     self.symbol, intent["client_order_id"])
                                 if not order:
@@ -679,9 +673,8 @@ class TradingBot:
                                 order = venue.executor.order_by_client_id(
                                     self.symbol, intent["client_order_id"])
                             if not order:
-                                # Unele implementari provider nu expun imediat
-                                # lookup-ul dupa client id; ticket-ul confirmat este
-                                # suficient pentru reconstructia aceleiasi runde.
+                                # Some providers do not expose client-ID lookup immediately;
+                                # a confirmed ticket is sufficient to reconstruct the round.
                                 order = {
                                     "orderId": ticket.order_id,
                                     "price": ticket.price,
@@ -749,8 +742,8 @@ class TradingBot:
             for order in orphan_orders:
                 order_id = str(order["orderId"])
                 client_id = order.get("clientOrderId")
-                # Un ordin RT_ fara intentie locala nu poate fi asociat sigur
-                # unei runde (ID-ul este hash-uit). Il anulam, nu inventam stare.
+                # An RT_ order without local intent cannot be safely associated with a
+                # round because its ID is hashed. Cancel it instead of inventing state.
                 venue.executor.cancel_order(self.symbol, order_id)
                 print(f"[{self.symbol}] recovery: ordin RT_ orfan anulat "
                       f"order_id={order_id} client_id={client_id}")
@@ -851,17 +844,17 @@ class TradingBot:
                                 f"active={len(active)}/"
                                 f"{RTRADE_PAIR_MAX_ACTIVE_ROUNDS}")
                 time.sleep(RTRADE_PAIR_POLL_SEC)
-            except Exception as exc:  # noqa: BLE001 — rundele raman pentru reconciliere
+            except Exception as exc:  # noqa: BLE001 — retain rounds for reconciliation.
                 print(f"[{self.symbol}] pair coordinator error: {exc}")
-                # Nu anulam global ordinele recente: intr-un registru multi-runda
-                # asta ar putea distruge picioarele valide ale altor pair_id-uri.
+                # Do not globally cancel recent orders in a multi-round registry; that
+                # could destroy valid legs owned by other pair IDs.
                 time.sleep(RTRADE_PAIR_POLL_SEC)
 
     def run(self):
         if RTRADE_PAIR_COORDINATOR_ENABLED:
             return self._run_coordinator_forever()
-        # Exact doi workeri per bot, reutilizati intre runde. Operatiile BUY/SELL raman
-        # concurente; se elimina doar churn-ul de Thread-uri si pierderea exceptiilor.
+        # Reuse exactly two workers per bot across rounds. BUY and SELL remain concurrent
+        # while avoiding thread churn and lost exceptions.
         prefix = f"rtrade-{self.symbol}"
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix=prefix) as executor:
             while True:
@@ -873,8 +866,8 @@ class TradingBot:
                         continue
                     print(f"[{self.symbol}] Current price: {current_price:.2f}")
 
-                    # FILTRU DE TREND: daca activul trend-uieste clar, rtrade (spread-bot) sta
-                    # deoparte tot ciclul (nu prinde cutitul). Reia la urmatoarea iteratie.
+                    # If the asset trends clearly, keep the spread bot idle for this cycle
+                    # to avoid catching a falling knife. Retry on the next iteration.
                     if _trend_too_strong(self.symbol):
                         time.sleep(WAIT_FOR_ORDER)
                         continue
@@ -895,12 +888,12 @@ class TradingBot:
 
                     time.sleep(1)
 
-                    # Reset pentru următoarea rundă
+                    # Reset for the next round.
                     with self.lock:
                         self.buy_filled = self.sell_filled = False
                 except Exception as e:
                     print(f"[{self.symbol}] Unexpected error: {e}")
-                    # Exceptiile workerilor ajung aici prin Future.result().
+                    # Worker exceptions arrive here through Future.result().
                     api.cancel_recent_orders("SELL", self.symbol, WAIT_FOR_ORDER)
                     api.cancel_recent_orders("BUY", self.symbol, WAIT_FOR_ORDER)
                     time.sleep(1)
@@ -910,16 +903,13 @@ _default_adj = round(u.calculate_difference_percent(60000, 60000 - 380) / 100, 4
 DEFAULT_ADJUSTMENT_PERCENT = float(os.environ.get("RTRADE_DEFAULT_ADJUSTMENT_PCT", str(_default_adj)))
 print(f"[INFO] DEFAULT_ADJUSTMENT_PERCENT = {DEFAULT_ADJUSTMENT_PERCENT}")
 
-# 23 iul: blocul de pornire efectiva (WS + instantiere bot + bot.run(), care e o
-# bucla LIVE infinita cu ordine reale) mutat sub __name__=="__main__" — inainte
-# rula necondiionat la IMPORT, ceea ce ar fi pornit tranzactionarea live doar prin
-# `import rtrade` (ex. dintr-un test). Nimic altceva nu importa acest modul azi
-# (verificat prin grep) si flota_start.sh il ruleaza cu `python rtrade.py`, deci
-# comportamentul de PRODUCTIE ramane identic — doar importul devine sigur.
+# Keep actual startup, including WebSocket setup and the infinite live order loop, under
+# ``__main__``. Historically it ran during import and could start live trading from a test.
+# Fleet startup executes ``python rtrade.py``, so production behavior remains unchanged
+# while importing the module is safe.
 if __name__ == "__main__":
-    # WS user-data bridge explicit: rtrade plasează ordine prin place_order_smart,
-    # care verifică intern istoricul de orders/trades (guard-uri max_daily_trades,
-    # politica zilnică de cantitate). WS ține acel cache proaspăt (altfel doar polling la 3 min).
+    # Explicit user-data bridge: placement guards inspect order/fill history, so the WS
+    # keeps that cache fresh instead of relying solely on three-minute polling.
     import cacheManager as cm
     cm.enable_real_ws_event_sync()
 
