@@ -3,6 +3,7 @@ import sys
 import time
 import datetime
 import json
+import math
 
 import pandas as pd
 
@@ -297,11 +298,13 @@ def get_relevant_trade(trade_orders, trade_type, threshold_s, symbol, now_fn=Non
     return trade_price, trade_time, can_trade
 
 
-def get_position_stats(symbol, maxage_trade_s, api=None):
+def get_position_stats(symbol, maxage_trade_s, api=None, buy_orders=None, sell_orders=None):
 
     api = api or mkt
-    buy_orders = api.get_orders(symbol, "BUY", maxage_trade_s)
-    sell_orders = api.get_orders(symbol, "SELL", maxage_trade_s)
+    if buy_orders is None:
+        buy_orders = api.get_orders(symbol, "BUY", maxage_trade_s)
+    if sell_orders is None:
+        sell_orders = api.get_orders(symbol, "SELL", maxage_trade_s)
 
     total_buy_qty = sum(float(o['qty']) for o in buy_orders)
     total_sell_qty = sum(float(o['qty']) for o in sell_orders)
@@ -385,29 +388,34 @@ def _as_instrument(x):
 
 
 def get_available_qty(symbol, api=None):
-    """Return real free base-asset quantity rather than an estimate from trades."""
+    """Return free base quantity, preserving ``None`` when balance is unavailable."""
     api = api or mkt
     try:
         if api is mkt:
-            return float(_as_instrument(symbol).free() or 0.0)
+            value = _as_instrument(symbol).free()
+            return None if value is None else float(value)
         base = u.base_asset(symbol)
-        return float(api.free_balance(base) or 0.0)
+        value = api.free_balance(base)
+        return None if value is None else float(value)
     except Exception as e:
         print(f"get_available_qty {symbol}: {e}")
-    return 0.0
+    return None
 
 
 #//todo: review 0.5
 def _place_guarded(inst, side, price, qty, min_qty, **kwargs):
     """Place only positive quantities meeting the venue minimum; return whether submitted."""
-    if qty is None or qty <= 0:
+    if qty is None or not math.isfinite(float(qty)) or qty <= 0:
         print(f"[{inst.symbol}] {side} skip: qty={qty}")
+        return False
+    if price is None or not math.isfinite(float(price)) or price <= 0:
+        print(f"[{inst.symbol}] {side} skip: price={price}")
         return False
     if min_qty and qty < min_qty:
         print(f"[{inst.symbol}] {side} skip: qty {qty} < volum minim venue {min_qty}")
         return False
-    inst.place(side, price, qty, **kwargs)
-    return True
+    result = inst.place(side, price, qty, **kwargs)
+    return result is not None
 
 
 def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None, lost_threshold=None,
@@ -448,7 +456,13 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
     buy_price, buy_time, can_buy = get_relevant_trade(trade_orders_buy, "BUY", threshold_s, symbol, now_fn=now_fn)
     sell_price, sell_time, can_sell = get_relevant_trade(trade_orders_sell, "SELL", threshold_s, symbol, now_fn=now_fn)
 
-    position = get_position_stats(symbol, maxage_trade_s, api=inst.provider)
+    position = get_position_stats(
+        symbol,
+        maxage_trade_s,
+        api=inst.provider,
+        buy_orders=trade_orders_buy,
+        sell_orders=trade_orders_sell,
+    )
     # Profit reference is configurable: latest BUY by default or the lookback average.
     if tp_ref == "average" and position["average_buy_price"] > 0:
         buy_price = position["average_buy_price"]
@@ -463,17 +477,28 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
     if current_time_s - max(buy_time, sell_time)  < threshold_all_s:
         print(f"Trades too ... recente."
             f"Pass only {u.secondsToHours(current_time_s -  max(buy_time, sell_time)):.2f} h. Wait to pass {u.secondsToHours(threshold_all_s)} h.")
-        can_trade = False
+        can_buy = False
+        can_sell = False
         
     
     # 2. Fetch current price through the facade for the instrument's provider.
     current_price = inst.price()
-    if current_price is None:
+    if current_price is None or not math.isfinite(float(current_price)) or current_price <= 0:
         print(f"No current price for {symbol} (piata inchisa / indisponibil) — skip")
         return
     print(f"Current price for {symbol}: {current_price}")
-    avail_qty = inst.free() or 0.0   # Entire free instrument quantity; normalize None to zero.
+    avail_qty = inst.free()
+    if avail_qty is None:
+        print(f"No available balance snapshot for {symbol} — skip")
+        return
+    avail_qty = float(avail_qty)
+    if not math.isfinite(avail_qty) or avail_qty < 0:
+        print(f"Invalid available balance for {symbol}: {avail_qty} — skip")
+        return
     min_qty = inst.min_qty() or 0.0  # Venue minimum-volume rejection guard.
+    isolation = str(inst.param("mt", "isolation", "own_ledger") or "own_ledger").lower()
+    owned_qty = max(float(position["net_qty"]), 0.0)
+    sellable_qty = min(avail_qty, owned_qty) if isolation == "own_ledger" else avail_qty
 
     # 3. Evaluate BUY history.
     if trade_orders_buy:
@@ -488,13 +513,15 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
         # prevents permanently missing a peak that fell just short on one tick.
         hard_tp_hit = price_increase >= hard_tp_pct or u.are_close(
             price_increase, hard_tp_pct, target_tolerance_percent=MT_ARE_CLOSE_TOLERANCE_PCT)
-        if HARD_TP_ENABLED and hard_tp_hit and avail_qty > 0:
+        hard_tp_config_valid = 0 < hard_tp_frac <= 1 and hard_tp_pct > 0 and hard_tp_cd >= 0
+        if HARD_TP_ENABLED and hard_tp_hit and sellable_qty > 0 and hard_tp_config_valid:
             if current_time_s - _hard_tp_last.get(symbol, 0) >= hard_tp_cd:
-                hard_qty = round(avail_qty * hard_tp_frac, 4)
+                hard_qty = round(sellable_qty * hard_tp_frac, 4)
                 print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% >= {hard_tp_pct*100:.0f}% "
                       f"-> vand {hard_tp_frac*100:.0f}% ({hard_qty}) INDIFERENT de trend")
                 if _place_guarded(inst, "SELL", current_price, hard_qty, min_qty,
-                                  safeback_seconds=sbs, force=True, cancelorders=True, hours=MT_SELL_SAFEBACK_HOURS, pair=False):
+                                  safeback_seconds=sbs, force=True, cancelorders=True,
+                                  hours=MT_SELL_SAFEBACK_HOURS, caller_owns_retry=True):
                     _hard_tp_last[symbol] = current_time_s
                     return   # Already sold this tick; do not use stale balance below.
             else:
@@ -504,21 +531,24 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
         if price_increase > gain_threshold or u.are_close(price_increase, gain_threshold, target_tolerance_percent=MT_ARE_CLOSE_TOLERANCE_PCT):
             if not is_trend_up(symbol):
                 print(f"Price increased with {price_increase * 100}% by more than {gain_threshold * 100}% versus buy price and not trend up!")
-                if can_sell and avail_qty > 0:
-                    _place_guarded(inst, "SELL", current_price, avail_qty, min_qty,
-                        safeback_seconds=sbs, force=False, cancelorders=True, hours=MT_SELL_SAFEBACK_HOURS, pair=False)
+                if can_sell and sellable_qty > 0:
+                    _place_guarded(inst, "SELL", current_price, sellable_qty, min_qty,
+                        safeback_seconds=sbs, force=False, cancelorders=True,
+                        hours=MT_SELL_SAFEBACK_HOURS, caller_owns_retry=True)
                 else:
-                    print(f"No can sell (can_sell={can_sell}, avail_qty={avail_qty})")
+                    print(f"No can sell (can_sell={can_sell}, sellable_qty={sellable_qty})")
             else :
                 print(f"No action taken, because trend is up!")
         elif price_decrease > lost_threshold or u.are_close(price_decrease, lost_threshold, target_tolerance_percent=MT_ARE_CLOSE_TOLERANCE_PCT):
             if not is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease * 100}% by more than {lost_threshold * 100}% versus buy price and not trend up!")
-                if can_sell and avail_qty > 0:
-                    _place_guarded(inst, "SELL", current_price, avail_qty, min_qty,
-                        safeback_seconds=sbs, force=False, cancelorders=True, hours=MT_SELL_SAFEBACK_HOURS, pair=True)
+                if can_sell and sellable_qty > 0:
+                    _place_guarded(inst, "SELL", current_price, sellable_qty, min_qty,
+                        safeback_seconds=sbs, force=False, cancelorders=True,
+                        hours=MT_SELL_SAFEBACK_HOURS, bypass_profit_guard=True,
+                        caller_owns_retry=True)
                 else:
-                    print(f"No can sell (can_sell={can_sell}, avail_qty={avail_qty})")
+                    print(f"No can sell (can_sell={can_sell}, sellable_qty={sellable_qty})")
             else:
                 print(f"No action taken, because trend is up!")
         else:
@@ -537,12 +567,18 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
                 if can_buy:
                     # Derive quantity from budget, configured fixed quantity, or default.
                     _buy_qty = round((buy_budget / current_price) if buy_budget else (buy_qty_cfg or qty), 6)
+                    # BUY exposure uses the account's actual free base balance.  Own-ledger
+                    # attribution restricts SELLs, but must not hide existing holdings from
+                    # the post-trade budget cap.
                     _pos_value = avail_qty * current_price
-                    if max_budget and _pos_value >= max_budget:
-                        print(f"[{symbol}] plafon buget atins ({_pos_value:.0f} >= {max_budget} USD) — nu cumpar")
+                    _projected_value = _pos_value + (_buy_qty * current_price)
+                    if max_budget and _projected_value > max_budget:
+                        print(f"[{symbol}] plafon buget depasit post-trade "
+                              f"({_projected_value:.0f} > {max_budget} USD) — nu cumpar")
                     else:
                         _place_guarded(inst, "BUY", current_price + MT_BUY_PRICE_OFFSET, _buy_qty, min_qty,
-                            safeback_seconds=sbs, cancelorders=True, hours=MT_BUY_SAFEBACK_HOURS, pair=False)
+                            safeback_seconds=sbs, cancelorders=True,
+                            hours=MT_BUY_SAFEBACK_HOURS, caller_owns_retry=True)
                 else:
                    print("No can buy")
             else :
