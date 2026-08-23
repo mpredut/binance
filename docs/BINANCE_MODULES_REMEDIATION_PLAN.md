@@ -245,6 +245,15 @@ Plan:
 - Use typed balance snapshot and single-instance plus file-lock guarantees.
 - Distinguish dry-run simulation transitions from live state transitions.
 
+Status snapshot (2026-08-23): immediate fail-closed hardening is implemented.
+The Binance adapter now advances sell/re-buy state only when the guarded facade
+returns an accepted order with an `orderId`; refused or queued attempts preserve
+the peak/re-buy state. Empty/invalid balance snapshots, non-finite prices and unsafe
+sell-fraction/runtime inputs are rejected. The existing common persistent retry
+policy and MARKET crash/re-buy behavior remain unchanged. Full fill reconciliation
+is still open: venue acceptance is not a fill, and completing this safely requires a
+persisted pending-action journal plus startup reconciliation before any resubmission.
+
 ### B11. `rtrade.py` residual hardening
 
 Plan:

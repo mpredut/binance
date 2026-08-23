@@ -30,13 +30,14 @@ class FakePo:
     # ca sa ramana robust; execute_sell/rebuy cheama .place().
     def __init__(self):
         self.orders = []
+        self.result = {"orderId": 1}
     def place(self, symbol, side, price, qty, force=False, **kw):
         self.orders.append({"side": side, "symbol": symbol, "price": price,
                             "qty": qty, "force": force,
                             "bypass_profit_guard": bool(
                                 kw.get("bypass_profit_guard", False)
                             )})
-        return {"orderId": 1}
+        return self.result
     def place_safe_order(self, side, symbol, price, qty, force=False, **kw):
         return self.place(symbol, side, price, qty, force=force, **kw)
 
@@ -70,6 +71,20 @@ class TestLogica(unittest.TestCase):
 
 
 class TestTrailing(Base):
+    def test_snapshot_balante_gol_nu_modifica_starea(self):
+        api = FakeApi(250.0)
+        api.get_account_assets_balances = lambda: []
+        ts = self.ts(api)
+        ts.check_once()
+        self.assertFalse(os.path.exists(self.sf))
+        self.assertEqual(self.po.orders, [])
+
+    def test_pret_nefinit_nu_modifica_starea(self):
+        api = FakeApi(float("nan"))
+        self.ts(api).check_once()
+        import json
+        self.assertEqual(json.load(open(self.sf)), {})
+
     def test_urca_nu_vinde_actualizeaza_varful(self):
         api = FakeApi(250.0)
         ts = self.ts(api)
@@ -93,6 +108,31 @@ class TestTrailing(Base):
             self.po.orders[0]["bypass_profit_guard"],
             "iesirea protectoare trebuie sa ocoleasca explicit profit guard",
         )
+
+    def test_sell_refuzat_pastreaza_varful_si_nu_armeaza_rebuy(self):
+        api = FakeApi(250.0)
+        ts = self.ts(api)
+        ts.check_once()
+        self.po.result = None
+        api.price = 190.0
+        ts.check_once()
+        import json
+        state = json.load(open(self.sf))["TAOUSDC"]
+        self.assertEqual(state["peak"], 250.0)
+        self.assertNotIn("rebuy", state)
+
+    def test_rebuy_refuzat_ramane_pentru_retry(self):
+        api = FakeApi(250.0)
+        ts = self.ts(api)
+        ts.check_once()
+        api.price = 190.0
+        ts.check_once()
+        self.po.result = None
+        api.free = 0.0
+        api.price = 193.0
+        ts.check_once()
+        import json
+        self.assertIn("rebuy", json.load(open(self.sf))["TAOUSDC"])
 
     def test_cadere_mica_nu_vinde(self):
         api = FakeApi(250.0)
@@ -148,6 +188,12 @@ class TestPerMoneda(Base):
         self.assertEqual(ts.trail_pct_for("BTCUSDC"), 20.0)
         self.assertEqual(ts.trail_pct_for("TAOUSDC"), 22.0)
         self.assertEqual(ts.trail_pct_for("XYZUSDC"), 22.0)   # default
+
+    def test_sell_fraction_invalid_esueaza_la_start(self):
+        with self.assertRaises(ValueError):
+            self.ts(FakeApi(1.0), frac=1.01)
+        with self.assertRaises(ValueError):
+            self.ts(FakeApi(1.0), frac=float("nan"))
 
 
 class TestMinProfit(Base):

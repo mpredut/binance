@@ -35,6 +35,7 @@ SAFETY:
 from __future__ import annotations
 
 import argparse
+import math
 import os
 import sys
 import time
@@ -88,6 +89,31 @@ SELL_SKIP_IF_TREND_UP = os.environ.get("TRAILING_SELL_SKIP_IF_TREND_UP", "false"
 MIN_PROFIT_PCT = float(os.environ.get("TRAILING_MIN_PROFIT_PCT", "0.0"))
 
 
+def _finite(value, *, name: str, minimum=None, maximum=None) -> float:
+    """Normalize one financial/runtime input or fail before the live loop starts."""
+    try:
+        result = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{name} trebuie sa fie numeric") from exc
+    if not math.isfinite(result):
+        raise ValueError(f"{name} trebuie sa fie finit")
+    if minimum is not None and result < minimum:
+        raise ValueError(f"{name} trebuie sa fie >= {minimum}")
+    if maximum is not None and result > maximum:
+        raise ValueError(f"{name} trebuie sa fie <= {maximum}")
+    return result
+
+
+def _accepted_order(result) -> bool:
+    """True only when the guarded facade confirms venue acceptance.
+
+    Acceptance is deliberately not called a fill.  The existing financial model
+    uses MARKET orders here, but a refused/queued call returns ``None`` and must not
+    advance the trailing state machine.
+    """
+    return isinstance(result, dict) and result.get("orderId") not in (None, "")
+
+
 class TrailingStop:
     """Binance adapter for TrailingCore, providing balance, price, sell/buy,
     trend APIs, and provider-specific logging. TrailingCore owns the state machine."""
@@ -100,8 +126,15 @@ class TrailingStop:
         self.sym = sym
         self.log = log
         self.enabled = (os.environ.get("TRAILING_ENABLED", "false").lower() == "true"
-                        if enabled is None else enabled)
-        self.sell_fraction = sell_fraction
+                        if enabled is None else bool(enabled))
+        self.sell_fraction = _finite(
+            sell_fraction, name="TRAILING_SELL_FRACTION", minimum=0.0, maximum=1.0)
+        min_profit_pct = _finite(
+            min_profit_pct, name="TRAILING_MIN_PROFIT_PCT", minimum=0.0)
+        _finite(CHECK_SECONDS, name="TRAILING_CHECK_SECONDS", minimum=0.1)
+        _finite(REBUY_BOUNCE_PCT, name="TRAILING_REBUY_BOUNCE_PCT", minimum=0.0)
+        if REBUY_TRANCHES != 1:
+            raise ValueError("TRAILING_REBUY_TRANCHES suporta momentan doar valoarea 1")
         self.state_file = state_file
         self._balances = []
         self.core = TrailingCore(
@@ -127,8 +160,9 @@ class TrailingStop:
         for bal in balances or []:
             if bal.get("asset") == asset:
                 try:
-                    return float(bal.get("free", 0.0))
-                except (TypeError, ValueError):
+                    qty = float(bal.get("free", 0.0))
+                    return qty if math.isfinite(qty) and qty >= 0 else 0.0
+                except (TypeError, ValueError, OverflowError):
                     return 0.0
         return 0.0
 
@@ -153,7 +187,14 @@ class TrailingStop:
 
     def begin_tick(self) -> bool:
         try:
-            self._balances = self.api.get_account_assets_balances()
+            balances = self.api.get_account_assets_balances()
+            # bapi currently represents an account-read failure as []; treating an
+            # empty account identically is safe because there is nothing to protect.
+            if not isinstance(balances, list) or not balances:
+                self._balances = []
+                self.log("  ! [TRAIL] snapshot balante gol/invalid — sar tick-ul")
+                return False
+            self._balances = balances
             return True
         except Exception as e:  # noqa: BLE001
             self.log(f"  ! [TRAIL] balante indisponibile ({e}) — sar tick-ul")
@@ -163,7 +204,12 @@ class TrailingStop:
         return self._free_qty(self._balances, asset)
 
     def price(self, pair: str):
-        return self.api.get_current_price(pair)
+        value = self.api.get_current_price(pair)
+        try:
+            value = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        return value if math.isfinite(value) and value > 0 else None
 
     def trend(self, pair: str) -> float:
         return self._trend_value(pair)
@@ -174,15 +220,26 @@ class TrailingStop:
         # bypass_profit_guard=True bypasses profit/history protection because this is a
         # STOP-LOSS below the last buy; otherwise the guard would block it. Daily limits
         # and cooldown remain active as before; the bypass skips only profit and weighting.
-        self.po.place(pair, "SELL", price, qty, force=True, bypass_profit_guard=True, smart=False)
-        self.log(f"  🛑 [TRAIL] VANDUT {pair} {qty} @ ~{price:.4f} "
-                 f"(varf {peak:.4f}, -{trail}%)")
+        result = self.po.place(
+            pair, "SELL", price, qty, force=True,
+            bypass_profit_guard=True, smart=False)
+        if not _accepted_order(result):
+            self.log(f"  ! [TRAIL] SELL {pair} neacceptat — pastrez starea pentru retry")
+            return False
+        self.log(f"  🛑 [TRAIL] SELL ACCEPTAT {pair} {qty} @ ~{price:.4f} "
+                 f"(varf {peak:.4f}, -{trail}%, orderId={result['orderId']})")
         return True
 
     def execute_rebuy(self, key, asset, pair, qty, price, rb) -> bool:
-        self.po.place(pair, "BUY", price, qty, force=True, bypass_profit_guard=True, smart=False)
-        self.log(f"  🟢 [TRAIL] RE-BUY {pair} {qty} @ ~{price:.4f}  "
-                 f"(recul +{REBUY_BOUNCE_PCT}% de la minim {rb['low']:.4f}; vandut la {rb.get('sell_price', 0):.4f})")
+        result = self.po.place(
+            pair, "BUY", price, qty, force=True,
+            bypass_profit_guard=True, smart=False)
+        if not _accepted_order(result):
+            self.log(f"  ! [TRAIL] RE-BUY {pair} neacceptat — pastrez starea pentru retry")
+            return False
+        self.log(f"  🟢 [TRAIL] RE-BUY ACCEPTAT {pair} {qty} @ ~{price:.4f}  "
+                 f"(recul +{REBUY_BOUNCE_PCT}% de la minim {rb['low']:.4f}; "
+                 f"vandut la {rb.get('sell_price', 0):.4f}; orderId={result['orderId']})")
         return True
 
     def log_dry_sell(self, key, asset, pair, qty, price, peak, trail) -> None:
