@@ -64,7 +64,7 @@ class Instrument:
     def history(self, lookback_h: float) -> Optional[List]:
         return self._provider.get_price_history(self.symbol, lookback_h)
 
-    # ── cont (sold liber pe ASSET; ordine/tranzactii pe symbol) ────────────────
+    # -- Account: free asset balance; orders and trades by symbol. -------------
     def free(self) -> Optional[float]:
         return self._provider.free_balance(self.base or self.symbol)
 
@@ -77,22 +77,19 @@ class Instrument:
     def open_orders(self) -> List[dict]:
         return self._provider.open_orders(self.symbol)
 
-    # ── plasare ordin (DRY/real dupa portile providerului) ─────────────────────
+    # -- Order placement: dry or real after provider gates. --------------------
     def place(self, side: str, price: float, qty: float, **kwargs):
-        # GARD complet AGNOSTIC — profit, plafon-zilnic/anti-spam, cooldown anti-rapid-fire,
-        # trend-wait, jurnal FLEET-WIDE. Se aplica DOAR providerilor care NU guardeaza intern
-        # (Binance are deja o implementare PROPRIE, mai bogata — foloseste date REALE de
-        # permisiuni API in loc de curba gauss generica — vezi binance_api/bapi_placeorder.py;
-        # ISI PASTREAZA acea implementare, NU trece pe aici, ca sa nu se dubleze/coliziona
-        # cooldown-ul). 30 iul, cerere user: Kraken/Hyperliquid capata acum ACELEASI 4
-        # protectii ca Binance, prin cod PARTAJAT (order_guard.py, lock/trade_cooldown.py,
-        # cacheManager.should_wait — deja generice — si order_outcomes_log.py, nou).
+        # Complete provider-agnostic guard: profit, daily cap/anti-spam, rapid-fire
+        # cooldown, trend wait, and fleet-wide logging. Apply only to providers
+        # without internal guards. Binance retains its richer implementation using
+        # real API-permission data, avoiding duplicated or conflicting cooldowns.
+        # Kraken and Hyperliquid receive the equivalent protections through shared
+        # order_guard, trade_cooldown, cacheManager, and outcome-log components.
         #
-        # bypass_profit_guard=True (ex. disjunctor de crash) sare DOAR gardul de profit +
-        # plafonul de weight (comportament PREEXISTENT, neschimbat) — la fel ca la Binance,
-        # NU sare plafonul zilnic, cooldown-ul sau trend-wait-ul (raman active si la disjunctor).
-        # Apelantul poate detine propriul lifecycle/retry (rtrade sau workerul
-        # outbox). In acest caz pipeline-ul nu atinge coada globala.
+        # bypass_profit_guard skips only profit and weight guards. Daily caps,
+        # cooldown, and trend wait remain active, including for crash breakers.
+        # A caller such as rtrade or the outbox worker may own its lifecycle and
+        # retry; in that case this pipeline does not touch the global queue.
         caller_owns_retry = bool(kwargs.pop("caller_owns_retry", False))
         bypass = bool(kwargs.pop("bypass_profit_guard", False))
         cooldown_pair_id = kwargs.pop("cooldown_pair_id", None)
@@ -100,53 +97,46 @@ class Instrument:
         if self._provider.guards_internally():
             return self._provider.place_order(self.symbol, side, price, qty, **kwargs)
 
-        # Capturate INAINTE de orice pop/reassign, pt eventualul enqueue de re-plasare:
-        # intentia ORIGINALA (qty ne-plafonat, pretul CERUT) + kwargs care reproduc apelul.
+        # Capture the original uncapped quantity, requested price, and reproducible
+        # arguments before mutation in case the placement must be queued for retry.
         orig_qty = qty
-        orig_price = price   # pretul cerut = intentia apelantului -> gardul de pret la retry
+        orig_price = price   # Requested price preserves caller intent for the retry guard.
         reason = None
         order = None
-        # 30 iul, fix: `safeback_seconds` e chiar parametrul pe care monitortrades.py
-        # (sbs=MT_GUARD_WINDOW_DAYS zile, implicit 12) si tradeall.py (14 zile) il
-        # SUPRASCRIU explicit la fiecare apel real — defaultul din config (48h) e
-        # aproape niciodata folosit efectiv pe Binance. instruments.conf are deja
-        # [KRAKEN_HYPE] enabled=yes sub "mt" -> acelasi `sbs` (12-14 zile) ar trebui
-        # sa se aplice IDENTIC si acolo, nu doar la Binance. NU se scoate din kwargs
-        # (ramane si pt provider.place_order(), desi Kraken/HL il ignora azi).
+        # safeback_seconds is explicitly overridden by monitortrades (normally 12
+        # days) and tradeall (14 days), so Binance rarely uses the 48-hour config
+        # default. Apply the same window to enabled Kraken instruments. Retain it
+        # in kwargs for provider.place_order even where currently ignored.
         safeback_override = kwargs.get("safeback_seconds")
-        # `smart` (30 iul, CORECTIE): distinge cele DOUA interfete vechi colapsate aici —
-        # place_order_smart (SMART: cancel ordine opuse + nudge pret ±0.1% INAINTE de gard)
-        # vs place_safe_order (SAFE: FARA cancel-opuse, FARA nudge). Colapsarea initiala
-        # aplica gresit pre-procesarea "smart" si apelantilor SAFE. Default True (monitortrades/
-        # tradeall/place_order_smart, calea principala); apelantii fostului place_safe_order
-        # (rtrade normal, monitororder, assetguardian, trailing_stop, legacy) trec smart=False.
+        # ``smart`` distinguishes two legacy interfaces: place_order_smart cancels
+        # opposing orders and nudges price before guards, while place_safe_order
+        # does neither. Default true for the main path; former safe-order callers
+        # explicitly pass false.
         smart = bool(kwargs.pop("smart", True))
-        # kwargs care reproduc EXACT acest apel la un retry (bypass/smart au fost pop-uite;
-        # restul — safeback_seconds/force/cancelorders/hours/motivation — raman in kwargs).
+        # Reconstruct this call exactly for retry after bypass/smart were popped;
+        # all other placement metadata remains in kwargs.
         retry_kwargs = dict(kwargs)
         retry_kwargs["bypass_profit_guard"] = bypass
         retry_kwargs["smart"] = smart
         if cooldown_pair_id:
             retry_kwargs["cooldown_pair_id"] = cooldown_pair_id
-        # Un ordin MARKET ignora pretul cerut de apelant. Retinem daca trebuie sa
-        # revalidam gardul chiar inainte de submit, la pretul executabil curent.
-        # Altfel un SELL cerut la +1% putea trece gardul, apoi `force=True` il
-        # executa imediat la piata sub marja validata (TOCTOU financiar).
+        # A market order ignores the requested price, so revalidate immediately
+        # before submission at the current executable price. This prevents a
+        # force-market sell from passing at +1% then executing below the validated
+        # margin, a financial time-of-check/time-of-use issue.
         is_market = bool(kwargs.get("force", False))
         profit_margin = None
         profit_window_ref = None
         try:
-            # 0. AJUSTARE PRET + curatare ordine opuse (MECANICA venue, hook) — DOAR daca
-            # smart, RULATA INAINTE de gardul de profit (ca gardul sa vada acelasi pret ca
-            # vechiul place_order_smart). Pe Binance: nudge ±0.1% + round + cancel ordine
-            # opuse contraproductive (neconditionat, ca in place_order_smart). smart=False ->
-            # pretul ramane neschimbat aici (ca vechiul place_safe_order); place_order_mechanics
-            # tot face clamp+round final la trimitere.
+            # 0. For smart placement only, apply venue price mechanics and remove
+            # opposing orders before the profit guard so it sees the submitted price.
+            # Safe placement leaves price unchanged here; final submission still
+            # clamps and rounds it through place_order_mechanics.
             if smart:
                 price = self._provider.adjust_order_price(self.symbol, side_u, price,
                                                           cancel_opposite=True)
 
-            # 1. PLAFON ZILNIC + ANTI-SPAM (agnostic) — NU sarit de bypass_profit_guard.
+            # 1. Provider-agnostic daily cap and anti-spam, never bypassed.
             ok, reason = order_guard.daily_limit_guard(self._provider, self.symbol, side_u,
                                                        safeback_sec=safeback_override)
             if not ok:
@@ -154,10 +144,10 @@ class Instrument:
 
             if not bypass:
                 profit_margin = order_guard.margin_for(self._provider.name)
-                # tier 1: referinta min/max via hook-ul providerului. Default (Kraken/HL):
-                # fereastra per-venue din order_guard.conf; Binance: fereastra safeback_sec
-                # (Order-cache). Fereastra goala/dezactivata -> profit_guard cade pe
-                # last_opposite_fill.
+                # Tier-one min/max reference comes from the provider hook. Kraken
+                # and Hyperliquid use their configured venue window; Binance uses
+                # safeback_sec from the order cache. An empty window falls back to
+                # the last opposite fill.
                 profit_window_ref = self._provider.profit_guard_window_ref(
                     self.symbol, side_u, safeback_override)
                 ok = order_guard.profit_guard(
@@ -166,13 +156,10 @@ class Instrument:
                 if not ok:
                     reason = "profit_guard"
                     return None
-                # PLAFON de CANTITATE pe AMBELE directii — via hook-ul providerului
-                # (30 iul): default agnostic = order_guard.weight_limit (gauss, ex.
-                # HYPE-Kraken); Binance suprascrie cu apply_weight_limit (API real).
-                # Nu tranzactiona tot dintr-o data. Side-aware: SELL->balanta base,
-                # BUY->balanta quote/pret.
-                # `cancelorders`/`hours` raman metadate compatibile pentru hook-urile
-                # providerilor; decizia comuna nu reciteste si nu rezerva balanta.
+                # Cap quantity in both directions through the provider hook so the
+                # full balance is not traded at once. SELL uses base balance; BUY
+                # uses quote balance divided by price. Provider hooks retain
+                # cancelorders/hours metadata without rereading or reserving balance.
                 decision = self._provider.quantity_decision(
                     self.symbol, side_u, price, qty,
                     base=self.base, quote=self.quote,
@@ -186,11 +173,9 @@ class Instrument:
                     reason = decision.refuse_reason or "qty_zero_after_weight"
                     return None
 
-            # 2. TREND-WAIT (agnostic, delay-nu-block — la fel ca Binance
-            # wait_for_favorable_entry). Deja calculat pt simboluri non-Binance inregistrate
-            # in instruments.conf (cacheManager.py); indisponibil -> should_wait cade pe
-            # False (nu asteapta), niciodata blocaj. Import LAZY: cacheManager -> market_api
-            # ar inchide ciclul la nivel de modul.
+            # 2. Provider-agnostic trend wait delays rather than blocks. It is
+            # available for registered non-Binance symbols; unavailable data falls
+            # back to no wait. Lazy import avoids a module-level dependency cycle.
             waited = False
             try:
                 import cacheManager as cm
@@ -200,13 +185,12 @@ class Instrument:
                     fresh = self._provider.get_current_price(self.symbol)
                     if fresh is not None:
                         price = fresh
-            except Exception as e:  # noqa: BLE001 — gate oportunist, esec -> trimite oricum
+            except Exception as e:  # noqa: BLE001 — Opportunistic gate; submit on failure.
                 print(f"[{self.symbol}] {side_u} trend-wait indisponibil: {e}")
 
-            # Revalidare finala dupa orice asteptare/repricing. Pentru MARKET folosim
-            # obligatoriu cotatia curenta, nu pretul-limită decorativ primit de la
-            # apelant. `bypass_profit_guard` ramane calea explicita pentru iesiri de
-            # protectie care trebuie executate chiar si in pierdere.
+            # Revalidate after waiting or repricing. Market orders must use the
+            # current quote rather than the caller's decorative limit. Explicit
+            # bypass remains available for protective exits that must accept a loss.
             if not bypass and (is_market or waited):
                 guard_price = price
                 if is_market:
@@ -223,8 +207,8 @@ class Instrument:
                     reason = "profit_guard"
                     return None
 
-            # 3. COOLDOWN anti-rapid-fire (agnostic, acelasi modul global ca Binance —
-            # cheile sunt symbol-uri, deci fara coliziune intre venue-uri diferite).
+            # 3. Provider-agnostic rapid-fire cooldown shared with Binance. Keys are
+            # symbols, preventing collisions between different venues.
             with trade_cooldown.trade_slot(
                     side_u, self.symbol, pair_id=cooldown_pair_id) as slot:
                 if not slot.allowed:
@@ -240,7 +224,7 @@ class Instrument:
                 else:
                     reason = reason or "no_fill"
                 return order
-        except Exception as e:  # noqa: BLE001 — nu pot verifica -> nu tranzactionez orb
+        except Exception as e:  # noqa: BLE001 — Fail closed when guards cannot be verified.
             print(f"[{self.symbol}] {side_u} BLOCAT (fail-closed): {e}")
             reason = "guard_check_failed"
             return None
@@ -252,25 +236,24 @@ class Instrument:
             _outcomes_log.log_order_outcome(
                 self.symbol, side_u, price, qty, "executed" if order else "refused",
                 None if order else reason, kwargs.get("motivation"), caller=caller)
-            # OUTBOX: o plasare normala reusita satisface orice intentie pending pe
-            # acelasi symbol+side. Este esential pt apelantii cu retry local (rtrade):
-            # altfel esecul initial ramane in coada si poate produce un ordin duplicat
-            # dupa ce retry-ul local a reusit deja. Workerul nu are nevoie de resolve:
-            # el face claim atomic inainte de plasare.
+            # A successful normal placement resolves pending outbox intent for the
+            # same symbol and side. This prevents a queued initial failure from
+            # duplicating an order after a local retry succeeds. The worker itself
+            # needs no resolve because it claims atomically before placement.
             if order is not None and not caller_owns_retry:
                 try:
                     import order_retry
                     order_retry.resolve(self.symbol, side_u)
                 except Exception as _e:  # noqa: BLE001
                     print(f"[{self.symbol}] {side_u} resolve retry esuat (ignor): {_e}")
-            # Daca a esuat si NU e deja un retry, salveaza intentia persistenta.
-            # Best-effort: orice eroare aici NU afecteaza returul.
+            # Persist a failed intent unless this is already a retry. Queue handling
+            # is best effort and never changes the placement return value.
             elif order is None and not caller_owns_retry:
                 try:
                     import order_retry
                     if order_retry.RETRY_ENABLED:
-                        # pretul de piata la momentul esecului (best-effort) — pt gardul de
-                        # pret/dedup la retry. Il luam DOAR cand chiar enqueue-am.
+                        # Capture best-effort market price only when enqueueing, for
+                        # retry price guarding and deduplication.
                         ref_price = None
                         try:
                             ref_price = self._provider.get_current_price(self.symbol)
