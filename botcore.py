@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-botcore.py — nucleul COMUN al utilitarelor de bot (logging, .env, HTTP, timp).
-Zero dependinte externe (doar stdlib).
+botcore.py — SHARED core for bot utilities: logging, .env, HTTP, and time.
+No external dependencies; standard library only.
 
-Sursa UNICA pentru functiile care erau duplicate (si incepusera sa divida) in
-kraken/common.py, hyperliquid/common.py, 212trading/ipo_common.py. Fiecare dintre
-acelea re-exporta de aici (compat inapoi: `from common import log` ramane valid).
+The SINGLE source for functions previously duplicated and beginning to diverge in
+kraken/common.py, hyperliquid/common.py, and 212trading/ipo_common.py. Each module
+re-exports these functions, preserving compatibility with `from common import log`.
 
-NU includem `now_str()` — DIVERGE intentionat intre boti (212 pune si timezone ET,
-kraken/HL doar Bucuresti); ramane per-provider. Transportul HTTP este însă comun;
-shim-urile venue-urilor doar re-exportă forma JSON/form de aici.
+`now_str()` is intentionally excluded because bots differ: T212 also includes ET,
+while Kraken/HL use only Bucharest time. It remains provider-specific. HTTP transport
+is shared, and venue shims only re-export the JSON/form helpers defined here.
 """
 from __future__ import annotations
 
@@ -23,9 +23,9 @@ import urllib.request
 from datetime import datetime, timezone, timedelta
 
 HTTP_TIMEOUT = 25
-BUCHAREST = timezone(timedelta(hours=3))   # EEST vara
+BUCHAREST = timezone(timedelta(hours=3))   # EEST in summer
 
-_LOCKS: dict = {}   # tine fd-urile de lock deschise cat traieste procesul (nu le colecta GC)
+_LOCKS: dict = {}   # retain open lock fds for process lifetime; prevent garbage collection
 
 
 def log(msg: str) -> None:
@@ -33,11 +33,10 @@ def log(msg: str) -> None:
 
 
 def single_instance(name: str, lockdir: str = "/tmp") -> None:
-    """Single-instance guard: prima instanta obtine lock-ul EXCLUSIV (flock) pe
-    <lockdir>/binance_<name>.lock si il tine cat traieste procesul; a doua instanta NU-l
-    obtine -> iese (exit 0). Previne dubla-lansare = dubla-tranzactionare. Ca flock-ul din
-    flota_start.sh, dar per-proces Python -> protejeaza indiferent CUM e lansat botul
-    (bots_start, healthcheck, systemd, manual)."""
+    """Enforce a single instance with an exclusive flock.
+    The first process holds <lockdir>/binance_<name>.lock for its lifetime; a second exits
+    successfully when it cannot acquire the lock. This prevents duplicate launches and
+    trades regardless of whether bots_start, healthcheck, systemd, or a user starts it."""
     path = os.path.join(lockdir, f"binance_{name}.lock")
     fd = open(path, "w")
     try:
@@ -46,11 +45,11 @@ def single_instance(name: str, lockdir: str = "/tmp") -> None:
         print(f"[{name}] ruleaza deja (lock activ: {path}) — ies.", flush=True)
         sys.exit(0)
     fd.write(str(os.getpid())); fd.flush()
-    _LOCKS[name] = fd   # pastreaza referinta -> lock-ul ramane pana moare procesul
+    _LOCKS[name] = fd   # retain the reference so the lock lasts until process exit
 
 
 def _dotenv_pairs(path: str) -> tuple[list[tuple[str, str]], bool]:
-    """Parsează o singură dată sintaxa comună; bool-ul indică o citire reușită."""
+    """Parse shared dotenv syntax once and report whether the file was read successfully."""
     if not os.path.exists(path):
         return [], False
     try:
@@ -65,7 +64,7 @@ def _dotenv_pairs(path: str) -> tuple[list[tuple[str, str]], bool]:
                 key, _, val = line.partition("=")
                 key = key.strip()
                 val = val.strip()
-                # sterge comentariile inline pt valori neghilimelate (VALUE=x  # comment)
+                # Strip inline comments from unquoted values (VALUE=x  # comment).
                 if not (val.startswith('"') or val.startswith("'")):
                     val = val.split("#")[0].strip()
                 val = val.strip('"').strip("'")
@@ -77,7 +76,7 @@ def _dotenv_pairs(path: str) -> tuple[list[tuple[str, str]], bool]:
 
 
 def load_dotenv(path: str = ".env") -> None:
-    """Incarca KEY=VALUE dintr-un .env in os.environ (fara a suprascrie mediul real)."""
+    """Load KEY=VALUE entries from .env without overriding the existing environment."""
     pairs, loaded = _dotenv_pairs(path)
     if not loaded:
         return
@@ -88,8 +87,8 @@ def load_dotenv(path: str = ".env") -> None:
 
 
 def parse_dotenv(path: str) -> dict:
-    """Ca load_dotenv, dar RETURNEAZA un dict (nu atinge os.environ). Necesar cand rulam
-    mai multe active in ACELASI proces: fiecare isi ia config-ul in dict separat."""
+    """Parse dotenv into a dictionary without changing os.environ.
+    This keeps configuration separate when multiple assets run in the same process."""
     pairs, _loaded = _dotenv_pairs(path)
     out: dict[str, str] = {}
     for key, value in pairs:
@@ -98,8 +97,8 @@ def parse_dotenv(path: str) -> dict:
 
 
 def float_env(key: str, env: dict | None = None) -> float | None:
-    """Float din env (os.environ implicit, sau un dict dat), ignorand comentariile inline.
-    Superset: `env` optional -> compatibil si cu apelurile vechi float_env(key)."""
+    """Read a float from os.environ or an injected dictionary, ignoring inline comments.
+    The optional `env` argument preserves compatibility with legacy float_env(key) calls."""
     src = os.environ if env is None else env
     raw = (src.get(key, "") or "").split("#")[0].strip()
     try:
@@ -116,12 +115,11 @@ def http_request(
     *,
     form: dict | None = None,
 ) -> tuple[int, bytes]:
-    """Transport HTTP stdlib comun, cu același contract ``(status, body)``.
+    """Shared standard-library HTTP transport with a ``(status, body)`` contract.
 
-    ``payload`` este serializat JSON, iar ``form`` ca
-    ``application/x-www-form-urlencoded``. Cele două forme sunt mutual exclusive.
-    Erorile HTTP păstrează status/body; erorile de transport sunt fail-closed ca
-    ``(0, b"")``, exact ca helper-ele venue-urilor pe care le înlocuiește.
+    Serialize ``payload`` as JSON and ``form`` as application/x-www-form-urlencoded;
+    the two forms are mutually exclusive. HTTP errors retain status/body, while
+    transport errors fail closed as ``(0, b"")``, matching the replaced venue helpers.
     """
     if payload is not None and form is not None:
         raise ValueError("payload și form sunt mutual exclusive")
@@ -167,30 +165,30 @@ def http_post_form(
     return http_request("POST", url, headers=headers, form=data)
 
 
-# ── Comparatii "aproape egal" (procentual, DETERMINIST) ──────────────────────
-# Sursa unica pt flota + boti. Inlocuieste utils.are_close (care avea
-# random.randint in bucla de toleranta -> acelasi input putea da True SAU False
-# in banda [tol*1.01, tol*1.5] — inacceptabil pt decizii de trading).
+# ── DETERMINISTIC percentage-based approximate comparisons ───────────────────
+# Single source for the fleet and bots. Replaces utils.are_close, whose random.randint
+# tolerance loop could return True OR False for the same input in [tol*1.01, tol*1.5],
+# which is unacceptable for trading decisions.
 
 def diff_percent(value1: float, value2: float) -> float:
-    """Diferenta procentuala simetrica (raportata la media absoluta a valorilor)."""
+    """Return symmetric percentage difference relative to the values' absolute mean."""
     if value1 == 0 and value2 == 0:
         return 0.0
     return abs(value1 - value2) / ((abs(value1) + abs(value2)) / 2) * 100
 
 
 def are_close(value1: float, value2: float, tolerance_percent: float = 1.0) -> bool:
-    """True daca valorile difera cu cel mult tolerance_percent (determinist).
+    """Return deterministically whether values differ by at most tolerance_percent.
 
-    Pt praguri de pret: are_close(pret, prag, 0.05) -> pretul la 0.05% de prag
-    conteaza ca atins (nu mai ratam o intrare la 2-3 centi de prag)."""
+    For price thresholds, are_close(price, threshold, 0.05) treats a price within
+    0.05% as reached, avoiding missed entries by a few cents."""
     return diff_percent(value1, value2) <= tolerance_percent
 
 
 def diff_equals_percent(value1: float, value2: float, target_percent: float,
                         tolerance_percent: float = 1.0) -> bool:
-    """True daca DIFERENTA procentuala dintre valori este ≈ target_percent
-    (banda pe ambele parti, determinist). Alta intrebare decat are_close:
-    nu "sunt apropiate valorile?", ci "difera cu ~X%?" — ex: "a scazut cu ~10%?".
-    Inlocuieste utils.are_difference_equal_with_aprox_proc (care avea random)."""
+    """Return whether the percentage DIFFERENCE is near target_percent using a
+    deterministic two-sided band. Unlike are_close, this asks whether values differ by
+    about X percent, e.g. whether price fell about 10%. Replaces the randomized
+    utils.are_difference_equal_with_aprox_proc implementation."""
     return abs(diff_percent(value1, value2) - target_percent) <= tolerance_percent
