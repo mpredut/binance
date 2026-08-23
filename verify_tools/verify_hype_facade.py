@@ -74,10 +74,11 @@ def main():
               f"close={last} price={price}")
 
     print("\n==== CONT SPOT HYPE (citire) ====")
-    free_hype = mkt.free_balance("HYPE")
-    free_usdc = mkt.free_balance("USDC")
+    free_hype = mkt.free_balance_for("hyperliquid", "HYPE")
+    free_usdc = mkt.free_balance_for("hyperliquid", "USDC")
     print(f"  free_balance(HYPE) = {free_hype}")
-    print(f"  free_balance(USDC) = {free_usdc}  (ruta: {mkt.provider_name_for('USDC')})")
+    print("  free_balance(USDC) = "
+          f"{free_usdc}  (provider explicit: hyperliquid)")
     check("free_balance(HYPE) numeric >=0", isinstance(free_hype, (int, float)) and free_hype >= 0,
           repr(free_hype))
 

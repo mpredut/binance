@@ -310,10 +310,20 @@ class MarketApi:
 
     # ── CONT (Faza 3): rutare pe symbol/asset, normalizat de provider. ─────────
     def free_balance(self, asset: str) -> Optional[float]:
-        # `asset` (ex. 'TAO') nu e un symbol, deci nu va revendica niciun provider via
-        # supports_symbol -> cade pe default = Binance. Behavior-preserving azi; cand
-        # apare HYPE, providerul lui isi va revendica asset-urile proprii.
+        """Compatibilitate legacy; pentru cod nou folosește free_balance_for().
+
+        Un asset simplu nu identifică venue-ul când USDC/HYPE există pe mai multe
+        platforme. Rutarea istorică pe primul provider rămâne doar ca să nu rupă
+        integrări externe vechi.
+        """
         return self._provider_for(asset).free_balance(asset)
+
+    def free_balance_for(self, provider_name: str, asset: str) -> Optional[float]:
+        """Sold liber citit explicit de la venue-ul cerut, fără rutare ambiguă."""
+        provider = self.provider_by_name(provider_name)
+        if provider is None:
+            raise ValueError(f"Provider necunoscut: {provider_name!r}")
+        return provider.free_balance(asset)
 
     def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:
         return self._provider_for(symbol).get_orders(symbol, side, since_s)

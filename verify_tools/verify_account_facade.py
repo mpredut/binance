@@ -58,7 +58,7 @@ def main():
 
         # 1) free_balance ------------------------------------------------------
         fd = free_direct(base)
-        ff = mkt.free_balance(base)
+        ff = mkt.free_balance_for("binance", base)
         same_free = (fd == ff)
         print(f"  free: direct={fd!r}  facada={ff!r}  -> {'OK' if same_free else 'DIFERA'}")
         if not same_free:

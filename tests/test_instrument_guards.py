@@ -116,6 +116,17 @@ class InstrumentGuardsTestCase(unittest.TestCase):
                 lines.extend(fh.read().splitlines())
         return lines
 
+    def test_explicit_balance_lookup_does_not_route_by_bare_asset(self):
+        first = _FakeProvider(name="First")
+        second = _FakeProvider(name="Second")
+        first.free_balance = lambda _asset: 11.0
+        second.free_balance = lambda _asset: 22.0
+        api = MarketApi([first, second])
+
+        self.assertEqual(api.free_balance_for("second", "USDC"), 22.0)
+        with self.assertRaisesRegex(ValueError, "Provider necunoscut"):
+            api.free_balance_for("missing", "USDC")
+
     # ── plafon zilnic + anti-spam ───────────────────────────────────────────────
     def test_daily_limit_blocks_after_threshold(self):
         p = _FakeProvider()
