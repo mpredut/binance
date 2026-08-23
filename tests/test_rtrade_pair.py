@@ -19,6 +19,7 @@ class FakeVenue:
         self.canceled = []
         self.market_calls = []
         self.fill_on_cancel = {}
+        self.failure_reasons = {}
 
     def current_price(self):
         return self.current
@@ -32,6 +33,9 @@ class FakeVenue:
         self.orders.append((ticket, pair_id))
         self.statuses[ticket.order_id] = OrderSnapshot()
         return ticket
+
+    def last_place_failure_reason(self, side):
+        return self.failure_reasons.get(side.upper())
 
     def place_market_exit(self, side, qty, reason):
         ticket = OrderTicket(
@@ -121,6 +125,14 @@ class PairCoordinatorTest(unittest.TestCase):
         self.assertTrue(outcome.terminal)
         self.assertEqual(outcome.reason, "sell_place_failed")
         self.assertEqual(venue.orders, [])
+
+    def test_venue_specific_insufficient_funds_reason_is_preserved(self):
+        venue = FakeVenue(fail_side="BUY")
+        venue.failure_reasons["BUY"] = "buy_insufficient_funds:USDC"
+
+        outcome = _coordinator(venue).start(mid=100.0)
+
+        self.assertEqual(outcome.reason, "buy_insufficient_funds:USDC")
 
     def test_no_fill_until_ttl_cancels_both(self):
         venue = FakeVenue()

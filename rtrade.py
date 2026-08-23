@@ -98,6 +98,8 @@ RTRADE_PAIR_DIRECTIONS = tuple(
     for side in os.environ.get("RTRADE_PAIR_DIRECTIONS", "BUY,SELL").split(",")
     if side.strip()
 )
+RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC = float(os.environ.get(
+    "RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC", "180"))
 RTRADE_FAST_FILL_RATIO = float(os.environ.get("RTRADE_FAST_FILL_RATIO", "0.25"))
 RTRADE_MIN_EDGE_PCT = float(os.environ.get("RTRADE_MIN_EDGE_PCT", "0.0115"))
 RTRADE_SHOCK_HARD_STOP_PCT = float(os.environ.get(
@@ -111,6 +113,7 @@ class _LivePairVenue:
     def __init__(self, symbol):
         self.symbol = symbol
         self._known_tickets = []
+        self._last_place_failures = {}
         provider_name = mkt.provider_name_for(symbol)
         self.executor = mkt.provider_by_name(provider_name)
         if self.executor is None:
@@ -129,6 +132,23 @@ class _LivePairVenue:
             price=actual_price, qty=actual_qty, pair_id=pair_id)
 
     def place_limit(self, side, price, qty, pair_id):
+        side = side.upper()
+        self._last_place_failures.pop(side, None)
+        base = u.base_asset(self.symbol)
+        quote = self.symbol[len(base):] if self.symbol.startswith(base) else None
+        required_asset = quote if side == "BUY" else base
+        if required_asset:
+            available = self.executor.free_balance(required_asset)
+            # Nu compara cu qty cerut: pipeline-ul comun cap_quantity + mecanica
+            # providerului reduc deja ordinul la soldul permis. Backoff numai cand
+            # activul necesar nu are deloc sold liber utilizabil.
+            if available is not None and float(available) <= 1e-12:
+                self._last_place_failures[side] = (
+                    f"{side.lower()}_insufficient_funds:{required_asset}")
+                print(
+                    f"[{self.symbol}] {side} fonduri insuficiente: "
+                    f"disponibil={float(available):.8f} {required_asset}")
+                return None
         hours = (RTRADE_BUY_NORMAL_HOURS if side.upper() == "BUY"
                  else RTRADE_SELL_NORMAL_HOURS)
         order = mkt.place(
@@ -142,6 +162,9 @@ class _LivePairVenue:
         if ticket is not None:
             self._known_tickets.append(ticket)
         return ticket
+
+    def last_place_failure_reason(self, side):
+        return self._last_place_failures.get(side.upper())
 
     def place_market_exit(self, side, qty, reason):
         # Iesire de risc explicita: contractul raw al executorului nu este blocat de
@@ -468,6 +491,8 @@ class TradingBot:
         if (not RTRADE_PAIR_DIRECTIONS
                 or any(side not in {"BUY", "SELL"} for side in RTRADE_PAIR_DIRECTIONS)):
             raise ValueError("RTRADE_PAIR_DIRECTIONS accepta numai BUY,SELL")
+        if RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC <= 0:
+            raise ValueError("RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC trebuie sa fie > 0")
 
         # Fiecare coordonator detine exclusiv order-id-urile si inventarul unei
         # runde. O runda expusa continua sa-si urmareasca exit-ul, dar nu mai
@@ -475,6 +500,7 @@ class TradingBot:
         active = []
         last_start_at = float("-inf")
         next_direction = 0
+        funds_backoff_until = {"BUY": 0.0, "SELL": 0.0}
         while True:
             try:
                 now = time.monotonic()
@@ -501,13 +527,33 @@ class TradingBot:
                 if can_start and not _trend_too_strong(self.symbol):
                     current_price = venue.current_price()
                     if current_price is not None:
-                        start_side = RTRADE_PAIR_DIRECTIONS[next_direction]
-                        next_direction = (next_direction + 1) % len(RTRADE_PAIR_DIRECTIONS)
+                        start_side = None
+                        for _ in range(len(RTRADE_PAIR_DIRECTIONS)):
+                            candidate = RTRADE_PAIR_DIRECTIONS[next_direction]
+                            next_direction = (
+                                next_direction + 1) % len(RTRADE_PAIR_DIRECTIONS)
+                            if now >= funds_backoff_until[candidate]:
+                                start_side = candidate
+                                break
+                        if start_side is None:
+                            time.sleep(RTRADE_PAIR_POLL_SEC)
+                            continue
                         coordinator = PairCoordinator(
                             venue, self.qty, policy, start_side=start_side)
                         outcome = coordinator.start(current_price)
                         last_start_at = now
                         if outcome.terminal:
+                            reason = outcome.reason or ""
+                            marker = "_insufficient_funds:"
+                            if marker in reason:
+                                failed_side = reason.split(marker, 1)[0].upper()
+                                if failed_side in funds_backoff_until:
+                                    funds_backoff_until[failed_side] = (
+                                        now + RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC)
+                                    print(
+                                        f"[{self.symbol}] {failed_side} backoff "
+                                        f"{RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC:.0f}s "
+                                        f"din cauza fondurilor insuficiente")
                             print(
                                 f"[{self.symbol}] pair={outcome.pair_id} "
                                 f"direction={start_side}-first "

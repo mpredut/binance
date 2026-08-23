@@ -87,6 +87,15 @@ class PairVenue(Protocol):
     def cancel(self, order_id: str) -> bool: ...
 
 
+def _place_failure_reason(venue: PairVenue, side: str) -> str:
+    detail = getattr(venue, "last_place_failure_reason", None)
+    if callable(detail):
+        reason = detail(side)
+        if reason:
+            return str(reason)
+    return f"{side.lower()}_place_failed"
+
+
 def quote_prices(mid: float, adjustment_fraction: float,
                  decimals: int = 4) -> tuple[float, float]:
     """Bid/ask simetrice fata de acelasi snapshot de piata."""
@@ -172,7 +181,7 @@ class PairCoordinator:
             first_side, prices[first_side], self.qty, self.pair_id)
         if first is None:
             self.phase = "failed"
-            self.reason = f"{first_side.lower()}_place_failed"
+            self.reason = _place_failure_reason(self.venue, first_side)
             return self.outcome()
         self.tickets.append(first)
 
@@ -181,7 +190,7 @@ class PairCoordinator:
         if second is None:
             self._cancel(first)
             self.phase = "failed"
-            self.reason = f"{second_side.lower()}_place_failed"
+            self.reason = _place_failure_reason(self.venue, second_side)
             return self.outcome()
         self.tickets.append(second)
         self.phase = "quoting"

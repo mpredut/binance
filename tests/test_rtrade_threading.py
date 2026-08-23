@@ -69,7 +69,7 @@ class RTradeThreadingTest(unittest.TestCase):
         self.assertEqual(coordinators[1].steps, [16.0])
 
     def test_live_pair_adapter_passes_pair_id_and_owns_retry(self):
-        executor = SimpleNamespace()
+        executor = SimpleNamespace(free_balance=lambda _asset: 1000.0)
         order = {"orderId": 7, "price": "99.36", "origQty": "0.8"}
         with patch.object(rtrade.mkt, "provider_name_for", return_value="Binance"), \
              patch.object(rtrade.mkt, "provider_by_name", return_value=executor), \
@@ -101,7 +101,9 @@ class RTradeThreadingTest(unittest.TestCase):
             kind="fast_fill_hard_stop")
 
     def test_live_pair_cancel_releases_only_its_cooldown_leg(self):
-        executor = SimpleNamespace(cancel_order=lambda *_args: None)
+        executor = SimpleNamespace(
+            cancel_order=lambda *_args: None,
+            free_balance=lambda _asset: 1000.0)
         order = {"orderId": 7, "price": "99.36", "origQty": "1"}
         with patch.object(rtrade.mkt, "provider_name_for", return_value="Binance"), \
              patch.object(rtrade.mkt, "provider_by_name", return_value=executor), \
@@ -112,6 +114,35 @@ class RTradeThreadingTest(unittest.TestCase):
             self.assertTrue(venue.cancel("7"))
 
         release.assert_called_once_with("TAOUSDC", "pair-1", "BUY")
+
+    def test_live_pair_adapter_rejects_insufficient_asset_before_submit(self):
+        executor = SimpleNamespace(free_balance=lambda _asset: 0.0)
+        with patch.object(rtrade.mkt, "provider_name_for", return_value="Binance"), \
+             patch.object(rtrade.mkt, "provider_by_name", return_value=executor), \
+             patch.object(rtrade.mkt, "place") as place:
+            venue = rtrade._LivePairVenue("TAOUSDC")
+            buy = venue.place_limit("BUY", 100.0, 1.0, "pair-buy")
+            sell = venue.place_limit("SELL", 101.0, 1.0, "pair-sell")
+
+        self.assertIsNone(buy)
+        self.assertIsNone(sell)
+        self.assertEqual(venue.last_place_failure_reason("BUY"),
+                         "buy_insufficient_funds:USDC")
+        self.assertEqual(venue.last_place_failure_reason("SELL"),
+                         "sell_insufficient_funds:TAO")
+        place.assert_not_called()
+
+    def test_live_pair_adapter_leaves_partial_balance_clamp_to_provider(self):
+        executor = SimpleNamespace(free_balance=lambda _asset: 10.0)
+        adjusted = {"orderId": 8, "price": "100", "origQty": "0.099"}
+        with patch.object(rtrade.mkt, "provider_name_for", return_value="Binance"), \
+             patch.object(rtrade.mkt, "provider_by_name", return_value=executor), \
+             patch.object(rtrade.mkt, "place", return_value=adjusted) as place:
+            venue = rtrade._LivePairVenue("TAOUSDC")
+            ticket = venue.place_limit("BUY", 100.0, 1.0, "pair-buy")
+
+        self.assertEqual(ticket.qty, 0.099)
+        place.assert_called_once()
 
     def test_pair_reuses_exactly_two_workers_between_rounds(self):
         bot = _bot()
