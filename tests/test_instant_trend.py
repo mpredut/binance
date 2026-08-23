@@ -1,8 +1,7 @@
-"""
-Teste pentru cacheManager.CachePriceShortTrendManager:
+"""Tests for cacheManager.CachePriceShortTrendManager:
   - store cross-process (file-backed) + merge snapshot
-  - gate oportunist (should_wait / wait_for_favorable_entry) + epsilon
-  - calc API (windows, get_instant_trend) + canal rapid on_price_update
+  - opportunistic gate (should_wait / wait_for_favorable_entry) and epsilon
+  - calculation API and fast on_price_update channel
 """
 import os, sys, json, time, tempfile, unittest
 from unittest.mock import MagicMock, patch
@@ -65,14 +64,14 @@ class TestStore(unittest.TestCase):
         fname = os.path.join(self.tmp, "nw.json")
         m = cm.CachePriceShortTrendManager(["BTCUSDT"], fname, writer=False)
         m.update_snapshot("BTCUSDT", gradient_recent=0.5)
-        self.assertFalse(os.path.exists(fname))     # non-writer nu scrie
-        self.assertIsNotNone(m.get_snapshot("BTCUSDT"))  # dar are in memorie
+        self.assertFalse(os.path.exists(fname))     # A non-writer does not write.
+        self.assertIsNotNone(m.get_snapshot("BTCUSDT"))  # It still retains memory state.
 
     def test_writer_writes_file(self):
         fname = os.path.join(self.tmp, "w.json")
         m = cm.CachePriceShortTrendManager(["BTCUSDT"], fname, writer=True)
         m.update_snapshot("BTCUSDT", gradient_recent=0.5)
-        self.assertTrue(os.path.exists(fname))      # writer scrie
+        self.assertTrue(os.path.exists(fname))      # A writer writes.
 
     def test_is_snapshot_fresh(self):
         m = cm.CachePriceShortTrendManager(["BTCUSDT"], os.path.join(self.tmp, "f.json"), writer=True)
@@ -89,10 +88,10 @@ class TestStore(unittest.TestCase):
         fname = os.path.join(self.tmp, "fail.json")
         m = cm.CachePriceShortTrendManager(["BTCUSDT"], fname, writer=False)
         m.update_snapshot("BTCUSDT", gradient_recent=0.5)
-        self.assertFalse(os.path.exists(fname))   # non-writer nu scrie
-        m.become_writer()                          # preia scrierea
+        self.assertFalse(os.path.exists(fname))   # A non-writer does not write.
+        m.become_writer()                          # Take over writing.
         m.update_snapshot("BTCUSDT", gradient_recent=0.6)
-        self.assertTrue(os.path.exists(fname))     # acum scrie
+        self.assertTrue(os.path.exists(fname))     # It now writes.
 
     def test_resilient_uses_file_when_fresh(self):
         fname = os.path.join(self.tmp, "res1.json")
@@ -101,18 +100,18 @@ class TestStore(unittest.TestCase):
         reader = cm.CachePriceShortTrendManager(["BTCUSDT"], fname)
         snap = reader.get_snapshot_resilient("BTCUSDT", max_age_sec=10)
         self.assertEqual(snap["gradient_recent"], -0.4)
-        self.assertFalse(reader._computing)   # NU a pornit calcul (fișier proaspăt)
+        self.assertFalse(reader._computing)   # A fresh file does not start computation.
 
     def test_resilient_failover_when_stale(self):
         fname = os.path.join(self.tmp, "res2.json")
         writer = cm.CachePriceShortTrendManager(["BTCUSDT"], fname, writer=True)
-        writer.update_snapshot("BTCUSDT", gradient_recent=-0.4, ts=time.time() - 100)  # vechi
+        writer.update_snapshot("BTCUSDT", gradient_recent=-0.4, ts=time.time() - 100)  # Stale.
         reader = cm.CachePriceShortTrendManager(["BTCUSDT"], fname)
         reader.get_snapshot_resilient(
             "BTCUSDT", max_age_sec=10,
             cache24_managers={"BTCUSDT": self._cache24()}, current_price_mgr=self._cpm())
-        self.assertTrue(reader._computing)   # a pornit calcul propriu (failover)
-        self.assertTrue(reader.writer)       # a devenit writer
+        self.assertTrue(reader._computing)   # Started local failover computation.
+        self.assertTrue(reader.writer)       # Became the writer.
 
     def _cache24(self):
         return _make_cache24("BTCUSDT", _entries_now(60), self.tmp)
@@ -128,17 +127,17 @@ class TestStore(unittest.TestCase):
         fname = os.path.join(self.tmp, "shared2.json")
         writer = cm.CachePriceShortTrendManager(["BTCUSDT"], fname, writer=True)
         writer.update_snapshot("BTCUSDT", gradient_recent=-0.3, slope_small=2.0)
-        # Reader nou se amorsează din fișier la startup
+        # A new reader seeds itself from the file at startup.
         reader = cm.CachePriceShortTrendManager(["BTCUSDT"], fname)   # writer=False
         n = reader.prime_from_file()
         self.assertEqual(n, 1)
         snap = reader.get_snapshot("BTCUSDT")
         self.assertEqual(snap["gradient_recent"], -0.3)
         self.assertEqual(snap["slope_small"], 2.0)
-        # După amorsare, reader-ul are datele în _mem (poate calcula singur ulterior)
-        reader.update_snapshot("BTCUSDT", gradient_recent=0.9)  # writer=False → doar _mem
+        # After seeding, the reader retains data in _mem for later local calculation.
+        reader.update_snapshot("BTCUSDT", gradient_recent=0.9)  # writer=False updates only _mem.
         self.assertEqual(reader.get_snapshot("BTCUSDT")["gradient_recent"], 0.9)
-        self.assertFalse(os.path.exists(fname + ".reader"))     # nu a scris alt fișier
+        self.assertFalse(os.path.exists(fname + ".reader"))     # No additional file was written.
 
     def test_cross_process_reader_sees_writer(self):
         fname = os.path.join(self.tmp, "shared.json")
@@ -150,7 +149,7 @@ class TestStore(unittest.TestCase):
         self.assertEqual(snap["gradient_recent"], -0.7)
 
     def test_cross_process_rapid_updates(self):
-        # două update-uri în aceeași secundă — reader le vede pe ambele (mtime_ns)
+        # The reader sees both same-second updates through mtime_ns.
         fname = os.path.join(self.tmp, "rapid.json")
         writer = cm.CachePriceShortTrendManager(["BTCUSDT"], fname, writer=True)
         reader = cm.CachePriceShortTrendManager(["BTCUSDT"], fname)
@@ -170,15 +169,15 @@ class TestGate(unittest.TestCase):
 
     def _pub(self, **f):
         f.setdefault("ts", time.time())
-        f.setdefault("current_price", 0.0)   # eps=0 → testăm direcția pură
+        f.setdefault("current_price", 0.0)   # eps=0 tests direction without noise.
         self.m.update_snapshot("BTCUSDT", **f)
 
     def test_mode_gradient_vs_full(self):
-        # gradient_recent și growth_coefficient au semne OPUSE → fast decide
+        # Opposing signs expose which metric fast mode selects.
         self._pub(gradient_recent=-0.5, growth_coefficient=0.5)
-        # fast=True: folosește gradient_recent (-0.5) → BUY așteaptă
+        # fast=True uses gradient_recent (-0.5), so BUY waits.
         self.assertTrue(self.m.should_wait("BUY", "BTCUSDT", fast=True))
-        # fast=False (implicit): folosește growth_coefficient (+0.5) → BUY plasează acum
+        # Default fast=False uses growth_coefficient (+0.5), so BUY proceeds.
         self.assertFalse(self.m.should_wait("BUY", "BTCUSDT", fast=False))
 
     def test_buy_waits_falling(self):
@@ -194,9 +193,8 @@ class TestGate(unittest.TestCase):
         self.assertTrue(self.m.should_wait("SELL", "BTCUSDT"))
 
     def test_no_snapshot(self):
-        # 30 iul: necunoscut -> NU asteapta (False), executa imediat. Corectat
-        # dupa o trecere anterioara (True) — user a semnalat riscul: daca
-        # cacheManager.py cade (trend stale), NU vrem ordine blocate deloc.
+        # Unknown direction does not wait and executes immediately. This avoids
+        # blocking orders indefinitely when cacheManager fails or trend data is stale.
         self.assertFalse(self.m.should_wait("BUY", "BTCUSDT"))
 
     def test_stale(self):
@@ -204,15 +202,15 @@ class TestGate(unittest.TestCase):
         self.assertFalse(self.m.should_wait("BUY", "BTCUSDT"))
 
     def test_noise_waits_for_clarity(self):
-        self._pub(gradient_recent=0.4, epsilon=1.0)   # sub epsilon → zgomot
+        self._pub(gradient_recent=0.4, epsilon=1.0)   # Below epsilon is noise.
         self.assertTrue(self.m.should_wait("BUY", "BTCUSDT"))
 
     def test_informed_epsilon_clear_up_places(self):
-        self._pub(gradient_recent=5.0, epsilon=1.0)   # peste epsilon, urcă clar
+        self._pub(gradient_recent=5.0, epsilon=1.0)   # Above epsilon is clearly rising.
         self.assertFalse(self.m.should_wait("BUY", "BTCUSDT"))
 
     def test_wait_returns_immediately_when_unfavorable(self):
-        self._pub(gradient_recent=0.5)   # urcă → BUY nu așteaptă
+        self._pub(gradient_recent=0.5)   # A rising trend does not delay BUY.
         calls = []
         waited = self.m.wait_for_favorable_entry("BUY", "BTCUSDT", max_wait_sec=10,
                                                  sleep_fn=lambda s: calls.append(s))
@@ -233,7 +231,7 @@ class TestGate(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Calc API + canal rapid (start_computation / on_price_update)
+# Calculation API and fast channel (start_computation / on_price_update).
 # ═══════════════════════════════════════════════════════════════════════════
 class TestComputation(unittest.TestCase):
     def setUp(self):
@@ -255,10 +253,9 @@ class TestComputation(unittest.TestCase):
         self.assertIn(ft, (-1, 0, 1))
 
     def test_on_price_update_publishes_fast(self):
-        # 29 iul: calea rapida scrie gradient_recent_fast/trend_fast (NU mai
-        # gradient_recent/final_trend — acele chei sunt acum EXCLUSIV ale caii
-        # lente, evaluate_full, ca sa elimine cursa fast/slow masurata empiric
-        # 14.9%/21.0% disagreement pe date reale).
+        # The fast path writes gradient_recent_fast/trend_fast. The slow
+        # evaluate_full path exclusively owns gradient_recent/final_trend, avoiding
+        # the empirically measured fast/slow race on real data.
         self.m.on_price_update("BTCUSDT", int(time.time() * 1000), 60500.0)
         snap = self.m.get_snapshot("BTCUSDT")
         self.assertIsNotNone(snap)
@@ -277,15 +274,15 @@ class TestComputation(unittest.TestCase):
     def test_configurable_window_durations(self):
         m = cm.CachePriceShortTrendManager(["BTCUSDT"], os.path.join(self.tmp, "cfg.json"),
                                         window_seconds=[120, 3600])
-        self.assertEqual(m.window_small_sec, 120)   # cea mai mică
-        self.assertEqual(m.window_big_sec, 3600)    # cea mai mare
+        self.assertEqual(m.window_small_sec, 120)   # Smallest.
+        self.assertEqual(m.window_big_sec, 3600)    # Largest.
         m.start_computation({"BTCUSDT": self.cache24}, self.cpm)
-        # fereastra mică (primary) reflectă durata configurată (≤ ce e în cache24)
+        # The primary small window reflects the configured Cache24 duration.
         self.assertIsNotNone(m.get_window("BTCUSDT"))
         self.assertIsNotNone(m.get_window("BTCUSDT", 3600))
 
     def test_n_windows_list(self):
-        # LISTĂ de N timpi → sortată crescător; primary = cea mai mică
+        # Sort an N-window list ascending and choose the smallest as primary.
         m = cm.CachePriceShortTrendManager(["BTCUSDT"], os.path.join(self.tmp, "n.json"),
                                         window_seconds=[3600, 60, 600])
         self.assertEqual(m.window_seconds, [60.0, 600.0, 3600.0])
@@ -296,18 +293,18 @@ class TestComputation(unittest.TestCase):
             self.assertIsNotNone(m.get_window("BTCUSDT", sec))
         m.evaluate_full("BTCUSDT")
         snap = m.get_snapshot("BTCUSDT")
-        # back-compat: slope_small (cea mai mică) + slope_big (cea mai mare)
+        # Compatibility aliases map slope_small to smallest and slope_big to largest.
         self.assertIn("slope_small", snap)
         self.assertIn("slope_big", snap)
-        # generic: slope per fiecare fereastră, keyed pe secunde
+        # Generic slope for each window, keyed by seconds.
         for sec in (60, 600, 3600):
             self.assertIn(str(sec), snap["slopes"])
-        self.assertIn("gradient_recent", snap)   # din primary
+        self.assertIn("gradient_recent", snap)   # From the primary window.
 
     def test_thresholds_default_per_window(self):
         m = cm.CachePriceShortTrendManager(["BTCUSDT"], os.path.join(self.tmp, "thd.json"),
                                         window_seconds=[60, 3600])
-        # default: cea mai mică → SMALL, cea mai mare → BIG
+        # Default: smallest maps to SMALL and largest to BIG.
         self.assertEqual(m.threshold_for("BTCUSDT", 60), m.PRICE_CHANGE_THRESHOLD_SMALL)
         self.assertEqual(m.threshold_for("BTCUSDT", 3600), m.PRICE_CHANGE_THRESHOLD_BIG)
 
@@ -319,13 +316,13 @@ class TestComputation(unittest.TestCase):
         self.assertEqual(m.threshold_for("BTCUSDT", 3600), 1.5)
 
     def test_thresholds_per_symbol(self):
-        # BTC vs TAO — volatilitate diferită → praguri diferite
+        # Different BTC and TAO volatility produces different thresholds.
         m = cm.CachePriceShortTrendManager(["BTCUSDT", "TAOUSDT"], os.path.join(self.tmp, "ths.json"),
                                         window_seconds=[60, 3600],
                                         thresholds={"BTCUSDT": {60: 0.3}, "TAOUSDT": {60: 1.2}})
         self.assertEqual(m.threshold_for("BTCUSDT", 60), 0.3)
         self.assertEqual(m.threshold_for("TAOUSDT", 60), 1.2)
-        # fereastra fără override → default per fereastră
+        # A window without an override uses its per-window default.
         self.assertEqual(m.threshold_for("TAOUSDT", 3600), m.PRICE_CHANGE_THRESHOLD_BIG)
 
     def test_thresholds_callable(self):
@@ -341,7 +338,7 @@ class TestComputation(unittest.TestCase):
         self.assertIs(self.m.get_window("BTCUSDT"), w1)
 
     def test_evaluate_full_writes_complete_snapshot(self):
-        # calculul complet (fără logică de trading) → snapshot cu toate metricile
+        # Full calculation without trading logic yields every snapshot metric.
         self.m.evaluate_full("BTCUSDT")
         snap = self.m.get_snapshot("BTCUSDT")
         self.assertIsNotNone(snap)
@@ -357,14 +354,16 @@ class TestComputation(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Fereastra DINAMICA (30 iul) — get_instant_trend_for_window / is_trend_up_for_window
-# / should_wait(window_seconds=...), calculate PE CERERE dintr-un buffer Cache24
-# brut, in loc de cele 2 ferestre fixe precalculate.
+# Dynamic window: get_instant_trend_for_window, is_trend_up_for_window, and
+# should_wait(window_seconds=...) calculate on demand from raw Cache24 data
+# instead of using the two fixed precomputed windows.
 # ═══════════════════════════════════════════════════════════════════════════
 def _entries_trending(n, interval_sec, start, delta, end_offset_sec=0.0):
-    """Serie de preturi STRICT monotona (delta>0 → urcă, delta<0 → scade),
-    ultimul tick la `end_offset_sec` secunde in urma fata de acum (0 → chiar acum,
-    >0 → simuleaza date STALE)."""
+    """Build a strictly monotonic price series ending ``end_offset_sec`` ago.
+
+    Positive delta rises and negative delta falls. Zero ends now; a positive
+    offset simulates stale data.
+    """
     now_ms = int(time.time() * 1000)
     end_ms = now_ms - int(end_offset_sec * 1000)
     step_ms = int(interval_sec * 1000)
@@ -389,8 +388,8 @@ class TestDynamicWindow(unittest.TestCase):
         return m
 
     def test_unavailable_without_start_computation(self):
-        # manager "gol" (niciun start_computation) → fereastra dinamica indisponibila,
-        # NU crapa — "necunoscut", exact ca lipsa de snapshot.
+        # Without start_computation, the dynamic window is unavailable but does
+        # not crash; it behaves as unknown, like a missing snapshot.
         m = _mgr(self.tmp)
         self.assertIsNone(m.get_instant_trend_for_window("BTCUSDT", 60))
         self.assertFalse(m.is_trend_up_for_window("BTCUSDT", 60))
@@ -417,37 +416,35 @@ class TestDynamicWindow(unittest.TestCase):
         self.assertFalse(m.is_trend_up_for_window("BTCUSDT", 60))
 
     def test_stale_returns_none(self):
-        # ultimul tick e mai vechi decat TREND_STALE_SEC → tratat ca stale, ca la fresh_snapshot
+        # A final tick older than TREND_STALE_SEC is treated as stale.
         stale_offset = cm.CachePriceShortTrendManager.TREND_STALE_SEC + 30
         m = self._mgr_with_cache24(self._cache24_up(end_offset_sec=stale_offset))
         self.assertIsNone(m.get_instant_trend_for_window("BTCUSDT", 60))
         self.assertFalse(m.should_wait("BUY", "BTCUSDT", window_seconds=60))
 
     def test_too_few_samples_returns_none(self):
-        # fereastra ceruta (14s, minimul CM_DYNAMIC_WINDOW_MIN_SEC) prinde <3 tick-uri
-        # dintr-o serie cu esantioane la fiecare 10s.
+        # A 14-second minimum window contains fewer than three ten-second samples.
         m = self._mgr_with_cache24(self._cache24_up(n=20, interval_sec=10.0))
         self.assertIsNone(m.get_instant_trend_for_window("BTCUSDT", 14))
 
     def test_window_clamped_to_configured_bounds(self):
         m = self._mgr_with_cache24(self._cache24_up(n=300, interval_sec=1.0))
-        below = m.get_instant_trend_for_window("BTCUSDT", 1.0)   # sub CM_DYNAMIC_WINDOW_MIN_SEC
+        below = m.get_instant_trend_for_window("BTCUSDT", 1.0)   # Below configured minimum.
         self.assertIsNotNone(below)
         self.assertEqual(below["window_seconds"], cm.CM_DYNAMIC_WINDOW_MIN_SEC)
-        above = m.get_instant_trend_for_window("BTCUSDT", 999999.0)  # peste CM_DYNAMIC_WINDOW_MAX_SEC
+        above = m.get_instant_trend_for_window("BTCUSDT", 999999.0)  # Above configured maximum.
         self.assertIsNotNone(above)
         self.assertEqual(above["window_seconds"], cm.CM_DYNAMIC_WINDOW_MAX_SEC)
 
     def test_should_wait_uses_dynamic_path_not_snapshot(self):
-        # Publicam manual un snapshot cu growth_coefficient POZITIV (ar spune "nu astepta"
-        # pt BUY pe fereastra implicita), dar bufferul brut Cache24 (fereastra custom) arata
-        # o scadere clara -> should_wait(window_seconds=custom) trebuie sa reflecte
-        # bufferul brut, NU snapshot-ul precalculat.
+        # Publish a positive snapshot that would allow BUY on the default window,
+        # while raw Cache24 data shows a clear decline. The custom-window decision
+        # must follow raw data rather than the precomputed snapshot.
         m = self._mgr_with_cache24(self._cache24_up(delta=-5.0))
         m.update_snapshot("BTCUSDT", growth_coefficient=5.0, ts=time.time())
-        self.assertFalse(m.should_wait("BUY", "BTCUSDT"))                       # fereastra implicita: nu asteapta
+        self.assertFalse(m.should_wait("BUY", "BTCUSDT"))                       # Default does not wait.
         self.assertTrue(m.should_wait("BUY", "BTCUSDT", window_seconds=60,
-                                      use_noise_gate=False))                    # fereastra dinamica: asteapta (scade)
+                                      use_noise_gate=False))                    # Falling dynamic window waits.
 
     def test_should_wait_dynamic_sell_side(self):
         m = self._mgr_with_cache24(self._cache24_up(delta=5.0))
@@ -455,7 +452,7 @@ class TestDynamicWindow(unittest.TestCase):
         self.assertFalse(m.should_wait("BUY", "BTCUSDT", window_seconds=60, use_noise_gate=False))
 
     def test_wait_for_favorable_entry_forwards_window_seconds(self):
-        m = self._mgr_with_cache24(self._cache24_up(delta=-5.0))   # scade -> BUY asteapta (fereastra dinamica)
+        m = self._mgr_with_cache24(self._cache24_up(delta=-5.0))   # Falling dynamic window delays BUY.
         calls = []
         waited = m.wait_for_favorable_entry(
             "BUY", "BTCUSDT", max_wait_sec=2, poll_sec=0.5, window_seconds=60,
@@ -465,8 +462,10 @@ class TestDynamicWindow(unittest.TestCase):
 
 
 class TestCache24RecentEntriesBisect(unittest.TestCase):
-    """get_recent_entries a trecut de la list-comprehension (O(n)) la bisect
-    (O(log n + k)) — verifica exact aceeasi iesire, pt orice cutoff."""
+    """Verify bisect produces the former O(n) filter's exact output.
+
+    The optimized complexity is O(log n + k) for every cutoff.
+    """
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
 
