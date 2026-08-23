@@ -23,24 +23,21 @@ import order_guard
 import symbols as sym
 import config as cfg
 import priceAnalysis as pa
-from . import order_id_context as rc   # client_order_id + tag context (mutat in binance_api/)
+from . import order_id_context as rc   # client_order_id and tag context moved into binance_api.
 
 from . import bapi as api
 from .bapi_client import client
-from lock import trade_cooldown   # gate anti rapid-fire (mutat in pachetul lock/)
+from lock import trade_cooldown   # Rapid-fire gate moved into the lock package.
 
-# 30 iul: incarca parametrii tunabili din bapi_placeorder_config.env (versionat,
-# se COMITE — fara secrete) INAINTE de a citi orice os.environ.get(...) de mai
-# jos. botcore.load_dotenv NU suprascrie variabile deja setate in mediul real,
-# doar completeaza ce lipseste — sigur de adaugat fara sa schimbe ce era deja
-# configurat altfel. Acelasi tipar ca tradeall_config.env/monitortrades_config.env.
+# Load versioned, non-secret tuning parameters before reading the environment below.
+# ``botcore.load_dotenv`` never overwrites variables already set in the real environment;
+# it only fills missing values, matching tradeall_config.env and monitortrades_config.env.
 from botcore import load_dotenv as _load_dotenv
 _load_dotenv("bapi_placeorder_config.env")
 
-# Valorile de mai jos erau constante HARDCODATE direct in semnaturile functiilor
-# de mai jos pana acum (unele inca din 3 iun, `722a548`) — extrase cu valorile
-# IMPLICITE identice (zero schimbare de comportament daca nu modifici config.env).
-# Vezi bapi_placeorder_config.env pt comentarii detaliate per parametru.
+# These values were hardcoded in function signatures. They were extracted with identical
+# defaults, so behavior changes only when config.env overrides them. See
+# bapi_placeorder_config.env for detailed parameter documentation.
 PLACE_ORDER_FEE_PCT = float(os.environ.get("PLACE_ORDER_FEE_PCT", "0.001"))
 PLACE_ORDER_HOURS = int(float(os.environ.get("PLACE_ORDER_HOURS", "5")))
 PLACE_ORDER_SAFEBACK_SEC = int(float(os.environ.get("PLACE_ORDER_SAFEBACK_SEC", str(48 * 3600 + 60))))
@@ -52,30 +49,30 @@ PLACE_ORDER_WAIT_MODE = os.environ.get("PLACE_ORDER_WAIT_MODE", "full").strip()
 
 
 class WeightLimitBlock(Exception):
-    """Ridicată când limita 24h de tranzacționare e atinsă — nu are sens să retryi."""
+    """Raised when the 24-hour trade limit makes retrying pointless."""
     pass
 
 
 def _resolve_qty(qty):
-    """Model uniform de cantitate (21 iul): qty=None ("nu dau cantitate") ->
-    foloseste maximul PERMIS de algoritm (apply_weight_limit + clamp pe
-    balanta reala, mai jos in lant) — nu un placeholder numeric arbitrar
-    (vechiul api.quantities[symbol], inconsistent intre 1000 si 10000 USD
-    nominal, oricum irelevant: era mereu taiat de weight-limit). Unde SE DA
-    o cantitate explicita, ramane neschimbata — algoritmul tot o plafoneaza
-    ca gard de siguranta, dar intentia apelantului nu e alterata."""
+    """Normalize the quantity model used by the placement pipeline.
+
+    ``qty=None`` means use the maximum allowed by weight limits and the real-balance
+    clamp rather than an arbitrary numeric placeholder. An explicit quantity remains
+    unchanged here; downstream safety guards may still cap it without changing the
+    caller's stated intent.
+    """
     return float("inf") if qty is None else qty
 
 
 def _maybe_wait_trend(side, symbol):
-    """Gate de întârziere oportunistă, partajat de toate funcțiile de plasare.
-    Așteaptă cât timp trendul aduce un preț mai bun (BUY: preț scade,
-    SELL: preț urcă), până la PLACE_ORDER_MAX_WAIT_SEC. No-op dacă
-    PLACE_ORDER_WAIT_TREND e False sau managerul de trend lipsește.
-    Returnează secundele așteptate.
-    30 iul: wait_trend/max_wait_sec ELIMINATE ca parametri (erau MOARTE — singurul
-    apelant, __place_order, nu le suprascria niciodata; nimeni altcineva nu apela
-    aceasta functie privata). Citite direct din config, sursa unica de adevar."""
+    """Shared opportunistic-delay gate for every placement function.
+
+    Wait while trend movement improves the price, bounded by
+    ``PLACE_ORDER_MAX_WAIT_SEC``. Return the elapsed wait and do nothing when the gate
+    is disabled or the trend manager is unavailable.
+    The former wait parameters were dead because the only caller never overrode them.
+    Read them directly from configuration as the single source of truth.
+    """
     if not PLACE_ORDER_WAIT_TREND:
         return 0.0
     try:
@@ -92,8 +89,7 @@ def _maybe_wait_trend(side, symbol):
 
 
 def _fresh_price(symbol):
-    """Prețul cel mai proaspăt (WS via CacheCurrentPriceManager), cu fallback
-    pe bapi.get_current_price. Folosit după wait, pentru reacție rapidă."""
+    """Return the freshest WS price, falling back to ``bapi.get_current_price``."""
     try:
         import cacheManager as cm
         p = cm.get_current_price_manager().get_price_value(symbol)
@@ -115,23 +111,23 @@ def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
             print("Weight is None, set it at default 0.03")
             weight = 0.03
 
-        # 2. Obține cât s-a tranzacționat deja în ultimele 24h (în quote)
+        # 2. Calculate already-traded quote value over the previous 24 hours.
         stats = apiorders.get_total_traded_stats(symbol)
         traded_value = stats.get(order_type.upper(), {}).get('total_value', 0)
 
-        # 3. Calculează valoarea totală tranzacționabilă (tranzacționată + disponibilă)
+        # 3. Calculate total tradable value: already traded plus available.
         total_value_reference = traded_value + available_qty * price
-        # 4. Calculează plafonul maxim permis (în quote) pe baza weight
+        # 4. Calculate the weight-based maximum quote allowance.
         max_trade_value = total_value_reference * weight
         #max_trade_value = available_qty * price * weight
 
         # 5. Cat mai pot tranzactiona in USDC
         remaining_trade_value = max(0, max_trade_value - traded_value)
 
-        # qty maxim în în cantitate/baza (BTC, TAO etc.)
+        # Convert the maximum allowance to base-asset quantity.
         remaining_trade_qty = remaining_trade_value / price if price else 0
 
-        # alegem cantitatea cea mai mică între ce vreau și cât am voie
+        # Select the smaller of requested and permitted quantity.
         adjusted_qty = min(required_qty, remaining_trade_qty)
 
         print(f"apply_weight_limit → {order_type} {symbol}, "
@@ -283,20 +279,24 @@ def place_SELL_order_at_market(symbol, qty, client_order_id=None):
 
 
 def _last_opposite_fill_price(symbol, order_type):
-    """Pretul ULTIMEI executii OPUSE pe symbol — PERSISTENT, fara limita de timp.
-    Pt BUY -> ultimul SELL executat; pt SELL -> ultimul BUY executat.
-    Returneaza None DOAR cand cache-ul e OK dar nu exista fill opus (referinta lipsa legitima).
-    RIDICA exceptie daca managerul/cache-ul nu e disponibil -> apelantul decide fail-closed.
-    Delegat la clasa dedicata CacheTradeManager (fills reale via WS) -> ZERO apel API."""
+    """Return the latest opposite fill price without a time limit.
+
+    BUY uses the latest SELL fill and SELL uses the latest BUY fill. Return ``None``
+    only when the cache is healthy but has no opposite fill. Raise when the manager or
+    cache is unavailable so the caller can fail closed. CacheTradeManager supplies real
+    WebSocket fills without an API call.
+    """
     import cacheManager as cm
     return cm.get_cache_manager("Trade").last_opposite_fill_price(symbol, order_type)
 
 
 def _last_opposite_fill_price_api(symbol, order_type):
-    """Fallback API DIRECT (get_my_trades) cand cache-ul nu are tranzactia opusa
-    (ex. cacheManager nepopulat inca / simbol nou). RIDICA exceptie pe eroare ->
-    apelantul face fail-closed. None DOAR daca Binance confirma ca nu exista opus."""
-    want_buyer = (order_type.upper() == "SELL")   # opusul unui SELL e un BUY (isBuyer=True)
+    """Query ``get_my_trades`` when the cache has no opposite fill.
+
+    This covers a new symbol or an unpopulated cache. Raise on API errors so the caller
+    fails closed; return ``None`` only when Binance confirms no opposite fill exists.
+    """
+    want_buyer = (order_type.upper() == "SELL")   # The opposite of SELL is BUY (isBuyer=True).
     for tr in reversed(client.get_my_trades(symbol=symbol, limit=200)):
         if tr["isBuyer"] == want_buyer:
             return float(tr["price"])
@@ -305,16 +305,11 @@ def _last_opposite_fill_price_api(symbol, order_type):
 
 def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
                         bypass_profit_guard=False):
-    # 30 iul: max_daily_trades si profit_percentage ELIMINATE ca parametri (erau
-    # MOARTE — 0 apelanti in tot repo-ul, singurul apelant real, place_safe_order
-    # mai jos, trecea mereu EXACT PLACE_ORDER_MAX_DAILY_TRADES / respectiv
-    # order_guard.margin_for("binance"), niciodata altceva). Citite direct mai
-    # jos, ca sursa unica de adevar — nu mai sunt parametri de suprascris.
-    # bypass_profit_guard=True -> IGNORA gardul de profit/istorie. ATENTIE: e DIFERIT de
-    # `force` (care doar executa la MARKET in __place_order, dar RESPECTA gardul). Sare peste
-    # gardul de profit SI peste fail-closed, pastrand siguranta (limita zilnica, anti-spam).
-    # Il paseaza DISJUNCTORUL DE CRASH (trailing: force=True + bypass=True = market, fara profit).
-    # Tradingul normal NU-l paseaza -> gard activ; eroare cache/manager fara bypass -> fail-closed.
+    # Removed dead max_daily_trades and profit_percentage parameters. The only real caller
+    # always supplied these exact configured values, now read here as the source of truth.
+    # ``bypass_profit_guard=True`` skips profit/history and fail-closed checks, unlike
+    # ``force``, which only selects MARKET execution. Daily limits and anti-spam remain.
+    # The crash circuit breaker uses both flags; normal trading keeps this bypass disabled.
     #import bapi_trades as apitrades
     from . import bapi_allorders as apiorders
     from providers.market_api import BinanceProvider
@@ -330,7 +325,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
 
         if order_type == "BUY":
             price = round(min(price, current_price), 0)
-        else:  # pentru "SELL"
+        else:  # SELL
             price = round(max(price, current_price), 0)
 
         qty = round(qty, 4)
@@ -338,16 +333,10 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
         opposite_order_type = "SELL" if order_type == "BUY" else "BUY"
         backdays = math.ceil(time_back_in_seconds / 86400)
 
-        # 30 iul: plafon zilnic + anti-spam DELEGATE la order_guard.daily_limit_guard()
-        # — elimina o a DOUA implementare a EXACT aceleiasi logici (era duplicata cu
-        # cea folosita deja de Kraken/Hyperliquid prin Instrument.place(), commit
-        # d8f7c86). BinanceProvider.get_orders() e doar un wrapper subtire peste
-        # apiorders.get_trade_orders() — ACEEASI sursa de date ca inainte, zero
-        # schimbare reala (formula backdays din daily_limit_guard e acum IDENTICA,
-        # math.ceil, ca sa nu schimbe pragul efectiv fata de cei 18 luni de aici).
-        # max_daily_trades/safeback_sec raman din PROPRIA configurare Binance
-        # (PLACE_ORDER_MAX_DAILY_TRADES / time_back_in_seconds), nu din
-        # order_guard.conf, ca sa nu introduca un al 2-lea knob care ar putea diverge.
+        # Delegate daily limits and anti-spam to order_guard.daily_limit_guard, removing
+        # a duplicate of the provider-neutral logic. BinanceProvider.get_orders wraps
+        # the same apiorders data source. Keep Binance's own limit and lookback settings
+        # instead of introducing a second potentially divergent order_guard knob.
         ok, reason = order_guard.daily_limit_guard(
             provider, symbol, order_type,
             max_daily_trades=PLACE_ORDER_MAX_DAILY_TRADES,
@@ -359,9 +348,8 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
         print(f"Am {len(oposite_trades)} trades de tip {opposite_order_type} pentru {backdays} zile. ")
 
         time_limit = float(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
-        # Filtram tranzactiile opuse care au avut loc in intervalul specificat
-        # price > 0: ignora orice ordin fara pret real (defensiv; dupa fix-ul din cacheManager
-        # anulatele nu mai ajung in cache, dar pastram filtrul ca plasa de siguranta).
+        # Keep opposite trades in the requested interval. Requiring price > 0 remains a
+        # defensive safety net even though canceled orders no longer enter the cache.
         recent_opposite_trades = [trade for trade in oposite_trades
                                   if float(trade['timestamp']) >= float(time_limit)
                                   and float(trade.get('price', 0)) > 0]
@@ -370,21 +358,16 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
             readable = datetime.fromtimestamp(trade['timestamp'] / 1000)
             print(f"[CHECK] {readable} - price: {trade['price']} - included: {float(trade['timestamp']) >= time_limit}")
         
-        # ---- GARD PROFIT (AGNOSTIC, order_guard) ----
-        # Logica de profit traieste acum decuplat in order_guard, ca sa ruleze IDENTIC si pe
-        # alte venue-uri (ex. Kraken HYPE). Referinta, in cascada: 1) min(sell)/max(buy) din
-        # fereastra (Order cache, calculat aici); 2) altfel ultimul fill opus al providerului
-        # (BinanceProvider.last_opposite_fill = cache fills + API direct). bypass_profit_guard
-        # sare tot; orice eroare de citire ridica -> prins de except-ul de jos -> fail-closed.
+        # Provider-neutral profit guard. Reference priority is the window's minimum SELL
+        # or maximum BUY, then the provider's latest opposite fill. The bypass skips both;
+        # read errors reach the handler below and fail closed.
         if not bypass_profit_guard:
             window_ref = None
-            if recent_opposite_trades:                       # fereastra (time-windowed) PRIMAR
+            if recent_opposite_trades:                       # Primary time-window reference.
                 _prices = [float(t['price']) for t in recent_opposite_trades]
                 window_ref = min(_prices) if order_type == "BUY" else max(_prices)
-            # profit_percentage nu mai e parametru (30 iul, dead — vezi nota de mai sus);
-            # calculat aici, lazy, doar cand chiar se foloseste (nu si pe calea bypass).
-            # `provider` (BinanceProvider) e deja construit mai sus, pt daily_limit_guard —
-            # reutilizat aici (e stateless, dar zero motiv sa construiesti 2 instante).
+            # Resolve the configured margin lazily only when the guard is used. Reuse the
+            # stateless provider already created for the daily-limit guard.
             if not order_guard.profit_guard(provider, symbol, order_type, price,
                                             order_guard.margin_for("binance"), window_ref=window_ref):
                 return False, "profit_guard"
@@ -394,8 +377,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
         print(f"Eroare la verificare if place safe order {order_type}: {e}")
         return False, "guard_check_api_exception"
     except Exception as e:
-        # obs.1: nu pot aduce datele / eroare manager -> fara bypass fail-closed (NU tranzactionez);
-        # cu bypass_profit_guard (disjunctor crash) lasam sa treaca (trebuie executat).
+        # Data or manager errors fail closed unless the crash circuit breaker explicitly bypasses.
         print(f"[GARD] {order_type} {symbol}: verificare esuata ({e}) -> "
               f"{'TREC (bypass)' if bypass_profit_guard else 'BLOCAT (fail-closed)'}")
         return bool(bypass_profit_guard), (None if bypass_profit_guard else "guard_check_failed")
@@ -405,11 +387,10 @@ from decimal import Decimal, ROUND_DOWN
 
 
 def _guarded_market_place(symbol, order_type, price, qty, **kwargs):
-    """Import lazy pentru a evita ciclul bapi_placeorder <-> market_api.
+    """Import lazily to avoid the bapi_placeorder/market_api cycle.
 
-    Punct unic usor de testat pentru adaptoarele legacy de mai jos. Orice ordin
-    venit prin API-ul vechi intra astfel in acelasi pipeline ``Instrument.place``
-    folosit de rtrade/tradeall si de ceilalti provideri.
+    This testable choke point routes legacy API orders through the same
+    ``Instrument.place`` pipeline used by rtrade, tradeall, and other providers.
     """
     from providers.market_api import api as market_api
     return market_api.place(symbol, order_type, price, qty, **kwargs)
@@ -419,7 +400,7 @@ def place_safe_order(order_type, symbol, price, qty=None,
                      safeback_seconds=PLACE_ORDER_SAFEBACK_SEC, force=False,
                      cancelorders=False, hours=PLACE_ORDER_HOURS,
                      bypass_profit_guard=False, _reason_out=None):
-    """Adaptor compatibil SAFE -> pipeline-ul comun (fara smart repricing)."""
+    """Adapt the compatible safe API to the common pipeline without smart repricing."""
     order_type = order_type.upper()
     qty = _resolve_qty(qty)
     sym.validate_params(order_type, symbol, price, qty)
@@ -432,25 +413,25 @@ def place_safe_order(order_type, symbol, price, qty=None,
         hours=hours,
         bypass_profit_guard=bypass_profit_guard,
     )
-    # Pipeline-ul comun jurnalizeaza motivul exact. Dict-ul ramane acceptat pentru
-    # compatibilitate, dar vechiul lant nu mai dubleaza evaluarea gardurilor.
+    # The common pipeline logs the exact reason. Retain dict compatibility without
+    # duplicating guard evaluation in the legacy chain.
     if order is None and _reason_out is not None:
         _reason_out.setdefault("reason", "common_pipeline_refused")
     return order
     
 
-# 30 iul: jurnalul FLEET-WIDE extras in order_outcomes_log.py (sursa unica —
-# reutilizat acum si de Instrument.place() pt Kraken/Hyperliquid, care inainte
-# erau invizibile in logger/order_outcomes_*.log). Re-export pt compat inapoi
-# (orice cod care citea bapi_placeorder.ORDER_OUTCOMES_LOG_DIR direct).
+# The fleet-wide journal lives in order_outcomes_log.py as a single source used by
+# Instrument.place for every provider. Re-export the directory for backward compatibility.
 import order_outcomes_log as _outcomes_log
 ORDER_OUTCOMES_LOG_DIR = _outcomes_log.ORDER_OUTCOMES_LOG_DIR
 
 
 def _log_order_outcome(symbol, side, price, qty, outcome, refuse_reason, motivation):
-    """Jurnal FLEET-WIDE (toti apelantii place_order_smart): un rand
-    pipe-delimited per incercare de ordin. Observational — nu poate afecta
-    returul catre caller (protejat de try/except in order_outcomes_log)."""
+    """Write one pipe-delimited fleet-wide record per placement attempt.
+
+    This is observational and cannot affect the caller's return value because the
+    logging implementation contains its own exception boundary.
+    """
     try:
         caller = os.path.basename(sys._getframe(2).f_code.co_filename)
     except Exception:
@@ -459,10 +440,8 @@ def _log_order_outcome(symbol, side, price, qty, outcome, refuse_reason, motivat
                                     motivation, caller=caller)
 
 
-# `pair` ramane in semnatura DOAR pt compatibilitate cu apelantii existenti
-# (tradeall.py, archive/old_trade/trade3.py, trade5.py trec pair=True explicit) — dar
-# e IGNORAT complet (era deja suprascris necontitionat cu False in corp, cod
-# mort de multa vreme). Nu sterge parametrul fara sa actualizezi si apelantii.
+# Retain ``pair`` only for compatibility with callers that explicitly pass it. It is
+# intentionally ignored legacy code; do not remove it without updating those callers.
 def place_order_smart(order_type, symbol, price, qty=None, safeback_seconds=PLACE_ORDER_SAFEBACK_SEC, force=False, cancelorders=True, hours=PLACE_ORDER_HOURS, pair=None, motivation=None):
     order_type = order_type.upper()
     qty = _resolve_qty(qty)
@@ -479,21 +458,19 @@ def place_order_smart(order_type, symbol, price, qty=None, safeback_seconds=PLAC
 
 
 # ============================================================================
-# MECANICA de plasare Binance, EXTRASA ca sa fie apelata prin proxy-ul unic
-# (Instrument.place() -> BinanceProvider). 30 iul: aceste 2 functii contin DOAR
-# mecanica specific-Binance (ajustare pret + curatare ordine opuse; clamp de
-# fee/balanta + min-notional + dispatch limit/market). PROTECTIA (plafon zilnic,
-# gard profit, weight, trend-wait, cooldown, jurnal) traieste in stratul AGNOSTIC
-# (Instrument.place + order_guard) — NU aici. API-urile legacy sunt acum adaptoare
-# subtiri catre acelasi pipeline; aceste functii raman mecanica venue-ului.
+# Binance placement mechanics called through Instrument.place and BinanceProvider.
+# These functions contain only venue-specific price adjustment, opposite-order cleanup,
+# fee/balance and minimum-notional clamps, and limit/market dispatch. Daily limits,
+# profit/weight/trend/cooldown guards, and journaling belong to the agnostic layer.
 # ============================================================================
 
 def adjust_price_and_cancel_opposite(order_type, symbol, price, cancel_opposite=True):
-    """MECANICA pret Binance (ex place_order_smart): (optional) anuleaza ordinele
-    OPUSE contraproductive (SELL sub pretul de BUY / BUY peste pretul de SELL), apoi
-    ajusteaza pretul (clamp la current +- nudge 0.1%, rotunjit). Intoarce pretul de
-    folosit. Rulat de Instrument.place() INAINTE de gardul de profit — ca gardul sa
-    vada exact acelasi pret ca in lantul vechi."""
+    """Apply Binance price mechanics and optionally cancel adverse opposite orders.
+
+    Cancel SELL below a BUY price or BUY above a SELL price, then clamp to current
+    price with a rounded 0.1% nudge. Instrument.place runs this before the profit guard
+    so the guard sees the same price as the legacy chain.
+    """
     order_type = order_type.upper()
     current_price = api.get_current_price(symbol)
     if order_type == "BUY":
@@ -519,12 +496,13 @@ def adjust_price_and_cancel_opposite(order_type, symbol, price, cancel_opposite=
 
 def place_order_mechanics(order_type, symbol, price, qty, force=False,
                           client_order_id=None):
-    """MECANICA de trimitere Binance (ex __place_order, DOAR partea de mecanica):
-    clamp de fee/balanta reala, min-notional (100 USDC), rotunjire, dispatch
-    limit/market. `qty` vine DEJA din QuantityDecision (Instrument.place).
-    NU face weight/trend-wait/cooldown/garduri — acelea sunt in stratul agnostic.
-    Intoarce order dict sau None. Cooldown-ul (RAII) e tinut de Instrument.place in
-    jurul acestui apel."""
+    """Execute Binance-specific submission mechanics.
+
+    Clamp to real balance after fees, enforce the 100 USDC minimum notional, round,
+    and dispatch a limit or market order. ``qty`` already comes from QuantityDecision.
+    Weight, trend, cooldown, and other guards belong to the agnostic layer.
+    Instrument.place holds the RAII cooldown around this call. Return an order or None.
+    """
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)
     try:
@@ -538,8 +516,8 @@ def place_order_mechanics(order_type, symbol, price, qty, force=False,
             print(f"No sufficient quantity available to place the {order_type} order.")
             return None
 
-        # Ultimul check ramane langa submit pentru cazul in care soldul s-a
-        # schimbat dupa planificare. available_qty este deja cantitate de baza.
+        # Keep the final check next to submission in case balance changed after planning.
+        # ``available_qty`` is already expressed as base quantity.
         fee_cap = fee_cap_quantity(available_qty, PLACE_ORDER_FEE_PCT)
         if qty > fee_cap:
             print(f"Adjusting {order_type} qty from {qty:.8f} to "
