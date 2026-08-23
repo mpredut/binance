@@ -1,24 +1,16 @@
 #!/usr/bin/env python3
-"""
-shadow_signals.py — semnale SHADOW (strict observationale) rulate in paralel
-cu modelul live din tradeall.py. NU iau decizii, NU ating place_order_smart —
-doar publica chei suplimentare in snapshot + jurnalizeaza tranzitiile proprii,
-ca sa poata fi comparate (vizual in tradeall_observe.py, cantitativ in
-offline/backtests/tradeall.py) cu modelul actual INAINTE de orice promovare.
+"""Kalman trend and adaptive-volatility signals consumed by tradeall.
 
-Componente:
-  KalmanTrend  — filtru Kalman constant-velocity (stare: nivel + viteza).
-                 Output: viteza trendului in %/min + incertitudinea ei +
-                 directie {-1,0,+1} doar cand |vel| > 1.64*std (~90% incredere).
-  vol_1h_pct   — volatilitate estimata la orizont 1h din fereastra BIG
-                 existenta (log-returns, scalare sqrt-timp).
-  ShadowJournal— writer pipe-text (acelasi tipar/sanitizare ca log_decision),
-                 un rand DOAR la tranzitie de trend Kalman (condensat).
+The Kalman trend is no longer purely observational: tradeall uses it to gate all
+orders and optionally initiate primary orders for configured symbols. Adaptive
+reentry and DCA thresholds remain observational because tradeall has no consumer
+for them. All fields are published to snapshots, and Kalman transitions are
+journaled for visual and quantitative comparison.
 
-Config optional prin env (default-uri sanatoase in cod):
-  SHADOW_KALMAN_QR   raport zgomot proces/masurare (default 0.05)
-  SHADOW_K_REENTRY   k pentru prag adaptiv reintrare = k * vol_1h (default 2.0)
-  SHADOW_K_DCA       k pentru prag adaptiv DCA       = k * vol_1h (default 1.0)
+KalmanTrend is a constant-velocity level/velocity filter that reports percentage
+velocity, uncertainty, and a {-1, 0, +1} direction. vol_1h_pct estimates one-hour
+volatility from log returns. ShadowJournal writes one condensed row per transition.
+Environment variables configure process/measurement noise and adaptive multipliers.
 """
 from __future__ import annotations
 
@@ -37,49 +29,45 @@ def _f_env(name: str, default: float) -> float:
         return default
 
 
-KALMAN_QR = _f_env("SHADOW_KALMAN_QR", 0.0005)   # sweep 17 iul: 94% stabil dupa detectie, latenta ~15s
+KALMAN_QR = _f_env("SHADOW_KALMAN_QR", 0.0005)   # Sweep: 94% stable after detection, ~15s latency.
 K_REENTRY = _f_env("SHADOW_K_REENTRY", 2.0)
 K_DCA = _f_env("SHADOW_K_DCA", 1.0)
 
-# Kalman e hranit SUBESANTIONAT (nu la fiecare tick): pe tick-uri de 1s viteza
-# urmareste oscilatiile de minute -> mii de tranzitii/zi (masurat 19 iul: 2868).
-# La 60s: ~4 tranzitii/zi pe BTC — scara de timp comparabila cu modelul actual.
+# Feed Kalman at a subsampled cadence. One-second ticks track minute oscillations
+# and produced thousands of daily transitions; 60 seconds yields about four BTC
+# transitions per day, comparable with the primary model's timescale.
 KALMAN_SAMPLE_SEC = _f_env("SHADOW_KALMAN_SAMPLE_SEC", 60.0)
 
-CONF_ENTER = 1.64         # intra pe directie la |vel| > 1.64*std (~90% incredere)
-CONF_EXIT = _f_env("SHADOW_KALMAN_EXIT", 0.8)   # histerezis: iese abia sub 0.8*std
-MIN_VEL_PCT_MIN = 0.005   # sub 0.005%/min consideram plat indiferent de std
+CONF_ENTER = 1.64         # Enter direction above 1.64 standard deviations (~90%).
+CONF_EXIT = _f_env("SHADOW_KALMAN_EXIT", 0.8)   # Exit only below 0.8 std for hysteresis.
+MIN_VEL_PCT_MIN = 0.005   # Treat below 0.005%/minute as flat regardless of std.
 DT_MIN = 0.05
-# 21 iul: peste acest gol (retea jos / proces oprit — incidentul VPN/DNS din 19
-# iul), viteza acumulata INAINTE de gol nu mai spune nimic despre ACUM. Vechiul
-# cod doar plafona dt la 900s si continua sa filtreze prin el — subestima cat de
-# nesigur devenise filtrul exact cand ar fi trebuit sa fie mai putin increzator
-# (acelasi tipar de bug ca timestamp-ul fabricat reparat azi in cacheManager).
-# 300s = acelasi prag folosit deja in tradeall.py (GATE_STALE_SEC) pt "semnal
-# prea vechi, nu-l mai folosi".
+# After a network or process gap, pre-gap velocity no longer describes current
+# state. Reset after 300 seconds rather than capping dt and understating filter
+# uncertainty. This matches tradeall's stale-signal gate.
 GAP_RESET_SEC = 300.0
 
 
 class KalmanTrend:
-    """Filtru Kalman 1D constant-velocity pentru UN simbol.
+    """Apply a one-dimensional constant-velocity Kalman filter to one symbol.
 
-    Stare x=[nivel, viteza(pret/sec)]; observatie = pretul. R (zgomotul de
-    masurare) vine din epsilon-ul deja calculat de PriceWindow (unitati
-    absolute de pret); Q = KALMAN_QR * R, discretizat cu dt real."""
+    State is level and price-per-second velocity; observation is price. R comes
+    from PriceWindow epsilon in absolute price units, and Q is KALMAN_QR times R
+    discretized using actual elapsed time.
+    """
 
     def __init__(self, qr: float = KALMAN_QR):
         self.qr = qr
-        self.x = None          # [nivel, viteza]
-        self.P = None          # covarianta starii
+        self.x = None          # [level, velocity]
+        self.P = None          # State covariance.
         self.last_ts = None
-        self.trend = 0         # -1 / 0 / +1 (ultima directie confirmata)
+        self.trend = 0         # Last confirmed direction: -1, 0, or +1.
 
     def update(self, ts: float, price: float, epsilon: float | None) -> dict:
-        """Un pas predict+update. Returneaza dict cu vel (%/min), vel_std,
-        trend si old_trend (pt detectarea tranzitiei de catre apelant)."""
+        """Run one predict/update step and return velocity and trend fields."""
         eps = float(epsilon) if epsilon else 0.0
         if eps <= 0:
-            eps = max(price * 1e-4, 1e-9)   # warm-up: zgomot presupus 0.01% din pret
+            eps = max(price * 1e-4, 1e-9)   # Warm-up assumes noise at 0.01% of price.
         R = eps * eps
 
         if self.x is None:
@@ -90,10 +78,8 @@ class KalmanTrend:
 
         raw_dt = ts - self.last_ts
         if raw_dt > GAP_RESET_SEC:
-            # Gol mai lung decat GAP_RESET_SEC: NU propagam viteza veche prin el
-            # (nici macar plafonata) — reset identic warm-up-ului. vel=0 duce
-            # natural (prin _out) la trend FLAT pana se aduna date noi dupa gol,
-            # in loc sa iasa din gol "increzator" pe o directie stale.
+            # Do not propagate stale velocity across a long gap. Reset as at warm-up
+            # so zero velocity remains flat until enough new data accumulates.
             self.x = np.array([price, 0.0])
             self.P = np.diag([R * 10.0, (price * 1e-3) ** 2])
             self.last_ts = ts
@@ -129,15 +115,15 @@ class KalmanTrend:
         vel_std = math.sqrt(max(float(self.P[1, 1]), 0.0))
         vel_pct_min = vel / price * 100.0 * 60.0
         std_pct_min = vel_std / price * 100.0 * 60.0
-        # Schmitt trigger (histerezis): intra la CONF_ENTER*std, iese abia sub
-        # CONF_EXIT*std — elimina palpairea in jurul pragului unic.
+        # Schmitt hysteresis enters at CONF_ENTER*std and exits below CONF_EXIT*std,
+        # eliminating flicker around a single threshold.
         trend = old_trend
         if old_trend == 0:
             if abs(vel_pct_min) > max(CONF_ENTER * std_pct_min, MIN_VEL_PCT_MIN):
                 trend = 1 if vel_pct_min > 0 else -1
         else:
             if vel_pct_min * old_trend < 0 and abs(vel_pct_min) > CONF_ENTER * std_pct_min:
-                trend = -old_trend                      # flip direct, cu incredere plina
+                trend = -old_trend                      # Direct high-confidence flip.
             elif abs(vel_pct_min) < CONF_EXIT * std_pct_min:
                 trend = 0
         return {"vel": round(vel_pct_min, 5), "vel_std": round(std_pct_min, 5),
@@ -145,8 +131,7 @@ class KalmanTrend:
 
 
 def vol_1h_pct(prices, sample_rate_sec: float) -> float | None:
-    """Volatilitate (1 sigma) estimata pe orizont de 1h, in %, din fereastra
-    de preturi existenta (log-returns, scalare sqrt-timp). None in warm-up."""
+    """Estimate one-sigma hourly volatility from scaled log returns."""
     p = np.asarray(prices, dtype=float)
     if len(p) < 20 or sample_rate_sec <= 0:
         return None
@@ -161,19 +146,18 @@ def vol_1h_pct(prices, sample_rate_sec: float) -> float | None:
 
 
 def adaptive_thresholds(vol1h: float | None) -> tuple[float | None, float | None]:
-    """(adapt_reentry_pct, adapt_dca_pct) = k * vol_1h; None in warm-up."""
+    """Return adaptive reentry and DCA percentages as multipliers of hourly vol."""
     if vol1h is None:
         return None, None
     return round(K_REENTRY * vol1h, 3), round(K_DCA * vol1h, 3)
 
 
 class ShadowJournal:
-    """Jurnal pipe-text pentru tranzitiile semnalelor shadow. Acelasi tipar ca
-    log_decision din tradeall.py: un rand per TRANZITIE, sanitizat, try/except
-    la scriere (un bug de jurnal nu are voie sa afecteze procesul gazda).
+    """Write sanitized pipe-delimited signal transitions without affecting host.
 
-    Format: ts|symbol|signal|event|state|old_state|price|vel|vel_std
-    Live: fisier rotit zilnic in logger/. Backtest: fisier FLAT (fixed_path)."""
+    Format is ts|symbol|signal|event|state|old_state|price|vel|vel_std. Live files
+    rotate daily; backtests use a flat fixed_path file.
+    """
 
     def __init__(self, out_dir: str = "logger", fixed_path: str | None = None):
         self.out_dir = out_dir
@@ -196,19 +180,17 @@ class ShadowJournal:
             cols = [ts, symbol, signal, "trend_start", state, old_state, price, vel, vel_std]
             with open(self._path(), "a", encoding="utf-8") as f:
                 f.write("|".join(self._sanitize(c) for c in cols) + "\n")
-        except Exception as e:  # noqa: BLE001 — observational, nu oprim gazda
+        except Exception as e:  # noqa: BLE001 — Logging must not stop the host.
             print(f"[shadow_signals] eroare scriere jurnal shadow: {e}")
 
 
 class ShadowSet:
-    """Toate semnalele shadow pentru un set de simboluri + jurnalul lor.
-    Un singur apel per evaluare: update(symbol, ts, price, epsilon,
-    big_prices, big_sample_rate) -> dict de chei pt snapshot.
+    """Maintain Kalman/adaptive signals and their journal for a symbol set.
 
-    state_path: fisier JSON propriu cu ultima stare per simbol. NECESAR live:
-    cache_instant_trend.json e scris de PROCESUL cacheManager (writer), nu de
-    tradeall — cheile adaugate de tradeall in snapshot raman doar in memoria
-    lui. Monitorul citeste acest fisier si il combina cu snapshot-ul."""
+    One update call returns snapshot fields. ``state_path`` stores the latest
+    per-symbol state because cacheManager, not tradeall, owns the trend-cache file;
+    the monitor combines this state file with that snapshot.
+    """
 
     def __init__(self, journal: ShadowJournal | None = None,
                  state_path: str | None = None, state_min_interval: float = 1.0):
@@ -218,9 +200,9 @@ class ShadowSet:
         self._state: dict = {}
         self._last_state_write = 0.0
         self._kalman: dict = {}
-        self._last_fed: dict = {}      # per simbol: ultimul ts hranit in Kalman
-        self._last_kfields: dict = {}  # per simbol: ultimele campuri Kalman (intre hraniri)
-        self._fed_prices: dict = {}    # per simbol: ultimele preturi HRANITE (pt epsilon la scara pasului)
+        self._last_fed: dict = {}      # Last Kalman feed timestamp per symbol.
+        self._last_kfields: dict = {}  # Last Kalman fields between feeds.
+        self._fed_prices: dict = {}    # Fed prices for step-scale epsilon.
 
     def _write_state(self, now: float) -> None:
         if not self.state_path or (now - self._last_state_write) < self.state_min_interval:
@@ -236,7 +218,7 @@ class ShadowSet:
             print(f"[shadow_signals] eroare scriere stare shadow: {e}")
 
     def current_trend(self, symbol: str) -> tuple:
-        """(kalman_trend sau None, varsta_stare_sec) — pentru gate-ul din tradeall."""
+        """Return Kalman trend and state age for tradeall's live order gate."""
         st = self._state.get(symbol)
         if not st:
             return None, 1e18
@@ -245,19 +227,16 @@ class ShadowSet:
 
     def update(self, symbol: str, ts: float, price: float, epsilon: float | None,
                big_prices, big_sample_rate: float) -> dict:
-        # Kalman e hranit doar la KALMAN_SAMPLE_SEC (vezi nota de la constante);
-        # intre hraniri refolosim ultimele campuri (snapshot-ul ramane populat).
+        # Feed only at KALMAN_SAMPLE_SEC and reuse fields between feeds so the
+        # snapshot remains populated.
         last_fed = self._last_fed.get(symbol, -1e18)
         if ts - last_fed >= KALMAN_SAMPLE_SEC:
             kf = self._kalman.get(symbol)
             if kf is None:
                 kf = self._kalman[symbol] = KalmanTrend()
-            # Zgomotul de masurare (R) trebuie masurat LA SCARA PASULUI Kalman
-            # (60s), nu la scara tick-ului de 1s — altfel masuratorile par
-            # nerealist de precise si semnalul palpaie (19 iul: 694 tranzitii/zi).
-            # Il calculam din chiar preturile HRANITE (subesantionate), fara
-            # factori de scalare ghiciti; fallback pe epsilonul caller-ului
-            # cat timp seria hranita e prea scurta (warm-up).
+            # Measure R at the Kalman step scale rather than one-second tick scale,
+            # which would appear unrealistically precise and flicker. Derive it from
+            # the subsampled fed prices, falling back to caller epsilon during warm-up.
             fed = self._fed_prices.setdefault(symbol, [])
             fed.append(price)
             if len(fed) > 60:
