@@ -16,26 +16,21 @@ from binance_api import bapi as api
 from binance_api import bapi_placeorder as po
 from binance_api import bapi_trades as apitrades
 from binance_api import bapi_allorders as apiorders
-# Faza 3 decuplare: CITIREA starii de cont (sold + ordine) trece prin facada generica,
-# nu mai direct prin bapi/apiorders. Asa monitortrades devine portabil pe HYPE.
-# `mkt` = singletonul facadei (azi ruteaza simbolurile Binance tot la bapi, identic).
-# place_order (po) si WS RAMAN Binance-specifice, neatinse.
+# Read account state through the generic facade instead of bapi/apiorders so this module
+# is portable to HYPE. The facade still routes Binance symbols identically to bapi.
+# Placement and WebSocket paths remain Binance-specific.
 from providers.market_api import api as mkt
 
 import utils as u
 import log
 
-# 23 iul: incarca parametrii tunabili din monitortrades_config.env (versionat,
-# se COMITE — fara secrete) INAINTE de a citi orice os.environ.get(...) de mai
-# jos. botcore.load_dotenv NU suprascrie variabile deja setate in mediul real,
-# doar completeaza ce lipseste. Config-ul PER-INSTRUMENT (gain/lost/maxage/
-# hardtp) ramane neschimbat, in instruments.conf + monitortrades.conf — asta e
-# doar pt constantele GLOBALE care nu aveau inca niciun mecanism de override.
+# Load versioned, non-secret global tuning parameters before reading the environment.
+# ``botcore.load_dotenv`` fills missing values without overwriting the real environment.
+# Per-instrument gain/loss/age/hard-TP configuration remains in the instrument configs.
 from botcore import load_dotenv as _load_dotenv
 _load_dotenv("monitortrades_config.env")
 
-# Constante globale extrase (implicit = valorile vechi hardcodate, zero schimbare
-# de comportament daca fisierul de config nu e modificat).
+# Extracted globals preserve the old hardcoded defaults unless configuration changes.
 MT_ARE_CLOSE_TOLERANCE_PCT = float(os.environ.get("MT_ARE_CLOSE_TOLERANCE_PCT", "1.0"))
 MT_RECENT_TRADE_BLOCK_SEC = float(os.environ.get("MT_RECENT_TRADE_BLOCK_HOURS", "3")) * 3600
 MT_ALL_TRADES_BLOCK_SEC = float(os.environ.get("MT_ALL_TRADES_BLOCK_HOURS", "1")) * 3600
@@ -45,11 +40,8 @@ MT_SELL_SAFEBACK_HOURS = float(os.environ.get("MT_SELL_SAFEBACK_HOURS", "2"))
 MT_BUY_SAFEBACK_HOURS = float(os.environ.get("MT_BUY_SAFEBACK_HOURS", "48"))
 
 
-# Cod legacy mutat in archive/monitortrades_legacy.py (vanzare graduala,
-# ProcentDistributor/BuyTransaction, monitor_close_orders_by_age*, update_trades/
-# apply_sell_orders, monitor_trades/start_monitoring, test()). NU mai e folosit de
-# calea activa. Pastram doar `trades` gol: e referit de liniile COMENTATE din main()
-# (update_trades/apply_sell_orders), ca sa ramana valide daca le decomenteaza cineva.
+# Legacy gradual-sale and monitoring code moved to archive/monitortrades_legacy.py.
+# Retain the empty ``trades`` value only for commented main-path calls that may be restored.
 trades = []
 
 
@@ -83,7 +75,7 @@ def print_number_of_orders(maxage_trade_s):
 
 
 
-# Cache-ul care va fi actualizat periodic
+# Cache updated periodically.
 default_values_sell_recommendation = {
     "BTCUSDC": {
         'force_sell': 0,
@@ -91,12 +83,12 @@ default_values_sell_recommendation = {
         'expired_duration': 3600 * 3.7,
         'min_procent': 0.0099,
         'days_after_use_current_price': 7,
-        'slope': 0.0,      # Valoare default pentru slope
-        'pos': 0,          # Valoare default pentru pos
-        'gradient': 0.0,   # Valoare default pentru gradient
-        'tick': 0,         # Valoare default pentru tick
-        'min': 0.0,        # Valoare default pentru min
-        'max': 0.0         # Valoare default pentru max
+        'slope': 0.0,      # Default slope.
+        'pos': 0,          # Default position.
+        'gradient': 0.0,   # Default gradient.
+        'tick': 0,         # Default tick.
+        'min': 0.0,        # Default minimum.
+        'max': 0.0         # Default maximum.
     },
     "TAOUSDC": {
         'force_sell': 0,
@@ -104,12 +96,12 @@ default_values_sell_recommendation = {
         'expired_duration': 3600 * 3.7,
         'min_procent': 0.0099,
         'days_after_use_current_price': 7,
-        'slope': 0.0,      # Valoare default pentru slope
-        'pos': 0,          # Valoare default pentru pos
-        'gradient': 0.0,   # Valoare default pentru gradient
-        'tick': 0,         # Valoare default pentru tick
-        'min': 0.0,        # Valoare default pentru min
-        'max': 0.0         # Valoare default pentru max
+        'slope': 0.0,      # Default slope.
+        'pos': 0,          # Default position.
+        'gradient': 0.0,   # Default gradient.
+        'tick': 0,         # Default tick.
+        'min': 0.0,        # Default minimum.
+        'max': 0.0         # Default maximum.
     },
     "ETHUSDC": {
         'force_sell': 0,
@@ -117,28 +109,27 @@ default_values_sell_recommendation = {
         'expired_duration': 3600 * 3.7,
         'min_procent': 0.0099,
         'days_after_use_current_price': 7,
-        'slope': 0.0,      # Valoare default pentru slope
-        'pos': 0,          # Valoare default pentru pos
-        'gradient': 0.0,   # Valoare default pentru gradient
-        'tick': 0,         # Valoare default pentru tick
-        'min': 0.0,        # Valoare default pentru min
-        'max': 0.0         # Valoare default pentru max
+        'slope': 0.0,      # Default slope.
+        'pos': 0,          # Default position.
+        'gradient': 0.0,   # Default gradient.
+        'tick': 0,         # Default tick.
+        'min': 0.0,        # Default minimum.
+        'max': 0.0         # Default maximum.
     },
-    # HYPE (Hyperliquid spot). Necesar AICI ca is_trend_up sa nu dea KeyError pe
-    # fallback cand cacheManager n-are inca snapshot de trend pt HYPEUSDC (flota
-    # nu scrie trend HYPE inca). slope/gradient=0 -> is_trend_up=False (neutru/sigur).
+    # HYPE needs a neutral fallback while cacheManager has no HYPE trend snapshot.
+    # Zero slope/gradient makes is_trend_up safely return False.
     "HYPEUSDC": {
         'force_sell': 0,
         'procent_desired_profit': 0.07,
         'expired_duration': 3600 * 3.7,
         'min_procent': 0.0099,
         'days_after_use_current_price': 7,
-        'slope': 0.0,      # Valoare default pentru slope
-        'pos': 0,          # Valoare default pentru pos
-        'gradient': 0.0,   # Valoare default pentru gradient
-        'tick': 0,         # Valoare default pentru tick
-        'min': 0.0,        # Valoare default pentru min
-        'max': 0.0         # Valoare default pentru max
+        'slope': 0.0,      # Default slope.
+        'pos': 0,          # Default position.
+        'gradient': 0.0,   # Default gradient.
+        'tick': 0,         # Default tick.
+        'min': 0.0,        # Default minimum.
+        'max': 0.0         # Default maximum.
     }
 }
 
@@ -159,11 +150,11 @@ class StateTracker:
             time.sleep(50)
 
     def update_sell_recommendation(self):
-        """Construiește sell_recommendation din:
-          - CONFIG static (force_sell, procent_desired_profit, etc.) = defaults din cod
-          - SEMNALE de trend (slope/pos/gradient/tick/min/max) = snapshot-ul din
-            CachePriceShortTrendManager (cross-process, scris de tradeall).
-        Înlocuiește fostul sell_recommendation.csv."""
+        """Build sell recommendations from static defaults and shared trend snapshots.
+
+        CachePriceShortTrendManager supplies cross-process trend fields, replacing the
+        former sell_recommendation.csv input.
+        """
         global sell_recommendation
         try:
             import cacheManager as cm
@@ -171,13 +162,11 @@ class StateTracker:
 
             new_rec = {}
             for symbol, cfg in default_values_sell_recommendation.items():
-                rec = dict(cfg)   # config static (force_sell, procente, expired_duration, ...)
+                rec = dict(cfg)   # Static force, percentage, and expiration configuration.
                 snap = mgr.get_snapshot(symbol)
                 if snap:
-                    # Doar slope și gradient sunt folosite efectiv (is_trend_up).
-                    # FIX: slope_small e adesea 0 (ferestre nepline) -> is_trend_up degenera
-                    # in final_trend (LENT). gradient_recent = momentum INSTANT real (canalul
-                    # rapid) -> asa is_trend_up reflecta trendul instant, cum trebuie.
+                    # is_trend_up consumes only slope and gradient. Use recent gradient as
+                    # real instant momentum because incomplete windows often leave slope_small zero.
                     rec['slope']    = float(snap.get('gradient_recent', snap.get('slope_small', 0.0)) or 0.0)
                     rec['gradient'] = float(snap.get('final_trend', 0.0) or 0.0)
                 new_rec[symbol] = rec
@@ -228,7 +217,7 @@ class StateTracker:
             return
 
         # If slope is the same as the last state, update the current state's tick and min/max
-        if slope * last_state['slope'] > 0 or (abs(slope - last_state['slope']) < 1e-9):  # Au acelasi semn:
+        if slope * last_state['slope'] > 0 or (abs(slope - last_state['slope']) < 1e-9):  # Same sign.
             last_state['tick'] = tick
             last_state['min'] = min(last_state['min'], min_val)
             last_state['max'] = max(last_state['max'], max_val)
@@ -266,18 +255,13 @@ class StateTracker:
 
 state_tracker = StateTracker()
 
-# Functie simplificata care verifica daca trendul este de crestere
+# Simplified upward-trend check.
 def is_trend_up(symbol):
-    """Trendul INSTANT, citit DIRECT din managerul de cache (up-to-date cu
-    cache_instant_trend.json), nu din copia sell_recommendation (care poate ramane in urma).
-    gradient_recent = momentum rapid real; fallback pe slope_small, apoi pe copie.
+    """Read instant trend directly from a fresh shared cache snapshot.
 
-    30 iul (unificare cu should_wait din cacheManager.py): foloseste acum
-    fresh_snapshot() — ACELASI gard de prospetime (TREND_STALE_SEC, 15s) ca
-    celalalt mecanism de trend. INAINTE, aceasta functie nu avea NICIUN
-    staleness-check (bug documentat: folosea orice era in fisier, oricat de
-    vechi, daca cacheManager.py murea silentios). Formula ramane NESCHIMBATA
-    (slope>0 sau slope==0 si gradient>0) — doar sursa e acum garantat proaspata."""
+    Recent gradient supplies fast momentum. The shared freshness guard prevents stale
+    files from influencing the unchanged upward-trend formula.
+    """
     try:
         import cacheManager as cm
         snap = cm.get_short_trend_manager().fresh_snapshot(symbol)
@@ -287,13 +271,11 @@ def is_trend_up(symbol):
             return slope > 0 or (slope == 0 and gradient > 0)
     except Exception as e:
         print(f"is_trend_up: snapshot direct esuat ({e}) — tratez ca neutru")
-    return False   # fara snapshot/stale in cache -> neutru (nu blocheaza vanzarea pe castig)
+    return False   # Missing or stale data is neutral and does not block a profitable sale.
 
 
 def get_relevant_trade(trade_orders, trade_type, threshold_s, symbol, now_fn=None):
-    """now_fn: sursa de "acum" (implicit time.time — comportament neschimbat).
-    Injectabila pt backtest/replay (23 iul), acelasi tipar ca `api=None` de mai
-    jos (get_position_stats) — override doar cand cineva chiar il da."""
+    """Use injectable ``now_fn`` for replay while preserving wall-clock behavior by default."""
     now_fn = now_fn or time.time
     if not trade_orders:
         print(f"Warning: No {trade_type} transactions for that currency!!!")
@@ -303,7 +285,7 @@ def get_relevant_trade(trade_orders, trade_type, threshold_s, symbol, now_fn=Non
      
     trade_orders.sort(key=lambda x: x['timestamp'], reverse=True)
     trade_price = float(trade_orders[0]['price'])
-    trade_time = float(trade_orders[0]['timestamp']) / 1000  # Timpul în secunde
+    trade_time = float(trade_orders[0]['timestamp']) / 1000  # Seconds.
     print(f"{trade_type.capitalize()} price for {symbol}: {trade_price} at {u.timeToHMS(trade_time)}")
     
     can_trade = True
@@ -349,26 +331,23 @@ def get_position_stats(symbol, maxage_trade_s, api=None):
         "sell_count": len(sell_orders),
     }
 
-# ── TP DUR — COEXISTA cu logica de trend de mai jos (nu o inlocuieste). Vinde o
-#    PROPORTIE din pozitie pe castig MARE, INDIFERENT de trend = backstop pt varfuri
-#    pe care gate-ul de trend le-ar rata (ex. TAO la $287). Cooldown ca sa nu descarce
-#    tot in cascada. Comuta cu HARD_TP_ENABLED.
-# ── Parametri reglabili: defaults din cod, SUPRASCRISE de monitortrades.conf (optional) ──
+# Hard TP coexists with trend logic. It sells a position fraction on a large gain
+# regardless of trend, catching peaks the trend gate may miss. Cooldown prevents a cascade.
+# Defaults below may be overridden by monitortrades.conf.
 HARD_TP_ENABLED    = True
-HARD_TP_PCT        = 0.17       # castig (fractie) de la care TP-ul dur vinde o proportie
-HARD_TP_FRACTION   = 0.5        # cat vinde (din soldul liber)
+HARD_TP_PCT        = 0.17       # Gain fraction that triggers a proportional hard TP.
+HARD_TP_FRACTION   = 0.5        # Fraction of free balance to sell.
 HARD_TP_COOLDOWN_S = 6 * 3600
 TP_REFERENCE       = "last"     # "last" (ultimul buy) | "average" (media pe maxage zile)
 _hard_tp_last = {}
 
 
 def _load_mt_conf(path=None):
-    """Suprascrie parametrii GLOBALI (hard_tp_*, tp_reference) din monitortrades.conf
-    (optional; fallback pe valorile din cod). Parametrii PER-SIMBOL (gain/lost/maxage)
-    NU se citesc de aici — sursa de adevar e instruments.conf (namespace mt.*, vezi
-    inst.param("mt", ...) in monitor_price_and_trade). 23 iul: eliminat SYMBOL_PARAMS
-    (liniile SIMBOL = gain%/lost%/maxage_zile din monitortrades.conf erau parsate dar
-    NICIODATA citite — instruments.conf era deja sursa reala; confirmat prin grep."""
+    """Override global hard-TP and reference settings from optional configuration.
+
+    Per-symbol gain, loss, and age settings come only from the ``mt`` namespace in
+    instruments.conf. Code defaults apply when this optional file is absent or invalid.
+    """
     global HARD_TP_ENABLED, HARD_TP_PCT, HARD_TP_FRACTION, HARD_TP_COOLDOWN_S, TP_REFERENCE
     path = path or os.path.join(os.path.dirname(os.path.abspath(__file__)), "monitortrades.conf")
     if not os.path.exists(path):
@@ -397,7 +376,7 @@ from instruments_config import load_for
 
 
 def _as_instrument(x):
-    """Accepta un Instrument SAU (compat) un symbol string -> Instrument rutat prin facada."""
+    """Accept an Instrument or adapt a symbol string through the provider facade."""
     if isinstance(x, _Instrument):
         return x
     sym = str(x)
@@ -406,9 +385,7 @@ def _as_instrument(x):
 
 
 def get_available_qty(symbol, api=None):
-    """Cantitatea LIBERA reala din activul de baza al simbolului (ex. TAOUSDC -> free TAO).
-    Sursa de adevar pt 'vinde TOT ce ai disponibil', nu aproximarea din trade-uri.
-    `api` = facada de cont (default singletonul `mkt`); injectabil pt alt provider/test."""
+    """Return real free base-asset quantity rather than an estimate from trades."""
     api = api or mkt
     try:
         if api is mkt:
@@ -422,8 +399,7 @@ def get_available_qty(symbol, api=None):
 
 #//todo: review 0.5
 def _place_guarded(inst, side, price, qty, min_qty, **kwargs):
-    """Plaseaza un ordin DOAR daca qty>0 si qty>=volumul minim al venue-ului. Evita
-    respingerile 'volume minimum not met' (ex Kraken pe praf). True daca a plasat efectiv."""
+    """Place only positive quantities meeting the venue minimum; return whether submitted."""
     if qty is None or qty <= 0:
         print(f"[{inst.symbol}] {side} skip: qty={qty}")
         return False
@@ -436,14 +412,11 @@ def _place_guarded(inst, side, price, qty, min_qty, **kwargs):
 
 def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None, lost_threshold=None,
                             now_fn=None):
-    """now_fn: sursa de "acum" (implicit time.time — comportament neschimbat).
-    Injectabila pt backtest/replay (23 iul, offline/research/UNIFIED_BACKTEST_PLAN.md
-    Faza 1) — cand vine un ReplayMarketDataProvider, timpul poate fi legat de
-    ceasul aceluiasi provider (timpul "vine din pretul obtinut", nu separat)."""
+    """Use injectable ``now_fn`` so replay time can follow its market-data provider."""
     now_fn = now_fn or time.time
     inst = _as_instrument(inst)
     symbol = inst.symbol
-    # params per-instrument (fallback pe argument, apoi pe globalele din cod) ───────────
+    # Per-instrument parameters fall back to arguments and then code defaults.
     if gain_threshold is None:
         _g = inst.param("mt", "gain", None, float)
         gain_threshold = _g / 100.0 if _g is not None else 0.07
@@ -457,17 +430,16 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
     hard_tp_frac = inst.param("mt", "hardtp_fraction", HARD_TP_FRACTION, float)
     hard_tp_cd = inst.param("mt", "hardtp_cooldown_h", HARD_TP_COOLDOWN_S / 3600.0, float) * 3600
     tp_ref = inst.param("mt", "ref", TP_REFERENCE)
-    buy_budget = inst.param("mt", "buy_budget", None, float)   # USD per buy -> qty = buget/pret
-    buy_qty_cfg = inst.param("mt", "buy_qty", None, float)     # alternativ: qty FIX per buy
-    max_budget = inst.param("mt", "max_budget", None, float)   # plafon expunere totala (USD)
+    buy_budget = inst.param("mt", "buy_budget", None, float)   # Convert per-buy USD budget to quantity.
+    buy_qty_cfg = inst.param("mt", "buy_qty", None, float)     # Alternative fixed quantity.
+    max_budget = inst.param("mt", "max_budget", None, float)   # Total USD exposure cap.
     #try:
     
     qty = 1 #qty = calculate_position_size(...)
     threshold_s = MT_RECENT_TRADE_BLOCK_SEC
     current_time_s = int(now_fn())
 
-    # 1. Obtine ordinele de cumparare si vanzare recente pentru simbol (prin facada,
-    #    normalizate la forma comuna {side,price,qty,timestamp} -> get_relevant_trade).
+    # 1. Fetch recent BUY and SELL orders through the facade in normalized form.
     trade_orders_buy = inst.orders("BUY", maxage_trade_s)
     trade_orders_sell = inst.orders("SELL", maxage_trade_s)
     if not (trade_orders_buy or trade_orders_sell):
@@ -477,8 +449,7 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
     sell_price, sell_time, can_sell = get_relevant_trade(trade_orders_sell, "SELL", threshold_s, symbol, now_fn=now_fn)
 
     position = get_position_stats(symbol, maxage_trade_s, api=inst.provider)
-    # Referinta de pret pt castig: configurabila (TP_REFERENCE). Default "last" =
-    # ultimul pret de cumparare (buy_price din get_relevant_trade); "average" = media pe maxage zile.
+    # Profit reference is configurable: latest BUY by default or the lookback average.
     if tp_ref == "average" and position["average_buy_price"] > 0:
         buy_price = position["average_buy_price"]
         print(f"POSITION (referinta=AVG {maxage_trade_s/86400:.0f}z) for {symbol} : {position}")
@@ -495,17 +466,16 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
         can_trade = False
         
     
-    # 2. Obtine pretul curent de pe piata (prin FACADA: HYPEUSDC -> HL spot,
-    #    BTC/TAO USDC -> BinanceProvider.get_current_price = bapi, IDENTIC ca azi).
+    # 2. Fetch current price through the facade for the instrument's provider.
     current_price = inst.price()
     if current_price is None:
         print(f"No current price for {symbol} (piata inchisa / indisponibil) — skip")
         return
     print(f"Current price for {symbol}: {current_price}")
-    avail_qty = inst.free() or 0.0   # TOATA cantitatea disponibila a instrumentului (None->0 pt Kraken/T212)
-    min_qty = inst.min_qty() or 0.0  # volum minim al venue-ului (gard anti-respingere)
+    avail_qty = inst.free() or 0.0   # Entire free instrument quantity; normalize None to zero.
+    min_qty = inst.min_qty() or 0.0  # Venue minimum-volume rejection guard.
 
-    # 3. Verifica ordinele de cumparare
+    # 3. Evaluate BUY history.
     if trade_orders_buy:
         if not buy_price:
             print(f"No buy_price !!!!!")
@@ -514,11 +484,8 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
         price_decrease = (buy_price - current_price) / buy_price
 
         print(f"(increase: {price_increase * 100}%, decrease: {price_decrease * 100}%)")
-        # 3.0. TP DUR: castig mare -> vinde o PROPORTIE din pozitie INDIFERENT de trend
-        #      (coexista cu 3.1 de mai jos; backstop pt varfuri ratate de gate-ul de trend).
-        # toleranta are_close, la fel ca la 3.1: fara ea, un pret care ratase pragul
-        # cu putin la un tick si apoi cade inapoi ar insemna ratarea PERMANENTA a
-        # exact varfului pe care mecanismul asta e menit sa-l prinda ("varfuri ratate").
+        # 3.0. Hard TP sells a fraction on a large gain regardless of trend. Tolerance
+        # prevents permanently missing a peak that fell just short on one tick.
         hard_tp_hit = price_increase >= hard_tp_pct or u.are_close(
             price_increase, hard_tp_pct, target_tolerance_percent=MT_ARE_CLOSE_TOLERANCE_PCT)
         if HARD_TP_ENABLED and hard_tp_hit and avail_qty > 0:
@@ -529,11 +496,11 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
                 if _place_guarded(inst, "SELL", current_price, hard_qty, min_qty,
                                   safeback_seconds=sbs, force=True, cancelorders=True, hours=MT_SELL_SAFEBACK_HOURS, pair=False):
                     _hard_tp_last[symbol] = current_time_s
-                    return   # am vandut deja in acest tick; nu mai rula vanzarea de jos pe sold invechit
+                    return   # Already sold this tick; do not use stale balance below.
             else:
                 print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% dar in cooldown (ultimul acum "
                       f"{u.secondsToHours(current_time_s - _hard_tp_last.get(symbol, 0)):.1f}h)")
-        # 3.1. Verifica daca trebuie sa plasezi un ordin de vanzare (logica CURENTA, ramane)
+        # 3.1. Evaluate the existing SELL placement rules.
         if price_increase > gain_threshold or u.are_close(price_increase, gain_threshold, target_tolerance_percent=MT_ARE_CLOSE_TOLERANCE_PCT):
             if not is_trend_up(symbol):
                 print(f"Price increased with {price_increase * 100}% by more than {gain_threshold * 100}% versus buy price and not trend up!")
@@ -557,7 +524,7 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
         else:
             print(f"Nothing interesting")
 
-    # 4. Verifica ordinele de vanzare
+    # 4. Evaluate SELL history.
     if trade_orders_sell:     
         if not sell_price:
             print(f"No sell_price !!!!!")
@@ -568,7 +535,7 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
             if is_trend_up(symbol):
                 print(f"Price decreased with {price_decrease_versus_sell * 100}% by more than {gain_threshold * 100}% versus sell price: Placing buy order")
                 if can_buy:
-                    # qty din BUGET (buy_budget/pret) sau qty fix configurat, altfel default (qty=1)
+                    # Derive quantity from budget, configured fixed quantity, or default.
                     _buy_qty = round((buy_budget / current_price) if buy_budget else (buy_qty_cfg or qty), 6)
                     _pos_value = avail_qty * current_price
                     if max_budget and _pos_value >= max_budget:
@@ -587,17 +554,17 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
     #    print(f"An error occurred while monitoring the price: {e}")
 
 def main():
-    # WS user-data bridge explicit (designul: fiecare proces își actualizează
-    # memoria Order/Trade prin WS propriu + polling, fără re-citire de fișiere).
+    # Explicit user-data bridge lets each process update Order/Trade memory through
+    # its own WebSocket and polling without rereading files.
     import cacheManager as cm
     cm.enable_real_ws_event_sync()
 
     filename = "trades.json"
     
-    maxage_trade_s =  4 * 24 * 3600  # Timpul maxim in care ordinele executate/filled sunt considerate recente (3 zile)
+    maxage_trade_s =  4 * 24 * 3600  # Maximum age for considering filled orders recent.
     interval = 60 * 4 #4 minute
 
-    # sell_recommendation vine din CachePriceShortTrendManager (cross-process), nu din CSV.
+    # sell_recommendation comes from the cross-process trend manager, not CSV.
     state_tracker.update_sell_recommendation()
     state_tracker.display_sell_recommendation()
 
@@ -615,18 +582,16 @@ def main():
     print(f"close_buy_orders {close_buy_orders}")
     print(f"close_sell_orders {close_sell_orders}")
 
-    d = int(os.environ.get("MT_GUARD_WINDOW_DAYS", "12"))  # fereastra gardei de profit (zile). 14 prindea un sell din 11 iun ($201) si bloca re-intrarea; 12 il exclude.
+    d = int(os.environ.get("MT_GUARD_WINDOW_DAYS", "12"))  # Profit-guard window in days.
     while True:
 
         print_number_of_orders(maxage_trade_s)
         print_number_of_trades(maxage_trade_s)
         
-        # PAS 4: itereaza instrumentele ENABLED din instruments.conf (namespace mt.*),
-        # rutate EXPLICIT pe providerul lor. BTC/TAO (Binance) raman IDENTICE; HYPE/Kraken/
-        # T212 intra cand le pui enabled=yes. Ordinele non-Binance raman DRY pana la portile
-        # lor (HL_LIVE_ORDERS / KRAKEN_LIVE_ORDERS / T212_LIVE_ORDERS).
+        # Iterate enabled instruments from the ``mt`` namespace and route each explicitly
+        # to its provider. Non-Binance orders remain dry until their live gates are enabled.
         try:
-            _instruments = load_for("mt")   # doar enabled, cu params mt.*
+            _instruments = load_for("mt")   # Enabled instruments with mt parameters only.
         except Exception as _e:
             print(f"[instruments.conf] {_e} — sar peste acest ciclu")
             _instruments = {}
@@ -638,10 +603,9 @@ def main():
                 print(f"[{_inst.name}] eroare in monitor: {_e}")
             print("--------------")
   
-        # (eliminat: blocul sell_recommendation[btcsymbol] -> procent_*/force_sell etc.
-        #  alimenta DOAR functii comentate (update_trades/apply_sell_orders). Trendul vine
-        #  acum direct din cacheManager via is_trend_up.)
-        time.sleep(MT_MAIN_LOOP_SLEEP_SEC)  # 48 sec implicit (comentariul vechi zicea gresit "1.8 minute")
+        # Removed a recommendation block consumed only by commented legacy functions.
+        # Active trend data now comes directly from cacheManager.
+        time.sleep(MT_MAIN_LOOP_SLEEP_SEC)  # Default is 48 seconds.
         
         
 if __name__ == "__main__":
@@ -649,8 +613,7 @@ if __name__ == "__main__":
      main()
 
 
-# ─── IDEI DE REFERINTA (imbunatatiri viitoare, neimplementate) ────────────────
-# Problema conceptuala: is_trend_up() poate fi lagging + crypto face fake
-# reversals -> risc sa vinzi bottom / sa ratezi breakout. De adaugat eventual:
-# confidence score, confirmare multi-indicator, acord multi-timeframe.
+# Reference ideas for unimplemented improvements: is_trend_up may lag and crypto can
+# produce false reversals. Possible additions include confidence scoring, multiple
+# indicators, and multi-timeframe agreement.
 # ──────────────────────────────────────────────────────────────────────────────
