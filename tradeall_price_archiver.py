@@ -72,8 +72,8 @@ def main():
     for symbol in symbols:
         filename = os.path.join(CACHEDB_DIR, f"cache_24price_long_{symbol}.jsonl")
         cache = cm.Cache24LongPriceManager(sync_ts=args.save_every, symbols=[symbol], filename=filename)
-        cache.KEEP_HOURS = keep_hours   # override per-instanta (suportat explicit in cod)
-        cache.enable_save_state_to_file()   # implicit False la constructie — fara asta nu scrie pe disc
+        cache.KEEP_HOURS = keep_hours   # per-instance override explicitly supported by the class
+        cache.enable_save_state_to_file()   # defaults to False; required for disk writes
         cache.periodic_sync(args.save_every, save_state=True)
         current_price_mgr.subscribe_price(cache)
         caches.append(cache)

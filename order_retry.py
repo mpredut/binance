@@ -119,7 +119,7 @@ def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_pric
 
 
 def load_all(now=None):
-    """Toate intrarile din coada (sub lock). Liniile corupte sunt sarite (defensiv)."""
+    """Return all queued entries under lock, defensively skipping corrupt lines."""
     _ensure_dir()
     with FileLock(LOCK_FILE):
         return _read_nolock()

@@ -40,9 +40,9 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 LOGGER_DIR = os.path.join(ROOT, "logger")
 CACHE_TREND_PATH = os.path.join(ROOT, "cachedb", "cache_instant_trend.json")
 
-# Folder DEDICAT pt output-ul modului LIVE (PNG-uri + HTML) — separat de restul
-# repo-ului in mod deliberat: e singurul folder sigur de servit pe web (nu contine
-# Unlike ROOT, this contains only generated charts, never .env, keys, or cachedb.
+# Dedicated live-mode output directory (PNGs and HTML), deliberately separated
+# from the repository. Unlike ROOT, it contains only generated charts and never
+# .env files, keys, or cachedb, making it the only safe directory to serve.
 LIVE_OUT_DIR = os.path.join(ROOT, "tradeall_live")
 
 PRICE_SAMPLES_PREFIX = "tradeall_price_samples_"
@@ -67,7 +67,7 @@ def _daily_log_path(prefix, date):
 
 _PIPE_LOG_CACHE_MAX_FILES = 32
 _PIPE_LOG_CACHE = OrderedDict()
-# path -> (bytes_consumati, ncols, rows, device, inode, marime_observata, mtime_ns)
+# path -> (bytes consumed, ncols, rows, device, inode, observed size, mtime_ns)
 
 
 def _read_pipe_log(path, ncols):
@@ -80,8 +80,8 @@ def _read_pipe_log(path, ncols):
     try:
         stream = open(path, "rb")
     except OSError:
-        # Rotatia jurnalelor sterge fisierele vechi. Versiunea anterioara
-                # Return [], but retain that file's parsed rows for the process lifetime.
+        # Log rotation deletes old files. Return [], while retaining that file's
+        # parsed rows for the process lifetime.
         _PIPE_LOG_CACHE.pop(path, None)
         return []
     with stream:

@@ -118,7 +118,7 @@ class RTradePairStore:
         self.mutate(op)
 
     def checkpoint_many(self, checkpoints):
-        """Un singur lock+fsync pentru toate rundele procesate in acel tick."""
+        """Use one lock and fsync for every round processed during the tick."""
         checkpoints = list(checkpoints)
         if not checkpoints:
             return

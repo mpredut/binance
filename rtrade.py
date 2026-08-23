@@ -212,11 +212,11 @@ class _LivePairVenue:
         return justified
 
     def place_market_exit(self, side, qty, reason, pair_id=None):
-        """Iesire spot MARKET, rezervata reducerii unei expuneri hard-stop.
+        """Place a spot market exit reserved for reducing hard-stop exposure.
 
-        Ordinele normale raman pe mkt.place/place_safe_order. Iesirea de risc
-        sare profit/cooldown/weight, dar NU sare soldul, fee-cap-ul, precizia,
-        preflight-ul sau auditul cu client-order-id.
+        Normal orders remain on ``mkt.place``/``place_safe_order``. This risk exit
+        bypasses profit, cooldown, and weight checks, but never bypasses balance,
+        fee-cap, precision, preflight, or client-order-ID auditing.
         """
         side = side.upper()
         price = float(self.current_price() or 0.0)

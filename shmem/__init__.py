@@ -1,8 +1,8 @@
-"""shmem — utilitare shared-memory (multiprocessing.shared_memory).
+"""Shared-memory utilities built on ``multiprocessing.shared_memory``.
 
-shmutils — conectare read/write la un segment numit + serializare JSON pe un
-           buffer fix. Folosibil ca:
+shmutils — read/write connection to a named segment plus JSON serialization in
+           a fixed buffer. Usage:
                from shmem import shmutils
 
-Nume distinct de `utils.py` (modulul de bază) ca să nu-l umbrească.
+The package name is distinct from the base ``utils.py`` module to avoid shadowing it.
 """

@@ -439,8 +439,8 @@ class PairCoordinator:
             if abs(net) <= 1e-8:
                 for ticket in self.tickets:
                     self._cancel(ticket)
-                # Cancelul poate concura cu un fill sau poate eșua. Confirmăm din
-                # exchange înainte de a declara runda terminală.
+                # Cancellation may race with a fill or fail. Confirm venue state
+                # before declaring the round terminal.
                 self._refresh()
                 bq, bc, _bf, sq, sc, _sf = self._totals()
                 net = bq - sq
@@ -456,7 +456,7 @@ class PairCoordinator:
             exposure_side = "LONG" if net > 0 else "SOLD"
             self.phase = "exposed"
             self._cancel_entry_remainder(exposure_side)
-            # Reconciliere dupa cancel: un ordin se poate umple in cursa cu anularea.
+            # Reconcile after cancellation because an order may fill during the race.
             self._refresh()
             bq, bc, _bf, sq, sc, _sf = self._totals()
             net = bq - sq
@@ -477,7 +477,7 @@ class PairCoordinator:
         if now - self.started_at >= self.policy.quote_ttl_sec:
             for ticket in self.tickets:
                 self._cancel(ticket)
-            # Ultima citire inchide cursa fill-vs-cancel.
+            # The final read resolves the fill-versus-cancel race.
             self._refresh()
             bq, _bc, _bf, sq, _sc, _sf = self._totals()
             if bq > 0 or sq > 0:

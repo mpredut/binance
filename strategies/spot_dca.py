@@ -946,7 +946,7 @@ class Strategy:
                         log(f"  [STRAT] TREND EXIT ({'break' if broke else 'trailing'} "
                             f"{self.p.trend_trail_pct}%) varf {peak:.{self.price_dec}f} -> IES la {exit_px}")
             else:
-                self._cancel_orders("sell", exclude_market=True)  # ride: nu vinde
+                self._cancel_orders("sell", exclude_market=True)  # Ride the trend; do not sell.
             return True
         if pending_trend_entry:
             if up:
@@ -1124,7 +1124,7 @@ class Strategy:
                     self.p.reentry_tolerance_pct,
                 )
                 and self.s["spent"] + effective_dca_amount <= self._effective_max_budget()
-                and not (self.p.dca_trend_brake and self._trend_down())  # B: frana DCA in downtrend
+                and not (self.p.dca_trend_brake and self._trend_down())  # B: DCA brake in a downtrend
                 and not self._has_open("buy")):
             log(
                 f"  [STRAT] dip {price} <= {self.s['last_buy_price']}"
@@ -1137,7 +1137,7 @@ class Strategy:
                 kind="DCA", amount=effective_dca_amount,
             )
 
-    # -- bucla -----------------------------------------------------------------
+    # -- main loop -------------------------------------------------------------
     def run(self) -> None:
         mode = "avg_tp" if self.p.enable_takeprofit else "dca_only"
         log(f"  === STRATEGIE {self.venue_label.upper()} PORNITA ===")
