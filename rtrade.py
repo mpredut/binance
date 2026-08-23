@@ -8,6 +8,9 @@ import threading
 from decimal import Decimal, ROUND_DOWN
 from concurrent.futures import ThreadPoolExecutor, wait
 
+# Politica financiara si invariantele operationale sunt documentate in
+# docs/RTRADE.md. Configuratia efectiva ramane rtrade_config.env.
+
 
 # my imports
 import log

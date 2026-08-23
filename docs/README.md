@@ -12,6 +12,8 @@ lângă codul lor (convenție — sunt linkate mai jos).
 ## Design & strategie (de ce-uri durabile)
 - [STRATEGY.md](STRATEGY.md) — logica de trading: detecție trend (lag +48h, curbă de
   supraviețuire, lindy plateau), garda de profit, trailing re-buy, T212 profit-guard/ladder, xStocks.
+- [RTRADE.md](RTRADE.md) — politica rtrade, ciclul BUY/SELL, evaluarea financiară,
+  stopurile dinamice, ownership-ul și recovery-ul ordinelor.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — facadă `providers/market_api` + provideri, HYPE pe HL,
   Kraken multi-proces (cacheManager partajat), trailing stop (core partajat + adaptoare).
 
