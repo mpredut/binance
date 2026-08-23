@@ -1,8 +1,7 @@
-"""Replay OHLC fidel pentru motorul live Trading212.
+"""Faithful OHLC replay for the live Trading 212 engine.
 
-Deciziile sunt produse de ``strategy.Strategy.step``. Acest fișier modelează
-numai mediul: fill-uri, ceas, FX și metrici. Ordinele decise la close pot fi
-executate cel mai devreme în bara următoare.
+``strategy.Strategy.step`` produces decisions. This file models only fills, time,
+FX, and metrics. Orders decided at close can execute no earlier than the next bar.
 """
 
 from __future__ import annotations
@@ -74,10 +73,10 @@ def run_replay(
     timestamps: Sequence[int] = (),
     execution: ExecutionModel | None = None,
 ) -> dict:
-    """Rulează strategia live T212 pe ``(open, high, low, close)``.
+    """Run the live T212 strategy over ``(open, high, low, close)`` bars.
 
-    ``fx_to_usd`` poate fi scalar sau o valoare istorică pentru fiecare bară.
-    Gate-ul DCA live citește bare Yahoo de 5 minute și refuză alte cadențe.
+    ``fx_to_usd`` may be scalar or one historical value per bar. The live DCA gate
+    reads five-minute Yahoo bars and rejects other cadences.
     """
     if not ohlc:
         raise ValueError("ohlc nu poate fi gol")
@@ -135,8 +134,8 @@ def _run_once(
             trend_slope_provider=lambda _symbol: _ols_slope_pct(list(trend_closes)),
         )
         engine._save = lambda: None
-        # Curba este în valuta contului. P&L-ul activului este produs în USD și
-        # convertit la cursul disponibil când se realizează/mark-to-market.
+        # The curve uses account currency. Asset P&L is produced in USD and converted
+        # at the available rate when realized or marked to market.
         initial_capital = float(params.max_budget)
         equity_curve = [initial_capital]
         exposure = []

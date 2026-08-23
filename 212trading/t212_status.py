@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-t212_status.py — raport cont Trading 212: cash (liber/investit/blocat), pozitii,
-ordine PENDING. Raspunde la "cat am investit, cat mai am liber, de ce e blocat".
+t212_status.py — Trading 212 account report for free/invested/blocked cash,
+positions, and PENDING orders. Explains invested, available, and blocked amounts.
 
   python3 t212_status.py
 """
@@ -63,7 +63,7 @@ def main() -> int:
     else:
         print("  ! nu pot citi cash-ul (rate-limit/auth?)")
 
-    # --- POZITII ---
+    # --- POSITIONS ---
     pf = _retry(c.get_portfolio) or []
     print(f"\n  --- POZITII ({len(pf)}) ---")
     inv_sum = 0.0
@@ -76,7 +76,7 @@ def main() -> int:
     if pf:
         print(f"    (suma cost pozitii: {inv_sum:.2f})")
 
-    # --- ORDINE PENDING (blocheaza cash) ---
+    # --- PENDING ORDERS that block cash ---
     orders = _retry(c.list_active_orders) or []
     print(f"\n  --- ORDINE PENDING ({len(orders)}) ---  <- ASTEA blocheaza cash liber")
     if not orders:

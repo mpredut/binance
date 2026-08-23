@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-analyze_volatility.py — analiza volatilitatii unui activ (Yahoo OHLC), ca sa
-CALIBREZI config-ul t212_bot (DCA spacing, TP, stop-loss) pe cifre, nu pe ghicite.
-Reutilizabil pt orice activ nou.
+analyze_volatility.py — analyze an asset's Yahoo OHLC volatility to CALIBRATE
+t212_bot DCA spacing, take profit, and stop loss from data rather than guesses.
+Reusable for any new asset.
 
   python3 analyze_volatility.py RGNT
 """
@@ -37,7 +37,7 @@ def pct(a, b):
 
 
 def pullbacks(closes):
-    """Adancimea retragerilor (% sub varful curent) intr-o serie — pt DCA spacing."""
+    """Return pullback depths below the running peak for DCA spacing."""
     peak = closes[0]; dips = []; cur = 0.0
     for c in closes:
         if c >= peak:
@@ -63,7 +63,7 @@ def main() -> int:
     closes = [b[4] for b in intra]
     rets = [pct(closes[i], closes[i - 1]) for i in range(1, len(closes))]
     abs_rets = [abs(r) for r in rets]
-    bar_rng = [pct(b[2], b[3]) for b in intra]           # (high-low)/low per bara 5m
+    bar_rng = [pct(b[2], b[3]) for b in intra]           # (high-low)/low per five-minute bar
     dips = pullbacks(closes)
 
     print(f"========== VOLATILITATE {sym} ==========")
@@ -84,14 +84,14 @@ def main() -> int:
         print(f"\n  --- zilnic (ultimele {len(dr)} zile) ---")
         print(f"  range mediu/zi {statistics.mean(dr):.1f}%  | miscare medie close-open {statistics.mean(dchg):.1f}%  | max zi {max(dr):.1f}%")
 
-    # --- SUGESTIE PARAMETRI (euristici transparente) ---
+    # --- PARAMETER SUGGESTION using transparent heuristics ---
     fee = 0.30  # FX 0.15%x2
     med_dip = statistics.median(dips) if dips else statistics.mean(abs_rets) * 2
     atr5 = statistics.mean(bar_rng)
-    tp = max(round(med_dip * 1.3, 1), round(fee + 2 * atr5, 1))   # bate fee+zgomot, prinde un swing real
-    drop = round(max(med_dip, atr5 * 1.5), 1)                     # DCA la un dip tipic
+    tp = max(round(med_dip * 1.3, 1), round(fee + 2 * atr5, 1))   # clear fees/noise and capture a real swing
+    drop = round(max(med_dip, atr5 * 1.5), 1)                     # DCA at a typical dip
     daily_rng = statistics.mean([pct(b[2], b[3]) for b in daily[-10:]]) if daily else 10
-    stop = round(min(max(daily_rng * 1.3, tp * 2.5), 25), 0)      # > swing zilnic tipic, plafon 25%
+    stop = round(min(max(daily_rng * 1.3, tp * 2.5), 25), 0)      # above a typical daily swing, capped at 25%
     print(f"\n  ===> SUGESTIE (euristic, pt buget $3000):")
     print(f"       TP            = {tp}%   (fee {fee}% + 2xATR5 {2*atr5:.1f}% sau 1.3x dip median)")
     print(f"       DCA_DROP_PCT  = {drop}%")

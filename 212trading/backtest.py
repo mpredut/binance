@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-backtest.py — backtester DCA + take-profit pentru Trading 212 (actiuni), pe date Yahoo.
+backtest.py — Trading 212 stock DCA and take-profit backtester using Yahoo data.
 
-Reia strategia bar-cu-bar (intrare la market-discount, DCA pe scadere, take-profit,
-STOP-LOSS), cu taxa FX 0.15%/leg (~0.30% round-trip). Raport ONEST: TOTAL include
-pozitia deschisa (mark-to-market), nu doar profitul realizat — ca sa nu te pacaleasca
-"100% win-rate" cu o pozitie pierzatoare blocata.
+Replay the strategy bar by bar with discounted entry, DCA on declines, take profit,
+and STOP-LOSS, including a 0.15% FX fee per leg (~0.30% round trip). The report's
+TOTAL includes marked-to-market open positions, not only realized profit, avoiding a
+misleading 100% win rate while a losing position remains trapped.
 
   python3 backtest.py --sym NVDA --range 1y --interval 1d
   python3 backtest.py --mode sweep --sym NVDA --range 6mo --interval 1d
@@ -42,7 +42,7 @@ def fetch_candles(sym, rng, interval):
 
 
 def simulate(ohlc, P):
-    """Compatibilitate CLI peste același ``Strategy.step`` folosit în live."""
+    """CLI compatibility wrapper over the same ``Strategy.step`` used live."""
     params = StratParams.from_env({
         "STRAT_CURRENCY": "USD",
         "YAHOO_SYMBOL": str(P.get("sym") or "REPLAY"),

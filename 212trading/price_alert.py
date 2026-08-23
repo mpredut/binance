@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-price_alert.py — alerta ntfy cand pretul unui activ (Yahoo) trece un prag.
+price_alert.py — ntfy alert when a Yahoo asset price crosses a threshold.
 
-Generic si reutilizabil (orice simbol), prietenos cu CRON: o verificare per rulare,
-cu dedup prin fisier de stare + histerezis (nu spameaza). Pretul off-hours e ultimul
-close (stabil) -> nu da false alarme cand piata e inchisa.
+Generic and reusable for any symbol, with one cron-friendly check per run. State-file
+deduplication and hysteresis avoid spam. Off-hours use the stable latest close and do
+not generate false alerts while the market is closed.
 
   python3 price_alert.py RGNT --below 4
   python3 price_alert.py NVDA --above 250 --topic alt-topic
@@ -48,7 +48,7 @@ def main() -> int:
     args = ap.parse_args()
 
     load_dotenv(args.env_file)
-    # alerta de PRET -> topicul dedicat categoriei (NTFY_TOPIC_PRICE), fallback pe cel generic.
+    # PRICE alerts use the dedicated NTFY_TOPIC_PRICE, falling back to the generic topic.
     topic = args.topic or os.environ.get("NTFY_TOPIC_PRICE") or os.environ.get("NTFY_TOPIC")
     if not topic:
         log("! niciun topic ntfy (--topic / NTFY_TOPIC_PRICE / NTFY_TOPIC in .env)"); return 1
@@ -72,7 +72,7 @@ def main() -> int:
     hit_above = args.above is not None and price >= args.above
     hit = hit_below or hit_above
 
-    # re-armare cu histerezis 5% (ca sa nu spameze la oscilatii in jurul pragului)
+    # Re-arm with 5% hysteresis to avoid spam from oscillations around the threshold.
     if not hit:
         if hit_below is False and args.below is not None and price > args.below * 1.05:
             armed = True
