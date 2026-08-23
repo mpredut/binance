@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
 """
-trailing_stop.py (Kraken) — DISJUNCTOR DE CRASH pe holdingurile manuale de pe Kraken.
+trailing_stop.py (Kraken) — crash circuit breaker for manual Kraken holdings.
 
-Protejeaza HYPE-ul cumparat manual (~$1.7k) impotriva unui colaps sustinut, FARA
-sa-ti capeze upside-ul (prag larg) si fara whipsaw (15%, nu 7%). Vinde DOAR
-balanta LIBERA (free = total - hold_trade), deci NU atinge cei 3.38 HYPE blocati
-in ordinul de TP al botului — separare curata.
+Protects manually purchased HYPE (~$1.7k) against a sustained collapse without
+capping upside (wide threshold) or causing tight-stop whipsaw (15%, not 7%). It
+sells only the FREE balance (free = total - hold_trade), so it does not touch the
+3.38 HYPE locked in the bot's take-profit order, maintaining clean separation.
 
-ONEST (vezi walk-forward in conversatie): trailing-ul nu produce alfa; rolul lui
-e protectia de crash. Prag larg ~15% = se declanseaza doar la o cadere reala.
+Walk-forward analysis shows trailing does not generate alpha; its role is crash
+protection. A wide ~15% threshold triggers only on a material decline.
 
-RE-BUY dupa crash sell (ca pe Binance binance_api/trailing_stop.py): dupa ce vinde
-in crash (force), tot el recumpara cand pretul revine REBUY_BOUNCE_PCT% de la minimul
-de dupa vanzare (confirma ca s-a oprit caderea -> nu prinde cutitul). Filtre de trend
-optionale (cache_instant_trend HYPE). Config in kraken/trailing.conf (nu in shell).
+Re-buy after a crash sale mirrors binance_api/trailing_stop.py: after a forced
+crash sale, it buys back when price rebounds REBUY_BOUNCE_PCT% from the post-sale
+low, confirming the fall has stopped before entry. Optional trend filters use the
+HYPE cache_instant_trend data. Configuration is in kraken/trailing.conf.
 
-Masina de stari (trailing + re-buy) e in trailing_core.TrailingCore, partajata cu
-Binance; aici e doar ADAPTORUL Kraken (API + log/notify specific). Comportament
-identic — vezi kraken/test_trailing_kraken.py.
+The trailing and re-buy state machine is in trailing_core.TrailingCore and shared
+with Binance. This module is only the Kraken ADAPTER for provider-specific API,
+logging, and notifications. See kraken/test_trailing_kraken.py.
 
-  python3 trailing_stop.py        # bucla (enabled din trailing.conf)
-  python3 trailing_stop.py --once                              # o verificare
-  python3 trailing_stop.py --status                            # varfuri + praguri
+  python3 trailing_stop.py        # loop (enabled in trailing.conf)
+  python3 trailing_stop.py --once                              # one check
+  python3 trailing_stop.py --status                            # peaks and thresholds
 """
 
 from __future__ import annotations
@@ -38,41 +38,41 @@ from notify import notify
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)   # ca sa importam nucleul partajat din radacina repo
+    sys.path.insert(0, _ROOT)   # import the shared core from the repository root
 
-from trailing_core import TrailingCore, should_sell  # noqa: E402  (should_sell reexportat pt teste/compat)
+from trailing_core import TrailingCore, should_sell  # noqa: E402  (re-export should_sell for tests/compatibility)
 
 STATE_FILE = os.path.join(_HERE, "trailing_state.json")
 CACHE_TREND = os.path.join(_ROOT, "cachedb", "cache_instant_trend.json")
 
 
-# Config KEY=VALUE din kraken/trailing.conf -> env (ENV extern suprascrie, pt test ad-hoc).
-# Foloseste load_dotenv-ul COMUN (botcore via kraken_common) in loc de un parser propriu.
+# Load KEY=VALUE configuration from kraken/trailing.conf; external environment values
+# override it for ad-hoc testing. Use the shared load_dotenv implementation.
 load_dotenv(os.path.join(_HERE, "trailing.conf"))
 
-# prag larg per ASSET (disjunctor de crash, nu unealta de profit) + perechea de vanzare
-TRAIL_PCT = {"HYPE": 18.0}   # 4 aug: 15->18 (decizie user, mai lat = mai putin whipsaw)
+# Wide threshold per asset (crash circuit breaker, not a profit tool) and sale pair.
+TRAIL_PCT = {"HYPE": 18.0}   # August 4: 15->18 by user decision; wider means less whipsaw
 PAIR_FOR = {"HYPE": "HYPEUSD"}
 DEFAULT_TRAIL_PCT = 15.0
 MIN_NOTIONAL_USD = 10.0
 CHECK_SECONDS = float(os.environ.get("KRAKEN_TRAILING_CHECK_SECONDS", "120"))
 
-# RE-BUY dupa crash sell: recumpara cand pretul revine BOUNCE% de la minimul de dupa vanzare.
+# After a crash sale, re-buy when price rebounds BOUNCE% from the post-sale low.
 REBUY_ENABLED = os.environ.get("KRAKEN_TRAILING_REBUY_ENABLED", "true").lower() == "true"
 REBUY_BOUNCE_PCT = float(os.environ.get("KRAKEN_TRAILING_REBUY_BOUNCE_PCT", "1.2"))
-# Filtre de trend (din cache_instant_trend HYPE). ACTIONEAZA doar la semnal CLAR opus;
-# neutru/necunoscut -> NU blocheaza (degradare sigura). Re-buy: sari daca trend CLAR jos.
-# Sell de crash: implicit NEFILTRAT (disjunctorul ramane fiabil); true = anti-wick.
+# Trend filters use HYPE cache_instant_trend and act only on a CLEAR opposing signal.
+# Neutral/unknown does not block, providing safe degradation. Skip re-buy on a clear
+# downtrend. Crash sells are unfiltered by default for reliability; true enables anti-wick.
 REBUY_SKIP_IF_TREND_DOWN = os.environ.get("KRAKEN_TRAILING_REBUY_SKIP_IF_TREND_DOWN", "true").lower() == "true"
 SELL_SKIP_IF_TREND_UP = os.environ.get("KRAKEN_TRAILING_SELL_SKIP_IF_TREND_UP", "false").lower() == "true"
-# Prag minim de profit inainte sa se activeze trailing-ul (0 = activ imediat, ca inainte).
-# Previne vanzarea in pierdere dupa un dip normal imediat dupa cumparare.
+# Minimum profit before trailing activates (0 means immediate activation as before).
+# This prevents selling at a loss after a normal dip immediately following a purchase.
 MIN_PROFIT_PCT = float(os.environ.get("KRAKEN_TRAILING_MIN_PROFIT_PCT", "0.0"))
 
 
 class KrakenTrailing:
-    """ADAPTOR Kraken pt TrailingCore: API (balanta libera, pret, sell/buy limit, trend) +
-    log/notify specific. Masina de stari (varf, trailing, re-buy) e in TrailingCore."""
+    """Kraken adapter for TrailingCore, providing free-balance, price,
+    limit sell/buy, and trend APIs plus provider-specific logging and notifications."""
 
     def __init__(self, client: KrakenClient, log=log, enabled=None, state_file=STATE_FILE,
                  min_profit_pct=MIN_PROFIT_PCT):
@@ -90,7 +90,7 @@ class KrakenTrailing:
             sell_fraction=1.0, item_isolation=False,
             min_profit_pct=min_profit_pct)
 
-    # -- stare (delegare la core; pastrate pt --status si teste) ---------------
+    # -- state delegated to the core; retained for --status and tests ----------
     def _load(self) -> dict:
         return self.core.load()
 
@@ -101,7 +101,7 @@ class KrakenTrailing:
         return TRAIL_PCT.get(asset, DEFAULT_TRAIL_PCT)
 
     def _free(self, asset: str) -> float:
-        """Balanta LIBERA (total - blocata in ordine) — ca sa nu atinga pozitia botului."""
+        """Return FREE balance (total minus order holds), excluding the bot position."""
         bx = self.client._private("BalanceEx").get(asset)
         if not bx:
             return 0.0
@@ -110,10 +110,10 @@ class KrakenTrailing:
         except (TypeError, ValueError):
             return 0.0
 
-    # -- trend instant HYPE (din cache_instant_trend.json) — pt filtrele optionale --
+    # -- HYPE instant trend from cache_instant_trend.json for optional filters --
     def _trend_value(self, pair: str) -> float:
-        """Panta trendului instant (>0 sus, <0 jos, 0 neutru/necunoscut). 0 la orice eroare
-        -> filtrele devin no-op (degradare sigura, comportament ca fara filtru)."""
+        """Return instant-trend slope (>0 up, <0 down, 0 neutral/unknown).
+        Errors return 0, making trend filters a safe no-op."""
         try:
             import json
             with open(CACHE_TREND) as f:
@@ -124,13 +124,13 @@ class KrakenTrailing:
             pass
         return 0.0
 
-    # == contract ADAPTOR pt TrailingCore =====================================
+    # == TrailingCore ADAPTER contract ========================================
     def assets(self):
         for asset, trail in TRAIL_PCT.items():
-            yield (asset, asset, PAIR_FOR.get(asset, asset + "USD"), trail)  # key=asset, pair separat
+            yield (asset, asset, PAIR_FOR.get(asset, asset + "USD"), trail)  # key=asset, separate pair
 
     def begin_tick(self) -> bool:
-        return True   # Kraken citeste balanta per-asset (in free_qty), nu in bloc
+        return True   # Kraken reads balances per asset in free_qty, not in bulk
 
     def free_qty(self, asset: str) -> float:
         return self._free(asset)
@@ -143,8 +143,8 @@ class KrakenTrailing:
 
     def execute_sell(self, key, asset, pair, qty, price, peak, trail) -> bool:
         try:
-            # pret usor SUB piata pt fill sigur; precizia (pair_decimals) o rotunjeste
-            # central add_order (nu hardcodat aici — evita respingerea Kraken pe zecimale).
+            # Price slightly BELOW market for reliable fill. Central add_order applies
+            # pair_decimals precision instead of hard-coding it here, avoiding rejection.
             self.client.add_order(pair, "sell", round(qty, 8),
                                   price * 0.995, ordertype="limit")
             self.log(f"  🛑 [TRAIL-K] VANDUT {qty} {asset} @ ~{price:.4f} "
@@ -159,8 +159,8 @@ class KrakenTrailing:
 
     def execute_rebuy(self, key, asset, pair, qty, price, rb) -> bool:
         try:
-            # limit usor PESTE pret -> fill sigur (ca add_order sell e usor sub); precizia o
-            # rotunjeste central add_order (pair_decimals), nu hardcodat 4 zecimale.
+            # Limit slightly ABOVE market for reliable fill, symmetric with the sell order.
+            # Central add_order applies pair_decimals rather than hard-coded precision.
             self.client.add_order(pair, "buy", qty, price * 1.005, ordertype="limit")
             self.log(f"  🟢 [TRAIL-K] RE-BUY {qty} {asset} @ ~{price:.4f}  "
                      f"(recul +{REBUY_BOUNCE_PCT}% de la minim {rb['low']:.4f}; vandut la {rb.get('sell_price', 0):.4f})")
@@ -170,7 +170,7 @@ class KrakenTrailing:
             return True
         except KrakenError as e:
             self.log(f"  ! [TRAIL-K] re-buy {asset} esuat: {e}")
-            return False                                      # pastreaza rebuy -> reincearca data viitoare
+            return False                                      # preserve re-buy state and retry next time
 
     def log_dry_sell(self, key, asset, pair, qty, price, peak, trail) -> None:
         self.log(f"  🟡 [TRAIL-K][DRY] AR VINDE {qty} {asset} @ ~{price:.4f} "
@@ -193,12 +193,12 @@ class KrakenTrailing:
     def log_tick_error(self, e) -> None:
         self.log(f"  ! [TRAIL-K] ciclu esuat ({e.__class__.__name__}: {e}) — reincerc")
 
-    # -- un pas / bucla --------------------------------------------------------
+    # -- one step / loop -------------------------------------------------------
     def check_once(self) -> None:
         self.core.check_once()
-        # healthcheck.sh foloseste mtime-ul logului ca heartbeat. Cand nu exista
-        # balanta libera de protejat, core-ul iese intentionat fara alte mesaje;
-        # confirma explicit ca procesul a terminat totusi ciclul cu succes.
+        # healthcheck.sh uses the log mtime as its heartbeat. When there is no free
+        # balance to protect, the core intentionally exits without another message;
+        # explicitly confirm that the process still completed the cycle successfully.
         self.log("  [TRAIL-K] heartbeat")
 
     def run(self):
@@ -221,8 +221,8 @@ def main() -> int:
     args = ap.parse_args()
     if not (args.once or args.status):
         single_instance("kraken_trailing")
-    # Cheie dedicata trailing (KRAKEN_API_KEY_TRAIL) -> nonce separat de _BOT (kraken_bot + xstock_watch).
-    # Fallback pe _BOT daca _TRAIL lipseste din .env.
+    # A dedicated trailing key (KRAKEN_API_KEY_TRAIL) keeps its nonce separate from
+    # _BOT (kraken_bot + xstock_watch). Fall back to _BOT when _TRAIL is absent.
     key    = os.environ.get("KRAKEN_API_KEY_TRAIL")    or os.environ.get("KRAKEN_API_KEY_BOT")
     secret = os.environ.get("KRAKEN_API_SECRET_TRAIL") or os.environ.get("KRAKEN_API_SECRET_BOT")
     client = KrakenClient(key, secret)

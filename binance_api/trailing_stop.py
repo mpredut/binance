@@ -1,35 +1,35 @@
 #!/usr/bin/env python3
 """
-trailing_stop.py — TRAILING STOP per-moneda pe holdings Binance.
+trailing_stop.py — per-coin trailing stop for Binance holdings.
 
-De ce exista: assetguardian.sell_all_assets() declanseaza corect dar cheama
-place_safe_order(force=False) -> trece prin apply_weight_limit -> intr-un uptrend
-ponderea contra-trend e 0.02 -> ordinul e zero-uit -> "Orders sent: 0". Adica
-mecanismul de protectie nu vinde NIMIC (vezi logul TAO 13 iun: a tras de sute de
-ori, a vandut 0). Trailing stop-ul:
-  * tine pozitia cat pretul URCA (urmareste varful)
-  * vinde DOAR cand pretul scade trail% de la varf -> protejeaza castigul real
-  * foloseste force=True -> ocoleste weight-ul (altfel ar fi zero-uit la fel)
+Why it exists: assetguardian.sell_all_assets() triggers correctly but calls
+place_safe_order(force=False), which passes through apply_weight_limit. During an
+uptrend the counter-trend weight is 0.02, reducing the order to zero and producing
+"Orders sent: 0". The protection mechanism therefore sells nothing. The trailing stop:
+  * holds the position while price rises and tracks the peak;
+  * sells only when price falls trail% from the peak, protecting realized gains;
+  * uses force=True to bypass weighting, which would otherwise zero the order.
 
-ONEST (walk-forward out-of-sample, feed real 291z): trailing-ul STRANS NU bate
-detinerea — declinul vine cu reculuri care produc whipsaw + fee. NU e o sursa de
-profit. Rol corect: DISJUNCTOR DE CRASH cu prag LARG (~22%) — se declanseaza doar
-la un colaps sustinut, ca plasa impotriva scenariului care distruge detinerea.
-Ruleaza-l in dry-run intai; restul strategiei (hold+DCA+weight) ramane neschimbat.
+Walk-forward out-of-sample results on a 291-day real feed show that a TIGHT
+trailing stop does not beat holding: rebounds during declines create whipsaw and
+fees. It is not a profit source. Its intended role is a CRASH CIRCUIT BREAKER with
+a WIDE threshold (~22%), triggered only by a sustained collapse as protection
+against the scenario that destroys the holding. Run it in dry-run first; the rest
+of the strategy (hold+DCA+weighting) remains unchanged.
 
-Masina de stari (trailing + re-buy) e in trailing_core.TrailingCore, partajata cu
-Kraken; aici e doar ADAPTORUL Binance (API + log specific). Comportament identic —
-vezi tests/test_trailing_stop.py.
+The trailing and re-buy state machine is in trailing_core.TrailingCore and shared
+with Kraken. This module is only the Binance ADAPTER (API and provider-specific
+logging). See tests/test_trailing_stop.py for behavior coverage.
 
-SIGURANTA:
-  * TRAILING_ENABLED=false (implicit) -> DRY-RUN: doar logheaza ce AR vinde.
-  * actioneaza doar pe monedele din symbols.py.
-  * varful e persistat (supravietuieste restartului) -> nu se reseteaza.
-  * sare ordinele sub notional minim.
+SAFETY:
+  * TRAILING_ENABLED=false (default) enables DRY-RUN and only logs proposed sales.
+  * It operates only on coins listed in symbols.py.
+  * The peak is persisted across restarts and is not reset.
+  * Orders below the minimum notional are skipped.
 
-  TRAILING_ENABLED=true python trailing_stop.py            # bucla
-  python trailing_stop.py --once                            # o verificare (dry-run)
-  python trailing_stop.py --status                          # varfuri + praguri curente
+  TRAILING_ENABLED=true python trailing_stop.py            # loop
+  python trailing_stop.py --once                            # one check (dry-run)
+  python trailing_stop.py --status                          # current peaks and thresholds
 """
 
 from __future__ import annotations
@@ -39,56 +39,58 @@ import os
 import sys
 import time
 
-_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # binance_api/ -> radacina repo
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # binance_api/ -> repository root
 if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)   # ruleaza si ca script (python binance_api/trailing_stop.py)
+    sys.path.insert(0, _ROOT)   # also support direct execution (python binance_api/trailing_stop.py)
 
 from providers.quantity import resolve_assets
 
-from trailing_core import TrailingCore, should_sell  # noqa: E402  (should_sell reexportat pt teste/compat)
-from botcore import load_dotenv, single_instance  # noqa: E402  (parser KEY=VALUE + single-instance comun)
+from trailing_core import TrailingCore, should_sell  # noqa: E402  (re-export should_sell for tests/compatibility)
+from botcore import load_dotenv, single_instance  # noqa: E402  (shared KEY=VALUE parser and single-instance guard)
 
 DEFAULT_STATE = os.path.join(_ROOT, "cachedb", "trailing_state.json")
 
 
-# Config KEY=VALUE din trailing.conf -> env (ENV extern suprascrie). load_dotenv COMUN (botcore).
+# Load KEY=VALUE configuration from trailing.conf into the environment; external values override it.
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "trailing.conf"))
 
-# PRAG LARG = DISJUNCTOR DE CRASH, nu unealta de profit.
-# Walk-forward out-of-sample (feed real 291z) a aratat ca trailing-ul STRANS (8-12%)
-# NU bate detinerea — declinul vine cu reculuri violente care produc whipsaw + fee.
-# Singura valoare reala e protectia impotriva unui COLAPS sustinut (fara reculuri):
-# prag larg (~22%) se declanseaza doar la o cadere catastrofala, nu pe zgomot.
+# A WIDE THRESHOLD is a CRASH CIRCUIT BREAKER, not a profit tool.
+# Walk-forward out-of-sample analysis on a real 291-day feed showed that tight
+# trailing stops (8-12%) do not beat holding because violent rebounds cause whipsaw
+# and fees. The useful role is protection against a sustained collapse: a wide
+# threshold (~22%) triggers only on a catastrophic fall, not market noise.
 TRAIL_PCT = {
     "BTCUSDC": 20.0,
     "TAOUSDC": 22.0,
 }
 DEFAULT_TRAIL_PCT = 22.0
-SELL_FRACTION = float(os.environ.get("TRAILING_SELL_FRACTION", "1.0"))  # 1.0=tot, 0.5=jumatate
+SELL_FRACTION = float(os.environ.get("TRAILING_SELL_FRACTION", "1.0"))  # 1.0=all, 0.5=half
 MIN_NOTIONAL_USD = 11.0
 CHECK_SECONDS = float(os.environ.get("TRAILING_CHECK_SECONDS", "60"))
 
-# RE-BUY dupa stop-loss de crash: trailing-ul a vandut (cu bypass) -> tot el recumpara (cu bypass),
-# scutit de garda de profit (care, cu fereastra ei lunga, ar bloca re-intrarea). Declansare: pretul
-# revine REBUY_BOUNCE_PCT% de la minimul de dupa vanzare (confirmare ca s-a oprit caderea) -> nu
-# prinde cutitul. 1 transa acum; REBUY_TRANCHES rezervat pt extindere (DCA pe dip).
+# Re-buy after a crash stop-loss: the trailing component that sold with a bypass also
+# buys back with a bypass, avoiding the profit guard whose long window would block
+# re-entry. Trigger when price rebounds REBUY_BOUNCE_PCT% from the post-sale low,
+# confirming the fall has stopped before entry. One tranche is supported currently;
+# REBUY_TRANCHES is reserved for a future dip-DCA extension.
 REBUY_ENABLED = os.environ.get("TRAILING_REBUY_ENABLED", "true").lower() == "true"
 REBUY_BOUNCE_PCT = float(os.environ.get("TRAILING_REBUY_BOUNCE_PCT", "1.2"))
 REBUY_TRANCHES = int(os.environ.get("TRAILING_REBUY_TRANCHES", "1"))
-# Filtre de trend (citite din cache_instant_trend via cacheManager). ACTIONEAZA doar la semnal
-# CLAR opus; neutru/necunoscut -> NU blocheaza (degradare sigura, comportament = ca fara filtru).
-# Re-buy: sari daca trend CLAR jos (nu prinde cutitul). Sell de crash: implicit NEFILTRAT (disjunctorul
-# trebuie sa ramana fiabil); pune true daca vrei sa NU vinda cand trendul instant e clar SUS (anti-wick).
+# Trend filters read cache_instant_trend through cacheManager. They act only on a
+# CLEAR opposing signal; neutral/unknown does not block, safely degrading to behavior
+# without a filter. Skip re-buy on a clear downtrend. Crash sells are unfiltered by
+# default so the circuit breaker remains reliable; enable the sell filter to avoid
+# selling while the instant trend is clearly up (anti-wick behavior).
 REBUY_SKIP_IF_TREND_DOWN = os.environ.get("TRAILING_REBUY_SKIP_IF_TREND_DOWN", "true").lower() == "true"
 SELL_SKIP_IF_TREND_UP = os.environ.get("TRAILING_SELL_SKIP_IF_TREND_UP", "false").lower() == "true"
-# Prag minim de profit inainte sa se activeze trailing-ul (0 = activ imediat, ca inainte).
-# Previne vanzarea in pierdere dupa un dip normal imediat dupa cumparare.
+# Minimum profit before trailing activates (0 means immediate activation as before).
+# This prevents selling at a loss after a normal dip immediately following a purchase.
 MIN_PROFIT_PCT = float(os.environ.get("TRAILING_MIN_PROFIT_PCT", "0.0"))
 
 
 class TrailingStop:
-    """ADAPTOR Binance pt TrailingCore: pune la dispozitie API-ul (balante, pret, sell/buy,
-    trend) + log-urile specifice. Masina de stari (varf, trailing, re-buy) e in TrailingCore."""
+    """Binance adapter for TrailingCore, providing balance, price, sell/buy,
+    trend APIs, and provider-specific logging. TrailingCore owns the state machine."""
 
     def __init__(self, api, po, sym, log=print, enabled=None,
                  sell_fraction=SELL_FRACTION, state_file=DEFAULT_STATE,
@@ -111,7 +113,7 @@ class TrailingStop:
             sell_fraction=sell_fraction, item_isolation=True,
             min_profit_pct=min_profit_pct)
 
-    # -- stare (delegare la core; pastrate pt --status si teste) ---------------
+    # -- state delegated to the core; retained for --status and tests ----------
     def _load(self) -> dict:
         return self.core.load()
 
@@ -130,10 +132,10 @@ class TrailingStop:
                     return 0.0
         return 0.0
 
-    # -- trend instant (din cacheManager) — pt filtrele optionale --------------
+    # -- instant trend from cacheManager for optional filters ------------------
     def _trend_value(self, symbol: str) -> float:
-        """Panta trendului instant (>0 sus, <0 jos, 0 neutru/necunoscut). 0 la orice eroare
-        -> filtrele de trend devin no-op (degradare sigura, comportament ca fara filtru)."""
+        """Return instant-trend slope (>0 up, <0 down, 0 neutral/unknown).
+        Errors return 0, making trend filters a safe no-op."""
         try:
             import cacheManager as cm
             snap = cm.get_short_trend_manager().get_snapshot(symbol)
@@ -143,11 +145,11 @@ class TrailingStop:
             pass
         return 0.0
 
-    # == contract ADAPTOR pt TrailingCore =====================================
+    # == TrailingCore ADAPTER contract ========================================
     def assets(self):
         for symbol in self.sym.symbols:
             asset = resolve_assets(symbol)[0]
-            yield (symbol, asset, symbol, self.trail_pct_for(symbol))  # key=pair=symbol pe Binance
+            yield (symbol, asset, symbol, self.trail_pct_for(symbol))  # key=pair=symbol on Binance
 
     def begin_tick(self) -> bool:
         try:
@@ -167,11 +169,11 @@ class TrailingStop:
         return self._trend_value(pair)
 
     def execute_sell(self, key, asset, pair, qty, price, peak, trail) -> bool:
-        # 30 iul: prin proxy-ul unic guardat (self.po = market_api.api, .place()).
-        # force=True -> vinde la MARKET (executie sigura in crash);
-        # bypass_profit_guard=True -> ignora gardul de profit/istorie (e STOP-LOSS,
-        # vinde sub ultimul buy). Fara bypass, gardul l-ar bloca. (Plafonul zilnic +
-        # cooldown raman active, ca in lantul vechi — bypass sare DOAR profit+weight.)
+        # July 30: use the single guarded proxy (self.po = market_api.api, .place()).
+        # force=True sells at MARKET for reliable crash execution.
+        # bypass_profit_guard=True bypasses profit/history protection because this is a
+        # STOP-LOSS below the last buy; otherwise the guard would block it. Daily limits
+        # and cooldown remain active as before; the bypass skips only profit and weighting.
         self.po.place(pair, "SELL", price, qty, force=True, bypass_profit_guard=True, smart=False)
         self.log(f"  🛑 [TRAIL] VANDUT {pair} {qty} @ ~{price:.4f} "
                  f"(varf {peak:.4f}, -{trail}%)")
@@ -205,7 +207,7 @@ class TrailingStop:
     def log_item_error(self, key, e) -> None:
         self.log(f"  ! [TRAIL] {key}: {e}")
 
-    # -- un pas / bucla --------------------------------------------------------
+    # -- one step / loop -------------------------------------------------------
     def check_once(self) -> None:
         self.core.check_once()
 
@@ -233,7 +235,7 @@ def main() -> int:
         single_instance("binance_trailing")
 
     from binance_api import bapi as api
-    from providers.market_api import api as po   # proxy unic guardat (.place()); era bapi_placeorder
+    from providers.market_api import api as po   # single guarded .place() proxy; formerly bapi_placeorder
     import symbols as sym
     ts = TrailingStop(api, po, sym)
 

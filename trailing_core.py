@@ -1,31 +1,32 @@
 #!/usr/bin/env python3
 """
-trailing_core.py — nucleul provider-agnostic al trailing-stop-ului cu re-buy.
+trailing_core.py — provider-agnostic trailing-stop core with re-buy support.
 
-De ce exista: binance_api/trailing_stop.py si kraken/trailing_stop.py aveau ACEEASI
-masina de stari (urmareste varful -> vinde la -trail% de la varf -> re-buy pe reculul
-de la minimul de dupa vanzare), copiata aproape linie-cu-linie. Aici sta logica de
-CONTROL (identica); fiecare provider ramane un ADAPTOR subtire care doar isi executa
-apelurile lui de API (pret, balanta, sell, buy, trend, notify) + propriile log-uri.
+Why it exists: binance_api/trailing_stop.py and kraken/trailing_stop.py used the
+SAME state machine (track the peak -> sell at trail% below the peak -> re-buy on
+a bounce from the post-sale low), copied almost line for line. The shared CONTROL
+logic lives here; each provider remains a thin ADAPTER that performs only its own
+API calls (price, balance, sell, buy, trend, notify) and provider-specific logging.
 
-Comportament IDENTIC cu inainte de extragere — garantat de tests/test_trailing_stop.py
-si kraken/test_trailing_kraken.py, care raman verzi neschimbate (testeaza clasele-adaptor
-TrailingStop / KrakenTrailing prin aceeasi masina de stari, acum centralizata aici).
+Behavior is IDENTICAL to the pre-extraction implementation, as covered by
+tests/test_trailing_stop.py and kraken/test_trailing_kraken.py. Those unchanged
+tests exercise the TrailingStop and KrakenTrailing adapters through the same
+state machine, which is now centralized here.
 
-Schema de stare (per cheie, persistata de core — NESCHIMBATA fata de versiunea veche,
-ca starile deja salvate ale demonilor care ruleaza sa se incarce mai departe):
+State schema (per key, persisted by the core and UNCHANGED from the old version,
+so existing daemon state files continue to load):
   { "<key>": { "peak": float, "rebuy": {"qty","sell_price","low"}  (optional) } }
 
-Contractul ADAPTORULUI (duck-typing — vezi cele doua clase-adaptor):
-  assets()        -> iterabil de (key, asset, pair, trail_pct)
-  begin_tick()    -> bool          # False = sari tick-ul (ex. balante indisponibile)
-  free_qty(asset) -> float         # cantitatea LIBERA de protejat
+ADAPTER contract (duck typing; see the two adapter classes):
+  assets()        -> iterable of (key, asset, pair, trail_pct)
+  begin_tick()    -> bool          # False skips the tick (e.g. unavailable balances)
+  free_qty(asset) -> float         # FREE quantity to protect
   price(pair)     -> float | None
-  trend(pair)     -> float         # >0 sus, <0 jos, 0 neutru/necunoscut (filtre = no-op la 0)
-  execute_sell(key, asset, pair, qty, price, peak, trail) -> bool  # plaseaza+logheaza+notifica; True=ok
-  execute_rebuy(key, asset, pair, qty, price, rb)         -> bool  # idem; False -> pastreaza rebuy, reincearca
+  trend(pair)     -> float         # >0 up, <0 down, 0 neutral/unknown (filters are no-op at 0)
+  execute_sell(key, asset, pair, qty, price, peak, trail) -> bool  # place+log+notify; True=success
+  execute_rebuy(key, asset, pair, qty, price, rb)         -> bool  # same; False preserves re-buy for retry
   log_dry_sell / log_dry_rebuy / log_hold / log_skip_rebuy_trend /
-  log_skip_sell_trend / log_item_error / log_tick_error            # doar log (wording specific provider)
+  log_skip_sell_trend / log_item_error / log_tick_error            # logging only (provider-specific wording)
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ import os
 
 
 def should_sell(current: float, peak: float, trail_pct: float) -> bool:
-    """True daca pretul a cazut >= trail% de la varf."""
+    """Return True when the price has fallen at least trail% from the peak."""
     return peak > 0 and trail_pct > 0 and current <= peak * (1 - trail_pct / 100.0)
 
 
@@ -55,12 +56,13 @@ class TrailingCore:
         self.sell_skip_if_trend_up = sell_skip_if_trend_up
         self.sell_fraction = sell_fraction
         self.min_profit_pct = min_profit_pct
-        # item_isolation=True (Binance): try per-moneda + save mereu dupa bucla (o moneda
-        # picata nu opreste restul). False (Kraken): try pe tot tick-ul; eroare -> log + fara
-        # save (reincearca data viitoare). Pastreaza exact structura de erori a fiecaruia.
+        # item_isolation=True (Binance): catch errors per coin and always save after the loop
+        # (one failed coin does not stop the rest). False (Kraken): wrap the entire tick;
+        # on error, log without saving and retry next time. This preserves each provider's
+        # original error-handling structure.
         self.item_isolation = item_isolation
 
-    # -- stare (varful per cheie) ---------------------------------------------
+    # -- state (peak per key) -------------------------------------------------
     def load(self) -> dict:
         try:
             with open(self.state_file) as f:
@@ -80,33 +82,33 @@ class TrailingCore:
         except OSError as e:
             self.log(f"  ! [TRAIL] nu pot salva starea: {e}")
 
-    # -- re-buy dupa crash sell -----------------------------------------------
+    # -- re-buy after a crash sale --------------------------------------------
     def _handle_rebuy(self, key, asset, pair, st: dict, price: float) -> None:
-        """Recumparare dupa stop-loss de crash: cand pretul revine rebuy_bounce_pct% de la
-        minimul de dupa vanzare (confirma ca s-a oprit caderea -> nu prinde cutitul)."""
+        """Re-buy after a crash stop-loss once price bounces rebuy_bounce_pct%
+        from the post-sale low, confirming the fall has stopped before entry."""
         rb = st.get("rebuy")
         if not rb:
             return
-        rb["low"] = min(rb.get("low", price), price)          # urmareste fundul de dupa vanzare
+        rb["low"] = min(rb.get("low", price), price)          # track the post-sale low
         if price < rb["low"] * (1 + self.rebuy_bounce_pct / 100.0):
-            return                                            # reculul inca neconfirmat -> asteapta
+            return                                            # bounce is not confirmed yet; wait
         if self.rebuy_skip_if_trend_down and self.a.trend(pair) < 0:
             self.a.log_skip_rebuy_trend(asset)
             return
-        qty = round(float(rb.get("qty", 0)), 8)               # 1 transa = qty intreg vandut
+        qty = round(float(rb.get("qty", 0)), 8)               # one tranche equals the full quantity sold
         if qty <= 0:
             st.pop("rebuy", None)
             return
         if self.enabled and qty * price >= self.min_notional:
             if not self.a.execute_rebuy(key, asset, pair, qty, price, rb):
-                return                                        # esuat -> pastreaza rebuy, reincearca data viitoare
+                return                                        # failed: retain re-buy state and retry next time
         else:
             self.a.log_dry_rebuy(key, asset, pair, qty, price, rb)
-        st.pop("rebuy", None)                                 # 1 transa -> gata
+        st.pop("rebuy", None)                                 # one tranche; complete
         if self.min_profit_pct > 0:
-            st["warmup_at"] = price * (1 + self.min_profit_pct / 100.0)  # warming up din nou de la pretul de re-buy
+            st["warmup_at"] = price * (1 + self.min_profit_pct / 100.0)  # restart warm-up from the re-buy price
 
-    # -- un activ -------------------------------------------------------------
+    # -- one asset ------------------------------------------------------------
     def _process(self, key, asset, pair, trail, state) -> None:
         free = self.a.free_qty(asset)
         price = self.a.price(pair)
@@ -115,20 +117,20 @@ class TrailingCore:
         is_new = key not in state
         st = state.setdefault(key, {"peak": price})
         if is_new and self.min_profit_pct > 0:
-            st["warmup_at"] = price * (1 + self.min_profit_pct / 100.0)  # primul tick: seteaza pragul de activare
-        if self.rebuy_enabled and st.get("rebuy"):            # re-buy pending INAINTE de check-ul de notional (free~0 dupa vanzare)
+            st["warmup_at"] = price * (1 + self.min_profit_pct / 100.0)  # first tick: set activation threshold
+        if self.rebuy_enabled and st.get("rebuy"):            # handle pending re-buy BEFORE notional check (free~0 after sale)
             self._handle_rebuy(key, asset, pair, st, price)
         if free * price < self.min_notional:
-            return                                            # nimic de protejat
+            return                                            # nothing to protect
         if "warmup_at" in st:
-            # warming up: asteapta pana pretul depaseste pragul (setat la primul tick sau dupa re-buy)
+            # Warm up until price exceeds the threshold set on the first tick or after re-buy.
             if price < st["warmup_at"]:
                 self.log(f"  [TRAIL] {asset}: {price:.4f}  warming up — activ la {st['warmup_at']:.4f}"
                          f" (+{self.min_profit_pct}%)")
                 return
-            st.pop("warmup_at")                              # prag atins -> trailing activ de-acum incolo
+            st.pop("warmup_at")                              # threshold reached; trailing is now active
         if price > st["peak"]:
-            st["peak"] = price                                # varf nou -> urca trailing-ul
+            st["peak"] = price                                # new peak moves the trailing level up
         stop_at = st["peak"] * (1 - trail / 100.0)
         if should_sell(price, st["peak"], trail):
             if self.sell_skip_if_trend_up and self.a.trend(pair) > 0:
@@ -137,31 +139,31 @@ class TrailingCore:
             sell_qty = round(free * self.sell_fraction, 8)
             if self.enabled and sell_qty * price >= self.min_notional:
                 if self.a.execute_sell(key, asset, pair, sell_qty, price, st["peak"], trail):
-                    st["peak"] = price                        # re-armeaza de la pretul curent
-                    if self.rebuy_enabled:                    # armeaza re-buy: recumpara cand pretul revine de la minim
+                    st["peak"] = price                        # re-arm from the current price
+                    if self.rebuy_enabled:                    # arm re-buy for a bounce from the low
                         st["rebuy"] = {"qty": sell_qty, "sell_price": price, "low": price}
             else:
                 self.a.log_dry_sell(key, asset, pair, sell_qty, price, st["peak"], trail)
         else:
             self.a.log_hold(key, asset, pair, price, st["peak"], stop_at, trail, free)
 
-    # -- un pas ---------------------------------------------------------------
+    # -- one step -------------------------------------------------------------
     def check_once(self) -> None:
         if not self.a.begin_tick():
             return
-        if self.item_isolation:                               # Binance: izoleaza fiecare moneda, salveaza mereu
+        if self.item_isolation:                               # Binance: isolate each coin and always save
             state = self.load()
             for key, asset, pair, trail in self.a.assets():
                 try:
                     self._process(key, asset, pair, trail, state)
-                except Exception as e:  # noqa: BLE001 — o moneda nu opreste restul
+                except Exception as e:  # noqa: BLE001 — one coin must not stop the rest
                     self.a.log_item_error(key, e)
             self.save(state)
-        else:                                                 # Kraken: tot tick-ul intr-un try; eroare -> reincearca (fara save)
+        else:                                                 # Kraken: one try per tick; retry errors without saving
             try:
                 state = self.load()
                 for key, asset, pair, trail in self.a.assets():
                     self._process(key, asset, pair, trail, state)
                 self.save(state)
-            except Exception as e:  # noqa: BLE001 — rezilienta: net picat -> reincearca
+            except Exception as e:  # noqa: BLE001 — resilience: retry after a network failure
                 self.a.log_tick_error(e)
