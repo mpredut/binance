@@ -5,7 +5,7 @@ future profitability.
 
 ## Automated gates
 
-- Complete suite: `948 passed`, `273 subtests passed`.
+- Complete suite: `956 passed`, `296 subtests passed` after tradeall hardening.
 - Monitortrades characterization and cooldown gates: `38 passed`.
 - Import inventory: `16/16 OK` for active/common modules.
 - Instrument/provider routing: PASS. Private Binance balance checks are explicitly

@@ -222,6 +222,13 @@ Plan:
 - Deduplicate by decision/intent, not only time cooldown.
 - Separate observation/shadow signals from live execution by typed command boundaries.
 
+Status snapshot (2026-08-23): immediate behavior-neutral hardening is implemented:
+tradeall owns retry for its time-sensitive signals, rejects invalid side/price and stale
+price snapshots before execution, validates unsafe runtime configuration, deduplicates
+coordinator symbols and supports deterministic coordinator shutdown. Accepted submissions
+are documented as throttling events rather than fills. Persisting trend/decision identity
+and reconciling accepted/partial/terminal orders across restart remains open.
+
 ### B10. Binance trailing stop must verify execution
 
 Problems:

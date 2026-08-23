@@ -16,6 +16,8 @@ lângă codul lor (convenție — sunt linkate mai jos).
   supraviețuire, lindy plateau), garda de profit, trailing re-buy, T212 profit-guard/ladder, xStocks.
 - [RTRADE.md](RTRADE.md) — politica rtrade, ciclul BUY/SELL, evaluarea financiară,
   stopurile dinamice, ownership-ul și recovery-ul ordinelor.
+- [TRADEALL.md](TRADEALL.md) — pipeline-ul de semnal, Kalman gate, limitele per trend,
+  ownership-ul retry-ului și riscurile de restart încă deschise.
 - [ASSETGUARDIAN.md](ASSETGUARDIAN.md) — semnalele pe valoarea portofoliului,
   baseline MIN/MAX, execuția guardată și riscul de concentrare al drawdown-buy.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — facadă `providers/market_api` + provideri, HYPE pe HL,

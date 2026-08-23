@@ -93,6 +93,38 @@ FIRE_SAFEBACK_SEC = FIRE_SAFEBACK_DAYS * 24 * 3600 + 60
 DECISIONS_LOG_DIR = "logger"
 
 
+def _validate_tradeall_config():
+    """Fail startup before trading when timing/risk configuration is unsafe."""
+    positive = {
+        "TREND_TO_BE_OLD_SECONDS": TREND_TO_BE_OLD_SECONDS,
+        "PRICE_CHANGE_THRESHOLD_EUR": PRICE_CHANGE_THRESHOLD_EUR,
+        "PRICE_CHANGE_THRESHOLD_BIG_EUR": PRICE_CHANGE_THRESHOLD_BIG_EUR,
+        "TREND_UNIFORM_RATE_THRESHOLD": TREND_UNIFORM_RATE_THRESHOLD,
+        "SLOPE_EXTREME_THRESHOLD": SLOPE_EXTREME_THRESHOLD,
+        "FIRE_MIN_RETRY_INTERVAL_SEC": FIRE_MIN_RETRY_INTERVAL_SEC,
+        "FIRE_SAFEBACK_SEC": FIRE_SAFEBACK_SEC,
+    }
+    for name, value in positive.items():
+        if not math.isfinite(float(value)) or float(value) <= 0:
+            raise ValueError(f"tradeall config invalid: {name}={value!r}")
+    nonnegative_counts = {
+        "TREND_MIN_VALIDATED_CONFIRMS": TREND_MIN_VALIDATED_CONFIRMS,
+        "TREND_CONSISTENT_CONFIRMS": TREND_CONSISTENT_CONFIRMS,
+    }
+    for name, value in nonnegative_counts.items():
+        if int(value) < 0:
+            raise ValueError(f"tradeall config invalid: {name}={value!r}")
+    if not math.isfinite(TREND_MIN_VALIDATED_SECONDS) or TREND_MIN_VALIDATED_SECONDS < 0:
+        raise ValueError(
+            f"tradeall config invalid: TREND_MIN_VALIDATED_SECONDS={TREND_MIN_VALIDATED_SECONDS!r}")
+    if FIRE_MAX_PER_TREND < 1:
+        raise ValueError(
+            f"tradeall config invalid: FIRE_MAX_PER_TREND={FIRE_MAX_PER_TREND!r}")
+
+
+_validate_tradeall_config()
+
+
 def _sanitize_field(value):
     """Remove characters that would break the pipe-delimited format (A3)."""
     return str(value).replace("|", "/").replace("\n", " ")
@@ -170,6 +202,19 @@ def _fire_order(symbol, action, price, reason, **kwargs):
     ``qty=None`` uses the QuantityDecision maximum under Binance policy, clamped
     to the real balance.
     """
+    action = str(action or "").upper()
+    try:
+        price = float(price)
+    except (TypeError, ValueError):
+        print(f"[TRADEALL] ordin refuzat: price invalid {price!r}")
+        return None
+    if action not in {"BUY", "SELL"}:
+        print(f"[TRADEALL] ordin refuzat: side invalid {action!r}")
+        return None
+    if not math.isfinite(price) or price <= 0:
+        print(f"[TRADEALL] ordin refuzat: price invalid {price!r}")
+        return None
+
     blocked, mode, trend = _kalman_gate_blocks(symbol, action)
     if blocked:
         print(f"[KALMAN-GATE] {action} {symbol} BLOCAT (kalman_trend={trend}, mode={mode}, motiv={reason})")
@@ -180,6 +225,10 @@ def _fire_order(symbol, action, price, reason, **kwargs):
         except Exception as _e:  # noqa: BLE001
             print(f"[KALMAN-GATE] eroare jurnal ({_e}) — blocarea ramane")
         return None
+    # A trend signal must be reevaluated at the next tradeall cycle.  The generic
+    # outbox must not replay it later at a stale price in parallel with this bot's
+    # own per-trend retry/cooldown policy.
+    kwargs["caller_owns_retry"] = True
     return mkt.place(symbol, action, price, None, motivation=reason, **kwargs)
 
 
@@ -264,8 +313,8 @@ class TrendState:
         self.expiration_trend_time = expiration_trend_time  # Maximum seconds between confirmations.
         self.fresh_trend_time = fresh_trend_time            # Freshness threshold.
         self._now = now_fn   # Real clock by default; replay injects each tick's time (A5).
-        # Per-trend cooldown: _confirmed_count_{up,down} counts successful, not
-        # merely attempted, executions in each direction. Stop at
+        # Per-trend cooldown: _confirmed_count_{up,down} is a legacy field name
+        # counting accepted submissions, not fills. Stop at
         # FIRE_MAX_PER_TREND until a new trend. _last_attempt_* records the last
         # accepted or rejected attempt, and every retry must wait at least
         # FIRE_MIN_RETRY_INTERVAL_SEC.
@@ -431,23 +480,27 @@ def logic(win, enable, symbol, gradient, slope, trend_state, current_price) :
     proposed_price = current_price
 
     def _fire_once(direction, action, reason):
-        """Enforce the per-trend cooldown and confirmed-execution limit.
+        """Enforce the per-trend cooldown and accepted-submission limit.
 
-        A confirmed action is a real execution (``_fire_order`` returns non-None),
-        not merely an attempt. Gate, weight-limit, or budget rejection imposes the
-        retry interval but does not block the trend permanently. Permit up to
-        FIRE_MAX_PER_TREND confirmed executions per direction and trend.
+        A non-None result means the provider accepted the submission; it is not a
+        confirmed fill. Gate, weight-limit, or budget rejection imposes the retry
+        interval but does not block the trend permanently. Permit up to
+        FIRE_MAX_PER_TREND accepted submissions per direction and trend.
         """
+        if not enable:
+            return
         if trend_state.fire_limit_reached(direction):
             return
         if not trend_state.can_retry_fire(direction):
             return
         trend_state.mark_fire_attempt(direction)
-        if enable:
-            result = _fire_order(symbol, action, current_price, reason, safeback_seconds=FIRE_SAFEBACK_SEC,
-                force=False, cancelorders=True, hours=1)
-            if result is not None:
-                trend_state.mark_confirmed(direction)
+        result = _fire_order(symbol, action, current_price, reason,
+            safeback_seconds=FIRE_SAFEBACK_SEC, force=False,
+            cancelorders=True, hours=1)
+        if result is not None:
+            # The provider accepted a submission.  This is intentionally a throttle
+            # count, not a claim that the order filled.
+            trend_state.mark_confirmed(direction)
 
     print(f"LOGIC gradient={gradient}, slope={slope}")
 
@@ -613,13 +666,19 @@ class TrendCoordinator:
     """
     def __init__(self, symbols, instant_mgr, current_price_mgr, cache24_managers=None,
                  min_interval=MIN_EVAL_INTERVAL_SEC, max_interval=MAX_EVAL_INTERVAL_SEC):
-        self.symbols = list(symbols)
+        min_interval = float(min_interval)
+        max_interval = float(max_interval)
+        if (not math.isfinite(min_interval) or not math.isfinite(max_interval)
+                or min_interval <= 0 or max_interval <= 0 or min_interval > max_interval):
+            raise ValueError("TrendCoordinator intervals must satisfy 0 < min <= max")
+        self.symbols = list(dict.fromkeys(symbols))
         self.instant_mgr = instant_mgr
         self.current_price_mgr = current_price_mgr
         self.min_interval = min_interval
         self.max_interval = max_interval
 
         self._event = threading.Event()
+        self._stop = threading.Event()
         self._lock = threading.Lock()
         self._dirty = {s: True for s in self.symbols}      # Force an initial evaluation.
         self._last_eval = {s: 0.0 for s in self.symbols}
@@ -670,8 +729,31 @@ class TrendCoordinator:
         return dirty and elapsed >= self.min_interval   # floor
 
     def evaluate(self, symbol):
-        current_price = self.current_price_mgr.get_price_value(symbol)
-        if current_price is None:
+        get_entry = getattr(self.current_price_mgr, "get_price", None)
+        if callable(get_entry):
+            entry = get_entry(symbol)
+            if not entry or len(entry) < 2:
+                return None
+            ts_ms, current_price = entry[0], entry[1]
+            try:
+                age_ms = time.time() * 1000.0 - float(ts_ms)
+                max_age_ms = float(getattr(
+                    self.current_price_mgr, "STALE_THRESHOLD_MS", 5_000))
+            except (TypeError, ValueError):
+                return None
+            # get_price() attempts an HTTP refresh, but historically returned its old
+            # cached entry when that refresh failed.  Do not trade on that stale value
+            # or on a timestamp materially in the future.
+            if age_ms > max_age_ms or age_ms < -1_000:
+                print(f"[TrendCoordinator] preț stale/future {symbol}: age_ms={age_ms:.0f}")
+                return None
+        else:
+            current_price = self.current_price_mgr.get_price_value(symbol)
+        try:
+            current_price = float(current_price)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(current_price) or current_price <= 0:
             return None
         snapshot = handle_symbol(
             symbol, current_price,
@@ -734,9 +816,11 @@ class TrendCoordinator:
 
     # Main event-driven loop and heartbeat.
     def run(self):
-        while True:
+        while not self._stop.is_set():
             self._event.wait(timeout=self.max_interval)
             self._event.clear()
+            if self._stop.is_set():
+                break
             now = time.time()
             due = [s for s in self.symbols if self._is_due(s, now)]
             if not due:
@@ -752,6 +836,11 @@ class TrendCoordinator:
                 web.salveaza_html(html_content, "index.html")
             except Exception as e:
                 print(f"[TrendCoordinator] Eroare la generare HTML: {e}")
+
+    def stop(self):
+        """Wake and stop the coordinator loop deterministically."""
+        self._stop.set()
+        self._event.set()
 
 
 if __name__ == "__main__":

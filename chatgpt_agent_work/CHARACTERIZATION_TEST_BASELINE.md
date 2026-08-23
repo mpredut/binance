@@ -86,7 +86,7 @@ Full command:
 Verified on 2026-08-23 after monitortrades hardening:
 
 ```text
-948 passed, 273 subtests passed
+956 passed, 296 subtests passed
 ```
 
 The lower top-level count is the result of the test-suite consolidation documented

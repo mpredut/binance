@@ -13,7 +13,7 @@ Acoperire:
     FIRE_MIN_RETRY_INTERVAL_SEC, reset la start_trend nou) — 22 iul
   - CacheCurrentPriceManager: get_sample_rate / get_update_frequency
 """
-import os, sys, json, time, tempfile, unittest
+import os, sys, json, time, tempfile, threading, unittest
 from collections import deque
 from unittest.mock import MagicMock, patch
 
@@ -75,6 +75,60 @@ finally:
                 delattr(_binance_package, _child)
 
 mock_bapi = _mock_bapi
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Tradeall order boundary
+# ═══════════════════════════════════════════════════════════════════════════
+
+class TestTradeallOrderBoundary(unittest.TestCase):
+
+    def test_unsafe_runtime_configuration_fails_closed(self):
+        fields = (
+            "TREND_TO_BE_OLD_SECONDS", "PRICE_CHANGE_THRESHOLD_EUR",
+            "PRICE_CHANGE_THRESHOLD_BIG_EUR", "TREND_UNIFORM_RATE_THRESHOLD",
+            "SLOPE_EXTREME_THRESHOLD", "FIRE_MIN_RETRY_INTERVAL_SEC",
+            "FIRE_SAFEBACK_SEC", "FIRE_MAX_PER_TREND",
+            "TREND_MIN_VALIDATED_SECONDS", "TREND_MIN_VALIDATED_CONFIRMS",
+            "TREND_CONSISTENT_CONFIRMS",
+        )
+        for field in fields:
+            with self.subTest(field=field), patch.object(ta, field, -1):
+                with self.assertRaises(ValueError):
+                    ta._validate_tradeall_config()
+
+    def test_strategy_owns_retry_and_does_not_enqueue_stale_signal(self):
+        with (patch.object(ta, "_kalman_gate_blocks", return_value=(False, "off", None)),
+              patch.object(ta.mkt, "place", return_value={"orderId": "accepted"}) as place):
+            result = ta._fire_order("BTCUSDT", "BUY", 100.0, "test")
+        self.assertIsNotNone(result)
+        self.assertTrue(place.call_args.kwargs["caller_owns_retry"])
+
+    def test_invalid_side_or_price_never_reaches_executor(self):
+        invalid = (("HOLD", 100.0), ("BUY", None), ("SELL", float("nan")),
+                   ("BUY", float("inf")), ("SELL", 0), ("BUY", -1))
+        with patch.object(ta.mkt, "place") as place:
+            for side, price in invalid:
+                with self.subTest(side=side, price=price):
+                    self.assertIsNone(ta._fire_order("BTCUSDT", side, price, "test"))
+        place.assert_not_called()
+
+    def test_disabled_logic_does_not_consume_retry_slot(self):
+        state = MagicMock()
+        state.is_trend_up.return_value = 1
+        state.is_trend_down.return_value = 0
+        state.is_trend_uniform_confirmed.return_value = True
+        state.is_trend_fresh.return_value = True
+        state.is_trend_consistent_validated.return_value = False
+        state.is_started_trend_older_than.return_value = False
+        state.fire_limit_reached.return_value = False
+        state.can_retry_fire.return_value = True
+
+        with patch.object(ta, "_fire_order") as fire:
+            ta.logic("BIG", False, "BTCUSDT", 1.0, -1.0, state, 100.0)
+
+        state.mark_fire_attempt.assert_not_called()
+        fire.assert_not_called()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -870,6 +924,45 @@ class TestTrendCoordinator(unittest.TestCase):
         coord._dirty["BTCUSDT"] = False
         self.assertTrue(coord._is_due("BTCUSDT", now + 31.0))
         self.assertFalse(coord._is_due("BTCUSDT", now + 5.0))
+
+    def test_invalid_intervals_fail_fast_and_symbols_are_deduplicated(self):
+        for minimum, maximum in ((0, 30), (-1, 30), (31, 30), (1, float("nan"))):
+            with self.subTest(minimum=minimum, maximum=maximum):
+                with self.assertRaises(ValueError):
+                    ta.TrendCoordinator(
+                        ["BTCUSDT"], self.mgr, self.cpm,
+                        min_interval=minimum, max_interval=maximum,
+                    )
+        coord = ta.TrendCoordinator(
+            ["BTCUSDT", "BTCUSDT"], self.mgr, self.cpm,
+            min_interval=1, max_interval=2,
+        )
+        self.assertEqual(coord.symbols, ["BTCUSDT"])
+
+    def test_invalid_price_is_not_evaluated(self):
+        coord = self._make_coord()
+        with (patch.object(self.cpm, "get_price", return_value=[time.time() * 1000, float("nan")]),
+              patch.object(ta, "handle_symbol") as handle):
+            self.assertIsNone(coord.evaluate("BTCUSDT"))
+        handle.assert_not_called()
+
+    def test_stale_or_future_price_is_not_evaluated(self):
+        coord = self._make_coord()
+        now_ms = time.time() * 1000
+        with patch.object(ta, "handle_symbol") as handle:
+            for timestamp in (now_ms - self.cpm.STALE_THRESHOLD_MS - 1, now_ms + 5_000):
+                with self.subTest(timestamp=timestamp):
+                    with patch.object(self.cpm, "get_price", return_value=[timestamp, 60_000.0]):
+                        self.assertIsNone(coord.evaluate("BTCUSDT"))
+        handle.assert_not_called()
+
+    def test_stop_wakes_run_loop(self):
+        coord = self._make_coord()
+        thread = threading.Thread(target=coord.run)
+        thread.start()
+        coord.stop()
+        thread.join(timeout=2)
+        self.assertFalse(thread.is_alive())
 
     def test_evaluation_cache_lifecycle(self):
         coord = self._make_coord()
