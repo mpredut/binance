@@ -475,7 +475,10 @@ def run_forever():
         except Exception as e:
             print(f" Runtime ERROR: {e}")
         sleep_seconds = _next_check_seconds()
-        print(f"[DEBUG] sleep {sleep_seconds}s before next cycle")
+        # Flush-ul de la limita ciclului publică și toate liniile precedente când
+        # stdout este redirectat în fișier de flota_start.sh (altfel botul cu
+        # volum mic de log poate părea stale minute întregi).
+        print(f"[DEBUG] sleep {sleep_seconds}s before next cycle", flush=True)
         time.sleep(sleep_seconds)
 
 
