@@ -1,26 +1,24 @@
-"""
-Teste comprehensive pentru cacheManager.py.
-Fișierul este critic — folosit de toate modulele din proiect.
+"""Comprehensive tests for cacheManager.py, a project-wide critical module.
 
-Acoperire:
+Coverage:
   - CacheManagerInterface (via ConcreteTestManager)
   - CacheTradeManager
   - CacheOrderManager
-  - CacheSparsePriceManager (fost CachePriceManager)
+  - CacheSparsePriceManager (formerly CachePriceManager)
   - Cache24PriceManager
   - CachePriceLongTrendManager
   - CacheAssetValueManager
   - CacheCurrentPriceManager
   - CacheFactory / get_cache_manager
   - get_current_price_manager (singleton)
-  - funcții WS health
+  - WebSocket health functions
 """
 import os, sys, json, time, tempfile, unittest
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
-# ── mock bapi înainte de orice import ────────────────────────────────────────
+# -- Mock bapi before any imports. ---------------------------------------------
 mock_api = MagicMock()
 mock_api.get_current_price = MagicMock(return_value=50000.0)
 mock_api.client = MagicMock()
@@ -33,10 +31,10 @@ import cacheManager as cm
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# Helper — manager concret pentru testarea interfeței abstracte
+# Concrete helper for testing the abstract interface.
 # ═══════════════════════════════════════════════════════════════════════════════
 class ConcreteTestManager(cm.CacheManagerInterface):
-    """Implementare minimă pentru testarea CacheManagerInterface."""
+    """Provide a minimal CacheManagerInterface implementation for tests."""
     def __init__(self, sync_ts, symbols, filename, append_mode=True, api_client=None,
                  remote_items=None, append_persist=False):
         self._remote_items = remote_items or {}   # {symbol: [items]}
@@ -114,15 +112,15 @@ class TestCacheManagerInterface(unittest.TestCase):
         self.assertEqual(data["items"]["SYM"], [[999, 42.0]])
 
     def test_save_uses_tmp_then_replace(self):
-        """Salvarea atomică: .tmp dispare după scriere."""
+        """Atomic saving removes its temporary file after writing."""
         fname = _tmp_file(self.tmp, "atomic.json")
         mgr = ConcreteTestManager(9999, ["SYM"], fname)
         mgr.enable_save_state_to_file()
         mgr.cache["SYM"] = [[1, 2.0]]
         mgr.save_state_to_file_if_enabled()
-        self.assertTrue(os.path.exists(fname))              # fișierul final scris
-        # tmp-ul are nume UNIC (pid+tid) → numele fix nu apare niciodată (determinist;
-        # un glob ar prinde tmp-ul concurent al thread-ului periodic_sync → flaky).
+        self.assertTrue(os.path.exists(fname))              # The final file was written.
+        # Temporary names include PID and TID, so the fixed name never appears.
+        # A glob could catch periodic_sync's concurrent temporary file and be flaky.
         self.assertFalse(os.path.exists(fname + ".tmp"))
 
     # ── update_cache_per_symbol ───────────────────────────────────────────────
@@ -205,7 +203,7 @@ class TestCacheManagerInterface(unittest.TestCase):
             self.assertEqual(mgr.cache.get("SYM", []), [])
 
     def test_query_remote_continues_on_empty_symbol(self):
-        """continue (nu return) la simbol fără date — celelalte simboluri se procesează."""
+        """A symbol without data continues instead of aborting other symbols."""
         fname = _tmp_file(self.tmp)
         ts = int(time.time() * 1000)
         remote = {"SYM1": [], "SYM2": [[ts, 5.0]]}
@@ -312,8 +310,8 @@ class TestCacheSparsePriceManager(unittest.TestCase):
         api_mock = MagicMock()
         api_mock.get_current_price.return_value = price
         fname = _tmp_file(self.tmp, "cache_price_BTC.json")
-        # patch get_current_price_manager pentru a folosi mock-ul nostru
-        # get_price() (nu get_price_value()) — 21 iul, fix timestamp real, nu time.time()
+        # Patch get_current_price_manager to use this test's mock. get_price(),
+        # rather than get_price_value(), preserves the real timestamp.
         cur_mgr = MagicMock()
         cur_mgr.get_price.return_value = [int(time.time() * 1000), price]
         with patch("cacheManager.get_current_price_manager", return_value=cur_mgr):
@@ -345,7 +343,7 @@ class TestCacheSparsePriceManager(unittest.TestCase):
             result = mgr.get_remote_items("BTC", 0)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0][1], 55000.0)
-        self.assertEqual(result[0][0], ts)   # 21 iul: timestamp-ul REAL al observatiei, nu time.time()
+        self.assertEqual(result[0][0], ts)   # Real observation timestamp, not time.time().
 
     def test_get_remote_items_none_price_returns_empty(self):
         fname = _tmp_file(self.tmp, "cp_none.json")
@@ -358,8 +356,7 @@ class TestCacheSparsePriceManager(unittest.TestCase):
         self.assertEqual(result, [])
 
     def test_get_remote_items_uses_real_timestamp_not_wallclock(self):
-        """21 iul: pret 'inghetat' (observat cu 27 min in urma) trebuie inregistrat
-        cu timestamp-ul REAL al observatiei, nu cu ceasul de perete curent."""
+        """Record a stale price with its real observation time, not wall time."""
         fname = _tmp_file(self.tmp, "cp_frozen.json")
         api_mock = MagicMock()
         cur_mgr = MagicMock()
@@ -392,8 +389,8 @@ class TestCache24PriceManager(unittest.TestCase):
         api_mock = MagicMock()
         fname = _tmp_file(self.tmp, "cache_24price_BTC.json")
         cur_mgr = MagicMock()
-        # get_remote_items foloseste get_price() (=[ts_ms, pret], nu doar pretul —
-        # 21 iul, fix timestamp fabricat), nu vechiul get_price_value().
+        # get_remote_items uses get_price() for timestamp and price rather than
+        # the legacy get_price_value(), which would fabricate the timestamp.
         cur_mgr.get_price.return_value = [int(time.time() * 1000), 50000.0]
         with patch("cacheManager.get_current_price_manager", return_value=cur_mgr):
             mgr = cm.Cache24PriceManager(9999, ["BTC"], fname, api_client=api_mock)
@@ -483,7 +480,7 @@ class TestCachePriceLongTrendManager(unittest.TestCase):
 
     def test_get_remote_items_missing_file(self):
         mgr = self._make()
-        # priceanalysis.json nu există → []
+        # A missing priceanalysis.json yields an empty list.
         with patch("os.path.exists", return_value=False):
             result = mgr.get_remote_items("BTC", 0)
         self.assertEqual(result, [])
@@ -568,8 +565,7 @@ class TestCacheCurrentPriceManager(unittest.TestCase):
         api_mock = MagicMock()
         api_mock.get_current_price.return_value = price
         fname = _tmp_file(self.tmp, "cache_currentprice.json")
-        # market_api=api_mock: fetch-ul HTTP trece acum prin fațada market-data
-        # (injectabilă în teste), nu prin api_client direct.
+        # Inject market_api so HTTP fetching uses the testable market-data facade.
         return cm.CacheCurrentPriceManager(
             sync_ts=9999, symbols=["BTC"], filename=fname,
             ws_manager=None, api_client=api_mock, market_api=api_mock
@@ -713,7 +709,7 @@ class TestCacheCurrentPriceManager(unittest.TestCase):
                 mgr._ws_last_event_ts = timestamp
                 self.assertEqual(mgr._ws_is_healthy(), expected)
 
-    # ── persistență ──────────────────────────────────────────────────────────
+    # -- Persistence. ----------------------------------------------------------
 
     def test_persistence_reload(self):
         mgr, api_mock = self._make()
@@ -779,7 +775,7 @@ class TestWsHealthFunctions(unittest.TestCase):
 class TestCacheFactory(unittest.TestCase):
 
     def setUp(self):
-        # reset singleton-uri
+        # Reset singletons.
         cm.CacheFactory.shutdown_all()
         cm._current_price_instance = None
 
@@ -850,7 +846,7 @@ class TestGetCurrentPriceManagerSingleton(unittest.TestCase):
         cm._current_price_instance = None
 
     def test_returns_single_cache_current_price_manager(self):
-        # Testul caracterizează identitatea singleton-ului, nu polling-ul live.
+        # This characterizes singleton identity, not live polling.
         m1 = cm.get_current_price_manager(symbols=["BTC"], start_sync=False)
         m2 = cm.get_current_price_manager(symbols=["BTC"], start_sync=False)
         self.assertIsInstance(m1, cm.CacheCurrentPriceManager)
@@ -865,7 +861,7 @@ class TestGetCurrentPriceManagerSingleton(unittest.TestCase):
 
 
 class TestRefreshSymbolInCache(unittest.TestCase):
-    """Helper folosit de handler-ul WS pentru a reîmprospăta un singur simbol."""
+    """Test the WebSocket handler helper that refreshes one symbol."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -883,11 +879,11 @@ class TestRefreshSymbolInCache(unittest.TestCase):
     def test_refresh_missing_symbol_no_crash(self):
         fname = _tmp_file(self.tmp, "x.json")
         mgr = ConcreteTestManager(9999, ["SYM"], fname, remote_items={})
-        cm._refresh_symbol_in_cache(mgr, "NOPE")   # nu trebuie să arunce
+        cm._refresh_symbol_in_cache(mgr, "NOPE")   # Must not raise.
 
 
 class TestFactorySingletonWarning(unittest.TestCase):
-    """Singleton pe nume: simbolurile diferite la apeluri ulterioare sunt ignorate."""
+    """The named singleton ignores different symbols on later calls."""
 
     def setUp(self):
         cm.CacheFactory.remove("AssetValue")
@@ -901,8 +897,8 @@ class TestFactorySingletonWarning(unittest.TestCase):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             m2 = cm.get_cache_manager("AssetValue", symbols=["OTHER"])
-        self.assertIs(m1, m2)                       # aceeași instanță
-        self.assertIn("IGNORAT", buf.getvalue())    # a avertizat
+        self.assertIs(m1, m2)                       # Same instance.
+        self.assertIn("IGNORAT", buf.getvalue())    # Warning was emitted.
 
     def test_no_warning_same_symbols(self):
         cm.get_cache_manager("AssetValue", symbols=["TOTAL"])
@@ -914,7 +910,7 @@ class TestFactorySingletonWarning(unittest.TestCase):
 
 
 class TestAppendJsonlPersist(unittest.TestCase):
-    """Persistență prin append JSONL pentru cache-uri pur-append (Trade/AssetValue)."""
+    """Test JSONL append persistence for append-only Trade/AssetValue caches."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -928,12 +924,12 @@ class TestAppendJsonlPersist(unittest.TestCase):
         m.save_state_to_file_if_enabled()
         n1 = sum(1 for _ in open(fname))
         self.assertEqual(n1, 2)
-        # adăugăm încă unul → se scrie DOAR delta (1 linie nouă)
+        # Add one item and write only its one-line delta.
         with m.lock:
             m.cache["SYM"].append({"id": 3})
         m.save_state_to_file_if_enabled()
         n2 = sum(1 for _ in open(fname))
-        self.assertEqual(n2, 3)   # 2 + 1, nu rescris
+        self.assertEqual(n2, 3)   # Two existing lines plus one, not a rewrite.
 
     def test_load_jsonl_rebuilds_cache(self):
         fname = os.path.join(self.tmp, "t2.jsonl")
@@ -942,7 +938,7 @@ class TestAppendJsonlPersist(unittest.TestCase):
         with w.lock:
             w.cache["SYM"] = [{"id": 1}, {"id": 2}]
         w.save_state_to_file_if_enabled()
-        # alt manager încarcă din JSONL la startup
+        # Another manager loads the JSONL at startup.
         r = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
         self.assertEqual(r.cache.get("SYM"), [{"id": 1}, {"id": 2}])
 
@@ -955,7 +951,7 @@ class TestAppendJsonlPersist(unittest.TestCase):
         m.save_state_to_file_if_enabled()
         m.compact_jsonl()
         with m.lock:
-            self.assertEqual(m.cache["SYM"], [{"id": 1}, {"id": 2}, {"id": 3}])  # dedup în memorie
+            self.assertEqual(m.cache["SYM"], [{"id": 1}, {"id": 2}, {"id": 3}])  # Deduplicate memory.
         n = sum(1 for _ in open(fname))
         self.assertEqual(n, 3)   # dedup pe disc
 
@@ -965,9 +961,9 @@ class TestAppendJsonlPersist(unittest.TestCase):
         m.save_state = False
         with m.lock:
             m.cache["SYM"] = [[1, 1.0]]
-        m.save_state_to_file_if_enabled()       # save_state=False → NU scrie
+        m.save_state_to_file_if_enabled()       # save_state=False does not write.
         self.assertFalse(os.path.exists(fname))
-        m.save_state_to_file()                  # neconditionat → scrie
+        m.save_state_to_file()                  # Unconditional write.
         self.assertTrue(os.path.exists(fname))
 
     def test_compact_rewrites(self):
@@ -989,39 +985,39 @@ class TestAppendJsonlPersist(unittest.TestCase):
         m.save_state = True
         m.RETENTION_DAYS = 730
         now_ms = int(time.time() * 1000)
-        old_ms = now_ms - 800 * 24 * 3600 * 1000   # >2 ani
+        old_ms = now_ms - 800 * 24 * 3600 * 1000   # More than two years old.
         with m.lock:
             m.cache["SYM"] = [[old_ms, 1.0], [now_ms, 2.0]]
         m.save_state_to_file_if_enabled()
         m.maintain_append_persist()
         with m.lock:
-            self.assertEqual(m.cache["SYM"], [[now_ms, 2.0]])   # cea veche ștearsă
+            self.assertEqual(m.cache["SYM"], [[now_ms, 2.0]])   # Old entry removed.
 
     def test_rotation_archives_and_keeps_latest(self):
         fname = os.path.join(self.tmp, "r.jsonl")
         m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
         m.save_state = True
-        m.MAX_FILE_BYTES = 1          # forțăm rotația
+        m.MAX_FILE_BYTES = 1          # Force rotation.
         m.ROTATE_KEEP_FRACTION = 0.10
         now_ms = int(time.time() * 1000)
         with m.lock:
             m.cache["SYM"] = [[now_ms + i, float(i)] for i in range(100)]
         m.save_state_to_file_if_enabled()
         m.maintain_append_persist()
-        # arhivă creată + memoria păstrează ultimele 10%
+        # Create an archive and retain the newest ten percent in memory.
         archives = [f for f in os.listdir(self.tmp) if ".archive" in f]
         self.assertTrue(archives)
         with m.lock:
             self.assertEqual(len(m.cache["SYM"]), 10)
             self.assertEqual(m.cache["SYM"][-1], [now_ms + 99, 99.0])
 
-    # ── Siguranță: rotația/mentenanța NU pierde date ──────────────────────────
+    # -- Safety: rotation and maintenance do not lose data. --------------------
 
     def _count_lines(self, path):
         return sum(1 for _ in open(path))
 
     def test_rotation_archive_has_FULL_history(self):
-        """Datele NU se pierd: arhiva conține TOATE înregistrările originale."""
+        """The archive contains every original record, so no data is lost."""
         fname = os.path.join(self.tmp, "full.jsonl")
         m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
         m.save_state = True
@@ -1033,14 +1029,14 @@ class TestAppendJsonlPersist(unittest.TestCase):
         self.assertEqual(self._count_lines(fname), 100)
         m.maintain_append_persist()
         archive = [os.path.join(self.tmp, f) for f in os.listdir(self.tmp) if ".archive" in f][0]
-        self.assertEqual(self._count_lines(archive), 100)   # arhiva = TOT istoricul
-        self.assertEqual(self._count_lines(fname), 10)       # curent = ultimele 10%
-        # reconstruire din arhivă → toate datele recuperabile
+        self.assertEqual(self._count_lines(archive), 100)   # Complete history.
+        self.assertEqual(self._count_lines(fname), 10)       # Newest ten percent.
+        # Rebuilding from the archive recovers every record.
         r = ConcreteTestManager(9999, ["SYM"], archive, append_persist=True)
         self.assertEqual(len(r.cache["SYM"]), 100)
 
     def test_maintain_noop_leaves_file_intact(self):
-        """Date recente, fișier mic → maintain NU șterge nimic, NU creează arhivă."""
+        """Maintenance leaves a small recent file intact and creates no archive."""
         fname = os.path.join(self.tmp, "intact.jsonl")
         m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
         m.save_state = True
@@ -1050,54 +1046,54 @@ class TestAppendJsonlPersist(unittest.TestCase):
         m.save_state_to_file_if_enabled()
         before = open(fname).read()
         m.maintain_append_persist()
-        self.assertEqual(open(fname).read(), before)         # fișier neschimbat
-        self.assertEqual([f for f in os.listdir(self.tmp) if ".archive" in f], [])  # fără arhivă
-        self.assertEqual(len(m.cache["SYM"]), 2)             # date intacte
+        self.assertEqual(open(fname).read(), before)         # File unchanged.
+        self.assertEqual([f for f in os.listdir(self.tmp) if ".archive" in f], [])  # No archive.
+        self.assertEqual(len(m.cache["SYM"]), 2)             # Data intact.
 
     def test_maintain_missing_file_no_crash(self):
         fname = os.path.join(self.tmp, "nofile.jsonl")
         m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
-        m.maintain_append_persist()   # fișier inexistent → fără crash
+        m.maintain_append_persist()   # A missing file must not crash.
         self.assertEqual([f for f in os.listdir(self.tmp) if ".archive" in f], [])
 
     def test_maintain_noop_when_not_append_persist(self):
-        """21 iul: maintain_append_persist() ruleaza acum si pt append_persist=False
-        (gating generalizat pe append_mode, ca sa prindem si retentia lipsa de la
-        Trade/Order/AssetValue) — dar cu date FRESH (nimic de prunat), tot no-op:
-        nu se rescrie fisierul degeaba. Fixtura veche folosea timestamp=1 (1970,
-        deci mai veche decat orice RETENTION_DAYS real) — parea "no-op" doar pt
-        ca gating-ul vechi sarea peste tot pasul, nu pt ca nu era nimic de sters;
-        dupa generalizare chiar ștergea intrarea (fals pozitiv al testului, nu bug)."""
+        """Fresh data makes generalized append maintenance a true no-op.
+
+        Maintenance also runs when append_persist is false so retention covers
+        Trade, Order, and AssetValue. The former timestamp=1 fixture was stale and
+        made old gating appear to be a no-op only because it skipped maintenance.
+        """
         fname = os.path.join(self.tmp, "fullrw.json")
         now_ms = int(time.time() * 1000)
         _write_cache_file(fname, {"SYM": [[now_ms, 1.0]]})
         m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=False)
         before = open(fname).read()
-        m.maintain_append_persist()   # date fresh -> nimic de prunat -> no-op
+        m.maintain_append_persist()   # Fresh data leaves nothing to prune.
         self.assertEqual(open(fname).read(), before)
         self.assertEqual(len(m.cache["SYM"]), 1)
 
     def test_maintain_prunes_old_entries_even_when_not_append_persist(self):
-        """21 iul: retentia (RETENTION_DAYS) trebuie sa se aplice si claselor cu
-        JSON complet (append_persist=False) — asta era chiar bug-ul gasit (Trade/
-        Order/AssetValue creşteau nemarginit). Aici verificam explicit ramura
-        save_state_to_file() (nu compact_jsonl) dupa prune."""
+        """Apply retention to full-JSON classes where append_persist is false.
+
+        This covers the discovered unbounded Trade, Order, and AssetValue growth
+        and explicitly exercises save_state_to_file after pruning.
+        """
         fname = os.path.join(self.tmp, "fullrw_prune.json")
         m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=False)
         m.RETENTION_DAYS = 730
         now_ms = int(time.time() * 1000)
-        old_ms = now_ms - 800 * 24 * 3600 * 1000   # >2 ani
+        old_ms = now_ms - 800 * 24 * 3600 * 1000   # More than two years old.
         with m.lock:
             m.cache["SYM"] = [[old_ms, 1.0], [now_ms, 2.0]]
         m.save_state_to_file_if_enabled()
         m.maintain_append_persist()
         with m.lock:
-            self.assertEqual(m.cache["SYM"], [[now_ms, 2.0]])   # cea veche ștearsă din memorie
+            self.assertEqual(m.cache["SYM"], [[now_ms, 2.0]])   # Old entry removed from memory.
         m.enable_save_state_to_file()
         m.save_state_to_file_if_enabled()
         with open(fname) as f:
             on_disk = json.load(f)
-        self.assertEqual(on_disk["items"]["SYM"], [[now_ms, 2.0]])   # si pe disc
+        self.assertEqual(on_disk["items"]["SYM"], [[now_ms, 2.0]])   # Also on disk.
 
     def test_prune_keeps_file_and_recent(self):
         fname = os.path.join(self.tmp, "prune.jsonl")
@@ -1109,22 +1105,22 @@ class TestAppendJsonlPersist(unittest.TestCase):
             m.cache["SYM"] = [[old, 1.0], [now, 2.0]]
         m.save_state_to_file_if_enabled()
         m.maintain_append_persist()
-        self.assertTrue(os.path.exists(fname))               # fișierul EXISTĂ
+        self.assertTrue(os.path.exists(fname))               # File still exists.
         r = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
-        self.assertEqual(r.cache["SYM"], [[now, 2.0]])       # recentul păstrat, vechiul șters
+        self.assertEqual(r.cache["SYM"], [[now, 2.0]])       # Retain recent, remove old.
 
     def test_skips_corrupt_lines(self):
         fname = os.path.join(self.tmp, "t4.jsonl")
         with open(fname, "w") as f:
             f.write(json.dumps({"s": "SYM", "i": {"id": 1}}) + "\n")
-            f.write("{partial broken line\n")   # linie coruptă (crash la append)
+            f.write("{partial broken line\n")   # Corrupt line from a crash during append.
             f.write(json.dumps({"s": "SYM", "i": {"id": 2}}) + "\n")
         r = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
-        self.assertEqual(r.cache.get("SYM"), [{"id": 1}, {"id": 2}])   # sare linia coruptă
+        self.assertEqual(r.cache.get("SYM"), [{"id": 1}, {"id": 2}])   # Skip corrupt line.
 
 
 class TestMemFileResync(unittest.TestCase):
-    """Reziliență: guard anti-suprascriere date vechi + reconciliere mem↔fișier."""
+    """Test stale-overwrite protection and memory-to-file reconciliation."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -1136,20 +1132,20 @@ class TestMemFileResync(unittest.TestCase):
 
     def test_refuses_overwrite_with_older(self):
         fname = _tmp_file(self.tmp, "g.json")
-        # Writerul A scrie date NOI (fetchtime mare)
+        # Writer A writes new data with a high fetch time.
         a = self._mgr(fname)
         with a.lock:
             a.cache["SYM"] = [[1, 1.0]]
-            a.fetchtime_time_per_symbol["SYM"] = 2000   # nou
+            a.fetchtime_time_per_symbol["SYM"] = 2000   # New.
         a.save_state_to_file_if_enabled()
-        # Writerul B are date VECHI (fetchtime mic) → NU trebuie să suprascrie
+        # Writer B has stale data and must not overwrite it.
         b = ConcreteTestManager(9999, ["SYM"], fname)
         b.save_state = True
         with b.lock:
             b.cache["SYM"] = [[9, 9.0]]
-            b.fetchtime_time_per_symbol["SYM"] = 1000   # mai vechi
+            b.fetchtime_time_per_symbol["SYM"] = 1000   # Older.
         b.save_state_to_file_if_enabled()
-        # fișierul rămâne cu datele lui A (nu suprascris cu B vechi)
+        # The file retains writer A's data.
         data = json.load(open(fname))
         self.assertEqual(data["items"]["SYM"], [[1, 1.0]])
 
@@ -1164,27 +1160,27 @@ class TestMemFileResync(unittest.TestCase):
         b.save_state = True
         with b.lock:
             b.cache["SYM"] = [[9, 9.0]]
-            b.fetchtime_time_per_symbol["SYM"] = 3000   # mai NOU → suprascrie
+            b.fetchtime_time_per_symbol["SYM"] = 3000   # Newer, so overwrite.
         b.save_state_to_file_if_enabled()
         data = json.load(open(fname))
         self.assertEqual(data["items"]["SYM"], [[9, 9.0]])
 
     def test_resync_reloads_when_file_newer(self):
         fname = _tmp_file(self.tmp, "r.json")
-        # Procesul A scrie date noi pe disc
+        # Process A writes new data to disk.
         a = self._mgr(fname)
         with a.lock:
             a.cache["SYM"] = [[5, 5.0]]
             a.fetchtime_time_per_symbol["SYM"] = 5000
         a.save_state_to_file_if_enabled()
-        # Procesul B are date vechi în memorie → resync trebuie să reîncarce
+        # Process B has stale memory, so resync must reload it.
         b = ConcreteTestManager(9999, ["SYM"], fname)
         with b.lock:
             b.cache["SYM"] = [[1, 1.0]]
             b.fetchtime_time_per_symbol["SYM"] = 1000
         b.resync_mem_file()
         with b.lock:
-            self.assertEqual(b.cache["SYM"], [[5, 5.0]])   # reîncărcat din fișier
+            self.assertEqual(b.cache["SYM"], [[5, 5.0]])   # Reloaded from the file.
 
 
 class TestAtomicWrite(unittest.TestCase):
@@ -1196,7 +1192,7 @@ class TestAtomicWrite(unittest.TestCase):
         cm.atomic_write_json(p, {"x": 1, "y": [2, 3]})
         with open(p) as f:
             self.assertEqual(json.load(f), {"x": 1, "y": [2, 3]})
-        self.assertFalse(os.path.exists(p + ".tmp"))   # tmp curățat
+        self.assertFalse(os.path.exists(p + ".tmp"))   # Temporary file cleaned up.
 
     def test_atomic_write_cleanup_on_error(self):
         p = os.path.join(self.tmp, "b.json")
@@ -1204,8 +1200,8 @@ class TestAtomicWrite(unittest.TestCase):
             with cm.atomic_write(p) as f:
                 f.write("partial")
                 raise ValueError("boom")
-        self.assertFalse(os.path.exists(p))            # fișierul țintă neatins
-        self.assertFalse(os.path.exists(p + ".tmp"))   # tmp șters
+        self.assertFalse(os.path.exists(p))            # Target file untouched.
+        self.assertFalse(os.path.exists(p + ".tmp"))   # Temporary file removed.
 
     def test_atomic_write_preserves_old_on_error(self):
         p = os.path.join(self.tmp, "c.json")
@@ -1215,7 +1211,7 @@ class TestAtomicWrite(unittest.TestCase):
                 f.write("nou-incomplet")
                 raise ValueError("boom")
         with open(p) as f:
-            self.assertEqual(json.load(f), {"v": "vechi"})   # conținutul vechi intact
+            self.assertEqual(json.load(f), {"v": "vechi"})   # Previous content remains intact.
 
 
 if __name__ == "__main__":
