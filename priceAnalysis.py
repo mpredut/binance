@@ -252,7 +252,7 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
         x_block = timestamps[start:end] - timestamps[start]
         y_block = prices[start:end]
 
-        slope_s, intercept = np.polyfit(x_block, y_block, 1) # cu cat creste pe secunda - viteza slope
+        slope_s, intercept = np.polyfit(x_block, y_block, 1)  # price increase per second
         
         trend_block_indices_test.append((0, window))
 
@@ -273,7 +273,7 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
 
         continue_trend = True
                     
-        if(trend_ref_slope_h * slope_h < 0): # semn trend diferit
+        if(trend_ref_slope_h * slope_h < 0):  # opposite trend sign
             if(len(trend_block_indices) == 0):
                 continue
             avg_slope = sum_slope / len(trend_block_indices)
@@ -286,11 +286,11 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
             continue_trend = True
                         
         if continue_trend:
-            if (trend_ref_slope_h * slope_h < 0): # semn schimbat
+            if (trend_ref_slope_h * slope_h < 0):  # sign changed
                 trend_ref_slope_h = slope_h
                 trend_ref_count = 1
                 print(f"CONTINUE ... ")
-            else : # medie sau ceva 
+            else:  # update the mean reference slope
                 
                 # w < 1 makes the previous mean count less than one new observation.
                 #trend_ref_slope_h = (w * trend_ref_slope_h + slope_h) / (w + 1)              
@@ -301,7 +301,7 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
             trend_block_indices.append((start, end))
             last_slope_h = slope_h
         else:
-            # trendul s-a rupt
+            # The trend has broken.
             print(f"BREAK!")
             break
                
@@ -370,7 +370,8 @@ def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
     gap and terminates the trend rather than inventing observations across the gap.
 
     Return ``{direction, start_timestamp, duration_seconds,
-    estimated_future_hours, current_slope_h, blocks(perechi de indici pt desen)} sau None.
+    estimated_future_hours, current_slope_h, blocks(index pairs for plotting)}``
+    or ``None``.
     """
     timestamps = np.asarray(timestamps, dtype=float)
     prices = np.asarray(prices, dtype=float)

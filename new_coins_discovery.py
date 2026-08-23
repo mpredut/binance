@@ -462,7 +462,7 @@ class NewCoinsMonitor:
                 "url": coin.get("url", "")
             })
 
-        # trimite toate alertele într-un singur callback
+        # Send all alerts through a single callback invocation.
         for callback in self.alert_callbacks:
             try:
                 callback(alerts)

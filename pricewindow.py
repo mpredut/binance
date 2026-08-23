@@ -150,7 +150,7 @@ class PriceWindow:
 
     @staticmethod
     def _sample_rate_from_entries(entries) -> float:
-        """Rata de sampling (secunde) din lista de [ts_ms, price] — median al gap-urilor."""
+        """Return the median sampling gap in seconds for [ts_ms, price] entries."""
         if len(entries) < 2:
             return DEFAULT_SAMPLE_RATE_SEC
         timestamps_sec = [e[0] / 1000.0 for e in entries]
@@ -246,8 +246,10 @@ class PriceWindow:
             return len(self.prices)
 
     def get_recent_gradient(self) -> float:
-        """Doar momentumul recent (media np.gradient pe ultimele recent_n sample-uri).
-        This inexpensive silent path supplies the fast per-tick buy/sell gate."""
+        """Return recent momentum as mean gradient over the latest samples.
+
+        This inexpensive silent path supplies the fast per-tick buy/sell gate.
+        """
         with self._lock:
             prices = list(self.prices)
         if len(prices) < 2:

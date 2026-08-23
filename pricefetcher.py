@@ -65,8 +65,8 @@ class PricePlatformInterface(ABC):
 class BinancePricePlatform(PricePlatformInterface):
     def __init__(self, api_client=None):
 # The price client is the market-data facade. Binance pairs route to bapi with
-# identical behavior. ``self.api_client`` remains
-        # un obiect cu .get_current_price(symbol=...), exact ca bapi.
+# identical behavior. ``self.api_client`` remains an object exposing
+        # .get_current_price(symbol=...), just like bapi.
         self.api_client = api_client or _market_api.api
         self._supported_symbols: Set[str] = set()
         self._usdc_pairs: Set[str] = set()
@@ -383,8 +383,8 @@ class StockYahooPricePlatform(PricePlatformInterface):
             q = (result.get("indicators", {}).get("quote") or [{}])[0]
             closes = [c for c in (q.get("close") or []) if c is not None]
             if closes:
-                return float(closes[-1])                      # ultima bara intraday (cea mai proaspata)
-            price = (result.get("meta", {}) or {}).get("regularMarketPrice")  # fallback: meta
+                return float(closes[-1])                      # freshest intraday bar
+            price = (result.get("meta", {}) or {}).get("regularMarketPrice")  # metadata fallback
             return float(price) if price else None
         except Exception as e:
             print(f"[YahooPlatform] Error for {symbol}: {e}")

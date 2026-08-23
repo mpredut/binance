@@ -14,10 +14,10 @@ import log
 import utils as u
 from pricefetcher import get_base_symbol
 
-# Slug canonic CoinMarketCap pt simboluri majore. _all_listings e cheiat pe SIMBOL,
-# deci cand mai multe monede impart un simbol (ex. "BTC" = Bitcoin real DAR si un
-# token scam "Bitcoin AI"), ultima suprascrie -> slug gresit ("bitcoin-ai"). Acest
-# map forteaza slug-ul corect pt monedele care ne intereseaza (watchlist + majore).
+# Canonical CoinMarketCap slugs for major symbols. _all_listings is keyed by
+# symbol, so when several coins share one (for example, real Bitcoin and a scam
+# "Bitcoin AI" token both using BTC), the last listing overwrites the correct
+# slug. This map forces canonical slugs for watchlist and major coins.
 _CANONICAL_CMC_SLUG = {
     "BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana", "ADA": "cardano",
     "XRP": "xrp", "DOGE": "dogecoin", "TAO": "bittensor", "HYPE": "hyperliquid",
@@ -93,7 +93,8 @@ class PriceChecker:
                  config: Optional[dict] = None):
         self.cachePriceAll = cachePriceAll
         self.alert_callback = alert_callback or self._default_alert_handler
-        # config din market_alerts.conf (cu per_coin) daca e dat; altfel hardcodul vechi
+        # Use market_alerts.conf configuration, including per_coin, when supplied;
+        # otherwise retain the legacy hardcoded defaults.
         self.config = copy.deepcopy(PRICE_ALERT_CONFIG)
         if config:
             for key, value in config.items():
@@ -118,7 +119,7 @@ class PriceChecker:
     def _build_cmc_url(self, symbol: str) -> str:
         try:
             base = get_base_symbol(symbol) or symbol
-            # Slug canonic hardcodat pt majore -> evita coliziunile de simbol din _all_listings.
+            # Canonical major-coin slugs avoid symbol collisions in _all_listings.
             canonical = _CANONICAL_CMC_SLUG.get((base or "").upper())
             if canonical:
                 return f"https://coinmarketcap.com/currencies/{canonical}/"
@@ -224,11 +225,11 @@ class PriceChecker:
 
     def _get_thresholds_for_symbol(self, symbol: str) -> Dict:
         per_coin = self.config.get("per_coin", {})
-        if symbol in per_coin:                 # pragul propriu (din config) bate orice
+        if symbol in per_coin:                 # configured per-coin threshold takes precedence
             return per_coin[symbol]
-        if self._is_dynamic_symbol(symbol):    # moneda noua -> prag pt monede noi
+        if self._is_dynamic_symbol(symbol):    # new coin uses the dynamic threshold
             return self.config["dynamic"]
-        return self.config["default"]          # restul -> implicit
+        return self.config["default"]          # all remaining coins use the default
 
     def _record_alert_sent(self, symbol: str, alert_type: str):
         """Record that an alert was sent."""
