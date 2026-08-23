@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""
-t212_client.py — client minimalist pentru API-ul Trading 212.
+"""Minimal Trading 212 API client for instruments and order lifecycle.
 
-Acopera doar ce ne trebuie: listare instrumente, plasare ordin LIMIT, status ordin.
-Schema ordinului LIMIT (confirmata de docs):
+The documented limit-order schema is:
     POST /equity/orders/limit
     {"ticker": "...", "quantity": <+BUY/-SELL>, "limitPrice": ..., "timeValidity": "DAY"|"GOOD_TILL_CANCEL"}
-NU exista camp "side"; NU e "instrumentTicker".
+There is no ``side`` field, and the ticker key is not ``instrumentTicker``.
 """
 
 from __future__ import annotations
@@ -18,10 +16,10 @@ import threading
 import time
 
 try:
-    # Import ca pachet (provider generic / wheel instalat).
+    # Package import for the generic provider or installed wheel.
     from .ipo_common import http_get, http_post_json, log
 except ImportError:
-    # Compatibilitate cu lansarea directa existenta: cd 212trading && python t212_bot.py.
+    # Compatibility with direct launch from the 212trading directory.
     from ipo_common import http_get, http_post_json, log
 
 LIVE_BASE = "https://live.trading212.com/api/v0"
@@ -36,25 +34,22 @@ class T212Client:
         self.api_secret = api_secret
         self.env = (env or "live").lower()
         self.base = DEMO_BASE if self.env == "demo" else LIVE_BASE
-        # Throttle COMUN: un singur client poate fi partajat de mai multe threaduri
-        # (un thread per activ). Serializam + spatiem apelurile ca sa nu lovim
-        # rate-limit-ul T212 (429). T212_MIN_GAP_SEC = pauza minima intre apeluri.
+        # A shared client may serve one thread per asset. Serialize and space calls
+        # to avoid T212 rate limits; T212_MIN_GAP_SEC sets the minimum gap.
         self._lock = threading.Lock()
         self._last = 0.0
         self._min_gap = float(os.environ.get("T212_MIN_GAP_SEC", "0.3"))
-        # Cache scurt PARTAJAT pt citirile la nivel de CONT (un apel = tot contul),
-        # deci cele N threaduri (un activ fiecare) nu mai fac N apeluri redundante -> nu mai
-        # lovim rate-limit-ul T212 (~1 apel/5s pe /equity/portfolio SI /equity/orders).
-        # TTL 6s > 5s = sigur.
+        # Brief shared account-level caches coalesce redundant per-asset thread
+        # reads. A six-second TTL stays above the approximate five-second limits
+        # on portfolio and order endpoints.
         self._pf_cache: tuple[float, list] | None = None
         self._ord_cache: tuple[float, list] | None = None
         self._pf_ttl = float(os.environ.get("T212_PORTFOLIO_TTL_SEC", "6.0"))
-        # Anti-stampede: cand expira TTL-ul, UN singur thread face fetch-ul; celelalte
-        # asteapta pe acest lock si refolosesc rezultatul lui (vezi _read_cached).
+        # On TTL expiry, one thread fetches while others wait and reuse its result.
         self._fetch_lock = threading.Lock()
 
     def _pace(self) -> None:
-        """Asigura minim _min_gap secunde intre doua apeluri T212 (peste toate threadurile)."""
+        """Enforce at least ``_min_gap`` seconds between calls across all threads."""
         with self._lock:
             wait = self._min_gap - (time.monotonic() - self._last)
             if wait > 0:
@@ -69,19 +64,18 @@ class T212Client:
         return self.api_key
 
     def _headers(self) -> dict:
-        # Fiecare request T212 isi cladeste antetele aici => loc bun pt throttle:
-        # spatiaza orice apel, indiferent de cate threaduri folosesc clientul.
+        # Every request builds headers here, providing one throttle point across threads.
         self._pace()
         return {
             "Authorization": self._auth(),
-            "User-Agent": _BROWSER_UA,  # evita 403 Cloudflare
+            "User-Agent": _BROWSER_UA,  # Avoid Cloudflare 403 responses.
             "Accept": "application/json",
         }
 
-    # -- instrumente -----------------------------------------------------------
+    # -- Instruments. ----------------------------------------------------------
     def list_instruments(self) -> list[dict] | None:
-        # Cache TTL: metadata instrumentelor se schimba rar. Evita apelul GREU
-        # repetat (per activ la pornire) care declanseaza 429.
+        # Instrument metadata changes rarely; cache it to avoid expensive per-asset
+        # startup calls that trigger rate limits.
         c = getattr(self, "_instr_cache", None)
         if c and (time.monotonic() - c[0]) < 300:
             return c[1]
@@ -102,7 +96,7 @@ class T212Client:
             return None
 
     def search_instruments(self, ticker_substr: str, name_patterns: tuple[str, ...]) -> list[dict] | None:
-        """Cauta instrumente dupa substring in ticker SAU pattern in nume/shortName."""
+        """Search by ticker substring or name/shortName pattern."""
         instruments = self.list_instruments()
         if instruments is None:
             return None
@@ -119,11 +113,9 @@ class T212Client:
                 hits.append(ins)
         return hits or None
 
-    # -- ordine ----------------------------------------------------------------
+    # -- Orders. ---------------------------------------------------------------
     def _place_order(self, endpoint: str, payload: dict) -> tuple[int, dict]:
-        """Transport comun pentru ordine. Nu face retry: endpoint-urile T212 de
-        plasare nu sunt idempotente, deci un retry dupa un raspuns pierdut ar
-        putea dubla ordinul."""
+        """Send an order without retrying non-idempotent placement endpoints."""
         log(f"  [ORDER] payload: {json.dumps(payload)}")
         status, body = http_post_json(
             f"{self.base}/equity/orders/{endpoint}",
@@ -134,9 +126,8 @@ class T212Client:
             data = json.loads(body) if body else {}
         except ValueError:
             data = {"raw": body.decode(errors="replace")[:500]}
-        # Invalidare NECONDITIONATA (si pe esec ambiguu): lista de ordine s-a schimbat
-        # (sau nu stim sigur) -> urmatorul list_active_orders citeste proaspat, ca
-        # reconcilierea sa vada ordinul nou si sa nu-l scoata din tracking.
+        # Invalidate unconditionally, including ambiguous failure, so reconciliation
+        # reads fresh state and does not drop a newly placed order from tracking.
         with self._lock:
             self._ord_cache = None
         return status, data
@@ -148,10 +139,10 @@ class T212Client:
         limit_price: float,
         validity: str = "DAY",
     ) -> tuple[int, dict]:
-        """Plaseaza ordin LIMIT. Returneaza (http_status, payload_raspuns)."""
+        """Place a limit order and return HTTP status with response payload."""
         return self._place_order("limit", {
             "ticker": ticker,
-            "quantity": round(quantity, 2),   # pozitiv = BUY, negativ = SELL
+            "quantity": round(quantity, 2),   # Positive buys and negative sells.
             "limitPrice": round(limit_price, 2),
             "timeValidity": validity,
         })
@@ -162,7 +153,7 @@ class T212Client:
         quantity: float,
         extended_hours: bool = False,
     ) -> tuple[int, dict]:
-        """Plaseaza ordin MARKET. Semnul cantitatii da directia, ca la LIMIT."""
+        """Place a market order, using quantity sign for direction as with limits."""
         return self._place_order("market", {
             "ticker": ticker,
             "quantity": round(quantity, 2),
@@ -170,13 +161,12 @@ class T212Client:
         })
 
     def get_historical_order(self, order_id) -> dict | None:
-        """Cauta ordinul terminal in prima pagina de istoric.
+        """Find a terminal order in the first history page.
 
-        GET /equity/orders/{id} este orientat spre ordine pending; dupa fill/cancel
-        ordinul poate disparea de acolo. Ordinele tocmai inchise sunt in prima pagina
-        (maxim 50), suficient pentru reconcilierea imediata. Daca istoricul nu este
-        disponibil sau ordinul nu a devenit inca vizibil, intoarcem None iar adaptorul
-        strict va reincerca ulterior, fara sa presupuna un fill.
+        The id endpoint focuses on pending orders, which may disappear after fill or
+        cancellation. Newly closed orders fit in the first 50-item page. Return None
+        when history is unavailable or not yet updated so strict reconciliation retries
+        without assuming a fill.
         """
         status, body = http_get(
             f"{self.base}/equity/history/orders?limit=50",
@@ -201,9 +191,8 @@ class T212Client:
         if not matches:
             return None
 
-        # Schema oficiala istorica este {order, fill}; acelasi order poate avea
-        # mai multe fills. Intoarcem forma Order folosita de restul clientului,
-        # imbogatita cu executia agregata reala (nu limitPrice aproximativ).
+        # History uses {order, fill}, and one order may have several fills. Return
+        # the client's order shape enriched with actual aggregate execution data.
         result = dict(matches[0][0])
         total_qty = total_cost = total_fee = 0.0
         fee_currencies = set()
@@ -252,7 +241,7 @@ class T212Client:
             return None
 
     def cancel_order(self, order_id) -> bool:
-        """Anuleaza un ordin dupa id. Returneaza True daca a fost acceptat."""
+        """Cancel an order by id and return whether the request was accepted."""
         try:
             from .ipo_common import http_request
         except ImportError:
@@ -263,21 +252,22 @@ class T212Client:
         if not ok:
             log(f"  ! [T212] cancel ordin {order_id} -> HTTP {status}")
         with self._lock:
-            self._ord_cache = None   # lista de ordine s-a schimbat -> citire proaspata
+            self._ord_cache = None   # Order list changed; force a fresh read.
         return ok
 
     def _log_read_fail(self, what: str, status: int) -> None:
-        """Logheaza MOTIVUL unui read esuat (portofoliu/ordine) cu DEBOUNCE: o singura data
-        la 60s per (endpoint, status). Fara asta un 429 la fiecare tick spameaza logul cu
-        'indisponibil' (vezi t212_bot: ~1 din 5 ticks). Cu asta stim DE CE (429/auth/timeout)
-        fara zgomot — semnal de anomalie observabil, nu 'zbor orb'."""
+        """Log a read-failure reason once per endpoint/status every 60 seconds.
+
+        Debouncing prevents repeated 429 noise while preserving an observable reason
+        such as rate limit, authentication, or timeout.
+        """
         now = time.monotonic()
         cache = getattr(self, "_read_fail_log", None)
         if cache is None:
             cache = self._read_fail_log = {}
         last = cache.get(what)
         if last and last[0] == status and (now - last[1]) < 60:
-            return                                  # acelasi motiv, recent -> nu re-loga
+            return                                  # Same recent reason; do not log again.
         cache[what] = (status, now)
         if status == 429:
             log(f"  ! T212 {what}: rate limit (429) — indisponibil temporar")
@@ -289,16 +279,17 @@ class T212Client:
             log(f"  ! T212 {what}: HTTP {status}")
 
     def _read_cached(self, attr: str, path: str, what: str) -> list | None:
-        """GET cu cache TTL + anti-stampede (double-checked locking). Fara asta, cele
-        N threaduri treceau SIMULTAN de verificarea TTL cand expira cache-ul -> N apeluri
-        aproape simultane -> 429 garantat pe endpoint-urile T212 cu limita ~1 apel/5s
-        (asa aparea '429 ordine active' la fiecare tick, toata noaptea)."""
+        """GET through a TTL cache with double-checked anti-stampede locking.
+
+        Without it, every asset thread crosses an expired TTL simultaneously and
+        triggers near-simultaneous requests against roughly five-second limits.
+        """
         with self._lock:
             c = getattr(self, attr)
             if c and (time.monotonic() - c[0]) < self._pf_ttl:
                 return c[1]
         with self._fetch_lock:
-            with self._lock:   # alt thread poate a reumplut cache-ul cat am asteptat lock-ul
+            with self._lock:   # Another thread may have refilled while this one waited.
                 c = getattr(self, attr)
                 if c and (time.monotonic() - c[0]) < self._pf_ttl:
                     return c[1]
@@ -316,15 +307,17 @@ class T212Client:
             return data
 
     def get_portfolio(self) -> list[dict] | None:
-        """Pozitiile deschise din cont (sursa de adevar pentru reconciliere).
-        Cache scurt PARTAJAT (TTL) intre threaduri -> coalesce apelurile celor N active
-        intr-unul singur, sub rate-limit-ul T212 (vezi _pf_ttl in __init__)."""
+        """Return open account positions, the reconciliation source of truth.
+
+        A brief shared TTL coalesces all asset-thread requests into one call.
+        """
         return self._read_cached("_pf_cache", "/equity/portfolio", "portofoliu")
 
     def list_active_orders(self) -> list[dict] | None:
-        """Ordinele inca PENDING (cele executate dispar de aici -> apar in portofoliu).
-        Acelasi cache TTL ca portofoliul (reconcilierea il cere la fiecare tick, din N
-        threaduri). Cache-ul e INVALIDAT la place/cancel: un ordin proaspat plasat
-        TREBUIE vazut de reconciliere imediat, altfel il crede executat/anulat si il
-        scoate din tracking (SELL si-ar marca gresit transa in tp_sold_levels)."""
+        """Return pending orders; executed orders disappear into the portfolio.
+
+        Share the portfolio TTL across threads and invalidate on placement/cancel so
+        reconciliation immediately sees new orders instead of incorrectly dropping
+        them or marking a take-profit tranche as sold.
+        """
         return self._read_cached("_ord_cache", "/equity/orders", "ordine active")
