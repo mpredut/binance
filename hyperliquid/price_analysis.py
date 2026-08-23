@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """
-price_analysis.py — portarea analizei tale de trend (din binance/priceAnalysis.py)
-pe datele Hyperliquid.
+price_analysis.py — port of binance/priceAnalysis.py trend analysis to Hyperliquid data.
 
-Metoda ta: detectie de trend pe ferestre definite in TIMP (nu numar de puncte),
-folosind panta (regresie liniara) pe fiecare fereastra, mergand inapoi cat timp
-semnul pantei se pastreaza (cu toleranta la zgomot). Da: directie, durata, si o
-estimare a continuarii (~jumatate din durata trecuta).
+Detect trends over TIME-defined windows rather than point counts. Use linear-regression
+slope in each window and walk backward while its sign persists within noise tolerance.
+Return direction, duration, and estimated continuation near half the past duration.
 
-Aici ruleaza pe lumanarile HL (1h), deci analizeaza pretul REAL al perp-ului.
+This runs on one-hour HL candles and therefore analyzes the real perpetual price.
 """
 
 from __future__ import annotations
@@ -23,7 +21,7 @@ MIN_POINTS_PER_WINDOW = 3
 def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
                            min_consecutive_blocks=3, noise_tolerance=2,
                            min_points_per_window=MIN_POINTS_PER_WINDOW):
-    """Portat din priceAnalysis.detect_long_term_trend (robust la gauri/densitate)."""
+    """Port priceAnalysis.detect_long_term_trend with gap/density robustness."""
     timestamps = np.asarray(timestamps, dtype=float)
     prices = np.asarray(prices, dtype=float)
     if len(timestamps) < 2:
@@ -49,7 +47,7 @@ def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
 
     blocks = [cur_idx]
     consecutive, noise = 1, 0
-    confirm_lo = cur_idx[0]      # cel mai vechi punct care CONFIRMA directia curenta
+    confirm_lo = cur_idx[0]      # oldest point CONFIRMING the current direction
     t_ws = t_end - window_sec - step_sec
     while t_ws >= t_first:
         s, idx = slope_h(t_ws, t_ws + window_sec)
@@ -59,17 +57,17 @@ def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
             blocks.append(idx); consecutive += 1; noise = 0
             confirm_lo = idx[0]
         elif noise < noise_tolerance:
-            noise += 1; blocks.append(idx)           # tentativ: poate trendul continua dincolo de zgomot
+            noise += 1; blocks.append(idx)           # tentatively allow trend continuation past noise
         else:
-            break                                    # zgomot peste toleranta → trendul s-a terminat aici
+            break                                    # noise beyond tolerance ends the trend here
         t_ws -= step_sec
 
-    # fara minim de blocuri CONFIRMATE nu exista trend coerent (un bounce de o zi
-    # contra unei scaderi de 4 zile NU e "trend up de 4 zile")
+    # Without enough CONFIRMED blocks there is no coherent trend. A one-day bounce
+    # against a four-day decline is not a four-day uptrend.
     if consecutive < min_consecutive_blocks:
         return None
 
-    trend_start_ts = float(timestamps[confirm_lo])   # durata = strict ce e confirmat
+    trend_start_ts = float(timestamps[confirm_lo])   # duration includes confirmed data only
     duration_seconds = t_end - trend_start_ts
     if duration_seconds <= 0:
         return None
@@ -83,10 +81,10 @@ def detect_long_term_trend(timestamps, prices, window_hours=24, step_hours=8,
 
 
 def analyze(client, coin: str) -> dict | None:
-    """Ruleaza analiza pe lumanarile HL pentru coin."""
+    """Run analysis over HL candles for the coin."""
     window_hours = int(float_env("ANALYSIS_WINDOW_H") or 24)
     step_hours = int(float_env("ANALYSIS_STEP_H") or 8)
-    lookback = window_hours + step_hours * 14   # destule ferestre inapoi
+    lookback = window_hours + step_hours * 14   # enough historical windows
     candles = client.candles(coin, "1h", lookback_hours=lookback)
     ts = [float(c["t"]) / 1000.0 for c in candles if "t" in c]
     px = [float(c["c"]) for c in candles if "c" in c]
@@ -96,11 +94,11 @@ def analyze(client, coin: str) -> dict | None:
 
 
 def signal(client, coin: str) -> dict:
-    """Semnal in formatul botului: {trend, confidence, source, detail}."""
+    """Return a bot-format signal: {trend, confidence, source, detail}."""
     res = analyze(client, coin)
     if not res:
         return {"trend": "neutral", "confidence": 0.0, "source": "analysis(insuf.)"}
-    # incredere din panta relativa (% pe ora) si durata trendului
+    # Confidence combines relative hourly slope and trend duration.
     last_px = None
     try:
         last_px = client.mid(coin)

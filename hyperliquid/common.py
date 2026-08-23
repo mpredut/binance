@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-common.py — utilitare pentru botul Hyperliquid.
-Nucleul comun (log/.env/float_env) vine din botcore.py (radacina); aici raman DOAR
-specificele HL: timeout-ul global de socket si now_str.
-Re-exportul pastreaza compat inapoi: `from common import log, load_dotenv, ...`.
+common.py — utilities for the Hyperliquid bot.
+The shared log/.env/float_env core comes from root botcore.py. Only HL-specific
+global socket timeout and now_str remain here. Re-exports preserve compatibility
+with `from common import log, load_dotenv, ...`.
 """
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ import sys
 import socket
 from datetime import datetime, timezone
 
-# REZILIENTA: SDK-ul Hyperliquid face cereri FARA read-timeout — daca netul cade
-# in mijlocul unei cereri deschise, procesul ar atarna la nesfarsit (fara eroare,
-# fara puls). Timeout implicit global: orice socket fara timeout explicit = 30s.
+# RESILIENCE: the Hyperliquid SDK makes requests WITHOUT a read timeout. A network
+# failure during an open request would hang forever without error or heartbeat.
+# Globally default sockets without explicit timeouts to 30 seconds.
 socket.setdefaulttimeout(30)
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # radacina repo
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repository root
 from botcore import BUCHAREST, log, load_dotenv, float_env, single_instance, are_close  # noqa: E402,F401  (re-export compat)
 
 

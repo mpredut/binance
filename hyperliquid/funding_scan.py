@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """
-funding_scan.py — scanner de funding pe perp-urile Hyperliquid pentru DN.
+funding_scan.py — Hyperliquid perpetual funding scanner for delta-neutral trading.
 
-Amplifica singurul edge real (funding): in loc de DN mereu pe HYPE (~11%/an),
-iti arata care monede LICHIDE platesc cel mai mult funding ACUM, ca sa indrepti
-DN-ul spre cel mai bun. ADVISORY — nu comuta singur (schimbarea monedei DN =
-inchidere+redeschidere, bani reali + riscul noii monede; decizi tu).
+Amplify the only real edge, funding. Instead of always running DN on HYPE (~11%/year),
+show which LIQUID coins pay the most funding NOW. ADVISORY only: switching a DN coin
+requires closing and reopening with real money and new-asset risk, so never switch automatically.
 
-DN cere AMBELE picioare: short perp (funding) + long SPOT. Deci doar monedele cu
-pereche spot pe HL sunt 'DN-fezabile' (marcate ✓).
+DN requires BOTH legs: short perpetual for funding and long SPOT. Only coins with an
+HL spot pair are DN-feasible and marked accordingly.
 
-ATENTIE: funding mare se coreleaza cu RISC mare (longii euforici pe un alt care
-pompeaza -> short-ul tau risca lichidare daca pompa continua). Alege printre
-monede lichide vetate, nu 'cel mai mare orbeste'.
+CAUTION: high funding correlates with high RISK. Euphoric longs in a pumping altcoin
+can liquidate the short if the rally continues. Choose vetted liquid coins rather than
+blindly selecting the maximum.
 
   /home/mariusp/binance/.venv/bin/python funding_scan.py
   ...funding_scan.py --min-vol 20000000 --top 20
@@ -28,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def rank(universe, ctxs, min_vol_usd, top=20):
-    """Pur (testabil): filtreaza pe volum, claseaza pe funding anualizat desc."""
+    """Pure/testable: filter by volume and rank annualized funding descending."""
     rows = []
     for i, a in enumerate(universe):
         c = ctxs[i] if i < len(ctxs) else {}
@@ -39,7 +38,7 @@ def rank(universe, ctxs, min_vol_usd, top=20):
             oi = float(c.get("openInterest") or 0)
         except (TypeError, ValueError):
             continue
-        if vol < min_vol_usd or f <= 0:           # vrem funding POZITIV (incasezi ca short)
+        if vol < min_vol_usd or f <= 0:           # require positive funding earned by shorts
             continue
         rows.append({"coin": a.get("name"), "apr": f * 24 * 365 * 100,
                      "funding_hr_pct": f * 100, "vol": vol, "oi_usd": oi * mark, "mark": mark})
@@ -48,7 +47,7 @@ def rank(universe, ctxs, min_vol_usd, top=20):
 
 
 def _spot_tokens(client) -> set:
-    """Tokenii care au pereche spot TOKEN/USDC pe HL (pt long-ul DN)."""
+    """Return tokens with a TOKEN/USDC spot pair for the long DN leg."""
     try:
         m = client.info.spot_meta()
         tokens = {t.get("name"): t.get("index") for t in m.get("tokens", [])}
@@ -86,7 +85,7 @@ def main() -> int:
         mark = " <-- DN-ul tau acum" if r["coin"] == cur else ""
         print(f"  {i:<2d} {r['coin']:<8s}  {r['apr']:+6.1f}%/an   {r['funding_hr_pct']:+.4f}%/h   "
               f"${r['vol']/1e6:6.1f}M   {dn:<11s}{mark}")
-    # context: unde e HYPE
+    # Context for HYPE's ranking.
     hype = next((r for r in rank(meta['universe'], ctxs, 0, 999) if r['coin'] == cur), None)
     if hype:
         print(f"\n  {cur} (DN-ul tau): {hype['apr']:+.1f}%/an. "

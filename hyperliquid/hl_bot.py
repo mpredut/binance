@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-hl_bot.py — watcher + auto-trade DCA/take-profit pe Hyperliquid (PERP long-only).
+hl_bot.py — Hyperliquid long-only perpetual watcher and DCA/take-profit auto-trader.
 
-IMPORTANT: ruleaza cu venv-ul cu SDK Hyperliquid (eth_account). Cel mai simplu:
-    ./hl_run.sh            # alege singur myenv (server) / .venv (local) / python3
-(sau manual: source ../myenv/bin/activate; python hl_bot.py)
+IMPORTANT: run with the Hyperliquid SDK/eth_account virtual environment. Easiest:
+    ./hl_run.sh            # selects server myenv, local .venv, or python3
+Alternatively: source ../myenv/bin/activate; python hl_bot.py
 
-Comenzi:
-    ...python hl_bot.py                  # ruleaza dupa .env
-    ...python hl_bot.py --paper          # PAPER (fara bani, fara wallet)
-    ...python hl_bot.py --price          # pretul HYPE (public)
-    ...python hl_bot.py --balance        # USDC disponibil (necesita HL_ACCOUNT_ADDRESS)
-    ...python hl_bot.py --positions      # pozitia curenta
+Commands:
+    ...python hl_bot.py                  # run from .env
+    ...python hl_bot.py --paper          # PAPER without money or wallet
+    ...python hl_bot.py --price          # public HYPE price
+    ...python hl_bot.py --balance        # available USDC; requires HL_ACCOUNT_ADDRESS
+    ...python hl_bot.py --positions      # current position
     ...python hl_bot.py --test-strategy HYPE
 """
 
@@ -43,8 +43,8 @@ def main() -> int:
     for i, a in enumerate(sys.argv):
         if a == "--env-file" and i + 1 < len(sys.argv):
             env_file = sys.argv[i + 1]
-    load_dotenv(env_file)                                                      # secrete (gitignored)
-    load_dotenv(os.path.join(os.path.dirname(env_file) or ".", "config.env"))  # config versionat (comis)
+    load_dotenv(env_file)                                                      # gitignored secrets
+    load_dotenv(os.path.join(os.path.dirname(env_file) or ".", "config.env"))  # versioned configuration
 
     ap = argparse.ArgumentParser(description="Bot DCA+TP pe Hyperliquid (perp long-only).")
     ap.add_argument("--env-file", default=env_file)
@@ -66,16 +66,16 @@ def main() -> int:
     strat_dry = args.paper or not (os.environ.get("STRAT_EXECUTE", "false").lower() == "true")
     interval  = max(args.interval, 15)
 
-    # clientul: wallet necesar doar pt tranzactionare reala
+    # A wallet is required only for real trading.
     need_wallet = not strat_dry or args.balance or args.positions
-    # REZILIENTA: fara net la pornire, reincercam in loop (nu murim cu traceback)
+    # RESILIENCE: retry startup network failures instead of terminating with a traceback.
     while True:
         try:
             client = _build_client(need_wallet)
             break
         except HLError as e:
             log(f"! {e}")
-            return 1                         # eroare de CONFIG — nu retry
+            return 1                         # configuration error: do not retry
         except KeyboardInterrupt:
             return 130
         except Exception as e:  # noqa: BLE001

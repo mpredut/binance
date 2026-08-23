@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Forward shadow HYPE spot pe Hyperliquid, fără acces la ordine.
+"""Forward shadow for HYPE spot on Hyperliquid without order access.
 
-Folosește motorul faithful ``strategies.spot_dca`` prin replay-ul comun și
-candles publice Hyperliquid. Starea, ordinele și soldul live nu sunt citite sau
-scrise. Variantele sunt preînregistrate și rămân PAPER:
+Use the faithful ``strategies.spot_dca`` engine through shared replay and public
+Hyperliquid candles. Never read or write live state, orders, or balances. Variants
+are preregistered and remain PAPER:
 
-* ``current``: configurația HLC efectivă;
-* ``long_tp3_trail3``: TP armat la 3%, trend-hold, trailing fix 3%;
-* ``reentry4``: configurația curentă, reintrare după recul de 4%.
-* ``trail_profit_floor_sl18``: trailing numai peste +1%, hard stop la -18%;
-* ``overlay650t8``: overlay de trend cu top-up 650 și trailing 8%.
+* ``current``: effective HLC configuration;
+* ``long_tp3_trail3``: TP armed at 3%, trend hold, fixed 3% trailing;
+* ``reentry4``: current configuration with reentry after a 4% pullback;
+* ``trail_profit_floor_sl18``: trailing only above +1%, hard stop at -18%;
+* ``overlay650t8``: trend overlay with 650 top-up and 8% trailing.
 """
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ def _fetch_with_ts(_pair: str, interval: int):
     from hl_client import HLClient
 
     token = os.environ.get("HL_SPOT_TOKEN") or "HYPE"
-    client = HLClient()  # fără secret_key => ``exchange`` rămâne None, zero ordine
+    client = HLClient()  # no secret_key keeps ``exchange`` None, allowing zero orders
     candles = client.candles(token, "4h", lookback_hours=5000 * 4)
     rows = sorted(
         (
@@ -89,7 +89,7 @@ def _fetch_with_ts(_pair: str, interval: int):
         )
         for item in candles
     )
-    # Ultima lumânare poate fi încă în formare; o eliminăm ca în runnerul Kraken.
+    # The final candle may still be forming; remove it as the Kraken runner does.
     return rows[:-1]
 
 
@@ -107,7 +107,7 @@ def main() -> int:
     _load_config()
     try:
         snapshot(quiet=args.quiet)
-    except Exception as exc:  # cron: eșec vizibil, fără efect live
+    except Exception as exc:  # visible cron failure without live effects
         print(f"[hl_shadow] eroare: {exc}", file=sys.stderr)
         return 1
     return 0

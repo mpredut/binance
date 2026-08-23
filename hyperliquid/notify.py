@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""notify.py — subtire peste notify() PARTAJAT din alertnotifiers.py (radacina).
-Doar rezolva simbolul specific HL si deleaga (logica comuna = in alertnotifiers)."""
+"""Thin wrapper over the SHARED notify() in root alertnotifiers.py.
+Resolve the HL-specific symbol and delegate all common logic."""
 from __future__ import annotations
 
 import os

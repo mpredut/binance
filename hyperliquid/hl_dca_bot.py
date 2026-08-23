@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
-"""hl_dca_bot.py — base v2 (motorul spot_dca) pe Hyperliquid SPOT, prin HyperliquidProvider.
+"""hl_dca_bot.py — base v2 spot_dca engine on Hyperliquid SPOT via HyperliquidProvider.
 
-ACELASI motor ca kraken_bot (strategies.spot_dca: DCA + take-profit + trailing + stop),
-doar venue-ul difera. Tranzactioneaza DOAR HYPE spot pe HL. Provider-agnostic (Calea B):
-strategia cere contractul StrategyExecutor; HyperliquidProvider il implementeaza.
+The SAME engine as kraken_bot (DCA + take profit + trailing + stop), with only the
+venue changed. It trades only HYPE spot on HL. In provider-agnostic path B, the strategy
+requires StrategyExecutor and HyperliquidProvider implements it.
 
-  python3 hl_dca_bot.py --paper   # PAPER (fara bani) — VALIDARE
-  python3 hl_dca_bot.py           # REAL (necesita STRAT_EXECUTE=true + HL_LIVE_ORDERS=true;
-                                  #        ordinele reale sunt gated in provider pt siguranta)
+  python3 hl_dca_bot.py --paper   # PAPER validation without money
+  python3 hl_dca_bot.py           # REAL requires STRAT_EXECUTE=true + HL_LIVE_ORDERS=true;
+                                  # provider safety-gates real orders
 
-ATENTIE: base v2 VINDE in putere (la +TP%). Pe HYPE spot foloseste ACELASI sold ca un
-eventual long direcțional -> nu tine si base v2 si long-hold pe acelasi HYPE.
+CAUTION: base v2 SELLS into strength at +TP%. It uses the SAME HYPE spot balance as a
+directional long, so do not run base v2 and long-hold over the same HYPE.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from providers.hyperliquid_provider import HyperliquidProvider
 
 
 def state_dir_for(dry_run: bool) -> str:
-    """Izolează starea HL de Kraken și separă PAPER de LIVE."""
+    """Isolate HL state from Kraken and separate PAPER from LIVE."""
     state_dir = os.path.join(_HERE, ".paper_state") if dry_run else _HERE
     if dry_run:
         os.makedirs(state_dir, exist_ok=True)
@@ -38,9 +38,8 @@ def state_dir_for(dry_run: bool) -> str:
 
 
 def main() -> int:
-    # Configurația trebuie încărcată înainte de valorile implicite CLI și înainte
-    # de calculul modului PAPER/REAL. `.env` câștigă deoarece load_dotenv nu
-    # suprascrie variabile deja definite.
+    # Load configuration before CLI defaults and PAPER/REAL calculation. `.env` wins
+    # because load_dotenv does not override already defined variables.
     load_dotenv(os.path.join(_HERE, ".env"))
     load_dotenv(os.path.join(_HERE, "config.env"))
 
@@ -53,8 +52,8 @@ def main() -> int:
     strategy_enabled = os.environ.get("STRAT_EXECUTE", "false").lower() == "true"
     venue_enabled = os.environ.get("HL_LIVE_ORDERS", "false").lower() == "true"
     strat_dry = args.paper or not (strategy_enabled and venue_enabled)
-    if not any(a in sys.argv for a in ()):  # (rezervat pt viitoare comenzi one-shot)
-        single_instance(f"hl_dca_bot_{token}")   # o instanta per token (nu se bate cu dn/hl_bot)
+    if not any(a in sys.argv for a in ()):  # reserved for future one-shot commands
+        single_instance(f"hl_dca_bot_{token}")   # one instance per token, independent of dn/hl_bot
 
     from providers.execution_audit import AuditedStrategyExecutor
 
