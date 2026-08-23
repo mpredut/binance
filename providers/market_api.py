@@ -25,9 +25,9 @@ from market_regime import (
 )
 
 
-# Importurile Binance ajung pana la websocket-uri si chei locale. Providerii
-# Kraken/HL trebuie sa poata fi importati intr-un checkout curat, fara secrete
-# Binance si fara efecte secundare. Variabilele raman patch-uibile in teste.
+# Binance imports reach WebSockets and local keys. Kraken and Hyperliquid must
+# remain importable in a clean checkout without Binance secrets or side effects.
+# Keep these variables patchable in tests.
 _bapi = None
 _allorders = None
 
@@ -49,7 +49,7 @@ def _get_allorders():
 
 
 def _step_decimals(step: str) -> int:
-    """Nr de zecimale semnificative dintr-un stepSize/tickSize Binance (ex '0.00100000'->3)."""
+    """Return significant decimals in a Binance stepSize/tickSize."""
     s = str(step).rstrip("0")
     return len(s.split(".")[1]) if "." in s and s.split(".", 1)[1] else 0
 
@@ -72,23 +72,21 @@ class BinanceProvider(MarketDataProvider):
         return None
 
     def supports_symbol(self, symbol: str) -> bool:
-        # Contul Binance operational foloseste exclusiv perechi USDC.
-        # pe default = Binance in facada, deci ramane behavior-preserving.
-        # EXCEPTIE: HYPE* e servit de HyperliquidProvider (HL spot), nu de Binance —
-        # altfel claim-ul lacom pe *USDC ar fura HYPEUSDC inaintea providerului HL.
+        # The operational Binance account uses USDC pairs exclusively, preserving
+        # the facade's Binance default. Hyperliquid owns HYPE spot symbols, so
+        # exclude them before Binance's broad USDC claim can capture HYPEUSDC.
         if symbol.upper().startswith("HYPE"):
             return False
         return symbol.endswith("USDC")
 
-    # ── CONT: aceleasi date ca azi, doar reimpachetate prin facada. ─────────────
+    # -- Account data, repackaged through the facade without semantic changes. --
     def free_balance(self, asset: str) -> Optional[float]:
         # Delegate to Binance's direct per-asset balance query. It returns ``0.0``
         # for an absent asset and ``None`` when the API read fails.
         return _get_bapi().get_free_balance(asset)
 
     def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:
-        # bapi_allorders.get_trade_orders(order_type, symbol, max_age_seconds) — aceeasi
-        # filtrare pe side+varsta ca pana acum; doar normalizam la forma comuna.
+        # Preserve get_trade_orders side and age filtering, then normalize shape.
         raw = _get_allorders().get_trade_orders(side, symbol, since_s) or []
         return [_normalize_order(o) for o in raw]
 
@@ -112,19 +110,16 @@ class BinanceProvider(MarketDataProvider):
             return _get_bapi().client.get_order(
                 symbol=symbol, origClientOrderId=client_order_id)
         except Exception as exc:
-            # Binance -2013 = ordin inexistent; celelalte erori raman fail-closed.
+            # Binance -2013 means missing order; all other errors remain fail closed.
             if getattr(exc, "code", None) == -2013:
                 return None
             raise ProviderError(
                 f"order_by_client_id({symbol},{client_order_id}): {exc}") from exc
 
     def place_order(self, symbol: str, side: str, price: float, qty: float, force: bool = False, **kwargs):
-        # 30 iul: MECANICA-ONLY (fee/balanta + min-notional + dispatch). Protectia
-        # (plafon zilnic, gard profit, cantitate, trend-wait, cooldown, jurnal) e rulata
-        # de Instrument.place() ca strat AGNOSTIC, prin hook-uri provider-neutral.
-        # guards_internally()=False, deci Binance trece prin acelasi pipeline.
-        # kwargs (safeback_seconds/cancelorders/hours/pair/motivation) sunt consumati
-        # de stratul agnostic; aici conteaza doar force (market vs limit).
+        # Mechanics only: fee/balance, minimum notional, and dispatch. Instrument.place
+        # applies daily, profit, quantity, trend, cooldown, and logging policies via
+        # provider-neutral hooks. Only force affects market versus limit here.
         from binance_api import bapi_placeorder as _po
         mechanics_kwargs = {"force": force}
         if kwargs.get("client_order_id") is not None:
@@ -137,18 +132,17 @@ class BinanceProvider(MarketDataProvider):
         return _po.adjust_price_and_cancel_opposite(side, symbol, price, cancel_opposite=cancel_opposite)
 
     def profit_guard_window_ref(self, symbol: str, side: str, safeback_sec):
-        # Referinta tier-1 din fereastra Order-cache pe safeback (12-14 zile), ca in
-        # vechiul if_place_safe_order. Daca apelantul n-a dat safeback -> defaultul
-        # bogat (14 zile), nu None (ca sa nu cada pe last_opposite_fill mai slab).
+        # Use the Order-cache safeback window as tier-one reference. When the caller
+        # omits it, use the rich 14-day default rather than a weaker fill fallback.
         import order_guard
         from binance_api import bapi_placeorder as _po
         sb = safeback_sec if safeback_sec else _po.PLACE_ORDER_SAFEBACK_SEC
         return order_guard.window_reference(self, symbol, side, sb)
 
     def last_opposite_fill(self, symbol: str, order_type: str, since_s: float = 0) -> Optional[float]:
-        # Sursa dedicata Binance (PERSISTENT, fara fereastra): cache de fills (CacheTradeManager)
-        # apoi API direct (get_my_trades). IDENTIC cu tier 2+3 din gardul vechi. Import LAZY
-        # (bapi_placeorder trage cacheManager->market_api -> ciclu daca ar fi la nivel de modul).
+        # Persistent Binance source without a window: fill cache followed by direct
+        # get_my_trades. This matches legacy guard tiers two and three. Lazy import
+        # avoids a bapi_placeorder/cacheManager/market_api cycle.
         from binance_api import bapi_placeorder as _po
         ref = _po._last_opposite_fill_price(symbol, order_type)        # cache fills (via WS)
         if ref is None:
@@ -168,16 +162,13 @@ class BinanceProvider(MarketDataProvider):
         return fee_cap_quantity(available_qty, _po.PLACE_ORDER_FEE_PCT)
 
     def guards_internally(self) -> bool:
-        # 30 iul: FALSE — Binance trece acum prin pipeline-ul AGNOSTIC din
-        # Instrument.place() (plafon zilnic, gard profit, QuantityDecision,
-        # trend-wait, cooldown, jurnal), cu hook-urile care-i pastreaza mecanica
-        # bogata (adjust_order_price, profit_guard_window_ref, policy cap). place_order
-        # e acum mecanica-only, deci NU se dubleaza gardul. (Era True cat timp Binance
-        # rula lantul propriu place_order_smart -> if_place_safe_order.)
+        # False because Binance now uses Instrument.place's shared policy pipeline.
+        # Provider hooks preserve its richer mechanics, while mechanics-only
+        # place_order prevents duplicated guards.
         return False
 
-    # ── CONTRACT StrategyExecutor (Faza 4) ─────────────────────────────────────
-    # get_current_price / free_balance de mai sus satisfac deja contractul.
+    # -- StrategyExecutor contract. --------------------------------------------
+    # get_current_price and free_balance already satisfy it.
     def pair_precision(self, symbol: str):
         try:
             info = _get_bapi().client.get_symbol_info(symbol)
@@ -202,8 +193,8 @@ class BinanceProvider(MarketDataProvider):
             kl = _get_bapi().client.get_klines(symbol=symbol, interval=iv, limit=91)
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"ohlc_closes({symbol}): {e}") from e
-        closes = [float(k[4]) for k in (kl or [])]     # k[4] = close
-        return closes[:-1] if closes else []           # exclude bara in formare
+        closes = [float(k[4]) for k in (kl or [])]     # k[4] is the close.
+        return closes[:-1] if closes else []           # Exclude the forming bar.
 
     def submit_order(self, symbol: str, side: str, qty: float,
                      price: Optional[float] = None, *, market: bool = False,
@@ -233,10 +224,10 @@ class BinanceProvider(MarketDataProvider):
         return str(oid)
 
     def _order_fee_quote(self, symbol: str, order_id: int) -> float:
-        """Comision cumulativ convertit in valuta de cotare a perechii.
+        """Return cumulative commission converted into the pair's quote currency.
 
-        Binance nu include fee-ul in get_order. Fara aceasta interogare motorul
-        generic ar supraestima sistematic P&L-ul si ar diferi de live.
+        Binance omits fees from get_order. Without this query the generic engine
+        would systematically overestimate P&L and diverge from live results.
         """
         client = _get_bapi().client
         info = client.get_symbol_info(symbol) or {}
@@ -296,21 +287,19 @@ class BinanceProvider(MarketDataProvider):
 
 
 class MarketApi:
-    """Facada cu rutare pe symbol. Pentru un symbol, alege PRIMUL provider cu
-    supports_symbol(symbol)==True; daca niciunul nu-l revendica, foloseste default-ul
-    (primul provider din lista = Binance). Memoizeaza ruta symbol->provider.
+    """Route each symbol to the first provider that claims it.
 
-    Semnatura get_current_price(symbol) e identica cu cea a bapi pentru market-data,
-    deci e drop-in pentru codul existent (doar sursa lui `api` se schimba)."""
+    Fall back to the first configured provider, Binance, and memoize routes. The
+    get_current_price signature matches bapi, making this a drop-in data facade.
+    """
 
     def __init__(self, providers: List[MarketDataProvider]):
         if not providers:
             raise ValueError("MarketApi: lista de provideri nu poate fi goala")
         self._providers: List[MarketDataProvider] = list(providers)
-        self._route: dict = {}   # symbol -> provider (memoizare lock-free, idempotenta)
-        # Registry pe NUME (ex. 'binance', 'hyperliquid'): rutare EXPLICITA pe venue
-        # pt descriptorul Instrument, in loc de ghicitul prin supports_symbol. Aditiv —
-        # nu schimba rutarea pe symbol de mai jos.
+        self._route: dict = {}   # Lock-free, idempotent symbol-to-provider memoization.
+        # Name registry enables explicit venue routing for Instrument rather than
+        # guessing via supports_symbol. It does not alter symbol routing below.
         self._by_name: dict = {p.name.lower(): p for p in self._providers}
         self._regime_service = MarketRegimeService()
 
@@ -333,7 +322,7 @@ class MarketApi:
                     return candidate
             except Exception:
                 continue
-        # Default behavior-preserving: primul provider (Binance).
+        # Behavior-preserving default: first provider (Binance).
         default = self._providers[0]
         self._route[symbol] = default
         return default
@@ -344,18 +333,17 @@ class MarketApi:
     def get_price_history(self, symbol: str, lookback_h: float) -> Optional[List]:
         return self._provider_for(symbol).get_price_history(symbol, lookback_h)
 
-    # ── CONT (Faza 3): rutare pe symbol/asset, normalizat de provider. ─────────
+    # -- Account routing by symbol/asset, normalized by provider. ---------------
     def free_balance(self, asset: str) -> Optional[float]:
-        """Compatibilitate legacy; pentru cod nou folosește free_balance_for().
+        """Preserve legacy compatibility; new code should use free_balance_for.
 
-        Un asset simplu nu identifică venue-ul când USDC/HYPE există pe mai multe
-        platforme. Rutarea istorică pe primul provider rămâne doar ca să nu rupă
-        integrări externe vechi.
+        A bare asset is ambiguous across venues. Historical first-provider routing
+        remains only to avoid breaking old external integrations.
         """
         return self._provider_for(asset).free_balance(asset)
 
     def free_balance_for(self, provider_name: str, asset: str) -> Optional[float]:
-        """Sold liber citit explicit de la venue-ul cerut, fără rutare ambiguă."""
+        """Read free balance explicitly from the requested unambiguous venue."""
         provider = self.provider_by_name(provider_name)
         if provider is None:
             raise ValueError(f"Provider necunoscut: {provider_name!r}")
@@ -497,19 +485,18 @@ class MarketApi:
             asset_short, asset_long, context, use_case=use_case, weights=weights)
 
     def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
-        # MECANICA-ONLY (dispatch la provider, FARA garduri) — NU folosi direct pt
-        # plasare reala; foloseste .place() (guardat). Ramas pt cazuri interne/DRY.
+        # Mechanics-only provider dispatch without guards. Real placement must use
+        # guarded .place(); this remains for internal and dry-run cases.
         return self._provider_for(symbol).place_order(symbol, side, price, qty, **kwargs)
 
     def place(self, symbol: str, side: str, price: float, qty: float,
               base: Optional[str] = None, quote: Optional[str] = None, **kwargs):
-        """Plasare GUARDATA prin proxy-ul unic (30 iul): construieste un Instrument
-        efemer rutat pe symbol si ruleaza pipeline-ul agnostic complet (plafon zilnic,
-        gard profit, weight, trend-wait, cooldown, jurnal), cu hook-urile provider-ului
-        (Binance isi pastreaza mecanica bogata). Inlocuitorul unic pt vechile apeluri
-        directe po.place_order_smart/place_safe_order. `base`/`quote` derivate din symbol
-        daca nu-s date (side-aware pt weight/balanta). Import LAZY al Instrument (evita
-        ciclul market_api<->instrument la nivel de modul)."""
+        """Place through the single guarded proxy using a temporary Instrument.
+
+        Run the complete provider-agnostic policy pipeline with provider hooks.
+        This replaces direct legacy smart/safe placement calls. Derive base and
+        quote from the symbol when absent. Lazy Instrument import avoids a cycle.
+        """
         from instrument import Instrument
         import utils as u
         prov_name = self.provider_name_for(symbol)
@@ -519,7 +506,7 @@ class MarketApi:
             except Exception:
                 base = None
         if quote is None and base and symbol.startswith(base) and symbol != base:
-            quote = symbol[len(base):]   # ex. BTCUSDC -> base=BTC -> quote=USDC
+            quote = symbol[len(base):]   # For example, BTCUSDC gives BTC and USDC.
         inst = Instrument(name=symbol, symbol=symbol, provider=prov_name,
                           base=base, quote=quote, api=self)
         return inst.place(side, price, qty, **kwargs)
@@ -528,14 +515,15 @@ class MarketApi:
         return any(p.supports_symbol(symbol) for p in self._providers)
 
     def provider_name_for(self, symbol: str) -> str:
-        """Numele providerului care ar servi symbolul (util pt debug/loguri)."""
+        """Return the provider that would serve the symbol for logs and debugging."""
         return self._provider_for(symbol).name
 
     def provider_by_name(self, name: str) -> Optional[MarketDataProvider]:
-        """Providerul inregistrat sub `name` (case-insensitive, ex. 'binance',
-        'hyperliquid'); None daca nu exista. Rutare EXPLICITA pe venue, folosita de
-        descriptorul Instrument: instrumentul isi declara providerul, nu-l mai ghicim
-        din string-ul de symbol (necesar cand acelasi activ e pe mai multe venue-uri)."""
+        """Return the case-insensitive named provider, or None when absent.
+
+        Instrument uses this for explicit venue routing so identical assets on
+        multiple venues are not inferred from the symbol string.
+        """
         return self._by_name.get((name or "").strip().lower())
 
     @property
@@ -543,18 +531,14 @@ class MarketApi:
         return list(self._providers)
 
 
-# Singleton injectat in constructori (api=None -> acest singleton).
-# ORDINE PROVIDERI: Binance ramane PRIMUL = default behavior-preserving pt symbolurile
-# nerevendicate (asset-uri bare BTC/TAO etc.). HyperliquidProvider revendica DOAR HYPE
-# (supports_symbol), iar Binance exclude explicit HYPE -> HYPEUSDC ajunge la HL.
-# Constructia HyperliquidProvider() e ieftina (NU atinge SDK-ul); SDK-ul se incarca
-# lenes la prima folosire. Daca pana si importul modulului ar esua (n-ar trebui),
-# cadem curat pe Binance-only, ca flota sa nu fie afectata.
+# Singleton injected when constructors receive api=None. Binance remains first to
+# preserve routing for unclaimed symbols. Hyperliquid claims only HYPE and Binance
+# explicitly excludes it. Provider construction is cheap and SDKs load lazily;
+# import failure falls back cleanly without affecting the fleet.
 _extra_providers = []
-# Fiecare provider in propriul try/except: import LAZY al SDK-urilor/clientilor, deci
-# constructia e ieftina; daca unul lipseste, ceilalti raman. Kraken/T212 sunt
-# EXPLICIT-ONLY (supports_symbol=False) -> NU schimba rutarea pe symbol; reachable doar
-# prin Instrument (provider_by_name). Deci ordinea lor aici nu afecteaza behavior-ul.
+# Isolate every provider import so one missing dependency leaves the others intact.
+# Kraken and T212 are explicit-only and reachable through Instrument, so their
+# ordering does not affect symbol routing.
 for _modname, _clsname in (("hyperliquid_provider", "HyperliquidProvider"),
                            ("kraken_provider", "KrakenProvider"),
                            ("t212_provider", "T212Provider")):
