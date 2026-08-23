@@ -3,27 +3,25 @@ import math
 import time
 
 from binance_api import bapi as api
-from providers.market_api import api as mkt   # proxy unic guardat (Instrument.place)
+from providers.market_api import api as mkt   # Single guarded proxy (Instrument.place).
 from providers.quantity import resolve_assets
 from assetguardian_state import AssetGuardianState
 import cacheManager as cm
 import symbols as sym
 
-# 23 iul: incarca parametrii tunabili din assetguardian_config.env (versionat,
-# se COMITE — fara secrete) INAINTE de a citi orice os.environ.get(...) de mai
-# jos. botcore.load_dotenv NU suprascrie variabile deja setate in mediul real.
+# Load tunable parameters from the versioned, secret-free config before reading
+# environment variables below. load_dotenv does not overwrite real environment.
 from botcore import load_dotenv as _load_dotenv
 _load_dotenv("assetguardian_config.env")
 
-CHECK_INTERVAL_SECONDS = float(os.environ.get("AG_CHECK_INTERVAL_SEC", str(0.9 * 60)))  # 9 minute
-# 2.9% declansa "sell all" la fiecare ciclu intr-un uptrend, dar sell_all_assets
-# cheama place_safe_order(force=False) -> apply_weight_limit zero-uia ordinul
-# (vindea NIMIC, spam "Orders sent: 0"). Walk-forward pe feed real (291z) a aratat
-# ca vanzarea agresiva pierde fata de deTinere -> ridicat la 100 (practic oprit).
-# Protectia reala de crash o face trailing_stop.py (force=True, prag larg ~22%).
+CHECK_INTERVAL_SECONDS = float(os.environ.get("AG_CHECK_INTERVAL_SEC", str(0.9 * 60)))  # 0.9 minutes.
+# A 2.9% threshold triggered sell-all every uptrend cycle, but the safe-order
+# weight limit reduced it to zero and produced log spam. A 291-day walk-forward
+# showed aggressive selling underperformed holding, so 100 effectively disables
+# it. trailing_stop.py provides the actual broad crash protection.
 TARGET_GROWTH_PERCENT = float(os.environ.get("AG_TARGET_GROWTH_PCT", "100.0"))
 TARGET_DROP_PERCENT = float(os.environ.get("AG_TARGET_DROP_PCT", "7.0"))
-ASSET_REFERENCE_MINUTES_BACK_DEFAULT = float(os.environ.get("AG_REFERENCE_MINUTES_BACK", str(24 * 60)))  # 24 ore
+ASSET_REFERENCE_MINUTES_BACK_DEFAULT = float(os.environ.get("AG_REFERENCE_MINUTES_BACK", str(24 * 60)))  # 24 hours.
 
 BUY_SYMBOL_DEFAULT = sym.symbols[0] if sym.symbols else "BTCUSDC"
 BUY_USE_CASH_RATIO = float(os.environ.get("AG_BUY_USE_CASH_RATIO", "0.995"))
@@ -93,7 +91,7 @@ def _finite_float(raw, *, positive=False):
 
 
 def _row_value_usdc(row):
-    """Valoare normalizata USDC; accepta cheia istorica USDT doar la citire."""
+    """Return normalized USDC value, accepting the legacy USDT key on reads."""
     raw = row.get("total_value_usdc")
     if raw is None:
         raw = row.get("total_value_usdt")
@@ -107,9 +105,8 @@ def _read_cache_rows():
     try:
         manager = cm.get_cache_manager("AssetValue")
         manager.enable_save_state_to_file()
-        # Citim direct din memoria managerului; fisierul poate fi in urma.
-        # Threadul CacheAssetValueManager poate adauga simultan un snapshot.
-        # Copia sub lock ofera fiecarei evaluari o vedere coerenta si scurta.
+        # Read manager memory because its file may lag. Copy under lock for a brief,
+        # coherent view while CacheAssetValueManager may append concurrently.
         with manager.lock:
             rows = list(manager.cache.get("TOTAL", []))
         print(f"[DEBUG] cache rows loaded: {len(rows)}")
@@ -137,7 +134,7 @@ def _get_window_extrema_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEF
     target_ts = now_ts - int(minutes_back * 60)
     print(f"[DEBUG] window start for last {minutes_back}m: {target_ts}")
 
-    # Folosim toate inregistrarile din ultimele `minutes_back` minute.
+    # Use every record from the last ``minutes_back`` minutes.
     window_rows = [
         r for r in rows
         if isinstance(r, dict)
@@ -149,7 +146,7 @@ def _get_window_extrema_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEF
     if not window_rows:
         return None
 
-    #printam doar un row per ora pentru a nu fi prea multe linii in output
+    # Print only one row per hour to limit output volume.
     if window_rows:
         print("[DEBUG] dump cache TOTAL rows:")
 
@@ -157,19 +154,19 @@ def _get_window_extrema_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEF
     for idx, row in enumerate(window_rows, start=1):
         current_ts = _row_timestamp(row)
 
-        # primul row se afiseaza mereu
+        # Always display the first row.
         if last_printed_ts is None:
             print(f"  [{idx}] {row}")
             last_printed_ts = current_ts
             continue
 
-        # afiseaza doar daca a trecut minim 1 ora
+        # Then display only after at least one hour.
         if current_ts - last_printed_ts >= 3600:
             print(f"  [{idx}] {row}")
             last_printed_ts = current_ts
 
 
-    # Profitul se masoara fata de minim, drawdown-ul fata de maxim.
+    # Measure profit from the minimum and drawdown from the maximum.
     window_rows = sorted(window_rows, key=_row_timestamp)
     minimum = min(window_rows, key=_row_value_usdc)
     maximum = max(window_rows, key=_row_value_usdc)
@@ -179,13 +176,13 @@ def _get_window_extrema_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEF
 
 
 def _get_value_minutes_ago_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT):
-    """Compatibilitate pentru consumatorii vechi: intoarce minimul ferestrei."""
+    """Preserve legacy consumers by returning the window minimum."""
     extrema = _get_window_extrema_from_cache(minutes_back)
     return extrema[0] if extrema else None
 
 
 def _get_sell_symbol_for_asset(asset):
-    # Contul Binance operational foloseste exclusiv USDC drept quote/cash.
+    # The operational Binance account uses USDC exclusively as quote/cash.
     candidate = f"{asset}USDC"
     return candidate if candidate in sym.symbols else None
 
@@ -198,7 +195,7 @@ def sell_all_assets():
         
     print(f"[DEBUG] balances fetched: {len(balances)}")
   
-    # Extragem doar asset-urile de baza din sym.symbols (ex: BTCUSDC -> BTC)
+    # Extract only base assets from configured symbols, for example BTC from BTCUSDC.
     tracked_assets = {resolve_assets(s)[0] for s in sym.symbols}
     
     excluded_assets = {"USDC"}
@@ -316,7 +313,7 @@ def buy_with_all_cash(buy_symbol=BUY_SYMBOL_DEFAULT, cash_ratio=BUY_USE_CASH_RAT
 
 
 def _campaign_tier(drawdown_abs, maximum_row, free_cash):
-    """Selectează prima tranșă depășită și încă neacceptată în campania curentă."""
+    """Select the first crossed but incomplete tier in the current campaign."""
     state = STATE.load()
     if drawdown_abs < RECOVERY_RESET_PERCENT:
         if state:
@@ -475,9 +472,8 @@ def run_forever():
         except Exception as e:
             print(f" Runtime ERROR: {e}")
         sleep_seconds = _next_check_seconds()
-        # Flush-ul de la limita ciclului publică și toate liniile precedente când
-        # stdout este redirectat în fișier de flota_start.sh (altfel botul cu
-        # volum mic de log poate părea stale minute întregi).
+        # Flushing at the cycle boundary publishes all preceding lines when stdout
+        # is redirected by flota_start.sh, preventing a quiet bot from appearing stale.
         print(f"[DEBUG] sleep {sleep_seconds}s before next cycle", flush=True)
         time.sleep(sleep_seconds)
 
