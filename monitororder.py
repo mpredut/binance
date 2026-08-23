@@ -12,7 +12,7 @@ import utils as u
 import symbols as sym
 from binance_api import bapi as api
 from binance_api import bapi_placeorder as po
-from providers.market_api import api as mkt   # proxy unic guardat (Instrument.place)
+from providers.market_api import api as mkt   # single guarded proxy (Instrument.place)
 
 
 
@@ -50,7 +50,7 @@ TIME_SLEEP_ERROR = 10
 
 
 def monitor_open_orders_by_type(symbol, order_type, failed_orders):
-    orders = api.get_open_orders(order_type, symbol)  # Obtine ordinele deschise de vanzare sau cumparare in functie de tip
+    orders = api.get_open_orders(order_type, symbol)  # Fetch open orders for the requested side.
     if not orders:
         print(f"Pentru {symbol} Nu exista ordine de {order_type} deschise initial.")
         return
@@ -68,7 +68,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
         order = orders[order_id]
         price = order['price']
 
-        if not price or price <= 0:          # gardă: evită împărțirea la 0 pe preț invalid
+        if not price or price <= 0:          # Guard against division by zero for invalid prices.
             print(f"Preț invalid ({price}) pentru ordinul {order_id}, sar peste.")
             continue
 
@@ -95,7 +95,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
                 continue
             time.sleep(MONITOR_BETWEEN_ORDERS_INTERVAL)
             
-            # Calculeaza noul pret in functie de tipul ordinului
+            # Calculate the new price according to the order side.
             if order_type == "SELL":
                 new_price = current_price * 1.001 + 1
             else:
@@ -103,7 +103,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
             
             quantity = order['quantity']
             
-            # incearca sa plaseze un nou ordin (proxy unic guardat)
+            # Attempt placement through the single guarded proxy.
             new_order = mkt.place(symbol, order_type, new_price, quantity, smart=False)
             
             if new_order:
@@ -125,7 +125,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
                 })
 
     # Retry ...
-    for failed_order in failed_orders[:]:  # Iteram pe o copie a listei 
+    for failed_order in failed_orders[:]:  # Iterate over a copy of the list.
         print(f"retry order failed: {failed_order}")
         time.sleep(MONITOR_BETWEEN_ORDERS_INTERVAL)
         retry_order = mkt.place(
@@ -137,7 +137,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
         )
         if retry_order:
             print(f"Ordin plasat cu succes la retry. ID nou: {retry_order['orderId']}")
-            failed_orders.remove(failed_order)  # Eliminăm ordinul din lista inițială
+            failed_orders.remove(failed_order)  # Remove the order from the original list.
         else:
             print("Error at resubmit order retry.")
     
@@ -146,7 +146,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
 MONITOR_BETWEEN_ORDERS_INTERVAL = 2
 MONITOR_OPEN_ORDER_INTERVAL = 8
 MONITOR_CLOSE_ORDER_INTERVAL = 8
-max_age_seconds =  3 * 24 * 3600  # Timpul maxim in care ordinele executate/filled sunt considerate recente (3 zile)
+max_age_seconds =  3 * 24 * 3600  # Maximum age for treating filled orders as recent (three days).
 
 def monitor_orders():
     #monitor_filled_buy_orders()
@@ -155,7 +155,7 @@ def monitor_orders():
     monitor_open_orders_lasttime = time.time() - MONITOR_OPEN_ORDER_INTERVAL - TIME_SLEEP_ERROR
     monitor_close_orders_by_age_lasttime = time.time() - MONITOR_CLOSE_ORDER_INTERVAL - TIME_SLEEP_ERROR
 
-    failed_orders = []  # Lista pentru a salva ordinele care dau eroare la plasare
+    failed_orders = []  # Orders whose placement failed and should be retried.
     while not api.stop:
         try:
             currenttime = time.time()

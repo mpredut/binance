@@ -1,24 +1,24 @@
-"""FileLock — mutex inter-PROCES și inter-THREAD bazat pe fcntl.flock.
+"""FileLock — cross-process and cross-thread mutex based on fcntl.flock.
 
     from lock import FileLock
-    with FileLock("/cale/catre/.lock"):     # exclusiv
-        ...secțiune critică...               # al doilea proces/thread așteaptă aici
+    with FileLock("/path/to/.lock"):        # exclusive
+        ...critical section...               # the next process/thread waits here
 
-Fiecare apel deschide PROPRIUL file descriptor → flock(LOCK_EX) e exclusiv între
-file descriptions diferite, deci serializează atât procese cât și thread-uri.
-Pe Windows (fără fcntl) e no-op — bot-ul rulează pe Linux. Generic: poate proteja
-ORICE operație, nu doar plasarea de ordine.
+Each invocation opens its own file descriptor, so flock(LOCK_EX) is exclusive
+across distinct file descriptions and serializes both processes and threads.
+On Windows, where fcntl is unavailable, this is a no-op; the bot runs on Linux.
+The lock is generic and can protect any operation, not just order placement.
 """
 
 try:
     import fcntl                            # Unix (Linux/WSL)
     _HAVE_FCNTL = True
-except ImportError:                         # Windows → gate dezactivat (no-op)
+except ImportError:                         # Windows: gate disabled (no-op)
     _HAVE_FCNTL = False
 
 
 class FileLock:
-    """Lock inter-PROCES și inter-THREAD: fcntl.flock(LOCK_EX) pe un fd propriu."""
+    """Cross-process/thread lock using fcntl.flock(LOCK_EX) on an owned fd."""
 
     def __init__(self, path):
         self.path = path

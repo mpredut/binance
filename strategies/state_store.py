@@ -1,8 +1,8 @@
-"""Persistenta JSON comuna pentru starea motoarelor financiare.
+"""Shared JSON persistence for financial-engine state.
 
-Scrierea este atomica in acelasi director, iar runtime-urile live pot cere
-fail-closed: o stare corupta sau imposibil de salvat nu este confundata cu o
-stare goala care ar putea permite o intrare duplicata.
+Writes are atomic within the same directory. Live runtimes may fail closed so
+corrupt or unsavable state is not mistaken for empty state that could permit a
+duplicate entry.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from collections.abc import Callable
 
 
 class StatePersistenceError(RuntimeError):
-    """Starea financiara nu poate fi citita sau persistata in siguranta."""
+    """Financial state cannot be read or persisted safely."""
 
 
 class JsonStateStore:

@@ -1,10 +1,10 @@
-"""lock — primitive de sincronizare locale, reutilizabile (nu doar pentru trade).
+"""Reusable local synchronization primitives, not limited to trading.
 
-FileLock  — mutex cross-PROCES + cross-THREAD (fcntl.flock pe un fd propriu).
-Cooldown  — gate „nu repeta operația pe <key> mai des de <ttl>s", cu rezervare
-            atomică + slot RAII, persistat pe disc. Generic peste orice resursă.
+FileLock  — cross-process and cross-thread mutex using fcntl.flock on its own fd.
+Cooldown  — persisted gate that prevents repeating an operation for <key> more
+            often than every <ttl>s, with atomic reservation and an RAII slot.
 
-Vezi `trade_cooldown.py` (rădăcină) pentru specializarea pe ordine de trading.
+See root-level ``trade_cooldown.py`` for the trading-order specialization.
 """
 from .file_lock import FileLock
 from .cooldown import Cooldown, Reservation

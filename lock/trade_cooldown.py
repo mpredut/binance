@@ -25,9 +25,9 @@ import configparser
 from .cooldown import Cooldown
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))          # = lock/
-STATE_FILE = os.path.join(BASE_DIR, "trade_cooldown.json")     # stare runtime (gitignored)
+STATE_FILE = os.path.join(BASE_DIR, "trade_cooldown.json")     # runtime state (gitignored)
 LOCK_FILE = os.path.join(BASE_DIR, "trade_cooldown.lock")      # lock fcntl (gitignored)
-CONF_FILE = os.path.join(BASE_DIR, "trade_cooldown.conf")      # config text/ini (trackat)
+CONF_FILE = os.path.join(BASE_DIR, "trade_cooldown.conf")      # tracked text/INI configuration
 
 
 def _load_cooldown_sec(fallback=20):

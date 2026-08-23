@@ -1,8 +1,8 @@
-"""Clasificare provider-neutral a regimului de piata.
+"""Provider-neutral market-regime classification.
 
-Providerul/sursa de date produce un snapshot normalizat. Strategiile consulta
-aceeasi decizie, dar isi pastreaza separat politica financiara (entry, exit,
-market/limit). Modulul nu importa Binance, Kraken, Hyperliquid sau cacheManager.
+The provider/data source produces a normalized snapshot. Strategies consume the
+same decision while retaining independent financial policy for entry, exit, and
+market/limit execution. This module imports neither venues nor cacheManager.
 """
 from __future__ import annotations
 
@@ -56,7 +56,7 @@ class CompositeMarketRegimeDecision:
 
 
 class MarketRegimeEvaluator:
-    """Transforma un snapshot comun intr-o decizie determinista."""
+    """Transform a common snapshot into a deterministic decision."""
 
     def __init__(self, strength_threshold: float = 2.0):
         threshold = float(strength_threshold)
@@ -136,11 +136,11 @@ _COMPOSITE_PROFILES = {
 
 
 class MarketRegimeService:
-    """Construiește aceeași decizie din snapshot sau OHLC-ul oricărui provider.
+    """Build the same decision from a snapshot or any provider's OHLC data.
 
-    Cache-ul mic evită ca mai mulți boți să lovească același endpoint OHLC în
-    aceeași secundă. Providerul rămâne sursa datelor; strategia rămâne proprietara
-    deciziei financiare.
+    A small cache prevents multiple bots from hitting the same OHLC endpoint in
+    the same second. The provider remains the data authority and the strategy
+    retains ownership of the financial decision.
     """
 
     def __init__(self, strength_threshold: float = 2.0, *, cache_ttl_sec=30.0,
@@ -319,7 +319,7 @@ class MarketRegimeService:
             closes = provider.ohlc_closes(symbol, interval_min) or []
             decision = self.evaluate_closes(
                 closes, interval_min=interval_min, window_seconds=window_seconds)
-        except Exception as exc:  # date indisponibile => unknown explicit, nu trade orb
+        except Exception as exc:  # Unavailable data yields explicit unknown, not blind trading.
             decision = self.evaluator.unknown(
                 f"source_error:{exc.__class__.__name__}")
         with self._lock:
