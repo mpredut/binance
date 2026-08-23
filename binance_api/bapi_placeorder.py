@@ -541,19 +541,39 @@ def __place_order(order_type, symbol, price, qty=None, force=False, cancelorders
 
 # fee_percentage NU mai e parametru (30 iul, dead — vezi place_order). max_daily_trades/
 # profit_percentage nu mai sunt trecute la if_place_safe_order — le citeste ea insasi.
-def place_safe_order(order_type, symbol, price, qty=None, safeback_seconds=PLACE_ORDER_SAFEBACK_SEC, force=False, cancelorders=False, hours=PLACE_ORDER_HOURS, bypass_profit_guard=False, _reason_out=None):
+def _guarded_market_place(symbol, order_type, price, qty, **kwargs):
+    """Import lazy pentru a evita ciclul bapi_placeorder <-> market_api.
 
+    Punct unic usor de testat pentru adaptoarele legacy de mai jos. Orice ordin
+    venit prin API-ul vechi intra astfel in acelasi pipeline ``Instrument.place``
+    folosit de rtrade/tradeall si de ceilalti provideri.
+    """
+    from providers.market_api import api as market_api
+    return market_api.place(symbol, order_type, price, qty, **kwargs)
+
+
+def place_safe_order(order_type, symbol, price, qty=None,
+                     safeback_seconds=PLACE_ORDER_SAFEBACK_SEC, force=False,
+                     cancelorders=False, hours=PLACE_ORDER_HOURS,
+                     bypass_profit_guard=False, _reason_out=None):
+    """Adaptor compatibil SAFE -> pipeline-ul comun (fara smart repricing)."""
     order_type = order_type.upper()
-    qty = _resolve_qty(qty)   # None = fara cantitate ceruta -> maximul permis de algoritm
+    qty = _resolve_qty(qty)
     sym.validate_params(order_type, symbol, price, qty)
-
-    ok, reason = if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds=safeback_seconds, bypass_profit_guard=bypass_profit_guard)
-    if not ok:
-        if _reason_out is not None:
-            _reason_out["reason"] = reason
-        return None
-
-    return place_order(order_type, symbol, price, qty, force=force, cancelorders=cancelorders, hours=hours)
+    order = _guarded_market_place(
+        symbol, order_type, price, qty,
+        smart=False,
+        safeback_seconds=safeback_seconds,
+        force=force,
+        cancelorders=cancelorders,
+        hours=hours,
+        bypass_profit_guard=bypass_profit_guard,
+    )
+    # Pipeline-ul comun jurnalizeaza motivul exact. Dict-ul ramane acceptat pentru
+    # compatibilitate, dar vechiul lant nu mai dubleaza evaluarea gardurilor.
+    if order is None and _reason_out is not None:
+        _reason_out.setdefault("reason", "common_pipeline_refused")
+    return order
     
 
 # 30 iul: jurnalul FLEET-WIDE extras in order_outcomes_log.py (sursa unica —
@@ -581,64 +601,18 @@ def _log_order_outcome(symbol, side, price, qty, outcome, refuse_reason, motivat
 # e IGNORAT complet (era deja suprascris necontitionat cu False in corp, cod
 # mort de multa vreme). Nu sterge parametrul fara sa actualizezi si apelantii.
 def place_order_smart(order_type, symbol, price, qty=None, safeback_seconds=PLACE_ORDER_SAFEBACK_SEC, force=False, cancelorders=True, hours=PLACE_ORDER_HOURS, pair=None, motivation=None):
-
     order_type = order_type.upper()
-    qty = _resolve_qty(qty)   # None = fara cantitate ceruta -> maximul permis de algoritm
+    qty = _resolve_qty(qty)
     sym.validate_params(order_type, symbol, price, qty)
-    reason_holder = {}
-    try:
-        qty = round(qty, 5)
-        cancel = False
-        current_price = api.get_current_price(symbol)
-
-        if order_type.upper() == 'BUY':
-            open_SELL_orders = api.get_open_orders("SELL", symbol)
-            # Anuleaza ordinele de vanzare existente la un pret mai mic decat pretul de cumparare dorit
-            for order_id, order_details in open_SELL_orders.items():
-                if order_details['price'] < price:
-                    cancel = api.cancel_order(symbol, order_id)
-                    if not cancel:
-                        print(f"Fail cancel order {order_id} prep. for BUY order. We wanted becuse low price for SELL.")
-
-            price = min(price, current_price)
-            price = round(price * 0.999, 0)
-            order = place_safe_order("BUY", symbol, price=price, qty=qty,
-                safeback_seconds=safeback_seconds, force=force, cancelorders=cancelorders, hours=hours,
-                _reason_out=reason_holder)
-
-        elif order_type.upper() == 'SELL':
-            open_BUY_orders = api.get_open_orders("BUY", symbol)
-            # Anuleaza ordinele de cumparare existente la un pret mai mare decat pretul de vanzare dorit
-            for order_id, order_details in open_BUY_orders.items():
-                if order_details['price'] > price:
-                    cancel = api.cancel_order(symbol, order_id)
-                    if not cancel:
-                        print(f"Fail cancel order {order_id} prep. for SELL order. We wanted becuse high price for BUY")
-
-            price = max(price, current_price)
-            price = round(price * (1 + 0.001), 0)
-            order = place_safe_order("SELL", symbol, price=price, qty=qty,
-                safeback_seconds=safeback_seconds, force=force, cancelorders=cancelorders, hours=hours,
-                _reason_out=reason_holder)
-        else:
-            print("Tipul ordinului este invalid. Trebuie sa fie 'BUY' sau 'SELL'.")
-            _log_order_outcome(symbol, order_type, price, qty, "refused", "invalid_order_type", motivation)
-            return None
-
-        _log_order_outcome(symbol, order_type, price, qty,
-                            "executed" if order else "refused",
-                            None if order else reason_holder.get("reason", "no_fill"),
-                            motivation)
-        return order
-    except BinanceAPIException as e:
-        _log_order_outcome(symbol, order_type, price, qty, "refused", str(e), motivation)
-        print(f"Eroare la plasarea ordinului de {order_type}: {e}")
-        return None
-        #return place_order(order_type, symbol, price, qty)
-    #except Exception as e:
-    #    print(f"place_order_smart: A aparut o eroare: {e}")
-    #    return None
-        #return place_order(order_type, symbol, price, qty)
+    return _guarded_market_place(
+        symbol, order_type, price, qty,
+        smart=True,
+        safeback_seconds=safeback_seconds,
+        force=force,
+        cancelorders=cancelorders,
+        hours=hours,
+        motivation=motivation,
+    )
 
 
 # ============================================================================
