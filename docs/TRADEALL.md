@@ -18,10 +18,11 @@ tick cannot subscribe or evaluate the same market twice.
 
 ## Retry and submission semantics
 
-Tradeall owns retry for every strategy signal (`caller_owns_retry=True`). A refused order
-is reevaluated only after the per-trend retry interval with current signal, price, balance
-and guards. It is not inserted into the generic outbox, which could otherwise replay a
-stale signal in parallel with tradeall.
+Tradeall preserves the historical common persistent retry policy. A refused placement may
+enter the generic outbox, while the in-process trend logic also observes its per-trend retry
+interval. The retry worker refreshes price and traverses the common guard pipeline before a
+new submission. Changing this ownership to strategy-only retry would change financial
+behavior and therefore requires a separate explicit decision.
 
 The per-trend maximum counts accepted submissions for anti-spam purposes. Acceptance is
 not called a fill and does not prove executed quantity or profit. Daily cap, profit guard,

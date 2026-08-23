@@ -225,10 +225,6 @@ def _fire_order(symbol, action, price, reason, **kwargs):
         except Exception as _e:  # noqa: BLE001
             print(f"[KALMAN-GATE] eroare jurnal ({_e}) — blocarea ramane")
         return None
-    # A trend signal must be reevaluated at the next tradeall cycle.  The generic
-    # outbox must not replay it later at a stale price in parallel with this bot's
-    # own per-trend retry/cooldown policy.
-    kwargs["caller_owns_retry"] = True
     return mkt.place(symbol, action, price, None, motivation=reason, **kwargs)
 
 

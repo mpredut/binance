@@ -223,7 +223,7 @@ Plan:
 - Separate observation/shadow signals from live execution by typed command boundaries.
 
 Status snapshot (2026-08-23): immediate behavior-neutral hardening is implemented:
-tradeall owns retry for its time-sensitive signals, rejects invalid side/price and stale
+tradeall preserves its existing common persistent retry policy, rejects invalid side/price and stale
 price snapshots before execution, validates unsafe runtime configuration, deduplicates
 coordinator symbols and supports deterministic coordinator shutdown. Accepted submissions
 are documented as throttling events rather than fills. Persisting trend/decision identity

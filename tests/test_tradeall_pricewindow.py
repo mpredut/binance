@@ -97,12 +97,12 @@ class TestTradeallOrderBoundary(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     ta._validate_tradeall_config()
 
-    def test_strategy_owns_retry_and_does_not_enqueue_stale_signal(self):
+    def test_strategy_preserves_common_persistent_retry_policy(self):
         with (patch.object(ta, "_kalman_gate_blocks", return_value=(False, "off", None)),
               patch.object(ta.mkt, "place", return_value={"orderId": "accepted"}) as place):
             result = ta._fire_order("BTCUSDT", "BUY", 100.0, "test")
         self.assertIsNotNone(result)
-        self.assertTrue(place.call_args.kwargs["caller_owns_retry"])
+        self.assertNotIn("caller_owns_retry", place.call_args.kwargs)
 
     def test_invalid_side_or_price_never_reaches_executor(self):
         invalid = (("HOLD", 100.0), ("BUY", None), ("SELL", float("nan")),
