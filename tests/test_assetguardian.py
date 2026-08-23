@@ -7,6 +7,17 @@ os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 import assetguardian as ag
 
 
+class MemoryState:
+    def __init__(self, value=None):
+        self.value = dict(value or {})
+
+    def load(self):
+        return dict(self.value)
+
+    def save(self, value):
+        self.value = dict(value)
+
+
 class AssetGuardianTest(unittest.TestCase):
     def test_window_uses_legacy_rows_and_returns_min_max(self):
         now = 2_000_000
@@ -42,14 +53,40 @@ class AssetGuardianTest(unittest.TestCase):
             {"timestamp": 1, "total_value_usdc": 80},
             {"timestamp": 2, "total_value_usdc": 100},
         )
+        provider = mock.Mock()
+        provider.free_balance.return_value = 1000.0
         with mock.patch.object(ag.api, "get_total_assets_value_usdc", return_value=92), \
              mock.patch.object(ag, "_get_window_extrema_from_cache", return_value=extrema), \
+             mock.patch.object(ag, "STATE", MemoryState()), \
+             mock.patch.object(ag.mkt, "provider_by_name", return_value=provider), \
              mock.patch.object(ag, "buy_with_all_cash", return_value=True) as buy, \
              mock.patch.object(ag, "sell_all_assets") as sell:
             self.assertTrue(ag.evaluate_and_maybe_sell_or_buy(
                 threshold_percent=100, drop_percent=7))
         buy.assert_called_once()
         sell.assert_not_called()
+
+    def test_completed_tier_is_not_repeated_in_same_campaign(self):
+        maximum = {"timestamp": 2, "total_value_usdc": 100}
+        state = MemoryState({
+            "peak_value": 100, "peak_ts": 2, "initial_cash": 1000,
+            "completed_tiers": [7],
+        })
+        with mock.patch.object(ag, "STATE", state):
+            tier, _ = ag._campaign_tier(8, maximum, 650)
+        self.assertIsNone(tier)
+
+    def test_refused_tier_uses_fast_interval(self):
+        state = MemoryState()
+        with mock.patch.object(ag, "STATE", state):
+            ag._last_evaluation.update(drawdown=-7.2, pending_tier=True)
+            self.assertEqual(ag._next_check_seconds(), ag.ACTIVE_TRIGGER_SECONDS)
+
+    def test_near_next_tier_uses_near_interval(self):
+        state = MemoryState({"completed_tiers": [7]})
+        with mock.patch.object(ag, "STATE", state):
+            ag._last_evaluation.update(drawdown=-8.5, pending_tier=False)
+            self.assertEqual(ag._next_check_seconds(), ag.NEAR_TRIGGER_SECONDS)
 
     def test_guardian_owns_retry_for_buy(self):
         provider = mock.Mock()

@@ -3,9 +3,9 @@ import math
 import time
 
 from binance_api import bapi as api
-from binance_api import bapi_placeorder as po
 from providers.market_api import api as mkt   # proxy unic guardat (Instrument.place)
 from providers.quantity import resolve_assets
+from assetguardian_state import AssetGuardianState
 import cacheManager as cm
 import symbols as sym
 
@@ -27,6 +27,26 @@ ASSET_REFERENCE_MINUTES_BACK_DEFAULT = float(os.environ.get("AG_REFERENCE_MINUTE
 
 BUY_SYMBOL_DEFAULT = sym.symbols[0] if sym.symbols else "BTCUSDC"
 BUY_USE_CASH_RATIO = float(os.environ.get("AG_BUY_USE_CASH_RATIO", "0.995"))
+BUY_TIERS_RAW = os.environ.get(
+    "AG_BUY_TIERS", f"{TARGET_DROP_PERCENT}:0.35,10:0.35,14:0.295")
+RECOVERY_RESET_PERCENT = float(os.environ.get("AG_RECOVERY_RESET_PCT", "3.0"))
+NEAR_TRIGGER_SECONDS = float(os.environ.get("AG_NEAR_TRIGGER_SEC", "30"))
+ACTIVE_TRIGGER_SECONDS = float(os.environ.get("AG_ACTIVE_TRIGGER_SEC", "15"))
+NEAR_TRIGGER_DISTANCE_PCT = float(os.environ.get("AG_NEAR_TRIGGER_DISTANCE_PCT", "2.0"))
+
+
+def _parse_buy_tiers(raw):
+    tiers = []
+    for item in str(raw).split(","):
+        threshold, allocation = item.strip().split(":", 1)
+        tiers.append((float(threshold), float(allocation)))
+    tiers.sort()
+    return tuple(tiers)
+
+
+BUY_TIERS = _parse_buy_tiers(BUY_TIERS_RAW)
+STATE = AssetGuardianState()
+_last_evaluation = {"drawdown": None, "pending_tier": False}
 
 
 def _validate_config():
@@ -41,6 +61,22 @@ def _validate_config():
         raise ValueError("AG_REFERENCE_MINUTES_BACK trebuie sa fie > 0")
     if not math.isfinite(BUY_USE_CASH_RATIO) or not 0 < BUY_USE_CASH_RATIO <= 1:
         raise ValueError("AG_BUY_USE_CASH_RATIO trebuie sa fie in (0, 1]")
+    if not BUY_TIERS or any(
+            not math.isfinite(threshold) or threshold <= 0
+            or not math.isfinite(allocation) or allocation <= 0
+            for threshold, allocation in BUY_TIERS):
+        raise ValueError("AG_BUY_TIERS trebuie sa contina prag:alocare pozitive")
+    if len({threshold for threshold, _ in BUY_TIERS}) != len(BUY_TIERS):
+        raise ValueError("AG_BUY_TIERS contine praguri duplicate")
+    if sum(allocation for _, allocation in BUY_TIERS) > BUY_USE_CASH_RATIO + 1e-12:
+        raise ValueError("suma alocarilor AG_BUY_TIERS depaseste AG_BUY_USE_CASH_RATIO")
+    for value, name in (
+            (RECOVERY_RESET_PERCENT, "AG_RECOVERY_RESET_PCT"),
+            (NEAR_TRIGGER_SECONDS, "AG_NEAR_TRIGGER_SEC"),
+            (ACTIVE_TRIGGER_SECONDS, "AG_ACTIVE_TRIGGER_SEC"),
+            (NEAR_TRIGGER_DISTANCE_PCT, "AG_NEAR_TRIGGER_DISTANCE_PCT")):
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError(f"{name} trebuie sa fie finit si > 0")
 
 
 _validate_config()
@@ -221,7 +257,8 @@ def sell_all_assets():
     return sell_count > 0
 
 
-def buy_with_all_cash(buy_symbol=BUY_SYMBOL_DEFAULT, cash_ratio=BUY_USE_CASH_RATIO):
+def buy_with_all_cash(buy_symbol=BUY_SYMBOL_DEFAULT, cash_ratio=BUY_USE_CASH_RATIO,
+                      cash_amount=None):
     try:
         _, quote_asset = resolve_assets(buy_symbol)
         cash_ratio = _finite_float(cash_ratio, positive=True)
@@ -248,7 +285,12 @@ def buy_with_all_cash(buy_symbol=BUY_SYMBOL_DEFAULT, cash_ratio=BUY_USE_CASH_RAT
         print(f" Invalid current price for {buy_symbol}.")
         return False
 
-    cash_to_use = free_cash * cash_ratio
+    requested_cash = (free_cash * cash_ratio if cash_amount is None
+                      else _finite_float(cash_amount, positive=True))
+    if requested_cash is None:
+        print(" Invalid requested cash amount for buy.")
+        return False
+    cash_to_use = min(requested_cash, free_cash * BUY_USE_CASH_RATIO)
     qty = cash_to_use / current_price
     if qty <= 0:
         print(" Computed qty <= 0. Skip buy.")
@@ -256,7 +298,7 @@ def buy_with_all_cash(buy_symbol=BUY_SYMBOL_DEFAULT, cash_ratio=BUY_USE_CASH_RAT
 
     print(
         f" BUY trigger active -> symbol={buy_symbol}, using {cash_to_use:.6f} {quote_asset} "
-        f"({cash_ratio*100:.2f}% of free cash), qty={qty:.8f}"
+        f"(safe cap {cash_ratio*100:.2f}% of free cash), qty={qty:.8f}"
     )
     try:
         order = mkt.place(
@@ -273,12 +315,62 @@ def buy_with_all_cash(buy_symbol=BUY_SYMBOL_DEFAULT, cash_ratio=BUY_USE_CASH_RAT
         return False
 
 
+def _campaign_tier(drawdown_abs, maximum_row, free_cash):
+    """Selectează prima tranșă depășită și încă neacceptată în campania curentă."""
+    state = STATE.load()
+    if drawdown_abs < RECOVERY_RESET_PERCENT:
+        if state:
+            STATE.save({})
+        return None, {}
+
+    peak_value = _row_value_usdc(maximum_row)
+    peak_ts = _row_timestamp(maximum_row)
+    stored_peak = _finite_float(state.get("peak_value"), positive=True)
+    if not state or stored_peak is None or peak_value > stored_peak:
+        state = {
+            "peak_value": peak_value,
+            "peak_ts": peak_ts,
+            "initial_cash": free_cash,
+            "completed_tiers": [],
+        }
+        STATE.save(state)
+
+    completed = {float(value) for value in state.get("completed_tiers", [])}
+    for threshold, allocation in BUY_TIERS:
+        if drawdown_abs >= threshold and threshold not in completed:
+            return (threshold, allocation), state
+    return None, state
+
+
+def _complete_campaign_tier(state, threshold):
+    completed = {float(value) for value in state.get("completed_tiers", [])}
+    completed.add(float(threshold))
+    state["completed_tiers"] = sorted(completed)
+    STATE.save(state)
+
+
+def _next_check_seconds():
+    drawdown = _last_evaluation.get("drawdown")
+    if drawdown is None:
+        return CHECK_INTERVAL_SECONDS
+    if _last_evaluation.get("pending_tier"):
+        return min(CHECK_INTERVAL_SECONDS, ACTIVE_TRIGGER_SECONDS)
+    completed = {float(value) for value in STATE.load().get("completed_tiers", [])}
+    next_threshold = next((threshold for threshold, _ in BUY_TIERS
+                           if threshold not in completed), None)
+    if (next_threshold is not None
+            and next_threshold - abs(drawdown) <= NEAR_TRIGGER_DISTANCE_PCT):
+        return min(CHECK_INTERVAL_SECONDS, NEAR_TRIGGER_SECONDS)
+    return CHECK_INTERVAL_SECONDS
+
+
 def evaluate_and_maybe_sell_or_buy(
     threshold_percent=TARGET_GROWTH_PERCENT,
     drop_percent=TARGET_DROP_PERCENT,
     minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT,
     buy_symbol=BUY_SYMBOL_DEFAULT,
 ):
+    _last_evaluation.update(drawdown=None, pending_tier=False)
     threshold_percent = _finite_float(threshold_percent, positive=True)
     drop_percent = _finite_float(drop_percent, positive=True)
     if threshold_percent is None or drop_percent is None:
@@ -307,6 +399,10 @@ def evaluate_and_maybe_sell_or_buy(
 
     growth_percent = ((current_value - minimum_value) / minimum_value) * 100.0
     drawdown_percent = ((current_value - maximum_value) / maximum_value) * 100.0
+    _last_evaluation["drawdown"] = drawdown_percent
+    if abs(drawdown_percent) < RECOVERY_RESET_PERCENT and STATE.load():
+        print(f" Drawdown recovered below {RECOVERY_RESET_PERCENT:.2f}%; rearm BUY campaign.")
+        STATE.save({})
     threshold_value = minimum_value * (1 + threshold_percent / 100.0)
     print(f"Current ASSETS value: {current_value:.1f} USDC ")
     print(f"Window MIN/MAX: {minimum_value:.1f}/{maximum_value:.1f} USDC, "
@@ -325,15 +421,30 @@ def evaluate_and_maybe_sell_or_buy(
         )
         return sell_all_assets()
 
-    if drawdown_percent <= -abs(drop_percent):
+    if drawdown_percent <= -BUY_TIERS[0][0]:
         print(
             f" Drawdown threshold reached ({drawdown_percent:.4f}% "
-            f"<= -{abs(drop_percent):.4f}%). "
-            "Buying with all available cash..."
+            f"<= -{BUY_TIERS[0][0]:.4f}%). Checking staged BUY..."
         )
-        #trimite alerta pe telefon - popup ca ceva este in neregula
-        #daca este sub un prag
-        if buy_with_all_cash(buy_symbol=buy_symbol):
+        provider = mkt.provider_by_name("binance")
+        free_cash = (_finite_float(provider.free_balance("USDC"), positive=True)
+                     if provider else None)
+        if free_cash is None:
+            print(" No valid USDC balance for staged BUY.")
+            return False
+        tier, campaign = _campaign_tier(abs(drawdown_percent), maximum_row, free_cash)
+        if tier is None:
+            print(" No uncompleted BUY tier at current drawdown.")
+            return False
+        threshold, allocation = tier
+        _last_evaluation["pending_tier"] = True
+        initial_cash = _finite_float(campaign.get("initial_cash"), positive=True)
+        cash_amount = initial_cash * allocation
+        print(f" BUY tier -{threshold:.2f}% allocation={allocation:.3f} "
+              f"cash_target={cash_amount:.6f} USDC")
+        if buy_with_all_cash(buy_symbol=buy_symbol, cash_amount=cash_amount):
+            _complete_campaign_tier(campaign, threshold)
+            _last_evaluation["pending_tier"] = False
             return True
 
     return False
@@ -350,8 +461,9 @@ def run_forever():
             evaluate_and_maybe_sell_or_buy(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT)
         except Exception as e:
             print(f" Runtime ERROR: {e}")
-        print(f"[DEBUG] sleep {CHECK_INTERVAL_SECONDS}s before next cycle")
-        time.sleep(CHECK_INTERVAL_SECONDS)
+        sleep_seconds = _next_check_seconds()
+        print(f"[DEBUG] sleep {sleep_seconds}s before next cycle")
+        time.sleep(sleep_seconds)
 
 
 if __name__ == "__main__":
