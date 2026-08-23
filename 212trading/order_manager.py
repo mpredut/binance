@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-order_manager.py — logica de plasare a ordinului SPCX:
-  * calcul cantitate din buget RON,
-  * plasare cu retry (instrumentul poate fi blocat pana se deschide piata),
-  * marker pe disc anti-dublura la restart,
-  * polling status pana la stare terminala (FILLED/CANCELLED/REJECTED).
+order_manager.py — SPCX order-placement logic:
+  * calculate quantity from a RON budget;
+  * retry placement while the instrument may be blocked until market open;
+  * write an on-disk marker to prevent duplicates after restart;
+  * poll status until FILLED, CANCELLED, or REJECTED.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from ipo_notify import notify
 from market_data import get_usd_ron, get_price_usd, t212_to_yahoo
 from t212_client import T212Client
 
-# marker pe disc, langa script, ca sa nu plasam ordin de doua ori
+# On-disk marker beside the script prevents duplicate placement.
 ORDER_MARKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".spcx_order_placed")
 
 ORDER_STATUS_POLL_SECONDS = 30
@@ -27,12 +27,12 @@ T212_ORDER_TERMINAL = {"FILLED", "CANCELLED", "REJECTED"}
 
 
 # ---------------------------------------------------------------------------
-# Cantitate
+# Quantity
 # ---------------------------------------------------------------------------
 def resolve_quantity(order_price: float,
                      order_qty: float | None,
                      order_budget_ron: float | None) -> float | None:
-    """Cantitatea de actiuni: fie fixa (ORDER_QTY), fie din buget RON la cursul curent."""
+    """Resolve share quantity from fixed ORDER_QTY or a RON budget at the current FX rate."""
     if order_qty:
         return order_qty
     if order_budget_ron:
@@ -47,7 +47,7 @@ def resolve_quantity(order_price: float,
 
 
 # ---------------------------------------------------------------------------
-# Marker anti-dublura
+# Duplicate-prevention marker
 # ---------------------------------------------------------------------------
 def order_already_placed() -> bool:
     return os.path.exists(ORDER_MARKER)
@@ -63,7 +63,7 @@ def _write_marker(ticker: str, result: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Polling status ordin
+# Order-status polling
 # ---------------------------------------------------------------------------
 def poll_order_until_terminal(client: T212Client, order_id, ticker: str,
                               desktop: bool = False) -> None:
@@ -99,7 +99,7 @@ def poll_order_until_terminal(client: T212Client, order_id, ticker: str,
 
 
 # ---------------------------------------------------------------------------
-# Plasare ordin (cu retry + validare pret + marker)
+# Order placement with retry, price validation, and marker
 # ---------------------------------------------------------------------------
 def place_order_with_retry(
     client: T212Client,
@@ -114,12 +114,12 @@ def place_order_with_retry(
     retry_delay: int = 60,
     write_marker: bool = True,
 ) -> bool:
-    """Plaseaza ordinul LIMIT. Returneaza True daca a fost acceptat (sau dry-run)."""
+    """Place the LIMIT order and return True when accepted or simulated in dry-run."""
 
     qty_r   = round(quantity, 2)
     price_r = round(limit_price, 2)
 
-    # info pret curent (doar log; nu modificam limita aleasa de user)
+    # Current price is informational only; do not change the user-selected limit.
     current = get_price_usd(t212_to_yahoo(ticker))
     if current:
         log(f"  [ORDER] pret curent {t212_to_yahoo(ticker)}: {current:.2f} USD  |  limita: {price_r:.2f} USD")
