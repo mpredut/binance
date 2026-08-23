@@ -1,42 +1,41 @@
 # order_guard.py
-"""Gard de profit AGNOSTIC de platforma.
+"""Platform-agnostic profit guard.
 
-Regula: nu CUMPARA peste ultimul SELL, nu VINDE sub ultimul BUY (cu o marja minima).
-Decuplat de Binance: primeste un `provider` (orice obiect cu `last_opposite_fill(symbol,
-order_type)`) si, optional, o referinta din fereastra (`window_ref`) calculata de apelant
-(ex. min(sell)/max(buy) din Order cache-ul Binance). Asa ACEEASI logica de profit ruleaza
-pe orice venue (Binance, Kraken HYPE, ...), nu doar inghesuita in bapi_placeorder.
+Rule: do not BUY above the last SELL or SELL below the last BUY, subject to a minimum
+margin. Decoupled from Binance, it accepts any `provider` implementing
+`last_opposite_fill(symbol, order_type)` and an optional caller-computed `window_ref`
+(for example, min(sell)/max(buy) from the Binance order cache). The SAME profit logic
+therefore runs on every venue instead of being embedded only in bapi_placeorder.
 
-Importa DOAR utils (fara provideri/cacheManager) -> zero risc de import circular.
-RIDICA exceptie daca citirea referintei esueaza (provider.last_opposite_fill) -> apelantul
-decide fail-closed. Returneaza True (poate plasa) / False (blocat).
+Imports only utils, with no providers/cacheManager, avoiding circular imports. Reference
+read failures from provider.last_opposite_fill propagate so the caller can fail closed.
+Returns True when placement is allowed and False when blocked.
 
-Pragul de profit (%) e per-venue in `order_guard.conf` (text, gitignorat? NU — versionat ca
-config nesensibil). Lipsa fisierului / valoare invalida -> default 1.15 (fail-safe)."""
+The profit threshold is configured per venue in versioned, non-sensitive
+`order_guard.conf`. A missing file or invalid value falls back to fail-safe 1.15%."""
 import os
 import time
 import math
 import utils as u
 
-_MARGINS = None   # cache: {provider_lower: procent, "default": 1.15}
+_MARGINS = None   # cache: {provider_lower: percentage, "default": 1.15}
 
 
 def _load_margins():
-    """Citeste order_guard.conf (o data, cache-uit). Linii `cheie = valoare`, '#' comentariu.
-    order_guard.conf e SURSA UNICA de adevar pt aceste valori. Dictionarul de mai jos e
-    DOAR plasa de siguranta daca un rand lipseste din conf (ex. fisier trunchiat) — un
-    SINGUR loc cu fallback-uri, ca sa NU existe valori 'default' imprastiate/duplicate prin
-    functiile de mai jos (cerere user: sa nu fie confuzie intre valoarea reala din conf si
-    un shadow hardcodat). Daca modifici o valoare, schimb-o in order_guard.conf, nu aici."""
+    """Read and cache `key = value` lines from order_guard.conf once.
+    The configuration file is the SINGLE source of truth. The dictionary below is only
+    a safety net for missing entries, such as a truncated file, and centralizes fallbacks
+    so hard-coded shadow defaults are not scattered across functions. Change operational
+    values in order_guard.conf, not here."""
     global _MARGINS
     if _MARGINS is not None:
         return _MARGINS
     m = {
-        "default": 1.15,                       # prag profit (%) fallback
-        "default_window_h": 0.0,               # fereastra gard profit (ore); 0 = doar last_opposite_fill
-        "default_max_daily_trades": 25,        # plafon tranzactii/zi
-        "default_safeback_sec": 14 * 24 * 3600 + 60,  # fereastra cautare tranzactii proprii (sec) — 14 zile
-        "default_recent_transaction_sec": 180,   # anti-spam (sec)
+        "default": 1.15,                       # fallback profit threshold (%)
+        "default_window_h": 0.0,               # profit-guard window (hours); 0 uses only last_opposite_fill
+        "default_max_daily_trades": 25,        # daily trade cap
+        "default_safeback_sec": 14 * 24 * 3600 + 60,  # own-trade search window (seconds): 14 days
+        "default_recent_transaction_sec": 180,   # anti-spam window (seconds)
     }
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "order_guard.conf")
     try:
@@ -47,7 +46,7 @@ def _load_margins():
                     continue
                 k, _, v = line.partition("=")
                 k = k.strip().lower(); v = v.strip()
-                try:                       # praguri/ore/weight = float; proxy = string (ex BTCUSDC)
+                try:                       # thresholds/hours/weights are floats; proxies are strings
                     m[k] = float(v)
                 except ValueError:
                     m[k] = v
@@ -60,14 +59,14 @@ def _load_margins():
 
 
 def margin_for(provider_name):
-    """Pragul minim de profit (%) pt un venue, din config (fallback 'default' = 1.15)."""
+    """Return the venue's configured minimum profit percentage, defaulting to 1.15."""
     m = _load_margins()
     return m.get((provider_name or "").lower(), m["default"])
 
 
 def window_for(provider_name):
-    """Fereastra (SECUNDE) pt referinta min/max time-windowed, per venue (cheia
-    `<venue>_window_h` in conf). 0 = fara tier time-windowed (doar last_opposite_fill)."""
+    """Return the per-venue min/max reference window in seconds.
+    Configuration key `<venue>_window_h`; 0 disables the windowed tier."""
     m = _load_margins()
     key = (provider_name or "").lower() + "_window_h"
     hours = m.get(key, m["default_window_h"])
@@ -75,18 +74,18 @@ def window_for(provider_name):
 
 
 def weight_proxy_for(provider_name):
-    """Symbol-ul al carui trend/gauss e PROXY cand symbol-ul curent n-are trend lung propriu
-    (ex HYPE -> BTC pana are date). Cheia `<venue>_weight_proxy` sau `default_weight_proxy`.
-    None = fara proxy (cade pe default 0.03)."""
+    """Return the trend/Gaussian-weight proxy symbol used when the current symbol lacks
+    its own long trend (e.g. HYPE -> BTC until data exists). Uses `<venue>_weight_proxy`
+    or `default_weight_proxy`; None falls back to weight 0.03."""
     m = _load_margins()
     return m.get((provider_name or "").lower() + "_weight_proxy", m.get("default_weight_proxy"))
 
 
 def window_reference(provider, symbol, order_type, window_s):
-    """Referinta TIME-WINDOWED: min(sell) pt un BUY / max(buy) pt un SELL, din ordinele/fills
-    OPUSE din ultimele window_s secunde (provider.get_orders). None daca fereastra e goala sau
-    window_s<=0. RIDICA pe eroare de citire -> apelantul fail-closed (ca last_opposite_fill).
-    Ignora preturile <=0 (defensiv). Acelasi tier 1 ca la Binance, dar agnostic."""
+    """Return a time-windowed reference from opposite-side orders/fills: minimum SELL
+    for a BUY or maximum BUY for a SELL. Return None for an empty or disabled window.
+    Read errors propagate so the caller fails closed. Non-positive prices are ignored.
+    This is the platform-agnostic equivalent of Binance tier 1."""
     if not window_s or window_s <= 0:
         return None
     opp = "SELL" if order_type.upper() == "BUY" else "BUY"
@@ -98,13 +97,12 @@ def window_reference(provider, symbol, order_type, window_s):
 
 
 def weight_limit(provider, symbol, order_type, price, required_qty, *, available_qty):
-    """Plafon de CANTITATE per ordin pe curba gauss (echivalentul agnostic al
-    apply_weight_limit din bapi). Distribuie suma tranzactionabila proportional cu pozitia
-    in trend -> nu vinzi/cumperi tot dintr-o data. AGNOSTIC: gauss-ul vine din priceAnalysis
-    (symbol-ul are trend in _trend_syms, incl. HYPEUSD); 'traded 24h' din provider.get_orders
-    (Kraken: cache-ul propriu). Balanța side-aware vine obligatoriu din decizia
-    comună de cantitate; gardul nu o recitește. Returneaza qty plafonat
-    (min(cerut, permis)). RIDICA pe eroare -> apelantul fail-closed (ca gardul)."""
+    """Cap per-order quantity using the Gaussian curve, the platform-agnostic equivalent
+    of bapi.apply_weight_limit. Allocate tradable value by trend position so the whole
+    amount is not bought or sold at once. priceAnalysis supplies the Gaussian weight;
+    provider.get_orders supplies 24-hour traded value. The shared quantity decision must
+    supply the side-aware balance, which this guard does not re-read. Return the smaller
+    of requested and permitted quantity. Errors propagate so the caller fails closed."""
     import math
     def _ok(w):
         return w is not None and not (isinstance(w, float) and math.isnan(w)) and w > 0
@@ -117,25 +115,25 @@ def weight_limit(provider, symbol, order_type, price, required_qty, *, available
             print(f"[WEIGHT] {sym}: nu pot calcula gauss ({e})")
             return None
 
-    weight = _gauss(symbol)                                 # gauss-ul propriu (daca symbol-ul are trend lung)
-    if not _ok(weight):                                     # n-are trend propriu (ex HYPE) -> proxy (ex BTC)
+    weight = _gauss(symbol)                                 # own Gaussian weight when a long trend exists
+    if not _ok(weight):                                     # no own trend: try a proxy such as BTC for HYPE
         proxy = weight_proxy_for(getattr(provider, "name", ""))
         if proxy and proxy != symbol:
             pw = _gauss(proxy)
             if _ok(pw):
                 weight = pw
                 print(f"[WEIGHT] {symbol}: fara trend propriu -> proxy {proxy} (weight={weight})")
-    if not _ok(weight):                                     # nici proxy -> default conservator
+    if not _ok(weight):                                     # no valid proxy: use conservative default
         weight = 0.03
-    recent = provider.get_orders(symbol, order_type, 86400) or []      # acelasi side, ultimele 24h
+    recent = provider.get_orders(symbol, order_type, 86400) or []      # same side over the last 24 hours
     traded_value = sum(float(o.get("price", 0)) * float(o.get("qty", o.get("quantity", 0))) for o in recent)
-    # available (in BASE), deja calculat side-aware de providers.quantity:
-    #   SELL -> balanta de BASE pe care o ai de vandut;
-    #   BUY  -> cat BASE poti cumpara cu balanta de QUOTE (free_balance mapeaza USD->ZUSD pe Kraken).
+    # available is in BASE and already side-aware from providers.quantity:
+    #   SELL: BASE balance available to sell;
+    #   BUY: BASE purchasable with QUOTE balance (free_balance maps USD to ZUSD on Kraken).
     available = float(available_qty)
-    total_ref = traded_value + available * price                       # tot ce-ai putea tranzactiona (quote)
-    max_trade_value = total_ref * weight                               # plafon pe gauss
-    remaining_value = max(0.0, max_trade_value - traded_value)         # cat mai poti azi
+    total_ref = traded_value + available * price                       # total potentially tradable quote value
+    max_trade_value = total_ref * weight                               # Gaussian-weighted cap
+    remaining_value = max(0.0, max_trade_value - traded_value)         # remaining value allowed today
     remaining_qty = remaining_value / price if price else 0.0
     adjusted = min(required_qty, remaining_qty)
     print(f"[WEIGHT] {order_type} {symbol}: weight={weight} traded24h={traded_value:.2f} "
@@ -145,24 +143,21 @@ def weight_limit(provider, symbol, order_type, price, required_qty, *, available
 
 
 def max_daily_trades_for(provider_name):
-    """Plafonul de tranzactii/zi pt un venue (din order_guard.conf; fallback in seed-ul
-    din _load_margins). Valoarea o schimbi in order_guard.conf, nu aici."""
+    """Return the venue's daily trade cap from order_guard.conf or the seed fallback."""
     m = _load_margins()
     key = (provider_name or "").lower() + "_max_daily_trades"
     return int(m.get(key, m["default_max_daily_trades"]))
 
 
 def safeback_sec_for(provider_name):
-    """Fereastra (SECUNDE) in care se cauta tranzactii pt plafonul zilnic, per venue
-    (din order_guard.conf; fallback in seed-ul din _load_margins)."""
+    """Return the per-venue trade-search window in seconds for the daily cap."""
     m = _load_margins()
     key = (provider_name or "").lower() + "_safeback_sec"
     return float(m.get(key, m["default_safeback_sec"]))
 
 
 def recent_transaction_sec_for(provider_name):
-    """Fereastra anti-spam (SECUNDE): refuza un ordin nou pe acelasi symbol+side daca a
-    mai fost unul recent, per venue (din order_guard.conf; fallback in seed-ul _load_margins)."""
+    """Return the anti-spam window that rejects a recent same-symbol, same-side order."""
     m = _load_margins()
     key = (provider_name or "").lower() + "_recent_transaction_sec"
     return float(m.get(key, m["default_recent_transaction_sec"]))
@@ -170,21 +165,18 @@ def recent_transaction_sec_for(provider_name):
 
 def daily_limit_guard(provider, symbol, order_type, max_daily_trades=None,
                       safeback_sec=None, recent_transaction_sec=None):
-    """Plafon zilnic + anti-spam — SURSA UNICA (30 iul: Binance delega aici acum, din
-    bapi_placeorder.if_place_safe_order(), in loc sa mentina o a doua implementare
-    inline; vezi si Kraken/Hyperliquid, prin Instrument.place()). Foloseste
-    provider.get_orders() (Kraken: cache-ul propriu; Binance: BinanceProvider, wrapper
-    subtire peste bapi_allorders.get_trade_orders() — ACELASI apel ca inainte).
-    Raporteaza ordinele PE ACELASI side (order_type) din ultimele `safeback_sec`;
-    peste `max_daily_trades`/zi -> "daily_limit"; unul in ultimele
-    `recent_transaction_sec` -> "recent_transaction".
+    """Enforce the daily cap and anti-spam policy as the SINGLE implementation.
+    Since July 30, Binance bapi_placeorder.if_place_safe_order delegates here instead of
+    maintaining a second inline version; Kraken and Hyperliquid use it through
+    Instrument.place(). provider.get_orders supplies same-side orders from safeback_sec.
+    Exceeding max_daily_trades per day returns "daily_limit"; a record inside
+    recent_transaction_sec returns "recent_transaction".
 
-    backdays = math.ceil(safeback_sec/86400) — ROTUNJIT IN SUS, identic cu formula
-    istorica Binance (bapi_placeorder, din prima zi a mecanismului) — NU împărțire
-    simpla, ca sa nu schimbe pragul efectiv fata de ce rula deja pe Binance de 18 luni.
+    backdays = math.ceil(safeback_sec/86400), rounded UP to preserve the historical
+    Binance formula and its effective threshold rather than using simple division.
 
-    Returneaza (True, None) / (False, motiv). RIDICA pe eroare de citire (provider.get_orders)
-    -> apelantul decide fail-closed (ca profit_guard/weight_limit)."""
+    Return (True, None) or (False, reason). Read errors propagate so the caller can fail
+    closed, consistently with profit_guard and weight_limit."""
     name = getattr(provider, "name", "")
     max_daily_trades = max_daily_trades if max_daily_trades is not None else max_daily_trades_for(name)
     safeback_sec = float(safeback_sec if safeback_sec is not None else safeback_sec_for(name))
@@ -208,19 +200,18 @@ def daily_limit_guard(provider, symbol, order_type, max_daily_trades=None,
 
 
 def profit_guard(provider, symbol, order_type, price, profit_percentage, window_ref=None):
-    """True = ordinul e profitabil fata de referinta (poate fi plasat); False = blocat.
-    Referinta, in cascada:
-      1) window_ref (daca apelantul o da — ex. min/max din fereastra time-windowed),
-      2) altfel provider.last_opposite_fill(symbol, order_type) (la Binance: cache fills + API).
-    Lipsa referintei (None / <=0) -> True (prima tranzactie, nimic de comparat)."""
+    """Return whether the order is profitable relative to its reference.
+    Reference cascade: caller-provided window_ref first, otherwise
+    provider.last_opposite_fill(symbol, order_type). A missing or non-positive reference
+    allows placement because there is no prior transaction to compare."""
     order_type = order_type.upper()
     ref = window_ref if window_ref is not None else provider.last_opposite_fill(symbol, order_type)
     if ref is None or ref <= 0:
         return True
     if order_type == "BUY":
-        diff = u.value_diff_to_percent(ref, price)   # (ref_SELL - pret_BUY)/ref_SELL
+        diff = u.value_diff_to_percent(ref, price)   # (ref_SELL - BUY_price) / ref_SELL
     else:
-        diff = u.value_diff_to_percent(price, ref)   # (pret_SELL - ref_BUY)/pret_SELL
+        diff = u.value_diff_to_percent(price, ref)   # (SELL_price - ref_BUY) / SELL_price
     src = "fereastra" if window_ref is not None else "provider"
     print(f"[GARD] {order_type} {symbol}: ref {ref} ({src}), pret {price}, "
           f"diff {diff:.2f}%, prag {profit_percentage}%")
