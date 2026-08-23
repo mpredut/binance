@@ -40,6 +40,11 @@ $ROOT/hyperliquid/*.log
 $ROOT/212trading/*.log
 $ROOT/binance_api/*.log
 $ROOT/logger/*.log
+$ROOT/logger/*.jsonl
+$ROOT/logger/execution_audit/*.jsonl
+$ROOT/logs/*.jsonl
+$ROOT/logs/shadow_live/*.jsonl
+$ROOT/logs/hyperliquid_shadow/*.jsonl
 $ROOT/*.log
 {
     size 20M

@@ -148,6 +148,8 @@ class PairCoordinatorTest(unittest.TestCase):
         self.assertEqual(outcome.phase, "expired")
         self.assertTrue(outcome.terminal)
         self.assertCountEqual(venue.canceled, ["L1", "L2"])
+        self.assertEqual(coordinator.tickets, [])
+        self.assertEqual(coordinator.snapshots, {})
 
     def test_fill_during_ttl_cancel_is_reconciled_as_exposure(self):
         venue = FakeVenue(current=99.36)

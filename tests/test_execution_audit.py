@@ -3,6 +3,9 @@ import json
 import os
 import tempfile
 import unittest
+from unittest import mock
+
+import providers.execution_audit as execution_audit_module
 
 from providers.execution_audit import (
     AuditedStrategyExecutor,
@@ -87,6 +90,18 @@ class ExecutionAuditTest(unittest.TestCase):
         client_id = intent_client_order_id("Kraken", "intent-fixed")
         self.assertEqual(rows[0]["client_order_id"], client_id)
         self.assertEqual(self.executor.calls[0][-1], client_id)
+
+    def test_cache_urile_de_corelare_sunt_lru_plafonate(self):
+        with mock.patch.object(execution_audit_module, "_CACHE_MAX", 2):
+            for index in range(3):
+                order_id = f"OID-{index}"
+                self.wrapped._remember("ABC", order_id, f"intent-{index}")
+                self.wrapped.order_status_with_intent(
+                    f"intent-{index}", "ABC", order_id)
+        self.assertEqual(len(self.wrapped._intent_by_order), 2)
+        self.assertEqual(len(self.wrapped._last_status), 2)
+        self.assertNotIn(("ABC", "OID-0"), self.wrapped._intent_by_order)
+        self.assertNotIn(("ABC", "OID-0"), self.wrapped._last_status)
 
     def test_submit_error_is_audited_and_original_exception_is_preserved(self):
         self.executor.submit_error = ProviderError("venue down")

@@ -256,6 +256,23 @@ class PairCoordinator:
             self.snapshots[ticket.order_id] = snap
             if snap.status in {"closed", "canceled", "expired"}:
                 ticket.active = False
+        self._compact_zero_fill_history()
+
+    def _compact_zero_fill_history(self) -> None:
+        """Elimina ordinele terminale care nu au contribuit la inventar/P&L.
+
+        Repricing-ul unei expuneri poate produce multe ordine anulate. Pastram
+        activele si orice ordin cu fill (necesare contabilitatii), dar nu lasam
+        anulările cu fill zero sa creasca memoria/checkpointul fara limita.
+        """
+        kept = []
+        for ticket in self.tickets:
+            snap = self.snapshots.get(ticket.order_id, OrderSnapshot())
+            if ticket.active or snap.filled_qty > 0:
+                kept.append(ticket)
+            else:
+                self.snapshots.pop(ticket.order_id, None)
+        self.tickets = kept
 
     def _side_totals(self, side: str) -> tuple[float, float, float]:
         qty = cost = fee = 0.0

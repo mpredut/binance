@@ -13,6 +13,7 @@ import re
 import threading
 import time
 import uuid
+from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
@@ -26,6 +27,7 @@ except ImportError:  # pragma: no cover - Windows/import tooling
 
 _WRITE_LOCK = threading.Lock()
 _UUID_HEX_SUFFIX = re.compile(r"([0-9a-fA-F]{32})$")
+_CACHE_MAX = max(100, int(os.environ.get("EXECUTION_AUDIT_CACHE_MAX", "10000")))
 
 
 def _slug(value: object) -> str:
@@ -113,13 +115,17 @@ class AuditedStrategyExecutor:
         self._executor = executor
         self.audit = audit or ExecutionAudit()
         self.name = venue or str(getattr(executor, "name", executor.__class__.__name__))
-        self._intent_by_order: dict[tuple[str, str], str] = {}
-        self._last_status: dict[tuple[str, str], tuple] = {}
+        self._intent_by_order = OrderedDict()
+        self._last_status = OrderedDict()
         self._lock = threading.Lock()
 
     def _remember(self, symbol: str, order_id: str, intent_id: str) -> None:
         with self._lock:
-            self._intent_by_order[(symbol, str(order_id))] = intent_id
+            key = (symbol, str(order_id))
+            self._intent_by_order[key] = intent_id
+            self._intent_by_order.move_to_end(key)
+            while len(self._intent_by_order) > _CACHE_MAX:
+                self._intent_by_order.popitem(last=False)
 
     def _intent(self, symbol: str, order_id: str, explicit: Optional[str] = None) -> str:
         if explicit:
@@ -184,6 +190,9 @@ class AuditedStrategyExecutor:
         with self._lock:
             changed = self._last_status.get(key) != fingerprint
             self._last_status[key] = fingerprint
+            self._last_status.move_to_end(key)
+            while len(self._last_status) > _CACHE_MAX:
+                self._last_status.popitem(last=False)
         if changed:
             self.audit.record(
                 "order_status", intent_id=intent_id, venue=self.name, symbol=symbol,

@@ -124,7 +124,9 @@ class _LivePairVenue:
 
     def __init__(self, symbol, pair_store=None):
         self.symbol = symbol
-        self._known_tickets = []
+        # Folosit numai pentru eliberarea cooldown-ului la cancel. Rundele isi
+        # pastreaza separat starea financiara; aici este suficient un LRU mic.
+        self._known_tickets = deque(maxlen=max(32, RTRADE_PAIR_MAX_ACTIVE_ROUNDS * 8))
         self._last_place_failures = {}
         provider_name = mkt.provider_name_for(symbol)
         self.provider_name = provider_name
