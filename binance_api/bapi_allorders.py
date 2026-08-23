@@ -213,7 +213,7 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
     if not cache_order_manager.cache:  # Handles both None and an empty cache.
         return []
         
-    # extrage lista pentru simbol
+    # Extract the list for this symbol.
     orders_for_symbol = cache_order_manager.cache.get(symbol, [])
     if not orders_for_symbol:
         return []

@@ -1336,7 +1336,7 @@ class CachePriceShortTrendManager:
                 self.windows[s][sec]   = w
                 self.analyzers[s][sec] = pw.WindowAnalyzer(w)
                 parts.append(f"{sec:.0f}s: {len(w.prices)} (rate={w.sample_rate_sec:.2f}s)")
-            c24.subscribe_price(self)                       # semnal de tick → canal rapid
+            c24.subscribe_price(self)                       # tick signal to the fast channel
             print(f"[InstantTrend][{s}] " + " ".join(parts))
           except Exception as _e:
             builtins.print(f"[InstantTrend][{s}] setup esuat ({_e}) — sar peste, Binance neafectat")
@@ -1417,7 +1417,7 @@ class CachePriceShortTrendManager:
         except Exception as e:
             print(f"[CachePriceShortTrendManager] on_price_update {symbol}: {e}")
 
-    # ── API de calcul ─────────────────────────────────────────────────────────
+    # ── Calculation API ──────────────────────────────────────────────────────
     def get_window(self, symbol, seconds=None):
         """Return the requested window, or the smallest primary window for None."""
         wins = self.windows.get(symbol) or {}

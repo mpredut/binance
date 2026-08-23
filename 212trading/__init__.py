@@ -1,1 +1,1 @@
-"""Runtime Trading212; scripturile raman lansabile direct din acest folder."""
+"""Trading212 runtime; scripts remain directly executable from this directory."""

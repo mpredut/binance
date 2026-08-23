@@ -1,12 +1,12 @@
 """
-cachepaths.py — locul unic care decide UNDE stau fișierele de cache.
+cachepaths.py — the single authority that determines where cache files live.
 
-Toate fișierele cache (cache_*.json/.jsonl + .meta) trăiesc în subfolderul
-`cachedb/`. `cache_path(name)` prefixează un nume simplu cu acel folder (creat
-la nevoie). Numele care au DEJA o cale (absolută sau cu separator — ex. teste,
-migrare) sunt lăsate neatinse.
+All cache files (cache_*.json/.jsonl plus .meta) live in the ``cachedb/``
+subdirectory. ``cache_path(name)`` prefixes a simple name with that directory,
+creating it when needed. Names that already contain an absolute or separator-
+qualified path, such as test or migration paths, remain unchanged.
 
-Se poate suprascrie folderul prin variabila de mediu BINANCE_CACHE_DIR.
+The BINANCE_CACHE_DIR environment variable can override the directory.
 """
 import os
 
@@ -17,9 +17,11 @@ CACHE_DIR = os.environ.get(
 
 
 def cache_path(name):
-    """Întoarce calea fișierului de cache în `cachedb/`.
-    Dacă `name` are deja o cale (absolut sau conține un separator de directoare),
-    e returnat ca atare → nu stricăm căi explicite (teste, migrare, etc.)."""
+    """Return the cache-file path under ``cachedb/``.
+
+    If ``name`` is already absolute or contains a directory separator, return it
+    unchanged so explicit test, migration, and other paths remain intact.
+    """
     if not name:
         return name
     if os.path.isabs(name) or os.sep in name or (os.altsep and os.altsep in name):

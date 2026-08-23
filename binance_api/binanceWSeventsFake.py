@@ -6,7 +6,7 @@ import time
 import log
 import utils as u
 import symbols as sym
-from . import bapi as api   # in interiorul pachetului binance_api/
+from . import bapi as api   # package-local Binance API facade
 
 
 # ------------------------------
@@ -17,7 +17,7 @@ orders_cache = {}
 trades_cache = []
 
 # ------------------------------
-# FUNCȚII DE MANIPULARE MESAJ
+# MESSAGE-HANDLING FUNCTIONS
 # ------------------------------
 def handle_execution_report(data):
     symbol = data["s"]
@@ -65,7 +65,7 @@ def handle_account_position(balances):
     print(f"[ACCOUNT UPDATE] {len(balances)} active actualizate")
 
 # ------------------------------
-# POLLING - înlocuiește WebSocket
+# POLLING — WebSocket replacement
 # ------------------------------
 
 _prev_orders = {}  # orderId -> status
@@ -73,12 +73,14 @@ _prev_balances = {}  # asset -> total
 
 def _poll_loop(handler=None, interval_sec=47):
     """
-    Polling la Binance API pentru ordere și balanțe.
-    Detectează schimbări și apelează handler-ul la fel ca înainte cu WebSocket.
+    Poll the Binance API for orders and balances.
+
+    Detect changes and invoke the handler through the same interface previously
+    used by the WebSocket implementation.
     """
     global _prev_orders, _prev_balances
 
-    # Inițializare stare initiala
+    # Initialize the baseline state.
     try:
         account = api.client.get_account()
         for bal in account["balances"]:
@@ -91,7 +93,7 @@ def _poll_loop(handler=None, interval_sec=47):
 
     while True:
         try:
-            # --- Verifică ordere deschise pe toate simbolurile ---
+            # --- Check open orders across all symbols. ---
             open_orders = api.client.get_open_orders()
             current_order_ids = set()
 
@@ -102,7 +104,7 @@ def _poll_loop(handler=None, interval_sec=47):
                 curr_status = order["status"]
 
                 if prev_status != curr_status:
-                    # Simulăm un eveniment executionReport
+                    # Simulate an executionReport event.
                     fake_event = {
                         "e": "executionReport",
                         "s": order["symbol"],
@@ -129,7 +131,7 @@ def _poll_loop(handler=None, interval_sec=47):
 
                 _prev_orders[oid] = {"status": curr_status}
 
-            # --- Verifică balanțe ---
+            # --- Check balances. ---
             account = api.client.get_account()
             changed_balances = []
             for bal in account["balances"]:
@@ -153,7 +155,7 @@ def _poll_loop(handler=None, interval_sec=47):
                         except Exception as e:
                             print(f"⚠️ Eroare în handler balanceUpdate: {e}")
 
-            # pt debug periodic
+            # Optional periodic debugging.
             # print(f"Orders: {len(orders_cache)}, Trades: {len(trades_cache)}, Balances: {len(balances_cache)}")
 
         except Exception as e:
@@ -163,7 +165,7 @@ def _poll_loop(handler=None, interval_sec=47):
 
 
 # ------------------------------
-# startWSevents - aceeași interfață ca înainte
+# startWSevents — preserve the previous interface
 # ------------------------------
 _ws_started = False
 

@@ -1,4 +1,4 @@
-"""Stare atomică minimă pentru tranșele Assetguardian."""
+"""Minimal atomic state store for Assetguardian tranches."""
 import json
 import os
 import tempfile
