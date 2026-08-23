@@ -1,4 +1,6 @@
 """Caracterizare si regresii pentru managementul workerilor din rtrade."""
+import os
+import tempfile
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -151,13 +153,15 @@ class RTradeThreadingTest(unittest.TestCase):
             pair_precision=lambda _symbol: precision,
             preflight_order=lambda *args, **kwargs: None,
             submit_order=lambda *args, **kwargs: "M9")
-        with patch.object(rtrade.mkt, "provider_name_for", return_value="Binance"), \
-             patch.object(rtrade.mkt, "provider_by_name", return_value=executor), \
-             patch.object(rtrade.mkt, "get_current_price", return_value=90.0), \
-             patch.object(executor, "submit_order", wraps=executor.submit_order) as submit:
-            venue = rtrade._LivePairVenue("TAOUSDC")
-            ticket = venue.place_market_exit(
-                "SELL", 0.4, "fast_fill_hard_stop", pair_id="pair-9")
+        with tempfile.TemporaryDirectory(prefix="rtrade-test-audit-") as audit_dir:
+            with patch.dict(os.environ, {"EXECUTION_AUDIT_DIR": audit_dir}), \
+                 patch.object(rtrade.mkt, "provider_name_for", return_value="Binance"), \
+                 patch.object(rtrade.mkt, "provider_by_name", return_value=executor), \
+                 patch.object(rtrade.mkt, "get_current_price", return_value=90.0), \
+                 patch.object(executor, "submit_order", wraps=executor.submit_order) as submit:
+                venue = rtrade._LivePairVenue("TAOUSDC")
+                ticket = venue.place_market_exit(
+                    "SELL", 0.4, "fast_fill_hard_stop", pair_id="pair-9")
 
         self.assertEqual((ticket.order_id, ticket.qty, ticket.pair_id),
                          ("M9", 0.39, "pair-9"))
