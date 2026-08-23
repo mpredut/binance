@@ -1,6 +1,6 @@
 [
   {
-    "ts": "2026-08-23T14:14:33",
+    "ts": "2026-08-24T02:14:39",
     "full_key": "BINANCE_BTC.mt.gain",
     "section": "BINANCE_BTC",
     "key": "mt.gain",
@@ -9,22 +9,22 @@
     "winner_value": 5.0,
     "margin_vs_current": {
       "half1": 79.24,
-      "half2": 117.27
+      "half2": 59.95
     },
-    "dev_commit": "f8193a5"
+    "dev_commit": "dd57cc6"
   },
   {
-    "ts": "2026-08-23T14:14:33",
-    "full_key": "BINANCE_BTC.mt.maxage_days",
+    "ts": "2026-08-24T02:14:39",
+    "full_key": "BINANCE_BTC.mt.lost",
     "section": "BINANCE_BTC",
-    "key": "mt.maxage_days",
+    "key": "mt.lost",
     "symbol": "BTCUSDC",
-    "current_on_dev": 10.5,
-    "winner_value": 14.0,
+    "current_on_dev": 3.55,
+    "winner_value": 2.3,
     "margin_vs_current": {
-      "half1": 145.45,
-      "half2": 68.47
+      "half1": 403.81,
+      "half2": 63.97
     },
-    "dev_commit": "f8193a5"
+    "dev_commit": "dd57cc6"
   }
 ]
