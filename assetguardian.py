@@ -169,6 +169,9 @@ def sell_all_assets():
     sell_count = 0
 
     for bal in balances:
+        if not isinstance(bal, dict):
+            print("[DEBUG] skip malformed non-dict balance row")
+            continue
         asset = bal.get("asset")        
         if asset not in tracked_assets:
             #print(f"[DEBUG] skip {asset}: not in sym.symbols")
@@ -276,9 +279,15 @@ def evaluate_and_maybe_sell_or_buy(
     minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT,
     buy_symbol=BUY_SYMBOL_DEFAULT,
 ):
+    threshold_percent = _finite_float(threshold_percent, positive=True)
+    drop_percent = _finite_float(drop_percent, positive=True)
+    if threshold_percent is None or drop_percent is None:
+        print("Error: invalid growth/drop threshold; skip evaluation.")
+        return False
 
-    current_value = api.get_total_assets_value_usdc(use_cache=False)
-    if current_value is None or current_value <= 0:
+    current_value = _finite_float(
+        api.get_total_assets_value_usdc(use_cache=False), positive=True)
+    if current_value is None:
         print(f"Error: evaluate_and_maybe_sell_or_buy: Current assets value can't be calculated")
         return False
 

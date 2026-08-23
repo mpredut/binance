@@ -82,6 +82,15 @@ class AssetGuardianTest(unittest.TestCase):
             self.assertFalse(ag.evaluate_and_maybe_sell_or_buy(threshold_percent=100))
         sell.assert_called_once()
 
+    def test_nonfinite_current_value_cannot_trigger_an_order(self):
+        with mock.patch.object(ag.api, "get_total_assets_value_usdc",
+                               return_value=float("inf")), \
+             mock.patch.object(ag, "sell_all_assets") as sell, \
+             mock.patch.object(ag, "buy_with_all_cash") as buy:
+            self.assertFalse(ag.evaluate_and_maybe_sell_or_buy())
+        sell.assert_not_called()
+        buy.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
