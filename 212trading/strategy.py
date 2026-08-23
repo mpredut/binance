@@ -1,22 +1,10 @@
 #!/usr/bin/env python3
-"""
-strategy.py — motor DCA + take-profit, generic pe orice instrument si valuta.
+"""Instrument- and currency-generic DCA plus take-profit engine.
 
-Logica (mod "avg_tp"):
-  * INTRARE: cumpara STRAT_ENTRY (in STRAT_CURRENCY) la LIMIT = market - STRAT_ENTRY_DISCOUNT_PCT.
-  * DCA: la fiecare scadere de STRAT_DCA_DROP_PCT fata de ultima cumparare,
-         mai cumpara STRAT_DCA (scade pretul mediu).
-  * TAKE-PROFIT: vinde TOATA pozitia cand pretul >= pret_mediu * (1 + STRAT_TAKEPROFIT_PCT),
-         apoi reia ciclul.
-  * Mod "dca_only": la fel, dar fara vanzare (doar acumulare).
-
-Siguranta:
-  * PAPER cand dry_run=True — logheaza, nu tranzactioneaza.
-  * Plafon STRAT_MAX_BUDGET (in valuta) pe ciclu + STRAT_MAX_DCA_BUYS cumparari maxime.
-  * Stare persistata per-instrument (.state_<TICKER>.json) — supravietuieste restartului.
-
-Cost real (T212): comision 0; 0.15% conversie valutara la fiecare buy si sell
-(~0.30% pe round-trip). TAKEPROFIT_PCT trebuie sa bata 0.30% + spread.
+Average-TP mode buys a discounted entry, adds DCA after configured drops, and closes
+the position at its average-cost profit target. DCA-only mode accumulates without sale.
+Dry-run is paper-only, per-cycle budget and buy-count caps bound exposure, and per-ticker
+state survives restarts. T212 FX conversion fees apply on both BUY and SELL legs.
 """
 
 from __future__ import annotations
@@ -36,7 +24,7 @@ from providers.strategy_executor import ProviderError
 from providers.t212_provider import T212Provider
 from strategies.state_store import JsonStateStore
 
-FX_FEE_PCT = 0.15  # taxa conversie valutara T212, per directie
+FX_FEE_PCT = 0.15  # T212 currency-conversion fee per direction.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -47,39 +35,38 @@ def state_path_for(ticker: str) -> str:
 
 @dataclass
 class StratParams:
-    currency: str            # "RON" | "EUR" | "USD" — valuta sumelor de mai jos
-    entry_amount: float      # marimea cumpararii initiale (in currency)
+    currency: str            # Currency used by the monetary settings below.
+    entry_amount: float      # Initial purchase size in that currency.
     entry_discount_pct: float
-    dca_amount: float        # marimea unei cumparari pe scadere (in currency)
+    dca_amount: float        # Size of one dip purchase in configured currency.
     dca_drop_pct: float
     check_minutes: float
     takeprofit_pct: float
-    max_budget: float        # plafon total/ciclu (in currency)
+    max_budget: float        # Per-cycle total cap in configured currency.
     max_dca_buys: int
     validity: str
     enable_takeprofit: bool
     order_ttl_min: float
-    stop_loss_pct: float     # SIGURANTA: vinde tot daca pierderea >= acest % (0 = oprit)
-    yahoo_sym: str = ""             # simbol Yahoo (din config; gol => derivat din ticker)
-    reentry_drop_pct: float = 0.0   # dupa TP reintra doar la -X% sub pretul vandut (anti-churn)
-    reentry_tolerance_pct: float = 0.0  # "aproape de prag" = atins (are_close) — reintrare + DCA
-    tp_ladder: list = field(default_factory=list)   # scale-out: [(nivel%, fractie0-1)]; gol => vinde tot la takeprofit_pct
-    fx_fee_pct: float = FX_FEE_PCT   # taxa FX T212 / directie (din STRAT_FX_FEE_PCT; default modul)
-    loss_alert_step: float = 1.0     # notifica la fiecare X% de adancire a pierderii nerealizate (0 = off)
-    ladder_min_free: float = 6.0     # lasa min acest $ NEREZERVAT pe scara TP (T212 cere pozitie libera, "min-opened-position")
-    sl_rebuy_enabled: bool = False   # dupa stop-loss de catastrofa, reintra pe RECUL in sus de la minim (ca trailing-ul Binance/Kraken), nu sub-vanzare
-    sl_rebuy_bounce_pct: float = 1.2 # recul% de la minimul de dupa SL pt re-buy (confirma ca s-a oprit caderea -> nu prinde cutitul)
-    dca_trend_gate_pct: float = 0.0  # GATE DCA pe trend (ca Binance/Kraken): daca panta scurta (%/bara) < -acest prag => NU face DCA (nu arunca capital intr-un downtrend confirmat). 0 = OFF (comportament neschimbat)
-    trail_pct: float = 0.0           # TRAILING crash-breaker (ca Binance/Kraken): vinde TOT daca pretul scade acest % de la PEAK-ul pozitiei. Iese devreme dintr-un declin sustinut (backtest SPCX: -7.5% -> -1.4% la 8%). 0 = OFF. Complementar stop-loss-ului fix (catastrofa).
-    trail_min_profit_pct: float = 5.0  # WARM-UP (fidel trailing_core Binance/Kraken, MIN_PROFIT_PCT): trailing-ul e INACTIV pana cand pretul urca acest % peste avg -> protejeaza CASTIGURILE, nu vinde bag-ul pe un dip ordinar (profit-guard). 0 = armat imediat (loss-cutter). Worst-case vanzare ~ avg*(1+w)*(1-trail).
+    stop_loss_pct: float     # Sell all at this loss percentage; zero disables it.
+    yahoo_sym: str = ""             # Configured Yahoo symbol or one derived from ticker.
+    reentry_drop_pct: float = 0.0   # After TP, reenter only below the sale price by X percent.
+    reentry_tolerance_pct: float = 0.0  # Near-threshold tolerance for reentry and DCA.
+    tp_ladder: list = field(default_factory=list)   # Scale-out level/fraction pairs.
+    fx_fee_pct: float = FX_FEE_PCT   # T212 FX fee per direction.
+    loss_alert_step: float = 1.0     # Alert for each further unrealized-loss band.
+    ladder_min_free: float = 6.0     # Minimum dollar amount left unreserved by TP ladder.
+    sl_rebuy_enabled: bool = False   # Rebuy on a bounce from the post-stop low.
+    sl_rebuy_bounce_pct: float = 1.2 # Bounce confirming the fall has stopped.
+    dca_trend_gate_pct: float = 0.0  # Skip DCA below this confirmed downtrend slope; zero disables.
+    trail_pct: float = 0.0           # Sell all after this drop from position peak; zero disables.
+    trail_min_profit_pct: float = 5.0  # Keep trailing inactive until price gains this much over average.
 
     @classmethod
     def from_env(cls, env: dict | None = None) -> "StratParams":
-        """Citeste din os.environ (implicit) SAU dintr-un dict dat. Dict-ul permite
-        mai multe active in acelasi proces, fiecare cu config-ul lui (fara coliziuni)."""
+        """Read the environment or an explicit mapping for collision-free multi-asset use."""
         e = os.environ if env is None else env
         mode = e.get("STRATEGY_MODE", "avg_tp").strip().lower()
-        # scara de vanzare (scale-out): "11:33,20:33,30:34" -> [(11.0,0.33),(20.0,0.33),(30.0,0.34)]
+        # Parse scale-out ladder percentages and fractions.
         _ladder = []
         for _part in (e.get("STRAT_TP_LADDER") or "").split(","):
             _part = _part.strip()
@@ -90,22 +77,22 @@ class StratParams:
                 except ValueError:
                     pass
         _budget = float_env("STRAT_MAX_BUDGET", e) or 2000.0
-        # intrare/DCA: ca PROCENT din buget (general, scaleaza cu bugetul) SAU absolut (fallback vechi)
+        # Size entry and DCA as budget percentages or legacy absolute fallbacks.
         _entry_pct = float_env("STRAT_ENTRY_PCT", e)
         _entry = (_budget * _entry_pct / 100.0) if _entry_pct else (float_env("STRAT_ENTRY", e) or 300.0)
         _dca_pct = float_env("STRAT_DCA_PCT", e)
         _dca = (_budget * _dca_pct / 100.0) if _dca_pct else (float_env("STRAT_DCA", e) or 150.0)
-        # nr maxim DCA: "auto" => calculat din buget ((buget-intrare)/dca); altfel explicit; gol => 10
+        # Auto DCA count derives from budget; otherwise use an explicit value or ten.
         _mdb = (e.get("STRAT_MAX_DCA_BUYS") or "").strip().lower()
         if _mdb in ("auto", "buget", "budget"):
             _max_dca = max(0, int((_budget - _entry) // _dca)) if _dca > 0 else 0
-            _entry = _budget - _max_dca * _dca   # intrarea ABSOARBE restul -> bugetul e acoperit INTEGRAL (intrare + N*DCA = buget, fara tampon)
+            _entry = _budget - _max_dca * _dca   # Entry absorbs remainder to cover the full budget.
         elif _mdb:
             _max_dca = int(float(_mdb))
         else:
             _max_dca = 10
         _fx_fee = float_env("STRAT_FX_FEE_PCT", e)
-        if _fx_fee is None:                 # 0 e valid (cont USD, fara FX) -> nu folosi `or`
+        if _fx_fee is None:                 # Zero validly represents a USD account without FX.
             _fx_fee = FX_FEE_PCT
         _loss_step = float_env("STRAT_LOSS_ALERT_STEP", e)
         if _loss_step is None:
@@ -114,8 +101,8 @@ class StratParams:
         if _ladder_free is None:
             _ladder_free = 6.0
         _trail_minp = float_env("STRAT_TRAIL_MIN_PROFIT_PCT", e)
-        if _trail_minp is None:             # 0 e valid (loss-cutter, fara warm-up) -> nu folosi `or`
-            _trail_minp = 5.0               # default = originalul Binance/Kraken (MIN_PROFIT_PCT=5)
+        if _trail_minp is None:             # Zero validly enables immediate loss-cutting.
+            _trail_minp = 5.0               # Match the original Binance/Kraken default.
         return cls(
             currency           = e.get("STRAT_CURRENCY", "RON").strip().upper(),
             entry_amount       = _entry,
@@ -149,28 +136,25 @@ def _new_state() -> dict:
     return {
         "cycle": 1,
         "qty": 0.0,
-        "cost_usd": 0.0,        # baza de cost in USD a cantitatii detinute
-        "spent_cash": 0.0,      # suma desfasurata in ciclul curent (in valuta), pt plafon
+        "cost_usd": 0.0,        # USD cost basis of held quantity.
+        "spent_cash": 0.0,      # Current-cycle deployed cash for cap enforcement.
         "dca_buys": 0,
         "entry_price": None,
         "last_buy_price": None,
-        "realized_pnl_usd": 0.0,   # profit BRUT cumulat (fara fee)
-        "realized_net_usd": 0.0,   # profit NET cumulat (dupa taxa FX 0.15% x2)
-        "fees_usd": 0.0,           # total taxe FX platite
-        "loss_band": 0,         # banda de pierdere deja alertata (anti-spam alerte de adancire)
-        "tp_sold_levels": [],   # nivele din scara TP deja vandute in ciclul curent (scale-out)
+        "realized_pnl_usd": 0.0,   # Cumulative gross profit.
+        "realized_net_usd": 0.0,   # Cumulative net profit after FX fees.
+        "fees_usd": 0.0,           # Total paid FX fees.
+        "loss_band": 0,         # Deepest alerted loss band for anti-spam.
+        "tp_sold_levels": [],   # Ladder levels sold in the current cycle.
         "orders": [],           # {id, side, qty, limit, amount, kind, ts, level}
-        "pos_peak": 0.0,        # cel mai mare pret cat detinem pozitia (pt trailing crash-breaker)
-        "tr_alerted": False,    # anti-spam: notificarea de trailing s-a trimis deja in episodul curent
-        "tr_armed": False,      # warm-up trecut? trailing-ul devine activ DOAR dupa ce pretul a urcat trail_min_profit_pct% peste avg (profit-guard); se re-armeaza pe ciclu nou
+        "pos_peak": 0.0,        # Highest price while holding, for trailing crash breaker.
+        "tr_alerted": False,    # Current-episode trailing notification anti-spam.
+        "tr_armed": False,      # Arm only after the configured gain over average.
     }
 
 
 def _sell_pnl(avg: float, price: float, qty: float, fee_pct: float = FX_FEE_PCT) -> tuple[float, float, float]:
-    """Returneaza (brut, fee_fx, net) pentru o vanzare de `qty` la `price`, cost mediu `avg`.
-
-    Taxa FX (fee_pct%) se aplica si pe valoarea cumparata (baza de cost), si pe cea vanduta.
-    """
+    """Return gross, round-trip FX fee, and net for selling quantity at price."""
     gross = (price - avg) * qty
     fee = (fee_pct / 100.0) * (avg * qty + price * qty)
     return gross, fee, gross - fee
@@ -194,8 +178,8 @@ class Strategy:
         self._clock = clock or time.time
         self._trend_slope_provider = trend_slope_provider or trend_slope_pct
         self.execution_audit = execution_audit or ExecutionAudit()
-        # Strategia financiara ramane separata, dar intreaga mecanica submit/status/
-        # cancel trece prin acelasi contract strict si acelasi audit ca spot_dca.
+        # Financial strategy remains separate while submission/status/cancellation use
+        # the same strict audited contract as spot_dca.
         self.executor = AuditedStrategyExecutor(
             T212Provider(
                 client=client, live_enabled=not dry_run,
@@ -288,8 +272,8 @@ class Strategy:
             self.s["realized_net_usd"] += net
             self.s["fees_usd"] += fee
             self.s["qty"] -= qty
-            # Cost basis-ul aparține cantității rămase. Fără această reducere,
-            # un scale-out parțial umfla artificial media poziției reziduale.
+            # Cost basis belongs to remaining quantity; reduce it after partial scale-out
+            # to avoid inflating the residual position's average.
             self.s["cost_usd"] = max(0.0, self.s["cost_usd"] - avg * qty)
             log(f"  [STRAT] {tag}SELL FILLED {qty} @ {price:.2f} USD  "
                 f"brut={gross:+.2f}  fee={fee:.2f}  net={net:+.2f} USD")
@@ -307,7 +291,7 @@ class Strategy:
                 self.s["realized_net_usd"] = net_tot
                 self.s["fees_usd"] = fees
                 self.s["cycle"] = nxt
-                self.s["last_sell_price"] = price   # regula de reintrare: nu recumpara mai sus
+                self.s["last_sell_price"] = price   # Reentry rule: do not buy back higher.
                 if was_sl and self.p.sl_rebuy_enabled:
                     self.s["sl_rebuy"] = {"low": price, "sell_price": price}
                     log(f"  🟢 [STRAT] re-buy pe recul ARMAT dupa stop-loss "
@@ -375,8 +359,8 @@ class Strategy:
             log(f"  ! [STRAT] SELL {kind}{tag} esuat: {message}")
             if "selling-equity-not-owned" not in message:
                 return False
-            # HARDENING: reseteaza la 0 DOAR daca owned e chiar ~0 (pozitie inchisa real),
-            # NU si cand owned>0 (free < ordin din rezervari/transe) -> altfel ai sterge o pozitie reala
+            # Reset only when the venue confirms owned is effectively zero. A positive
+            # owned amount with lower free balance must not erase a real position.
             _m = re.search(r'owned["\']?\s*[:=]\s*([0-9.]+)', message)
             if _m is None:
                 log("  ! [STRAT] selling-not-owned fara cantitatea owned — NU resetez pozitia")
@@ -438,14 +422,15 @@ class Strategy:
         return success
 
     def _manage_tp_ladder(self, held: float, avg: float) -> None:
-        """Scale-out: un ordin SELL per nivel din scara (nivel%, fractie), la avg*(1+nivel%).
-        Nivelele deja vandute (tp_sold_levels) NU se recreeaza; restul se dimensioneaza din
-        held-ul curent proportional cu fractiile ramase -> pastreaza fractiile originale pe
-        masura ce transele se executa, si se re-aseaza cand avg se schimba (dupa DCA)."""
-        # in mod scara, anuleaza orice SELL legacy fara nivel (ex. TP unic de dinainte de scara)
+        """Maintain one SELL per unsold ladder level at its target over average.
+
+        Size remaining levels proportionally from current holdings and replace them when
+        average cost changes after DCA. Never recreate levels already sold.
+        """
+        # Cancel any legacy non-level SELL before creating a ladder.
         for o in [x for x in self.s["orders"] if x["side"] == "SELL" and x.get("level") is None]:
             if not self._cancel_specific(o):
-                return  # nu suprapune scara peste un SELL care poate fi inca activ
+                return  # Do not overlap a ladder with a potentially active SELL.
             if o in self.s["orders"]:
                 return  # live: cererea e acceptata, dar asteptam statusul terminal
         sold = set(self.s.get("tp_sold_levels", []))
@@ -453,8 +438,8 @@ class Strategy:
         total = sum(f for _, f in remaining)
         if total <= 0 or held <= 1e-9:
             return
-        # ultima transa (nivelul cel mai inalt) ia RESTUL, MINUS un buffer nerezervat -> suma <= held;
-        # evita oversell-ul prin rotunjire SI lasa pozitie libera (T212 "min-opened-position").
+        # Highest tranche receives the remainder minus an unreserved buffer, preventing
+        # rounding oversell while satisfying T212's minimum-open-position rule.
         desired = {}   # nivel -> (qty, limit)
         buf = (self.p.ladder_min_free / avg) if (self.p.ladder_min_free > 0 and avg > 0) else 0.0
         remaining_sorted = sorted(remaining, key=lambda x: x[0])
@@ -467,14 +452,14 @@ class Strategy:
                 desired[lvl] = (q, round(avg * (1 + lvl / 100.0), 2))
         open_sells = {o.get("level"): o for o in self.s["orders"]
                       if o["side"] == "SELL" and o.get("level") is not None}
-        # anuleaza ordinele ne-dorite sau cu pret/qty schimbat (avg s-a mutat dupa DCA)
+        # Cancel unwanted orders or orders whose price/quantity changed after DCA.
         for lvl, o in list(open_sells.items()):
             d = desired.get(lvl)
             if d is None or abs(o["limit"] - d[1]) / d[1] > 0.001 or abs(o["qty"] - d[0]) > 1e-6:
                 if self._cancel_specific(o) and o not in self.s["orders"]:
                     open_sells.pop(lvl, None)
-        # plaseaza nivelele lipsa; daca o transa esueaza persistent (ex. T212 min-opened-position
-        # pe ultima dintr-o pozitie fractionara mica), BACKOFF 30 min in loc de retry la fiecare tick
+        # Place missing levels. Back off for 30 minutes after persistent tranche failure
+        # instead of retrying on every tick.
         now = self._now()
         fails = self.s.setdefault("tp_fail_until", {})
         for lvl, (q, lim) in desired.items():
@@ -485,7 +470,7 @@ class Strategy:
             if not self._place_sell(q, lim, level=lvl):
                 fails[str(lvl)] = now + 1800
 
-    # -- reconciliere ----------------------------------------------------------
+    # -- Reconciliation --------------------------------------------------------
     def _remove_order(self, o: dict) -> None:
         if o in self.s["orders"]:
             self.s["orders"].remove(o)
@@ -496,9 +481,9 @@ class Strategy:
         else:
             self._reconcile_real(price)
 
-    # -- reconciliere PAPER (simulare) -----------------------------------------
+    # -- Paper reconciliation --------------------------------------------------
     def _reconcile_paper(self, price: float) -> None:
-        # BUY: presupunem fill la limita; SELL: fill cand pretul atinge limita
+        # Assume BUY fills at limit; SELL fills when price reaches its limit.
         for side in ("BUY", "SELL"):
             for o in [x for x in self.s["orders"] if x["side"] == side]:
                 if o not in self.s["orders"]:
@@ -512,9 +497,8 @@ class Strategy:
                         self.s.setdefault("tp_sold_levels", []).append(o["level"])
                     self._apply_fill(o, o["qty"], price if o.get("market") else o["limit"])
 
-    # -- reconciliere REALA: portofoliul T212 e SURSA DE ADEVAR ----------------
-    # (ordinele executate dispar din /equity/orders/{id} -> 404; pozitia apare
-    #  in portofoliu. Deci ne uitam la portofoliu, nu la statusul ordinului.)
+    # -- Live reconciliation: T212 portfolio is the source of truth -------------
+    # Filled orders disappear from the order endpoint while their position appears in portfolio.
     def _portfolio_position(self) -> tuple[float, float] | None:
         pf = self.client.get_portfolio()
         if pf is None:
@@ -522,7 +506,7 @@ class Strategy:
         for p in pf:
             if str(p.get("ticker", "")).upper() == self.ticker.upper():
                 return float(p.get("quantity") or 0.0), float(p.get("averagePrice") or 0.0)
-        return 0.0, 0.0   # nu detinem nimic
+        return 0.0, 0.0   # No holding.
 
     def _active_order_ids(self) -> set | None:
         orders = self.client.list_active_orders()
@@ -532,7 +516,7 @@ class Strategy:
                 if str(o.get("ticker", "")).upper() == self.ticker.upper()}
 
     def _tracked_order_status(self, order: dict, cache: dict[str, object]):
-        """Status strict, memorat pe durata unui singur reconcile."""
+        """Return strict order status, cached for one reconciliation pass."""
         key = str(order.get("id"))
         if key in cache:
             return cache[key]
@@ -550,10 +534,10 @@ class Strategy:
 
     def _exact_execution_price(self, side: str, position_delta: float,
                                cache: dict[str, object]) -> float | None:
-        """Pret ponderat din deltele cumulative ale ordinelor urmarite.
+        """Return the weighted price from tracked orders' cumulative deltas.
 
-        Portofoliul ramane sursa de adevar pentru cantitate. Pretul ordinelor este
-        folosit numai cand suma deltelor corespunde schimbarii pozitiei.
+        The portfolio remains the source of truth for quantity. Order prices are
+        used only when the sum of the deltas matches the position change.
         """
         rows = []
         total_qty = total_cost = 0.0
@@ -599,7 +583,7 @@ class Strategy:
     def _reconcile_real(self, price: float) -> None:
         real = self._portfolio_position()
         if real is None:
-            # Debounce: logam prima data si la fiecare 10 minute (nu la fiecare tick).
+            # Debounce: log initially and every ten minutes, not on every tick.
             now = self._now()
             last = getattr(self, "_pf_unavail_logged", 0)
             if now - last > 600:
@@ -609,13 +593,13 @@ class Strategy:
         real_qty, real_avg = real
         active = self._active_order_ids()
         if active is None:
-            active = {str(o["id"]) for o in self.s["orders"]}  # nu putem lista -> nu curatam
+            active = {str(o["id"]) for o in self.s["orders"]}  # Cannot list, so retain tracked orders.
 
         prev_qty = self.s["qty"]
         prev_avg = self._avg_cost() or real_avg
         status_cache: dict[str, object] = {}
 
-        # --- BUY executat: pozitia a crescut (sau adoptam o pozitie pre-existenta) ---
+        # --- Executed BUY: the position increased (or adopt an existing position). ---
         if real_qty > prev_qty + 1e-6 and self._now() < self.s.get("locked_zero_until", 0):
             log("  [STRAT] adoptie ignorata — portfolio stale (not-owned recent, lock activ)")
             return
@@ -635,7 +619,7 @@ class Strategy:
                 and not source_order.get("dca_counted")
             )
             if is_dca:
-                # Un ordin partial DCA numara o singura cumparare, nu una per poll.
+                # Count a partially filled DCA order once, not once per poll.
                 source_order["dca_counted"] = True
             self.s["last_buy_price"] = fp
             if self.s["entry_price"] is None:
@@ -655,9 +639,9 @@ class Strategy:
                    body=(f"{kind_label} | q{real_qty:.4f} a{real_avg:.2f} p~{fp:.2f} | "
                          f"desf{self.s['spent_cash']:.0f}{self.ccy} DCA{self.s['dca_buys']}/{self.p.max_dca_buys}"),
                    source="T212", price=fp, desktop=self.desktop)
-            self._cancel_open("SELL")   # avg schimbat -> reasezam TP la pasul urmator
+            self._cancel_open("SELL")   # The average changed; rebuild TP on the next step.
 
-        # --- SELL executat: pozitia a scazut ---
+        # --- Executed SELL: the position decreased. ---
         elif real_qty < prev_qty - 1e-6:
             sold = prev_qty - real_qty
             exact_price = self._exact_execution_price("SELL", sold, status_cache)
@@ -678,13 +662,13 @@ class Strategy:
                    source="T212", price=sell_price, desktop=self.desktop)
 
         else:
-            # pozitie neschimbata -> sincronizam valorile cu realitatea
+            # Unchanged position: synchronize state with the actual position.
             self.s["qty"] = real_qty
             self.s["cost_usd"] = real_qty * real_avg
             if real_qty > 1e-9:
                 self.s["spent_cash"] = round(real_qty * real_avg / self.fx_to_usd, 2)
 
-        # --- curata ordinele care nu mai sunt active; TTL pe BUY-uri stale ---
+        # --- Remove inactive orders and enforce the TTL for stale BUY orders. ---
         for o in list(self.s["orders"]):
             if str(o["id"]).startswith("PAPER"):
                 continue
@@ -702,11 +686,11 @@ class Strategy:
                 log(f"  [STRAT] BUY {o['id']} neexecutat, pret a urcat — anulez & reasez")
                 self._cancel_specific(o)
 
-        # --- ciclu inchis (am vandut tot) -> reincepe ---
+        # --- Closed cycle (the full position was sold): start a new cycle. ---
         if real_qty <= 1e-9 and prev_qty > 1e-9:
             pnl, net_tot, fees = (self.s["realized_pnl_usd"],
                                   self.s["realized_net_usd"], self.s["fees_usd"])
-            was_sl = bool(self.s.get("sl_pending"))   # inchidere din stop-loss de catastrofa?
+            was_sl = bool(self.s.get("sl_pending"))   # Was this a catastrophic stop-loss exit?
             exit_price = self.s.get("last_sell_price") or price
             nxt = self.s.get("cycle", 1) + 1
             self.s = _new_state()
@@ -715,43 +699,45 @@ class Strategy:
             self.s["fees_usd"] = fees
             self.s["cycle"] = nxt
             self.s["last_sell_price"] = exit_price
-            if was_sl and self.p.sl_rebuy_enabled:   # catastrofa -> re-buy pe RECUL (nu sub-vanzare); prinde recuperarea
+            if was_sl and self.p.sl_rebuy_enabled:   # Rebuy on a bounce, not below the sale, to catch recovery.
                 self.s["sl_rebuy"] = {"low": exit_price, "sell_price": exit_price}
                 log(f"  🟢 [STRAT] re-buy pe recul ARMAT dupa stop-loss (asteptam +{self.p.sl_rebuy_bounce_pct}% de la minim)")
             log(f"  [STRAT] === ciclu inchis, reincep (ciclu {nxt}) ===")
 
-    # -- pas de decizie --------------------------------------------------------
+    # -- decision step ---------------------------------------------------------
     def _check_trailing(self, price: float) -> bool:
-        """TRAILING crash-breaker: vinde TOT daca pretul a cazut trail_pct% de la PEAK-ul pozitiei.
-        Complementar stop-loss-ului fix (din avg): iese DEVREME dintr-un declin sustinut, inainte
-        sa se adanceasca pana la catastrofa (backtest SPCX: -7.5% -> -1.4% la prag 8%). Ca la
-        Binance/Kraken. Refoloseste armarea sl_rebuy (re-intrare pe recul). Intoarce True daca a
-        actionat (opreste procesarea tick-ului)."""
+        """Sell the entire position after a ``trail_pct`` drop from its peak.
+
+        This crash breaker complements the fixed average-cost stop loss by exiting
+        a sustained decline earlier. It reuses ``sl_rebuy`` to reenter on a bounce.
+        Return ``True`` when triggered so processing of the current tick stops.
+        """
         if self.p.trail_pct <= 0 or self.s["qty"] <= 1e-9:
-            self.s["pos_peak"] = 0.0            # flat / trailing oprit -> reseteaza peak-ul
+            self.s["pos_peak"] = 0.0            # Flat or disabled trailing: reset the peak.
             self.s["tr_alerted"] = False
-            self.s["tr_armed"] = False          # ciclu nou -> warm-up de la capat
+            self.s["tr_armed"] = False          # A new cycle starts with a new warm-up.
             return False
-        # WARM-UP (fidel trailing_core Binance/Kraken): trailing INACTIV pana cand pretul urca
-        # trail_min_profit_pct% peste avg -> protejeaza castigurile, NU vinde bag-ul pe un dip
-        # ordinar (respecta profit-guard-ul; catastrofa ramane la stop_loss_pct). 0 = armat direct.
+        # WARM-UP (matching Binance/Kraken trailing_core): keep trailing inactive until
+        # price rises trail_min_profit_pct above average. This protects gains without
+        # selling on an ordinary dip; stop_loss_pct still handles catastrophic loss.
+        # A value of zero arms trailing immediately.
         if not self.s.get("tr_armed"):
             minp = self.p.trail_min_profit_pct
             avg = self._avg_cost()
             if minp > 0 and (not avg or price < avg * (1 + minp / 100.0)):
-                return False                    # warming up — nu urmarim peak, nu vindem
+                return False                    # Warming up: do not track a peak or sell.
             self.s["tr_armed"] = True
-            self.s["pos_peak"] = price          # peak porneste de la pretul de activare
+            self.s["pos_peak"] = price          # Start the peak at the activation price.
             log(f"  [STRAT] trailing ARMAT: pret {price:.2f} ≥ avg{(avg or 0):.2f}+{minp}% — protejez de-acum (-{self.p.trail_pct}% de la peak)")
         peak = self.s.get("pos_peak", 0.0) or 0.0
         if price > peak:
-            self.s["pos_peak"] = peak = price   # urmareste maximul cat detinem
+            self.s["pos_peak"] = peak = price   # Track the high while holding the position.
         if peak <= 0:
             return False
         drop_pct = (peak - price) / peak * 100
         if drop_pct < self.p.trail_pct:
             return False
-        # a cazut prag% de la peak -> vinde TOT (o data; re-plaseaza doar daca limita ramane in urma)
+        # The peak drawdown reached the threshold: sell all once, replacing only a stale limit.
         tr = next((o for o in self.s["orders"] if o.get("kind") == "TR"), None)
         if tr is None or (not tr.get("market") and price < tr["limit"]):
             if not self._cancel_all_orders():
@@ -762,7 +748,7 @@ class Strategy:
             )
             if not placed:
                 return True
-            self.s["sl_pending"] = True         # armeaza re-buy pe recul (ca stop-loss-ul de catastrofa)
+            self.s["sl_pending"] = True         # Arm bounce reentry as for a catastrophic stop loss.
         if not self.s.get("tr_alerted"):
             self.s["tr_alerted"] = True
             log(f"  📉 [STRAT] TRAILING: -{drop_pct:.2f}% de la peak {peak:.2f} >= {self.p.trail_pct}% — VAND TOT")
@@ -772,18 +758,18 @@ class Strategy:
         return True
 
     def _check_stop_loss(self, price: float) -> bool:
-        """Inchide TOT daca pierderea nerealizata depaseste pragul (anti-runaway DCA)."""
+        """Close the entire position when unrealized loss exceeds the threshold."""
         if self.p.stop_loss_pct <= 0:
             return False
         avg = self._avg_cost()
         if not avg:
             return False
-        loss_pct = (avg - price) / avg * 100   # long: pierdem cand pretul < pret mediu
+        loss_pct = (avg - price) / avg * 100   # A long loses when price is below average cost.
         if loss_pct < self.p.stop_loss_pct:
-            self.s["sl_alerted"] = False        # pretul a revenit peste prag -> permite o noua alerta daca recade
-            self.s["sl_pending"] = False        # episod SL incheiat (pretul a revenit peste prag) -> inchiderea ulterioara NU mai e catastrofa
+            self.s["sl_alerted"] = False        # Recovery above threshold permits a new alert.
+            self.s["sl_pending"] = False        # End this stop-loss episode after recovery.
             return False
-        # ANTI-SPAM: plaseaza SL-ul O DATA; re-plaseaza DOAR daca limita a ramas in urma (pretul a cazut sub ea)
+        # Anti-spam: place the stop once and replace it only if price moved below its limit.
         sl = next((o for o in self.s["orders"] if o.get("kind") == "SL"), None)
         if sl is None or (not sl.get("market") and price < sl["limit"]):
             if not self._cancel_all_orders():
@@ -794,8 +780,8 @@ class Strategy:
             )
             if not placed:
                 return True
-            self.s["sl_pending"] = True         # marcheaza episodul: inchiderea ciclului = catastrofa -> armeaza re-buy pe recul
-        if not self.s.get("sl_alerted"):           # notifica O SINGURA DATA per episod
+            self.s["sl_pending"] = True         # Mark this episode so cycle closure arms bounce reentry.
+        if not self.s.get("sl_alerted"):           # Notify only once per episode.
             self.s["sl_alerted"] = True
             log(f"  🛑 [STRAT] STOP-LOSS: pierdere {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — VAND TOT (taie pierderea)")
             notify(title=f"🛑 SL {self.yahoo_sym} -{loss_pct:.1f}%",
@@ -804,17 +790,20 @@ class Strategy:
         return True
 
     def _check_loss_alert(self, price: float) -> None:
-        """Alerta INFORMATIVA (nu vinde) cand pierderea nerealizata se adanceste cu inca un prag
-        (loss_alert_step%). O notificare per banda noua => util fara spam; coboara tacut la recuperare."""
+        """Send an informational alert for each new unrealized-loss band.
+
+        This does not sell. One notification per ``loss_alert_step`` band avoids
+        spam, and recovery is silent.
+        """
         step = self.p.loss_alert_step
         avg = self._avg_cost()
         if step <= 0 or not avg:
             return
         loss_pct = (avg - price) / avg * 100
         band = int(loss_pct // step) if loss_pct > 0 else 0
-        # HIGH-WATER MARK: notifica DOAR cand pierderea bate un nou maxim (cu inca un prag).
-        # NU coboara la recuperare -> daca recade la un nivel deja alertat, NU re-notifica.
-        # Se reseteaza singur la inchiderea ciclului (vanzare -> _new_state -> loss_band=0).
+        # High-water mark: notify only when loss reaches a new maximum band.
+        # Do not lower it on recovery, so revisiting an alerted level does not notify again.
+        # Cycle closure resets it through _new_state (loss_band=0).
         if band > self.s.get("loss_band", 0):
             log(f"  📉 [STRAT] {self.yahoo_sym} pierdere -{loss_pct:.1f}% (prag {band*step:.0f}%)")
             notify(title=f"📉 {self.yahoo_sym} -{loss_pct:.1f}%",
@@ -823,16 +812,19 @@ class Strategy:
             self.s["loss_band"] = band
 
     def _handle_sl_rebuy(self, price: float) -> None:
-        """Re-buy pe RECUL dupa stop-loss de catastrofa: urmareste minimul de dupa vanzare si
-        reintra (ENTRY) cand pretul revine sl_rebuy_bounce_pct% de la fund — prinde recuperarea,
-        nu cutitul. Mecanism analog trailing-ului Binance/Kraken (recul, nu sub-vanzare)."""
+        """Rebuy after a catastrophic stop loss once price bounces from its low.
+
+        Track the post-sale low and reenter when price recovers by
+        ``sl_rebuy_bounce_pct``. This mirrors Binance/Kraken trailing reentry and
+        targets recovery rather than a falling price.
+        """
         rb = self.s.get("sl_rebuy")
         if not rb:
             return
-        rb["low"] = min(rb.get("low", price), price)          # urmareste fundul de dupa SL
+        rb["low"] = min(rb.get("low", price), price)          # Track the post-stop low.
         if price < rb["low"] * (1 + self.p.sl_rebuy_bounce_pct / 100.0):
-            return                                            # recul neconfirmat -> asteapta
-        self.s.pop("sl_rebuy", None)                          # consuma armarea (1 transa)
+            return                                            # Wait until the bounce is confirmed.
+        self.s.pop("sl_rebuy", None)                          # Consume the one-tranche reentry arm.
         if self.s["spent_cash"] + self.p.entry_amount > self.p.max_budget:
             log(f"  [STRAT] re-buy SL anulat — plafon buget {self.p.max_budget:.0f} {self.ccy} atins")
             return
@@ -846,28 +838,27 @@ class Strategy:
 
     def step(self, price: float) -> None:
         held = self.s["qty"]
-        self._check_loss_alert(price)   # alerta pe adancirea pierderii (oricand detinem; nu vinde)
+        self._check_loss_alert(price)   # Alert on deeper loss while holding; never sells.
         disc = 1 - self.p.entry_discount_pct / 100
 
         in_backoff = self._now() < self.s.get("buy_backoff_until", 0)
 
         if held <= 1e-9:
-            if in_backoff:   # backoff dupa "insufficient funds": nu incerca cumparari cat contul e gol
+            if in_backoff:   # After insufficient funds, avoid buys while the account is empty.
                 return
             if self._has_open("BUY"):
                 return
-            # RE-BUY pe RECUL dupa stop-loss de catastrofa (ca trailing-ul Binance/Kraken):
-            # prinde recuperarea, are prioritate fata de reintrarea sub-vanzare cat e armat.
+            # Rebuy on a bounce after a catastrophic stop loss, as on Binance/Kraken.
+            # While armed, it takes priority over reentry below the previous sale.
             if self.s.get("sl_rebuy"):
                 self._handle_sl_rebuy(price)
                 return
-            # REGULA DE REINTRARE (ca pe Kraken): dupa vanzare nu recumpara mai sus —
-            # anti "vand la 174.17, recumpar la 174.9"
+            # Kraken-style reentry rule: do not buy back above the previous sale price.
             lsp = self.s.get("last_sell_price")
             rdp = self.p.reentry_drop_pct
             if rdp > 0 and lsp:
                 prag = lsp * (1 - rdp / 100)
-                # "aproape de prag" conteaza ca atins (are_close din botcore, determinist)
+                # Treat a value close to the threshold as reached (deterministic are_close).
                 if price > prag and not are_close(price, prag, self.p.reentry_tolerance_pct):
                     log(f"  [STRAT] reintrare blocata: {price:.2f} > prag {prag:.2f} "
                         f"(vandut la {lsp:.2f}, astept -{rdp}%)")
@@ -878,11 +869,11 @@ class Strategy:
             self._place_buy(self.p.entry_amount, price * disc, kind="ENTRY")
             return
 
-        # TRAILING crash-breaker (mai STRANS decat stop-loss-ul de catastrofa) -> verificat PRIMUL
+        # Check the tighter trailing crash breaker before the catastrophic stop loss.
         if self._check_trailing(price):
             return
 
-        # STOP-LOSS: taie pierderea inainte de DCA/TP
+        # Stop loss cuts the loss before DCA or take-profit handling.
         if self._check_stop_loss(price):
             return
 
@@ -890,7 +881,7 @@ class Strategy:
 
         if self.p.enable_takeprofit and avg:
             if self.p.tp_ladder:
-                self._manage_tp_ladder(held, avg)        # scale-out in trepte
+                self._manage_tp_ladder(held, avg)        # Scale out in ladder steps.
             else:
                 target = avg * (1 + self.p.takeprofit_pct / 100)
                 sell = self._find_open("SELL")
@@ -905,19 +896,18 @@ class Strategy:
         if (not in_backoff
                 and self.s["dca_buys"] < self.p.max_dca_buys
                 and prag_dca
-                # "aproape de prag" conteaza ca atins (are_close, aceeasi toleranta ca reintrarea)
+                # Treat a price close to the threshold as reached, using reentry tolerance.
                 and (price <= prag_dca or are_close(price, prag_dca, self.p.reentry_tolerance_pct))
                 and self.s["spent_cash"] + self.p.dca_amount <= self.p.max_budget
                 and not self._has_open("BUY")):
-            # GATE pe trend (ca Binance/Kraken): nu face DCA daca activul e in downtrend
-            # confirmat (panta scurta prea negativa) -> nu arunca capital intr-un cutit in
-            # cadere. 0 = OFF. ATENTIE: intr-un dip sustinut conditia de DCA e adevarata
-            # la FIECARE tick (~18s), deci fara fereastra gate-ul ar re-verifica (apel
-            # Yahoo) si re-loga la fiecare tick, toata noaptea (~4800 linii). Cand blocam,
-            # tinem blocajul 5 min fara re-verificare — panta e pe bare de 5m oricum.
+            # Binance/Kraken-style trend gate: skip DCA during a confirmed downtrend
+            # so capital is not added to a falling asset. Zero disables the gate.
+            # During a sustained dip, the DCA condition is true on every tick (~18s),
+            # so a five-minute cache prevents repeated Yahoo calls and log spam. The
+            # slope already uses five-minute bars.
             if self.p.dca_trend_gate_pct > 0:
                 if self._now() < getattr(self, "_dca_gate_until", 0):
-                    return   # blocat recent de trend — re-verificam abia dupa fereastra
+                    return   # Recently trend-blocked; retry after the cache window.
                 slope = self._trend_slope_provider(self.yahoo_sym)
                 if slope is not None and slope < -self.p.dca_trend_gate_pct:
                     self._dca_gate_until = self._now() + 300
@@ -928,7 +918,7 @@ class Strategy:
                 f"×(1-{self.p.dca_drop_pct}%) — DCA")
             self._place_buy(self.p.dca_amount, price * disc, kind="DCA")
 
-    # -- bucla -----------------------------------------------------------------
+    # -- main loop -------------------------------------------------------------
     def run(self) -> None:
         mode = "avg_tp" if self.p.enable_takeprofit else "dca_only"
         log("  === STRATEGIE PORNITA ===")
@@ -953,14 +943,14 @@ class Strategy:
                     time.sleep(self.p.check_minutes * 60)
                     continue
                 try:
-                    # Dupa o eroare de disc, nu mai luam decizii noi pana cand
-                    # snapshot-ul curent poate fi persistat din nou.
+                    # After a disk error, make no new decisions until the current
+                    # snapshot can be persisted again.
                     if self._state_write_failed:
                         self._save()
                     self.reconcile(price)
                     self.step(price)
                     self._save()
-                except Exception as e:  # noqa: BLE001 — REZILIENTA: net/API picat -> reincerc
+                except Exception as e:  # noqa: BLE001 — Resilience: retry network/API failures.
                     log(f"  ! [STRAT] eroare ({e.__class__.__name__}: {e}) — reincerc")
                     time.sleep(self.p.check_minutes * 60)
                     continue
