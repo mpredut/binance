@@ -186,6 +186,31 @@ def _config_hash(path):
         return None
 
 
+def _config_kv(path):
+    """Parseaza un *_config.env in {KEY: VALUE} (ignora comentarii/goale)."""
+    kv = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            for ln in f:
+                ln = ln.split("#", 1)[0].strip()
+                if "=" in ln and not ln.startswith("export"):
+                    k, v = ln.split("=", 1)
+                    kv[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return kv
+
+
+def _diff_config(old_kv, new_kv):
+    """Linii 'KEY: old->new' pt cheile schimbate/adaugate/scoase."""
+    lines = []
+    for k in sorted(set(old_kv) | set(new_kv)):
+        o, n = old_kv.get(k), new_kv.get(k)
+        if o != n:
+            lines.append(f"{k}: {o if o is not None else '(nou)'} -> {n if n is not None else '(scos)'}")
+    return lines
+
+
 def check_configs_once(now=None):
     """Restart config owners after debounced content changes.
 
@@ -197,22 +222,33 @@ def check_configs_once(now=None):
     state = wc.load_state(STATE_FILE)
     hashes = state.setdefault("config_hashes", {})
 
+    kv_state = state.setdefault("config_kv", {})
     changed = []
+    diffs = {}
     for name in _CONFIG_OWNERS:
-        h = _config_hash(str(_ROOT / name))
+        path = str(_ROOT / name)
+        h = _config_hash(path)
         if h is None:
             continue
         prev = hashes.get(name)
+        new_kv = _config_kv(path)
+        prev_kv = kv_state.get(name)
         hashes[name] = h                      # Always update for baseline and debounce.
+        kv_state[name] = new_kv
         if prev is not None and h != prev:
             changed.append(name)
+            if prev_kv is not None:
+                diffs[name] = _diff_config(prev_kv, new_kv)
 
     if not changed:
         wc.save_state(STATE_FILE, state)
         return []
 
     owners = sorted({o for n in changed for o in _CONFIG_OWNERS[n]})
-    note = f"config schimbat: {', '.join(changed)} -> proprietari: {', '.join(owners)}"
+    diff_txt = "".join(
+        f"\n{n}:\n  " + "\n  ".join(diffs[n]) for n in changed if diffs.get(n)
+    )
+    note = f"config schimbat: {', '.join(changed)} -> proprietari: {', '.join(owners)}" + diff_txt
 
     if not CONFIG_RESTART:
         print(f"[watchdog] {note} — WATCHDOG_CONFIG_RESTART=false, doar notific")
@@ -239,7 +275,8 @@ def check_configs_once(now=None):
     wc.save_state(STATE_FILE, state)
 
     msg = (f"🔄 {', '.join(changed)} s-a schimbat -> repornit {', '.join(owners)} "
-           f"(respawn prin healthcheck --supervise). Restart {len(hist)}/{CONFIG_RESTART_MAX} in {CONFIG_RESTART_WINDOW_H:.0f}h.")
+           f"(respawn prin healthcheck --supervise). Restart {len(hist)}/{CONFIG_RESTART_MAX} in {CONFIG_RESTART_WINDOW_H:.0f}h."
+           + diff_txt)
     print(f"[watchdog] {msg}")
     wc.send_ntfy("🔄 Config schimbat -> restart", msg)
     wc.send_email("Config schimbat -> restart proces", msg)
