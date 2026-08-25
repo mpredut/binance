@@ -217,7 +217,7 @@ def _cleanup_loop() -> None:
                     _delete_oldest_log(folder)
                     free_pct = _get_disk_free_percent(folder)
                     if free_pct is None or free_pct <= before_pct:
-                        # Nimic nu s-a eliberat sau nu putem măsura — oprim
+                        # Nothing was freed, or we cannot measure it — stop here
                         _original_print(
                             "[LOGGER] WARNING: could not recover disk space, aborting cleanup"
                         )

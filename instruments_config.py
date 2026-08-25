@@ -36,8 +36,8 @@ def load_instruments(path: Optional[str] = None, api=None) -> Dict[str, Instrume
     if not os.path.exists(path):
         return out
     cp = configparser.ConfigParser()
-    # pastreaza cheile cum sunt scrise (configparser le lasa lowercase oricum; ale
-    # noastre sunt deja lowercase, deci e ok).
+    # Keep the keys exactly as written (configparser lowercases them anyway; ours
+    # are already lowercase, so this is fine).
     cp.read(path)
     for section in cp.sections():
         d = dict(cp.items(section))
@@ -61,8 +61,9 @@ def load_instruments(path: Optional[str] = None, api=None) -> Dict[str, Instrume
 
 def load_for(consumer: str, path: Optional[str] = None, api=None,
              only_enabled: bool = True) -> Dict[str, Instrument]:
-    """Instrumentele relevante pt un consumator (ex. 'mt'): cele cu cel putin o cheie
-    in namespace-ul lui, optional doar cele enabled. Comoditate pt monitortrades/tradeall/rtrade."""
+    """Instruments relevant to one consumer (for example 'mt'): those with at least one
+    key in its namespace, optionally only the enabled ones. Convenience helper for
+    monitortrades/tradeall/rtrade."""
     pref = consumer + "."
     res = {}
     for name, inst in load_instruments(path, api).items():

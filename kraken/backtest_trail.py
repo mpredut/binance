@@ -7,9 +7,9 @@ trailing TP (once profitable, sell only after price falls X% from its peak) capt
 more. The comparison uses multiple pairs rather than only HYPE, plus sequential
 walk-forward segments. TOTAL is realized P&L plus the open position, versus buy-and-hold.
 
-  python3 backtest_trail.py                 # tabel compare pe mai multe perechi
-  python3 backtest_trail.py --wf HYPEUSD     # walk-forward pe o pereche
-  python3 backtest_trail.py --intraday HYPEUSD  # pattern pe ora din zi
+  python3 backtest_trail.py                     # comparison table across several pairs
+  python3 backtest_trail.py --wf HYPEUSD        # walk-forward on a single pair
+  python3 backtest_trail.py --intraday HYPEUSD  # pattern by hour of day
 """
 from __future__ import annotations
 
