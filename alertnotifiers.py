@@ -415,14 +415,18 @@ class AlertNotifier:
                 # ntfy decodes Title as UTF-8, preserving non-ASCII symbols.
                 response = None
                 for attempt in range(2):
+                    _hdr = {
+                        "Title": AlertNotifier.utf8_header(title),
+                        "Priority": "urgent" if urgent else os.environ.get("NTFY_PRIORITY", "high"),
+                        "Tags": "warning" if urgent else tags,
+                    }
+                    _tok = _ntfy_token()  # cont ntfy.sh -> cota per-cont, nu per-IP anonim
+                    if _tok:
+                        _hdr["Authorization"] = f"Bearer {_tok}"
                     response = requests.post(
                         webhook_url,
                         data=message.encode("utf-8"),
-                        headers={
-                            "Title": AlertNotifier.utf8_header(title),
-                            "Priority": "urgent" if urgent else os.environ.get("NTFY_PRIORITY", "high"),
-                            "Tags": "warning" if urgent else tags,
-                        },
+                        headers=_hdr,
                         timeout=10,
                     )
                     if response.status_code != 429 or _is_provider_daily_limit(response):
@@ -510,6 +514,25 @@ def _topic_for(title: str, source: str) -> Optional[str]:
 # Do not include 📉, which is also used by informational loss alerts such as ``📉 SPCX -8%``,
 # or a lone ⚠, which is too broad. ``TRAILING`` identifies trailing events. Urgent DN events
 # also include LICHID/ERORI/MANUAL in their titles. Override with email=True/False when needed.
+
+
+_NTFY_TOKEN_CACHE = None
+
+
+def _ntfy_token():
+    """Token ntfy.sh: env NTFY_TOKEN, altfel ~/.binance_ntfy_token (600). Cota per-cont."""
+    global _NTFY_TOKEN_CACHE
+    if _NTFY_TOKEN_CACHE is not None:
+        return _NTFY_TOKEN_CACHE
+    tok = os.environ.get("NTFY_TOKEN", "").strip()
+    if not tok:
+        try:
+            with open(os.path.expanduser("~/.binance_ntfy_token"), encoding="utf-8") as fh:
+                tok = fh.read().strip()
+        except OSError:
+            tok = ""
+    _NTFY_TOKEN_CACHE = tok
+    return tok
 
 
 def notify(title: str, body: str, source: str, symbol: str,
