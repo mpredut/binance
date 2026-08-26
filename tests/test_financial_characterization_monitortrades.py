@@ -208,7 +208,7 @@ class MonitorTradesFinancialCharacterization(unittest.TestCase):
         self.assertEqual(order["side"], "SELL")
         self.assertEqual(order["qty"], 5.0)
         self.assertTrue(order["kwargs"]["force"])
-        self.assertTrue(order["kwargs"]["caller_owns_retry"])
+        self.assertNotIn("caller_owns_retry", order["kwargs"])
 
     def test_normal_take_profit_sells_all_free_balance_when_trend_not_up(self):
         mt.HARD_TP_ENABLED = False
@@ -219,7 +219,7 @@ class MonitorTradesFinancialCharacterization(unittest.TestCase):
         self.assertEqual((order["side"], order["price"], order["qty"]),
                          ("SELL", 112.0, 7.25))
         self.assertFalse(order["kwargs"]["force"])
-        self.assertTrue(order["kwargs"]["caller_owns_retry"])
+        self.assertNotIn("caller_owns_retry", order["kwargs"])
 
     def test_uptrend_blocks_normal_take_profit(self):
         mt.HARD_TP_ENABLED = False
@@ -227,7 +227,7 @@ class MonitorTradesFinancialCharacterization(unittest.TestCase):
         self.run_tick(inst, trend_up=True, gain=0.10)
         self.assertEqual(inst.placed, [])
 
-    def test_loss_exit_bypasses_profit_guard_and_owns_its_retry(self):
+    def test_loss_exit_bypasses_profit_guard_and_uses_shared_outbox(self):
         mt.HARD_TP_ENABLED = False
         inst = FakeInstrument(price=93, free=4, fills=[_fill("BUY", 100, 4)])
         self.run_tick(inst, trend_up=False, loss=0.05)
@@ -235,7 +235,7 @@ class MonitorTradesFinancialCharacterization(unittest.TestCase):
         order = inst.placed[0]
         self.assertEqual((order["side"], order["qty"]), ("SELL", 4.0))
         self.assertTrue(order["kwargs"]["bypass_profit_guard"])
-        self.assertTrue(order["kwargs"]["caller_owns_retry"])
+        self.assertNotIn("caller_owns_retry", order["kwargs"])
 
     def test_buyback_uses_budget_divided_by_market_price_and_adds_offset(self):
         mt.HARD_TP_ENABLED = False

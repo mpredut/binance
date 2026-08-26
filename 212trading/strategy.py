@@ -147,6 +147,9 @@ def _new_state() -> dict:
         "loss_band": 0,         # Deepest alerted loss band for anti-spam.
         "tp_sold_levels": [],   # Ladder levels sold in the current cycle.
         "orders": [],           # {id, side, qty, limit, amount, kind, ts, level}
+        # Submit intent persisted before the non-idempotent T212 POST.  T212 has no
+        # client-order-id, so recovery correlates active orders plus portfolio delta.
+        "pending_submit": None,
         "pos_peak": 0.0,        # Highest price while holding, for trailing crash breaker.
         "tr_alerted": False,    # Current-episode trailing notification anti-spam.
         "tr_armed": False,      # Arm only after the configured gain over average.
@@ -191,6 +194,7 @@ class Strategy:
         self.state_file = state_path_for(ticker)
         self._state_write_failed = False
         self.s = initial_state if initial_state is not None else self._load()
+        self.s.setdefault("pending_submit", None)
         self._paper_seq = 0
 
     def _now(self) -> float:
@@ -236,13 +240,156 @@ class Strategy:
         return round(usd / price, 2) if price > 0 else 0.0
 
     def _has_open(self, side: str) -> bool:
-        return any(o["side"] == side for o in self.s["orders"])
+        side_u = str(side).upper()
+        pending = self.s.get("pending_submit") or {}
+        return (
+            str(pending.get("side") or "").upper() == side_u
+            or any(str(o["side"]).upper() == side_u for o in self.s["orders"])
+        )
 
     def _find_open(self, side: str) -> dict | None:
         for o in self.s["orders"]:
             if o["side"] == side:
                 return o
         return None
+
+    @staticmethod
+    def _definitive_submit_rejection(exc: Exception) -> bool:
+        """Return true only for an explicit non-retryable T212 HTTP response."""
+        message = str(exc)
+        match = re.search(r"T212 HTTP\s+(\d{3})", message, flags=re.IGNORECASE)
+        if match is None:
+            return False
+        status = int(match.group(1))
+        if 400 <= status < 500 and status not in {408, 425, 429}:
+            return True
+        # A structured response that explicitly says the request was rejected is
+        # terminal even when the gateway reports 5xx.  A bare 5xx/timeout remains
+        # ambiguous because the non-idempotent POST may have reached the venue.
+        return "rejected" in message.lower()
+
+    def _new_pending_submit(self, *, side: str, qty: float, limit: float,
+                            amount: float | None, kind: str,
+                            level: float | None, market: bool) -> dict:
+        intent_id = new_intent_id("T212", self.ticker, kind)
+        return {
+            "intent_id": intent_id,
+            "side": str(side).upper(),
+            "qty": float(qty),
+            "limit": round(float(limit), 2),
+            "amount": amount,
+            "kind": kind,
+            "level": level,
+            "market": bool(market),
+            "ts": self._now(),
+            "before_qty": float(self.s.get("qty") or 0.0),
+            "lookup_misses": 0,
+        }
+
+    def _persist_pending_submit(self, pending: dict | None) -> None:
+        self.s["pending_submit"] = None if pending is None else dict(pending)
+        self._save()
+
+    def _adopt_pending_submit(self, order_id: str) -> dict:
+        pending = dict(self.s.get("pending_submit") or {})
+        if not pending:
+            raise RuntimeError("nu exista intentie T212 pending de adoptat")
+        order = {
+            "id": str(order_id),
+            "side": pending["side"],
+            "qty": float(pending["qty"]),
+            "limit": float(pending["limit"]),
+            "kind": pending.get("kind"),
+            "level": pending.get("level"),
+            "intent_id": pending.get("intent_id"),
+            "market": bool(pending.get("market")),
+            "ts": float(pending.get("ts") or self._now()),
+        }
+        if pending.get("amount") is not None:
+            order["amount"] = pending["amount"]
+        self.s["orders"].append(order)
+        self.s["pending_submit"] = None
+        self._save()
+        return order
+
+    @staticmethod
+    def _active_order_identity(order: dict) -> tuple[str, str, float | None, float | None]:
+        instrument = order.get("instrument")
+        nested_ticker = instrument.get("ticker") if isinstance(instrument, dict) else None
+        ticker = str(order.get("ticker") or nested_ticker or "").upper()
+        side = str(order.get("side") or "").upper()
+        raw_qty = order.get("quantity", order.get("qty"))
+        try:
+            signed_qty = float(raw_qty)
+            qty = abs(signed_qty)
+            if not side:
+                side = "BUY" if signed_qty > 0 else "SELL" if signed_qty < 0 else ""
+        except (TypeError, ValueError, OverflowError):
+            qty = None
+        raw_limit = order.get("limitPrice", order.get("limit"))
+        try:
+            limit = float(raw_limit) if raw_limit is not None else None
+        except (TypeError, ValueError, OverflowError):
+            limit = None
+        return ticker, side, qty, limit
+
+    def _active_matches_pending(self, order: dict, pending: dict) -> bool:
+        ticker, side, qty, limit = self._active_order_identity(order)
+        if ticker != self.ticker.upper() or side != str(pending.get("side") or "").upper():
+            return False
+        expected_qty = float(pending.get("qty") or 0.0)
+        if qty is None or abs(qty - expected_qty) > max(0.011, expected_qty * 1e-6):
+            return False
+        if pending.get("market"):
+            return True
+        expected_limit = float(pending.get("limit") or 0.0)
+        return limit is not None and abs(limit - expected_limit) <= 0.011
+
+    def _recover_pending_submit(self, real_qty: float,
+                                active_orders: list[dict] | None) -> str:
+        """Recover one response-lost T212 submit without blocking the loop.
+
+        Outcomes are ``none``, ``adopted``, ``filled``, ``waiting`` or
+        ``retryable``.  A portfolio delta is independent evidence of execution;
+        otherwise two fresh active-order snapshots with no unique match release the
+        intent for strategy revalidation and a later at-least-once submit.
+        """
+        pending = self.s.get("pending_submit")
+        if not isinstance(pending, dict) or not pending:
+            return "none"
+        if active_orders is None:
+            return "waiting"
+        matches = [
+            order for order in active_orders
+            if isinstance(order, dict) and self._active_matches_pending(order, pending)
+        ]
+        if len(matches) == 1 and matches[0].get("id") is not None:
+            order = self._adopt_pending_submit(str(matches[0]["id"]))
+            log(f"  [STRAT] submit T212 recuperat din ordine active: {order['id']}")
+            return "adopted"
+        if len(matches) > 1:
+            log("  ! [STRAT] submit T212 ambiguu: mai multe ordine active se potrivesc — pastrez pending")
+            return "waiting"
+
+        before = float(pending.get("before_qty") or 0.0)
+        side = str(pending.get("side") or "").upper()
+        delta = float(real_qty) - before
+        if (side == "BUY" and delta > 1e-6) or (side == "SELL" and delta < -1e-6):
+            pending["portfolio_fill_observed"] = True
+            self._persist_pending_submit(pending)
+            return "filled"
+
+        misses = int(pending.get("lookup_misses") or 0) + 1
+        pending["lookup_misses"] = misses
+        if misses < 2:
+            self._persist_pending_submit(pending)
+            return "waiting"
+        log(
+            f"  [STRAT] submit T212 absent in 2 snapshoturi si fara delta de portofoliu "
+            f"({side} {self.ticker}) — eliberez pentru reevaluare/retry"
+        )
+        self._persist_pending_submit(None)
+        return "retryable"
 
     # -- aplicare fill ---------------------------------------------------------
     def _apply_fill(self, order: dict, qty: float, price: float) -> None:
@@ -311,25 +458,34 @@ class Strategy:
                                      "limit": round(limit, 2), "amount": amount, "kind": kind,
                                      "ts": self._now()})
             return
-        intent_id = new_intent_id("T212", self.ticker, kind)
+        if self.s.get("pending_submit"):
+            log(f"  [STRAT] BUY {kind} amanat — exista deja un submit T212 pending")
+            return
+        pending = self._new_pending_submit(
+            side="BUY", qty=qty, limit=limit, amount=amount, kind=kind,
+            level=None, market=False,
+        )
+        self._persist_pending_submit(pending)
         try:
             order_id = self.executor.submit_order_with_intent(
-                intent_id, self.ticker, "buy", qty, round(limit, 2),
+                pending["intent_id"], self.ticker, "buy", qty, round(limit, 2),
                 market=False, kind=kind,
             )
         except ProviderError as exc:
-            log(f"  ! [STRAT] BUY {kind} esuat: {exc}")
+            definitive = self._definitive_submit_rejection(exc)
+            pending["submit_error"] = f"{exc.__class__.__name__}: {exc}"
+            if definitive:
+                self._persist_pending_submit(None)
+                log(f"  ! [STRAT] BUY {kind} respins explicit: {exc}")
+            else:
+                self._persist_pending_submit(pending)
+                log(f"  ! [STRAT] BUY {kind} raspuns ambiguu: {exc} — pastrez pending")
             if "insufficient" in str(exc).lower():
                 self.s["buy_backoff_until"] = self._now() + 1800
                 log("  [STRAT] fonduri insuficiente — pauza cumparari 30 min (alimenteaza contul)")
             return
         log(f"  [STRAT] BUY {kind} plasat id={order_id} {qty} @ {limit:.2f}")
-        self.s["orders"].append({
-            "id": order_id, "side": "BUY", "qty": qty,
-            "limit": round(limit, 2), "amount": amount, "kind": kind,
-            "intent_id": intent_id, "market": False, "ts": self._now(),
-        })
-        self._save()
+        self._adopt_pending_submit(order_id)
 
     def _place_sell(self, qty: float, limit: float, level: float | None = None,
                     kind: str = "TP", *, market: bool = False) -> bool:
@@ -347,18 +503,32 @@ class Strategy:
                                      "kind": kind, "level": level, "market": market,
                                      "ts": self._now()})
             return True
-        intent_id = new_intent_id("T212", self.ticker, kind)
+        if self.s.get("pending_submit"):
+            log(f"  [STRAT] SELL {kind}{tag} amanat — exista deja un submit T212 pending")
+            return False
+        pending = self._new_pending_submit(
+            side="SELL", qty=qty, limit=limit, amount=None, kind=kind,
+            level=level, market=market,
+        )
+        self._persist_pending_submit(pending)
         try:
             order_id = self.executor.submit_order_with_intent(
-                intent_id, self.ticker, "sell", qty,
+                pending["intent_id"], self.ticker, "sell", qty,
                 None if market else round(limit, 2), market=market, kind=kind,
                 reference_price=round(limit, 2) if market else None,
             )
         except ProviderError as exc:
             message = str(exc)
-            log(f"  ! [STRAT] SELL {kind}{tag} esuat: {message}")
+            definitive = self._definitive_submit_rejection(exc)
+            pending["submit_error"] = f"{exc.__class__.__name__}: {exc}"
+            if definitive:
+                self._persist_pending_submit(None)
+                log(f"  ! [STRAT] SELL {kind}{tag} respins explicit: {message}")
+            else:
+                self._persist_pending_submit(pending)
+                log(f"  ! [STRAT] SELL {kind}{tag} raspuns ambiguu: {message} — pastrez pending")
             if "selling-equity-not-owned" not in message:
-                return False
+                return not definitive
             # Reset only when the venue confirms owned is effectively zero. A positive
             # owned amount with lower free balance must not erase a real position.
             _m = re.search(r'owned["\']?\s*[:=]\s*([0-9.]+)', message)
@@ -379,12 +549,7 @@ class Strategy:
             return False
         order_type = "MARKET" if market else f"@ {limit:.2f}"
         log(f"  [STRAT] SELL {kind}{tag} plasat id={order_id} {qty:.2f} {order_type}")
-        self.s["orders"].append({
-            "id": order_id, "side": "SELL", "qty": round(qty, 2),
-            "limit": round(limit, 2), "kind": kind, "level": level,
-            "intent_id": intent_id, "market": market, "ts": self._now(),
-        })
-        self._save()
+        self._adopt_pending_submit(order_id)
         return True
 
     def _cancel_open(self, side: str) -> bool:
@@ -508,8 +673,9 @@ class Strategy:
                 return float(p.get("quantity") or 0.0), float(p.get("averagePrice") or 0.0)
         return 0.0, 0.0   # No holding.
 
-    def _active_order_ids(self) -> set | None:
-        orders = self.client.list_active_orders()
+    def _active_order_ids(self, orders: list[dict] | None = None) -> set | None:
+        if orders is None:
+            orders = self.client.list_active_orders()
         if orders is None:
             return None
         return {str(o.get("id")) for o in orders
@@ -591,7 +757,13 @@ class Strategy:
                 self._pf_unavail_logged = now
             return
         real_qty, real_avg = real
-        active = self._active_order_ids()
+        active_orders = self.client.list_active_orders()
+        pending_outcome = self._recover_pending_submit(real_qty, active_orders)
+        pending_for_fill = (
+            dict(self.s.get("pending_submit") or {})
+            if pending_outcome == "filled" else None
+        )
+        active = self._active_order_ids(active_orders)
         if active is None:
             active = {str(o["id"]) for o in self.s["orders"]}  # Cannot list, so retain tracked orders.
 
@@ -612,6 +784,8 @@ class Strategy:
             source_order = next(
                 (o for o in self.s["orders"] if o.get("side") == "BUY"), None,
             )
+            if source_order is None and pending_for_fill and pending_for_fill.get("side") == "BUY":
+                source_order = pending_for_fill
             is_adoption = source_order is None and prev_qty < 1e-9
             is_dca = bool(
                 source_order is not None
@@ -639,6 +813,8 @@ class Strategy:
                    body=(f"{kind_label} | q{real_qty:.4f} a{real_avg:.2f} p~{fp:.2f} | "
                          f"desf{self.s['spent_cash']:.0f}{self.ccy} DCA{self.s['dca_buys']}/{self.p.max_dca_buys}"),
                    source="T212", price=fp, desktop=self.desktop)
+            if source_order is pending_for_fill:
+                self._persist_pending_submit(None)
             self._cancel_open("SELL")   # The average changed; rebuild TP on the next step.
 
         # --- Executed SELL: the position decreased. ---
@@ -660,6 +836,8 @@ class Strategy:
             notify(title=f"{self.yahoo_sym} SELL {sold:.4f}@{approx}{sell_price:.2f} N{net:+.2f}$",
                    body=f"a{prev_avg:.2f} · br{gross:+.2f} fee{fee:.2f} N{net:+.2f}$ | Ntot{self.s['realized_net_usd']:+.2f}$",
                    source="T212", price=sell_price, desktop=self.desktop)
+            if pending_for_fill and pending_for_fill.get("side") == "SELL":
+                self._persist_pending_submit(None)
 
         else:
             # Unchanged position: synchronize state with the actual position.

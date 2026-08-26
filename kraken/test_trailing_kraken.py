@@ -20,9 +20,25 @@ class FakeK:
             return {"HYPE": {"balance": str(self.total), "hold_trade": str(self.held)}}
         return {}
     def last_price(self, pair): return self.price
-    def add_order(self, pair, side, volume, price=None, ordertype="limit", validate=False):
-        self.orders.append({"side": side, "volume": volume, "price": price, "ordertype": ordertype})
+    def add_order(self, pair, side, volume, price=None, ordertype="limit", validate=False,
+                  cl_ord_id=None):
+        self.orders.append({"side": side, "volume": volume, "price": price,
+                            "ordertype": ordertype, "cl_ord_id": cl_ord_id})
         return {"txid": ["X"]}
+    def query_orders(self, txids):
+        order = self.orders[-1]
+        return {str(txids): {
+            "status": "closed", "vol_exec": str(order["volume"]),
+            "cost": str(order["volume"] * order["price"]), "fee": "0",
+        }}
+    def open_orders(self):
+        return {}
+    def closed_orders(self):
+        return {}
+    def pair_info(self, pair):
+        return {"pair_decimals": 2, "lot_decimals": 8, "ordermin": "0.01"}
+    def cancel_order(self, txid):
+        return {"count": 1}
 
 
 class Base(unittest.TestCase):

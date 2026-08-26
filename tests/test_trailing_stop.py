@@ -9,6 +9,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from binance_api.trailing_stop import TrailingStop, should_sell  # noqa: E402
+from providers.strategy_executor import OrderStatus  # noqa: E402
 
 
 class FakeApi:
@@ -31,13 +32,29 @@ class FakePo:
     def __init__(self):
         self.orders = []
         self.result = {"orderId": 1}
+        self.status = "closed"
+        self.by_client_id = {}
     def place(self, symbol, side, price, qty, force=False, **kw):
-        self.orders.append({"side": side, "symbol": symbol, "price": price,
+        order = {"side": side, "symbol": symbol, "price": price,
                             "qty": qty, "force": force,
+                            "client_order_id": kw.get("client_order_id"),
                             "bypass_profit_guard": bool(
                                 kw.get("bypass_profit_guard", False)
-                            )})
+                            )}
+        self.orders.append(order)
+        if self.result and order["client_order_id"]:
+            self.by_client_id[order["client_order_id"]] = self.result
         return self.result
+    def order_by_client_id(self, symbol, client_order_id, *, provider_name=None):
+        return self.by_client_id.get(client_order_id)
+    def order_status(self, symbol, order_id, *, provider_name=None):
+        order = next(o for o in self.orders
+                     if str(self.by_client_id.get(o["client_order_id"], {}).get("orderId"))
+                     == str(order_id))
+        filled = order["qty"] if self.status == "closed" else 0.0
+        return OrderStatus(self.status, filled, filled * order["price"], 0.0)
+    def cancel_order(self, symbol, order_id, *, provider_name=None):
+        self.status = "canceled"
     def place_safe_order(self, side, symbol, price, qty, force=False, **kw):
         return self.place(symbol, side, price, qty, force=force, **kw)
 
@@ -170,6 +187,7 @@ class TestTrailing(Base):
         ts = self.ts(api)
         ts.check_once()
         api.price = 190.0; ts.check_once()             # vinde, varf se reseteaza la 190
+        ts.check_once()                                # status terminal confirmat
         import json
         self.assertEqual(json.load(open(self.sf))["TAOUSDC"]["peak"], 190.0)
 
@@ -226,9 +244,11 @@ class TestMinProfit(Base):
         api.price = 263.0; ts.check_once() # trece de prag -> activ
         api.price = 200.0; ts.check_once() # crash -23.9% -> vinde; armeaza rebuy
         self.assertEqual(len(self.po.orders), 1)
+        ts.check_once()                    # confirma fill-ul SELL si armeaza re-buy
         # simuleaza rebuy: pretul urca 1.2% de la 200 -> 202.4
         api.price = 199.0; ts.check_once() # low=199
         api.price = 201.5; ts.check_once() # +1.26% de la 199 -> re-buy; initial=201.5
+        ts.check_once()                    # confirma fill-ul REBUY si seteaza warmup
         # acum trailing inactiv pana la 201.5*1.05=211.6
         api.price = 180.0; ts.check_once() # crash de la 201.5 dar sub pragul de activare
         # ordinele: 1 vanzare + 1 re-buy; al treilea NU se executa (warming up)

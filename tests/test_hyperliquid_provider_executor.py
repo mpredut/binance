@@ -159,6 +159,16 @@ class HLExecutorContractTest(unittest.TestCase):
         st = self.p.order_status("HYPE", "999")
         self.assertEqual(st.status, "open")
 
+    def test_order_by_client_id_recupereaza_din_open_orders(self):
+        cloid = "0x0123456789abcdef0123456789abcdef"
+        self.p._client = FakeRead(opens=[{
+            "oid": 42, "cloid": cloid, "status": "open",
+        }])
+        self.assertEqual(
+            self.p.order_by_client_id("HYPE", cloid),
+            {"orderId": "42", "status": "open"},
+        )
+
     def test_order_status_open_include_fill_partial(self):
         self.p._client = FakeRead(
             fills=[{"oid": 999, "sz": "0.4", "px": "60", "fee": "0.02"}],

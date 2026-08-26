@@ -41,6 +41,15 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)   # import the shared core from the repository root
 
 from trailing_core import TrailingCore, should_sell  # noqa: E402  (re-export should_sell for tests/compatibility)
+from providers.execution_audit import (  # noqa: E402
+    AuditedStrategyExecutor,
+    intent_client_order_id,
+)
+from providers.kraken_provider import KrakenProvider  # noqa: E402
+from providers.tracked_order import (  # noqa: E402
+    StrategyExecutorLifecycleApi,
+    TrackedOrderLifecycle,
+)
 
 STATE_FILE = os.path.join(_HERE, "trailing_state.json")
 CACHE_TREND = os.path.join(_ROOT, "cachedb", "cache_instant_trend.json")
@@ -89,6 +98,14 @@ class KrakenTrailing:
             sell_skip_if_trend_up=SELL_SKIP_IF_TREND_UP,
             sell_fraction=1.0, item_isolation=False,
             min_profit_pct=min_profit_pct)
+        self.executor = AuditedStrategyExecutor(
+            KrakenProvider(client=client), venue="Kraken")
+        self.order_lifecycle = TrackedOrderLifecycle(
+            StrategyExecutorLifecycleApi(self.executor),
+            provider_name="Kraken", venue="Kraken",
+            missing_confirmations=2, retry_on_lookup_error=False,
+            max_age_seconds=180,
+        )
 
     # -- state delegated to the core; retained for --status and tests ----------
     def _load(self) -> dict:
@@ -141,36 +158,70 @@ class KrakenTrailing:
     def trend(self, pair: str) -> float:
         return self._trend_value(pair)
 
-    def execute_sell(self, key, asset, pair, qty, price, peak, trail) -> bool:
-        try:
-            # Price slightly BELOW market for reliable fill. Central add_order applies
-            # pair_decimals precision instead of hard-coding it here, avoiding rejection.
-            self.client.add_order(pair, "sell", round(qty, 8),
-                                  price * 0.995, ordertype="limit")
-            self.log(f"  🛑 [TRAIL-K] VANDUT {qty} {asset} @ ~{price:.4f} "
-                     f"(varf {peak:.4f}, -{trail}%)")
-            notify(title=f"🛑 TRAILING {asset} vandut {qty:.2f}@~{price:.2f}",
-                   body=f"crash >{trail}% de la varf {peak:.2f}",
-                   source="kraken-trail", price=price, desktop=False)
-            return True
-        except KrakenError as e:
-            self.log(f"  ! [TRAIL-K] vanzare {asset} esuata: {e}")
-            return False
+    def _order_intent(self, action, key, asset, pair, qty, price, **metadata):
+        intent_id = (
+            f"trailing:kraken:{key}:{action}:{qty:.8f}:{price:.8f}:"
+            f"{metadata.get('anchor', price):.8f}"
+        )
+        return self.order_lifecycle.new_intent(
+            intent_id=intent_id,
+            client_order_id=intent_client_order_id("Kraken", intent_id),
+            symbol=pair, side="SELL" if action == "SELL" else "BUY",
+            requested_qty=qty, requested_price=price,
+            kind=f"TRAIL_{action}",
+            metadata={"action": action, "asset": asset, **metadata},
+        )
 
-    def execute_rebuy(self, key, asset, pair, qty, price, rb) -> bool:
-        try:
-            # Limit slightly ABOVE market for reliable fill, symmetric with the sell order.
-            # Central add_order applies pair_decimals rather than hard-coded precision.
-            self.client.add_order(pair, "buy", qty, price * 1.005, ordertype="limit")
-            self.log(f"  🟢 [TRAIL-K] RE-BUY {qty} {asset} @ ~{price:.4f}  "
-                     f"(recul +{REBUY_BOUNCE_PCT}% de la minim {rb['low']:.4f}; vandut la {rb.get('sell_price', 0):.4f})")
-            notify(title=f"🟢 RE-BUY {asset} {qty:.2f}@~{price:.2f}",
-                   body=f"recul +{REBUY_BOUNCE_PCT}% de la min {rb['low']:.2f} dupa crash",
-                   source="kraken-trail", price=price, desktop=False)
-            return True
-        except KrakenError as e:
-            self.log(f"  ! [TRAIL-K] re-buy {asset} esuat: {e}")
-            return False                                      # preserve re-buy state and retry next time
+    def reconcile_pending(self, pending, persist):
+        result = self.order_lifecycle.reconcile(pending, persist=persist)
+        if result.outcome == "terminal" and result.status.filled_qty > 0:
+            action = str(result.intent.get("action") or "ORDER")
+            qty = result.status.filled_qty
+            avg = (result.status.cost / qty
+                   if result.status.cost > 0 else result.intent["requested_price"])
+            notify(
+                title=f"{'🛑' if action == 'SELL' else '🟢'} TRAILING "
+                      f"{result.intent.get('asset')} {action} FILLED {qty:.2f}@~{avg:.2f}",
+                body=f"status={result.status.status} fee={result.status.fee}",
+                source="kraken-trail", price=avg, desktop=False,
+            )
+        return result
+
+    def execute_sell(self, key, asset, pair, qty, price, peak, trail, persist):
+        limit = price * 0.995
+        intent = self._order_intent(
+            "SELL", key, asset, pair, qty, limit, anchor=peak, trail=trail)
+        result = self.order_lifecycle.submit(
+            intent, persist=persist,
+            submit=lambda: self.executor.submit_order_with_intent(
+                intent["intent_id"], pair, "sell", qty, limit,
+                market=False, kind="TRAIL_SELL",
+                client_order_id=intent["client_order_id"]),
+        )
+        self.log(
+            f"  🛑 [TRAIL-K] SELL PENDING {qty} {asset} @ ~{limit:.4f} "
+            f"(orderId={result.intent.get('order_id')})"
+        )
+        return result
+
+    def execute_rebuy(self, key, asset, pair, qty, price, rb, persist):
+        limit = price * 1.005
+        intent = self._order_intent(
+            "REBUY", key, asset, pair, qty, limit,
+            anchor=float(rb.get("low") or price),
+            sell_price=float(rb.get("sell_price") or 0.0))
+        result = self.order_lifecycle.submit(
+            intent, persist=persist,
+            submit=lambda: self.executor.submit_order_with_intent(
+                intent["intent_id"], pair, "buy", qty, limit,
+                market=False, kind="TRAIL_REBUY",
+                client_order_id=intent["client_order_id"]),
+        )
+        self.log(
+            f"  🟢 [TRAIL-K] REBUY PENDING {qty} {asset} @ ~{limit:.4f} "
+            f"(orderId={result.intent.get('order_id')})"
+        )
+        return result
 
     def log_dry_sell(self, key, asset, pair, qty, price, peak, trail) -> None:
         self.log(f"  🟡 [TRAIL-K][DRY] AR VINDE {qty} {asset} @ ~{price:.4f} "

@@ -39,6 +39,33 @@ class TrackedOrderResult:
         return bool(self.intent.get("order_id"))
 
 
+class StrategyExecutorLifecycleApi:
+    """Adapt one strict executor to the lifecycle lookup contract.
+
+    Stateful strategies already own a credential-scoped executor and should not
+    create a second global provider merely to reconcile an ambiguous submission.
+    This adapter keeps lookup, status, and cancel calls on that same executor.
+    """
+
+    def __init__(self, executor):
+        self.executor = executor
+
+    def order_by_client_id(self, symbol: str, client_order_id: str, *,
+                           provider_name=None):
+        method = getattr(self.executor, "order_by_client_id", None)
+        if not callable(method):
+            raise RuntimeError(
+                f"{provider_name or type(self.executor).__name__}: "
+                "order_by_client_id is unsupported")
+        return method(symbol, str(client_order_id))
+
+    def order_status(self, symbol: str, order_id: str, *, provider_name=None):
+        return self.executor.order_status(symbol, str(order_id))
+
+    def cancel_order(self, symbol: str, order_id: str, *, provider_name=None):
+        return self.executor.cancel_order(symbol, str(order_id))
+
+
 def _finite(raw, *, positive=False):
     try:
         value = float(raw)

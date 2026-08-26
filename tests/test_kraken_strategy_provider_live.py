@@ -24,14 +24,27 @@ class FakeExecutor:
         self.next_status = OrderStatus("open", 0.0, 0.0, 0.0)
         self._seq = 0
         self.preflight_error = None
+        self.client_orders = {}
+        self.on_submit = None
 
     def get_current_price(self, symbol):
         return 60.0
 
-    def submit_order(self, symbol, side, qty, price=None, *, market=False, kind=None):
+    def submit_order(self, symbol, side, qty, price=None, *, market=False, kind=None,
+                     client_order_id=None):
         self._seq += 1
-        self.calls.append(("submit_order", symbol, side, qty, price, market, kind))
+        self.calls.append((
+            "submit_order", symbol, side, qty, price, market, kind,
+            client_order_id,
+        ))
+        if self.on_submit:
+            self.on_submit(client_order_id)
         return f"OID-{self._seq}"
+
+    def order_by_client_id(self, symbol, client_order_id):
+        self.calls.append(("order_by_client_id", symbol, client_order_id))
+        order_id = self.client_orders.get(client_order_id)
+        return None if order_id is None else {"orderId": order_id, "status": "open"}
 
     def order_status(self, symbol, order_id):
         self.calls.append(("order_status", symbol, order_id))
@@ -92,8 +105,10 @@ class ProviderLivePathTest(unittest.TestCase):
         sub = [c for c in self.fake.calls if c[0] == "submit_order"]
         self.assertEqual(len(sub), 1)
         self.assertEqual(sub[0][1:4], ("HYPEUSD", "buy", 1.0))
+        self.assertTrue(sub[0][-1])
         self.assertEqual(self.s.s["orders"][-1]["txid"], "OID-1")
-        self.s._save.assert_called_once()
+        self.assertGreaterEqual(self.s._save.call_count, 2)
+        self.assertIsNone(self.s.s["pending_intent"])
 
     def test_place_market_propaga_flagul(self):
         self.s.s["qty"] = 5.0
@@ -101,16 +116,44 @@ class ProviderLivePathTest(unittest.TestCase):
         sub = [c for c in self.fake.calls if c[0] == "submit_order"][-1]
         self.assertTrue(sub[5])                  # market=True propagat
 
+    def test_intentia_este_persistata_inainte_de_submit(self):
+        observed = []
+        self.fake.on_submit = lambda client_id: observed.append(
+            dict(self.s.s.get("pending_intent") or {}))
+        self.assertTrue(self.s._place("buy", 1.0, 60.0, kind="ENTRY", amount=60.0))
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(observed[0]["client_order_id"], self.fake.calls[-1][-1])
+        self.assertNotIn("order_id", observed[0])
+
+    def test_raspuns_pierdut_se_recupereaza_fara_al_doilea_submit(self):
+        original = self.fake.submit_order
+
+        def lose_response(*args, **kwargs):
+            client_id = kwargs.get("client_order_id")
+            self.fake.client_orders[client_id] = "OID-RECOVERED"
+            original(*args, **kwargs)
+            raise ProviderError("timeout dupa acceptare")
+
+        self.fake.submit_order = lose_response
+        self.assertFalse(
+            self.s._place("buy", 1.0, 60.0, kind="ENTRY", amount=60.0))
+        self.assertIsNotNone(self.s.s["pending_intent"])
+        self.s.reconcile(60.0)
+        submits = [call for call in self.fake.calls if call[0] == "submit_order"]
+        self.assertEqual(len(submits), 1)
+        self.assertEqual(self.s.s["orders"][0]["txid"], "OID-RECOVERED")
+        self.assertIsNone(self.s.s["pending_intent"])
+
     def test_audited_market_submit_receives_observational_reference_price(self):
         class IntentExecutor(FakeExecutor):
             def submit_order_with_intent(
                 self, intent_id, symbol, side, qty, price=None, *, market=False,
-                kind=None, reference_price=None,
+                kind=None, reference_price=None, client_order_id=None,
             ):
                 self._seq += 1
                 self.calls.append((
                     "submit_with_intent", symbol, side, qty, price, market, kind,
-                    reference_price,
+                    reference_price, client_order_id,
                 ))
                 return f"OID-{self._seq}"
 

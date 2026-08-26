@@ -44,6 +44,8 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)   # also support direct execution (python binance_api/trailing_stop.py)
 
 from providers.quantity import resolve_assets
+from providers.execution_audit import intent_client_order_id
+from providers.tracked_order import TrackedOrderLifecycle
 
 from trailing_core import TrailingCore, should_sell  # noqa: E402  (re-export should_sell for tests/compatibility)
 from botcore import load_dotenv, single_instance  # noqa: E402  (shared KEY=VALUE parser and single-instance guard)
@@ -103,16 +105,6 @@ def _finite(value, *, name: str, minimum=None, maximum=None) -> float:
     return result
 
 
-def _accepted_order(result) -> bool:
-    """True only when the guarded facade confirms venue acceptance.
-
-    Acceptance is deliberately not called a fill.  The existing financial model
-    uses MARKET orders here, but a refused/queued call returns ``None`` and must not
-    advance the trailing state machine.
-    """
-    return isinstance(result, dict) and result.get("orderId") not in (None, "")
-
-
 class TrailingStop:
     """Binance adapter for TrailingCore, providing balance, price, sell/buy,
     trend APIs, and provider-specific logging. TrailingCore owns the state machine."""
@@ -144,6 +136,11 @@ class TrailingStop:
             sell_skip_if_trend_up=SELL_SKIP_IF_TREND_UP,
             sell_fraction=sell_fraction, item_isolation=True,
             min_profit_pct=min_profit_pct)
+        self.order_lifecycle = TrackedOrderLifecycle(
+            self.po, provider_name="BINANCE", venue="Binance",
+            missing_confirmations=1, retry_on_lookup_error=True,
+            max_age_seconds=180,
+        )
 
     # -- state delegated to the core; retained for --status and tests ----------
     def _load(self) -> dict:
@@ -213,33 +210,62 @@ class TrailingStop:
     def trend(self, pair: str) -> float:
         return self._trend_value(pair)
 
-    def execute_sell(self, key, asset, pair, qty, price, peak, trail) -> bool:
+    def _order_intent(self, action, key, asset, pair, qty, price, **metadata):
+        intent_id = (
+            f"trailing:binance:{key}:{action}:{qty:.8f}:{price:.8f}:"
+            f"{metadata.get('anchor', price):.8f}"
+        )
+        return self.order_lifecycle.new_intent(
+            intent_id=intent_id,
+            client_order_id=intent_client_order_id("Binance", intent_id),
+            symbol=pair, side="SELL" if action == "SELL" else "BUY",
+            requested_qty=qty, requested_price=price, kind=f"TRAIL_{action}",
+            metadata={"action": action, "asset": asset, **metadata},
+        )
+
+    def reconcile_pending(self, pending, persist):
+        return self.order_lifecycle.reconcile(pending, persist=persist)
+
+    def execute_sell(self, key, asset, pair, qty, price, peak, trail, persist):
         # July 30: use the single guarded proxy (self.po = market_api.api, .place()).
         # force=True sells at MARKET for reliable crash execution.
         # bypass_profit_guard=True bypasses profit/history protection because this is a
         # STOP-LOSS below the last buy; otherwise the guard would block it. Daily limits
         # and cooldown remain active as before; the bypass skips only profit and weighting.
-        result = self.po.place(
-            pair, "SELL", price, qty, force=True,
-            bypass_profit_guard=True, smart=False)
-        if not _accepted_order(result):
-            self.log(f"  ! [TRAIL] SELL {pair} neacceptat — pastrez starea pentru retry")
-            return False
-        self.log(f"  🛑 [TRAIL] SELL ACCEPTAT {pair} {qty} @ ~{price:.4f} "
-                 f"(varf {peak:.4f}, -{trail}%, orderId={result['orderId']})")
-        return True
+        intent = self._order_intent(
+            "SELL", key, asset, pair, qty, price, anchor=peak, trail=trail)
+        result = self.order_lifecycle.submit(
+            intent, persist=persist,
+            submit=lambda: self.po.place(
+                pair, "SELL", price, qty, force=True,
+                bypass_profit_guard=True, smart=False,
+                caller_owns_retry=True, wait_for_trend=False,
+                client_order_id=intent["client_order_id"]),
+        )
+        self.log(
+            f"  🛑 [TRAIL] SELL PENDING {pair} {qty} @ ~{price:.4f} "
+            f"(varf {peak:.4f}, -{trail}%, orderId={result.intent.get('order_id')})"
+        )
+        return result
 
-    def execute_rebuy(self, key, asset, pair, qty, price, rb) -> bool:
-        result = self.po.place(
-            pair, "BUY", price, qty, force=True,
-            bypass_profit_guard=True, smart=False)
-        if not _accepted_order(result):
-            self.log(f"  ! [TRAIL] RE-BUY {pair} neacceptat — pastrez starea pentru retry")
-            return False
-        self.log(f"  🟢 [TRAIL] RE-BUY ACCEPTAT {pair} {qty} @ ~{price:.4f}  "
-                 f"(recul +{REBUY_BOUNCE_PCT}% de la minim {rb['low']:.4f}; "
-                 f"vandut la {rb.get('sell_price', 0):.4f}; orderId={result['orderId']})")
-        return True
+    def execute_rebuy(self, key, asset, pair, qty, price, rb, persist):
+        intent = self._order_intent(
+            "REBUY", key, asset, pair, qty, price,
+            anchor=float(rb.get("low") or price),
+            sell_price=float(rb.get("sell_price") or 0.0))
+        result = self.order_lifecycle.submit(
+            intent, persist=persist,
+            submit=lambda: self.po.place(
+                pair, "BUY", price, qty, force=True,
+                bypass_profit_guard=True, smart=False,
+                caller_owns_retry=True, wait_for_trend=False,
+                client_order_id=intent["client_order_id"]),
+        )
+        self.log(
+            f"  🟢 [TRAIL] RE-BUY PENDING {pair} {qty} @ ~{price:.4f} "
+            f"(orderId={result.intent.get('order_id')})"
+        )
+        return result
 
     def log_dry_sell(self, key, asset, pair, qty, price, peak, trail) -> None:
         self.log(f"  🟡 [TRAIL][DRY] AR VINDE {pair} {qty} @ ~{price:.4f} "

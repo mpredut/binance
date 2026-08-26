@@ -521,7 +521,7 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
                       f"-> vand {hard_tp_frac*100:.0f}% ({hard_qty}) INDIFERENT de trend")
                 if _place_guarded(inst, "SELL", current_price, hard_qty, min_qty,
                                   safeback_seconds=sbs, force=True, cancelorders=True,
-                                  hours=MT_SELL_SAFEBACK_HOURS, caller_owns_retry=True):
+                                  hours=MT_SELL_SAFEBACK_HOURS):
                     _hard_tp_last[symbol] = current_time_s
                     return   # Already sold this tick; do not use stale balance below.
             else:
@@ -534,7 +534,7 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
                 if can_sell and sellable_qty > 0:
                     _place_guarded(inst, "SELL", current_price, sellable_qty, min_qty,
                         safeback_seconds=sbs, force=False, cancelorders=True,
-                        hours=MT_SELL_SAFEBACK_HOURS, caller_owns_retry=True)
+                        hours=MT_SELL_SAFEBACK_HOURS)
                 else:
                     print(f"No can sell (can_sell={can_sell}, sellable_qty={sellable_qty})")
             else :
@@ -546,7 +546,7 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
                     _place_guarded(inst, "SELL", current_price, sellable_qty, min_qty,
                         safeback_seconds=sbs, force=False, cancelorders=True,
                         hours=MT_SELL_SAFEBACK_HOURS, bypass_profit_guard=True,
-                        caller_owns_retry=True)
+                    )
                 else:
                     print(f"No can sell (can_sell={can_sell}, sellable_qty={sellable_qty})")
             else:
@@ -578,7 +578,7 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
                     else:
                         _place_guarded(inst, "BUY", current_price + MT_BUY_PRICE_OFFSET, _buy_qty, min_qty,
                             safeback_seconds=sbs, cancelorders=True,
-                            hours=MT_BUY_SAFEBACK_HOURS, caller_owns_retry=True)
+                            hours=MT_BUY_SAFEBACK_HOURS)
                 else:
                    print("No can buy")
             else :

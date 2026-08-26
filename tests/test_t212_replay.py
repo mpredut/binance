@@ -1,6 +1,7 @@
 """Trading212 replay rulează motorul live și păstrează contabilitatea parțială."""
 
 import importlib.util
+import copy
 import json
 import os
 import sys
@@ -408,6 +409,9 @@ class _CancelClient:
         self.market_result = None
         self.cancel_calls = []
         self.place_calls = []
+        self.portfolio = []
+        self.active = []
+        self.status = None
 
     def cancel_order(self, order_id):
         self.cancel_calls.append(order_id)
@@ -426,6 +430,15 @@ class _CancelClient:
         if self.market_result is not None:
             return self.market_result
         return 200, {"id": f"NEW-{len(self.place_calls)}"}
+
+    def get_portfolio(self):
+        return self.portfolio
+
+    def list_active_orders(self):
+        return self.active
+
+    def get_order_status(self, order_id):
+        return self.status
 
 
 class T212CancellationLifecycleTest(unittest.TestCase):
@@ -525,12 +538,76 @@ class T212CancellationLifecycleTest(unittest.TestCase):
         engine._save = MagicMock()
 
         self.assertTrue(engine._place_sell(1.0, 110.0))
-        engine._save.assert_called_once()
+        self.assertEqual(engine._save.call_count, 2)  # pending pre-submit, apoi order id
 
         engine._save.reset_mock()
         order = engine.s["orders"][0]
         self.assertTrue(engine._cancel_specific(order))
         engine._save.assert_called_once()
+
+    def test_live_submit_is_durable_before_external_post(self):
+        client = _CancelClient(True)
+        engine = self._engine(client)
+        snapshots = []
+
+        def save_snapshot():
+            snapshots.append(copy.deepcopy(engine.s))
+
+        engine._save = save_snapshot
+        self.assertTrue(engine._place_sell(1.0, 110.0))
+
+        self.assertGreaterEqual(len(snapshots), 2)
+        self.assertEqual(snapshots[0]["pending_submit"]["side"], "SELL")
+        self.assertEqual(snapshots[0]["orders"], [])
+        self.assertIsNone(engine.s["pending_submit"])
+        self.assertEqual(engine.s["orders"][0]["id"], "NEW-1")
+
+    def test_ambiguous_submit_stays_pending_and_blocks_second_post(self):
+        client = _CancelClient(True)
+        client.market_result = (500, {"error": "gateway timeout"})
+        engine = self._engine(client)
+
+        self.assertTrue(engine._place_sell(1.0, 110.0, kind="SL", market=True))
+        first_intent = dict(engine.s["pending_submit"])
+        self.assertEqual(engine.s["orders"], [])
+
+        self.assertFalse(engine._place_sell(1.0, 109.0, kind="SL", market=True))
+        self.assertEqual(len(client.place_calls), 1)
+        self.assertEqual(engine.s["pending_submit"]["intent_id"], first_intent["intent_id"])
+
+    def test_response_lost_submit_is_recovered_from_unique_active_order(self):
+        client = _CancelClient(True)
+        client.limit_result = (500, {"error": "gateway timeout"})
+        client.portfolio = [{
+            "ticker": "TEST_US_EQ", "quantity": 1.0, "averagePrice": 100.0,
+        }]
+        engine = self._engine(client)
+        engine.s.update({
+            "qty": 1.0, "cost_usd": 100.0, "spent_cash": 100.0,
+        })
+        self.assertTrue(engine._place_sell(1.0, 110.0))
+        client.active = [{
+            "id": "RECOVERED-1", "ticker": "TEST_US_EQ",
+            "quantity": -1.0, "limitPrice": 110.0,
+        }]
+
+        with patch.object(strategy, "notify"):
+            engine._reconcile_real(110.0)
+
+        self.assertIsNone(engine.s["pending_submit"])
+        self.assertEqual(engine.s["orders"][0]["id"], "RECOVERED-1")
+        self.assertEqual(len(client.place_calls), 1)
+
+    def test_two_confirmed_absences_release_ambiguous_submit_for_retry(self):
+        client = _CancelClient(True)
+        client.limit_result = (500, {"error": "gateway timeout"})
+        engine = self._engine(client)
+        engine._place_buy(100.0, 100.0, "ENTRY")
+
+        self.assertEqual(engine._recover_pending_submit(0.0, []), "waiting")
+        self.assertIsNotNone(engine.s["pending_submit"])
+        self.assertEqual(engine._recover_pending_submit(0.0, []), "retryable")
+        self.assertIsNone(engine.s["pending_submit"])
 
     def test_trailing_exit_is_market_and_is_not_replaced_while_pending(self):
         client = _CancelClient(True)

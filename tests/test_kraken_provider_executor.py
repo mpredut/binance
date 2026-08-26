@@ -27,6 +27,22 @@ class FakeClient:
     def query_orders(self, txids):
         return {txids: {"status": "closed", "vol_exec": "2.5", "cost": "150.0", "fee": "0.39"}}
 
+    def open_orders(self):
+        return {
+            "OPEN-1": {
+                "cl_ord_id": "0123456789abcdef0123456789abcdef",
+                "status": "open", "descr": {"pair": "HYPEUSD"},
+            },
+        }
+
+    def closed_orders(self):
+        return {
+            "CLOSED-1": {
+                "cl_ord_id": "fedcba9876543210fedcba9876543210",
+                "status": "closed", "descr": {"pair": "HYPEUSD"},
+            },
+        }
+
     def cancel_order(self, txid):
         self.calls.append(("cancel_order", txid))
         return {"count": 1}
@@ -96,6 +112,20 @@ class KrakenExecutorContractTest(unittest.TestCase):
         self.fake.query_orders = lambda txids: {}      # ordinul nu apare
         with self.assertRaises(ProviderError):
             self.p.order_status("HYPEUSD", "NOPE")
+
+    def test_order_by_client_id_cauta_open_si_closed(self):
+        self.assertEqual(
+            self.p.order_by_client_id(
+                "HYPEUSD", "0123456789abcdef0123456789abcdef"),
+            {"orderId": "OPEN-1", "status": "open"},
+        )
+        self.assertEqual(
+            self.p.order_by_client_id(
+                "HYPEUSD", "fedcba9876543210fedcba9876543210"),
+            {"orderId": "CLOSED-1", "status": "closed"},
+        )
+        self.assertIsNone(
+            self.p.order_by_client_id("HYPEUSD", "0" * 32))
 
     def test_cancel_deleaga(self):
         self.p.cancel_order("HYPEUSD", "OABC-123")

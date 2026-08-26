@@ -237,6 +237,10 @@ class KrakenClient:
     def open_orders(self) -> dict:
         return self._private("OpenOrders").get("open", {})
 
+    def closed_orders(self) -> dict:
+        """Return recent closed orders for deterministic client-ID recovery."""
+        return self._private("ClosedOrders").get("closed", {})
+
 
 # ---------------------------------------------------------------------------
 # Signature self-test using the vector from Kraken documentation; run:

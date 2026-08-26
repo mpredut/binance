@@ -39,6 +39,10 @@ class _Executor:
         self.calls.append(("status", symbol, order_id))
         return self.status
 
+    def order_by_client_id(self, symbol, client_order_id):
+        self.calls.append(("lookup", symbol, client_order_id))
+        return {"orderId": "OID-7", "status": "open"}
+
     def cancel_order(self, symbol, order_id):
         self.calls.append(("cancel", symbol, order_id))
 
@@ -138,6 +142,11 @@ class ExecutionAuditTest(unittest.TestCase):
             "0x0123456789abcdef0123456789abcdef",
         )
         self.assertIsNone(intent_client_order_id("T212", intent))
+
+    def test_order_by_client_id_is_delegated(self):
+        result = self.wrapped.order_by_client_id("ABC", "client-7")
+        self.assertEqual(result["orderId"], "OID-7")
+        self.assertEqual(self.executor.calls[-1], ("lookup", "ABC", "client-7"))
 
 
 if __name__ == "__main__":

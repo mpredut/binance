@@ -369,6 +369,43 @@ class HyperliquidProvider(MarketDataProvider):
                 f"({float(available):.8f} < {required:.8f}) — ordin netrimis"
             )
 
+    def order_by_client_id(self, symbol: str, client_order_id: str):
+        """Recover a Hyperliquid spot order by CLOID when supported by the SDK."""
+        c = self._hl()
+        pair = self._pair()
+        addr = os.environ.get("HL_ACCOUNT_ADDRESS")
+        if c is None or pair is None or not addr:
+            raise ProviderError(
+                "order_by_client_id: client/pereche/adresa indisponibila")
+        try:
+            query = getattr(c.info, "query_order_by_cloid", None)
+            if callable(query):
+                raw = query(addr, str(client_order_id)) or {}
+                payload = raw.get("order") if raw.get("status") == "order" else None
+                order = (payload or {}).get("order") or {}
+                oid = order.get("oid", (payload or {}).get("oid"))
+                if oid is not None:
+                    return {
+                        "orderId": str(oid),
+                        "status": (payload or {}).get("status"),
+                    }
+            for order in c.open_orders(pair) or []:
+                if (str(order.get("cloid") or "").lower()
+                        != str(client_order_id).lower()):
+                    continue
+                oid = order.get("oid")
+                if oid is not None:
+                    return {
+                        "orderId": str(oid),
+                        "status": order.get("status") or "open",
+                    }
+            return None
+        except ProviderError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(
+                f"order_by_client_id({symbol},{client_order_id}): {e}") from e
+
     def order_status(self, symbol: str, order_id: str):
         c = self._hl()
         pair = self._pair()

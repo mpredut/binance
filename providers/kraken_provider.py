@@ -268,6 +268,26 @@ class KrakenProvider(MarketDataProvider):
             fee=float(info.get("fee") or 0.0),
         )
 
+    def order_by_client_id(self, symbol: str, client_order_id: str):
+        """Recover an open or recently terminal Kraken order by ``cl_ord_id``."""
+        wanted = str(client_order_id).lower()
+        try:
+            groups = (self._client().open_orders(), self._client().closed_orders())
+        except Exception as e:  # noqa: BLE001
+            raise ProviderError(
+                f"order_by_client_id({symbol},{client_order_id}): {e}") from e
+        for orders in groups:
+            for order_id, raw in dict(orders or {}).items():
+                if str(raw.get("cl_ord_id") or "").lower() != wanted:
+                    continue
+                descr = raw.get("descr") or {}
+                pair = str(descr.get("pair") or raw.get("pair") or "")
+                if (pair and symbol.upper() not in pair.upper()
+                        and pair.upper() not in symbol.upper()):
+                    continue
+                return {"orderId": str(order_id), "status": raw.get("status")}
+        return None
+
     def cancel_order_by_id(self, symbol: str, order_id: str) -> None:
         """Cancel by id, treating an already closed or missing order as success.
 

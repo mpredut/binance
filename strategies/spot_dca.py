@@ -18,8 +18,12 @@ from typing import Callable
 
 from alertnotifiers import bind_notify
 from botcore import are_close, float_env, log
-from providers.execution_audit import new_intent_id
+from providers.execution_audit import intent_client_order_id
 from providers.strategy_executor import ProviderError, StrategyExecutor
+from providers.tracked_order import (
+    StrategyExecutorLifecycleApi,
+    TrackedOrderLifecycle,
+)
 
 from . import spot_dca_rules as sr
 from .state_store import JsonStateStore
@@ -255,6 +259,7 @@ def _new_state() -> dict:
         "trend_peak": None,       # peak tracked in trend mode
         "trend_confirm_count": 0, # consecutive uptrend bars confirming the signal
         "orders": [],           # {txid, side, vol, price, amount, kind, ts}
+        "pending_intent": None, # durable pre-submit boundary before venue acceptance
     }
 
 
@@ -286,6 +291,7 @@ class Strategy:
         )
         self._state_write_failed = False
         self.s = initial_state if initial_state is not None else self._load()
+        self.s.setdefault("pending_intent", None)
         self._paper_seq = 0
         # Observational adaptive-volatility shadow history stays in memory for sigma.
         # It is rebuilt after restart and never enters persistent state.
@@ -300,6 +306,13 @@ class Strategy:
                 self.ordermin = precision.order_min
         except ProviderError:
             log("  ! nu pot citi precizia perechii — folosesc valori implicite")
+        self._order_lifecycle = TrackedOrderLifecycle(
+            StrategyExecutorLifecycleApi(client),
+            provider_name=self.venue_label,
+            venue=self.venue_label,
+            missing_confirmations=2,
+            retry_on_lookup_error=False,
+        )
 
     def _emit(self, **event) -> None:
         """Send an event through the venue sink or legacy compatibility wrapper."""
@@ -323,6 +336,61 @@ class Strategy:
         self._state_write_failed = True
         if self._store().save(self.s):
             self._state_write_failed = False
+
+    def _persist_pending_intent(self, pending: dict | None) -> None:
+        self.s["pending_intent"] = None if pending is None else dict(pending)
+        self._save()
+        if self._state_write_failed:
+            raise ProviderError("starea intentiei nu a putut fi persistata")
+
+    def _intent_identity(self, side: str, kind: str, vol: float, price: float) -> str:
+        """Stable semantic ID for retries of one rounded strategy instruction."""
+        return (
+            f"spot-dca:{self.venue_label}:{self.pair}:cycle-{self.s.get('cycle', 1)}:"
+            f"{kind}:{side}:{vol:.{self.vol_dec}f}:{price:.{self.price_dec}f}"
+        )
+
+    @staticmethod
+    def _order_from_pending(pending: dict) -> dict:
+        return {
+            "txid": str(pending["order_id"]),
+            "side": str(pending["side"]).lower(),
+            "vol": float(pending["requested_qty"]),
+            "price": float(pending.get("requested_price") or 0.0),
+            "amount": float(pending.get("amount") or 0.0),
+            "kind": pending.get("kind"),
+            "market": bool(pending.get("market")),
+            "intent_id": pending.get("intent_id"),
+            "ts": float(pending.get("created_at") or time.time()),
+        }
+
+    def _adopt_pending_order(self, pending: dict) -> None:
+        order_id = str(pending.get("order_id") or "")
+        if not order_id:
+            return
+        if not any(str(order.get("txid")) == order_id for order in self.s["orders"]):
+            self.s["orders"].append(self._order_from_pending(pending))
+        self.s["pending_intent"] = None
+        self._save()
+
+    def _reconcile_pending_submit(self) -> None:
+        pending = self.s.get("pending_intent")
+        if not pending or self.dry_run:
+            return
+        try:
+            result = self._order_lifecycle.reconcile(
+                pending, persist=self._persist_pending_intent)
+        except (ProviderError, RuntimeError, ValueError) as exc:
+            log(f"  ! [STRAT] intent pending nereconciliat ({exc}) — nu retrimit")
+            return
+        if result.order_known:
+            self._adopt_pending_order(result.intent)
+            log(
+                f"  [STRAT] intent recuperat {result.intent['side']} "
+                f"txid={result.intent['order_id']}"
+            )
+        elif result.outcome in {"absent", "retryable"}:
+            log("  [STRAT] intent absent confirmat — strategia il poate reevalua")
 
     # -- Helpers ---------------------------------------------------------------
     def _avg(self) -> float | None:
@@ -371,6 +439,9 @@ class Strategy:
                                      "vol": vol, "price": price, "amount": amount,
                                      "kind": kind, "market": market, "ts": time.time()})
             return True
+        if self.s.get("pending_intent"):
+            log("  ! [STRAT] exista o intentie pre-submit nereconciliata — nu dublez")
+            return False
         try:
             # Venues that might accept an underfunded BUY and cancel its remainder can
             # reject the intent during preflight before audit/submission.
@@ -380,28 +451,50 @@ class Strategy:
                     self.client, self.pair, side, vol, None if market else price,
                     market=market, kind=kind,
                 )
-            intent_id = new_intent_id(self.venue_label, self.pair, kind)
+            intent_id = self._intent_identity(side, kind, vol, price)
+            client_order_id = intent_client_order_id(self.venue_label, intent_id)
+            if not client_order_id:
+                raise ProviderError(
+                    f"{self.venue_label}: client_order_id indisponibil pentru lifecycle")
+            intent = self._order_lifecycle.new_intent(
+                intent_id=intent_id,
+                client_order_id=client_order_id,
+                symbol=self.pair,
+                side=side,
+                requested_qty=vol,
+                requested_price=price,
+                kind=kind,
+                metadata={"amount": amount, "market": market},
+            )
             submit_with_intent = getattr(type(self.client), "submit_order_with_intent", None)
-            if callable(submit_with_intent):
-                txid = submit_with_intent(
-                    self.client, intent_id, self.pair, side, vol, None if market else price,
-                    market=market, kind=kind,
-                    reference_price=price if market else None,
-                )
-            else:
-                txid = self.client.submit_order(
+            def submit():
+                if callable(submit_with_intent):
+                    return submit_with_intent(
+                        self.client, intent_id, self.pair, side, vol,
+                        None if market else price,
+                        market=market, kind=kind,
+                        reference_price=price if market else None,
+                        client_order_id=client_order_id,
+                    )
+                return self.client.submit_order(
                     self.pair, side, vol, None if market else price,
                     market=market, kind=kind,
+                    client_order_id=client_order_id,
                 )
+
+            tracked = self._order_lifecycle.submit(
+                intent, persist=self._persist_pending_intent, submit=submit)
+            if not tracked.order_known:
+                log(
+                    f"  ! [STRAT] {side} {kind} submit ambiguu; "
+                    "intentia ramane persistata pentru reconciliere"
+                )
+                return False
+            txid = str(tracked.intent["order_id"])
             log(f"  [STRAT] {side.upper()} {kind} plasat txid={txid} {vol} @ {price}")
-            self.s["orders"].append({"txid": txid, "side": side, "vol": vol, "price": price,
-                                     "amount": amount, "kind": kind, "market": market,
-                                     "intent_id": intent_id, "ts": time.time()})
-            # Minimize the crash window after venue acceptance. Persist an accepted live
-            # order ID before making any further decision.
-            self._save()
+            self._adopt_pending_order(tracked.intent)
             return True
-        except ProviderError as e:
+        except (ProviderError, RuntimeError, ValueError) as e:
             log(f"  ! [STRAT] {side} {kind} esuat: {e}")
             return False
 
@@ -459,6 +552,7 @@ class Strategy:
 
     # -- Reconciliation --------------------------------------------------------
     def reconcile(self, price: float) -> None:
+        self._reconcile_pending_submit()
         for side in ("buy", "sell"):
             for o in [x for x in self.s["orders"] if x["side"] == side]:
                 if o not in self.s["orders"]:
@@ -967,6 +1061,9 @@ class Strategy:
         return False
 
     def step(self, price: float, timestamp: float | None = None) -> None:
+        if self.s.get("pending_intent"):
+            log("  [STRAT] intentie pre-submit in reconciliere — aman deciziile noi")
+            return
         held = self.s["qty"]
         entry_px = sr.entry_price(price, self.p.entry_discount_pct)   # = price*(1 - disc%)
         # Live uses wall time while replay injects bar time. Without this distinction, a

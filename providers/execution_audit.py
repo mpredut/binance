@@ -232,6 +232,13 @@ class AuditedStrategyExecutor:
             self._intent(symbol, order_id), symbol, order_id,
         )
 
+    def order_by_client_id(self, symbol: str, client_order_id: str):
+        """Delegate deterministic recovery without inventing audit acceptance."""
+        lookup = getattr(self._executor, "order_by_client_id", None)
+        if not callable(lookup):
+            raise RuntimeError(f"{self.name}: order_by_client_id is unsupported")
+        return lookup(symbol, str(client_order_id))
+
     def get_current_price(self, symbol: str):
         return self._executor.get_current_price(symbol)
 

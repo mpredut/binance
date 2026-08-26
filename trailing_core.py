@@ -23,8 +23,8 @@ ADAPTER contract (duck typing; see the two adapter classes):
   free_qty(asset) -> float         # FREE quantity to protect
   price(pair)     -> float | None
   trend(pair)     -> float         # >0 up, <0 down, 0 neutral/unknown (filters are no-op at 0)
-  execute_sell(key, asset, pair, qty, price, peak, trail) -> bool  # place+log+notify; True=success
-  execute_rebuy(key, asset, pair, qty, price, rb)         -> bool  # same; False preserves re-buy for retry
+  execute_sell(..., persist) / execute_rebuy(..., persist) -> TrackedOrderResult
+  reconcile_pending(pending, persist) -> TrackedOrderResult
   log_dry_sell / log_dry_rebuy / log_hold / log_skip_rebuy_trend /
   log_skip_sell_trend / log_item_error / log_tick_error            # logging only (provider-specific wording)
 """
@@ -70,7 +70,7 @@ class TrailingCore:
         except (OSError, ValueError):
             return {}
 
-    def save(self, state: dict) -> None:
+    def save(self, state: dict) -> bool:
         try:
             d = os.path.dirname(self.state_file)
             if d:
@@ -78,12 +78,68 @@ class TrailingCore:
             tmp = self.state_file + ".tmp"
             with open(tmp, "w") as f:
                 json.dump(state, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(tmp, self.state_file)
+            return True
         except OSError as e:
             self.log(f"  ! [TRAIL] nu pot salva starea: {e}")
+            return False
+
+    def _pending_persist(self, state: dict, st: dict):
+        """Return a durability callback bound to one asset's full state."""
+        def persist(pending):
+            if pending is None:
+                st.pop("pending_order", None)
+            else:
+                st["pending_order"] = dict(pending)
+            if not self.save(state):
+                raise RuntimeError("starea trailing pending nu a putut fi persistata")
+        return persist
+
+    def _finish_pending(self, st: dict, result, price: float) -> None:
+        """Apply one terminal fill exactly once, then acknowledge pending state."""
+        status = result.status
+        pending = result.intent
+        action = str(pending.get("action") or "").upper()
+        filled = float(status.filled_qty or 0.0)
+        avg = (float(status.cost) / filled
+               if filled > 0 and float(status.cost or 0.0) > 0 else price)
+        if action == "SELL" and filled > 0:
+            st["peak"] = avg
+            if self.rebuy_enabled:
+                st["rebuy"] = {"qty": filled, "sell_price": avg, "low": avg}
+        elif action == "REBUY" and filled > 0:
+            rb = st.get("rebuy") or {}
+            remaining = max(0.0, float(rb.get("qty") or 0.0) - filled)
+            if remaining > 1e-8:
+                rb["qty"] = remaining
+                rb["low"] = min(float(rb.get("low") or avg), avg)
+                st["rebuy"] = rb
+            else:
+                st.pop("rebuy", None)
+            if self.min_profit_pct > 0:
+                st["warmup_at"] = avg * (1 + self.min_profit_pct / 100.0)
+        st.pop("pending_order", None)
+
+    def _reconcile_pending(self, state: dict, st: dict, price: float) -> bool:
+        """Return true when this tick is consumed by a persisted order lifecycle."""
+        pending = st.get("pending_order")
+        if not pending:
+            return False
+        persist = self._pending_persist(state, st)
+        result = self.a.reconcile_pending(pending, persist)
+        if result.outcome == "terminal":
+            self._finish_pending(st, result, price)
+            if not self.save(state):
+                raise RuntimeError("statusul terminal trailing nu a putut fi salvat")
+        # active waits; absent/retryable were already cleared by lifecycle and the
+        # strategy may recreate the same deterministic intent on a later tick.
+        return True
 
     # -- re-buy after a crash sale --------------------------------------------
-    def _handle_rebuy(self, key, asset, pair, st: dict, price: float) -> None:
+    def _handle_rebuy(self, key, asset, pair, st: dict, price: float,
+                      state: dict) -> None:
         """Re-buy after a crash stop-loss once price bounces rebuy_bounce_pct%
         from the post-sale low, confirming the fall has stopped before entry."""
         rb = st.get("rebuy")
@@ -100,8 +156,11 @@ class TrailingCore:
             st.pop("rebuy", None)
             return
         if self.enabled and qty * price >= self.min_notional:
-            if not self.a.execute_rebuy(key, asset, pair, qty, price, rb):
-                return                                        # failed: retain re-buy state and retry next time
+            self.a.execute_rebuy(
+                key, asset, pair, qty, price, rb,
+                self._pending_persist(state, st),
+            )
+            return                                            # terminal truth is applied on a later tick
         else:
             self.a.log_dry_rebuy(key, asset, pair, qty, price, rb)
         st.pop("rebuy", None)                                 # one tranche; complete
@@ -118,8 +177,12 @@ class TrailingCore:
         st = state.setdefault(key, {"peak": price})
         if is_new and self.min_profit_pct > 0:
             st["warmup_at"] = price * (1 + self.min_profit_pct / 100.0)  # first tick: set activation threshold
+        if self._reconcile_pending(state, st, price):
+            return
         if self.rebuy_enabled and st.get("rebuy"):            # handle pending re-buy BEFORE notional check (free~0 after sale)
-            self._handle_rebuy(key, asset, pair, st, price)
+            self._handle_rebuy(key, asset, pair, st, price, state)
+            if st.get("pending_order"):
+                return
         if free * price < self.min_notional:
             return                                            # nothing to protect
         if "warmup_at" in st:
@@ -138,10 +201,10 @@ class TrailingCore:
                 return
             sell_qty = round(free * self.sell_fraction, 8)
             if self.enabled and sell_qty * price >= self.min_notional:
-                if self.a.execute_sell(key, asset, pair, sell_qty, price, st["peak"], trail):
-                    st["peak"] = price                        # re-arm from the current price
-                    if self.rebuy_enabled:                    # arm re-buy for a bounce from the low
-                        st["rebuy"] = {"qty": sell_qty, "sell_price": price, "low": price}
+                self.a.execute_sell(
+                    key, asset, pair, sell_qty, price, st["peak"], trail,
+                    self._pending_persist(state, st),
+                )
             else:
                 self.a.log_dry_sell(key, asset, pair, sell_qty, price, st["peak"], trail)
         else:
