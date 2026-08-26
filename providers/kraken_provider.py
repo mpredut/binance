@@ -33,6 +33,26 @@ _KRAKEN_CACHE_FILE = os.path.join(os.path.dirname(_KRAKEN_DIR), "cachedb", "cach
 _CACHE_MAX_STALE_S = 30.0   # Beyond this, assume cachemanager stopped and use TradesHistory.
 
 
+def _kraken_pair_key(value: str) -> str:
+    """Canonicalize common Kraken legacy pair wrappers for strict comparison."""
+    key = "".join(ch for ch in str(value or "").upper() if ch.isalnum())
+    quote = next((candidate for candidate in (
+        "USDC", "USDT", "USD", "EUR", "GBP", "CAD", "JPY", "AUD",
+        "BTC", "XBT", "ETH",
+    ) if key.endswith(candidate) or key.endswith("Z" + candidate)), None)
+    if quote is None:
+        return key.replace("XBT", "BTC")
+    suffix = "Z" + quote if key.endswith("Z" + quote) else quote
+    base = key[:-len(suffix)]
+    if base.startswith("X") and len(base) > 3:
+        base = base[1:]
+    return (base + quote).replace("XBT", "BTC")
+
+
+def _kraken_pair_matches(expected: str, actual: str) -> bool:
+    return bool(actual) and _kraken_pair_key(expected) == _kraken_pair_key(actual)
+
+
 def _live() -> bool:
     # os.environ takes precedence, with kraken/.env as the API-key-style fallback.
     v = os.environ.get("KRAKEN_LIVE_ORDERS")
@@ -57,7 +77,7 @@ class KrakenProvider(MarketDataProvider):
             lookup_by_client_order_id=True,
             status_by_order_id=True,
             cancel_by_order_id=True,
-            list_open_orders=False,
+            list_open_orders=True,
         )
 
     def supports_symbol(self, symbol: str) -> bool:
@@ -183,6 +203,59 @@ class KrakenProvider(MarketDataProvider):
             print(f"[Kraken] get_orders {symbol}: {e}")
             return []
 
+    def open_orders(self, symbol: str) -> List[dict]:
+        """Return a strict Binance-shaped snapshot of active Kraken orders."""
+        try:
+            raw_orders = self._client().open_orders()
+        except Exception as exc:  # noqa: BLE001
+            raise ProviderError(f"open_orders({symbol}): {exc}") from exc
+        if not isinstance(raw_orders, dict):
+            raise ProviderError(
+                f"open_orders({symbol}): payload Kraken invalid")
+
+        normalized = []
+        for order_id, raw in raw_orders.items():
+            if not isinstance(raw, dict):
+                raise ProviderError(
+                    f"open_orders({symbol}): ordin {order_id} invalid")
+            description = raw.get("descr") or {}
+            if not isinstance(description, dict):
+                raise ProviderError(
+                    f"open_orders({symbol}): descriere {order_id} invalida")
+            pair = str(description.get("pair") or raw.get("pair") or "")
+            if not pair:
+                raise ProviderError(
+                    f"open_orders({symbol}): ordin {order_id} fara pair")
+            if not _kraken_pair_matches(symbol, pair):
+                continue
+            side = str(description.get("type") or raw.get("type") or "").upper()
+            if side not in {"BUY", "SELL"}:
+                raise ProviderError(
+                    f"open_orders({symbol}): side invalid pentru {order_id}")
+            try:
+                price = float(description.get("price", raw.get("price", 0.0)) or 0.0)
+                original_qty = float(raw.get("vol") or 0.0)
+                executed_qty = float(raw.get("vol_exec") or 0.0)
+            except (TypeError, ValueError, OverflowError) as exc:
+                raise ProviderError(
+                    f"open_orders({symbol}): valori invalide pentru {order_id}") from exc
+            if (not all(math.isfinite(value) for value in (
+                    price, original_qty, executed_qty))
+                    or price < 0 or original_qty <= 0 or executed_qty < 0
+                    or executed_qty > original_qty):
+                raise ProviderError(
+                    f"open_orders({symbol}): cantitati/pret invalide pentru {order_id}")
+            normalized.append({
+                "orderId": str(order_id),
+                "clientOrderId": raw.get("cl_ord_id"),
+                "side": side,
+                "price": price,
+                "origQty": original_qty,
+                "executedQty": executed_qty,
+                "status": str(raw.get("status") or "open").upper(),
+            })
+        return normalized
+
     def _fills_from_cache(self, symbol: str):
         """Read symbol fills from the shared cache, or return None for API fallback."""
         try:
@@ -296,8 +369,7 @@ class KrakenProvider(MarketDataProvider):
                     continue
                 descr = raw.get("descr") or {}
                 pair = str(descr.get("pair") or raw.get("pair") or "")
-                if (pair and symbol.upper() not in pair.upper()
-                        and pair.upper() not in symbol.upper()):
+                if pair and not _kraken_pair_matches(symbol, pair):
                     continue
                 return {"orderId": str(order_id), "status": raw.get("status")}
         return None

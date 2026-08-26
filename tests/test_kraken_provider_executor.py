@@ -31,7 +31,17 @@ class FakeClient:
         return {
             "OPEN-1": {
                 "cl_ord_id": "0123456789abcdef0123456789abcdef",
-                "status": "open", "descr": {"pair": "HYPEUSD"},
+                "status": "open", "vol": "2.5", "vol_exec": "0.5",
+                "descr": {
+                    "pair": "HYPEUSD", "type": "buy", "price": "60.25",
+                },
+            },
+            "OTHER-1": {
+                "cl_ord_id": "11111111111111111111111111111111",
+                "status": "open", "vol": "1", "vol_exec": "0",
+                "descr": {
+                    "pair": "ADAUSD", "type": "sell", "price": "1.25",
+                },
             },
         }
 
@@ -126,6 +136,24 @@ class KrakenExecutorContractTest(unittest.TestCase):
         )
         self.assertIsNone(
             self.p.order_by_client_id("HYPEUSD", "0" * 32))
+
+    def test_open_orders_normalizeaza_si_filtreaza_simbolul(self):
+        self.assertEqual(self.p.open_orders("HYPEUSD"), [{
+            "orderId": "OPEN-1",
+            "clientOrderId": "0123456789abcdef0123456789abcdef",
+            "side": "BUY",
+            "price": 60.25,
+            "origQty": 2.5,
+            "executedQty": 0.5,
+            "status": "OPEN",
+        }])
+
+    def test_open_orders_payload_ambiguu_esueaza_inchis(self):
+        self.fake.open_orders = lambda: {
+            "BROKEN": {"status": "open", "vol": "1", "vol_exec": "0"},
+        }
+        with self.assertRaisesRegex(ProviderError, "fara pair"):
+            self.p.open_orders("HYPEUSD")
 
     def test_cancel_deleaga(self):
         self.p.cancel_order("HYPEUSD", "OABC-123")

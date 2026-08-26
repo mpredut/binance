@@ -76,7 +76,7 @@ strict operațiile normalizate disponibile; lipsa declarației înseamnă lipsă
 | Venue | lookup client ID | status order ID | cancel order ID | listă open orders |
 |---|---:|---:|---:|---:|
 | Binance | da | da | da | da |
-| Kraken | da | da | da | nu, încă nu prin adaptorul comun |
+| Kraken | da | da | da | da |
 | Hyperliquid spot | da | da | da | da |
 | Trading212 | nu | da | da | nu, reconcilierea rămâne order+portfolio |
 
