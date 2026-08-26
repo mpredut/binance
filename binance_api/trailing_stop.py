@@ -2,10 +2,9 @@
 """
 trailing_stop.py — per-coin trailing stop for Binance holdings.
 
-Why it exists: assetguardian.sell_all_assets() triggers correctly but calls
-place_safe_order(force=False), which passes through apply_weight_limit. During an
-uptrend the counter-trend weight is 0.02, reducing the order to zero and producing
-"Orders sent: 0". The protection mechanism therefore sells nothing. The trailing stop:
+Why it exists: the historical AssetGuardian growth exit passed through
+place_safe_order(force=False) and apply_weight_limit. During an uptrend the
+counter-trend weight could reduce the order to zero. The trailing stop instead:
   * holds the position while price rises and tracks the peak;
   * sells only when price falls trail% from the peak, protecting realized gains;
   * uses force=True to bypass weighting, which would otherwise zero the order.

@@ -23,10 +23,10 @@ TARGET_GROWTH_PERCENT = float(os.environ.get("AG_TARGET_GROWTH_PCT", "100.0"))
 TARGET_DROP_PERCENT = float(os.environ.get("AG_TARGET_DROP_PCT", "7.0"))
 ASSET_REFERENCE_MINUTES_BACK_DEFAULT = float(os.environ.get("AG_REFERENCE_MINUTES_BACK", str(24 * 60)))  # 24 hours.
 
-BUY_SYMBOL_DEFAULT = sym.symbols[0] if sym.symbols else "BTCUSDC"
 BUY_USE_CASH_RATIO = float(os.environ.get("AG_BUY_USE_CASH_RATIO", "0.995"))
 BUY_TIERS_RAW = os.environ.get(
     "AG_BUY_TIERS", f"{TARGET_DROP_PERCENT}:0.35,10:0.35,14:0.30")
+TRACKED_SYMBOLS_RAW = os.environ.get("AG_SYMBOLS", ",".join(sym.symbols))
 RECOVERY_RESET_PERCENT = float(os.environ.get("AG_RECOVERY_RESET_PCT", "3.0"))
 NEAR_TRIGGER_SECONDS = float(os.environ.get("AG_NEAR_TRIGGER_SEC", "30"))
 ACTIVE_TRIGGER_SECONDS = float(os.environ.get("AG_ACTIVE_TRIGGER_SEC", "15"))
@@ -42,9 +42,23 @@ def _parse_buy_tiers(raw):
     return tuple(tiers)
 
 
+def _parse_symbols(raw):
+    return tuple(dict.fromkeys(
+        item.strip().upper() for item in str(raw).split(",") if item.strip()))
+
+
 BUY_TIERS = _parse_buy_tiers(BUY_TIERS_RAW)
+TRACKED_SYMBOLS = _parse_symbols(TRACKED_SYMBOLS_RAW)
+LEGACY_BUY_SYMBOL_DEFAULT = sym.symbols[0] if sym.symbols else "BTCUSDC"
+# Backward-compatible default for direct/manual callers.  The live evaluator
+# always passes the symbol whose own drawdown triggered the order.
+BUY_SYMBOL_DEFAULT = LEGACY_BUY_SYMBOL_DEFAULT
 STATE = AssetGuardianState()
-_last_evaluation = {"drawdown": None, "pending_tier": False}
+_last_evaluation = {
+    symbol: {"drawdown": None, "pending_tier": False}
+    for symbol in TRACKED_SYMBOLS
+}
+_local_price_samples = {symbol: [] for symbol in TRACKED_SYMBOLS}
 
 
 def _validate_config():
@@ -68,6 +82,11 @@ def _validate_config():
         raise ValueError("AG_BUY_TIERS contine praguri duplicate")
     if sum(allocation for _, allocation in BUY_TIERS) > 1.0 + 1e-12:
         raise ValueError("suma ponderilor AG_BUY_TIERS depaseste 1")
+    if not TRACKED_SYMBOLS:
+        raise ValueError("AG_SYMBOLS trebuie sa contina cel putin un simbol")
+    unsupported = [symbol for symbol in TRACKED_SYMBOLS if symbol not in sym.symbols]
+    if unsupported:
+        raise ValueError(f"AG_SYMBOLS contine simboluri nepermise: {unsupported}")
     for value, name in (
             (RECOVERY_RESET_PERCENT, "AG_RECOVERY_RESET_PCT"),
             (NEAR_TRIGGER_SECONDS, "AG_NEAR_TRIGGER_SEC"),
@@ -90,168 +109,117 @@ def _finite_float(raw, *, positive=False):
     return value
 
 
-def _row_value_usdc(row):
-    """Return normalized USDC value, accepting the legacy USDT key on reads."""
-    raw = row.get("total_value_usdc")
-    if raw is None:
-        raw = row.get("total_value_usdt")
-    return _finite_float(raw, positive=True)
+def _price_row(row):
+    """Normalize a Price24 row to ``(timestamp_seconds, positive_price)``."""
+    if isinstance(row, dict):
+        raw_ts = row.get("timestamp")
+        raw_price = row.get("price")
+    elif isinstance(row, (list, tuple)) and len(row) >= 2:
+        raw_ts, raw_price = row[0], row[1]
+    else:
+        return None
+    timestamp = _finite_float(raw_ts, positive=True)
+    price = _finite_float(raw_price, positive=True)
+    if timestamp is None or price is None:
+        return None
+    if timestamp > 100_000_000_000:  # Price24 persists Binance timestamps in ms.
+        timestamp /= 1000.0
+    return timestamp, price
 
 
-def _row_timestamp(row):
-    return _finite_float(row.get("timestamp"), positive=True)
-
-def _read_cache_rows():
+def _read_symbol_price_rows(symbol):
+    """Copy one symbol's shared 24h price history under the manager lock."""
     try:
-        manager = cm.get_cache_manager("AssetValue")
-        manager.enable_save_state_to_file()
-        # Read manager memory because its file may lag. Copy under lock for a brief,
-        # coherent view while CacheAssetValueManager may append concurrently.
+        managers = cm.get_cache_manager("Price24", symbols=list(TRACKED_SYMBOLS))
+        manager = managers.get(symbol) if isinstance(managers, dict) else None
+        if manager is None:
+            print(f"ERROR Price24 manager missing for {symbol}")
+            return []
         with manager.lock:
-            rows = list(manager.cache.get("TOTAL", []))
-        print(f"[DEBUG] cache rows loaded: {len(rows)}")
-        #if rows:
-            #print("[DEBUG] dump cache TOTAL rows:")
-            #for idx, row in enumerate(rows, start=1):
-            #    print(f"  [{idx}] {row}")
+            rows = list(manager.cache.get(symbol, []))
+        print(f"[DEBUG] {symbol} Price24 rows loaded: {len(rows)}")
         return rows
     except Exception as e:
-        print(f"ERROR reading AssetValue cache via cacheManager: {e}")
+        print(f"ERROR reading Price24 cache for {symbol}: {e}")
         return []
 
 
-def _get_window_extrema_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT):
-    rows = _read_cache_rows()
-    if not rows:
-        print("[DEBUG] no rows available in cache TOTAL.")
-        return None
-
+def _get_symbol_window_extrema(symbol, current_price,
+                               minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT):
+    """Return validated per-symbol price minimum/maximum for the rolling window."""
     minutes_back = _finite_float(minutes_back, positive=True)
-    if minutes_back is None:
-        print(" Invalid cache window; skip evaluation.")
+    current_price = _finite_float(current_price, positive=True)
+    if minutes_back is None or current_price is None:
+        print(f"[{symbol}] Invalid price/cache window; skip evaluation.")
         return None
-    now_ts = int(time.time())
-    target_ts = now_ts - int(minutes_back * 60)
-    print(f"[DEBUG] window start for last {minutes_back}m: {target_ts}")
+    now_ts = float(time.time())
+    target_ts = now_ts - minutes_back * 60.0
 
-    # Use every record from the last ``minutes_back`` minutes.
-    window_rows = [
-        r for r in rows
-        if isinstance(r, dict)
-        and _row_timestamp(r) is not None
-        and target_ts <= _row_timestamp(r) <= now_ts
-        and _row_value_usdc(r) is not None
-    ]
-    print(f"[DEBUG] candidate rows in window: {len(window_rows)}")
-    if not window_rows:
-        return None
+    local = _local_price_samples.setdefault(symbol, [])
+    local.append([now_ts, current_price])
+    local[:] = [row for row in local
+                if (parsed := _price_row(row)) is not None
+                and target_ts <= parsed[0] <= now_ts]
 
-    # Print only one row per hour to limit output volume.
-    if window_rows:
-        print("[DEBUG] dump cache TOTAL rows:")
-
-    last_printed_ts = None
-    for idx, row in enumerate(window_rows, start=1):
-        current_ts = _row_timestamp(row)
-
-        # Always display the first row.
-        if last_printed_ts is None:
-            print(f"  [{idx}] {row}")
-            last_printed_ts = current_ts
+    normalized = []
+    seen = set()
+    for raw in _read_symbol_price_rows(symbol) + list(local):
+        parsed = _price_row(raw)
+        if parsed is None:
             continue
+        timestamp, price = parsed
+        if not target_ts <= timestamp <= now_ts:
+            continue
+        key = (timestamp, price)
+        if key not in seen:
+            seen.add(key)
+            normalized.append({"timestamp": timestamp, "price": price})
 
-        # Then display only after at least one hour.
-        if current_ts - last_printed_ts >= 3600:
-            print(f"  [{idx}] {row}")
-            last_printed_ts = current_ts
-
-
-    # Measure profit from the minimum and drawdown from the maximum.
-    window_rows = sorted(window_rows, key=_row_timestamp)
-    minimum = min(window_rows, key=_row_value_usdc)
-    maximum = max(window_rows, key=_row_value_usdc)
-    print(f"[DEBUG] chosen MIN: {minimum}")
-    print(f"[DEBUG] chosen MAX: {maximum}")
+    print(f"[DEBUG] {symbol} candidate price rows: {len(normalized)}")
+    if len(normalized) < 2:
+        print(f"[{symbol}] Insufficient per-asset price baseline; skip evaluation.")
+        return None
+    minimum = min(normalized, key=lambda row: row["price"])
+    maximum = max(normalized, key=lambda row: row["price"])
+    print(f"[DEBUG] {symbol} chosen MIN/MAX: {minimum}/{maximum}")
     return minimum, maximum
 
 
-def _get_value_minutes_ago_from_cache(minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT):
-    """Preserve legacy consumers by returning the window minimum."""
-    extrema = _get_window_extrema_from_cache(minutes_back)
-    return extrema[0] if extrema else None
-
-
-def _get_sell_symbol_for_asset(asset):
-    # The operational Binance account uses USDC exclusively as quote/cash.
-    candidate = f"{asset}USDC"
-    return candidate if candidate in sym.symbols else None
-
-
-def sell_all_assets():
-    balances = api.get_account_assets_balances()
-    if not balances:
-       print("No balances available for selling.")
-       return False
-        
-    print(f"[DEBUG] balances fetched: {len(balances)}")
-  
-    # Extract only base assets from configured symbols, for example BTC from BTCUSDC.
-    tracked_assets = {resolve_assets(s)[0] for s in sym.symbols}
-    
-    excluded_assets = {"USDC"}
-    sell_count = 0
-
-    for bal in balances:
-        if not isinstance(bal, dict):
-            print("[DEBUG] skip malformed non-dict balance row")
-            continue
-        asset = bal.get("asset")        
-        if asset not in tracked_assets:
-            #print(f"[DEBUG] skip {asset}: not in sym.symbols")
-            continue
-
-        qty = _finite_float(bal.get("free", 0.0))
-        total_qty = _finite_float(bal.get("total", 0.0))
-        locked_qty = _finite_float(bal.get("locked", 0.0))
-
-        if qty is None or total_qty is None or locked_qty is None:
-            print(f"[DEBUG] skip malformed balance row for asset={asset}")
-            continue
-
-        print(
-            f"[DEBUG] analyze asset={asset}, free={qty}, "
-            f"locked={locked_qty}, total={total_qty}"
+def sell_asset(symbol, current_price=None):
+    """Sell only the free balance belonging to the triggered symbol."""
+    try:
+        base_asset, _ = resolve_assets(symbol)
+        provider = mkt.provider_by_name("binance")
+        if provider is None:
+            print(f"[{symbol}] Binance provider unavailable; skip SELL fail-closed.")
+            return False
+        qty = _finite_float(provider.free_balance(base_asset), positive=True)
+        price = _finite_float(
+            current_price if current_price is not None else api.get_current_price(symbol),
+            positive=True,
         )
-
-        if asset in excluded_assets:
-            print(f"[DEBUG] skip {asset}: excluded stable asset")
-            continue
-        if qty <= 0:
-            print(f"[DEBUG] skip {asset}: free qty <= 0")
-            continue
-
-        sell_symbol = _get_sell_symbol_for_asset(asset)
-        if not sell_symbol:
-            print(f" Skip {asset}: no supported sell pair in symbols.py")
-            continue
-        print(f"[DEBUG] selected sell symbol for {asset}: {sell_symbol}")
-
-        try:
-            current_price = api.get_current_price(sell_symbol)
-            order = mkt.place(
-                sell_symbol, "SELL", current_price, qty,
-                force=False, smart=False, caller_owns_retry=True,
-                motivation="assetguardian_growth_exit")
-            if order:
-                sell_count += 1
-                print(f" SELL safe-order sent: {sell_symbol} qty={qty}")
-            else:
-                print(f" SELL safe-order failed: {sell_symbol} qty={qty}")
-        except Exception as e:
-            print(f"ERROR selling {sell_symbol}: {e}")
-
-    print(f" Finished sell_all_assets. Orders sent: {sell_count}")
-    return sell_count > 0
+    except Exception as e:
+        print(f"ERROR preparing SELL for {symbol}: {e}")
+        return False
+    if qty is None:
+        print(f"[{symbol}] No valid free {base_asset} balance; skip SELL.")
+        return False
+    if price is None:
+        print(f"[{symbol}] Invalid current price; skip SELL.")
+        return False
+    try:
+        order = mkt.place(
+            symbol, "SELL", price, qty,
+            force=False, smart=False, caller_owns_retry=True,
+            motivation="assetguardian_growth_exit")
+        if order:
+            print(f" SELL safe-order sent: {symbol} qty={qty}")
+            return True
+        print(f" SELL safe-order failed: {symbol} qty={qty}")
+        return False
+    except Exception as e:
+        print(f"ERROR selling {symbol}: {e}")
+        return False
 
 
 def buy_with_all_cash(buy_symbol=BUY_SYMBOL_DEFAULT, cash_ratio=BUY_USE_CASH_RATIO,
@@ -312,55 +280,6 @@ def buy_with_all_cash(buy_symbol=BUY_SYMBOL_DEFAULT, cash_ratio=BUY_USE_CASH_RAT
         return False
 
 
-def _campaign_tier(drawdown_abs, maximum_row, free_cash):
-    """Select the first crossed but incomplete tier in the current campaign."""
-    state = STATE.load()
-    if drawdown_abs < RECOVERY_RESET_PERCENT:
-        if state:
-            STATE.save({})
-        return None, {}
-
-    peak_value = _row_value_usdc(maximum_row)
-    peak_ts = _row_timestamp(maximum_row)
-    stored_peak = _finite_float(state.get("peak_value"), positive=True)
-    if not state or stored_peak is None or peak_value > stored_peak:
-        state = {
-            "peak_value": peak_value,
-            "peak_ts": peak_ts,
-            "initial_cash": free_cash,
-            "completed_tiers": [],
-        }
-        STATE.save(state)
-
-    completed = _completed_tier_values(state)
-    for threshold, allocation in BUY_TIERS:
-        if drawdown_abs >= threshold and threshold not in completed:
-            return (threshold, allocation), state
-    return None, state
-
-
-def _complete_campaign_tier(state, threshold):
-    completed = _completed_tier_values(state)
-    completed.add(float(threshold))
-    state["completed_tiers"] = sorted(completed)
-    STATE.save(state)
-
-
-def _next_check_seconds():
-    drawdown = _last_evaluation.get("drawdown")
-    if drawdown is None:
-        return CHECK_INTERVAL_SECONDS
-    if _last_evaluation.get("pending_tier"):
-        return min(CHECK_INTERVAL_SECONDS, ACTIVE_TRIGGER_SECONDS)
-    completed = _completed_tier_values(STATE.load())
-    next_threshold = next((threshold for threshold, _ in BUY_TIERS
-                           if threshold not in completed), None)
-    if (next_threshold is not None
-            and next_threshold - max(0.0, -drawdown) <= NEAR_TRIGGER_DISTANCE_PCT):
-        return min(CHECK_INTERVAL_SECONDS, NEAR_TRIGGER_SECONDS)
-    return CHECK_INTERVAL_SECONDS
-
-
 def _completed_tier_values(state):
     completed = set()
     for raw in state.get("completed_tiers", []):
@@ -370,93 +289,214 @@ def _completed_tier_values(state):
     return completed
 
 
-def evaluate_and_maybe_sell_or_buy(
-    threshold_percent=TARGET_GROWTH_PERCENT,
-    drop_percent=TARGET_DROP_PERCENT,
-    minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT,
-    buy_symbol=BUY_SYMBOL_DEFAULT,
-):
-    _last_evaluation.update(drawdown=None, pending_tier=False)
+def _load_state_root():
+    """Load v2 per-symbol state and map legacy global campaigns to BTC only."""
+    raw = STATE.load()
+    if not isinstance(raw, dict):
+        raw = {}
+    symbol_rows = raw.get("symbols")
+    if isinstance(symbol_rows, dict):
+        return {
+            "version": 2,
+            "symbols": {
+                str(symbol): dict(value)
+                for symbol, value in symbol_rows.items()
+                if isinstance(value, dict)
+            },
+        }
+    legacy_keys = {"peak_value", "peak_ts", "initial_cash", "completed_tiers"}
+    if legacy_keys.intersection(raw):
+        return {
+            "version": 2,
+            "symbols": {LEGACY_BUY_SYMBOL_DEFAULT: dict(raw)},
+        }
+    return {"version": 2, "symbols": {}}
+
+
+def _symbol_campaign(symbol):
+    return dict(_load_state_root()["symbols"].get(symbol, {}))
+
+
+def _save_symbol_campaign(symbol, campaign):
+    root = _load_state_root()
+    symbols_state = dict(root["symbols"])
+    if campaign:
+        symbols_state[symbol] = dict(campaign)
+    else:
+        symbols_state.pop(symbol, None)
+    STATE.save({"version": 2, "symbols": symbols_state})
+
+
+def _campaign_tier(symbol, drawdown_abs, maximum_row, free_cash):
+    """Select one crossed, incomplete BUY tier for one symbol campaign."""
+    state = _symbol_campaign(symbol)
+    if drawdown_abs < RECOVERY_RESET_PERCENT:
+        if state:
+            _save_symbol_campaign(symbol, {})
+        return None, {}
+
+    peak_price = _finite_float(maximum_row.get("price"), positive=True)
+    peak_ts = _finite_float(maximum_row.get("timestamp"), positive=True)
+    stored_peak = _finite_float(state.get("peak_price"), positive=True)
+    if (peak_price is None or peak_ts is None
+            or _finite_float(free_cash, positive=True) is None):
+        return None, state
+    if not state:
+        state = {
+            "peak_price": peak_price,
+            "peak_ts": peak_ts,
+            "initial_cash": free_cash,
+            "completed_tiers": [],
+        }
+        _save_symbol_campaign(symbol, state)
+    elif stored_peak is None:
+        # A legacy global campaign has no meaningful per-asset peak. Preserve
+        # its completed tiers so migration cannot repeat an already accepted
+        # order, then attach the first valid per-asset peak conservatively.
+        state = dict(state)
+        state["peak_price"] = peak_price
+        state["peak_ts"] = peak_ts
+        if _finite_float(state.get("initial_cash"), positive=True) is None:
+            state["initial_cash"] = free_cash
+        state["completed_tiers"] = sorted(_completed_tier_values(state))
+        _save_symbol_campaign(symbol, state)
+    elif peak_price > stored_peak:
+        # A higher peak within the same unrecovered campaign changes the
+        # reference, but must never clear completed tiers or replenish budget.
+        state = dict(state)
+        state["peak_price"] = peak_price
+        state["peak_ts"] = peak_ts
+        _save_symbol_campaign(symbol, state)
+
+    completed = _completed_tier_values(state)
+    for threshold, allocation in BUY_TIERS:
+        if drawdown_abs >= threshold and threshold not in completed:
+            return (threshold, allocation), state
+    return None, state
+
+
+def _complete_campaign_tier(symbol, state, threshold):
+    completed = _completed_tier_values(state)
+    completed.add(float(threshold))
+    state = dict(state)
+    state["completed_tiers"] = sorted(completed)
+    _save_symbol_campaign(symbol, state)
+
+
+def _next_check_seconds():
+    if any(state.get("pending_tier") for state in _last_evaluation.values()):
+        return min(CHECK_INTERVAL_SECONDS, ACTIVE_TRIGGER_SECONDS)
+    root = _load_state_root()
+    for symbol, evaluation in _last_evaluation.items():
+        drawdown = evaluation.get("drawdown")
+        if drawdown is None:
+            continue
+        completed = _completed_tier_values(root["symbols"].get(symbol, {}))
+        next_threshold = next((threshold for threshold, _ in BUY_TIERS
+                               if threshold not in completed), None)
+        if (next_threshold is not None
+                and next_threshold - max(0.0, -drawdown) <= NEAR_TRIGGER_DISTANCE_PCT):
+            return min(CHECK_INTERVAL_SECONDS, NEAR_TRIGGER_SECONDS)
+    return CHECK_INTERVAL_SECONDS
+
+
+def evaluate_symbol(symbol, threshold_percent=TARGET_GROWTH_PERCENT,
+                    minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT):
+    """Evaluate and possibly submit exactly one asset-specific SELL or BUY."""
+    evaluation = _last_evaluation.setdefault(
+        symbol, {"drawdown": None, "pending_tier": False})
+    evaluation.update(drawdown=None, pending_tier=False)
     threshold_percent = _finite_float(threshold_percent, positive=True)
-    drop_percent = _finite_float(drop_percent, positive=True)
-    if threshold_percent is None or drop_percent is None:
-        print("Error: invalid growth/drop threshold; skip evaluation.")
+    if symbol not in TRACKED_SYMBOLS or threshold_percent is None:
+        print(f"[{symbol}] Invalid symbol/growth threshold; skip evaluation.")
         return False
 
-    current_value = _finite_float(
-        api.get_total_assets_value_usdc(use_cache=False), positive=True)
-    if current_value is None:
-        print(f"Error: evaluate_and_maybe_sell_or_buy: Current assets value can't be calculated")
+    current_price = _finite_float(api.get_current_price(symbol), positive=True)
+    if current_price is None:
+        print(f"[{symbol}] Current price unavailable; skip evaluation.")
         return False
-
-    print(f"[DEBUG] Current ASSETS value (USDC): {current_value}")
-    extrema = _get_window_extrema_from_cache(minutes_back=minutes_back)
+    extrema = _get_symbol_window_extrema(
+        symbol, current_price, minutes_back=minutes_back)
 
     if not extrema:
-        print(f" No baseline in cache yet for last {minutes_back}m.")
+        print(f"[{symbol}] No per-asset baseline for the last {minutes_back}m.")
         return False
 
     minimum_row, maximum_row = extrema
-    minimum_value = _row_value_usdc(minimum_row)
-    maximum_value = _row_value_usdc(maximum_row)
-    if not minimum_value or not maximum_value:
-        print(" Invalid baseline value.")
+    minimum_price = _finite_float(minimum_row.get("price"), positive=True)
+    maximum_price = _finite_float(maximum_row.get("price"), positive=True)
+    if minimum_price is None or maximum_price is None:
+        print(f"[{symbol}] Invalid per-asset baseline.")
         return False
 
-    growth_percent = ((current_value - minimum_value) / minimum_value) * 100.0
-    drawdown_percent = ((current_value - maximum_value) / maximum_value) * 100.0
-    _last_evaluation["drawdown"] = drawdown_percent
-    if drawdown_percent > -RECOVERY_RESET_PERCENT and STATE.load():
-        print(f" Drawdown recovered below {RECOVERY_RESET_PERCENT:.2f}%; rearm BUY campaign.")
-        STATE.save({})
-    threshold_value = minimum_value * (1 + threshold_percent / 100.0)
-    print(f"Current ASSETS value: {current_value:.1f} USDC ")
-    print(f"Window MIN/MAX: {minimum_value:.1f}/{maximum_value:.1f} USDC, "
-          f"minutes_back={minutes_back:.4f}, growth_from_min={growth_percent:.4f}%, "
-          f"drawdown_from_max={drawdown_percent:.4f}%"
-    )
+    growth_percent = ((current_price - minimum_price) / minimum_price) * 100.0
+    drawdown_percent = ((current_price - maximum_price) / maximum_price) * 100.0
+    evaluation["drawdown"] = drawdown_percent
+    if drawdown_percent > -RECOVERY_RESET_PERCENT and _symbol_campaign(symbol):
+        print(f"[{symbol}] Drawdown recovered below {RECOVERY_RESET_PERCENT:.2f}%; "
+              "rearm BUY campaign.")
+        _save_symbol_campaign(symbol, {})
+    sell_trigger_price = minimum_price * (1 + threshold_percent / 100.0)
     print(
-        f"[DEBUG] Trigger when ASSETS >= {threshold_value:.4f} USDC "
-        f"(threshold={threshold_percent}%)"
+        f"[{symbol}] price={current_price:.8f}, window_min/max="
+        f"{minimum_price:.8f}/{maximum_price:.8f}, minutes_back={minutes_back:.1f}, "
+        f"growth_from_min={growth_percent:.4f}%, "
+        f"drawdown_from_max={drawdown_percent:.4f}%, "
+        f"sell_trigger={sell_trigger_price:.8f}"
     )
 
     if growth_percent >= threshold_percent:
         print(
-            f" Threshold reached ({growth_percent:.4f}% >= {threshold_percent}%). "
-            "Selling all assets..."
+            f"[{symbol}] Growth threshold reached "
+            f"({growth_percent:.4f}% >= {threshold_percent}%). Selling this asset..."
         )
-        return sell_all_assets()
+        return sell_asset(symbol, current_price=current_price)
 
     if drawdown_percent <= -BUY_TIERS[0][0]:
         print(
-            f" Drawdown threshold reached ({drawdown_percent:.4f}% "
+            f"[{symbol}] Drawdown threshold reached ({drawdown_percent:.4f}% "
             f"<= -{BUY_TIERS[0][0]:.4f}%). Checking staged BUY..."
         )
         provider = mkt.provider_by_name("binance")
         free_cash = (_finite_float(provider.free_balance("USDC"), positive=True)
                      if provider else None)
         if free_cash is None:
-            print(" No valid USDC balance for staged BUY.")
+            print(f"[{symbol}] No valid USDC balance for staged BUY.")
             return False
-        tier, campaign = _campaign_tier(abs(drawdown_percent), maximum_row, free_cash)
+        tier, campaign = _campaign_tier(
+            symbol, abs(drawdown_percent), maximum_row, free_cash)
         if tier is None:
-            print(" No uncompleted BUY tier at current drawdown.")
+            print(f"[{symbol}] No uncompleted BUY tier at current drawdown.")
             return False
         threshold, allocation = tier
-        _last_evaluation["pending_tier"] = True
+        evaluation["pending_tier"] = True
         initial_cash = _finite_float(campaign.get("initial_cash"), positive=True)
         if initial_cash is None:
-            print(" Invalid campaign initial cash; reset staged BUY fail-closed.")
-            STATE.save({})
+            print(f"[{symbol}] Invalid campaign initial cash; reset fail-closed.")
+            _save_symbol_campaign(symbol, {})
             return False
         cash_amount = initial_cash * BUY_USE_CASH_RATIO * allocation
-        print(f" BUY tier -{threshold:.2f}% allocation={allocation:.3f} "
+        print(f"[{symbol}] BUY tier -{threshold:.2f}% allocation={allocation:.3f} "
               f"cash_target={cash_amount:.6f} USDC")
-        if buy_with_all_cash(buy_symbol=buy_symbol, cash_amount=cash_amount):
-            _complete_campaign_tier(campaign, threshold)
-            _last_evaluation["pending_tier"] = False
+        if buy_with_all_cash(buy_symbol=symbol, cash_amount=cash_amount):
+            _complete_campaign_tier(symbol, campaign, threshold)
+            evaluation["pending_tier"] = False
             return True
 
+    return False
+
+
+def evaluate_and_maybe_sell_or_buy(
+    threshold_percent=TARGET_GROWTH_PERCENT,
+    minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT,
+    symbols=None,
+):
+    """Evaluate configured assets independently, accepting at most one order/cycle."""
+    selected = tuple(symbols) if symbols is not None else TRACKED_SYMBOLS
+    for symbol in selected:
+        if evaluate_symbol(
+                symbol, threshold_percent=threshold_percent, minutes_back=minutes_back):
+            return True
     return False
 
 
@@ -464,7 +504,8 @@ def run_forever():
     print(
         f" Started. check_interval={CHECK_INTERVAL_SECONDS}s, "
         f"sell_threshold={TARGET_GROWTH_PERCENT}%, buy_tiers={BUY_TIERS}, "
-        f"minutes_back={ASSET_REFERENCE_MINUTES_BACK_DEFAULT}m, buy_symbol={BUY_SYMBOL_DEFAULT}"
+        f"minutes_back={ASSET_REFERENCE_MINUTES_BACK_DEFAULT}m, "
+        f"symbols={TRACKED_SYMBOLS}"
     )
     while True:
         try:

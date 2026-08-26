@@ -1,65 +1,86 @@
 # assetguardian — politică financiară și limite
 
-`assetguardian.py` evaluează valoarea totală a portofoliului Binance în USDC la
-fiecare 54 secunde. Nu este un stop-loss: protecția de crash aparține modulului
-trailing stop. Guardianul implementează două semnale contrariene rare.
+`assetguardian.py` evaluează independent fiecare simbol configurat prin
+`AG_SYMBOLS` (implicit `BTCUSDC,TAOUSDC`) la fiecare 54 secunde. Nu este un
+stop-loss: protecția de crash aparține modulului trailing stop. Guardianul
+implementează două semnale contrariene rare, calculate din prețul fiecărui activ,
+nu din valoarea totală a portofoliului.
 
-## Semnale
+## Semnale per activ
 
-- Growth exit: dacă valoarea curentă este cu 100% peste minimul ultimelor 24h,
-  încearcă SELL pentru activele urmărite. Pragul este intenționat practic dezactivat,
-  deoarece testarea istorică a vânzării agresive a pierdut față de hold.
-- Drawdown buy în tranșe: la -7%/-10%/-14% față de maximul ultimelor 24h încearcă
-  să aloce 35%/35%/30% din bugetul total configurat (implicit 99,5% din USDC
-  liber existent la începutul campaniei). Fiecare
-  tranșă acceptată este marcată persistent și nu se repetă în aceeași cădere.
-  Campania se rearmează după recuperarea drawdown-ului sub 3%.
+- Growth exit: dacă prețul curent al unui activ este cu 100% peste minimul propriu
+  din ultimele 24h, încearcă SELL numai pentru soldul liber al acelui activ. Pragul
+  este intenționat practic dezactivat, deoarece testarea istorică a vânzării
+  agresive a pierdut față de hold.
+- Drawdown buy în tranșe: la -7%/-10%/-14% față de maximul propriu al activului din
+  ultimele 24h, încearcă BUY pe același simbol, cu 35%/35%/30% din bugetul campaniei
+  acelui simbol. Bugetul inițial este implicit 99,5% din USDC liber când începe
+  campania. Fiecare tranșă acceptată este marcată persistent și nu se repetă în
+  aceeași cădere. Campania acelui activ se rearmează după recuperarea drawdown-ului
+  sub 3%.
 
-Minimul și maximul sunt calculate din aceeași fereastră, dar au roluri financiare
-diferite: profitul față de trough și drawdown-ul față de peak. Citirea acceptă cheia
-istorică `total_value_usdt` doar pentru compatibilitatea cache-ului vechi; toate
-deciziile și ordinele operaționale sunt USDC.
+Exemplu: o scădere TAOUSDC de la 242 la 225 este aproximativ -7,02% și poate emite
+o intenție BUY TAOUSDC. Nu mai poate produce o intenție BTC doar fiindcă TAO a
+scăzut. În oglindă, o creștere TAO peste prag poate vinde numai TAO, nu BTC și nu
+întregul portofoliu.
+
+Minimul și maximul vin din cache-ul comun `Price24`, iar fiecare rând este validat
+pentru simbol, timestamp și preț finit pozitiv. Un baseline lipsă, stătut sau format
+numai din eșantionul curent nu poate produce ordin.
 
 ## Execuție și retry
 
 Ordinele trec prin `mkt.place`/`Instrument.place`, deci păstrează profit guard,
 plafon zilnic, trend-wait, cooldown, reconcilierea soldului, fee-cap și mecanica
-Binance. Guardianul setează `caller_owns_retry=True`: nu introduce ordine în outbox.
-Dacă un ordin este refuzat, următorul ciclu recalculează portofoliul și poate încerca
-din nou numai dacă semnalul financiar este încă adevărat. Intervalul este dinamic:
-54s normal, 30s la cel mult două puncte procentuale de următoarea tranșă și 15s cât
-timp o tranșă declanșată este refuzată. Nu există MARKET sau bypass în acest modul.
+Binance. Un drawdown de -7% este o condiție necesară pentru prima tranșă, nu o
+garanție că ordinul va fi acceptat: de exemplu, profit guard poate refuza un BUY
+dacă prețul nu este suficient de bun față de ultima referință SELL.
 
-SELL folosește numai soldul liber; activele blocate în ordine nu sunt atinse. Ordinul
-este LIMIT/safe, nu lichidare MARKET garantată, iar quantity policy poate reduce mult
-cantitatea. Numele istoric `sell_all_assets` descrie intenția, nu garantează vânzarea
-întregii poziții într-un singur ciclu.
+Guardianul setează `caller_owns_retry=True`: nu introduce ordine în outbox. Dacă un
+ordin este refuzat, următorul ciclu recalculează prețul, fereastra, soldul și starea,
+apoi poate încerca din nou numai dacă semnalul financiar este încă adevărat.
+Intervalul este dinamic: 54s normal, 30s la cel mult două puncte procentuale de
+următoarea tranșă și 15s cât timp o tranșă declanșată este refuzată. Nu există
+MARKET, `force=True` sau bypass în acest modul.
+
+Pentru a limita concurența pe cash-ul USDC comun, evaluatorul oprește ciclul după
+primul ordin acceptat. Ordinea din `AG_SYMBOLS` decide ce semnal este evaluat primul;
+următorul ciclu reevaluează toate simbolurile din starea actuală. Un ordin acceptat
+nu este numit fill: statusul real rămâne responsabilitatea pipeline-ului comun și a
+reconcilierii cu exchange-ul.
+
+## Stare persistentă
+
+Starea este versiunea 2 și păstrează campanii separate sub cheia fiecărui simbol:
+peak-ul de preț, cash-ul inițial și tranșele acceptate. O stare veche, globală, este
+migrată conservator numai către simbolul implicit istoric BTCUSDC; nu este copiată
+la TAO și nu poate marca artificial tranșe TAO ca executate.
 
 ## Riscuri și verdict
 
-- BUY la drawdown este mean-reversion/catch-the-dip, nu protecție. Poate cumpăra într-o
-  piață care continuă să cadă.
-- Cumulat, campania poate aloca până la 99,5% din cash-ul inițial și produce
-  concentrare foarte mare în BTC. Tranșele reduc riscul de timing, nu riscul final
-  de concentrare.
-- Semnalul se bazează pe valoarea întregului portofoliu, dar cumpără un singur activ.
-  O scădere produsă de TAO poate declanșa cumpărare BTC; aceasta este o alegere de
-  alocare, nu o compensare exactă a activului care a scăzut.
-- Guard-urile comune pot refuza ordinul; aceasta este comportare fail-closed, nu eroare.
-
-Modulul poate favoriza cumpărarea unui drawdown și realizarea unui câștig excepțional,
-dar profitabilitatea nu este demonstrată. Principalul beneficiu al corecțiilor este că
-semnalul este calculat coerent și nu supraviețuiește artificial prin retry-uri fantomă.
+- BUY la drawdown este mean-reversion/catch-the-dip, nu protecție. Poate cumpăra un
+  activ care continuă să cadă.
+- Campaniile sunt separate, dar cash-ul este comun. Primul semnal acceptat reduce
+  soldul disponibil pentru celelalte active; fiecare ordin recitește soldul real și
+  este plafonat la acesta.
+- Configurația permite cumulat până la 99,5% din cash-ul disponibil pentru campania
+  unui activ. Tranșele reduc riscul de timing, nu riscul de concentrare.
+- Guard-urile comune pot refuza ordinul; aceasta este comportare fail-closed, nu
+  eroare și nu este ocolită de această schimbare.
+- Profitabilitatea strategiei nu este demonstrată. Schimbarea repară atribuirea
+  semnalului și ordinului la același activ, nu garantează câștig.
 
 ## Invariante operaționale
 
-- intervalul, pragurile, fereastra și cash ratio trebuie să fie valori valide;
+- simbolurile, intervalul, pragurile, fereastra și cash ratio trebuie să fie valide;
+- fiecare decizie este `preț simbol -> ordin pe același simbol`;
 - baseline lipsă sau sold/preț indisponibil => fără ordin;
-- rândurile cache/balanță invalide, viitoare, `NaN` sau infinite sunt ignorate;
-- evaluarea citește atomic un snapshot al cache-ului, fără concurență cu threadul de sync;
-- maximum o evaluare per ciclu; fără ordine în outbox-ul global;
-- starea atomică păstrează numai peak-ul campaniei, cash-ul inițial și tranșele
-  acceptate; nu păstrează o intenție executabilă fără reevaluarea semnalului;
-- un trigger raportează succes numai dacă pipeline-ul a acceptat cel puțin un ordin;
-- toate cantitățile sunt reconciliate în pipeline-ul comun înainte de Binance;
+- rândurile cache invalide, viitoare, stătute, `NaN` sau infinite sunt ignorate;
+- evaluarea citește atomic un snapshot al cache-ului, fără concurență cu threadul de
+  sincronizare;
+- maximum un ordin acceptat per ciclu și niciun ordin în outbox-ul global;
+- aceeași tranșă nu se repetă în aceeași campanie a aceluiași simbol;
+- starea persistentă nu păstrează o intenție executabilă fără reevaluarea semnalului;
+- un trigger raportează succes numai dacă pipeline-ul a acceptat ordinul;
+- cantitățile sunt reconciliate în pipeline-ul comun înainte de Binance;
 - logurile sunt gestionate de rotația comună a flotei.
