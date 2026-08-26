@@ -608,22 +608,25 @@ def render_chart(symbol, window_label, window_start, window_end,
                     xytext=(3, 8), textcoords="offset points", color=SHADOW_COLOR)
 
     visible_orders = [e for e in order_events if window_start <= e["ts"] <= window_end]
-    # ``executed`` is the legacy submission-outcome label. It means the provider
-    # returned a truthy payload, not that venue reconciliation confirmed a fill.
-    executed = [e for e in visible_orders if e["outcome"] == "executed"]
+    # ``accepted`` is submission truth, never fill truth. Continue reading legacy
+    # ``executed`` rows without perpetuating that misleading label in new output.
+    accepted = [
+        e for e in visible_orders
+        if e["outcome"] in {"accepted", "executed"}
+    ]
     refused = [e for e in visible_orders if e["outcome"] == "refused"]
 
     # Limit marker annotations when attempts are dense. Filled marker styling below
-    # represents the legacy truthy-submission category, not a confirmed venue fill.
+    # represents provider acceptance, not a confirmed venue fill.
     MAX_ANNOTATED = 25
 
-    _plot_order_markers(ax, executed, filled=True, max_annotated=MAX_ANNOTATED)
+    _plot_order_markers(ax, accepted, filled=True, max_annotated=MAX_ANNOTATED)
     _plot_order_markers(ax, refused, filled=False, max_annotated=MAX_ANNOTATED)
 
     summary = (
-        f"BUY  executat: {sum(1 for e in executed if e['side'] == 'BUY')}   "
+        f"BUY  acceptat: {sum(1 for e in accepted if e['side'] == 'BUY')}   "
         f"refuzat: {sum(1 for e in refused if e['side'] == 'BUY')}\n"
-        f"SELL executat: {sum(1 for e in executed if e['side'] == 'SELL')}   "
+        f"SELL acceptat: {sum(1 for e in accepted if e['side'] == 'SELL')}   "
         f"refuzat: {sum(1 for e in refused if e['side'] == 'SELL')}"
     )
     ax.text(0.01, 0.98, summary, transform=ax.transAxes, va="top", fontsize=9,

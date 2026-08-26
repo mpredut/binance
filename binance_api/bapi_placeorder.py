@@ -42,10 +42,6 @@ PLACE_ORDER_FEE_PCT = float(os.environ.get("PLACE_ORDER_FEE_PCT", "0.001"))
 PLACE_ORDER_HOURS = int(float(os.environ.get("PLACE_ORDER_HOURS", "5")))
 PLACE_ORDER_SAFEBACK_SEC = int(float(os.environ.get("PLACE_ORDER_SAFEBACK_SEC", str(48 * 3600 + 60))))
 PLACE_ORDER_MAX_DAILY_TRADES = int(float(os.environ.get("PLACE_ORDER_MAX_DAILY_TRADES", "25")))
-PLACE_ORDER_WAIT_TREND = os.environ.get("PLACE_ORDER_WAIT_TREND", "true").strip().lower() == "true"
-PLACE_ORDER_MAX_WAIT_SEC = float(os.environ.get("PLACE_ORDER_MAX_WAIT_SEC", "10.0"))
-PLACE_ORDER_WAIT_POLL_SEC = float(os.environ.get("PLACE_ORDER_WAIT_POLL_SEC", "0.2"))
-PLACE_ORDER_WAIT_MODE = os.environ.get("PLACE_ORDER_WAIT_MODE", "full").strip()
 
 
 class WeightLimitBlock(Exception):
@@ -62,30 +58,6 @@ def _resolve_qty(qty):
     caller's stated intent.
     """
     return float("inf") if qty is None else qty
-
-
-def _maybe_wait_trend(side, symbol):
-    """Shared opportunistic-delay gate for every placement function.
-
-    Wait while trend movement improves the price, bounded by
-    ``PLACE_ORDER_MAX_WAIT_SEC``. Return the elapsed wait and do nothing when the gate
-    is disabled or the trend manager is unavailable.
-    The former wait parameters were dead because the only caller never overrode them.
-    Read them directly from configuration as the single source of truth.
-    """
-    if not PLACE_ORDER_WAIT_TREND:
-        return 0.0
-    try:
-        import cacheManager as cm
-        waited = cm.get_short_trend_manager().wait_for_favorable_entry(
-            side, symbol, max_wait_sec=PLACE_ORDER_MAX_WAIT_SEC, poll_sec=PLACE_ORDER_WAIT_POLL_SEC,
-            sleep_fn=time.sleep, mode=PLACE_ORDER_WAIT_MODE)
-        if waited:
-            print(f"[{side} {symbol}] așteptat {waited:.1f}s pentru preț mai bun (trend favorabil)")
-        return waited
-    except Exception as e:
-        print(f"[{side} {symbol}] trend gate indisponibil: {e}")
-        return 0.0
 
 
 def _fresh_price(symbol):

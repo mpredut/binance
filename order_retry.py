@@ -1,7 +1,8 @@
 # order_retry.py
-"""Provider-agnostic persistent queue for retrying failed placement attempts.
+"""Provider-agnostic persistent submission outbox.
 
-Any process calling ``Instrument.place`` may enqueue a rejected or failed attempt;
+``Instrument.place`` persists a valid intent before its provider submit and also
+enqueues attempts rejected by an earlier guard;
 ``order_retry_worker.py`` is intended to be the single consumer. Records are stored
 as JSONL under ``cachedb`` and queue mutations are serialized with a cross-process
 file lock.
@@ -9,13 +10,15 @@ file lock.
 Each record preserves the symbol, side, quantity, placement options, requested and
 reference prices, timestamps, and attempt count. A retry recalculates its placement
 from the current market price and proceeds only when ``price_gate_ok`` accepts that
-price. Deduplication retains one pending record per symbol and side, refreshing its
-target while preserving its original age.
+price. Optional legacy deduplication can retain one pending record per symbol and
+side, but it is disabled operationally so independent strategy intents are preserved.
 
 Claims are durable leases: a worker crash leaves the record unavailable only until the
-lease expires. Queue admission still reflects ``Instrument.place`` failure, not a fresh
-evaluation of the originating strategy signal; the worker relies on placement guards and
-the stored price constraint. Configuration lives in ``order_retry_config.env``.
+lease expires. A trend deferral consumes neither attempt count nor TTL. The outbox owns
+delivery through provider acceptance; it does not call an accepted LIMIT order a fill.
+Queue retry still cannot reconstruct every originating strategy signal, so it relies on
+placement guards and the stored price constraint. Configuration lives in
+``order_retry_config.env``.
 """
 import os
 import json
@@ -35,8 +38,9 @@ RETRY_TTL_SEC = float(os.environ.get("RETRY_TTL_SEC", str(24 * 3600)))
 RETRY_MAX_ATTEMPTS = int(float(os.environ.get("RETRY_MAX_ATTEMPTS", "0")))
 # Retry only at an equal or more favorable current price than the original request.
 RETRY_PRICE_TOL = float(os.environ.get("RETRY_PRICE_TOL", "0.002"))
-# Deduplication retains one pending record per symbol and side and refreshes its target.
-RETRY_DEDUP = os.environ.get("RETRY_DEDUP", "true").strip().lower() == "true"
+# Optional legacy compaction. Disabled operationally so independent strategies or
+# distinct same-side intents cannot overwrite each other in the shared outbox.
+RETRY_DEDUP = os.environ.get("RETRY_DEDUP", "false").strip().lower() == "true"
 # Hard queue-size bound; zero disables the bound.
 RETRY_MAX_QUEUE = int(float(os.environ.get("RETRY_MAX_QUEUE", "500")))
 RETRY_CLAIM_LEASE_SEC = float(os.environ.get("RETRY_CLAIM_LEASE_SEC", "120"))
@@ -89,7 +93,8 @@ def valid_record(rec):
 
 
 def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_price=None,
-            now=None, created_ts=None, attempts=0, last_attempt_ts=0.0):
+            now=None, created_ts=None, attempts=0, last_attempt_ts=0.0,
+            failure_reason=None):
     """Add or refresh a failed placement attempt while holding the queue lock.
 
     With deduplication enabled, one record is retained per symbol and side. A match
@@ -133,6 +138,9 @@ def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_pric
         "created_ts": cts,
         "attempts": attempts,
         "last_attempt_ts": last_attempt_ts,
+        "last_failure_reason": (str(failure_reason)
+                                if failure_reason is not None else None),
+        "ttl_started_ts": cts,
         "revision": 0,
     }
     _ensure_dir()
@@ -154,6 +162,13 @@ def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_pric
                     e["attempts"] = max(int(e.get("attempts", 0)), int(attempts))
                     e["last_attempt_ts"] = max(float(e.get("last_attempt_ts", 0)),
                                                float(last_attempt_ts))
+                    previous_reason = e.get("last_failure_reason")
+                    next_reason = (str(failure_reason)
+                                   if failure_reason is not None else None)
+                    if (previous_reason == "trend_deferred"
+                            and next_reason != "trend_deferred"):
+                        e["ttl_started_ts"] = now
+                    e["last_failure_reason"] = next_reason
                     e["revision"] = revision
                     _write_nolock(existing)
                     return e.get("id")
@@ -170,6 +185,72 @@ def load_all(now=None):
     _ensure_dir()
     with FileLock(LOCK_FILE):
         return _read_nolock()
+
+
+def get(record_id):
+    """Return one current queue record by ID under lock, or ``None``."""
+    if not record_id:
+        return None
+    _ensure_dir()
+    with FileLock(LOCK_FILE):
+        for rec in _read_nolock():
+            if rec.get("id") == record_id:
+                return dict(rec)
+    return None
+
+
+def mark_failure(record_id, failure_reason, *, now=None, client_order_id=None):
+    """Annotate an already persisted pre-submit record without changing its ID.
+
+    ``client_order_id`` protects a newer concurrent revision from being overwritten
+    by the result of an older submit call.
+    """
+    if not record_id:
+        return False
+    now = float(time.time() if now is None else now)
+    changed = False
+    _ensure_dir()
+    with FileLock(LOCK_FILE):
+        existing = _read_nolock()
+        for rec in existing:
+            if rec.get("id") != record_id:
+                continue
+            current_cid = dict(rec.get("place_kwargs") or {}).get("client_order_id")
+            if client_order_id is not None and current_cid != client_order_id:
+                continue
+            previous = rec.get("last_failure_reason")
+            reason = str(failure_reason) if failure_reason is not None else None
+            if previous == "trend_deferred" and reason != "trend_deferred":
+                rec["ttl_started_ts"] = now
+            rec["last_failure_reason"] = reason
+            changed = True
+            break
+        if changed:
+            _write_nolock(existing)
+    return changed
+
+
+def resolve_record(record_id, *, client_order_id=None):
+    """Remove only the exact persisted intent/revision satisfied by acceptance."""
+    if not record_id:
+        return False
+    removed = False
+    _ensure_dir()
+    with FileLock(LOCK_FILE):
+        existing = _read_nolock()
+        remaining = []
+        for rec in existing:
+            matches = rec.get("id") == record_id
+            if matches and client_order_id is not None:
+                matches = (dict(rec.get("place_kwargs") or {}).get(
+                    "client_order_id") == client_order_id)
+            if matches:
+                removed = True
+            else:
+                remaining.append(rec)
+        if removed:
+            _write_nolock(remaining)
+    return removed
 
 
 def claim(ids, now=None, lease_sec=None):
@@ -206,14 +287,14 @@ def claim(ids, now=None, lease_sec=None):
     return claimed
 
 
-def complete_claim(claimed, outcome, now=None):
+def complete_claim(claimed, outcome, now=None, *, failure_reason=None):
     """Finalize one leased record as success, failure, or release.
 
     A successful placement removes only the exact revision that was submitted. If a
     writer refreshed the intent while it was leased, that newer revision remains due.
     Failure increments attempts in place. Release simply clears the lease.
     """
-    if outcome not in {"success", "failure", "release"}:
+    if outcome not in {"success", "failure", "deferred", "release"}:
         raise ValueError(f"invalid claim outcome: {outcome}")
     now = float(time.time() if now is None else now)
     changed = False
@@ -236,6 +317,17 @@ def complete_claim(claimed, outcome, now=None):
                 rec["attempts"] = max(int(rec.get("attempts", 0)),
                                       int(claimed.get("attempts", 0))) + 1
                 rec["last_attempt_ts"] = now
+                next_reason = (str(failure_reason)
+                               if failure_reason is not None else None)
+                if (rec.get("last_failure_reason") == "trend_deferred"
+                        and next_reason != "trend_deferred"):
+                    # TTL begins only after the trend gate stops deferring.  Time
+                    # spent waiting for a favorable trend cannot discard an intent.
+                    rec["ttl_started_ts"] = now
+                rec["last_failure_reason"] = next_reason
+            elif outcome == "deferred" and same_revision:
+                rec["last_attempt_ts"] = now
+                rec["last_failure_reason"] = "trend_deferred"
             for key in ("claim_token", "claim_until", "claim_revision"):
                 rec.pop(key, None)
             remaining.append(rec)
@@ -316,19 +408,28 @@ def rewrite(items):
 
 
 def is_expired(rec, now=None):
-    """Return true after the record exceeds its TTL or hard attempt limit."""
+    """Return true after active retry TTL or hard attempt limit.
+
+    A trend-deferred intent has made no venue attempt and therefore never consumes
+    TTL or the attempt budget.  Once another refusal reason appears, ``ttl_started_ts``
+    is reset and normal expiry resumes.
+    """
     try:
         now = float(time.time() if now is None else now)
         claim_until = float(rec.get("claim_until", 0) or 0)
         created = float(rec.get("created_ts", 0))
+        ttl_started = float(rec.get("ttl_started_ts", created))
         attempts = int(rec.get("attempts", 0))
     except (TypeError, ValueError, OverflowError):
         return True
-    if not all(math.isfinite(v) for v in (now, claim_until, created)) or created <= 0:
+    if (not all(math.isfinite(v) for v in (now, claim_until, created, ttl_started))
+            or created <= 0 or ttl_started <= 0):
         return True
     if claim_until > now:
         return False
-    return ((now - created) > RETRY_TTL_SEC or
+    if rec.get("last_failure_reason") == "trend_deferred":
+        return False
+    return ((now - ttl_started) > RETRY_TTL_SEC or
             (RETRY_MAX_ATTEMPTS > 0 and attempts >= RETRY_MAX_ATTEMPTS))
 
 

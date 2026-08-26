@@ -20,6 +20,28 @@ import order_outcomes_log as _outcomes_log
 from lock import trade_cooldown
 
 
+def _accepted_order_payload(payload):
+    """Return whether a provider payload proves venue acceptance, never fill."""
+    if not isinstance(payload, dict):
+        return False
+    status = str(payload.get("status") or "").upper()
+    if status in {"REJECTED", "CANCELED", "CANCELLED", "EXPIRED", "FAILED"}:
+        return False
+    native_id = payload.get("orderId", payload.get("id", payload.get("txid")))
+    if isinstance(native_id, (list, tuple)):
+        return any(str(item).strip() for item in native_id)
+    return native_id is not None and str(native_id).strip() != ""
+
+
+def _order_id_from_payload(payload):
+    if not isinstance(payload, dict):
+        return None
+    native_id = payload.get("orderId", payload.get("id", payload.get("txid")))
+    if isinstance(native_id, (list, tuple)):
+        native_id = next((item for item in native_id if str(item).strip()), None)
+    return None if native_id is None else str(native_id)
+
+
 class Instrument:
     """Provider-bound symbol with namespaced consumer parameters.
 
@@ -80,7 +102,7 @@ class Instrument:
     # -- Order placement: dry or real after provider gates. --------------------
     def place(self, side: str, price: float, qty: float, **kwargs):
         # Complete provider-agnostic guard: profit, daily cap/anti-spam, rapid-fire
-        # cooldown, trend wait, and fleet-wide logging. Apply only to providers
+        # cooldown, instantaneous trend deferral, and fleet-wide logging. Apply only to providers
         # without internal guards. Binance retains its richer implementation using
         # real API-permission data, avoiding duplicated or conflicting cooldowns.
         # Kraken and Hyperliquid receive the equivalent protections through shared
@@ -94,9 +116,16 @@ class Instrument:
         # A caller such as rtrade or the outbox worker may own its lifecycle and
         # retry; in that case this pipeline does not touch the global queue.
         caller_owns_retry = bool(kwargs.pop("caller_owns_retry", False))
+        # Internal mutable result channel used by the outbox worker.  It keeps the
+        # public return type backward compatible while exposing the exact refusal
+        # reason (notably trend deferral) without parsing logs or blocking.
+        outcome_context = kwargs.pop("_outcome_context", None)
+        if outcome_context is not None and not isinstance(outcome_context, dict):
+            raise TypeError("_outcome_context must be a dict")
         bypass = bool(kwargs.pop("bypass_profit_guard", False))
         bypass_profit_reference = bool(kwargs.pop("bypass_profit_reference", False))
         bypass_quantity_policy = bool(kwargs.pop("bypass_quantity_policy", False))
+        wait_for_trend = bool(kwargs.pop("wait_for_trend", True))
         cooldown_pair_id = kwargs.pop("cooldown_pair_id", None)
         side_u = side.upper()
         # This narrow escape hatch exists only for drawdown BUY flows.  A SELL
@@ -124,6 +153,8 @@ class Instrument:
         orig_price = price   # Requested price preserves caller intent for the retry guard.
         reason = None
         order = None
+        prequeued_record_id = None
+        prequeued_client_order_id = None
         # safeback_seconds is explicitly overridden by monitortrades (normally 12
         # days) and tradeall (14 days), so Binance rarely uses the 48-hour config
         # default. Apply the same window to enabled Kraken instruments. Retain it
@@ -140,6 +171,7 @@ class Instrument:
         retry_kwargs["bypass_profit_guard"] = bypass
         retry_kwargs["bypass_profit_reference"] = bypass_profit_reference
         retry_kwargs["bypass_quantity_policy"] = bypass_quantity_policy
+        retry_kwargs["wait_for_trend"] = wait_for_trend
         retry_kwargs["smart"] = smart
         if cooldown_pair_id:
             retry_kwargs["cooldown_pair_id"] = cooldown_pair_id
@@ -202,25 +234,27 @@ class Instrument:
                     reason = decision.refuse_reason or "qty_zero_after_weight"
                     return None
 
-            # 2. Provider-agnostic trend wait delays rather than blocks. It is
-            # available for registered non-Binance symbols; unavailable data falls
-            # back to no wait. Lazy import avoids a module-level dependency cycle.
-            waited = False
-            try:
-                import cacheManager as cm
-                waited = cm.get_short_trend_manager().wait_for_favorable_entry(side_u, self.symbol)
-                if waited:
-                    print(f"[{self.symbol}] {side_u} așteptat {waited:.1f}s (trend favorabil)")
-                    fresh = self._provider.get_current_price(self.symbol)
-                    if fresh is not None:
-                        price = fresh
-            except Exception as e:  # noqa: BLE001 — Opportunistic gate; submit on failure.
-                print(f"[{self.symbol}] {side_u} trend-wait indisponibil: {e}")
+            # 2. Optional provider-agnostic trend gate is instantaneous.  Placement
+            # must never sleep or poll: a negative decision returns immediately and
+            # the durable outbox retries it on a later worker tick.  Callers that own
+            # their lifecycle (AssetGuardian) apply the same check in their strategy
+            # loop and disable this duplicate gate.
+            if wait_for_trend:
+                try:
+                    import cacheManager as cm
+                    if cm.get_short_trend_manager().should_wait(side_u, self.symbol):
+                        print(
+                            f"[{self.symbol}] {side_u} amanat de trend; "
+                            "plasarea nu asteapta, intentia ramane pentru retry")
+                        reason = "trend_deferred"
+                        return None
+                except Exception as e:  # noqa: BLE001 — Opportunistic gate.
+                    print(f"[{self.symbol}] {side_u} trend-gate indisponibil: {e}")
 
-            # Revalidate after waiting or repricing. Market orders must use the
-            # current quote rather than the caller's decorative limit. Explicit
-            # bypass remains available for protective exits that must accept a loss.
-            if not bypass and not bypass_profit_reference and (is_market or waited):
+            # Market orders must use the current quote rather than the caller's
+            # decorative limit. Explicit bypass remains available for protective
+            # exits that must accept a loss.
+            if not bypass and not bypass_profit_reference and is_market:
                 guard_price = price
                 if is_market:
                     guard_price = self._provider.get_current_price(self.symbol)
@@ -246,24 +280,61 @@ class Instrument:
                           f"({slot.info.get('side')}) acum {age:.0f}s")
                     reason = "cooldown"
                     return None
-                order = self._provider.place_order(self.symbol, side, price, qty, **kwargs)
-                if order:
-                    order_id = order.get("orderId") if isinstance(order, dict) else None
-                    slot.commit(order_id)
+                # Persist the exact intent before the external side effect.  This
+                # closes the process-crash/response-loss gap for every normal caller
+                # of Instrument.place. Lifecycle-owned callers already persist in
+                # their own campaign state and opt out with caller_owns_retry=True.
+                if not caller_owns_retry:
+                    try:
+                        import order_retry
+                        if order_retry.RETRY_ENABLED:
+                            prequeue_kwargs = dict(retry_kwargs)
+                            prequeue_kwargs["smart"] = smart
+                            prequeued_record_id = order_retry.enqueue(
+                                self.symbol, side_u, qty, prequeue_kwargs,
+                                requested_price=orig_price, ref_price=price,
+                                failure_reason="submit_pending")
+                            prequeued = order_retry.get(prequeued_record_id)
+                            if prequeued is None:
+                                raise RuntimeError("intentia nu poate fi citita dupa persistare")
+                            prequeued_client_order_id = dict(
+                                prequeued.get("place_kwargs") or {}).get(
+                                    "client_order_id")
+                            if not prequeued_client_order_id:
+                                raise RuntimeError("intentia persistata nu are client_order_id")
+                            kwargs["client_order_id"] = prequeued_client_order_id
+                    except Exception as exc:
+                        print(
+                            f"[{self.symbol}] {side_u} BLOCAT: intentia nu poate fi "
+                            f"persistata inainte de submit ({exc})")
+                        reason = "pre_submit_persist_failed"
+                        return None
+
+                reason = "submit_ambiguous"
+                response = self._provider.place_order(
+                    self.symbol, side, price, qty, **kwargs)
+                if _accepted_order_payload(response):
+                    order = response
+                    reason = None
+                    slot.commit(_order_id_from_payload(order))
                 else:
-                    reason = reason or "no_fill"
+                    reason = "response_without_order_id"
+                    order = None
                 return order
         except Exception as e:  # noqa: BLE001 — Fail closed when guards cannot be verified.
             print(f"[{self.symbol}] {side_u} BLOCAT (fail-closed): {e}")
-            reason = "guard_check_failed"
+            reason = reason or "guard_check_failed"
             return None
         finally:
+            if outcome_context is not None:
+                outcome_context["accepted"] = order is not None
+                outcome_context["reason"] = None if order is not None else reason
             try:
                 caller = os.path.basename(sys._getframe(1).f_code.co_filename)
             except Exception:
                 caller = None
             _outcomes_log.log_order_outcome(
-                self.symbol, side_u, price, qty, "executed" if order else "refused",
+                self.symbol, side_u, price, qty, "accepted" if order else "refused",
                 None if order else reason, kwargs.get("motivation"), caller=caller)
             # A successful normal placement resolves pending outbox intent for the
             # same symbol and side. This prevents a queued initial failure from
@@ -272,7 +343,12 @@ class Instrument:
             if order is not None and not caller_owns_retry:
                 try:
                     import order_retry
-                    order_retry.resolve(self.symbol, side_u)
+                    if prequeued_record_id is not None:
+                        order_retry.resolve_record(
+                            prequeued_record_id,
+                            client_order_id=prequeued_client_order_id)
+                    else:
+                        order_retry.resolve(self.symbol, side_u)
                 except Exception as _e:  # noqa: BLE001
                     print(f"[{self.symbol}] {side_u} resolve retry esuat (ignor): {_e}")
             # Persist a failed intent unless this is already a retry. Queue handling
@@ -281,15 +357,28 @@ class Instrument:
                 try:
                     import order_retry
                     if order_retry.RETRY_ENABLED:
-                        # Capture best-effort market price only when enqueueing, for
-                        # retry price guarding and deduplication.
-                        ref_price = None
-                        try:
-                            ref_price = self._provider.get_current_price(self.symbol)
-                        except Exception:  # noqa: BLE001
+                        if prequeued_record_id is not None:
+                            order_retry.mark_failure(
+                                prequeued_record_id, reason,
+                                client_order_id=prequeued_client_order_id)
+                        else:
+                            # Capture best-effort market price only when enqueueing,
+                            # for retry price guarding and deduplication.
+                            queue_qty = orig_qty
+                            try:
+                                if queue_qty is None or float(queue_qty) <= 0:
+                                    queue_qty = qty
+                            except (TypeError, ValueError, OverflowError):
+                                queue_qty = qty
                             ref_price = None
-                        order_retry.enqueue(self.symbol, side_u, orig_qty, retry_kwargs,
-                                            requested_price=orig_price, ref_price=ref_price)
+                            try:
+                                ref_price = self._provider.get_current_price(self.symbol)
+                            except Exception:  # noqa: BLE001
+                                ref_price = None
+                            order_retry.enqueue(
+                                self.symbol, side_u, queue_qty, retry_kwargs,
+                                requested_price=orig_price, ref_price=ref_price,
+                                failure_reason=reason)
                 except Exception as _e:  # noqa: BLE001
                     print(f"[{self.symbol}] {side_u} enqueue retry esuat (ignor): {_e}")
 

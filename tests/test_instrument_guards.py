@@ -2,8 +2,8 @@
 Teste pentru Instrument.place() — cele 4 protectii AGNOSTICE nou-adaugate (30 iul,
 cerere user: "guardrail-urile din bapi_placeorder ca implementare comuna pt toti
 providerii"): plafon zilnic + anti-spam (order_guard.daily_limit_guard), cooldown
-anti-rapid-fire (lock/trade_cooldown, deja generic), trend-wait (cacheManager,
-deja generic — cade pe "nu astepta" pt un symbol necunoscut) si jurnalul FLEET-WIDE
+anti-rapid-fire (lock/trade_cooldown, deja generic), trend-gate instantaneu
+(cacheManager) si jurnalul FLEET-WIDE
 (order_outcomes_log). Se aplica DOAR providerilor cu guards_internally()==False
 (Binance ramane neatins, isi pastreaza propria implementare — vezi bapi_placeorder.py).
 
@@ -298,7 +298,64 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         self.assertIsNotNone(order)
         self.assertEqual(len(p.placed), 1)
         lines = self._log_lines()
-        self.assertTrue(any("|executed|" in l and SYMBOL in l for l in lines), lines)
+        self.assertTrue(any("|accepted|" in l and SYMBOL in l for l in lines), lines)
+
+    def test_intent_is_persisted_with_same_client_id_before_provider_submit(self):
+        import order_retry as oq
+
+        class _InspectProvider(_FakeProvider):
+            def place_order(self, symbol, side, price, qty, **kwargs):
+                queued = oq.load_all()
+                self.persisted_during_submit = copy = dict(queued[0])
+                self.submitted_client_id = kwargs.get("client_order_id")
+                return {"orderId": "persisted-1"}
+
+        p = _InspectProvider()
+        order = self._inst(p).place("BUY", 100.0, 1.0)
+
+        self.assertEqual(order["orderId"], "persisted-1")
+        self.assertEqual(
+            p.persisted_during_submit["place_kwargs"]["client_order_id"],
+            p.submitted_client_id)
+        self.assertEqual(oq.load_all(), [])
+
+    def test_truthy_payload_without_order_id_is_refused_and_remains_queued(self):
+        import order_retry as oq
+
+        class _AmbiguousProvider(_FakeProvider):
+            def place_order(self, symbol, side, price, qty, **kwargs):
+                self.placed.append((symbol, side, price, qty, kwargs))
+                return {"status": "UNKNOWN"}
+
+        p = _AmbiguousProvider()
+        order = self._inst(p).place("BUY", 100.0, 1.0)
+
+        self.assertIsNone(order)
+        queued = oq.load_all()
+        self.assertEqual(len(queued), 1)
+        self.assertEqual(queued[0]["last_failure_reason"],
+                         "response_without_order_id")
+        self.assertTrue(any("|refused|response_without_order_id|" in line
+                            for line in self._log_lines()))
+
+    def test_submit_response_loss_keeps_pre_submit_intent_with_same_client_id(self):
+        import order_retry as oq
+
+        class _LostResponseProvider(_FakeProvider):
+            def place_order(self, symbol, side, price, qty, **kwargs):
+                self.submitted_client_id = kwargs.get("client_order_id")
+                raise TimeoutError("response lost after possible venue acceptance")
+
+        p = _LostResponseProvider()
+        order = self._inst(p).place("BUY", 100.0, 1.0)
+
+        self.assertIsNone(order)
+        queued = oq.load_all()
+        self.assertEqual(len(queued), 1)
+        self.assertEqual(
+            queued[0]["place_kwargs"]["client_order_id"],
+            p.submitted_client_id)
+        self.assertEqual(queued[0]["last_failure_reason"], "submit_ambiguous")
 
     # ── cooldown anti-rapid-fire ────────────────────────────────────────────────
     def test_cooldown_blocks_second_order(self):
@@ -475,19 +532,54 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         self.assertIsNotNone(order)
         self.assertTrue(p.placed[0][4]["force"])
 
-    def test_limit_repriced_after_trend_wait_is_revalidated(self):
-        class _Waited:
+    def test_trend_deferral_returns_immediately_without_wait_loop(self):
+        class _Deferred:
             @staticmethod
-            def wait_for_favorable_entry(_side, _symbol):
-                return 1.0
+            def should_wait(_side, _symbol):
+                return True
+
+            @staticmethod
+            def wait_for_favorable_entry(*_args, **_kwargs):
+                raise AssertionError("Instrument.place must not enter a wait loop")
 
         p = _FakeProvider(price=100.0)
         p.seed_trade("BUY", age_sec=400.0, price=100.0)
-        with patch("cacheManager.get_short_trend_manager", return_value=_Waited()):
+        with patch("cacheManager.get_short_trend_manager", return_value=_Deferred()):
             order = self._inst(p).place("SELL", 102.0, 1.0, force=False, smart=False)
 
         self.assertIsNone(order)
         self.assertEqual(p.placed, [])
+        self.assertTrue(any("|refused|trend_deferred|" in line
+                            for line in self._log_lines()))
+
+    def test_trend_deferral_with_auto_quantity_enters_outbox_with_numeric_qty(self):
+        import order_retry as oq
+
+        class _Deferred:
+            @staticmethod
+            def should_wait(_side, _symbol):
+                return True
+
+        p = _FakeProvider(price=100.0)
+        with patch("cacheManager.get_short_trend_manager", return_value=_Deferred()):
+            order = self._inst(p).place("BUY", 100.0, None, smart=False)
+
+        self.assertIsNone(order)
+        queued = oq.load_all()
+        self.assertEqual(len(queued), 1)
+        self.assertGreater(float(queued[0]["qty"]), 0.0)
+        self.assertEqual(queued[0]["last_failure_reason"], "trend_deferred")
+
+    def test_tracked_caller_can_disable_instantaneous_trend_gate(self):
+        p = _FakeProvider(price=102.0)
+        p.seed_trade("BUY", age_sec=400.0, price=100.0)
+        with patch("cacheManager.get_short_trend_manager") as manager:
+            order = self._inst(p).place(
+                "SELL", 102.0, 1.0, force=False, smart=False,
+                wait_for_trend=False)
+
+        self.assertIsNotNone(order)
+        manager.assert_not_called()
 
     # ── guards_internally (Binance-style) — sare TOT stratul agnostic ───────────
     def test_guards_internally_provider_bypasses_new_gates(self):

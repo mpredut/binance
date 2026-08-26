@@ -87,7 +87,9 @@ DEFAULTS = [
     (ag, "ASSET_REFERENCE_MINUTES_BACK_DEFAULT", 24 * 60),
     (ag, "BUY_USE_CASH_RATIO", 0.995),
     (ag, "SELL_REARM_GROWTH_PERCENT", 5.0),
-    (ag, "SELL_ORDER_MAX_AGE_SECONDS", 15 * 60),
+    (ag, "ORDER_MAX_AGE_SECONDS", 15 * 60),
+    (ag, "ORDER_MISSING_CONFIRMATIONS", 1),
+    (ag, "TREND_DEFER_MAX_SECONDS", 3 * 60),
 ]
 
 # (modul, env_var, valoare_str, atribut, valoare_asteptata_dupa_override)
@@ -114,7 +116,8 @@ OVERRIDES = [
     (rt, "RTRADE_FAST_FILL_RATIO", "0.5", "RTRADE_FAST_FILL_RATIO", 0.5),
     (ag, "AG_CHECK_INTERVAL_SEC", "30", "CHECK_INTERVAL_SECONDS", 30),
     (ag, "AG_SELL_REARM_GROWTH_PCT", "4", "SELL_REARM_GROWTH_PERCENT", 4),
-    (ag, "AG_SELL_ORDER_MAX_AGE_SEC", "120", "SELL_ORDER_MAX_AGE_SECONDS", 120),
+    (ag, "AG_ORDER_MAX_AGE_SEC", "120", "ORDER_MAX_AGE_SECONDS", 120),
+    (ag, "AG_TREND_DEFER_MAX_SEC", "60", "TREND_DEFER_MAX_SECONDS", 60),
     (ag, "AG_REFERENCE_MINUTES_BACK", "60", "ASSET_REFERENCE_MINUTES_BACK_DEFAULT", 60),
     (ag, "AG_BUY_USE_CASH_RATIO", "0.5", "BUY_USE_CASH_RATIO", 0.5),
 ]
@@ -173,7 +176,9 @@ class TestModuleSpecifics(unittest.TestCase):
             "AG_BUY_TIERS",
             "AG_SELL_TIERS",
             "AG_SELL_REARM_GROWTH_PCT",
-            "AG_SELL_ORDER_MAX_AGE_SEC",
+            "AG_ORDER_MAX_AGE_SEC",
+            "AG_ORDER_MISSING_CONFIRMATIONS",
+            "AG_TREND_DEFER_MAX_SEC",
             "AG_SYMBOLS",
             "AG_RECOVERY_RESET_PCT",
             "AG_NEAR_TRIGGER_SEC",

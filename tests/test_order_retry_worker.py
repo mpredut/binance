@@ -59,6 +59,28 @@ class ProcessOnceTest(unittest.TestCase):
         self.assertEqual(q[0]["attempts"], 1)
         self.assertAlmostEqual(q[0]["last_attempt_ts"], 1000.0 + 400)
 
+    def test_trend_refusal_is_retried_without_attempt_or_ttl_consumption(self):
+        oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=100.0, now=1000.0)
+
+        class TrendDeferredMkt(FakeMkt):
+            def place(self, symbol, side, price, qty, **kw):
+                self.calls.append({
+                    "symbol": symbol, "side": side, "price": price,
+                    "qty": qty, "kw": kw,
+                })
+                kw["_outcome_context"].update(
+                    accepted=False, reason="trend_deferred")
+                return None
+
+        now = 1000.0 + 400
+        stats = worker.process_once(TrendDeferredMkt(), now=now)
+        rec = oq.load_all()[0]
+        self.assertEqual(stats["attempted"], 1)
+        self.assertEqual(stats["succeeded"], 0)
+        self.assertEqual(rec["attempts"], 0)
+        self.assertEqual(rec["last_failure_reason"], "trend_deferred")
+        self.assertFalse(oq.is_expired(rec, now=now + 20 * 86400))
+
     def test_not_due_skipped(self):
         oq.enqueue("BTCUSDC", "BUY", 1.0, {}, now=1000.0)
         mkt = FakeMkt(succeed=True)

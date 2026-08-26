@@ -1,10 +1,11 @@
 # order_outcomes_log.py
 """Fleet-wide log of order-submission attempts, one pipe-delimited row per call.
 
-The writer is observational and suppresses its own I/O errors. The legacy outcome
-value ``executed`` means that the provider returned a truthy submission payload; it
-does **not** prove that a limit order filled. Fill truth belongs to venue status and
-trade reconciliation, which this log does not perform.
+The writer is observational and suppresses its own I/O errors. New rows use
+``accepted`` when the provider returns a truthy submission payload. Historical rows
+may contain the misleading legacy value ``executed``; neither label proves a fill.
+Fill truth belongs to venue status and trade reconciliation, which this log does not
+perform.
 
 The format is consumed by ``tradeall_observe.py``:
     ts|symbol|side|price|qty|outcome|refuse_reason|caller|motivation

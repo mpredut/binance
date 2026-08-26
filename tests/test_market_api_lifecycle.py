@@ -61,6 +61,15 @@ class MarketApiLifecycleTest(unittest.TestCase):
         self.assertEqual(
             self.api.latest_fill_price("ABCUSD", "SELL", 60), 11.0)
 
+    def test_tracked_lifecycle_factory_keeps_place_synchronous_contract_separate(self):
+        lifecycle = self.api.tracked_order_lifecycle(
+            provider_name="Fake", max_age_seconds=60,
+            retry_on_lookup_error=True)
+        self.assertIs(lifecycle.market_api, self.api)
+        self.assertEqual(lifecycle.provider_name, "Fake")
+        self.assertEqual(lifecycle.max_age_seconds, 60)
+        self.assertTrue(lifecycle.retry_on_lookup_error)
+
     def test_market_regime_routes_to_provider_ohlc(self):
         decision = self.api.market_regime(
             "ABCUSD", interval_min=1, window_seconds=300)

@@ -5,6 +5,7 @@ import time
 
 from binance_api import bapi as api
 from providers.market_api import api as mkt   # Single guarded proxy (Instrument.place).
+from providers.execution_audit import ExecutionAudit
 from providers.quantity import resolve_assets
 from assetguardian_state import AssetGuardianState
 import cacheManager as cm
@@ -33,6 +34,14 @@ def _required_float_config(name):
             f"Configuratie AssetGuardian numerica invalida: {name}={raw!r}") from exc
 
 
+def _required_int_config(name):
+    value = _required_float_config(name)
+    if not math.isfinite(value) or not value.is_integer():
+        raise ValueError(
+            f"Configuratie AssetGuardian intreaga invalida: {name}={value!r}")
+    return int(value)
+
+
 # Every financial/operational parameter is mandatory in assetguardian_config.env.
 # There are deliberately no hidden code defaults: a missing key stops startup.
 CHECK_INTERVAL_SECONDS = _required_float_config("AG_CHECK_INTERVAL_SEC")
@@ -43,14 +52,14 @@ BUY_TIERS_RAW = _required_config("AG_BUY_TIERS")
 SELL_TIERS_RAW = _required_config("AG_SELL_TIERS")
 SELL_REARM_GROWTH_PERCENT = _required_float_config(
     "AG_SELL_REARM_GROWTH_PCT")
-SELL_ORDER_MAX_AGE_SECONDS = _required_float_config(
-    "AG_SELL_ORDER_MAX_AGE_SEC")
+ORDER_MAX_AGE_SECONDS = _required_float_config("AG_ORDER_MAX_AGE_SEC")
 TRACKED_SYMBOLS_RAW = _required_config("AG_SYMBOLS")
 RECOVERY_RESET_PERCENT = _required_float_config("AG_RECOVERY_RESET_PCT")
 NEAR_TRIGGER_SECONDS = _required_float_config("AG_NEAR_TRIGGER_SEC")
 ACTIVE_TRIGGER_SECONDS = _required_float_config("AG_ACTIVE_TRIGGER_SEC")
 NEAR_TRIGGER_DISTANCE_PCT = _required_float_config(
     "AG_NEAR_TRIGGER_DISTANCE_PCT")
+TREND_DEFER_MAX_SECONDS = _required_float_config("AG_TREND_DEFER_MAX_SEC")
 
 
 def _parse_tiers(raw):
@@ -71,7 +80,8 @@ BUY_TIERS = _parse_tiers(BUY_TIERS_RAW)
 SELL_TIERS = _parse_tiers(SELL_TIERS_RAW)
 TRACKED_SYMBOLS = _parse_symbols(TRACKED_SYMBOLS_RAW)
 LEGACY_BUY_SYMBOL = "BTCUSDC"
-PENDING_ORDER_MISSING_CONFIRMATIONS = 2
+ORDER_MISSING_CONFIRMATIONS = _required_int_config(
+    "AG_ORDER_MISSING_CONFIRMATIONS")
 STATE = AssetGuardianState()
 _last_evaluation = {
     symbol: {"growth": None, "drawdown": None, "pending_tier": False}
@@ -113,9 +123,10 @@ def _validate_config():
             or SELL_REARM_GROWTH_PERCENT >= SELL_TIERS[0][0]):
         raise ValueError(
             "AG_SELL_REARM_GROWTH_PCT trebuie sa fie > 0 si sub primul prag SELL")
-    if (not math.isfinite(SELL_ORDER_MAX_AGE_SECONDS)
-            or SELL_ORDER_MAX_AGE_SECONDS <= 0):
-        raise ValueError("AG_SELL_ORDER_MAX_AGE_SEC trebuie sa fie finit si > 0")
+    if not math.isfinite(ORDER_MAX_AGE_SECONDS) or ORDER_MAX_AGE_SECONDS <= 0:
+        raise ValueError("AG_ORDER_MAX_AGE_SEC trebuie sa fie finit si > 0")
+    if ORDER_MISSING_CONFIRMATIONS <= 0:
+        raise ValueError("AG_ORDER_MISSING_CONFIRMATIONS trebuie sa fie intreg si > 0")
     if not TRACKED_SYMBOLS:
         raise ValueError("AG_SYMBOLS trebuie sa contina cel putin un simbol")
     unsupported = [symbol for symbol in TRACKED_SYMBOLS if symbol not in sym.symbols]
@@ -125,12 +136,24 @@ def _validate_config():
             (RECOVERY_RESET_PERCENT, "AG_RECOVERY_RESET_PCT"),
             (NEAR_TRIGGER_SECONDS, "AG_NEAR_TRIGGER_SEC"),
             (ACTIVE_TRIGGER_SECONDS, "AG_ACTIVE_TRIGGER_SEC"),
-            (NEAR_TRIGGER_DISTANCE_PCT, "AG_NEAR_TRIGGER_DISTANCE_PCT")):
+            (NEAR_TRIGGER_DISTANCE_PCT, "AG_NEAR_TRIGGER_DISTANCE_PCT"),
+            (TREND_DEFER_MAX_SECONDS, "AG_TREND_DEFER_MAX_SEC")):
         if not math.isfinite(value) or value <= 0:
             raise ValueError(f"{name} trebuie sa fie finit si > 0")
 
 
 _validate_config()
+
+
+ORDER_LIFECYCLE = mkt.tracked_order_lifecycle(
+    provider_name="binance",
+    venue="Binance",
+    missing_confirmations=ORDER_MISSING_CONFIRMATIONS,
+    retry_on_lookup_error=True,
+    max_age_seconds=ORDER_MAX_AGE_SECONDS,
+    audit=ExecutionAudit(),
+    clock=lambda: time.time(),
+)
 
 
 def _finite_float(raw, *, positive=False):
@@ -248,6 +271,7 @@ def sell_asset(symbol, qty, current_price, client_order_id, tier_threshold):
             symbol, "SELL", price, qty_to_sell,
             force=False, smart=False, caller_owns_retry=True,
             bypass_quantity_policy=True,
+            wait_for_trend=False,
             client_order_id=client_order_id,
             motivation=f"assetguardian_growth_exit_tier_{tier_threshold:g}")
         if order:
@@ -264,7 +288,7 @@ def sell_asset(symbol, qty, current_price, client_order_id, tier_threshold):
 
 
 def buy_with_all_cash(buy_symbol, cash_ratio=BUY_USE_CASH_RATIO,
-                      cash_amount=None):
+                      cash_amount=None, client_order_id=None):
     try:
         _, quote_asset = resolve_assets(buy_symbol)
         cash_ratio = _finite_float(cash_ratio, positive=True)
@@ -311,15 +335,17 @@ def buy_with_all_cash(buy_symbol, cash_ratio=BUY_USE_CASH_RATIO,
             buy_symbol, "BUY", current_price, qty,
             force=False, smart=False, caller_owns_retry=True,
             bypass_profit_reference=True,
+            wait_for_trend=False,
+            client_order_id=client_order_id,
             motivation="assetguardian_drawdown_buy")
         if order:
             print(f" BUY safe-order sent: {buy_symbol}, qty={qty:.8f}")
-            return True
+            return order
         print(f" BUY safe-order failed: {buy_symbol}, qty={qty:.8f}")
-        return False
+        return None
     except Exception as e:
         print(f"ERROR buying {buy_symbol}: {e}")
-        return False
+        return None
 
 
 def _completed_tier_values(state):
@@ -391,6 +417,62 @@ def _save_symbol_campaign(symbol, kind, campaign):
     STATE.save({"version": 3, "symbols": symbols_state})
 
 
+def _trend_defer_ready(symbol, kind, side, threshold, state):
+    """Non-blocking trend deferral, re-evaluated by the normal Guardian loop."""
+    state = dict(state)
+    now = float(time.time())
+    defer = state.get("trend_defer")
+    if not isinstance(defer, dict):
+        defer = {}
+    same_intent = (
+        str(defer.get("side") or "").upper() == str(side).upper()
+        and _finite_float(defer.get("threshold"), positive=True) == float(threshold)
+    )
+    started_at = (_finite_float(defer.get("started_at"), positive=True)
+                  if same_intent else None)
+    try:
+        should_wait = bool(
+            cm.get_short_trend_manager().should_wait(side, symbol))
+    except Exception as exc:
+        print(f"[{symbol}] Trend defer unavailable; continue submit: {exc}")
+        should_wait = False
+
+    if should_wait:
+        if started_at is None:
+            started_at = now
+            state["trend_defer"] = {
+                "side": str(side).upper(),
+                "threshold": float(threshold),
+                "started_at": started_at,
+            }
+            _save_symbol_campaign(symbol, kind, state)
+        elapsed = max(0.0, now - started_at)
+        if elapsed < TREND_DEFER_MAX_SECONDS:
+            print(
+                f"[{symbol}] {side} tier {float(threshold):g}% deferred by "
+                f"short trend: {elapsed:.1f}/{TREND_DEFER_MAX_SECONDS:.1f}s; "
+                "no blocking sleep.")
+            return False, state
+        print(
+            f"[{symbol}] {side} trend defer reached "
+            f"{TREND_DEFER_MAX_SECONDS:.1f}s; submit only if signal remains valid.")
+
+    if "trend_defer" in state:
+        state.pop("trend_defer", None)
+        _save_symbol_campaign(symbol, kind, state)
+    return True, state
+
+
+def _clear_inactive_trend_defer(symbol, kind, state):
+    """Reset the 180s clock when its tier signal is no longer crossed."""
+    if not isinstance(state, dict) or "trend_defer" not in state:
+        return state
+    state = dict(state)
+    state.pop("trend_defer", None)
+    _save_symbol_campaign(symbol, kind, state)
+    return state
+
+
 def _campaign_tier(symbol, drawdown_abs, maximum_row, free_cash):
     """Select one crossed, incomplete BUY tier for one symbol campaign."""
     state = _symbol_campaign(symbol, "buy")
@@ -411,6 +493,10 @@ def _campaign_tier(symbol, drawdown_abs, maximum_row, free_cash):
             "peak_ts": peak_ts,
             "initial_cash": free_cash,
             "completed_tiers": [],
+            "spent_quote_by_tier": {},
+            "total_spent_quote": 0.0,
+            "attempts_by_tier": {},
+            "terminal_orders": [],
         }
         _save_symbol_campaign(symbol, "buy", state)
     elif stored_peak is None:
@@ -451,11 +537,75 @@ def _tier_key(threshold):
     return f"{float(threshold):g}"
 
 
+def _buy_remaining_cash(state, threshold, allocation):
+    initial_cash = _finite_float(state.get("initial_cash"), positive=True)
+    if initial_cash is None:
+        return None, None, None
+    target_cash = initial_cash * BUY_USE_CASH_RATIO * float(allocation)
+    prior_spent = _finite_float(
+        dict(state.get("spent_quote_by_tier") or {}).get(
+            _tier_key(threshold))) or 0.0
+    return max(0.0, target_cash - prior_spent), target_cash, prior_spent
+
+
 def _sell_client_order_id(symbol, state, threshold, attempt):
     raw = (
         f"assetguardian:sell:{symbol}:{state.get('trough_ts')}:"
         f"{float(threshold):g}:{int(attempt)}")
     return "AGS" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:29]
+
+
+def _buy_client_order_id(symbol, state, threshold, attempt):
+    raw = (
+        f"assetguardian:buy:{symbol}:{state.get('peak_ts')}:"
+        f"{float(threshold):g}:{int(attempt)}")
+    return "AGB" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:29]
+
+
+def _record_terminal_buy(symbol, state, status):
+    """Atomically apply one terminal BUY result and acknowledge generic pending."""
+    pending = dict(state.get("pending") or {})
+    threshold = _finite_float(pending.get("threshold"), positive=True)
+    if threshold is None:
+        print(f"[{symbol}] Corrupt BUY terminal pending; preserve fail-closed.")
+        return state
+
+    key = _tier_key(threshold)
+    spent_by_tier = dict(state.get("spent_quote_by_tier") or {})
+    prior_spent = _finite_float(spent_by_tier.get(key)) or 0.0
+    executed_quote = max(0.0, float(status.cost) + float(status.fee))
+    spent_by_tier[key] = prior_spent + executed_quote
+
+    state = dict(state)
+    state["spent_quote_by_tier"] = spent_by_tier
+    state["total_spent_quote"] = (
+        (_finite_float(state.get("total_spent_quote")) or 0.0)
+        + executed_quote)
+    if status.status == "closed" and status.filled_qty > 0:
+        completed = _completed_tier_values(state)
+        completed.add(threshold)
+        state["completed_tiers"] = sorted(completed)
+
+    terminal = list(state.get("terminal_orders") or [])[-19:]
+    terminal.append({
+        "order_id": pending.get("order_id"),
+        "client_order_id": pending.get("client_order_id"),
+        "threshold": threshold,
+        "status": status.status,
+        "filled_qty": status.filled_qty,
+        "cost": status.cost,
+        "fee": status.fee,
+        "terminal_ts": time.time(),
+    })
+    state["terminal_orders"] = terminal
+    state.pop("pending", None)
+    _save_symbol_campaign(symbol, "buy", state)
+    print(
+        f"[{symbol}] BUY tier terminal: threshold={threshold:g}% "
+        f"status={status.status} orderId={pending.get('order_id')} "
+        f"filled={status.filled_qty:.8f} cost={status.cost:.8f} "
+        f"fee={status.fee:.8f}")
+    return state
 
 
 def _record_terminal_sell(symbol, state, status):
@@ -504,119 +654,133 @@ def _record_terminal_sell(symbol, state, status):
     return state
 
 
+def _campaign_pending_persistor(symbol, kind, state):
+    """Embed generic tracked pending state in one atomic campaign save."""
+    if kind not in {"buy", "sell"}:
+        raise ValueError(f"invalid tracked campaign kind: {kind}")
+    box = {"state": dict(state)}
+
+    def persist(pending):
+        updated = dict(box["state"])
+        if pending is None:
+            updated.pop("pending", None)
+        else:
+            updated["pending"] = dict(pending)
+        box["state"] = updated
+        _save_symbol_campaign(symbol, kind, updated)
+
+    return box, persist
+
+
+def _reuse_unaccepted_attempt(symbol, kind, state, pending):
+    """Release one unverified submit without consuming its deterministic ID.
+
+    The next strategy evaluation increments the counter back to the same attempt,
+    producing the same client_order_id.  This gives AssetGuardian at-least-once
+    submit semantics while retaining venue-side idempotency where supported.
+    """
+    threshold = _finite_float(pending.get("threshold"), positive=True)
+    try:
+        attempt = int(pending.get("attempt"))
+    except (TypeError, ValueError, OverflowError):
+        attempt = 0
+    if threshold is None or attempt <= 0:
+        print(f"[{symbol}] Cannot reuse corrupt {kind.upper()} attempt; preserve counters.")
+        return state
+    key = _tier_key(threshold)
+    attempts = dict(state.get("attempts_by_tier") or {})
+    attempts[key] = max(0, attempt - 1)
+    state = dict(state)
+    state["attempts_by_tier"] = attempts
+    _save_symbol_campaign(symbol, kind, state)
+    return state
+
+
+def _normalize_legacy_sell_pending(symbol, pending):
+    """Add generic identity fields to pending rows created before the refactor."""
+    normalized = dict(pending)
+    normalized.setdefault("intent_id", normalized.get("client_order_id"))
+    normalized.setdefault("symbol", symbol)
+    normalized.setdefault("side", "SELL")
+    normalized.setdefault("kind", "ASSET_GUARDIAN_SELL_TIER")
+    normalized.setdefault("requested_price", None)
+    return normalized
+
+
+def _normalize_legacy_buy_pending(symbol, pending):
+    normalized = dict(pending)
+    normalized.setdefault("intent_id", normalized.get("client_order_id"))
+    normalized.setdefault("symbol", symbol)
+    normalized.setdefault("side", "BUY")
+    normalized.setdefault("kind", "ASSET_GUARDIAN_BUY_TIER")
+    normalized.setdefault("requested_price", None)
+    return normalized
+
+
 def _reconcile_pending_sell(symbol, state):
-    """Return ``active``/``terminal``/``none`` after querying venue truth."""
+    """Adapt generic tracked-order truth to the SELL campaign accounting."""
     pending = state.get("pending")
     if not isinstance(pending, dict) or not pending:
         return state, "none"
-    pending = dict(pending)
-    client_order_id = str(pending.get("client_order_id") or "")
-    if not client_order_id:
-        print(f"[{symbol}] SELL pending without client_order_id; block fail-closed.")
-        return state, "active"
-
-    order_id = pending.get("order_id")
-    if order_id is None:
-        try:
-            native = mkt.order_by_client_id(
-                symbol, client_order_id, provider_name="binance")
-        except Exception as exc:
-            print(f"[{symbol}] SELL lookup by client id failed; keep pending: {exc}")
-            return state, "active"
-        if native is None:
-            misses = int(pending.get("lookup_misses") or 0) + 1
-            pending["lookup_misses"] = misses
-            state = dict(state)
-            state["pending"] = pending
-            _save_symbol_campaign(symbol, "sell", state)
-            if misses < PENDING_ORDER_MISSING_CONFIRMATIONS:
-                print(
-                    f"[{symbol}] SELL intent absent at venue ({misses}/"
-                    f"{PENDING_ORDER_MISSING_CONFIRMATIONS}); keep pending.")
-                return state, "active"
-            state.pop("pending", None)
-            _save_symbol_campaign(symbol, "sell", state)
-            print(
-                f"[{symbol}] SELL intent confirmed absent at venue twice; "
-                "clear pending without completing tier.")
-            return state, "terminal"
-        order_id = native.get("orderId") if isinstance(native, dict) else None
-        if order_id is None:
-            print(f"[{symbol}] SELL lookup response without orderId; keep pending.")
-            return state, "active"
-        pending["order_id"] = str(order_id)
-        pending["lookup_misses"] = 0
-        state = dict(state)
-        state["pending"] = pending
-        _save_symbol_campaign(symbol, "sell", state)
-
+    pending = _normalize_legacy_sell_pending(symbol, pending)
+    box, persist = _campaign_pending_persistor(symbol, "sell", state)
+    if pending != state.get("pending"):
+        persist(pending)
     try:
-        status = mkt.order_status(symbol, str(order_id), provider_name="binance")
+        result = ORDER_LIFECYCLE.reconcile(pending, persist=persist)
     except Exception as exc:
-        print(f"[{symbol}] SELL order status unavailable; keep pending: {exc}")
-        return state, "active"
-    if not status.terminal:
-        pending["last_status"] = status.status
-        pending["filled_qty"] = status.filled_qty
-        state = dict(state)
-        state["pending"] = pending
-        _save_symbol_campaign(symbol, "sell", state)
-
-        created_at = _finite_float(pending.get("created_at"), positive=True)
-        now_ts = float(time.time())
-        age_seconds = (max(0.0, now_ts - created_at)
-                       if created_at is not None else None)
-        cancel_attempted = _finite_float(
-            pending.get("cancel_attempted_at"), positive=True)
-        if (age_seconds is not None
-                and age_seconds >= SELL_ORDER_MAX_AGE_SECONDS
-                and cancel_attempted is None):
-            # Persist before the side effect. Even an ambiguous API error must not
-            # generate repeated cancel requests or permit a replacement order.
-            pending["cancel_attempted_at"] = now_ts
-            state["pending"] = pending
-            _save_symbol_campaign(symbol, "sell", state)
-            print(
-                f"[{symbol}] SELL order exceeded owned TTL: orderId={order_id} "
-                f"clientOrderId={client_order_id} age={age_seconds:.1f}s; "
-                "request one cancel after fresh status reconciliation.")
-            try:
-                mkt.cancel_order(
-                    symbol, str(order_id), provider_name="binance")
-            except Exception as exc:
-                print(
-                    f"[{symbol}] SELL cancel result ambiguous/failed; keep pending "
-                    f"without retrying cancel: orderId={order_id} error={exc}")
-                return state, "active"
-            try:
-                status = mkt.order_status(
-                    symbol, str(order_id), provider_name="binance")
-            except Exception as exc:
-                print(
-                    f"[{symbol}] SELL post-cancel status unavailable; keep pending: "
-                    f"orderId={order_id} error={exc}")
-                return state, "active"
-            if status.terminal:
-                return _record_terminal_sell(symbol, state, status), "terminal"
-            pending["last_status"] = status.status
-            pending["filled_qty"] = status.filled_qty
-            state["pending"] = pending
-            _save_symbol_campaign(symbol, "sell", state)
-            print(
-                f"[{symbol}] SELL cancel not terminal yet; keep pending: "
-                f"orderId={order_id} status={status.status} "
-                f"filled={status.filled_qty:.8f}")
-            return state, "active"
-
-        if age_seconds is None:
-            print(
-                f"[{symbol}] SELL pending has no valid created_at; cannot expire "
-                "safely and remains fail-closed.")
+        print(f"[{symbol}] Invalid/corrupt SELL pending; block fail-closed: {exc}")
+        return box["state"], "active"
+    state = box["state"]
+    if result.outcome == "terminal":
+        return _record_terminal_sell(symbol, state, result.status), "terminal"
+    if result.outcome in {"absent", "retryable"}:
+        state = _reuse_unaccepted_attempt(symbol, "sell", state, result.intent)
+        truth = ("confirmed absent" if result.outcome == "absent"
+                 else "lookup unavailable")
         print(
-            f"[{symbol}] SELL tier still {status.status}: orderId={order_id} "
-            f"filled={status.filled_qty:.8f} age={age_seconds}")
-        return state, "active"
-    return _record_terminal_sell(symbol, state, status), "terminal"
+            f"[{symbol}] SELL intent {truth}; release for same-ID, revalidated retry "
+            "without completing tier.")
+        return state, "retryable"
+    status_label = result.status.status if result.status is not None else "unknown"
+    print(
+        f"[{symbol}] SELL tier pending: status={status_label} "
+        f"orderId={result.intent.get('order_id')} "
+        f"filled={_finite_float(result.intent.get('filled_qty')) or 0.0:.8f}")
+    return state, "active"
+
+
+def _reconcile_pending_buy(symbol, state):
+    """Adapt generic tracked-order truth to BUY campaign accounting."""
+    pending = state.get("pending")
+    if not isinstance(pending, dict) or not pending:
+        return state, "none"
+    pending = _normalize_legacy_buy_pending(symbol, pending)
+    box, persist = _campaign_pending_persistor(symbol, "buy", state)
+    if pending != state.get("pending"):
+        persist(pending)
+    try:
+        result = ORDER_LIFECYCLE.reconcile(pending, persist=persist)
+    except Exception as exc:
+        print(f"[{symbol}] Invalid/corrupt BUY pending; block fail-closed: {exc}")
+        return box["state"], "active"
+    state = box["state"]
+    if result.outcome == "terminal":
+        return _record_terminal_buy(symbol, state, result.status), "terminal"
+    if result.outcome in {"absent", "retryable"}:
+        state = _reuse_unaccepted_attempt(symbol, "buy", state, result.intent)
+        truth = ("confirmed absent" if result.outcome == "absent"
+                 else "lookup unavailable")
+        print(
+            f"[{symbol}] BUY intent {truth}; release for same-ID, revalidated retry "
+            "without completing tier.")
+        return state, "retryable"
+    status_label = result.status.status if result.status is not None else "unknown"
+    print(
+        f"[{symbol}] BUY tier pending: status={status_label} "
+        f"orderId={result.intent.get('order_id')} "
+        f"filled={_finite_float(result.intent.get('filled_qty')) or 0.0:.8f}")
+    return state, "active"
 
 
 def _active_sell_orders(provider, symbol):
@@ -735,42 +899,77 @@ def _submit_sell_tier(symbol, current_price, tier, state):
     attempt = int(attempts.get(key) or 0) + 1
     attempts[key] = attempt
     client_order_id = _sell_client_order_id(symbol, state, threshold, attempt)
-    pending = {
-        "intent_id": client_order_id,
-        "client_order_id": client_order_id,
-        "threshold": threshold,
-        "allocation": allocation,
-        "requested_qty": qty,
-        "attempt": attempt,
-        "created_at": time.time(),
-        "lookup_misses": 0,
-    }
     state = dict(state)
     state["attempts_by_tier"] = attempts
-    state["pending"] = pending
-    _save_symbol_campaign(symbol, "sell", state)
-
-    order = sell_asset(
-        symbol, qty=qty, current_price=current_price,
-        client_order_id=client_order_id, tier_threshold=threshold)
-    if not order:
-        # The shared guard may have refused before submission, or the venue response
-        # may be ambiguous. Preserve the intent and reconcile by deterministic ID.
+    intent = ORDER_LIFECYCLE.new_intent(
+        intent_id=client_order_id,
+        client_order_id=client_order_id,
+        symbol=symbol,
+        side="SELL",
+        requested_qty=qty,
+        requested_price=current_price,
+        kind="ASSET_GUARDIAN_SELL_TIER",
+        attempt=attempt,
+        metadata={"threshold": threshold, "allocation": allocation},
+    )
+    box, persist = _campaign_pending_persistor(symbol, "sell", state)
+    try:
+        result = ORDER_LIFECYCLE.submit(
+            intent,
+            persist=persist,
+            submit=lambda: sell_asset(
+                symbol, qty=qty, current_price=current_price,
+                client_order_id=client_order_id, tier_threshold=threshold),
+        )
+    except Exception as exc:
+        print(f"[{symbol}] SELL tracked submit failed before/around submit: {exc}")
         return False
-    order_id = order.get("orderId") if isinstance(order, dict) else None
-    if order_id is not None:
-        pending["order_id"] = str(order_id)
-    if isinstance(order, dict):
-        submitted_qty = _finite_float(order.get("origQty"), positive=True)
-        if submitted_qty is not None:
-            pending["submitted_qty"] = submitted_qty
-        pending["submit_status"] = str(order.get("status") or "accepted")
-    state["pending"] = pending
-    _save_symbol_campaign(symbol, "sell", state)
-    # Immediate reconciliation catches a synchronous FILLED response. A NEW or
-    # PARTIALLY_FILLED order remains pending and blocks duplicate tiers.
-    _reconcile_pending_sell(symbol, state)
-    return True
+    # Known order ID means venue acceptance was observed.  An ambiguous response
+    # remains pending and is recovered by client ID in a later evaluator cycle.
+    return result.order_known
+
+
+def _submit_buy_tier(symbol, current_price, cash_amount, tier, state):
+    threshold, allocation = tier
+    key = _tier_key(threshold)
+    attempts = dict(state.get("attempts_by_tier") or {})
+    attempt = int(attempts.get(key) or 0) + 1
+    attempts[key] = attempt
+    client_order_id = _buy_client_order_id(symbol, state, threshold, attempt)
+    qty = _finite_float(cash_amount, positive=True) / _finite_float(
+        current_price, positive=True)
+    state = dict(state)
+    state["attempts_by_tier"] = attempts
+    intent = ORDER_LIFECYCLE.new_intent(
+        intent_id=client_order_id,
+        client_order_id=client_order_id,
+        symbol=symbol,
+        side="BUY",
+        requested_qty=qty,
+        requested_price=current_price,
+        kind="ASSET_GUARDIAN_BUY_TIER",
+        attempt=attempt,
+        metadata={
+            "threshold": threshold,
+            "allocation": allocation,
+            "requested_cash": cash_amount,
+        },
+    )
+    _box, persist = _campaign_pending_persistor(symbol, "buy", state)
+    try:
+        result = ORDER_LIFECYCLE.submit(
+            intent,
+            persist=persist,
+            submit=lambda: buy_with_all_cash(
+                buy_symbol=symbol,
+                cash_amount=cash_amount,
+                client_order_id=client_order_id,
+            ),
+        )
+    except Exception as exc:
+        print(f"[{symbol}] BUY tracked submit failed before/around submit: {exc}")
+        return False
+    return result.order_known
 
 
 def _next_check_seconds():
@@ -778,7 +977,8 @@ def _next_check_seconds():
         return min(CHECK_INTERVAL_SECONDS, ACTIVE_TRIGGER_SECONDS)
     root = _load_state_root()
     if any(
-            isinstance(row.get("sell", {}).get("pending"), dict)
+            any(isinstance(row.get(kind, {}).get("pending"), dict)
+                for kind in ("buy", "sell"))
             for row in root["symbols"].values() if isinstance(row, dict)):
         return min(CHECK_INTERVAL_SECONDS, ACTIVE_TRIGGER_SECONDS)
     for symbol, evaluation in _last_evaluation.items():
@@ -809,6 +1009,24 @@ def evaluate_symbol(symbol, minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT):
         print(f"[{symbol}] Invalid AssetGuardian symbol; skip evaluation.")
         return False
 
+    # Reconcile external truth before requiring fresh signal data. A stale/missing
+    # price must not prevent terminalizing an already submitted order, and a BUY
+    # recovery must never clear a pending intent before venue reconciliation.
+    for kind, reconcile in (
+            ("sell", _reconcile_pending_sell),
+            ("buy", _reconcile_pending_buy)):
+        campaign = _symbol_campaign(symbol, kind)
+        if not campaign.get("pending"):
+            continue
+        _campaign, pending_outcome = reconcile(symbol, campaign)
+        if pending_outcome == "active":
+            evaluation["pending_tier"] = True
+            return False
+        if pending_outcome == "terminal":
+            # One-cycle cooldown separates terminal/cancel accounting from a new
+            # signal and prevents cancel-partial from immediate resubmission.
+            return False
+
     current_price = _finite_float(api.get_current_price(symbol), positive=True)
     if current_price is None:
         print(f"[{symbol}] Current price unavailable; skip evaluation.")
@@ -836,17 +1054,6 @@ def evaluate_symbol(symbol, minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT):
         _save_symbol_campaign(symbol, "buy", {})
 
     provider = mkt.provider_by_name("binance")
-    sell_state = _symbol_campaign(symbol, "sell")
-    if sell_state.get("pending"):
-        sell_state, pending_outcome = _reconcile_pending_sell(symbol, sell_state)
-        if pending_outcome == "active":
-            evaluation["pending_tier"] = True
-            return False
-        if pending_outcome == "terminal":
-            # Cool down one evaluator cycle after terminal reconciliation. This
-            # prevents a cancel/partial terminal from being resubmitted immediately.
-            return False
-
     try:
         base_asset, _ = resolve_assets(symbol)
         free_base_qty = (provider.free_balance(base_asset)
@@ -856,6 +1063,9 @@ def evaluate_symbol(symbol, minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT):
         free_base_qty = None
     sell_tier, sell_state, effective_growth = _sell_campaign_tier(
         symbol, current_price, minimum_row, free_base_qty, provider)
+    if sell_tier is None:
+        sell_state = _clear_inactive_trend_defer(
+            symbol, "sell", sell_state)
     evaluation["growth"] = (
         rolling_growth_percent if effective_growth is None else effective_growth)
     frozen_trough = _finite_float(sell_state.get("trough_price"), positive=True)
@@ -875,6 +1085,10 @@ def evaluate_symbol(symbol, minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT):
             f"target_remaining={qty:.8f} base."
         )
         evaluation["pending_tier"] = True
+        ready, sell_state = _trend_defer_ready(
+            symbol, "sell", "SELL", threshold, sell_state)
+        if not ready:
+            return False
         accepted = _submit_sell_tier(
             symbol, current_price=current_price, tier=sell_tier, state=sell_state)
         if accepted:
@@ -883,7 +1097,10 @@ def evaluate_symbol(symbol, minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT):
             return True
         return False
 
-    if drawdown_percent <= -BUY_TIERS[0][0]:
+    if drawdown_percent > -BUY_TIERS[0][0]:
+        _clear_inactive_trend_defer(
+            symbol, "buy", _symbol_campaign(symbol, "buy"))
+    else:
         print(
             f"[{symbol}] Drawdown threshold reached ({drawdown_percent:.4f}% "
             f"<= -{BUY_TIERS[0][0]:.4f}%). Checking staged BUY..."
@@ -906,12 +1123,26 @@ def evaluate_symbol(symbol, minutes_back=ASSET_REFERENCE_MINUTES_BACK_DEFAULT):
             print(f"[{symbol}] Invalid campaign initial cash; reset fail-closed.")
             _save_symbol_campaign(symbol, "buy", {})
             return False
-        cash_amount = initial_cash * BUY_USE_CASH_RATIO * allocation
-        print(f"[{symbol}] BUY tier -{threshold:.2f}% allocation={allocation:.3f} "
-              f"cash_target={cash_amount:.6f} USDC")
-        if buy_with_all_cash(buy_symbol=symbol, cash_amount=cash_amount):
+        cash_amount, target_cash, prior_spent = _buy_remaining_cash(
+            campaign, threshold, allocation)
+        if cash_amount is None:
+            print(f"[{symbol}] Invalid BUY tier budget; preserve fail-closed.")
+            return False
+        if cash_amount <= 0:
             _complete_campaign_tier(symbol, "buy", campaign, threshold)
-            evaluation["pending_tier"] = False
+            print(
+                f"[{symbol}] BUY tier -{threshold:.2f}% already funded by "
+                f"terminal partials ({prior_spent:.6f} quote); mark complete.")
+            return False
+        print(f"[{symbol}] BUY tier -{threshold:.2f}% allocation={allocation:.3f} "
+              f"cash_remaining={cash_amount:.6f}/{target_cash:.6f} USDC")
+        ready, campaign = _trend_defer_ready(
+            symbol, "buy", "BUY", threshold, campaign)
+        if not ready:
+            return False
+        if _submit_buy_tier(
+                symbol, current_price, cash_amount, tier, campaign):
+            evaluation["pending_tier"] = True
             return True
 
     return False
@@ -933,7 +1164,8 @@ def run_forever():
     print(
         f" Started. check_interval={CHECK_INTERVAL_SECONDS}s, "
         f"sell_tiers={SELL_TIERS}, sell_rearm={SELL_REARM_GROWTH_PERCENT}%, "
-        f"sell_order_max_age={SELL_ORDER_MAX_AGE_SECONDS}s, "
+        f"order_max_age={ORDER_MAX_AGE_SECONDS}s, "
+        f"trend_defer_max={TREND_DEFER_MAX_SECONDS}s, "
         f"buy_tiers={BUY_TIERS}, "
         f"minutes_back={ASSET_REFERENCE_MINUTES_BACK_DEFAULT}m, "
         f"symbols={TRACKED_SYMBOLS}"

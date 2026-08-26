@@ -448,6 +448,28 @@ class MarketApi:
             raise ProviderError(f"{provider.name}: cancel_order is unsupported")
         method(symbol, str(order_id))
 
+    def tracked_order_lifecycle(self, *, provider_name: str, venue=None,
+                                missing_confirmations=2,
+                                retry_on_lookup_error=False,
+                                max_age_seconds=None, audit=None,
+                                clock=time.time):
+        """Build the persistent lifecycle companion for synchronous ``place``.
+
+        Persistence remains strategy-owned and is supplied to each lifecycle call;
+        this facade supplies provider-neutral lookup/status/cancel routing.
+        """
+        from .tracked_order import TrackedOrderLifecycle
+        return TrackedOrderLifecycle(
+            self,
+            provider_name=provider_name,
+            venue=venue,
+            missing_confirmations=missing_confirmations,
+            retry_on_lookup_error=retry_on_lookup_error,
+            max_age_seconds=max_age_seconds,
+            audit=audit,
+            clock=clock,
+        )
+
     def market_regime(self, symbol: str, *, provider_name=None, horizon="short",
                       interval_min=None, window_seconds=None, snapshot=None,
                       strength_threshold=None,

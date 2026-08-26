@@ -135,6 +135,29 @@ class OrderRetryStoreTest(unittest.TestCase):
         self.assertEqual(len(rem), 1)
         self.assertEqual(rem[0]["symbol"], "TAOUSDC")
 
+    def test_exact_record_resolution_does_not_remove_newer_revision(self):
+        rid = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=100.0,
+                         now=1000.0)
+        first = oq.get(rid)
+        first_cid = first["place_kwargs"]["client_order_id"]
+        oq.enqueue("BTCUSDC", "BUY", 2.0, {}, requested_price=99.0,
+                   now=1001.0)
+
+        self.assertFalse(oq.resolve_record(rid, client_order_id=first_cid))
+        self.assertEqual(oq.get(rid)["qty"], 2.0)
+
+    def test_mark_failure_preserves_pre_submit_client_id(self):
+        rid = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=100.0,
+                         failure_reason="submit_pending", now=1000.0)
+        client_id = oq.get(rid)["place_kwargs"]["client_order_id"]
+
+        self.assertTrue(oq.mark_failure(
+            rid, "response_without_order_id", now=1001.0,
+            client_order_id=client_id))
+        rec = oq.get(rid)
+        self.assertEqual(rec["place_kwargs"]["client_order_id"], client_id)
+        self.assertEqual(rec["last_failure_reason"], "response_without_order_id")
+
     def test_claim_leases_and_returns_without_removing(self):
         a = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0, now=1000.0)
         oq.enqueue("TAOUSDC", "SELL", 2.0, {}, requested_price=2.0, now=1001.0)
@@ -222,6 +245,35 @@ class OrderRetryStoreTest(unittest.TestCase):
         rec = {"created_ts": 1000.0, "attempts": 0}
         self.assertFalse(oq.is_expired(rec, now=1000.0 + 86400 - 1))
         self.assertTrue(oq.is_expired(rec, now=1000.0 + 86400 + 1))
+
+    def test_trend_deferred_record_never_consumes_ttl_or_attempts(self):
+        rid = oq.enqueue(
+            "BTCUSDC", "BUY", 1.0, {}, requested_price=100.0,
+            failure_reason="trend_deferred", now=1000.0)
+        rec = oq.load_all()[0]
+        self.assertFalse(oq.is_expired(rec, now=1000.0 + 10 * 86400))
+
+        claimed = oq.claim([rid], now=1000.0 + 10 * 86400)[0]
+        oq.complete_claim(
+            claimed, "deferred", now=1000.0 + 10 * 86400,
+            failure_reason="trend_deferred")
+        rec = oq.load_all()[0]
+        self.assertEqual(rec["attempts"], 0)
+        self.assertEqual(rec["last_failure_reason"], "trend_deferred")
+        self.assertFalse(oq.is_expired(rec, now=1000.0 + 20 * 86400))
+
+    def test_ttl_starts_fresh_after_trend_stops_deferring(self):
+        rid = oq.enqueue(
+            "BTCUSDC", "BUY", 1.0, {}, requested_price=100.0,
+            failure_reason="trend_deferred", now=1000.0)
+        transition = 1000.0 + 10 * 86400
+        claimed = oq.claim([rid], now=transition)[0]
+        oq.complete_claim(
+            claimed, "failure", now=transition, failure_reason="cooldown")
+        rec = oq.load_all()[0]
+        self.assertEqual(rec["ttl_started_ts"], transition)
+        self.assertFalse(oq.is_expired(rec, now=transition + 86400 - 1))
+        self.assertTrue(oq.is_expired(rec, now=transition + 86400 + 1))
 
     def test_is_expired_max_attempts(self):
         oq.RETRY_MAX_ATTEMPTS = 3

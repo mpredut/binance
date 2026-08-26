@@ -197,7 +197,8 @@ def _fire_order(symbol, action, price, reason, **kwargs):
     """Submit an order through the single guarded proxy.
 
     Since July 30 this uses ``mkt.place`` instead of ``po.place_order_smart``;
-    Instrument.place centrally records execution or refusal in order_outcomes.
+    Instrument.place centrally records provider acceptance or refusal in
+    order_outcomes; acceptance is not a confirmed fill.
     The Kalman gate must pass before execution. No explicit quantity is supplied:
     ``qty=None`` uses the QuantityDecision maximum under Binance policy, clamped
     to the real balance.

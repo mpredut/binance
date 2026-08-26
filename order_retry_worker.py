@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """order_retry_worker.py — the SINGLE READER of the order_retry.py replacement outbox.
 
-Model B uses multiple writers (Instrument.place -> order_retry.enqueue on failure) and
+Model B uses multiple writers (Instrument.place -> durable pre-submit outbox) and
 ONE reader: this process. It scans the queue and, for every DUE order whose
 RETRY_INTERVAL_SEC has elapsed, checks oq.price_gate_ok to determine whether the current
 price is more favorable than the requested price. If not, the order remains queued
 without counting an attempt while it waits for price to recover. If favorable, the worker
 retries through mkt.place() at CURRENT PRICE with caller_owns_retry=True to prevent an
-automatic re-enqueue. Success removes the leased revision. Failure increments attempts
-and releases the lease while retaining it. Exceeding TTL or the attempt limit removes it
-and sends an alert for manual intervention.
+automatic re-enqueue. Provider acceptance removes the leased revision; that event is
+not a fill. Failure increments attempts and releases the lease while retaining it.
+Trend deferral releases without consuming attempts or TTL. Exceeding active TTL or the
+attempt limit removes it and sends an alert for manual intervention.
 
 ``process_once`` has an injectable market facade for tests. It still mutates the
 persistent queue and sends alerts. Claiming uses a durable lease, so a crash leaves the
@@ -115,6 +116,8 @@ def process_once(mkt, now=None):
         symbol = r.get("symbol")
         kwargs = dict(r.get("place_kwargs") or {})
         kwargs["caller_owns_retry"] = True  # the worker explicitly re-adds failures
+        outcome_context = {}
+        kwargs["_outcome_context"] = outcome_context
         client_order_id = kwargs.get("client_order_id")
         existing_order = _reconcile_client_order(
             mkt, symbol, client_order_id)
@@ -143,7 +146,15 @@ def process_once(mkt, now=None):
             print(f"[order_retry] ACCEPTAT {r.get('side')} {symbol} @ {price} "
                   f"orderId={order.get('orderId')}")
         else:
-            oq.complete_claim(r, "failure", now)
+            refusal_reason = outcome_context.get("reason")
+            if refusal_reason == "trend_deferred":
+                # A trend gate is a non-blocking deferral, not a failed attempt.
+                # Keep retrying indefinitely at the normal worker cadence.
+                oq.complete_claim(r, "deferred", now,
+                                  failure_reason=refusal_reason)
+            else:
+                oq.complete_claim(r, "failure", now,
+                                  failure_reason=refusal_reason)
 
     return {"attempted": attempted,
             "succeeded": succeeded,

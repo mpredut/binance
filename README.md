@@ -56,7 +56,7 @@ cannot trade simultaneously.
 | `monitortrades.py` | generic monitoring through the multi-provider facade |
 | `assetguardian.py` | protections and checks on assets |
 | `market_alerts.py` | market alerts with cooldown and configurable watchlist |
-| `order_retry_worker.py` | single consumer of the persistent failed orders queue |
+| `order_retry_worker.py` | single consumer of the persistent pre-submit/retry outbox |
 
 `tradeall_observe.py` is an auxiliary observation process. The dense archiver
 `tradeall_price_archiver.py` is part of the supervised fleet manifest: upon
@@ -75,6 +75,13 @@ resolution, which is why the watchdog restarts it quickly.
   submit/status/cancel cycle to `logger/execution_audit/`, without modifying the decision;
 - `order_guard.py`, `order_retry.py`, and `order_retry_worker.py` apply guards,
   persistence, and retry reconciliation;
+- for normal `Instrument.place` calls, the exact client ID is persisted before the
+  external submit; provider acceptance is logged as `accepted`, never as a fill;
+- shared-outbox deduplication by only `symbol+side` is disabled, so an intent from one
+  module cannot overwrite an independent same-side intent from another module;
+- the common outbox guarantees retry only through provider acceptance. Terminal
+  fill/cancel reconciliation remains strategy-owned because only the originating
+  strategy can decide whether a canceled intent is still financially valid;
 - `trailing_core.py` is the common state machine, and the Binance and Kraken adapters
   keep the venue-specific API, configuration, and state.
 
