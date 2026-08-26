@@ -3,9 +3,9 @@ Teste CONSOLIDATE pt extragerea constantelor in fisiere de config (28 iul —
 unificate din 4 fisiere aproape identice: test_{tradeall,monitortrades,rtrade,
 assetguardian}_config_extraction.py, ~56 teste sparse -> table-driven aici).
 
-Intentia PASTRATA integral:
-  - DEFAULTS: fiecare constanta extrasa are ca default EXACT valoarea veche
-    hardcodata (zero schimbare de comportament daca nu modifici configul).
+Intentia PASTRATA integral pentru modulele legacy si stricta pentru AssetGuardian:
+  - DEFAULTS: valorile incarcate din config sunt cele versionate asteptate;
+    AssetGuardian nu mai are fallback-uri ascunse in cod.
   - OVERRIDE: setarea variabilei de mediu + reload chiar schimba valoarea
     (mecanismul de override functioneaza real, nu doar aparent).
   - Specific per modul: siguranta importului (rtrade/assetguardian NU pornesc
@@ -84,10 +84,10 @@ DEFAULTS = [
     (rt, "RTRADE_SHOCK_HARD_STOP_PCT", 0.04),
     (rt, "RTRADE_HARD_STOP_PCT", 0.08),
     (ag, "CHECK_INTERVAL_SECONDS", 0.9 * 60),
-    (ag, "TARGET_GROWTH_PERCENT", 100.0),
-    (ag, "TARGET_DROP_PERCENT", 7.0),
     (ag, "ASSET_REFERENCE_MINUTES_BACK_DEFAULT", 24 * 60),
     (ag, "BUY_USE_CASH_RATIO", 0.995),
+    (ag, "SELL_REARM_GROWTH_PERCENT", 5.0),
+    (ag, "SELL_ORDER_MAX_AGE_SECONDS", 15 * 60),
 ]
 
 # (modul, env_var, valoare_str, atribut, valoare_asteptata_dupa_override)
@@ -113,8 +113,8 @@ OVERRIDES = [
     (rt, "RTRADE_PAIR_START_INTERVAL_SEC", "3.5", "RTRADE_PAIR_START_INTERVAL_SEC", 3.5),
     (rt, "RTRADE_FAST_FILL_RATIO", "0.5", "RTRADE_FAST_FILL_RATIO", 0.5),
     (ag, "AG_CHECK_INTERVAL_SEC", "30", "CHECK_INTERVAL_SECONDS", 30),
-    (ag, "AG_TARGET_GROWTH_PCT", "15", "TARGET_GROWTH_PERCENT", 15),
-    (ag, "AG_TARGET_DROP_PCT", "5", "TARGET_DROP_PERCENT", 5),
+    (ag, "AG_SELL_REARM_GROWTH_PCT", "4", "SELL_REARM_GROWTH_PERCENT", 4),
+    (ag, "AG_SELL_ORDER_MAX_AGE_SEC", "120", "SELL_ORDER_MAX_AGE_SECONDS", 120),
     (ag, "AG_REFERENCE_MINUTES_BACK", "60", "ASSET_REFERENCE_MINUTES_BACK_DEFAULT", 60),
     (ag, "AG_BUY_USE_CASH_RATIO", "0.5", "BUY_USE_CASH_RATIO", 0.5),
 ]
@@ -159,6 +159,82 @@ class TestModuleSpecifics(unittest.TestCase):
 
     def test_assetguardian_import_does_not_run_forever(self):
         self.assertTrue(hasattr(ag, "run_forever"))   # exista, dar guard-ul __main__ nu l-a rulat
+
+    def test_assetguardian_has_no_redundant_drop_parameter(self):
+        self.assertFalse(hasattr(ag, "TARGET_DROP_PERCENT"))
+        self.assertFalse(hasattr(ag, "TARGET_GROWTH_PERCENT"))
+        self.assertEqual(ag.SELL_TIERS, ((15.0, 0.30), (25.0, 0.30), (35.0, 0.40)))
+
+    def test_assetguardian_requires_every_config_key(self):
+        required = (
+            "AG_CHECK_INTERVAL_SEC",
+            "AG_REFERENCE_MINUTES_BACK",
+            "AG_BUY_USE_CASH_RATIO",
+            "AG_BUY_TIERS",
+            "AG_SELL_TIERS",
+            "AG_SELL_REARM_GROWTH_PCT",
+            "AG_SELL_ORDER_MAX_AGE_SEC",
+            "AG_SYMBOLS",
+            "AG_RECOVERY_RESET_PCT",
+            "AG_NEAR_TRIGGER_SEC",
+            "AG_ACTIVE_TRIGGER_SEC",
+            "AG_NEAR_TRIGGER_DISTANCE_PCT",
+        )
+        for key in required:
+            with self.subTest(key=key):
+                previous = os.environ.get(key)
+                os.environ[key] = ""
+                try:
+                    with self.assertRaisesRegex(ValueError, key):
+                        importlib.reload(ag)
+                finally:
+                    if previous is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = previous
+                    importlib.reload(ag)
+
+    def test_assetguardian_rejects_invalid_numeric_config_without_fallback(self):
+        key = "AG_SELL_REARM_GROWTH_PCT"
+        previous = os.environ.get(key)
+        os.environ[key] = "not-a-number"
+        try:
+            with self.assertRaisesRegex(ValueError, key):
+                importlib.reload(ag)
+        finally:
+            if previous is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous
+            importlib.reload(ag)
+
+    def test_assetguardian_rejects_incomplete_sell_allocations(self):
+        key = "AG_SELL_TIERS"
+        previous = os.environ.get(key)
+        os.environ[key] = "15:0.30,25:0.30"
+        try:
+            with self.assertRaisesRegex(ValueError, "exact 1"):
+                importlib.reload(ag)
+        finally:
+            if previous is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous
+            importlib.reload(ag)
+
+    def test_assetguardian_rearm_must_be_below_first_sell_tier(self):
+        key = "AG_SELL_REARM_GROWTH_PCT"
+        previous = os.environ.get(key)
+        os.environ[key] = "15"
+        try:
+            with self.assertRaisesRegex(ValueError, "sub primul prag SELL"):
+                importlib.reload(ag)
+        finally:
+            if previous is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous
+            importlib.reload(ag)
 
     def test_monitortrades_dead_symbol_params_removed(self):
         # SYMBOL_PARAMS (linii per-simbol din monitortrades.conf) era parsat dar

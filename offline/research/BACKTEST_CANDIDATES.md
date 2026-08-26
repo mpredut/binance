@@ -79,7 +79,7 @@ Ala e adresat de filtrul de trend + followup-ul trend-aware (deja live). Nicio s
 | 14 | `monitortrades_config.env` | `MT_BUY_SAFEBACK_HOURS` | 48h | 🟡 FARA DIFERENTIERE (28 iul) | Acelasi sweep/aceeasi cauza ca #13 — {24,36,60,72}h dau rezultate IDENTICE cu #13 (inclusiv intre ele). Vezi nota #13. |
 | 15 | `instruments.conf` `[BINANCE_BTC/TAO]` `mt.hardtp` / `mt.hardtp_fraction` (per-instrument, monitortrades.py:447; fallback global in `monitortrades.conf`) | `hard_tp` / `fraction` | 17% / 0.5 | 🟢 **RAMANE 17/0.5** | Testat 28 iul (pilot dry-run): **INERT pe acest istoric** — hard-TP nu se armeaza (pretul n-a urcat +12%..+24%), toate valorile dau rezultate IDENTICE (BTC net -274.22, TAO +152.69 pe tot gridul). Nimic de reglat pe date unde parametrul nu se declanseaza. A si expus un bug de guardrail in pilot (max() pe egalitate "aplica" fals primul din grila) — REPARAT: marja min vs valoarea curenta pe ambele ferestre. |
 | 16 | `instruments.conf` `[BINANCE_BTC/TAO]` | `mt.maxage_days` | 7 / 17 | 🟢 **RAMANE 7/17** | Testat 28 iul (pilot dry-run): BTC castigator diferit intre ferestre (10 vs 14) → respins ca zgomot; TAO castigator=17=valoarea curenta → deja optim. Niciun semnal confirmat. |
-| 17 | `assetguardian_config.env` | `AG_TARGET_DROP_PCT` | 7% | 🔴 | {4, 5.5, 7, 9, 12}% |
+| 17 | `assetguardian_config.env` | primul prag din `AG_BUY_TIERS` | 7% | 🔴 | {4, 5.5, 7, 9, 12}% |
 | 18 | `assetguardian_config.env` | `AG_REFERENCE_MINUTES_BACK` | 1440 min (24h) | 🔴 | {360, 720, 1440, 2160, 2880} min (6h→48h) |
 | 19 | `rtrade_config.env` | `RTRADE_BAD_DAY_MULTIPLIER` | 1.7 | 🔴 | {1.2, 1.45, 1.7, 2.1, 2.5} |
 | 20 | `rtrade_config.env` | `RTRADE_BUY_NORMAL_HOURS` / `RTRADE_SELL_NORMAL_HOURS` | 16h / 12h | 🔴 | BUY: {8,12,16,20,24}h · SELL: {6,9,12,15,18}h (pastreaza asimetria) |
@@ -124,10 +124,10 @@ Ala e adresat de filtrul de trend + followup-ul trend-aware (deja live). Nicio s
   restul constantelor Kalman). Ar trebui intai extrase in `SHADOW_*` (ca
   `SHADOW_KALMAN_EXIT`) inainte sa poata fi backtestate prin sweep, la fel ca
   restul.
-- **`AG_TARGET_GROWTH_PCT` (100%)** — intentionat "practic oprit" dupa un
-  walk-forward anterior (291 zile) care a aratat ca vanzarea agresiva pe
-  crestere pierde fata de detinere; re-testarea lui ar relua o concluzie deja
-  stabilita, nu adauga informatie noua fara un motiv nou sa o pui la indoiala.
+- **`AG_SELL_TIERS` (15/25/35%)** — inlocuieste pragul unic eliminat si trebuie
+  evaluat ca schema completa de profit-taking (inclusiv alocari si rearmare), nu
+  ca un prag izolat. Rezultatul istoric vechi pentru vanzarea agresiva ramane un
+  avertisment; schimbarea actuala este explicita, per activ si in transe.
 
 ---
 

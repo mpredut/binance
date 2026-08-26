@@ -67,7 +67,7 @@ justificat sa fie Faza 2.
 
 | Linie | Context | Categorie | Nota |
 |---|---|---|---|
-| 51 | `_get_value_minutes_ago_from_cache()`: `now_ts = int(time.time())` | 🔴 | `target_ts = now_ts - minutes_back*60` — fereastra de referinta pt calculul cresterii/scaderii portofoliului. Simplu de injectat (o comparatie aritmetica), dar valoare de backtest mica (vezi `BACKTEST_CANDIDATES.md` — AG_TARGET_GROWTH_PCT e deliberat "practic oprit"). Ramane Faza 2 nu din cauza dificultatii, ci a valorii.
+| 51 | `_get_symbol_window_extrema()`: `now_ts = float(time.time())` | 🔴 | `target_ts = now_ts - minutes_back*60` — fereastra per activ pentru minim/maxim. SELL foloseste `AG_SELL_TIERS`, iar la prima transa ingheata minimul campaniei; BUY foloseste maximul per activ.
 
 ---
 

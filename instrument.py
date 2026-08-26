@@ -86,14 +86,35 @@ class Instrument:
         # Kraken and Hyperliquid receive the equivalent protections through shared
         # order_guard, trade_cooldown, cacheManager, and outcome-log components.
         #
-        # bypass_profit_guard skips only profit and weight guards. Daily caps,
-        # cooldown, and trend wait remain active, including for crash breakers.
+        # bypass_profit_guard skips both profit and weight guards for emergency
+        # flows. bypass_profit_reference skips only the historical price-reference
+        # check while retaining quantity/weight policy and every other guard.
+        # bypass_quantity_policy skips only the dynamic quantity/weight policy;
+        # balance, fee, profit, daily-cap, cooldown, and trend guards stay active.
         # A caller such as rtrade or the outbox worker may own its lifecycle and
         # retry; in that case this pipeline does not touch the global queue.
         caller_owns_retry = bool(kwargs.pop("caller_owns_retry", False))
         bypass = bool(kwargs.pop("bypass_profit_guard", False))
+        bypass_profit_reference = bool(kwargs.pop("bypass_profit_reference", False))
+        bypass_quantity_policy = bool(kwargs.pop("bypass_quantity_policy", False))
         cooldown_pair_id = kwargs.pop("cooldown_pair_id", None)
         side_u = side.upper()
+        # This narrow escape hatch exists only for drawdown BUY flows.  A SELL
+        # must always prove profitability against its historical BUY reference;
+        # silently ignore the flag there so a misplaced caller argument cannot
+        # weaken the exit guard.
+        if bypass_profit_reference and side_u != "BUY":
+            print(
+                f"[GARD] {side_u} {self.symbol}: bypass_profit_reference ignorat; "
+                "este permis numai pentru BUY")
+            bypass_profit_reference = False
+        # Quantity-policy bypass reduces exposure and is therefore SELL-only.
+        # Ignore it on BUY so a misplaced argument can never increase exposure.
+        if bypass_quantity_policy and side_u != "SELL":
+            print(
+                f"[GARD] {side_u} {self.symbol}: bypass_quantity_policy ignorat; "
+                "este permis numai pentru SELL")
+            bypass_quantity_policy = False
         if self._provider.guards_internally():
             return self._provider.place_order(self.symbol, side, price, qty, **kwargs)
 
@@ -117,6 +138,8 @@ class Instrument:
         # all other placement metadata remains in kwargs.
         retry_kwargs = dict(kwargs)
         retry_kwargs["bypass_profit_guard"] = bypass
+        retry_kwargs["bypass_profit_reference"] = bypass_profit_reference
+        retry_kwargs["bypass_quantity_policy"] = bypass_quantity_policy
         retry_kwargs["smart"] = smart
         if cooldown_pair_id:
             retry_kwargs["cooldown_pair_id"] = cooldown_pair_id
@@ -143,19 +166,24 @@ class Instrument:
                 return None
 
             if not bypass:
-                profit_margin = order_guard.margin_for(self._provider.name)
-                # Tier-one min/max reference comes from the provider hook. Kraken
-                # and Hyperliquid use their configured venue window; Binance uses
-                # safeback_sec from the order cache. An empty window falls back to
-                # the last opposite fill.
-                profit_window_ref = self._provider.profit_guard_window_ref(
-                    self.symbol, side_u, safeback_override)
-                ok = order_guard.profit_guard(
-                    self._provider, self.symbol, side_u, price, profit_margin,
-                    window_ref=profit_window_ref)
-                if not ok:
-                    reason = "profit_guard"
-                    return None
+                if bypass_profit_reference:
+                    print(
+                        f"[GARD] {side_u} {self.symbol}: referinta istorica de pret "
+                        "ocolita explicit; quantity/weight guard ramane activ")
+                else:
+                    profit_margin = order_guard.margin_for(self._provider.name)
+                    # Tier-one min/max reference comes from the provider hook. Kraken
+                    # and Hyperliquid use their configured venue window; Binance uses
+                    # safeback_sec from the order cache. An empty window falls back to
+                    # the last opposite fill.
+                    profit_window_ref = self._provider.profit_guard_window_ref(
+                        self.symbol, side_u, safeback_override)
+                    ok = order_guard.profit_guard(
+                        self._provider, self.symbol, side_u, price, profit_margin,
+                        window_ref=profit_window_ref)
+                    if not ok:
+                        reason = "profit_guard"
+                        return None
                 # Cap quantity in both directions through the provider hook so the
                 # full balance is not traded at once. SELL uses base balance; BUY
                 # uses quote balance divided by price. Provider hooks retain
@@ -165,6 +193,7 @@ class Instrument:
                     base=self.base, quote=self.quote,
                     cancelorders=bool(kwargs.get("cancelorders", False)),
                     hours=float(kwargs.get("hours", 5) or 5),
+                    apply_policy=not bypass_quantity_policy,
                 )
                 qty = decision.final_qty
                 if qty <= 0:
@@ -191,7 +220,7 @@ class Instrument:
             # Revalidate after waiting or repricing. Market orders must use the
             # current quote rather than the caller's decorative limit. Explicit
             # bypass remains available for protective exits that must accept a loss.
-            if not bypass and (is_market or waited):
+            if not bypass and not bypass_profit_reference and (is_market or waited):
                 guard_price = price
                 if is_market:
                     guard_price = self._provider.get_current_price(self.symbol)

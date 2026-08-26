@@ -182,6 +182,115 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         order = inst.place("BUY", 100.0, 1.0, safeback_seconds=48 * 3600 + 60, bypass_profit_guard=True)
         self.assertIsNone(order)   # plafonul zilnic ramane activ chiar si cu bypass
 
+    def test_reference_only_bypass_keeps_quantity_policy_active(self):
+        quantity_calls = []
+
+        class _QuantityCapProvider(_FakeProvider):
+            def policy_cap_quantity(self, symbol, side, price, qty, available_qty,
+                                    **kwargs):
+                quantity_calls.append((symbol, side, price, qty, available_qty))
+                return 0.25
+
+        p = _QuantityCapProvider()
+        p.seed_trade("SELL", age_sec=400.0, price=100.0)
+        inst = self._inst(p)
+
+        blocked = inst.place(
+            "BUY", 101.0, 1.0, smart=False, caller_owns_retry=True)
+        allowed = inst.place(
+            "BUY", 101.0, 1.0, smart=False, caller_owns_retry=True,
+            bypass_profit_reference=True)
+
+        self.assertIsNone(blocked, "gardul normal trebuie sa blocheze BUY peste SELL")
+        self.assertIsNotNone(allowed)
+        self.assertEqual(len(quantity_calls), 1)
+        self.assertEqual(p.placed[0][3], 0.25)
+
+    def test_reference_only_bypass_does_not_skip_daily_limit(self):
+        p = _FakeProvider()
+        for _ in range(90):
+            p.seed_trade("BUY", age_sec=4000.0)
+        order = self._inst(p).place(
+            "BUY", 100.0, 1.0,
+            safeback_seconds=48 * 3600 + 60,
+            bypass_profit_reference=True,
+            caller_owns_retry=True)
+        self.assertIsNone(order)
+        self.assertEqual(p.placed, [])
+
+    def test_reference_only_bypass_is_ignored_for_sell(self):
+        p = _FakeProvider()
+        p.seed_trade("BUY", age_sec=400.0, price=100.0)
+
+        order = self._inst(p).place(
+            "SELL", 99.0, 1.0,
+            smart=False,
+            bypass_profit_reference=True,
+            caller_owns_retry=True)
+
+        self.assertIsNone(order, "SELL sub referinta BUY trebuie blocat")
+        self.assertEqual(p.placed, [])
+        lines = self._log_lines()
+        self.assertTrue(any("|refused|profit_guard|" in line for line in lines), lines)
+
+    def test_quantity_policy_bypass_is_sell_only_and_keeps_profit_guard(self):
+        policy_calls = []
+
+        class _ZeroPolicyProvider(_FakeProvider):
+            def policy_cap_quantity(self, *args, **kwargs):
+                policy_calls.append((args, kwargs))
+                return 0.0
+
+        p = _ZeroPolicyProvider()
+        p.seed_trade("BUY", age_sec=400.0, price=100.0)
+        inst = self._inst(p)
+
+        loss = inst.place(
+            "SELL", 99.0, 1.0, smart=False, caller_owns_retry=True,
+            bypass_quantity_policy=True)
+        profit = inst.place(
+            "SELL", 102.0, 1.0, smart=False, caller_owns_retry=True,
+            bypass_quantity_policy=True)
+
+        self.assertIsNone(loss, "quantity bypass nu trebuie sa sara profit guard")
+        self.assertIsNotNone(profit)
+        self.assertEqual(policy_calls, [], "weight policy trebuie sarita numai la SELL")
+        self.assertEqual(p.placed[0][3], 1.0)
+
+    def test_quantity_policy_bypass_is_ignored_for_buy(self):
+        class _ZeroPolicyProvider(_FakeProvider):
+            def policy_cap_quantity(self, *args, **kwargs):
+                return 0.0
+
+        p = _ZeroPolicyProvider()
+        p.seed_trade("SELL", age_sec=400.0, price=100.0)
+        order = self._inst(p).place(
+            "BUY", 98.0, 1.0, smart=False, caller_owns_retry=True,
+            bypass_quantity_policy=True)
+
+        self.assertIsNone(order)
+        self.assertEqual(p.placed, [])
+
+    def test_quantity_policy_bypass_keeps_balance_and_fee_caps(self):
+        class _FeeCapProvider(_FakeProvider):
+            def free_balance(self, _asset):
+                return 1.0
+
+            def policy_cap_quantity(self, *args, **kwargs):
+                raise AssertionError("policy must be bypassed")
+
+            def fee_cap_quantity(self, symbol, side, price, available_qty):
+                return 0.9
+
+        p = _FeeCapProvider()
+        p.seed_trade("BUY", age_sec=400.0, price=100.0)
+        order = self._inst(p).place(
+            "SELL", 102.0, 2.0, smart=False, caller_owns_retry=True,
+            bypass_quantity_policy=True)
+
+        self.assertIsNotNone(order)
+        self.assertEqual(p.placed[0][3], 0.9)
+
     def test_first_order_allowed_and_logged(self):
         p = _FakeProvider()
         inst = self._inst(p)
