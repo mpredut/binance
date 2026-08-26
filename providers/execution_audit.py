@@ -187,7 +187,10 @@ class AuditedStrategyExecutor:
                 order_id=str(order_id), error_type=exc.__class__.__name__, error=str(exc),
             )
             raise
-        fingerprint = (status.status, status.filled_qty, status.cost, status.fee)
+        fingerprint = (
+            status.status, status.filled_qty, status.cost, status.fee,
+            status.venue_status,
+        )
         key = (symbol, str(order_id))
         with self._lock:
             changed = self._last_status.get(key) != fingerprint
@@ -199,6 +202,7 @@ class AuditedStrategyExecutor:
             self.audit.record(
                 "order_status", intent_id=intent_id, venue=self.name, symbol=symbol,
                 order_id=str(order_id), status=status.status,
+                venue_status=status.venue_status,
                 filled_qty=status.filled_qty, cost=status.cost, fee=status.fee,
             )
         return status

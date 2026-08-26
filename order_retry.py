@@ -15,10 +15,11 @@ side, but it is disabled operationally so independent strategy intents are prese
 
 Claims are durable leases: a worker crash leaves the record unavailable only until the
 lease expires. A trend deferral consumes neither attempt count nor TTL. The outbox owns
-delivery through provider acceptance; it does not call an accepted LIMIT order a fill.
-Queue retry still cannot reconstruct every originating strategy signal, so it relies on
-placement guards and the stored price constraint. Configuration lives in
-``order_retry_config.env``.
+delivery through terminal venue truth: acceptance is persisted and monitored, never
+called a fill. Rejected/expired orders can retry only their unfilled remainder, while
+an intentional/ambiguous cancellation is never blindly resubmitted. Queue retry still
+cannot reconstruct every originating strategy signal, so it relies on placement guards
+and the stored price constraint. Configuration lives in ``order_retry_config.env``.
 """
 import os
 import json
@@ -76,6 +77,18 @@ def _client_order_id(record_id, revision):
     return f"OR_{record_id[:24]}_{int(revision)}"
 
 
+def order_id_from_response(response):
+    """Extract one venue order ID from common Binance/Kraken/HL/T212 shapes."""
+    if not isinstance(response, dict):
+        return None
+    native = response.get("orderId", response.get("id", response.get("txid")))
+    if isinstance(native, (list, tuple)):
+        native = next((value for value in native if str(value).strip()), None)
+    if native is None or not str(native).strip():
+        return None
+    return str(native)
+
+
 def valid_record(rec):
     """Return whether a persisted record is safe to evaluate or submit."""
     try:
@@ -84,17 +97,21 @@ def valid_record(rec):
         revision = int(rec.get("revision", 0))
     except (TypeError, ValueError, OverflowError):
         return False
+    lifecycle = str(rec.get("lifecycle") or "submit_pending").lower()
+    lifecycle_ok = lifecycle in {"submit_pending", "accepted"}
+    if lifecycle == "accepted" and not str(rec.get("order_id") or "").strip():
+        lifecycle_ok = False
     return bool(
         rec.get("id") and rec.get("symbol") and
         str(rec.get("side") or "").upper() in {"BUY", "SELL"} and
         math.isfinite(qty) and qty > 0 and
-        math.isfinite(created) and created > 0 and revision >= 0
+        math.isfinite(created) and created > 0 and revision >= 0 and lifecycle_ok
     )
 
 
 def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_price=None,
             now=None, created_ts=None, attempts=0, last_attempt_ts=0.0,
-            failure_reason=None):
+            failure_reason=None, *, provider_name=None, intent_id=None, kind=None):
     """Add or refresh a failed placement attempt while holding the queue lock.
 
     With deduplication enabled, one record is retained per symbol and side. A match
@@ -129,9 +146,14 @@ def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_pric
     placement.setdefault("client_order_id", _client_order_id(record_id, 0))
     rec = {
         "id": record_id,
+        "intent_id": str(intent_id or f"outbox-{record_id}"),
+        "provider_name": (None if provider_name is None else str(provider_name)),
         "symbol": symbol,
         "side": side_u,
+        "kind": (None if kind is None else str(kind)),
         "qty": qty,
+        "requested_qty_total": qty,
+        "delivered_qty": 0.0,
         "place_kwargs": placement,
         "requested_price": requested_price,
         "ref_price": ref_price,
@@ -142,13 +164,17 @@ def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_pric
                                 if failure_reason is not None else None),
         "ttl_started_ts": cts,
         "revision": 0,
+        "lifecycle": "submit_pending",
     }
     _ensure_dir()
     with FileLock(LOCK_FILE):
         existing = _read_nolock()
         if RETRY_DEDUP:
             for e in existing:
-                if e.get("symbol") == symbol and (e.get("side") or "").upper() == side_u:
+                if (e.get("symbol") == symbol
+                        and (e.get("side") or "").upper() == side_u
+                        and str(e.get("lifecycle") or "submit_pending").lower()
+                        == "submit_pending"):
                     # Refresh one symbol/side target while preserving age and attempts.
                     e["requested_price"] = requested_price
                     e["ref_price"] = ref_price
@@ -169,6 +195,13 @@ def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_pric
                             and next_reason != "trend_deferred"):
                         e["ttl_started_ts"] = now
                     e["last_failure_reason"] = next_reason
+                    e["provider_name"] = (None if provider_name is None
+                                            else str(provider_name))
+                    e["intent_id"] = str(intent_id or e.get("intent_id")
+                                         or f"outbox-{e.get('id', record_id)}")
+                    e["kind"] = None if kind is None else str(kind)
+                    e["lifecycle"] = "submit_pending"
+                    e.pop("order_id", None)
                     e["revision"] = revision
                     _write_nolock(existing)
                     return e.get("id")
@@ -230,8 +263,82 @@ def mark_failure(record_id, failure_reason, *, now=None, client_order_id=None):
     return changed
 
 
+def _append_order_history(rec, *, observed_at, status=None):
+    """Retain a bounded audit trail when one logical intent has several orders."""
+    order_id = rec.get("order_id")
+    if not order_id:
+        return
+    row = {
+        "order_id": str(order_id),
+        "client_order_id": dict(rec.get("place_kwargs") or {}).get(
+            "client_order_id"),
+        "revision": int(rec.get("revision", 0)),
+        "observed_at": float(observed_at),
+    }
+    if status is not None:
+        row.update({
+            "status": str(getattr(status, "status", "") or ""),
+            "venue_status": str(getattr(status, "venue_status", "") or ""),
+            "filled_qty": float(getattr(status, "filled_qty", 0.0) or 0.0),
+            "cost": float(getattr(status, "cost", 0.0) or 0.0),
+            "fee": float(getattr(status, "fee", 0.0) or 0.0),
+        })
+    history = list(rec.get("order_history") or [])
+    if not history or history[-1].get("order_id") != row["order_id"]:
+        history.append(row)
+    else:
+        history[-1].update(row)
+    rec["order_history"] = history[-20:]
+
+
+def _apply_accepted(rec, order, now, provider_name=None):
+    order_id = order_id_from_response(order)
+    if order_id is None:
+        return False
+    rec["order_id"] = order_id
+    rec["lifecycle"] = "accepted"
+    rec["accepted_ts"] = float(now)
+    rec["last_status_ts"] = 0.0
+    rec["last_failure_reason"] = None
+    if provider_name is not None:
+        rec["provider_name"] = str(provider_name)
+    if isinstance(order, dict) and order.get("status") is not None:
+        rec["submit_status"] = str(order.get("status"))
+    _append_order_history(rec, observed_at=now)
+    return True
+
+
+def mark_accepted(record_id, order, *, now=None, client_order_id=None,
+                  provider_name=None):
+    """Move one exact pre-submit revision to durable accepted tracking."""
+    if not record_id:
+        return False
+    now = float(time.time() if now is None else now)
+    changed = False
+    _ensure_dir()
+    with FileLock(LOCK_FILE):
+        existing = _read_nolock()
+        for rec in existing:
+            if rec.get("id") != record_id:
+                continue
+            current_cid = dict(rec.get("place_kwargs") or {}).get("client_order_id")
+            if client_order_id is not None and current_cid != client_order_id:
+                continue
+            changed = _apply_accepted(
+                rec, order, now, provider_name=provider_name)
+            break
+        if changed:
+            _write_nolock(existing)
+    return changed
+
+
 def resolve_record(record_id, *, client_order_id=None):
-    """Remove only the exact persisted intent/revision satisfied by acceptance."""
+    """Legacy helper: remove one exact *unsubmitted* persisted revision.
+
+    Once a venue ID has been accepted, only terminal reconciliation may remove the
+    tracker. This prevents an old caller from turning acceptance into an implicit
+    fill acknowledgement.
+    """
     if not record_id:
         return False
     removed = False
@@ -240,7 +347,11 @@ def resolve_record(record_id, *, client_order_id=None):
         existing = _read_nolock()
         remaining = []
         for rec in existing:
-            matches = rec.get("id") == record_id
+            matches = (
+                rec.get("id") == record_id
+                and str(rec.get("lifecycle") or "submit_pending").lower()
+                == "submit_pending"
+            )
             if matches and client_order_id is not None:
                 matches = (dict(rec.get("place_kwargs") or {}).get(
                     "client_order_id") == client_order_id)
@@ -287,14 +398,20 @@ def claim(ids, now=None, lease_sec=None):
     return claimed
 
 
-def complete_claim(claimed, outcome, now=None, *, failure_reason=None):
-    """Finalize one leased record as success, failure, or release.
+def complete_claim(claimed, outcome, now=None, *, failure_reason=None,
+                   order=None, status=None, provider_name=None):
+    """Finalize one exact leased revision without losing accepted-order tracking.
 
-    A successful placement removes only the exact revision that was submitted. If a
-    writer refreshed the intent while it was leased, that newer revision remains due.
-    Failure increments attempts in place. Release simply clears the lease.
+    ``accepted`` persists the venue ID instead of deleting the record. ``observed``
+    keeps an open/partial order. ``retry_terminal`` creates a new client-ID revision
+    for only the unfilled remainder. ``success`` removes a filled or intentionally
+    canceled terminal order.
     """
-    if outcome not in {"success", "failure", "deferred", "release"}:
+    allowed = {
+        "success", "failure", "deferred", "release", "accepted",
+        "observed", "status_error", "retry_terminal",
+    }
+    if outcome not in allowed:
         raise ValueError(f"invalid claim outcome: {outcome}")
     now = float(time.time() if now is None else now)
     changed = False
@@ -313,7 +430,57 @@ def complete_claim(claimed, outcome, now=None, *, failure_reason=None):
                 claimed.get("claim_revision", 0))
             if outcome == "success" and same_revision:
                 continue
-            if outcome == "failure" and same_revision:
+            if outcome == "accepted" and same_revision:
+                if not _apply_accepted(
+                        rec, order, now, provider_name=provider_name):
+                    rec["last_failure_reason"] = "response_without_order_id"
+                    rec["attempts"] = max(int(rec.get("attempts", 0)),
+                                          int(claimed.get("attempts", 0))) + 1
+                    rec["last_attempt_ts"] = now
+            elif outcome == "observed" and same_revision:
+                rec["last_status_ts"] = now
+                rec["last_status"] = str(getattr(status, "status", "") or "")
+                rec["venue_status"] = str(
+                    getattr(status, "venue_status", "") or "")
+                rec["filled_qty"] = float(
+                    getattr(status, "filled_qty", 0.0) or 0.0)
+                rec["filled_cost"] = float(getattr(status, "cost", 0.0) or 0.0)
+                rec["filled_fee"] = float(getattr(status, "fee", 0.0) or 0.0)
+                rec.pop("status_error", None)
+            elif outcome == "status_error" and same_revision:
+                rec["last_status_ts"] = now
+                rec["status_error"] = (str(failure_reason)
+                                       if failure_reason is not None else "unknown")
+            elif outcome == "retry_terminal" and same_revision:
+                filled_qty = max(0.0, float(
+                    getattr(status, "filled_qty", 0.0) or 0.0))
+                current_qty = float(rec.get("qty") or 0.0)
+                remaining_qty = max(0.0, current_qty - filled_qty)
+                _append_order_history(rec, observed_at=now, status=status)
+                rec["delivered_qty"] = float(rec.get("delivered_qty") or 0.0) + min(
+                    current_qty, filled_qty)
+                if remaining_qty <= max(1e-12, current_qty * 1e-9):
+                    continue
+                revision = int(rec.get("revision", 0)) + 1
+                rec["revision"] = revision
+                rec["qty"] = remaining_qty
+                rec["attempts"] = max(int(rec.get("attempts", 0)),
+                                      int(claimed.get("attempts", 0))) + 1
+                rec["last_attempt_ts"] = now
+                rec["last_failure_reason"] = (
+                    "terminal_" + str(getattr(status, "venue_status", "")
+                                      or getattr(status, "status", "unknown")).lower())
+                rec["lifecycle"] = "submit_pending"
+                for key in (
+                        "order_id", "accepted_ts", "last_status_ts", "last_status",
+                        "venue_status", "submit_status", "filled_qty", "filled_cost",
+                        "filled_fee"):
+                    rec.pop(key, None)
+                placement = dict(rec.get("place_kwargs") or {})
+                placement["client_order_id"] = _client_order_id(
+                    rec.get("id", ""), revision)
+                rec["place_kwargs"] = placement
+            elif outcome == "failure" and same_revision:
                 rec["attempts"] = max(int(rec.get("attempts", 0)),
                                       int(claimed.get("attempts", 0))) + 1
                 rec["last_attempt_ts"] = now
@@ -321,7 +488,7 @@ def complete_claim(claimed, outcome, now=None, *, failure_reason=None):
                                if failure_reason is not None else None)
                 if (rec.get("last_failure_reason") == "trend_deferred"
                         and next_reason != "trend_deferred"):
-                    # TTL begins only after the trend gate stops deferring.  Time
+                    # TTL begins only after the trend gate stops deferring. Time
                     # spent waiting for a favorable trend cannot discard an intent.
                     rec["ttl_started_ts"] = now
                 rec["last_failure_reason"] = next_reason
@@ -351,10 +518,10 @@ def discard(ids):
 
 
 def resolve(symbol, side):
-    """Atomically remove pending records satisfied by a normal successful placement.
+    """Legacy helper: remove only unaccepted pending records by symbol and side.
 
-    Local retry callers can succeed before the global worker. Removing the old record
-    prevents a later duplicate order. Returns the number of removed records.
+    Accepted trackers are venue truth and can only be removed by exact terminal
+    reconciliation. New code should use ``mark_accepted``/``complete_claim``.
     """
     side_u = (side or "").upper()
     _ensure_dir()
@@ -363,7 +530,9 @@ def resolve(symbol, side):
         remaining = [
             rec for rec in existing
             if not (rec.get("symbol") == symbol
-                    and (rec.get("side") or "").upper() == side_u)
+                    and (rec.get("side") or "").upper() == side_u
+                    and str(rec.get("lifecycle") or "submit_pending").lower()
+                    == "submit_pending")
         ]
         removed = len(existing) - len(remaining)
         if removed:
@@ -414,6 +583,10 @@ def is_expired(rec, now=None):
     TTL or the attempt budget.  Once another refusal reason appears, ``ttl_started_ts``
     is reset and normal expiry resumes.
     """
+    # An accepted order is real venue state, not a stale submit attempt. Never
+    # discard its tracker merely because the submission TTL elapsed.
+    if str(rec.get("lifecycle") or "submit_pending").lower() == "accepted":
+        return False
     try:
         now = float(time.time() if now is None else now)
         claim_until = float(rec.get("claim_until", 0) or 0)
@@ -438,8 +611,13 @@ def is_due(rec, now=None):
     try:
         now = float(time.time() if now is None else now)
         claim_until = float(rec.get("claim_until", 0) or 0)
-        base = max(float(rec.get("last_attempt_ts", 0)),
-                   float(rec.get("created_ts", 0)))
+        if str(rec.get("lifecycle") or "submit_pending").lower() == "accepted":
+            base = max(float(rec.get("last_status_ts", 0) or 0),
+                       float(rec.get("accepted_ts", 0) or 0),
+                       float(rec.get("created_ts", 0)))
+        else:
+            base = max(float(rec.get("last_attempt_ts", 0)),
+                       float(rec.get("created_ts", 0)))
     except (TypeError, ValueError, OverflowError):
         return False
     if not all(math.isfinite(v) for v in (now, claim_until, base)):

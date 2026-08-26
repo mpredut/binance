@@ -71,7 +71,7 @@ flowchart LR
       GUARD["profit / daily limit / weight / trend / cooldown"]
       API["MarketApi + providers"]
       BPIPE["Binance internal order pipeline"]
-      RETRY["persistent order retry"]
+      RETRY["persistent order lifecycle outbox"]
     end
 
     subgraph Autonomous["Boți autonomi"]
@@ -104,7 +104,7 @@ flowchart LR
 4. Procesele de strategie citesc prețuri, trenduri, balances, ordine sau fills și decid BUY/SELL.
 5. Pentru calea generică, strategia operează prin `Instrument`, care leagă explicit simbolul de un provider.
 6. `Instrument.place()` aplică gardurile comune pentru provideri non-Binance. Pentru Binance deleagă către pipeline-ul intern, care are mecanisme echivalente și logică suplimentară.
-7. Un ordin refuzat/eșuat în calea generică este jurnalizat și pus în coada persistentă de retry. Worker-ul îl reevaluează la prețul curent și îl trece din nou prin garduri.
+7. Intenția este persistată înainte de submit. Worker-ul reconciliază răspunsurile ambigue prin client ID, reevaluează retry-ul la prețul curent și prin garduri, apoi păstrează ordinul acceptat până la status terminal. `open`/partial nu se retrimit; `REJECTED`/`EXPIRED` pot relua numai restul neexecutat, iar `CANCELED` este terminal și alertat.
 8. Evenimentele și anomaliile sunt logate și pot genera notificări ntfy/email/desktop.
 
 ## 4. Runtime și deployment

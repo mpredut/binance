@@ -79,6 +79,7 @@ def _finite(raw, *, positive=False):
 def _terminal_payload(status: OrderStatus, observed_at: float) -> dict:
     return {
         "status": status.status,
+        "venue_status": status.venue_status,
         "filled_qty": status.filled_qty,
         "cost": status.cost,
         "fee": status.fee,
@@ -95,6 +96,7 @@ def _status_from_terminal_payload(payload) -> Optional[OrderStatus]:
             payload["filled_qty"],
             payload["cost"],
             payload["fee"],
+            venue_status=payload.get("venue_status", ""),
         )
     except (KeyError, TypeError, ValueError, OverflowError):
         return None
@@ -271,6 +273,7 @@ class TrackedOrderLifecycle:
         persist(dict(pending))
         self._audit(
             "order_terminal", pending, status=status.status,
+            venue_status=status.venue_status,
             filled_qty=status.filled_qty, cost=status.cost, fee=status.fee,
         )
         return TrackedOrderResult("terminal", pending, status)
@@ -349,6 +352,7 @@ class TrackedOrderLifecycle:
         persist(dict(pending))
         self._audit(
             "order_status", pending, status=status.status,
+            venue_status=status.venue_status,
             filled_qty=status.filled_qty, cost=status.cost, fee=status.fee,
         )
 

@@ -56,7 +56,7 @@ cannot trade simultaneously.
 | `monitortrades.py` | generic monitoring through the multi-provider facade |
 | `assetguardian.py` | protections and checks on assets |
 | `market_alerts.py` | market alerts with cooldown and configurable watchlist |
-| `order_retry_worker.py` | single consumer of the persistent pre-submit/retry outbox |
+| `order_retry_worker.py` | single consumer of the persistent order-lifecycle outbox |
 
 `tradeall_observe.py` is an auxiliary observation process. The dense archiver
 `tradeall_price_archiver.py` is part of the supervised fleet manifest: upon
@@ -79,9 +79,14 @@ resolution, which is why the watchdog restarts it quickly.
   external submit; provider acceptance is logged as `accepted`, never as a fill;
 - shared-outbox deduplication by only `symbol+side` is disabled, so an intent from one
   module cannot overwrite an independent same-side intent from another module;
-- the common outbox guarantees retry only through provider acceptance. Terminal
-  fill/cancel reconciliation remains strategy-owned because only the originating
-  strategy can decide whether a canceled intent is still financially valid;
+- the common outbox keeps the venue order ID after acceptance and advances one bounded
+  status step per worker cycle: `open`/partial stays tracked without resubmit, a fill
+  completes the record, and status failures remain durable for a later poll;
+- native `REJECTED`/`EXPIRED` may create a new deterministic client-ID revision for
+  only the unfilled remainder. `CANCELED` is terminal and alerted, never blindly
+  replayed, because the common layer cannot prove whether cancellation was intentional;
+- Trading 212 one-shot IPO orders keep a separate durable lifecycle because that API
+  does not provide a usable client-order-ID reconciliation path;
 - `trailing_core.py` is the common state machine, and the Binance and Kraken adapters
   keep the venue-specific API, configuration, and state.
 

@@ -2,28 +2,35 @@
 """
 order_manager.py — SPCX order-placement logic:
   * calculate quantity from a RON budget;
-  * retry placement while the instrument may be blocked until market open;
-  * write an on-disk marker to prevent duplicates after restart;
-  * poll status until FILLED, CANCELLED, or REJECTED.
+  * persist the exact intent before the non-idempotent POST;
+  * perform one bounded submit/reconciliation step per invocation;
+  * recover a lost response from active orders or portfolio delta;
+  * never sleep or poll inside placement.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
 import time
+import uuid
 
 from ipo_common import log, now_str
 from ipo_notify import notify
 from market_data import get_usd_ron, get_price_usd, t212_to_yahoo
 from t212_client import T212Client
 
-# On-disk marker beside the script prevents duplicate placement.
+# Legacy marker retained only for conservative migration of pre-v2 SPCX intents.
 ORDER_MARKER = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".spcx_order_placed")
 
-ORDER_STATUS_POLL_SECONDS = 30
-ORDER_STATUS_MAX_WAIT = 900           # 15 min
-T212_ORDER_TERMINAL = {"FILLED", "CANCELLED", "REJECTED"}
+T212_ORDER_TERMINAL = {"FILLED", "CANCELLED", "CANCELED", "EXPIRED", "REJECTED"}
+T212_ORDER_OPEN = {
+    "LOCAL", "UNCONFIRMED", "CONFIRMED", "NEW", "OPEN", "PENDING",
+    "PARTIALLY_FILLED",
+}
+ABSENCE_CONFIRMATIONS = 2
 
 
 # ---------------------------------------------------------------------------
@@ -50,52 +57,240 @@ def resolve_quantity(order_price: float,
 # Duplicate-prevention marker
 # ---------------------------------------------------------------------------
 def order_already_placed() -> bool:
-    return os.path.exists(ORDER_MARKER)
+    """Conservatively report whether the legacy marker blocks a new submit."""
+    try:
+        record = _read_marker(ORDER_MARKER)
+    except RuntimeError as exc:
+        log(f"  ! [ORDER] marker ilizibil — fail closed: {exc}")
+        return True
+    return bool(record and str(record.get("lifecycle") or "").lower() not in {
+        "canceled", "cancelled", "expired",
+    })
+
+
+def _read_marker(path: str) -> dict | None:
+    try:
+        with open(path, encoding="utf-8") as handle:
+            value = json.load(handle)
+    except FileNotFoundError:
+        return None
+    except (OSError, TypeError, ValueError) as exc:
+        raise RuntimeError(f"marker T212 ilizibil {path}: {exc}") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError(f"marker T212 invalid {path}: obiect JSON asteptat")
+    return value
+
+
+def _safe_marker_component(value: str) -> str:
+    component = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value or "").strip())
+    return component.strip("._") or "unknown"
+
+
+def _marker_path(ticker: str, *, test: bool = False) -> str:
+    """Namespace one-shot state by profile and ticker, never across accounts."""
+    profile = _safe_marker_component(os.environ.get("IPO_PROFILE") or "default")
+    symbol = _safe_marker_component(ticker.upper())
+    suffix = ".test" if test else ""
+    return os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        f".t212_order.{profile}.{symbol}{suffix}.json",
+    )
+
+
+def _read_or_migrate_marker(ticker: str, marker_path: str) -> dict | None:
+    record = _read_marker(marker_path)
+    if record is not None or marker_path == ORDER_MARKER:
+        return record
+
+    # The old global file was named for SPCX. Migrate it only when its payload
+    # proves the same ticker; an unrelated/unknown marker must never be guessed.
+    legacy = _read_marker(ORDER_MARKER)
+    if legacy is None:
+        return None
+    legacy_ticker = str(
+        legacy.get("ticker")
+        or (legacy.get("order") or {}).get("ticker")
+        or ""
+    ).upper()
+    if legacy_ticker != ticker.upper():
+        return None
+    _persist_marker(legacy, marker_path)
+    log(f"  [ORDER] marker legacy migrat conservator: {marker_path}")
+    return legacy
+
+
+def _persist_marker(record: dict, path: str) -> None:
+    temporary = f"{path}.tmp.{os.getpid()}"
+    try:
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(record, handle, indent=2, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except (OSError, TypeError, ValueError) as exc:
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        raise RuntimeError(f"nu pot persista intentia T212 in {path}: {exc}") from exc
 
 
 def _write_marker(ticker: str, result: dict) -> None:
-    try:
-        with open(ORDER_MARKER, "w", encoding="utf-8") as f:
-            json.dump({"at": now_str(), "ticker": ticker, "order": result}, f)
-        log(f"  [ORDER] marker scris: {ORDER_MARKER}")
-    except OSError as e:
-        log(f"  ! nu pot scrie markerul: {e}")
+    """Backward-compatible accepted-order marker writer."""
+    _persist_marker({
+        "version": 2, "at": now_str(), "ticker": ticker,
+        "lifecycle": "accepted", "order_id": result.get("id"),
+        "venue_status": result.get("status"), "order": result,
+    }, _marker_path(ticker))
+    log(f"  [ORDER] marker scris: {_marker_path(ticker)}")
 
 
 # ---------------------------------------------------------------------------
 # Order-status polling
 # ---------------------------------------------------------------------------
 def poll_order_until_terminal(client: T212Client, order_id, ticker: str,
-                              desktop: bool = False) -> None:
-    log(f"  [ORDER] Polling status ordin {order_id} (max {ORDER_STATUS_MAX_WAIT}s)...")
-    deadline = time.time() + ORDER_STATUS_MAX_WAIT
-    last_status = None
-    while time.time() < deadline:
-        time.sleep(ORDER_STATUS_POLL_SECONDS)
-        info = client.get_order_status(order_id)
-        if not info:
-            log(f"  [ORDER] nu pot citi statusul {order_id}")
+                              desktop: bool = False) -> dict | None:
+    """Observe one status snapshot and return immediately."""
+    info = client.get_order_status(order_id)
+    if not info:
+        log(f"  [ORDER] status {order_id} indisponibil — verific din nou la ciclul urmator")
+        return None
+    st = str(info.get("status") or "").upper()
+    log(f"  [ORDER] status {order_id}: {st or 'NECUNOSCUT'}")
+    if st not in T212_ORDER_TERMINAL:
+        return info
+    fq = info.get("filledQuantity") or info.get("quantity", 0)
+    fp = info.get("fillPrice") or info.get("limitPrice", 0)
+    if st == "FILLED":
+        log(f"  [ORDER] ✓ FILLED: {fq} @ {fp} USD")
+        notify(title=f"✓ Ordin executat: {ticker}", body=f"q{fq} @ {fp}",
+               source="T212 order", price=float(fp or 0), desktop=desktop)
+    else:
+        log(f"  [ORDER] ✗ {st}")
+        notify(title=f"✗ Ordin {st}: {ticker}", body=f"id={order_id}",
+               source="T212 order", desktop=desktop)
+    return info
+
+
+def _portfolio_qty(client: T212Client, ticker: str) -> float | None:
+    portfolio = client.get_portfolio()
+    if portfolio is None:
+        return None
+    for position in portfolio:
+        if str(position.get("ticker") or "").upper() == ticker.upper():
+            try:
+                return float(position.get("quantity") or 0.0)
+            except (TypeError, ValueError, OverflowError):
+                return None
+    return 0.0
+
+
+def _matching_active_orders(client: T212Client, record: dict) -> list[dict] | None:
+    orders = client.list_active_orders()
+    if orders is None:
+        return None
+    expected_qty = float(record["qty"])
+    expected_limit = float(record["limit_price"])
+    matches = []
+    for order in orders:
+        instrument = order.get("instrument")
+        nested_ticker = instrument.get("ticker") if isinstance(instrument, dict) else None
+        ticker = str(order.get("ticker") or nested_ticker or "").upper()
+        if ticker != str(record["ticker"]).upper():
             continue
-        st = (info.get("status") or "").upper()
-        if st == last_status:
+        try:
+            signed_qty = float(order.get("quantity", order.get("qty")))
+            qty = abs(signed_qty)
+            limit = float(order.get("limitPrice", order.get("limit")))
+        except (TypeError, ValueError, OverflowError):
             continue
-        last_status = st
-        log(f"  [ORDER] status {order_id}: {st}")
-        if st in T212_ORDER_TERMINAL:
-            fq = info.get("filledQuantity") or info.get("quantity", 0)
-            fp = info.get("fillPrice") or info.get("limitPrice", 0)
-            if st == "FILLED":
-                log(f"  [ORDER] ✓ FILLED: {fq} @ {fp} USD")
-                notify(title=f"✓ Ordin executat: {ticker}",
-                       body=f"q{fq} @ {fp}",
-                       source="T212 order", price=float(fp or 0), desktop=desktop)
-            else:
-                log(f"  [ORDER] ✗ {st}")
-                notify(title=f"✗ Ordin {st}: {ticker}",
-                       body=f"id={order_id}",
-                       source="T212 order", desktop=desktop)
-            return
-    log(f"  [ORDER] timeout polling — {order_id} inca neterminat dupa {ORDER_STATUS_MAX_WAIT}s")
+        side = str(order.get("side") or "").upper()
+        if not side:
+            side = "BUY" if signed_qty > 0 else "SELL" if signed_qty < 0 else ""
+        if side != "BUY" or qty <= 0:
+            continue
+        if abs(qty - expected_qty) > max(0.011, expected_qty * 1e-6):
+            continue
+        if abs(limit - expected_limit) > 0.011:
+            continue
+        matches.append(order)
+    return matches
+
+
+def _reconcile_record(client: T212Client, record: dict, marker_path: str,
+                      *, now: float, retry_delay: float,
+                      desktop: bool) -> str:
+    """Return complete, terminal_failed, waiting, or retryable."""
+    order_id = record.get("order_id")
+    if order_id:
+        info = poll_order_until_terminal(client, order_id, record["ticker"], desktop)
+        if info is None:
+            return "waiting"
+        status = str(info.get("status") or "").upper()
+        record["venue_status"] = status
+        record["last_observed_at"] = now
+        if status == "FILLED":
+            record["lifecycle"] = "filled"
+        elif status in {"CANCELLED", "CANCELED", "EXPIRED"}:
+            record["lifecycle"] = "expired" if status == "EXPIRED" else "canceled"
+        elif status == "REJECTED":
+            history = list(record.get("venue_order_ids") or [])
+            if str(order_id) not in history:
+                history.append(str(order_id))
+            record.update({
+                "lifecycle": "submit_pending", "order_id": None,
+                "venue_order_ids": history,
+                "lookup_misses": 0, "next_retry_at": now + retry_delay,
+            })
+        elif status in T212_ORDER_OPEN:
+            record["lifecycle"] = "open"
+        else:
+            # An undocumented status is not proof of either absence or terminality.
+            record["lifecycle"] = "status_unknown"
+        _persist_marker(record, marker_path)
+        if record["lifecycle"] == "filled":
+            return "complete"
+        if record["lifecycle"] in {"canceled", "expired"}:
+            return "terminal_failed"
+        return "waiting"
+
+    matches = _matching_active_orders(client, record)
+    if matches is None:
+        return "waiting"
+    if len(matches) == 1 and matches[0].get("id") is not None:
+        record.update({
+            "order_id": str(matches[0]["id"]), "lifecycle": "accepted",
+            "lookup_misses": 0, "last_observed_at": now,
+        })
+        _persist_marker(record, marker_path)
+        log(f"  [ORDER] raspuns pierdut recuperat: id={record['order_id']}")
+        return "waiting"
+    if len(matches) > 1:
+        log("  ! [ORDER] mai multe ordine T212 se potrivesc intentiei — pastrez pending")
+        return "waiting"
+
+    before_qty = record.get("before_qty")
+    current_qty = _portfolio_qty(client, record["ticker"])
+    if current_qty is None:
+        return "waiting"
+    if (before_qty is not None and current_qty is not None
+            and current_qty > float(before_qty) + 1e-6):
+        record.update({
+            "lifecycle": "filled", "portfolio_fill_observed": True,
+            "filled_qty": current_qty - float(before_qty),
+            "last_observed_at": now,
+        })
+        _persist_marker(record, marker_path)
+        log("  [ORDER] submit recuperat din cresterea pozitiei T212")
+        return "complete"
+
+    misses = int(record.get("lookup_misses") or 0) + 1
+    record["lookup_misses"] = misses
+    record["last_observed_at"] = now
+    _persist_marker(record, marker_path)
+    if misses < ABSENCE_CONFIRMATIONS or now < float(record.get("next_retry_at") or 0.0):
+        return "waiting"
+    return "retryable"
 
 
 # ---------------------------------------------------------------------------
@@ -108,16 +303,29 @@ def place_order_with_retry(
     limit_price: float,
     validity: str,
     dry_run: bool,
-    max_limit: float | None = None,
     desktop: bool = False,
-    max_retries: int = 10,
     retry_delay: int = 60,
     write_marker: bool = True,
 ) -> bool:
-    """Place the LIMIT order and return True when accepted or simulated in dry-run."""
+    """Perform one non-blocking lifecycle step for a persistent LIMIT BUY.
 
-    qty_r   = round(quantity, 2)
-    price_r = round(limit_price, 2)
+    ``True`` means the submit is accepted/recovered or an existing venue order remains
+    owned. An ambiguous/pending submit returns ``False`` while its durable marker keeps
+    it eligible for a later invocation. There is no in-process retry loop.
+    """
+
+    try:
+        qty_r = round(float(quantity), 2)
+        price_r = round(float(limit_price), 2)
+        retry_delay_f = float(retry_delay)
+    except (TypeError, ValueError, OverflowError) as exc:
+        log(f"  ! [ORDER] parametri numerici invalizi: {exc}")
+        return False
+    if (not math.isfinite(qty_r) or qty_r <= 0
+            or not math.isfinite(price_r) or price_r <= 0
+            or not math.isfinite(retry_delay_f) or retry_delay_f < 0):
+        log("  ! [ORDER] qty/pret/retry_delay trebuie sa fie finite si valide")
+        return False
 
     # Current price is informational only; do not change the user-selected limit.
     current = get_price_usd(t212_to_yahoo(ticker))
@@ -132,31 +340,129 @@ def place_order_with_retry(
         log("  [ORDER] Dry-run — ordin NESENT. Seteaza ORDER_EXECUTE=true in .env.")
         return True
 
-    for attempt in range(max_retries):
-        if attempt > 0:
-            log(f"  [ORDER] Retry {attempt}/{max_retries} in {retry_delay}s "
-                f"(instrumentul poate fi inca netranzactionabil)...")
-            time.sleep(retry_delay)
-
-        log(f"  [ORDER] LIMIT BUY {ticker}  qty={qty_r}  @ {price_r} USD  validity={validity}")
-        status, data = client.place_limit_order(ticker, qty_r, price_r, validity)
-
-        if status in (200, 201):
-            oid = data.get("id")
-            log(f"  [ORDER] ✓ plasat: id={oid}  status={data.get('status')}")
-            if write_marker:
-                _write_marker(ticker, data)
-            notify(title="Ordin SPCX plasat pe T212!",
-                   body=(f"LIMIT {ticker}  qty={qty_r} @ {price_r} USD\n"
-                         f"id={oid}  status={data.get('status')}"),
-                   source="T212 order", price=price_r, desktop=desktop)
-            if oid:
-                poll_order_until_terminal(client, oid, ticker, desktop=desktop)
+    marker_path = _marker_path(ticker, test=not write_marker)
+    now = time.time()
+    try:
+        record = _read_or_migrate_marker(ticker, marker_path)
+    except RuntimeError as exc:
+        log(f"  ! [ORDER] {exc} — NU trimit fara stare durabila verificabila")
+        return False
+    if record:
+        # Legacy accepted markers stay blocking rather than silently creating a
+        # second order whose identity cannot be reconstructed.
+        if int(record.get("version") or 1) < 2:
+            legacy = record.get("order") if isinstance(record.get("order"), dict) else {}
+            legacy_id = legacy.get("id")
+            if legacy_id:
+                info = poll_order_until_terminal(client, legacy_id, ticker, desktop)
+                record["last_status"] = (info or {}).get("status")
+                _persist_marker(record, marker_path)
+            log("  [ORDER] marker legacy existent — nu dublez ordinul")
             return True
-        else:
-            log(f"  ! [ORDER] T212 HTTP {status}: {json.dumps(data)[:400]}")
+        same_intent = (
+            str(record.get("ticker") or "").upper() == ticker.upper()
+            and abs(float(record.get("qty") or 0.0) - qty_r) <= 0.011
+            and abs(float(record.get("limit_price") or 0.0) - price_r) <= 0.011
+        )
+        if not same_intent:
+            log("  ! [ORDER] alta intentie exista deja in marker — NU suprascriu")
+            return False
+        lifecycle = str(record.get("lifecycle") or "").lower()
+        if lifecycle == "filled":
+            return True
+        if lifecycle in {"canceled", "cancelled", "expired"}:
+            log(f"  [ORDER] intentia este terminala ({lifecycle}); nu o retrimit")
+            return False
+        outcome = _reconcile_record(
+            client, record, marker_path, now=now,
+            retry_delay=retry_delay_f, desktop=desktop,
+        )
+        if outcome == "terminal_failed":
+            return False
+        if outcome == "complete":
+            return True
+        if outcome == "waiting":
+            # Do not report success merely because an unproven intent was durably
+            # queued. A known venue order may safely remain open/status-unknown.
+            return bool(record.get("order_id"))
+    else:
+        before_qty = _portfolio_qty(client, ticker)
+        if before_qty is None:
+            log("  ! [ORDER] portofoliul T212 este indisponibil — NU trimit")
+            return False
+        record = {
+            "version": 2,
+            "intent_id": f"t212-one-shot-{ticker}-{uuid.uuid4().hex}",
+            "ticker": ticker,
+            "side": "BUY",
+            "qty": qty_r,
+            "limit_price": price_r,
+            "validity": validity,
+            "before_qty": before_qty,
+            "created_at": now,
+            "attempts": 0,
+            "lookup_misses": 0,
+            "lifecycle": "submit_pending",
+            "next_retry_at": now,
+        }
+        active_matches = _matching_active_orders(client, record)
+        if active_matches is None:
+            log("  ! [ORDER] ordinele active T212 sunt indisponibile — NU trimit")
+            return False
+        if active_matches:
+            log(
+                "  ! [ORDER] exista deja un ordin activ cu acelasi ticker/side/qty/pret; "
+                "nu il revendic si NU trimit altul"
+            )
+            return False
 
-    notify(title="✗ Ordin SPCX ESUAT pe T212!",
-           body=f"{max_retries} incercari esuate pentru {ticker}. Plaseaza manual.",
-           source="T212 order", desktop=desktop)
+    record["attempts"] = int(record.get("attempts") or 0) + 1
+    record["last_submit_at"] = now
+    record["next_retry_at"] = now + retry_delay_f
+    record["lookup_misses"] = 0
+    record["lifecycle"] = "submit_pending"
+    _persist_marker(record, marker_path)  # durability boundary before POST
+
+    log(f"  [ORDER] LIMIT BUY {ticker}  qty={qty_r}  @ {price_r} USD  validity={validity}")
+    try:
+        status, data = client.place_limit_order(ticker, qty_r, price_r, validity)
+    except Exception as exc:  # response may have been lost after venue acceptance
+        record["submit_error"] = f"{exc.__class__.__name__}: {exc}"
+        _persist_marker(record, marker_path)
+        log(f"  ! [ORDER] raspuns submit ambiguu ({exc}) — intentia ramane pending")
+        return False
+
+    if status in (200, 201) and isinstance(data, dict) and data.get("id") is not None:
+        oid = str(data["id"])
+        venue_status = str(data.get("status") or "").upper()
+        lifecycle = "filled" if venue_status == "FILLED" else "accepted"
+        if venue_status in {"CANCELLED", "CANCELED", "EXPIRED"}:
+            lifecycle = "expired" if venue_status == "EXPIRED" else "canceled"
+        elif venue_status == "REJECTED":
+            lifecycle = "submit_pending"
+        record.update({
+            "order_id": None if venue_status == "REJECTED" else oid,
+            "venue_status": venue_status,
+            "lifecycle": lifecycle, "order": data,
+        })
+        if venue_status == "REJECTED":
+            history = list(record.get("venue_order_ids") or [])
+            if oid not in history:
+                history.append(oid)
+            record["venue_order_ids"] = history
+        _persist_marker(record, marker_path)
+        log(f"  [ORDER] raspuns submit: id={oid}  status={venue_status or 'NECUNOSCUT'}")
+        if lifecycle in {"canceled", "expired"}:
+            return False
+        if lifecycle == "submit_pending":
+            log("  ! [ORDER] ordin respins; intentia ramane in coada pentru reconciliere/retry")
+            return False
+        notify(title="Ordin T212 acceptat!",
+               body=f"LIMIT {ticker} qty={qty_r} @ {price_r} USD\nid={oid}",
+               source="T212 order", price=price_r, desktop=desktop)
+        return True
+
+    record["submit_error"] = f"T212 HTTP {status}: {json.dumps(data)[:400]}"
+    _persist_marker(record, marker_path)
+    log(f"  ! [ORDER] {record['submit_error']} — retry non-blocant la ciclul urmator")
     return False

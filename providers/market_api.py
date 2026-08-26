@@ -266,11 +266,13 @@ class BinanceProvider(MarketDataProvider):
             raise ProviderError(f"order_status({order_id}): {e}") from e
         st_map = {"FILLED": "closed", "CANCELED": "canceled", "EXPIRED": "expired",
                   "REJECTED": "canceled", "NEW": "open", "PARTIALLY_FILLED": "open"}
+        venue_status = str(o.get("status") or "").upper()
         return OrderStatus(
             status=st_map.get(o.get("status"), "open"),
             filled_qty=executed_qty,
             cost=float(o.get("cummulativeQuoteQty") or 0.0),
             fee=fee,
+            venue_status=venue_status,
         )
 
     def cancel_order(self, symbol: str, order_id: str) -> None:

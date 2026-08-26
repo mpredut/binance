@@ -27,6 +27,7 @@ class OrderStatus:
     filled_qty: float          # Executed quantity (Kraken ``vol_exec``).
     cost: float                # Executed notional; average price is cost / filled_qty.
     fee: float                 # Actual fee reported by the venue.
+    venue_status: str = ""     # Native terminal reason (REJECTED vs CANCELED, etc.).
 
     def __post_init__(self):
         if self.status not in {"open", "closed", "canceled", "expired"}:
@@ -38,6 +39,7 @@ class OrderStatus:
             if not math.isfinite(value) or (name != "fee" and value < 0):
                 raise ValueError(f"invalid {name} in OrderStatus: {raw!r}")
             object.__setattr__(self, name, value)
+        object.__setattr__(self, "venue_status", str(self.venue_status or "").upper())
 
     @property
     def terminal(self) -> bool:

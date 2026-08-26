@@ -20,7 +20,6 @@ from providers.market_api import api as mkt   # single guarded proxy (Instrument
 MAX_PROC = 0.77
 monitor_interval = 3.7
 MAX_TRACKED_ORDER_IDS = 10_000
-MAX_FAILED_ORDERS = 500
 initial_prices = OrderedDict()
 initial_sell_prices = OrderedDict()
 initial_buy_prices = OrderedDict()
@@ -33,23 +32,16 @@ def _remember_initial_price(cache, order_id, price):
         cache.popitem(last=False)
 
 
-def _remember_failed_order(failed_orders, record):
-    key = (record["symbol"], record["order_type"])
-    failed_orders[:] = [
-        item for item in failed_orders
-        if (item["symbol"], item["order_type"]) != key
-    ]
-    failed_orders.append(record)
-    if len(failed_orders) > MAX_FAILED_ORDERS:
-        del failed_orders[:-MAX_FAILED_ORDERS]
-
-import time
-
-
 TIME_SLEEP_ERROR = 10
 
 
-def monitor_open_orders_by_type(symbol, order_type, failed_orders):
+def monitor_open_orders_by_type(symbol, order_type, failed_orders=None):
+    """Reprice eligible open orders without owning a second retry loop.
+
+    ``mkt.place`` persists every replacement intent in the shared outbox before
+    submit.  ``failed_orders`` remains as a compatibility-only argument for old
+    callers; this function neither writes nor drains it.
+    """
     orders = api.get_open_orders(order_type, symbol)  # Fetch open orders for the requested side.
     if not orders:
         print(f"Pentru {symbol} Nu exista ordine de {order_type} deschise initial.")
@@ -93,7 +85,6 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
             if not api.cancel_order(symbol, order_id):
                 initial_prices.pop(order_id)
                 continue
-            time.sleep(MONITOR_BETWEEN_ORDERS_INTERVAL)
             
             # Calculate the new price according to the order side.
             if order_type == "SELL":
@@ -115,31 +106,10 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders):
                     initial_prices, new_order['orderId'], initial_prices.pop(order_id))
                 print(f"Updated order from {price} to {new_price}. New ID: {new_order['orderId']}")
             else:
-                # Save fail order
-                print(f"Eroare la plasarea noului ordin de {order_type}.")
-                _remember_failed_order(failed_orders, {
-                    'order_type': order_type,
-                    'symbol': symbol,
-                    'price': new_price,
-                    'quantity': quantity
-                })
-
-    # Retry ...
-    for failed_order in failed_orders[:]:  # Iterate over a copy of the list.
-        print(f"retry order failed: {failed_order}")
-        time.sleep(MONITOR_BETWEEN_ORDERS_INTERVAL)
-        retry_order = mkt.place(
-            failed_order['symbol'],
-            failed_order['order_type'],
-            failed_order['price'],
-            failed_order['quantity'],
-            smart=False,
-        )
-        if retry_order:
-            print(f"Ordin plasat cu succes la retry. ID nou: {retry_order['orderId']}")
-            failed_orders.remove(failed_order)  # Remove the order from the original list.
-        else:
-            print("Error at resubmit order retry.")
+                print(
+                    f"Inlocuirea {order_type} nu a fost acceptata imediat; "
+                    "intentia persistata ramane in outboxul comun pentru retry."
+                )
     
 
 
@@ -155,14 +125,13 @@ def monitor_orders():
     monitor_open_orders_lasttime = time.time() - MONITOR_OPEN_ORDER_INTERVAL - TIME_SLEEP_ERROR
     monitor_close_orders_by_age_lasttime = time.time() - MONITOR_CLOSE_ORDER_INTERVAL - TIME_SLEEP_ERROR
 
-    failed_orders = []  # Orders whose placement failed and should be retried.
     while not api.stop:
         try:
             currenttime = time.time()
             if(currenttime - monitor_open_orders_lasttime > MONITOR_OPEN_ORDER_INTERVAL) :
                 for symbol in sym.symbols:
-                    monitor_open_orders_by_type(symbol, "SELL", failed_orders)
-                    monitor_open_orders_by_type(symbol, "BUY", failed_orders)
+                    monitor_open_orders_by_type(symbol, "SELL")
+                    monitor_open_orders_by_type(symbol, "BUY")
                     monitor_open_orders_lasttime = currenttime
             if(currenttime - monitor_close_orders_by_age_lasttime > MONITOR_CLOSE_ORDER_INTERVAL) :
                 #monitor_close_orders_by_age(max_age_seconds)

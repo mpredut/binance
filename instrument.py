@@ -15,9 +15,13 @@ import time
 from typing import Optional, List, Callable, Any
 
 from providers.market_api import api as _default_api
+from providers.execution_audit import ExecutionAudit
 import order_guard
 import order_outcomes_log as _outcomes_log
 from lock import trade_cooldown
+
+
+_EXECUTION_AUDIT = ExecutionAudit()
 
 
 def _accepted_order_payload(payload):
@@ -155,6 +159,7 @@ class Instrument:
         order = None
         prequeued_record_id = None
         prequeued_client_order_id = None
+        prequeued_intent_id = None
         # safeback_seconds is explicitly overridden by monitortrades (normally 12
         # days) and tradeall (14 days), so Binance rarely uses the 48-hour config
         # default. Apply the same window to enabled Kraken instruments. Retain it
@@ -293,13 +298,17 @@ class Instrument:
                             prequeued_record_id = order_retry.enqueue(
                                 self.symbol, side_u, qty, prequeue_kwargs,
                                 requested_price=orig_price, ref_price=price,
-                                failure_reason="submit_pending")
+                                failure_reason="submit_pending",
+                                provider_name=self.provider_name,
+                                intent_id=kwargs.get("intent_id"),
+                                kind=kwargs.get("kind") or kwargs.get("motivation"))
                             prequeued = order_retry.get(prequeued_record_id)
                             if prequeued is None:
                                 raise RuntimeError("intentia nu poate fi citita dupa persistare")
                             prequeued_client_order_id = dict(
                                 prequeued.get("place_kwargs") or {}).get(
                                     "client_order_id")
+                            prequeued_intent_id = prequeued.get("intent_id")
                             if not prequeued_client_order_id:
                                 raise RuntimeError("intentia persistata nu are client_order_id")
                             kwargs["client_order_id"] = prequeued_client_order_id
@@ -311,6 +320,15 @@ class Instrument:
                         return None
 
                 reason = "submit_ambiguous"
+                if prequeued_intent_id:
+                    _EXECUTION_AUDIT.record(
+                        "submit_requested", intent_id=prequeued_intent_id,
+                        venue=self.provider_name, symbol=self.symbol,
+                        side=side_u.lower(), qty=qty, price=price,
+                        market=is_market,
+                        kind=kwargs.get("kind") or kwargs.get("motivation"),
+                        client_order_id=prequeued_client_order_id,
+                    )
                 response = self._provider.place_order(
                     self.symbol, side, price, qty, **kwargs)
                 if _accepted_order_payload(response):
@@ -336,26 +354,49 @@ class Instrument:
             _outcomes_log.log_order_outcome(
                 self.symbol, side_u, price, qty, "accepted" if order else "refused",
                 None if order else reason, kwargs.get("motivation"), caller=caller)
-            # A successful normal placement resolves pending outbox intent for the
-            # same symbol and side. This prevents a queued initial failure from
-            # duplicating an order after a local retry succeeds. The worker itself
-            # needs no resolve because it claims atomically before placement.
+            # Acceptance is not a fill. Preserve the venue ID in the exact outbox
+            # record so the single worker follows open/partial/terminal state. If
+            # this persistence step fails, the pre-submit record and deterministic
+            # client ID remain available for response-loss recovery.
             if order is not None and not caller_owns_retry:
                 try:
                     import order_retry
                     if prequeued_record_id is not None:
-                        order_retry.resolve_record(
+                        tracked = order_retry.mark_accepted(
                             prequeued_record_id,
+                            order,
                             client_order_id=prequeued_client_order_id)
-                    else:
-                        order_retry.resolve(self.symbol, side_u)
+                        if not tracked:
+                            print(
+                                f"[{self.symbol}] {side_u} acceptat, dar tracking-ul "
+                                "nu a putut fi actualizat; intentia ramane pending")
+                        elif prequeued_intent_id:
+                            _EXECUTION_AUDIT.record(
+                                "submit_accepted", intent_id=prequeued_intent_id,
+                                venue=self.provider_name, symbol=self.symbol,
+                                side=side_u.lower(), qty=qty, price=price,
+                                market=is_market,
+                                kind=kwargs.get("kind") or kwargs.get("motivation"),
+                                client_order_id=prequeued_client_order_id,
+                                order_id=_order_id_from_payload(order),
+                            )
                 except Exception as _e:  # noqa: BLE001
-                    print(f"[{self.symbol}] {side_u} resolve retry esuat (ignor): {_e}")
+                    print(f"[{self.symbol}] {side_u} tracking accepted esuat: {_e}")
             # Persist a failed intent unless this is already a retry. Queue handling
             # is best effort and never changes the placement return value.
             elif order is None and not caller_owns_retry:
                 try:
                     import order_retry
+                    if prequeued_intent_id:
+                        _EXECUTION_AUDIT.record(
+                            "submit_ambiguous", intent_id=prequeued_intent_id,
+                            venue=self.provider_name, symbol=self.symbol,
+                            side=side_u.lower(), qty=qty, price=price,
+                            market=is_market,
+                            kind=kwargs.get("kind") or kwargs.get("motivation"),
+                            client_order_id=prequeued_client_order_id,
+                            failure_reason=reason,
+                        )
                     if order_retry.RETRY_ENABLED:
                         if prequeued_record_id is not None:
                             order_retry.mark_failure(
@@ -378,7 +419,10 @@ class Instrument:
                             order_retry.enqueue(
                                 self.symbol, side_u, queue_qty, retry_kwargs,
                                 requested_price=orig_price, ref_price=ref_price,
-                                failure_reason=reason)
+                                failure_reason=reason,
+                                provider_name=self.provider_name,
+                                intent_id=kwargs.get("intent_id"),
+                                kind=kwargs.get("kind") or kwargs.get("motivation"))
                 except Exception as _e:  # noqa: BLE001
                     print(f"[{self.symbol}] {side_u} enqueue retry esuat (ignor): {_e}")
 

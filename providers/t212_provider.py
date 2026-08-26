@@ -297,6 +297,7 @@ class T212Provider(MarketDataProvider):
             filled_qty=filled_qty,
             cost=cost,
             fee=fee,
+            venue_status=venue_status,
         )
 
     def cancel_order(self, symbol: str, order_id: str) -> None:

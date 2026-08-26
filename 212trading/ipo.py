@@ -151,6 +151,9 @@ def main() -> int:
     ap.add_argument("--find-ticker",       metavar="NUME",
                     help="Cauta instrument in T212 dupa nume/simbol")
     args = ap.parse_args()
+    # The one-shot lifecycle marker is namespaced by profile. Preserve the CLI
+    # identity explicitly so parallel profiles/accounts never share one marker.
+    os.environ["IPO_PROFILE"] = args.profile.strip()
 
     # --- .env configuration ---
     t212_key    = os.environ.get("T212_API_KEY")
@@ -314,7 +317,7 @@ def _cmd_test_order(client, ticker, order_price, order_qty, order_budget_ron,
     if not qty or qty <= 0:
         log("! cantitate invalida"); return 1
     ok = place_order_with_retry(client, ticker, qty, order_price, order_validity,
-                                order_dry, desktop=desktop, max_retries=1, write_marker=False)
+                                order_dry, desktop=desktop, write_marker=False)
     return 0 if ok else 1
 
 

@@ -133,7 +133,9 @@ class T212ExecutorContractTest(unittest.TestCase):
     def test_status_partial_terminal_si_fail_closed(self):
         self.assertEqual(
             self.provider.order_status("NVDA_US_EQ", "712"),
-            OrderStatus("open", filled_qty=0.4, cost=48.0, fee=0.0),
+            OrderStatus(
+                "open", filled_qty=0.4, cost=48.0, fee=0.0,
+                venue_status="PARTIALLY_FILLED"),
         )
 
         cases = [
@@ -147,10 +149,9 @@ class T212ExecutorContractTest(unittest.TestCase):
                     "ticker": "NVDA_US_EQ", "status": venue_status,
                     "filledQuantity": 1.0, "filledValue": 120.0,
                 }
-                self.assertEqual(
-                    self.provider.order_status("NVDA_US_EQ", "712").status,
-                    expected,
-                )
+                observed = self.provider.order_status("NVDA_US_EQ", "712")
+                self.assertEqual(observed.status, expected)
+                self.assertEqual(observed.venue_status, venue_status)
 
         self.fake.status_result = {
             "ticker": "NVDA_US_EQ", "status": "FILLED", "filledQuantity": 1.0,

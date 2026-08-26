@@ -58,6 +58,21 @@ class OrderRetryStoreTest(unittest.TestCase):
         self.assertNotEqual(items[0]["place_kwargs"]["client_order_id"],
                             f"OR_{a[:24]}_0")
 
+    def test_legacy_dedup_never_overwrites_an_accepted_tracker(self):
+        first = oq.enqueue(
+            "BTCUSDC", "SELL", 1.0, {}, requested_price=100.0, now=1000.0)
+        oq.mark_accepted(first, {"orderId": 7, "status": "NEW"}, now=1001.0)
+
+        second = oq.enqueue(
+            "BTCUSDC", "SELL", 2.0, {}, requested_price=101.0, now=1002.0)
+
+        self.assertNotEqual(first, second)
+        rows = oq.load_all()
+        self.assertEqual(len(rows), 2)
+        accepted = next(row for row in rows if row["id"] == first)
+        self.assertEqual(accepted["lifecycle"], "accepted")
+        self.assertEqual(accepted["order_id"], "7")
+
     def test_client_order_id_is_stable_for_one_revision(self):
         rid = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=100.0, now=1000.0)
         rec = oq.load_all()[0]
@@ -157,6 +172,53 @@ class OrderRetryStoreTest(unittest.TestCase):
         rec = oq.get(rid)
         self.assertEqual(rec["place_kwargs"]["client_order_id"], client_id)
         self.assertEqual(rec["last_failure_reason"], "response_without_order_id")
+
+    def test_mark_accepted_keeps_exact_record_until_terminal(self):
+        rid = oq.enqueue(
+            "BTCUSDC", "BUY", 1.0, {}, requested_price=100.0,
+            provider_name="Binance", intent_id="strategy-cycle-entry",
+            kind="ENTRY", now=1000.0)
+        client_id = oq.get(rid)["place_kwargs"]["client_order_id"]
+
+        self.assertTrue(oq.mark_accepted(
+            rid, {"orderId": 123, "status": "NEW"}, now=1100.0,
+            client_order_id=client_id))
+
+        rec = oq.get(rid)
+        self.assertEqual(rec["lifecycle"], "accepted")
+        self.assertEqual(rec["order_id"], "123")
+        self.assertEqual(rec["provider_name"], "Binance")
+        self.assertEqual(rec["intent_id"], "strategy-cycle-entry")
+        self.assertEqual(rec["kind"], "ENTRY")
+        self.assertFalse(oq.is_expired(rec, now=1000.0 + 100 * 86400))
+        self.assertFalse(oq.is_due(rec, now=1399.0))
+        self.assertTrue(oq.is_due(rec, now=1400.0))
+
+    def test_mark_accepted_rejects_wrong_revision_client_id(self):
+        rid = oq.enqueue(
+            "BTCUSDC", "BUY", 1.0, {}, requested_price=100.0, now=1000.0)
+
+        self.assertFalse(oq.mark_accepted(
+            rid, {"orderId": 123}, now=1100.0,
+            client_order_id="different"))
+        self.assertEqual(oq.get(rid)["lifecycle"], "submit_pending")
+
+    def test_legacy_resolve_record_cannot_remove_accepted_tracker(self):
+        rid = oq.enqueue(
+            "BTCUSDC", "BUY", 1.0, {}, requested_price=100.0, now=1000.0)
+        cid = oq.get(rid)["place_kwargs"]["client_order_id"]
+        self.assertTrue(oq.mark_accepted(
+            rid, {"orderId": 91, "status": "NEW"}, now=1100.0,
+            client_order_id=cid))
+
+        self.assertFalse(oq.resolve_record(rid, client_order_id=cid))
+        self.assertEqual(oq.get(rid)["order_id"], "91")
+
+    def test_order_id_parser_handles_provider_shapes(self):
+        self.assertEqual(oq.order_id_from_response({"orderId": 1}), "1")
+        self.assertEqual(oq.order_id_from_response({"id": "two"}), "two")
+        self.assertEqual(oq.order_id_from_response({"txid": ["three"]}), "three")
+        self.assertIsNone(oq.order_id_from_response({"status": "NEW"}))
 
     def test_claim_leases_and_returns_without_removing(self):
         a = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0, now=1000.0)

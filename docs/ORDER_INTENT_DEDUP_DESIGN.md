@@ -10,7 +10,8 @@ older age and attempt counters survived. That could silently lose one financial
 intent and leave a hybrid record representing neither producer correctly.
 
 With deduplication disabled, each enqueue receives its own record ID and deterministic
-client order ID. Leasing, retry, and resolution operate on that exact record/revision.
+client order ID. Leasing, retry, status observation, and terminal reconciliation operate
+on that exact record/revision.
 The trade-off is that a producer which emits the same logical signal repeatedly can
 create multiple records. Queue bounds, guards, cooldowns, price validation, and
 venue client IDs reduce the operational risk, but they do not prove semantic equality.
@@ -50,11 +51,19 @@ Before enabling semantic deduplication, every producer must publish:
 
 ## Lifecycle rule
 
-The common monitor may reconcile persisted intent, venue order, status, fills, and
-balances. It may retry an absent or ambiguous submit only under the intent's policy.
-It must not blindly resubmit an open order or an intentionally canceled/expired order.
-The originating strategy remains responsible for revalidating strategy-specific
-signals before a new exposure-increasing submit.
+The common monitor reconciles persisted intent, venue order, status, fills, and native
+terminal reason. It may retry an absent or ambiguous submit only under the intent's
+policy. It must not resubmit an open/partial order. Native `REJECTED` and `EXPIRED`
+produce a new deterministic client-ID revision for only the unfilled remainder;
+`CANCELED` is terminal and alerted because the common layer cannot distinguish an
+intentional cancel from a strategy invalidation. The originating strategy remains
+responsible for revalidating strategy-specific signals before a new exposure-increasing
+intent is emitted.
+
+Acceptance does not remove the outbox record. Accepted trackers ignore submit TTL and
+remain durable across status/API failures until terminal venue truth is observed. This
+is intentionally fail-closed: a temporarily unreachable exchange cannot turn a real
+order into an apparently absent order and trigger another submit.
 
 Trend deferral is not an attempted submit: it consumes neither attempt count nor TTL.
 If a different refusal reason later appears, the normal active TTL begins at that

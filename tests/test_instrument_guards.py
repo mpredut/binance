@@ -317,7 +317,10 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         self.assertEqual(
             p.persisted_during_submit["place_kwargs"]["client_order_id"],
             p.submitted_client_id)
-        self.assertEqual(oq.load_all(), [])
+        tracked = oq.load_all()
+        self.assertEqual(len(tracked), 1)
+        self.assertEqual(tracked[0]["lifecycle"], "accepted")
+        self.assertEqual(tracked[0]["order_id"], "persisted-1")
 
     def test_truthy_payload_without_order_id_is_refused_and_remains_queued(self):
         import order_retry as oq
@@ -430,16 +433,20 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         self.assertIsNone(order)
         self.assertEqual(_oq.load_all(), [])   # NU se re-enqueue-aza (fara recursie)
 
-    def test_success_not_enqueued(self):
+    def test_success_remains_tracked_until_terminal(self):
         import order_retry as _oq
         p = _FakeProvider()
         inst = self._inst(p)
         order = inst.place("BUY", 100.0, 1.0)
         self.assertIsNotNone(order)
-        self.assertEqual(_oq.load_all(), [])   # succes -> nimic in coada
+        tracked = _oq.load_all()
+        self.assertEqual(len(tracked), 1)
+        self.assertEqual(tracked[0]["lifecycle"], "accepted")
+        self.assertEqual(tracked[0]["order_id"], "1")
 
-    def test_success_resolves_stale_same_side_retry(self):
+    def test_success_does_not_remove_an_independent_same_side_intent(self):
         import order_retry as _oq
+        _oq.RETRY_DEDUP = False
         _oq.enqueue(SYMBOL, "BUY", 1.0, {}, requested_price=100.0, now=1000.0)
         _oq.enqueue(SYMBOL, "SELL", 1.0, {}, requested_price=101.0, now=1001.0)
 
@@ -448,8 +455,15 @@ class InstrumentGuardsTestCase(unittest.TestCase):
 
         self.assertIsNotNone(order)
         remaining = _oq.load_all()
-        self.assertEqual(len(remaining), 1)
-        self.assertEqual(remaining[0]["side"], "SELL")
+        self.assertEqual(len(remaining), 3)
+        buys = [row for row in remaining if row["side"] == "BUY"]
+        sells = [row for row in remaining if row["side"] == "SELL"]
+        self.assertEqual(len(buys), 2)
+        self.assertEqual(len(sells), 1)
+        self.assertEqual(
+            sorted(row["lifecycle"] for row in buys),
+            ["accepted", "submit_pending"],
+        )
 
     def test_smart_flag_gates_price_adjust(self):
         # CORECTIE 30 iul: place_order_smart (SMART: cancel-opuse + nudge) vs place_safe_order

@@ -7,8 +7,11 @@ RETRY_INTERVAL_SEC has elapsed, checks oq.price_gate_ok to determine whether the
 price is more favorable than the requested price. If not, the order remains queued
 without counting an attempt while it waits for price to recover. If favorable, the worker
 retries through mkt.place() at CURRENT PRICE with caller_owns_retry=True to prevent an
-automatic re-enqueue. Provider acceptance removes the leased revision; that event is
-not a fill. Failure increments attempts and releases the lease while retaining it.
+automatic re-enqueue. Provider acceptance keeps the leased revision as ``accepted``;
+the worker then polls normalized status without resubmitting open/partial orders. A
+fill removes it. REJECTED/EXPIRED creates a new revision for only the unfilled
+remainder; CANCELED is terminal and is never blindly resubmitted. Failure increments
+attempts and releases the lease while retaining it.
 Trend deferral releases without consuming attempts or TTL. Exceeding active TTL or the
 attempt limit removes it and sends an alert for manual intervention.
 
@@ -31,12 +34,14 @@ if _ROOT not in sys.path:
 import order_retry as oq
 import alertnotifiers as alert
 from botcore import single_instance
+from providers.execution_audit import ExecutionAudit
 
 WORKER_POLL_SEC = float(os.environ.get("RETRY_WORKER_POLL_SEC", "30"))
+_AUDIT = ExecutionAudit()
 
 
 def _accepted_order(order):
-    return isinstance(order, dict) and order.get("orderId") not in (None, "")
+    return oq.order_id_from_response(order) is not None
 
 
 def _reconcile_client_order(mkt, symbol, client_order_id):
@@ -51,20 +56,56 @@ def _reconcile_client_order(mkt, symbol, client_order_id):
         return None
     if not isinstance(order, dict):
         return None
-    status = str(order.get("status") or "").upper()
-    return order if status in {"NEW", "PARTIALLY_FILLED", "FILLED"} else None
+    return order if oq.order_id_from_response(order) is not None else None
+
+
+def _provider_name(mkt, record):
+    configured = record.get("provider_name")
+    if configured:
+        return str(configured)
+    resolver = getattr(mkt, "provider_name_for", None)
+    if callable(resolver):
+        return str(resolver(record.get("symbol")))
+    return None
+
+
+def _retryable_terminal(status):
+    native = str(getattr(status, "venue_status", "") or "").upper()
+    return native in {"REJECTED", "EXPIRED"} or status.status == "expired"
+
+
+def _audit_event(record, event, **fields):
+    payload = {
+        "side": str(record.get("side") or "").lower() or None,
+        "kind": record.get("kind"),
+        "client_order_id": dict(record.get("place_kwargs") or {}).get(
+            "client_order_id"),
+        "order_id": record.get("order_id"),
+        "revision": record.get("revision"),
+    }
+    payload.update(fields)
+    _AUDIT.record(
+        event,
+        intent_id=str(record.get("intent_id") or f"outbox-{record.get('id')}"),
+        venue=str(record.get("provider_name") or "routed"),
+        symbol=str(record.get("symbol") or "unknown"),
+        **payload,
+    )
 
 
 def process_once(mkt, now=None):
-    """Drain one queue step using guarded facade `mkt` (get_current_price + place).
-    Due records are leased before placement, preventing another retry while they are in
-    flight without deleting crash-recovery state. They are placed at CURRENT PRICE with
-    caller_owns_retry=True. Accepted revisions are removed; failures are released with
-    attempts+1. Return processing statistics."""
+    """Advance each due outbox record by at most one non-blocking lifecycle step.
+
+    Pending records are leased before placement and submitted at the current guarded
+    price with ``caller_owns_retry=True``. Accepted records are status-polled once;
+    open/partial orders stay tracked, fills are removed, and only explicit
+    rejection/expiry can create a remainder revision. Return processing statistics.
+    """
     now = now if now is not None else time.time()
     snapshot = oq.load_all(now)
 
     to_retry = []       # (record, price): due and price-favorable
+    to_observe = []     # accepted venue orders due for one status snapshot
     expired = []
     skipped_price = 0   # due, but current price is still worse than requested
     for r in snapshot:
@@ -75,6 +116,9 @@ def process_once(mkt, now=None):
             expired.append(r)
             continue
         if not oq.is_due(r, now):
+            continue
+        if str(r.get("lifecycle") or "submit_pending").lower() == "accepted":
+            to_observe.append(r)
             continue
         symbol = r.get("symbol")
         try:
@@ -95,7 +139,8 @@ def process_once(mkt, now=None):
     # Expired work is never submitted. Retryable work remains persisted under a lease.
     expired = oq.discard([r["id"] for r in expired])
     prices = {r["id"]: price for r, price in to_retry}
-    claimed = oq.claim([r["id"] for (r, _) in to_retry], now)
+    claimed = oq.claim(
+        [r["id"] for (r, _) in to_retry] + [r["id"] for r in to_observe], now)
 
     for r in expired:
         _alert_giveup(r, now)   # already removed from the queue
@@ -103,7 +148,83 @@ def process_once(mkt, now=None):
     succeeded = 0
     reconciled = 0
     attempted = 0
+    observed = 0
+    filled = 0
+    terminal_failed = 0
+    terminal_retried = 0
     for r in claimed:
+        lifecycle = str(r.get("lifecycle") or "submit_pending").lower()
+        symbol = r.get("symbol")
+        provider_name = _provider_name(mkt, r)
+        if lifecycle == "accepted":
+            observed += 1
+            try:
+                status = mkt.order_status(
+                    symbol, str(r.get("order_id")), provider_name=provider_name)
+            except Exception as exc:  # noqa: BLE001 — status ambiguity stays tracked.
+                print(
+                    f"[order_retry] status indisponibil {symbol}/{r.get('order_id')}: {exc}")
+                oq.complete_claim(
+                    r, "status_error", now, failure_reason=str(exc))
+                _audit_event(
+                    r, "status_error", error_type=exc.__class__.__name__,
+                    error=str(exc))
+                continue
+            if not status.terminal:
+                oq.complete_claim(r, "observed", now, status=status)
+                fingerprint = (
+                    str(status.status), float(status.filled_qty),
+                    str(status.venue_status),
+                )
+                previous = (
+                    str(r.get("last_status") or ""),
+                    float(r.get("filled_qty") or 0.0),
+                    str(r.get("venue_status") or ""),
+                )
+                if fingerprint != previous:
+                    _audit_event(
+                        r, "order_status", status=status.status,
+                        venue_status=status.venue_status,
+                        filled_qty=status.filled_qty, cost=status.cost,
+                        fee=status.fee)
+                continue
+            if status.status == "closed":
+                filled += 1
+                oq.complete_claim(r, "success", now, status=status)
+                _audit_event(
+                    r, "order_terminal", status=status.status,
+                    venue_status=status.venue_status,
+                    filled_qty=status.filled_qty, cost=status.cost,
+                    fee=status.fee)
+                print(
+                    f"[order_retry] FILLED {r.get('side')} {symbol} "
+                    f"orderId={r.get('order_id')} qty={status.filled_qty}")
+                continue
+            if _retryable_terminal(status):
+                before_qty = float(r.get("qty") or 0.0)
+                oq.complete_claim(r, "retry_terminal", now, status=status)
+                terminal_retried += 1
+                _audit_event(
+                    r, "order_terminal_retry", status=status.status,
+                    venue_status=status.venue_status,
+                    filled_qty=status.filled_qty, cost=status.cost,
+                    fee=status.fee,
+                    remaining_qty=max(0.0, before_qty-status.filled_qty))
+                print(
+                    f"[order_retry] {status.venue_status or status.status} {symbol} "
+                    f"orderId={r.get('order_id')} filled={status.filled_qty} "
+                    f"remainder={max(0.0, before_qty-status.filled_qty)}")
+                continue
+            terminal_failed += 1
+            oq.complete_claim(r, "success", now, status=status)
+            _audit_event(
+                r, "order_terminal", status=status.status,
+                venue_status=status.venue_status,
+                filled_qty=status.filled_qty, cost=status.cost,
+                fee=status.fee, retry=False)
+            _alert_terminal(r, status)
+            continue
+
         price = prices.get(r.get("id"))
         # A concurrent writer may refresh the requested price before the lease is
         # acquired. Recheck the leased revision and release without an attempt if the
@@ -113,7 +234,6 @@ def process_once(mkt, now=None):
             skipped_price += 1
             continue
         attempted += 1
-        symbol = r.get("symbol")
         kwargs = dict(r.get("place_kwargs") or {})
         kwargs["caller_owns_retry"] = True  # the worker explicitly re-adds failures
         outcome_context = {}
@@ -124,11 +244,19 @@ def process_once(mkt, now=None):
         if existing_order is not None:
             succeeded += 1
             reconciled += 1
-            oq.complete_claim(r, "success", now)
+            oq.complete_claim(
+                r, "accepted", now, order=existing_order,
+                provider_name=provider_name)
+            _audit_event(
+                r, "order_recovered",
+                order_id=oq.order_id_from_response(existing_order))
             print(f"[order_retry] RECONCILIAT {r.get('side')} {symbol} "
-                  f"orderId={existing_order.get('orderId')}")
+                  f"orderId={oq.order_id_from_response(existing_order)}")
             continue
         try:
+            _audit_event(
+                r, "submit_requested", qty=r.get("qty"), price=price,
+                attempt=int(r.get("attempts") or 0) + 1)
             order = mkt.place(symbol, r.get("side"), price, r.get("qty"), **kwargs)
         except Exception as e:  # noqa: BLE001
             print(f"[order_retry] retry {r.get('side')} {symbol} a aruncat ({e}) — tratez ca esec")
@@ -142,9 +270,15 @@ def process_once(mkt, now=None):
                 reconciled += 1
         if accepted:
             succeeded += 1
-            oq.complete_claim(r, "success", now)
+            oq.complete_claim(
+                r, "accepted", now, order=order,
+                provider_name=provider_name)
+            _audit_event(
+                r, "submit_accepted",
+                order_id=oq.order_id_from_response(order),
+                qty=r.get("qty"), price=price)
             print(f"[order_retry] ACCEPTAT {r.get('side')} {symbol} @ {price} "
-                  f"orderId={order.get('orderId')}")
+                  f"orderId={oq.order_id_from_response(order)}")
         else:
             refusal_reason = outcome_context.get("reason")
             if refusal_reason == "trend_deferred":
@@ -155,13 +289,33 @@ def process_once(mkt, now=None):
             else:
                 oq.complete_claim(r, "failure", now,
                                   failure_reason=refusal_reason)
+            _audit_event(
+                r, "submit_rejected", qty=r.get("qty"), price=price,
+                failure_reason=refusal_reason)
 
     return {"attempted": attempted,
             "succeeded": succeeded,
             "reconciled": reconciled,
+            "observed": observed,
+            "filled": filled,
+            "terminal_failed": terminal_failed,
+            "terminal_retried": terminal_retried,
             "expired": len(expired),
             "skipped_price": skipped_price,
             "remaining": len(oq.load_all(now))}
+
+
+def _alert_terminal(rec, status):
+    """Alert on a canceled intent whose remainder is deliberately not replayed."""
+    try:
+        alert.notify(
+            title=f"🛑 order terminal {rec.get('side')} {rec.get('symbol')}",
+            body=(f"Ordin {rec.get('order_id')} a devenit "
+                  f"{status.venue_status or status.status}; filled={status.filled_qty}, "
+                  "restul NU este retrimis automat dupa cancel."),
+            source="order_retry", symbol=str(rec.get("symbol")))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[order_retry] alerta terminala esuata (ignor): {exc}")
 
 
 def _alert_giveup(rec, now):

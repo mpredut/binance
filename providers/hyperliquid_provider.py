@@ -476,7 +476,8 @@ class HyperliquidProvider(MarketDataProvider):
                 # Every rejection or cancellation is terminal, not a temporarily
                 # missing open order.
                 normalized = "canceled"
-            return OrderStatus(normalized, filled, cost, fee)
+            return OrderStatus(
+                normalized, filled, cost, fee, venue_status=venue_status)
         except ProviderError:
             raise
         except Exception as e:  # noqa: BLE001
