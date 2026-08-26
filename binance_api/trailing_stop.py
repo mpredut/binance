@@ -45,7 +45,7 @@ if _ROOT not in sys.path:
 
 from providers.quantity import resolve_assets
 from providers.execution_audit import intent_client_order_id
-from providers.tracked_order import TrackedOrderLifecycle
+from order_retry import TrackedOrderLifecycle
 
 from trailing_core import TrailingCore, should_sell  # noqa: E402  (re-export should_sell for tests/compatibility)
 from botcore import load_dotenv, single_instance  # noqa: E402  (shared KEY=VALUE parser and single-instance guard)

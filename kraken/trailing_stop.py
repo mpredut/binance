@@ -46,7 +46,7 @@ from providers.execution_audit import (  # noqa: E402
     intent_client_order_id,
 )
 from providers.kraken_provider import KrakenProvider  # noqa: E402
-from providers.tracked_order import (  # noqa: E402
+from order_retry import (  # noqa: E402
     StrategyExecutorLifecycleApi,
     TrackedOrderLifecycle,
 )

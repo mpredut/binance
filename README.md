@@ -75,6 +75,10 @@ resolution, which is why the watchdog restarts it quickly.
   submit/status/cancel cycle to `logger/execution_audit/`, without modifying the decision;
 - `order_guard.py`, `order_retry.py`, and `order_retry_worker.py` apply guards,
   persistence, and retry reconciliation;
+- `order_retry.py` is also the canonical home of `TrackedOrderLifecycle`; strategies
+  may retain campaign state while sharing one persist/submit/recover/status/cancel
+  implementation. The migration boundary is documented in
+  `docs/ORDER_LIFECYCLE_CENTRALIZATION.md`;
 - for normal `Instrument.place` calls, the exact client ID is persisted before the
   external submit; provider acceptance is logged as `accepted`, never as a fill;
 - shared-outbox deduplication by only `symbol+side` is disabled, so an intent from one

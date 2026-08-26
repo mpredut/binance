@@ -107,6 +107,11 @@ flowchart LR
 7. Intenția este persistată înainte de submit. Worker-ul reconciliază răspunsurile ambigue prin client ID, reevaluează retry-ul la prețul curent și prin garduri, apoi păstrează ordinul acceptat până la status terminal. `open`/partial nu se retrimit; `REJECTED`/`EXPIRED` pot relua numai restul neexecutat, iar `CANCELED` este terminal și alertat.
 8. Evenimentele și anomaliile sunt logate și pot genera notificări ntfy/email/desktop.
 
+`order_retry.py` este și modulul canonic pentru `TrackedOrderLifecycle`. Acesta nu este
+un daemon separat: strategiile cu state financiar propriu îl apelează la fiecare tick,
+iar `order_retry_worker.py` rămâne consumatorul unic doar pentru outbox-ul global.
+Detaliile și limitele migrării sunt în `docs/ORDER_LIFECYCLE_CENTRALIZATION.md`.
+
 ## 4. Runtime și deployment
 
 ### Inventarul unic

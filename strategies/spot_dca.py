@@ -20,7 +20,7 @@ from alertnotifiers import bind_notify
 from botcore import are_close, float_env, log
 from providers.execution_audit import intent_client_order_id
 from providers.strategy_executor import ProviderError, StrategyExecutor
-from providers.tracked_order import (
+from order_retry import (
     StrategyExecutorLifecycleApi,
     TrackedOrderLifecycle,
 )

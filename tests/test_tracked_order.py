@@ -4,7 +4,8 @@ import unittest
 from unittest import mock
 
 from providers.strategy_executor import OrderStatus
-from providers.tracked_order import TrackedOrderLifecycle
+from order_retry import TrackedOrderLifecycle
+from providers import tracked_order as compatibility_module
 
 
 class FakeMarketApi:
@@ -55,6 +56,12 @@ class TrackedOrderLifecycleTest(unittest.TestCase):
             clock=lambda: self.now,
         )
         self.store = MemoryPending()
+
+    def test_legacy_provider_module_reexports_canonical_class(self):
+        self.assertIs(
+            compatibility_module.TrackedOrderLifecycle,
+            TrackedOrderLifecycle,
+        )
 
     def intent(self, **overrides):
         values = {
