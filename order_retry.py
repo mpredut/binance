@@ -924,7 +924,8 @@ class TrackedOrderLifecycle:
             "lookup_misses": 0,
         }
         reserved = set(intent) | {
-            "order_id", "last_status", "filled_qty", "terminal_status",
+            "order_id", "submit_status", "submitted_qty", "submitted_price",
+            "last_status", "filled_qty", "terminal_status",
             "cancel_attempted_at",
         }
         for key, value in dict(metadata or {}).items():
@@ -951,6 +952,10 @@ class TrackedOrderLifecycle:
                 response.get("origQty", response.get("qty")), positive=True)
             if submitted_qty is not None:
                 fields["submitted_qty"] = submitted_qty
+            submitted_price = _lifecycle_finite(
+                response.get("price"), positive=True)
+            if submitted_price is not None:
+                fields["submitted_price"] = submitted_price
             return fields
         if (not isinstance(response, bool)
                 and isinstance(response, (str, int)) and str(response).strip()):

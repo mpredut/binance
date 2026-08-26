@@ -101,6 +101,65 @@ class RTradePairStore:
             return True
         self.mutate(op)
 
+    def persist_intent(self, pair_id, side, kind, pending, *, symbol=None,
+                       start_side=None, qty=None):
+        """Durably replace one canonical tracked intent, or remove it.
+
+        ``TrackedOrderLifecycle`` calls this function before and after every
+        external observation.  The legacy ``price``/``qty`` aliases are retained
+        in the JSON so an older checkout can still recover records written by the
+        new coordinator.
+        """
+        side = str(side).upper()
+        kind = str(kind)
+        key = f"{kind}:{side}"
+
+        def op(pairs):
+            now = time.time()
+            rec = pairs.get(pair_id)
+            if pending is None:
+                if rec is None or key not in rec.get("intents", {}):
+                    return False
+                del rec["intents"][key]
+                rec["updated_ts"] = now
+                return True
+
+            value = dict(pending)
+            requested_qty = value.get("requested_qty", value.get("qty", qty))
+            if requested_qty is None:
+                raise ValueError("tracked rtrade intent missing requested_qty")
+            requested_qty = float(requested_qty)
+            requested_price = value.get(
+                "requested_price", value.get("price"))
+            if requested_price is not None:
+                requested_price = float(requested_price)
+
+            if rec is None:
+                if not symbol:
+                    raise KeyError(f"pair necunoscut: {pair_id}")
+                rec = pairs[pair_id] = {
+                    "symbol": symbol, "pair_id": pair_id,
+                    "start_side": (start_side or side).upper(),
+                    "qty": requested_qty, "phase": "reserved",
+                    "terminal": False, "intents": {}, "state": None,
+                    "created_ts": now, "updated_ts": now,
+                }
+
+            value["side"] = side
+            value["kind"] = kind
+            value["requested_qty"] = requested_qty
+            value["requested_price"] = requested_price
+            # Backward-compatible aliases for the old startup recovery code.
+            value["qty"] = requested_qty
+            value["price"] = requested_price
+            if rec.setdefault("intents", {}).get(key) == value:
+                return False
+            rec["intents"][key] = value
+            rec["updated_ts"] = now
+            return True
+
+        self.mutate(op)
+
     def accepted(self, pair_id, side, order_id, kind="limit"):
         def op(pairs):
             key = f"{kind}:{side.upper()}"

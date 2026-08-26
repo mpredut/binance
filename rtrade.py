@@ -23,6 +23,7 @@ from providers.market_api import api as mkt      # Single guarded Instrument.pla
 from providers.execution_audit import AuditedStrategyExecutor
 from providers.quantity import decide_quantity
 from market_regime import MarketRegimeDecision
+from order_retry import StrategyExecutorLifecycleApi, TrackedOrderLifecycle
 from rtrade_pair_store import RTradePairStore, rtrade_client_order_id
 from strategies.rtrade_pair import (
     OrderSnapshot as PairOrderSnapshot,
@@ -127,6 +128,7 @@ class _LivePairVenue:
         # financial state, so a small LRU is sufficient here.
         self._known_tickets = deque(maxlen=max(32, RTRADE_PAIR_MAX_ACTIVE_ROUNDS * 8))
         self._last_place_failures = {}
+        self.recovery_blocked = False
         provider_name = mkt.provider_name_for(symbol)
         self.provider_name = provider_name
         self.executor = mkt.provider_by_name(provider_name)
@@ -135,18 +137,153 @@ class _LivePairVenue:
         self.audited_executor = AuditedStrategyExecutor(
             self.executor, venue=provider_name)
         self.pair_store = pair_store
+        # A Binance client ID is deterministic for one pair leg.  The old recovery
+        # retried after one confirmed absence, so keep that behaviour while moving
+        # the persistence/lookup state machine into the shared lifecycle facade.
+        self.order_lifecycle = TrackedOrderLifecycle(
+            StrategyExecutorLifecycleApi(self.executor),
+            provider_name=provider_name, venue=provider_name,
+            missing_confirmations=1, retry_on_lookup_error=False,
+            audit=(self.audited_executor.audit
+                   if self.pair_store is not None else None),
+        )
 
     def current_price(self):
         return mkt.get_current_price(self.symbol)
 
-    def _ticket(self, order, side, requested_price, requested_qty, pair_id=None):
-        if not order or order.get("orderId") is None:
+    @staticmethod
+    def _intent_id(pair_id, side, kind):
+        return f"rtrade:{pair_id}:{kind}:{str(side).lower()}"
+
+    def _persist_callback(self, pair_id, side, kind, requested_qty):
+        if self.pair_store is None:
+            return lambda _pending: None
+
+        def persist(pending):
+            self.pair_store.persist_intent(
+                pair_id, side, kind, pending,
+                symbol=self.symbol, start_side=side, qty=requested_qty)
+        return persist
+
+    def _remember_ticket(self, ticket):
+        if ticket is None:
             return None
-        actual_price = float(order.get("price") or requested_price)
-        actual_qty = float(order.get("origQty") or order.get("quantity") or requested_qty)
-        return PairOrderTicket(
-            order_id=str(order["orderId"]), side=side.upper(),
-            price=actual_price, qty=actual_qty, pair_id=pair_id)
+        if not any(existing.order_id == ticket.order_id
+                   for existing in self._known_tickets):
+            self._known_tickets.append(ticket)
+        return ticket
+
+    def _ticket_from_pending(self, pending, pair_id):
+        order_id = pending.get("order_id")
+        if not order_id:
+            return None
+        ticket = PairOrderTicket(
+            order_id=str(order_id), side=str(pending["side"]).upper(),
+            price=float(
+                pending.get("submitted_price")
+                or pending.get("requested_price") or 0.0),
+            qty=float(
+                pending.get("submitted_qty")
+                or pending.get("requested_qty")),
+            pair_id=pair_id,
+        )
+        return self._remember_ticket(ticket)
+
+    def _submit_limit_intent(self, side, price, qty, pair_id, *, attempt=1):
+        side = side.upper()
+        hours = (RTRADE_BUY_NORMAL_HOURS if side == "BUY"
+                 else RTRADE_SELL_NORMAL_HOURS)
+        client_id = rtrade_client_order_id(pair_id, side, "limit")
+        intent = self.order_lifecycle.new_intent(
+            intent_id=self._intent_id(pair_id, side, "limit"),
+            client_order_id=client_id, symbol=self.symbol, side=side,
+            requested_qty=qty, requested_price=price, kind="limit",
+            attempt=attempt, metadata={"pair_id": pair_id},
+        )
+        persist = self._persist_callback(
+            pair_id, side, "limit", requested_qty=qty)
+        result = self.order_lifecycle.submit(
+            intent, persist=persist,
+            submit=lambda: mkt.place(
+                self.symbol, side, price, qty,
+                force=False, cancelorders=False, hours=hours, smart=False,
+                cooldown_pair_id=pair_id,
+                # The coordinator owns retry/reconciliation. The global outbox
+                # must not later recreate a leg from an expired pair.
+                caller_owns_retry=True, motivation="rtrade_pair_quote",
+                client_order_id=client_id,
+            ),
+        )
+        return self._ticket_from_pending(result.intent, pair_id), result.intent
+
+    def _canonical_intent(self, record, stored):
+        """Upgrade an old rtrade intent in memory without losing observations."""
+        pending = dict(stored)
+        side = str(pending.get("side") or record["start_side"]).upper()
+        kind = str(pending.get("kind") or "limit")
+        requested_qty = pending.get("requested_qty", pending.get("qty"))
+        requested_price = pending.get("requested_price", pending.get("price"))
+        pending.update({
+            "intent_id": pending.get("intent_id")
+                         or self._intent_id(record["pair_id"], side, kind),
+            "client_order_id": pending["client_order_id"],
+            "symbol": pending.get("symbol") or record["symbol"],
+            "side": side,
+            "kind": kind,
+            "requested_qty": float(requested_qty),
+            "requested_price": (None if requested_price is None
+                                else float(requested_price)),
+            "attempt": int(pending.get("attempt") or 1),
+            "created_at": float(
+                pending.get("created_at") or record.get("created_ts")
+                or time.time()),
+            "lookup_misses": int(pending.get("lookup_misses") or 0),
+            "pair_id": pending.get("pair_id") or record["pair_id"],
+        })
+        return pending
+
+    def recover_intent(self, record, stored):
+        """Recover one fsynced pair intent without guessing venue state.
+
+        A lookup/status error leaves the round active and blocks startup.  Only a
+        confirmed absence permits one idempotent resubmission with the same
+        deterministic client order ID.
+        """
+        pending = self._canonical_intent(record, stored)
+        side = pending["side"]
+        kind = pending["kind"]
+        pair_id = record["pair_id"]
+        persist = self._persist_callback(
+            pair_id, side, kind, requested_qty=pending["requested_qty"])
+        persist(pending)
+        result = self.order_lifecycle.reconcile(pending, persist=persist)
+
+        if result.outcome == "absent":
+            if kind != "limit":
+                raise RuntimeError(
+                    f"intentie {kind} absenta; retransmiterea automata este blocata")
+            _, submitted = self._submit_limit_intent(
+                side, pending["requested_price"], pending["requested_qty"],
+                pair_id, attempt=int(pending.get("attempt") or 1) + 1)
+            result = self.order_lifecycle.reconcile(submitted, persist=persist)
+            if result.outcome == "absent":
+                return None
+
+        if not result.intent.get("order_id"):
+            raise RuntimeError(
+                f"intentie {kind}:{side} ambigua; lookup/status indisponibil")
+        if result.status is None:
+            raise RuntimeError(
+                f"intentie {kind}:{side} are order_id dar status indisponibil")
+
+        ticket = self._ticket_from_pending(result.intent, pair_id)
+        snapshot = PairOrderSnapshot(
+            status=result.status.status,
+            filled_qty=result.status.filled_qty,
+            cost=result.status.cost,
+            fee=result.status.fee,
+        )
+        return ticket, snapshot
 
     def place_limit(self, side, price, qty, pair_id):
         side = side.upper()
@@ -165,27 +302,34 @@ class _LivePairVenue:
                     f"[{self.symbol}] {side} fonduri insuficiente: "
                     f"disponibil=0.00000000 {required_asset}")
                 return None
-        hours = (RTRADE_BUY_NORMAL_HOURS if side.upper() == "BUY"
-                 else RTRADE_SELL_NORMAL_HOURS)
-        client_id = rtrade_client_order_id(pair_id, side, "limit")
-        if self.pair_store is not None:
-            self.pair_store.intent(
-                pair_id, side, price, qty, client_id, kind="limit",
-                symbol=self.symbol, start_side=side)
-        order = mkt.place(
-            self.symbol, side, price, qty,
-            force=False, cancelorders=False, hours=hours, smart=False,
-            cooldown_pair_id=pair_id,
-            # The coordinator owns retry/reconciliation. The global outbox must not
-            # later recreate a leg from an expired pair.
-            caller_owns_retry=True, motivation="rtrade_pair_quote",
-            client_order_id=client_id)
-        ticket = self._ticket(order, side, price, qty, pair_id=pair_id)
-        if ticket is not None:
-            if self.pair_store is not None:
-                self.pair_store.accepted(
-                    pair_id, side, ticket.order_id, kind="limit")
-            self._known_tickets.append(ticket)
+        ticket, _pending = self._submit_limit_intent(
+            side, price, qty, pair_id)
+        if ticket is None and self.pair_store is not None:
+            # One bounded recovery closes the live response-loss gap without a
+            # sleep/poll loop.  A confirmed absence may cause one second submit
+            # with the same deterministic client ID; lookup ambiguity blocks new
+            # rounds and leaves the fsynced intent available for restart recovery.
+            record = next(
+                (candidate for candidate in self.pair_store.active(self.symbol)
+                 if candidate.get("pair_id") == pair_id),
+                None,
+            )
+            if record is None:
+                self.recovery_blocked = True
+                raise RuntimeError(
+                    f"pair={pair_id}: intentia persistata nu poate fi recitita")
+            stored = record.get("intents", {}).get(f"limit:{side}")
+            if stored is None:
+                self.recovery_blocked = True
+                raise RuntimeError(
+                    f"pair={pair_id}: intentia {side} lipseste dupa submit")
+            try:
+                recovered = self.recover_intent(record, stored)
+            except Exception:
+                self.recovery_blocked = True
+                raise
+            if recovered is not None:
+                ticket, _snapshot = recovered
         return ticket
 
     def last_place_failure_reason(self, side):
@@ -649,47 +793,15 @@ class TradingBot:
                     tickets = []
                     snapshots = {}
                     for intent in record.get("intents", {}).values():
-                        order = venue.executor.order_by_client_id(
-                            self.symbol, intent["client_order_id"])
-                        if not order:
-                            # The intent was fsynced before submission. If the process
-                            # died in that window, resubmitting the same clientOrderId is
-                            # idempotent at Binance. The normal pipeline retains every
-                            # guard and quantity reconciliation.
-                            if intent.get("kind", "limit") != "limit":
-                                continue
-                            ticket = venue.place_limit(
-                                intent["side"], float(intent["price"]),
-                                float(intent["qty"]), record["pair_id"])
-                            if ticket is None:
-                                # Submission may have reached the venue despite a lost
-                                # response or None from the SDK. Reconcile once more before
-                                # declaring that the intent was not placed.
-                                order = venue.executor.order_by_client_id(
-                                    self.symbol, intent["client_order_id"])
-                                if not order:
-                                    continue
-                            else:
-                                order = venue.executor.order_by_client_id(
-                                    self.symbol, intent["client_order_id"])
-                            if not order:
-                                # Some providers do not expose client-ID lookup immediately;
-                                # a confirmed ticket is sufficient to reconstruct the round.
-                                order = {
-                                    "orderId": ticket.order_id,
-                                    "price": ticket.price,
-                                    "origQty": ticket.qty,
-                                }
-                        order_id = str(order["orderId"])
-                        pair_store.accepted(
-                            record["pair_id"], intent["side"], order_id,
-                            kind=intent.get("kind", "limit"))
-                        snap = venue.order_status(order_id)
+                        recovered = venue.recover_intent(record, intent)
+                        if recovered is None:
+                            continue
+                        ticket, snap = recovered
+                        order_id = ticket.order_id
                         snapshots[order_id] = vars(snap).copy()
                         tickets.append({
-                            "order_id": order_id, "side": intent["side"],
-                            "price": float(order.get("price") or intent.get("price") or 0),
-                            "qty": float(order.get("origQty") or intent["qty"]),
+                            "order_id": order_id, "side": ticket.side,
+                            "price": ticket.price, "qty": ticket.qty,
                             "active": snap.status not in {"closed", "canceled", "expired"},
                             "pair_id": record["pair_id"],
                         })
@@ -793,8 +905,8 @@ class TradingBot:
 
                 can_start = (
                     not recovery_blocked
-                    and
-                    len(active) < RTRADE_PAIR_MAX_ACTIVE_ROUNDS
+                    and not getattr(venue, "recovery_blocked", False)
+                    and len(active) < RTRADE_PAIR_MAX_ACTIVE_ROUNDS
                     and now - last_start_at >= RTRADE_PAIR_START_INTERVAL_SEC
                 )
                 if can_start and not _trend_too_strong(self.symbol):

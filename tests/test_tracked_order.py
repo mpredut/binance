@@ -95,6 +95,19 @@ class TrackedOrderLifecycleTest(unittest.TestCase):
         self.assertTrue(result.order_known)
         self.assertEqual(result.outcome, "active")
 
+    def test_submit_persists_venue_adjusted_quantity_and_price(self):
+        result = self.lifecycle.submit(
+            self.intent(), persist=self.store.persist,
+            submit=lambda: {
+                "orderId": "7", "status": "NEW",
+                "origQty": "2.75", "price": "114.25",
+            },
+        )
+
+        self.assertEqual(result.intent["submitted_qty"], 2.75)
+        self.assertEqual(result.intent["submitted_price"], 114.25)
+        self.assertEqual(self.store.value["submitted_price"], 114.25)
+
     def test_lost_submit_response_recovers_by_client_id_without_resubmit(self):
         self.api.lookup = {"orderId": 8, "status": "NEW", "origQty": "3"}
         submit = mock.Mock(return_value=None)
@@ -224,6 +237,8 @@ class TrackedOrderLifecycleTest(unittest.TestCase):
     def test_metadata_cannot_override_lifecycle_fields(self):
         with self.assertRaisesRegex(ValueError, "reserved key"):
             self.intent(metadata={"order_id": "foreign"})
+        with self.assertRaisesRegex(ValueError, "reserved key"):
+            self.intent(metadata={"submitted_price": 1.0})
 
 
 if __name__ == "__main__":

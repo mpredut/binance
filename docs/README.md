@@ -22,6 +22,12 @@ lângă codul lor (convenție — sunt linkate mai jos).
   baseline MIN/MAX, execuția guardată și riscul de concentrare al drawdown-buy.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — facadă `providers/market_api` + provideri, HYPE pe HL,
   Kraken multi-proces (cacheManager partajat), trailing stop (core partajat + adaptoare).
+- [ORDER_RETRY_ARCHITECTURE.md](ORDER_RETRY_ARCHITECTURE.md) — outbox versus lifecycle
+  deținut de strategie, threadurile de cache, starea JSON și reconcilierea ordinelor.
+- [ORDER_LIFECYCLE_CENTRALIZATION.md](ORDER_LIFECYCLE_CENTRALIZATION.md) — limitele
+  refactorului comun și inventarul căilor migrate.
+- [ORDER_INTENT_DEDUP_DESIGN.md](ORDER_INTENT_DEDUP_DESIGN.md) — analiza salvată a
+  cheilor semantice și motivul pentru care `RETRY_DEDUP=false` rămâne activ.
 
 ## README de componentă (lângă cod)
 - [../hyperliquid/README.md](../hyperliquid/README.md) — Hyperliquid: spot oprit pentru capital insuficient, porți runtime, stare izolată și candidat long-term shadow.

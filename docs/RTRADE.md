@@ -107,18 +107,28 @@ reconciliată din nou cu soldul, fee-cap-ul, precizia și minimul venue-ului.
 
 ## Persistență și recovery
 
-`cachedb/rtrade_pairs.json` păstrează intenția înainte de submit, order ID-ul acceptat
-și checkpointul coordonatorului. La restart:
+`cachedb/rtrade_pairs.json` păstrează intenția canonică înainte de submit, valorile
+cerute și acceptate, order ID-ul și checkpointul coordonatorului. Ordinele LIMIT trec
+prin `order_retry.TrackedOrderLifecycle`, dar rămân în state-ul rtrade și nu în
+outbox-ul global. Fiecare apel lifecycle face un singur submit și nu așteaptă
+terminalul. Dacă răspunsul nu conține order ID, rtrade face un lookup imediat; numai
+absența confirmată permite un al doilea apel cu același client ID. Nu există loop de
+submit sau așteptare activă. La restart:
 
 - intenție + ordin existent: ordinul este adoptat;
-- intenție fără ordin: submit idempotent cu același client ID;
-- răspuns de submit pierdut: lookup repetat după client ID;
+- intenție fără ordin după absență confirmată: un submit idempotent cu același client ID;
+- răspuns de submit pierdut: lookup după client ID, fără submit concurent;
 - ordin `RT_` fără ownership local: anulare și confirmare automată;
 - stare ambiguă/API indisponibil: fail-closed, fără ordin speculativ.
 
 Sunt păstrate maximum 200 de runde terminale. Checkpointurile active sunt scrise în
 batch, ordinele terminale cu fill zero sunt compactate, iar cache-urile auxiliare au
 plafoane de memorie.
+
+Lifecycle-ul comun rezolvă mecanica de persistență, lookup și status. `PairCoordinator`
+rămâne ownerul politicii de TTL, cancel/reprice, partial fill și hard-stop. Calea
+legacy `repetitive_buy`/`repetitive_sell` rămâne disponibilă în spatele feature
+flagului și nu este consumată de workerul global.
 
 ## Invariante operaționale
 

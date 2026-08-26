@@ -62,7 +62,8 @@ intenție după ce strategia și-a invalidat campania.
 | AssetGuardian BUY/SELL per asset | `order_retry.TrackedOrderLifecycle` | campania AssetGuardian |
 | Binance/Kraken trailing | `order_retry.TrackedOrderLifecycle` | state trailing |
 | Kraken/Hyperliquid spot-DCA | `order_retry.TrackedOrderLifecycle` plus contabilizare DCA | state-ul strategiei |
-| rtrade pair | coordonator propriu; încă nemigrat complet | `pair_store` |
+| rtrade pair LIMIT | `order_retry.TrackedOrderLifecycle` pentru submit și startup recovery; coordonatorul păstrează TTL/cancel/fill policy | `cachedb/rtrade_pairs.json` |
+| rtrade hard-stop | execuție auditată și recovery prin lifecycle; politica MARKET rămâne în coordonator | `cachedb/rtrade_pairs.json` |
 | T212 strategy | lifecycle propriu bazat pe ordine active și delta poziției | state T212 |
 | T212 one-shot | reconciliere proprie fără client-ID universal | marker profil+ticker |
 | `monitororder` | nelive; nu se mai extinde | exclus din migrarea următoare |
@@ -125,7 +126,7 @@ nu vor fi adăugate ca fallback generic în `order_retry`.
 ## Pașii de refactor rămași
 
 1. păstrăm `providers/tracked_order.py` până când nu mai există consumatori externi;
-2. migrăm întâi rtrade, apoi T212, doar cu characterization/golden tests;
+2. extindem după rtrade către T212 numai cu characterization/golden tests;
 3. abia ulterior introducem politicile financiare declarative și un ledger activ unic.
 
 Tranzițiile mecanice duplicate din `order_retry_worker.py` au fost extrase în

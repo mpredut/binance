@@ -52,6 +52,35 @@ class RTradePairStoreTest(unittest.TestCase):
         self.assertEqual(rec["intents"]["limit:BUY"]["client_order_id"],
                          "SD_atomic")
 
+    def test_canonical_tracked_intent_replaces_and_removes_exact_leg(self):
+        pending = {
+            "intent_id": "rtrade:pair-4:limit:buy",
+            "client_order_id": "RT_canonical",
+            "symbol": "TAOUSDC", "side": "BUY", "kind": "limit",
+            "requested_qty": 1.25, "requested_price": 99.5,
+            "attempt": 1, "created_at": 100.0, "lookup_misses": 0,
+        }
+        self.store.persist_intent(
+            "pair-4", "BUY", "limit", pending,
+            symbol="TAOUSDC", start_side="BUY")
+        rec = self.store.active("TAOUSDC")[0]
+        stored = rec["intents"]["limit:BUY"]
+        self.assertEqual(stored["requested_qty"], 1.25)
+        self.assertEqual(stored["requested_price"], 99.5)
+        self.assertEqual(stored["qty"], 1.25)
+        self.assertEqual(stored["price"], 99.5)
+
+        accepted = dict(pending, order_id="77", submitted_qty=1.2)
+        self.store.persist_intent(
+            "pair-4", "BUY", "limit", accepted, symbol="TAOUSDC")
+        rec = self.store.active("TAOUSDC")[0]
+        self.assertEqual(rec["intents"]["limit:BUY"]["order_id"], "77")
+
+        self.store.persist_intent(
+            "pair-4", "BUY", "limit", None, symbol="TAOUSDC")
+        rec = self.store.active("TAOUSDC")[0]
+        self.assertNotIn("limit:BUY", rec["intents"])
+
     def test_checkpoint_many_updates_rounds_in_one_transaction(self):
         for pair_id in ("p1", "p2"):
             self.store.begin("TAOUSDC", pair_id, "BUY", 1.0)
