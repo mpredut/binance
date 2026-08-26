@@ -17,6 +17,9 @@ Există două moduri de folosire a aceluiași domeniu:
 `TrackedOrderLifecycle` nu este și nu pornește un proces separat. Este un state
 machine apelat o dată pe tick de AssetGuardian, spot-DCA și trailing. Procesul
 continuu al flotei rămâne `order_retry_worker.py` și consumă numai outbox-ul global.
+Workerul este un proces OS separat, nu un thread pornit de `Instrument.place`.
+Plasarea nu face polling și nu așteaptă terminalul: se încheie după persistență,
+garduri și un singur apel de submit către provider.
 
 Fișierul `providers/tracked_order.py` este doar un shim temporar de compatibilitate.
 Codul de producție importă tipurile lifecycle direct din `order_retry`.
@@ -28,6 +31,7 @@ Codul de producție importă tipurile lifecycle direct din `order_retry`.
 - delimitarea dintre acceptare și fill;
 - recuperarea unui răspuns ambiguu prin client order ID;
 - statusul `open`, partial și terminal;
+- tranzițiile persistente ale outbox-ului dintr-un snapshot de status;
 - păstrarea statusului nativ al venue-ului;
 - confirmările multiple de absență;
 - cancel-ul bounded, persistat înainte de efectul extern;
@@ -104,11 +108,14 @@ nu vor fi adăugate ca fallback generic în `order_retry`.
 ## Pașii de refactor rămași
 
 1. păstrăm `providers/tracked_order.py` până când nu mai există consumatori externi;
-2. extragem din `order_retry_worker.py` tranzițiile mecanice duplicate și le facem să
-   folosească aceleași primitive din `order_retry`;
-3. definim capabilitățile de reconciliere per provider;
-4. migrăm întâi rtrade, apoi T212, doar cu characterization/golden tests;
-5. abia ulterior introducem politicile financiare declarative și un ledger activ unic.
+2. definim capabilitățile de reconciliere per provider;
+3. migrăm întâi rtrade, apoi T212, doar cu characterization/golden tests;
+4. abia ulterior introducem politicile financiare declarative și un ledger activ unic.
+
+Tranzițiile mecanice duplicate din `order_retry_worker.py` au fost extrase în
+`order_retry.advance_claimed_status`. Workerul păstrează exclusiv I/O-ul cu venue-ul,
+auditul și orchestrarea unei iterații; nucleul comun aplică atomic snapshotul în
+outbox.
 
 Nu se schimbă praguri, bugete, tier-uri sau semantica financiară în timpul acestei
 centralizări mecanice.

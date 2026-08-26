@@ -69,11 +69,6 @@ def _provider_name(mkt, record):
     return None
 
 
-def _retryable_terminal(status):
-    native = str(getattr(status, "venue_status", "") or "").upper()
-    return native in {"REJECTED", "EXPIRED"} or status.status == "expired"
-
-
 def _audit_event(record, event, **fields):
     payload = {
         "side": str(record.get("side") or "").lower() or None,
@@ -170,27 +165,17 @@ def process_once(mkt, now=None):
                     r, "status_error", error_type=exc.__class__.__name__,
                     error=str(exc))
                 continue
-            if not status.terminal:
-                oq.complete_claim(r, "observed", now, status=status)
-                fingerprint = (
-                    str(status.status), float(status.filled_qty),
-                    str(status.venue_status),
-                )
-                previous = (
-                    str(r.get("last_status") or ""),
-                    float(r.get("filled_qty") or 0.0),
-                    str(r.get("venue_status") or ""),
-                )
-                if fingerprint != previous:
+            transition = oq.advance_claimed_status(r, status, now)
+            if transition.action == "observed":
+                if transition.status_changed:
                     _audit_event(
                         r, "order_status", status=status.status,
                         venue_status=status.venue_status,
                         filled_qty=status.filled_qty, cost=status.cost,
                         fee=status.fee)
                 continue
-            if status.status == "closed":
+            if transition.action == "filled":
                 filled += 1
-                oq.complete_claim(r, "success", now, status=status)
                 _audit_event(
                     r, "order_terminal", status=status.status,
                     venue_status=status.venue_status,
@@ -200,23 +185,20 @@ def process_once(mkt, now=None):
                     f"[order_retry] FILLED {r.get('side')} {symbol} "
                     f"orderId={r.get('order_id')} qty={status.filled_qty}")
                 continue
-            if _retryable_terminal(status):
-                before_qty = float(r.get("qty") or 0.0)
-                oq.complete_claim(r, "retry_terminal", now, status=status)
+            if transition.action == "retry_terminal":
                 terminal_retried += 1
                 _audit_event(
                     r, "order_terminal_retry", status=status.status,
                     venue_status=status.venue_status,
                     filled_qty=status.filled_qty, cost=status.cost,
                     fee=status.fee,
-                    remaining_qty=max(0.0, before_qty-status.filled_qty))
+                    remaining_qty=transition.remaining_qty)
                 print(
                     f"[order_retry] {status.venue_status or status.status} {symbol} "
                     f"orderId={r.get('order_id')} filled={status.filled_qty} "
-                    f"remainder={max(0.0, before_qty-status.filled_qty)}")
+                    f"remainder={transition.remaining_qty}")
                 continue
             terminal_failed += 1
-            oq.complete_claim(r, "success", now, status=status)
             _audit_event(
                 r, "order_terminal", status=status.status,
                 venue_status=status.venue_status,

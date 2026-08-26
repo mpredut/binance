@@ -37,6 +37,7 @@ class _FakeProvider(MarketDataProvider):
         self._price = price
         self._orders = []   # [{"side","price","qty","timestamp"(ms)}]
         self.placed = []    # apeluri REALE catre place_order (dupa toate gate-urile)
+        self.status_calls = []
 
     @property
     def name(self):
@@ -62,6 +63,10 @@ class _FakeProvider(MarketDataProvider):
     def place_order(self, symbol, side, price, qty, **kwargs):
         self.placed.append((symbol, side, price, qty, kwargs))
         return {"orderId": len(self.placed)}
+
+    def order_status(self, symbol, order_id):
+        self.status_calls.append((symbol, order_id))
+        raise AssertionError("Instrument.place must not poll terminal status")
 
     def guards_internally(self):
         return False
@@ -443,6 +448,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         self.assertEqual(len(tracked), 1)
         self.assertEqual(tracked[0]["lifecycle"], "accepted")
         self.assertEqual(tracked[0]["order_id"], "1")
+        self.assertEqual(p.status_calls, [])
 
     def test_success_does_not_remove_an_independent_same_side_intent(self):
         import order_retry as _oq

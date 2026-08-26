@@ -9,6 +9,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import order_retry as oq
+from providers.strategy_executor import OrderStatus
 
 
 class OrderRetryStoreTest(unittest.TestCase):
@@ -240,6 +241,70 @@ class OrderRetryStoreTest(unittest.TestCase):
         self.assertEqual(rec["attempts"], 1)
         self.assertEqual(rec["last_attempt_ts"], 1401.0)
         self.assertNotIn("claim_token", rec)
+
+    def _accepted_claim(self, *, qty=1.0, now=1000.0):
+        rid = oq.enqueue(
+            "BTCUSDC", "BUY", qty, {}, requested_price=100.0, now=now)
+        oq.mark_accepted(
+            rid, {"orderId": 77, "status": "NEW"}, now=now + 100.0)
+        return oq.claim([rid], now=now + 400.0)[0]
+
+    def test_advance_claimed_status_observes_partial_without_resubmit_state(self):
+        claimed = self._accepted_claim(qty=2.0)
+        status = OrderStatus(
+            "open", 0.5, 49.0, 0.01, venue_status="PARTIALLY_FILLED")
+
+        transition = oq.advance_claimed_status(claimed, status, now=1401.0)
+
+        self.assertEqual(transition.action, "observed")
+        self.assertTrue(transition.status_changed)
+        record = oq.load_all()[0]
+        self.assertEqual(record["lifecycle"], "accepted")
+        self.assertEqual(record["filled_qty"], 0.5)
+        self.assertNotIn("claim_token", record)
+
+    def test_advance_claimed_status_fill_removes_active_record(self):
+        claimed = self._accepted_claim()
+
+        transition = oq.advance_claimed_status(
+            claimed,
+            OrderStatus("closed", 1.0, 100.0, 0.02, venue_status="FILLED"),
+            now=1401.0,
+        )
+
+        self.assertEqual(transition.action, "filled")
+        self.assertEqual(oq.load_all(), [])
+
+    def test_advance_claimed_status_rejected_revises_only_remainder(self):
+        claimed = self._accepted_claim(qty=2.0)
+
+        transition = oq.advance_claimed_status(
+            claimed,
+            OrderStatus(
+                "canceled", 0.5, 49.0, 0.01, venue_status="REJECTED"),
+            now=1401.0,
+        )
+
+        self.assertEqual(transition.action, "retry_terminal")
+        self.assertEqual(transition.remaining_qty, 1.5)
+        record = oq.load_all()[0]
+        self.assertEqual(record["lifecycle"], "submit_pending")
+        self.assertEqual(record["qty"], 1.5)
+        self.assertEqual(record["revision"], 1)
+
+    def test_advance_claimed_status_cancel_is_terminal_without_revision(self):
+        claimed = self._accepted_claim(qty=2.0)
+
+        transition = oq.advance_claimed_status(
+            claimed,
+            OrderStatus(
+                "canceled", 0.5, 49.0, 0.01, venue_status="CANCELED"),
+            now=1401.0,
+        )
+
+        self.assertEqual(transition.action, "terminal")
+        self.assertEqual(transition.remaining_qty, 1.5)
+        self.assertEqual(oq.load_all(), [])
 
     def test_claim_survives_crash_and_becomes_due_after_lease(self):
         rid = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0, now=1000.0)

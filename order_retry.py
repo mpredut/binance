@@ -511,6 +511,75 @@ def complete_claim(claimed, outcome, now=None, *, failure_reason=None,
     return changed
 
 
+@dataclass(frozen=True)
+class OutboxStatusTransition:
+    """Result of one accepted outbox record advancing from one venue snapshot."""
+
+    action: str  # observed, filled, retry_terminal, terminal
+    status_changed: bool = False
+    remaining_qty: float = 0.0
+
+    def __post_init__(self):
+        if self.action not in {
+                "observed", "filled", "retry_terminal", "terminal"}:
+            raise ValueError(f"invalid outbox status action: {self.action!r}")
+
+
+def _outbox_retryable_terminal(status: OrderStatus) -> bool:
+    """Preserve the current mechanical outbox terminal rule.
+
+    This is deliberately not the future financial-policy API. Rejected/expired
+    orders retain the existing remainder-retry behavior; other cancellations remain
+    terminal. Strategy-specific policy will be added separately.
+    """
+    native = str(status.venue_status or "").upper()
+    return native in {"REJECTED", "EXPIRED"} or status.status == "expired"
+
+
+def advance_claimed_status(claimed: dict, status: OrderStatus,
+                           now=None) -> OutboxStatusTransition:
+    """Persist one accepted order-status transition without venue I/O.
+
+    ``Instrument.place`` never calls this function. The external worker obtains one
+    status snapshot, then delegates the state mutation here. Therefore terminal
+    monitoring remains outside the submit call and every invocation is bounded.
+    """
+    if not isinstance(status, OrderStatus):
+        raise TypeError("status must be OrderStatus")
+    if str(claimed.get("lifecycle") or "").lower() != "accepted":
+        raise ValueError("status transition requires an accepted claimed record")
+
+    if not status.terminal:
+        fingerprint = (
+            str(status.status), float(status.filled_qty),
+            str(status.venue_status),
+        )
+        previous = (
+            str(claimed.get("last_status") or ""),
+            float(claimed.get("filled_qty") or 0.0),
+            str(claimed.get("venue_status") or ""),
+        )
+        complete_claim(claimed, "observed", now, status=status)
+        return OutboxStatusTransition(
+            "observed", status_changed=fingerprint != previous)
+
+    if status.status == "closed":
+        complete_claim(claimed, "success", now, status=status)
+        return OutboxStatusTransition("filled", status_changed=True)
+
+    current_qty = float(claimed.get("qty") or 0.0)
+    remaining_qty = max(0.0, current_qty - status.filled_qty)
+    if _outbox_retryable_terminal(status):
+        complete_claim(claimed, "retry_terminal", now, status=status)
+        return OutboxStatusTransition(
+            "retry_terminal", status_changed=True,
+            remaining_qty=remaining_qty)
+
+    complete_claim(claimed, "success", now, status=status)
+    return OutboxStatusTransition(
+        "terminal", status_changed=True, remaining_qty=remaining_qty)
+
+
 def discard(ids):
     """Atomically remove records by ID without submitting them (expiry/give-up)."""
     ids = set(ids)
