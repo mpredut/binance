@@ -743,12 +743,13 @@ SubmitIntent = Callable[[], object]
 class TrackedOrderResult:
     """One lifecycle observation without equating submit acceptance with a fill."""
 
-    outcome: str  # active, terminal, absent, retryable
+    outcome: str  # active, terminal, absent, retryable, refused
     intent: dict
     status: Optional[OrderStatus] = None
 
     def __post_init__(self):
-        if self.outcome not in {"active", "terminal", "absent", "retryable"}:
+        if self.outcome not in {
+                "active", "terminal", "absent", "retryable", "refused"}:
             raise ValueError(f"invalid tracked-order outcome: {self.outcome!r}")
         if self.outcome == "terminal" and self.status is None:
             raise ValueError("terminal tracked-order result requires status")
@@ -831,6 +832,22 @@ def _status_from_terminal_payload(payload) -> Optional[OrderStatus]:
     except (KeyError, TypeError, ValueError, OverflowError):
         return None
     return status if status.terminal else None
+
+
+class OrderSubmissionRefused(RuntimeError):
+    """Signal that a local pre-submit guard refused an owned intent.
+
+    This is materially different from an exception or a response without an
+    order ID: the provider was never called, so venue lookup/resubmission would
+    manufacture response-loss ambiguity where none exists.
+    """
+
+    def __init__(self, reason: str):
+        reason = str(reason or "").strip()
+        if not reason:
+            raise ValueError("submission refusal reason is required")
+        self.reason = reason
+        super().__init__(reason)
 
 
 class TrackedOrderLifecycle:
@@ -974,6 +991,14 @@ class TrackedOrderLifecycle:
         )
         try:
             response = submit()
+        except OrderSubmissionRefused as exc:
+            pending["refusal_reason"] = exc.reason
+            pending["submit_status"] = "refused_before_submit"
+            persist(dict(pending))
+            self._audit(
+                "submit_refused", pending, reason=exc.reason,
+            )
+            return TrackedOrderResult("refused", pending)
         except Exception as exc:
             pending["submit_error"] = f"{exc.__class__.__name__}: {exc}"
             persist(dict(pending))

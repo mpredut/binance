@@ -193,6 +193,41 @@ class RTradeThreadingTest(unittest.TestCase):
         self.assertEqual(intent["submitted_qty"], 0.8)
         self.assertEqual(intent["order_id"], "7")
 
+    def test_live_pair_guard_refusal_does_not_run_response_loss_recovery(self):
+        class Executor:
+            name = "Binance"
+
+            @staticmethod
+            def free_balance(_asset):
+                return 1000.0
+
+            @staticmethod
+            def order_by_client_id(*_args, **_kwargs):
+                raise AssertionError("pre-submit refusal must not query venue")
+
+        def refuse(*_args, **kwargs):
+            kwargs["_outcome_context"].update(
+                accepted=False, reason="trend_deferred")
+            return None
+
+        with tempfile.TemporaryDirectory(prefix="rtrade-refusal-") as root:
+            store = RTradePairStore(os.path.join(root, "pairs.json"))
+            with patch.dict(os.environ, {"EXECUTION_AUDIT_DIR": root}), \
+                 patch.object(rtrade.mkt, "provider_name_for", return_value="Binance"), \
+                 patch.object(rtrade.mkt, "provider_by_name", return_value=Executor()), \
+                 patch.object(rtrade.mkt, "place", side_effect=refuse) as place:
+                venue = rtrade._LivePairVenue("TAOUSDC", pair_store=store)
+                ticket = venue.place_limit("SELL", 101.0, 1.0, "pair-1")
+
+            intent = store.active("TAOUSDC")[0]["intents"]["limit:SELL"]
+
+        self.assertIsNone(ticket)
+        place.assert_called_once()
+        self.assertEqual(intent["refusal_reason"], "trend_deferred")
+        self.assertEqual(intent["submit_status"], "refused_before_submit")
+        self.assertNotIn("order_id", intent)
+        self.assertFalse(venue.recovery_blocked)
+
     def test_live_pair_recovers_lost_submit_response_without_resubmit(self):
         class Executor:
             name = "Binance"

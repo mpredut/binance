@@ -23,7 +23,11 @@ from providers.market_api import api as mkt      # Single guarded Instrument.pla
 from providers.execution_audit import AuditedStrategyExecutor
 from providers.quantity import decide_quantity
 from market_regime import MarketRegimeDecision
-from order_retry import StrategyExecutorLifecycleApi, TrackedOrderLifecycle
+from order_retry import (
+    OrderSubmissionRefused,
+    StrategyExecutorLifecycleApi,
+    TrackedOrderLifecycle,
+)
 from rtrade_pair_store import RTradePairStore, rtrade_client_order_id
 from strategies.rtrade_pair import (
     OrderSnapshot as PairOrderSnapshot,
@@ -202,9 +206,10 @@ class _LivePairVenue:
         )
         persist = self._persist_callback(
             pair_id, side, "limit", requested_qty=qty)
-        result = self.order_lifecycle.submit(
-            intent, persist=persist,
-            submit=lambda: mkt.place(
+        outcome_context = {}
+
+        def submit_once():
+            response = mkt.place(
                 self.symbol, side, price, qty,
                 force=False, cancelorders=False, hours=hours, smart=False,
                 cooldown_pair_id=pair_id,
@@ -212,7 +217,16 @@ class _LivePairVenue:
                 # must not later recreate a leg from an expired pair.
                 caller_owns_retry=True, motivation="rtrade_pair_quote",
                 client_order_id=client_id,
-            ),
+                _outcome_context=outcome_context,
+            )
+            reason = str(outcome_context.get("reason") or "").strip()
+            if response is None and reason and reason != "response_without_order_id":
+                raise OrderSubmissionRefused(reason)
+            return response
+
+        result = self.order_lifecycle.submit(
+            intent, persist=persist,
+            submit=submit_once,
         )
         return self._ticket_from_pending(result.intent, pair_id), result.intent
 
@@ -304,6 +318,11 @@ class _LivePairVenue:
                 return None
         ticket, _pending = self._submit_limit_intent(
             side, price, qty, pair_id)
+        if ticket is None and _pending.get("refusal_reason"):
+            # A guard refusal happened before any provider submit. It is safe to
+            # finish this round and let the strategy backoff create a fresh intent;
+            # venue response-loss recovery would be both false and duplicative.
+            return None
         if ticket is None and self.pair_store is not None:
             # One bounded recovery closes the live response-loss gap without a
             # sleep/poll loop.  A confirmed absence may cause one second submit

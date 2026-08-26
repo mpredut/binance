@@ -4,7 +4,7 @@ import unittest
 from unittest import mock
 
 from providers.strategy_executor import OrderStatus
-from order_retry import TrackedOrderLifecycle
+from order_retry import OrderSubmissionRefused, TrackedOrderLifecycle
 from providers import tracked_order as compatibility_module
 
 
@@ -107,6 +107,19 @@ class TrackedOrderLifecycleTest(unittest.TestCase):
         self.assertEqual(result.intent["submitted_qty"], 2.75)
         self.assertEqual(result.intent["submitted_price"], 114.25)
         self.assertEqual(self.store.value["submitted_price"], 114.25)
+
+    def test_pre_submit_refusal_is_not_classified_as_ambiguous(self):
+        result = self.lifecycle.submit(
+            self.intent(), persist=self.store.persist,
+            submit=lambda: (_ for _ in ()).throw(
+                OrderSubmissionRefused("trend_deferred")),
+        )
+
+        self.assertEqual(result.outcome, "refused")
+        self.assertFalse(result.order_known)
+        self.assertEqual(result.intent["refusal_reason"], "trend_deferred")
+        self.assertEqual(result.intent["submit_status"], "refused_before_submit")
+        self.assertEqual(self.store.value, result.intent)
 
     def test_lost_submit_response_recovers_by_client_id_without_resubmit(self):
         self.api.lookup = {"orderId": 8, "status": "NEW", "origQty": "3"}
