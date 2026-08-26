@@ -20,7 +20,12 @@ import time
 from typing import List, Optional
 
 from .base import MarketDataProvider, _normalize_order
-from .strategy_executor import OrderStatus, PairPrecision, ProviderError
+from .strategy_executor import (
+    OrderReconciliationCapabilities,
+    OrderStatus,
+    PairPrecision,
+    ProviderError,
+)
 
 # Repository root and hyperliquid directory for bare common/hl_client imports.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # providers/ -> root
@@ -54,6 +59,14 @@ class HyperliquidProvider(MarketDataProvider):
     @property
     def name(self) -> str:
         return "Hyperliquid"
+
+    def reconciliation_capabilities(self) -> OrderReconciliationCapabilities:
+        return OrderReconciliationCapabilities(
+            lookup_by_client_order_id=True,
+            status_by_order_id=True,
+            cancel_by_order_id=True,
+            list_open_orders=True,
+        )
 
     def supports_symbol(self, symbol: str) -> bool:
         # Claim only HYPE, leaving Binance pairs and bare assets on the default.

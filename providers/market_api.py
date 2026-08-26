@@ -17,7 +17,13 @@ import time
 from typing import List, Optional
 
 from .base import MarketDataProvider, _normalize_order, env_value
-from .strategy_executor import OrderStatus, PairPrecision, ProviderError
+from .strategy_executor import (
+    OrderReconciliationCapabilities,
+    OrderStatus,
+    PairPrecision,
+    ProviderError,
+    reconciliation_capabilities_of,
+)
 from market_regime import (
     CompositeMarketRegimeDecision,
     MarketRegimeDecision,
@@ -64,6 +70,14 @@ class BinanceProvider(MarketDataProvider):
     @property
     def name(self) -> str:
         return "Binance"
+
+    def reconciliation_capabilities(self) -> OrderReconciliationCapabilities:
+        return OrderReconciliationCapabilities(
+            lookup_by_client_order_id=True,
+            status_by_order_id=True,
+            cancel_by_order_id=True,
+            list_open_orders=True,
+        )
 
     def get_current_price(self, symbol: str) -> Optional[float]:
         return _get_bapi().get_current_price(symbol)
@@ -406,8 +420,22 @@ class MarketApi:
             candidates.append((timestamp, price))
         return max(candidates)[1] if candidates else None
 
-    def open_orders(self, symbol: str) -> List[dict]:
-        return self._provider_for(symbol).open_orders(symbol)
+    @staticmethod
+    def _reconciliation_capabilities(provider) -> OrderReconciliationCapabilities:
+        return reconciliation_capabilities_of(provider)
+
+    def reconciliation_capabilities(
+            self, symbol: str, *, provider_name=None
+    ) -> OrderReconciliationCapabilities:
+        provider = self._provider_explicit_or_routed(symbol, provider_name)
+        return self._reconciliation_capabilities(provider)
+
+    def open_orders(self, symbol: str, *, provider_name=None) -> List[dict]:
+        provider = self._provider_explicit_or_routed(symbol, provider_name)
+        capabilities = self._reconciliation_capabilities(provider)
+        if not capabilities.list_open_orders:
+            raise ProviderError(f"{provider.name}: open_orders is unsupported")
+        return provider.open_orders(symbol)
 
     def order_by_client_id(self, symbol: str, client_order_id: str, *,
                            provider_name=None):
@@ -417,18 +445,26 @@ class MarketApi:
         submit without guessing from balances or submitting a duplicate.
         """
         provider = self._provider_explicit_or_routed(symbol, provider_name)
+        capabilities = self._reconciliation_capabilities(provider)
+        if not capabilities.lookup_by_client_order_id:
+            raise ProviderError(
+                f"{provider.name}: order_by_client_id is unsupported")
         method = getattr(provider, "order_by_client_id", None)
         if not callable(method):
-            raise ProviderError(f"{provider.name}: order_by_client_id is unsupported")
+            raise ProviderError(
+                f"{provider.name}: declared order_by_client_id is missing")
         return method(symbol, str(client_order_id))
 
     def order_status(self, symbol: str, order_id: str, *,
                      provider_name=None) -> OrderStatus:
         """Return venue-neutral status; lookup failures remain fail-closed."""
         provider = self._provider_explicit_or_routed(symbol, provider_name)
+        capabilities = self._reconciliation_capabilities(provider)
+        if not capabilities.status_by_order_id:
+            raise ProviderError(f"{provider.name}: order_status is unsupported")
         method = getattr(provider, "order_status", None)
         if not callable(method):
-            raise ProviderError(f"{provider.name}: order_status is unsupported")
+            raise ProviderError(f"{provider.name}: declared order_status is missing")
         try:
             status = method(symbol, str(order_id))
         except ProviderError:
@@ -445,9 +481,12 @@ class MarketApi:
     def cancel_order(self, symbol: str, order_id: str, *, provider_name=None) -> None:
         """Cancel through the provider-neutral adapter contract."""
         provider = self._provider_explicit_or_routed(symbol, provider_name)
+        capabilities = self._reconciliation_capabilities(provider)
+        if not capabilities.cancel_by_order_id:
+            raise ProviderError(f"{provider.name}: cancel_order is unsupported")
         method = getattr(provider, "cancel_order", None)
         if not callable(method):
-            raise ProviderError(f"{provider.name}: cancel_order is unsupported")
+            raise ProviderError(f"{provider.name}: declared cancel_order is missing")
         method(symbol, str(order_id))
 
     def tracked_order_lifecycle(self, *, provider_name: str, venue=None,

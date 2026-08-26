@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from typing import Callable, Dict, Optional
 
 from lock import FileLock
-from providers.strategy_executor import OrderStatus
+from providers.strategy_executor import OrderStatus, reconciliation_capabilities_of
 
 from botcore import load_dotenv as _load_dotenv
 _load_dotenv("order_retry_config.env")
@@ -769,8 +769,17 @@ class StrategyExecutorLifecycleApi:
     def __init__(self, executor):
         self.executor = executor
 
+    def reconciliation_capabilities(self):
+        return reconciliation_capabilities_of(self.executor)
+
+    def _require(self, capability: str, operation: str) -> None:
+        if not getattr(self.reconciliation_capabilities(), capability):
+            raise RuntimeError(
+                f"{self.executor.__class__.__name__}: {operation} is unsupported")
+
     def order_by_client_id(self, symbol: str, client_order_id: str, *,
                            provider_name=None):
+        self._require("lookup_by_client_order_id", "order_by_client_id")
         method = getattr(self.executor, "order_by_client_id", None)
         if not callable(method):
             raise RuntimeError(
@@ -779,9 +788,11 @@ class StrategyExecutorLifecycleApi:
         return method(symbol, str(client_order_id))
 
     def order_status(self, symbol: str, order_id: str, *, provider_name=None):
+        self._require("status_by_order_id", "order_status")
         return self.executor.order_status(symbol, str(order_id))
 
     def cancel_order(self, symbol: str, order_id: str, *, provider_name=None):
+        self._require("cancel_by_order_id", "cancel_order")
         return self.executor.cancel_order(symbol, str(order_id))
 
 

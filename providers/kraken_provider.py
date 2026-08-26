@@ -20,7 +20,12 @@ import time
 from typing import Optional, List
 
 from .base import MarketDataProvider, _normalize_order, env_value
-from .strategy_executor import OrderStatus, PairPrecision, ProviderError
+from .strategy_executor import (
+    OrderReconciliationCapabilities,
+    OrderStatus,
+    PairPrecision,
+    ProviderError,
+)
 
 _KRAKEN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kraken")
 # Shared cross-process fill cache produced by kraken_cachemanager.py.
@@ -46,6 +51,14 @@ class KrakenProvider(MarketDataProvider):
     @property
     def name(self) -> str:
         return "Kraken"
+
+    def reconciliation_capabilities(self) -> OrderReconciliationCapabilities:
+        return OrderReconciliationCapabilities(
+            lookup_by_client_order_id=True,
+            status_by_order_id=True,
+            cancel_by_order_id=True,
+            list_open_orders=False,
+        )
 
     def supports_symbol(self, symbol: str) -> bool:
         # Explicit-only: claim no pattern and remain reachable only through Instrument.

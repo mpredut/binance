@@ -6,13 +6,20 @@ import unittest
 from unittest import mock
 
 import providers.execution_audit as execution_audit_module
+from order_retry import StrategyExecutorLifecycleApi
 
 from providers.execution_audit import (
     AuditedStrategyExecutor,
     ExecutionAudit,
     intent_client_order_id,
 )
-from providers.strategy_executor import OrderStatus, PairPrecision, ProviderError, StrategyExecutor
+from providers.strategy_executor import (
+    OrderReconciliationCapabilities,
+    OrderStatus,
+    PairPrecision,
+    ProviderError,
+    StrategyExecutor,
+)
 
 
 class _Executor:
@@ -25,6 +32,9 @@ class _Executor:
 
     def get_current_price(self, symbol):
         return 100.0
+
+    def reconciliation_capabilities(self):
+        return OrderReconciliationCapabilities(True, True, True, False)
 
     def submit_order(self, symbol, side, qty, price=None, *, market=False, kind=None,
                      client_order_id=None):
@@ -147,6 +157,17 @@ class ExecutionAuditTest(unittest.TestCase):
         result = self.wrapped.order_by_client_id("ABC", "client-7")
         self.assertEqual(result["orderId"], "OID-7")
         self.assertEqual(self.executor.calls[-1], ("lookup", "ABC", "client-7"))
+
+    def test_reconciliation_capabilities_survive_audit_decoration(self):
+        self.assertEqual(
+            self.wrapped.reconciliation_capabilities(),
+            self.executor.reconciliation_capabilities(),
+        )
+        lifecycle_api = StrategyExecutorLifecycleApi(self.wrapped)
+        self.assertEqual(
+            lifecycle_api.reconciliation_capabilities(),
+            self.executor.reconciliation_capabilities(),
+        )
 
 
 if __name__ == "__main__":

@@ -13,7 +13,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
-from providers.strategy_executor import StrategyExecutor  # noqa: E402
+from providers.strategy_executor import (  # noqa: E402
+    OrderReconciliationCapabilities,
+    StrategyExecutor,
+)
 from providers.kraken_provider import KrakenProvider  # noqa: E402
 from providers.hyperliquid_provider import HyperliquidProvider  # noqa: E402
 from providers.market_api import BinanceProvider  # noqa: E402
@@ -23,7 +26,15 @@ from providers.t212_provider import T212Provider  # noqa: E402
 CONTRACT_METHODS = (
     "get_current_price", "submit_order", "order_status", "cancel_order",
     "pair_precision", "free_balance", "ohlc_closes",
+    "reconciliation_capabilities",
 )
+
+EXPECTED_RECONCILIATION = {
+    "kraken": OrderReconciliationCapabilities(True, True, True, False),
+    "hyperliquid": OrderReconciliationCapabilities(True, True, True, True),
+    "binance": OrderReconciliationCapabilities(True, True, True, True),
+    "trading212": OrderReconciliationCapabilities(False, True, True, False),
+}
 
 
 def _providers():
@@ -48,6 +59,14 @@ class ProviderContractConformanceTest(unittest.TestCase):
                 with self.subTest(provider=name, method=meth):
                     self.assertTrue(callable(getattr(prov, meth, None)),
                                     f"{name}.{meth} lipseste sau nu e apelabil")
+
+    def test_capabilitatile_de_reconciliere_sunt_declarate_explicit(self):
+        for name, provider in _providers():
+            with self.subTest(provider=name):
+                self.assertEqual(
+                    provider.reconciliation_capabilities(),
+                    EXPECTED_RECONCILIATION[name],
+                )
 
 
 if __name__ == "__main__":

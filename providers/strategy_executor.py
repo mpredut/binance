@@ -68,6 +68,40 @@ class PairPrecision:
     base_asset: str = ""       # Pair base asset, used when adopting an existing position.
 
 
+@dataclass(frozen=True)
+class OrderReconciliationCapabilities:
+    """Venue facts needed by the common order-lifecycle machinery.
+
+    A capability means the adapter exposes a strict, normalized operation. It does
+    not promise that the venue is currently reachable. Missing declarations fail
+    closed through the conservative all-false default on ``MarketDataProvider``.
+    """
+
+    lookup_by_client_order_id: bool = False
+    status_by_order_id: bool = False
+    cancel_by_order_id: bool = False
+    list_open_orders: bool = False
+
+    def __post_init__(self):
+        for field_name in (
+                "lookup_by_client_order_id", "status_by_order_id",
+                "cancel_by_order_id", "list_open_orders"):
+            if type(getattr(self, field_name)) is not bool:
+                raise TypeError(f"{field_name} capability must be bool")
+
+
+def reconciliation_capabilities_of(provider) -> OrderReconciliationCapabilities:
+    """Read and validate an adapter's explicit reconciliation declaration."""
+    name = str(getattr(provider, "name", type(provider).__name__))
+    method = getattr(provider, "reconciliation_capabilities", None)
+    if not callable(method):
+        raise ProviderError(f"{name}: reconciliation capabilities are undeclared")
+    capabilities = method()
+    if not isinstance(capabilities, OrderReconciliationCapabilities):
+        raise ProviderError(f"{name}: invalid reconciliation capabilities")
+    return capabilities
+
+
 @runtime_checkable
 class StrategyExecutor(Protocol):
     """Minimum venue-neutral interface required by the spot-DCA engine."""

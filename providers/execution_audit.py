@@ -16,7 +16,7 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
-from .strategy_executor import OrderStatus
+from .strategy_executor import OrderStatus, reconciliation_capabilities_of
 
 try:  # Linux live: cross-process serialization; safe per-process fallback.
     import fcntl
@@ -242,6 +242,10 @@ class AuditedStrategyExecutor:
         if not callable(lookup):
             raise RuntimeError(f"{self.name}: order_by_client_id is unsupported")
         return lookup(symbol, str(client_order_id))
+
+    def reconciliation_capabilities(self):
+        """Preserve the wrapped adapter's venue facts through decoration."""
+        return reconciliation_capabilities_of(self._executor)
 
     def get_current_price(self, symbol: str):
         return self._executor.get_current_price(symbol)

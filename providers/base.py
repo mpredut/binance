@@ -4,6 +4,8 @@ import os
 from abc import ABC, abstractmethod
 from typing import List, Optional
 
+from .strategy_executor import OrderReconciliationCapabilities
+
 
 def env_value(folder: str, key: str) -> Optional[str]:
     """Read one key from ``.env``/``config.env`` without mutating ``os.environ``."""
@@ -70,6 +72,15 @@ class MarketDataProvider(ABC):
 
     def open_orders(self, symbol: str) -> List[dict]:
         return []
+
+    def reconciliation_capabilities(self) -> OrderReconciliationCapabilities:
+        """Return explicitly supported strict lifecycle operations.
+
+        The default is deliberately conservative. An inherited empty
+        ``open_orders`` implementation must never be mistaken for a confirmed
+        empty venue snapshot.
+        """
+        return OrderReconciliationCapabilities()
 
     def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
         return None

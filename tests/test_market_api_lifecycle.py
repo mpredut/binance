@@ -3,7 +3,11 @@ import time
 
 from providers.base import MarketDataProvider
 from providers.market_api import MarketApi
-from providers.strategy_executor import OrderStatus, ProviderError
+from providers.strategy_executor import (
+    OrderReconciliationCapabilities,
+    OrderStatus,
+    ProviderError,
+)
 
 
 class FakeProvider(MarketDataProvider):
@@ -14,6 +18,12 @@ class FakeProvider(MarketDataProvider):
 
     def get_current_price(self, symbol):
         return 10.0
+
+    def reconciliation_capabilities(self):
+        return OrderReconciliationCapabilities(
+            status_by_order_id=True,
+            cancel_by_order_id=True,
+        )
 
     def order_status(self, symbol, order_id):
         return OrderStatus("closed", 2.0, 20.0, 0.02)
@@ -60,6 +70,18 @@ class MarketApiLifecycleTest(unittest.TestCase):
         self.assertEqual(self.provider.canceled, ("ABCUSD", "8"))
         self.assertEqual(
             self.api.latest_fill_price("ABCUSD", "SELL", 60), 11.0)
+
+    def test_unsupported_reconciliation_operations_fail_closed(self):
+        capabilities = self.api.reconciliation_capabilities("ABCUSD")
+        self.assertTrue(capabilities.status_by_order_id)
+        self.assertTrue(capabilities.cancel_by_order_id)
+        self.assertFalse(capabilities.lookup_by_client_order_id)
+        self.assertFalse(capabilities.list_open_orders)
+
+        with self.assertRaisesRegex(ProviderError, "order_by_client_id is unsupported"):
+            self.api.order_by_client_id("ABCUSD", "CID-1")
+        with self.assertRaisesRegex(ProviderError, "open_orders is unsupported"):
+            self.api.open_orders("ABCUSD")
 
     def test_tracked_lifecycle_factory_keeps_place_synchronous_contract_separate(self):
         lifecycle = self.api.tracked_order_lifecycle(

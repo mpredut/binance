@@ -14,7 +14,12 @@ sys.path.insert(0, ROOT)
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
 from strategies import spot_dca as strat  # noqa: E402
-from providers.strategy_executor import OrderStatus, PairPrecision, ProviderError  # noqa: E402
+from providers.strategy_executor import (  # noqa: E402
+    OrderReconciliationCapabilities,
+    OrderStatus,
+    PairPrecision,
+    ProviderError,
+)
 
 
 class FakeExecutor:
@@ -29,6 +34,9 @@ class FakeExecutor:
 
     def get_current_price(self, symbol):
         return 60.0
+
+    def reconciliation_capabilities(self):
+        return OrderReconciliationCapabilities(True, True, True, False)
 
     def submit_order(self, symbol, side, qty, price=None, *, market=False, kind=None,
                      client_order_id=None):

@@ -67,6 +67,23 @@ intenție după ce strategia și-a invalidat campania.
 | T212 one-shot | reconciliere proprie fără client-ID universal | marker profil+ticker |
 | `monitororder` | nelive; nu se mai extinde | exclus din migrarea următoare |
 
+## Capabilități de reconciliere declarate
+
+Adaptorii nu mai pot lăsa lifecycle-ul să deducă suportul din existența accidentală
+a unei metode sau dintr-un `[]` moștenit. `OrderReconciliationCapabilities` declară
+strict operațiile normalizate disponibile; lipsa declarației înseamnă lipsă de suport.
+
+| Venue | lookup client ID | status order ID | cancel order ID | listă open orders |
+|---|---:|---:|---:|---:|
+| Binance | da | da | da | da |
+| Kraken | da | da | da | nu, încă nu prin adaptorul comun |
+| Hyperliquid spot | da | da | da | da |
+| Trading212 | nu | da | da | nu, reconcilierea rămâne order+portfolio |
+
+`false` nu înseamnă că venue-ul nu are niciun endpoint posibil; înseamnă că adaptorul
+comun nu oferă momentan o operație suficient de strictă pentru lifecycle. Erorile de
+transport rămân distincte de o capabilitate absentă.
+
 ## De ce nu mutăm încă toate state-urile într-un singur fișier
 
 Un ledger unic fără politica terminală ar putea retrimite un BUY după expirarea
@@ -108,9 +125,8 @@ nu vor fi adăugate ca fallback generic în `order_retry`.
 ## Pașii de refactor rămași
 
 1. păstrăm `providers/tracked_order.py` până când nu mai există consumatori externi;
-2. definim capabilitățile de reconciliere per provider;
-3. migrăm întâi rtrade, apoi T212, doar cu characterization/golden tests;
-4. abia ulterior introducem politicile financiare declarative și un ledger activ unic.
+2. migrăm întâi rtrade, apoi T212, doar cu characterization/golden tests;
+3. abia ulterior introducem politicile financiare declarative și un ledger activ unic.
 
 Tranzițiile mecanice duplicate din `order_retry_worker.py` au fost extrase în
 `order_retry.advance_claimed_status`. Workerul păstrează exclusiv I/O-ul cu venue-ul,

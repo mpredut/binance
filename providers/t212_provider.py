@@ -18,7 +18,12 @@ import importlib
 from typing import Optional, List
 
 from .base import MarketDataProvider, _normalize_order, env_value
-from .strategy_executor import OrderStatus, PairPrecision, ProviderError
+from .strategy_executor import (
+    OrderReconciliationCapabilities,
+    OrderStatus,
+    PairPrecision,
+    ProviderError,
+)
 
 _T212_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "212trading")
 _PRICE_DECIMALS = 2
@@ -60,6 +65,14 @@ class T212Provider(MarketDataProvider):
     @property
     def name(self) -> str:
         return "T212"
+
+    def reconciliation_capabilities(self) -> OrderReconciliationCapabilities:
+        return OrderReconciliationCapabilities(
+            lookup_by_client_order_id=False,
+            status_by_order_id=True,
+            cancel_by_order_id=True,
+            list_open_orders=False,
+        )
 
     def supports_symbol(self, symbol: str) -> bool:
         return False  # explicit-only
