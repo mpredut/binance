@@ -58,7 +58,13 @@ class FakeClient:
         return {"count": 1}
 
     def pair_info(self, pair):
-        return {"pair_decimals": 2, "lot_decimals": 8, "ordermin": "0.1"}
+        return {
+            "pair_decimals": 2, "lot_decimals": 8,
+            "ordermin": "0.1", "base": "HYPE",
+        }
+
+    def balance(self):
+        return {"HYPE": "2.5", "ZUSD": "1000"}
 
     def ohlc_closes(self, pair, interval):
         return [10.0, 11.0, 12.0]
@@ -109,6 +115,21 @@ class KrakenExecutorContractTest(unittest.TestCase):
         self.fake.add_order = boom
         with self.assertRaises(ProviderError):
             self.p.submit_order("HYPEUSD", "buy", 1.0, price=60.0)
+
+    def test_sell_preflight_refuses_quantity_above_balance(self):
+        with self.assertRaisesRegex(ProviderError, "insufficient funds SELL"):
+            self.p.preflight_order(
+                "HYPEUSD", "sell", 2.50000001, price=60.0,
+            )
+        self.assertFalse(any(call[0] == "add_order" for call in self.fake.calls))
+
+    def test_sell_preflight_accepts_reconciled_balance(self):
+        self.p.preflight_order("HYPEUSD", "sell", 2.5, price=60.0)
+
+    def test_buy_preflight_leaves_fee_and_slippage_to_venue(self):
+        self.fake.balance = lambda: (_ for _ in ()).throw(
+            AssertionError("BUY preflight must not read balance"))
+        self.p.preflight_order("HYPEUSD", "buy", 100.0, price=60.0)
 
     def test_order_status_mapare(self):
         st = self.p.order_status("HYPEUSD", "OABC-123")
@@ -172,7 +193,10 @@ class KrakenExecutorContractTest(unittest.TestCase):
 
     def test_pair_precision_mapare(self):
         pp = self.p.pair_precision("HYPEUSD")
-        self.assertEqual(pp, PairPrecision(price_decimals=2, volume_decimals=8, order_min=0.1))
+        self.assertEqual(pp, PairPrecision(
+            price_decimals=2, volume_decimals=8,
+            order_min=0.1, base_asset="HYPE",
+        ))
 
     def test_pair_precision_nelistat_intoarce_none(self):
         self.fake.pair_info = lambda pair: None

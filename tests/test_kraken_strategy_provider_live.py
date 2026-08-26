@@ -7,7 +7,7 @@ Provider FAKE (fara retea)."""
 import os
 import sys
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -219,6 +219,44 @@ class ProviderLivePathTest(unittest.TestCase):
         self.fake.submit_order = boom
         self.s._place("buy", 1.0, 60.0, kind="ENTRY", amount=650.0)
         self.assertEqual(self.s.s["orders"], [])   # esec -> niciun ordin stocat
+        self.assertIn("buy:ENTRY", self.s.s["placement_backoffs"])
+
+    def test_insufficient_funds_preflight_has_persistent_exponential_backoff(self):
+        self.fake.preflight_error = ProviderError("sold insuficient")
+        with patch.object(strat.time, "time", return_value=1000.0):
+            self.assertFalse(
+                self.s._place("sell", 1.0, 60.0, kind="TP"))
+        record = self.s.s["placement_backoffs"]["sell:TP"]
+        self.assertEqual(record["attempts"], 1)
+        self.assertEqual(record["until"], 1120.0)
+        preflight_calls = len([
+            call for call in self.fake.calls if call[0] == "preflight_order"
+        ])
+
+        with patch.object(strat.time, "time", return_value=1060.0):
+            self.assertFalse(
+                self.s._place("sell", 1.0, 60.0, kind="TP"))
+        self.assertEqual(len([
+            call for call in self.fake.calls if call[0] == "preflight_order"
+        ]), preflight_calls)
+
+        with patch.object(strat.time, "time", return_value=1121.0):
+            self.assertFalse(
+                self.s._place("sell", 1.0, 60.0, kind="TP"))
+        record = self.s.s["placement_backoffs"]["sell:TP"]
+        self.assertEqual(record["attempts"], 2)
+        self.assertEqual(record["until"], 1361.0)
+
+    def test_market_protection_bypasses_funds_backoff(self):
+        self.s.s["placement_backoffs"]["sell:STOP"] = {
+            "attempts": 4, "until": 9999999999.0,
+            "reason": "Insufficient funds",
+        }
+        self.assertTrue(
+            self.s._place("sell", 1.0, 59.0, kind="STOP", market=True))
+        self.assertTrue(any(
+            call[0] == "submit_order" for call in self.fake.calls
+        ))
 
     def test_preflight_refuzat_nu_creeaza_intentie_sau_ordin(self):
         self.fake.preflight_error = ProviderError("sold insuficient")

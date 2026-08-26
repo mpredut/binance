@@ -37,6 +37,38 @@ from strategies.rtrade_pair import (
 )
 
 
+_RTRADE_HEARTBEAT_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "cachedb", "rtrade.heartbeat")
+_RTRADE_HEARTBEAT_INTERVAL_SEC = 30.0
+_rtrade_heartbeat_lock = threading.Lock()
+_rtrade_heartbeat_last = float("-inf")
+
+
+def _touch_rtrade_heartbeat(*, force=False, now=None):
+    """Publish actual coordinator progress independently from buffered stdout.
+
+    The healthcheck must not infer liveness from ``rtrade.log``: normal trend and
+    placement backoffs can make that log quiet, while redirection can delay writes.
+    Touching from the bounded coordinator loop still detects a blocked API call or
+    dead loop, unlike a separate heartbeat thread that could outlive the work.
+    """
+    global _rtrade_heartbeat_last
+    now = time.monotonic() if now is None else float(now)
+    with _rtrade_heartbeat_lock:
+        if not force and now - _rtrade_heartbeat_last < _RTRADE_HEARTBEAT_INTERVAL_SEC:
+            return
+        try:
+            os.makedirs(os.path.dirname(_RTRADE_HEARTBEAT_PATH), exist_ok=True)
+            with open(_RTRADE_HEARTBEAT_PATH, "a", encoding="utf-8"):
+                pass
+            os.utime(_RTRADE_HEARTBEAT_PATH, None)
+        except OSError:
+            # Trading must not stop because an observational heartbeat cannot be
+            # written. The healthcheck will surface the stale/missing file.
+            return
+        _rtrade_heartbeat_last = now
+
+
 # Load versioned, non-secret tuning parameters before reading the environment below.
 # ``botcore.load_dotenv`` does not overwrite variables already set in the real environment.
 from botcore import load_dotenv as _load_dotenv
@@ -900,6 +932,7 @@ class TradingBot:
         while True:
             try:
                 now = time.monotonic()
+                _touch_rtrade_heartbeat(now=now)
                 survivors = []
                 checkpoints = []
                 for coordinator in active:
@@ -982,6 +1015,7 @@ class TradingBot:
                 time.sleep(RTRADE_PAIR_POLL_SEC)
 
     def run(self):
+        _touch_rtrade_heartbeat(force=True)
         if RTRADE_PAIR_COORDINATOR_ENABLED:
             return self._run_coordinator_forever()
         # Reuse exactly two workers per bot across rounds. BUY and SELL remain concurrent
@@ -989,6 +1023,7 @@ class TradingBot:
         prefix = f"rtrade-{self.symbol}"
         with ThreadPoolExecutor(max_workers=2, thread_name_prefix=prefix) as executor:
             while True:
+                _touch_rtrade_heartbeat()
                 try:
                     current_price = api.get_current_price(self.symbol)
                     if current_price is None:

@@ -339,6 +339,46 @@ class KrakenProvider(MarketDataProvider):
             raise ProviderError(f"submit_order {symbol}: raspuns fara txid ({res})")
         return str(txids[0])
 
+    def preflight_order(self, symbol: str, side: str, qty: float,
+                        price: Optional[float] = None, *, market: bool = False,
+                        kind: Optional[str] = None) -> None:
+        """Reject an impossible SELL before creating a durable submit intent.
+
+        Kraken previously received the same TP repeatedly when persisted strategy
+        quantity exceeded the account balance. A read-only balance gate stops that
+        deterministic venue rejection without guessing a replacement quantity or
+        mutating strategy state. BUY funding remains venue-authoritative because its
+        required fee/slippage reserve depends on order type and execution.
+        """
+        if not str(side or "").lower().startswith("s"):
+            return
+        try:
+            requested = float(qty)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ProviderError(
+                f"preflight_order {symbol}: cantitate SELL invalida") from exc
+        if not math.isfinite(requested) or requested <= 0:
+            raise ProviderError(
+                f"preflight_order {symbol}: cantitate SELL invalida")
+
+        precision = self.pair_precision(symbol)
+        base_asset = precision.base_asset if precision else ""
+        if not base_asset:
+            raise ProviderError(
+                f"preflight_order {symbol}: activul de baza este indisponibil")
+        available = self.free_balance(base_asset)
+        if available is None or not math.isfinite(float(available)):
+            raise ProviderError(
+                f"preflight_order {symbol}: balanta {base_asset} indisponibila")
+        available = max(0.0, float(available))
+        decimals = precision.volume_decimals if precision else 8
+        tolerance = 0.5 * (10.0 ** -max(0, decimals))
+        if requested > available + tolerance:
+            raise ProviderError(
+                f"preflight_order {symbol}: insufficient funds SELL "
+                f"qty={requested} available={available} {base_asset}"
+            )
+
     def order_status(self, symbol: str, order_id: str) -> OrderStatus:
         try:
             res = self._client().query_orders(order_id) or {}

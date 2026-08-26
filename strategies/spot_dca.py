@@ -31,6 +31,7 @@ from .state_store import JsonStateStore
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _LEGACY_STATE_DIR = os.path.join(_ROOT, "kraken")
 _DEFAULT_FEE_NOTE = "fee Kraken ~0.26% taker / ~0.16% maker per leg"
+_PLACEMENT_BACKOFF_CAP_SEC = 3600.0
 
 
 notify = bind_notify(("SYMBOL_LABEL", "KRAKEN_PAIR"), "CRYPTO")
@@ -260,6 +261,9 @@ def _new_state() -> dict:
         "trend_confirm_count": 0, # consecutive uptrend bars confirming the signal
         "orders": [],           # {txid, side, vol, price, amount, kind, ts}
         "pending_intent": None, # durable pre-submit boundary before venue acceptance
+        # Per side/kind operational cooldown after a deterministic funds refusal.
+        # This survives restarts but never blocks urgent MARKET protection.
+        "placement_backoffs": {},
     }
 
 
@@ -292,6 +296,7 @@ class Strategy:
         self._state_write_failed = False
         self.s = initial_state if initial_state is not None else self._load()
         self.s.setdefault("pending_intent", None)
+        self.s.setdefault("placement_backoffs", {})
         self._paper_seq = 0
         # Observational adaptive-volatility shadow history stays in memory for sigma.
         # It is rebuilt after restart and never enters persistent state.
@@ -422,6 +427,52 @@ class Strategy:
         if o in self.s["orders"]:
             self.s["orders"].remove(o)
 
+    @staticmethod
+    def _insufficient_funds_error(error) -> bool:
+        text = str(error or "").lower()
+        return any(marker in text for marker in (
+            "insufficient funds", "insufficient balance", "sold insuficient",
+        ))
+
+    @staticmethod
+    def _placement_backoff_key(side: str, kind: str) -> str:
+        return f"{str(side).lower()}:{str(kind or 'UNKNOWN').upper()}"
+
+    def _placement_backoff_remaining(self, side: str, kind: str) -> float:
+        key = self._placement_backoff_key(side, kind)
+        record = self.s.get("placement_backoffs", {}).get(key) or {}
+        try:
+            return max(0.0, float(record.get("until") or 0.0) - time.time())
+        except (TypeError, ValueError, OverflowError):
+            # Corrupt observational cooldown state must fail open; order lifecycle
+            # and venue preflight remain the financial safety boundaries.
+            return 0.0
+
+    def _record_placement_backoff(self, side: str, kind: str, error) -> None:
+        key = self._placement_backoff_key(side, kind)
+        records = self.s.setdefault("placement_backoffs", {})
+        previous = records.get(key) or {}
+        try:
+            attempts = max(0, int(previous.get("attempts") or 0)) + 1
+        except (TypeError, ValueError, OverflowError):
+            attempts = 1
+        base = max(60.0, float(self.p.check_minutes) * 60.0)
+        delay = min(_PLACEMENT_BACKOFF_CAP_SEC, base * (2 ** min(attempts - 1, 10)))
+        records[key] = {
+            "attempts": attempts,
+            "until": time.time() + delay,
+            "reason": str(error),
+        }
+        self._save()
+        log(
+            f"  ! [STRAT] {side} {kind} fonduri insuficiente — "
+            f"cooldown operational {delay:.0f}s (refuz {attempts})"
+        )
+
+    def _clear_placement_backoff(self, side: str, kind: str) -> None:
+        self.s.setdefault("placement_backoffs", {}).pop(
+            self._placement_backoff_key(side, kind), None)
+
     # -- Placement -------------------------------------------------------------
     def _place(self, side: str, vol: float, price: float, kind: str, amount: float = 0.0,
                market: bool = False) -> bool:
@@ -432,6 +483,17 @@ class Strategy:
         if vol <= 0 or (self.ordermin and vol < self.ordermin):
             log(f"  ! [STRAT] volum {vol} < ordin minim {self.ordermin} — sar")
             return False
+        # A previous deterministic funds rejection cannot become executable merely
+        # by hammering the venue every tick. MARKET exits deliberately bypass this:
+        # missing a protective exit is a larger risk than a repeated refusal.
+        if not market:
+            remaining = self._placement_backoff_remaining(side, kind)
+            if remaining > 0:
+                log(
+                    f"  ! [STRAT] {side} {kind} in cooldown dupa fonduri "
+                    f"insuficiente ({remaining:.0f}s ramase)"
+                )
+                return False
         if self.dry_run:
             self._paper_seq += 1
             log(f"  [STRAT] [PAPER] {side.upper()} {kind}{' MKT' if market else ''} {vol} @ {price} {self.ccy}")
@@ -485,6 +547,11 @@ class Strategy:
             tracked = self._order_lifecycle.submit(
                 intent, persist=self._persist_pending_intent, submit=submit)
             if not tracked.order_known:
+                submit_error = tracked.intent.get("submit_error")
+                if (not market
+                        and self._insufficient_funds_error(submit_error)):
+                    self._record_placement_backoff(
+                        side, kind, submit_error)
                 log(
                     f"  ! [STRAT] {side} {kind} submit ambiguu; "
                     "intentia ramane persistata pentru reconciliere"
@@ -492,9 +559,12 @@ class Strategy:
                 return False
             txid = str(tracked.intent["order_id"])
             log(f"  [STRAT] {side.upper()} {kind} plasat txid={txid} {vol} @ {price}")
+            self._clear_placement_backoff(side, kind)
             self._adopt_pending_order(tracked.intent)
             return True
         except (ProviderError, RuntimeError, ValueError) as e:
+            if not market and self._insufficient_funds_error(e):
+                self._record_placement_backoff(side, kind, e)
             log(f"  ! [STRAT] {side} {kind} esuat: {e}")
             return False
 
