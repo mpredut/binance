@@ -84,6 +84,22 @@ def test_dead_trade_cache_manager_is_archived_not_packaged():
     assert '"tradeCacheManager"' not in packaging
 
 
+def test_tracked_order_compatibility_shim_is_archived_after_consumer_migration():
+    assert (ROOT / "archive/providers_tracked_order.py").is_file()
+    assert not (ROOT / "providers/tracked_order.py").exists()
+    active_imports = []
+    for path in ROOT.rglob("*.py"):
+        relative = path.relative_to(ROOT)
+        if (set(relative.parts) & {"archive", "tests", ".venv", "myenv"}
+                or any(part.startswith(".") for part in relative.parts)):
+            continue
+        text = path.read_text(encoding="utf-8")
+        if ("providers.tracked_order" in text
+                or "from providers import tracked_order" in text):
+            active_imports.append(relative.as_posix())
+    assert active_imports == []
+
+
 def test_live_launcher_env_defaults_are_location_based():
     for relative in (
         "kraken/kraken_bot.py",

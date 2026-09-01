@@ -21,6 +21,18 @@ VPN_PROBE_TIMEOUT="${PIA_PROBE_TIMEOUT:-8}"
 
 pia() { timeout "$PIA_CLI_TIMEOUT" piactl "$@" 2>/dev/null | tr -d '\r'; }
 
+# Read-only financial-intent visibility. The index has no write/submit/cancel API.
+intent_state() {
+    "$HLPY" - "$ROOT" <<'PY' 2>/dev/null
+import sys
+sys.path.insert(0, sys.argv[1])
+from active_intents import build_active_intent_index
+result = build_active_intent_index(sys.argv[1])
+unknown = sum(row.get("status") == "unknown" for row in result["intents"])
+print(f"{'error' if result['errors'] else 'ok'}|{len(result['intents'])}|{unknown}|{len(result['errors'])}")
+PY
+}
+
 # Return a concise reason instead of only Connected/DOWN. Every external probe is
 # bounded, and HTTPS is explicitly bound to tun0 so it cannot escape via the ISP.
 vpn_state() {
@@ -66,6 +78,12 @@ if [ "$1" = "--check" ]; then
     vpn=$(vpn_state)
     [ "$vpn" = ok ] && echo "  VPN              ok (piactl + tun0 + DNS + Binance HTTPS)" \
         || echo "  VPN              FAULT ($vpn)"
+    intents=$(intent_state || echo "error|0|0|1")
+    IFS='|' read -r intent_ok intent_count intent_unknown intent_errors <<EOF
+$intents
+EOF
+    printf '  %-16s %-6s active=%-4s unknown=%-4s errors=%s\n' \
+        "INTENTS" "$intent_ok" "$intent_count" "$intent_unknown" "$intent_errors"
     while IFS='|' read -r pat dir cmd label hblog hbstale role; do
         [ -z "$pat" ] && continue
         case "$pat" in \#*) continue;; esac
@@ -88,6 +106,12 @@ if [ "$1" = "--alert" ]; then
     missing=""
     vpn=$(vpn_state)
     [ "$vpn" != ok ] && missing="$missing VPN($vpn)"
+    intents=$(intent_state || echo "error|0|0|1")
+    IFS='|' read -r intent_ok intent_count intent_unknown intent_errors <<EOF
+$intents
+EOF
+    [ "$intent_ok" != ok ] && missing="$missing INTENT_INDEX(errors=$intent_errors)"
+    [ "$intent_unknown" -gt 0 ] && missing="$missing INTENTS_UNKNOWN($intent_unknown)"
     while IFS='|' read -r pat dir cmd label hblog hbstale role; do
         [ -z "$pat" ] && continue
         case "$pat" in \#*) continue;; esac
@@ -123,6 +147,12 @@ if [ "$1" = "--supervise" ]; then
     alert_miss=""
     vpn=$(vpn_state)
     [ "$vpn" != ok ] && alert_miss=" VPN($vpn)"
+    intents=$(intent_state || echo "error|0|0|1")
+    IFS='|' read -r intent_ok intent_count intent_unknown intent_errors <<EOF
+$intents
+EOF
+    [ "$intent_ok" != ok ] && alert_miss="$alert_miss INTENT_INDEX(errors=$intent_errors)"
+    [ "$intent_unknown" -gt 0 ] && alert_miss="$alert_miss INTENTS_UNKNOWN($intent_unknown)"
     while IFS='|' read -r pat dir cmd label hblog hbstale role; do
         [ -z "$pat" ] && continue
         case "$pat" in \#*) continue;; esac
@@ -163,6 +193,9 @@ fi
 echo "============ HEALTHCHECK $(date '+%Y-%m-%d %H:%M') ============"
 echo "=== PROCESSES (etime = how long they have run) ==="
 ps -eo etime,args | grep -E "dn_bot|kraken_bot|kraken_xstock_watch|t212_bot|ipo.py|trailing_stop|cacheManager|priceAnalysis|tradeall|rtrade|monitortrades|market_alerts|run_price_monitor|assetguardian" | grep -v grep
+
+echo "=== ACTIVE INTENTS (READ-ONLY INDEX) ==="
+intent_state
 
 echo "=== HYPERLIQUID DN ==="
 ( cd "$ROOT/hyperliquid" && "$HLPY" dn_bot.py --status 2>&1 | grep -E "SPOT|PERP|DELTA|FUNDING|LICHIDARE|COLATERAL" )

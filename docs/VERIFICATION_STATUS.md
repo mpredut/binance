@@ -5,8 +5,8 @@ future profitability.
 
 ## Automated gates
 
-- Complete suite: `1166 passed`, `324 subtests passed` after typed submission outcomes
-  and the T212 common-submit refactor.
+- Complete suite: `1173 passed`, `324 subtests passed` after common Binance filters,
+  the direct-order boundary gate and read-only intent health reporting.
 - Monitortrades characterization and cooldown gates: `38 passed`.
 - Import inventory: `16/16 OK` for active/common modules.
 - Instrument/provider routing: PASS. Private Binance balance checks are explicitly
@@ -35,6 +35,21 @@ coordination domain:
 These are not currently classified as conflicts by the inventory. They must be
 rechecked before changing execution ownership, bypass policy or a bot's live symbol
 set.
+
+The direct-order static gate separately inventories low-level venue submit/cancel calls.
+Only reviewed mechanics and venue-adapter boundaries are allowlisted; a new production
+call site fails the test until its persistence and recovery ownership are reviewed.
+
+`healthcheck.sh` also reports the read-only active-intent index. Index read errors and
+persisted `unknown` submissions are alert conditions, but healthcheck has no authority to
+write, retry, submit, or cancel an intent.
+
+## Binance exchange filters
+
+Price, limit quantity, market quantity and notional validation now share
+`providers/binance_filters.py`. Exchange `PRICE_FILTER`, `LOT_SIZE`,
+`MARKET_LOT_SIZE`, `MIN_NOTIONAL` and `NOTIONAL` remain distinct from the versioned
+business minimum `PLACE_ORDER_MIN_NOTIONAL`.
 
 ## Production snapshot
 

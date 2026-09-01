@@ -17,12 +17,14 @@ import time
 from typing import List, Optional
 
 from .base import MarketDataProvider, _normalize_order, env_value
+from .binance_filters import BinanceFilterError, BinanceOrderRules, decimal_places
 from .strategy_executor import (
     OrderReconciliationCapabilities,
     OrderStatus,
     PairPrecision,
     ProviderError,
     candle_interval,
+    extract_order_id,
     reconciliation_capabilities_of,
 )
 from market_regime import (
@@ -189,23 +191,15 @@ class BinanceProvider(MarketDataProvider):
             info = _get_bapi().client.get_symbol_info(symbol)
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"pair_precision({symbol}): {e}") from e
-        if not info:
-            return None
-        price_dec = vol_dec = None
-        omin = None
-        for f in info.get("filters", []):
-            if f.get("filterType") == "PRICE_FILTER":
-                price_dec = _step_decimals(f.get("tickSize", "0"))
-            elif f.get("filterType") == "LOT_SIZE":
-                vol_dec = _step_decimals(f.get("stepSize", "0"))
-                omin = float(f.get("minQty", 0) or 0.0)
-        base_asset = str(info.get("baseAsset", "")).strip()
-        if price_dec is None or vol_dec is None or omin is None or not base_asset:
-            raise ProviderError(
-                f"pair_precision({symbol}): incomplete Binance symbol filters"
-            )
-        return PairPrecision(price_decimals=price_dec, volume_decimals=vol_dec,
-                             order_min=omin, base_asset=base_asset)
+        try:
+            rules = BinanceOrderRules.from_symbol_info(info)
+        except BinanceFilterError as exc:
+            raise ProviderError(f"pair_precision({symbol}): {exc}") from exc
+        return PairPrecision(
+            price_decimals=decimal_places(rules.tick_size),
+            volume_decimals=decimal_places(rules.lot_step),
+            order_min=float(rules.lot_min), base_asset=rules.base_asset,
+        )
 
     def ohlc_closes(self, symbol: str, interval_min: int) -> list:
         iv = candle_interval(interval_min)
@@ -222,8 +216,16 @@ class BinanceProvider(MarketDataProvider):
                      client_order_id: Optional[str] = None) -> str:
         order_type = "BUY" if (side or "").lower().startswith("b") else "SELL"
         try:
+            client = _get_bapi().client
+            rules = BinanceOrderRules.from_symbol_info(client.get_symbol_info(symbol))
+            reference_price = _get_bapi().get_current_price(symbol)
+            normalized_qty, normalized_price = rules.normalize(
+                quantity=qty, price=price, market=bool(market or price is None),
+                reference_price=reference_price,
+            )
+            qty = float(normalized_qty)
+            price = None if normalized_price is None else float(normalized_price)
             if market or price is None:
-                client = _get_bapi().client
                 fn = (client.order_market_buy if order_type == "BUY"
                       else client.order_market_sell)
                 kwargs = {"symbol": symbol, "quantity": qty}
@@ -238,10 +240,10 @@ class BinanceProvider(MarketDataProvider):
                 res = _po.place_order_mechanics(order_type, symbol, price, qty, **kwargs)
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"submit_order({symbol}): {e}") from e
-        oid = (res or {}).get("orderId")
+        oid = extract_order_id(res)
         if oid is None:
             raise ProviderError(f"submit_order({symbol}): raspuns fara orderId ({res})")
-        return str(oid)
+        return oid
 
     def _order_fee_quote(self, symbol: str, order_id: int) -> float:
         """Return cumulative commission converted into the pair's quote currency.

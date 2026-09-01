@@ -41,6 +41,7 @@ PLACE_ORDER_FEE_PCT = required_float_env("PLACE_ORDER_FEE_PCT")
 PLACE_ORDER_HOURS = required_int_env("PLACE_ORDER_HOURS")
 PLACE_ORDER_SAFEBACK_SEC = required_int_env("PLACE_ORDER_SAFEBACK_SEC")
 PLACE_ORDER_MAX_DAILY_TRADES = required_int_env("PLACE_ORDER_MAX_DAILY_TRADES")
+PLACE_ORDER_MIN_NOTIONAL = required_float_env("PLACE_ORDER_MIN_NOTIONAL")
 
 
 class WeightLimitBlock(Exception):
@@ -117,136 +118,49 @@ def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
         print(f"apply_weight_limit: Error: {e}, order_type {order_type} and {symbol}")
         return required_qty
 
-def place_BUY_order(symbol, price, qty, client_order_id=None):
-    try:
-        if not cfg.is_trade_enabled() :
-            print(f"Trade is desabled!")
-            return None
-
-        price = round(min(price, _fresh_price(symbol)), 2)
-        qty = round(qty, 4)
-        client_order_id = client_order_id or rc.create_client_order_id()
-        BUY_order = client.order_limit_buy(
-            symbol=symbol,
-            quantity=qty,
-            price=str(price),
-            newClientOrderId=client_order_id
-        )
-
-        if BUY_order:
-            print(f"BUY order placed successfully: {BUY_order['orderId']} clientId {client_order_id}")
-        else :
-            print(f"Eroare la plasarea ordinului de BUY")
-        
-        return BUY_order
-    except BinanceAPIException as e:
-        print(f"Eroare la plasarea ordinului de cumparare: {e}")
+def _submit_binance_order(order_type, symbol, qty, *, price=None, market=False,
+                          client_order_id=None):
+    """Single low-level dispatch after common filter normalization."""
+    side = str(order_type).upper()
+    if side not in {"BUY", "SELL"} or not cfg.is_trade_enabled():
         return None
+    client_order_id = client_order_id or rc.create_client_order_id()
+    try:
+        if market:
+            method = client.order_market_buy if side == "BUY" else client.order_market_sell
+            kwargs = {"symbol": symbol, "quantity": qty}
+        else:
+            method = client.order_limit_buy if side == "BUY" else client.order_limit_sell
+            kwargs = {"symbol": symbol, "quantity": qty, "price": str(price)}
+        order = method(**kwargs, newClientOrderId=client_order_id)
+        if order:
+            print(f"{side} order placed successfully: {order['orderId']} clientId {client_order_id}")
+        return order
+    except BinanceAPIException as exc:
+        print(f"Binance {side} submission failed: {exc}")
+        return None
+
+
+def place_BUY_order(symbol, price, qty, client_order_id=None):
+    return _submit_binance_order(
+        "BUY", symbol, qty, price=price, client_order_id=client_order_id)
 
 def place_SELL_order(symbol, price, qty, client_order_id=None):
-    try:
-        if not cfg.is_trade_enabled() :
-            print(f"Trade is disabled!")
-            return None
-
-        price = round(max(price, _fresh_price(symbol)), 2)
-        qty = round(qty, 4)
-        client_order_id = client_order_id or rc.create_client_order_id()
-        SELL_order = client.order_limit_sell(
-            symbol=symbol,
-            quantity=qty,
-            price=str(price),
-            newClientOrderId=client_order_id
-        )
-
-        if SELL_order:
-            print(f"SELL order placed successfully: {SELL_order['orderId']} clientId {client_order_id}")
-        else :
-            print(f"Eroare la plasarea ordinului de SELL")
-        
-        return SELL_order
-    except BinanceAPIException as e:
-        print(f"Eroare la plasarea ordinului de vanzare: {e}")
-        return None
+    return _submit_binance_order(
+        "SELL", symbol, qty, price=price, client_order_id=client_order_id)
 
 
 def place_SELL_BUY_order(order_type, symbol, price, qty) :
- 
-    if not cfg.is_trade_enabled():
-        print(f"Trade este dezactivat!")
-        return None
-    
-    order = None
-    client_order_id = rc.create_client_order_id()
-    if order_type == "BUY":
-        order = client.order_limit_buy(
-            symbol=symbol,
-            quantity=qty,
-            price=str(price),
-            newClientOrderId=client_order_id
-        )
-    elif order_type == "SELL":
-        order = client.order_limit_sell(
-            symbol=symbol,
-            quantity=qty,
-            price=str(price),
-            newClientOrderId=client_order_id
-        )
-
-    if order:
-        print(f"{order_type} order placed successfully: {order['orderId']} clientId {client_order_id}")
-    else :
-        print(f"Eroare la plasarea ordinului de {order_type}, pret {price:.2f}")
-    return order
+    return _submit_binance_order(order_type, symbol, qty, price=price)
 
 def place_BUY_order_at_market(symbol, qty, client_order_id=None):
-    try:
-        if not cfg.is_trade_enabled():
-            print(f"Trade este dezactivat!")
-            return None
-
-        qty = round(qty, 4)  # Round quantity to four decimal places.
-        client_order_id = client_order_id or rc.create_client_order_id()
-        BUY_order = client.order_market_buy(
-            symbol=symbol,
-            quantity=qty,
-            newClientOrderId=client_order_id
-        )
-
-        if BUY_order:
-            print(f"BUY order de market executed successfully: {BUY_order['orderId']} clientId {client_order_id}")
-        else:
-            print(f"Eroare la plasarea ordinului de BUY de market")
-        
-        return BUY_order
-    except BinanceAPIException as e:
-        print(f"Eroare la plasarea ordinului de market de cumparare: {e}")
-        return None
+    return _submit_binance_order(
+        "BUY", symbol, qty, market=True, client_order_id=client_order_id)
 
 
 def place_SELL_order_at_market(symbol, qty, client_order_id=None):
-    try:
-        if not cfg.is_trade_enabled():
-            print(f"Trade este dezactivat!")
-            return None
-
-        qty = round(qty, 4)  # Round quantity to four decimal places.
-        client_order_id = client_order_id or rc.create_client_order_id()
-        SELL_order = client.order_market_sell(
-            symbol=symbol,
-            quantity=qty,
-            newClientOrderId=client_order_id
-        )
-
-        if SELL_order:
-            print(f"SELL order de market executed successfully: {SELL_order['orderId']} clientId {client_order_id}")
-        else:
-            print(f"Eroare la plasarea ordinului de SELL de market")
-        
-        return SELL_order
-    except BinanceAPIException as e:
-        print(f"Eroare la plasarea ordinului de market de vanzare: {e}")
-        return None
+    return _submit_binance_order(
+        "SELL", symbol, qty, market=True, client_order_id=client_order_id)
 
 
 def _last_opposite_fill_price(symbol, order_type):
@@ -354,7 +268,6 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
         return bool(bypass_profit_guard), (None if bypass_profit_guard else "guard_check_failed")
 
 
-from decimal import Decimal, ROUND_DOWN
 
 
 def _guarded_market_place(symbol, order_type, price, qty, **kwargs):
@@ -495,25 +408,39 @@ def place_order_mechanics(order_type, symbol, price, qty, force=False,
                   f"{fee_cap:.8f} to cover balance and fees")
             qty = fee_cap
 
-        qty = round(qty, 4)
-        qty = float(Decimal(qty).quantize(Decimal('0.0001'), rounding=ROUND_DOWN))
-
         current_price = api.get_current_price(symbol)
-        if qty * current_price < 100:
-            print(f"Value {qty * current_price} of {symbol} too small to trade. by by!")
+        from providers.binance_filters import BinanceFilterError, BinanceOrderRules
+        rules = BinanceOrderRules.from_symbol_info(client.get_symbol_info(symbol))
+        candidate_price = None
+        if not force:
+            candidate_price = (
+                max(price, current_price) if order_type == "SELL"
+                else min(price, current_price)
+            )
+        try:
+            normalized_qty, normalized_price = rules.normalize(
+                quantity=qty,
+                price=candidate_price,
+                market=bool(force),
+                reference_price=current_price,
+                business_min_notional=PLACE_ORDER_MIN_NOTIONAL,
+            )
+        except BinanceFilterError as exc:
+            print(f"Binance filters refused {order_type} {symbol}: {exc}")
             return None
+        qty = float(normalized_qty)
+        if normalized_price is not None:
+            price = float(normalized_price)
 
         print(f"Trying to place {order_type} {symbol} qty {qty:.8f} at "
               f"{'market price' if force else f'price {price}'}")
         if order_type == 'SELL':
-            price = round(max(price, current_price), 0)
             if force:
                 return (place_SELL_order_at_market(symbol, qty, client_order_id)
                         if client_order_id else place_SELL_order_at_market(symbol, qty))
             return (place_SELL_order(symbol, price, qty, client_order_id)
                     if client_order_id else place_SELL_order(symbol, price, qty))
         elif order_type == 'BUY':
-            price = round(min(price, current_price), 0)
             if force:
                 return (place_BUY_order_at_market(symbol, qty, client_order_id)
                         if client_order_id else place_BUY_order_at_market(symbol, qty))

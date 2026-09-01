@@ -24,6 +24,7 @@ from .strategy_executor import (
     PairPrecision,
     ProviderError,
     SubmissionRefused,
+    extract_order_id,
 )
 from credentials import t212_credentials
 
@@ -262,10 +263,10 @@ class T212Provider(MarketDataProvider):
             if _definitive_submit_failure(status, data):
                 raise SubmissionRefused(message)
             raise ProviderError(message)
-        order_id = data.get("id") if isinstance(data, dict) else None
+        order_id = extract_order_id(data)
         if order_id is None:
             raise ProviderError(f"submit_order({symbol}): response without an id: {data}")
-        return str(order_id)
+        return order_id
 
     def order_status(self, symbol: str, order_id: str) -> OrderStatus:
         try:

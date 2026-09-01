@@ -72,21 +72,29 @@ def capture_submission(submit: Callable[[], object]) -> SubmissionOutcome:
             "unknown", reason=f"{exc.__class__.__name__}: {exc}")
     if isinstance(native, SubmissionOutcome):
         return native
+    order_id = extract_order_id(native)
+    if order_id is None:
+        return SubmissionOutcome(
+            "unknown", reason="response_without_order_id", native=native)
+    return SubmissionOutcome("accepted", order_id=order_id, native=native)
+
+
+def extract_order_id(native) -> Optional[str]:
+    """Extract a venue order ID from normalized and common native response shapes."""
+    if isinstance(native, SubmissionOutcome):
+        return native.order_id
     order_id = None
     if isinstance(native, dict):
         order_id = native.get("orderId", native.get("order_id", native.get("id")))
         if order_id is None:
-            txid = native.get("txid")
-            if isinstance(txid, (list, tuple)):
-                order_id = next((item for item in txid if str(item).strip()), None)
-            else:
-                order_id = txid
-    elif not isinstance(native, bool) and native is not None and str(native).strip():
+            order_id = native.get("txid")
+    elif not isinstance(native, bool):
         order_id = native
+    if isinstance(order_id, (list, tuple)):
+        order_id = next((item for item in order_id if str(item).strip()), None)
     if order_id is None or not str(order_id).strip():
-        return SubmissionOutcome(
-            "unknown", reason="response_without_order_id", native=native)
-    return SubmissionOutcome("accepted", order_id=str(order_id), native=native)
+        return None
+    return str(order_id)
 
 
 @dataclass(frozen=True)

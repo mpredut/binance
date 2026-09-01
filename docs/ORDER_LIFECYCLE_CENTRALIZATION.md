@@ -21,8 +21,9 @@ The worker is a separate OS process, not a thread started by `Instrument.place`.
 Placement does no polling and does not wait for the terminal status: it finishes after
 persistence, the guards and a single submit call to the provider.
 
-`providers/tracked_order.py` is only a temporary compatibility shim. Production code
-imports the lifecycle types directly from `order_retry`.
+The former `providers/tracked_order.py` compatibility shim has no active consumers and
+is preserved as `archive/providers_tracked_order.py`. Production code imports lifecycle
+types directly from `order_retry`.
 
 ## What is centralised
 
@@ -144,9 +145,8 @@ policies will not be added as a generic fallback in `order_retry`.
 
 ## The remaining refactor steps
 
-1. keep `providers/tracked_order.py` until no external consumers remain;
-2. extend past rtrade towards T212 only with characterisation/golden tests;
-3. only afterwards introduce the declarative financial policies and a single active ledger.
+1. extend past rtrade towards T212 only with characterisation/golden tests;
+2. only afterwards introduce the declarative financial policies and a single active ledger.
 
 The duplicated mechanical transitions in `order_retry_worker.py` were extracted into
 `order_retry.advance_claimed_status`. The worker keeps only the venue I/O, the audit and the

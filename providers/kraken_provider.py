@@ -25,6 +25,7 @@ from .strategy_executor import (
     OrderStatus,
     PairPrecision,
     ProviderError,
+    extract_order_id,
 )
 from credentials import CredentialProfileMissingError, kraken_credentials
 
@@ -341,10 +342,10 @@ class KrakenProvider(MarketDataProvider):
                 **order_kwargs) or {}
         except Exception as e:  # noqa: BLE001 — Normalize venue errors.
             raise ProviderError(f"submit_order {symbol} {s}: {e}") from e
-        txids = res.get("txid") or []
-        if not txids:
+        order_id = extract_order_id(res)
+        if order_id is None:
             raise ProviderError(f"submit_order {symbol}: raspuns fara txid ({res})")
-        return str(txids[0])
+        return order_id
 
     def preflight_order(self, symbol: str, side: str, qty: float,
                         price: Optional[float] = None, *, market: bool = False,

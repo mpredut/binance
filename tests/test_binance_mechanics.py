@@ -57,6 +57,21 @@ class TestAdjustPriceAndCancelOpposite(unittest.TestCase):
 
 
 class TestPlaceOrderMechanics(unittest.TestCase):
+    def setUp(self):
+        fake_client = MagicMock()
+        fake_client.get_symbol_info.return_value = {
+            "baseAsset": "BTC", "quoteAsset": "USDC", "filters": [
+                {"filterType": "PRICE_FILTER", "tickSize": "0.01"},
+                {"filterType": "LOT_SIZE", "stepSize": "0.0001", "minQty": "0.0001"},
+                {"filterType": "MIN_NOTIONAL", "minNotional": "10", "applyToMarket": True},
+            ],
+        }
+        self.client_patch = patch.object(po, "client", fake_client)
+        self.client_patch.start()
+
+    def tearDown(self):
+        self.client_patch.stop()
+
     def test_buy_dispatches_limit(self):
         with patch.object(po.api, "get_current_price", return_value=100.0), \
              patch.object(po.api, "get_free_balance", return_value=1000.0), \

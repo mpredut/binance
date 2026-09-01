@@ -38,7 +38,7 @@ from typing import Callable, Dict, Optional
 from lock import FileLock
 from providers.strategy_executor import (
     OrderStatus, ProviderError, SubmissionOutcome, SubmissionRefused,
-    capture_submission, reconciliation_capabilities_of,
+    capture_submission, extract_order_id, reconciliation_capabilities_of,
 )
 
 from botcore import (load_dotenv as _load_dotenv, required_bool_env,
@@ -91,14 +91,7 @@ def _client_order_id(record_id, revision):
 
 def order_id_from_response(response):
     """Extract one venue order ID from common Binance/Kraken/HL/T212 shapes."""
-    if not isinstance(response, dict):
-        return None
-    native = response.get("orderId", response.get("id", response.get("txid")))
-    if isinstance(native, (list, tuple)):
-        native = next((value for value in native if str(value).strip()), None)
-    if native is None or not str(native).strip():
-        return None
-    return str(native)
+    return extract_order_id(response)
 
 
 def valid_record(rec):
