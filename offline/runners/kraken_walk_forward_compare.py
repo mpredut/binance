@@ -43,10 +43,10 @@ def default_candidates() -> list[Candidate]:
         Candidate("tp_4", "prag TP 4%", {"takeprofit_pct": 4.0}),
         Candidate("tp_6", "prag TP 6%", {"takeprofit_pct": 6.0}),
         Candidate("dca_drop_1", "DCA la scădere 1%", {"dca_drop_pct": 1.0}),
-        Candidate("dca_drop_1_5", "DCA la scădere 1,5%", {"dca_drop_pct": 1.5}),
-        Candidate("dca_drop_2", "DCA la scădere 2%", {"dca_drop_pct": 2.0}),
-        Candidate("reentry_1_5", "reintrare după -1,5%", {"reentry_drop_pct": 1.5}),
-        Candidate("reentry_3", "reintrare după -3%", {"reentry_drop_pct": 3.0}),
+        Candidate("dca_drop_1_5", "DCA on a 1.5% drop", {"dca_drop_pct": 1.5}),
+        Candidate("dca_drop_2", "DCA on a 2% drop", {"dca_drop_pct": 2.0}),
+        Candidate("reentry_1_5", "re-entry after -1.5%", {"reentry_drop_pct": 1.5}),
+        Candidate("reentry_3", "re-entry after -3%", {"reentry_drop_pct": 3.0}),
         Candidate("sl_off", "stop-loss oprit", {"stop_loss_pct": 0.0}),
         Candidate("sl_10", "stop-loss 10%", {"stop_loss_pct": 10.0}),
         Candidate("sl_15", "stop-loss 15%", {"stop_loss_pct": 15.0}),
@@ -137,7 +137,7 @@ def _relative(candidate: list[dict], live: list[dict]) -> dict:
 
 
 def _dominates(left: dict, right: dict, tolerance: float = 1e-10) -> bool:
-    """Dominanță conservatoare: medie și worst-case mai bune, DD nu mai mare."""
+    """Conservative dominance: better mean and worst case, drawdown no larger."""
     no_worse = (
         left["mean_return_pct"] >= right["mean_return_pct"] - tolerance
         and left["worst_return_pct"] >= right["worst_return_pct"] - tolerance
@@ -239,7 +239,7 @@ def main() -> int:
     source_report = _load_report(baseline_path)
     datasets = _load_datasets(source_report)
     if args.candidate_set == "hype-240" and set(datasets) != {240}:
-        parser.error("candidate-set hype-240 cere un baseline care conține numai intervalul 240")
+        parser.error("candidate set hype-240 requires a baseline containing only the 240 interval")
     base_params = baseline.StratParams(**source_report["strategy_params"])
     base_fee = float(source_report["fee_pct_per_leg"])
     execution = baseline.ExecutionModel(**source_report.get("execution_model", {}))

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generează un raport read-only din fișierele execution_audit JSONL."""
+"""Generate a read-only report from the execution_audit JSONL files."""
 
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def _fmt(value) -> str:
 def markdown_report(report: dict, paths: list[Path]) -> str:
     lines = [
         "# Execution audit calibration", "",
-        f"Fișiere: {len(paths)}", "",
+        f"Files: {len(paths)}", "",
         "| Tip | Orders | Filled | Partial | Fee p50 bps | Fee p95 bps | "
         "Latency p50 s | Fill ratio p50 | Shortfall p50 bps |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
@@ -72,19 +72,19 @@ def markdown_report(report: dict, paths: list[Path]) -> str:
     lines.extend([
         "", "## Readiness", "",
         f"Filled orders: {ready['filled_orders']}/{ready['minimum_filled_orders']} minimum.",
-        "", "MARKET shortfall: disponibil după deploy când auditul conține "
-        "`reference_price`; nu este slippage pur.",
+        "", "MARKET shortfall: available after deploy, once the audit carries "
+        "`reference_price`; it is not pure slippage.",
         "", "Market slippage separat: indisponibil — "
         + ready["market_slippage_blocker"] + ".",
         "", "Spread: indisponibil — " + ready["spread_blocker"] + ".", "",
-        "Raportul este observațional și nu modifică automat scenariile de backtest.", "",
+        "The report is observational and does not automatically change the backtest scenarios.", "",
         "## Client order ID", "",
         f"Ordine acceptate pe venue-uri cu suport: "
         f"{client_ids['supported_accepted_orders']}; "
         f"ID prezent: {client_ids['with_client_order_id']}; "
         f"valid: {client_ids['valid_client_order_ids']}; "
         f"invalid: {client_ids['invalid_client_order_ids']}; "
-        f"lipsă: {client_ids['missing_client_order_ids']}.", "",
+        f"missing: {client_ids['missing_client_order_ids']}.", "",
     ])
     evidence = client_ids["first_valid_by_venue"]
     if evidence:
@@ -97,11 +97,11 @@ def markdown_report(report: dict, paths: list[Path]) -> str:
                 f"| {venue} | {item['symbol']} | {item['intent_id']} | "
                 f"{item['client_order_id']} | {item['order_id']} |"
             )
-        lines.extend(["", "Aceste dovezi provin din `submit_accepted`; raportul nu plasează ordine.", ""])
+        lines.extend(["", "This evidence comes from `submit_accepted`; the report places no orders.", ""])
     else:
         lines.extend([
-            "PENDING: nu există încă un `submit_accepted` cu ID valid după deploy; "
-            "nu se plasează un ordin doar pentru această verificare.", "",
+            "PENDING: there is no `submit_accepted` with a valid ID after deploy yet; "
+            "no order is placed just for this check.", "",
         ])
     return "\n".join(lines)
 
@@ -110,7 +110,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "inputs", nargs="+", type=Path,
-        help="fișiere JSONL sau directoare logger/execution_audit",
+        help="JSONL files or logger/execution_audit directories",
     )
     parser.add_argument("--venue")
     parser.add_argument("--output", type=Path)
@@ -118,7 +118,7 @@ def main() -> int:
     args = parser.parse_args()
     paths = _paths(args.inputs)
     if not paths:
-        parser.error("nu am găsit fișiere execution_audit")
+        parser.error("no execution_audit files found")
     try:
         events = _load(paths, args.venue)
     except ValueError as error:

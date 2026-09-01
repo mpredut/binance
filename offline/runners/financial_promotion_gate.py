@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compară două rapoarte financiare și aplică gate-ul conservator."""
+"""Compare two financial reports and apply the conservative gate."""
 
 from __future__ import annotations
 

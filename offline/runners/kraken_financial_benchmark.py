@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Benchmark financiar HYPE: configurație fixă, central + stress, numai TEST OOS."""
+"""HYPE financial benchmark: fixed configuration, central + stress, OOS TEST only."""
 
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ def _load_expected_dataset(manifest_path: Path, interval: int) -> dict:
         manifest = json.load(handle)
     expected = (manifest.get("datasets") or {}).get(str(interval))
     if not expected:
-        raise ValueError(f"manifestul nu declară datasetul {interval}m")
+        raise ValueError(f"the manifest does not declare the {interval}m dataset")
     return {"manifest": manifest, "expected": expected}
 
 
@@ -82,7 +82,7 @@ def _load_params(args) -> StratParams:
         payload = json.load(handle)
     values = payload.get("strategy_params", payload)
     if not isinstance(values, dict):
-        raise ValueError("--params-report trebuie să conțină strategy_params sau un obiect")
+        raise ValueError("--params-report must contain strategy_params or an object")
     return StratParams(**values)
 
 
@@ -147,7 +147,7 @@ def build_report(
             f"hash dataset diferit: {digest} != {expected.get('sha256')}"
         )
     if len(records) != int(expected.get("bars", -1)):
-        raise ValueError(f"număr bare diferit: {len(records)} != {expected.get('bars')}")
+        raise ValueError(f"different bar count: {len(records)} != {expected.get('bars')}")
 
     scenarios = {}
     for scenario in default_scenarios():
@@ -223,8 +223,8 @@ def markdown_report(report: dict) -> str:
         "",
         f"Candidate: `{report['candidate_name']}`",
         "",
-        "Acesta este un benchmark OOS reproductibil, nu o promisiune de profit.",
-        "Datasetul este proxy Hyperliquid; costurile central/stress sunt încă necalibrate.",
+        "This is a reproducible OOS benchmark, not a promise of profit.",
+        "The dataset is a Hyperliquid proxy; the central/stress costs are still uncalibrated.",
         "",
         "| Scenario | Mean/fold % | Mean USD/fold | Sum reset USD | Worst % | Worst DD % | Buy&hold mean % | CVaR 95% | Exposure % | Positive |",
         "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
@@ -263,11 +263,11 @@ def markdown_report(report: dict) -> str:
         lines.extend(["## Promotion gate", "", f"Verdict: **{verdict}**", ""])
     lines.extend([
         "## Interpretation", "",
-        "- `Mean USD/fold` folosește același buget inițial în fiecare fereastră TEST.",
-        "- `Sum reset USD` adună fold-urile; nu este equity compus și nu păstrează poziția între ferestre.",
-        f"- Cele {next(iter(report['scenarios'].values()))['aggregate']['total_test_bars']} bare TEST înseamnă "
-        f"{next(iter(report['scenarios'].values()))['aggregate']['total_test_bars'] * report['walk_forward']['interval_minutes'] / 1440:.0f} zile fără suprapunere.",
-        "- Calibrarea finală cere distribuții reale Kraken pentru spread, slippage și fee tier.",
+        "- `Mean USD/fold` uses the same initial budget in every TEST window.",
+        "- `Sum reset USD` adds up the folds; it is not compounded equity and does not carry the position across windows.",
+        f"- The {next(iter(report['scenarios'].values()))['aggregate']['total_test_bars']} TEST bars mean "
+        f"{next(iter(report['scenarios'].values()))['aggregate']['total_test_bars'] * report['walk_forward']['interval_minutes'] / 1440:.0f} days without overlap.",
+        "- Final calibration requires real Kraken distributions for spread, slippage and fee tier.",
         "",
     ])
     return "\n".join(lines)
@@ -275,8 +275,8 @@ def markdown_report(report: dict) -> str:
 
 def _projection(report: dict) -> dict:
     strategy_params = dict(report.get("strategy_params") or {})
-    # Câmpurile noi implicit oprite sunt compatibile cu artefactele baseline mai
-    # vechi; normalizarea evită regenerarea lor când deciziile sunt identice.
+    # The new fields, off by default, stay compatible with older baseline artefacts;
+    # normalisation avoids regenerating them when the decisions are identical.
     strategy_params.setdefault("dca_spacing_growth_pct", 0.0)
     strategy_params.setdefault("dca_vol_scale_k", 0.0)
     strategy_params.setdefault("dca_vol_ref", 2.0)
@@ -317,7 +317,7 @@ def main() -> int:
 
     for name in ("train", "validation", "test", "step"):
         if getattr(args, name) <= 0:
-            parser.error(f"--{name} trebuie să fie pozitiv")
+            parser.error(f"--{name} must be positive")
     if args.warmup < 0 or args.regime_threshold < 0:
         parser.error("warmup/regime-threshold nu pot fi negative")
     args.dataset = args.dataset.expanduser().resolve()
@@ -359,7 +359,7 @@ def main() -> int:
         with args.verify.expanduser().resolve().open(encoding="utf-8") as handle:
             expected = json.load(handle)
         if _projection(expected) != _projection(report):
-            print("VERIFY FAILED: benchmarkul diferă de artefactul versionat", file=sys.stderr)
+            print("VERIFY FAILED: the benchmark differs from the versioned artefact", file=sys.stderr)
             return 1
         print("VERIFY OK: benchmark reproductibil")
     if "promotion_gate" in report:

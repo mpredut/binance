@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Îngheață lumânări publice Hyperliquid într-un CSV compatibil cu replay-ul.
+"""Freeze public Hyperliquid candles into a CSV compatible with the replay.
 
-Datele spot HYPE/USDC sunt un proxy cross-venue pentru validarea robusteții
-strategiei Kraken. Ele nu modelează spread-ul, lichiditatea sau fill-urile Kraken.
+The HYPE/USDC spot data is a cross-venue proxy for validating the robustness of
+the Kraken strategy. It does not model Kraken spread, liquidity or fills.
 """
 from __future__ import annotations
 
@@ -52,7 +52,7 @@ def _post(body: dict) -> object:
 
 
 def resolve_spot_pair(token: str, quote: str, spot_meta: dict) -> str:
-    """Rezolvă numele API ``@index`` din ``spotMeta``, fără index hardcodat."""
+    """Resolve the ``@index`` API name from ``spotMeta``, with no hardcoded index."""
     token_indices = {
         str(item.get("name", "")).upper(): item.get("index")
         for item in spot_meta.get("tokens", [])
@@ -60,17 +60,17 @@ def resolve_spot_pair(token: str, quote: str, spot_meta: dict) -> str:
     base_index = token_indices.get(token.upper())
     quote_index = token_indices.get(quote.upper())
     if base_index is None or quote_index is None:
-        raise ValueError(f"token spot negăsit: {token}/{quote}")
+        raise ValueError(f"spot token not found: {token}/{quote}")
     for market in spot_meta.get("universe", []):
         if market.get("tokens") == [base_index, quote_index]:
             name = market.get("name")
             if name:
                 return str(name)
-    raise ValueError(f"pereche spot negăsită: {token}/{quote}")
+    raise ValueError(f"spot pair not found: {token}/{quote}")
 
 
 def normalize_closed_candles(rows: list[dict], *, now_ms: int) -> list[dict]:
-    """Sortează, deduplică și elimină lumânarea încă deschisă."""
+    """Sort, deduplicate and drop the candle that is still open."""
     by_open_time: dict[int, dict] = {}
     for row in rows:
         open_time = int(row["t"])
@@ -88,7 +88,7 @@ def normalize_closed_candles(rows: list[dict], *, now_ms: int) -> list[dict]:
 
 
 def validate_continuity(records: list[dict], interval_minutes: int) -> None:
-    """Replay-ul presupune bare echidistante; refuză dataset-uri cu goluri."""
+    """The replay assumes evenly spaced bars; it refuses datasets with gaps."""
     expected_seconds = interval_minutes * 60
     for previous, current in zip(records, records[1:]):
         actual_seconds = current["timestamp"] - previous["timestamp"]
@@ -96,7 +96,7 @@ def validate_continuity(records: list[dict], interval_minutes: int) -> None:
             raise ValueError(
                 "dataset discontinuu: "
                 f"{previous['timestamp']} -> {current['timestamp']} "
-                f"({actual_seconds}s, așteptat {expected_seconds}s)"
+                f"({actual_seconds}s, expected {expected_seconds}s)"
             )
 
 
@@ -120,7 +120,7 @@ def fetch_closed_candles(
         },
     })
     if not isinstance(payload, list):
-        raise RuntimeError(f"răspuns candleSnapshot invalid: {payload!r}")
+        raise RuntimeError(f"invalid candleSnapshot response: {payload!r}")
     return normalize_closed_candles(payload, now_ms=end_ms)
 
 
@@ -128,7 +128,7 @@ def _parse_intervals(value: str) -> list[int]:
     try:
         intervals = [int(part.strip()) for part in value.split(",") if part.strip()]
     except ValueError as exc:
-        raise argparse.ArgumentTypeError("intervalele trebuie să fie minute") from exc
+        raise argparse.ArgumentTypeError("intervals must be in minutes") from exc
     unsupported = [value for value in intervals if value not in INTERVALS]
     if not intervals or unsupported:
         raise argparse.ArgumentTypeError(
@@ -144,7 +144,7 @@ def main() -> int:
     parser.add_argument("--intervals", type=_parse_intervals, default=[60, 240, 1440])
     parser.add_argument(
         "--lookback-days", type=int,
-        help="limitează toate intervalele la aceeași perioadă; implicit maximul API",
+        help="limit every interval to the same period; defaults to the API maximum",
     )
     parser.add_argument(
         "--output-dir", type=Path,
@@ -152,7 +152,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     if args.lookback_days is not None and args.lookback_days <= 0:
-        parser.error("--lookback-days trebuie să fie pozitiv")
+        parser.error("--lookback-days must be positive")
 
     generated_at = dt.datetime.now(tz=dt.timezone.utc)
     end_ms = int(generated_at.timestamp() * 1000)
@@ -162,7 +162,7 @@ def main() -> int:
     )
     spot_meta = _post({"type": "spotMeta"})
     if not isinstance(spot_meta, dict):
-        raise RuntimeError("răspuns spotMeta invalid")
+        raise RuntimeError("invalid spotMeta response")
     coin = resolve_spot_pair(args.token, args.quote, spot_meta)
     output_dir = args.output_dir.expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Baseline walk-forward Trading212 peste engine-ul live și OHLC Yahoo.
+"""Trading212 walk-forward baseline over the live engine and Yahoo OHLC.
 
-Configurația vine direct din ``212trading/config.<profile>.env``. Runnerul nu
-optimizează parametri și nu contactează API-ul de ordine Trading212.
+The configuration comes straight from ``212trading/config.<profile>.env``. The runner
+optimises no parameters and never contacts the Trading212 order API.
 """
 
 from __future__ import annotations
@@ -52,19 +52,19 @@ def parse_interval_minutes(value: str) -> int:
     except (KeyError, ValueError, IndexError) as exc:
         raise argparse.ArgumentTypeError("interval Yahoo invalid; exemple: 5m, 1h, 1d") from exc
     if minutes <= 0:
-        raise argparse.ArgumentTypeError("intervalul trebuie să fie pozitiv")
+        raise argparse.ArgumentTypeError("the interval must be positive")
     return minutes
 
 
 def periods_per_year(interval_minutes: int) -> float:
-    # Sesiune regulată US: 6,5h și aproximativ 252 zile de tranzacționare/an.
+    # Regular US session: 6.5h and roughly 252 trading days per year.
     if interval_minutes >= 1440:
         return 252.0 * 1440.0 / interval_minutes
     return 252.0 * 390.0 / interval_minutes
 
 
 def fx_quote(currency: str) -> tuple[str, bool]:
-    """Întoarce simbolul Yahoo și dacă valoarea trebuie inversată în USD/unitate."""
+    """Return the Yahoo symbol and whether the value must be inverted to USD per unit."""
     currency = currency.upper()
     if currency == "RON":
         return "USDRON=X", True
@@ -75,8 +75,8 @@ def fetch_yahoo_candles(symbol: str, range_: str, interval: str) -> list[dict]:
     query = {"range": range_, "interval": interval}
     day_range = re.fullmatch(r"([1-9][0-9]*)d", range_.lower())
     if day_range:
-        # Yahoo rotunjește uneori range=59d la o perioadă calendaristică mai mare
-        # și respinge 5m ca fiind >60d. period1/period2 păstrează exact fereastra.
+        # Yahoo sometimes rounds range=59d up to a larger calendar period and
+        # rejects 5m as being >60d. period1/period2 keep the window exact.
         end = int(time.time())
         query = {
             "period1": end - int(day_range.group(1)) * 24 * 60 * 60,
@@ -101,7 +101,7 @@ def fetch_yahoo_candles(symbol: str, range_: str, interval: str) -> list[dict]:
     result = (payload.get("chart", {}).get("result") or [None])[0]
     if not result:
         error = payload.get("chart", {}).get("error")
-        raise RuntimeError(f"Yahoo nu a întors date pentru {symbol}: {error}")
+        raise RuntimeError(f"Yahoo returned no data for {symbol}: {error}")
     timestamps = result.get("timestamp") or []
     quote = (result.get("indicators", {}).get("quote") or [{}])[0]
     records = []
@@ -137,18 +137,18 @@ def main() -> int:
     parser.add_argument("--profile", default="nvda", help="config.<profile>.env")
     parser.add_argument("--range", default="2y", help="range Yahoo: 60d, 1y, 2y etc.")
     parser.add_argument("--interval", default="1d", help="interval Yahoo: 5m, 1h, 1d")
-    parser.add_argument("--dataset", type=Path, help="CSV înghețat în loc de Yahoo")
+    parser.add_argument("--dataset", type=Path, help="a frozen CSV instead of Yahoo")
     parser.add_argument(
         "--seed-dataset", type=Path,
-        help="istoric înghețat de unit cu fereastra Yahoo nouă (acumulare intraday)",
+        help="frozen unit history plus the new Yahoo window (intraday accumulation)",
     )
     parser.add_argument(
         "--fx-to-usd", type=float,
-        help="override FX fix; implicit se descarcă seria istorică pentru non-USD",
+        help="fixed FX override; by default the historical series is downloaded for non-USD",
     )
-    parser.add_argument("--fx-dataset", type=Path, help="CSV OHLC FX înghețat")
+    parser.add_argument("--fx-dataset", type=Path, help="a frozen FX OHLC CSV")
     parser.add_argument("--fx-symbol", help="override simbol Yahoo FX, ex. EURUSD=X")
-    parser.add_argument("--fx-invert", action="store_true", help="inversează close-ul FX")
+    parser.add_argument("--fx-invert", action="store_true", help="invert the FX close")
     parser.add_argument("--spread-bps", type=float, default=0.0)
     parser.add_argument("--market-slippage-bps", type=float, default=0.0)
     parser.add_argument("--partial-fill-ratio", type=float, default=1.0)
@@ -162,7 +162,7 @@ def main() -> int:
     parser.add_argument("--step", type=int)
     parser.add_argument(
         "--warmup", type=int,
-        help="bare de semnal anterioare; implicit 12 când gate-ul DCA este activ",
+        help="preceding signal bars; defaults to 12 when the DCA gate is active",
     )
     parser.add_argument(
         "--output-dir", type=Path, default=ROOT / "offline/results/t212_walk_forward",
@@ -177,13 +177,13 @@ def main() -> int:
     params = StratParams.from_env(config)
     symbol = (config.get("YAHOO_SYMBOL") or params.yahoo_sym).strip().upper()
     if not symbol:
-        parser.error("profilul nu definește YAHOO_SYMBOL")
+        parser.error("the profile does not define YAHOO_SYMBOL")
     if args.fx_to_usd is not None and args.fx_dataset is not None:
-        parser.error("--fx-to-usd și --fx-dataset sunt alternative")
+        parser.error("--fx-to-usd and --fx-dataset are alternatives")
     if args.dataset is not None and args.seed_dataset is not None:
-        parser.error("--dataset și --seed-dataset sunt alternative")
+        parser.error("--dataset and --seed-dataset are alternatives")
     if args.fx_to_usd is not None and args.fx_to_usd <= 0:
-        parser.error("--fx-to-usd trebuie să fie pozitiv")
+        parser.error("--fx-to-usd must be positive")
     try:
         execution = ExecutionModel(
             spread_bps=args.spread_bps,
@@ -196,9 +196,9 @@ def main() -> int:
 
     explicit = (args.train, args.validation, args.test)
     if any(value is not None for value in explicit) and not all(value is not None for value in explicit):
-        parser.error("--train, --validation și --test se dau împreună")
+        parser.error("--train, --validation and --test are given together")
     if any(value is not None and value <= 0 for value in (*explicit, args.step)):
-        parser.error("dimensiunile walk-forward trebuie să fie pozitive")
+        parser.error("the walk-forward sizes must be positive")
     warmup = (12 if params.dca_trend_gate_pct > 0 else 0) if args.warmup is None else args.warmup
     if warmup < 0:
         parser.error("--warmup nu poate fi negativ")
@@ -226,7 +226,7 @@ def main() -> int:
     fx_invert = False
     if params.currency == "USD":
         if args.fx_dataset or args.fx_symbol or args.fx_invert:
-            parser.error("opțiunile FX istorice nu sunt necesare pentru un profil USD")
+            parser.error("the historical FX options are not needed for a USD profile")
         fx_fixed = 1.0 if fx_fixed is None else fx_fixed
         fx_metadata = {"mode": "identity", "currency": "USD", "usd_per_unit": fx_fixed}
     elif fx_fixed is not None:

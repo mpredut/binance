@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """apply_proposals.py — PROD: trage propunerile de backtest de pe branch-ul git
-`backtest-proposals` si le aplica cu guardrail-uri. NU reruleaza backtestul (dev
-a facut-o deja). Restartul procesului proprietar NU se face aici — il face
+`backtest-proposals` and applies them with guardrails. It does NOT rerun the backtest
+(dev already did). The owning process is NOT restarted here — that is done by
 watchdogfor_cacheandconfig cand detecteaza schimbarea de config (decizie user).
 
 Guardrail-uri (aplicate AICI, pe prod, unde valoarea live e autoritativa):
-  - valoarea curenta se RECITESTE live de pe prod (nu se ia din propunere) — daca
+  - the current value is RE-READ live from prod (not taken from the proposal) — if
     prod s-a schimbat intre timp, aplicam fata de valoarea reala;
   - MEDIE, nu salt: new = (current_prod + winner) / 2 (amortizare, ca in pilot);
-  - RATE-LIMIT: acelasi parametru nu se schimba mai des de MIN_DAYS_BETWEEN_CHANGES;
-  - AUDIT: fiecare decizie (aplicata sau nu) in logger/backtest_pilot_audit.jsonl;
+  - RATE LIMIT: the same parameter does not change more often than MIN_DAYS_BETWEEN_CHANGES;
+  - AUDIT: every decision (applied or not) in logger/backtest_pilot_audit.jsonl;
   - commit git pe main dupa fiecare schimbare (istoric + reversibil).
 
-  --dry-run : arata ce ar aplica, fara sa scrie config / commit
+  --dry-run : show what it would apply, without writing config or committing
 """
 from __future__ import annotations
 
@@ -30,8 +30,8 @@ os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 from offline.research.monitortrades_backtest import scheduled_pilot as sp  # noqa: E402
 from botcore import parse_dotenv  # noqa: E402
 
-# Incarca .env + config.env ca notificarile (PHONE_ALERT_URL/NTFY_TOPIC din .env) sa
-# functioneze — apply ruleaza standalone, nu prin fleet (care le incarca la pornire).
+# Load .env + config.env so the notifications (PHONE_ALERT_URL/NTFY_TOPIC from .env)
+# work — apply runs standalone, not through the fleet (which loads them at startup).
 try:
     from dotenv import load_dotenv
     load_dotenv(os.path.join(ROOT, ".env"))
@@ -47,7 +47,7 @@ if not BRANCH:
 
 
 def _read_proposals():
-    """Citeste backtest_proposals.json de pe origin/BRANCH FARA checkout (git show)."""
+    """Read backtest_proposals.json from origin/BRANCH WITHOUT a checkout (git show)."""
     subprocess.run(["git", "-C", ROOT, "fetch", "-q", "origin", BRANCH],
                    capture_output=True, timeout=30)
     out = subprocess.run(["git", "-C", ROOT, "show", f"origin/{BRANCH}:backtest_proposals.json"],
@@ -63,11 +63,11 @@ def _read_proposals():
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dry-run", action="store_true",
-                     help="arata ce ar aplica, fara sa scrie config/commit")
+                     help="show what it would apply, without writing config or committing")
     args = ap.parse_args()
 
     if os.environ.get("APPLY_DISABLED", "").strip().lower() in ("1", "true", "yes"):
-        print("[apply] APPLY_DISABLED=true -- ies fara sa fac nimic")
+        print("[apply] APPLY_DISABLED=true -- exiting without doing anything")
         return
 
     proposals = _read_proposals()

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Baseline walk-forward pentru configurația Kraken live, fără optimizare.
+"""Walk-forward baseline for the live Kraken configuration, without optimisation.
 
-Încarcă aceeași configurație ca botul (.env apoi config.env), rulează motorul
-faithful din kraken/replay.py pe ferestre temporale fără shuffle și păstrează
-dataset-ul exact folosit împreună cu hash-ul lui. Fiecare segment pornește cu
-stare curată; TEST este raportul out-of-sample, TRAIN/VALIDATION sunt doar
-diagnostic de regim și nu aleg parametri.
+It loads the same configuration as the bot (.env then config.env), runs the faithful
+engine from kraken/replay.py over time windows without shuffling, and keeps the
+exact dataset used together with its hash. Each segment starts with a clean
+state; TEST is the out-of-sample report, TRAIN/VALIDATION are only regime
+diagnostics and choose no parameters.
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ from offline.backtests.execution import ExecutionModel  # noqa: E402
 
 
 def fetch_closed_candles(pair: str, interval: int) -> list[dict]:
-    """Citește maximum 720 bare Kraken și elimină ultima bară încă în formare."""
+    """Read at most 720 Kraken bars and drop the last, still-forming bar."""
     url = f"https://api.kraken.com/0/public/OHLC?pair={pair}&interval={interval}"
     request = urllib.request.Request(
         url, headers={"User-Agent": "binance-repo/walk-forward-baseline"}
@@ -111,7 +111,7 @@ def evaluate_walk_forward(records: list[dict], params: StratParams, *, fee_pct: 
 def _parse_intervals(value: str) -> list[int]:
     intervals = [int(part.strip()) for part in value.split(",") if part.strip()]
     if not intervals or any(interval <= 0 for interval in intervals):
-        raise argparse.ArgumentTypeError("intervalele trebuie să fie minute pozitive")
+        raise argparse.ArgumentTypeError("intervals must be positive minutes")
     return intervals
 
 
@@ -130,7 +130,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--env-file", default=str(KRAKEN_DIR / ".env"))
     parser.add_argument("--config-file", default=str(KRAKEN_DIR / "config.env"))
-    parser.add_argument("--pair", help="implicit KRAKEN_PAIR din configurația live")
+    parser.add_argument("--pair", help="defaults to KRAKEN_PAIR from the live configuration")
     parser.add_argument("--intervals", type=_parse_intervals, default=[60, 240, 1440])
     parser.add_argument("--fee", type=float, default=0.26, help="fee per leg, procente")
     parser.add_argument("--spread-bps", type=float, default=0.0)

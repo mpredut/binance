@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Compară setul HYPE preînregistrat în scenariile financiare central + stress.
+"""Compare the pre-registered HYPE set in the central + stress financial scenarios.
 
-Runnerul nu caută parametri și nu schimbă configurația live. El pornește din
-parametrii baseline-ului versionat, reproduce profilul live și aplică fiecărui
-candidat același dataset, aceleași ferestre și același promotion gate.
+The runner searches no parameters and changes no live configuration. It starts from
+the versioned baseline parameters, reproduces the live profile and applies to every
+candidate the same dataset, the same windows and the same promotion gate.
 """
 
 from __future__ import annotations
@@ -55,7 +55,7 @@ def build_comparison(args) -> dict:
         known = {candidate.name for candidate in candidates}
         unknown = sorted(selected - known)
         if unknown:
-            raise ValueError(f"candidați necunoscuți: {', '.join(unknown)}")
+            raise ValueError(f"unknown candidates: {', '.join(unknown)}")
         candidates = [
             candidate for candidate in candidates
             if candidate.name == "live" or candidate.name in selected
@@ -71,7 +71,7 @@ def build_comparison(args) -> dict:
         if candidate.name == "live":
             if benchmark._projection(report) != benchmark._projection(baseline_report):
                 raise ValueError(
-                    "profilul live regenerat diferă de baseline-ul versionat"
+                    "the regenerated live profile differs from the versioned baseline"
                 )
             live_report = report
         gate = evaluate_dual_promotion(baseline_report, report)
@@ -84,7 +84,7 @@ def build_comparison(args) -> dict:
         }
 
     if live_report is None:
-        raise ValueError("setul de candidați trebuie să conțină profilul live")
+        raise ValueError("the candidate set must contain the live profile")
     return {
         "schema_version": 1,
         "benchmark": "HYPE financial candidate comparison",
@@ -109,8 +109,8 @@ def _fmt(value: float, *, signed: bool = False) -> str:
 def markdown_report(report: dict) -> str:
     lines = [
         "# HYPE financial candidate comparison", "",
-        "Set preînregistrat; aceleași 31 ferestre OOS și aceleași costuri pentru toți.",
-        "Niciun candidat nu este activat de acest runner.", "",
+        "Pre-registered set; the same 31 OOS windows and the same costs for all.",
+        "No candidate is enabled by this runner.", "",
         "| Candidate | Scenario | Mean % | Δ mean pp | Worst % | Δ worst pp | "
         "Δ DD pp | Return W/T/L | Calmar Δ | DD W/T/L | Return/Risk |",
         "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
@@ -142,8 +142,8 @@ def markdown_report(report: dict) -> str:
             ", ".join(f"`{name}`" for name in report["promotable"])
             if report["promotable"] else "niciun candidat"
         ), "",
-        "Rezultatul este screening pe proxy Hyperliquid; calibrarea execuției Kraken "
-        "și shadow-ul forward rămân porți separate.", "",
+        "The result is screening on a Hyperliquid proxy; Kraken execution calibration "
+        "and the forward shadow remain separate gates.", "",
     ])
     return "\n".join(lines)
 
