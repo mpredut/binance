@@ -89,7 +89,7 @@ def main() -> int:
     hype = next((r for r in rank(meta['universe'], ctxs, 0, 999) if r['coin'] == cur), None)
     if hype:
         print(f"\n  {cur} (DN-ul tau): {hype['apr']:+.1f}%/an. "
-              f"Daca o moneda DN-fezabila de mai sus plateste vizibil mai mult SI e lichida,")
+              f"If a DN-feasible coin above pays visibly more AND is liquid,")
         print("  poti muta DN-ul acolo: schimbi HL_COIN in config.env + inchizi/redeschizi DN-ul.")
     print("\n  ⚠ funding mare = risc mai mare. Alege lichid + monede vetate, nu maximul orb.")
     return 0

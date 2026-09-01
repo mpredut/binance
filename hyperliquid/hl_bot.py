@@ -52,7 +52,7 @@ def main() -> int:
     ap.add_argument("--interval", type=int, default=required_int_env("HL_POLL_SECONDS"))
     ap.add_argument("--desktop", action="store_true")
     ap.add_argument("--skip-wait", action="store_true")
-    ap.add_argument("--paper", action="store_true", help="PAPER (fara bani, fara wallet)")
+    ap.add_argument("--paper", action="store_true", help="PAPER (no money, no wallet)")
     ap.add_argument("--price", action="store_true")
     ap.add_argument("--balance", action="store_true")
     ap.add_argument("--positions", action="store_true")
@@ -106,7 +106,7 @@ def main() -> int:
 
     log("=== Hyperliquid bot ===")
     log(f"    coin         : {label}  ({coin} perp, levier {leverage}x)")
-    log(f"    wallet       : {'da' if os.environ.get('HL_SECRET_KEY') else 'NU (doar public/paper)'}")
+    log(f"    wallet       : {'yes' if os.environ.get('HL_SECRET_KEY') else 'NO (public/paper only)'}")
     log(f"    executie     : {'PAPER (fara bani)' if strat_dry else '⚠ REAL — BANI ADEVARATI'}")
     log(f"    ntfy/email   : {os.environ.get('NTFY_TOPIC') or '-'} / {os.environ.get('ALERT_TO_EMAIL') or '-'}")
 

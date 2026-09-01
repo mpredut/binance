@@ -66,7 +66,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
     """Read-only monitor of the REAL position: ZERO orders, only reads and alerts.
     Safe to run alongside the server bot for redundant supervision."""
     from notify import notify
-    log("=== MONITOR DN (read-only — nu plaseaza NICIUN ordin) ===")
+    log("=== DN MONITOR (read-only — it places NO orders) ===")
     log(f"    coin={params.coin}  verifica la {params.check_minutes} min  alerte: lichidare<{params.liq_alert_pct}%, delta, funding negativ, pozitie disparuta")
     armed = {"liq": True, "delta": True, "fund": True, "gone": True}
     errors = 0
@@ -89,7 +89,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
                 if armed["gone"]:
                     armed["gone"] = False
                     notify(title=f"👁 MONITOR {params.coin}: pozitia DN a disparut",
-                           body="Nu mai vad niciun picior pe cont. Verifica botul de pe server!",
+                           body="No leg is visible on the account any more. Check the bot on the server!",
                            source="dn-watch", desktop=desktop)
             else:
                 armed["gone"] = True
@@ -108,7 +108,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
                     if 0 < dist <= params.liq_alert_pct and armed["liq"]:
                         armed["liq"] = False
                         notify(title=f"👁 MONITOR {params.coin}: short la {dist:.1f}% de LICHIDARE",
-                               body=f"p{perp_px:.2f} liq{liq:.2f} — daca serverul nu reduce singur, intervino!",
+                               body=f"p{perp_px:.2f} liq{liq:.2f} — if the server does not reduce on its own, step in!",
                                source="dn-watch", desktop=desktop)
                     elif dist > params.liq_alert_pct * 1.5:
                         armed["liq"] = True
@@ -154,13 +154,13 @@ def main() -> int:
     ap.add_argument("--funding", action="store_true", help="Arata funding-ul curent si iese")
     ap.add_argument("--status", action="store_true", help="Arata picioarele + delta si iese")
     ap.add_argument("--watch", action="store_true",
-                    help="MONITOR read-only al pozitiei reale: zero ordine, doar alerte. "
+                    help="read-only MONITOR of the real position: zero orders, alerts only. "
                          "Sigur in paralel cu botul de pe server.")
     ap.add_argument("--once", action="store_true", help="(cu --watch) o singura verificare si iese")
     ap.add_argument("--close", action="store_true",
                     help="IESIRE: vinde TOT spot-ul + acopera TOT short-ul (flat), apoi iese. "
                          "Real daca STRAT_EXECUTE=true (altfel/--paper = simulare). "
-                         "OPRESTE intai botul+watchdog (vezi dn_close.sh) ca sa nu se bata cu el.")
+                         "STOP the bot and watchdog first (see dn_close.sh) so they do not fight it.")
     args = ap.parse_args()
     if args.watch:
         single_instance("dn_watch")            # separate watcher process uses its own lock
@@ -197,7 +197,7 @@ def main() -> int:
         dn = DeltaNeutral(client, params, dry_run=dry, desktop=False)
         L = dn.legs()
         if L is None:
-            log("  [--close] nu pot citi picioarele (API?) — NU inchid orbeste"); return 1
+            log("  [--close] cannot read the legs (API?) — NOT closing blindly"); return 1
         log(f"  [--close] inchid pozitia ({'PAPER (simulare)' if dry else '⚠ REAL — BANI ADEVARATI'}): "
             f"spot={L['spot_qty']:.4f} perp={L['perp_szi']:.4f}")
         dn._close(L, "inchidere manuala --close")

@@ -34,8 +34,8 @@ class TestTradeCooldown(unittest.TestCase):
         self.assertTrue(tc.reserve_trade("BUY", "TAOUSDC", cooldown_sec=180)[0])
 
     def test_allowed_after_cooldown(self):
-        # Ceas controlat, nu sleep real: evită flake la ajustări de wall-clock/NTP
-        # și testează exact semantica pragului (permis după expirare).
+        # A controlled clock, not a real sleep: avoids flakiness on wall-clock/NTP
+        # adjustments and tests the threshold semantics exactly (allowed after expiry).
         with mock.patch("lock.cooldown.time.time") as now:
             now.return_value = 1_000.0
             self.assertTrue(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=1)[0])
@@ -45,7 +45,7 @@ class TestTradeCooldown(unittest.TestCase):
 
     def test_release_unblocks(self):
         self.assertTrue(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)[0])
-        tc.release_trade("BTCUSDC")                 # ordin eșuat → eliberat
+        tc.release_trade("BTCUSDC")                 # failed order -> released
         self.assertTrue(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)[0])  # din nou permis
 
     def test_update_binance_order_id(self):
@@ -54,12 +54,12 @@ class TestTradeCooldown(unittest.TestCase):
         self.assertIn("12345", tc.describe_last_trade("BTCUSDC"))
 
     def test_concurrent_threads_single_winner(self):
-        # 20 de thread-uri lansează simultan pe ACELAȘI simbol → exact UNUL trece
+        # 20 threads fire at once on the SAME symbol -> exactly ONE gets through
         results = []
         barrier = threading.Barrier(20)
 
         def attempt():
-            barrier.wait()                          # pornesc toate odată
+            barrier.wait()                          # they all start together
             ok, _ = tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)
             results.append(ok)
 
@@ -68,7 +68,7 @@ class TestTradeCooldown(unittest.TestCase):
             t.start()
         for t in threads:
             t.join()
-        self.assertEqual(sum(1 for r in results if r), 1)   # un singur câștigător
+        self.assertEqual(sum(1 for r in results if r), 1)   # a single winner
 
     def test_concurrent_processes_single_winner(self):
         # Spawn avoids forking the suite's background threads on Python 3.14 while
@@ -84,37 +84,37 @@ class TestTradeCooldown(unittest.TestCase):
         results = [q.get() for _ in range(10)]
         q.close()
         q.join_thread()
-        self.assertEqual(sum(1 for r in results if r), 1)   # un singur câștigător
+        self.assertEqual(sum(1 for r in results if r), 1)   # a single winner
 
     # ─── RAII / trade_slot ────────────────────────────────────────────────────
     def test_slot_commit_keeps_reservation(self):
         with tc.trade_slot("BUY", "BTCUSDC", cooldown_sec=180) as slot:
             self.assertTrue(slot.allowed)
             slot.commit(999)                         # ordin plasat
-        # commit → rezervarea RĂMÂNE → al doilea e blocat
+        # commit -> the reservation STAYS -> the second one is blocked
         self.assertFalse(tc.reserve_trade("SELL", "BTCUSDC", cooldown_sec=180)[0])
 
     def test_slot_no_commit_auto_releases(self):
         with tc.trade_slot("BUY", "BTCUSDC", cooldown_sec=180) as slot:
             self.assertTrue(slot.allowed)
-            # NU facem commit (ca și cum ordinul a eșuat / am uitat)
-        # auto-release la ieșire → din nou permis
+            # we do NOT commit (as if the order failed, or we forgot)
+        # auto-release on exit -> allowed again
         self.assertTrue(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)[0])
 
     def test_slot_exception_auto_releases(self):
         with self.assertRaises(RuntimeError):
             with tc.trade_slot("BUY", "BTCUSDC", cooldown_sec=180) as slot:
                 self.assertTrue(slot.allowed)
-                raise RuntimeError("plasare a crăpat")   # excepție → rollback automat
+                raise RuntimeError("placement crashed")   # exception -> automatic rollback
         self.assertTrue(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)[0])
 
     def test_slot_blocked_does_not_release_existing(self):
-        # primul rezervă; al doilea slot e blocked → la ieșire NU trebuie să șteargă
+        # the first reserves; the second slot is blocked -> on exit it must NOT delete
         # rezervarea primului
         self.assertTrue(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)[0])
         with tc.trade_slot("SELL", "BTCUSDC", cooldown_sec=180) as slot:
             self.assertFalse(slot.allowed)
-        # rezervarea inițială încă activă
+        # the initial reservation is still active
         self.assertFalse(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)[0])
 
     def test_get_last_trade_age(self):
@@ -154,7 +154,7 @@ class TestTradeCooldown(unittest.TestCase):
             self.assertFalse(outsider.allowed)
         self.assertFalse(
             tc.reserve_trade("SELL", "TAOUSDC", cooldown_sec=180)[0],
-            "o ordine fara pair_id nu trebuie sa ocoleasca perechea activa")
+            "an order without a pair_id must not bypass the active pair")
 
     def test_failed_second_leg_rolls_back_only_that_leg(self):
         with tc.trade_slot("BUY", "TAOUSDC", cooldown_sec=180,

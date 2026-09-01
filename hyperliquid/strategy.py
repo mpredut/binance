@@ -291,7 +291,7 @@ class Strategy:
             agg = price * (1 - self.sign * 0.005)           # aggressive price for reliable fill
             self._place("close", self.s["qty"], agg, "STOP")
             notify(title=f"🛑 SL {self.coin} -{loss_pct:.1f}%",
-                   body=f"pierdere {loss_pct:.1f}% ≥prag{self.p.stop_loss_pct}% — inchis pozitia",
+                   body=f"loss {loss_pct:.1f}% >=threshold{self.p.stop_loss_pct}% — position closed",
                    source="hyperliquid", price=price, desktop=self.desktop)
             return True
         return False

@@ -1,12 +1,12 @@
 """
 Teste pentru tradeall.py — PriceWindow, PriceTrendAnalyzer, TrendState
-și integrarea cu Cache24PriceManager.
+and the integration with Cache24PriceManager.
 
 Acoperire:
   - PriceTrendAnalyzer: linreg, gradient, date insuficiente
   - PriceWindow: sample_rate_sec, recent_n, process_price, get_trend (4 valori)
   - PriceWindow.from_cache24: factory din Cache24PriceManager cu date reale
-  - PriceWindow._sample_rate_from_entries: calcul rată din timestamp-uri
+  - PriceWindow._sample_rate_from_entries: rate computed from timestamps
   - TrendState: lifecycle complet
   - TrendState: cooldown per instanta de trend (fire_limit_reached/mark_confirmed
     cu FIRE_MAX_PER_TREND executii, can_retry_fire/mark_fire_attempt cu
@@ -17,7 +17,7 @@ import os, sys, json, time, tempfile, threading, unittest
 from collections import deque
 from unittest.mock import MagicMock, patch
 
-# ── mock-uri pentru dependențele externe (înainte de orice import local) ───
+# ── mocks for the external dependencies (before any local import) ─────────
 _mock_bapi = MagicMock()
 _mock_bapi.get_current_price = MagicMock(return_value=60000.0)
 _mock_bapi.cancel_order      = MagicMock(return_value=True)
@@ -55,13 +55,13 @@ _BINANCE_CHILDREN = ("bapi", "bapi_trades", "bapi_allorders", "bapi_placeorder")
 sys.modules.update(_IMPORT_MOCKS)
 
 try:
-    # cacheManager pornește un WS thread la import — îl blocăm
+    # cacheManager starts a WS thread at import — we block it
     with patch("cacheManager._initialize_once", return_value=None):
         import cacheManager as cm
     import tradeall as ta
 finally:
-    # Colectarea pytest importă toate fișierele înainte să ruleze testele. Fără
-    # restaurare, mock-urile de venue ar schimba testele Binance colectate înainte.
+    # pytest collection imports every file before running the tests. Without
+    # restoring, the venue mocks would change the Binance tests collected earlier.
     for _name in _IMPORT_MOCKS:
         sys.modules.pop(_name, None)
     sys.modules.update(_PRELOADED_IMPORTS)
@@ -143,7 +143,7 @@ def _window(prices, sample_rate=0.8, symbol="BTCUSDT"):
 
 
 def _make_cache24_manager(symbol, entries, tmp_dir):
-    """Creează un Cache24PriceManager pre-populat cu entries = [[ts_ms, price], ...]."""
+    """Create a Cache24PriceManager pre-populated with entries = [[ts_ms, price], ...]."""
     fname = os.path.join(tmp_dir, f"cache_24_{symbol}.json")
     with open(fname, "w") as f:
         json.dump({"items": {symbol: entries}, "fetchtime": {}}, f)
@@ -158,7 +158,7 @@ def _make_cache24_manager(symbol, entries, tmp_dir):
 
 def _synthetic_entries(n=100, start_price=60000.0, delta=10.0,
                        interval_ms=800, start_ts_ms=None):
-    """Generează n intrări [ts_ms, price] cu interval și delta constante."""
+    """Generate n [ts_ms, price] entries with a constant interval and delta."""
     if start_ts_ms is None:
         start_ts_ms = int(time.time() * 1000) - n * interval_ms
     return [
@@ -247,7 +247,7 @@ class TestPriceWindowSampleRate(unittest.TestCase):
         self.assertEqual(pw.window_size, 50)   # neschimbat
 
     def test_set_sample_rate_resizes_to_target_duration(self):
-        # țintă 60s; la rate 1s → ~60 sample, la rate 2s → ~30 sample
+        # target 60s; at a 1s rate -> ~60 samples, at 2s -> ~30 samples
         pw = ta.PriceWindow("BTCUSDT", 60, sample_rate_sec=1.0, window_seconds=60.0)
         pw.set_sample_rate(2.0)
         self.assertEqual(pw.window_size, 30)
@@ -260,7 +260,7 @@ class TestPriceWindowSampleRate(unittest.TestCase):
         pw.set_sample_rate(4.0)   # 100/4 = 25 sample
         self.assertEqual(pw.window_size, 25)
         self.assertEqual(len(pw.prices), 25)
-        self.assertIn(99.0, pw.prices)        # cele mai recente păstrate
+        self.assertIn(99.0, pw.prices)        # the most recent ones are kept
         self.assertEqual(len(pw.sorted_prices), len(pw.prices))
 
     def test_set_sample_rate_ignores_invalid(self):
@@ -345,8 +345,8 @@ class TestPriceWindowFromCache24(unittest.TestCase):
         self.assertLess(gc, 0)
 
     def test_window_within_24h_only(self):
-        # Intrări mai vechi de 24h ar fi eliminate de Cache24PriceManager._trim_old_data
-        # Verificăm că from_cache24 cu window>24h nu crează ferestre imposibil de mari
+        # Entries older than 24h would be dropped by Cache24PriceManager._trim_old_data
+        # We check that from_cache24 with window>24h does not create impossibly large windows
         entries = _synthetic_entries(100, interval_ms=800)
         max_seconds = cm.Cache24PriceManager.KEEP_HOURS * 3600
         pw = self._make(entries, window_seconds=max_seconds)
@@ -358,7 +358,7 @@ class TestPriceWindowFromCache24(unittest.TestCase):
         self.assertGreaterEqual(pw.window_size, 10)
 
     def test_small_window_detects_reversal_before_large_window(self):
-        """Scenariu determinist: trend lung UP, urmat de o inversare recentă DOWN."""
+        """Deterministic scenario: a long UP trend followed by a recent DOWN reversal."""
         now_ms = int(time.time() * 1000)
         prices = [100.0 + i for i in range(100)]
         prices.extend(prices[-1] - i for i in range(1, 21))
@@ -415,14 +415,14 @@ class TestPriceWindowGetTrend(unittest.TestCase):
                 self.assertAlmostEqual(gradient, 0.0, places=6)
 
     def test_recent_gradient_captures_late_reversal(self):
-        # Trend general UP, dar ultimele 5 prețuri cad brusc
+        # Overall UP trend, but the last 5 prices drop sharply
         prices = [100 + i for i in range(30)] + [129 - i * 8 for i in range(1, 6)]
         pw = _window(prices, sample_rate=0.8)
         _, _, _, gr = pw.get_trend()
         self.assertLess(gr, 0)   # momentumul recent e negativ
 
     def test_slope_full_sees_whole_window(self):
-        # Trend general UP chiar dacă ultimele 2 prețuri scad ușor
+        # Overall UP trend even though the last 2 prices dip slightly
         prices = [100 + i for i in range(30)] + [129, 128]
         pw = _window(prices)
         _, _, sf, _ = pw.get_trend()
@@ -563,8 +563,8 @@ class TestCacheCurrentPriceFrequency(unittest.TestCase):
             sync_ts=9999, symbols=["BTCUSDT"],
             filename=fname, ws_manager=None, api_client=mock_bapi,
         )
-        # Construcția (fișier lipsă → fetch init) poate înregistra un timestamp.
-        # Pornim măsurătoarea frecvenței curată pentru a testa mecanismul izolat.
+        # Construction (missing file -> init fetch) can record a timestamp.
+        # We start the frequency measurement clean to test the mechanism in isolation.
         self.mgr._update_timestamps.clear()
 
     def test_empty_state_uses_fallback_and_zero_frequency(self):
@@ -578,7 +578,7 @@ class TestCacheCurrentPriceFrequency(unittest.TestCase):
         self.mgr.on_items_update("BTCUSDT", [60001.0])
         elapsed = time.time() - t0
         rate = self.mgr.get_sample_rate("BTCUSDT", fallback=9.9)
-        # rata măsurată ≈ intervalul real dintre cele 2 update-uri (nu fallback-ul)
+        # the measured rate is approximately the real interval between the 2 updates (not the fallback)
         self.assertGreater(rate, 0.0)
         self.assertLess(rate, 9.9)                  # nu e fallback-ul
         self.assertLessEqual(rate, elapsed + 0.5)   # robust la jitter de scheduling
@@ -598,11 +598,11 @@ class TestCacheCurrentPriceFrequency(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Subscriber pattern moștenit din CacheManagerInterface + atașare WS
+# Subscriber pattern inherited from CacheManagerInterface + WS attachment
 # ═══════════════════════════════════════════════════════════════════════════
 
 class _FakeWSManager:
-    """Mimează BinanceWebSocketManager: subscribe(sub) + push() → on_items_update."""
+    """Mimics BinanceWebSocketManager: subscribe(sub) + push() -> on_items_update."""
     def __init__(self):
         self._subs = []
     def subscribe(self, sub):
@@ -657,7 +657,7 @@ class TestSubscriberPatternInheritance(unittest.TestCase):
         rec = _RecordingSubscriber()
         mgr.subscribe_price(rec)
 
-        ws.push("BTCUSDT", 67000.0)   # simulează un tick WS
+        ws.push("BTCUSDT", 67000.0)   # simulates a WS tick
         self.assertIn(("BTCUSDT", 67000.0), rec.events)
 
     def test_attach_ws_manager_idempotent(self):
@@ -677,7 +677,7 @@ class TestSubscriberPatternInheritance(unittest.TestCase):
             sync_ts=9999, symbols=["BTCUSDT"],
             filename=fname, ws_manager=None, api_client=mock_bapi,
         )
-        self.assertFalse(mgr._ws_is_healthy())   # niciun event încă
+        self.assertFalse(mgr._ws_is_healthy())   # no event yet
         mgr.on_items_update("BTCUSDT", [50000.0])
         self.assertTrue(mgr._ws_is_healthy())    # WS marcat activ
 
@@ -692,7 +692,7 @@ class TestPriceWindowCache24Wiring(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
 
     def _make_wired(self, entries, symbol="BTCUSDT", window_seconds=None):
-        """Creează Cache24PriceManager + PriceWindow abonat la el."""
+        """Create a Cache24PriceManager plus a PriceWindow subscribed to it."""
         mgr = _make_cache24_manager(symbol, entries, self.tmp)
         if window_seconds is None:
             window_seconds = len(entries) * 0.8
@@ -716,7 +716,7 @@ class TestPriceWindowCache24Wiring(unittest.TestCase):
         self.assertEqual(len(pw.prices), min(n_before + 1, pw.window_size))
 
     def test_cache24_notifies_pricewindow(self):
-        """Când Cache24PriceManager primește un preț nou, PriceWindow e actualizat automat."""
+        """When Cache24PriceManager receives a new price, PriceWindow is updated automatically."""
         entries = _synthetic_entries(10)
         pw, mgr = self._make_wired(entries, symbol="BTCUSDT")
         n_before = len(pw.prices)
@@ -735,7 +735,7 @@ class TestPriceWindowCache24Wiring(unittest.TestCase):
         self.assertEqual(len(pw.prices), n_before)  # nu s-a actualizat
 
     def test_multiple_windows_same_cache24(self):
-        """Două ferestre (mică și mare) pot fi abonate la același Cache24."""
+        """Two windows (small and large) can subscribe to the same Cache24."""
         entries = _synthetic_entries(50)
         mgr = _make_cache24_manager("BTCUSDT", entries, self.tmp)
         pw_small = ta.PriceWindow.from_cache24("BTCUSDT", 20 * 0.8, mgr)
@@ -852,14 +852,14 @@ class TestWindowAnalyzer(unittest.TestCase):
         self.assertIsNotNone(max_pos)
 
     def test_analyze_price_movement_returns_tuple(self):
-        # logica complicată restaurată — trebuie să întoarcă (slope, price_diff)
+        # the complicated logic restored — it must return (slope, price_diff)
         pw = _window([100 + i for i in range(20)])
         an = ta.WindowAnalyzer(pw)
         result = an._analyze_price_movement(100, 0, 119, 19, 119, 19, 19.0)
         self.assertEqual(len(result), 2)
 
     def test_analyzer_shares_window_mutation(self):
-        # compoziție: analyzer vede modificările ferestrei (același obiect)
+        # composition: the analyzer sees the window's changes (the same object)
         pw = _window([100, 101, 102])
         an = ta.WindowAnalyzer(pw)
         before = pw.get_max()
@@ -889,7 +889,7 @@ class TestTrendCoordinator(unittest.TestCase):
         )
         self.cpm.on_items_update("BTCUSDT", [60000.0])
 
-        # Managerul deține ferestrele + calc + cache cross-process
+        # The manager owns the windows + calc + cross-process cache
         self.mgr = cm.CachePriceShortTrendManager(["BTCUSDT"], os.path.join(self.tmp, "trend.json"))
         self.mgr.start_computation({"BTCUSDT": self.cache24}, self.cpm)
 
@@ -983,7 +983,7 @@ class TestTrendCoordinator(unittest.TestCase):
         self.assertIn("slope_big", manager_snapshot)
 
     def test_manager_tick_publishes_instant_gradient(self):
-        # canalul rapid e în MANAGER: on_price_update publică gradientul, sub
+        # the fast channel lives in the MANAGER: on_price_update publishes the gradient, under
         # gradient_recent_fast (29 iul: gradient_recent e acum EXCLUSIV al caii
         # lente, evaluate_full — vezi cachemanager-trend-race-investigation).
         self.mgr.on_price_update("BTCUSDT", int(time.time() * 1000), 60500.0)
@@ -1008,7 +1008,7 @@ class TestTrendCoordinator(unittest.TestCase):
         self.assertIn(61234.0, win.prices)
 
     def test_concurrent_update_and_read_no_crash(self):
-        """WS thread actualizează fereastra în timp ce evaluarea citește."""
+        """A WS thread updates the window while the evaluation reads it."""
         import threading as _t
         coord = self._make_coord()
         stop = _t.Event()
@@ -1043,7 +1043,7 @@ class TestTrendCoordinator(unittest.TestCase):
         stop.set()
         for th in threads:
             th.join(timeout=5)
-        self.assertEqual(errors, [], f"Erori de concurență: {errors[:3]}")
+        self.assertEqual(errors, [], f"concurrency errors: {errors[:3]}")
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

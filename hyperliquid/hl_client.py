@@ -73,7 +73,7 @@ class HLClient:
                  mainnet: bool = True):
         if not _SDK_OK:
             raise HLError(f"SDK Hyperliquid indisponibil: {_SDK_ERR} "
-                          f"(ruleaza cu python-ul din .venv)")
+                          f"(run it with the python from .venv)")
         self.base = constants.MAINNET_API_URL if mainnet else constants.TESTNET_API_URL
         self.info = Info(self.base, skip_ws=True)
         # RESILIENCE: the SDK has no read timeout. Fail Info reads (mid/spot_mid/
@@ -306,7 +306,7 @@ class HLClient:
                     reduce_only: bool = False) -> tuple[bool, int | None, str]:
         """Place a GTC LIMIT order and return (ok, oid, message)."""
         if not self.exchange:
-            raise HLError("Fara agent wallet (HL_SECRET_KEY) — nu pot plasa ordine")
+            raise HLError("No agent wallet (HL_SECRET_KEY) — orders cannot be placed")
         sz = round(sz, self.sz_decimals(coin))
         px = _round_px(px, self.sz_decimals(coin))
         try:

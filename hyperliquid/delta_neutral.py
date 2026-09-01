@@ -173,7 +173,7 @@ class DeltaNeutral:
                 self.s["spot_qty"] = spot_qty   # Persist real live position rather than paper zero.
                 self.s["perp_szi"] = perp_szi
             except Exception as e:  # noqa: BLE001
-                log(f"  [DN] citirea contului a esuat ({e}) — sar peste tick (nu ghicesc)")
+                log(f"  [DN] reading the account failed ({e}) — skipping this tick (no guessing)")
                 return None
         return {"spot_px": spot_px, "perp_px": perp_px, "funding": funding,
                 "spot_qty": spot_qty, "perp_szi": perp_szi}
@@ -199,7 +199,7 @@ class DeltaNeutral:
             if self.s["order_fails"] == 3:
                 notify(title=f"⚠ DN {self.p.coin}: 3 ordine esuate consecutiv",
                        body="Verifica marginea/colateralul pe Hyperliquid. "
-                            "Botul continua sa incerce (fara sa dubleze nimic).",
+                            "The bot keeps retrying (without duplicating anything).",
                        source="dn", desktop=self.desktop)
 
     def _buy_spot(self, sz: float, px: float):
@@ -411,7 +411,7 @@ class DeltaNeutral:
             log(f"  ! [DN] ALTA INSTANTA ruleaza deja pe {self.p.coin} — IES (anti-dublare)")
             notify(title=f"DN {self.p.coin}: instanta dubla refuzata",
                    body="Un alt dn_bot ruleaza deja pe aceeasi moneda/stare. "
-                        "Aceasta instanta s-a oprit singura ca sa nu dubleze ordinele.",
+                        "This instance stopped itself so it would not duplicate the orders.",
                    source="dn", desktop=self.desktop)
             return
         log("  === DELTA-NEUTRAL PORNIT ===")
@@ -435,7 +435,7 @@ class DeltaNeutral:
                 log(f"  ! [DN] eroare neasteptata (#{errors} consecutiv): {e!r} — botul continua")
                 if errors == 3:
                     notify(title=f"⚠ DN {self.p.coin}: erori repetate",
-                           body=f"{e!r}\nBotul ruleaza in continuare si reincearca cu backoff.",
+                           body=f"{e!r}\nThe bot keeps running and retries with backoff.",
                            source="dn", desktop=self.desktop)
                 try:
                     self._save()
@@ -506,7 +506,7 @@ class DeltaNeutral:
 
         if self.s["status"] == "flat":
             if now < self.s.get("cooldown_until", 0):
-                log(f"  [DN] in cooldown dupa un incident ({(self.s['cooldown_until']-now)/60:.0f} min ramase) — nu redeschid")
+                log(f"  [DN] in cooldown after an incident ({(self.s['cooldown_until']-now)/60:.0f} min left) — not reopening")
             elif avg_f >= self.p.entry_funding_hr:
                 self._open(L)
             else:

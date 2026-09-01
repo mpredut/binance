@@ -1,14 +1,14 @@
 """
-Testează comportamentul thread-ului de fallback din CacheCurrentPriceManager.
+Tests the behaviour of the fallback thread in CacheCurrentPriceManager.
 
 Scenarii:
-  1. La startup cu cache încărcat din fișier, thread-ul NU suprascrie imediat.
-  2. Dacă WS e sănătos, thread-ul NU face HTTP poll.
-  3. Dacă WS e mort, thread-ul FACE HTTP poll după sync_ts.
-  4. Dacă WS revine, thread-ul se oprește din polling.
+  1. At startup with a cache loaded from file, the thread does NOT overwrite immediately.
+  2. If the WS is healthy, the thread does NOT poll over HTTP.
+  3. If the WS is dead, the thread DOES poll over HTTP after sync_ts.
+  4. If the WS comes back, the thread stops polling.
 
-Izolare: fiecare test folosește un MagicMock local pentru api_client,
-evitând cross-contamination cauzată de thread-uri daemon rămase active.
+Isolation: each test uses a local MagicMock for api_client, avoiding the
+cross-contamination caused by daemon threads left running.
 """
 import os, sys, json, time, tempfile, unittest, threading
 from unittest.mock import MagicMock
@@ -37,14 +37,14 @@ def _saved_file(tmp_dir, price, ts_ms=None):
 
 
 def _make_mgr(filename, sync_ts, api_mock):
-    """Creează manager cu mock propriu — izolat de alte teste."""
+    """Create a manager with its own mock — isolated from the other tests."""
     return cm.CacheCurrentPriceManager(
         sync_ts=sync_ts,
         symbols=SYMBOLS,
         filename=filename,
         ws_manager=None,
         api_client=api_mock,
-        market_api=api_mock,   # fetch-ul HTTP trece prin fațada market-data (injectabilă)
+        market_api=api_mock,   # the HTTP fetch goes through the market-data facade (injectable)
     )
 
 
@@ -66,12 +66,12 @@ class TestFallbackThreadBehavior(unittest.TestCase):
         manager.periodic_sync(save_state=False)
         return manager
 
-    # ── Test 1: cache-ul din fișier NU e suprascris imediat ──────────────────
+    # ── Test 1: the cache from file is NOT overwritten immediately ───────────
 
     def test_loaded_cache_not_overwritten_immediately(self):
         """
-        Un manager nou cu sync_ts mare nu trebuie să suprascrie
-        cache-ul încărcat din fișier înainte de primul sleep.
+        A fresh manager with a large sync_ts must not overwrite the cache
+        loaded from file before the first sleep.
         """
         fname = _saved_file(self.tmp, price=99000.0)
         api_mock = MagicMock()
@@ -82,37 +82,37 @@ class TestFallbackThreadBehavior(unittest.TestCase):
         with mgr.lock:
             entries = mgr.cache.get("BTCUSDC", [])
 
-        self.assertTrue(entries, "Cache gol după load din fișier")
+        self.assertTrue(entries, "empty cache after loading from file")
         self.assertEqual(
             entries[0][1], 99000.0,
-            f"Prețul din cache e {entries[0][1]}, nu 99000.0 — thread-ul a suprascris imediat!"
+            f"The cached price is {entries[0][1]}, not 99000.0 — the thread overwrote it immediately!"
         )
         api_mock.get_current_price.assert_not_called()
 
-    # ── Test 2: WS sănătos → NO HTTP poll ────────────────────────────────────
+    # ── Test 2: healthy WS -> NO HTTP poll ──────────────────────────────────
 
     def test_ws_healthy_skips_http_poll(self):
         """
-        Dacă WS e sănătos (_ws_last_event_ts recent),
-        thread-ul NU face HTTP poll pe toată durata testului.
+        If the WS is healthy (_ws_last_event_ts recent),
+        the thread does NOT poll over HTTP for the whole test.
         """
         fname = _saved_file(self.tmp, price=55000.0)
         api_mock = MagicMock()
         api_mock.get_current_price.return_value = 55000.0
 
         mgr = self._manager(fname, sync_ts=1, api_mock=api_mock)
-        mgr._ws_last_event_ts = time.time()   # WS proaspăt
+        mgr._ws_last_event_ts = time.time()   # fresh WS
 
         time.sleep(2.5)   # 2 cicluri complete
 
         api_mock.get_current_price.assert_not_called()
 
-    # ── Test 3: WS mort → face HTTP poll ─────────────────────────────────────
+    # ── Test 3: dead WS -> it polls over HTTP ───────────────────────────────
 
     def test_ws_dead_triggers_http_poll(self):
         """
-        Cu _ws_last_event_ts = 0 (WS niciodată activ),
-        thread-ul trebuie să polling HTTP după sync_ts secunde.
+        With _ws_last_event_ts = 0 (the WS never active),
+        the thread must poll over HTTP after sync_ts seconds.
         """
         fname = _saved_file(self.tmp, price=55000.0)
         api_mock = MagicMock()
@@ -125,11 +125,11 @@ class TestFallbackThreadBehavior(unittest.TestCase):
 
         api_mock.get_current_price.assert_called()
 
-    # ── Test 4: WS revine → poll se oprește ──────────────────────────────────
+    # ── Test 4: the WS returns -> polling stops ─────────────────────────────
 
     def test_ws_recovery_stops_polling(self):
         """
-        Dacă WS era mort și revine, thread-ul se oprește din polling.
+        If the WS was dead and comes back, the thread stops polling.
         """
         fname = _saved_file(self.tmp, price=55000.0)
         api_mock = MagicMock()
@@ -141,17 +141,17 @@ class TestFallbackThreadBehavior(unittest.TestCase):
         time.sleep(1.5)
         self.assertGreater(
             api_mock.get_current_price.call_count, 0,
-            "Niciun poll cu WS mort — thread-ul nu funcționează"
+            "no poll with a dead WS — the thread is not working"
         )
 
         # WS revine
         api_mock.get_current_price.reset_mock()
         mgr._ws_last_event_ts = time.time()
 
-        time.sleep(2.5)   # 2 cicluri — nu ar trebui să mai polling
+        time.sleep(2.5)   # 2 cycles — it should no longer poll
         self.assertEqual(
             api_mock.get_current_price.call_count, 0,
-            "Thread-ul continuă să polling după ce WS a revenit"
+            "the thread keeps polling after the WS came back"
         )
 
     def test_shutdown_stops_waiting_thread(self):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Suita de teste pt edge-case-urile botului delta-neutral (autonomie pe server).
-FARA API real, FARA bani: client fals, notificari capturate, stare in fisiere temp.
+NO real API, NO money: a fake client, captured notifications, state in temp files.
 
   /home/mariusp/binance/.venv/bin/python test_dn.py -v
 """
@@ -134,7 +134,7 @@ class TestPiciorOrfan(Base):
     def test_un_tick_suspect_nu_actioneaza(self):
         d = self.make(); self.opened(d)
         d.tick(L(spot_qty=2.0, perp_szi=0.0))      # perp "disparut" — o singura citire
-        self.assertEqual(self.c.orders, [], "anti-glitch: nu actioneaza din prima")
+        self.assertEqual(self.c.orders, [], "anti-glitch: it does not act on the first reading")
         self.assertEqual(d.s["orphan_count"], 1)
 
     def test_short_lichidat_inchide_spotul_dupa_confirmare(self):
@@ -180,7 +180,7 @@ class TestDriftSiDust(Base):
 
     def test_drift_mic_corecteaza_imediat(self):
         d = self.make(); self.opened(d)
-        d.tick(L(spot_qty=1.6, perp_szi=-2.0))     # -20% drift: peste toleranta, sub 50%, peste $10
+        d.tick(L(spot_qty=1.6, perp_szi=-2.0))     # -20% drift: above tolerance, below 50%, above $10
         buys = [o for o in self.c.orders if o[0] == "spot" and o[1] == "buy"]
         self.assertEqual(len(buys), 1, "driftul normal se corecteaza fara intarziere")
 
@@ -261,7 +261,7 @@ class TestInfrastructura(Base):
         d.tick(L(spot_qty=1.7, perp_szi=-1.71))
         self.assertEqual(d.s["status"], "open", "adopta in loc sa deschida dublu")
         self.assertAlmostEqual(d.s["target_sz"], 1.705, places=3)
-        self.assertEqual(self.c.orders, [], "adoptarea nu plaseaza ordine noi")
+        self.assertEqual(self.c.orders, [], "adoption places no new orders")
 
 
 class TestProtectieLichidare(Base):
