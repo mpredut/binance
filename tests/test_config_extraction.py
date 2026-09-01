@@ -232,7 +232,7 @@ class TestModuleSpecifics(unittest.TestCase):
         previous = os.environ.get(key)
         os.environ[key] = "15"
         try:
-            with self.assertRaisesRegex(ValueError, "sub primul prag SELL"):
+            with self.assertRaisesRegex(ValueError, "below the first SELL threshold"):
                 importlib.reload(ag)
         finally:
             if previous is None:

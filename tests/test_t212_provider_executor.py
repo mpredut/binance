@@ -93,7 +93,7 @@ class T212ExecutorContractTest(unittest.TestCase):
         self.assertEqual(self.fake.calls[-1], ("market", "NVDA_US_EQ", -0.25, False))
 
         os.environ["T212_LIVE_ORDERS"] = "false"
-        with self.assertRaisesRegex(ProviderError, "blocat"):
+        with self.assertRaisesRegex(ProviderError, "blocked"):
             self.provider.submit_order("NVDA_US_EQ", "buy", 0.5, price=119.25)
 
         os.environ["T212_LIVE_ORDERS"] = "true"
@@ -110,7 +110,7 @@ class T212ExecutorContractTest(unittest.TestCase):
 
         os.environ["T212_LIVE_ORDERS"] = "true"
         explicit_paper = T212Provider(client=self.fake, live_enabled=False)
-        with self.assertRaisesRegex(ProviderError, "blocat"):
+        with self.assertRaisesRegex(ProviderError, "blocked"):
             explicit_paper.submit_order("NVDA_US_EQ", "buy", 0.5, price=119.25)
 
     def test_validitatea_limita_poate_fi_injectata_de_profil(self):
@@ -168,7 +168,7 @@ class T212ExecutorContractTest(unittest.TestCase):
             "filledQuantity": 1.0, "filledValue": 120.0, "fee": 0.2,
             "_feeCurrencies": ["RON"],
         }
-        with self.assertRaisesRegex(ProviderError, "moneda ordinului"):
+        with self.assertRaisesRegex(ProviderError, "order currency"):
             self.provider.order_status("NVDA_US_EQ", "712")
 
     def test_cancel_confirmat_idempotent_terminal_si_neconfirmat(self):
@@ -186,7 +186,7 @@ class T212ExecutorContractTest(unittest.TestCase):
             "ticker": "NVDA_US_EQ", "status": "NEW",
             "filledQuantity": 0.0, "filledValue": 0.0,
         }
-        with self.assertRaisesRegex(ProviderError, "inca open"):
+        with self.assertRaisesRegex(ProviderError, "still open"):
             self.provider.cancel_order("NVDA_US_EQ", "712")
 
 

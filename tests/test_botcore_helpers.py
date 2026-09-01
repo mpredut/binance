@@ -60,7 +60,7 @@ class SharedHttpHelpersTest(unittest.TestCase):
                              (0, b""))
 
     def test_json_and_form_payloads_cannot_be_mixed(self):
-        with self.assertRaisesRegex(ValueError, "mutual exclusive"):
+        with self.assertRaisesRegex(ValueError, "mutually exclusive"):
             botcore.http_request(
                 "POST", "https://example.test", payload={"x": 1}, form={"x": 1}
             )

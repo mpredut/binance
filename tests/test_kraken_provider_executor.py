@@ -173,7 +173,7 @@ class KrakenExecutorContractTest(unittest.TestCase):
         self.fake.open_orders = lambda: {
             "BROKEN": {"status": "open", "vol": "1", "vol_exec": "0"},
         }
-        with self.assertRaisesRegex(ProviderError, "fara pair"):
+        with self.assertRaisesRegex(ProviderError, "without a pair"):
             self.p.open_orders("HYPEUSD")
 
     def test_cancel_deleaga(self):

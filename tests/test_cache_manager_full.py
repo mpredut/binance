@@ -898,7 +898,7 @@ class TestFactorySingletonWarning(unittest.TestCase):
         with contextlib.redirect_stdout(buf):
             m2 = cm.get_cache_manager("AssetValue", symbols=["OTHER"])
         self.assertIs(m1, m2)                       # Same instance.
-        self.assertIn("IGNORAT", buf.getvalue())    # Warning was emitted.
+        self.assertIn("IGNORED", buf.getvalue())    # Warning was emitted.
 
     def test_no_warning_same_symbols(self):
         cm.get_cache_manager("AssetValue", symbols=["TOTAL"])
@@ -906,7 +906,7 @@ class TestFactorySingletonWarning(unittest.TestCase):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             cm.get_cache_manager("AssetValue", symbols=["TOTAL"])
-        self.assertNotIn("IGNORAT", buf.getvalue())
+        self.assertNotIn("IGNORED", buf.getvalue())
 
 
 class TestAppendJsonlPersist(unittest.TestCase):
