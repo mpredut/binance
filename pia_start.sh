@@ -27,22 +27,22 @@ DIP_TOKEN="${PIA_DIP_TOKEN:-/home/predut/piatoken.txt}"
 
 sleep 5
 
-# `piactl connect` este ignorat IN TACERE cand nu ruleaza clientul grafic; pe server
-# nu ruleaza niciodata, deci modul background este obligatoriu (1 sep 2026: fara el
-# daemonul accepta RPC-ul "connectVPN" si ramane senin Disconnected).
+# `piactl connect` is SILENTLY ignored when no graphical client is running, and none
+# ever runs on the server, so background mode is mandatory (1 Sep 2026: without it
+# the daemon accepts the "connectVPN" RPC and stays calmly Disconnected).
 pia background enable || exit 1
 
-# Regiunea NU se mai hardcodeaza: la fiecare logout PIA sterge inregistrarea IP-ului
-# dedicat, iar la re-adaugare tokenul poate intoarce ALT IP (1 sep 2026: .86 -> .79).
-# Un id hardcodat devine atunci "Unknown region", `set region` esueaza si tunelul urca
-# pe un IP din pool -> Binance raspunde -2015. Deci intrebam daemonul care e regiunea.
+# The region is no longer hardcoded: on every logout PIA deletes the dedicated IP
+# registration, and a re-added token can return a DIFFERENT IP (1 Sep 2026: .86 -> .79).
+# A hardcoded id then becomes "Unknown region", `set region` fails and the tunnel comes
+# up on a pool IP -> Binance answers -2015. So we ask the daemon what the region is.
 if ! pia get regions 2>/dev/null | grep -q "^dedicated-"; then
     pia dedicatedip add "$DIP_TOKEN" || exit 1
     sleep 3
 fi
 DEDICATED=$(pia get regions 2>/dev/null | tr -d '\r' | grep -m1 "^dedicated-")
 if [ -z "$DEDICATED" ]; then
-    echo "Niciun IP dedicat inregistrat (token $DIP_TOKEN invalid?); systemd va reincerca."
+    echo "No dedicated IP registered (is token $DIP_TOKEN invalid?); systemd will retry."
     exit 1
 fi
 

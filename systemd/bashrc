@@ -5,26 +5,26 @@ export DISPLAY=192.168.0.104:0
 alias python='python3'
 cd /home/predut/binance
 
-# piactl FARA timeout atarna la login: daca pia-daemon e agatat (s-a intamplat
-# 34 de zile, aug-sep 2026), fiecare apel blocheaza ~5s si orice sesiune SSH devine
-# lenta exact cand ai nevoie sa intri ca sa depanezi. Vezi systemd/PIA.md.
+# piactl WITHOUT a timeout hangs the login: when pia-daemon is wedged (it was, for
+# 34 days, Aug-Sep 2026) every call blocks for ~5s and any SSH session becomes slow
+# exactly when you need to get in and debug. See systemd/PIA.md.
 pia() { timeout 5 piactl "$@" 2>/dev/null; }
 
-#PIA — regiunea NU se hardcodeaza: tokenul re-adaugat poate intoarce alt IP
-#      (sep 2026: .86 -> .79), iar un id fix devine "Unknown region".
+#PIA — the region is NOT hardcoded: a re-added token can return a different IP
+#      (Sep 2026: .86 -> .79), and a fixed id then becomes "Unknown region".
 #piactl dedicatedip add ~/piatoken.txt
 #piactl set region "$(piactl get regions | grep -m1 '^dedicated-')"
 #piactl set requestportforward true
 #piactl connect
 #
 
-# `pubip` este IP-ul conexiunii FIZICE (linia ISP-ului) si ramane pe el si cand
-# tunelul e perfect sanatos — afisat singur, parea ca serverul iese neprotejat.
-# Pentru whitelist-ul cheilor Binance conteaza `vpnip`: IP-ul prin care ies cererile.
+# `pubip` is the PHYSICAL link's IP (the ISP line) and stays on it even when the
+# tunnel is perfectly healthy — shown on its own it looked like the server was
+# leaving unprotected. What matters for the Binance key whitelist is `vpnip`.
 printf "🔐 VPN State      : %s\n" "$(pia get connectionstate)"
 printf "🔌 Port Forward   : %s\n" "$(pia get portforward)"
-printf "🌍 IP iesire VPN  : %s\n" "$(pia get vpnip)"
-printf "🏠 IP fizic ISP   : %s\n" "$(pia get pubip)"
+printf "🌍 VPN exit IP    : %s\n" "$(pia get vpnip)"
+printf "🏠 ISP link IP    : %s\n" "$(pia get pubip)"
 
 #source myenv/bin/activate && python demon.py && deactivate
 #nohup python3 demon.py &

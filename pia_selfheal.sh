@@ -1,47 +1,55 @@
 #!/bin/bash
-# pia_selfheal.sh — reparare automata a VPN-ului PIA + alerta care ajunge chiar
-# daca defectul e "nu mai am internet".
+# pia_selfheal.sh — automatic recovery of the PIA VPN, plus an alert that still
+# arrives when the failure itself is "the box has no internet".
 #
-# DE CE EXISTA: incident 1 sep 2026 — pia-daemon a crapat pe "Too many open files"
-# si a ramas proces-fantoma; orice `piactl` returna "Timed out after 5 sec". Fara
-# tun0, killswitch-ul PIA a taiat TOT traficul de iesire. Consecinte in lant:
-#   - pia.service a intrat in bucla de restart (a ajuns la 6975 reporniri);
-#   - binance.service are Requires=pia.service, deci flota_start.sh se bloca la
-#     gardul "Verific conexiunea VPN" si NU pornea niciunul dintre cei 7 membri,
-#     desi `systemctl is-active binance.service` raporta senin "active";
-#   - NICIO alerta n-a ajuns la telefon: ntfy.sh se atinge tot prin internet, iar
-#     internetul era exact ce lipsea (278 x "EROARE curl" in logs/deadman.log).
-# A stat asa ~34 de zile fara ca cineva sa afle.
+# WHY THIS EXISTS: incident of 1 Sep 2026. pia-daemon crashed on "Too many open
+# files" and stayed behind as a ghost process; every `piactl` call returned
+# "Timed out after 5 sec". With no tun0, the PIA killswitch cut ALL outbound
+# traffic. The chain of consequences:
+#   - pia.service went into a restart loop (it reached 6975 restarts);
+#   - binance.service has Requires=pia.service, so flota_start.sh blocked on its
+#     "checking the VPN connection" gate and started NONE of the 7 fleet members,
+#     while `systemctl is-active binance.service` cheerfully reported "active";
+#   - NO alert ever reached the phone: ntfy.sh is reached over the internet, and
+#     the internet was precisely what was missing (278 x "EROARE curl" in
+#     logs/deadman.log).
+# It stayed like that for ~34 days without anyone finding out.
 #
-# PRINCIPIUL: intai repara, apoi raporteaza. Alertele se pun intr-un SPOOL pe disc
-# si se golesc cand conectivitatea revine, deci povestea completa a caderii ajunge
-# la telefon chiar daca in timpul ei nu putea iesi niciun pachet.
+# THE PRINCIPLE: repair first, report afterwards. Alerts are written to a SPOOL on
+# disk and drained once connectivity returns, so the full story of the outage
+# reaches the phone even though not a single packet could leave during it.
 #
-# Rulare (cron root, la 5 min):
+# Scheduling (root crontab, every 5 minutes):
 #   */5 * * * * /home/predut/binance/pia_selfheal.sh >> /home/predut/binance/logs/pia_selfheal.log 2>&1
-# Manual:
-#   ./pia_selfheal.sh --check   # doar diagnostic, nu atinge nimic
-#   ./pia_selfheal.sh --force   # forteaza scara de reparare chiar daca pare sanatos
+# Manual use:
+#   ./pia_selfheal.sh --check   # diagnostics only, touches nothing
+#   ./pia_selfheal.sh --force   # run the recovery ladder even if things look healthy
+#
+# Note on language: comments and log lines are English, per CLAUDE.md. The ntfy
+# alert bodies stay Romanian on purpose — they land on the operator's phone next to
+# the alerts from healthcheck.sh and deadman_switch.sh, and translating them would
+# change what the operator reads, which is a behaviour change rather than a cleanup.
 
 set -u
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 STATE_DIR="/var/lib/pia_selfheal"
-SPOOL="$STATE_DIR/alert_spool"          # alerte nelivrate (internetul era jos)
-OUTAGE_MARK="$STATE_DIR/outage_since"   # timestampul inceputului caderii
+SPOOL="$STATE_DIR/alert_spool"          # Alerts that could not be delivered.
+OUTAGE_MARK="$STATE_DIR/outage_since"   # Timestamp of when the outage started.
 REINSTALL_MARK="$STATE_DIR/last_reinstall"
 SPOOL_MAX_BYTES="${PIA_SPOOL_MAX_BYTES:-262144}"
 LOCK="/tmp/pia_selfheal.lock"
 
 PIA_USER="${PIA_USER:-predut}"
 PROBE_TIMEOUT="${PIA_PROBE_TIMEOUT:-8}"
-CLI_TIMEOUT="${PIA_CLI_TIMEOUT:-6}"     # peste asta = daemon agatat
-CONNECT_WAIT="${PIA_CONNECT_WAIT:-60}"  # cat asteptam un tunel dupa fiecare treapta
+CLI_TIMEOUT="${PIA_CLI_TIMEOUT:-6}"     # Longer than this means the daemon is wedged.
+CONNECT_WAIT="${PIA_CONNECT_WAIT:-60}"  # How long we wait for a tunnel after each rung.
 DIP_TOKEN="${PIA_DIP_TOKEN:-/home/$PIA_USER/piatoken.txt}"
 FALLBACK_REGION="${PIA_FALLBACK_REGION:-auto}"
-REINSTALL_COOLDOWN="${PIA_REINSTALL_COOLDOWN:-86400}"  # max o reinstalare/24h
-# Endpoint-ul "latest" al PIA intoarce HTML, nu installer, iar pia-linux-latest.run
-# da 403 — deci URL-ul trebuie versionat explicit. Bump-ul e o singura linie in .env.
+REINSTALL_COOLDOWN="${PIA_REINSTALL_COOLDOWN:-86400}"  # At most one reinstall per 24h.
+# PIA's "latest" endpoint returns HTML rather than an installer, and
+# pia-linux-latest.run answers 403, so the URL has to carry an explicit version.
+# Bumping it is a single line in .env.
 PIA_VERSION="${PIA_VERSION:-3.7.2-08420}"
 INSTALLER_URL="${PIA_INSTALLER_URL:-https://installers.privateinternetaccess.com/download/pia-linux-${PIA_VERSION}.run}"
 
@@ -51,13 +59,13 @@ case "$MODE" in
     --check) CHECK_ONLY=1 ;;
     --force) FORCE=1 ;;
     "") ;;
-    *) echo "Folosire: $0 [--check|--force]" >&2; exit 2 ;;
+    *) echo "Usage: $0 [--check|--force]" >&2; exit 2 ;;
 esac
 
 log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
 
-# piactl trebuie chemat ca utilizatorul proprietar al sesiunii PIA, nu ca root.
-# `timeout` este obligatoriu: cand daemonul e agatat, piactl blocheaza la nesfarsit.
+# piactl must be called as the user who owns the PIA session, not as root.
+# The `timeout` is mandatory: with a wedged daemon, piactl blocks forever.
 pia() {
     if [ "$(id -un)" = "$PIA_USER" ]; then
         timeout "$CLI_TIMEOUT" piactl "$@" 2>/dev/null | tr -d '\r'
@@ -66,15 +74,17 @@ pia() {
     fi
 }
 
-# ===== PROBE ==============================================================
-# Internet brut, fara DNS si fara tunel: separa "VPN picat" de "netul e jos".
+# ===== PROBES =============================================================
+# Raw internet, without DNS and without the tunnel: separates "the VPN is down"
+# from "the line is down".
 net_raw_ok() { curl --fail -s -m "$PROBE_TIMEOUT" -o /dev/null https://1.1.1.1 2>/dev/null; }
 
-# Daemonul raspunde? (starea patologica din incident: raspunde procesul, nu socketul)
+# Does the daemon answer at all? (the pathological state during the incident was a
+# live process with a dead control socket)
 daemon_responsive() { [ -n "$(pia get connectionstate)" ]; }
 
-# Sanatate reala: nu ne multumim cu "Connected" — in timpul unui flap PIA raporteaza
-# Connected desi tun0/DNS/HTTPS sunt deja moarte. Proba e legata explicit de tun0.
+# Real health: "Connected" alone is not enough — during a flap PIA reports Connected
+# while tun0/DNS/HTTPS are already dead. The probe is bound explicitly to tun0.
 vpn_healthy() {
     [ "$(pia get connectionstate)" = "Connected" ] || return 1
     ip link show dev tun0 2>/dev/null | grep -q '<[^>]*UP[^>]*>' || return 1
@@ -91,9 +101,9 @@ wait_healthy() {
     return 1
 }
 
-# ===== ALERTE =============================================================
-# Nu incercam sa livram cu orice pret: daca netul e jos, punem in spool si mergem
-# mai departe cu repararea. Spool-ul se goleste singur cand conectivitatea revine.
+# ===== ALERTS =============================================================
+# We do not try to deliver at all costs: if the line is down we spool the alert and
+# get on with the repair. The spool drains by itself once connectivity returns.
 ntfy_topic() {
     local t
     t=$(grep -hs '^NTFY_TOPIC_ERROR=' "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '" ')
@@ -101,22 +111,22 @@ ntfy_topic() {
     echo "$t"
 }
 
-ntfy_push() {  # $1=titlu $2=corp -> 0 daca a plecat
+ntfy_push() {  # $1=title $2=body -> 0 if it went out
     local topic; topic=$(ntfy_topic)
     [ -z "$topic" ] && return 1
     curl --fail-with-body -sS -m 15 --retry 2 --retry-delay 3 --retry-all-errors \
         -H "Title: $1" -d "$2" "https://ntfy.sh/$topic" >/dev/null 2>&1
 }
 
-alert() {  # $1=titlu $2=corp
+alert() {  # $1=title $2=body
     if ntfy_push "$1" "$2"; then
-        log "alerta trimisa: $1"
+        log "alert sent: $1"
     else
         if [ -f "$SPOOL" ] && [ "$(stat -c %s "$SPOOL" 2>/dev/null || echo 0)" -ge "$SPOOL_MAX_BYTES" ]; then
             mv -f "$SPOOL" "$SPOOL.previous"
         fi
         printf '%s\t%s\t%s\n' "$(date '+%Y-%m-%d %H:%M')" "$1" "$2" >> "$SPOOL"
-        log "alerta pusa in spool (fara conectivitate): $1"
+        log "alert spooled (no connectivity): $1"
     fi
 }
 
@@ -135,52 +145,53 @@ flush_spool() {
     body=$(cat "$SPOOL")
     if ntfy_push "PIA: $n alerte intarziate ($(hostname))" "$body"; then
         rm -f "$SPOOL"
-        log "spool golit ($n alerte livrate retroactiv)"
+        log "spool drained ($n alerts delivered retroactively)"
     fi
 }
 
-# ===== TREPTELE DE REPARARE ==============================================
+# ===== RECOVERY RUNGS =====================================================
 rung_connect() {
-    log "treapta 1: piactl connect"
+    log "rung 1: piactl connect"
     pia background enable >/dev/null
     pia connect >/dev/null
 }
 
 rung_reconnect() {
-    log "treapta 2: disconnect + connect (reset de sesiune)"
+    log "rung 2: disconnect + connect (session reset)"
     pia disconnect >/dev/null
     sleep 4
     pia connect >/dev/null
 }
 
-# Treapta 3 = fix-ul care a rezolvat incidentul din 1 sep.
+# Rung 3 is the fix that actually resolved the 1 Sep incident.
 rung_restart_daemon() {
-    log "treapta 3: restart piavpn.service (daemon agatat / stare corupta)"
+    log "rung 3: restart piavpn.service (wedged daemon / corrupt state)"
     systemctl stop pia.service    >/dev/null 2>&1
     systemctl stop piavpn.service >/dev/null 2>&1
     sleep 3
-    # Daemonul agatat nu moare la SIGTERM — ramane cu copii <defunct>.
+    # A wedged daemon does not die on SIGTERM — it lingers with <defunct> children.
     if pgrep -x pia-daemon >/dev/null; then
-        log "   pia-daemon nu a murit la stop -> kill -9"
+        log "   pia-daemon survived the stop -> kill -9"
         pkill -9 -x pia-daemon
         sleep 2
     fi
     systemctl start piavpn.service >/dev/null 2>&1
     sleep 8
-    # Fara asta `piactl connect` e ignorat IN TACERE cand nu ruleaza GUI-ul.
+    # Without this, `piactl connect` is SILENTLY ignored when no GUI is running.
     pia background enable >/dev/null
 
-    # Logout-ul/resetarea sterge inregistrarea IP-ului dedicat din daemon; regiunea
-    # ramane setata pe una inexistenta -> "Unknown region" si conectare esuata.
+    # A logout or a reset drops the dedicated IP registration from the daemon, while
+    # the region stays pointed at one that no longer exists -> "Unknown region" and a
+    # failed connection.
     if ! pia get regions | grep -q '^dedicated-'; then
-        # Verdictul il dam pe starea REALA de dupa (apare regiunea dedicata?), nu pe
-        # textul intors de piactl: la succes nu tipareste nimic, deci un test pe
-        # output ar raporta fals esec.
+        # Judge by the REAL state afterwards (did the dedicated region appear?), not
+        # by what piactl printed: on success it prints nothing, so a test on its
+        # output would report a false failure.
         [ -f "$DIP_TOKEN" ] && pia dedicatedip add "$DIP_TOKEN" >/dev/null
         if pia get regions | grep -q '^dedicated-'; then
-            log "   IP dedicat re-adaugat din $DIP_TOKEN"
+            log "   dedicated IP re-registered from $DIP_TOKEN"
         else
-            log "   ATENTIE: token IP dedicat lipsa/invalid -> cad pe regiunea $FALLBACK_REGION"
+            log "   WARNING: dedicated IP token missing/invalid -> falling back to region $FALLBACK_REGION"
             alert "PIA fara IP dedicat ($(hostname))" \
 "Tokenul $DIP_TOKEN e invalid sau lipseste, asa ca tunelul merge pe '$FALLBACK_REGION'.
 Serverul iese pe un IP din pool, NU pe cel dedicat -> cheile Binance whitelist-uite
@@ -196,35 +207,37 @@ vor da -2015. Genereaza token nou din contul PIA (sectiunea Dedicated IP)."
     pia connect >/dev/null
 }
 
-# Treapta 4 = reinstalare. Best-effort si explicit ultima: installerul PIA refuza sa
-# ruleze ca root si poate cere escaladare interactiva, deci poate esua legitim aici.
+# Rung 4 is the reinstall. Best-effort and deliberately last: the PIA installer
+# refuses to run as root and may want interactive escalation, so it can legitimately
+# fail here.
 rung_reinstall() {
     local last=0
     [ -f "$REINSTALL_MARK" ] && last=$(cat "$REINSTALL_MARK" 2>/dev/null || echo 0)
     local age=$(( $(date +%s) - last ))
     if [ "$age" -lt "$REINSTALL_COOLDOWN" ]; then
-        log "treapta 4: SARITA (reinstalare acum $((age/3600))h, cooldown $((REINSTALL_COOLDOWN/3600))h)"
+        log "rung 4: SKIPPED (reinstalled $((age/3600))h ago, cooldown $((REINSTALL_COOLDOWN/3600))h)"
         return 1
     fi
     if ! net_raw_ok; then
-        log "treapta 4: SARITA (fara internet nu se poate descarca installerul)"
+        log "rung 4: SKIPPED (the installer cannot be downloaded without internet)"
         return 1
     fi
 
-    log "treapta 4: reinstalez PIA de la $INSTALLER_URL"
+    log "rung 4: reinstalling PIA from $INSTALLER_URL"
     local tmp
     tmp=$(mktemp -d /tmp/pia_reinstall.XXXXXX)
     if ! curl -fsSL -m 600 -o "$tmp/pia.run" "$INSTALLER_URL"; then
-        log "   descarcare esuata"
+        log "   download failed"
         rm -rf "$tmp"
         return 1
     fi
 
-    # Nu executam orice ne-a dat reteaua: un 403/pagina de eroare ar fi HTML de cativa KB.
+    # Never execute whatever the network handed us: a 403 or an error page would be
+    # a few KB of HTML.
     local size
     size=$(stat -c %s "$tmp/pia.run")
     if [ "$size" -lt 20000000 ] || ! head -c 100 "$tmp/pia.run" | grep -q '^#!/'; then
-        log "   fisier descarcat suspect (size=$size, nu pare installer) -> NU il rulez"
+        log "   downloaded file looks wrong (size=$size, not an installer) -> NOT running it"
         alert "PIA: installer invalid ($(hostname))" \
             "Descarcarea de la $INSTALLER_URL a dat $size octeti si nu arata a script .run. Reinstaleaza manual."
         rm -rf "$tmp"
@@ -236,9 +249,9 @@ rung_reinstall() {
     chown -R "$PIA_USER" "$tmp"
     systemctl stop pia.service >/dev/null 2>&1
     if runuser -u "$PIA_USER" -- "$tmp/pia.run" >/tmp/pia_reinstall.out 2>&1; then
-        log "   reinstalare reusita (versiune: $(pia -v))"
+        log "   reinstall succeeded (version: $(pia -v))"
     else
-        log "   reinstalare ESUATA (vezi /tmp/pia_reinstall.out) — probabil cere interactiv"
+        log "   reinstall FAILED (see /tmp/pia_reinstall.out) — it probably wants a terminal"
         alert "PIA: reinstalarea automata a esuat ($(hostname))" \
             "$(tail -5 /tmp/pia_reinstall.out 2>/dev/null). Reinstaleaza manual versiunea $PIA_VERSION."
         rm -rf "$tmp"
@@ -250,53 +263,53 @@ rung_reinstall() {
     pia connect >/dev/null
 }
 
-# ===== EXECUTIE ===========================================================
+# ===== EXECUTION ==========================================================
 mkdir -p "$STATE_DIR" 2>/dev/null
 
 if [ "$CHECK_ONLY" = 1 ]; then
     echo "=== pia_selfheal --check (read-only) ==="
-    echo "  versiune PIA   : $(pia -v)"
-    echo "  daemon raspunde: $(daemon_responsive && echo DA || echo 'NU (agatat)')"
-    echo "  stare          : $(pia get connectionstate)"
-    echo "  regiune        : $(pia get region)"
+    echo "  PIA version    : $(pia -v)"
+    echo "  daemon answers : $(daemon_responsive && echo YES || echo 'NO (wedged)')"
+    echo "  state          : $(pia get connectionstate)"
+    echo "  region         : $(pia get region)"
     echo "  vpnip          : $(pia get vpnip)"
     echo "  tun0           : $(ip -brief addr show tun0 2>&1 | head -1)"
-    echo "  IP dedicat     : $(pia get regions | grep -m1 '^dedicated-' || echo 'NEINREGISTRAT')"
-    echo "  internet brut  : $(net_raw_ok && echo OK || echo PICAT)"
-    echo "  vpn_healthy    : $(vpn_healthy && echo DA || echo NU)"
-    echo "  alerte in spool: $([ -f "$SPOOL" ] && wc -l < "$SPOOL" || echo 0)"
+    echo "  dedicated IP   : $(pia get regions | grep -m1 '^dedicated-' || echo 'NOT REGISTERED')"
+    echo "  raw internet   : $(net_raw_ok && echo OK || echo DOWN)"
+    echo "  vpn_healthy    : $(vpn_healthy && echo YES || echo NO)"
+    echo "  spooled alerts : $([ -f "$SPOOL" ] && wc -l < "$SPOOL" || echo 0)"
     exit 0
 fi
 
-# O singura instanta: treptele dureaza minute, cronul e la 5 min.
+# Single instance: the rungs take minutes and cron fires every 5.
 exec 9>"$LOCK"
-flock -n 9 || { log "deja ruleaza (lock $LOCK) — ies"; exit 0; }
+flock -n 9 || { log "already running (lock $LOCK) — exiting"; exit 0; }
 
 if [ "$(id -u)" != 0 ]; then
-    log "EROARE: treptele 3-4 cer root (systemctl). Ruleaza din cron-ul root."
+    log "ERROR: rungs 3-4 need root (systemctl). Run this from the root crontab."
     exit 1
 fi
 
 flush_spool
 
-# Gratie la boot: imediat dupa pornire VPN-ul este LEGITIM jos (network-online.target,
-# apoi PIA negociaza tunelul). Fara garda asta, primul cron de dupa reboot ar declara
-# avarie si ar porni scara de reparare peste o conexiune care urca singura — oprind
-# inclusiv pia.service in timp ce lucra. pia.service are Restart=always, deci lasam
-# mecanismul normal sa incerce intai.
+# Boot grace: right after startup the VPN is LEGITIMATELY down (network-online.target,
+# then PIA negotiates the tunnel). Without this guard, the first cron run after a
+# reboot would declare a fault and start the recovery ladder over a connection that
+# was coming up on its own — stopping pia.service while it was working. pia.service
+# has Restart=always, so we let the normal mechanism try first.
 UPTIME=$(cut -d. -f1 /proc/uptime)
 if [ "$UPTIME" -lt "${PIA_BOOT_GRACE:-300}" ] && [ "$FORCE" = 0 ]; then
     if vpn_healthy; then
-        log "OK la $((UPTIME))s de la boot (regiune=$(pia get region) vpnip=$(pia get vpnip))"
+        log "OK at $((UPTIME))s after boot (region=$(pia get region) vpnip=$(pia get vpnip))"
     else
-        log "boot recent (${UPTIME}s < ${PIA_BOOT_GRACE:-300}s) — las pia.service sa urce singur, nu escaladez"
+        log "recent boot (${UPTIME}s < ${PIA_BOOT_GRACE:-300}s) — letting pia.service come up on its own, not escalating"
     fi
     exit 0
 fi
 
 if vpn_healthy && [ "$FORCE" = 0 ]; then
     if [ -f "$OUTAGE_MARK" ]; then
-        # Reparat intre timp: raportam abia acum, cu durata reala a caderii.
+        # Recovered in the meantime: we report only now, with the real outage length.
         mins=$(( ( $(date +%s) - $(cat "$OUTAGE_MARK") ) / 60 ))
         rm -f "$OUTAGE_MARK"
         alert "PIA restabilit ($(hostname))" \
@@ -304,18 +317,18 @@ if vpn_healthy && [ "$FORCE" = 0 ]; then
 IP VPN: $(pia get vpnip) | regiune: $(pia get region)
 Verifica flota: systemctl is-active binance.service (are Requires=pia.service)."
     fi
-    log "OK (tun0 + HTTPS prin tunel), regiune=$(pia get region) vpnip=$(pia get vpnip)"
+    log "OK (tun0 + HTTPS through the tunnel), region=$(pia get region) vpnip=$(pia get vpnip)"
     exit 0
 fi
 
 [ -f "$OUTAGE_MARK" ] || date +%s > "$OUTAGE_MARK"
-log "VPN NESANATOS (state=$(pia get connectionstate) daemon=$(daemon_responsive && echo ok || echo agatat)) — pornesc scara de reparare"
+log "VPN UNHEALTHY (state=$(pia get connectionstate) daemon=$(daemon_responsive && echo ok || echo wedged)) — starting the recovery ladder"
 
-# Daemonul agatat nu se repara cu `connect`; sarim direct la restartul lui.
+# A wedged daemon is not fixed by `connect`; jump straight to restarting it.
 if daemon_responsive; then
     LADDER="rung_connect rung_reconnect rung_restart_daemon rung_reinstall"
 else
-    log "daemonul nu raspunde la piactl -> sar treptele 1-2"
+    log "the daemon does not answer piactl -> skipping rungs 1-2"
     LADDER="rung_restart_daemon rung_reinstall"
 fi
 
@@ -324,21 +337,21 @@ for rung in $LADDER; do
     if wait_healthy; then
         mins=$(( ( $(date +%s) - $(cat "$OUTAGE_MARK" 2>/dev/null || date +%s) ) / 60 ))
         rm -f "$OUTAGE_MARK"
-        log "REPARAT la $rung (vpnip=$(pia get vpnip))"
+        log "RECOVERED at $rung (vpnip=$(pia get vpnip))"
         alert "PIA reparat automat ($(hostname))" \
 "Tunelul a fost restabilit de $rung dupa ~${mins} min de cadere.
 IP VPN: $(pia get vpnip) | regiune: $(pia get region)
 Daca regiunea NU e cea dedicata, Binance va da -2015 pana repui tokenul DIP."
-        # pia.service a fost oprit de treapta 3; il repunem, iar binance.service
-        # (Requires=pia.service) porneste odata cu el.
+        # Rung 3 stopped pia.service; bring it back, and binance.service
+        # (Requires=pia.service) starts along with it.
         systemctl start pia.service     >/dev/null 2>&1
         systemctl start binance.service >/dev/null 2>&1
         exit 0
     fi
-    log "$rung nu a rezolvat; escaladez"
+    log "$rung did not fix it; escalating"
 done
 
-log "ESEC: toate treptele epuizate, VPN-ul ramane jos"
+log "FAILURE: every rung exhausted, the VPN is still down"
 alert "PIA NEREPARABIL automat ($(hostname))" \
 "Am epuizat toate treptele (connect, reconnect, restart daemon, reinstalare) si tunelul tot nu urca.
 Stare: $(pia get connectionstate) | regiune: $(pia get region) | internet brut: $(net_raw_ok && echo OK || echo PICAT)
