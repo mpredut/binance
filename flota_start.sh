@@ -159,12 +159,13 @@ WATCHDOG_PY="$(command -v python)"
 # Two watchdogs: cache freshness plus anomalies (the error rate in the logs).
 _WD_CACHE="*/2 * * * * cd $SCRIPT_DIR && $WATCHDOG_PY $SCRIPT_DIR/verify_tools/watchdogfor_cacheandconfig.py >> $SCRIPT_DIR/logs/watchdog.log 2>&1"
 _WD_ANOM="*/5 * * * * cd $SCRIPT_DIR && $WATCHDOG_PY $SCRIPT_DIR/verify_tools/watchdogfor_anomaly.py >> $SCRIPT_DIR/logs/anomaly_watchdog.log 2>&1"
+_WD_RESOURCE="*/2 * * * * cd $SCRIPT_DIR && $WATCHDOG_PY $SCRIPT_DIR/verify_tools/watchdogfor_resources.py >> $SCRIPT_DIR/logs/resource_watchdog.log 2>&1"
 # Markers to clean from crontab (including OLD names, so nothing is orphaned after a rename).
-_WD_STRIP='cache_watchdog\.py|log_anomaly_watchdog\.py|watchdogfor_cache\.py|watchdogfor_cacheandconfig\.py|watchdogfor_anomaly\.py|price_monitor_watchdog\.py'
+_WD_STRIP='cache_watchdog\.py|log_anomaly_watchdog\.py|watchdogfor_cache\.py|watchdogfor_cacheandconfig\.py|watchdogfor_anomaly\.py|watchdogfor_resources\.py|price_monitor_watchdog\.py'
 
 install_watchdog() {
-    ( crontab -l 2>/dev/null | grep -vE "$_WD_STRIP"; echo "$_WD_CACHE"; echo "$_WD_ANOM" ) | crontab -
-    echo "✔ Watchdog-uri active (cache + anomalii, cron la 5 min)"
+    ( crontab -l 2>/dev/null | grep -vE "$_WD_STRIP"; echo "$_WD_CACHE"; echo "$_WD_ANOM"; echo "$_WD_RESOURCE" ) | crontab -
+    echo "✔ Watchdogs active (cache + anomalies + process resources)"
 }
 remove_watchdog() {
     crontab -l 2>/dev/null | grep -vE "$_WD_STRIP" | crontab - 2>/dev/null
