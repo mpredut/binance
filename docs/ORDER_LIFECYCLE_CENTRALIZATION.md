@@ -1,104 +1,104 @@
-# Centralizarea OrderLifecycle
+# Centralising OrderLifecycle
 
-## Decizia curentă
+## The current decision
 
-`order_retry.py` este sursa canonică pentru mecanica reutilizabilă a ciclului de
-viață al ordinelor. Centralizarea privește mecanica de execuție, nu deciziile
-financiare ale strategiilor.
+`order_retry.py` is the canonical source for the reusable mechanics of the order
+lifecycle. The centralisation concerns execution mechanics, not the strategies'
+financial decisions.
 
-Există două moduri de folosire a aceluiași domeniu:
+There are two ways of using the same domain:
 
-1. outbox global: `Instrument.place` persistă înainte de submit, iar
-   `order_retry_worker.py` este consumatorul unic care reia și urmărește recordurile;
-2. lifecycle cu state deținut de strategie: strategia apelează sincron
-   `order_retry.TrackedOrderLifecycle.submit/reconcile`, furnizând callback-ul prin
-   care intenția este persistată atomic în campania sa.
+1. the global outbox: `Instrument.place` persists before the submit, and
+   `order_retry_worker.py` is the single consumer that resumes and tracks the records;
+2. a lifecycle with state owned by the strategy: the strategy synchronously calls
+   `order_retry.TrackedOrderLifecycle.submit/reconcile`, supplying the callback through
+   which the intent is persisted atomically into its campaign.
 
-`TrackedOrderLifecycle` nu este și nu pornește un proces separat. Este un state
-machine apelat o dată pe tick de AssetGuardian, spot-DCA și trailing. Procesul
-continuu al flotei rămâne `order_retry_worker.py` și consumă numai outbox-ul global.
-Workerul este un proces OS separat, nu un thread pornit de `Instrument.place`.
-Plasarea nu face polling și nu așteaptă terminalul: se încheie după persistență,
-garduri și un singur apel de submit către provider.
+`TrackedOrderLifecycle` is not, and does not start, a separate process. It is a state
+machine called once per tick by AssetGuardian, spot-DCA and trailing. The fleet's
+continuous process remains `order_retry_worker.py`, and it consumes only the global outbox.
+The worker is a separate OS process, not a thread started by `Instrument.place`.
+Placement does no polling and does not wait for the terminal status: it finishes after
+persistence, the guards and a single submit call to the provider.
 
-Fișierul `providers/tracked_order.py` este doar un shim temporar de compatibilitate.
-Codul de producție importă tipurile lifecycle direct din `order_retry`.
+`providers/tracked_order.py` is only a temporary compatibility shim. Production code
+imports the lifecycle types directly from `order_retry`.
 
-## Ce este centralizat
+## What is centralised
 
-- validarea identității `intent_id` / `client_order_id`;
-- persistența înainte de submit;
-- delimitarea dintre acceptare și fill;
-- recuperarea unui răspuns ambiguu prin client order ID;
-- statusul `open`, partial și terminal;
-- tranzițiile persistente ale outbox-ului dintr-un snapshot de status;
-- păstrarea statusului nativ al venue-ului;
-- confirmările multiple de absență;
-- cancel-ul bounded, persistat înainte de efectul extern;
-- auditul mecanic al etapelor lifecycle;
-- adaptorul pentru un `StrategyExecutor` credential-scoped.
+- validating the `intent_id` / `client_order_id` identity;
+- persistence before the submit;
+- the distinction between acceptance and fill;
+- recovering from an ambiguous response through the client order ID;
+- the `open`, partial and terminal statuses;
+- the outbox's persistent transitions from a status snapshot;
+- preserving the venue's native status;
+- multiple confirmations of absence;
+- the bounded cancel, persisted before the external effect;
+- the mechanical audit of the lifecycle stages;
+- the adapter for a credential-scoped `StrategyExecutor`.
 
-## Ce rămâne în strategie
+## What stays in the strategy
 
-- semnalul și validitatea sa;
-- campania, ciclul, tierul și bugetul;
-- contabilizarea delta-fill-urilor și P&L;
-- aplicarea fill-ului în poziție;
-- decizia dacă un terminal permite o intenție nouă;
-- diferența dintre ENTRY, DCA, TP și ieșire protectoare;
-- dacă un cancel invalidează intenția sau reprezintă repricing;
-- dacă o ieșire poate trece de la LIMIT la MARKET.
+- the signal and its validity;
+- the campaign, the cycle, the tier and the budget;
+- accounting for fill deltas and P&L;
+- applying the fill to the position;
+- deciding whether a terminal status permits a new intent;
+- the difference between ENTRY, DCA, TP and a protective exit;
+- whether a cancel invalidates the intent or represents repricing;
+- whether an exit may move from LIMIT to MARKET.
 
-O strategie folosește `caller_owns_retry=True` când își păstrează intenția în
-propriul state și apelează lifecycle-ul central. Acest flag nu înseamnă că strategia
-reinventează mecanica; înseamnă că outbox-ul global nu are voie să creeze ulterior o
-intenție după ce strategia și-a invalidat campania.
+A strategy uses `caller_owns_retry=True` when it keeps its intent in its own state and
+calls the central lifecycle. The flag does not mean the strategy reinvents the mechanics;
+it means the global outbox may not later create an intent after the strategy has
+invalidated its campaign.
 
-## Inventar după centralizarea codului
+## Inventory after the code centralisation
 
-| Cale | Motor lifecycle | Persistență activă |
+| Path | Lifecycle engine | Active persistence |
 |---|---|---|
-| `tradeall`, `monitortrades`, comenzi prin `Instrument.place` | outbox + worker din `order_retry` | `cachedb/order_retry_queue.jsonl` |
-| AssetGuardian BUY/SELL per asset | `order_retry.TrackedOrderLifecycle` | campania AssetGuardian |
-| Binance/Kraken trailing | `order_retry.TrackedOrderLifecycle` | state trailing |
-| Kraken/Hyperliquid spot-DCA | `order_retry.TrackedOrderLifecycle` plus contabilizare DCA | state-ul strategiei |
-| rtrade pair LIMIT | `order_retry.TrackedOrderLifecycle` pentru submit și startup recovery; coordonatorul păstrează TTL/cancel/fill policy | `cachedb/rtrade_pairs.json` |
-| rtrade hard-stop | execuție auditată și recovery prin lifecycle; politica MARKET rămâne în coordonator | `cachedb/rtrade_pairs.json` |
-| T212 strategy | lifecycle propriu bazat pe ordine active și delta poziției | state T212 |
-| T212 one-shot | reconciliere proprie fără client-ID universal | marker profil+ticker |
-| `monitororder` | nelive; nu se mai extinde | exclus din migrarea următoare |
+| `tradeall`, `monitortrades`, commands through `Instrument.place` | outbox plus the worker from `order_retry` | `cachedb/order_retry_queue.jsonl` |
+| AssetGuardian BUY/SELL per asset | `order_retry.TrackedOrderLifecycle` | the AssetGuardian campaign |
+| Binance/Kraken trailing | `order_retry.TrackedOrderLifecycle` | the trailing state |
+| Kraken/Hyperliquid spot-DCA | `order_retry.TrackedOrderLifecycle` plus DCA accounting | the strategy's state |
+| rtrade pair LIMIT | `order_retry.TrackedOrderLifecycle` for the submit and startup recovery; the coordinator keeps the TTL/cancel/fill policy | `cachedb/rtrade_pairs.json` |
+| rtrade hard stop | audited execution and recovery through the lifecycle; the MARKET policy stays in the coordinator | `cachedb/rtrade_pairs.json` |
+| T212 strategy | its own lifecycle based on active orders and the position delta | the T212 state |
+| T212 one-shot | its own reconciliation, without a universal client ID | a profile plus ticker marker |
+| `monitororder` | not live; no longer extended | excluded from the next migration |
 
-## Capabilități de reconciliere declarate
+## Declared reconciliation capabilities
 
-Adaptorii nu mai pot lăsa lifecycle-ul să deducă suportul din existența accidentală
-a unei metode sau dintr-un `[]` moștenit. `OrderReconciliationCapabilities` declară
-strict operațiile normalizate disponibile; lipsa declarației înseamnă lipsă de suport.
+The adapters can no longer let the lifecycle infer support from the accidental existence of
+a method or from an inherited `[]`. `OrderReconciliationCapabilities` strictly declares the
+normalised operations available; a missing declaration means no support.
 
-| Venue | lookup client ID | status order ID | cancel order ID | listă open orders |
+| Venue | client ID lookup | order ID status | order ID cancel | open orders list |
 |---|---:|---:|---:|---:|
-| Binance | da | da | da | da |
-| Kraken | da | da | da | da |
-| Hyperliquid spot | da | da | da | da |
-| Trading212 | nu | da | da | nu, reconcilierea rămâne order+portfolio |
+| Binance | yes | yes | yes | yes |
+| Kraken | yes | yes | yes | yes |
+| Hyperliquid spot | yes | yes | yes | yes |
+| Trading212 | no | yes | yes | no, reconciliation stays order plus portfolio |
 
-`false` nu înseamnă că venue-ul nu are niciun endpoint posibil; înseamnă că adaptorul
-comun nu oferă momentan o operație suficient de strictă pentru lifecycle. Erorile de
-transport rămân distincte de o capabilitate absentă.
+`false` does not mean the venue has no possible endpoint; it means the shared adapter does
+not currently offer an operation strict enough for the lifecycle. Transport errors stay
+distinct from a missing capability.
 
-## De ce nu mutăm încă toate state-urile într-un singur fișier
+## Why we do not yet move every state into a single file
 
-Un ledger unic fără politica terminală ar putea retrimite un BUY după expirarea
-semnalului sau ar putea pierde o ieșire protectoare după un cancel extern. Mai întâi
-centralizăm codul mecanic. Politicile financiare și migrarea autorității de state vor
-fi o etapă separată, protejată prin teste de caracterizare.
+A single ledger without the terminal policy could resend a BUY after the signal has expired,
+or lose a protective exit after an external cancel. We centralise the mechanical code first.
+The financial policies and the migration of state authority will be a separate stage,
+protected by characterisation tests.
 
-T212 necesită în plus capabilități de recuperare diferite: ordine active și delta de
-portofoliu, deoarece client-order-ID lookup nu este universal disponibil.
+T212 additionally requires different recovery capabilities: active orders and the portfolio
+delta, because client order ID lookup is not universally available.
 
-## Contractul viitor pentru politica terminală — amânat
+## The future contract for the terminal policy — deferred
 
-Etapa următoare va adăuga o politică declarativă per intenție, fără a o implementa în
-acest refactor. Câmpurile candidate salvate pentru analiză sunt:
+The next stage will add a declarative per-intent policy, without implementing it in this
+refactor. The candidate fields saved for analysis are:
 
 ```text
 intent_id
@@ -119,20 +119,19 @@ requires_strategy_revalidation
 protective_exit / allow_market_fallback
 ```
 
-Statusul singur nu decide retry-ul. `CANCELED` poate însemna invalidare de strategie,
-repricing, operator, exchange sau o stare necunoscută. De aceea politicile financiare
-nu vor fi adăugate ca fallback generic în `order_retry`.
+The status alone does not decide the retry. `CANCELED` can mean a strategy invalidation,
+repricing, the operator, the exchange, or an unknown state. That is why the financial
+policies will not be added as a generic fallback in `order_retry`.
 
-## Pașii de refactor rămași
+## The remaining refactor steps
 
-1. păstrăm `providers/tracked_order.py` până când nu mai există consumatori externi;
-2. extindem după rtrade către T212 numai cu characterization/golden tests;
-3. abia ulterior introducem politicile financiare declarative și un ledger activ unic.
+1. keep `providers/tracked_order.py` until no external consumers remain;
+2. extend past rtrade towards T212 only with characterisation/golden tests;
+3. only afterwards introduce the declarative financial policies and a single active ledger.
 
-Tranzițiile mecanice duplicate din `order_retry_worker.py` au fost extrase în
-`order_retry.advance_claimed_status`. Workerul păstrează exclusiv I/O-ul cu venue-ul,
-auditul și orchestrarea unei iterații; nucleul comun aplică atomic snapshotul în
-outbox.
+The duplicated mechanical transitions in `order_retry_worker.py` were extracted into
+`order_retry.advance_claimed_status`. The worker keeps only the venue I/O, the audit and the
+orchestration of one iteration; the shared core applies the snapshot to the outbox atomically.
 
-Nu se schimbă praguri, bugete, tier-uri sau semantica financiară în timpul acestei
-centralizări mecanice.
+No thresholds, budgets, tiers or financial semantics change during this mechanical
+centralisation.

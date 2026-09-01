@@ -1,73 +1,71 @@
-# Order retry, lifecycle și starea strategiilor
+# Order retry, lifecycle and strategy state
 
-Acesta este designul canonic pentru ordine persistente. `order_retry` centralizează
-mecanica ordinului; strategia rămâne autoritatea pentru semnal, buget, campanie și
-decizia financiară de după un status terminal.
+This is the canonical design for persistent orders. `order_retry` centralises the order
+mechanics; the strategy remains the authority for the signal, the budget, the campaign and
+the financial decision that follows a terminal status.
 
-## Cele două fluxuri
+## The two flows
 
-### 1. Outbox-ul global
+### 1. The global outbox
 
 ```text
-strategie fără lifecycle propriu
+a strategy without its own lifecycle
   -> Instrument.place
-  -> persistă intenția în cachedb/order_retry_queue.jsonl
-  -> face un singur submit, fără polling terminal
-  -> order_retry_worker.py citește ulterior outbox-ul
-  -> lookup/status/retry conform stării recordului
+  -> persists the intent into cachedb/order_retry_queue.jsonl
+  -> performs a single submit, with no terminal polling
+  -> order_retry_worker.py reads the outbox later
+  -> lookup/status/retry according to the record's state
 ```
 
-`order_retry.py` este o bibliotecă. Definește formatul outbox-ului, operațiile
-atomice și state machine-ul comun; nu rulează singur. `order_retry_worker.py` este
-procesul OS unic care consumă outbox-ul global. Numai bucla sa principală apelează
-`process_once`; un apel `Instrument.place` nu pornește workerul și nu așteaptă ca
-ordinul să devină terminal.
+`order_retry.py` is a library. It defines the outbox format, the atomic operations and the
+shared state machine; it does not run on its own. `order_retry_worker.py` is the single OS
+process that consumes the global outbox. Only its main loop calls `process_once`; an
+`Instrument.place` call neither starts the worker nor waits for the order to become terminal.
 
-`RETRY_DEDUP=false` păstrează record separat pentru fiecare intenție. Două intenții
-independente pe același simbol și aceeași direcție nu se suprascriu. Idempotency-ul
-unei singure intenții este dat de `intent_id` și `client_order_id`, nu de deduplicare
-după `symbol + side`.
+`RETRY_DEDUP=false` keeps a separate record for each intent. Two independent intents on the
+same symbol and the same side do not overwrite each other. The idempotency of a single
+intent comes from `intent_id` and `client_order_id`, not from deduplication by
+`symbol + side`.
 
-### 2. Lifecycle deținut de strategie
+### 2. A lifecycle owned by the strategy
 
 ```text
-strategie stateful
+a stateful strategy
   -> TrackedOrderLifecycle.submit
-       -> callback atomic în JSON-ul strategiei
-       -> un singur submit
-  -> următorul tick/restart
+       -> an atomic callback into the strategy's JSON
+       -> a single submit
+  -> the next tick or restart
        -> TrackedOrderLifecycle.reconcile
-       -> lookup client ID, status și terminal
-  -> strategia aplică fill-ul și actualizează campania
+       -> client ID lookup, status and terminal state
+  -> the strategy applies the fill and updates the campaign
 ```
 
-Acest flux folosește `caller_owns_retry=True`, deci ordinul nu intră și în outbox-ul
-global. Nu există două monitoare concurente. `TrackedOrderLifecycle` este o clasă
-apelată în tickurile procesului strategiei, nu un thread și nu un daemon ascuns.
+This flow uses `caller_owns_retry=True`, so the order does not also enter the global outbox.
+There are never two concurrent monitors. `TrackedOrderLifecycle` is a class called during the
+ticks of the strategy's process, not a thread and not a hidden daemon.
 
-## Ce sunt threadurile de cache din procesul worker
+## What the cache threads in the worker process are
 
-Un proces `order_retry_worker.py` poate avea mai multe threaduri după ce atinge calea
-Binance. Acestea nu sunt consumatori suplimentari ai cozii:
+An `order_retry_worker.py` process can end up with several threads once it touches the
+Binance path. They are not additional consumers of the queue:
 
-- `MainThread` deține bucla unică `process_once` și citește JSONL-ul;
-- `BinanceTimeResync` menține offsetul ceasului pentru requesturile semnate;
-- managerii creați lazy de `cacheManager.CacheFactory` actualizează cache-uri precum
-  ordine, filluri/trades sau preț curent, atunci când profit guard-ul și pipeline-ul
-  Binance le cer;
-- threadurile de trend/cache (`InstantTrend...`, price managers sau websocket) apar
-  numai dacă acea infrastructură este inițializată în proces.
+- `MainThread` owns the single `process_once` loop and reads the JSONL;
+- `BinanceTimeResync` maintains the clock offset for signed requests;
+- the managers created lazily by `cacheManager.CacheFactory` update caches such as orders,
+  fills/trades or the current price, when the profit guard and the Binance pipeline ask for them;
+- the trend/cache threads (`InstantTrend...`, price managers or the websocket) appear only if
+  that infrastructure is initialised in the process.
 
-Fiecare `CacheManagerInterface.periodic_sync` are propriul thread daemon. El
-alimentează datele folosite de guarduri; nu citește `order_retry_queue.jsonl`, nu
-retransmite ordine și nu schimbă ownership-ul lifecycle. Numărul exact de threaduri
-depinde de cache-urile cerute lazy în acel proces. Separarea unui provider Binance
-minimal pentru worker ar putea reduce aceste threaduri, dar trebuie caracterizată
-înainte, deoarece gardurile curente depind de istoricul din cache.
+Each `CacheManagerInterface.periodic_sync` has its own daemon thread. It feeds the data used
+by the guards; it does not read `order_retry_queue.jsonl`, does not resend orders and does
+not change lifecycle ownership. The exact thread count depends on which caches are requested
+lazily in that process. Separating a minimal Binance provider for the worker could reduce
+these threads, but it must be characterised first, because the current guards depend on the
+history held in the cache.
 
-## Contractul comun al unei intenții
+## The shared contract of an intent
 
-Câmpurile mecanice importante sunt:
+The important mechanical fields are:
 
 ```text
 intent_id, client_order_id, venue, symbol, side, kind
@@ -76,15 +74,15 @@ order_id, submitted_qty, submitted_price, submit_status
 lookup_misses, last_status, filled_qty, terminal_status
 ```
 
-Ordinea obligatorie este: persistare durabilă, apoi efect extern. Un răspuns de submit
-pierdut lasă intenția persistentă fără `order_id`; reconcilierea caută mai întâi după
-`client_order_id`. O eroare de lookup este ambiguă și blochează retransmiterea. Numai
-absența confirmată conform politicii ownerului poate elibera intenția pentru retry.
+The mandatory order is: durable persistence, then the external effect. A lost submit response
+leaves the intent persisted without an `order_id`; reconciliation looks it up by
+`client_order_id` first. A lookup error is ambiguous and blocks resending. Only an absence
+confirmed according to the owner's policy may release the intent for a retry.
 
-## rtrade după refactor
+## rtrade after the refactor
 
-Calea activă `PairCoordinator` folosește acum lifecycle-ul comun pentru ordinele
-LIMIT și pentru recovery-ul de startup:
+The active `PairCoordinator` path now uses the shared lifecycle for LIMIT orders and for
+startup recovery:
 
 ```text
 PairCoordinator
@@ -94,140 +92,132 @@ PairCoordinator
   -> mkt.place(... caller_owns_retry=True)
 ```
 
-Submitul nu face polling și nu blochează până la fill. Dacă primul răspuns nu conține
-`order_id`, calea live face o singură reconciliere imediată, fără sleep-loop. Ordinul
-găsit este adoptat; numai după absență confirmată este permis un al doilea submit
-idempotent cu același client ID. Lookup/status indisponibil păstrează intenția și
-blochează rundele noi. La restart, `recover_intent` transformă și recordurile vechi în
-formatul canonic, caută ordinul după client ID și citește statusul normalizat.
+The submit does no polling and does not block until the fill. If the first response carries no
+`order_id`, the live path performs a single immediate reconciliation, with no sleep loop. A
+found order is adopted; only after a confirmed absence is a second idempotent submit with the
+same client ID permitted. An unavailable lookup or status keeps the intent and blocks new
+rounds. On restart, `recover_intent` also converts the old records into the canonical format,
+looks the order up by client ID, and reads the normalised status.
 
-`PairCoordinator` păstrează intenționat politica per-tick pentru TTL, cancel,
-repricing, partial fill și hard-stop. Acestea sunt decizii financiare ale rundei, nu
-mecanică generică. `repetitive_buy` și `repetitive_sell` rămân calea legacy din
-spatele feature flagului și nu au fost eliminate.
+`PairCoordinator` deliberately keeps the per-tick policy for the TTL, cancel, repricing,
+partial fills and the hard stop. Those are the round's financial decisions, not generic
+mechanics. `repetitive_buy` and `repetitive_sell` remain the legacy path behind the feature
+flag and have not been removed.
 
-## Unde se salvează starea
+## Where the state is saved
 
-Fișierele sunt relative la rădăcina repository-ului, dacă nu este specificată o
-cale prin configurare:
+The files are relative to the repository root, unless a path is set through configuration:
 
-| Owner | Fișier/pattern |
+| Owner | File/pattern |
 |---|---|
-| outbox global | `cachedb/order_retry_queue.jsonl` + `.lock` |
-| rtrade | `cachedb/rtrade_pairs.json` + `.lock` |
+| the global outbox | `cachedb/order_retry_queue.jsonl` plus `.lock` |
+| rtrade | `cachedb/rtrade_pairs.json` plus `.lock` |
 | AssetGuardian | `cachedb/assetguardian_state.json` |
-| cooldown comun Binance | `lock/trade_cooldown.json` + `.lock` |
-| trailing Binance | `cachedb/trailing_state.json` |
-| trailing Kraken | `kraken/trailing_state.json` |
+| the shared Binance cooldown | `lock/trade_cooldown.json` plus `.lock` |
+| Binance trailing | `cachedb/trailing_state.json` |
+| Kraken trailing | `kraken/trailing_state.json` |
 | Kraken spot-DCA | `kraken/.state_<PAIR>.json` |
 | Hyperliquid spot-DCA live | `hyperliquid/.state_<TOKEN>.json` |
 | Hyperliquid spot-DCA paper | `hyperliquid/.paper_state/.state_<TOKEN>.json` |
-| Hyperliquid direcțional legacy | `hyperliquid/.state_<COIN>_<direction>.json` |
+| Hyperliquid legacy directional | `hyperliquid/.state_<COIN>_<direction>.json` |
 | Hyperliquid delta-neutral | `hyperliquid/.state_dn_<COIN>.json` |
 | Trading212 per ticker | `212trading/.state_<TICKER>.json` |
 
-Pentru rtrade, JSON-ul are `pairs[pair_id]`. Fiecare rundă conține identitatea,
-cantitatea, faza, `intents`, checkpointul `state`, timpii și marcajul `terminal`.
-`intents["limit:BUY"]`/`intents["limit:SELL"]` păstrează lifecycle-ul canonic;
-`state.tickets` și `state.snapshots` păstrează ledgerul financiar al coordonatorului.
-Scrierea folosește file lock, fișier temporar, `fsync` și `os.replace`.
+For rtrade, the JSON has `pairs[pair_id]`. Each round holds the identity, the quantity, the
+phase, `intents`, the `state` checkpoint, the timings and the `terminal` marker.
+`intents["limit:BUY"]`/`intents["limit:SELL"]` hold the canonical lifecycle;
+`state.tickets` and `state.snapshots` hold the coordinator's financial ledger.
+Writing uses a file lock, a temporary file, `fsync` and `os.replace`.
 
-## Ce înseamnă reconciliere
+## What reconciliation means
 
-Reconcilierea nu înseamnă „presupunem că ordinul a reușit” și nici simpla comparare a
-soldului. Este corelarea deterministă a patru surse:
+Reconciliation does not mean "assume the order succeeded", nor is it a simple balance
+comparison. It is the deterministic correlation of four sources:
 
-1. intenția persistentă (`intent_id` și `client_order_id`);
-2. ordinul venue-ului (`order_id`, open orders și lookup după client ID);
-3. statusul normalizat și fillurile cumulative (`filled_qty`, cost, fee);
-4. state-ul financiar al strategiei și execution audit.
+1. the persisted intent (`intent_id` and `client_order_id`);
+2. the venue's order (`order_id`, open orders and lookup by client ID);
+3. the normalised status and the cumulative fills (`filled_qty`, cost, fee);
+4. the strategy's financial state and the execution audit.
 
-Dacă `order_id` lipsește, se face lookup după `client_order_id`. Dacă ordinul există,
-se persistă ID-ul și se citește statusul. Dacă este open/partial, rămâne urmărit fără
-resubmit. Dacă este terminal, adevărul venue-ului rămâne în `terminal_status` până
-când strategia aplică atomic delta-fill-ul în poziție și checkpoint. Dacă lookup-ul
-sau statusul eșuează, starea este ambiguă și se păstrează; nu se inventează absență.
-Open-order inventory detectează separat ordinele orfane care nu au owner local.
+If the `order_id` is missing, a lookup by `client_order_id` follows. If the order exists, the
+ID is persisted and the status is read. If it is open or partial, it stays tracked without a
+resubmit. If it is terminal, the venue's truth stays in `terminal_status` until the strategy
+atomically applies the fill delta to the position and the checkpoint. If the lookup or the
+status fails, the state is ambiguous and is preserved; absence is never invented.
+The open-order inventory separately detects orphaned orders that have no local owner.
 
-Această delimitare evită atât ordinul pierdut, cât și retrimiterea necontrolată, fără
-a muta pragurile sau politica financiară într-un fallback generic.
+This boundary avoids both the lost order and uncontrolled resending, without moving the
+thresholds or the financial policy into a generic fallback.
 
-## Refuz local înainte de submit versus rezultat ambiguu după submit
+## A local refusal before the submit versus an ambiguous result after it
 
-Nu orice apel `Instrument.place(...)` care nu întoarce un `order_id` înseamnă că
-ordinul s-a pierdut. Sunt două situații diferite:
+Not every `Instrument.place(...)` call that returns no `order_id` means the order was lost.
+There are two different situations:
 
-1. **Refuz local înainte de submit.** Guard-ul de profit, trendul, validarea sau
-   altă politică poate opri intenția înainte ca providerul să fie apelat. Starea
-   lifecycle este `submit_refused`, cu motivul exact din `outcome_context`. Nu
-   există ordin pe exchange care trebuie căutat sau retransmis de worker.
-2. **Răspuns pierdut/ambiguu după submit.** Providerul a putut primi ordinul, dar
-   procesul nu a primit un `order_id` sigur. În acest caz se face mai întâi lookup
-   după `client_order_id`; retransmiterea este permisă numai dacă reconcilierea nu
-   găsește ordinul existent și politica intenției permite retry.
+1. **A local refusal before the submit.** The profit guard, the trend, validation or another
+   policy can stop the intent before the provider is ever called. The lifecycle state is
+   `submit_refused`, with the exact reason in `outcome_context`. There is no order on the
+   exchange to be looked up or resent by the worker.
+2. **A lost or ambiguous response after the submit.** The provider may have received the
+   order, but the process did not receive a reliable `order_id`. Here a lookup by
+   `client_order_id` comes first; resending is permitted only if reconciliation does not find
+   the existing order and the intent's policy allows a retry.
 
-Pentru `rtrade`, refuzurile locale rămân în audit ca intenții terminale și nu sunt
-introduse în outbox-ul generic. Perechea curentă este închisă, iar o evaluare
-ulterioară poate crea o intenție nouă după backoff. Asta evită ca workerul generic
-să încerce să reconstruiască în afara strategiei relația dintre BUY și SELL.
+For `rtrade`, local refusals stay in the audit as terminal intents and are not put into the
+generic outbox. The current pair is closed, and a later evaluation may create a new intent
+after the backoff. This stops the generic worker from trying to reconstruct the relationship
+between the BUY and the SELL outside the strategy.
 
-## Identificatorii rtrade
+## The rtrade identifiers
 
-O pereche `rtrade` folosește patru identificatori cu roluri diferite:
+An `rtrade` pair uses four identifiers with different roles:
 
-| Câmp | Exemplu | Rol |
+| Field | Example | Role |
 | --- | --- | --- |
-| `pair_id` | `3110e4e9a39f4453b0acaf1d41c9537a` | Identitatea internă persistentă a perechii BUY/SELL. Este cheia principală din `cachedb/rtrade_pairs.json`. |
-| `intent_id` | `rtrade:3110...:limit:buy` | Cheia internă de corelare între strategie, audit și lifecycle. Nu este trimisă exchange-ului și nu are limita Binance pentru `newClientOrderId`. |
-| `client_order_id` | `RT_f3d1...` | Cheia de idempotency aleasă de noi și trimisă providerului. Prefixul `RT_` identifică ownerul, iar restul identifică determinist o singură ramură `pair_id + side + kind`. |
-| `order_id` | număr alocat de venue | Identitatea returnată de exchange după acceptarea ordinului. |
+| `pair_id` | `3110e4e9a39f4453b0acaf1d41c9537a` | The persistent internal identity of the BUY/SELL pair. It is the primary key in `cachedb/rtrade_pairs.json`. |
+| `intent_id` | `rtrade:3110...:limit:buy` | The internal correlation key between the strategy, the audit and the lifecycle. It is not sent to the exchange and is not bound by the Binance limit on `newClientOrderId`. |
+| `client_order_id` | `RT_f3d1...` | The idempotency key we choose and send to the provider. The `RT_` prefix identifies the owner, and the rest deterministically identifies a single `pair_id + side + kind` branch. |
+| `order_id` | a number allocated by the venue | The identity returned by the exchange once the order is accepted. |
 
-În implementarea curentă, `client_order_id` este:
+In the current implementation, `client_order_id` is:
 
 ```text
 RT_ + BLAKE2s-128(pair_id + side + kind)
 ```
 
-Rezultatul are 35 de caractere și încape în limita de 36 de caractere tratată de
-integrarea Binance. Hashul de 128 de biți nu este necesar pentru secretizare; este
-folosit ca o cheie deterministă, compactă și cu probabilitate neglijabilă de
-coliziune. Aceeași ramură produce același ID după restart, iar BUY și SELL produc
-ID-uri diferite fără un contor global.
+The result is 35 characters and fits within the 36-character limit handled by the Binance
+integration. The 128-bit hash is not needed for secrecy; it is used as a deterministic,
+compact key with a negligible collision probability. The same branch produces the same ID
+after a restart, and BUY and SELL produce different IDs without a global counter.
 
-`RT` singur nu poate fi un `client_order_id`: toate ordinele rtrade ar avea aceeași
-cheie, lookup-ul ar deveni ambiguu, iar providerul poate refuza reutilizarea ei.
-Forma `RT_123` ar putea fi sigură numai dacă `123` vine dintr-un allocator
-persistent și atomic, unic între procese și restarturi, iar valoarea este salvată
-înainte de primul submit. Un contor ținut doar în memorie ar reveni la zero după
-reboot și ar putea identifica greșit un ordin vechi.
+`RT` on its own cannot be a `client_order_id`: every rtrade order would share the same key,
+lookups would become ambiguous, and the provider may refuse to reuse it. The form `RT_123`
+would be safe only if `123` came from a persistent, atomic allocator, unique across processes
+and restarts, with the value saved before the first submit. A counter kept only in memory
+would reset after a reboot and could misidentify an old order.
 
-Pentru lizibilitate operațională, soluția recomandată este să păstrăm ID-ul de
-protocol stabil și să adăugăm separat un alias de afișare, de exemplu `R000123`,
-sau să afișăm primele 8 caractere din `pair_id`. Acest alias poate apărea în loguri
-și rapoarte, dar nu trebuie folosit singur pentru idempotency ori reconciliere.
-Aceeași regulă se aplică `intent_id`: forma lungă rămâne cheia exactă, iar un alias
-scurt este doar pentru operator.
+For operational readability, the recommended solution is to keep the protocol ID stable and
+add a separate display alias, for example `R000123`, or to show the first 8 characters of
+`pair_id`. That alias may appear in logs and reports, but it must not be used on its own for
+idempotency or reconciliation. The same rule applies to `intent_id`: the long form stays the
+exact key, and a short alias is for the operator only.
 
-Identificatorii deja persistați sunt imuabili. Schimbarea schemei trebuie
-versionată și migrată doar când nu există ordine sau intenții în tranziție;
-altfel, lookup-ul după vechiul `client_order_id` poate rata tocmai ordinul pe care
-reconcilierea încearcă să-l protejeze.
+Identifiers that have already been persisted are immutable. A schema change must be versioned
+and migrated only when no orders or intents are in flight; otherwise a lookup by the old
+`client_order_id` can miss precisely the order that reconciliation is trying to protect.
 
-## Reconcilierea rtrade după restart
+## rtrade reconciliation after a restart
 
-La pornire, `rtrade` citește `cachedb/rtrade_pairs.json` și tratează fiecare
-înregistrare neterminală ca stare de recuperat, nu ca motiv pentru un submit nou.
-Pentru fiecare ramură se corelează:
+At startup, `rtrade` reads `cachedb/rtrade_pairs.json` and treats every non-terminal record as
+a state to recover, not as a reason for a new submit. For each branch it correlates:
 
-1. `pair_id` și `intent_id` din starea strategiei;
-2. `client_order_id` din lifecycle/audit;
-3. `order_id` și statusul normalizat din cache-ul providerului sau din lookup-ul
-   live;
-4. cantitatea cerută, executată și rămasă, inclusiv fill-uri parțiale și fee-uri;
-5. starea terminală a ramurii și efectul ei asupra perechii BUY/SELL.
+1. `pair_id` and `intent_id` from the strategy state;
+2. `client_order_id` from the lifecycle/audit;
+3. `order_id` and the normalised status from the provider cache or the live lookup;
+4. the requested, executed and remaining quantity, including partial fills and fees;
+5. the branch's terminal state and its effect on the BUY/SELL pair.
 
-Doar după această corelare se decide una dintre acțiunile terminale: urmărește
-ordinul existent, aplică fill-ul în strategia persistentă, retransmite aceeași
-intenție conform politicii ei sau închide intenția refuzată/anulată. Rebootul nu
-trebuie să creeze un `pair_id`, `intent_id` sau `client_order_id` nou pentru o
-ramură deja emisă.
+Only after that correlation is one of the terminal actions chosen: track the existing order,
+apply the fill into the persistent strategy, resend the same intent according to its policy,
+or close the refused/cancelled intent. A reboot must never create a new `pair_id`, `intent_id`
+or `client_order_id` for a branch that was already issued.
