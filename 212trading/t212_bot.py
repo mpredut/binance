@@ -64,7 +64,7 @@ def verify_isin(client: T212Client, ticker: str, expected_isin: str) -> bool:
     if not match:
         return True
     if str(match.get("isin", "")) != expected_isin:
-        log(f"  ! [{ticker}] ISIN {match.get('isin')} != asteptat {expected_isin} — NU tranzactionez")
+        log(f"  ! [{ticker}] ISIN {match.get('isin')} != the expected {expected_isin} — NOT trading")
         notify(title=f"⚠ {ticker}: ISIN nepotrivit", source="T212",
                body=f"Found {match.get('isin')}, we expected {expected_isin}.", symbol=ticker)
         return False
@@ -87,7 +87,7 @@ def run_asset(name: str, cfg: dict, client: T212Client, force_paper: bool, skip_
     if not strat_enabled:
         log(f"  ! [{name}] STRAT_ENABLED!=true — skipping (t212_bot only runs strategies)"); return
 
-    log(f"  ▶ [{label}] {ticker} | pret via {yahoo} | {'PAPER' if strat_dry else '⚠ REAL — BANI'} | poll {interval}s")
+    log(f"  ▶ [{label}] {ticker} | price through {yahoo} | {'PAPER' if strat_dry else '⚠ REAL — MONEY'} | poll {interval}s")
     while not STOP.is_set():
         try:
             if not verify_isin(client, ticker, isin):
@@ -115,10 +115,10 @@ def run_asset(name: str, cfg: dict, client: T212Client, force_paper: bool, skip_
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Bot unificat T212: un proces, mai multe active (config.*.env).")
-    ap.add_argument("--paper", action="store_true", help="Forteaza PAPER pe toate (test sigur)")
+    ap.add_argument("--paper", action="store_true", help="Force PAPER on all of them (a safe test)")
     ap.add_argument("--only", metavar="NUME", help="Run only the asset with this name (config.NAME.env)")
-    ap.add_argument("--skip-wait", action="store_true", help="Sari peste asteptarea lansarii")
-    ap.add_argument("--list", action="store_true", help="Arata activele si iesi")
+    ap.add_argument("--skip-wait", action="store_true", help="Skip waiting for the launch")
+    ap.add_argument("--list", action="store_true", help="Show the assets and exit")
     ap.add_argument("--env-file", default=os.path.join(_HERE, ".env"))
     args = ap.parse_args()
     if not args.list:

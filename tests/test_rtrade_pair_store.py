@@ -6,7 +6,7 @@ from rtrade_pair_store import RTradePairStore, rtrade_client_order_id
 
 
 class RTradePairStoreTest(unittest.TestCase):
-    def test_client_order_id_este_stabil_si_specific_rtrade(self):
+    def test_the_client_order_id_is_stable_and_rtrade_specific(self):
         first = rtrade_client_order_id("pair-1", "buy")
         self.assertEqual(first, rtrade_client_order_id("pair-1", "BUY"))
         self.assertTrue(first.startswith("RT_"))

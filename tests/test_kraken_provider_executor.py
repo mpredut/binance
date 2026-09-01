@@ -98,13 +98,13 @@ class KrakenExecutorContractTest(unittest.TestCase):
         )
         self.assertEqual(self.fake.calls[-1][-1], client_id)
 
-    def test_submit_order_market_fara_pret(self):
+    def test_submit_order_market_without_a_price(self):
         self.p.submit_order("HYPEUSD", "sell", 1.0, price=59.0, market=True)
         c = self.fake.calls[-1]
         self.assertEqual(c[5], "market")     # ordertype
         self.assertIsNone(c[4])              # pretul e None la market
 
-    def test_submit_order_fara_txid_ridica(self):
+    def test_submit_order_without_a_txid_raises(self):
         self.fake.add_order = lambda *a, **k: {"descr": {}}   # raspuns fara txid
         with self.assertRaises(ProviderError):
             self.p.submit_order("HYPEUSD", "buy", 1.0, price=60.0)
@@ -139,12 +139,12 @@ class KrakenExecutorContractTest(unittest.TestCase):
         self.assertEqual(st.cost, 150.0)
         self.assertEqual(st.fee, 0.39)
 
-    def test_order_status_lipsa_ridica(self):
+    def test_a_missing_order_status_raises(self):
         self.fake.query_orders = lambda txids: {}      # ordinul nu apare
         with self.assertRaises(ProviderError):
             self.p.order_status("HYPEUSD", "NOPE")
 
-    def test_order_by_client_id_cauta_open_si_closed(self):
+    def test_order_by_client_id_searches_open_and_closed(self):
         self.assertEqual(
             self.p.order_by_client_id(
                 "HYPEUSD", "0123456789abcdef0123456789abcdef"),
@@ -158,7 +158,7 @@ class KrakenExecutorContractTest(unittest.TestCase):
         self.assertIsNone(
             self.p.order_by_client_id("HYPEUSD", "0" * 32))
 
-    def test_open_orders_normalizeaza_si_filtreaza_simbolul(self):
+    def test_open_orders_normalises_and_filters_by_symbol(self):
         self.assertEqual(self.p.open_orders("HYPEUSD"), [{
             "orderId": "OPEN-1",
             "clientOrderId": "0123456789abcdef0123456789abcdef",
@@ -180,7 +180,7 @@ class KrakenExecutorContractTest(unittest.TestCase):
         self.p.cancel_order("HYPEUSD", "OABC-123")
         self.assertEqual(self.fake.calls[-1], ("cancel_order", "OABC-123"))
 
-    def test_cancel_idempotent_pe_ordin_necunoscut(self):
+    def test_cancel_is_idempotent_on_an_unknown_order(self):
         def boom(txid):
             raise RuntimeError("EOrder:Unknown order")
         self.fake.cancel_order = boom

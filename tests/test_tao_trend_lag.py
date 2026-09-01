@@ -65,7 +65,7 @@ class TestTrendLagPeDeclin(unittest.TestCase):
         # Right at the peak it is still rising over 24h -> 'up' (correct, but this is where the problem starts).
         self.assertEqual(direction_at(self.ts, self.px, self.peak_i), "up")
 
-    def test_dupa_destul_declin_devine_down(self):
+    def test_after_enough_decline_it_becomes_down(self):
         # At the end of the fall (a 24h window full of the decline) it must be 'down'.
         self.assertEqual(direction_at(self.ts, self.px, len(self.ts) - 1), "down")
 

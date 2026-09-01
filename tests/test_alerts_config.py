@@ -38,16 +38,16 @@ class TestLoad(unittest.TestCase):
     def setUp(self):
         self.cfg = load_config(_tmp(SAMPLE))
 
-    def test_watch_si_sources(self):
+    def test_watch_and_sources(self):
         self.assertEqual(self.cfg["watch"], ["BTC", "TAO", "HYPE"])
         self.assertEqual(self.cfg["sources"], ["coinmarketcap", "coingecko"])
 
-    def test_praguri_bucket(self):
+    def test_bucket_thresholds(self):
         ac = self.cfg["alert_config"]
         self.assertEqual(ac["default"], {"up_percent": 4.1, "down_percent": 7.5})
         self.assertEqual(ac["dynamic"], {"up_percent": 12.0, "down_percent": 25.0})
 
-    def test_praguri_per_moneda(self):
+    def test_per_coin_thresholds(self):
         per = self.cfg["alert_config"]["per_coin"]
         self.assertEqual(per["BTC"], {"up_percent": 6.0, "down_percent": 10.0})
         self.assertEqual(per["ETH"], {"up_percent": 5.0, "down_percent": 9.0})

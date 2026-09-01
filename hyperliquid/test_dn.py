@@ -118,26 +118,26 @@ class Base(unittest.TestCase):
 
 # ---------------------------------------------------------------------------
 class TestCitiriEsuate(Base):
-    def test_eroare_api_la_cont_nu_ghiceste_si_nu_tranzactioneaza(self):
+    def test_an_account_api_error_does_not_guess_and_does_not_trade(self):
         d = self.make()
         self.c.raise_account = True
-        self.assertIsNone(d.legs(), "citire esuata -> None, nu 0 fals")
+        self.assertIsNone(d.legs(), "a failed read -> None, not a false 0")
         self.assertEqual(self.c.orders, [])
 
-    def test_pret_lipsa_da_none(self):
+    def test_a_missing_price_gives_none(self):
         d = self.make()
         self.c.spot_mid = lambda pair: None
         self.assertIsNone(d.legs())
 
 
 class TestPiciorOrfan(Base):
-    def test_un_tick_suspect_nu_actioneaza(self):
+    def test_a_single_suspicious_tick_does_not_act(self):
         d = self.make(); self.opened(d)
         d.tick(L(spot_qty=2.0, perp_szi=0.0))      # The perp is absent in one reading.
         self.assertEqual(self.c.orders, [], "anti-glitch: it does not act on the first reading")
         self.assertEqual(d.s["orphan_count"], 1)
 
-    def test_short_lichidat_inchide_spotul_dupa_confirmare(self):
+    def test_a_liquidated_short_closes_the_spot_after_confirmation(self):
         d = self.make(); self.opened(d)
         d.tick(L(spot_qty=2.0, perp_szi=0.0))
         d.tick(L(spot_qty=2.0, perp_szi=0.0))      # confirmat
@@ -147,21 +147,21 @@ class TestPiciorOrfan(Base):
         self.assertGreater(d.s["cooldown_until"], time.time(), "cooldown anti-thrash")
         self.assertTrue(any("a leg is gone" in a for a in self.alerts))
 
-    def test_glitch_recuperat_reseteaza_contorul(self):
+    def test_a_recovered_glitch_resets_the_counter(self):
         d = self.make(); self.opened(d)
         d.tick(L(spot_qty=2.0, perp_szi=0.0))      # citire gresita o data
         d.tick(L())                                 # revine normal
         self.assertEqual(d.s["orphan_count"], 0)
         self.assertEqual(d.s["status"], "open")
 
-    def test_ambele_disparute_trece_flat_fara_ordine(self):
+    def test_both_legs_gone_goes_flat_without_orders(self):
         d = self.make(); self.opened(d)
         d.tick(L(spot_qty=0.0, perp_szi=0.0))
         d.tick(L(spot_qty=0.0, perp_szi=0.0))
-        self.assertEqual(self.c.orders, [], "nu are ce inchide")
+        self.assertEqual(self.c.orders, [], "there is nothing to close")
         self.assertEqual(d.s["status"], "flat")
 
-    def test_fara_auto_protect_doar_alerta(self):
+    def test_without_auto_protect_it_only_alerts(self):
         d = self.make(auto_protect=False); self.opened(d)
         d.tick(L(spot_qty=2.0, perp_szi=0.0))
         d.tick(L(spot_qty=2.0, perp_szi=0.0))
@@ -170,28 +170,28 @@ class TestPiciorOrfan(Base):
 
 
 class TestDriftSiDust(Base):
-    def test_drift_mare_cere_confirmare_2_tickuri(self):
+    def test_a_large_drift_needs_confirmation_over_2_ticks(self):
         d = self.make(); self.opened(d)
-        d.tick(L(spot_qty=0.8, perp_szi=-2.0))     # spotul la 40% din tinta (>50% drift)
-        self.assertEqual(self.c.orders, [], "primul tick: doar observa")
+        d.tick(L(spot_qty=0.8, perp_szi=-2.0))     # The spot is at 40% of the target (>50% drift).
+        self.assertEqual(self.c.orders, [], "the first tick: it only observes")
         d.tick(L(spot_qty=0.8, perp_szi=-2.0))     # confirmat -> corecteaza
         buys = [o for o in self.c.orders if o[0] == "spot" and o[1] == "buy"]
         self.assertEqual(len(buys), 1)
 
-    def test_drift_mic_corecteaza_imediat(self):
+    def test_a_small_drift_is_corrected_immediately(self):
         d = self.make(); self.opened(d)
         d.tick(L(spot_qty=1.6, perp_szi=-2.0))     # -20% drift: above tolerance, below 50%, above $10
         buys = [o for o in self.c.orders if o[0] == "spot" and o[1] == "buy"]
-        self.assertEqual(len(buys), 1, "driftul normal se corecteaza fara intarziere")
+        self.assertEqual(len(buys), 1, "normal drift is corrected without delay")
 
-    def test_dust_sub_minim_nu_trimite_ordin(self):
+    def test_dust_below_the_minimum_sends_no_order(self):
         d = self.make(); self.opened(d, target=2.0)
         d._buy_spot(0.1, 50.0)                     # $5 < $10.5
         self.assertEqual(self.c.orders, [])
 
 
 class TestOrdineEsuate(Base):
-    def test_alerta_dupa_3_esecuri_consecutive(self):
+    def test_alerts_after_3_consecutive_failures(self):
         d = self.make(); self.opened(d)
         self.c.fail_orders = True
         for _ in range(3):
@@ -203,14 +203,14 @@ class TestOrdineEsuate(Base):
 
 
 class TestCooldownSiIntrare(Base):
-    def test_cooldown_blocheaza_redeschiderea(self):
+    def test_the_cooldown_blocks_reopening(self):
         d = self.make()
         d.s["cooldown_until"] = time.time() + 600
         d.tick(L(spot_qty=0.0, perp_szi=0.0, funding=0.001))   # funding excelent
         self.assertEqual(d.s["status"], "flat")
         self.assertEqual(self.c.orders, [])
 
-    def test_dupa_cooldown_deschide(self):
+    def test_after_the_cooldown_it_opens(self):
         d = self.make()
         d.s["cooldown_until"] = time.time() - 1
         d.tick(L(spot_qty=0.0, perp_szi=0.0, funding=0.001))
@@ -222,33 +222,33 @@ class TestIesireInteligenta(Base):
     def _force_avg(self, d, val):
         d.s["funding_hist"] = [[time.time(), val]] * 5
 
-    def test_funding_negativ_dar_tinut_putin_nu_inchide(self):
+    def test_negative_funding_held_briefly_does_not_close(self):
         d = self.make(); self.opened(d)
         self._force_avg(d, -0.0002)
         d.tick(L(funding=-0.0002))
-        self.assertEqual(d.s["status"], "open", "min_hold inca neimplinit")
+        self.assertEqual(d.s["status"], "open", "min_hold is not met yet")
 
-    def test_funding_negativ_si_tinut_destul_inchide(self):
+    def test_negative_funding_held_long_enough_closes(self):
         d = self.make(); self.opened(d)
         d.s["opened_ts"] = time.time() - 7 * 3600   # tinut 7h > 6h
         self._force_avg(d, -0.0002)
         d.tick(L(funding=-0.0002))
         self.assertEqual(d.s["status"], "flat")
-        self.assertEqual(len(self.c.orders), 2, "vinde spot + acopera perp")
+        self.assertEqual(len(self.c.orders), 2, "it sells the spot and covers the perp")
 
 
 class TestInfrastructura(Base):
-    def test_a_doua_instanta_refuzata_de_lacat(self):
+    def test_the_second_instance_is_refused_by_the_lock(self):
         d1 = self.make()
         self.assertTrue(d1._acquire_lock())
         d2 = self.make()
         self.assertFalse(d2._acquire_lock(), "lacatul previne dublarea ordinelor")
         d1._lock_fh.close()
         d3 = self.make()
-        self.assertTrue(d3._acquire_lock(), "dupa oprire lacatul se elibereaza")
+        self.assertTrue(d3._acquire_lock(), "after the stop the lock is released")
         d3._lock_fh.close()
 
-    def test_salvarea_e_atomica_si_valida(self):
+    def test_the_save_is_atomic_and_valid(self):
         d = self.make(); self.opened(d)
         d._save()
         with open(d.state_file) as f:
@@ -256,18 +256,18 @@ class TestInfrastructura(Base):
         self.assertEqual(st["status"], "open")
         self.assertFalse(os.path.exists(d.state_file + ".tmp"))
 
-    def test_adopta_pozitia_existenta_la_restart(self):
+    def test_it_adopts_the_existing_position_on_a_restart(self):
         d = self.make()                              # stare proaspata (flat)
         d.tick(L(spot_qty=1.7, perp_szi=-1.71))
-        self.assertEqual(d.s["status"], "open", "adopta in loc sa deschida dublu")
+        self.assertEqual(d.s["status"], "open", "it adopts instead of opening a double position")
         self.assertAlmostEqual(d.s["target_sz"], 1.705, places=3)
         self.assertEqual(self.c.orders, [], "adoption places no new orders")
 
 
 class TestProtectieLichidare(Base):
-    def test_auto_protect_reduce_ambele_picioare(self):
+    def test_auto_protect_reduces_both_legs(self):
         d = self.make(); self.opened(d)
-        self.c.liq_px = 55.0                         # pret 50, lichidare 55 -> 10% < 20%
+        self.c.liq_px = 55.0                         # A price of 50, liquidation at 55 -> 10% < 20%.
         d.tick(L())
         covers = [o for o in self.c.orders if o[0] == "perp" and o[1] == "buy"]
         sells = [o for o in self.c.orders if o[0] == "spot" and o[1] == "sell"]
@@ -276,34 +276,34 @@ class TestProtectieLichidare(Base):
 
 
 class TestScaleUp(Base):
-    def test_dezactivat_nu_face_nimic(self):
+    def test_disabled_does_nothing(self):
         d = self.make(dry=True, allow_scale_up=False, notional=400.0); self.opened(d, target=2.0)
         d._maybe_scale_up(L())
         self.assertEqual(d.s["target_sz"], 2.0)
 
-    def test_bumpeaza_target_la_notional(self):
+    def test_it_bumps_the_target_to_the_notional(self):
         d = self.make(dry=True, allow_scale_up=True, notional=400.0); self.opened(d, target=2.0)
         d._maybe_scale_up(L())                 # perp_px 50 -> want 400/50 = 8.0
         self.assertAlmostEqual(d.s["target_sz"], 8.0)
 
-    def test_nu_creste_peste_tinta(self):
+    def test_it_does_not_grow_past_the_target(self):
         d = self.make(dry=True, allow_scale_up=True, notional=400.0); self.opened(d, target=8.0)
         d._maybe_scale_up(L())
         self.assertEqual(d.s["target_sz"], 8.0)
 
-    def test_partial_cand_colateral_mic(self):
+    def test_partial_when_the_collateral_is_small(self):
         d = self.make(dry=False, allow_scale_up=True, notional=400.0); self.opened(d, target=2.0)
-        self.c.free = 100.0                    # doar $100 liber, spot_px 50 -> +~1.9
+        self.c.free = 100.0                    # Only $100 free, spot_px 50 -> +~1.9.
         d._maybe_scale_up(L())
         self.assertGreater(d.s["target_sz"], 2.0)
         self.assertLess(d.s["target_sz"], 8.0)
 
-    def test_tick_executa_scale_up_si_cumpara_ambele_picioare(self):
+    def test_a_tick_executes_the_scale_up_and_buys_both_legs(self):
         d = self.make(dry=False, allow_scale_up=True, notional=400.0); self.opened(d, target=2.0)
         d.tick(L()); d.tick(L())               # 2 tick-uri (confirmarea anti-glitch a rebalansului)
         buys_spot = [o for o in self.c.orders if o[0] == "spot" and o[1] == "buy"]
         buys_perp = [o for o in self.c.orders if o[0] == "perp" and o[1] == "sell"]
-        self.assertTrue(buys_spot and buys_perp, "scale-up cumpara spot + shorteaza perp (ramane neutru)")
+        self.assertTrue(buys_spot and buys_perp, "the scale-up buys spot and shorts perp (staying neutral)")
 
 
 if __name__ == "__main__":

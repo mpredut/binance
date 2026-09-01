@@ -111,7 +111,7 @@ class BinanceExecutorContractTest(unittest.TestCase):
             self.fake.client.order_calls[-1][-1]["newClientOrderId"], client_id,
         )
 
-    def test_submit_order_fara_orderId_ridica(self):
+    def test_submit_order_without_an_orderId_raises(self):
         self.fake.client.order_market_buy = lambda symbol, quantity, **kwargs: {}
         with self.assertRaises(ProviderError):
             self.p.submit_order("BTCUSDC", "buy", 0.01, market=True)
@@ -125,7 +125,7 @@ class BinanceExecutorContractTest(unittest.TestCase):
         with self.assertRaises(ProviderError):
             self.p.cancel_order("BTCUSDC", "42")
 
-    def test_open_orders_pastreaza_identitatea_pentru_recovery(self):
+    def test_open_orders_keeps_the_identity_for_recovery(self):
         self.fake.client.open = [{
             "orderId": 77, "clientOrderId": "RT_abc", "side": "buy",
             "price": "60", "origQty": "2", "executedQty": "0.5",
@@ -137,7 +137,7 @@ class BinanceExecutorContractTest(unittest.TestCase):
             "status": "PARTIALLY_FILLED",
         }])
 
-    def test_lookup_dupa_client_order_id(self):
+    def test_lookup_by_client_order_id(self):
         order = self.p.order_by_client_id("BTCUSDC", "RT_abc")
         self.assertEqual(order["orderId"], 77)
         self.assertEqual(order["clientOrderId"], "RT_abc")

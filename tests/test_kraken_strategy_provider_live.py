@@ -101,14 +101,14 @@ class ProviderLivePathTest(unittest.TestCase):
     def tearDown(self):
         strat.notify = self._orig_notify
 
-    def test_init_citeste_precizia_prin_contract(self):
+    def test_init_reads_the_precision_through_the_contract(self):
         self.assertEqual((self.s.price_dec, self.s.vol_dec), (2, 8))
 
     def test_dust_safe_lasa_un_singur_tick_la_precizie_mica(self):
         self.s.vol_dec = 2
         self.assertEqual(self.s._dust_safe_qty(13.4), 13.39)
 
-    def test_place_cheama_submit_order_si_stocheaza_order_id(self):
+    def test_place_calls_submit_order_and_stores_the_order_id(self):
         self.s._save = MagicMock()
         self.s._place("buy", 1.0, 60.0, kind="ENTRY", amount=650.0)
         sub = [c for c in self.fake.calls if c[0] == "submit_order"]
@@ -125,7 +125,7 @@ class ProviderLivePathTest(unittest.TestCase):
         sub = [c for c in self.fake.calls if c[0] == "submit_order"][-1]
         self.assertTrue(sub[5])                  # market=True propagat
 
-    def test_intentia_este_persistata_inainte_de_submit(self):
+    def test_the_intent_is_persisted_before_the_submit(self):
         observed = []
         self.fake.on_submit = lambda client_id: observed.append(
             dict(self.s.s.get("pending_intent") or {}))
@@ -134,7 +134,7 @@ class ProviderLivePathTest(unittest.TestCase):
         self.assertEqual(observed[0]["client_order_id"], self.fake.calls[-1][-1])
         self.assertNotIn("order_id", observed[0])
 
-    def test_raspuns_pierdut_se_recupereaza_fara_al_doilea_submit(self):
+    def test_a_lost_response_recovers_without_a_second_submit(self):
         original = self.fake.submit_order
 
         def lose_response(*args, **kwargs):
@@ -224,7 +224,7 @@ class ProviderLivePathTest(unittest.TestCase):
         self.assertIsNotNone(strategy._dca_vol_1h())
         strategy.client.ohlc_closes.assert_called_once_with("HYPEUSD", 240)
 
-    def test_place_ProviderError_nu_stocheaza_ordinul(self):
+    def test_place_ProviderError_does_not_store_the_order(self):
         def boom(*a, **k):
             raise ProviderError("Insufficient funds")
         self.fake.submit_order = boom
@@ -269,7 +269,7 @@ class ProviderLivePathTest(unittest.TestCase):
             call[0] == "submit_order" for call in self.fake.calls
         ))
 
-    def test_preflight_refuzat_nu_creeaza_intentie_sau_ordin(self):
+    def test_a_refused_preflight_creates_no_intent_or_order(self):
         self.fake.preflight_error = ProviderError("Insufficient funds")
         placed = self.s._place("buy", 10.0, 60.0, kind="DCA", amount=600.0)
         self.assertFalse(placed)
@@ -277,7 +277,7 @@ class ProviderLivePathTest(unittest.TestCase):
         self.assertFalse(any(c[0] == "submit_order" for c in self.fake.calls))
         self.assertEqual(self.s.s["orders"], [])
 
-    def test_reconcile_umple_pe_closed_prin_order_status(self):
+    def test_reconcile_fills_on_closed_through_order_status(self):
         self.s.s["orders"] = [{"txid": "OID-9", "side": "buy", "vol": 2.0, "price": 60.0,
                                "amount": 120.0, "kind": "ENTRY", "ts": 0}]
         self.fake.next_status = OrderStatus("closed", filled_qty=2.0, cost=120.0, fee=0.31)

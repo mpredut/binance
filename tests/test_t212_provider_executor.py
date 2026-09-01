@@ -72,7 +72,7 @@ class T212ExecutorContractTest(unittest.TestCase):
         else:
             os.environ["T212_LIVE_ORDERS"] = self.previous_live
 
-    def test_contract_balanta_si_precizie(self):
+    def test_the_contract_balance_and_precision(self):
         self.assertIsInstance(self.provider, StrategyExecutor)
         self.assertEqual(self.provider.free_balance("NVDA_US_EQ"), 1.25)
         self.assertEqual(
@@ -84,7 +84,7 @@ class T212ExecutorContractTest(unittest.TestCase):
         self.fake.portfolio_result = None
         self.assertIsNone(self.provider.free_balance("NVDA_US_EQ"))
 
-    def test_submit_limit_market_si_poarta_live(self):
+    def test_submit_limit_market_and_the_live_gate(self):
         oid = self.provider.submit_order("NVDA_US_EQ", "buy", 0.5, price=119.25)
         self.assertEqual(oid, "712")
         self.assertEqual(self.fake.calls[-1], ("limit", "NVDA_US_EQ", 0.5, 119.25, "DAY"))
@@ -100,7 +100,7 @@ class T212ExecutorContractTest(unittest.TestCase):
         with self.assertRaisesRegex(ProviderError, "quantity"):
             self.provider.submit_order("NVDA_US_EQ", "buy", 0.001, price=119.25)
 
-    def test_poarta_live_poate_fi_injectata_de_launcherul_autonom(self):
+    def test_the_live_gate_can_be_injected_by_the_standalone_launcher(self):
         os.environ["T212_LIVE_ORDERS"] = "false"
         explicit_live = T212Provider(
             client=self.fake, live_enabled=True, order_validity="DAY",
@@ -115,7 +115,7 @@ class T212ExecutorContractTest(unittest.TestCase):
         with self.assertRaisesRegex(ProviderError, "blocked"):
             explicit_paper.submit_order("NVDA_US_EQ", "buy", 0.5, price=119.25)
 
-    def test_validitatea_limita_poate_fi_injectata_de_profil(self):
+    def test_the_limit_validity_can_be_injected_by_the_profile(self):
         provider = T212Provider(
             client=self.fake, live_enabled=True,
             order_validity="GOOD_TILL_CANCEL",
@@ -125,14 +125,14 @@ class T212ExecutorContractTest(unittest.TestCase):
 
         self.assertEqual(self.fake.calls[-1][-1], "GOOD_TILL_CANCEL")
 
-    def test_submit_respins_sau_fara_id_este_eroare(self):
+    def test_a_rejected_submit_or_one_without_an_id_is_an_error(self):
         for result in ((429, {"error": "rate limit"}), (200, {"status": "NEW"})):
             with self.subTest(result=result):
                 self.fake.place_result = result
                 with self.assertRaises(ProviderError):
                     self.provider.submit_order("NVDA_US_EQ", "buy", 0.5, price=119.25)
 
-    def test_status_partial_terminal_si_fail_closed(self):
+    def test_status_partial_terminal_and_fail_closed(self):
         self.assertEqual(
             self.provider.order_status("NVDA_US_EQ", "712"),
             OrderStatus(
@@ -173,7 +173,7 @@ class T212ExecutorContractTest(unittest.TestCase):
         with self.assertRaisesRegex(ProviderError, "order currency"):
             self.provider.order_status("NVDA_US_EQ", "712")
 
-    def test_cancel_confirmat_idempotent_terminal_si_neconfirmat(self):
+    def test_cancel_confirmed_idempotent_terminal_and_unconfirmed(self):
         self.provider.cancel_order("NVDA_US_EQ", "712")
         self.assertEqual(self.fake.calls[-1], ("cancel", "712"))
 
@@ -193,7 +193,7 @@ class T212ExecutorContractTest(unittest.TestCase):
 
 
 class T212ClientTransportTest(unittest.TestCase):
-    def test_market_payload_si_fallback_la_istoric(self):
+    def test_the_market_payload_and_the_history_fallback(self):
         client = t212_client.T212Client(
             "dummy", "dummy", env="demo", min_gap_sec=0.0,
             portfolio_ttl_sec=6.0,

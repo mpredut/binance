@@ -126,7 +126,7 @@ class HLExecutorContractTest(unittest.TestCase):
         )
         self.assertEqual(self.signer.calls[-1][-1], cloid)
 
-    def test_submit_order_market_incruciseaza_pretul(self):
+    def test_submit_order_market_crosses_the_price(self):
         os.environ["HL_LIVE_ORDERS"] = "true"
         self.p.submit_order("HYPE", "sell", 1.0, price=None, market=True)
         px = self.signer.calls[-1][4]
@@ -138,7 +138,7 @@ class HLExecutorContractTest(unittest.TestCase):
         with self.assertRaises(ProviderError):
             self.p.submit_order("HYPE", "buy", 1.0, price=60.0)
 
-    def test_buy_subfinantat_este_refuzat_inainte_de_signer(self):
+    def test_an_underfunded_buy_is_refused_before_the_signer(self):
         os.environ["HL_LIVE_ORDERS"] = "true"
         self.p._client = FakeRead(balances=[
             {"coin": "USDC", "total": "10", "hold": "0"},
@@ -147,7 +147,7 @@ class HLExecutorContractTest(unittest.TestCase):
             self.p.submit_order("HYPE", "buy", 1.0, price=60.0, kind="DCA")
         self.assertEqual(self.signer.calls, [])
 
-    def test_sell_nu_este_blocat_de_soldul_quote(self):
+    def test_a_sell_is_not_blocked_by_the_quote_balance(self):
         os.environ["HL_LIVE_ORDERS"] = "true"
         self.p._client = FakeRead(balances=[])
         self.assertEqual(
@@ -159,7 +159,7 @@ class HLExecutorContractTest(unittest.TestCase):
         st = self.p.order_status("HYPE", "999")
         self.assertEqual(st.status, "open")
 
-    def test_order_by_client_id_recupereaza_din_open_orders(self):
+    def test_order_by_client_id_recovers_from_open_orders(self):
         cloid = "0x0123456789abcdef0123456789abcdef"
         self.p._client = FakeRead(opens=[{
             "oid": 42, "cloid": cloid, "status": "open",
@@ -204,7 +204,7 @@ class HLExecutorContractTest(unittest.TestCase):
         self.assertAlmostEqual(st.cost, 1.5 * 60 + 0.5 * 62)
         self.assertAlmostEqual(st.fee, 0.15)
 
-    def test_order_status_converteste_fee_din_hype_in_usdc(self):
+    def test_order_status_converts_the_fee_from_hype_to_usdc(self):
         self.p._client = FakeRead(
             fills=[{
                 "oid": 5, "sz": "2", "px": "75", "fee": "0.001",
@@ -215,7 +215,7 @@ class HLExecutorContractTest(unittest.TestCase):
         st = self.p.order_status("HYPE", "5")
         self.assertAlmostEqual(st.fee, 0.075)
 
-    def test_order_status_canceled_din_endpoint_dedicat(self):
+    def test_order_status_canceled_from_the_dedicated_endpoint(self):
         self.p._client = FakeRead(status="canceled")
         st = self.p.order_status("HYPE", "77")
         self.assertEqual(st.status, "canceled")
@@ -225,7 +225,7 @@ class HLExecutorContractTest(unittest.TestCase):
         with self.assertRaises(ProviderError):
             self.p.order_status("HYPE", "77")
 
-    def test_order_terminal_asteapta_fills_complete(self):
+    def test_a_terminal_order_waits_for_complete_fills(self):
         read = FakeRead(status="filled")
         read.info.query_order_by_oid = lambda addr, oid: {
             "status": "order",

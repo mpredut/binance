@@ -1,6 +1,6 @@
-"""Regulile spot DCA pure, partajate live<->backtest. Verifica formulele
-+ ca are_close e IDENTIC cu botcore.are_close (dovada ca refactorul din strategy.py
-NU schimba comportamentul LIVE)."""
+"""The pure spot-DCA rules, shared between live and backtest. It checks the formulas
+plus that are_close is IDENTICAL to botcore.are_close (proof that the refactor in strategy.py
+does NOT change the LIVE behaviour)."""
 import os
 import sys
 import unittest
@@ -21,7 +21,7 @@ class StratRulesTest(unittest.TestCase):
         self.assertTrue(sr.hit_stop(100.0, 87.0, 12.5))    # -13% >= 12.5
         self.assertFalse(sr.hit_stop(100.0, 90.0, 12.5))   # -10% < 12.5
         self.assertFalse(sr.hit_stop(100.0, 50.0, 0.0))    # sl dezactivat
-        self.assertFalse(sr.hit_stop(0.0, 50.0, 12.5))     # avg lipsa
+        self.assertFalse(sr.hit_stop(0.0, 50.0, 12.5))     # A missing avg.
 
     def test_reentry_stop_bounce(self):
         # min 50.0, bounce 1.5% -> threshold 50.75; below it = blocked
@@ -32,8 +32,8 @@ class StratRulesTest(unittest.TestCase):
         # sold at 100, drop 2% -> threshold 98; above it = blocked
         self.assertTrue(sr.reentry_drop_blocked(99.0, 100.0, 2.0, 0.0))
         self.assertFalse(sr.reentry_drop_blocked(97.0, 100.0, 2.0, 0.0))  # sub prag -> intra
-        self.assertFalse(sr.reentry_drop_blocked(99.0, 100.0, 0.0, 0.0))  # drop 0 -> fara bariera
-        self.assertFalse(sr.reentry_drop_blocked(99.0, 0.0, 2.0, 0.0))    # last_sell lipsa
+        self.assertFalse(sr.reentry_drop_blocked(99.0, 100.0, 0.0, 0.0))  # drop 0 -> no barrier.
+        self.assertFalse(sr.reentry_drop_blocked(99.0, 0.0, 2.0, 0.0))    # A missing last_sell.
 
     def test_dca_price_hit(self):
         # last_buy 100, drop 2% -> prag 98
@@ -48,7 +48,7 @@ class StratRulesTest(unittest.TestCase):
         self.assertEqual(sr.progressive_dca_drop_pct(1.25, 0.25, 4), 2.25)
         self.assertEqual(sr.progressive_dca_drop_pct(1.25, -1.0, 4), 1.25)
 
-    def test_are_close_identic_cu_botcore(self):
+    def test_are_close_is_identical_to_botcore(self):
         import botcore
         for a, b, tol in [(50.0, 50.75, 0.05), (65.93, 65.91, 0.05), (100.0, 98.0, 0.0),
                           (99.0, 100.0, 2.0), (0.0, 0.0, 0.05), (58.42, 58.47, 0.05)]:

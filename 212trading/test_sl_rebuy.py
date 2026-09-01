@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 import strategy as strat_mod  # noqa: E402
 from strategy import Strategy, StratParams, state_path_for  # noqa: E402
 
-strat_mod.notify = lambda **kw: None   # fara telegram/desktop in test
+strat_mod.notify = lambda **kw: None   # No telegram or desktop notification in the test.
 
 TICK = "SLREBUYTEST_US_EQ"
 
@@ -58,7 +58,7 @@ def main() -> int:
         os.remove(sf)
 
     params = StratParams.from_env({
-        "STRAT_CURRENCY": "USD",          # 1:1 -> fara retea FX
+        "STRAT_CURRENCY": "USD",          # 1:1 -> no FX network call.
         "YAHOO_SYMBOL": "SLREBUY",
         "STRAT_ENTRY": "100",
         "STRAT_MAX_BUDGET": "1000",
@@ -78,7 +78,7 @@ def main() -> int:
         if not cond:
             fails.append(msg)
 
-    # --- starea de plecare: detinem 1.0 @ 100, SL tocmai a fost plasat (catastrofa) ---
+    # --- The starting state: we hold 1.0 @ 100, the SL has just been placed (catastrophe) ---
     s.s["qty"] = 1.0
     s.s["cost_usd"] = 100.0
     s.s["entry_price"] = 100.0
@@ -86,38 +86,38 @@ def main() -> int:
     s.s["spent_cash"] = 100.0
     s.s["sl_pending"] = True            # Marked before the stop executes.
 
-    # 1+2. SL-ul a executat -> portofoliu 0; reconcilierea vede inchiderea de catastrofa
+    # 1+2. The SL executed -> the portfolio is 0; reconciliation sees the catastrophe close.
     client.portfolio = [{"ticker": TICK, "quantity": 0.0, "averagePrice": 0.0}]
     client.active = []
     s._reconcile_real(94.0)
     rb = s.s.get("sl_rebuy")
     check(rb is not None, "sl_rebuy ARMED after the stop-loss close")
     check(abs(s.s.get("last_sell_price", 0) - 94.0) < 1e-9, "last_sell_price = the sale price (94)")
-    check(s.s["qty"] <= 1e-9, "pozitie inchisa (qty 0) dupa SL")
+    check(s.s["qty"] <= 1e-9, "the position is closed (qty 0) after the SL")
     n_after_arm = len(client.placed)
 
     # 3. A deeper fall tracks the low and does not buy.
     s.step(92.0)
-    check(s.s.get("sl_rebuy") is not None, "inca armat in caderea adanca (92)")
+    check(s.s.get("sl_rebuy") is not None, "still armed during the deep fall (92)")
     check(abs(s.s["sl_rebuy"]["low"] - 92.0) < 1e-9, "minimul urmarit cobora la 92")
-    check(len(client.placed) == n_after_arm, "NICIUN buy in caderea adanca (nu prinde cutitul)")
+    check(len(client.placed) == n_after_arm, "NO buy during the deep fall (it does not catch the knife)")
 
     # 4. a small pullback (+0.5% from 92) < the 1.2% threshold -> it does not buy yet
     s.step(92.0 * 1.005)
-    check(len(client.placed) == n_after_arm, "recul +0.5% < 1.2% -> inca fara buy")
-    check(s.s.get("sl_rebuy") is not None, "inca armat dupa recul insuficient")
+    check(len(client.placed) == n_after_arm, "a pullback of +0.5% < 1.2% -> still no buy")
+    check(s.s.get("sl_rebuy") is not None, "still armed after an insufficient pullback")
 
-    # 5. recul >= 1.2% de la minimul 92 -> plaseaza BUY ENTRY
+    # 5. A pullback >= 1.2% from the low of 92 -> it places a BUY ENTRY.
     s.step(92.0 * 1.013)
-    check(len(client.placed) == n_after_arm + 1, "recul +1.3% >= 1.2% -> BUY ENTRY plasat")
+    check(len(client.placed) == n_after_arm + 1, "a pullback of +1.3% >= 1.2% -> a BUY ENTRY is placed")
     if len(client.placed) == n_after_arm + 1:
         last = client.placed[-1]
-        check(last["quantity"] > 0, "ordinul plasat e BUY (qty>0)")
+        check(last["quantity"] > 0, "the order placed is a BUY (qty>0)")
 
     # 6. The consumed arm prevents another buy on the next bounce.
     s.step(92.0 * 1.02)
-    check(s.s.get("sl_rebuy") is None, "armarea CONSUMATA (1 transa) dupa re-buy")
-    check(len(client.placed) == n_after_arm + 1, "fara al doilea buy (armare consumata)")
+    check(s.s.get("sl_rebuy") is None, "the arming is CONSUMED (1 tranche) after the re-buy")
+    check(len(client.placed) == n_after_arm + 1, "no second buy (the arming is consumed)")
 
     if os.path.exists(sf):
         os.remove(sf)

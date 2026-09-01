@@ -47,13 +47,13 @@ def _providers():
 
 
 class ProviderContractConformanceTest(unittest.TestCase):
-    def test_toti_providerii_satisfac_StrategyExecutor(self):
+    def test_every_provider_satisfies_StrategyExecutor(self):
         for name, prov in _providers():
             with self.subTest(provider=name):
                 self.assertIsInstance(prov, StrategyExecutor,
                                       f"{name} NU satisface contractul StrategyExecutor")
 
-    def test_toate_metodele_contractului_exista_si_sunt_apelabile(self):
+    def test_every_contract_method_exists_and_is_callable(self):
         for name, prov in _providers():
             for meth in CONTRACT_METHODS:
                 with self.subTest(provider=name, method=meth):

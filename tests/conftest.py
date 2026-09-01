@@ -7,14 +7,14 @@ import threading
 import pytest
 
 
-# Setat la import, inainte de colectarea modulelor de test. Astfel nici apelurile
+# Set at import time, before the test modules are collected. That way not even the calls
 # made at import time, and subprocesses started by tests cannot send
-# notificari reale catre ntfy/email/desktop.
+# real notifications towards ntfy, email or the desktop.
 os.environ["DISABLE_EXTERNAL_NOTIFICATIONS"] = "1"
 
-# Unele teste construiesc motoarele live cu executori fake. Fara un director
-# separat, auditul implicit ajungea in logger/execution_audit si amesteca
-# TEST_US_EQ cu fill-urile reale folosite pentru calibrare.
+# Some tests build the live engines with fake executors. Without a separate
+# directory, the default audit ended up in logger/execution_audit and mixed
+# TEST_US_EQ with the real fills used for calibration.
 _execution_audit_tmp = tempfile.TemporaryDirectory(
     prefix="binance-tests-execution-audit-",
 )

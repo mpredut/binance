@@ -57,7 +57,7 @@ def realized_vol_series(px: np.ndarray, win: int) -> np.ndarray:
 
 def _load_pipeline():
     from chronos import ChronosPipeline
-    print(f"  incarc {MODEL_NAME} (zero-shot, fara antrenare)...")
+    print(f"  loading {MODEL_NAME} (zero-shot, no training)...")
     return ChronosPipeline.from_pretrained(MODEL_NAME, device_map="cpu", torch_dtype=torch.float32)
 
 
@@ -84,7 +84,7 @@ def walk_forward_vol(rv: np.ndarray, horizon: int, warmup: int, stride: int):
             bases.append(float(rv[i]))
             actuals.append(float(rv[i + horizon]))
         done = b + len(chunk)
-        print(f"    {done}/{len(idxs)} ferestre testate ({time.time()-t0:.0f}s)", end="\r")
+        print(f"    {done}/{len(idxs)} windows tested ({time.time()-t0:.0f}s)", end="\r")
     print()
     preds, bases, actuals = map(np.array, (preds, bases, actuals))
     mae_model = float(np.mean(np.abs(preds - actuals)))
@@ -108,9 +108,9 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Test onest Chronos zero-shot pt predictie volatilitate.")
     ap.add_argument("--symbol", default="TAOUSDC")
     ap.add_argument("--days", type=int, default=400)
-    ap.add_argument("--win", type=int, default=24, help="fereastra (ore) pt volatilitatea realizata")
-    ap.add_argument("--horizon", type=int, default=24, help="cu cate ore inainte prezicem")
-    ap.add_argument("--stride", type=int, default=6, help="pas intre ferestrele de test (ore) — CPU")
+    ap.add_argument("--win", type=int, default=24, help="the window (hours) for the realised volatility")
+    ap.add_argument("--horizon", type=int, default=24, help="how many hours ahead we predict")
+    ap.add_argument("--stride", type=int, default=6, help="the step between test windows (hours) — CPU")
     ap.add_argument("--eval", action="store_true")
     args = ap.parse_args()
 
@@ -120,7 +120,7 @@ def main() -> int:
     warmup = args.win + MAX_CONTEXT // 4     # minimum history before testing begins
     if args.eval:
         rep = walk_forward_vol(rv, args.horizon, warmup, args.stride)
-        print(f"  test pe {rep['n_test']} ferestre (stride={args.stride}h), "
+        print(f"  tested on {rep['n_test']} windows (stride={args.stride}h), "
               f"orizont={args.horizon}h, fereastra_vol={args.win}h")
         print(f"    MAE model={rep['mae_model']:.5f}  baseline(persistenta)={rep['mae_baseline_persistenta']:.5f}"
               f"  -> {rep['improvement_pct']}% {'mai bun' if (rep['improvement_pct'] or 0) > 0 else 'mai slab'}")

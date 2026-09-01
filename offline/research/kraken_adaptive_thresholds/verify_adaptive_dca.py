@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
 verify_adaptive_dca.py — merita promovat pragul de DCA adaptiv (shadow, K_DCA *
-vol_1h realizat, deja calculat in shadow_signals.py dar folosit DOAR ca log in
+the realised vol_1h, already computed in shadow_signals.py but used ONLY as a log in
 kraken/strategy.py) la decizie REALA, in locul pragului FIX (STRAT_DCA_DROP_PCT)?
 
-Refoloseste EXACT motorul de simulare din kraken/backtest_adaptive.py
-(simulate_variant/trailing_vol_series/fetch_candles) — nu rescrie logica.
+It reuses EXACTLY the simulation engine from kraken/backtest_adaptive.py
+(simulate_variant/trailing_vol_series/fetch_candles) — it does not rewrite the logic.
 It SKIPS the Chronos part (an ML model — it would load memory on the machine
-reali activi, inutil pt aceasta intrebare specifica: fix vs shadow).
+real active ones, useless for this specific question: fixed versus shadow).
 
 Parameters = the REAL values from kraken/config.env (NOT the defaults of the
 original script, which are guessed or stale — exactly the mistake caught in a
-anterioara: prima rulare cu parametri gresiti a aratat un castig mare pt
-adaptiv, apoi complet inversat cu valorile reale).
+session: the first run with the wrong parameters showed a large gain for the
+adaptive variant, and then it reversed completely with the real values).
 
 Rulare:  python3 offline/research/kraken_adaptive_thresholds/verify_adaptive_dca.py
 """

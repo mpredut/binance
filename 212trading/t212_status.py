@@ -60,13 +60,13 @@ def main() -> int:
         blk = cash.get("blocked") or 0; tot = cash.get("total", 0)
         ppl = cash.get("ppl", 0); pie = cash.get("pieCash", 0)
         print(f"  INVESTIT (cost)   : {inv:>10.2f}")
-        print(f"  DISPONIBIL (liber): {free:>10.2f}   <- cu astia poti plasa ordine noi")
+        print(f"  AVAILABLE (free): {free:>10.2f}   <- this is what you can place new orders with")
         print(f"  BLOCKED            : {blk:>10.2f}   <- locked in pending or in-flight orders")
         print(f"  cash in pie-uri   : {pie:>10.2f}")
         print(f"  P&L nerealizat    : {ppl:>+10.2f}")
         print(f"  TOTAL cont        : {tot:>10.2f}")
     else:
-        print("  ! nu pot citi cash-ul (rate-limit/auth?)")
+        print("  ! cannot read the cash (rate limit or auth?)")
 
     # --- POSITIONS ---
     pf = _retry(c.get_portfolio) or []
@@ -76,14 +76,14 @@ def main() -> int:
         q = float(p.get("quantity", 0)); avg = float(p.get("averagePrice", 0))
         cur = float(p.get("currentPrice", 0)); ppl = p.get("ppl", 0)
         val = q * cur; inv_sum += q * avg
-        print(f"    {p.get('ticker',''):<14} qty {q:<8.3f} avg {avg:<9.2f} pret {cur:<9.2f} "
-              f"valoare {val:>9.2f}  P&L {float(ppl):>+8.2f}")
+        print(f"    {p.get('ticker',''):<14} qty {q:<8.3f} avg {avg:<9.2f} price {cur:<9.2f} "
+              f"value {val:>9.2f}  P&L {float(ppl):>+8.2f}")
     if pf:
         print(f"    (suma cost pozitii: {inv_sum:.2f})")
 
     # --- PENDING ORDERS that block cash ---
     orders = _retry(c.list_active_orders) or []
-    print(f"\n  --- ORDINE PENDING ({len(orders)}) ---  <- ASTEA blocheaza cash liber")
+    print(f"\n  --- PENDING ORDERS ({len(orders)}) ---  <- THESE lock up free cash")
     if not orders:
         print("    (none — the cash is not locked by orders)")
     for o in orders:

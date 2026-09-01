@@ -62,7 +62,7 @@ class TestLogica(unittest.TestCase):
 
 
 class TestTrailingKraken(Base):
-    def test_urca_actualizeaza_varf_nu_vinde(self):
+    def test_a_rise_updates_the_peak_and_does_not_sell(self):
         c = FakeK(60.0)
         self.ts(c).check_once()
         c.price = 65.0
@@ -71,7 +71,7 @@ class TestTrailingKraken(Base):
         import json
         self.assertEqual(json.load(open(self.sf))["HYPE"]["peak"], 65.0)
 
-    def test_crash_peste_18pct_vinde_liberul(self):
+    def test_a_crash_beyond_18pct_sells_the_free_balance(self):
         c = FakeK(60.0, total=25.0, held=3.38)        # 21.62 liber
         ts = self.ts(c)
         ts.check_once()                                # varf 60
@@ -81,21 +81,21 @@ class TestTrailingKraken(Base):
         self.assertEqual(c.orders[0]["side"], "sell")
         self.assertAlmostEqual(c.orders[0]["volume"], 21.62, places=2)   # only the free balance, not 25
 
-    def test_cadere_mica_nu_vinde(self):
+    def test_a_small_fall_does_not_sell(self):
         c = FakeK(60.0)
         ts = self.ts(c); ts.check_once()
         c.price = 56.0                                 # -6.7% < 18%
         ts.check_once()
         self.assertEqual(c.orders, [])
 
-    def test_dry_run_nu_vinde(self):
+    def test_a_dry_run_does_not_sell(self):
         c = FakeK(60.0)
         ts = self.ts(c, enabled=False); ts.check_once()
         c.price = 48.0
         ts.check_once()
         self.assertEqual(c.orders, [])
 
-    def test_varf_persista_peste_restart(self):
+    def test_the_peak_survives_a_restart(self):
         c = FakeK(65.0)
         self.ts(c).check_once()
         c.price = 53.0                                 # -18.5% de la 65
@@ -109,7 +109,7 @@ class TestTrailingKraken(Base):
         ts.check_once()
         self.assertEqual(c.orders, [])
 
-    def test_fara_balanta_libera_emite_heartbeat(self):
+    def test_without_a_free_balance_it_emits_a_heartbeat(self):
         messages = []
         c = FakeK(60.0, total=3.38, held=3.38)
         ts = KrakenTrailing(c, log=messages.append, enabled=True, state_file=self.sf)
@@ -123,7 +123,7 @@ class TestTrailingKraken(Base):
 class TestMinProfitKraken(Base):
     """Require minimum profit before Kraken trailing activates."""
 
-    def test_warming_up_nu_vinde_sub_prag(self):
+    def test_warming_up_does_not_sell_below_the_threshold(self):
         c = FakeK(60.0)
         ts = self.ts(c, min_profit_pct=5.0)
         ts.check_once()                    # initial=60, activ la 63.0
@@ -131,7 +131,7 @@ class TestMinProfitKraken(Base):
         ts.check_once()
         self.assertEqual(c.orders, [], "nu vinde inainte sa atinga pragul de profit")
 
-    def test_activ_dupa_prag_vinde(self):
+    def test_active_past_the_threshold_sells(self):
         c = FakeK(60.0)
         ts = self.ts(c, min_profit_pct=5.0)
         ts.check_once()                    # initial=60

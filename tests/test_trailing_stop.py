@@ -88,7 +88,7 @@ class TestLogica(unittest.TestCase):
 
 
 class TestTrailing(Base):
-    def test_snapshot_balante_gol_nu_modifica_starea(self):
+    def test_an_empty_balance_snapshot_does_not_change_the_state(self):
         api = FakeApi(250.0)
         api.get_account_assets_balances = lambda: []
         ts = self.ts(api)
@@ -96,13 +96,13 @@ class TestTrailing(Base):
         self.assertFalse(os.path.exists(self.sf))
         self.assertEqual(self.po.orders, [])
 
-    def test_pret_nefinit_nu_modifica_starea(self):
+    def test_a_non_finite_price_does_not_change_the_state(self):
         api = FakeApi(float("nan"))
         self.ts(api).check_once()
         import json
         self.assertEqual(json.load(open(self.sf)), {})
 
-    def test_urca_nu_vinde_actualizeaza_varful(self):
+    def test_a_rise_does_not_sell_and_updates_the_peak(self):
         api = FakeApi(250.0)
         ts = self.ts(api)
         ts.check_once()
@@ -112,7 +112,7 @@ class TestTrailing(Base):
         import json
         self.assertEqual(json.load(open(self.sf))["TAOUSDC"]["peak"], 260.0)
 
-    def test_cade_sub_prag_vinde_cu_force(self):
+    def test_falling_below_the_threshold_sells_with_force(self):
         api = FakeApi(250.0)
         ts = self.ts(api)
         ts.check_once()                                # varf 250
@@ -126,7 +126,7 @@ class TestTrailing(Base):
             "the protective exit must bypass the profit guard explicitly",
         )
 
-    def test_sell_refuzat_pastreaza_varful_si_nu_armeaza_rebuy(self):
+    def test_a_refused_sell_keeps_the_peak_and_does_not_arm_a_rebuy(self):
         api = FakeApi(250.0)
         ts = self.ts(api)
         ts.check_once()
@@ -138,7 +138,7 @@ class TestTrailing(Base):
         self.assertEqual(state["peak"], 250.0)
         self.assertNotIn("rebuy", state)
 
-    def test_rebuy_refuzat_ramane_pentru_retry(self):
+    def test_a_refused_rebuy_stays_for_a_retry(self):
         api = FakeApi(250.0)
         ts = self.ts(api)
         ts.check_once()
@@ -151,7 +151,7 @@ class TestTrailing(Base):
         import json
         self.assertIn("rebuy", json.load(open(self.sf))["TAOUSDC"])
 
-    def test_cadere_mica_nu_vinde(self):
+    def test_a_small_fall_does_not_sell(self):
         api = FakeApi(250.0)
         ts = self.ts(api)
         ts.check_once()
@@ -159,7 +159,7 @@ class TestTrailing(Base):
         ts.check_once()
         self.assertEqual(self.po.orders, [])
 
-    def test_dry_run_nu_vinde(self):
+    def test_a_dry_run_does_not_sell(self):
         api = FakeApi(250.0)
         ts = self.ts(api, enabled=False)
         ts.check_once()
@@ -167,14 +167,14 @@ class TestTrailing(Base):
         ts.check_once()
         self.assertEqual(self.po.orders, [], "dry run: it only logs, it does not place orders")
 
-    def test_varf_persista_peste_restart(self):
+    def test_the_peak_survives_a_restart(self):
         api = FakeApi(260.0)
         self.ts(api).check_once()                      # varf 260, instanta 1
         api.price = 200.0                              # -23% de la 260 (prag 22%)
         self.ts(api).check_once()                      # instance 2 (a restart) — it reads the peak
         self.assertEqual(len(self.po.orders), 1, "varful 260 supravietuieste restartului")
 
-    def test_vanzare_partiala(self):
+    def test_a_partial_sale(self):
         api = FakeApi(250.0, free=4.0)
         ts = self.ts(api, frac=0.5)
         ts.check_once()
@@ -182,7 +182,7 @@ class TestTrailing(Base):
         ts.check_once()
         self.assertAlmostEqual(self.po.orders[0]["qty"], 2.0)   # 50% of 4
 
-    def test_re_armeaza_dupa_vanzare(self):
+    def test_it_re_arms_after_a_sale(self):
         api = FakeApi(250.0)
         ts = self.ts(api)
         ts.check_once()
@@ -217,7 +217,7 @@ class TestPerMoneda(Base):
 class TestMinProfit(Base):
     """The minimum profit threshold before the trailing activates."""
 
-    def test_warming_up_nu_vinde_sub_prag(self):
+    def test_warming_up_does_not_sell_below_the_threshold(self):
         api = FakeApi(250.0)
         ts = self.ts(api, min_profit_pct=5.0)
         ts.check_once()                    # initial=250, activ la 262.5
@@ -225,7 +225,7 @@ class TestMinProfit(Base):
         ts.check_once()
         self.assertEqual(self.po.orders, [], "it does not sell before the profit threshold is reached")
 
-    def test_activ_dupa_prag_vinde(self):
+    def test_active_past_the_threshold_sells(self):
         api = FakeApi(250.0)
         ts = self.ts(api, min_profit_pct=5.0)
         ts.check_once()                    # initial=250
@@ -236,7 +236,7 @@ class TestMinProfit(Base):
         self.assertEqual(len(self.po.orders), 1, "it sells once the profit threshold is passed")
         self.assertEqual(self.po.orders[0]["side"], "SELL")
 
-    def test_initial_se_reseteaza_la_rebuy(self):
+    def test_it_initially_resets_to_the_rebuy(self):
         """After a crash sell plus a re-buy, it initially resets to the re-buy price."""
         api = FakeApi(250.0)
         ts = self.ts(api, min_profit_pct=5.0)

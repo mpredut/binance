@@ -17,7 +17,7 @@ class TestThresholds(unittest.TestCase):
         self.assertEqual(down, FLOOR)
         self.assertEqual(upm, 0.0)
 
-    def test_volatil_da_praguri_mari(self):
+    def test_a_volatile_market_gives_wide_thresholds(self):
         # serie cu swing-uri ~10-30% -> praguri peste floor
         prices = [100, 90, 115, 88, 130, 85, 120] * 6
         up, down, _, _ = thresholds_from_prices(prices, window=4)

@@ -72,7 +72,7 @@ STRAT_TRAIL_MIN_PROFIT_PCT=5
 
 
 class TestParseDotenv(unittest.TestCase):
-    def test_returns_dict_fara_environ(self):
+    def test_returns_dict_without_environ(self):
         with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as f:
             f.write("FOO_UNIQ_123=bar\n")
             path = f.name
@@ -83,7 +83,7 @@ class TestParseDotenv(unittest.TestCase):
         finally:
             os.unlink(path)
 
-    def test_curata_comentarii_inline(self):
+    def test_it_strips_inline_comments(self):
         with tempfile.NamedTemporaryFile("w", suffix=".env", delete=False) as f:
             f.write("X=0.4  # check minutes\nY=\"quoted\"\n")
             path = f.name
@@ -96,11 +96,11 @@ class TestParseDotenv(unittest.TestCase):
 
 
 class TestFloatEnvDict(unittest.TestCase):
-    def test_din_dict(self):
+    def test_from_a_dict(self):
         self.assertEqual(float_env("A", {"A": "12.5"}), 12.5)
         self.assertIsNone(float_env("LIPSA", {"A": "1"}))
 
-    def test_implicit_environ(self):
+    def test_environ_by_default(self):
         os.environ["TST_FLT_9"] = "3.3"
         try:
             self.assertEqual(float_env("TST_FLT_9"), 3.3)
@@ -109,7 +109,7 @@ class TestFloatEnvDict(unittest.TestCase):
 
 
 class TestIzolareParams(unittest.TestCase):
-    def test_doua_active_parametri_diferiti(self):
+    def test_two_assets_with_different_parameters(self):
         """Inima redesign-ului: from_env(dict) izoleaza — fara coliziune pe environ."""
         nv = parse_dotenv(_tmp(NVDA))
         sp = parse_dotenv(_tmp(SPCX))
@@ -134,7 +134,7 @@ class TestIzolareParams(unittest.TestCase):
 
 
 class TestDiscover(unittest.TestCase):
-    def test_gaseste_config_active(self):
+    def test_it_finds_the_active_configs(self):
         d = tempfile.mkdtemp()
         for n in ("nvda", "spcx", "rgnt"):
             open(os.path.join(d, f"config.{n}.env"), "w").close()

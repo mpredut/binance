@@ -35,7 +35,7 @@ def _bot():
 
 
 class RTradeThreadingTest(unittest.TestCase):
-    def test_startup_anuleaza_automat_ordinul_rtrade_orfan(self):
+    def test_startup_cancels_the_orphaned_rtrade_order_automatically(self):
         bot = _bot()
         canceled = []
         executor = SimpleNamespace(

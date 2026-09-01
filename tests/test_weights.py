@@ -35,7 +35,7 @@ class TestAliniat(unittest.TestCase):
     def test_capatul_tanar_da_pondere_mica(self):
         self.assertLess(w(0.5), 0.25, "trend tanar = posibil zgomot -> prudent")
 
-    def test_dupa_varf_plafon_la_mijloc_ipoteza_lindy_validata(self):
+    def test_after_the_peak_it_caps_at_the_middle_the_lindy_hypothesis_validated(self):
         # validat empiric (trend_survival.py): trendul batran continua la fel de
         # probably as at the middle -> we behave as at the middle, we do not descend the gaussian
         self.assertAlmostEqual(w(10), 0.95, delta=0.02)
@@ -45,7 +45,7 @@ class TestAliniat(unittest.TestCase):
         self.assertLess(w(0.5), w(3))
         self.assertLess(w(3), w(7))
 
-    def test_scara_coerenta_cu_zona_2(self):
+    def test_the_scale_is_coherent_with_zone_2(self):
         # before the fix: 13.9 days -> 0.021 and 14.1 days -> 0.86 (a 40x jump)
         self.assertGreater(w(13.5), 0.1)
         self.assertLess(w(14.1) / max(w(13.5), 1e-9), 7,
@@ -58,16 +58,16 @@ class TestAliniat(unittest.TestCase):
 class TestContraTrend(unittest.TestCase):
     """SELL+up / BUY+down: the middle -> ~0.02 (do not trade), the ends -> ~0.13-0.15."""
 
-    def test_mijlocul_blocheaza(self):
+    def test_the_middle_blocks(self):
         self.assertAlmostEqual(w(7, order_type="SELL"), 0.02, delta=0.01)
 
-    def test_capatul_tanar_permite_putin_cel_batran_ramane_blocat(self):
+    def test_the_young_end_allows_a_little_the_old_end_stays_blocked(self):
         # with the validated Lindy cap: an old trend behaves as at the middle,
         # so the counter-trade stays blocked even in old age
         self.assertGreater(w(0.5, order_type="SELL"), 0.1)
         self.assertAlmostEqual(w(13, order_type="SELL"), 0.02, delta=0.01)
 
-    def test_fara_plateau_curba_e_simetrica(self):
+    def test_without_the_plateau_the_curve_is_symmetric(self):
         # comportamentul clasic (gaussiana pura) ramane disponibil
         young = w(0.5, order_type="SELL", lindy_plateau=False)
         old = w(13, order_type="SELL", lindy_plateau=False)
@@ -75,13 +75,13 @@ class TestContraTrend(unittest.TestCase):
         self.assertGreater(old, 0.1)
         self.assertLess(w(13, lindy_plateau=False), 0.25, "aligned, without the cap, it descends at the end")
 
-    def test_niciodata_peste_plafonul_contra_trend(self):
+    def test_never_above_the_counter_trend_cap(self):
         for tl in (0.5, 3, 7, 10, 13, 15, 21):
             self.assertLessEqual(w(tl, order_type="SELL"), 0.15 + 1e-9)
 
 
 class TestZone(unittest.TestCase):
-    def test_cusatura_la_exact_T_nu_da_fallback(self):
+    def test_the_seam_at_exactly_T_does_not_fall_back(self):
         self.assertGreater(w(14.0), 0.1, "at exactly T the slice is no longer empty (the 0.05 fallback)")
 
     def test_zona_2_aliniat(self):
@@ -111,7 +111,7 @@ class TestEstimareT(unittest.TestCase):
         r = hybrid_T([72.0] * 5, prior_T=14.0)
         self.assertGreaterEqual(r["T"], 11, "with 5 episodes, the prior must dominate")
 
-    def test_fara_episoade_prior_curat(self):
+    def test_without_episodes_the_prior_is_clean(self):
         from forecast.trend_survival import hybrid_T
         r = hybrid_T([], prior_T=14.0)
         self.assertEqual(r["T"], 14)

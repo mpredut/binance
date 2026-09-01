@@ -45,13 +45,13 @@ def up(h, start=100.0, rate=0.3):
 class TestCazulTAO(unittest.TestCase):
     """The reported case: a falling slope over 4 days but a 'current trend' of UP."""
 
-    def test_bounce_de_o_zi_contra_scaderii_nu_e_trend_up(self):
+    def test_a_one_day_bounce_against_the_fall_is_not_an_up_trend(self):
         d = down(96)                                  # 4 zile scadere
         b = up(24, start=d[-1], rate=0.25)            # 24h bounce
         r = run(*series(d, b))
         self.assertIsNone(r, "the 24h bounce is NOT a coherent UP trend — it must be None")
 
-    def test_bounce_sustinut_2_zile_devine_trend_up_cu_durata_corecta(self):
+    def test_a_sustained_2_day_bounce_becomes_an_up_trend_with_the_right_duration(self):
         d = down(96)
         b = up(48, start=d[-1], rate=0.25)            # bounce sustinut 2 zile
         r = run(*series(d, b))
@@ -62,7 +62,7 @@ class TestCazulTAO(unittest.TestCase):
 
 
 class TestDurata(unittest.TestCase):
-    def test_durata_nu_depaseste_span_ul_datelor(self):
+    def test_the_duration_does_not_exceed_the_data_span(self):
         ts, px = series(down(96))                     # 4 zile date
         r = run(ts, px)
         self.assertIsNotNone(r)
@@ -77,7 +77,7 @@ class TestDurata(unittest.TestCase):
 
 
 class TestZgomot(unittest.TestCase):
-    def test_zgomot_in_toleranta_nu_rupe_trendul(self):
+    def test_noise_within_the_tolerance_does_not_break_the_trend(self):
         # a 2-day fall plus a noise window (a 16h rise) plus another 2-day fall
         a = down(48)
         z = up(16, start=a[-1], rate=0.1)
@@ -98,7 +98,7 @@ class TestLagDetectie(unittest.TestCase):
     """detection_lag_hours: trendul incepe inaintea confirmarii (euristica ~2 zile),
     explicitly and CAPPED at the data span (the duration cannot exceed the history)."""
 
-    def test_lag_se_adauga_dar_nu_depaseste_span_ul(self):
+    def test_the_lag_is_added_but_does_not_exceed_the_span(self):
         ts, px = series(down(96))                     # span = 95h
         r = run(ts, px, detection_lag_hours=48)
         self.assertIsNotNone(r)
@@ -106,7 +106,7 @@ class TestLagDetectie(unittest.TestCase):
                              "the lag must not push the duration beyond the existing data")
         self.assertGreater(r["duration_seconds"] / 3600, 90, "capped at the span, not cut below it")
 
-    def test_lag_se_adauga_cand_incape_in_span(self):
+    def test_the_lag_is_added_when_it_fits_in_the_span(self):
         d = down(96)
         u_ = up(72, start=d[-1], rate=0.25)           # trend up confirmat ~3 zile
         r = run(*series(d, u_), detection_lag_hours=48)
@@ -116,7 +116,7 @@ class TestLagDetectie(unittest.TestCase):
         self.assertGreater(dur_h, 95, "the duration must include the lag (+48h)")
         self.assertLess(dur_h, 135)
 
-    def test_fara_lag_durata_e_strict_confirmata(self):
+    def test_without_the_lag_the_duration_is_strictly_confirmed(self):
         d = down(96)
         u_ = up(72, start=d[-1], rate=0.25)
         r0 = run(*series(d, u_), detection_lag_hours=0)
@@ -126,7 +126,7 @@ class TestLagDetectie(unittest.TestCase):
 
 
 class TestGapuri(unittest.TestCase):
-    def test_gap_in_date_opreste_confirmarea(self):
+    def test_a_gap_in_the_data_stops_the_confirmation(self):
         # 2 days down, a 2-day GAP (no points), then 2 recent days down
         old = down(48, start=130)
         recent = down(48, start=115)

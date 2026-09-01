@@ -225,7 +225,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 def main():
     ap = argparse.ArgumentParser(description="Alert monitor: new coins plus price thresholds (config-driven).")
     ap.add_argument("--config", default=os.path.join(_HERE, "market_alerts.conf"))
-    ap.add_argument("--check", action="store_true", help="validate the config + imports and exit (nu porneste monitorul)")
+    ap.add_argument("--check", action="store_true", help="validate the config plus the imports and exit (it does not start the monitor)")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -239,20 +239,20 @@ def main():
         pc = ", ".join(f"{k}(+{v['up_percent']}/-{v['down_percent']})" for k, v in ac["per_coin"].items())
         print(f"   per-coin: {pc}")
     print(f"   cooldown {ac['cooldown_minutes']}min | lookback {ac['lookback_hours']}h | "
-          f"scan pret {cfg['price_scan_seconds']}s | scan monede noi {cfg['new_coins_scan_seconds']}s")
+          f"price scan {cfg['price_scan_seconds']}s | new-coin scan {cfg['new_coins_scan_seconds']}s")
     print("=" * 70)
 
     if args.check:
-        print("✅ --check: config valid + importuri OK. Ies fara sa pornesc monitorul.")
+        print("✅ --check: the config is valid and the imports are OK. Exiting without starting the monitor.")
         return
 
-    print("\n⏳ Init cache preturi...")
+    print("\n⏳ Initialising the price cache...")
     cachePriceAll = create_cachePriceAll(cmc_api_key=CMC_API_KEY,
                                          symbols=cfg["watch"], max_symbols=cfg["max_monitored"])
     print("⏳ Waiting for the first price sync (5s)...")
     time.sleep(5)
 
-    print("⏳ Pornesc verificatorul de praguri de pret...")
+    print("⏳ Starting the price-threshold checker...")
     price_checker = start_price_alert_checker(
         cachePriceAll=cachePriceAll, alert_callback=alert_handler,
         check_interval_seconds=cfg["price_scan_seconds"], config=ac)

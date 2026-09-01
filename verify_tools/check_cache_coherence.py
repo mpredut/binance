@@ -36,7 +36,7 @@ def expected_symbols():
             if inst.provider_name != "binance" and inst.symbol not in syms:
                 syms.append(inst.symbol)
     except Exception as e:  # noqa: BLE001
-        print(f"  [warn] nu pot deriva simbolurile asteptate: {e}")
+        print(f"  [warn] cannot derive the expected symbols: {e}")
     return syms
 
 
@@ -52,8 +52,8 @@ print(f"-- cache_instant_trend.json: {sorted(it.keys())}")
 for s in exp:
     e = it.get(s)
     if not e:
-        problems.append(f"instant_trend LIPSA {s}")
-        print(f"   {s:10} LIPSESTE")
+        problems.append(f"instant_trend MISSING {s}")
+        print(f"   {s:10} IS MISSING")
         continue
     ts = e.get("ts", 0)
     age = now - ts if ts else 1e9
@@ -65,14 +65,14 @@ for s in exp:
 
 # 2. current price
 cp = load("cache_currentprice.json") or {}
-# format: {'fetchtime': {...}, 'items': {symbol: [[ts_ms, price]]}} (sau direct pe symbol)
+# format: {'fetchtime': {...}, 'items': {symbol: [[ts_ms, price]]}} (or directly per symbol)
 items = cp.get("items", cp) if isinstance(cp, dict) else {}
 print(f"-- cache_currentprice.json: {sorted(k for k in items.keys() if k != 'fetchtime')}")
 for s in exp:
     entries = items.get(s)
     if not entries or not isinstance(entries, list):
-        problems.append(f"currentprice LIPSA {s}")
-        print(f"   {s:10} LIPSESTE")
+        problems.append(f"currentprice MISSING {s}")
+        print(f"   {s:10} IS MISSING")
         continue
     ts_ms, price = entries[-1][0], entries[-1][1]
     age = now - ts_ms / 1000.0

@@ -83,7 +83,7 @@ class TestFiltruMKInDetector(unittest.TestCase):
         r = detect_long_term_trend(ts, px, 24, 8, 3, 2, 5, mk_alpha=0.05)
         self.assertIsNone(r, "fereastra curenta fara trend semnificativ -> None")
 
-    def test_fara_filtru_comportament_vechi(self):
+    def test_without_the_filter_the_old_behaviour(self):
         ts, px = self._mk_series([100 - 0.3 * i for i in range(96)])
         r = detect_long_term_trend(ts, px, 24, 8, 3, 2, 5, mk_alpha=None)
         self.assertIsNotNone(r)

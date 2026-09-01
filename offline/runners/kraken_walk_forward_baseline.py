@@ -140,10 +140,10 @@ def main() -> int:
         "--intrabar-policy", choices=("buy_first", "sell_first", "worst_case"),
         default="buy_first",
     )
-    parser.add_argument("--train", type=int, help="bare; implicit auto 45%% din istoric")
+    parser.add_argument("--train", type=int, help="bars; by default automatically 45%% of the history")
     parser.add_argument("--validation", type=int, help="bare; implicit auto 10%%")
     parser.add_argument("--test", type=int, help="bare; implicit auto 15%%")
-    parser.add_argument("--step", type=int, help="bare; implicit egal cu TEST")
+    parser.add_argument("--step", type=int, help="bars; by default equal to TEST")
     parser.add_argument(
         "--warmup", type=int, default=0,
         help="preceding bars for the signals; they carry no position or P&L into the segment",
@@ -158,7 +158,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.fee < 0:
-        parser.error("--fee nu poate fi negativ")
+        parser.error("--fee cannot be negative")
     explicit_windows = (args.train, args.validation, args.test)
     if any(value is not None for value in explicit_windows) and not all(
             value is not None for value in explicit_windows):
@@ -167,7 +167,7 @@ def main() -> int:
            for value in (*explicit_windows, args.step)):
         parser.error("the walk-forward sizes must be positive")
     if args.warmup < 0:
-        parser.error("--warmup nu poate fi negativ")
+        parser.error("--warmup cannot be negative")
     try:
         execution = ExecutionModel(
             spread_bps=args.spread_bps,
@@ -220,7 +220,7 @@ def main() -> int:
         source = supplied.get(interval)
         records = load_frozen_dataset(source) if source else fetch_closed_candles(pair, interval)
         if not records:
-            raise RuntimeError(f"dataset gol pentru {pair} {interval}m")
+            raise RuntimeError(f"an empty dataset for {pair} {interval}m")
         records = validate_dataset(records, interval_minutes=interval)
         digest = dataset_sha256(records)
         frozen_path = dataset_dir / f"{pair}_{interval}m_{digest[:12]}.csv"
@@ -262,7 +262,7 @@ def main() -> int:
     with report_path.open("w", encoding="utf-8") as handle:
         json.dump(report, handle, indent=2, ensure_ascii=False)
 
-    print(f"Baseline salvat: {report_path}")
+    print(f"Baseline saved: {report_path}")
     for interval, value in report["intervals"].items():
         aggregate = value["aggregate_test"]
         print(
