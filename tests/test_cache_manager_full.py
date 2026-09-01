@@ -293,6 +293,22 @@ class TestCacheOrderManager(unittest.TestCase):
         mgr.cache = {"BTC": [], "ETH": []}
         self.assertEqual(set(mgr.get_all_symbols_from_cache()), {"BTC", "ETH"})
 
+    def test_mutable_order_update_is_persisted_in_atomic_snapshot(self):
+        mgr = self._make()
+        mgr.enable_save_state_to_file()
+        order = {
+            "orderId": 7, "price": "100", "quantity": "0.5",
+            "timestamp": int(time.time() * 1000), "side": "BUY",
+            "status": "PARTIALLY_FILLED",
+        }
+        mgr.cache = {"BTC": [order]}
+        mgr.save_state_to_file()
+        order.update({"quantity": "1.0", "status": "FILLED"})
+        mgr.save_state_to_file()
+        reloaded = self._make()
+        self.assertEqual(reloaded.cache["BTC"][0]["status"], "FILLED")
+        self.assertEqual(reloaded.cache["BTC"][0]["quantity"], "1.0")
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 4. CacheSparsePriceManager (redenumit din CachePriceManager, 21 iul)

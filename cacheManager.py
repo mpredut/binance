@@ -776,8 +776,10 @@ class CacheTradeManager(CacheManagerInterface):
 
 class CacheOrderManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
+        # Orders are mutable: an execution report updates the same order from partial
+        # to filled. Keep an atomic snapshot so an in-place update is persisted.
         super().__init__(sync_ts, symbols, filename, append_mode=True,
-                         api_client=api_client, append_persist=True)
+                         api_client=api_client, append_persist=False)
         
     def _is_valid_trade(self, trade):
        required_keys = ['orderId', 'price', 'quantity', 'timestamp', 'side']
@@ -1847,7 +1849,7 @@ class CacheFactory:
         },
         "Order": {
             "class": CacheOrderManager,
-            "filename": "cache_order.jsonl",
+            "filename": "cache_order.json",
             "sync_ts": lambda: ORDER_SYNC_INTERVAL_SEC,
         },
         "Price": {

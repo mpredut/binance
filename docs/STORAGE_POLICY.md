@@ -7,8 +7,11 @@ Configuration is mandatory and versioned; missing values fail during component s
 
 - Operational state and active financial intents use atomic snapshots and are never
   pruned by generic retention.
-- Binance fills, orders and portfolio-value history use incremental JSONL files. On the
-  first upgraded start, the previous full JSON file is imported without deleting it.
+- Binance fills and portfolio-value history use incremental JSONL files. On the first
+  upgraded start, the previous full JSON file is imported without deleting it.
+- Binance orders remain an atomic JSON snapshot because execution reports mutate an
+  existing order from partial to filled. Incremental append is valid only for immutable
+  records.
 - Sparse and dense price histories append compact JSONL records, periodically deduplicate
   and prune by timestamp, and rotate above the configured size.
 - Rotated cache archives are gzip-compressed atomically. A bounded number is retained.

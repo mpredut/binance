@@ -62,7 +62,7 @@ _STALE_OVERRIDES = {
     "cache_asset_value.jsonl": 60,
     "cache_T_trend.json": 11520,   # T empiric per moneda: recalc la 7 zile -> prag 8 zile
     # Event-driven content may legitimately remain unchanged for days; use 72 hours.
-    "cache_order.jsonl": 4320,
+    "cache_order.json": 4320,
     "cache_trade.jsonl": 4320,
     "cache_trade_kraken.json": 4320,
     # market_alerts, not cacheManager, writes cache_prices_multi about every five minutes.
@@ -74,9 +74,9 @@ _STALE_OVERRIDES = {
 # mean only that no fills occurred. Suppress those alerts until a hard 30-day ceiling,
 # after which fill tracking itself is suspect. Without proof of life, fail safe and alert.
 _EVENT_DRIVEN_CACHES = {
-    "cache_order.jsonl", "cache_trade.jsonl", "cache_trade_kraken.json",
+    "cache_order.json", "cache_trade.jsonl", "cache_trade_kraken.json",
     # Retain recognition of explicit legacy/test overrides during the JSONL migration.
-    "cache_order.json", "cache_trade.json",
+    "cache_order.jsonl", "cache_trade.json",
 }
 _FLEET_ALIVE_CACHES = {"cache_prices_multi.json", "cache_currentprice.json", "cache_instant_trend.json"}
 _EVENT_DRIVEN_HARD_CEILING_MIN = 43200   # Fill tracking is suspect after 30 days even if fleet is alive.
