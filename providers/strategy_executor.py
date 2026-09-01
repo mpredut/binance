@@ -67,6 +67,34 @@ class PairPrecision:
     order_min: float           # Minimum quantity (Kraken ``ordermin``).
     base_asset: str = ""       # Pair base asset, used when adopting an existing position.
 
+    def __post_init__(self):
+        for name in ("price_decimals", "volume_decimals"):
+            raw = getattr(self, name)
+            if isinstance(raw, bool) or int(raw) != raw or int(raw) < 0:
+                raise ValueError(f"invalid {name} in PairPrecision: {raw!r}")
+            object.__setattr__(self, name, int(raw))
+        minimum = float(self.order_min)
+        if not math.isfinite(minimum) or minimum < 0:
+            raise ValueError(f"invalid order_min in PairPrecision: {self.order_min!r}")
+        object.__setattr__(self, "order_min", minimum)
+        object.__setattr__(self, "base_asset", str(self.base_asset or "").strip())
+
+
+_CANDLE_INTERVALS = {
+    1: "1m", 5: "5m", 15: "15m", 60: "1h", 240: "4h", 1440: "1d",
+}
+
+
+def candle_interval(interval_min: int) -> str:
+    """Return the canonical venue interval or reject an unsupported horizon."""
+    try:
+        minutes = int(interval_min)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ProviderError(f"invalid candle interval: {interval_min!r}") from exc
+    if minutes != interval_min or minutes not in _CANDLE_INTERVALS:
+        raise ProviderError(f"unsupported candle interval: {interval_min!r} minutes")
+    return _CANDLE_INTERVALS[minutes]
+
 
 @dataclass(frozen=True)
 class OrderReconciliationCapabilities:

@@ -25,6 +25,7 @@ from .strategy_executor import (
     OrderStatus,
     PairPrecision,
     ProviderError,
+    candle_interval,
 )
 
 # Repository root and hyperliquid directory for bare common/hl_client imports.
@@ -96,6 +97,17 @@ class HyperliquidProvider(MarketDataProvider):
         except Exception as e:  # noqa: BLE001 — Without env files, use public data only.
             print(f"[HL] _load_env esuat: {e}")
 
+    def _new_client(self, secret_key=None):
+        """Build one consistently configured SDK client for reads or signing."""
+        if _HL_DIR not in sys.path:
+            sys.path.insert(0, _HL_DIR)
+        from hl_client import HLClient
+        return HLClient(
+            secret_key=secret_key,
+            account_address=os.environ.get("HL_ACCOUNT_ADDRESS"),
+            mainnet=_mainnet_setting(),
+        )
+
     def _hl(self):
         """Return a memoized read-only client, or None when unavailable."""
         if self._client is not None or self._client_tried:
@@ -106,13 +118,8 @@ class HyperliquidProvider(MarketDataProvider):
             self._client_tried = True
             self._load_env()
             try:
-                if _HL_DIR not in sys.path:
-                    sys.path.insert(0, _HL_DIR)
-                from hl_client import HLClient  # hyperliquid/hl_client.py (reutilizat)
-                mainnet = _mainnet_setting()
-                addr = os.environ.get("HL_ACCOUNT_ADDRESS")
-                # secret=None creates a read-only Info client; public data needs no address.
-                self._client = HLClient(secret_key=None, account_address=addr, mainnet=mainnet)
+                # A missing secret creates a read-only Info client.
+                self._client = self._new_client()
             except Exception as e:  # noqa: BLE001
                 print(f"[HL] client indisponibil (SDK/conexiune): {e}")
                 self._client = None
@@ -263,17 +270,11 @@ class HyperliquidProvider(MarketDataProvider):
             print(f"[HL] place_order: perechea spot indisponibila pt {symbol}")
             return None
         try:
-            if _HL_DIR not in sys.path:
-                sys.path.insert(0, _HL_DIR)
-            from hl_client import HLClient
             secret = os.environ.get("HL_SECRET_KEY")
             if not secret:
                 print("[HL] place_order: HL_SECRET_KEY lipsa — nu pot semna")
                 return None
-            mainnet = _mainnet_setting()
-            signer = HLClient(secret_key=secret,
-                              account_address=os.environ.get("HL_ACCOUNT_ADDRESS"),
-                              mainnet=mainnet)
+            signer = self._new_client(secret)
             sz_dec = signer.sz_decimals(self._token)
             ok, oid, msg = signer.spot_order(pair, side == "BUY", float(qty), float(price),
                                              sz_decimals=sz_dec)
@@ -287,15 +288,10 @@ class HyperliquidProvider(MarketDataProvider):
     # get_current_price and free_balance already satisfy the contract.
     def _signer(self):
         """Return a signing client or raise ProviderError when its key is absent."""
-        if _HL_DIR not in sys.path:
-            sys.path.insert(0, _HL_DIR)
-        from hl_client import HLClient
         secret = os.environ.get("HL_SECRET_KEY")
         if not secret:
             raise ProviderError("HL_SECRET_KEY missing — HL orders cannot be signed")
-        mainnet = _mainnet_setting()
-        return HLClient(secret_key=secret,
-                        account_address=os.environ.get("HL_ACCOUNT_ADDRESS"), mainnet=mainnet)
+        return self._new_client(secret)
 
     def pair_precision(self, symbol: str):
         c = self._hl()
@@ -316,7 +312,7 @@ class HyperliquidProvider(MarketDataProvider):
         pair = self._pair()
         if c is None or pair is None:
             raise ProviderError(f"ohlc_closes({symbol}): client/pereche indisponibile")
-        iv = {1: "1m", 5: "5m", 15: "15m", 60: "1h", 240: "4h", 1440: "1d"}.get(int(interval_min), "1h")
+        iv = candle_interval(interval_min)
         lookback_h = max(1, int(90 * int(interval_min) / 60))   # About 90 bars, as on Kraken.
         try:
             candles = c.candles(pair, iv, lookback_h) or []

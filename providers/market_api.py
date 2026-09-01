@@ -22,6 +22,7 @@ from .strategy_executor import (
     OrderStatus,
     PairPrecision,
     ProviderError,
+    candle_interval,
     reconciliation_capabilities_of,
 )
 from market_regime import (
@@ -207,7 +208,7 @@ class BinanceProvider(MarketDataProvider):
                              order_min=omin, base_asset=base_asset)
 
     def ohlc_closes(self, symbol: str, interval_min: int) -> list:
-        iv = {1: "1m", 5: "5m", 15: "15m", 60: "1h", 240: "4h", 1440: "1d"}.get(int(interval_min), "1h")
+        iv = candle_interval(interval_min)
         try:
             kl = _get_bapi().client.get_klines(symbol=symbol, interval=iv, limit=91)
         except Exception as e:  # noqa: BLE001

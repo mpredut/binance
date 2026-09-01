@@ -319,8 +319,6 @@ class Strategy:
         self.price_dec = precision.price_decimals
         self.vol_dec = precision.volume_decimals
         self.ordermin = precision.order_min
-        if self.price_dec < 0 or self.vol_dec < 0 or self.ordermin < 0:
-            raise RuntimeError(f"Cannot start {pair}: invalid venue precision {precision!r}")
         self._order_lifecycle = TrackedOrderLifecycle(
             StrategyExecutorLifecycleApi(client),
             provider_name=self.venue_label,
