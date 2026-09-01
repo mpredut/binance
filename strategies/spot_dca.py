@@ -266,6 +266,9 @@ def _new_state() -> dict:
         # Per side/kind operational cooldown after a deterministic funds refusal.
         # This survives restarts but never blocks urgent MARKET protection.
         "placement_backoffs": {},
+        # Set only after a definitive insufficient-balance rejection. The next
+        # decision must compare strategy holdings with the venue ledger.
+        "ledger_reconcile_required": False,
     }
 
 
@@ -299,6 +302,7 @@ class Strategy:
         self.s = initial_state if initial_state is not None else self._load()
         self.s.setdefault("pending_intent", None)
         self.s.setdefault("placement_backoffs", {})
+        self.s.setdefault("ledger_reconcile_required", False)
         self._paper_seq = 0
         # Observational adaptive-volatility shadow history stays in memory for sigma.
         # It is rebuilt after restart and never enters persistent state.
@@ -433,7 +437,8 @@ class Strategy:
     def _insufficient_funds_error(error) -> bool:
         text = str(error or "").lower()
         return any(marker in text for marker in (
-            "insufficient funds", "insufficient balance", "sold insuficient",
+            "insufficient funds", "insufficient balance",
+            "insufficient spot balance", "sold insuficient",
         ))
 
     @staticmethod
@@ -554,6 +559,7 @@ class Strategy:
                     refusal = tracked.intent.get("refusal_reason") or "venue refusal"
                     self._persist_pending_intent(None)
                     if self._insufficient_funds_error(refusal):
+                        self.s["ledger_reconcile_required"] = True
                         self._record_placement_backoff(side, kind, refusal)
                     log(
                         f"  ! [STRAT] {side} {kind} rejected definitively; "
@@ -1147,6 +1153,24 @@ class Strategy:
             log("  [STRAT] intentie pre-submit in reconciliere — aman deciziile noi")
             return
         held = self.s["qty"]
+        if (not self.dry_run and self.s.get("ledger_reconcile_required")
+                and held > 1e-12 and not self.s.get("orders")):
+            try:
+                precision = self.client.pair_precision(self.pair)
+                base = precision.base_asset if precision else ""
+                ledger_qty = float(self.client.free_balance(base))
+            except (ProviderError, TypeError, ValueError, OverflowError) as exc:
+                log(f"  ! [STRAT] ledger reconciliation unavailable ({exc}); decisions blocked")
+                return
+            tolerance = max(2 * 10.0 ** -max(self.vol_dec, 1), 1e-12)
+            if ledger_qty + tolerance < held:
+                log(
+                    f"  ! [STRAT] LEDGER MISMATCH: state qty={held:.{self.vol_dec}f}, "
+                    f"available {base}={ledger_qty:.{self.vol_dec}f}; decisions blocked"
+                )
+                return
+            self.s["ledger_reconcile_required"] = False
+            self._save()
         entry_px = sr.entry_price(price, self.p.entry_discount_pct)   # = price*(1 - disc%)
         # Live uses wall time while replay injects bar time. Without this distinction, a
         # backtest processing hundreds of bars per second produces meaningless hourly

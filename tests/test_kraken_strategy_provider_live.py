@@ -161,6 +161,7 @@ class ProviderLivePathTest(unittest.TestCase):
             self.s._place("sell", 1.0, 60.0, kind="TP", market=True)
         )
         self.assertIsNone(self.s.s["pending_intent"])
+        self.assertTrue(self.s.s["ledger_reconcile_required"])
 
     def test_audited_market_submit_receives_observational_reference_price(self):
         class IntentExecutor(FakeExecutor):
