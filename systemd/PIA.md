@@ -19,15 +19,15 @@ timeout 8 piactl get regions           # the AVAILABLE regions (the dedicated on
 timeout 8 piactl get portforward
 piactl background enable               # mandatory on a server, see pitfalls
 piactl connect / piactl disconnect
-piactl dedicatedip add /home/predut/piatoken.txt
-piactl login /home/predut/pia.txt      # username on line 1, password on line 2
+piactl dedicatedip add "$HOME/piatoken.txt"
+piactl login "$HOME/pia.txt"          # username on line 1, password on line 2
 piactl set debuglogging true           # creates /opt/piavpn/var/daemon.log (root)
 ```
 
 Quick diagnosis without touching anything:
 
 ```bash
-/home/predut/binance/pia_selfheal.sh --check
+./pia_selfheal.sh --check
 ```
 
 The REAL check of where traffic leaves (do not trust `connectionstate`):
@@ -92,7 +92,7 @@ problem. After a fresh login and a new DIP token, everything came back on
 ## pia_selfheal.sh
 
 Runs from the **root crontab** every 5 minutes (`systemd/crontab.root.prod.txt`) —
-as `predut` it would fail in precisely the scenario it exists for, because rungs 3-4
+as an unprivileged account it would fail in precisely the scenario it exists for, because rungs 3-4
 need `systemctl` and `kill` on pia-daemon.
 
 The escalation ladder stops at the first rung that works, and every rung is followed
@@ -133,7 +133,7 @@ page never gets run). The URL must be **versioned**: `pia-linux-latest.run` answ
 - `piavpn.service`, `pia.service`, `binance.service`, `cron.service` — all `enabled`.
 - SSH is **socket-activated** on Ubuntu 24.04: `ssh.service` shows as `disabled`, but
   `ssh.socket` is `enabled` and listens on 32238. That is not a problem.
-- Both crontabs (predut and root) survive the reboot.
+- Both crontabs (the trading account and root) survive the reboot.
 - The non-fleet bots have no `@reboot` entry; `healthcheck.sh --supervise` brings
   them back within 3 minutes.
 - `pia_selfheal.sh` does not intervene during the first 5 minutes (boot grace).

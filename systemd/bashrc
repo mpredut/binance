@@ -3,7 +3,7 @@ export PATH=$PATH:/opt/piavpn/bin
 export DISPLAY=192.168.0.104:0
 
 alias python='python3'
-cd /home/predut/binance
+cd @TRADING_ROOT@
 
 # piactl WITHOUT a timeout hangs the login: when pia-daemon is wedged (it was, for
 # 34 days, Aug-Sep 2026) every call blocks for ~5s and any SSH session becomes slow

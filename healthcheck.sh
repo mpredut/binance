@@ -109,11 +109,12 @@ fi
 
 # ===== MOD --supervise (cron */5): reporneste boti morti/inghetati + alerta flota =====
 if [ "$1" = "--supervise" ]; then
-    # Local-workstation guard: --supervise STARTS bots with the real keys. From the
-    # de dezvoltare (WSL, /home/mariusp) refuzam. Serverul (/home/predut) ramane activ.
-    case "$ROOT" in
-        /home/mariusp/*) echo "$(date '+%H:%M') supervise dezactivat pe statia locala ($ROOT)"; exit 0;;
-    esac
+    # Supervision can start live bots. Enable it explicitly in the production
+    # scheduler instead of guessing the environment from a username or path.
+    [ "${TRADING_SUPERVISE_ENABLED:-false}" = true ] || {
+        echo "$(date '+%H:%M') supervision disabled; set TRADING_SUPERVISE_ENABLED=true"
+        exit 0
+    }
     exec 8>/tmp/binance_supervise.lock
     flock -n 8 || { echo "$(date '+%H:%M') supervise deja ruleaza — sar (anti-dublare)"; exit 0; }
     SUP=/tmp/binance_sup; mkdir -p "$SUP"; WINDOW=1800; MAX=3

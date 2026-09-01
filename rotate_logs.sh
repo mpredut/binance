@@ -10,7 +10,7 @@
 # PLACE (no rename), otherwise the bot would keep writing to the renamed old file.
 #
 # Cron sugerat (orar, decalat sa nu se bata cu healthcheck-ul de la :*0/:*5):
-#   17 * * * * /home/predut/binance/rotate_logs.sh >/dev/null 2>&1
+# Schedule this script through the rendered production crontab.
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 LOGROTATE="$(command -v logrotate || echo /usr/sbin/logrotate)"
 [ -x "$LOGROTATE" ] || { echo "rotate_logs: logrotate negasit"; exit 1; }

@@ -1,19 +1,18 @@
-# crontab.prod — snapshot al crontab-ului de pe masina PROD (trading).
-# Reproductibil: dupa un dezastru, restaureaza cu:  crontab systemd/crontab.prod.txt
-# Sincronizat cu PROD: 2026-08-23.
+# Production crontab template for the configured trading account.
+# install_prod.sh renders paths and installs this file.
 
-*/3 * * * * /home/predut/binance/healthcheck.sh --supervise >> /home/predut/binance/logs/healthcheck.log 2>&1
-17 * * * * /home/predut/binance/rotate_logs.sh >/dev/null 2>&1
-*/15 * * * * /usr/bin/python3 /home/predut/binance/212trading/price_alert.py RGNT --below 4 >> /home/predut/binance/212trading/price_alert.log 2>&1
-*/15 * * * * cd /home/predut/binance && /home/predut/binance/myenv/bin/python verify_tools/check_cache_coherence.py >> /home/predut/binance/logs/cache_coherence.log 2>&1
-30 3 * * * cd /home/predut/binance && ./backup_secrets.sh >> /home/predut/binance/logs/backup_secrets.log 2>&1
-*/15 * * * * /home/predut/binance/deadman_switch.sh >> /home/predut/binance/logs/deadman.log 2>&1
-23 2 * * * /home/predut/binance/logger_retention.sh >> /home/predut/binance/logs/logger_retention.log 2>&1
-*/30 * * * * /home/predut/binance/offline/runners/refresh_dev.sh >> /home/predut/binance/logs/refresh_dev.log 2>&1
-0 2,14 * * * /home/predut/binance/offline/runners/trigger_backtest_dev.sh >> /home/predut/binance/logs/backtest_cycle.log 2>&1
-7 * * * * /home/predut/binance/myenv/bin/python /home/predut/binance/kraken/shadow_live.py --interval 240 >> /home/predut/binance/logs/shadow_live.log 2>&1
-37 * * * * /home/predut/binance/myenv/bin/python /home/predut/binance/kraken/shadow_live.py --interval 60 >> /home/predut/binance/logs/shadow_live.log 2>&1
-*/20 * * * * /home/predut/binance/myenv/bin/python /home/predut/binance/verify_tools/portfolio_snapshot.py --alert --json >> /home/predut/binance/logs/portfolio_snapshot.jsonl 2>/dev/null
-27 * * * * /home/predut/binance/myenv/bin/python /home/predut/binance/hyperliquid/shadow_longterm.py --quiet >> /home/predut/binance/logs/hyperliquid_shadow.log 2>&1
-*/2 * * * * cd /home/predut/binance && /home/predut/binance/myenv/bin/python /home/predut/binance/verify_tools/watchdogfor_cacheandconfig.py >> /home/predut/binance/logs/watchdog.log 2>&1
-*/5 * * * * cd /home/predut/binance && /home/predut/binance/myenv/bin/python /home/predut/binance/verify_tools/watchdogfor_anomaly.py >> /home/predut/binance/logs/anomaly_watchdog.log 2>&1
+*/3 * * * * TRADING_SUPERVISE_ENABLED=true @TRADING_ROOT@/healthcheck.sh --supervise >> @TRADING_ROOT@/logs/healthcheck.log 2>&1
+17 * * * * @TRADING_ROOT@/rotate_logs.sh >/dev/null 2>&1
+*/15 * * * * /usr/bin/python3 @TRADING_ROOT@/212trading/price_alert.py RGNT --below 4 >> @TRADING_ROOT@/212trading/price_alert.log 2>&1
+*/15 * * * * cd @TRADING_ROOT@ && @TRADING_PYTHON@ verify_tools/check_cache_coherence.py >> @TRADING_ROOT@/logs/cache_coherence.log 2>&1
+30 3 * * * cd @TRADING_ROOT@ && ./backup_secrets.sh >> @TRADING_ROOT@/logs/backup_secrets.log 2>&1
+*/15 * * * * @TRADING_ROOT@/deadman_switch.sh >> @TRADING_ROOT@/logs/deadman.log 2>&1
+23 2 * * * @TRADING_ROOT@/logger_retention.sh >> @TRADING_ROOT@/logs/logger_retention.log 2>&1
+*/30 * * * * @TRADING_ROOT@/offline/runners/refresh_dev.sh >> @TRADING_ROOT@/logs/refresh_dev.log 2>&1
+0 2,14 * * * @TRADING_ROOT@/offline/runners/trigger_backtest_dev.sh >> @TRADING_ROOT@/logs/backtest_cycle.log 2>&1
+7 * * * * @TRADING_PYTHON@ @TRADING_ROOT@/kraken/shadow_live.py --interval 240 >> @TRADING_ROOT@/logs/shadow_live.log 2>&1
+37 * * * * @TRADING_PYTHON@ @TRADING_ROOT@/kraken/shadow_live.py --interval 60 >> @TRADING_ROOT@/logs/shadow_live.log 2>&1
+*/20 * * * * @TRADING_PYTHON@ @TRADING_ROOT@/verify_tools/portfolio_snapshot.py --alert --json >> @TRADING_ROOT@/logs/portfolio_snapshot.jsonl 2>/dev/null
+27 * * * * @TRADING_PYTHON@ @TRADING_ROOT@/hyperliquid/shadow_longterm.py --quiet >> @TRADING_ROOT@/logs/hyperliquid_shadow.log 2>&1
+*/2 * * * * cd @TRADING_ROOT@ && @TRADING_PYTHON@ @TRADING_ROOT@/verify_tools/watchdogfor_cacheandconfig.py >> @TRADING_ROOT@/logs/watchdog.log 2>&1
+*/5 * * * * cd @TRADING_ROOT@ && @TRADING_PYTHON@ @TRADING_ROOT@/verify_tools/watchdogfor_anomaly.py >> @TRADING_ROOT@/logs/anomaly_watchdog.log 2>&1

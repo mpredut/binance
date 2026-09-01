@@ -4,7 +4,7 @@
 # Without it, a second instance (e.g. systemd plus a manual launch) starts a
 # "supervision war": each revives the processes the other kills -> DUPLICATION.
 # The second instance does not get the lock -> it exits immediately.
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"   # radacina = locul scriptului (portabil, fara /home/predut hardcodat)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"   # The repository root is the script directory.
 mkdir -p "$SCRIPT_DIR/logs"   # loguri de consola in folder dedicat (nu mai in root)
 LOCK_PATH="$SCRIPT_DIR/flota_start.lock"
 exec 9>"$LOCK_PATH" || exit 1

@@ -20,7 +20,7 @@
 # reaches the phone even though not a single packet could leave during it.
 #
 # Scheduling (root crontab, every 5 minutes):
-#   */5 * * * * /home/predut/binance/pia_selfheal.sh >> /home/predut/binance/logs/pia_selfheal.log 2>&1
+# Schedule this script through the rendered root production crontab.
 # Manual use:
 #   ./pia_selfheal.sh --check   # diagnostics only, touches nothing
 #   ./pia_selfheal.sh --force   # run the recovery ladder even if things look healthy
@@ -40,11 +40,17 @@ REINSTALL_MARK="$STATE_DIR/last_reinstall"
 SPOOL_MAX_BYTES="${PIA_SPOOL_MAX_BYTES:-262144}"
 LOCK="/tmp/pia_selfheal.lock"
 
-PIA_USER="${PIA_USER:-predut}"
+PIA_USER="${PIA_USER:-$(stat -c %U "$ROOT")}"
+id "$PIA_USER" >/dev/null 2>&1 || {
+    echo "invalid repository owner/trading user: $PIA_USER" >&2
+    exit 1
+}
+PIA_USER_HOME="$(getent passwd "$PIA_USER" | cut -d: -f6)"
+[ -n "$PIA_USER_HOME" ] || { echo "home missing for $PIA_USER" >&2; exit 1; }
 PROBE_TIMEOUT="${PIA_PROBE_TIMEOUT:-8}"
 CLI_TIMEOUT="${PIA_CLI_TIMEOUT:-6}"     # Longer than this means the daemon is wedged.
 CONNECT_WAIT="${PIA_CONNECT_WAIT:-60}"  # How long we wait for a tunnel after each rung.
-DIP_TOKEN="${PIA_DIP_TOKEN:-/home/$PIA_USER/piatoken.txt}"
+DIP_TOKEN="${PIA_DIP_TOKEN:-$PIA_USER_HOME/piatoken.txt}"
 FALLBACK_REGION="${PIA_FALLBACK_REGION:-auto}"
 REINSTALL_COOLDOWN="${PIA_REINSTALL_COOLDOWN:-86400}"  # At most one reinstall per 24h.
 # PIA's "latest" endpoint returns HTML rather than an installer, and

@@ -16,7 +16,7 @@
 # NU atinge logger/backtest/ (rezultate de analiza, revizuiesc manual).
 #
 # Cron sugerat (zilnic, noaptea):
-#   23 2 * * * /home/predut/binance/logger_retention.sh >> /home/predut/binance/logs/logger_retention.log 2>&1
+# Schedule this script through the rendered production crontab.
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 LOGGER_DIR="$ROOT/logger"
 COMPRESS_AFTER_DAYS=3

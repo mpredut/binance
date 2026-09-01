@@ -6,15 +6,20 @@ backup/restore scripts, before the fleet is started.
 
 Recommended order on a fresh machine:
 
-1. create the `predut` user and clone the repository into `/home/predut/binance`;
+1. create a dedicated trading account and clone the repository at any absolute path;
 2. restore the secrets and state files from backup;
 3. install the dependencies/venv and PIA under the same paths;
-4. run `sudo /home/predut/binance/systemd/install_prod.sh`;
+4. run `sudo env TRADING_ROOT="$PWD" TRADING_USER="$(id -un)" systemd/install_prod.sh`;
 5. check `systemctl status binance pia piavpn`, cron, and the healthcheck.
 
-Cron comes from two files: `crontab.prod.txt` (the `predut` user) and
+Cron comes from two files: `crontab.prod.txt` (the configured trading user) and
 `crontab.root.prod.txt` (root). The second one exists because `pia_selfheal.sh`
-needs `systemctl`/`kill` on `pia-daemon`, so it cannot run as `predut`.
+needs `systemctl`/`kill` on `pia-daemon`, so it cannot run unprivileged.
+
+The installer renders `@TRADING_*@` placeholders from `TRADING_ROOT`,
+`TRADING_USER`, and `TRADING_PYTHON`. It never infers production from a username
+or a checkout directory name. `healthcheck.sh --supervise` is enabled explicitly
+only by the rendered production crontab.
 
 `PIA.md` documents the VPN: the `piactl` commands, the pitfalls that cost us 34 days
 of a stopped fleet (`pubip` is not the exit IP, `connect` silently ignored without

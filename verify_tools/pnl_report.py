@@ -4,7 +4,7 @@ P&L (current position at current price). Sources: Binance get_filled_orders (dir
 not the incomplete cache) and Kraken/HL state. Binance uses a 120-day window, so older
 cost basis is approximate. Run with: ./myenv/bin/python verify_tools/pnl_report.py"""
 import sys, os, time, json
-ROOT = "/home/predut/binance"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT); os.chdir(ROOT)
 from binance_api import bapi_allorders as ao
 from binance_api import bapi

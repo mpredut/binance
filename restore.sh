@@ -4,12 +4,11 @@
 # Presupune: repo deja clonat (ai nevoie de el ca sa rulezi scriptul) + folderul de
 # SECRETE copiat de pe backup-ul tau (NU e in git — facut cu ./backup_secrets.sh).
 #
-#   git clone git@github.com:mpredut/binance.git ~/binance
-#   cd ~/binance && ./restore.sh /cale/catre/binance-secrets-backup
+#   git clone <repository-url> /srv/trading/current
+#   cd /srv/trading/current && ./restore.sh /path/to/secrets-backup
 #
 # Folderul de secrete OGLINDESTE structura repo-ului (.env, hyperliquid/.env, keys/, ...).
-# Cale repo presupusa: aceeasi ca productia (~/binance, user predut). Daca difera,
-# set TRADING_ROOT and adapt the systemd/ profile if needed.
+# The repository path and account name are detected and passed to the installer.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 SECRETS="${1:-}"
@@ -36,7 +35,9 @@ echo "    ✔ dependinte instalate"
 
 echo "--- [3/5] systemd + DNS + SSH + cron (cere sudo) ---"
 if sudo -v 2>/dev/null; then
-    sudo bash "$ROOT/systemd/install_prod.sh"
+    sudo env TRADING_ROOT="$ROOT" TRADING_USER="$(id -un)" \
+        TRADING_PYTHON="$ROOT/myenv/bin/python" \
+        bash "$ROOT/systemd/install_prod.sh"
     echo "    ✔ profil PROD instalat"
 else
     echo "    ! fara sudo — manual: sudo bash systemd/install_prod.sh"

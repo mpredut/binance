@@ -12,7 +12,7 @@ comparison is reported as inconclusive rather than misclassifying unavailable da
 a real zero balance. Confirmed differences still produce a nonzero exit.
 
 Run before restarting the fleet:
-  ~/binance/myenv/bin/python verify_account_facade.py
+  ../myenv/bin/python verify_account_facade.py
 """
 import os
 import sys

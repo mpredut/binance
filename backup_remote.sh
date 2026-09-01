@@ -4,14 +4,15 @@
 # DOAR ciphertext. Parola de crypt o tii SEPARAT (off-server) ca sa poti decripta la restore.
 # Suprascrie ultima versiune (fara bloat). Vezi docs/DISASTER_RECOVERY.md pt config + restore.
 #
-# Cron (instalat la finalul setarii): 30 3 * * * cd ~/binance && ./backup_remote.sh >> logs/backup_remote.log 2>&1
+# The archive name follows the checkout directory unless BACKUP_NAME overrides it.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 RCLONE="${RCLONE:-$HOME/bin/rclone}"
 command -v "$RCLONE" >/dev/null 2>&1 || RCLONE=rclone
 REMOTE="${RCLONE_REMOTE:-storj-crypt:}"          # remote-ul crypt (peste Storj)
-TAR="$HOME/binance-secrets-backup.tar.gz"
-DEST="${REMOTE}binance-secrets-backup.tar.gz"
+BACKUP_NAME="${BACKUP_NAME:-$(basename "$ROOT")-secrets-backup}"
+TAR="${BACKUP_TAR:-$HOME/$BACKUP_NAME.tar.gz}"
+DEST="${REMOTE}${BACKUP_NAME}.tar.gz"
 
 echo "$(date '+%F %T') === backup_remote ==="
 # 1. backup local proaspat (folder + tarball) — refoloseste scriptul existent

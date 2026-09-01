@@ -3,8 +3,8 @@
 # (or automatically, through systemd/install_prod.sh)
 # Synced with PROD: 2026-09-01.
 #
-# WHY ROOT and not predut: pia_selfheal.sh has to be able to run
-# `systemctl stop/start piavpn.service` and `kill -9` on pia-daemon. As predut it
+# WHY ROOT and not @TRADING_USER@: pia_selfheal.sh has to be able to run
+# `systemctl stop/start piavpn.service` and `kill -9` on pia-daemon. As @TRADING_USER@ it
 # would fail in exactly the scenario it exists for. See systemd/PIA.md.
 
-*/5 * * * * /home/predut/binance/pia_selfheal.sh >> /home/predut/binance/logs/pia_selfheal.log 2>&1
+*/5 * * * * @TRADING_ROOT@/pia_selfheal.sh >> @TRADING_ROOT@/logs/pia_selfheal.log 2>&1

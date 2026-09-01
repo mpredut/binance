@@ -5,11 +5,11 @@
 # .watchdog_state, trade_cooldown, priceanalysis.json etc. — si fisiere viitoare, automat.
 # Rezultat: folder + tarball IN AFARA repo-ului. Copiaza tarball-ul OFF-MACHINE.
 #
-#   ./backup_secrets.sh                 # -> ~/binance-secrets-backup/ + .tar.gz
+#   ./backup_secrets.sh                 # -> ~/<checkout>-secrets-backup/ + .tar.gz
 #   ./backup_secrets.sh /media/usb/bk   # destinatie custom
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-OUT="${1:-$HOME/binance-secrets-backup}"
+OUT="${1:-$HOME/$(basename "$ROOT")-secrets-backup}"
 case "$OUT" in "$ROOT"|"$ROOT"/*) echo "❌ destinatia NU poate fi in repo (s-ar comite secrete): $OUT"; exit 1;; esac
 
 cd "$ROOT"
@@ -25,8 +25,9 @@ printf '%s\n' "$LIST" | tar cf - -C "$ROOT" -T - | tar xf - -C "$OUT"
 # Date de masina aflate intentionat in afara repo-ului. Tokenul PIA este secret
 # and it is required to restore the dedicated IP on a fresh install.
 mkdir -p "$OUT/_machine"
-if [ -f /home/predut/piatoken.txt ]; then
-    install -m 0600 /home/predut/piatoken.txt "$OUT/_machine/piatoken.txt"
+PIA_TOKEN="${PIA_DIP_TOKEN:-$HOME/piatoken.txt}"
+if [ -f "$PIA_TOKEN" ]; then
+    install -m 0600 "$PIA_TOKEN" "$OUT/_machine/piatoken.txt"
 fi
 
 tar czf "$OUT.tar.gz" -C "$OUT" .   # latest, cale stabila pt pull-ul Windows

@@ -5,9 +5,9 @@ Requires=pia.service
 
 [Service]
 Type=simple
-User=predut
-WorkingDirectory=/home/predut/binance
-ExecStart=/bin/bash /home/predut/binance/flota_start.sh
+User=@TRADING_USER@
+WorkingDirectory=@TRADING_ROOT@
+ExecStart=/bin/bash @TRADING_ROOT@/flota_start.sh
 Restart=always
 RestartSec=45
 StandardOutput=journal
@@ -15,4 +15,3 @@ StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
-

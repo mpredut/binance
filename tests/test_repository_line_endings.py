@@ -17,6 +17,8 @@ def _tracked_text_files():
         if not relative:
             continue
         path = ROOT / relative
+        if not path.is_file():
+            continue
         if path.suffix.lower() in TEXT_SUFFIXES or path.name in {
             ".gitattributes", ".gitignore", "submit",
         }:

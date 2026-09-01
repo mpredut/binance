@@ -10,7 +10,7 @@
 #    fills trebuie sa existe la prima citire).
 #  - dn_bot / binance trailing au nevoie de venv (eth_account / SDK Binance) — comanda lor
 #    from the manifest does 'source $VENV/bin/activate' inline; kraken/t212 run on system python3.
-ROOT="$HOME/binance"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
 MANIFEST="$ROOT/procs.conf"
 # venv cu SDK-urile (prefera .venv, cade pe myenv) — expandat in comenzile din manifest ($VENV)
 VENV=""

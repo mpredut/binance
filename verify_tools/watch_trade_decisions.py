@@ -8,7 +8,7 @@ Reads UN-buffered signals (the source of truth, not the buffered log):
   - avg buy + net position from the Binance trades
 It also shows the thresholds: HARD-TP (+18%) and the normal sell (gain>9.2% AND trend DOWN).
 
-  ~/binance/myenv/bin/python trade_watch.py
+  ../myenv/bin/python trade_watch.py
 """
 from __future__ import annotations
 

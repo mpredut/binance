@@ -134,4 +134,5 @@ def test_selfheal_is_part_of_reproducible_root_cron():
     cron = _text("systemd/crontab.root.prod.txt")
     installer = _text("systemd/install_prod.sh")
     assert "pia_selfheal.sh" in cron
-    assert 'crontab -u root "$SYSTEMD_DIR/crontab.root.prod.txt"' in installer
+    assert 'render "$SYSTEMD_DIR/crontab.root.prod.txt"' in installer
+    assert 'crontab -u root "$TMP_DIR/crontab.root.prod.txt"' in installer

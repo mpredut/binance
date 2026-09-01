@@ -1,5 +1,4 @@
-sudo visudo -f /etc/sudoers.d/predut-pia
+sudo visudo -f /etc/sudoers.d/trading-pia
 
-predut ALL=(ALL) NOPASSWD: /bin/systemctl restart pia.service
-
+@TRADING_USER@ ALL=(ALL) NOPASSWD: /bin/systemctl restart pia.service
 

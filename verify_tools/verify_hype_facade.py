@@ -13,7 +13,7 @@ Places ZERO real orders. Through the market_api facade (the `mkt` singleton) it 
   - place_order(HYPEUSDC, SELL) is DRY (HL_LIVE_ORDERS off) -> None, no order sent.
 
 Run it locally with the venv that has the HL SDK:
-  ~/binance/.venv/bin/python verify_hype_facade.py
+  ../.venv/bin/python verify_hype_facade.py
 Exits non-zero if anything is clearly unhealthy (wrong routing, invalid price, real order).
 """
 import os

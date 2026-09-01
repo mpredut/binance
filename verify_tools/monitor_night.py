@@ -6,8 +6,8 @@ Output: per-process status, recent log errors, and actions taken.
 
 Credentials come from the gitignored .env at the repository root. Keys read:
   MONITOR_HOST (REQUIRED, no default), MONITOR_PASS (REQUIRED, no default),
-  MONITOR_PORT (default 32238), MONITOR_USER (default predut),
-  MONITOR_ROOT (default /home/predut/binance).
+  MONITOR_PORT (default 32238), MONITOR_USER (REQUIRED),
+  MONITOR_ROOT (REQUIRED remote repository path).
 
 MONITOR_HOST deliberately has no default. A built-in address does not fail when
 configuration is missing: it connects to whatever lives at that address today and
@@ -27,9 +27,9 @@ load_dotenv(_REPO / ".env")                      # Secrets (gitignored).
 
 HOST = os.environ.get("MONITOR_HOST")  # no default: an address must be configured
 PORT = int(os.environ.get("MONITOR_PORT", "32238"))
-USER = os.environ.get("MONITOR_USER", "predut")
+USER = os.environ.get("MONITOR_USER")
 PASS = os.environ.get("MONITOR_PASS")  # No default: the secret DOES NOT live in code.
-ROOT = os.environ.get("MONITOR_ROOT", "/home/predut/binance")
+ROOT = os.environ.get("MONITOR_ROOT")
 
 # The process list is no longer hard-coded here. It is read live from the server's
 # procs.conf, the same single source of truth used by bots_start, flota_start, and
@@ -121,7 +121,10 @@ def main():
     # Fail loudly on missing configuration instead of falling back to a builtin
     # address: a wrong default connects to the wrong machine and reports its
     # processes as if they were the trading server's.
-    missing = [name for name, value in (("MONITOR_HOST", HOST), ("MONITOR_PASS", PASS))
+    missing = [name for name, value in (
+        ("MONITOR_HOST", HOST), ("MONITOR_USER", USER),
+        ("MONITOR_PASS", PASS), ("MONITOR_ROOT", ROOT),
+    )
                if not value]
     if missing:
         print(f"  ERROR: {', '.join(missing)} missing from .env "
