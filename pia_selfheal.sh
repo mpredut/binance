@@ -30,6 +30,7 @@ STATE_DIR="/var/lib/pia_selfheal"
 SPOOL="$STATE_DIR/alert_spool"          # alerte nelivrate (internetul era jos)
 OUTAGE_MARK="$STATE_DIR/outage_since"   # timestampul inceputului caderii
 REINSTALL_MARK="$STATE_DIR/last_reinstall"
+SPOOL_MAX_BYTES="${PIA_SPOOL_MAX_BYTES:-262144}"
 LOCK="/tmp/pia_selfheal.lock"
 
 PIA_USER="${PIA_USER:-predut}"
@@ -67,7 +68,7 @@ pia() {
 
 # ===== PROBE ==============================================================
 # Internet brut, fara DNS si fara tunel: separa "VPN picat" de "netul e jos".
-net_raw_ok() { curl -s -m "$PROBE_TIMEOUT" -o /dev/null https://1.1.1.1 2>/dev/null; }
+net_raw_ok() { curl --fail -s -m "$PROBE_TIMEOUT" -o /dev/null https://1.1.1.1 2>/dev/null; }
 
 # Daemonul raspunde? (starea patologica din incident: raspunde procesul, nu socketul)
 daemon_responsive() { [ -n "$(pia get connectionstate)" ]; }
@@ -103,7 +104,7 @@ ntfy_topic() {
 ntfy_push() {  # $1=titlu $2=corp -> 0 daca a plecat
     local topic; topic=$(ntfy_topic)
     [ -z "$topic" ] && return 1
-    curl -s -m 15 --retry 2 --retry-delay 3 --retry-all-errors \
+    curl --fail-with-body -sS -m 15 --retry 2 --retry-delay 3 --retry-all-errors \
         -H "Title: $1" -d "$2" "https://ntfy.sh/$topic" >/dev/null 2>&1
 }
 
@@ -111,12 +112,22 @@ alert() {  # $1=titlu $2=corp
     if ntfy_push "$1" "$2"; then
         log "alerta trimisa: $1"
     else
+        if [ -f "$SPOOL" ] && [ "$(stat -c %s "$SPOOL" 2>/dev/null || echo 0)" -ge "$SPOOL_MAX_BYTES" ]; then
+            mv -f "$SPOOL" "$SPOOL.previous"
+        fi
         printf '%s\t%s\t%s\n' "$(date '+%Y-%m-%d %H:%M')" "$1" "$2" >> "$SPOOL"
         log "alerta pusa in spool (fara conectivitate): $1"
     fi
 }
 
 flush_spool() {
+    if [ -s "$SPOOL.previous" ]; then
+        if ntfy_push "PIA: alerte intarziate ($(hostname))" "$(tail -c "$SPOOL_MAX_BYTES" "$SPOOL.previous")"; then
+            rm -f "$SPOOL.previous"
+        else
+            return 1
+        fi
+    fi
     [ -s "$SPOOL" ] || return 0
     net_raw_ok || return 1
     local n body

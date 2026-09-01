@@ -16,6 +16,7 @@ fi
 # lock-ul (fd 9) e ținut cât trăiește scriptul; se eliberează automat la ieșire.
 
 VPN_RETRY_TIMEOUT=60
+PIA_CLI_TIMEOUT="${PIA_CLI_TIMEOUT:-6}"
 SLEEP_AFTER_VPN_CONNECT=3
 SLEEP_AFTER_KILL=5
 PYTHON_START_WAIT=5   # secunde să așteptăm după pornire înainte să verificăm
@@ -24,9 +25,10 @@ PYTHON_START_WAIT=5   # secunde să așteptăm după pornire înainte să verifi
 echo "🔐 Verific conexiunea VPN..."
 SECONDS_PASSED=0
 sleep 5
-while [ "$(piactl get connectionstate | tr -d '\r')" != "Connected" ]; do
+pia() { timeout "$PIA_CLI_TIMEOUT" piactl "$@"; }
+while [ "$(pia get connectionstate 2>/dev/null | tr -d '\r')" != "Connected" ]; do
     echo "⏳ VPN nu este conectat. Încerc reconectare..."
-    piactl connect
+    pia connect >/dev/null 2>&1 || true
     sleep $SLEEP_AFTER_VPN_CONNECT
     SECONDS_PASSED=$((SECONDS_PASSED + SLEEP_AFTER_VPN_CONNECT))
     if [ "$SECONDS_PASSED" -ge "$VPN_RETRY_TIMEOUT" ]; then
@@ -35,8 +37,8 @@ while [ "$(piactl get connectionstate | tr -d '\r')" != "Connected" ]; do
     fi
 done
 echo "✔ VPN activ"
-echo "IP Public: $(piactl get pubip)"
-echo "Port Forward: $(piactl get portforward)"
+echo "IP Public: $(pia get pubip 2>/dev/null)"
+echo "Port Forward: $(pia get portforward 2>/dev/null)"
 
 # ===== Activare mediu virtual =====
 echo "📦 Activez mediul Python..."

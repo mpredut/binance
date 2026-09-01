@@ -25,7 +25,7 @@ HOST=$(hostname)
 # (NameResolutionError), nu doar la 5xx. Un blip tipic (~30-40s) e depasit intr-o singura rulare
 # -> evita o alertă falsă când server-ul e viu, dar rezolvarea DNS a picat temporar.
 # Worst-case ~4x(10s+5s)=60s, mult sub cadenta de 15 min.
-curl -s -m 10 --retry 4 --retry-delay 5 --retry-all-errors --retry-connrefused \
+curl --fail-with-body -sS -m 10 --retry 4 --retry-delay 5 --retry-all-errors --retry-connrefused \
     -H "In: 35m" -H "Title: SERVER OPRIT ($HOST)" \
     -d "Nu a mai trimis heartbeat de 35 minute — verifica serverul (crash / reboot / fara curent)." \
     "https://ntfy.sh/$TOPIC/server-alive" >/dev/null \
