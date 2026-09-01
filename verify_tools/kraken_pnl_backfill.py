@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""One-shot / cron READ-ONLY: trage TOT istoricul TradesHistory de la Kraken (paginat pe
-`ofs`) si scrie <root>/kraken_trades_full.json + un rezumat P&L realizat.
+"""One-shot / cron READ-ONLY: fetch the COMPLETE Kraken TradesHistory (paginated by
+`ofs`) and write <root>/kraken_trades_full.json plus a realized P&L summary.
 
-DE CE separat de kraken_cachemanager: acela tine intentionat o fereastra de 14 zile
-(rate-limit Kraken, call greu) — corect pt TRADING (cititorul filtreaza oricum pe since_s).
-Asta e DOAR pt ANALIZA P&L pe istoric complet, decuplat de flota. NU atinge cache-ul live.
+WHY it is separate from kraken_cachemanager: that process intentionally retains a 14-day
+window (Kraken rate limit, expensive call), which is correct for TRADING because the reader
+filters by since_s anyway. This script is ONLY for full-history P&L ANALYSIS, decoupled from
+the fleet. It DOES NOT touch the live cache.
 
-Cheie: perechea _SPARE (fallback _BOT). Nonce = time_ns (nanosec) -> nu se ciocneste cu
-procesele vii. Paginare blanda (sleep) ca sa nu atinga rate-limit-ul de cont.
+Credentials: use the _SPARE pair, falling back to _BOT. A nanosecond time_ns nonce avoids
+collisions with live processes. Pagination is deliberately gentle to avoid the account rate limit.
 """
 import os, sys, json, time, datetime as dt
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(_HERE)                      # radacina repo (parintele verify_tools/)
+ROOT = os.path.dirname(_HERE)                      # Repository root (parent of verify_tools/).
 KD = os.path.join(ROOT, 'kraken')
 OUT = os.path.join(ROOT, 'kraken_trades_full.json')
 

@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
 """
-tradeall_price_archiver.py — captureaza pretul LIVE (acelasi stream WS
-public ca tradeall.py) intr-un cache24 SEPARAT, cu retentie LUNGA (implicit
-12 luni, --months) in loc de 24h. Scop: incepand de ACUM, acumuleaza date de
-pret la rezolutie DENSA (~1s, ca live), pentru backtesting viitor mult mai
-fidel decat cache_price_{symbol}.jsonl (istoricul existent, mult mai rar —
-vezi caveat-ul din plan, sectiunea A5).
+tradeall_price_archiver.py — captures the LIVE price (from the same public WS
+stream as tradeall.py) in a SEPARATE cache24 with LONG retention (12 months by
+default, controlled by --months) instead of 24 hours. From now on, it builds a
+DENSE-resolution price history (~1 second, like live data) for future backtests
+that are much more faithful than cache_price_{symbol}.jsonl (the existing,
+significantly sparser history; see the caveat in plan section A5).
 
-NU atinge tradeall.py si NU scrie in cache_24price_{symbol}.json (fisierul
-LIVE folosit de tradeall pentru decizii) — scrie separat, in
-cachedb/cache_24price_long_{symbol}.jsonl. Proces SEPARAT, cu propria
-conexiune WS (stream public de piata, fara chei API) — sigur sa ruleze in
-paralel cu tradeall.py.
+It DOES NOT touch tradeall.py and DOES NOT write to
+cache_24price_{symbol}.json (the LIVE file used by tradeall for decisions). It
+writes separately to cachedb/cache_24price_long_{symbol}.jsonl. This is a
+SEPARATE process with its own WS connection (public market stream, no API keys),
+so it is safe to run in parallel with tradeall.py.
 
-21 iul: foloseste Cache24LongPriceManager (cacheManager.py) — clasa DEDICATA
-acestui script, separata de Cache24PriceManager (cea din tradeall.py, complet
-neatinsa). Persista JSONL (scriere incrementala) in loc de JSON complet
-rescris la fiecare salvare — arhiva a ajuns la ~20MB/simbol si tot creste
-spre cateva sute de MB la tinta de 6 luni; rescrierea completa avea un cost
-care creste o data cu arhiva, JSONL scrie doar tick-urile noi.
+July 21: uses Cache24LongPriceManager (cacheManager.py), a class DEDICATED to
+this script and separate from Cache24PriceManager (used by tradeall.py and left
+completely untouched). It persists JSONL incrementally instead of rewriting a
+complete JSON document on every save. The archive had reached ~20 MB per symbol
+and continues toward several hundred MB at the six-month target; the cost of a
+full rewrite grew with the archive, while JSONL writes only new ticks.
 
-Rulare (lasa-l sa ruleze continuu, la fel ca tradeall.py insusi):
+Run it continuously, like tradeall.py itself:
     ./tradeall_price_archiver.py --symbols BTCUSDC,TAOUSDC --months 12
 
-Apoi, dupa ce s-a acumulat destul istoric dens:
+After enough dense history has accumulated:
     ./offline/backtests/tradeall.py --symbol BTCUSDC --start <data> --source cache24 \\
         --cache24-file cachedb/cache_24price_long_BTCUSDC.jsonl
 """

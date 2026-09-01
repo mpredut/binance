@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-gen_alert_thresholds.py — genereaza praguri de alerta (UP/DOWN) pt monede din
-VOLATILITATEA lor reala (CoinGecko), nu dintr-un default orb. (fost suggest_thresholds.py)
+    gen_alert_thresholds.py — generates alert thresholds (UP/DOWN) for coins from
+    their actual VOLATILITY (CoinGecko), not from a blind default. (Formerly suggest_thresholds.py.)
 
-Logica: la fiecare punct, calculeaza ca PriceChecker "cat a urcat fata de minimul pe
-24h" si "cat a scazut fata de maximul pe 24h". Ia percentila (p85) a acestor miscari
-=> pragul prinde sferturile de zile cu miscare MARE, nu zgomotul zilnic normal.
+    Logic: at every point, calculate the same measures as PriceChecker: "rise from the
+    24-hour low" and "drop from the 24-hour high". Use the p85 percentile of these
+    movements, so the threshold captures high-movement parts of days rather than normal daily noise.
 
-Output = linii gata de pus in market_alerts.conf. TU le revizuiesti (sunt provizorii;
-moneda noua are istoric subtire -> rafineaza pe masura ce se aduna date).
+    Output consists of lines ready for market_alerts.conf. Review them manually; they
+    are provisional because a new coin has sparse history and improves as data accumulates.
 
   python3 verify_tools/gen_alert_thresholds.py SPCXX TAO BTC
 """
@@ -19,10 +19,10 @@ import statistics
 import sys
 import urllib.request
 
-WINDOW = 24       # ~ore intr-o fereastra de 24h (granularitate orara CoinGecko)
-PERCENTILE = 85   # pragul = miscarea de la care in sus consideram "notabil"
+WINDOW = 24       # Approximate hourly observations in a 24-hour window (CoinGecko hourly granularity).
+PERCENTILE = 85   # Movement at or above this percentile is considered notable.
 DAYS = 14
-FLOOR = 3.0       # nu coborî pragul sub atat (altfel alerteaza pe zgomot)
+FLOOR = 3.0       # Do not lower the threshold below this value, or noise will trigger alerts.
 
 
 def _get(url):
@@ -32,7 +32,7 @@ def _get(url):
 
 
 def resolve_id(symbol):
-    """Simbol -> (coingecko_id, simbol, nume). Prefera potrivirea exacta de simbol."""
+    """Map a symbol to (coingecko_id, symbol, name), preferring an exact symbol match."""
     coins = _get(f"https://api.coingecko.com/api/v3/search?query={symbol}").get("coins", [])
     for c in coins:
         if c["symbol"].upper() == symbol.upper():

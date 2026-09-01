@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-# check_cache_coherence.py — verifica PROSPETIMEA + coerenta cache-urilor de trend/pret
-# pt TOATE simbolurile (Binance + non-Binance din instruments.conf). Exit 1 daca ceva e stale.
-# Rulat periodic (cron/loop) ca sa prinzi cache inghetat.
+# check_cache_coherence.py — checks the FRESHNESS and consistency of trend/price caches
+# for ALL symbols (Binance and non-Binance entries from instruments.conf). Exits 1 if anything is stale.
+# Run periodically (cron/loop) to detect a frozen cache.
 import json
 import os
 import sys
@@ -9,7 +9,7 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CACHEDB = os.path.join(ROOT, "cachedb")
-STALE_S = 600.0  # >10 min fara update = STALE (instant-trend se reimprospateaza la secunde / 20s)
+STALE_S = 600.0  # More than 10 minutes without an update is STALE (instant trend refreshes every few seconds / 20s).
 
 
 def load(name):
@@ -25,7 +25,7 @@ def load(name):
 
 
 def expected_symbols():
-    """sym.symbols (Binance) + simbolurile non-Binance enabled din instruments.conf."""
+    """Return sym.symbols (Binance) plus enabled non-Binance symbols from instruments.conf."""
     syms = []
     try:
         sys.path.insert(0, ROOT)

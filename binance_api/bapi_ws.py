@@ -38,12 +38,12 @@ except (ModuleNotFoundError, ImportError):
 
 logger = logging.getLogger("binance.ws")
 
-# ─── Constante ────────────────────────────────────────────────────────────────
+# ─── Constants ────────────────────────────────────────────────────────────────
 
 WS_BASE_URL      = "wss://stream.binance.com:9443/stream"   # market data
 WS_API_URL       = "wss://ws-api.binance.com:443/ws-api/v3"  # user-data (auth)
 WS_MAX_STREAMS   = 1024        # Binance limit per connection
-WS_RECV_TIMEOUT  = 3.0         # TREBUIE < WS_STOP_TIMEOUT (market)
+WS_RECV_TIMEOUT  = 3.0         # Must be lower than WS_STOP_TIMEOUT (market).
 WS_USERDATA_RECV_TIMEOUT = 30.0
 WS_STOP_TIMEOUT  = 8.0
 WS_PING_INTERVAL = 20

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Normalizeaza denumirile legacy USDT care reprezinta politica USDC curenta.
+"""Normalize legacy USDT names that represent the current USDC policy.
 
-Modifica numai forme cunoscute si sigure:
-  * cheia total_value_usdt -> total_value_usdc;
-  * simbolurile legacy BTCUSDT/TAOUSDT -> BTCUSDC/TAOUSDC in chei si campuri
-    declarative de stare (symbol/s/pair/name).
+Modify only known, safe forms:
+  * the total_value_usdt key becomes total_value_usdc;
+  * legacy BTCUSDT/TAOUSDT symbols become BTCUSDC/TAOUSDC in keys and declarative
+    state fields (symbol/s/pair/name).
 
-Nu converteste valori monetare si nu rescrie istoricul ordinelor altor perechi.
-Scrierea este atomica; primul apply creeaza backup `.pre_usdc_migration`.
+It does not convert monetary values or rewrite the order history of other pairs.
+Writes are atomic; the first apply creates a `.pre_usdc_migration` backup.
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ def normalize(value, parent_key=None):
             if new_key != key:
                 changes += 1
             changes += count
-            # Valoarea USDC existenta are prioritate fata de aliasul legacy.
+            # The existing USDC value takes precedence over the legacy alias.
             if new_key not in result or key != "total_value_usdt":
                 result[new_key] = normalized
         return result, changes
