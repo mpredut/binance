@@ -23,7 +23,7 @@ import sys
 import time
 
 from common import (
-    load_dotenv, log, now_str, required_env, required_int_env,
+    load_env_stack, log, now_str, required_env, required_int_env,
     required_bool_env,
 )
 from hl_client import HLClient, HLError
@@ -43,8 +43,7 @@ def main() -> int:
     for i, a in enumerate(sys.argv):
         if a == "--env-file" and i + 1 < len(sys.argv):
             env_file = sys.argv[i + 1]
-    load_dotenv(env_file)                                                      # gitignored secrets
-    load_dotenv(os.path.join(os.path.dirname(env_file) or ".", "config.env"))  # versioned configuration
+    load_env_stack(env_file)
 
     ap = argparse.ArgumentParser(description="Bot DCA+TP pe Hyperliquid (perp long-only).")
     ap.add_argument("--env-file", default=env_file)

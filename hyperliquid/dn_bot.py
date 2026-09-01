@@ -19,7 +19,7 @@ import sys
 
 import time
 
-from common import load_dotenv, log, single_instance, required_bool_env
+from common import load_env_stack, log, single_instance, required_bool_env
 from hl_client import HLClient, HLError
 from delta_neutral import DeltaNeutral, DNParams
 
@@ -145,8 +145,7 @@ def main() -> int:
     for i, a in enumerate(sys.argv):
         if a == "--env-file" and i + 1 < len(sys.argv):
             env_file = sys.argv[i + 1]
-    load_dotenv(env_file)                                                      # gitignored secrets
-    load_dotenv(os.path.join(os.path.dirname(env_file) or ".", "config.env"))  # versioned configuration
+    load_env_stack(env_file)
 
     ap = argparse.ArgumentParser(description="Bot delta-neutral (funding) pe Hyperliquid.")
     ap.add_argument("--env-file", default=env_file)

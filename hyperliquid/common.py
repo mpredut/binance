@@ -19,7 +19,7 @@ socket.setdefaulttimeout(30)
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # repository root
 from botcore import (  # noqa: E402,F401  (re-export compatibility)
-    BUCHAREST, log, load_dotenv, float_env, single_instance, are_close,
+    BUCHAREST, log, load_dotenv, load_env_stack, float_env, single_instance, are_close,
     required_env, defined_env, required_float_env, required_int_env, required_bool_env,
 )
 

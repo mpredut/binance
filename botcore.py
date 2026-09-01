@@ -87,6 +87,18 @@ def load_dotenv(path: str = ".env") -> None:
     log(f"  .env incarcat din {path}")
 
 
+def load_env_stack(env_file: str, config_name: str = "config.env") -> None:
+    """Load secrets/overrides first, then the adjacent versioned configuration.
+
+    ``load_dotenv`` never overwrites existing values, so process environment wins,
+    followed by the selected secrets file, followed by versioned policy. Keeping
+    this ordering here prevents venue launchers from silently diverging.
+    """
+    env_path = os.path.abspath(env_file)
+    load_dotenv(env_path)
+    load_dotenv(os.path.join(os.path.dirname(env_path), config_name))
+
+
 def parse_dotenv(path: str) -> dict:
     """Parse dotenv into a dictionary without changing os.environ.
     This keeps configuration separate when multiple assets run in the same process."""

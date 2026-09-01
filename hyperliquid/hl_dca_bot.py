@@ -25,7 +25,7 @@ for _p in (_ROOT, _HERE):
         sys.path.insert(0, _p)
 
 from common import (  # hyperliquid/common.py
-    load_dotenv, log, single_instance, required_env, required_bool_env,
+    load_env_stack, log, single_instance, required_env, required_bool_env,
 )
 from strategies.spot_dca import Strategy, StratParams
 from providers.hyperliquid_provider import HyperliquidProvider
@@ -42,8 +42,7 @@ def state_dir_for(dry_run: bool) -> str:
 def main() -> int:
     # Load configuration before CLI defaults and PAPER/REAL calculation. `.env` wins
     # because load_dotenv does not override already defined variables.
-    load_dotenv(os.path.join(_HERE, ".env"))
-    load_dotenv(os.path.join(_HERE, "config.env"))
+    load_env_stack(os.path.join(_HERE, ".env"))
 
     ap = argparse.ArgumentParser(description="base v2 (spot_dca) pe Hyperliquid HYPE.")
     ap.add_argument("--paper", action="store_true", help="Forteaza PAPER (fara bani)")

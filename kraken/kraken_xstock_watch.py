@@ -29,7 +29,7 @@ import time
 import urllib.request
 
 from kraken_common import (
-    log, load_dotenv, single_instance, required_env,
+    log, load_env_stack, single_instance, required_env,
     required_float_env, required_bool_env,
 )
 from notify import notify
@@ -360,8 +360,7 @@ def run_trial(client: KrakenClient, desktop: bool) -> int:
 
 
 def main() -> int:
-    load_dotenv(os.path.join(_HERE, ".env"))
-    load_dotenv(os.path.join(_HERE, "config.env"))
+    load_env_stack(os.path.join(_HERE, ".env"))
 
     ap = argparse.ArgumentParser(description="Watcher alocare xStocks (Kraken).")
     ap.add_argument("--once", action="store_true", help="o singura verificare si iese")
