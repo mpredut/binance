@@ -7,10 +7,9 @@ duplicate entry.
 
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import Callable
-from state_io import atomic_write_json
+from state_io import StateReadError, atomic_write_json, load_json_state
 
 
 class StatePersistenceError(RuntimeError):
@@ -27,13 +26,11 @@ class JsonStateStore:
         self.fail_closed = fail_closed
 
     def load(self) -> dict:
-        if not os.path.exists(self.path):
-            return self.default_factory()
         try:
-            with open(self.path, "r", encoding="utf-8") as handle:
-                loaded = json.load(handle)
-            if not isinstance(loaded, dict):
-                raise ValueError("the JSON root is not an object")
+            loaded = load_json_state(
+                self.path, default_factory=dict, fail_closed=True,
+                label=self.label,
+            )
             merged = self.default_factory()
             if not isinstance(merged, dict):
                 raise TypeError("default_factory nu a returnat dict")
@@ -43,7 +40,7 @@ class JsonStateStore:
                 f"qty {merged.get('qty')})"
             )
             return merged
-        except (OSError, TypeError, ValueError) as exc:
+        except (OSError, StateReadError, TypeError, ValueError) as exc:
             message = f"stare {self.label} invalida in {self.path}: {exc}"
             if self.fail_closed:
                 raise StatePersistenceError(message) from exc

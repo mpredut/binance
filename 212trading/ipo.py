@@ -42,6 +42,7 @@ from t212_client import T212Client
 from ipo_notify import notify
 from order_manager import resolve_quantity, place_order_with_retry
 from strategy import Strategy, StratParams
+from credentials import t212_credentials
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -159,14 +160,10 @@ def main() -> int:
     os.environ["IPO_PROFILE"] = args.profile.strip()
 
     # --- .env configuration ---
-    t212_key    = os.environ.get("T212_API_KEY")
-    t212_secret = os.environ.get("T212_API_SECRET")
+    credentials = t212_credentials()
     t212_env    = required_env("T212_ENV").lower()
-    if not t212_key:
-        log("! T212_API_KEY missing from .env — cannot continue.")
-        return 1
     client = T212Client(
-        t212_key, t212_secret, env=t212_env,
+        credentials.key, credentials.secret, env=t212_env,
         min_gap_sec=required_float_env("T212_MIN_GAP_SEC"),
         portfolio_ttl_sec=required_float_env("T212_PORTFOLIO_TTL_SEC"),
     )

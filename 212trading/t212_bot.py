@@ -36,6 +36,7 @@ from ipo_notify import notify  # noqa: E402
 from listing_watcher import wait_for_launch  # noqa: E402
 from strategy import Strategy, StratParams  # noqa: E402
 from t212_client import T212Client  # noqa: E402
+from credentials import t212_credentials  # noqa: E402
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 STOP = threading.Event()
@@ -142,11 +143,9 @@ def main() -> int:
                 f"{'STRAT' if on else 'OFF':<6} {'⚠ REAL' if real else 'PAPER'}")
         return 0
 
-    key = os.environ.get("T212_API_KEY")
-    if not key:
-        log("! T212_API_KEY missing from .env — cannot continue"); return 1
+    credentials = t212_credentials()
     client = T212Client(
-        key, os.environ.get("T212_API_SECRET"),
+        credentials.key, credentials.secret,
         env=required_env("T212_ENV"),
         min_gap_sec=required_float_env("T212_MIN_GAP_SEC"),
         portfolio_ttl_sec=required_float_env("T212_PORTFOLIO_TTL_SEC"),

@@ -28,7 +28,7 @@ from common import (
     required_int_env, required_bool_env,
 )
 from notify import notify
-from state_io import atomic_write_json
+from state_io import atomic_write_json, load_json_state
 from hl_client import HLClient, HLError
 from market_data import get_price
 from signals import get_signal
@@ -120,16 +120,15 @@ class Strategy:
 
     # -- persistence -----------------------------------------------------------
     def _load(self) -> dict:
-        if os.path.exists(self.state_file):
-            try:
-                with open(self.state_file, "r", encoding="utf-8") as f:
-                    st = json.load(f)
-                m = _new_state(); m.update(st)
-                log(f"  [STRAT] stare incarcata (ciclu {m.get('cycle')}, qty {m.get('qty')})")
-                return m
-            except (OSError, ValueError) as e:
-                log(f"  ! [STRAT] stare invalida ({e}), pornesc curat")
-        return _new_state()
+        st = load_json_state(
+            self.state_file, default_factory=dict, fail_closed=not self.dry_run,
+            label="Hyperliquid strategy",
+        )
+        merged = _new_state()
+        merged.update(st)
+        if st:
+            log(f"  [STRAT] state loaded (cycle {merged.get('cycle')}, qty {merged.get('qty')})")
+        return merged
 
     def _save(self) -> None:
         try:

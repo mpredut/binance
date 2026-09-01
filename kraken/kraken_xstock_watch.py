@@ -34,7 +34,8 @@ from kraken_common import (
 )
 from notify import notify
 from kraken_client import KrakenClient, KrakenError
-from state_io import atomic_write_json
+from state_io import atomic_write_json, load_json_state
+from credentials import kraken_credentials
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -47,15 +48,15 @@ def _state_file() -> str:
 # -- state -------------------------------------------------------------------
 def _load_state() -> dict:
     path = _state_file()
-    if os.path.exists(path):
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (OSError, ValueError) as e:
-            log(f"  ! nu pot citi starea ({e}) — pornesc curat")
-    return {"known_assets": {}, "allocated": None, "pair": None,
+    return load_json_state(
+        path,
+        default_factory=lambda: {
+            "known_assets": {}, "allocated": None, "pair": None,
             "alerted_pair": False, "alerted_tp": False, "alerted_sl": False,
-            "bot_pid": None, "alerted_need_price": False}
+            "bot_pid": None, "alerted_need_price": False,
+        },
+        fail_closed=True, label="Kraken xStock watcher",
+    )
 
 
 def _save_state(st: dict) -> None:
@@ -381,7 +382,8 @@ def main() -> int:
     sl_pct = required_float_env("XSTOCK_SL_ALERT_PCT")
     yahoo_sym = required_env("XSTOCK_YAHOO")
 
-    client = KrakenClient(os.environ.get("KRAKEN_API_KEY_BOT"), os.environ.get("KRAKEN_API_SECRET_BOT"))
+    credentials = kraken_credentials("bot")
+    client = KrakenClient(credentials.key, credentials.secret)
     if args.trial:
         return run_trial(client, args.desktop)
     st = _load_state()

@@ -26,6 +26,7 @@ from .strategy_executor import (
     PairPrecision,
     ProviderError,
 )
+from credentials import CredentialProfileMissingError, kraken_credentials
 
 _KRAKEN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kraken")
 # Shared cross-process fill cache produced by kraken_cachemanager.py.
@@ -98,16 +99,22 @@ class KrakenProvider(MarketDataProvider):
         finally:
             sys.path[:] = saved_path                  # Restore order for other providers.
         # Read Kraken-specific credentials, with environment variables taking
-        # precedence. The fleet is a distinct concurrent consumer and prefers
-        # _SPARE for its own nonce sequence, then falls back to plain and _BOT keys.
-        api_key = (os.environ.get("KRAKEN_API_KEY")
-                   or env_value(_KRAKEN_DIR, "KRAKEN_API_KEY")
-                   or env_value(_KRAKEN_DIR, "KRAKEN_API_KEY_SPARE")
-                   or env_value(_KRAKEN_DIR, "KRAKEN_API_KEY_BOT"))
-        api_secret = (os.environ.get("KRAKEN_API_SECRET")
-                      or env_value(_KRAKEN_DIR, "KRAKEN_API_SECRET")
-                      or env_value(_KRAKEN_DIR, "KRAKEN_API_SECRET_SPARE")
-                      or env_value(_KRAKEN_DIR, "KRAKEN_API_SECRET_BOT"))
+        # precedence. Preserve the existing whole-profile priority: primary,
+        # then SPARE, then BOT. The resolver prevents cross-profile key mixing.
+        names = (
+            "KRAKEN_API_KEY", "KRAKEN_API_SECRET",
+            "KRAKEN_API_KEY_SPARE", "KRAKEN_API_SECRET_SPARE",
+            "KRAKEN_API_KEY_BOT", "KRAKEN_API_SECRET_BOT",
+        )
+        values = {
+            name: os.environ.get(name) or env_value(_KRAKEN_DIR, name)
+            for name in names
+        }
+        try:
+            credentials = kraken_credentials("fleet", values=values)
+            api_key, api_secret = credentials.key, credentials.secret
+        except CredentialProfileMissingError:
+            api_key = api_secret = None
         cli = KrakenClient(api_key, api_secret)
         # Cache only a credentialed client. When keys are initially absent, retry
         # loading them on the next tick so the process can recover without restart.

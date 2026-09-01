@@ -25,7 +25,7 @@ from common import (
 )
 from notify import notify
 from hl_client import HLClient, HLError
-from state_io import atomic_write_json
+from state_io import atomic_write_json, load_json_state
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 MIN_ORDER_USD = 10.5          # Do not submit orders below Hyperliquid's ~$10 minimum.
@@ -124,13 +124,13 @@ class DeltaNeutral:
         self.s = self._load()
 
     def _load(self) -> dict:
-        if os.path.exists(self.state_file):
-            try:
-                with open(self.state_file) as f:
-                    m = _new_state(); m.update(json.load(f)); return m
-            except (OSError, ValueError):
-                pass
-        return _new_state()
+        loaded = load_json_state(
+            self.state_file, default_factory=dict, fail_closed=not self.dry_run,
+            label="Hyperliquid delta-neutral",
+        )
+        state = _new_state()
+        state.update(loaded)
+        return state
 
     def _save(self):
         try:

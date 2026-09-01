@@ -74,3 +74,31 @@ def test_specialized_atomic_writers_are_explicitly_bounded():
         if owns_temporary and ("os.replace" in text or "mkstemp" in text):
             candidates.append(relative)
     assert set(candidates) == remaining
+
+
+def test_live_launcher_env_defaults_are_location_based():
+    for relative in (
+        "kraken/kraken_bot.py",
+        "hyperliquid/dn_bot.py",
+        "hyperliquid/hl_bot.py",
+    ):
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        assert 'os.environ.get("ENV_FILE", ".env")' not in text
+        assert 'os.path.dirname(__file__), ".env"' in text
+
+
+def test_live_venue_credentials_use_complete_profile_resolver():
+    files = (
+        "kraken/kraken_bot.py",
+        "kraken/kraken_cachemanager.py",
+        "kraken/kraken_xstock_watch.py",
+        "kraken/trailing_stop.py",
+        "providers/kraken_provider.py",
+        "212trading/ipo.py",
+        "212trading/t212_bot.py",
+        "212trading/t212_status.py",
+        "providers/t212_provider.py",
+    )
+    for relative in files:
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        assert "_credentials(" in text

@@ -15,6 +15,34 @@ from collections.abc import Iterator
 from typing import Any
 
 
+class StateReadError(RuntimeError):
+    """Persisted runtime state cannot be trusted."""
+
+
+def load_json_state(path: str, *, default_factory, fail_closed: bool,
+                    label: str, root_type: type = dict):
+    """Load JSON state with an explicit live-versus-observational failure policy.
+
+    A missing file represents first start and returns the factory default. Invalid,
+    unreadable, or structurally wrong state raises in fail-closed mode; paper,
+    shadow, and monitoring callers may explicitly opt into a clean default.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            value = json.load(handle)
+        if not isinstance(value, root_type):
+            raise ValueError(
+                f"expected {root_type.__name__}, got {type(value).__name__}"
+            )
+        return value
+    except FileNotFoundError:
+        return default_factory()
+    except (OSError, TypeError, ValueError) as exc:
+        if fail_closed:
+            raise StateReadError(f"invalid {label} state in {path}: {exc}") from exc
+        return default_factory()
+
+
 @contextlib.contextmanager
 def atomic_text_writer(path: str, *, encoding: str = "utf-8") -> Iterator[Any]:
     """Yield a text handle and atomically publish it only after a successful write."""

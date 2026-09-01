@@ -34,6 +34,7 @@ from kraken_common import (load_env_stack, log, required_env, required_float_env
                            single_instance)
 from kraken_client import KrakenClient
 from state_io import atomic_write_json
+from credentials import CredentialConfigurationError, kraken_credentials
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 load_env_stack(os.path.join(_HERE, ".env"))
@@ -212,13 +213,13 @@ def main():
     # The cache manager's dedicated _CACHE key has its own nonce sequence, separate from
     # _BOT/_TRAIL trading processes. Kraken requires strictly increasing nonces per key,
     # so this avoids collisions. Fall back to _BOT if _CACHE is absent.
-    key = os.environ.get("KRAKEN_API_KEY_CACHE") or os.environ.get("KRAKEN_API_KEY_BOT")
-    secret = os.environ.get("KRAKEN_API_SECRET_CACHE") or os.environ.get("KRAKEN_API_SECRET_BOT")
-    used_ws_key = bool(os.environ.get("KRAKEN_API_KEY_CACHE") and os.environ.get("KRAKEN_API_SECRET_CACHE"))
-    if not key or not secret:
-        log("[kraken_cache] FATAL: lipsesc cheile Kraken (_CACHE sau _BOT) in kraken/.env"); return
-    client = KrakenClient(key, secret)
-    log(f"[kraken_cache] start: mode={MODE} cheie={'_CACHE dedicata' if used_ws_key else '_BOT (fallback)'} "
+    try:
+        credentials = kraken_credentials("cache")
+    except CredentialConfigurationError as exc:
+        log(f"[kraken_cache] FATAL: {exc}")
+        return
+    client = KrakenClient(credentials.key, credentials.secret)
+    log(f"[kraken_cache] start: mode={MODE} credentials={credentials.profile} "
         f"pairs={PAIRS} poll={POLL_INTERVAL}s -> {CACHE_FILE}")
     if MODE == "ws":
         ws_loop(client)        # real-time; requires websocket-client

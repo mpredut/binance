@@ -31,9 +31,8 @@ ADAPTER contract (duck typing; see the two adapter classes):
 
 from __future__ import annotations
 
-import json
 import os
-from state_io import atomic_write_json
+from state_io import atomic_write_json, load_json_state
 
 
 def should_sell(current: float, peak: float, trail_pct: float) -> bool:
@@ -65,11 +64,10 @@ class TrailingCore:
 
     # -- state (peak per key) -------------------------------------------------
     def load(self) -> dict:
-        try:
-            with open(self.state_file) as f:
-                return json.load(f)
-        except (OSError, ValueError):
-            return {}
+        return load_json_state(
+            self.state_file, default_factory=dict, fail_closed=self.enabled,
+            label="live trailing" if self.enabled else "paper trailing",
+        )
 
     def save(self, state: dict) -> bool:
         try:

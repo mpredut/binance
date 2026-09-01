@@ -141,7 +141,7 @@ def _client(need_wallet: bool) -> HLClient:
 
 
 def main() -> int:
-    env_file = os.environ.get("ENV_FILE", ".env")
+    env_file = os.environ.get("ENV_FILE", os.path.join(os.path.dirname(__file__), ".env"))
     for i, a in enumerate(sys.argv):
         if a == "--env-file" and i + 1 < len(sys.argv):
             env_file = sys.argv[i + 1]

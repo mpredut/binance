@@ -51,6 +51,7 @@ from order_retry import (  # noqa: E402
     StrategyExecutorLifecycleApi,
     TrackedOrderLifecycle,
 )
+from credentials import kraken_credentials  # noqa: E402
 
 STATE_FILE = os.path.join(_HERE, "trailing_state.json")
 CACHE_TREND = os.path.join(_ROOT, "cachedb", "cache_instant_trend.json")
@@ -274,9 +275,8 @@ def main() -> int:
         single_instance("kraken_trailing")
     # A dedicated trailing key (KRAKEN_API_KEY_TRAIL) keeps its nonce separate from
     # _BOT (kraken_bot + xstock_watch). Fall back to _BOT when _TRAIL is absent.
-    key    = os.environ.get("KRAKEN_API_KEY_TRAIL")    or os.environ.get("KRAKEN_API_KEY_BOT")
-    secret = os.environ.get("KRAKEN_API_SECRET_TRAIL") or os.environ.get("KRAKEN_API_SECRET_BOT")
-    client = KrakenClient(key, secret)
+    credentials = kraken_credentials("trail")
+    client = KrakenClient(credentials.key, credentials.secret)
     ts = KrakenTrailing(client)
     if args.status:
         st = ts._load()

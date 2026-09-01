@@ -40,9 +40,11 @@ from strategies.spot_dca import Strategy, StratParams
 # commands continue using KrakenClient directly.
 from providers.kraken_provider import KrakenProvider  # noqa: E402
 from providers.execution_audit import AuditedStrategyExecutor  # noqa: E402
+from credentials import kraken_credentials  # noqa: E402
 
 def _build_client() -> KrakenClient:
-    return KrakenClient(os.environ.get("KRAKEN_API_KEY_BOT"), os.environ.get("KRAKEN_API_SECRET_BOT"))
+    credentials = kraken_credentials("bot")
+    return KrakenClient(credentials.key, credentials.secret)
 
 
 def _build_executor(client: KrakenClient) -> AuditedStrategyExecutor:
@@ -51,7 +53,7 @@ def _build_executor(client: KrakenClient) -> AuditedStrategyExecutor:
 
 
 def main() -> int:
-    env_file = os.environ.get("ENV_FILE", ".env")
+    env_file = os.environ.get("ENV_FILE", os.path.join(os.path.dirname(__file__), ".env"))
     for i, a in enumerate(sys.argv):
         if a == "--env-file" and i + 1 < len(sys.argv):
             env_file = sys.argv[i + 1]

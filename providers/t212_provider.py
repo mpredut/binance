@@ -24,6 +24,7 @@ from .strategy_executor import (
     PairPrecision,
     ProviderError,
 )
+from credentials import t212_credentials
 
 _T212_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "212trading")
 _PRICE_DECIMALS = 2
@@ -84,14 +85,15 @@ class T212Provider(MarketDataProvider):
         # mutation and also works in the installable wheel.
         T212Client = importlib.import_module("212trading.t212_client").T212Client
         # Use gitignored 212trading credentials, with fleet environment precedence.
-        key = os.environ.get("T212_API_KEY") or env_value(_T212_DIR, "T212_API_KEY")
-        if not key:
-            raise RuntimeError("Lipseste T212_API_KEY (212trading/.env sau env)")
-        secret = os.environ.get("T212_API_SECRET") or env_value(_T212_DIR, "T212_API_SECRET")
+        values = {
+            name: os.environ.get(name) or env_value(_T212_DIR, name)
+            for name in ("T212_API_KEY", "T212_API_SECRET")
+        }
+        credentials = t212_credentials(values=values)
         env = os.environ.get("T212_ENV") or env_value(_T212_DIR, "T212_ENV")
         if not env:
             raise RuntimeError("T212_ENV is missing (212trading/.env or environment)")
-        self._cli = T212Client(key, secret, env)
+        self._cli = T212Client(credentials.key, credentials.secret, env)
         return self._cli
 
     def _position(self, symbol: str, *, strict: bool = False) -> Optional[dict]:

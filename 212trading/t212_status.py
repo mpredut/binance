@@ -17,6 +17,7 @@ from ipo_common import (  # noqa: E402
     http_get, load_t212_environment, required_env, required_float_env,
 )
 from t212_client import T212Client  # noqa: E402
+from credentials import t212_credentials  # noqa: E402
 
 
 def _retry(fn, tries=4, pause=2):
@@ -35,11 +36,9 @@ def _retry(fn, tries=4, pause=2):
 def main() -> int:
     here = os.path.dirname(os.path.abspath(__file__))
     load_t212_environment(os.path.join(here, ".env"))
-    key = os.environ.get("T212_API_KEY")
-    if not key:
-        print("! lipseste T212_API_KEY (.env)"); return 1
+    credentials = t212_credentials()
     c = T212Client(
-        key, os.environ.get("T212_API_SECRET"), env=required_env("T212_ENV"),
+        credentials.key, credentials.secret, env=required_env("T212_ENV"),
         min_gap_sec=required_float_env("T212_MIN_GAP_SEC"),
         portfolio_ttl_sec=required_float_env("T212_PORTFOLIO_TTL_SEC"),
     )
