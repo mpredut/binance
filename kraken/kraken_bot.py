@@ -27,7 +27,9 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from kraken_common import load_dotenv, log, now_str, float_env, single_instance
+from kraken_common import (load_dotenv, log, now_str, float_env,
+                           required_bool_env, required_env, required_int_env,
+                           single_instance)
 from kraken_client import KrakenClient, KrakenError
 from market_data import get_price, pair_available
 from notify import notify
@@ -38,9 +40,6 @@ from strategies.spot_dca import Strategy, StratParams
 # commands continue using KrakenClient directly.
 from providers.kraken_provider import KrakenProvider  # noqa: E402
 from providers.execution_audit import AuditedStrategyExecutor  # noqa: E402
-
-POLL_SECONDS = 60
-
 
 def _build_client() -> KrakenClient:
     return KrakenClient(os.environ.get("KRAKEN_API_KEY_BOT"), os.environ.get("KRAKEN_API_SECRET_BOT"))
@@ -58,11 +57,12 @@ def main() -> int:
             env_file = sys.argv[i + 1]
     load_dotenv(env_file)                                                      # gitignored secrets
     load_dotenv(os.path.join(os.path.dirname(env_file) or ".", "config.env"))  # versioned configuration
+    poll_seconds = required_int_env("KRAKEN_BOT_POLL_SEC")
 
     ap = argparse.ArgumentParser(description="Bot DCA+TP pe Kraken.")
     ap.add_argument("--env-file", default=env_file)
     ap.add_argument("--pair", help="Override pereche (altfel din .env KRAKEN_PAIR)")
-    ap.add_argument("--interval", type=int, default=POLL_SECONDS)
+    ap.add_argument("--interval", type=int, default=poll_seconds)
     ap.add_argument("--desktop", action="store_true")
     ap.add_argument("--skip-wait", action="store_true", help="Sari peste asteptarea listarii")
     ap.add_argument("--paper", action="store_true", help="Forteaza PAPER (fara bani)")
@@ -74,14 +74,14 @@ def main() -> int:
     if not any(getattr(args, a, None) for a in ("balance", "find_pair", "price", "test_strategy")):
         # Use one instance PER PAIR so HYPE, ADA, WIF, etc. can run concurrently with
         # separate locks. The former fixed 'kraken_bot' key blocked a second pair.
-        _lock_pair = (args.pair or os.environ.get("KRAKEN_PAIR") or "default").strip()
+        _lock_pair = (args.pair or required_env("KRAKEN_PAIR")).strip()
         single_instance(f"kraken_bot_{_lock_pair}")
 
     client = _build_client()
 
-    pair        = (args.pair or os.environ.get("KRAKEN_PAIR") or "").strip()
-    label       = os.environ.get("SYMBOL_LABEL") or pair
-    strat_dry   = args.paper or not (os.environ.get("STRAT_EXECUTE", "false").lower() == "true")
+    pair        = (args.pair or required_env("KRAKEN_PAIR")).strip()
+    label       = required_env("SYMBOL_LABEL")
+    strat_dry   = args.paper or not required_bool_env("STRAT_EXECUTE")
     interval    = max(args.interval, 15)
 
     # --- one-shot commands ---

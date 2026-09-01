@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) 
 from botcore import (  # noqa: E402,F401  (re-export: compat `from common import ...`)
     BUCHAREST, HTTP_TIMEOUT, log, load_dotenv, float_env, http_get,
     http_post_form, http_request, single_instance, are_close, diff_percent,
+    required_bool_env, required_env, required_float_env, required_int_env,
 )
 
 

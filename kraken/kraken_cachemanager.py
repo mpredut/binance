@@ -30,21 +30,24 @@ import json
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from kraken_common import load_dotenv, log, single_instance
+from kraken_common import (load_dotenv, log, required_env, required_float_env,
+                           single_instance)
 from kraken_client import KrakenClient
 
-# ── configuration from environment with defaults ─────────────────────────────
-PAIRS = [p for p in os.environ.get("KRAKEN_CACHE_PAIRS", "HYPEUSD").split(",") if p]
-POLL_INTERVAL = float(os.environ.get("KRAKEN_CACHE_POLL_S", "30"))   # Ledgers is expensive and all Kraken processes
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.env"))
+
+# ── mandatory configuration ──────────────────────────────────────────────────
+PAIRS = [p for p in required_env("KRAKEN_CACHE_PAIRS").split(",") if p]
+POLL_INTERVAL = required_float_env("KRAKEN_CACHE_POLL_S")   # Ledgers is expensive and all Kraken processes
                                                                      # share the account counter: 5s hits rate limits;
                                                                      # 30s suffices for the guard; use WS below 5s
-POLL_BACKOFF_INIT = float(os.environ.get("KRAKEN_CACHE_BACKOFF_INIT_S", "10"))   # first pause after error
-POLL_BACKOFF_MAX = float(os.environ.get("KRAKEN_CACHE_BACKOFF_MAX_S", "120"))    # max 2 min, below 20-min watchdog limit
-MODE = os.environ.get("KRAKEN_CACHE_MODE", "poll").strip().lower()   # poll | ws
+POLL_BACKOFF_INIT = required_float_env("KRAKEN_CACHE_BACKOFF_INIT_S")
+POLL_BACKOFF_MAX = required_float_env("KRAKEN_CACHE_BACKOFF_MAX_S")
+MODE = required_env("KRAKEN_CACHE_MODE").lower()
 WS_URL = "wss://ws-auth.kraken.com/"      # authenticated endpoint for private ownTrades
 CACHE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                           "cachedb", "cache_trade_kraken.json")
-LEDGER_LOOKBACK_S = float(os.environ.get("KRAKEN_CACHE_LOOKBACK_H", "336")) * 3600   # default 14 days
+LEDGER_LOOKBACK_S = required_float_env("KRAKEN_CACHE_LOOKBACK_H") * 3600
 # USD-like quote assets map to symbol suffixes; all others (HYPE, BTC, etc.) are base assets.
 _QUOTE = {"ZUSD": "USD", "USD": "USD", "USDC": "USDC", "USDG": "USDG", "ZEUR": "EUR"}
 

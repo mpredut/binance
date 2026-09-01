@@ -31,7 +31,8 @@ import os
 import sys
 import time
 
-from kraken_common import load_dotenv, log, float_env, single_instance
+from kraken_common import (load_dotenv, log, float_env, required_bool_env,
+                           required_env, required_float_env, single_instance)
 from kraken_client import KrakenClient, KrakenError
 from notify import notify
 
@@ -60,23 +61,23 @@ CACHE_TREND = os.path.join(_ROOT, "cachedb", "cache_instant_trend.json")
 load_dotenv(os.path.join(_HERE, "trailing.conf"))
 
 # Wide threshold per asset (crash circuit breaker, not a profit tool) and sale pair.
-TRAIL_PCT = {"HYPE": 18.0}   # August 4: 15->18 by user decision; wider means less whipsaw
-PAIR_FOR = {"HYPE": "HYPEUSD"}
-DEFAULT_TRAIL_PCT = 15.0
-MIN_NOTIONAL_USD = 10.0
-CHECK_SECONDS = float(os.environ.get("KRAKEN_TRAILING_CHECK_SECONDS", "120"))
+TRAIL_PCT = {"HYPE": required_float_env("KRAKEN_TRAILING_HYPE_PCT")}
+PAIR_FOR = {"HYPE": required_env("KRAKEN_TRAILING_HYPE_PAIR")}
+DEFAULT_TRAIL_PCT = required_float_env("KRAKEN_TRAILING_DEFAULT_PCT")
+MIN_NOTIONAL_USD = required_float_env("KRAKEN_TRAILING_MIN_NOTIONAL_USD")
+CHECK_SECONDS = required_float_env("KRAKEN_TRAILING_CHECK_SECONDS")
 
 # After a crash sale, re-buy when price rebounds BOUNCE% from the post-sale low.
-REBUY_ENABLED = os.environ.get("KRAKEN_TRAILING_REBUY_ENABLED", "true").lower() == "true"
-REBUY_BOUNCE_PCT = float(os.environ.get("KRAKEN_TRAILING_REBUY_BOUNCE_PCT", "1.2"))
+REBUY_ENABLED = required_bool_env("KRAKEN_TRAILING_REBUY_ENABLED")
+REBUY_BOUNCE_PCT = required_float_env("KRAKEN_TRAILING_REBUY_BOUNCE_PCT")
 # Trend filters use HYPE cache_instant_trend and act only on a CLEAR opposing signal.
 # Neutral/unknown does not block, providing safe degradation. Skip re-buy on a clear
 # downtrend. Crash sells are unfiltered by default for reliability; true enables anti-wick.
-REBUY_SKIP_IF_TREND_DOWN = os.environ.get("KRAKEN_TRAILING_REBUY_SKIP_IF_TREND_DOWN", "true").lower() == "true"
-SELL_SKIP_IF_TREND_UP = os.environ.get("KRAKEN_TRAILING_SELL_SKIP_IF_TREND_UP", "false").lower() == "true"
+REBUY_SKIP_IF_TREND_DOWN = required_bool_env("KRAKEN_TRAILING_REBUY_SKIP_IF_TREND_DOWN")
+SELL_SKIP_IF_TREND_UP = required_bool_env("KRAKEN_TRAILING_SELL_SKIP_IF_TREND_UP")
 # Minimum profit before trailing activates (0 means immediate activation as before).
 # This prevents selling at a loss after a normal dip immediately following a purchase.
-MIN_PROFIT_PCT = float(os.environ.get("KRAKEN_TRAILING_MIN_PROFIT_PCT", "0.0"))
+MIN_PROFIT_PCT = required_float_env("KRAKEN_TRAILING_MIN_PROFIT_PCT")
 
 
 class KrakenTrailing:
@@ -87,8 +88,7 @@ class KrakenTrailing:
                  min_profit_pct=MIN_PROFIT_PCT):
         self.client = client
         self.log = log
-        self.enabled = (os.environ.get("KRAKEN_TRAILING_ENABLED", "false").lower() == "true"
-                        if enabled is None else enabled)
+        self.enabled = required_bool_env("KRAKEN_TRAILING_ENABLED") if enabled is None else enabled
         self.state_file = state_file
         self.core = TrailingCore(
             self, log=log, enabled=self.enabled, state_file=state_file,
@@ -144,7 +144,7 @@ class KrakenTrailing:
     # == TrailingCore ADAPTER contract ========================================
     def assets(self):
         for asset, trail in TRAIL_PCT.items():
-            yield (asset, asset, PAIR_FOR.get(asset, asset + "USD"), trail)  # key=asset, separate pair
+            yield (asset, asset, PAIR_FOR[asset], trail)
 
     def begin_tick(self) -> bool:
         return True   # Kraken reads balances per asset in free_qty, not in bulk
