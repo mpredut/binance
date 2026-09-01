@@ -190,12 +190,12 @@ def main():
             actions.append(f"RESTART: {bot_mort}")
 
         if fleet_mort:
-            print(f"\n  ⚠  FLEET mort (nu repornesc manual, tine flota_start): {fleet_mort}")
+            print(f"\n  ⚠  FLEET dead (not restarting by hand, flota_start owns it): {fleet_mort}")
             actions.append(f"ALERT-FLEET: {fleet_mort}")
 
     # 5. Rezumat final
     print(f"\n{'='*60}")
-    print(f"  REZUMAT: OK={ok}  MORT={[l for l,_ in mort]}  WARN={[l for l,_ in warn]}")
+    print(f"  SUMMARY: OK={ok}  DEAD={[l for l,_ in mort]}  WARN={[l for l,_ in warn]}")
     if actions:
         print(f"  ACTIUNI: {actions}")
     else:

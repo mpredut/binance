@@ -324,7 +324,7 @@ def place_order_with_retry(
     if (not math.isfinite(qty_r) or qty_r <= 0
             or not math.isfinite(price_r) or price_r <= 0
             or not math.isfinite(retry_delay_f) or retry_delay_f < 0):
-        log("  ! [ORDER] qty/pret/retry_delay trebuie sa fie finite si valide")
+        log("  ! [ORDER] qty/price/retry_delay must be finite and valid")
         return False
 
     # Current price is informational only; do not change the user-selected limit.
@@ -333,7 +333,7 @@ def place_order_with_retry(
         log(f"  [ORDER] pret curent {t212_to_yahoo(ticker)}: {current:.2f} USD  |  limita: {price_r:.2f} USD")
         if price_r < current:
             log(f"  ! [ORDER] limita {price_r} < pret {current:.2f} -> ordinul va sta in asteptare "
-                f"(se executa doar daca pretul scade la {price_r}).")
+                f"(it only executes if the price falls to {price_r}).")
 
     if dry_run:
         log(f"  [ORDER] [DRY-RUN] LIMIT BUY {ticker}  qty={qty_r}  @ {price_r} USD  validity={validity}")
@@ -345,7 +345,7 @@ def place_order_with_retry(
     try:
         record = _read_or_migrate_marker(ticker, marker_path)
     except RuntimeError as exc:
-        log(f"  ! [ORDER] {exc} — NU trimit fara stare durabila verificabila")
+        log(f"  ! [ORDER] {exc} — NOT sending without verifiable durable state")
         return False
     if record:
         # Legacy accepted markers stay blocking rather than silently creating a
@@ -371,7 +371,7 @@ def place_order_with_retry(
         if lifecycle == "filled":
             return True
         if lifecycle in {"canceled", "cancelled", "expired"}:
-            log(f"  [ORDER] intentia este terminala ({lifecycle}); nu o retrimit")
+            log(f"  [ORDER] the intent is terminal ({lifecycle}); not resending it")
             return False
         outcome = _reconcile_record(
             client, record, marker_path, now=now,
@@ -388,7 +388,7 @@ def place_order_with_retry(
     else:
         before_qty = _portfolio_qty(client, ticker)
         if before_qty is None:
-            log("  ! [ORDER] portofoliul T212 este indisponibil — NU trimit")
+            log("  ! [ORDER] the T212 portfolio is unavailable — NOT sending")
             return False
         record = {
             "version": 2,
@@ -407,12 +407,12 @@ def place_order_with_retry(
         }
         active_matches = _matching_active_orders(client, record)
         if active_matches is None:
-            log("  ! [ORDER] ordinele active T212 sunt indisponibile — NU trimit")
+            log("  ! [ORDER] the active T212 orders are unavailable — NOT sending")
             return False
         if active_matches:
             log(
-                "  ! [ORDER] exista deja un ordin activ cu acelasi ticker/side/qty/pret; "
-                "nu il revendic si NU trimit altul"
+                "  ! [ORDER] an active order with the same ticker/side/qty/price already exists; "
+                "not claiming it and NOT sending another"
             )
             return False
 
@@ -455,7 +455,7 @@ def place_order_with_retry(
         if lifecycle in {"canceled", "expired"}:
             return False
         if lifecycle == "submit_pending":
-            log("  ! [ORDER] ordin respins; intentia ramane in coada pentru reconciliere/retry")
+            log("  ! [ORDER] order rejected; the intent stays queued for reconciliation/retry")
             return False
         notify(title="Ordin T212 acceptat!",
                body=f"LIMIT {ticker} qty={qty_r} @ {price_r} USD\nid={oid}",

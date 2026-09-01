@@ -149,7 +149,7 @@ def main() -> int:
 
     key = os.environ.get("T212_API_KEY")
     if not key:
-        log("! T212_API_KEY lipsa in .env — nu pot continua"); return 1
+        log("! T212_API_KEY missing from .env — cannot continue"); return 1
     client = T212Client(
         key, os.environ.get("T212_API_SECRET"),
         env=required_env("T212_ENV"),

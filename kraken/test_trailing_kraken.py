@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Teste pt trailing_stop Kraken (fara API real, fara bani)."""
+"""Tests for the Kraken trailing_stop (no real API, no money)."""
 from __future__ import annotations
 
 import os
@@ -79,7 +79,7 @@ class TestTrailingKraken(Base):
         ts.check_once()
         self.assertEqual(len(c.orders), 1)
         self.assertEqual(c.orders[0]["side"], "sell")
-        self.assertAlmostEqual(c.orders[0]["volume"], 21.62, places=2)   # doar liberul, nu 25
+        self.assertAlmostEqual(c.orders[0]["volume"], 21.62, places=2)   # only the free balance, not 25
 
     def test_cadere_mica_nu_vinde(self):
         c = FakeK(60.0)

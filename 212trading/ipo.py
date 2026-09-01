@@ -63,7 +63,7 @@ def verify_instrument(client: T212Client, ticker: str, expected_isin: str) -> bo
         return True
     instruments = client.list_instruments()
     if not instruments:
-        log("  ! nu pot verifica ISIN (metadata indisponibila) — continui pe ticker explicit")
+        log("  ! cannot verify the ISIN (metadata unavailable) — continuing on the explicit ticker")
         return True
     match = next((i for i in instruments if str(i.get("ticker", "")).upper() == ticker.upper()), None)
     if not match:
@@ -72,7 +72,7 @@ def verify_instrument(client: T212Client, ticker: str, expected_isin: str) -> bo
     if str(match.get("isin", "")) != expected_isin:
         log(f"  ! ISIN {match.get('isin')} != asteptat {expected_isin} — OPRESC (instrument gresit).")
         notify(title=f"⚠ {ticker}: ISIN nepotrivit!",
-               body=f"Gasit isin={match.get('isin')}, asteptam {expected_isin}. Nu tranzactionez.",
+               body=f"Found isin={match.get('isin')}, expected {expected_isin}. Not trading.",
                source="verify")
         return False
     log(f"  [verify] {ticker} confirmat (isin {expected_isin})")
@@ -141,16 +141,16 @@ def main() -> int:
     ap.add_argument("--desktop",           action="store_true")
     ap.add_argument("--market-hours-only", action="store_true")
     ap.add_argument("--skip-wait",         action="store_true",
-                    help="Sari peste verificarea de lansare (porneste direct chiar daca feed-ul zice ca nu se tranzactioneaza inca)")
+                    help="Skip the launch check (start straight away even if the feed says it is not trading yet)")
     ap.add_argument("--paper",             action="store_true",
                     help="Forteaza PAPER (test sigur, fara bani), indiferent de .env")
     ap.add_argument("--execute",           action="store_true",
-                    help="Override: ordin real (mod ordin-unic)")
+                    help="Override: a real order (single-order mode)")
     ap.add_argument("--test-notify",       choices=["market", "trade", "all"], metavar="WHAT")
     ap.add_argument("--test-order",        metavar="T212_TICKER",
-                    help="Testeaza un singur ordin pe ticker dat si iese")
+                    help="Test a single order on the given ticker and exit")
     ap.add_argument("--test-strategy",     metavar="T212_TICKER",
-                    help="Ruleaza strategia ACUM pe ticker dat (paper daca STRAT_EXECUTE!=true)")
+                    help="Run the strategy NOW on the given ticker (paper if STRAT_EXECUTE!=true)")
     ap.add_argument("--find-ticker",       metavar="NUME",
                     help="Cauta instrument in T212 dupa nume/simbol")
     args = ap.parse_args()
@@ -163,7 +163,7 @@ def main() -> int:
     t212_secret = os.environ.get("T212_API_SECRET")
     t212_env    = required_env("T212_ENV").lower()
     if not t212_key:
-        log("! T212_API_KEY lipsa in .env — nu pot continua.")
+        log("! T212_API_KEY missing from .env — cannot continue.")
         return 1
     client = T212Client(
         t212_key, t212_secret, env=t212_env,
@@ -206,7 +206,7 @@ def main() -> int:
 
     # --- banner ---
     if not t212_ticker:
-        log("! T212_TICKER lipsa in .env (sau foloseste --symbol). Nu stiu ce sa tranzactionez.")
+        log("! T212_TICKER missing from .env (or use --symbol). Nothing to trade.")
         return 1
     log("=== Watcher T212 ===")
     log(f"    instrument   : {label}  ({t212_ticker}, pret via {yahoo_symbol})")
@@ -320,7 +320,7 @@ def _cmd_test_order(client, ticker, order_price, order_qty, order_budget_ron,
     if not order_price:
         log("! ORDER_PRICE lipsa in .env"); return 1
     if not order_qty and not order_budget_ron:
-        log("! ORDER_QTY sau ORDER_BUDGET_RON lipsa in .env"); return 1
+        log("! ORDER_QTY or ORDER_BUDGET_RON missing from .env"); return 1
     qty = resolve_quantity(order_price, order_qty, order_budget_ron)
     if not qty or qty <= 0:
         log("! cantitate invalida"); return 1

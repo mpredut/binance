@@ -87,7 +87,7 @@ def main() -> int:
     orders = _retry(c.list_active_orders) or []
     print(f"\n  --- ORDINE PENDING ({len(orders)}) ---  <- ASTEA blocheaza cash liber")
     if not orders:
-        print("    (niciunul — cash-ul nu e blocat de ordine)")
+        print("    (none — the cash is not locked by orders)")
     for o in orders:
         q = o.get("quantity", 0); lp = o.get("limitPrice", o.get("price"))
         side = "BUY" if (isinstance(q, (int, float)) and q > 0) else "SELL"

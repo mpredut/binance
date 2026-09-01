@@ -85,5 +85,5 @@ print()
 if problems:
     print(f"PROBLEME ({len(problems)}): {problems}")
     sys.exit(1)
-print("OK — toate cache-urile sunt PROASPETE si coerente pt toate simbolurile")
+print("OK — every cache is FRESH and coherent for all symbols")
 sys.exit(0)

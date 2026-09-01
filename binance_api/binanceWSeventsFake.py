@@ -89,7 +89,7 @@ def _poll_loop(handler=None, interval_sec=47):
             _prev_balances[asset] = total
         handle_account_position(account["balances"])
     except Exception as e:
-        print(f"[POLLING] Eroare la init balanțe: {e}")
+        print(f"[POLLING] Error initialising balances: {e}")
 
     while True:
         try:
@@ -127,7 +127,7 @@ def _poll_loop(handler=None, interval_sec=47):
                         try:
                             handler("executionReport", fake_event)
                         except Exception as e:
-                            print(f"⚠️ Eroare în handler: {e}")
+                            print(f"⚠️ Error in handler: {e}")
 
                 _prev_orders[oid] = {"status": curr_status}
 
@@ -153,7 +153,7 @@ def _poll_loop(handler=None, interval_sec=47):
                         try:
                             handler("balanceUpdate", fake_balance_event)
                         except Exception as e:
-                            print(f"⚠️ Eroare în handler balanceUpdate: {e}")
+                            print(f"⚠️ Error in the balanceUpdate handler: {e}")
 
             # Optional periodic debugging.
             # print(f"Orders: {len(orders_cache)}, Trades: {len(trades_cache)}, Balances: {len(balances_cache)}")
@@ -183,4 +183,4 @@ def startWSevents(handler=None, interval_sec=47):
         daemon=True
     )
     poll_thread.start()
-    print(f"🚀 Polling Binance pornit (interval {interval_sec}s) - înlocuiește WebSocket\n")
+    print(f"🚀 Binance polling started (interval {interval_sec}s) - replacing the WebSocket\n")

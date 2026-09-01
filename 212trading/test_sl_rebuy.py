@@ -26,7 +26,7 @@ TICK = "SLREBUYTEST_US_EQ"
 
 
 class StubClient:
-    """T212 client minimal: portofoliu + ordine controlabile din test."""
+    """Minimal T212 client: portfolio plus orders controllable from the test."""
     def __init__(self):
         self.portfolio = [{"ticker": TICK, "quantity": 1.0, "averagePrice": 100.0}]
         self.active = []
@@ -66,7 +66,7 @@ def main() -> int:
         "STRAT_STOP_LOSS_PCT": "30",
         "STRAT_SL_REBUY_ENABLED": "true",
         "STRAT_SL_REBUY_BOUNCE_PCT": "1.2",
-        "STRAT_REENTRY_DROP_PCT": "1.0",  # garda profit: ar bloca reintrarea peste last_sell daca sl_rebuy n-ar avea prioritate
+        "STRAT_REENTRY_DROP_PCT": "1.0",  # profit guard: it would block re-entry above last_sell if sl_rebuy did not take priority
     })
     client = StubClient()
     s = Strategy(client, TICK, params, dry_run=False)
@@ -91,8 +91,8 @@ def main() -> int:
     client.active = []
     s._reconcile_real(94.0)
     rb = s.s.get("sl_rebuy")
-    check(rb is not None, "sl_rebuy ARMAT dupa inchiderea din stop-loss")
-    check(abs(s.s.get("last_sell_price", 0) - 94.0) < 1e-9, "last_sell_price = pret vanzare (94)")
+    check(rb is not None, "sl_rebuy ARMED after the stop-loss close")
+    check(abs(s.s.get("last_sell_price", 0) - 94.0) < 1e-9, "last_sell_price = the sale price (94)")
     check(s.s["qty"] <= 1e-9, "pozitie inchisa (qty 0) dupa SL")
     n_after_arm = len(client.placed)
 
@@ -102,7 +102,7 @@ def main() -> int:
     check(abs(s.s["sl_rebuy"]["low"] - 92.0) < 1e-9, "minimul urmarit cobora la 92")
     check(len(client.placed) == n_after_arm, "NICIUN buy in caderea adanca (nu prinde cutitul)")
 
-    # 4. recul mic (+0.5% de la 92) < prag 1.2% -> inca nu cumpara
+    # 4. a small pullback (+0.5% from 92) < the 1.2% threshold -> it does not buy yet
     s.step(92.0 * 1.005)
     check(len(client.placed) == n_after_arm, "recul +0.5% < 1.2% -> inca fara buy")
     check(s.s.get("sl_rebuy") is not None, "inca armat dupa recul insuficient")

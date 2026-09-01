@@ -684,11 +684,11 @@ def compare_trade_sources(symbol, order_type="BUY", max_age_seconds=3600, limit=
         if tid in api_map: sources.append("api")
 
         if len(sources) == 1:
-            print(f"⚠️ Trade ID {tid} există doar în: {sources[0]}")
+            print(f"⚠️ Trade ID {tid} exists only in: {sources[0]}")
             print_trade(main_map.get(tid) or tcm_map.get(tid) or api_map.get(tid))
         elif len(sources) == 2:
             missing = {"main", "tcm", "api"} - set(sources)
-            print(f"ℹ️ Trade ID {tid} există în {sources}, dar lipsește din {list(missing)[0]}")
+            print(f"ℹ️ Trade ID {tid} exists in {sources}, but is missing from {list(missing)[0]}")
             
             # Compare the two available sources.
             ref = main_map.get(tid) or tcm_map.get(tid)
@@ -702,7 +702,7 @@ def compare_trade_sources(symbol, order_type="BUY", max_age_seconds=3600, limit=
                         inconsistencies[source_name] = diffs
 
             if inconsistencies:
-                print(f"🔄 Trade ID {tid} are diferențe între cele două surse găsite:")
+                print(f"🔄 Trade ID {tid} differs between the two sources found:")
                 for src, diff in inconsistencies.items():
                     print(f"  ↪️ {src}:")
                     for k, (v1, v2) in diff.items():
@@ -721,7 +721,7 @@ def compare_trade_sources(symbol, order_type="BUY", max_age_seconds=3600, limit=
                         inconsistencies[source_name] = diffs
 
             if inconsistencies:
-                print(f"🔄 Trade ID {tid} are diferențe între surse:")
+                print(f"🔄 Trade ID {tid} differs between sources:")
                 for src, diff in inconsistencies.items():
                     print(f"  ↪️ {src}:")
                     for k, (v1, v2) in diff.items():

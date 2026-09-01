@@ -40,24 +40,24 @@ class Base(unittest.TestCase):
 
 class TestLansare(Base):
     def test_placeholder_pre_ipo_NU_e_lansat(self):
-        # meta statuta (vol 0, vechi) + fara serie -> placeholder, nelansat
+        # stale meta (vol 0, old) + no series -> placeholder, not launched
         self.feed(chart(price=135.0, meta_vol=0, meta_age_s=55 * 3600, series=[]))
         m = md.check_market("SPCX")
         self.assertFalse(m["launched"])
 
     def test_placeholder_serie_plata_NU_e_lansat(self):
-        # serie cu acelasi pret repetat (fara miscare, fara volum) -> nelansat
+        # a series with the same price repeated (no movement, no volume) -> not launched
         self.feed(chart(price=135.0, meta_vol=0, meta_age_s=55 * 3600,
                         series=[(600, 135.0, 0), (60, 135.0, 0)]))
         self.assertFalse(md.check_market("SPCX")["launched"])
 
     def test_CAZUL_SPCX_meta_statuta_dar_serie_live(self):
-        # META zice vol=0/pret 135 vechi (bug-ul), dar SERIA are bare live la 164-166
+        # META says vol=0/old price 135 (the bug), but the SERIES has live bars at 164-166
         self.feed(chart(price=135.0, meta_vol=0, meta_age_s=55 * 3600,
                         series=[(600, 164.0, 100), (300, 165.0, 200), (60, 166.0, 150)]))
         m = md.check_market("SPCX")
         self.assertTrue(m["launched"], "seria live trebuie sa declare lansarea")
-        self.assertEqual(m["price"], 166.0, "pretul = ultima bara live, nu 135 din meta")
+        self.assertEqual(m["price"], 166.0, "the price is the last live bar, not the 135 from meta")
 
     def test_miscare_de_pret_fara_volum_e_lansat(self):
         # unele feed-uri nu dau volum; pretul in miscare proaspat = tranzactioneaza
@@ -71,7 +71,7 @@ class TestLansare(Base):
         self.assertTrue(md.check_market("NVDA")["launched"])
 
     def test_serie_VECHE_nu_declanseaza(self):
-        # serie cu bare dar toate vechi (> 20 min) -> nu confirma lansarea acum
+        # a series with bars but all old (> 20 min) -> it does not confirm a launch now
         self.feed(chart(price=135.0, meta_vol=0, meta_age_s=55 * 3600,
                         series=[(3600, 164.0, 100), (1800, 165.0, 200)]))
         self.assertFalse(md.check_market("SPCX")["launched"])

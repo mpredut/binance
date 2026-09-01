@@ -138,7 +138,7 @@ class BinanceWSBase:
                 break
             if time.time() - t0 >= self.STABLE_SESSION_SEC:
                 self._reset_backoff()                 # A stable session restores the short delay.
-            logger.info("WS reconnect în %.1fs", self._retry_delay)
+            logger.info("WS reconnect in %.1fs", self._retry_delay)
             await self._interruptible_sleep(self._retry_delay)
             self._retry_delay = min(self._retry_delay * 2, WS_RETRY_MAX)
         logger.info("WS reconnect loop stopped")
@@ -457,7 +457,7 @@ class BinanceAccountStream(BinanceWSBase):
     async def _main(self) -> None:
         if self._signing_key is None or not api_key_ws:
             self._mark_available(False); self._mark_unhealthy()
-            logger.error("[WS] Cheia Ed25519/API lipsește → fallback polling.")
+            logger.error("[WS] The Ed25519/API key is missing -> falling back to polling.")
             return
         self._mark_available(True)
         await self._run_with_reconnect(self._connect_and_run)
@@ -469,7 +469,7 @@ class BinanceAccountStream(BinanceWSBase):
             await ws.send(self._signed_logon_msg("login"))
             resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
             if resp.get("status") != 200:
-                raise RuntimeError(f"login eșuat: {resp}")     # The base reconnect loop applies backoff.
+                raise RuntimeError(f"login failed: {resp}")     # The base reconnect loop applies backoff.
             logger.info("[WS] ✅ Login OK")
             # Do not reset backoff here. The reconnect loop does so only after a stable
             # session, protecting the connection rate limit from reconnect storms.
@@ -501,7 +501,7 @@ class BinanceAccountStream(BinanceWSBase):
                     continue
                 if kind == "response":
                     if event.get("status") not in (None, 200):
-                        logger.warning("[WS] Răspuns eroare id=%s status=%s: %s",
+                        logger.warning("[WS] Error response id=%s status=%s: %s",
                                        event.get("id"), event.get("status"), event)
                     continue
                 self._mark_event()
@@ -519,7 +519,7 @@ class BinanceAccountStream(BinanceWSBase):
                 age = now - self._last_event_ts if self._last_event_ts else float("inf")
                 available, healthy = self._available, self._healthy
             if available and healthy and age > self.loss_timeout_sec:
-                logger.warning("[WS][WARN] Fără evenimente WS de %ds → fallback polling.", int(age))
+                logger.warning("[WS][WARN] No WS events for %ds -> falling back to polling.", int(age))
                 self._mark_unhealthy()
             self._stop_event.wait(5)
 

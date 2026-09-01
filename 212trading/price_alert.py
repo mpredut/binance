@@ -38,10 +38,10 @@ def push(topic: str, title: str, body: str) -> bool:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Alerta ntfy la prag de pret (Yahoo).")
+    ap = argparse.ArgumentParser(description="ntfy alert on a price threshold (Yahoo).")
     ap.add_argument("symbol")
-    ap.add_argument("--below", type=float, help="alerteaza cand pretul <= acest prag")
-    ap.add_argument("--above", type=float, help="alerteaza cand pretul >= acest prag")
+    ap.add_argument("--below", type=float, help="alert when the price <= this threshold")
+    ap.add_argument("--above", type=float, help="alert when the price >= this threshold")
     ap.add_argument("--topic", default=None, help="topic ntfy (altfel NTFY_TOPIC din .env)")
     ap.add_argument("--state", default=None)
     ap.add_argument("--env-file", default=os.path.join(_HERE, ".env"))

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Teste pt botul unificat T212: izolarea config-ului per activ + descoperire.
 
-Cheia redesign-ului: doua active in acelasi proces TREBUIE sa aiba parametri
+The key to the redesign: two assets in the same process MUST have
 diferiti, fara sa se calce pe os.environ.
 """
 from __future__ import annotations
@@ -79,7 +79,7 @@ class TestParseDotenv(unittest.TestCase):
         try:
             cfg = parse_dotenv(path)
             self.assertEqual(cfg["FOO_UNIQ_123"], "bar")
-            self.assertNotIn("FOO_UNIQ_123", os.environ, "parse_dotenv NU trebuie sa atinga os.environ")
+            self.assertNotIn("FOO_UNIQ_123", os.environ, "parse_dotenv must NOT touch os.environ")
         finally:
             os.unlink(path)
 
@@ -126,7 +126,7 @@ class TestIzolareParams(unittest.TestCase):
 
     def test_inline_comment_in_check_minutes(self):
         pn = StratParams.from_env(parse_dotenv(_tmp(NVDA)))
-        self.assertEqual(pn.check_minutes, 0.4)  # nu 'NaN' din comentariul inline
+        self.assertEqual(pn.check_minutes, 0.4)  # not 'NaN' from the inline comment
 
     def test_missing_environment_fails_instead_of_using_defaults(self):
         with self.assertRaisesRegex(ValueError, "mandatory setting"):

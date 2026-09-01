@@ -324,7 +324,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
         recent_opposite_trades = [trade for trade in oposite_trades
                                   if float(trade['timestamp']) >= float(time_limit)
                                   and float(trade.get('price', 0)) > 0]
-        print(f"Ma raportrez doar la cele care sunt cu {time_back_in_seconds} sec. back , in numar de '{len(recent_opposite_trades)}'")
+        print(f"Considering only those within the last {time_back_in_seconds}s, {len(recent_opposite_trades)} of them")
         for trade in recent_opposite_trades:
             readable = datetime.fromtimestamp(trade['timestamp'] / 1000)
             print(f"[CHECK] {readable} - price: {trade['price']} - included: {float(trade['timestamp']) >= time_limit}")

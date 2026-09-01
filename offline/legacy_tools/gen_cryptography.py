@@ -1,8 +1,25 @@
-# Fragment istoric de shell pentru generarea cheilor; se rulează numai manual.
-python -c "
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat, PrivateFormat, NoEncryption
+#!/usr/bin/env python3
+"""Generate an Ed25519 key pair. Historical helper, run manually.
+
+This file used to be a shell one-liner (``python -c "..."``) saved with a .py
+extension, so it did not parse as Python at all: any lint, import or AST pass over
+offline/legacy_tools crashed on it. The body was already valid Python, so the
+wrapper is gone and the script runs directly:
+
+    python3 offline/legacy_tools/gen_cryptography.py
+
+It writes ed25519_private.pem and ed25519_public.pem into the current directory and
+prints the public key in base64.
+"""
 import base64
+
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    NoEncryption,
+    PrivateFormat,
+    PublicFormat,
+)
 
 private_key = Ed25519PrivateKey.generate()
 public_key = private_key.public_key()
@@ -14,8 +31,7 @@ with open('ed25519_private.pem', 'wb') as f:
     f.write(priv_bytes)
 with open('ed25519_public.pem', 'wb') as f:
     f.write(pub_bytes)
-    
-print('Chei generate: ed25519_private.pem si ed25519_public.pem')
+
+print('Keys generated: ed25519_private.pem and ed25519_public.pem')
 print('Public key base64:')
 print(base64.b64encode(pub_bytes).decode())
-"

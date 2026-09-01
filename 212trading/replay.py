@@ -58,7 +58,7 @@ def _fx_rates(value: float | Sequence[float], count: int) -> list[float]:
         if len(rates) != count:
             raise ValueError(f"seria FX are {len(rates)} valori pentru {count} bare")
     if any(rate <= 0 for rate in rates):
-        raise ValueError("toate valorile fx_to_usd trebuie să fie pozitive")
+        raise ValueError("all fx_to_usd values must be positive")
     return rates
 
 
@@ -82,10 +82,10 @@ def run_replay(
         raise ValueError("ohlc nu poate fi gol")
     if params.dca_trend_gate_pct > 0 and bar_minutes != 5:
         raise ValueError(
-            "dca_trend_gate_pct cere bare de 5 minute, aceeași cadență ca semnalul live Yahoo"
+            "dca_trend_gate_pct requires 5-minute bars, the same cadence as the live Yahoo signal"
         )
     if timestamps and len(timestamps) != len(ohlc):
-        raise ValueError("timestamps trebuie să aibă aceeași lungime ca ohlc")
+        raise ValueError("timestamps must have the same length as ohlc")
     rates = _fx_rates(fx_to_usd, len(ohlc))
     model = execution or ExecutionModel()
     return choose_intrabar_scenario(

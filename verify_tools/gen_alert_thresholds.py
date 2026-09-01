@@ -49,7 +49,7 @@ def _perc(xs, pct):
 
 
 def thresholds_from_prices(prices, window=WINDOW, pct=PERCENTILE):
-    """PUR (testabil): din seria de preturi -> (up, down, up_median, down_median)."""
+    """PURE (testable): from the price series -> (up, down, up_median, down_median)."""
     ups, downs = [], []
     for i in range(window, len(prices)):
         win = prices[i - window:i + 1]
@@ -86,7 +86,7 @@ def suggest(symbol, days=DAYS):
 
 def main() -> int:
     syms = sys.argv[1:] or ["BTC", "TAO"]
-    print(f"# praguri sugerate din volatilitate (p{PERCENTILE} pe {DAYS} zile) — REVIZUIESTE, apoi pune in market_alerts.conf")
+    print(f"# thresholds suggested from volatility (p{PERCENTILE} over {DAYS} days) — REVIEW, then put them in market_alerts.conf")
     for s in syms:
         try:
             r = suggest(s)

@@ -359,9 +359,9 @@ def find_overlaps(owners: list[Owner], *, require_running: bool = False) -> list
 
 def _print(owners: list[Owner], *, require_running: bool) -> None:
     print(
-        "Scope: procese care rulează acum"
+        "Scope: processes running right now"
         if require_running else
-        "Scope: configurație versionată/locală (procesul poate să nu ruleze acum)"
+        "Scope: versioned/local configuration (the process may not be running right now)"
     )
     print("venue         account_ref          symbol          owner                         role        active")
     print("------------- -------------------- --------------- ----------------------------- ----------- ------")
@@ -388,7 +388,7 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=ROOT)
     parser.add_argument(
         "--running", action="store_true",
-        help="consideră activ numai un owner al cărui proces rulează acum",
+        help="treat an owner as active only if its process is running right now",
     )
     parser.add_argument("--json", action="store_true", dest="as_json")
     args = parser.parse_args()

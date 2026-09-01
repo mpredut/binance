@@ -159,7 +159,7 @@ def main() -> int:
     print(f"=== {args.pair} interval={args.interval}m ({len(ohlc)} bare) — buy&hold {bh:+.1f}% ===")
 
     vol_trail = trailing_vol_series(closes)
-    print(f"  vol_1h_pct trailing: disponibil din bara {WIN} (din {len(closes)})")
+    print(f"  vol_1h_pct trailing: available from bar {WIN} (of {len(closes)})")
     chronos_vol = chronos_forecast_series(vol_trail, args.refresh, args.horizon)
 
     base = dict(entry=args.entry, dca=args.dca, disc=args.disc, tp=args.tp,

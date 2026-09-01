@@ -178,7 +178,7 @@ def run_alerts(kr: list[dict]) -> list[str]:
                 f"⚠️ Risc {r['engine']}: DD {dd:.1f}%",
                 f"{r['engine']} drawdown nerealizat {dd:.1f}% "
                 f"(nereal ${r['unrealized']:.0f} pe cost ${r['cost']:.0f}, "
-                f"prag {threshold:.0f}%). Verifica pozitia.")
+                f"threshold {threshold:.0f}%). Check the position.")
             st[r["engine"]] = {"dd": dd, "ts": now.isoformat(timespec="seconds")}
             fired.append(f"{r['engine']} DD {dd:.1f}%")
     _save_alert_state(st)
@@ -210,7 +210,7 @@ def main() -> int:
         return 0
 
     if args.alert:
-        print(f"  risk-alert: {'; '.join(fired) if fired else 'nimic peste prag'}")
+        print(f"  risk-alert: {'; '.join(fired) if fired else 'nothing over the threshold'}")
 
     print(f"=== PORTOFOLIU {snap['ts']} ===")
     print(f"  {'motor':<22}{'qty':>12}{'valoare$':>11}{'realizat$':>11}{'nereal$':>10}{'buget':>10}")

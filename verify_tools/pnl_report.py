@@ -70,7 +70,7 @@ except Exception as e:
 print("-" * 57)
 print(f"{'TOTAL':<22}{tot_r:>+11.2f}{tot_u:>+12.2f}   -> NET {tot_r+tot_u:+.2f} USD")
 print("\nNota: Binance realized pe fereastra de 120z (cost-basis mai vechi de-atat = aproximat).")
-print("Fara comisioane Binance in realized (fill-urile API nu le expun aici); ~0.075%/leg cu BNB.")
+print("No Binance fees in realized (the API fills do not expose them here); ~0.075%/leg with BNB.")
 
 
 # ── PER-BOT ATTRIBUTION (from get_all_orders, by clientOrderId prefix) ──────────
@@ -120,5 +120,5 @@ def per_bot(symbol):
 print("\n=== ATRIBUIRE PER BOT (clientOrderId; realized_own = doar round-trip propriu) ===")
 for _sym in ("BTCUSDC", "TAOUSDC"):
     per_bot(_sym)
-print("Nota: boti care schimba inventar intre ei (tradeall cumpara / rtrade vinde acelasi TAO)")
+print("Note: bots that trade inventory between themselves (tradeall buys / rtrade sells the same TAO)")
 print("NU au realized separabil curat — net_qty arata cine acumuleaza (+) vs distribuie (-).")

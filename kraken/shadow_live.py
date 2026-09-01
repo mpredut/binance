@@ -200,8 +200,8 @@ def _merge_forward_history(pair: str, interval: int, anchor: int, fetched):
         expected_step = interval * 60
         if cached[-1][0] < fetched[0][0] - expected_step:
             raise RuntimeError(
-                "istoricul forward are un gol mai mare decât un interval; "
-                "nu pot raporta o fereastră ancorată completă"
+                "the forward history has a gap larger than one interval; "
+                "a complete anchored window cannot be reported"
             )
 
     merged_by_ts = {bar[0]: bar for bar in cached}
@@ -209,7 +209,7 @@ def _merge_forward_history(pair: str, interval: int, anchor: int, fetched):
     merged = [merged_by_ts[ts] for ts in sorted(merged_by_ts)]
     if not merged or merged[0][0] != anchor:
         raise RuntimeError(
-            f"ancora forward {anchor} nu mai este disponibilă în istoricul local/Kraken"
+            f"the forward anchor {anchor} is no longer available in the local/Kraken history"
         )
     _save_history(pair, interval, merged)
     return merged
@@ -338,7 +338,7 @@ def _append_jsonl(pair: str, interval: int, snap: dict) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(
-        description="Shadow test live: current vs candidați preînregistrați (read-only)."
+        description="Live shadow test: current vs pre-registered candidates (read-only)."
     )
     ap.add_argument("--interval", type=int, default=60, help="minute per bara (60/240/1440)")
     ap.add_argument("--fee", type=float, default=0.26, help="comision per leg %%")

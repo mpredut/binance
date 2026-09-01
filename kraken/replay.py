@@ -29,25 +29,25 @@ def _validate_replay(ohlc, params, bar_minutes: float | None) -> None:
     if (params.trend_overlay or params.dca_trend_brake) and (
             bar_minutes is None or float(bar_minutes) != float(params.trend_interval)):
         raise ValueError(
-            "trend_overlay/dca_trend_brake cere ca bar_minutes să fie egal cu trend_interval "
-            f"({params.trend_interval} minute); resampling-ul nu este implementat"
+            "trend_overlay/dca_trend_brake requires bar_minutes to equal trend_interval "
+            f"({params.trend_interval} minutes); resampling is not implemented"
         )
     if params.tp_trail_adaptive and (
             bar_minutes is None
             or float(bar_minutes) != float(params.tp_trail_vol_interval)):
         raise ValueError(
-            "tp_trail_adaptive cere ca bar_minutes să fie egal cu "
+            "tp_trail_adaptive requires bar_minutes to equal "
             f"tp_trail_vol_interval ({params.tp_trail_vol_interval} minute)"
         )
     if params.dca_vol_scale_k and (
             bar_minutes is None
             or float(bar_minutes) != float(params.dca_vol_interval)):
         raise ValueError(
-            "dca_vol_scale_k cere ca bar_minutes să fie egal cu "
+            "dca_vol_scale_k requires bar_minutes to equal "
             f"dca_vol_interval ({params.dca_vol_interval} minute)"
         )
     if params.reentry_adaptive and bar_minutes is None:
-        raise ValueError("reentry_adaptive cere bar_minutes pentru volatilitatea temporală")
+        raise ValueError("reentry_adaptive requires bar_minutes for the time-based volatility")
 
 
 def run_replay(

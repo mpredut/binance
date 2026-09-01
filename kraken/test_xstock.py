@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Suita de teste pt watcher-ul xStock + modul de adoptare din strategie.
-FARA API real, FARA bani: client fals, notificari capturate, stare in fisiere temp.
+NO real API, NO money: a fake client, captured notifications, state in temp files.
 
   python3 test_xstock.py -v
 """
@@ -106,7 +106,7 @@ class Base(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Watcher: persistenta si fara dubluri la restart
+# Watcher: persistence and no duplicates on restart
 # ---------------------------------------------------------------------------
 class TestWatcherPersistenta(Base):
     def test_alocare_o_singura_alerta_peste_restart(self):
@@ -121,8 +121,8 @@ class TestWatcherPersistenta(Base):
         xw._save_state(st)
         st = xw._load_state()                               # *** RESTART ***
         xw.check_balance(c, st, "SPCX", False)
-        self.assertEqual(len(self.alerts), 1, "restart nu trebuie sa redubleze alerta")
-        self.assertEqual(st["allocated"]["qty"], 37.5, "alocarea trebuie stiuta dupa restart")
+        self.assertEqual(len(self.alerts), 1, "a restart must not duplicate the alert")
+        self.assertEqual(st["allocated"]["qty"], 37.5, "the allocation must be known after a restart")
 
     def test_activ_nou_nepotrivit_da_alerta_informativa(self):
         c = FakeKraken(bal={"ZUSD": "100"})
@@ -195,7 +195,7 @@ class TestAutoStart(Base):
         self.assertTrue(xw._bot_alive(pid))
         self.assertEqual(len(self.alerts), 1)
         xw.maybe_start_bot(self.st, 200.0, False)           # a doua chemare
-        self.assertEqual(self.st["bot_pid"], pid, "nu porneste al doilea bot")
+        self.assertEqual(self.st["bot_pid"], pid, "it does not start a second bot")
         self.assertEqual(len(self.alerts), 1)
 
     def test_watchdog_reporneste_botul_mort_chiar_zombie(self):
@@ -203,7 +203,7 @@ class TestAutoStart(Base):
         pid = self.st["bot_pid"]
         os.kill(pid, signal.SIGKILL)                        # devine zombie (copilul nostru)
         time.sleep(0.3)
-        self.assertFalse(xw._bot_alive(pid), "zombie-ul trebuie secerat si declarat mort")
+        self.assertFalse(xw._bot_alive(pid), "the zombie must be reaped and declared dead")
         xw.maybe_start_bot(self.st, 200.0, False)
         self.assertNotEqual(self.st["bot_pid"], pid)
         self.assertTrue(xw._bot_alive(self.st["bot_pid"]))
@@ -231,7 +231,7 @@ class TestAutoStart(Base):
 
     def test_paper_flag_e_transmis_botului(self):
         os.environ["XSTOCK_BOT_PAPER"] = "true"
-        with open(self.stub, "w") as f:                     # stub care isi scrie argv
+        with open(self.stub, "w") as f:                     # a stub that writes its own argv
             f.write("import sys,time\nopen(sys.argv[0]+'.argv','w').write(' '.join(sys.argv[1:]))\ntime.sleep(120)\n")
         xw.maybe_start_bot(self.st, 200.0, False)
         time.sleep(0.6)
@@ -270,7 +270,7 @@ class TestAdoptare(Base):
         self.assertTrue(s.s["adopted"])
         # adoptarea din balanta lasa un praf (balanta Kraken e raportata rotunjit)
         self.assertAlmostEqual(s.s["qty"], 37.5, delta=0.001)
-        self.assertLess(s.s["qty"], 37.5 + 1e-12, "nu vinde niciodata peste ledger")
+        self.assertLess(s.s["qty"], 37.5 + 1e-12, "it never sells more than the ledger")
         self.assertAlmostEqual(s.s["cost"] / s.s["qty"], 200.0)
         sells = [o for o in s.s["orders"] if o["side"] == "sell" and o["kind"] == "TP"]
         self.assertEqual(
@@ -282,7 +282,7 @@ class TestAdoptare(Base):
         c = FakeKraken(bal={"ZUSD": "100"})                 # inca fara alocare
         s = self._strategy(c)
         s.step(100.0)
-        self.assertEqual(s.s["orders"], [], "NU cumpara intrare noua cat asteapta")
+        self.assertEqual(s.s["orders"], [], "it does NOT buy a new entry while waiting")
         c.bal = {"ZUSD": "100", "TSTX": "37.5"}             # soseste
         s.step(200.0)
         self.assertTrue(s.s["adopted"])
@@ -304,7 +304,7 @@ class TestAdoptare(Base):
         s._save()
         s2 = self._strategy(FakeKraken(bal={"TSTX": "99999"}))   # balanta crescuta intre timp
         s2._maybe_adopt()
-        self.assertEqual(s2.s["qty"], q1, "restart nu re-adopta / nu dubleaza")
+        self.assertEqual(s2.s["qty"], q1, "a restart does not re-adopt or duplicate")
 
     def test_alocarea_nu_consuma_plafonul_dca(self):
         s = self._strategy(FakeKraken(bal={"TSTX": "37.5"}))
