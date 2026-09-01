@@ -34,16 +34,23 @@ def env_value(folder, name):
 
 
 def _client():
-    key = env_value(KD, 'KRAKEN_API_KEY_SPARE') or env_value(KD, 'KRAKEN_API_KEY_BOT')
-    sec = env_value(KD, 'KRAKEN_API_SECRET_SPARE') or env_value(KD, 'KRAKEN_API_SECRET_BOT')
-    if not key or not sec:
-        sys.exit('[kraken_pnl] lipsesc cheile _SPARE/_BOT in kraken/.env')
+    names = (
+        'KRAKEN_API_KEY_SPARE', 'KRAKEN_API_SECRET_SPARE',
+        'KRAKEN_API_KEY_BOT', 'KRAKEN_API_SECRET_BOT',
+    )
+    values = {name: env_value(KD, name) or '' for name in names}
+    sys.path.insert(0, ROOT)
+    from credentials import CredentialConfigurationError, kraken_credentials
+    try:
+        credentials = kraken_credentials('analysis', values=values)
+    except CredentialConfigurationError as exc:
+        sys.exit(f'[kraken_pnl] invalid Kraken analysis credentials: {exc}')
     saved = list(sys.path)
     sys.modules.pop('common', None); sys.modules.pop('kraken_client', None)
     sys.path.insert(0, KD)
     from kraken_client import KrakenClient
     sys.path[:] = saved
-    return KrakenClient(key, sec)
+    return KrakenClient(credentials.key, credentials.secret)
 
 
 def fetch_all_trades(cli):

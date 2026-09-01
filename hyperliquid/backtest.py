@@ -168,7 +168,7 @@ def main() -> int:
     ap.add_argument("--step", type=int, default=8)
     args = ap.parse_args()
 
-    c = HLClient()
+    c = HLClient.public()
     candles = c.candles(args.coin, "1h", lookback_hours=args.days*24 + 5)
     ohlc = [(float(x["o"]), float(x["h"]), float(x["l"]), float(x["c"])) for x in candles]
     ts = [int(x["t"]) for x in candles]

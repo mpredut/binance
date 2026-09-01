@@ -352,13 +352,20 @@ class StockYahooPricePlatform(PricePlatformInterface):
 
     Binance, Hyperliquid, and CMC claim crypto first, so only equity tickers reach this
     platform. It shares the T212/price-alert data source and prefers the latest intraday
-    bar because metadata can be stale. Tickers come from ``STOCK_TICKERS`` (default SPCX).
+    bar because metadata can be stale. Tickers come from the required
+    ``STOCK_TICKERS`` configuration unless explicitly injected by the caller.
     """
     _YAHOO = "https://query1.finance.yahoo.com/v8/finance/chart/{sym}"
     _UA = {"User-Agent": "Mozilla/5.0 (pricefetcher)"}
 
     def __init__(self, tickers: Optional[List[str]] = None):
-        src = tickers if tickers is not None else os.environ.get("STOCK_TICKERS", "SPCX").split(",")
+        if tickers is None:
+            configured = os.environ.get("STOCK_TICKERS", "").strip()
+            if not configured:
+                raise ValueError("STOCK_TICKERS is required when tickers are not injected")
+            src = configured.split(",")
+        else:
+            src = tickers
         self._symbols: Set[str] = {t.strip().upper() for t in src if t.strip()}
 
     @property

@@ -174,6 +174,7 @@ class ShadowLiveTest(unittest.TestCase):
     def test_single_shot_failure_returns_nonzero(self):
         with patch.object(shadow, "_load_runtime_config"), \
                 patch.object(shadow, "snapshot", side_effect=RuntimeError("fetch failed")), \
+                patch.dict(os.environ, {"KRAKEN_PAIR": "HYPEUSD"}), \
                 patch.object(sys, "argv", ["shadow_live.py", "--quiet"]), \
                 contextlib.redirect_stderr(io.StringIO()):
             self.assertEqual(shadow.main(), 1)

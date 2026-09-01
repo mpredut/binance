@@ -50,6 +50,7 @@ from state_io import atomic_text_writer  # noqa: E402
 from shadow_runtime import (  # noqa: E402
     load_shadow_environment, prepare_shadow_runtime,
 )
+from botcore import required_env  # noqa: E402
 prepare_shadow_runtime(ROOT, HERE)
 
 CONFIG_ENV = os.path.join(HERE, "config.env")
@@ -343,7 +344,7 @@ def main() -> int:
     args = ap.parse_args()
 
     _load_runtime_config()
-    pair = args.pair or os.environ.get("KRAKEN_PAIR", "HYPEUSD")
+    pair = args.pair or required_env("KRAKEN_PAIR")
 
     while True:
         try:

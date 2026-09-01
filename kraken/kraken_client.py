@@ -88,6 +88,11 @@ class KrakenClient:
         self.api_key = api_key or ""
         self.api_secret = api_secret or ""
 
+    @classmethod
+    def public(cls) -> "KrakenClient":
+        """Build a client that cannot call authenticated account endpoints."""
+        return cls(api_key=None, api_secret=None)
+
     # ----- signature -----------------------------------------------------------
     @staticmethod
     def _signature(urlpath: str, data: dict, secret: str) -> str:

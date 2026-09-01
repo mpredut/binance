@@ -63,6 +63,10 @@ _KRAKEN_PROFILES = {
         ("Kraken SPARE", "KRAKEN_API_KEY_SPARE", "KRAKEN_API_SECRET_SPARE"),
         ("Kraken BOT fallback", "KRAKEN_API_KEY_BOT", "KRAKEN_API_SECRET_BOT"),
     ),
+    "analysis": (
+        ("Kraken SPARE", "KRAKEN_API_KEY_SPARE", "KRAKEN_API_SECRET_SPARE"),
+        ("Kraken BOT fallback", "KRAKEN_API_KEY_BOT", "KRAKEN_API_SECRET_BOT"),
+    ),
 }
 
 

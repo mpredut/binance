@@ -72,11 +72,16 @@ def main() -> int:
     args = ap.parse_args()
 
     from hl_client import HLClient
-    client = HLClient()
+    client = HLClient.public()
     meta, ctxs = client.info.meta_and_asset_ctxs()
     rows = rank(meta["universe"], ctxs, args.min_vol, args.top)
     spot_ok = _spot_tokens(client)
-    cur = os.environ.get("HL_COIN", "HYPE")
+    ap_config = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.env")
+    from botcore import parse_dotenv
+    configured_coin = os.environ.get("HL_COIN") or parse_dotenv(ap_config).get("HL_COIN")
+    if not configured_coin:
+        ap.error("HL_COIN is required in the environment or hyperliquid/config.env")
+    cur = configured_coin.strip()
 
     print(f"=== FUNDING SCAN Hyperliquid (vol 24h >= ${args.min_vol/1e6:.0f}M) ===")
     print("  #  moneda    funding/an   funding/ora   vol 24h    DN-fezabil   ")

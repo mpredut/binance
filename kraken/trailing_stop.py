@@ -271,7 +271,7 @@ def main() -> int:
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--status", action="store_true")
     args = ap.parse_args()
-    if not (args.once or args.status):
+    if not args.status:
         single_instance("kraken_trailing")
     # A dedicated trailing key (KRAKEN_API_KEY_TRAIL) keeps its nonce separate from
     # _BOT (kraken_bot + xstock_watch). Fall back to _BOT when _TRAIL is absent.

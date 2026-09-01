@@ -50,7 +50,7 @@ def _kraken_price(pair: str):
     try:
         sys.path.insert(0, KRAKEN_DIR)
         from kraken_client import KrakenClient
-        return KrakenClient().last_price(pair)
+        return KrakenClient.public().last_price(pair)
     except Exception:  # noqa: BLE001 — the snapshot must not die on one missed price
         return None
 
@@ -103,7 +103,7 @@ def hl_row() -> dict | None:
             load_env_stack(os.path.join(ROOT, "hyperliquid", ".env"))
             from hl_client import HLClient
             addr = os.environ.get("HL_ACCOUNT_ADDRESS")
-            c = HLClient(secret_key=None, account_address=addr, mainnet=True)
+            c = HLClient.public(account_address=addr, mainnet=True)
             ss = c.info.spot_user_state(addr)
             mid = c.spot_mid(c.resolve_spot_pair("HYPE")) or 0.0
         hype = next((float(b["total"]) for b in ss.get("balances", []) if b.get("coin") == "HYPE"), 0.0)

@@ -91,6 +91,12 @@ class HLClient:
             _force_timeout(self.exchange)
         self._meta_cache: dict[str, dict] = {}
 
+    @classmethod
+    def public(cls, *, account_address: str | None = None,
+               mainnet: bool = True) -> "HLClient":
+        """Build an unsigned client; account reads may use a public address."""
+        return cls(secret_key=None, account_address=account_address, mainnet=mainnet)
+
     # ----- metadata / prices --------------------------------------------------
     def _meta(self) -> dict:
         if not self._meta_cache:

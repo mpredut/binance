@@ -54,7 +54,6 @@ def test_operational_thresholds_have_one_versioned_source():
 def test_specialized_atomic_writers_are_explicitly_bounded():
     remaining = {
         "order_retry.py",                    # locked durable JSONL outbox
-        "tradeCacheManager.py",              # dead legacy module, no importers
         "verify_tools/migrate_cachedb_usdc.py",  # one-shot migration with backup
     }
     candidates = []
@@ -63,10 +62,12 @@ def test_specialized_atomic_writers_are_explicitly_bounded():
     ).splitlines()
     for relative in tracked:
         if (relative == "state_io.py"
-                or relative.startswith(("tests/", "offline/"))
+                or relative.startswith(("tests/", "offline/", "archive/"))
                 or "/test_" in relative):
             continue
         path = ROOT / relative
+        if not path.is_file():
+            continue
         text = path.read_text(encoding="utf-8")
         owns_temporary = re.search(
             r"\b(?:tmp|tmp_file|temporary)\s*=.*(?:\.tmp|mkstemp)", text,
@@ -74,6 +75,13 @@ def test_specialized_atomic_writers_are_explicitly_bounded():
         if owns_temporary and ("os.replace" in text or "mkstemp" in text):
             candidates.append(relative)
     assert set(candidates) == remaining
+
+
+def test_dead_trade_cache_manager_is_archived_not_packaged():
+    assert (ROOT / "archive/tradeCacheManager.py").is_file()
+    assert not (ROOT / "tradeCacheManager.py").exists()
+    packaging = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert '"tradeCacheManager"' not in packaging
 
 
 def test_live_launcher_env_defaults_are_location_based():

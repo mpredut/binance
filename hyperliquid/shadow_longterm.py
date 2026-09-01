@@ -77,7 +77,7 @@ def _fetch_with_ts(_pair: str, interval: int):
     from hl_client import HLClient
 
     token = os.environ.get("HL_SPOT_TOKEN") or "HYPE"
-    client = HLClient()  # no secret_key keeps ``exchange`` None, allowing zero orders
+    client = HLClient.public()  # the unsigned client cannot submit orders
     candles = client.candles(token, "4h", lookback_hours=5000 * 4)
     rows = sorted(
         (

@@ -24,7 +24,7 @@ import time
 
 from common import (
     load_env_stack, log, now_str, required_env, required_int_env,
-    required_bool_env,
+    required_bool_env, single_instance,
 )
 from hl_client import HLClient, HLError
 from market_data import get_price, coin_available
@@ -64,6 +64,11 @@ def main() -> int:
     leverage  = required_int_env("HL_LEVERAGE")
     strat_dry = args.paper or not required_bool_env("STRAT_EXECUTE")
     interval  = max(args.interval, 15)
+
+    if args.test_strategy:
+        single_instance(f"hl_bot_{args.test_strategy.strip()}")
+    elif not any((args.price, args.balance, args.positions, args.signal)):
+        single_instance(f"hl_bot_{coin}")
 
     # A wallet is required only for real trading.
     need_wallet = not strat_dry or args.balance or args.positions

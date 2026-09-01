@@ -274,14 +274,14 @@ def maybe_start_bot(st: dict, alloc_price: float, desktop: bool) -> None:
 def run_trial(client: KrakenClient, desktop: bool) -> int:
     """Run a zero-money end-to-end trial against the real API.
 
-    An existing account asset (``XSTOCK_TRIAL_ASSET``, default ADA) is treated
+    The configured existing account asset (``XSTOCK_TRIAL_ASSET``) is treated
     as a new allocation and its real pair as the listing. The bot is forced
     into paper mode, the watchdog is tested by killing and restarting it, and
     trial state is removed afterward. Notifications are real and use [PROBA].
     """
     global notify
-    asset = os.environ.get("XSTOCK_TRIAL_ASSET", "ADA")
-    quote = os.environ.get("XSTOCK_QUOTE", "USD")
+    asset = required_env("XSTOCK_TRIAL_ASSET")
+    quote = required_env("XSTOCK_QUOTE")
     os.environ["XSTOCK_BOT_PAPER"] = "true"                      # guaranteed zero-money mode
     os.environ["XSTOCK_AUTOSTART"] = "true"
     os.environ["XSTOCK_STATE_FILE"] = os.path.join(_HERE, "xstock_state_trial.json")
@@ -372,7 +372,7 @@ def main() -> int:
     ap.add_argument("--interval", type=float,
                     default=required_float_env("XSTOCK_CHECK_MINUTES"), help="minute")
     args = ap.parse_args()
-    if not (args.once or args.status):
+    if not args.status and not args.trial:
         single_instance("kraken_xstock_watch")
 
     rx = required_env("XSTOCK_REGEX")

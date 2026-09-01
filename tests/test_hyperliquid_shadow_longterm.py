@@ -53,7 +53,7 @@ class HyperliquidLongtermShadowTest(unittest.TestCase):
             {"t": 1000, "o": "1", "h": "2", "l": "0.5", "c": "1.5"},
             {"t": 2000, "o": "1.5", "h": "3", "l": "1", "c": "2.5"},
         ]
-        with patch("hl_client.HLClient", return_value=fake) as constructor:
+        with patch("hl_client.HLClient.public", return_value=fake) as constructor:
             rows = module._fetch_with_ts("ignored", 240)
         constructor.assert_called_once_with()
         self.assertEqual(rows, [(1, 1.0, 2.0, 0.5, 1.5)])

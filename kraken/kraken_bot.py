@@ -72,7 +72,9 @@ def main() -> int:
     ap.add_argument("--balance", action="store_true", help="Arata soldurile (necesita chei)")
     ap.add_argument("--test-strategy", metavar="PAIR", help="Ruleaza strategia ACUM pe perechea data")
     args = ap.parse_args()
-    if not any(getattr(args, a, None) for a in ("balance", "find_pair", "price", "test_strategy")):
+    if args.test_strategy:
+        single_instance(f"kraken_bot_{args.test_strategy.strip()}")
+    elif not any(getattr(args, a, None) for a in ("balance", "find_pair", "price")):
         # Use one instance PER PAIR so HYPE, ADA, WIF, etc. can run concurrently with
         # separate locks. The former fixed 'kraken_bot' key blocked a second pair.
         _lock_pair = (args.pair or required_env("KRAKEN_PAIR")).strip()

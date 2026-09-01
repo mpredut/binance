@@ -93,7 +93,6 @@ py-modules = [
     "server",
     "shadow_signals",
     "symbols",
-    "tradeCacheManager",
     "tradeall",
     "tradeall_observe",
     "tradeall_price_archiver",

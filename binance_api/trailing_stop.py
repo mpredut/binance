@@ -314,7 +314,7 @@ def main() -> int:
     ap.add_argument("--once", action="store_true", help="o verificare si iese")
     ap.add_argument("--status", action="store_true", help="varfuri + praguri curente")
     args = ap.parse_args()
-    if not (args.once or args.status):
+    if not args.status:
         single_instance("binance_trailing")
 
     from binance_api import bapi as api
