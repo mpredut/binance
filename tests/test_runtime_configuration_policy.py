@@ -84,8 +84,8 @@ def test_dead_trade_cache_manager_is_archived_not_packaged():
     assert '"tradeCacheManager"' not in packaging
 
 
-def test_tracked_order_compatibility_shim_is_archived_after_consumer_migration():
-    assert (ROOT / "archive/providers_tracked_order.py").is_file()
+def test_tracked_order_compatibility_shim_is_removed_after_consumer_migration():
+    assert not (ROOT / "archive/providers_tracked_order.py").exists()
     assert not (ROOT / "providers/tracked_order.py").exists()
     active_imports = []
     for path in ROOT.rglob("*.py"):

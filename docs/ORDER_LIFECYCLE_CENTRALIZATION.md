@@ -21,9 +21,9 @@ The worker is a separate OS process, not a thread started by `Instrument.place`.
 Placement does no polling and does not wait for the terminal status: it finishes after
 persistence, the guards and a single submit call to the provider.
 
-The former `providers/tracked_order.py` compatibility shim has no active consumers and
-is preserved as `archive/providers_tracked_order.py`. Production code imports lifecycle
-types directly from `order_retry`.
+The former `providers/tracked_order.py` compatibility shim had no active consumers and
+contained only re-exports, so it was removed. Production code imports lifecycle types
+directly from `order_retry`.
 
 ## What is centralised
 
