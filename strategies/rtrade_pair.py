@@ -41,7 +41,7 @@ class OrderSnapshot:
 
     def __post_init__(self):
         if self.status not in {"open", "closed", "canceled", "expired"}:
-            raise ValueError(f"status ordin rtrade invalid: {self.status}")
+            raise ValueError(f"invalid rtrade order status: {self.status}")
         if any(not math.isfinite(float(value)) or float(value) < 0
                for value in (self.filled_qty, self.cost, self.fee)):
             raise ValueError("snapshot financiar rtrade invalid")
@@ -65,17 +65,17 @@ class PairPolicy:
             self.shock_hard_stop_fraction, self.hard_stop_fraction,
         )
         if any(not math.isfinite(float(value)) for value in numeric):
-            raise ValueError("politica rtrade trebuie sa contina valori finite")
+            raise ValueError("the rtrade policy must hold finite values")
         if not 0 < self.adjustment_fraction < 1:
-            raise ValueError("adjustment_fraction trebuie sa fie in (0, 1)")
+            raise ValueError("adjustment_fraction must be in (0, 1)")
         if self.quote_ttl_sec <= 0 or self.poll_sec <= 0:
             raise ValueError("quote_ttl_sec and poll_sec must be positive")
         if not 0 < self.fast_fill_ratio <= 1:
-            raise ValueError("fast_fill_ratio trebuie sa fie in (0, 1]")
+            raise ValueError("fast_fill_ratio must be in (0, 1]")
         if not 0 <= self.min_edge_fraction < 1:
-            raise ValueError("min_edge_fraction trebuie sa fie in [0, 1)")
+            raise ValueError("min_edge_fraction must be in [0, 1)")
         if not 0 < self.shock_hard_stop_fraction < 1:
-            raise ValueError("shock_hard_stop_fraction trebuie sa fie in (0, 1)")
+            raise ValueError("shock_hard_stop_fraction must be in (0, 1)")
         if not self.shock_hard_stop_fraction <= self.hard_stop_fraction < 1:
             raise ValueError(
                 "hard_stop_fraction must be >= shock_hard_stop_fraction and < 1")
@@ -125,7 +125,7 @@ def quote_prices(mid: float, adjustment_fraction: float,
                  decimals: int = 4) -> tuple[float, float]:
     """Return bid/ask quotes symmetric around the same market snapshot."""
     if mid <= 0:
-        raise ValueError("mid trebuie sa fie pozitiv")
+        raise ValueError("mid must be positive")
     return (
         round(mid * (1 - adjustment_fraction), decimals),
         round(mid * (1 + adjustment_fraction), decimals),
@@ -143,7 +143,7 @@ def anchored_exit_price(exit_side: str, fill_price: float, current_price: float,
     """
     side = exit_side.upper()
     if fill_price <= 0 or current_price <= 0:
-        raise ValueError("preturile trebuie sa fie pozitive")
+        raise ValueError("the prices must be positive")
     if side == "SELL":
         market_target = current_price * (1 + adjustment_fraction)
         floor = fill_price / (1 - min_edge_fraction)
@@ -191,7 +191,7 @@ class PairCoordinator:
             raise RuntimeError("the existing round is not terminal")
         mid = float(mid if mid is not None else (self.venue.current_price() or 0.0))
         if not math.isfinite(mid):
-            raise ValueError("mid rtrade trebuie sa fie finit")
+            raise ValueError("the rtrade mid must be finite")
         buy_price, sell_price = quote_prices(
             mid, self.policy.adjustment_fraction, self.policy.price_decimals)
         self.pair_id = pair_id or self.pair_id_factory()
@@ -421,7 +421,7 @@ class PairCoordinator:
         if self.phase in {"complete", "expired", "failed", "hard_stop"}:
             return self.outcome()
         if self.phase == "idle":
-            raise RuntimeError("start() trebuie apelat inainte de step()")
+            raise RuntimeError("start() must be called before step()")
         now = self.clock() if now is None else float(now)
         self._refresh()
         bq, bc, _bf, sq, sc, _sf = self._totals()

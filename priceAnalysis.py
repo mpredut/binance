@@ -236,7 +236,7 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
     step = points_per_hour * step_hours     # Points per step.
     
     _dbg(f"[DEBUG] {symbol}: numar puncte={len(prices)}, window={window}, step={step}, delta(s)={delta}")
-    _dbg(f"[DEBUG] {symbol}: numar de ferestre={len(prices)/window}, numar de pasi in price {len(prices)/step}")
+    _dbg(f"[DEBUG] {symbol}: window count={len(prices)/window}, step count in price {len(prices)/step}")
     _dbg(f"[DEBUG] {symbol}: slope_tolerance={slope_tolerance}")
  
     last_slope_h = None
@@ -282,7 +282,7 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
             if(len(trend_block_indices) == 0):
                 continue
             avg_slope = sum_slope / len(trend_block_indices)
-            _dbg(f"[DEBUG] trendul curent difera {slope_h}. Se compara cu trend_ref_slope_h={trend_ref_slope_h} si avg_slope={avg_slope}")
+            _dbg(f"[DEBUG] the current trend differs {slope_h}. Compared against trend_ref_slope_h={trend_ref_slope_h} and avg_slope={avg_slope}")
             if abs(slope_h - trend_ref_slope_h) >= relative_tolerance: # Significant difference from the starting trend.
                 continue_trend = False;
             if abs(slope_h - avg_slope) >= relative_tolerance:  # Large difference from the mean.
@@ -315,7 +315,7 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
     estimated_future_hours = duration_hours * persistence_factor
     
     if duration_seconds <= 0:
-        print(f"[{symbol}] duration_seconds={duration_seconds}, insuficient date pentru trend.")
+        print(f"[{symbol}] duration_seconds={duration_seconds}, not enough data for a trend.")
         return None
     
     if trend_ref_slope_h is None:
@@ -488,7 +488,7 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
         detection_lag_hours=detection_lag_hours, mk_alpha=mk_alpha)
 
     if res is None:
-        print(f"[{symbol}] Trend indeterminabil (date insuficiente, gap sau nesemnificativ MK).")
+        print(f"[{symbol}] Trend undecidable (not enough data, a gap, or MK-insignificant).")
         return None
 
     # Hurst regime is informational: persistence favors trend following, while
@@ -678,7 +678,7 @@ def get_trade_weight(T, trend_len, trend, order_type,
     # Zone 3: use conservative weights in both directions for a very old trend.
     if trend_len > T_extended:
         w_val = 0.22 if aligned else max_against_trend
-        _dbg(f"[DEBUG] Zona 3: trend_len={trend_len:.2f} e peste T_extended={T_extended}. Aligned={aligned}, return {w_val} ")
+        _dbg(f"[DEBUG] Zone 3: trend_len={trend_len:.2f} is above T_extended={T_extended}. Aligned={aligned}, return {w_val} ")
         return np.array([0.0]), np.array([w_val])
 
     # Zone 1: Gaussian over the full T, sliced from the trend's current age.
@@ -686,7 +686,7 @@ def get_trade_weight(T, trend_len, trend, order_type,
     idx = min(int(trend_len), T - 1)
     t_full, w_full = u.gaussian_weights_from_idx(T=T, idx=0)
     if len(w_full) == 0:
-        _dbg(f"[DEBUG] Zona 1: gaussian_weights_from_idx a returnat gol. return [0.05]")
+        _dbg(f"[DEBUG] Zone 1: gaussian_weights_from_idx returned empty. return [0.05]")
         return np.array([0.0]), np.array([0.05])
     # utils normalizes a probability distribution. Rescale its peak to one for
     # trading weights, avoiding the former 8-40x zone-scale mismatch.
@@ -706,7 +706,7 @@ def get_trade_weight(T, trend_len, trend, order_type,
     else:
         # Invert the global curve, not its slice: midpoint maps to min_weight and
         # endpoints to max_against_trend.
-        _dbg(f"[DEBUG] Order type {order_type} nu e aliniat cu trend {trend}, invers global, max_against_trend={max_against_trend}")
+        _dbg(f"[DEBUG] Order type {order_type} is not aligned with the trend {trend}, globally inverted, max_against_trend={max_against_trend}")
         w_seq = min_weight + (1.0 - w01) * (max_against_trend - min_weight)
 
     return t_seq, w_seq  # slice [idx..T-1]

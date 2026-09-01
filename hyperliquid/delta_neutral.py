@@ -120,7 +120,7 @@ class DeltaNeutral:
                 os.rename(_OLD_STATE, self.state_file)
                 log(f"  [DN] stare migrata: .state_dn.json -> {os.path.basename(self.state_file)}")
             except OSError as e:
-                log(f"  ! [DN] migrare stare esuata: {e}")
+                log(f"  ! [DN] state migration failed: {e}")
         self.s = self._load()
 
     def _load(self) -> dict:
@@ -136,7 +136,7 @@ class DeltaNeutral:
         try:
             atomic_write_json(self.state_file, self.s, indent=2)
         except OSError as e:
-            log(f"  ! [DN] nu pot salva: {e}")
+            log(f"  ! [DN] cannot save: {e}")
 
     def _acquire_lock(self) -> bool:
         """Lock state so a second same-coin instance refuses to start."""
@@ -183,7 +183,7 @@ class DeltaNeutral:
     def _skip_dust(self, sz: float, px: float, what: str) -> bool:
         """Skip sub-minimum orders to avoid repeated venue rejections."""
         if sz * px < MIN_ORDER_USD:
-            log(f"  [DN] {what} {sz} (~${sz*px:.2f}) sub minimul HL — sar (dust)")
+            log(f"  [DN] {what} {sz} (~${sz*px:.2f}) below the HL minimum — skipping (dust)")
             return True
         return False
 
@@ -195,8 +195,8 @@ class DeltaNeutral:
         else:
             self.s["order_fails"] = self.s.get("order_fails", 0) + 1
             if self.s["order_fails"] == 3:
-                notify(title=f"⚠ DN {self.p.coin}: 3 ordine esuate consecutiv",
-                       body="Verifica marginea/colateralul pe Hyperliquid. "
+                notify(title=f"⚠ DN {self.p.coin}: 3 consecutive failed orders",
+                       body="Check the margin and collateral on Hyperliquid. "
                             "The bot keeps retrying (without duplicating anything).",
                        source="dn", desktop=self.desktop)
 
@@ -252,7 +252,7 @@ class DeltaNeutral:
             for o in self.client.open_orders():
                 if o.get("coin") in (self.p.coin, self.p.spot_pair):
                     self.client.cancel(o.get("coin"), o.get("oid"))
-                    log(f"  [DN] ordin ramas cancelled: {o.get('coin')} oid={o.get('oid')}")
+                    log(f"  [DN] leftover order cancelled: {o.get('coin')} oid={o.get('oid')}")
         except Exception as e:  # noqa: BLE001
             log(f"  ! [DN] curatenia ordinelor failed ({e}) — continui")
 
@@ -295,7 +295,7 @@ class DeltaNeutral:
         if tgt > 0 and max(abs(d_spot), abs(d_perp)) > tgt * 0.5:
             self.s["drift_count"] = self.s.get("drift_count", 0) + 1
             if self.s["drift_count"] < 2:
-                log("  [DN] drift mare detectat — astept confirmarea pe inca un tick (anti-glitch)")
+                log("  [DN] large drift detected — waiting for confirmation on one more tick (anti-glitch)")
                 return
         else:
             self.s["drift_count"] = 0
@@ -313,7 +313,7 @@ class DeltaNeutral:
         self.s = _new_state()
         self.s["funding_accrued"], self.s["fees_paid"] = keep_fund, keep_fee
         self.s["cooldown_until"] = time.time() + cooldown_s
-        log(f"  [DN] -> flat ({reason}); cooldown {cooldown_s/60:.0f} min inainte de o noua deschidere")
+        log(f"  [DN] -> flat ({reason}); {cooldown_s/60:.0f} min cooldown before a new opening")
 
     def _check_legs_integrity(self, L: dict) -> bool:
         """Handle a missing leg from liquidation, manual action, or API glitch.
@@ -330,36 +330,36 @@ class DeltaNeutral:
         if spot_gone and perp_gone:
             self.s["gone_count"] = self.s.get("gone_count", 0) + 1
             if self.s["gone_count"] < 2:
-                log("  [DN] ambele picioare par disparute — astept confirmarea (anti-glitch)")
+                log("  [DN] both legs look gone — waiting for confirmation (anti-glitch)")
                 return True
             log("  [DN] pozitia a disparut de pe cont (inchisa manual?)")
             self._cancel_open_orders()
             notify(title=f"DN {self.p.coin}: pozitia a disparut — trec pe flat",
-                   body=f"ambele picioare disparute (inchise manual?) — curat ordinele, cooldown 1h",
+                   body=f"both legs gone (closed manually?) — clearing the orders, 1h cooldown",
                    source="dn", desktop=self.desktop)
             self._go_flat("ambele picioare disparute")
             return True
         if spot_gone != perp_gone:                    # Exactly one missing leg creates directional risk.
             self.s["orphan_count"] = self.s.get("orphan_count", 0) + 1
             if self.s["orphan_count"] < 2:
-                log("  [DN] un picior pare disparut — astept confirmarea (anti-glitch)")
+                log("  [DN] one leg looks gone — waiting for confirmation (anti-glitch)")
                 return True
-            what = ("short-ul perp (LICHIDAT sau inchis manual)" if perp_gone
-                    else "spot-ul (vandut manual?)")
-            log(f"  ⚠ [DN] {what} a disparut — pozitia NU mai e neutra!")
+            what = ("the perp short (LIQUIDATED or closed manually)" if perp_gone
+                    else "the spot leg (sold manually?)")
+            log(f"  ⚠ [DN] {what} is gone — the position is NO LONGER neutral!")
             self._cancel_open_orders()
             if self.p.auto_protect:
                 if perp_gone and sq > 0:
                     self._sell_spot(sq, L["spot_px"])
                 if spot_gone and pq > 0:
                     self._cover_perp(pq, L["perp_px"])
-                notify(title=f"🛡 DN {self.p.coin}: picior disparut — am inchis si restul",
+                notify(title=f"🛡 DN {self.p.coin}: a leg is gone — closed the rest too",
                        body=f"{what} — lichidat piciorul ramas (elimin riscul directional), cooldown 1h",
                        source="dn", desktop=self.desktop)
                 self._go_flat("picior orfan inchis")
             else:
                 notify(title=f"⚠ DN {self.p.coin}: picior disparut — INTERVENTIE MANUALA",
-                       body=f"{what}, DN_AUTO_PROTECT=false: nu actionez singur — pozitia ramasa e DIRECTIONALA!",
+                       body=f"{what}, DN_AUTO_PROTECT=false: not acting alone — the remaining position is DIRECTIONAL!",
                        source="dn", desktop=self.desktop)
             return True
         self.s["orphan_count"] = 0
@@ -383,7 +383,7 @@ class DeltaNeutral:
         if 0 < dist_pct <= self.p.liq_alert_pct:
             if not self.s.get("liq_alerted"):
                 self.s["liq_alerted"] = True
-                log(f"  ⚠ [DN] SHORT aproape de LICHIDARE! pret={perp_px:.4f} liq={liq:.4f} ({dist_pct:.1f}% distanta)")
+                log(f"  ⚠ [DN] SHORT close to LIQUIDATION! price={perp_px:.4f} liq={liq:.4f} ({dist_pct:.1f}% away)")
                 notify(title=f"⚠ {self.p.coin}: short aproape de LICHIDARE!",
                        body=f"p{perp_px:.2f} liq{liq:.2f} (dist {dist_pct:.1f}%)",
                        source="dn", desktop=self.desktop)
@@ -406,9 +406,9 @@ class DeltaNeutral:
     # -- Main loop. ------------------------------------------------------------
     def run(self):
         if not self._acquire_lock():
-            log(f"  ! [DN] ALTA INSTANTA ruleaza deja pe {self.p.coin} — IES (anti-dublare)")
+            log(f"  ! [DN] ANOTHER INSTANCE is already running on {self.p.coin} — EXITING (anti-duplication)")
             notify(title=f"DN {self.p.coin}: instanta dubla refuzata",
-                   body="Un alt dn_bot ruleaza deja pe aceeasi moneda/stare. "
+                   body="Another dn_bot is already running on the same coin and state. "
                         "This instance stopped itself so it would not duplicate the orders.",
                    source="dn", desktop=self.desktop)
             return
@@ -464,15 +464,15 @@ class DeltaNeutral:
                 # report zero even when spot USDC exists.
                 free = self.client.spot_balance("USDC")
             except Exception as e:  # noqa: BLE001
-                log(f"  ! [DN] scale-up: nu pot citi colateralul ({e}) — deferred"); return
+                log(f"  ! [DN] scale-up: cannot read the collateral ({e}) — deferred"); return
             if free < add * L["spot_px"]:                 # Scale partially when full size is unaffordable.
                 aff = self._round((free * 0.95) / L["spot_px"])
                 if aff <= 0:
-                    log(f"  [DN] scale-up dorit dar colateral insuficient (liber ${free:.0f})")
+                    log(f"  [DN] scale-up wanted but the collateral is insufficient (free ${free:.0f})")
                     return
                 want = self._round(self.s["target_sz"] + aff)
-        log(f"  [DN] ⬆ SCALE-UP catre ${self.p.notional:.0f}/picior: target {self.s['target_sz']} -> {want} "
-            f"(~${want*L['perp_px']:.0f}/picior). _rebalance cumpara diferenta.")
+        log(f"  [DN] ⬆ SCALE-UP towards ${self.p.notional:.0f}/leg: target {self.s['target_sz']} -> {want} "
+            f"(~${want*L['perp_px']:.0f}/leg). _rebalance buys the difference.")
         self.s["target_sz"] = want
         notify(title=f"⬆ DN {self.p.coin}: cresc pozitia la ~${want*L['perp_px']:.0f}/picior",
                body=f"scale-up spre notional {self.p.notional}, raman neutru",
@@ -508,7 +508,7 @@ class DeltaNeutral:
             elif avg_f >= self.p.entry_funding_hr:
                 self._open(L)
             else:
-                log(f"  [DN] funding mediu {avg_f*100:+.4f}%/ora < prag intrare — astept (flat)")
+                log(f"  [DN] average funding {avg_f*100:+.4f}%/h < the entry threshold — waiting (flat)")
         else:
             if self._check_legs_integrity(L):       # Liquidation, manual close, or glitch.
                 return
@@ -519,10 +519,10 @@ class DeltaNeutral:
             held_h = (now - (self.s.get("opened_ts") or now)) / 3600
             # Close only below the average threshold after the minimum hold period.
             if avg_f < self.p.exit_funding_hr and held_h >= self.p.min_hold_h:
-                self._close(L, f"funding mediu {avg_f*100:.4f}%/ora sub prag, tinut {held_h:.1f}h")
+                self._close(L, f"average funding {avg_f*100:.4f}%/h below the threshold, held {held_h:.1f}h")
             elif avg_f < self.p.exit_funding_hr:
-                log(f"  [DN] funding mediu negativ dar tinut doar {held_h:.1f}h < {self.p.min_hold_h}h "
-                    f"— NU inchid (las timpul sa lucreze, evit churn-ul)")
+                log(f"  [DN] average funding is negative but held only {held_h:.1f}h < {self.p.min_hold_h}h "
+                    f"— NOT closing (letting time work, avoiding churn)")
                 if not reduced:
                     self._rebalance(L)
             elif not reduced:

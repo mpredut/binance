@@ -162,7 +162,7 @@ class _LivePairVenue:
         self.provider_name = provider_name
         self.executor = mkt.provider_by_name(provider_name)
         if self.executor is None:
-            raise RuntimeError(f"provider executor indisponibil pentru {symbol}")
+            raise RuntimeError(f"provider executor unavailable for {symbol}")
         self.audited_executor = AuditedStrategyExecutor(
             self.executor, venue=provider_name)
         self.pair_store = pair_store
@@ -313,7 +313,7 @@ class _LivePairVenue:
                 f"intentie {kind}:{side} ambigua; lookup/status indisponibil")
         if result.status is None:
             raise RuntimeError(
-                f"intentie {kind}:{side} are order_id dar status indisponibil")
+                f"intent {kind}:{side} has an order_id but no available status")
 
         ticket = self._ticket_from_pending(result.intent, pair_id)
         snapshot = PairOrderSnapshot(
@@ -361,12 +361,12 @@ class _LivePairVenue:
             if record is None:
                 self.recovery_blocked = True
                 raise RuntimeError(
-                    f"pair={pair_id}: intentia persistata nu poate fi recitita")
+                    f"pair={pair_id}: the persisted intent cannot be re-read")
             stored = record.get("intents", {}).get(f"limit:{side}")
             if stored is None:
                 self.recovery_blocked = True
                 raise RuntimeError(
-                    f"pair={pair_id}: intentia {side} lipseste dupa submit")
+                    f"pair={pair_id}: the {side} intent is missing after the submit")
             try:
                 recovered = self.recover_intent(record, stored)
             except Exception:
@@ -424,7 +424,7 @@ class _LivePairVenue:
             final_qty = float(Decimal(str(final_qty)).quantize(quantum, rounding=ROUND_DOWN))
             if final_qty <= 0 or final_qty < float(precision.order_min or 0.0):
                 print(f"[{self.symbol}] {side} hard-stop BLOCKED: qty {final_qty} "
-                      f"sub minim {precision.order_min}")
+                      f"below the minimum {precision.order_min}")
                 return None
         kind = f"rtrade:{reason}:{pair_id or 'unknown-pair'}"
         intent_id = f"rtrade-{pair_id or 'unknown'}-{reason}-{side.lower()}"
@@ -482,7 +482,7 @@ def _trend_too_strong(symbol):
     if decision.directional:
         print(f"[{symbol}] rtrade STA DEOPARTE: regim {decision.regime} "
               f"strength={decision.strength} reason={decision.reason} "
-              f"fereastra={RTRADE_TREND_WINDOW_SEC:.0f}s")
+              f"window={RTRADE_TREND_WINDOW_SEC:.0f}s")
     return decision.directional
 
 
@@ -514,7 +514,7 @@ def _order_fully_filled(symbol, order_id):
     try:
         return mkt.order_status(symbol, str(order_id)).fully_filled
     except Exception as exc:
-        print(f"[{symbol}] status ordin {order_id} indisponibil: {exc}")
+        print(f"[{symbol}] order status {order_id} unavailable: {exc}")
         return False
 
 
@@ -523,7 +523,7 @@ def _cancel_order_confirmed(symbol, order_id):
         mkt.cancel_order(symbol, str(order_id))
         return True
     except Exception as exc:
-        print(f"[{symbol}] cancel ordin {order_id} neconfirmat: {exc}")
+        print(f"[{symbol}] order cancel {order_id} unconfirmed: {exc}")
         return False
 
 
@@ -566,7 +566,7 @@ def _followup_force(symbol, side):
     adverse = decision.adverse_to(exposure)
     if adverse:
         print(f"[{symbol}] followup {su}: regim {decision.regime} ADVERS "
-              "-> limita rabdatoare, NU piata")
+              "-> a patient limit, NOT the market")
         return False
     return True
 
@@ -809,16 +809,16 @@ class TradingBot:
             hard_stop_fraction=RTRADE_HARD_STOP_PCT,
         )
         if RTRADE_PAIR_MAX_ACTIVE_ROUNDS < 1:
-            raise ValueError("RTRADE_PAIR_MAX_ACTIVE_ROUNDS trebuie sa fie >= 1")
+            raise ValueError("RTRADE_PAIR_MAX_ACTIVE_ROUNDS must be >= 1")
         if RTRADE_PAIR_START_INTERVAL_SEC <= 0:
-            raise ValueError("RTRADE_PAIR_START_INTERVAL_SEC trebuie sa fie > 0")
+            raise ValueError("RTRADE_PAIR_START_INTERVAL_SEC must be > 0")
         if (not RTRADE_PAIR_DIRECTIONS
                 or any(side not in {"BUY", "SELL"} for side in RTRADE_PAIR_DIRECTIONS)):
             raise ValueError("RTRADE_PAIR_DIRECTIONS accepta numai BUY,SELL")
         if RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC <= 0:
-            raise ValueError("RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC trebuie sa fie > 0")
+            raise ValueError("RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC must be > 0")
         if RTRADE_PLACE_FAILURE_BACKOFF_SEC <= 0:
-            raise ValueError("RTRADE_PLACE_FAILURE_BACKOFF_SEC trebuie sa fie > 0")
+            raise ValueError("RTRADE_PLACE_FAILURE_BACKOFF_SEC must be > 0")
         if RTRADE_DYNAMIC_MARKET_EXIT_MODE not in {"off", "shadow", "live"}:
             raise ValueError("RTRADE_DYNAMIC_MARKET_EXIT_MODE: off|shadow|live")
         if not RTRADE_HARD_STOP_PCT <= RTRADE_EMERGENCY_HARD_STOP_PCT < 1:
@@ -860,7 +860,7 @@ class TradingBot:
                         pair_store.checkpoint(
                             record["pair_id"], terminal_state, terminal=True)
                         print(f"[{self.symbol}] pair={record['pair_id']} recovery: "
-                              "intentia nu a putut fi plasata; inchisa controlat")
+                              "the intent could not be placed; closed in a controlled way")
                         continue
                     state = {
                         "pair_id": record["pair_id"], "qty": record["qty"],
@@ -914,7 +914,7 @@ class TradingBot:
                 ]
                 if not_canceled:
                     print(f"[{self.symbol}] RECOVERY BLOCKED: unconfirmed cancellation "
-                          f"pentru ordinele RT_ {not_canceled}")
+                          f"for the RT_ orders {not_canceled}")
                     recovery_blocked = True
         except Exception as exc:
             print(f"[{self.symbol}] RECOVERY BLOCKED: exchange inventory unavailable ({exc})")
@@ -987,7 +987,7 @@ class TradingBot:
                                 side_backoff_until[failed_side] = now + backoff_sec
                                 print(
                                     f"[{self.symbol}] {failed_side} backoff "
-                                    f"{backoff_sec:.0f}s dupa esec de plasare "
+                                    f"{backoff_sec:.0f}s after a placement failure "
                                     f"({outcome.reason})")
                             print(
                                 f"[{self.symbol}] pair={outcome.pair_id} "

@@ -206,7 +206,7 @@ class Strategy:
         if rate:
             return rate
         log(f"  ! curs {currency}/USD indisponibil — tratez sumele ca USD (1:1). "
-            f"Verifica STRAT_CURRENCY!")
+            f"Check STRAT_CURRENCY!")
         return 1.0
 
     # -- persistenta -----------------------------------------------------------
@@ -286,7 +286,7 @@ class Strategy:
     def _adopt_pending_submit(self, order_id: str) -> dict:
         pending = dict(self.s.get("pending_submit") or {})
         if not pending:
-            raise RuntimeError("nu exista intentie T212 pending de adoptat")
+            raise RuntimeError("there is no pending T212 intent to adopt")
         order = {
             "id": str(order_id),
             "side": pending["side"],
@@ -383,7 +383,7 @@ class Strategy:
             log(f"  [STRAT] T212 submit recovered from the active orders: {order['id']}")
             return "adopted"
         if len(matches) > 1:
-            log("  ! [STRAT] submit T212 ambiguu: mai multe ordine active se potrivesc — keeping it pending")
+            log("  ! [STRAT] ambiguous T212 submit: several active orders match — keeping it pending")
             return "waiting"
 
         before = float(pending.get("before_qty") or 0.0)
@@ -401,7 +401,7 @@ class Strategy:
             return "waiting"
         log(
             f"  [STRAT] T212 submit absent in 2 snapshots and no portfolio delta "
-            f"({side} {self.ticker}) — eliberez pentru reevaluare/retry"
+            f"({side} {self.ticker}) — releasing it for re-evaluation/retry"
         )
         self._persist_pending_submit(None)
         return "retryable"
@@ -456,8 +456,8 @@ class Strategy:
                 self.s["last_sell_price"] = price   # Reentry rule: do not buy back higher.
                 if was_sl and self.p.sl_rebuy_enabled:
                     self.s["sl_rebuy"] = {"low": price, "sell_price": price}
-                    log(f"  🟢 [STRAT] re-buy pe recul ARMED dupa stop-loss "
-                        f"(asteptam +{self.p.sl_rebuy_bounce_pct}% de la minim)")
+                    log(f"  🟢 [STRAT] pullback re-buy ARMED after the stop-loss "
+                        f"(expecting +{self.p.sl_rebuy_bounce_pct}% from the low)")
                 log(f"  [STRAT] === ciclu inchis, reincep (ciclu {nxt}) ===")
 
     # -- plasare / anulare -----------------------------------------------------
@@ -474,7 +474,7 @@ class Strategy:
                                      "ts": self._now()})
             return
         if self.s.get("pending_submit"):
-            log(f"  [STRAT] BUY {kind} deferred — exista deja un submit T212 pending")
+            log(f"  [STRAT] BUY {kind} deferred — a T212 submit is already pending")
             return
         pending = self._new_pending_submit(
             side="BUY", qty=qty, limit=limit, amount=amount, kind=kind,
@@ -509,7 +509,7 @@ class Strategy:
                                      "ts": self._now()})
             return True
         if self.s.get("pending_submit"):
-            log(f"  [STRAT] SELL {kind}{tag} deferred — exista deja un submit T212 pending")
+            log(f"  [STRAT] SELL {kind}{tag} deferred — a T212 submit is already pending")
             return False
         pending = self._new_pending_submit(
             side="SELL", qty=qty, limit=limit, amount=None, kind=kind,
@@ -556,7 +556,7 @@ class Strategy:
     def _cancel_specific(self, o: dict) -> bool:
         if self.dry_run or str(o["id"]).startswith("PAPER"):
             self._remove_order(o)
-            log(f"  [STRAT] cancelled ordin {o.get('side', '?')} {o['id']}")
+            log(f"  [STRAT] cancelled order {o.get('side', '?')} {o['id']}")
             return True
         if o.get("cancel_requested"):
             return True
@@ -566,7 +566,7 @@ class Strategy:
                 self.ticker, str(o["id"]),
             )
         except ProviderError as exc:
-            log(f"  ! [STRAT] cancel failed pentru {o['id']}: {exc} — the order stays tracked")
+            log(f"  ! [STRAT] cancel failed for {o['id']}: {exc} — the order stays tracked")
             return False
         o["cancel_requested"] = True
         o["cancel_ts"] = self._now()
@@ -592,7 +592,7 @@ class Strategy:
             if not self._cancel_specific(o):
                 return  # Do not overlap a ladder with a potentially active SELL.
             if o in self.s["orders"]:
-                return  # live: cererea e acceptata, dar asteptam statusul terminal
+                return  # Live: the request is accepted, but we wait for the terminal status.
         sold = set(self.s.get("tp_sold_levels", []))
         remaining = [(lvl, frac) for (lvl, frac) in self.p.tp_ladder if lvl not in sold]
         total = sum(f for _, f in remaining)
@@ -687,7 +687,7 @@ class Strategy:
                 self.ticker, key,
             )
         except ProviderError as exc:
-            log(f"  ! [STRAT] status T212 {key} indisponibil: {exc} — pastrez ordinul")
+            log(f"  ! [STRAT] T212 status {key} unavailable: {exc} — keeping the order")
             cache[key] = None
             return None
         cache[key] = status
@@ -856,7 +856,7 @@ class Strategy:
             elif (o["side"] == "BUY"
                   and (self._now() - o.get("ts", 0)) / 60 > self.p.order_ttl_min
                   and price > o["limit"] * 1.003):
-                log(f"  [STRAT] BUY {o['id']} neexecutat, pret a urcat — anulez & reasez")
+                log(f"  [STRAT] BUY {o['id']} unfilled, the price rose — cancelling and re-placing")
                 self._cancel_specific(o)
 
         # --- Closed cycle (the full position was sold): start a new cycle. ---
@@ -874,7 +874,7 @@ class Strategy:
             self.s["last_sell_price"] = exit_price
             if was_sl and self.p.sl_rebuy_enabled:   # Rebuy on a bounce, not below the sale, to catch recovery.
                 self.s["sl_rebuy"] = {"low": exit_price, "sell_price": exit_price}
-                log(f"  🟢 [STRAT] re-buy pe recul ARMED dupa stop-loss (we expected +{self.p.sl_rebuy_bounce_pct}% de la minim)")
+                log(f"  🟢 [STRAT] pullback re-buy ARMED after the stop-loss (expecting +{self.p.sl_rebuy_bounce_pct}% from the low)")
             log(f"  [STRAT] === ciclu inchis, reincep (ciclu {nxt}) ===")
 
     # -- decision step ---------------------------------------------------------
@@ -901,7 +901,7 @@ class Strategy:
                 return False                    # Warming up: do not track a peak or sell.
             self.s["tr_armed"] = True
             self.s["pos_peak"] = price          # Start the peak at the activation price.
-            log(f"  [STRAT] trailing ARMED: pret {price:.2f} ≥ avg{(avg or 0):.2f}+{minp}% — protecting from now on (-{self.p.trail_pct}% de la peak)")
+            log(f"  [STRAT] trailing ARMED: price {price:.2f} >= avg{(avg or 0):.2f}+{minp}% — protecting from now on (-{self.p.trail_pct}% from the peak)")
         peak = self.s.get("pos_peak", 0.0) or 0.0
         if price > peak:
             self.s["pos_peak"] = peak = price   # Track the high while holding the position.
@@ -956,7 +956,7 @@ class Strategy:
             self.s["sl_pending"] = True         # Mark this episode so cycle closure arms bounce reentry.
         if not self.s.get("sl_alerted"):           # Notify only once per episode.
             self.s["sl_alerted"] = True
-            log(f"  🛑 [STRAT] STOP-LOSS: pierdere {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — VAND TOT (taie pierderea)")
+            log(f"  🛑 [STRAT] STOP-LOSS: loss {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — SELLING EVERYTHING (cutting the loss)")
             notify(title=f"🛑 SL {self.yahoo_sym} -{loss_pct:.1f}%",
                    body=f"loss {loss_pct:.1f}% >=threshold{self.p.stop_loss_pct}% — selling everything",
                    source="T212", price=price, desktop=self.desktop)
@@ -1002,8 +1002,8 @@ class Strategy:
             log(f"  [STRAT] re-buy SL cancelled — budget cap {self.p.max_budget:.0f} {self.ccy} reached")
             return
         disc = 1 - self.p.entry_discount_pct / 100
-        log(f"  🟢 [STRAT] RE-BUY dupa SL: recul +{self.p.sl_rebuy_bounce_pct}% de la minim {rb['low']:.2f} — reintru ENTRY")
-        notify(title=f"🟢 {self.yahoo_sym} RE-BUY dupa stop-loss",
+        log(f"  🟢 [STRAT] RE-BUY after the SL: a +{self.p.sl_rebuy_bounce_pct}% pullback from the low {rb['low']:.2f} — re-entering ENTRY")
+        notify(title=f"🟢 {self.yahoo_sym} RE-BUY after the stop-loss",
                body=(f"recul +{self.p.sl_rebuy_bounce_pct}% de la min {rb['low']:.2f} — "
                      f"reintru cu {self.p.entry_amount:.0f}{self.ccy}"),
                source="T212", price=price, desktop=self.desktop)
@@ -1034,10 +1034,10 @@ class Strategy:
                 # Treat a value close to the threshold as reached (deterministic are_close).
                 if price > prag and not are_close(price, prag, self.p.reentry_tolerance_pct):
                     log(f"  [STRAT] re-entry blocked: {price:.2f} > threshold {prag:.2f} "
-                        f"(vandut la {lsp:.2f}, astept -{rdp}%)")
+                        f"(sold at {lsp:.2f}, waiting for -{rdp}%)")
                     return
             if self.s["spent_cash"] + self.p.entry_amount > self.p.max_budget:
-                log(f"  [STRAT] budget cap {self.p.max_budget:.0f} {self.ccy} reached — nu intru")
+                log(f"  [STRAT] budget cap {self.p.max_budget:.0f} {self.ccy} reached — not entering")
                 return
             self._place_buy(self.p.entry_amount, price * disc, kind="ENTRY")
             return
@@ -1095,18 +1095,18 @@ class Strategy:
     def run(self) -> None:
         mode = "avg_tp" if self.p.enable_takeprofit else "dca_only"
         log("  === STRATEGIE PORNITA ===")
-        log(f"      instrument : {self.ticker}  (pret via {self.yahoo_sym})")
+        log(f"      instrument : {self.ticker}  (price through {self.yahoo_sym})")
         log(f"      mod        : {mode}   {'[PAPER]' if self.dry_run else '⚠ REAL — BANI ADEVARATI'}")
         log(f"      intrare    : {self.p.entry_amount:.0f} {self.ccy} @ market-{self.p.entry_discount_pct}%")
-        log(f"      DCA        : {self.p.dca_amount:.0f} {self.ccy} la fiecare -{self.p.dca_drop_pct}% "
+        log(f"      DCA        : {self.p.dca_amount:.0f} {self.ccy} at every -{self.p.dca_drop_pct}% "
             f"(max {self.p.max_dca_buys})")
         if self.p.enable_takeprofit:
-            log(f"      take-profit: +{self.p.takeprofit_pct}% fata de pret mediu")
+            log(f"      take-profit: +{self.p.takeprofit_pct}% above the average price")
         else:
             log("      take-profit: dezactivat (dca_only)")
         log(f"      PLAFON     : {self.p.max_budget:.0f} {self.ccy} / ciclu")
         log(f"      check      : la {self.p.check_minutes:.0f} min   |  1 {self.ccy} = {self.fx_to_usd:.4f} USD")
-        log(f"      ! prag rentabilitate ~{self.p.fx_fee_pct*2:.2f}% (FX) + spread; TP={self.p.takeprofit_pct}%")
+        log(f"      ! break-even threshold ~{self.p.fx_fee_pct*2:.2f}% (FX) plus spread; TP={self.p.takeprofit_pct}%")
 
         try:
             while True:
@@ -1132,14 +1132,14 @@ class Strategy:
                 net = self.s.get("realized_net_usd", 0.0)
                 fees = self.s.get("fees_usd", 0.0)
                 if avg:
-                    log(f"  [STRAT] pret={price:.2f}  qty={self.s['qty']:.2f}  avg={avg:.2f}  "
+                    log(f"  [STRAT] price={price:.2f}  qty={self.s['qty']:.2f}  avg={avg:.2f}  "
                         f"desf={self.s['spent_cash']:.0f}{self.ccy}  "
                         f"NET={net:+.2f}USD (brut {self.s['realized_pnl_usd']:+.2f}, fee {fees:.2f})  "
                         f"ord={len(self.s['orders'])}")
                 else:
-                    log(f"  [STRAT] pret={price:.2f}  qty=0  "
+                    log(f"  [STRAT] price={price:.2f}  qty=0  "
                         f"NET={net:+.2f}USD (brut {self.s['realized_pnl_usd']:+.2f}, fee {fees:.2f})  "
-                        f"(astept intrare)")
+                        f"(waiting for an entry)")
                 time.sleep(self.p.check_minutes * 60)
         except KeyboardInterrupt:
             log("  [STRAT] stopped manually.")

@@ -354,7 +354,7 @@ class Strategy:
         self.s["pending_intent"] = None if pending is None else dict(pending)
         self._save()
         if self._state_write_failed:
-            raise ProviderError("starea intentiei nu a putut fi persistata")
+            raise ProviderError("the intent state could not be persisted")
 
     def _intent_identity(self, side: str, kind: str, vol: float, price: float) -> str:
         """Stable semantic ID for retries of one rounded strategy instruction."""
@@ -394,7 +394,7 @@ class Strategy:
             result = self._order_lifecycle.reconcile(
                 pending, persist=self._persist_pending_intent)
         except (ProviderError, RuntimeError, ValueError) as exc:
-            log(f"  ! [STRAT] intent pending nereconciliat ({exc}) — nu retrimit")
+            log(f"  ! [STRAT] unreconciled pending intent ({exc}) — not resending")
             return
         if result.order_known:
             self._adopt_pending_order(result.intent)
@@ -403,7 +403,7 @@ class Strategy:
                 f"txid={result.intent['order_id']}"
             )
         elif result.outcome in {"absent", "retryable"}:
-            log("  [STRAT] intent absent confirmat — strategia il poate reevalua")
+            log("  [STRAT] intent absence confirmed — the strategy may re-evaluate it")
 
     # -- Helpers ---------------------------------------------------------------
     def _avg(self) -> float | None:
@@ -440,7 +440,7 @@ class Strategy:
         text = str(error or "").lower()
         return any(marker in text for marker in (
             "insufficient funds", "insufficient balance",
-            "insufficient spot balance", "sold insuficient",
+            "insufficient spot balance", "insufficient balance",
         ))
 
     @staticmethod
@@ -490,7 +490,7 @@ class Strategy:
         vol = round(vol, self.vol_dec)
         price = round(price, self.price_dec)
         if vol <= 0 or (self.ordermin and vol < self.ordermin):
-            log(f"  ! [STRAT] volum {vol} < ordin minim {self.ordermin} — sar")
+            log(f"  ! [STRAT] volume {vol} < minimum order {self.ordermin} — skipping")
             return False
         # A previous deterministic funds rejection cannot become executable merely
         # by hammering the venue every tick. MARKET exits deliberately bypass this:
@@ -499,7 +499,7 @@ class Strategy:
             remaining = self._placement_backoff_remaining(side, kind)
             if remaining > 0:
                 log(
-                    f"  ! [STRAT] {side} {kind} in cooldown dupa fonduri "
+                    f"  ! [STRAT] {side} {kind} in cooldown after a funds error "
                     f"insuficiente ({remaining:.0f}s ramase)"
                 )
                 return False
@@ -511,7 +511,7 @@ class Strategy:
                                      "kind": kind, "market": market, "ts": time.time()})
             return True
         if self.s.get("pending_intent"):
-            log("  ! [STRAT] exista o intentie pre-submit nereconciliata — nu dublez")
+            log("  ! [STRAT] an unreconciled pre-submit intent exists — not duplicating")
             return False
         try:
             # Venues that might accept an underfunded BUY and cancel its remainder can
@@ -526,7 +526,7 @@ class Strategy:
             client_order_id = intent_client_order_id(self.venue_label, intent_id)
             if not client_order_id:
                 raise ProviderError(
-                    f"{self.venue_label}: client_order_id indisponibil pentru lifecycle")
+                    f"{self.venue_label}: client_order_id unavailable for the lifecycle")
             intent = self._order_lifecycle.new_intent(
                 intent_id=intent_id,
                 client_order_id=client_order_id,
@@ -583,7 +583,7 @@ class Strategy:
                         side, kind, submit_error)
                 log(
                     f"  ! [STRAT] {side} {kind} submit ambiguu; "
-                    "intentia ramane persistata pentru reconciliere"
+                    "the intent stays persisted for reconciliation"
                 )
                 return False
             txid = str(tracked.intent["order_id"])
@@ -619,7 +619,7 @@ class Strategy:
             else:
                 self.client.cancel_order(self.pair, o["txid"])
         except ProviderError as e:
-            log(f"  ! [STRAT] cancel failed pentru {o['txid']}: {e} — the order stays tracked")
+            log(f"  ! [STRAT] cancel failed for {o['txid']}: {e} — the order stays tracked")
             return False
         o["cancel_requested"] = True
         o["cancel_ts"] = time.time()
@@ -682,7 +682,7 @@ class Strategy:
                     else:
                         status = self.client.order_status(self.pair, o["txid"])
                 except ProviderError as e:
-                    log(f"  ! [STRAT] status {o['txid']} failed: {e} — pastrez ordinul")
+                    log(f"  ! [STRAT] status {o['txid']} failed: {e} — keeping the order")
                     continue
                 st = status.status
                 terminal = st in ("closed", "canceled", "expired")
@@ -692,7 +692,7 @@ class Strategy:
                     total_fee = float(status.fee or 0.0)
                     reported_price = total_cost / total_vol if total_vol > 0 else float(o["price"])
                 except (TypeError, ValueError):
-                    log(f"  ! [STRAT] status {o['txid']} are executie invalida — pastrez ordinul")
+                    log(f"  ! [STRAT] status {o['txid']} has an invalid execution — keeping the order")
                     continue
 
                 applied_vol = float(o.get("applied_vol") or 0.0)
@@ -701,7 +701,7 @@ class Strategy:
                 eps = max(1e-12, float(o["vol"]) * 1e-12)
                 if total_vol + eps < applied_vol or total_cost + eps < applied_cost:
                     log(f"  ! [STRAT] status {o['txid']} a regresat cumulativ "
-                        f"(vol {total_vol}<{applied_vol}) — nu reaplic")
+                        f"(vol {total_vol}<{applied_vol}) — not reapplying")
                     continue
 
                 delta_vol = max(0.0, total_vol - applied_vol)
@@ -740,12 +740,12 @@ class Strategy:
                         self._remove(o)
                     if o["side"] == "sell":
                         self._finalize_cycle_if_flat(o, reported_price)
-                    log(f"  [STRAT] {o['txid']} {st} (executat {total_vol}/{o['vol']})")
+                    log(f"  [STRAT] {o['txid']} {st} (executed {total_vol}/{o['vol']})")
                 else:
                     age = (time.time() - o.get("ts", 0)) / 60
                     if (side == "buy" and not o.get("cancel_requested")
                             and age > self.p.order_ttl_min and price > o["price"] * 1.003):
-                        log(f"  [STRAT] buy {o['txid']} neexecutat, pret a urcat — anulez & reasez")
+                        log(f"  [STRAT] buy {o['txid']} unfilled, the price rose — cancelling and re-placing")
                         self._cancel_order(o)
 
     def _apply_fill(self, o: dict, vol: float, price: float, fee: float,
@@ -830,7 +830,7 @@ class Strategy:
             # Reconcile an already submitted MARKET exit instead of canceling or duplicating it.
             if self._has_pending_market_exit():
                 return True
-            log(f"  🛑 [STRAT] STOP-LOSS: pierdere {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — VAND TOT (taie pierderea)")
+            log(f"  🛑 [STRAT] STOP-LOSS: loss {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — SELLING EVERYTHING (cutting the loss)")
             # Retain orders after failed cancellation because a ghost DCA/TP can fill
             # after exit. Submit exit only when all cancellations are accepted.
             if not self._cancel_orders():
@@ -839,7 +839,7 @@ class Strategy:
             placed = self._place("sell", self._dust_safe_qty(self.s["qty"]),
                                  round(price * 0.995, self.price_dec), kind="STOP", market=True)
             if not placed:
-                log("  ! [STRAT] STOP declansat, dar ordinul MARKET nu a fost acceptat — reincerc")
+                log("  ! [STRAT] STOP triggered, but the MARKET order was not accepted — retrying")
                 return True
             self._emit(title=f"🛑 SL {self.pair} -{loss_pct:.1f}%",
                        body=f"loss {loss_pct:.1f}% >=threshold{self.p.stop_loss_pct}% — selling everything",
@@ -879,7 +879,7 @@ class Strategy:
                 base = precision.base_asset if precision else ""
                 qty = float(self.client.free_balance(base) or 0.0)
             except ProviderError as e:
-                log(f"  ! [STRAT] adopt: nu pot citi balanta ({e})")
+                log(f"  ! [STRAT] adopt: cannot read the balance ({e})")
                 return
         if qty <= 1e-12:
             log("  [STRAT] adopt: balance 0 on the base asset — waiting for the allocation")
@@ -986,12 +986,12 @@ class Strategy:
             k_re = float_env("SHADOW_K_REENTRY") or 2.0
             vol = self._shadow_vol_1h()
             if vol is None:
-                log(f"  [SHADOW] prag adaptiv: warm-up ({len(self._shadow_prices)}/20 puncte)")
+                log(f"  [SHADOW] adaptive threshold: warm-up ({len(self._shadow_prices)}/20 points)")
                 return
             adapt_pct = k_re * vol
             prag_adapt = lsp * (1 - adapt_pct / 100)
-            verdict = "AR FI INTRAT" if price <= prag_adapt else "nu ar fi intrat nici el"
-            log(f"  [SHADOW] prag fix {prag_fix:.2f} vs adaptiv {prag_adapt:.2f} "
+            verdict = "WOULD HAVE ENTERED" if price <= prag_adapt else "would not have entered either"
+            log(f"  [SHADOW] fixed threshold {prag_fix:.2f} vs adaptive {prag_adapt:.2f} "
                 f"(vol_1h {vol:.2f}% x k={k_re}) → {verdict}")
         except Exception as e:  # noqa: BLE001 — observational
             log(f"  [SHADOW] eroare calcul ({e}) — ignor")
@@ -1235,14 +1235,14 @@ class Strategy:
                     if sr.reentry_drop_blocked(price, lsp, drop_pct, self.p.reentry_tolerance_pct):
                         log(f"  [STRAT] re-entry blocked: price {price} > threshold {prag:.2f} [{drop_source}]"
                             f"{f' (tol {self.p.reentry_tolerance_pct}%)' if self.p.reentry_tolerance_pct else ''} "
-                            f"(vandut la {lsp}, astept -{drop_pct:.2f}%)")
+                            f"(sold at {lsp}, waiting for -{drop_pct:.2f}%)")
                         if not self.p.reentry_adaptive:
                             self._shadow_reentry_line(price, lsp, prag)   # Compare only while fixed logic decides.
                         return
             entry_amt = self._effective_entry_amount()
             budget = self._effective_max_budget()
             if self.s["spent"] + entry_amt > budget:
-                log(f"  [STRAT] plafon {budget:.0f} {self.ccy} reached — nu intru")
+                log(f"  [STRAT] cap {budget:.0f} {self.ccy} reached — not entering")
                 return
             self._place("buy", self._qty_for(entry_amt, entry_px),
                         entry_px, kind="ENTRY", amount=entry_amt)
@@ -1286,7 +1286,7 @@ class Strategy:
                 return
             else:
                 self._cancel_orders("sell", exclude_market=True)
-                log(f"  [STRAT] peste TP, CALARESC (varf {peak:.{self.price_dec}f}, "
+                log(f"  [STRAT] above the TP, RIDING IT (peak {peak:.{self.price_dec}f}, "
                     f"trail-stop {trail_stop:.{self.price_dec}f})")
         elif self.p.enable_takeprofit and avg and self.p.tp_trend_hold:
             # Below TP with ride enabled, do not place a fixed TP. Wait to cross TP and
@@ -1398,8 +1398,8 @@ class Strategy:
                     time.sleep(self.p.check_minutes * 60)
                     continue
                 avg = self._avg()
-                pos = f"qty={self.s['qty']:.8f} avg={avg:.{self.price_dec}f}" if avg else "qty=0 (astept intrare)"
-                log(f"  [STRAT] pret={price}  {pos}  "
+                pos = f"qty={self.s['qty']:.8f} avg={avg:.{self.price_dec}f}" if avg else "qty=0 (waiting for an entry)"
+                log(f"  [STRAT] price={price}  {pos}  "
                     f"NET={self.s['realized_net']:+.2f} (brut {self.s['realized_gross']:+.2f}, "
                     f"fee {self.s['fees_total']:.2f}) {self.ccy}  ord={len(self.s['orders'])}")
                 time.sleep(self.p.check_minutes * 60)

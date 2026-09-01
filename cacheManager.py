@@ -174,7 +174,7 @@ class CacheManagerInterface(ABC):
             try:
                 sub.on_price_update(symbol, ts_ms, price)
             except Exception as e:
-                print(f"[{self.cls_name}] Eroare notificare subscriber {sub}: {e}")
+                print(f"[{self.cls_name}] Error notifying subscriber {sub}: {e}")
     
 
     #def get_all_symbols_from_cache(self):
@@ -297,7 +297,7 @@ class CacheManagerInterface(ABC):
         """
         if self._persisted_max_ts() > self._mem_max_ts():
             builtins.print(f"[{self.cls_name}][resync] file newer than memory -> "
-                           f"refuz suprascrierea cu date vechi ({self.filename})")
+                           f"refusing to overwrite with stale data ({self.filename})")
             return
         if self.append_persist:
             self._save_jsonl_append()
@@ -438,7 +438,7 @@ class CacheManagerInterface(ABC):
                     self.cache[symbol] = kept
                     changed = True
         if changed:
-            builtins.print(f"[{self.cls_name}][maintain] prune >{self.RETENTION_DAYS}z din {self.filename}")
+            builtins.print(f"[{self.cls_name}][maintain] pruning >{self.RETENTION_DAYS}d from {self.filename}")
             if self.append_persist:
                 self.compact_jsonl()
             else:
@@ -1005,7 +1005,7 @@ class CacheAssetValueManager(CacheManagerInterface):
         try:
             total_usdc = self.api_client.get_total_assets_value_usdc(use_cache=False)
         except Exception as e:
-            print(f"[{self.cls_name}][Eroare] Nu pot interoga valoarea totala: {e}")
+            print(f"[{self.cls_name}][Error] Cannot query the total value: {e}")
             return []
 
         if not isinstance(total_usdc, (int, float)) or total_usdc <= 0:
@@ -2103,7 +2103,7 @@ def _start_nonbinance_trend_poller(cpm, symbols, interval_sec=20,
                         cpm._push_price(s, float(p))
                 except _futures.TimeoutError:
                     builtins.print(f"[NB-trend] {s}: fetch BLOCKED >{fetch_deadline_sec}s "
-                                   f"(deadline dur — probabil DNS/retea) — sar peste, reincerc ciclul urmator")
+                                   f"(hard deadline — probably DNS or the network) — skipping, retrying next cycle")
                 except Exception as _e:
                     builtins.print(f"[NB-trend] {s}: {_e}")
             stop_event.wait(interval_sec)
@@ -2170,7 +2170,7 @@ if __name__ == "__main__":
         if _nb_syms:   # WebSocket covers Binance only; push other prices manually.
             _nb_poller = _start_nonbinance_trend_poller(_trend_cpm, _nb_syms, interval_sec=20)
     except Exception as e:
-        print(f"[cacheManager] Nu pot porni calculul de trend: {e}")
+        print(f"[cacheManager] Cannot start the trend computation: {e}")
 
     try:
         for t in threads:
