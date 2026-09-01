@@ -268,6 +268,21 @@ fi
 
 flush_spool
 
+# Gratie la boot: imediat dupa pornire VPN-ul este LEGITIM jos (network-online.target,
+# apoi PIA negociaza tunelul). Fara garda asta, primul cron de dupa reboot ar declara
+# avarie si ar porni scara de reparare peste o conexiune care urca singura — oprind
+# inclusiv pia.service in timp ce lucra. pia.service are Restart=always, deci lasam
+# mecanismul normal sa incerce intai.
+UPTIME=$(cut -d. -f1 /proc/uptime)
+if [ "$UPTIME" -lt "${PIA_BOOT_GRACE:-300}" ] && [ "$FORCE" = 0 ]; then
+    if vpn_healthy; then
+        log "OK la $((UPTIME))s de la boot (regiune=$(pia get region) vpnip=$(pia get vpnip))"
+    else
+        log "boot recent (${UPTIME}s < ${PIA_BOOT_GRACE:-300}s) — las pia.service sa urce singur, nu escaladez"
+    fi
+    exit 0
+fi
+
 if vpn_healthy && [ "$FORCE" = 0 ]; then
     if [ -f "$OUTAGE_MARK" ]; then
         # Reparat intre timp: raportam abia acum, cu durata reala a caderii.

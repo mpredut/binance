@@ -20,9 +20,13 @@ install -m 0644 "$SYSTEMD_DIR/sshd-20-trading.conf" \
 
 install -d -o predut -g predut -m 0755 "$ROOT/logs"
 crontab -u predut "$SYSTEMD_DIR/crontab.prod.txt"
+# Crontab separat pentru root: pia_selfheal.sh are nevoie de systemctl/kill pe
+# pia-daemon, deci nu poate rula ca predut. Vezi systemd/PIA.md.
+crontab -u root "$SYSTEMD_DIR/crontab.root.prod.txt"
 
 systemctl daemon-reload
 sshd -t
+systemctl enable cron.service
 systemctl enable piavpn.service pia.service binance.service
 systemctl restart systemd-resolved
 systemctl reload ssh
@@ -30,3 +34,4 @@ systemctl restart piavpn.service pia.service binance.service
 
 systemctl --no-pager --full status binance.service pia.service piavpn.service
 crontab -u predut -l
+crontab -u root -l

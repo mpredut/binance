@@ -1,0 +1,10 @@
+# crontab.root.prod — snapshot al crontab-ului ROOT de pe masina PROD (trading).
+# Reproductibil: dupa un dezastru, restaureaza cu:  crontab -u root systemd/crontab.root.prod.txt
+# (sau automat, prin systemd/install_prod.sh)
+# Sincronizat cu PROD: 2026-09-01.
+#
+# DE CE ROOT si nu predut: pia_selfheal.sh trebuie sa poata face
+# `systemctl stop/start piavpn.service` si `kill -9` pe pia-daemon. Ca predut ar
+# esua exact in scenariul pentru care exista. Vezi systemd/PIA.md.
+
+*/5 * * * * /home/predut/binance/pia_selfheal.sh >> /home/predut/binance/logs/pia_selfheal.log 2>&1
