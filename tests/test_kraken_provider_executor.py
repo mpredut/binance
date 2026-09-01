@@ -1,5 +1,5 @@
 """Faza 1 provider-unify — kraken_provider satisface contractul StrategyExecutor
-prin delegare la kraken_client. Client FAKE injectat (fara retea/chei)."""
+by delegating to kraken_client. A FAKE client is injected (no network, no keys)."""
 import os
 import sys
 import unittest
@@ -184,7 +184,7 @@ class KrakenExecutorContractTest(unittest.TestCase):
         def boom(txid):
             raise RuntimeError("EOrder:Unknown order")
         self.fake.cancel_order = boom
-        self.p.cancel_order("HYPEUSD", "GONE")         # NU trebuie sa ridice (idempotent)
+        self.p.cancel_order("HYPEUSD", "GONE")         # must NOT raise (idempotent)
 
     def test_cancel_neconfirmat_ridica(self):
         self.fake.cancel_order = lambda txid: {"count": 0}

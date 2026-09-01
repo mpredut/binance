@@ -1,4 +1,4 @@
-"""Caracterizare si regresii pentru managementul workerilor din rtrade."""
+"""Characterisation and regressions for worker management in rtrade."""
 import os
 import tempfile
 import threading
@@ -628,7 +628,7 @@ class RTradeThreadingTest(unittest.TestCase):
             self.assertTrue(sell_started.wait(timeout=1.0))
             self.assertFalse(
                 owner_finished.wait(timeout=0.05),
-                "ownerul nu trebuie sa porneasca alta runda cat SELL-ul vechi ruleaza",
+                "the owner must not start another round while the old SELL is running",
             )
             release_sell.set()
             owner.join(timeout=1.0)
@@ -638,7 +638,7 @@ class RTradeThreadingTest(unittest.TestCase):
         self.assertRegex(str(errors[0]), "buy worker failed")
 
     def test_cancel_fill_followup_uses_same_trend_policy(self):
-        """Al saselea followup nu trebuie sa ocoleasca _followup_force."""
+        """The sixth follow-up must not bypass _followup_force."""
         bot = _bot()
         first_order = {"orderId": 7, "price": "101.0"}
         with patch.object(rtrade.api, "get_current_price", return_value=100.0), \

@@ -6,11 +6,11 @@ fara sa bata reteaua).
 Acoperire:
   - load_price_series: parseaza corect formatul real cache_price_{symbol}.jsonl.
   - ReplayMarketDataProvider: avansare, get_current_price, now() (= timestamp-ul
-    ultimului pret citit, NU wall-clock), get_orders/free_balance dupa BUY/SELL.
+    the last price read, NOT wall clock), get_orders/free_balance after BUY/SELL.
   - Integrare: monitortrades.monitor_price_and_trade() ruleaza un ciclu complet
-    (BUY vechi -> pret creste peste gain_threshold -> SELL) printr-un Instrument
+    (an old BUY -> the price rises past gain_threshold -> SELL) through an Instrument
     construit cu api=MarketApi([replay]) — FARA nicio schimbare la codul real
-    din monitortrades.py (doar now_fn injectat, deja adaugat azi).
+    from monitortrades.py (only now_fn injected, already added today).
 
 Folosim un symbol SINTETIC ("ZZZTESTUSDC") — nu unul real urmarit de flota live
 (BTCUSDC/TAOUSDC) — ca is_trend_up() sa fie determinist FALSE (cacheManager nu
@@ -117,15 +117,15 @@ class TestReplayMarketDataProvider(unittest.TestCase):
 
 
 class TestNowFnDefaultsToRealTime(unittest.TestCase):
-    """Regresie: fara now_fn (calea LIVE, neschimbata), get_relevant_trade si
+    """Regression: without now_fn (the LIVE path, unchanged), get_relevant_trade and
     monitor_price_and_trade trebuie sa foloseasca in continuare time.time()
-    real — verificat direct, nu doar presupus din citirea codului."""
+    real — verified directly, not merely assumed by reading the code."""
 
     def test_get_relevant_trade_uses_real_time_by_default(self):
         import time as real_time
         trade_orders = [{"timestamp": int(real_time.time() * 1000) - 1000, "price": 42.0}]
         _, trade_time, can_trade = mt.get_relevant_trade(trade_orders, "BUY", threshold_s=3600, symbol=SYMBOL)
-        # trade_time trebuie sa fie ~acum (1 secunda in urma), nu ceva arbitrar
+        # trade_time must be ~now (one second ago), not something arbitrary
         self.assertAlmostEqual(trade_time, real_time.time(), delta=5)
 
 
@@ -136,7 +136,7 @@ class TestMonitorPriceAndTradeIntegration(unittest.TestCase):
 
     def test_full_cycle_buy_then_gain_triggers_sell(self):
         # Pret: 100 (BUY aici) -> ramane 100 cateva pasi -> urca la 115 (+15%,
-        # peste gain_threshold implicit 7%) -> monitor_price_and_trade trebuie
+        # above the default gain_threshold of 7%) -> monitor_price_and_trade must
         # sa vanda (is_trend_up e determinist False: symbol sintetic, fara
         # snapshot in cacheManager).
         prices = [100.0, 100.0, 100.0, 115.0]
@@ -148,7 +148,7 @@ class TestMonitorPriceAndTradeIntegration(unittest.TestCase):
         inst = Instrument(name="ZZZTEST", symbol=SYMBOL, provider="replay",
                           base="ZZZTEST", quote="USDC", api=api)
 
-        provider.advance(SYMBOL)                              # ts+3600, pret=100 (fara schimbare)
+        provider.advance(SYMBOL)                              # ts+3600, price=100 (no change)
         provider.advance(SYMBOL)                              # ts+7200, pret=100
         provider.advance(SYMBOL)                              # ts+10800, pret=115 (+15%)
 
@@ -156,13 +156,13 @@ class TestMonitorPriceAndTradeIntegration(unittest.TestCase):
                                     now_fn=lambda: provider.now(SYMBOL))
 
         sells = provider.get_orders(SYMBOL, "SELL", since_s=1e9)
-        self.assertEqual(len(sells), 1, "trebuia sa vanda dupa +15% peste gain_threshold")
+        self.assertEqual(len(sells), 1, "it should have sold after +15% above gain_threshold")
         self.assertAlmostEqual(sells[0]["price"], 115.0, places=2)
 
 
 class TestSimClock(unittest.TestCase):
     """Fost test_replay_clock.py (unificat 28 iul) — SimClock, cealalta piesa
-    de infra replay din providers/, partajata intre tradeall si monitortrades."""
+    of the replay infrastructure in providers/, shared by tradeall and monitortrades."""
 
     def test_callable_returns_ts(self):
         from providers.replay_clock import SimClock
@@ -179,7 +179,7 @@ class TestSimClock(unittest.TestCase):
         self.assertEqual(clock(), 200.0)
 
     def test_tradeall_backtest_uses_shared_class(self):
-        """tradeall_backtest._SimClock trebuie sa fie ACELASI tip ca
+        """tradeall_backtest._SimClock must be the SAME type as
         providers.replay_clock.SimClock (nu o reimplementare separata)."""
         from offline.backtests import tradeall as tb
         from providers.replay_clock import SimClock

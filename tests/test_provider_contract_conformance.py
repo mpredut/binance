@@ -1,9 +1,9 @@
 """Faza 5 provider-unify — GARDA UNICA: TOTI providerii de venue satisfac contractul
-StrategyExecutor. Daca cineva adauga o metoda in contract dar uita un provider (sau
-schimba o semnatura), acest test pica -> nu ajunge base v2 sa crape pe acel venue.
+StrategyExecutor. If someone adds a method to the contract but forgets a provider (or
+changes a signature), this test fails -> base v2 never gets to crash on that venue.
 
-Parametrizat peste kraken / hyperliquid / binance / Trading212. Instantiere fara retea (clientii sunt
-lazy); verificam DOAR ca interfata exista si e apelabila, nu comportamentul (acela e in
+Parametrised over kraken / hyperliquid / binance / Trading212. Instantiated without network (the clients are
+lazy); we check ONLY that the interface exists and is callable, not the behaviour (that lives in
 testele per-provider test_*_provider_executor.py)."""
 import os
 import sys
@@ -58,7 +58,7 @@ class ProviderContractConformanceTest(unittest.TestCase):
             for meth in CONTRACT_METHODS:
                 with self.subTest(provider=name, method=meth):
                     self.assertTrue(callable(getattr(prov, meth, None)),
-                                    f"{name}.{meth} lipseste sau nu e apelabil")
+                                    f"{name}.{meth} is missing or not callable")
 
     def test_capabilitatile_de_reconciliere_sunt_declarate_explicit(self):
         for name, provider in _providers():

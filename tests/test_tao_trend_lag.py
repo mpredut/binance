@@ -4,9 +4,9 @@ test_tao_trend_lag.py — reproduce intrebarea: dupa ce TAO a inceput sa SCADA d
 varf, de ce a ramas trendul "up" (si a blocat TP-ul)?
 
 Detectorul (detect_long_term_trend) ia directia din panta ULTIMELOR window_hours (24h).
-Dupa varf, fereastra de 24h inca contine urcusul -> panta pozitiva -> "up", chiar daca
+After the peak, the 24h window still contains the climb -> positive slope -> "up", even though
 pretul scade DEJA. Abia cand fereastra se umple cu scaderea, directia devine "down".
-Testul masoara acest LAG: cate ore dupa varf ramane "up" cat pretul scade.
+The test measures that LAG: how many hours after the peak it stays "up" while the price falls.
 
 Ruleaza pe server (numpy):  ~/binance/myenv/bin/python test_tao_trend_lag.py
 """

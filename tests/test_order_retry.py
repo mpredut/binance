@@ -48,7 +48,7 @@ class OrderRetryStoreTest(unittest.TestCase):
 
     def test_dedup_same_side_refreshes_not_duplicates(self):
         a = oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63000.0, now=1000.0)
-        # aceeasi intentie symbol+side -> NU dubleaza; reimprospateaza pretul, acelasi id
+        # the same symbol+side intent -> no duplicate; it refreshes the price, same id
         b = oq.enqueue("BTCUSDC", "SELL", 2.0, {}, requested_price=63100.0, now=1001.0)
         self.assertEqual(a, b)
         items = oq.load_all()
@@ -104,7 +104,7 @@ class OrderRetryStoreTest(unittest.TestCase):
 
     def test_max_queue_cap(self):
         oq.RETRY_MAX_QUEUE = 2
-        oq.RETRY_DEDUP = False   # ca sa nu se comprime prin dedup
+        oq.RETRY_DEDUP = False   # so it is not collapsed by dedup
         self.assertIsNotNone(oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0))
         self.assertIsNotNone(oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=2.0))
         self.assertIsNone(oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=3.0))  # plin
@@ -116,7 +116,7 @@ class OrderRetryStoreTest(unittest.TestCase):
         self.assertTrue(oq.price_gate_ok(rec, 101.0))         # mai sus -> ok (vinzi mai bine)
         self.assertTrue(oq.price_gate_ok(rec, 99.9))          # in toleranta 0.2%
         self.assertFalse(oq.price_gate_ok(rec, 95.0))         # mult sub -> asteapta
-        self.assertFalse(oq.price_gate_ok(rec, None))         # fara pret -> nu decidem
+        self.assertFalse(oq.price_gate_ok(rec, None))         # no price -> we do not decide
 
     def test_price_gate_buy(self):
         rec = {"side": "BUY", "requested_price": 100.0}
@@ -125,7 +125,7 @@ class OrderRetryStoreTest(unittest.TestCase):
         self.assertFalse(oq.price_gate_ok(rec, 105.0))        # mult peste -> asteapta
 
     def test_price_gate_no_intent_skips(self):
-        # fara requested_price capturat (intrare veche/anormala) -> conservator, NU reia orb
+        # no captured requested_price (old/abnormal entry) -> conservative, do NOT retry blind
         self.assertFalse(oq.price_gate_ok({"side": "SELL"}, 50.0))
         self.assertFalse(oq.price_gate_ok({"side": "BUY", "requested_price": 0}, 50.0))
         self.assertFalse(oq.price_gate_ok({"side": "HOLD", "requested_price": 50}, 50.0))

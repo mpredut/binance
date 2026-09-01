@@ -1,7 +1,7 @@
 """Teste pt KrakenClient.add_order — protectie de MECANICA centralizata: rotunjeste pretul
 la precizia reala a perechii (pair_decimals). Fara retea (pair_info + _private mock-uite).
 Regresie pt bug-ul '(504/EOrder) Invalid price: HYPE/USD price can only be specified up to
-2 decimals' care facea trailing-ul Kraken sa esueze la vanzare/rebuy (1353 respingeri)."""
+2 decimals' that made Kraken trailing fail on sell/rebuy (1353 rejections)."""
 import os
 import sys
 import unittest
@@ -13,7 +13,7 @@ from kraken_client import KrakenClient
 
 class AddOrderRoundingTest(unittest.TestCase):
     def _client(self, pair_decimals):
-        c = KrakenClient.__new__(KrakenClient)   # fara __init__ (fara chei/retea)
+        c = KrakenClient.__new__(KrakenClient)   # No __init__ (no keys, no network)
         c.pair_info = lambda pair: {"pair_decimals": pair_decimals}
         sent = {}
         c._private = lambda method, data: sent.update(data) or {"ok": True}

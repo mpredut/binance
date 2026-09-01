@@ -292,7 +292,7 @@ class ProviderLivePathTest(unittest.TestCase):
                                "amount": 60.0, "kind": "ENTRY", "ts": 0}]
         self.s._cancel_open("buy")
         self.assertIn(("cancel_order", "HYPEUSD", "OID-7"), self.fake.calls)
-        # Ordinul ramane urmarit pana la status terminal, pentru a nu pierde
+        # The order stays tracked until a terminal status, so we do not lose
         # un fill concurent cu anularea.
         self.assertTrue(self.s.s["orders"][0]["cancel_requested"])
         self.s._save.assert_called_once()

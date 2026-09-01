@@ -1,4 +1,4 @@
-"""Contractul StrategyExecutor pentru Trading212, fara retea sau chei reale."""
+"""The StrategyExecutor contract for Trading212, without network or real keys."""
 
 import os
 import sys

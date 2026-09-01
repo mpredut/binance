@@ -1,17 +1,17 @@
 """
-Teste pentru pragul de reintrare ADAPTIV din motorul spot DCA (23 iul).
+Tests for the ADAPTIVE re-entry threshold in the spot DCA engine (23 Jul).
 
 Context: investigat in offline/research/kraken_adaptive_thresholds/ — pragul adaptiv
 (K_REENTRY * vol_1h) bate pragul fix pe date reale (HYPEUSD, ~30 zile: TOTAL
 +3.26% vs +2.20%). Promovat la decizie reala prin StratParams.reentry_adaptive
 (implicit False — activat explicit via STRAT_REENTRY_ADAPTIVE=true), cu
-fail-safe pe pragul fix daca volatilitatea nu poate fi calculata (warm-up).
+fail-safe onto the fixed threshold when volatility cannot be computed (warm-up).
 
 Acoperire:
   - _effective_reentry_drop_pct(): fix cand reentry_adaptive=False (mereu,
-    indiferent de istoricul de pret); fallback pe fix cand adaptiv=True dar
+    regardless of price history); falls back to fixed when adaptive=True but
     warm-up (<20 puncte); adaptiv cand exista destul istoric.
-  - Blocul de reintrare din step(): foloseste pragul EFECTIV (nu mereu cel fix).
+  - The re-entry block in step(): uses the EFFECTIVE threshold (not always the fixed one).
 """
 import os
 import sys
@@ -55,7 +55,7 @@ class TestEffectiveReentryDropPct(unittest.TestCase):
         self.assertEqual(source, "fix")
 
     def test_fixed_stays_fixed_even_with_price_history(self):
-        """Cand reentry_adaptive=False, istoricul de pret NU trebuie sa conteze deloc."""
+        """With reentry_adaptive=False, price history must NOT matter at all."""
         s = _make_strategy(reentry_adaptive=False, reentry_drop_pct=2.2)
         for i in range(30):
             s._shadow_prices.append((i * 120.0, 100.0 + (i % 3)))
@@ -84,7 +84,7 @@ class TestEffectiveReentryDropPct(unittest.TestCase):
             s._shadow_prices.append((i * 120.0, price))
         pct, source = s._effective_reentry_drop_pct()
         self.assertIn("adaptiv", source)
-        self.assertNotEqual(pct, 2.2, "pragul adaptiv nu trebuie sa coincida intamplator cu fixul")
+        self.assertNotEqual(pct, 2.2, "the adaptive threshold must not coincide with the fixed one by accident")
         self.assertGreater(pct, 0)
 
     def test_adaptive_respects_shadow_k_reentry_env_override(self):
@@ -102,43 +102,43 @@ class TestEffectiveReentryDropPct(unittest.TestCase):
         finally:
             del os.environ["SHADOW_K_REENTRY"]
         self.assertAlmostEqual(pct_k4, pct_k2 * 2.0, places=6,
-                                msg="K=4.0 trebuie sa dea exact dublu fata de K=2.0 (default), acelasi vol_1h")
+                                msg="K=4.0 must give exactly double K=2.0 (the default), same vol_1h")
 
 
 class TestReentryGateUsesEffectivePct(unittest.TestCase):
-    """step() foloseste pragul EFECTIV (fix sau adaptiv), nu mereu cel fix direct."""
+    """step() uses the EFFECTIVE threshold (fixed or adaptive), not always the fixed one."""
 
     def test_step_blocks_reentry_using_fixed_when_adaptive_disabled(self):
         s = _make_strategy(reentry_adaptive=False, reentry_drop_pct=2.2, reentry_tolerance_pct=0.0)
         s.s["last_sell_price"] = 100.0
         s.s["qty"] = 0.0
-        # pret 98.5 > prag fix (100*0.978=97.8) -> ar trebui blocat
+        # price 98.5 > fixed threshold (100*0.978=97.8) -> should be blocked
         s.step(98.5)
-        self.assertFalse(s._has_open("buy"), "reintrarea trebuia blocata (pret peste pragul fix)")
+        self.assertFalse(s._has_open("buy"), "the re-entry should have been blocked (price above the fixed threshold)")
 
     def test_step_allows_reentry_when_price_below_fixed_threshold(self):
         s = _make_strategy(reentry_adaptive=False, reentry_drop_pct=2.2, reentry_tolerance_pct=0.0)
         s.s["last_sell_price"] = 100.0
         s.s["qty"] = 0.0
-        # pret 97.0 < prag fix (97.8) -> reintrarea trebuie permisa
+        # price 97.0 < fixed threshold (97.8) -> the re-entry must be allowed
         s.step(97.0)
         self.assertTrue(s._has_open("buy"), "reintrarea trebuia permisa (pret sub pragul fix)")
 
 
 class TestStopAwareReentry(unittest.TestCase):
-    """4 aug: dupa un STOP-LOSS, reintrarea e pe REVENIRE (bounce de la minim), nu pe o
-    scadere si mai jos — altfel botul ramane blocat afara cand pretul isi revine."""
+    """4 Aug: after a STOP-LOSS, re-entry is on RECOVERY (a bounce off the low), not on a
+    further drop — otherwise the bot stays locked out when the price recovers."""
 
     def test_stop_reentry_not_stranded_on_recovery(self):
-        # BUG-ul reparat: vandut 51.19 la stop-loss, pretul revine la 55.6 (peste vanzare).
-        # Regula veche (reintra doar sub 50.06) ar bloca la nesfarsit. Cea noua reintra.
+        # The fixed BUG: sold at 51.19 on stop-loss, the price recovers to 55.6 (above the sale).
+        # The old rule (re-enter only below 50.06) would block forever. The new one re-enters.
         s = _make_strategy(reentry_sl_bounce_pct=1.5, reentry_drop_pct=2.2, reentry_tolerance_pct=0.0)
         s.s["qty"] = 0.0
         s.s["last_sell_price"] = 51.19
         s.s["last_exit_kind"] = "STOP"
         s.s["sl_low"] = 51.19
         s.step(55.6)
-        self.assertTrue(s._has_open("buy"), "dupa STOP, revenirea trebuie sa declanseze reintrarea")
+        self.assertTrue(s._has_open("buy"), "after a STOP, the recovery must trigger the re-entry")
 
     def test_stop_reentry_blocked_until_bounce_then_enters(self):
         s = _make_strategy(reentry_sl_bounce_pct=1.5, reentry_tolerance_pct=0.0)
@@ -153,7 +153,7 @@ class TestStopAwareReentry(unittest.TestCase):
         self.assertTrue(s._has_open("buy"), "bounce >= prag -> reintra")
 
     def test_tp_exit_keeps_old_drop_below_sell_rule(self):
-        # dupa TP (nu STOP), regula veche ramane: nu recumpara mai sus decat ai vandut
+        # after a TP (not a STOP) the old rule stands: do not rebuy higher than you sold
         s = _make_strategy(reentry_sl_bounce_pct=1.5, reentry_drop_pct=2.2, reentry_tolerance_pct=0.0)
         s.s["qty"] = 0.0
         s.s["last_sell_price"] = 100.0
@@ -165,7 +165,7 @@ class TestStopAwareReentry(unittest.TestCase):
 
 
 class TestTrailingTakeProfit(unittest.TestCase):
-    """Trailing-ul rămâne armat după prima depășire a TP-ului."""
+    """Trailing stays armed after the TP is first exceeded."""
 
     @staticmethod
     def _positioned_strategy(**overrides):
@@ -187,20 +187,20 @@ class TestTrailingTakeProfit(unittest.TestCase):
     def test_pullback_below_tp_after_arming_still_exits(self):
         s = self._positioned_strategy()
 
-        s.step(105.5)       # depășește TP=105 și armează trailing-ul
+        s.step(105.5)       # exceeds TP=105 and arms the trailing
         self.assertEqual(s.s["trail_peak"], 105.5)
         self.assertFalse(s._has_open("sell"))
 
         s.step(102.0)       # pullback 3.32%; este sub TP, dar trailing-ul e deja armat
         sell = s._find_open("sell")
-        self.assertIsNotNone(sell, "trailing-ul armat trebuie să iasă și după căderea sub TP")
+        self.assertIsNotNone(sell, "the armed trailing must still exit after falling back below the TP")
         self.assertEqual(sell["kind"], "TP")
 
     def test_trailing_exit_does_not_open_dca_in_same_tick(self):
         s = self._positioned_strategy(dca_drop_pct=2.0)
         s.step(105.5)
-        # Face pragul DCA eligibil simultan cu pullback-ul trailing. O ieșire și o
-        # cumpărare în același tick s-ar contrazice și ar crește expunerea accidental.
+        # Makes the DCA threshold eligible at the same time as the trailing pullback. An exit
+        # and a buy in the same tick would contradict each other and raise exposure by accident.
         s.s["last_buy_price"] = 110.0
 
         s.step(102.0)
@@ -217,7 +217,7 @@ class TestTrailingTakeProfit(unittest.TestCase):
             self.assertAlmostEqual(protected, 104.41)
 
             # Volatilitatea creste si trailing-ul adaptiv s-ar largi la 3%.
-            # Floor-ul deja castigat nu trebuie coborat la 102.82.
+            # The floor already earned must not be lowered to 102.82.
             s.step(104.0)
 
         self.assertEqual(s.s["trail_stop"], protected)
@@ -231,8 +231,8 @@ class TestTrailingTakeProfit(unittest.TestCase):
             stop_loss_pct=12.5,
             tp_trail_profit_floor_pct=1.0,
         )
-        s.step(105.5)       # armează trailing-ul
-        s.step(95.0)        # gap sub break-even, dar încă deasupra hard stop-ului
+        s.step(105.5)       # arms the trailing
+        s.step(95.0)        # gap below break-even, but still above the hard stop
 
         self.assertIsNone(s._find_open("sell"))
         self.assertFalse(s._has_open("buy"))
@@ -244,7 +244,7 @@ class TestTrailingTakeProfit(unittest.TestCase):
         )
         s.step(105.5)
         s.step(95.0)
-        s.step(101.2)       # referința MARKET 101.10 >= floor; sub trail-stop 102.335
+        s.step(101.2)       # MARKET reference 101.10 >= floor; below the trail stop 102.335
         sell = s._find_open("sell")
         self.assertIsNotNone(sell)
         self.assertTrue(sell["market"])
@@ -291,7 +291,7 @@ class TestProgressiveDcaSpacing(unittest.TestCase):
             "dca_buys": 2,
         })
 
-        s.step(97.5)  # prag progresiv = 2% + 2×0,5% = 3%; încă nu cumpără
+        s.step(97.5)  # progressive threshold = 2% + 2x0.5% = 3%; it still does not buy
         self.assertFalse(s._has_open("buy"))
         s.step(97.0)
         self.assertTrue(s._has_open("buy"))
@@ -338,7 +338,7 @@ class TestPaperMarketReconciliation(unittest.TestCase):
 
 
 class TestFillAccounting(unittest.TestCase):
-    """Cost basis și fees rămân corecte când ieșirea se face în tranșe."""
+    """Cost basis and fees stay correct when the exit happens in tranches."""
 
     def test_two_partial_sells_reduce_cost_and_charge_each_fee_once(self):
         s = _make_strategy()

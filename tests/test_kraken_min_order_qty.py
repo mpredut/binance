@@ -1,7 +1,7 @@
 """KrakenProvider.min_order_qty: un lookup ESUAT (blip DNS / AssetPairs gol ->
-ordermin 0) NU trebuie cache-uit — altfel 0-ul cache-uit dezactiva permanent gardul
+ordermin 0) must NOT be cached — otherwise the cached 0 permanently disables the guard
 anti-'volume minimum not met' din monitortrades._place_guarded, producand churn de
-ordine respinse pe praf (ex HYPE 0.0175 < min 0.1). Doar valorile POZITIVE se cache-uiesc."""
+and dust orders get rejected (e.g. HYPE 0.0175 < min 0.1). Only POSITIVE values are cached."""
 import os
 import sys
 import unittest

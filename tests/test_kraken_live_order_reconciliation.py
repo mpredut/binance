@@ -1,7 +1,7 @@
 """Invariante pentru reconcilierea ordinelor Kraken reale.
 
-Kraken raporteaza executia cumulativ prin QueryOrders.  Motorul live trebuie sa
-aplice numai delta noua si sa pastreze ordinul local pana cand exchange-ul il
+Kraken reports execution cumulatively through QueryOrders. The live engine must
+apply only the new delta and keep the order locally until the exchange marks it
 raporteaza terminal (closed/canceled/expired).
 """
 import json
@@ -66,7 +66,7 @@ class KrakenLiveReconciliationTest(unittest.TestCase):
 
         with patch.object(strat, "notify"):
             engine.reconcile(101.0)
-            engine.reconcile(101.0)  # acelasi raspuns cumulativ nu se reaplica
+            engine.reconcile(101.0)  # the same cumulative reply is not reapplied
 
         self.assertAlmostEqual(engine.s["qty"], 0.4)
         self.assertAlmostEqual(engine.s["cost"], 40.0)

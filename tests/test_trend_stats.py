@@ -29,7 +29,7 @@ class TestMannKendall(unittest.TestCase):
     def test_zgomot_alb_nesemnificativ(self):
         rng = np.random.default_rng(42)
         s, z, p = mann_kendall(100 + rng.normal(0, 1, 24))
-        self.assertGreater(p, 0.1, "zgomotul pur nu trebuie sa para trend")
+        self.assertGreater(p, 0.1, "pure noise must not look like a trend")
 
     def test_serie_scurta_nesemnificativa(self):
         _, _, p = mann_kendall([1, 2, 3])

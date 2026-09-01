@@ -1,4 +1,4 @@
-"""rtrade _trend_too_strong: filtru de trend care face bot-ul de spread sa stea deoparte
+"""rtrade _trend_too_strong: the trend filter that makes the spread bot stand aside
 cand activul trend-uieste clar (|gradient_recent| > K*epsilon). Fail-OPEN + kill-switch.
 cacheManager e injectat fake in sys.modules (import lazy in _trend_too_strong)."""
 import os
@@ -64,7 +64,7 @@ class TrendFilterTest(unittest.TestCase):
         self.assertFalse(rtrade._trend_too_strong("TAOUSDC"))         # eroare -> nu blocheaza
 
 class FollowupForceTest(unittest.TestCase):
-    """Followup (flip dupa fill): force=piata DOAR daca trendul nu e advers. Advers:
+    """Follow-up (flip after a fill): force=market ONLY if the trend is not adverse. Adverse:
     SELL in declin / BUY in urcus -> False (limita rabdatoare, nu dumpeaza la piata)."""
     def setUp(self):
         self._en = rtrade.RTRADE_TREND_FILTER_ENABLED

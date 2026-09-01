@@ -90,8 +90,8 @@ class T212ReplayTest(unittest.TestCase):
         bars = [
             (100, 101, 99, 100),   # decide ENTRY
             (100, 101, 99, 100),   # fill ENTRY, decide TP
-            (97, 101, 96.9, 97),   # decide DCA; TP rămâne deschis
-            (100, 104, 96, 100),   # atinge și DCA BUY, și TP SELL
+            (97, 101, 96.9, 97),   # decides DCA; the TP stays open
+            (100, 104, 96, 100),   # hits both the DCA BUY and the TP SELL
         ]
         result = replay.run_replay(
             bars, params, bar_minutes=1440,

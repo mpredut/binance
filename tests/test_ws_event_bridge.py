@@ -17,7 +17,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
-# ─── mock bapi înainte de import ──────────────────────────────────────────────
+# ─── mock bapi before the import ────────────────────────────────────────────
 mock_bapi = MagicMock()
 mock_bapi.get_current_price = MagicMock(return_value=50000.0)
 mock_bapi.client = MagicMock()
@@ -75,7 +75,7 @@ class TestBapiWsSubscriber(unittest.TestCase):
         good = MagicMock()
         self.ws.subscribe(bad)
         self.ws.subscribe(good)
-        self.ws._notify_subscribers("BTCUSDC", [1.0])   # nu trebuie să arunce
+        self.ws._notify_subscribers("BTCUSDC", [1.0])   # must not raise
         good.on_items_update.assert_called_once()
 
 
@@ -147,7 +147,7 @@ class TestIntegration(unittest.TestCase):
             self.assertEqual(len(self.cur.cache.get("BTCUSDC", [])), 1)
 
     def test_persistence_currentprice(self):
-        """Dupa restart, cache-ul e incarcat din fisier."""
+        """After a restart, the cache is loaded from the file."""
         self.cur.enable_save_state_to_file()
         self.ws._notify_subscribers("BTCUSDC", [58000.0])
         self.cur.save_state_to_file_if_enabled()
@@ -157,7 +157,7 @@ class TestIntegration(unittest.TestCase):
         )
         with mgr2.lock:
             entries = mgr2.cache.get("BTCUSDC", [])
-        self.assertTrue(entries, "cache gol după load")
+        self.assertTrue(entries, "empty cache after load")
         self.assertEqual(entries[0][1], 58000.0)
 
 

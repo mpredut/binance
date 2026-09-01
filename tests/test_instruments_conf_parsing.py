@@ -1,7 +1,7 @@
 """
 Teste pentru parsarea instruments.conf (23 iul).
 
-Motiv: gasit un bug real in timpul sesiunii — configparser.ConfigParser() NU
+Reason: a real bug found during the session — configparser.ConfigParser() does NOT
 taie comentariile INLINE (pe aceeasi linie cu valoarea) by default, doar cele
 pe linie proprie. KRAKEN_HYPE avea "mt.buy_budget = 200  # comentariu" -> se
 parsa literal ca string-ul "200  # comentariu", float() esua in

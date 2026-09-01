@@ -1,4 +1,4 @@
-"""Regresii pentru shadow-testul Kraken: configurație, P&L și fereastră forward."""
+"""Regressions for the Kraken shadow test: configuration, P&L and forward window."""
 from __future__ import annotations
 
 import contextlib
@@ -93,7 +93,7 @@ class ShadowLiveTest(unittest.TestCase):
         profit_floor = variants_60["trail_profit_floor_sl18"]
         self.assertEqual(profit_floor.tp_trail_profit_floor_pct, 1.0)
         self.assertEqual(profit_floor.stop_loss_pct, 18.0)
-        # decuplat: profit-floor cu stop-ul baseline (NU lărgit la 18)
+        # Decoupled: profit floor with the baseline stop (NOT widened to 18)
         floor_only = variants_60["trail_profit_floor_sl125"]
         self.assertEqual(floor_only.tp_trail_profit_floor_pct, 1.0)
         self.assertEqual(floor_only.stop_loss_pct, variants_60["current"].stop_loss_pct)

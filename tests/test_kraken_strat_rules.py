@@ -24,12 +24,12 @@ class StratRulesTest(unittest.TestCase):
         self.assertFalse(sr.hit_stop(0.0, 50.0, 12.5))     # avg lipsa
 
     def test_reentry_stop_bounce(self):
-        # min 50.0, bounce 1.5% -> prag 50.75; sub prag = blocat
+        # min 50.0, bounce 1.5% -> threshold 50.75; below it = blocked
         self.assertTrue(sr.reentry_stop_blocked(50.0, 50.0, 1.5, 0.0))
-        self.assertFalse(sr.reentry_stop_blocked(50.8, 50.0, 1.5, 0.0))  # peste prag -> intra
+        self.assertFalse(sr.reentry_stop_blocked(50.8, 50.0, 1.5, 0.0))  # above the threshold -> it enters
 
     def test_reentry_drop(self):
-        # vandut 100, drop 2% -> prag 98; peste prag = blocat
+        # sold at 100, drop 2% -> threshold 98; above it = blocked
         self.assertTrue(sr.reentry_drop_blocked(99.0, 100.0, 2.0, 0.0))
         self.assertFalse(sr.reentry_drop_blocked(97.0, 100.0, 2.0, 0.0))  # sub prag -> intra
         self.assertFalse(sr.reentry_drop_blocked(99.0, 100.0, 0.0, 0.0))  # drop 0 -> fara bariera
@@ -39,7 +39,7 @@ class StratRulesTest(unittest.TestCase):
         # last_buy 100, drop 2% -> prag 98
         self.assertTrue(sr.dca_price_hit(98.0, 100.0, 2.0, 0.0))    # exact la prag
         self.assertTrue(sr.dca_price_hit(97.0, 100.0, 2.0, 0.0))    # sub prag
-        self.assertFalse(sr.dca_price_hit(99.0, 100.0, 2.0, 0.0))   # peste prag, fara tol
+        self.assertFalse(sr.dca_price_hit(99.0, 100.0, 2.0, 0.0))   # above the threshold, no tolerance
         self.assertTrue(sr.dca_price_hit(98.04, 100.0, 2.0, 0.05))  # in toleranta 0.05%
 
     def test_progressive_dca_spacing_is_safe_and_zero_preserves_live(self):

@@ -1,6 +1,6 @@
 import os, sys, time, unittest
 
-os.environ.setdefault("MPLBACKEND", "Agg")   # fără backend GUI la import matplotlib
+os.environ.setdefault("MPLBACKEND", "Agg")   # No GUI backend when importing matplotlib
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
@@ -27,31 +27,31 @@ class TestTimeBasedTrend(unittest.TestCase):
         self.assertEqual(r["direction"], "down")
 
     def test_window_is_time_based_not_point_count(self):
-        # densitate DIFERITĂ (1min vs 10min) trebuie să dea aceeași direcție:
-        # dovada că fereastra e în timp, nu în număr de puncte.
+        # DIFFERENT density (1min vs 10min) must give the same direction:
+        # proof that the window is measured in time, not in number of points.
         ts_a, pr_a = _uniform_series(days=15, step_sec=60.0, slope_per_day=2.0)
         ts_b, pr_b = _uniform_series(days=15, step_sec=600.0, slope_per_day=2.0)
         ra = pa.detect_long_term_trend(ts_a, pr_a, window_hours=12, step_hours=6)
         rb = pa.detect_long_term_trend(ts_b, pr_b, window_hours=12, step_hours=6)
         self.assertEqual(ra["direction"], rb["direction"])
-        # durata în zile e comparabilă deși densitatea diferă de 10x
+        # the duration in days is comparable although the density differs 10x
         self.assertAlmostEqual(ra["duration_seconds"] / 86400,
                                rb["duration_seconds"] / 86400, delta=1.0)
 
     def test_gap_stops_trend(self):
-        # trend UP cu un gol de 10 zile la mijloc → trendul se oprește la gap,
-        # nu pretinde continuitate peste gol.
+        # an UP trend with a 10-day gap in the middle -> the trend stops at the gap,
+        # it does not claim continuity across the gap.
         ts, pr = _uniform_series(days=20, slope_per_day=1.0)
         keep = ~((ts > ts[0] + 5 * 86400) & (ts < ts[0] + 15 * 86400))
         r = pa.detect_long_term_trend(ts[keep], pr[keep], window_hours=16,
                                       step_hours=8, noise_tolerance=2)
         self.assertIsNotNone(r)
-        # start după gap (cu toleranța de padding (noise+1)*window)
+        # start after the gap (with the padding tolerance (noise+1)*window)
         self.assertGreaterEqual(r["start_timestamp"],
                                 ts[0] + 15 * 86400 - (2 + 1) * 16 * 3600 - 1)
 
     def test_insufficient_recent_data_returns_none(self):
-        # doar 2 puncte recente → fereastra recentă sub min_points → None
+        # only 2 recent points -> the recent window is below min_points -> None
         ts = np.array([time.time() - 100, time.time() - 50])
         pr = np.array([100.0, 101.0])
         self.assertIsNone(pa.detect_long_term_trend(ts, pr, window_hours=16))

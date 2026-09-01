@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Teste pt trailing_stop (fara API real, fara bani)."""
+"""Tests for trailing_stop (no real API, no money)."""
 from __future__ import annotations
 
 import os
@@ -165,7 +165,7 @@ class TestTrailing(Base):
         ts.check_once()
         api.price = 190.0
         ts.check_once()
-        self.assertEqual(self.po.orders, [], "dry-run: doar logheaza, nu plaseaza ordine")
+        self.assertEqual(self.po.orders, [], "dry run: it only logs, it does not place orders")
 
     def test_varf_persista_peste_restart(self):
         api = FakeApi(260.0)
@@ -251,9 +251,9 @@ class TestMinProfit(Base):
         ts.check_once()                    # confirma fill-ul REBUY si seteaza warmup
         # acum trailing inactiv pana la 201.5*1.05=211.6
         api.price = 180.0; ts.check_once() # crash de la 201.5 dar sub pragul de activare
-        # ordinele: 1 vanzare + 1 re-buy; al treilea NU se executa (warming up)
+        # the orders: 1 sell + 1 re-buy; the third does NOT execute (warming up)
         sells = [o for o in self.po.orders if o["side"] == "SELL"]
-        self.assertEqual(len(sells), 1, "al doilea crash nu declanseaza vanzare (warming up dupa rebuy)")
+        self.assertEqual(len(sells), 1, "the second crash does not trigger a sell (warming up after the rebuy)")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-"""Caracterizare pentru mutarea motorului spot din venue in pachetul neutru."""
+"""Characterisation for moving the spot engine out of the venue into the neutral package."""
 
 import importlib.util
 import os

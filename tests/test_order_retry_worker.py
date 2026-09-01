@@ -137,13 +137,13 @@ class ProcessOnceTest(unittest.TestCase):
         self.assertEqual(len(oq.load_all()), 1)      # pret indisponibil -> ramane
 
     def test_price_gate_skips_unfavorable(self):
-        # SELL cerut la 100; pretul curent 90 (sub) -> gardul opreste, ramane fara incercare
+        # SELL requested at 100; current price 90 (below) -> the guard stops it, no attempt
         oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=100.0, now=1000.0)
         mkt = FakeMkt(price=90.0, succeed=True)
         stats = worker.process_once(mkt, now=1000.0 + 400)
         self.assertEqual(stats["attempted"], 0)
         self.assertEqual(stats["skipped_price"], 1)
-        self.assertEqual(len(mkt.calls), 0)          # NU s-a plasat nimic
+        self.assertEqual(len(mkt.calls), 0)          # nothing was placed
         q = oq.load_all()
         self.assertEqual(len(q), 1)
         self.assertEqual(q[0]["attempts"], 0)        # nu se numara ca incercare

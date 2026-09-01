@@ -1,8 +1,8 @@
 """Caracterizare pentru overlay-ul de trend Kraken.
 
-Overlay-ul este experimental și implicit oprit, dar trebuie să păstreze aceleași
-invariante financiare ca motorul range: ordinul nu este poziție până la fill,
-stop-loss-ul are prioritate și paper-live citește barele OHLC reale.
+The overlay is experimental and off by default, but it must preserve the same
+financial invariants as the range engine: an order is not a position until it fills,
+the stop-loss takes priority, and paper-live reads the real OHLC bars.
 """
 import os
 import sys
@@ -78,7 +78,7 @@ class TrendOverlayTest(unittest.TestCase):
         order = s._find_open("buy")
         self.assertIsNotNone(order)
         self.assertEqual(order["kind"], "TREND_ENTRY")
-        self.assertFalse(s.s["trend_mode"], "un ordin neexecutat nu este încă poziție de trend")
+        self.assertFalse(s.s["trend_mode"], "an unfilled order is not a trend position yet")
 
         s._remove(order)
         with patch.object(strat, "notify"):
@@ -97,7 +97,7 @@ class TrendOverlayTest(unittest.TestCase):
             s.step(100.0)
 
         order = s._find_open("buy")
-        self.assertIsNotNone(order, "după anularea top-up-ului revine la logica range")
+        self.assertIsNotNone(order, "after the top-up is cancelled it returns to the range logic")
         self.assertEqual(order["kind"], "ENTRY")
         self.assertFalse(s.s["trend_mode"])
 

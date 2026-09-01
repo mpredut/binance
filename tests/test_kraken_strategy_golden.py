@@ -1,14 +1,14 @@
 """GOLDEN REGRESSION — blocheaza comportamentul base v2 (kraken/strategy.py) INAINTE de
 refactorul provider-agnostic (Calea B: unificare pe MarketDataProvider).
 
-Ruleaza strategia LIVE prin motorul faithful (replay.run_replay) peste un slice
-DETERMINIST din dataset-ul HYPE inghetat si verifica:
-  1. URMA DE DECIZII exacta (fiecare ordin plasat: side/kind/pret/vol/market) — hash stabil.
+Runs the LIVE strategy through the faithful engine (replay.run_replay) over a
+DETERMINISTIC slice of the frozen HYPE dataset and checks:
+  1. the exact DECISION TRACE (every order placed: side/kind/price/vol/market) — stable hash.
   2. METRICILE finale (net/realized/fees/cycles/...) — la 8 zecimale.
 
-Dupa refactor (rewire strategy.py de la KrakenClient la MarketDataProvider), ACEST TEST
-TREBUIE SA TREACA NESCHIMBAT — dovada ca deciziile base v2 sunt byte-identical. Daca
-pica, refactorul a schimbat comportamentul live (regresie) si trebuie oprit.
+After the refactor (rewiring strategy.py from KrakenClient to MarketDataProvider), THIS TEST
+MUST PASS UNCHANGED — proof that the base v2 decisions are byte-identical. If it
+fails, the refactor changed live behaviour (a regression) and must be stopped.
 
 Valorile golden au fost capturate pe HEAD-ul dinainte de refactor (branch
 refactor/provider-unify, Faza 0)."""
@@ -28,7 +28,7 @@ os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
 # Venue-urile au module legacy cu aceleasi nume (`strategy`, `replay`,
 # `notify`). Incarcam graful Kraken sub un nume unic si restauram cache-ul,
-# astfel rezultatul nu depinde de ordinea in care pytest colecteaza fisierele.
+# so the result does not depend on the order in which pytest collects the files.
 _COLLIDING = ("strategy", "replay", "market_data", "notify")
 _PRELOADED = {name: sys.modules.pop(name) for name in _COLLIDING if name in sys.modules}
 try:

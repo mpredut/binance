@@ -1,5 +1,5 @@
 """kraken_client._public: un rezultat GOL ({}) de la un endpoint public (AssetPairs/
-Ticker) NU se cache-uieste — e mereu un fetch tranzitoriu ratat, nu o stare valida.
+Ticker) is NOT cached — it is always a transient failed fetch, not a valid state.
 Daca s-ar cache-ui (TTL AssetPairs=1h), pair_info->None->ordermin=0 dezactiva gardul
 anti-'volume minimum not met' ~1h -> churn de ordine respinse pe praf (HYPE 0.0175<0.1)."""
 import os

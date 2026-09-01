@@ -49,7 +49,7 @@ class TestCazulTAO(unittest.TestCase):
         d = down(96)                                  # 4 zile scadere
         b = up(24, start=d[-1], rate=0.25)            # 24h bounce
         r = run(*series(d, b))
-        self.assertIsNone(r, "bounce-ul de 24h NU e un trend UP coerent — trebuie None")
+        self.assertIsNone(r, "the 24h bounce is NOT a coherent UP trend — it must be None")
 
     def test_bounce_sustinut_2_zile_devine_trend_up_cu_durata_corecta(self):
         d = down(96)
@@ -58,7 +58,7 @@ class TestCazulTAO(unittest.TestCase):
         self.assertIsNotNone(r)
         self.assertEqual(r["direction"], "up")
         dur_days = r["duration_seconds"] / 86400
-        self.assertLess(dur_days, 2.6, "durata trebuie ~2 zile (bounce-ul), nu 4-6")
+        self.assertLess(dur_days, 2.6, "the duration must be ~2 days (the bounce), not 4-6")
 
 
 class TestDurata(unittest.TestCase):
@@ -68,7 +68,7 @@ class TestDurata(unittest.TestCase):
         self.assertIsNotNone(r)
         self.assertEqual(r["direction"], "down")
         self.assertLessEqual(r["duration_seconds"], ts[-1] - ts[0] + 1,
-                             "durata raportata era > decat TOATE datele (bug-ul vechi: +72h inventate)")
+                             "the reported duration was longer than ALL the data (the old bug: +72h invented)")
 
     def test_scadere_pura_da_durata_aproape_de_span(self):
         ts, px = series(down(96))
@@ -86,7 +86,7 @@ class TestZgomot(unittest.TestCase):
         self.assertIsNotNone(r)
         self.assertEqual(r["direction"], "down")
         self.assertGreater(r["duration_seconds"] / 86400, 3.5,
-                           "zgomotul tolerat nu trebuie sa taie durata trendului real")
+                           "tolerated noise must not cut the duration of the real trend")
 
     def test_trend_up_curat(self):
         r = run(*series(up(96)))
@@ -96,14 +96,14 @@ class TestZgomot(unittest.TestCase):
 
 class TestLagDetectie(unittest.TestCase):
     """detection_lag_hours: trendul incepe inaintea confirmarii (euristica ~2 zile),
-    explicit si PLAFONAT la span-ul datelor (durata nu poate depasi istoricul)."""
+    explicitly and CAPPED at the data span (the duration cannot exceed the history)."""
 
     def test_lag_se_adauga_dar_nu_depaseste_span_ul(self):
         ts, px = series(down(96))                     # span = 95h
         r = run(ts, px, detection_lag_hours=48)
         self.assertIsNotNone(r)
         self.assertLessEqual(r["duration_seconds"], ts[-1] - ts[0] + 1,
-                             "lag-ul nu are voie sa scoata durata peste datele existente")
+                             "the lag must not push the duration beyond the existing data")
         self.assertGreater(r["duration_seconds"] / 3600, 90, "plafonat la span, nu taiat sub")
 
     def test_lag_se_adauga_cand_incape_in_span(self):
@@ -131,13 +131,13 @@ class TestGapuri(unittest.TestCase):
         old = down(48, start=130)
         recent = down(48, start=115)
         ts_old = [i * H for i in range(48)]
-        ts_recent = [(i + 96) * H for i in range(48)]     # gap intre 48h si 96h
+        ts_recent = [(i + 96) * H for i in range(48)]     # gap between 48h and 96h
         ts = np.array(ts_old + ts_recent)
         px = np.array(old + recent, float)
         r = run(ts, px)
         if r is not None:
             self.assertLessEqual(r["duration_seconds"] / 3600, 50,
-                                 "trendul nu are voie sa se intinda peste gap")
+                                 "the trend must not stretch across the gap")
 
     def test_date_insuficiente_da_none(self):
         ts, px = series(down(10))

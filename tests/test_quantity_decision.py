@@ -77,7 +77,7 @@ class QuantityDecisionTest(unittest.TestCase):
 
     def test_weight_limit_uses_precomputed_balance_without_refetch(self):
         provider = Provider({"USDC": 500})
-        provider.free_balance = lambda _asset: self.fail("balanta nu trebuie recitita")
+        provider.free_balance = lambda _asset: self.fail("the balance must not be re-read")
         fake_pa = SimpleNamespace(
             get_weight_for_cash_permission_at_quant_time=lambda *_: 0.5)
         with patch.dict("sys.modules", {"priceAnalysis": fake_pa}):

@@ -1,6 +1,6 @@
-"""kraken/replay.py — motorul de backtest care ruleaza STRATEGIA LIVE peste OHLC.
-Caracterizare: pe o serie determinista, motorul ruleaza fara retea/notificari/fisiere
-de stare si intoarce metrici sanatoase (contabilitate din _apply_fill-ul live)."""
+"""kraken/replay.py — the backtest engine that runs the LIVE STRATEGY over OHLC.
+Characterisation: on a deterministic series the engine runs without network,
+notifications or state files, and returns sane metrics (accounting from the live _apply_fill)."""
 import os
 import importlib.util
 import json
@@ -100,7 +100,7 @@ class ReplayEngineTest(unittest.TestCase):
         rp.run_replay(_series(), _params(), fee_pct=0.26)
         after = set(os.listdir(os.path.join(ROOT, "kraken")))
         new_state = [f for f in (after - before) if "REPLAY" in f or f.startswith(".state")]
-        self.assertEqual(new_state, [], f"replay NU trebuie sa scrie stare: {new_state}")
+        self.assertEqual(new_state, [], f"replay must NOT write state: {new_state}")
 
     def test_existing_replay_state_cannot_contaminate_result(self):
         clean = rp.run_replay(_series(), _params(), fee_pct=0.26)
@@ -116,7 +116,7 @@ class ReplayEngineTest(unittest.TestCase):
 
     def test_order_created_at_close_cannot_fill_on_same_bar(self):
         # Low-ul 1 ar umple orice BUY, dar ordinul este decis abia la close=100.
-        # Harness-ul trebuie să îl poată executa doar în bara următoare.
+        # The harness must only be able to execute it on the next bar.
         first_bar = (100.0, 200.0, 1.0, 100.0)
         one_bar = rp.run_replay([first_bar], _params(), fee_pct=0.26)
         self.assertEqual(one_bar["fills"], 0)
@@ -129,10 +129,10 @@ class ReplayEngineTest(unittest.TestCase):
 
     def test_market_stop_fills_at_next_open_even_below_reference_price(self):
         bars = [
-            (100.0, 101.0, 99.0, 100.0),  # plasează intrarea
+            (100.0, 101.0, 99.0, 100.0),  # places the entry
             (100.0, 101.0, 99.0, 100.0),  # umple intrarea
-            (80.0, 82.0, 78.0, 80.0),     # declanșează STOP MARKET
-            (70.0, 71.0, 69.0, 70.0),     # gap down: fill la open, nu așteaptă limita
+            (80.0, 82.0, 78.0, 80.0),     # triggers STOP MARKET
+            (70.0, 71.0, 69.0, 70.0),     # gap down: fills at open, does not wait for the limit
         ]
 
         result = rp.run_replay(
