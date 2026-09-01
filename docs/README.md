@@ -1,40 +1,40 @@
-# docs/ — documentație operațională (centralizată)
+# docs/ — operational documentation (centralised)
 
-Documentația transversală a sistemului de trading. READMI-urile de componentă stau
-lângă codul lor (convenție — sunt linkate mai jos).
+Cross-cutting documentation for the trading system. Component READMEs live next to
+their code (a deliberate convention — they are linked below).
 
-## Operațional / runbook
-- [OPERATIONS.md](OPERATIONS.md) — cum funcționează (arhitectură, manifest, supraveghere) +
-  **capcane & lecții** (lock-leak fd, hang vs crash, co-mingling DN, bit execuție, quoting) + diagnostic.
-- [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) — refacere completă pe VM nou (sămânța DR,
-  backup secrete, restore.sh), backup periodic, ce e/nu e în git.
-- [VERIFICATION_STATUS.md](VERIFICATION_STATUS.md) — ultima verificare reproductibilă,
-  limitările mediului local și suprapunerile intenționate de ownership.
+## Operational / runbook
+- [OPERATIONS.md](OPERATIONS.md) — how it works (architecture, manifest, supervision) plus
+  **pitfalls and lessons** (fd lock leak, hang vs crash, DN co-mingling, the execute bit, quoting) and diagnostics.
+- [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) — full rebuild on a new VM (the DR seed,
+  secret backups, restore.sh), periodic backups, what is and is not in git.
+- [VERIFICATION_STATUS.md](VERIFICATION_STATUS.md) — the last reproducible verification,
+  the limits of the local environment, and the intentional ownership overlaps.
 
-## Design & strategie (de ce-uri durabile)
-- [STRATEGY.md](STRATEGY.md) — logica de trading: detecție trend (lag +48h, curbă de
-  supraviețuire, lindy plateau), garda de profit, trailing re-buy, T212 profit-guard/ladder, xStocks.
-- [RTRADE.md](RTRADE.md) — politica rtrade, ciclul BUY/SELL, evaluarea financiară,
-  stopurile dinamice, ownership-ul și recovery-ul ordinelor.
-- [TRADEALL.md](TRADEALL.md) — pipeline-ul de semnal, Kalman gate, limitele per trend,
-  ownership-ul retry-ului și riscurile de restart încă deschise.
-- [ASSETGUARDIAN.md](ASSETGUARDIAN.md) — semnalele pe valoarea portofoliului,
-  baseline MIN/MAX, execuția guardată și riscul de concentrare al drawdown-buy.
-- [ARCHITECTURE.md](ARCHITECTURE.md) — facadă `providers/market_api` + provideri, HYPE pe HL,
-  Kraken multi-proces (cacheManager partajat), trailing stop (core partajat + adaptoare).
-- [ORDER_RETRY_ARCHITECTURE.md](ORDER_RETRY_ARCHITECTURE.md) — outbox versus lifecycle
-  deținut de strategie, threadurile de cache, starea JSON și reconcilierea ordinelor.
-- [ORDER_LIFECYCLE_CENTRALIZATION.md](ORDER_LIFECYCLE_CENTRALIZATION.md) — limitele
-  refactorului comun și inventarul căilor migrate.
-- [ORDER_INTENT_DEDUP_DESIGN.md](ORDER_INTENT_DEDUP_DESIGN.md) — analiza salvată a
-  cheilor semantice și motivul pentru care `RETRY_DEDUP=false` rămâne activ.
+## Design and strategy (the durable whys)
+- [STRATEGY.md](STRATEGY.md) — the trading logic: trend detection (+48h lag, survival
+  curve, lindy plateau), the profit guard, trailing re-buy, the T212 profit guard/ladder, xStocks.
+- [RTRADE.md](RTRADE.md) — the rtrade policy, the BUY/SELL cycle, financial evaluation,
+  dynamic stops, ownership and order recovery.
+- [TRADEALL.md](TRADEALL.md) — the signal pipeline, the Kalman gate, per-trend limits,
+  retry ownership and the restart risks still open.
+- [ASSETGUARDIAN.md](ASSETGUARDIAN.md) — signals on portfolio value, the MIN/MAX
+  baseline, guarded execution, and the concentration risk of drawdown buying.
+- [ARCHITECTURE.md](ARCHITECTURE.md) — the `providers/market_api` facade plus providers, HYPE on HL,
+  multi-process Kraken (a shared cacheManager), trailing stop (shared core plus adapters).
+- [ORDER_RETRY_ARCHITECTURE.md](ORDER_RETRY_ARCHITECTURE.md) — the outbox versus the
+  lifecycle owned by the strategy, the cache threads, the JSON state and order reconciliation.
+- [ORDER_LIFECYCLE_CENTRALIZATION.md](ORDER_LIFECYCLE_CENTRALIZATION.md) — the limits of
+  the shared refactor and an inventory of the migrated paths.
+- [ORDER_INTENT_DEDUP_DESIGN.md](ORDER_INTENT_DEDUP_DESIGN.md) — the saved analysis of
+  the semantic keys and why `RETRY_DEDUP=false` is still in force.
 
-## README de componentă (lângă cod)
-- [../hyperliquid/README.md](../hyperliquid/README.md) — Hyperliquid: spot oprit pentru capital insuficient, porți runtime, stare izolată și candidat long-term shadow.
-- [../kraken/README.md](../kraken/README.md) — Kraken: boți (HYPE, xStock, trailing) + cachemanager.
+## Component READMEs (next to the code)
+- [../hyperliquid/README.md](../hyperliquid/README.md) — Hyperliquid: spot stopped for insufficient capital, runtime gates, isolated state and the long-term shadow candidate.
+- [../kraken/README.md](../kraken/README.md) — Kraken: the bots (HYPE, xStock, trailing) plus the cachemanager.
 
-## Hărți rapide (unde e ce)
-- **Manifest unic procese**: `procs.conf` (rădăcină) — citit de `healthcheck.sh`, `flota_start.sh`, `bots_start.sh`.
-- **Supraveghere**: `healthcheck.sh` — `--supervise` (repornește morți + înghețați), `--alert`, `--check` (read-only).
-- **Pornire**: `flota_start.sh` (flota, sub systemd `binance`), `bots_start.sh` (boții).
-- **Backup/DR**: `backup_secrets.sh` (local), `backup_remote.sh` (Storj criptat), `restore.sh` (refacere), `systemd/crontab.prod.txt`, `requirements.txt`, `systemd/install_prod.sh`.
+## Quick maps (where things are)
+- **Single process manifest**: `procs.conf` (repository root) — read by `healthcheck.sh`, `flota_start.sh` and `bots_start.sh`.
+- **Supervision**: `healthcheck.sh` — `--supervise` (restarts dead and frozen processes), `--alert`, `--check` (read-only).
+- **Startup**: `flota_start.sh` (the fleet, under systemd `binance`), `bots_start.sh` (the bots).
+- **Backup/DR**: `backup_secrets.sh` (local), `backup_remote.sh` (encrypted Storj), `restore.sh` (rebuild), `systemd/crontab.prod.txt`, `requirements.txt`, `systemd/install_prod.sh`.

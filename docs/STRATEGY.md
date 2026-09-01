@@ -1,56 +1,58 @@
-# STRATEGY — logica de trading & decizii (note de referință)
+# STRATEGY — trading logic and decisions (reference notes)
 
-Snapshot al intenției de design (mijloc 2026). Pentru praguri/commits exacte verifică
-codul curent — aici sunt „de ce"-urile durabile, nu starea live.
+A snapshot of the design intent (mid-2026). For exact thresholds and commits check the
+current code — what lives here are the durable "whys", not the live state.
 
-## Detecția de trend (`priceAnalysis.py` + `trend_survival.py`)
-- **Lag de detecție +48h INTENȚIONAT.** Durata trendului include un lag de ~2 zile: empiric,
-  când detectorul confirmă un trend, el începuse cu ~2 zile înainte. Parametru explicit
-  `detection_lag_hours` (default 48 în `getTrendLongTerm_fixed`, 0 în funcția pură
-  `detect_long_term_trend`), plafonat la span-ul datelor. **NU-l elimina la refactor** (a fost
-  „reparat" greșit o dată înainte de a se explica intenția).
-- **Ponderea de cash (`get_trade_weight`) = curbă de supraviețuire empirică, nu gaussiană fixă T=14.**
-  - `trend_survival.py`: S(vârstă) per monedă; `estimate_T(symbol)` (T_emp = max(P90, 2·mediană),
-    hibrid cu prior 14, cache disc TTL 7z). Live BTC/TAO → T≈8 zile.
-  - **`lindy_plateau=True`**: P(continuare|vârstă) e ~plată (0.65–0.75) la toate vârstele →
-    după vârf ponderea rămâne la vârf („pe final de trend poartă-te ca la mijloc" — validat empiric).
-  - **Filtru Mann-Kendall** (`mk_alpha=0.05`) taie ~30% din ferestre ca zgomot; Hurst informativ.
-  - **Regimul de piață NU schimbă durata** — invariantă la bull/bear/range (mediană ~3z identică);
-    analizat și abandonat (per-regim = artefact de eșantion mic). T global + plateau e suficient.
-  - `forecast.py` = modul paralel (test, NU tranzacționează); nu bate baseline-ul lindy.
-    LSTM (`priceprediction.py`, Keras) nu rulează — tensorflow nu e în venv.
+## Trend detection (`priceAnalysis.py` + `trend_survival.py`)
+- **The +48h detection lag is INTENTIONAL.** The trend duration includes a lag of ~2 days:
+  empirically, by the time the detector confirms a trend it had started ~2 days earlier. It is an
+  explicit parameter, `detection_lag_hours` (default 48 in `getTrendLongTerm_fixed`, 0 in the pure
+  `detect_long_term_trend`), capped at the data span. **Do NOT remove it in a refactor** (it was
+  once "fixed" by mistake, before the intent had been explained).
+- **The cash weight (`get_trade_weight`) is an empirical survival curve, not a fixed T=14 Gaussian.**
+  - `trend_survival.py`: S(age) per coin; `estimate_T(symbol)` (T_emp = max(P90, 2·median),
+    hybrid with a prior of 14, disk cache with a 7-day TTL). Live BTC/TAO -> T is about 8 days.
+  - **`lindy_plateau=True`**: P(continues | age) is roughly flat (0.65-0.75) at every age, so
+    past the peak the weight stays at the peak ("late in a trend, behave as if mid-trend" — empirically validated).
+  - **The Mann-Kendall filter** (`mk_alpha=0.05`) discards ~30% of windows as noise; Hurst is informative.
+  - **The market regime does NOT change the duration** — it is invariant across bull/bear/range
+    (the median of ~3 days is identical); analysed and abandoned (per-regime turned out to be a
+    small-sample artefact). A global T plus the plateau is enough.
+  - `forecast.py` is a parallel module (experimental, it does NOT trade); it does not beat the lindy
+    baseline. The LSTM (`priceprediction.py`, Keras) does not run — tensorflow is not in the venv.
 
-## Garda de profit Binance — fereastră 12 zile
-`monitortrades` + `bapi_placeorder.if_place_safe_order`: garda ia referința din ultimele
-`MT_GUARD_WINDOW_DAYS` (default **12**) zile (`min(sell)` pt BUY / `max(buy)` pt SELL). Era 14 —
-un sell vechi bloca re-intrarea după un crash (incident TAO iun 2026); redus la 12.
+## The Binance profit guard — a 12-day window
+`monitortrades` plus `bapi_placeorder.if_place_safe_order`: the guard takes its reference from the
+last `MT_GUARD_WINDOW_DAYS` (default **12**) days (`min(sell)` for a BUY, `max(buy)` for a SELL). It
+used to be 14 — an old sell blocked re-entry after a crash (the TAO incident, June 2026); reduced to 12.
 
-## Trailing — disjunctor de crash + re-buy
-`binance_api/trailing_stop.py` + `kraken/trailing_stop.py` (config în `*/trailing.conf`):
-- **Disjunctor:** vinde balanța LIBERĂ dacă prețul cade de la vârf (BTC ~−22% / −20% / Kraken −15%),
-  `force=True`, NU atinge pozițiile blocate în ordinele TP. Recomandat NECONDIȚIONAT de trend
-  (să nu blochezi protecția pe un trend citit greșit).
-- **Re-buy după crash** (`TRAILING_REBUY_ENABLED`): după un stop de crash armează re-buy în
-  `cachedb/trailing_state.json`; recumpără când prețul revine `TRAILING_REBUY_BOUNCE_PCT`%
-  (~1.2) de la minim, cu `bypass_profit_guard`. Sare dacă trendul e CLAR jos. `min_profit_pct`
-  înainte de activare (să nu vândă în pierdere pe un dip normal).
+## Trailing — crash breaker plus re-buy
+`binance_api/trailing_stop.py` and `kraken/trailing_stop.py` (configured in `*/trailing.conf`):
+- **Breaker:** sells the FREE balance if the price falls from its peak (BTC ~-22% / -20% / Kraken -15%),
+  with `force=True`; it does NOT touch positions locked in TP orders. Recommended UNCONDITIONALLY on
+  trend (so protection is never blocked by a misread trend).
+- **Re-buy after a crash** (`TRAILING_REBUY_ENABLED`): after a crash stop it arms a re-buy in
+  `cachedb/trailing_state.json`; it buys back once the price recovers `TRAILING_REBUY_BOUNCE_PCT`%
+  (~1.2) from the low, with `bypass_profit_guard`. It skips when the trend is CLEARLY down. There is a
+  `min_profit_pct` before activation (so it does not sell at a loss on a normal dip).
 
-## T212 (`212trading/t212_bot.py` — un proces, thread per `config.*.env`)
-- **Profit-guard** (SPCX, NVDA): vinde DOAR pe profit (TP), `STRAT_STOP_LOSS_PCT=30` = doar
-  catastrofă; cumpără DOAR sub ultima vânzare (re-entry guard). Nu vinde în pierdere normală
-  (riscul asumat: capital blocat pe scădere, exit la pierdere doar la −30%).
-- **Scale-out TP ladder** (`STRAT_TP_LADDER`, ex `11:33,20:33,30:34`): vinde în trepte la +11/+20/+30%.
-- **Exit-uri urgente:** stop-loss și trailing folosesc MARKET; TP/scara rămân LIMIT.
-- **Config generic** (`MAX_BUDGET` + `STRAT_ENTRY_PCT`/`STRAT_DCA_PCT`, `MAX_DCA_BUYS=auto`):
-  schimbi bugetul → entry/DCA/contor scalează singure.
-- **FX:** cont T212 cu bază RON → ordinele rămân `currency=RON`, FX `STRAT_FX_FEE_PCT` (0.15%)/direcție
-  se aplică. Convertirea cashului NU schimbă baza contului — doar un cont NOU cu bază USD scapă de FX.
-- **Lecții:** (1) la `selling-not-owned` verifică ordinele PENDING (rezervă), nu doar starea;
-  (2) ladder: ultima transă = held − suma celorlalte ȘI lasă ~$5–6 liber (`STRAT_LADDER_MIN_FREE`),
-  altfel T212 respinge (`min-opened-position`); (3) alerte O DATĂ per episod / high-water-mark
-  (spam-ul de stop-loss a umplut cota gratuită ntfy.sh → 429).
+## T212 (`212trading/t212_bot.py` — one process, one thread per `config.*.env`)
+- **Profit guard** (SPCX, NVDA): it sells ONLY at a profit (TP); `STRAT_STOP_LOSS_PCT=30` is the
+  catastrophe net only; it buys ONLY below the last sale (the re-entry guard). It does not sell at a
+  normal loss (the accepted risk: capital locked up during a decline, exiting at a loss only at -30%).
+- **Scale-out TP ladder** (`STRAT_TP_LADDER`, e.g. `11:33,20:33,30:34`): sells in steps at +11/+20/+30%.
+- **Urgent exits:** stop-loss and trailing use MARKET; the TP and the ladder stay LIMIT.
+- **Generic config** (`MAX_BUDGET` plus `STRAT_ENTRY_PCT`/`STRAT_DCA_PCT`, `MAX_DCA_BUYS=auto`):
+  change the budget and entry, DCA and the counter scale by themselves.
+- **FX:** the T212 account has a RON base, so orders stay `currency=RON` and the FX
+  `STRAT_FX_FEE_PCT` (0.15%) per direction applies. Converting the cash does NOT change the account
+  base — only a NEW account with a USD base escapes the FX cost.
+- **Lessons:** (1) on `selling-not-owned`, check the PENDING orders (a reservation), not just the
+  state; (2) in the ladder, the last tranche = held minus the sum of the others AND it must leave
+  ~$5-6 free (`STRAT_LADDER_MIN_FREE`), otherwise T212 rejects it (`min-opened-position`);
+  (3) alert ONCE per episode / high-water mark (stop-loss spam exhausted the free ntfy.sh quota -> 429).
 
-## Kraken xStocks (SPCX etc.) = DOAR watcher
-`kraken/kraken_xstock_watch.py` NU tranzacționează prin API (xStocks nu apar pe `asset_pairs`);
-doar monitorizează balanță + nivele → **ALERTE** (nu vânzări). SpaceX se tranzacționează prin
-**T212** (real). Vezi și [ARCHITECTURE.md](ARCHITECTURE.md).
+## Kraken xStocks (SPCX and friends) — a watcher ONLY
+`kraken/kraken_xstock_watch.py` does NOT trade through the API (xStocks do not appear in
+`asset_pairs`); it only monitors the balance and levels, producing **ALERTS**, not sales. SpaceX is
+traded through **T212** (for real). See also [ARCHITECTURE.md](ARCHITECTURE.md).

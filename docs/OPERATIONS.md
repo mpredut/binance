@@ -1,112 +1,112 @@
-# OPERATIONS — cum funcționează + capcane (runbook)
+# OPERATIONS — how it works, and the pitfalls (runbook)
 
-„De ce"-ul sistemului și capcanele care nu se văd din cod. Pentru refacere completă vezi
-[DISASTER_RECOVERY.md](DISASTER_RECOVERY.md).
+The system's "why", and the traps that are invisible from the code. For a full rebuild
+see [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md).
 
-## Arhitectură pe scurt
-- **Flota Binance** (8 procese): `cacheManager`, `assetguardian`, `priceAnalysis`,
-  `tradeall`, `monitortrades`, `rtrade`, `market_alerts`, `order_retry_worker`. Pornite
-  și supravegheate de `flota_start.sh`, sub **systemd `binance`**.
-- **Boți activi separați de flotă**: `kraken_cachemanager`, `kraken_bot`,
-  `kraken_xstock_watch`, `t212_bot`, `kraken/trailing_stop` și
-  `binance_api/trailing_stop`. Sunt porniți din rolurile `bot` ale `procs.conf` și
-  supravegheați de `healthcheck.sh --supervise` (cron */5).
-- **Hyperliquid**: `dn_bot`/watch sunt oprite și comentate în manifest. `hl_dca_bot`
-  este oprit, are zero ordine și rămâne în afara `procs.conf`. Profilul pregătit
-  1.000/600/10.000 cere minimum 7.000 USDC; snapshotul avea ~1.024 USDC disponibili.
-- **Facadă market/cont**: `providers/market_api.py` rutează pe symbol către
-  `BinanceProvider` / `HyperliquidProvider` / `kraken` / `t212`. `monitortrades` o folosește.
+## Architecture in brief
+- **The Binance fleet** (8 processes): `cacheManager`, `assetguardian`, `priceAnalysis`,
+  `tradeall`, `monitortrades`, `rtrade`, `market_alerts`, `order_retry_worker`. Started
+  and supervised by `flota_start.sh`, under **systemd `binance`**.
+- **Bots running outside the fleet**: `kraken_cachemanager`, `kraken_bot`,
+  `kraken_xstock_watch`, `t212_bot`, `kraken/trailing_stop` and
+  `binance_api/trailing_stop`. They are started from the `bot` roles in `procs.conf` and
+  supervised by `healthcheck.sh --supervise` (cron */5).
+- **Hyperliquid**: `dn_bot`/watch are stopped and commented out in the manifest. `hl_dca_bot`
+  is stopped, has zero orders, and stays outside `procs.conf`. The prepared
+  1,000/600/10,000 profile needs at least 7,000 USDC; the snapshot had ~1,024 USDC available.
+- **Market/account facade**: `providers/market_api.py` routes by symbol to
+  `BinanceProvider` / `HyperliquidProvider` / `kraken` / `t212`. `monitortrades` uses it.
 
-## Sursa unică de procese: `procs.conf`
+## The single source of processes: `procs.conf`
 Format: `pat | dir | start_cmd | label | hb_log | hb_stale_s | role` (`role=bot|fleet`).
-Citită de **toate**: `healthcheck.sh`, `flota_start.sh`, `bots_start.sh`, `deploy_providers.sh`.
-**Adaugi/scoți/modifici un proces → editezi DOAR `procs.conf`.**
+Read by **all of them**: `healthcheck.sh`, `flota_start.sh`, `bots_start.sh`, `deploy_providers.sh`.
+**To add, remove or change a process, edit ONLY `procs.conf`.**
 
-## Supraveghere — `healthcheck.sh`
-- `--check` — preview READ-ONLY (ce ar face, fără să atingă nimic). Sigur oricând.
-- `--supervise` (cron */5) — repornește `role=bot` morți SAU înghețați; `role=fleet` =
-  doar alertă (o ține flota_start). Backoff: max 3 reporniri/30 min, apoi crash-loop alert.
-- `--alert` — doar alertă, fără restart.
-- **Detecție dublă:** absență (`pgrep`) **și HANG** (proces viu dar `hb_log` nescris de
-  `hb_stale_s`). Heartbeat-urile active sunt cele declarate pe fiecare linie din
-  manifest; intrările HL comentate nu sunt supravegheate și nu sunt repornite.
+## Supervision — `healthcheck.sh`
+- `--check` — a READ-ONLY preview (what it would do, without touching anything). Always safe.
+- `--supervise` (cron */5) — restarts `role=bot` processes that are dead OR frozen; `role=fleet` is
+  alert-only (flota_start owns those). Backoff: at most 3 restarts per 30 min, then a crash-loop alert.
+- `--alert` — alerts only, no restart.
+- **Double detection:** absence (`pgrep`) **and HANG** (a live process whose `hb_log` has not been
+  written for `hb_stale_s`). The active heartbeats are the ones declared on each manifest
+  line; the commented-out HL entries are neither supervised nor restarted.
 
-## Pornire / deploy / backup
-- **Pornire:** `flota_start.sh` (flotă, systemd) · `bots_start.sh` (boți).
-- **Deploy cod:** `deploy_providers.sh` — `git pull` → **gate de import** (nu repornește
-  dacă facada nu se încarcă) → restart flotă → verificare.
-- **Backup/DR:** `backup_secrets.sh` (local, auto din `git ls-files`), `backup_remote.sh`
-  (Storj criptat), `restore.sh`. Detalii în DISASTER_RECOVERY.md.
+## Startup / deploy / backup
+- **Startup:** `flota_start.sh` (the fleet, systemd) · `bots_start.sh` (the bots).
+- **Code deploy:** `deploy_providers.sh` — `git pull` -> an **import gate** (it does not restart
+  if the facade fails to load) -> fleet restart -> verification.
+- **Backup/DR:** `backup_secrets.sh` (local, derived automatically from `git ls-files`), `backup_remote.sh`
+  (encrypted Storj), `restore.sh`. Details in DISASTER_RECOVERY.md.
 
-## La REBOOT — totul revine singur
-- systemd `binance` (enabled) → `flota_start` → flota (după VPN/pia).
-- crontab persistă → `healthcheck --supervise` (*/5) pornește procesele declarate
-  active (`role=bot`) în ≤5 min.
-- Intrările HL comentate și `hl_dca_bot.py`, absent din `procs.conf`, **nu** repornesc.
-- Nu este necesară intervenție manuală pentru flota și boții declarați activi.
+## On REBOOT — everything comes back on its own
+- systemd `binance` (enabled) -> `flota_start` -> the fleet (after VPN/pia).
+- The crontab persists -> `healthcheck --supervise` (*/5) starts the processes declared
+  active (`role=bot`) within 5 minutes.
+- The commented-out HL entries, and `hl_dca_bot.py` which is absent from `procs.conf`, do **not** restart.
+- No manual intervention is needed for the fleet and the bots declared active.
 
-### Activare HL după finanțare
+### Enabling HL after funding
 
-1. Confirmă minimum `7.000 USDC` liberi; recomandat `7.200` pentru fee/slippage.
-2. Confirmă zero ordine HYPE și un singur owner în `ownership_inventory.py --running`.
-3. Rulează testele și backtestul pe DEV după sincronizarea `cachedb`; nu pe PROD.
-4. Pornește controlat `hl_dca_bot.py`, apoi verifică PID-ul detașat, starea LIVE și
-   două tick-uri consecutive. Nu adăuga procesul în manifest fără decizie explicită.
+1. Confirm at least `7,000 USDC` free; `7,200` is recommended for fees and slippage.
+2. Confirm zero HYPE orders and a single owner in `ownership_inventory.py --running`.
+3. Run the tests and the backtest on DEV after syncing `cachedb`; never on PROD.
+4. Start `hl_dca_bot.py` in a controlled way, then check the detached PID, the LIVE state and
+   two consecutive ticks. Do not add the process to the manifest without an explicit decision.
 
-## ⚠ CAPCANE & LECȚII (citește înainte să modifici)
+## ⚠ PITFALLS AND LESSONS (read before changing anything)
 
-### 1. Scurgere de lock prin moștenire de fd (supervizor blocat „în tăcere")
-`flota_start.sh` (`exec 9>flota_start.lock`) și `healthcheck --supervise`
-(`exec 8>/tmp/binance_supervise.lock`) folosesc `flock`. Dacă pornesc un copil cu
-`nohup … &`, copilul **moștenește fd-ul lock-ului** → ține lock-ul deschis după ce
-scriptul iese → următoarea rulare dă „**deja ruleaza**" la infinit = supraveghere
-**dezactivată silențios**.
-- **Fix (aplicat):** `8>&-` / `9>&-` la spawn (copilul nu mai moștenește fd-ul).
-- **Diagnostic:** `lsof /tmp/binance_supervise.lock` (sau `flota_start.lock`) → PID cu `8w`/`9w`.
-- **Deblocare imediată:** `rm /tmp/binance_supervise.lock` (următoarea rulare ia inode nou).
+### 1. Lock leak through fd inheritance (a supervisor disabled "silently")
+`flota_start.sh` (`exec 9>flota_start.lock`) and `healthcheck --supervise`
+(`exec 8>/tmp/binance_supervise.lock`) use `flock`. If they start a child with
+`nohup … &`, the child **inherits the lock's fd** -> it keeps the lock open after the
+script exits -> the next run reports "**already running**" forever, which means supervision
+is **silently disabled**.
+- **Fix (applied):** `8>&-` / `9>&-` at spawn time (the child no longer inherits the fd).
+- **Diagnosis:** `lsof /tmp/binance_supervise.lock` (or `flota_start.lock`) -> a PID holding `8w`/`9w`.
+- **Immediate unblock:** `rm /tmp/binance_supervise.lock` (the next run takes a fresh inode).
 
-### 2. Hang ≠ crash (lecție păstrată din DN)
-Când era activ, `dn_bot` putea îngheța silențios (proces viu, fără tick), motiv pentru
-care simplul `pgrep` nu era suficient. Dacă DN se reintroduce vreodată, intrările din
-manifest trebuie să aibă din nou heartbeat pe `hb_log`/`hb_stale_s`; acum sunt comentate.
+### 2. A hang is not a crash (a lesson kept from DN)
+While it was active, `dn_bot` could freeze silently (a live process producing no ticks), which
+is why `pgrep` alone was not enough. If DN is ever reintroduced, its manifest entries
+must carry a heartbeat on `hb_log`/`hb_stale_s` again; they are commented out today.
 
-### 3. ⚠ Co-mingling SPOT pe Hyperliquid
-Soldul HYPE spot este unic pe wallet. Dacă DN este repornit, piciorul lui LONG spot,
-`hl_dca_bot` și orice owner `monitortrades` ar vedea același sold; un SELL de „tot
-available” poate desface hedge-ul sau poziția altui motor. La ultima verificare `hl_dca_bot` era oprit; înaintea oricărui al doilea owner trebuie demonstrat ownership exclusiv
-sau folosit un
-subcont/wallet separat. `STRAT_EXECUTE` și `HL_LIVE_ORDERS` sunt porți necesare, nu dovadă
-de ownership și nu aprobare de deploy.
+### 3. ⚠ SPOT co-mingling on Hyperliquid
+The HYPE spot balance is a single pool per wallet. If DN is restarted, its LONG spot leg,
+`hl_dca_bot` and any `monitortrades` owner would all see the same balance; a SELL of "everything
+available" can undo the hedge or another engine's position. At the last check `hl_dca_bot` was
+stopped; before any second owner exists, exclusive ownership must be demonstrated, or a
+separate subaccount/wallet used. `STRAT_EXECUTE` and `HL_LIVE_ORDERS` are necessary gates, not
+proof of ownership and not deploy approval.
 
-### 4. Bitul de execuție se pierde la editări din Windows
-Editarea unui `.sh` din Windows/UNC îl resetează la `644` → cron-ul `./script.sh` dă
-„Permission denied". **Fix:** `chmod +x x.sh && git update-index --chmod=+x x.sh`.
+### 4. The execute bit is lost on edits from Windows
+Editing a `.sh` from Windows/UNC resets it to `644` -> cron's `./script.sh` reports
+"Permission denied". **Fix:** `chmod +x x.sh && git update-index --chmod=+x x.sh`.
 
-### 5. `pkill -f` se poate prinde pe SINE
-`pkill -f flota_start.sh` rulat dintr-o comandă al cărei string CONȚINE pattern-ul își
-omoară propriul shell. **Folosește scripturi-fișier sau PID-uri**, nu pattern inline.
+### 5. `pkill -f` can catch ITSELF
+`pkill -f flota_start.sh` run from a command whose own string CONTAINS the pattern kills
+its own shell. **Use script files or PIDs**, not inline patterns.
 
-### 6. WSL NU ajunge la server
-Din WSL, `192.168.0.144` face buclă la localhost (rutare VPN). **Doar Windows**
-(plink/pscp) ajunge la server. Backup-urile se TRAG de pe Windows în WSL, nu invers.
+### 6. WSL does NOT reach the server
+From WSL, `192.168.0.144` loops back to localhost (VPN routing). **Only Windows**
+(plink/pscp) reaches the server. Backups are PULLED from Windows into WSL, not the other way round.
 
-### 7. Quoting plink → PowerShell → bash e fragil
-Evită în comenzi inline: `$( )`, `<`, `|` (alternare în grep), `\"`, `\$`, paranteze în
-`echo`. Pune logica într-un **script-fișier** (pscp + rulează) când e nontrivială.
+### 7. Quoting through plink -> PowerShell -> bash is fragile
+Avoid in inline commands: `$( )`, `<`, `|` (alternation in grep), `\"`, `\$`, parentheses in
+`echo`. Put the logic in a **script file** (pscp then run) whenever it is non-trivial.
 
-### 8. NU rula flota în 2 locuri pe aceleași chei
-Flota pornită SIMULTAN local (WSL `/home/mariusp`) ȘI pe server (`/home/predut`), pe
-ACELEAȘI chei API live → **tranzacții dublate** + conflicte de nonce pe Kraken. Rulează
-flota într-UN singur loc; pentru test local folosește chei separate / cont demo, sau
-oprește serverul întâi. (Garda din `--supervise` refuză pornirea pe `/home/mariusp`, dar
-`flota_start`/`bots_start` NU au garda — atenție.)
+### 8. Do NOT run the fleet in two places on the same keys
+The fleet started SIMULTANEOUSLY locally (WSL `/home/mariusp`) AND on the server (`/home/predut`),
+on the SAME live API keys -> **duplicated trades** plus Kraken nonce conflicts. Run the
+fleet in ONE place; for local testing use separate keys or a demo account, or stop the
+server first. (The guard in `--supervise` refuses to start on `/home/mariusp`, but
+`flota_start`/`bots_start` have NO such guard — be careful.)
 
-## Diagnostic rapid
+## Quick diagnostics
 ```bash
-./healthcheck.sh --check                 # stare toate procesele (read-only)
-./healthcheck.sh                         # raport complet (procese + conturi HL/Kraken/T212)
-ps -ef | grep -E '[h]l_dca_bot|[d]n_bot' # procese HL, inclusiv cele din afara manifestului
+./healthcheck.sh --check                 # state of every process (read-only)
+./healthcheck.sh                         # full report (processes plus HL/Kraken/T212 accounts)
+ps -ef | grep -E '[h]l_dca_bot|[d]n_bot' # HL processes, including those outside the manifest
 python3 verify_tools/ownership_inventory.py --running
-lsof /tmp/binance_supervise.lock         # cine ține lock-ul supervize (scurgere?)
-tail -n 5 logs/healthcheck.log           # ce a făcut supervizorul (cron)
+lsof /tmp/binance_supervise.lock         # who holds the supervise lock (a leak?)
+tail -n 5 logs/healthcheck.log           # what the supervisor did (cron)
 ```
