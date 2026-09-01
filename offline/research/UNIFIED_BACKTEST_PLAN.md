@@ -1,14 +1,14 @@
 # Plan: framework de backtest unificat — DE DISCUTAT, nu implementat
 
-Raspuns la intrebarea din sesiune: "as vrea un singur backtest pt toate
-modulele, doar setez parametrul/modulul de testat; rangurile sa vina din
+An answer to the question from the session: "I would like a single backtest for all
+the modules, where I just set the parameter or module to test; the ranges should come from
 configul modulului, poate printr-un comentariu structurat deasupra fiecarui
-parametru — sau ai o idee mai eleganta, cu mai putin cod si informatie mai
+the parameter — or do you have a more elegant idea, with less code and information that is
 putin duplicata?"
 
 Concluzie scurta: DA la ideea de uniformizare, dar NU printr-un singur motor
-de simulare si NU prin comentarii parseabile in fiecare fisier de config.
-Recomand: 2 motoare (deja separate, ramân separate) + 1 CLI generic deasupra
+simulation, and NOT through parseable comments in every config file.
+The recommendation: 2 engines (already separate, and they stay separate) plus 1 generic CLI above them
 + 1 SINGUR fisier declarativ cu rangurile (nu comentarii imprastiate in N
 formate de config diferite). Detalii mai jos.
 
@@ -22,9 +22,9 @@ ireconciliabile de simulare in acest repo:
 | | **Fleet** (tradeall.py, monitortrades.py) | **Boti pe pozitie** (kraken, hyperliquid, t212) |
 |---|---|---|
 | Motor existent | `offline.backtests.tradeall.run_backtest()` | `kraken/backtest.py::simulate()` |
-| Unitate de timp | TICK (pret continuu, ~1-7 min/tick din arhiva) | BARA OHLC (1h/4h/1z) |
+| Time unit | TICK (a continuous price, ~1-7 min per tick from the archive) | OHLC BAR (1h/4h/1d) |
 | Stare | `PriceWindow`/`TrendState`/`WindowAnalyzer` — ferestre glisante, trend continuu | `qty/cost/dca/last_open` — masina de stari DCA/TP/SL discreta |
-| Decizie | slope/gradient vs prag, pe fereastra | pret vs prag_mediu*(1±%), pe close de bara |
+| Decision | slope/gradient vs a threshold, over a window | price vs average*(1±%), on the bar close |
 | Simbol/pereche | multi-simbol, coordonat (`TrendCoordinator`) | UN simbol per instanta de bot |
 
 Fortarea celor doua in ACELASI motor ar insemna fie (a) sa transformi bare
@@ -32,8 +32,8 @@ OHLC in pseudo-tick-uri (pierzi fidelitate: strategia reala kraken evalueaza
 pe close de bara, nu pe fiecare tick), fie (b) un singur fisier cu
 `if bot_type == "fleet": ... else: ...` care ar deveni EXACT genul de cod
 neclar pe care uniformizarea incearca sa-l evite. Cele doua motoare de azi
-sunt deja CORECTE si validate (kraken/backtest.py acum are si bariera de
-reintrare, dupa merge-ul de azi) — problema nu e ca sunt doua, problema e ca
+are already CORRECT and validated (kraken/backtest.py now also has the re-entry
+barrier, after today's merge) — the problem is not that there are two, it is that
 n-au o "fatada" comuna deasupra.
 
 **Recomandare: pastreaza 2 motoare, unifica doar STRATUL DE DEASUPRA lor**
@@ -51,23 +51,23 @@ la prima vedere, dar are 3 probleme concrete, observate DEJA in acest repo:
    etc.), `monitortrades.conf` (format propriu, `cheie = valoare`), `instruments.conf`
    (INI, sectiuni `[NUME]`). Un parser de comentarii ar trebui sa stie sa
    citeasca toate 3 — exact opusul lui "mai putin cod, mai uniform".
-2. **Nu tot ce merita testat are deja un env var**: 3 din constantele Kalman
+2. **Not everything worth testing already has an env var**: 3 of the Kalman constants
    (`CONF_ENTER`, `MIN_VEL_PCT_MIN`, `GAP_RESET_SEC`, vezi
-   `BACKTEST_CANDIDATES.md`) sunt hardcodate, FARA nicio linie de config unde
+   `BACKTEST_CANDIDATES.md`) are hardcoded, with NO config line where
    sa atasezi un comentariu. Un mecanism bazat pe "comentariu deasupra
-   parametrului din config" nu le acopera decat dupa ce le extragi intai.
+   the parameter in config" only covers them once you extract them first.
 3. **Comentariile deriveaza tacut** — chiar in sesiunea asta am gasit si
    reparat DOUA comentarii stale (`tradeall.py`: "SHADOW observational" cand
    de fapt initia ordine reale; `instruments_config.py`: pretindea consumatori
-   care nu existau). Un comentariu care e SI documentatie SI configuratie
+   that did not exist). A comment that is BOTH documentation AND configuration
    parseabila mosteneste exact aceeasi fragilitate — nimic nu garanteaza ca
    ramane sincron cu valoarea reala de langa el.
 
 **Alternativa propusa: UN SINGUR fisier declarativ**, nu comentarii
 imprastiate in N formate. Vezi `offline/research/BACKTEST_CANDIDATES.md` (deja scris
 azi) — as extinde EXACT acel fisier (nu unul nou) cu un bloc masina-citibil
-(YAML/JSON intr-un fenced code block, sau un `.json` sidecar langa el) care
-sa contina, pt fiecare rand din tabel, exact ce ii trebuie unui runner ca sa
+(YAML/JSON in a fenced code block, or a `.json` sidecar next to it) that
+contains, for each table row, exactly what a runner needs in order to
 stie ce sa ruleze:
 
 ```yaml
@@ -86,7 +86,7 @@ stie ce sa ruleze:
 
 De ce e mai simplu decat comentarii-in-config:
 - **UN loc, un format** — nu 3 parsere pt 3 formate de config.
-- **Acopera si ce nu e inca extras** (`target` poate lipsi/fi gol pt o idee
+- **It covers what has not been extracted yet** (`target` may be missing or empty for an idea
   neconfigurata inca — runner-ul stie sa refuze/avertizeze clar, nu sa
   ghiceasca dintr-un comentariu absent).
 - **Nu dubleaza informatia de doua ori "in cod"** — fisierul de config ramane
@@ -107,9 +107,9 @@ python3 offline/research/backtest_runner.py --param mt_btc_gain
 python3 offline/research/backtest_runner.py --param kraken_dca_drop --symbol HYPEUSD
 ```
 
-Ce ar face (schematic, tot plan — nu cod):
+What it would do (schematically, still a plan, not code):
 1. Cauta `--param` in blocul declarativ din `BACKTEST_CANDIDATES.md`.
-2. Din `engine: fleet|position` stie care din cele 2 motoare sa foloseasca.
+2. From `engine: fleet|position` it knows which of the 2 engines to use.
 3. Genereaza grid-ul (`min/max/values`, sau lista explicita) — ≤5 valori,
    aceeasi logica de generare pt AMBELE motoare (asta e partea genuin
    "unificata": generarea grid-ului + rularea in bucla + raportarea rezultatelor
@@ -135,27 +135,27 @@ rescris, e o "fatada" peste ce exista.
 Da, backtest SEPARAT pt flota (tradeall/monitortrades) si pt boti-pozitie
 (kraken/hyperliquid/t212) — dar NU doua CLI-uri separate pt utilizator, ci
 DOUA ADAPTOARE sub ACELASI CLI (`--param X` alege automat motorul corect prin
-campul `engine:` din declaratie). Din perspectiva ta (utilizator), ramane
+the `engine:` field in the declaration). From your perspective as a user, it stays
 "un singur backtest, setez parametrul" — separarea reala (fleet vs pozitie)
-e un detaliu de implementare ascuns, nu ceva ce trebuie sa alegi manual.
+an implementation detail that is hidden, not something you have to choose by hand.
 
 ---
 
 ## 5. Ce NU rezolva planul asta (limite onest raportate)
 
-- Rtrade si assetguardian nu au inca UN motor de backtest deloc (spre
+- Rtrade and assetguardian still have NO backtest engine at all (unlike
   deosebire de kraken/tradeall) — ar avea nevoie de un al treilea adaptor sau
-  de extins unul din cele 2 existente, dupa ce se decide care paradigma se
+  one of the 2 existing ones has to be extended, once it is decided which paradigm
   potriveste mai bine (rtrade pare mai aproape de "pozitie" — DCA-like — desi
-  cu BUY si SELL concurente, ceva ce niciun motor de azi nu modeleaza).
-- Comparabilitate INTRE module diferite (ex. "care e mai bun, un gain de 7%
-  pe BTC sau un K de 2.0 pe reentry Kraken") nu are sens direct — fiecare
-  param se compara doar cu variantele LUI, nu intre module. Planul de mai sus
+  with concurrent BUY and SELL, something no engine models today).
+- Comparability BETWEEN different modules (e.g. "which is better, a 7% gain
+  on BTC or a K of 2.0 on Kraken re-entry") makes no direct sense — each
+  parameter is compared only against ITS OWN variants, not across modules. The plan above
   nu incearca sa rezolve asta (nici n-ar trebui).
 - Fisierul declarativ propus (§2) tot cere disciplina umana sa fie actualizat
   cand se schimba o valoare live — reduce riscul de derapaj (un singur loc,
-  nu N comentarii), dar nu il elimina complet. Ar putea exista un test simplu
-  care verifica ca fiecare `target.key` din declaratie chiar exista in
+  not N comments), but it does not remove it entirely. There could be a simple test
+  that checks that every `target.key` in the declaration really exists in
   fisierul de config referit (evita cel putin typo-uri/chei sterse).
 
 ---
@@ -171,7 +171,7 @@ e un detaliu de implementare ascuns, nu ceva ce trebuie sa alegi manual.
    are valoare de backtest mica. Le includem dupa ce tiparul de adaptor se
    valideaza pe cele 2 din faza 1.
 3. CLI-ul (§3): **mai tarziu**, dupa inca 1-2 cazuri (ex. #15-16) — ramanem pe
-   scripturi individuale ca adaptorul sa iasa din experienta, nu din design a
+   individual scripts so that the adapter emerges from experience rather than from design
    priori.
 
 ---
@@ -184,24 +184,24 @@ ori pe zi"). Mutarea pe o masina-oglinda (**"dev"**) rezolva asta si a fost
 blocajul real al periodizarii. Trei componente:
 
 **A. Masina dev ruleaza backtestele.** Citesc `cachedb/cache_price_{symbol}.jsonl`
-(arhiva de pret) + valorile LIVE din config (baseline-ul). Deci dev are nevoie
+(the price archive) plus the LIVE values from config (the baseline). So dev needs
 de ambele proaspete → **sync productie→dev via git** (decizie user: git, nu
 ssh/rsync — da audit-trail gratis + reversibil). dev face pull la arhiva+config.
 
 **B. Scriere inapoi = POARTA de propunere, nu scriere directa** (guardrail-urile
 impartite pe cele 2 masini):
-- **dev** ruleaza gridul + confirmarea pe 2 ferestre → produce doar
+- **dev** runs the grid plus the confirmation over 2 windows, producing only
   *castigatorul confirmat* per cheie (semnalul curat), il propune (commit git).
 - **productia** primeste propunerea si APLICA: media cu valoarea live reala
-  (autoritativa acolo), rate-limit 7 zile, audit, scrie config. dev NU are drept
+  (authoritative there), a 7-day rate limit, an audit, and writes the config. dev has NO right
   de scriere directa — aceleasi 5 guardrail-uri raman, doar CPU-ul se muta.
 
 **C. `watchdogfor_cacheandconfig.py`** (decizie user: UN singur .py pt cache SI
 config — extind watchdogfor_cache.py existent, NU un fisier separat). Pe langa
-staleness de cache (azi), se uita prin fisierele de config si reporneste
+cache staleness (today), it looks through the config files and restarts
 procesul proprietar cand un config s-a schimbat recent. Generalizeaza
 `scheduled_pilot._restart_monitortrades()` + bonus: **prinde si editarile
-manuale** (azi editezi un config si trebuie sa-ti amintesti sa repornesti). 3
+manual ones** (today you edit a config and have to remember to restart). 3
 cerinte ca sa fie robust:
 1. **Detectie pe hash de continut, NU pe mtime** (acelasi tipar content-based
    deja folosit pt cache) — altfel o atingere de fisier fara schimbare reala
@@ -209,18 +209,18 @@ cerinte ca sa fie robust:
 2. **Harta config→proces** — atentie, unele config-uri au MAI MULTI consumatori:
    `instruments.conf` e citit de monitortrades.py SI tradeall.py → o schimbare =
    repornesti ambele.
-3. **Debounce / scriere atomica** — reporneste doar dupa o scriere completa, o
+3. **Debounce / atomic write** — it restarts only after a complete write, a
    singura data.
 
 Ramane de implementat dupa ce se dau datele de conectare pe dev. Pana atunci:
-candidati de backtest care ruleaza 100% local (one-off, dry-run), vezi §8/#15-16.
+backtest candidates that run 100% locally (one-off, dry run), see §8/#15-16.
 
 ---
 
 ## 6. Observatie 23 iul (dupa #1/#2): API-ul de piata are o interfata unificata
-care sa dea si "acum live" si "starea simulata la momentul X"?
+that can give both "live now" and "the simulated state at moment X"?
 
-Intrebare user: exchange-urile au un API unificat prin care iei fie starea
+The user's question: do the exchanges have a unified API from which you take either the
 LIVE reala acum, fie starea SIMULATA la un moment X — ar fi un pas important
 pt backtest consistent?
 
@@ -231,17 +231,17 @@ bucati separate care n-au fost inca unite:
   exchange-uri** (Binance/Kraken/Hyperliquid/T212 raspund la aceleasi apeluri:
   `get_current_price`, `get_orders`, `free_balance`).
 - `offline/backtests/tradeall.py`'s `_SimClock` + iteratorul de tick-uri istorice
-  unifica deja LIVE-vs-ISTORIC **pt timp**, dar DOAR pt tradeall.py, si NU
-  prin facada — e o bucla separata care re-construieste `PriceWindow`/
+  already unifies LIVE versus HISTORICAL **for time**, but ONLY for tradeall.py, and NOT
+  through the facade — it is a separate loop that rebuilds `PriceWindow`/
   `TrendState` direct din date istorice, ocolind complet `TrendCoordinator`/
-  cacheManager (calea REALA prin care tradeall.py obtine preturi azi).
+  cacheManager (the REAL path by which tradeall.py obtains prices today).
 
-Ce NU exista inca: facada `mkt` insasi sa aiba un "mod replay" — adica
+What does NOT exist yet: the `mkt` facade itself having a "replay mode" — that is,
 `mkt.get_current_price(symbol)` sa poata raspunde fie "acum", fie "la
-timestamp-ul simulat T", prin ACELASI apel. Daca ar exista, codul REAL al
+the simulated timestamp T", through the SAME call. If it existed, the REAL code of
 botilor (nu o reimplementare separata ca `kraken/backtest.py::simulate()`)
 ar putea rula neschimbat impotriva istoricului — eliminand complet riscul de
-derapaj intre "ce face botul real" si "ce simuleaza backtest-ul" (exact
+drift between "what the real bot does" and "what the backtest simulates" (exactly
 problema gasita azi la #1: bariera de reintrare lipsea din simulare pt ca
 simularea era o COPIE, nu codul real).
 
@@ -249,15 +249,15 @@ Limita onesta: unificarea asta rezolva doar latura de "ce spunea piata" —
 tot ai nevoie de un broker simulat separat (ca `BacktestBroker`/motoarele
 `simulate()` de azi) ca sa decizi "s-ar fi executat ordinul asta la pretul
 istoric respectiv" — asta ramane un mecanism DIFERIT, complementar, nu
-dispare prin unificarea sursei de pret/timp.
+disappears once the price/time source is unified.
 
 ---
 
 ## 7. Cerere user: flota (tradeall/monitortrades/rtrade/assetguardian) trebuie
-sa fie UNIFORMA ca sursa de pret (cache, nu live) si timp (din timestamp-ul
+be UNIFORM in its price source (the cache, not live) and its time (from the timestamp
 pretului, sau scara simulata a backtestului) — de unde incepem?
 
-Aleg 2 module pt FAZA 1 (nu toate 4 deodata), pe criteriul "cel mai mic efort
+I pick 2 modules for PHASE 1 (not all 4 at once), on the criterion of "the least effort
 x cea mai mare valoare imediata":
 
 ### FAZA 1: `tradeall.py` (formalizeaza ce exista deja) + `monitortrades.py` (nou)
@@ -268,7 +268,7 @@ simulare" cerut) si `offline/backtests/tradeall.py` deja re-alimenteaza `PriceWi
 cu preturi istorice in loc de live. Ce lipseste azi: mecanismul e ad hoc,
 scris o singura data in `offline/backtests/tradeall.py`, nereutilizabil de altundeva
 (hook-ul `threshold_provider` de azi e un prim pas spre generalizare, dar
-sursa de pret + ceasul raman "cusute" in bucla lui `run_backtest()`, nu o
+the price source and the clock stay "sewn into" the `run_backtest()` loop, rather than a
 componenta separata, reutilizabila). Faza 1 aici = extrage `_SimClock` +
 incarcarea tick-urilor istorice intr-o componenta mica, separata
 (`PriceReplaySource`?), NEschimband tradeall.py insusi (deja e suficient de
@@ -277,18 +277,18 @@ injectabil).
 **`monitortrades.py` — 0% azi, dar cea mai mare valoare.** Nu exista NICIUN
 backtest pt el, si `BACKTEST_CANDIDATES.md` a identificat gain/lost per
 simbol (`instruments.conf`) ca cel mai valoros candidat NETESTAT din tot
-inventarul (#4-5, prioritate ÎNALTĂ).
+the inventory (#4-5, HIGH priority).
 
-**23 iul, CONFIRMAT (nu doar speculat) — seama de injectare EXISTA deja, completa:**
-- `Instrument.__init__(..., api=None)` — daca `api` nu e dat, cade pe
+**23 Jul, CONFIRMED (not merely speculated) — the injection seam ALREADY EXISTS, complete:**
+- `Instrument.__init__(..., api=None)` — if `api` is not given, it falls back to
   singleton-ul live (`_default_api`); daca E dat, `self._provider =
-  self._api.provider_by_name(provider)` foloseste ACEL api. Toate metodele
+  self._api.provider_by_name(provider)` uses THAT api. Every method
   (`price()`, `orders()`, `free()`) delegheaza la `self._provider`.
 - `instruments_config.load_instruments(path=None, api=None)` si
   `load_for(consumer, path=None, api=None, ...)` propaga DEJA acest `api` mai
-  departe catre fiecare `Instrument` construit din `instruments.conf`.
-- Concluzie: `monitortrades.py` NU trebuie schimbat DELOC la liniile unde
-  citeste pret/ordine (`inst.price()`, `inst.orders(...)`, `load_for("mt")`)
+  onwards to every `Instrument` built from `instruments.conf`.
+- Conclusion: `monitortrades.py` needs NO change AT ALL at the lines where
+  it reads price and orders (`inst.price()`, `inst.orders(...)`, `load_for("mt")`)
   — doar construit/injectat un `MarketApi` diferit (unul de REPLAY) la
   pornirea unui backtest. Asta era, de fapt, exact scopul pt care facada asta
   a fost proiectata ("Faza 2a/2b" din docstring-ul `market_api.py` — cineva
@@ -297,66 +297,66 @@ inventarul (#4-5, prioritate ÎNALTĂ).
   — dar verificat azi: cele 2 implementari REALE existente (Hyperliquid,
   Kraken) sunt LIVE-ONLY ("ultimele N ore de la time.time() ACUM", bat reteaua
   reala de fiecare data) — bune pt backfill la pornirea unui bot, INUTILIZABILE
-  ca sursa de replay (nu citesc din cache local, nu accepta un moment T arbitrar
-  din trecut). T212/Binance nici nu-l implementeaza (return None).
+  as a replay source (they do not read from a local cache and accept no arbitrary moment T
+  in the past). T212 and Binance do not even implement it (they return None).
 
 **Ramane de scris DOAR o piesa noua**: `ReplayMarketDataProvider` (implementeaza
-`MarketDataProvider`, citeste din `cache_price_{symbol}.jsonl`/`cache_24price_*`,
+`MarketDataProvider`, reads from `cache_price_{symbol}.jsonl`/`cache_24price_*`,
 tine un cursor/ceas intern care avanseaza cu fiecare citire) + injectarea celor
 2 `time.time()` din `monitortrades.py` (`get_relevant_trade`,
 `monitor_price_and_trade`) printr-un `now_fn` implicit = `time.time`, legat de
-ACELASI ceas pe care il avanseaza noul provider — asa timpul chiar vine "din
+the SAME clock that the new provider advances — that way the time really does come "from
 timpul pretului obtinut", cum a cerut mesajul, nu dintr-un ceas simulat separat.
 
 Efortul e mult mai mic decat parea initial: 1 fisier nou (provider-ul de
 replay) + o injectare minima de ceas in monitortrades.py — NU o rescriere a
-cailor de pret/ordine, care functioneaza deja prin injectare de `api`.
+the price and order paths, which already work through `api` injection.
 
 **De ce NU rtrade/assetguardian in faza 1:**
-- `rtrade.py` ruleaza BUY si SELL pe THREAD-URI SEPARATE, concurent, pe
+- `rtrade.py` runs BUY and SELL on SEPARATE THREADS, concurrently, on
   ACELASI simbol — niciun motor de azi (fleet sau pozitie) modeleaza asta;
-  ar necesita design nou, nu doar injectare de pret/timp.
+  would require a new design, not merely price/time injection.
 - `assetguardian.py` evalueaza o singura data la ~54s pe o valoare de
   portofoliu AGREGATA (cache "AssetValue"), nu pe pretul unui simbol — sursa
   lui de "adevar" e alt tip de cache decat cel de pret; injectarea
   timpului/pretului e mai simpla acolo, dar valoarea de backtest e mai mica
   (deja "practic oprit" pe crestere, vezi `BACKTEST_CANDIDATES.md` §exclusii).
 
-Raman FAZA 2, dupa ce tiparul (sursa de pret injectabila + ceas injectabil)
+They remain PHASE 2, once the pattern (an injectable price source plus an injectable clock)
 se valideaza pe cele 2 din faza 1.
 
 ### Ce ar insemna concret sursa de pret + ceas unificate (schematic, tot plan)
 
-Doua componente MICI, reutilizabile intre tradeall si monitortrades:
+Two SMALL components, reusable between tradeall and monitortrades:
 
 - **`Clock`**: un obiect cu o metoda, `now() -> float`. Implicit = `time.time`
   (comportament live, neschimbat). In replay: `now()` intoarce timestamp-ul
-  ULTIMULUI pret citit din sursa de mai jos — nu un ceas simulat care avanseaza
+  the LAST price read from the source below — not a simulated clock that advances
   independent, exact cum a cerut mesajul ("timpul sa vina din timpul pretului
   obtinut") — asta e deja tiparul `_SimClock` din `offline/backtests/tradeall.py`,
-  doar generalizat sa nu fie legat de un singur fisier.
+  merely generalised so it is not tied to a single file.
 - **`PriceSource`**: un obiect cu o metoda, `get_price(symbol) -> float`.
   Implicit = calea live de azi (mkt/cacheManager, neschimbata). In replay:
-  citeste secvential din `cache_price_{symbol}.jsonl`/`cache_24price_*.json`,
+  reads sequentially from `cache_price_{symbol}.jsonl`/`cache_24price_*.json`,
   avansand `Clock`-ul asociat la fiecare citire.
 
 Ambele module (tradeall, monitortrades) ar primi aceste 2 obiecte prin
-injectare (parametru cu default = comportamentul live de azi), nu prin
+injection (a parameter whose default is today's live behaviour), not through
 monkeypatch extern — asta e diferenta fata de tiparul de azi din
 `offline/backtests/tradeall.py` (care monkeypatch-uieste `ta.po.place_order_smart`
-etc. din AFARA) si ar face testarea mai directa/clara.
+and so on from OUTSIDE) and would make testing more direct and clearer.
 
 ### Atentie (acelasi standard ca extragerile de azi)
 
-Orice schimbare in `monitortrades.py` insusi (nu doar harness alaturi)
-trebuie sa treaca prin acelasi test: valoarea implicita (fara Clock/PriceSource
+Any change in `monitortrades.py` itself (not just a harness beside it)
+must pass the same test: the default value (without a Clock/PriceSource
 custom injectat) trebuie sa reproduca EXACT comportamentul de azi — verificat
 numeric, cu teste dedicate, inainte de orice commit. Nu se schimba logica de
 decizie, doar SURSA datelor de intrare.
 
 ---
 
-## 8. Pilot construit 23 iul — status si un TODO real gasit (nu doar teoretic)
+## 8. The pilot built on 23 Jul — status and a real TODO found (not merely theoretical)
 
 Pilotul (monitortrades.py, `offline/research/backtest_ranges.py` +
 `offline/research/monitortrades_backtest/scheduled_pilot.py`) e construit si validat
@@ -365,7 +365,7 @@ bug-uri REALE (nu ipotetice) in mecanismul de backtest insusi:
 
 1. **`run_replay_backtest.SYMBOLS` era o copie hardcodata** a `instruments.conf`,
    inghetata inainte sa adaugam `mt.buy_budget`/`mt.max_budget` — orice test
-   ulterior rula FARA acea protectie, fara sa se observe (fix: citeste live,
+   would later run WITHOUT that protection, unnoticed (the fix: read it live,
    la fiecare acces).
 2. **`is_trend_up()` citea cache-ul de trend LIVE** (contamina un replay
    istoric cu starea REALA, curenta a pietei — acelasi backtest, rulat de 2
@@ -373,22 +373,22 @@ bug-uri REALE (nu ipotetice) in mecanismul de backtest insusi:
    (`return False`) in timpul backtest-ului.
 
 Fix-ul #2 e o SIMPLIFICARE, nu fidelitate completa — observatie user (23 iul,
-seara): `priceAnalysis.py` (care alimenteaza semnalul de trend din API-ul
+evening): `priceAnalysis.py` (which feeds the trend signal from the
 Binance in productie) ar trebui sa ruleze SINCRON cu `tradeall.py`/replay-ul
-istoric intr-un backtest, nu doar neutralizat. Adica: `priceAnalysis.py` ar
+historically in a backtest, not merely neutralised. That is: `priceAnalysis.py` would
 avea nevoie de ACELASI tratament de injectare pret+ceas ca `monitortrades.py`
 azi, calculand trendul DIN istoricul redat (acelasi ceas, aceleasi tick-uri),
-nu dintr-un feed live separat. Asta ar face `is_trend_up()` sa reflecte ce ar
-fi vazut CU ADEVARAT botul la acel moment istoric, nu doar "niciun semnal".
+not from a separate live feed. That would make `is_trend_up()` reflect what the bot
+would TRULY have seen at that historical moment, rather than just "no signal".
 
 **Ramane TODO explicit, NU implementat inca** — e o bucata de lucru comparabila
 ca marime cu ce am facut azi pt monitortrades.py (Instrument/MarketDataProvider),
 dar pt priceAnalysis.py, care azi n-are NICIUN punct de injectare. Pana atunci,
-orice backtest care foloseste is_trend_up() (deci orice backtest monitortrades)
+any backtest that uses is_trend_up() (so any monitortrades backtest)
 ramane cu simplificarea "neutru" — corect etichetata, dar incompleta.
 
 **Re-validare dupa fix-uri**: `instruments.conf` de azi (buy_budget=250,
-max_budget=3500 pt TAO) da rezultate STABILE si identice pt max_budget intre
+max_budget=3500 for TAO) gives STABLE and identical results for max_budget between
 1500-5000 (net -$170.83 vs buy&hold -$426.06) — instabilitatea vazuta inainte
 de fix (acelasi max_budget dand +$3016 apoi -$5279) era in intregime bug-ul
 #2, nu sensibilitate reala la parametru. Nicio schimbare de config necesara.
@@ -399,7 +399,7 @@ insemna ~20-90 min per ciclu — prea lent pt "de mai multe ori pe zi" fara
 ajustari (fereastra mai scurta pt rulari de rutina? rotatie prin parametri in
 loc de toti deodata? de decis inainte de a pune pe cron).
 
-**Pilot RULAT complet (23 iul, seara)**: 3 din 4 chei NU confirmate (castigator
+**The pilot was RUN in full (23 Jul, evening)**: 3 of the 4 keys were NOT confirmed (a winner
 diferit intre cele 2 ferestre — guardrail corect, respins ca zgomot). 1
 confirmata clar: TAO `mt.lost` — 5.6% a castigat pe AMBELE ferestre (edge vs
 buy&hold 259.85/329.0, fata de 84.07/208.21 la 4.9% actual). Aplicat automat
@@ -407,11 +407,11 @@ buy&hold 259.85/329.0, fata de 84.07/208.21 la 4.9% actual). Aplicat automat
 
 **TODO investigat, NU implementat (23 iul, seara — cerere user)**: observatie
 ca `priceAnalysis.py` si `tradeall.py` ar trebui sa fie sincrone intr-un
-backtest. Verificat prin grep: NU `priceAnalysis.py` scrie semnalul de trend
+backtest. Verified by grep: it is NOT `priceAnalysis.py` that writes the trend signal
 citit de `is_trend_up()` — e chiar `tradeall.py` (`TrendCoordinator.evaluate()`
 scrie `gradient_recent`/`final_trend` in `cacheManager.get_short_trend_manager()`,
 un singleton cu memorie IN-PROCES + fallback pe fisier `cache_instant_trend.json`
-pt orice proces care nu are inca nimic in memorie — asta explica exact
+for any process that has nothing in memory yet — that explains exactly
 contaminarea gasita: procesul de backtest, fiind un proces NOU, cade pe
 fisierul de pe disc, care e scris LIVE de tradeall.py real). Fix-ul corect ar
 insemna: alimentat un `PriceWindow` (acelasi tip deja folosit de
@@ -420,13 +420,13 @@ calculand `gradient_recent` real din date istorice, publicat intr-un
 snapshot IZOLAT (nu fisierul global) pt ca `is_trend_up()` sa-l citeasca.
 Tractabil (piesele exista deja), dar netestat — amanat deliberat (nu la ora
 asta, fara sa poata fi validat riguros ca restul sesiunii) in favoarea
-rularilor de backtest deja construite si validate, lasate peste noapte.
+the backtest runs already built and validated, left to run overnight.
 
 ---
 
 ## 10. Strategia de cautare: OFAT vs grid complet (EXTENSIE, 28 iul — NU implementat)
 
-Intrebare user: iau parametrii unul cate unul, sau toate combinatiile? Estimare
+The user's question: do I take the parameters one at a time, or all combinations? An estimate
 data: "4 params × 3 sample = 12 rulari".
 
 **Corectie de aritmetica** (capcana e combinatoriala, nu liniara):
@@ -439,7 +439,7 @@ data: "4 params × 3 sample = 12 rulari".
 | | OFAT | Grid complet |
 |---|---|---|
 | Rulari (4p × 3s) | 12 | 81 |
-| Prinde interactiuni intre parametri? | NU | DA |
+| Does it catch interactions between parameters? | NO | YES |
 | Interpretabil ("care knob e prost setat") | DA | greu (verdict cuplat) |
 
 **De ce conteaza interactiunile aici (nu teoretic):** `max_budget=5000` a dat
@@ -450,7 +450,7 @@ curenta a lui B; daca B se schimba, optimul lui A se muta.
 **Recomandare (pragmatica, bani reali):**
 1. **Default = OFAT** — exact ce face pilotul azi. Ieftin, verdict clar per param,
    se preteaza la rotatie pe dev (un param/rulare).
-2. **Grid complet DOAR pe perechi cunoscute cuplate** (ex. `gain × lost`, sau
+2. **A full grid ONLY on known coupled pairs** (e.g. `gain × lost`, or
    `hardtp × hardtp_fraction`) — 3×3=9 combinatii, ieftin, prinde fix interactiunea
    pe care OFAT o rateaza. Grid pe toti 4 deodata → evitat (81+).
 3. **O rulare de confirmare la config-ul propus COMPLET inainte de aplicare** —
@@ -464,5 +464,5 @@ schimbare confirmata asteapta 7 zile) — nu aplici 4 mutari simultan orb. Riscu
 "config comun netestat" e marginit natural.
 
 **Extensie propusa (NU implementata):** un mod `--grid gain,lost` in
-scheduled_pilot care face produs cartezian DOAR peste perechea data (restul raman
+scheduled_pilot that takes the Cartesian product ONLY over the given pair (the rest stay
 OFAT/fix). Mic, optional, de adaugat pe dev cand implementam faza dev/prod.
