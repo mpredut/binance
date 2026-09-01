@@ -1,4 +1,4 @@
-# Director exclusiv local: poate conține chei private, API keys și copii
-# decriptate. Singurul fișier permis în Git este chiar această regulă.
+# A strictly local directory: it may hold private keys, API keys and decrypted
+# copies. The only file allowed in Git is this rule itself.
 *
 !.gitignore
