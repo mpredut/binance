@@ -440,7 +440,7 @@ class Strategy:
         text = str(error or "").lower()
         return any(marker in text for marker in (
             "insufficient funds", "insufficient balance",
-            "insufficient spot balance", "insufficient balance",
+            "insufficient spot balance",
         ))
 
     @staticmethod

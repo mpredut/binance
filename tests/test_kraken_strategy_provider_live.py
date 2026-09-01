@@ -233,7 +233,7 @@ class ProviderLivePathTest(unittest.TestCase):
         self.assertIn("buy:ENTRY", self.s.s["placement_backoffs"])
 
     def test_insufficient_funds_preflight_has_persistent_exponential_backoff(self):
-        self.fake.preflight_error = ProviderError("sold insuficient")
+        self.fake.preflight_error = ProviderError("Insufficient funds")
         with patch.object(strat.time, "time", return_value=1000.0):
             self.assertFalse(
                 self.s._place("sell", 1.0, 60.0, kind="TP"))
@@ -270,7 +270,7 @@ class ProviderLivePathTest(unittest.TestCase):
         ))
 
     def test_preflight_refuzat_nu_creeaza_intentie_sau_ordin(self):
-        self.fake.preflight_error = ProviderError("sold insuficient")
+        self.fake.preflight_error = ProviderError("Insufficient funds")
         placed = self.s._place("buy", 10.0, 60.0, kind="DCA", amount=600.0)
         self.assertFalse(placed)
         self.assertTrue(any(c[0] == "preflight_order" for c in self.fake.calls))
