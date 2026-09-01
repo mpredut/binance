@@ -591,7 +591,7 @@ def render_chart(symbol, window_label, window_start, window_end,
         ax.plot([datetime.fromtimestamp(t) for t in vis_ts], vis_px,
                 color="#1f6feb", lw=0.8, label="pret")
     else:
-        ax.text(0.5, 0.5, "Inca nu sunt esantioane de pret\n(lasa monitorul sa ruleze putin)",
+        ax.text(0.5, 0.5, "No price samples yet\n(let the monitor run for a while)",
                 ha="center", va="center", transform=ax.transAxes, color="#888888")
 
     # Shadow Kalman transitions use violet diamonds and dotted lines so they are
@@ -810,7 +810,7 @@ def render_backtest_chunks(symbol, directory, chunk_hours=24, out_dir=None):
 
     all_ts = price_ts + [e["ts"] for e in trend_events] + [e["ts"] for e in order_events]
     if not all_ts:
-        print(f"[tradeall_observe] {symbol}: inca nu sunt date pentru cadre")
+        print(f"[tradeall_observe] {symbol}: no data for the frames yet")
         return []
 
     chunk_sec = chunk_hours * 3600
@@ -928,7 +928,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                       formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--symbols", default="BTCUSDC,TAOUSDC",
-                         help="listă separată prin virgulă (implicit: BTCUSDC,TAOUSDC)")
+                         help="comma-separated list (default: BTCUSDC,TAOUSDC)")
     parser.add_argument("--interval", type=float, default=2.0,
                          help="secunde intre cicluri (live + stare analiza; implicit 2)")
     parser.add_argument("--live-minutes", type=float, default=60.0,
@@ -944,7 +944,7 @@ def main():
     parser.add_argument("--frame-hours", type=float, default=None,
                          help="cu --backtest-dir: in loc de UN grafic dens cu tot intervalul, "
                               "genereaza o SERIE de cadre STATICE (imagini), cate unul per N ore. "
-                              "Genereaza o data si iese (nu ruleaza in bucla).")
+                              "Generate once and exit (it does not loop).")
     parser.add_argument("--window-hours", type=float, default=None,
                          help="cu --backtest-dir (fara --frame-hours): fereastra GLISANTA de N ore, "
                               "ancorata la ceasul simulat curent — ruleaza in bucla (ca live), "

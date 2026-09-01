@@ -1,4 +1,4 @@
-"""Gate conservator de promovare pentru două benchmarkuri financiare."""
+"""Conservative promotion gate for two financial benchmarks."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ class PromotionThresholds:
 
 @dataclass(frozen=True)
 class RiskAdjustedThresholds:
-    """Praguri pentru un candidat defensiv, fără a-l confunda cu unul de return."""
+    """Thresholds for a defensive candidate, without confusing it with a return one."""
 
     min_median_calmar_improvement_ratio: float = 0.15
     max_median_sortino_degradation_ratio: float = 0.05
@@ -46,7 +46,7 @@ def _identity(report: dict) -> tuple:
 
 
 def _one_sided_sign_pvalue(wins: int, losses: int) -> float:
-    """P(X >= wins), X~Binomial(wins+losses, 0.5), ignorând egalitățile."""
+    """P(X >= wins), X~Binomial(wins+losses, 0.5), ignoring ties."""
     active = wins + losses
     if active == 0:
         return 1.0
@@ -64,7 +64,7 @@ def _finite(value) -> float | None:
 
 
 def _relative_change(baseline, candidate) -> float | None:
-    """Schimbare relativă numai pentru o bază pozitivă, comparabilă."""
+    """Relative change only for a positive, comparable base."""
     base = _finite(baseline)
     cand = _finite(candidate)
     if base is None or cand is None or base <= 0:
@@ -77,26 +77,26 @@ def evaluate_promotion(
     candidate: dict,
     thresholds: PromotionThresholds | None = None,
 ) -> dict:
-    """Candidatul trece numai dacă este robust în TOATE scenariile comune."""
+    """The candidate passes only if it is robust in ALL shared scenarios."""
     limits = thresholds or PromotionThresholds()
     if _identity(baseline) != _identity(candidate):
-        raise ValueError("baseline și candidat folosesc dataset/ferestre diferite")
+        raise ValueError("baseline and candidate use different datasets or windows")
 
     base_scenarios = baseline.get("scenarios") or {}
     candidate_scenarios = candidate.get("scenarios") or {}
     if not base_scenarios or set(base_scenarios) != set(candidate_scenarios):
-        raise ValueError("baseline și candidat trebuie să aibă aceleași scenarii")
+        raise ValueError("baseline and candidate must have the same scenarios")
 
     scenario_results = {}
     for name in sorted(base_scenarios):
         base = base_scenarios[name]
         cand = candidate_scenarios[name]
         if base.get("assumptions") != cand.get("assumptions"):
-            raise ValueError(f"ipoteze de execuție diferite în scenariul {name}")
+            raise ValueError(f"different execution assumptions in scenario {name}")
         base_windows = {window["key"]: window for window in base.get("windows", [])}
         cand_windows = {window["key"]: window for window in cand.get("windows", [])}
         if set(base_windows) != set(cand_windows):
-            raise ValueError(f"ferestre diferite în scenariul {name}")
+            raise ValueError(f"different windows in scenario {name}")
         deltas = [
             float(cand_windows[key]["return_pct"])
             - float(base_windows[key]["return_pct"])
@@ -166,20 +166,20 @@ def evaluate_risk_adjusted_promotion(
     candidate: dict,
     thresholds: RiskAdjustedThresholds | None = None,
 ) -> dict:
-    """Evaluează o pistă defensivă pe metricile reale ale fold-urilor.
+    """Evaluate a defensive track on the real per-fold metrics.
 
-    Nu folosim ``mean_return / worst_drawdown`` drept Calmar: numărătorul și
-    numitorul ar putea proveni din fold-uri diferite. Benchmarkul calculează
-    Calmar pe curba fiecărui fold, iar gate-ul compară medianele acelor valori.
+    We do not use ``mean_return / worst_drawdown`` as Calmar: the numerator and
+    denominator could come from different folds. The benchmark computes Calmar on
+    each fold's curve, and the gate compares the medians of those values.
     """
     limits = thresholds or RiskAdjustedThresholds()
     if _identity(baseline) != _identity(candidate):
-        raise ValueError("baseline și candidat folosesc dataset/ferestre diferite")
+        raise ValueError("baseline and candidate use different datasets or windows")
 
     base_scenarios = baseline.get("scenarios") or {}
     candidate_scenarios = candidate.get("scenarios") or {}
     if not base_scenarios or set(base_scenarios) != set(candidate_scenarios):
-        raise ValueError("baseline și candidat trebuie să aibă aceleași scenarii")
+        raise ValueError("baseline and candidate must have the same scenarios")
 
     scenario_results = {}
     tolerance = 1e-10
@@ -187,11 +187,11 @@ def evaluate_risk_adjusted_promotion(
         base = base_scenarios[name]
         cand = candidate_scenarios[name]
         if base.get("assumptions") != cand.get("assumptions"):
-            raise ValueError(f"ipoteze de execuție diferite în scenariul {name}")
+            raise ValueError(f"different execution assumptions in scenario {name}")
         base_windows = {window["key"]: window for window in base.get("windows", [])}
         cand_windows = {window["key"]: window for window in cand.get("windows", [])}
         if set(base_windows) != set(cand_windows):
-            raise ValueError(f"ferestre diferite în scenariul {name}")
+            raise ValueError(f"different windows in scenario {name}")
 
         drawdown_improvements = [
             float(base_windows[key]["max_drawdown_pct"])
@@ -311,7 +311,7 @@ def evaluate_dual_promotion(
     return_thresholds: PromotionThresholds | None = None,
     risk_thresholds: RiskAdjustedThresholds | None = None,
 ) -> dict:
-    """Candidatul este eligibil prin RETURN sau DEFENSIVE, cu eticheta păstrată."""
+    """The candidate is eligible through RETURN or DEFENSIVE, with the label kept."""
     return_gate = evaluate_promotion(baseline, candidate, return_thresholds)
     defensive_gate = evaluate_risk_adjusted_promotion(
         baseline, candidate, risk_thresholds,

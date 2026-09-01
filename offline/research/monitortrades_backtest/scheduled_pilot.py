@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 scheduled_pilot.py — PILOT (un singur modul: monitortrades.py, decizie user
-23 iul: "deocamdata facem un test pilot si nu extindem la toate modulele").
+23 Jul: "for now we run a pilot test and do not extend it to all modules").
 
-Citeste rangurile de test din adnotarile "# BACKTEST: ..." scrise DIRECT in
+It reads the test ranges from the "# BACKTEST: ..." annotations written DIRECTLY in
 instruments.conf (offline/research/backtest_ranges.py, text simplu — NU YAML/JSON,
 decizie explicita user), ruleaza backtest REAL (offline/research/monitortrades_backtest/
 run_replay_backtest.py, peste cache_price_{symbol}.jsonl) pt fiecare valoare
-din grid, si RECONFIGUREAZA + REPORNESTE monitortrades.py daca gaseste o
+from the grid, and RECONFIGURES + RESTARTS monitortrades.py if it finds a
 valoare clar mai buna — cu guardrail-uri explicite (user a cerut automatizare
 completa, dar dupa ce am aratat azi ca acelasi max_budget=5000 a dat +$3016 in
 o configurare si -$5279 in alta, pe ACELASI istoric):
@@ -15,18 +15,18 @@ o configurare si -$5279 in alta, pe ACELASI istoric):
   1. CONFIRMARE PE 2 FERESTRE INDEPENDENTE: istoricul disponibil e impartit in
      jumatate (prima/a doua) — o valoare e considerata "castigatoare" DOAR
      daca are cel mai bun avantaj fata de buy&hold (net - buy_hold) in AMBELE
-     jumatati, nu doar una. Un rezultat care castiga doar pe o fereastra e
+     halves, not just one. A result that wins on only one window is
      tratat ca zgomot, nu semnal.
-  2. DOAR valori din grid (niciodata extrapolare).
+  2. ONLY values from the grid (never extrapolation).
   3. MEDIE, nu salt direct (decizie user): valoarea aplicata efectiv =
      (valoare_configurata_azi + valoare_castigatoare_backtest) / 2 —
      amortizeaza exact genul de instabilitate demonstrat azi.
   4. RATE-LIMIT: un parametru nu se schimba mai des de o data la
      PILOT_MIN_DAYS_BETWEEN_CHANGES zile (implicit 7) — jurnal persistent.
   5. AUDIT: fiecare rulare scrie un rand in jurnal (testat, ambele ferestre,
-     decizie, motiv) — independent daca s-a schimbat ceva sau nu.
+     decision, reason) — whether or not anything changed.
   6. NOTIFICARE (alertnotifiers.notify, canalul deja folosit de flota): DOAR
-     cand se aplica o schimbare reala (nu la fiecare rulare "nimic nou").
+     when a real change is applied (not on every "nothing new" run).
   7. KILL-SWITCH: env PILOT_DISABLED=true opreste TOTUL, fara sa atinga codul.
 
 Rulare manuala (recomandat inainte de a fi pusa pe cron):
@@ -58,14 +58,14 @@ AUDIT_LOG = os.path.join(ROOT, "logger", "backtest_pilot_audit.jsonl")
 MIN_DAYS_BETWEEN_CHANGES = float(os.environ.get("PILOT_MIN_DAYS_BETWEEN_CHANGES", "7"))
 # Castigatorul trebuie sa bata valoarea CURENTA cu cel putin atata (net-buy_hold,
 # USD) pe AMBELE ferestre. Altfel schimbarea e sub zgomot / parametrul e inert pe
-# acest istoric (ex. gasit 28 iul: hard-TP nu se declanseaza -> toate valorile dau
+# this history (e.g. found 28 Jul: hard-TP never fires -> every value gives
 # rezultate identice, iar max() pe egalitate "aplica" fals primul element din grila).
 MIN_EDGE_MARGIN_USD = float(os.environ.get("PILOT_MIN_EDGE_MARGIN_USD", "1.0"))
 
 # Chei in scope-ul pilotului (BTC/TAO, monitortrades) — restul adnotarilor din
-# instruments.conf NU sunt atinse fara sa extindem explicit lista asta (decizie
-# user: pilot restrans la monitortrades, nu toate modulele). Toate traiesc ca
-# mt.* in instruments.conf, deci run_replay_backtest le fireaza deja prin params
+# instruments.conf are NOT touched without explicitly extending this list (a user
+# decision: the pilot is limited to monitortrades, not all modules). They all live as
+# mt.* in instruments.conf, so run_replay_backtest already fires them through params
 # (verificat: is_trend_up neutralizat, maxage->since_s, hardtp->inst.param).
 #   #4-5  gain/lost   (FACUT 23 iul: TAO mt.lost 4.9->5.25 aplicat)
 #   #16   maxage_days (28 iul)
@@ -90,7 +90,7 @@ def _now_iso():
 
 def _git_head_short():
     """Commit-ul (scurt) al codului care a produs propunerea — pt ca prod sa stie
-    exact ce versiune de motor/config a generat-o. '?' daca git nu raspunde."""
+    exactly which engine/config version produced it. '?' if git does not answer."""
     import subprocess
     try:
         return subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"],
@@ -123,7 +123,7 @@ def _last_change_for(full_key):
 
 
 def _current_value(section, key):
-    """Citeste valoarea LIVE azi (nu grid-ul) direct din instruments.conf."""
+    """Read today's LIVE value (not the grid) directly from instruments.conf."""
     import configparser
     cp = configparser.ConfigParser()
     cp.read(INSTRUMENTS_CONF)
@@ -153,10 +153,10 @@ def _split_series(symbol):
 
 def _run_one(symbol, base, params, series):
     """Ruleaza logica REALA de backtest (identica structural cu
-    run_replay_backtest.run_symbol()) peste o SERIE data direct (nu fisierul
+    run_replay_backtest.run_symbol()) over a SERIES given directly (not the file
     intreg de pe disc) — necesar ca sa putem testa cele 2 jumatati separat
-    fara sa citim/impartim fisierul de fiecare data. NU scrie pnl.json (pilotul
-    ruleaza zeci de variante -> ar genera zeci de foldere fara rost in
+    without reading/splitting the file every time. It does NOT write pnl.json (the pilot
+    runs dozens of variants -> it would generate dozens of pointless folders in
     logger/backtest/)."""
     if not series:
         return None
@@ -221,9 +221,9 @@ def evaluate_key(full_key, symbol, base, key, dry_run=True, propose=False):
     if len(half1) < 100 or len(half2) < 100:
         return {"full_key": full_key, "action": "skipped", "reason": "istoric insuficient pt 2 ferestre"}
 
-    # Asigura ca valoarea LIVE curenta e printre cele testate: fara ea nu putem
+    # Make sure the current LIVE value is among those tested: without it we cannot
     # compara castigatorul CU ea, iar un parametru INERT (toate valorile dau
-    # rezultate identice) ar fi "aplicat" fals catre primul element din grila
+    # identical results) would be falsely "applied" to the first element of the grid
     # (max() pe egalitate intoarce primul). Gasit 28 iul la #15 hardtp.
     test_values = list(grid_values)
     if not any(abs(float(v) - current) < 1e-9 for v in test_values):
@@ -310,7 +310,7 @@ def evaluate_key(full_key, symbol, base, key, dry_run=True, propose=False):
 
 
 def _apply_config_change(section, key, old_value, new_value):
-    """Inlocuieste DOAR valoarea numerica de pe linia `key = ...` din
+    """Replace ONLY the numeric value on the `key = ...` line in
     sectiunea `section`, pastrand tot restul fisierului (comentarii,
     formatare, alte sectiuni) neatins."""
     with open(INSTRUMENTS_CONF, encoding="utf-8") as f:

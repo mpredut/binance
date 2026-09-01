@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-Experiment IZOLAT (nu atinge niciun fisier din repo) pt intrebarea utilizatorului:
-"pot mari sansa cand se executa triggerele BUY/SELL din tradeall.py? sunt niste
+An ISOLATED experiment (it touches no file in the repo) for the user's question:
+"can I improve the odds when the BUY/SELL triggers in tradeall.py fire? there are
 contoare/limite harcodate acolo..."
 
 Ipoteza (din citirea codului, tradeall.py:206-334 TrendState + 356-471 logic()):
-  confirm_trend()/start_trend() sunt apelate DOAR in interiorul conditiei inguste
-  "gradient>0 si slope_big<0" (sau invers) — o divergenta intre trendul FERESTREI
-  MICI (gradient, semn -1/0/+1) si un prag de miscare mare pe FEREASTRA MARE
+  confirm_trend()/start_trend() are called ONLY inside the narrow condition
+  "gradient>0 and slope_big<0" (or the reverse) — a divergence between the SMALL
+  WINDOW trend (gradient, sign -1/0/+1) and a large movement threshold on the BIG WINDOW
   (slope_big, aproape mereu 0 -- vezi WindowAnalyzer.check_price_change). Daca
   aceasta divergenta e rara, atunci:
     - confirm_count rareori ajunge la pragul de 24 (8*3) cerut de
@@ -23,7 +23,7 @@ Testam empiric: instrumentam TrendState (subclasa, override start_trend/
 confirm_trend/check_trend_expiration) ca sa numaram exact aceste evenimente,
 pe un backtest SCURT (cateva ore) BTCUSDC, cu pragurile ACTUALE (baseline)
 si apoi cu un candidat de relaxare (expiration_trend_time mult mai mare).
-NU modifica tradeall.py pe disc — totul e monkeypatch in memorie, in acest
+It does NOT modify tradeall.py on disk — everything is an in-memory monkeypatch, in this
 proces separat.
 """
 import os
@@ -121,8 +121,8 @@ def run_variant(tag, symbol, start_ts, end_ts, expiration_trend_time_override=No
     pnl_path = os.path.join(out_dir, "pnl.json")
     pnl = json.load(open(pnl_path)) if os.path.exists(pnl_path) else {}
     # quiet=True -> log.disable_print() monkeypatch-uieste builtins.print GLOBAL
-    # (nu doar in tradeall.py) -> print() de mai jos ar fi inghitit tacut. stderr
-    # ramane vizibil (acelasi motiv pt care offline/backtests/tradeall.py insusi foloseste
+    # (not only in tradeall.py) -> the print() below would be swallowed silently. stderr
+    # stays visible (the same reason offline/backtests/tradeall.py itself uses
     # sys.stderr.write pt propriile mesaje de progres in modul --quiet).
     sys.stderr.write(f"\n=== {tag} === (wall {elapsed:.1f}s)\n")
     sys.stderr.write(f"stats: {STATS[tag]}\n")
@@ -135,9 +135,9 @@ if __name__ == "__main__":
     # TAOUSDC, nu BTCUSDC: backtest-ul principal a aratat deja activitate (186 BUY
     # intr-un puseu) pe TAO, in timp ce BTC a stat la 0/0 zeci de mii de tick-uri —
     # avem nevoie de un simbol unde divergenta gradient/slope_big chiar se intampla,
-    # ca sa observam starts/confirms/expires, nu doar zerouri plate.
+    # so we can observe starts/confirms/expires, not just flat zeroes.
     symbol = "TAOUSDC"
-    # arhiva TAO incepe la 2026-07-14 19:35:09 (verificat direct din jsonl) — NU
+    # the TAO archive starts at 2026-07-14 19:35:09 (checked directly in the jsonl) — do NOT
     # miezul noptii (prima incercare a dat 0 tick-uri, fereastra cadea inainte de
     # inceputul real al datelor).
     start_ts = datetime.strptime("2026-07-14 19:40:00", "%Y-%m-%d %H:%M:%S").timestamp()

@@ -66,12 +66,12 @@ class AlertRequest(BaseModel):
 @app.post("/trade/sell")
 async def sell(request: TradeRequest):
     # Submit a guarded limit sell one percent above the current Binance price.
-    print(f"Vândut {request.amount} din {request.symbol}")
+    print(f"Sold {request.amount} of {request.symbol}")
     current_price = api.get_current_price(str(request.symbol))
     sell_price = current_price * (1 + 0.01 )
     print(f"Pret BTC {current_price} {sell_price}")
     mkt.place(str(request.symbol), "SELL", sell_price, request.amount)   # proxy unic guardat
-    return {"message": f"Vândut {request.amount} din {request.symbol}"}
+    return {"message": f"Sold {request.amount} of {request.symbol}"}
 
 @app.post("/trade/buy")
 async def buy(request: TradeRequest):
@@ -81,7 +81,7 @@ async def buy(request: TradeRequest):
     sell_price = current_price * (1 - 0.01 )
     print(f"Pret BTC {current_price} {sell_price}")
     mkt.place(str(request.symbol), "BUY", sell_price, request.amount)   # proxy unic guardat
-    return {"message": f"Cumpărat {request.amount} din {request.symbol}"}
+    return {"message": f"Bought {request.amount} of {request.symbol}"}
 
 @app.get("/status/get")
 async def get_status(symbol: str):
@@ -92,5 +92,5 @@ async def get_status(symbol: str):
 async def set_alert(request: AlertRequest):
     # Placeholder response; this endpoint does not persist or schedule an alert.
     return {
-        "message": f"Alertă setată pentru {request.symbol}: {request.direction} la {request.threshold}"
+        "message": f"Alert set for {request.symbol}: {request.direction} at {request.threshold}"
     }

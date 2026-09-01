@@ -598,7 +598,7 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=No
     duration_days = trend["duration_seconds"] / 86400
     print(f"Trend read from the cache manager for symbol {symbol}: {trend}")
     print(f"   Start trend:     {format_timestamp(trend["start_timestamp"])}")
-    print(f"   Durată:          {format_duration(trend["duration_seconds"])} ({duration_days:.1f} days)")
+    print(f"   Duration:        {format_duration(trend["duration_seconds"])} ({duration_days:.1f} days)")
     timestamp = trend['timestamp']
     # Include order type and T in the memo key because their weights differ and
     # automatic T may change after re-estimation.

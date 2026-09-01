@@ -30,7 +30,7 @@ class TradeCacheManager:
                     self.trade_cache = data.get("trades", [])
                     self.last_fetch_time_per_symbol = data.get("last_fetch", {})
             except Exception as e:
-                print(f"[Eroare] La citirea fișierului cache: {e}")
+                print(f"[Error] While reading the cache file: {e}")
 
         if not self.last_fetch_time_per_symbol:
             self.last_fetch_time_per_symbol = self._rebuild_last_fetch_times()
@@ -69,7 +69,7 @@ class TradeCacheManager:
                 }, f)
             os.replace(tmp_file, self.filename)
         except Exception as e:
-            print(f"[Eroare] La salvarea fișierului cache: {e}")
+            print(f"[Error] While saving the cache file: {e}")
 
     def _is_valid_trade(self, trade):
         required_keys = ['symbol', 'id', 'orderId', 'price', 'qty', 'time', 'isBuyer']
@@ -110,7 +110,7 @@ class TradeCacheManager:
         self.trade_cache.extend(unique_new_trades)
         self.last_fetch_time_per_symbol[symbol] = current_time
 
-        print(f"[Info] {symbol}: Adăugate {len(unique_new_trades)} tranzacții noi.")
+        print(f"[Info] {symbol}: added {len(unique_new_trades)} new trades.")
 
     def update_all(self, symbols):
         for symbol in symbols:

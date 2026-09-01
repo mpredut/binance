@@ -28,7 +28,7 @@ def calculate_performance_metrics(
     prevents falsely comparing 1h series with 4h/1d ones.
     """
     if initial_capital <= 0:
-        raise ValueError("initial_capital trebuie să fie pozitiv")
+        raise ValueError("initial_capital must be positive")
     if not 0 < cvar_confidence < 1:
         raise ValueError("cvar_confidence must be between 0 and 1")
 
@@ -36,7 +36,7 @@ def calculate_performance_metrics(
     if not curve:
         raise ValueError("equity_curve cannot be empty")
     if not math.isclose(curve[0], initial_capital, rel_tol=1e-9, abs_tol=1e-9):
-        raise ValueError("primul punct din equity_curve trebuie să fie initial_capital")
+        raise ValueError("the first point of equity_curve must be initial_capital")
 
     peak = curve[0]
     peak_index = 0
@@ -64,7 +64,7 @@ def calculate_performance_metrics(
 
     annualized_return = sharpe = sortino = calmar = None
     if periods_per_year is not None and periods_per_year <= 0:
-        raise ValueError("periods_per_year trebuie să fie pozitiv")
+        raise ValueError("periods_per_year must be positive")
     if periods_per_year and periodic_returns and returns_valid:
         periods = len(periodic_returns)
         growth = curve[-1] / initial_capital

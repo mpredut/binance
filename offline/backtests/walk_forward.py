@@ -1,4 +1,4 @@
-"""Splituri temporale walk-forward fără shuffle și fără leakage."""
+"""Walk-forward time splits, without shuffling and without leakage."""
 
 from __future__ import annotations
 
@@ -22,18 +22,18 @@ def walk_forward_splits(
     step_size: int | None = None,
     anchored_train: bool = False,
 ) -> list[WalkForwardFold]:
-    """Returnează fold-uri strict cronologice ``train < validation < test``.
+    """Return strictly chronological folds ``train < validation < test``.
 
-    În modul rolling, train-ul are lungime fixă. Cu ``anchored_train=True``,
-    începutul rămâne 0 și fereastra de train crește la fiecare pas.
+    In rolling mode the train has a fixed length. With ``anchored_train=True``,
+    the start stays at 0 and the train window grows at every step.
     """
     sizes = (sample_count, train_size, validation_size, test_size)
     if any(not isinstance(value, int) or value <= 0 for value in sizes):
-        raise ValueError("sample_count și dimensiunile ferestrelor trebuie să fie întregi pozitivi")
+        raise ValueError("sample_count and the window sizes must be positive integers")
     if step_size is None:
         step_size = test_size
     if not isinstance(step_size, int) or step_size <= 0:
-        raise ValueError("step_size trebuie să fie un întreg pozitiv")
+        raise ValueError("step_size must be a positive integer")
 
     required = train_size + validation_size + test_size
     if sample_count < required:
@@ -56,21 +56,21 @@ def walk_forward_splits(
 
 
 def summarize_test_windows(windows: list[dict]) -> dict:
-    """Agregă ferestre TEST comparabile, fără să ascundă cel mai slab regim.
+    """Aggregate comparable TEST windows without hiding the worst regime.
 
-    Fiecare element trebuie să conțină ``return_pct``, ``max_drawdown_pct``,
-    ``buy_hold_return_pct``, ``cycles`` și ``fills``. Ferestrele au pondere
-    egală; nu amestecăm curbele de equity cu frecvențe diferite.
+    Each element must contain ``return_pct``, ``max_drawdown_pct``,
+    ``buy_hold_return_pct``, ``cycles`` and ``fills``. The windows are weighted
+    equally; we do not mix equity curves with different frequencies.
     """
     if not windows:
-        raise ValueError("este necesară cel puțin o fereastră TEST")
+        raise ValueError("at least one TEST window is required")
     required = {
         "return_pct", "max_drawdown_pct", "buy_hold_return_pct", "cycles", "fills",
     }
     for window in windows:
         missing = required.difference(window)
         if missing:
-            raise ValueError(f"câmpuri lipsă în fereastra TEST: {sorted(missing)}")
+            raise ValueError(f"missing fields in the TEST window: {sorted(missing)}")
 
     returns = [float(window["return_pct"]) for window in windows]
     drawdowns = [float(window["max_drawdown_pct"]) for window in windows]

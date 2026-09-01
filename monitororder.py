@@ -44,7 +44,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders=None):
     """
     orders = api.get_open_orders(order_type, symbol)  # Fetch open orders for the requested side.
     if not orders:
-        print(f"Pentru {symbol} Nu exista ordine de {order_type} deschise initial.")
+        print(f"For {symbol} there are no open {order_type} orders to begin with.")
         return
     
     current_price = api.get_current_price(symbol)
@@ -61,7 +61,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders=None):
         price = order['price']
 
         if not price or price <= 0:          # Guard against division by zero for invalid prices.
-            print(f"Preț invalid ({price}) pentru ordinul {order_id}, sar peste.")
+            print(f"Invalid price ({price}) for order {order_id}, skipping.")
             continue
 
         if order_id not in initial_prices:

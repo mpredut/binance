@@ -156,7 +156,7 @@ print(df_sorted_greatest_decrease_24h)
 # Build and print the cross-source comparison.
 df_top_10_new, df_top_10_increase_7d, df_top_10_decrease_7d, df_top_10_increase_24h, df_top_10_decrease_24h = find_common_coins_and_sort(10, df_cmc, binance_coins)
 
-print("Primele 10 monede disponibile si pe CoinMarketCap, si pe Binance, sortate dupa noutate:")
+print("The first 10 coins available on both CoinMarketCap and Binance, sorted by newness:")
 print(df_top_10_new)
 
 print("\nTop 10 cresteri pe 7 zile:")

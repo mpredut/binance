@@ -57,7 +57,7 @@ def plot_history(symbol: str, dt, prices: np.ndarray, outdir="plots"):
     ensure_dir(outdir)
     plt.figure(figsize=(10, 5))
     plt.plot(dt, prices, marker="o", linestyle="-")
-    plt.title(f"Evoluția prețului - {symbol}")
+    plt.title(f"Price evolution - {symbol}")
     plt.xlabel("Timp")
     plt.ylabel("Preț")
     plt.grid(True)
@@ -102,7 +102,7 @@ def plot_with_linear(symbol: str, dt, prices: np.ndarray, lin_forecast: np.ndarr
     plt.plot(dt, prices, marker="o", linestyle="-", label="Istoric")
     if future_dt:
         plt.plot(future_dt, lin_forecast, marker="o", linestyle="--", label="Regresie (forecast)")
-    plt.title(f"Forecast (Regresie liniară) - {symbol}")
+    plt.title(f"Forecast (linear regression) - {symbol}")
     plt.xlabel("Timp")
     plt.ylabel("Preț")
     plt.grid(True)
@@ -152,7 +152,7 @@ def forecast_lstm(prices: np.ndarray, window: int = 20, epochs: int = 50, batch_
         return None, f"LSTM indisponibil: {tf_or_err}"
 
     if len(prices) < window + 5:
-        return None, f"Seria e prea scurtă pentru LSTM (minim ~{window+5} puncte)."
+        return None, f"The series is too short for LSTM (at least ~{window+5} points)."
 
     # Scale to [0, 1].
     scaled, vmin, vmax = min_max_scale(prices)
@@ -234,7 +234,7 @@ def run_for_symbols(symbols: List[str],
         ts, prices, dt = to_series(pairs)
 
         if len(prices) == 0:
-            results[symbol] = {"error": "Nu există date în cache."}
+            results[symbol] = {"error": "No data in the cache."}
             continue
 
         print(f" plot history{symbol} ")
@@ -290,4 +290,4 @@ if __name__ == "__main__":
     # 3) Optionally save a JSON report of the results.
     with open("forecast_results.json", "w", encoding="utf-8") as f:
         json.dump(res, f, ensure_ascii=False, indent=2)
-    print("\nImaginile au fost salvate în folderul ./plots și rezumatul în forecast_results.json")
+    print("\nThe images were saved in ./plots and the summary in forecast_results.json")

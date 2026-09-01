@@ -31,7 +31,7 @@ def load_config():
             config_cache = new_config
             print("Config actualizat:", config_cache)
     except FileNotFoundError:
-        print(f"Fișierul {config_file_path} nu a fost găsit.")
+        print(f"File {config_file_path} was not found.")
 
 def config_watcher(interval= 5 * 60): #5 minute
     """
@@ -78,13 +78,13 @@ load_config()
 # Exemplu de utilizare
 if __name__ == "__main__":
     start_config_watcher()
-    print("Monitorizarea fișierului de configurare...")
+    print("Watching the configuration file...")
     try:
         while True:
             # Demonstrate the trading-enabled check.
             print("Trade Enabled:", is_trade_enabled())
             time.sleep(10)
     except KeyboardInterrupt:
-        print("Monitorizare oprită.")
+        print("Monitoring stopped.")
         stop_config_watcher()
         

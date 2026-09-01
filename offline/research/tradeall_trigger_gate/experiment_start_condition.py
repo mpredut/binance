@@ -24,9 +24,9 @@ start — restul functiei e IDENTIC cu originalul citit direct din tradeall.py):
                       ca slope_big sa nu mai fie aproape mereu 0
 
 Rulat pe DOUA simboluri: BTCUSDC (complet TACUT sub V0 in primele ~60% din arhiva
-de 7 zile — cel mai clar test daca o conditie mai larga "trezeste" ceva) si
+of 7 days — the clearest test of whether a wider condition "wakes up" anything) and
 TAOUSDC (avea deja 1 start sub V0 in 12h — verificam daca variantele produc
-starturi SUPLIMENTARE, independente, nu doar acelasi eveniment).
+ADDITIONAL, independent starts, not merely the same event).
 """
 import os
 import sys
@@ -190,7 +190,7 @@ if __name__ == "__main__":
 
     # BTC: primele 2 zile — sub V0 (baseline) stim deja ca sunt COMPLET TACUTE
     # (0 starts, verificat separat in backtest-ul A/B principal). Cel mai curat
-    # test daca o conditie mai larga produce starturi noi acolo unde azi nu e nimic.
+    # a test of whether a wider condition produces new starts where there is nothing today.
     btc_start = datetime.strptime("2026-07-14", "%Y-%m-%d").timestamp()
     btc_end = btc_start + 2 * 24 * 3600
 

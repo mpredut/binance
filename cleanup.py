@@ -21,10 +21,10 @@ def parse_date_from_filename(filename):
         return None
 
 """
-Monitorizează și curăță fișierele dintr-un folder conform criteriilor:
-- Șterge fișierele mai vechi de `max_file_age_days` zile.
-- Șterge fișierele care depășesc `max_file_size_mb` MB.
-- Dacă spațiul liber pe disc este sub `min_free_space_mb`, șterge cel mai vechi fișier din fiecare tip.
+Monitor and clean the files in a folder according to these criteria:
+- Delete files older than `max_file_age_days` days.
+- Delete files larger than `max_file_size_mb` MB.
+- If free disk space is below `min_free_space_mb`, delete the oldest file of each type.
 """
 def monitor_and_cleanup(folder_path, max_file_age_days=30, max_file_size_mb=1024, min_free_space_mb=1024):
     now = datetime.now()
@@ -78,11 +78,11 @@ CURRENT_PATH = os.getcwd()
 folder_to_monitor = CURRENT_PATH + "/bot_logger"
 
 if __name__ == "__main__":
-    print("Monitorizarea logurilor a început.")
+    print("Log monitoring started.")
     try:
         while True:
             monitor_and_cleanup(folder_to_monitor, max_file_age_days=60, max_file_size_mb=1024/10, min_free_space_mb=1024 * 2) #2 GB
             time.sleep(12 * 60 * 60) # seconds
             #time.sleep(100)
     except KeyboardInterrupt:
-        print("Monitorizarea a fost oprită manual.")
+        print("Monitoring stopped manually.")
