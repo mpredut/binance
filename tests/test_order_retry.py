@@ -144,6 +144,30 @@ class OrderRetryStoreTest(unittest.TestCase):
         self.assertEqual(
             {record["id"] for record in oq.load_all()}, {accepted_id, latest})
 
+    def test_startup_consolidation_compacts_existing_deferred_history(self):
+        oq.RETRY_DEDUP = False
+        ids = []
+        for now, qty in ((1000.0, 5.0), (1001.0, 3.0), (1002.0, 2.0)):
+            ids.append(oq.enqueue(
+                "TAOUSDC", "SELL", qty, {}, requested_price=240.0, now=now,
+                failure_reason="network", kind="trend_confirmed_down"))
+        records = oq.load_all()
+        for record in records:
+            record["last_failure_reason"] = "trend_deferred"
+        records.append({
+            "id": "cooldown", "symbol": "TAOUSDC", "side": "SELL", "qty": 1.0,
+            "created_ts": 1003.0, "lifecycle": "submit_pending", "revision": 0,
+            "last_failure_reason": "cooldown",
+        })
+        oq.rewrite(records)
+
+        removed = oq.consolidate_deferred_streams()
+
+        remaining = oq.load_all()
+        self.assertEqual(len(removed), 2)
+        self.assertEqual({record["id"] for record in remaining}, {ids[-1], "cooldown"})
+        self.assertEqual(next(r for r in remaining if r["id"] == ids[-1])["qty"], 2.0)
+
     def test_full_queue_replaces_oldest_pending_record(self):
         oq.RETRY_MAX_QUEUE = 2
         oq.RETRY_DEDUP = False   # so it is not collapsed by dedup

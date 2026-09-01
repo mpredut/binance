@@ -304,6 +304,46 @@ def load_all(now=None):
         return _read_nolock()
 
 
+def consolidate_deferred_streams():
+    """Atomically keep only the newest pending record per deferred signal stream.
+
+    Return the removed records for operational accounting. Accepted venue orders and
+    every non-trend failure remain byte-for-byte represented in the rewritten queue.
+    """
+    _ensure_dir()
+    with FileLock(LOCK_FILE):
+        existing = _read_nolock()
+
+        def _created(item):
+            try:
+                value = float(item.get("created_ts", 0))
+                return value if math.isfinite(value) else 0.0
+            except (TypeError, ValueError, OverflowError):
+                return 0.0
+
+        kept_deferred = []
+        keep_ids = set()
+        removed = []
+        for index, item in sorted(
+                enumerate(existing), key=lambda pair: _created(pair[1]), reverse=True):
+            is_deferred = (
+                str(item.get("lifecycle") or "submit_pending").lower()
+                == "submit_pending"
+                and item.get("last_failure_reason") == "trend_deferred")
+            if is_deferred and any(
+                    _same_deferred_stream(item, newer) for newer in kept_deferred):
+                removed.append(item)
+                continue
+            keep_ids.add(index)
+            if is_deferred:
+                kept_deferred.append(item)
+        if removed:
+            _write_nolock([
+                item for index, item in enumerate(existing) if index in keep_ids
+            ])
+        return removed
+
+
 def get(record_id):
     """Return one current queue record by ID under lock, or ``None``."""
     if not record_id:

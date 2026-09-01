@@ -342,6 +342,12 @@ def main():
 
     from providers.market_api import api as mkt
 
+    consolidated = oq.consolidate_deferred_streams()
+    if consolidated:
+        print(
+            f"[order_retry] startup consolidation removed {len(consolidated)} "
+            "superseded trend-deferred record(s)")
+
     print(f"[order_retry] start (poll={WORKER_POLL_SEC:.0f}s, interval={oq.RETRY_INTERVAL_SEC:.0f}s, "
           f"TTL={oq.RETRY_TTL_SEC:.0f}s)")
     while True:
