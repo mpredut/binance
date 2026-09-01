@@ -4,32 +4,32 @@ scheduled_pilot.py — PILOT (un singur modul: monitortrades.py, decizie user
 23 Jul: "for now we run a pilot test and do not extend it to all modules").
 
 It reads the test ranges from the "# BACKTEST: ..." annotations written DIRECTLY in
-instruments.conf (offline/research/backtest_ranges.py, text simplu — NU YAML/JSON,
-decizie explicita user), ruleaza backtest REAL (offline/research/monitortrades_backtest/
-run_replay_backtest.py, peste cache_price_{symbol}.jsonl) pt fiecare valoare
+instruments.conf (offline/research/backtest_ranges.py, plain text — NOT YAML/JSON,
+an explicit user decision), runs a REAL backtest (offline/research/monitortrades_backtest/
+run_replay_backtest.py, over cache_price_{symbol}.jsonl) for each value
 from the grid, and RECONFIGURES + RESTARTS monitortrades.py if it finds a
-valoare clar mai buna — cu guardrail-uri explicite (user a cerut automatizare
-completa, dar dupa ce am aratat azi ca acelasi max_budget=5000 a dat +$3016 in
-o configurare si -$5279 in alta, pe ACELASI istoric):
+value is clearly better — with explicit guardrails (the user asked for complete
+automation, but after it was shown today that the same max_budget=5000 gave +$3016 in
+one configuration and -$5279 in another, on the SAME history):
 
-  1. CONFIRMARE PE 2 FERESTRE INDEPENDENTE: istoricul disponibil e impartit in
-     jumatate (prima/a doua) — o valoare e considerata "castigatoare" DOAR
-     daca are cel mai bun avantaj fata de buy&hold (net - buy_hold) in AMBELE
+  1. CONFIRMATION ON 2 INDEPENDENT WINDOWS: the available history is split in
+     half (first/second) — a value is considered a "winner" ONLY
+     if it has the best edge against buy & hold (net - buy_hold) in BOTH
      halves, not just one. A result that wins on only one window is
-     tratat ca zgomot, nu semnal.
+     treated as noise, not signal.
   2. ONLY values from the grid (never extrapolation).
-  3. MEDIE, nu salt direct (decizie user): valoarea aplicata efectiv =
+  3. AVERAGING, not a direct jump (a user decision): the value actually applied =
      (valoare_configurata_azi + valoare_castigatoare_backtest) / 2 —
      amortizeaza exact genul de instabilitate demonstrat azi.
-  4. RATE-LIMIT: un parametru nu se schimba mai des de o data la
+  4. RATE LIMIT: a parameter does not change more often than once every
      PILOT_MIN_DAYS_BETWEEN_CHANGES zile (implicit 7) — jurnal persistent.
-  5. AUDIT: fiecare rulare scrie un rand in jurnal (testat, ambele ferestre,
+  5. AUDIT: every run writes a line into the journal (what was tested, both windows,
      decision, reason) — whether or not anything changed.
-  6. NOTIFICARE (alertnotifiers.notify, canalul deja folosit de flota): DOAR
+  6. NOTIFICATION (alertnotifiers.notify, the channel the fleet already uses): ONLY
      when a real change is applied (not on every "nothing new" run).
-  7. KILL-SWITCH: env PILOT_DISABLED=true opreste TOTUL, fara sa atinga codul.
+  7. KILL SWITCH: the env var PILOT_DISABLED=true stops EVERYTHING, without touching the code.
 
-Rulare manuala (recomandat inainte de a fi pusa pe cron):
+Running it by hand (recommended before putting it on cron):
     python3 offline/research/monitortrades_backtest/scheduled_pilot.py --dry-run
     python3 offline/research/monitortrades_backtest/scheduled_pilot.py
 """
@@ -56,18 +56,18 @@ from providers.replay_provider import load_price_series
 INSTRUMENTS_CONF = os.path.join(ROOT, "instruments.conf")
 AUDIT_LOG = os.path.join(ROOT, "logger", "backtest_pilot_audit.jsonl")
 MIN_DAYS_BETWEEN_CHANGES = float(os.environ.get("PILOT_MIN_DAYS_BETWEEN_CHANGES", "7"))
-# Castigatorul trebuie sa bata valoarea CURENTA cu cel putin atata (net-buy_hold,
-# USD) pe AMBELE ferestre. Altfel schimbarea e sub zgomot / parametrul e inert pe
+# The winner must beat the CURRENT value by at least this much (net-buy_hold,
+# USD) on BOTH windows. Otherwise the change is below the noise, or the parameter is inert on
 # this history (e.g. found 28 Jul: hard-TP never fires -> every value gives
-# rezultate identice, iar max() pe egalitate "aplica" fals primul element din grila).
+# identical results, and max() on a tie falsely "applies" the first element of the grid).
 MIN_EDGE_MARGIN_USD = float(os.environ.get("PILOT_MIN_EDGE_MARGIN_USD", "1.0"))
 
-# Chei in scope-ul pilotului (BTC/TAO, monitortrades) — restul adnotarilor din
+# The keys in the pilot's scope (BTC/TAO, monitortrades) — the rest of the annotations in
 # instruments.conf are NOT touched without explicitly extending this list (a user
 # decision: the pilot is limited to monitortrades, not all modules). They all live as
 # mt.* in instruments.conf, so run_replay_backtest already fires them through params
-# (verificat: is_trend_up neutralizat, maxage->since_s, hardtp->inst.param).
-#   #4-5  gain/lost   (FACUT 23 iul: TAO mt.lost 4.9->5.25 aplicat)
+# (verified: is_trend_up neutralised, maxage->since_s, hardtp->inst.param).
+#   #4-5  gain/lost   (DONE 23 Jul: TAO mt.lost 4.9->5.25 applied)
 #   #16   maxage_days (28 iul)
 #   #15   hardtp / hardtp_fraction (28 iul; per-instrument, monitortrades.py:447)
 PILOT_KEYS = {
@@ -89,7 +89,7 @@ def _now_iso():
 
 
 def _git_head_short():
-    """Commit-ul (scurt) al codului care a produs propunerea — pt ca prod sa stie
+    """The (short) commit of the code that produced the proposal — so that prod knows
     exactly which engine/config version produced it. '?' if git does not answer."""
     import subprocess
     try:
@@ -107,7 +107,7 @@ def _append_audit(entry):
 
 
 def _last_change_for(full_key):
-    """Cea mai recenta intrare din jurnal cu action='applied' pt full_key."""
+    """The most recent journal entry with action='applied' for full_key."""
     if not os.path.exists(AUDIT_LOG):
         return None
     last = None
@@ -132,19 +132,19 @@ def _current_value(section, key):
 
 def _edge(pnl):
     """net - buy_hold — masura de "cat mai bine decat simpla detinere",
-    comparabila intre ferestre diferite (spre deosebire de net brut)."""
+    comparable between different windows (unlike the raw net)."""
     return pnl["net"] - pnl["buy_hold"]
 
 
 def _num_str(x):
-    """Reprezentare compacta a unei valori numerice pt grila (17.0->'17',
-    0.5->'0.5', 5.25->'5.25') — folosita cand adaugam valoarea LIVE la testare."""
+    """A compact representation of a numeric value for the grid (17.0->'17',
+    0.5->'0.5', 5.25->'5.25') — used when the LIVE value is added to the test set."""
     return "%g" % x
 
 
 def _split_series(symbol):
-    """Istoricul disponibil, impartit in 2 jumatati (prima/a doua) — cele 2
-    ferestre INDEPENDENTE cerute de guardrail-ul de confirmare."""
+    """The available history, split into 2 halves (first/second) — the 2
+    INDEPENDENT windows required by the confirmation guardrail."""
     path = os.path.join(ROOT, "cachedb", f"cache_price_{symbol}.jsonl")
     series = load_price_series(path, symbol)
     mid = len(series) // 2
@@ -152,9 +152,9 @@ def _split_series(symbol):
 
 
 def _run_one(symbol, base, params, series):
-    """Ruleaza logica REALA de backtest (identica structural cu
+    """Runs the REAL backtest logic (structurally identical to
     run_replay_backtest.run_symbol()) over a SERIES given directly (not the file
-    intreg de pe disc) — necesar ca sa putem testa cele 2 jumatati separat
+    whole file from disk) — needed so that the 2 halves can be tested separately
     without reading/splitting the file every time. It does NOT write pnl.json (the pilot
     runs dozens of variants -> it would generate dozens of pointless folders in
     logger/backtest/)."""
@@ -166,8 +166,8 @@ def _run_one(symbol, base, params, series):
                          base=base, quote="USDC", params=dict(params), api=api)
     maxage_s = int(float(params["mt.maxage_days"]) * 24 * 3600)
 
-    # 23 iul: is_trend_up() reala citeste cache-ul de trend LIVE (contamineaza
-    # un replay istoric cu starea REALA curenta a pietei — vezi
+    # 23 Jul: the real is_trend_up() reads the LIVE trend cache (contaminating
+    # a historical replay with the REAL current state of the market — see
     # run_replay_backtest._neutral_is_trend_up). Neutralizat identic aici.
     orig_is_trend_up = rb.mt.is_trend_up
     rb.mt.is_trend_up = rb._neutral_is_trend_up
@@ -219,12 +219,12 @@ def evaluate_key(full_key, symbol, base, key, dry_run=True, propose=False):
 
     half1, half2 = _split_series(symbol)
     if len(half1) < 100 or len(half2) < 100:
-        return {"full_key": full_key, "action": "skipped", "reason": "istoric insuficient pt 2 ferestre"}
+        return {"full_key": full_key, "action": "skipped", "reason": "not enough history for 2 windows"}
 
     # Make sure the current LIVE value is among those tested: without it we cannot
-    # compara castigatorul CU ea, iar un parametru INERT (toate valorile dau
+    # compares the winner AGAINST it, and an INERT parameter (every value giving
     # identical results) would be falsely "applied" to the first element of the grid
-    # (max() pe egalitate intoarce primul). Gasit 28 iul la #15 hardtp.
+    # (max() on a tie returns the first). Found 28 Jul at #15 hardtp.
     test_values = list(grid_values)
     if not any(abs(float(v) - current) < 1e-9 for v in test_values):
         test_values.append(_num_str(current))
@@ -242,7 +242,7 @@ def evaluate_key(full_key, symbol, base, key, dry_run=True, propose=False):
         results[v] = {"edge_half1": _edge(r1), "edge_half2": _edge(r2), "pnl1": r1, "pnl2": r2}
 
     if not results:
-        return {"full_key": full_key, "action": "skipped", "reason": "backtest fara rezultate"}
+        return {"full_key": full_key, "action": "skipped", "reason": "backtest without results"}
 
     winner_half1 = max(results, key=lambda v: results[v]["edge_half1"])
     winner_half2 = max(results, key=lambda v: results[v]["edge_half2"])
@@ -255,33 +255,33 @@ def evaluate_key(full_key, symbol, base, key, dry_run=True, propose=False):
 
     if winner_half1 != winner_half2:
         entry["action"] = "no_change"
-        entry["reason"] = f"neconfirmat: castigator diferit pe cele 2 ferestre ({winner_half1} vs {winner_half2})"
+        entry["reason"] = f"unconfirmed: a different winner on the 2 windows ({winner_half1} vs {winner_half2})"
         return entry
 
     winner = winner_half1
     winner_val = float(winner)
     if abs(winner_val - current) < 1e-9:
         entry["action"] = "no_change"
-        entry["reason"] = "valoarea castigatoare = valoarea deja configurata"
+        entry["reason"] = "the winning value = the value already configured"
         return entry
 
-    # Castigatorul difera de valoarea curenta -> trebuie sa o BATA cu o marja
-    # semnificativa pe AMBELE ferestre. Marja ~0 = parametru inert pe acest istoric
-    # (ex. hard-TP nedeclansat), iar "castigatorul" e doar artefactul tie-break-ului.
+    # The winner differs from the current value -> it has to BEAT it by a
+    # significant margin on BOTH windows. A margin of ~0 means the parameter is inert on this history
+    # (e.g. a hard TP that never triggered), and the "winner" is merely a tie-break artefact.
     cur_key = next(v for v in results if abs(float(v) - current) < 1e-9)
     margin_h1 = results[winner]["edge_half1"] - results[cur_key]["edge_half1"]
     margin_h2 = results[winner]["edge_half2"] - results[cur_key]["edge_half2"]
     entry["margin_vs_current"] = {"half1": round(margin_h1, 2), "half2": round(margin_h2, 2)}
     if margin_h1 < MIN_EDGE_MARGIN_USD or margin_h2 < MIN_EDGE_MARGIN_USD:
         entry["action"] = "no_change"
-        entry["reason"] = (f"castig neglijabil vs valoarea curenta {current} "
+        entry["reason"] = (f"negligible gain versus the current value {current} "
                             f"(+{margin_h1:.2f}/+{margin_h2:.2f} < {MIN_EDGE_MARGIN_USD} USD) "
-                            f"— parametru posibil inert pe acest istoric")
+                            f"— the parameter may be inert on this history")
         return entry
 
     # Mod DEV (--propose): castigatorul a trecut de guardrail-uri (confirmat pe 2
-    # ferestre + bate valoarea curenta cu marja). NU aplicam/rate-limitam aici —
-    # propunem valoarea BRUTA castigatoare; PROD decide la aplicare (media cu
+    # windows plus beating the current value by a margin). We do NOT apply or rate-limit here —
+    # we propose the RAW winning value; PROD decides at application time (averaging with
     # valoarea LUI live, rate-limit, audit). Vezi UNIFIED_BACKTEST_PLAN.md §9.
     if propose:
         entry["winner_value"] = winner_val
@@ -293,8 +293,8 @@ def evaluate_key(full_key, symbol, base, key, dry_run=True, propose=False):
         last_ts = datetime.fromisoformat(last_change["ts"])
         if datetime.now() - last_ts < timedelta(days=MIN_DAYS_BETWEEN_CHANGES):
             entry["action"] = "rate_limited"
-            entry["reason"] = (f"schimbat ultima data la {last_change['ts']}, "
-                                f"asteapta {MIN_DAYS_BETWEEN_CHANGES} zile intre schimbari")
+            entry["reason"] = (f"last changed at {last_change['ts']}, "
+                                f"waiting {MIN_DAYS_BETWEEN_CHANGES} days between changes")
             return entry
 
     new_value = round((current + winner_val) / 2, 4)
@@ -332,8 +332,8 @@ def _apply_config_change(section, key, old_value, new_value):
 
 
 def _restart_monitortrades():
-    """Omoara procesul live — supervisor-ul flota_start.sh il reporneste
-    automat (acelasi mecanism folosit manual toata sesiunea)."""
+    """Kills the live process — the flota_start.sh supervisor restarts it
+    automatically (the same mechanism used by hand throughout the session)."""
     import subprocess
     try:
         out = subprocess.run(["pgrep", "-f", "python monitortrades.py"],
@@ -341,7 +341,7 @@ def _restart_monitortrades():
         pids = [p for p in out.stdout.split() if p.isdigit()]
         for pid in pids:
             subprocess.run(["kill", pid], timeout=5)
-    except Exception as e:  # noqa: BLE001 — nu opreste jurnalizarea/notificarea
+    except Exception as e:  # noqa: BLE001 — it does not stop the journalling or the notification
         print(f"[scheduled_pilot] eroare la restart monitortrades: {e}")
 
 
@@ -349,8 +349,8 @@ def _notify_change(full_key, symbol, old_value, new_value, winner_val, entry):
     try:
         import alertnotifiers as alert
         body = (f"{full_key}: {old_value} -> {new_value} "
-                f"(castigator backtest confirmat pe 2 ferestre: {winner_val}, "
-                f"medie cu valoarea veche)")
+                f"(a backtest winner confirmed on 2 windows: {winner_val}, "
+                f"averaged with the old value)")
         alert.notify(title="Pilot backtest: config schimbat", body=body,
                      source="scheduled_pilot.py", symbol=symbol)
     except Exception as e:  # noqa: BLE001
@@ -368,14 +368,14 @@ def main():
                      help="DEV mode: do NOT apply or restart; write the confirmed proposals (value "
                           "castigatoare bruta) in --propose-out, pt fluxul git dev->prod")
     ap.add_argument("--propose-out", default=os.path.join(ROOT, "backtest_proposals.json"),
-                     help="unde scrie propunerile in modul --propose (implicit backtest_proposals.json)")
+                     help="where to write the proposals in --propose mode (default backtest_proposals.json)")
     args = ap.parse_args()
 
     if os.environ.get("PILOT_DISABLED", "").strip().lower() in ("1", "true", "yes"):
-        print("[scheduled_pilot] PILOT_DISABLED=true -- ies fara sa fac nimic")
+        print("[scheduled_pilot] PILOT_DISABLED=true -- leaving without doing anything")
         return
 
-    # monitor_price_and_trade() e f-oarte "vorbaret" (print() la fiecare tick) —
+    # monitor_price_and_trade() is VERY chatty (a print() on every tick) —
     # the pilot runs dozens of variants over hundreds of thousands of ticks, so
     # suprimarea e necesara (altfel I/O-ul de consola domina timpul de rulare).
     rb.mt.log.disable_print()
@@ -384,16 +384,16 @@ def main():
     keys = {k: v for k, v in PILOT_KEYS.items()
             if not only_terms or any(t in k for t in only_terms)}
     if not keys:
-        print(f"[scheduled_pilot] nicio cheie nu contine '{args.only}' -- ies")
+        print(f"[scheduled_pilot] no key contains '{args.only}' -- leaving")
         return
 
     # Chei INDEPENDENTE => rulare in PARALEL (ProcessPoolExecutor). Fork pe Linux =>
     # each key has its own rb.mt (so the is_trend_up monkeypatch from _run_one
-    # ramane izolat per proces). Audit/proposals se colecteaza in parinte (fara race).
+    # stays isolated per process). The audit and the proposals are collected in the parent (no race).
     proposals = []
     max_workers = min(len(keys), os.cpu_count() or 2)
-    # stderr (nu print/stdout): disable_print() + buffering-ul ProcessPool inghit
-    # stdout-ul parintelui; per-value lines folosesc deja sys.stderr.write si apar corect.
+    # stderr (not print/stdout): disable_print() plus the ProcessPool buffering swallow
+    # the parent's stdout; the per-value lines already use sys.stderr.write and show up correctly.
     sys.stderr.write(f"[scheduled_pilot] {len(keys)} chei pe {max_workers} workeri paraleli\n")
     with _futures.ProcessPoolExecutor(max_workers=max_workers) as ex:
         fut2key = {ex.submit(evaluate_key, fk, sym, base, key, args.dry_run, args.propose): fk
@@ -401,7 +401,7 @@ def main():
         entries = {}
         for fut in _futures.as_completed(fut2key):
             entries[fut2key[fut]] = fut.result()
-    for full_key, (symbol, base, key) in keys.items():   # procesare in ordine stabila
+    for full_key, (symbol, base, key) in keys.items():   # Processing in a stable order.
         entry = entries[full_key]
         _append_audit(entry)
         sys.stderr.write(f"=== {full_key} ===\n"
@@ -418,8 +418,8 @@ def main():
             })
 
     if args.propose:
-        # snapshot al propunerilor curente (suprascrie — fisierul = "ce propune dev
-        # ACUM"; prod le consuma si aplica cu propriile guardrail-uri). Gol = niciun
+        # a snapshot of the current proposals (overwriting — the file means "what dev proposes
+        # NOW"; prod consumes them and applies them with its own guardrails). Empty = no
         # a confirmed signal in this cycle (prod has nothing to apply).
         with open(args.propose_out, "w", encoding="utf-8") as f:
             json.dump(proposals, f, indent=2, default=str)
@@ -434,7 +434,7 @@ def main():
                 lines = [f"{p['full_key']}: {p['current_on_dev']} -> castigator {p['winner_value']}"
                          for p in proposals]
                 alert.notify(title=f"Backtest: {len(proposals)} propunere(i) noi de config",
-                             body="Ruleaza offline/runners/apply_proposals.py pe prod (cu guardrail-uri):\n"
+                             body="Run offline/runners/apply_proposals.py on prod (with guardrails):\n"
                                   + "\n".join(lines),
                              source="scheduled_pilot.py", symbol="backtest")
             except Exception as e:  # noqa: BLE001

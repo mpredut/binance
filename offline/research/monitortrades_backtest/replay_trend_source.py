@@ -1,11 +1,11 @@
 """replay_trend_source.py — a trend signal computed from the REPLAYED history (not from
-cache_instant_trend.json, care e scris LIVE), pt backtest-uri monitortrades.
+cache_instant_trend.json, which is written LIVE), for monitortrades backtests.
 
 It uses EXACTLY the same PriceWindow class (pricewindow.py) and formula
 (get_instant_trend: (slope_full + gradient_recent)/2 -> semn) ca live
 (cacheManager.py, after the 29 Jul race fix — see below; identical also to
-formula proprie a lui tradeall.handle_symbol), alimentata manual din tick-urile de
-replay — acelasi tipar deja folosit de offline/backtests/tradeall.py pt ferestrele lui.
+tradeall.handle_symbol's own formula), fed by hand from the replay ticks
+— the same pattern already used by offline/backtests/tradeall.py for its windows.
 
 Why we do NOT model "tradeall absent": tradeall.py ALWAYS runs live (it is not an
 optional process) — so this signal is always available, exactly as in live. Neutral
@@ -14,21 +14,21 @@ chosen window, never as a fallback for a process that might not be running.
 
 Context (29 iul, investigatie cursa fast/slow in cacheManager.py): masurat empiric
 pe istoric real ca cele 2 cai (rapida=get_recent_gradient simplu, lenta=
-get_instant_trend bogat) difera in SEMN la 14.9% (BTC) / 21.0% (TAO) din tick-uri,
-iar calea rapida singura isi schimba semnul la 32-35% din tick-uri (fereastra prea
+the rich get_instant_trend) differ in SIGN on 14.9% (BTC) / 21.0% (TAO) of the ticks,
+and the fast path alone changes its sign on 32-35% of the ticks (a window too
 mica/zgomotoasa pt un semnal de "trend" stabil). Fix aplicat live (cacheManager.py,
 not yet committed at that date): the fast path no longer writes gradient_recent/final_trend,
 only the slow path does. This module REPLICATES the slow-path formula (get_instant_trend),
 the only one that reaches is_trend_up() in monitortrades.py today.
 
-Parametrizabil pe durata ferestrei (window_seconds) — 3 orizonturi distincte, TOATE
-valide (decizie user: nu se unifica intr-unul singur, fiecare model de trading
-foloseste ce i se potriveste):
-  - "instant"  ~3.7 min (implicit, identic cu WINDOW_SECONDS[0] din
-                cacheManager.CachePriceShortTrendManager — ce citeste is_trend_up() azi)
+Parameterised on the window length (window_seconds) — 3 distinct horizons, ALL
+valid (a user decision: they are not unified into a single one, each trading model
+uses what suits it):
+  - "instant"  ~3.7 min (the default, identical to WINDOW_SECONDS[0] in
+                cacheManager.CachePriceShortTrendManager — what is_trend_up() reads today)
   - "mediu"    ~1.5-6h  (orizontul "big" al lui tradeall, slope_big — azi nepublicat
-                cross-process, dar calculabil identic aici pt teste A/B)
-  - "lung"     nedefinit inca (fereastra exacta ramane de decis; suportat generic
+                cross-process, but computable identically here for A/B tests)
+  - "long"     not defined yet (the exact window remains to be decided; supported generically
                 through the same window_seconds parameter, with no default)
 """
 from __future__ import annotations
@@ -40,21 +40,21 @@ import numpy as np
 
 import pricewindow as pw
 
-# Fereastra "instant" implicita — identica azi cu WINDOW_SECONDS[0] din
-# cacheManager.CachePriceShortTrendManager (fereastra pe care se bazeaza is_trend_up()).
+# The default "instant" window — identical today to WINDOW_SECONDS[0] in
+# cacheManager.CachePriceShortTrendManager (the window is_trend_up() relies on).
 DEFAULT_WINDOW_SECONDS = 3.7 * 60
 
-# Rangurile propuse (user, 29 iul) pt sweep-uri A/B de sensibilitate — NU valori
-# implicite, doar puncte de plecare pt un backtest viitor pe orizont mediu/lung.
+# The proposed ranges (user, 29 Jul) for A/B sensitivity sweeps — NOT default
+# values, only starting points for a future backtest on a medium/long horizon.
 SMALL_WINDOW_RANGE_SEC = (60.0, 7 * 60.0)          # 1-7 minute
 MEDIUM_WINDOW_RANGE_SEC = (1.5 * 3600.0, 6 * 3600.0)  # 1.5-6 ore
-# Orizont lung: interval nedecis inca (user: "nu stiu") — de stabilit ulterior,
-# pe baza unui backtest asupra intervalului, nu presupus a priori.
+# The long horizon: the interval is not decided yet (user: "I don't know") — to be settled later,
+# based on a backtest of the interval rather than assumed a priori.
 
 
 class ReplayTrendSource:
-    """Un PriceWindow per simbol, alimentat manual din tick-urile de replay —
-    izolat complet (nu atinge niciodata cache_instant_trend.json). Instantiaza-l
+    """One PriceWindow per symbol, fed by hand from the replay ticks —
+    entirely isolated (it never touches cache_instant_trend.json). Instantiate it
     o data per (simbol-set, window_seconds); pt teste A/B pe orizonturi diferite,
     use SEPARATE instances (do not reuse one across horizons)."""
 
@@ -67,8 +67,8 @@ class ReplayTrendSource:
         self._prev_ts: Dict[str, Optional[float]] = {s: None for s in symbols}
 
     def advance(self, symbol: str, ts: float, price: float) -> None:
-        """Alimenteaza fereastra simbolului cu UN tick nou de replay. Trebuie
-        apelat pt FIECARE tick, INAINTE de a citi is_trend_up() pt acelasi moment
+        """Feed the symbol's window with ONE new replay tick. It must be
+        called for EVERY tick, BEFORE reading is_trend_up() for the same moment
         — otherwise the signal "sees" prices from the replay's future (look-ahead)."""
         win = self._windows.get(symbol)
         if win is None:
@@ -94,18 +94,18 @@ class ReplayTrendSource:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Prototip (29 iul, idee user): fereastra mica CONFIRMABILA si DINAMICA — in loc
-# de o singura fereastra FIXA (3.7 min, aleasa empiric de user din observatii),
-# is_trend_up(symbol, timeout) accepta ORICE durata din rangul mic (14-30s pana
+# A prototype (29 Jul, the user's idea): a small window that is CONFIRMABLE and DYNAMIC — instead
+# of a single FIXED window (3.7 min, chosen empirically by the user from observation),
+# is_trend_up(symbol, timeout) accepts ANY duration in the small range (14-30s up
 # at 9-11 min), computed ON DEMAND from a RAW buffer (ts, price) — not N
-# ferestre PriceWindow precalculate pe bucket-uri fixe. "Confirmabil" = verifici
+# PriceWindow windows precomputed on fixed buckets. "Confirmable" = you check
 # agreement between several timeouts in the range before declaring a trend, instead
-# sa te bazezi pe un singur esantion (acelasi principiu ca marja/confirmarea pe
+# rather than relying on a single sample (the same principle as the margin/confirmation in
 # of the 2-window rule already used throughout the session's backtests).
 #
 # NOT DECIDED YET (to be validated empirically, not assumed): whether "confirmation
-# timeout-uri" chiar bate o singura fereastra bine aleasa (3.7 min e deja
-# empiric validat de user) — de comparat direct pe date reale inainte de orice
+# timeouts" really beats a single well-chosen window (3.7 min is already
+# empirically validated by the user) — to be compared directly on real data before any
 # concluzie.
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -114,19 +114,19 @@ SMALL_TIMEOUT_RANGE_SEC = (14.0, 11 * 60.0)   # 14s - 11 min (user, 29 iul)
 
 def _instant_trend_from_slice(prices: Sequence[float], sample_rate_sec: float
                                ) -> Tuple[int, float, float, float]:
-    """Aceeasi formula ca PriceWindow.get_instant_trend(), aplicata direct pe o
+    """The same formula as PriceWindow.get_instant_trend(), applied directly to a
     a list of prices (without rebuilding a PriceWindow) — for slices computed
     PE CERERE dintr-un buffer brut. Intoarce (final_trend, growth_coefficient,
-    slope_full, gradient_recent), identic ca semnatura cu get_instant_trend().
-    30 iul: subtire wrapper peste pw.instant_trend_from_prices() (sursa unica a
+    slope_full, gradient_recent), identical in signature to get_instant_trend().
+    30 Jul: a thin wrapper over pw.instant_trend_from_prices() (the single source of
     of the formula, extracted so it is not duplicated — cacheManager.py now uses
-    aceeasi functie pt fereastra dinamica live)."""
+    the same function for the live dynamic window)."""
     return pw.instant_trend_from_prices(prices, sample_rate_sec)
 
 
 class DynamicReplayTrendSource:
-    """Buffer BRUT (ts, pret) per simbol, acoperind max(timeouts folosite) —
-    in loc de o fereastra PriceWindow FIXA. is_trend_up_at(symbol, timeout_sec)
+    """A RAW (ts, price) buffer per symbol, covering max(the timeouts used) —
+    instead of a FIXED PriceWindow window. is_trend_up_at(symbol, timeout_sec)
     it trims the buffer to the last timeout_sec and computes the formula ON DEMAND
     (not precomputed) — any timeout in the range, not just fixed buckets."""
 
@@ -162,7 +162,7 @@ class DynamicReplayTrendSource:
         return prices, sample_rate
 
     def is_trend_up_at(self, symbol: str, timeout_sec: float) -> bool:
-        """is_trend_up(timeout) — cere idea user: fereastra mica DINAMICA, orice
+        """is_trend_up(timeout) — what the user's idea asks for: a small DYNAMIC window, any
         any duration in the range (14s-11min), not just a fixed 3.7min."""
         prices, sample_rate = self._prices_and_rate(symbol, timeout_sec)
         if len(prices) < 2:
@@ -174,31 +174,31 @@ class DynamicReplayTrendSource:
                                min_agree: Optional[int] = None) -> bool:
         """"Confirmable": True only if at least `min_agree` of the given timeouts
         agree that the trend is up (default min_agree=all — the most
-        strict). Raspuns la ideea user: nu te baza pe UN singur esantion zgomotos."""
+        strict). An answer to the user's idea: do not rely on ONE noisy sample."""
         votes = [self.is_trend_up_at(symbol, t) for t in timeouts_sec]
         threshold = min_agree if min_agree is not None else len(timeouts_sec)
         return sum(votes) >= threshold
 
     def should_wait(self, symbol: str, side: str, timeout_sec: float,
                     use_noise_gate: bool = False, epsilon_k: float = 1.0) -> bool:
-        """True = ASTEAPTA (nu inca un moment bun sa executi o intentie de BUY/SELL
-        in coada), False = OK, executa acum. BUY asteapta cat pretul SCADE, executa
-        la PRIMUL semn de urcare (g>=0); SELL invers (asteapta cat urca, executa la
-        primul semn de scadere, g<=0).
+        """True = WAIT (this is not yet a good moment to execute a queued BUY/SELL
+        intent), False = OK, execute now. BUY waits while the price FALLS and executes
+        at the FIRST sign of a rise (g>=0); SELL is the mirror image (it waits while the price rises and executes at
+        the first sign of a fall, g<=0).
 
-        Precizare user (29 iul, dupa masurare empirica): "prima tendinta USOARA de
-        [inversare] -> intru" — orice semn, oricat de slab, e suficient. Implicit
+        A user clarification (29 Jul, after empirical measurement): "the first SLIGHT sign of
+        [a reversal] -> I enter" — any sign, however weak, is enough. By default
         (use_noise_gate=False) no longer requires exceeding a noise threshold (eps) —
-        varianta initiala (copiata fidel din cacheManager.is_favorable_to_wait) o
-        cerea, si asta a fost EXACT problema gasita: la cele 2 evenimente reale
+        the initial variant (copied faithfully from cacheManager.is_favorable_to_wait) required
+        it, and that was EXACTLY the problem found: at the 2 real events
         testate, growth_coefficient era in interiorul lui eps (flat/zgomot la scara
-        scurta) desi trendul mai larg (pe care se baza deja decizia lui tradeall de
-        a firea) era deja confirmat — regula de zgomot tinea in asteptare MAI MULT
-        exact cand semnalul era slab/marginal, opusul a ce se dorea. use_noise_gate=
-        True pastreaza varianta veche (fidela cu is_favorable_to_wait) pt comparatie."""
+        short) although the wider trend (on which tradeall's decision to fire was already
+        based) was already confirmed — the noise rule kept it waiting LONGER
+        precisely when the signal was weak or marginal, the opposite of what was wanted. use_noise_gate=
+        True keeps the old variant (faithful to is_favorable_to_wait) for comparison."""
         prices, _sample_rate = self._prices_and_rate(symbol, timeout_sec)
         if len(prices) < 3:
-            return True   # date insuficiente -> comportament sigur: asteapta
+            return True   # Not enough data -> the safe behaviour: wait.
         _final_trend, growth_coefficient, _slope_full, _gradient_recent = \
             _instant_trend_from_slice(prices, _sample_rate)
         g = growth_coefficient

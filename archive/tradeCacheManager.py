@@ -81,7 +81,7 @@ class TradeCacheManager:
             # ``startTime`` is the parameter; the former undefined name raised NameError.
             new_trades = api.client.get_my_trades(symbol=symbol, startTime=startTime)
         except Exception as e:
-            print(f"[Eroare] Binance API pentru {symbol}: {e}")
+            print(f"[Error] Binance API for {symbol}: {e}")
             return
 
         # Deduplicate by ID when present, otherwise by time and symbol.

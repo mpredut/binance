@@ -20,23 +20,23 @@ def calculate_commissions(amount, price):
 
     
 def calculate_buy_proc(current_price, changed_proc, decrease_proc=7):
-    if changed_proc < 0:  # Daca pretul a scazut
-        if abs(changed_proc) > decrease_proc:  # Daca scaderea este mai mare decat pragul specificat
-            proc = 1 - 0.01  # Aproape pretul curent
+    if changed_proc < 0:  # If the price has fallen.
+        if abs(changed_proc) > decrease_proc:  # If the fall is larger than the given threshold.
+            proc = 1 - 0.01  # Close to the current price.
         else:
-            # Calculeaza procentul suplimentar necesar pentru a ajunge la pragul de scadere
+            # Compute the extra percentage needed to reach the fall threshold.
             procent_suplimentar = decrease_proc + changed_proc
             proc = 1 - procent_suplimentar / 100
             if procent_suplimentar < 0:
-                proc = 1 - 0.01  # Aproape pretul curent
-    else:  # Daca pretul a crescut
+                proc = 1 - 0.01  # Close to the current price.
+    else:  # If the price has risen.
         proc = 1 - decrease_proc/100;
 
     return proc
 
 
 def calculate_sell_proc(initial_desired_proc, current_proc, i, max_i):
-    # Calculeaza procentul dorit descrescator
+    # Compute the decreasing target percentage.
     desired_proc = initial_desired_proc * (1 - (i / max_i))
     print(f"Step {i}/{max_i}: Desired proc calculated as {desired_proc}")
 
@@ -44,7 +44,7 @@ def calculate_sell_proc(initial_desired_proc, current_proc, i, max_i):
     #adjustment_factor = np.exp(-i / max_i)
     #print(f"Step {i}/{max_i}: Adjustment factor calculated as {adjustment_factor}")
                     
-    # Calculeaza procentul ajustat
+    # Compute the adjusted percentage.
     #adjusted_proc = current_proc * np.minimum(2, np.maximum(0, 1 + adjustment_factor * desired_proc))
     #print(f"Step {i}/{max_i}: Adjusted proc calculated as {adjusted_proc}")
 
@@ -97,7 +97,7 @@ u.beep(1)
 last_state = State("none", api.get_current_price(sym.btcsymbol), timestamp=datetime.now())
 #last_state.price = 55635
 if last_state.price:
-   print(f"Pretul curent al BTC: {last_state.price}")
+   print(f"The current BTC price: {last_state.price}")
 
 current_buy_order_id = None
 
@@ -108,46 +108,46 @@ current_buy_order_id = None
 
 
 def check_orders(symbol):
-    # Preluam toate ordinele deschise de vanzare
+    # Fetch every open sell order.
     open_orders = api.get_open_orders("SELL", symbol)
 
-    # Preluam pretul curent pentru simbolul respectiv
+    # Fetch the current price for that symbol.
     current_price = api.get_current_price(symbol)
 
     min_price = 899999
     max_price = 0
-    # Parcurgem toate ordinele deschise
+    # Walk through every open order.
     for order_id, order_info in open_orders.items():
-        order_price = order_info['price']  # Pretul ordinului
+        order_price = order_info['price']  # The order's price.
         if(order_price > max_price) :
             max_price = order_price
         if(order_price < min_price) :
             min_price = order_price
-    print(f"Min vanzare {min_price} Max vanzare {max_price}")
+    print(f"Min sell {min_price} Max sell {max_price}")
 
 def check_and_close_orders(symbol):
-    # Preluam toate ordinele deschise de vanzare
+    # Fetch every open sell order.
     open_orders = api.get_open_orders("SELL", symbol)
 
-    # Preluam pretul curent pentru simbolul respectiv
+    # Fetch the current price for that symbol.
     current_price = api.get_current_price(symbol)
 
-    # Parcurgem toate ordinele deschise
+    # Walk through every open order.
     for order_id, order_info in open_orders.items():
-        order_price = order_info['price']  # Pretul ordinului
+        order_price = order_info['price']  # The order's price.
         print(f"check {order_price}  < {(current_price) + 300}")
-        #Verificam daca pretul ordinului este cu 2% mai mic decat pretul curent
+        #Check whether the order's price is 2% below the current price.
         #api.cancel_order(order_id) 
-        #print(f"Ordinul {order_id} a fost inchis deoarece pretul sau ({order_price}) este sub 2% din pretul curent ({current_price}).{(order_price) + 300 < (current_price)}")
+        #print(f"Order {order_id} was closed because its price ({order_price}) is more than 2% below the current price ({current_price}).{(order_price) + 300 < (current_price)}")
         if (order_price)  < (current_price) + 300:
             api.cancel_order(symbol, order_id) 
-            print(f"Ordinul {order_id} a fost inchis deoarece pretul sau ({order_price}) este sub 2% din pretul curent ({current_price}).")
+            print(f"Order {order_id} was closed because its price ({order_price}) is more than 2% below the current price ({current_price}).")
         if (order_price)  > 59500:
-            print(f"Ordinul {order_id} a fost inchis deoarece pretul sau ({order_price}) este foarte mare fata de  ({current_price}).")
+            print(f"Order {order_id} was closed because its price ({order_price}) is very high compared with ({current_price}).")
             api.cancel_order(symbol, order_id) 
             
             
-# Exemplu de utilizare:
+# A usage example:
 #check_and_close_orders("BTCUSDT")
 usdt = api.get_asset_info("SELL", sym.btcsymbol)
 btc = api.get_asset_info("BUY", sym.btcsymbol)
@@ -168,7 +168,7 @@ while True:
     try:
         current_state = State("none", api.get_current_price(sym.btcsymbol), timestamp=datetime.now())
         if current_state.price is None:
-            print("Eroare la obtinerea pretului. Incerc din nou in cateva secunde.")
+            print("Failed to obtain the price. Retrying in a few seconds.")
             time.sleep(1)
             continue
         check_orders("BTCUSDT")
@@ -178,7 +178,7 @@ while True:
                  
         for state in states[:]:  # Copy to avoid modifying the list while iterating
             if api.check_order_filled(state.buy_order_id, sym.btcsymbol):
-                print(f"Ordinul de cumparare a fost executat. Incercam vanzarea in {state.name}. interatia {state.iteration}....")
+                print(f"The buy order was filled. Trying to sell in {state.name}. iteration {state.iteration}....")
                 if state.sell_order_id:
                     # Check if sell order has expired
                     expiration_time = state.timestamp + timedelta(seconds=TIME_QUANT * state.iteration)
@@ -196,12 +196,12 @@ while True:
                     if sell_order:
                         state.sell_order_id = sell_order['orderId']
                         state.iteration += 1
-                        print(f"Ordin de vanzare plasat/actualizat la pretul {sell_price} = {state.buy_price} * {proc}%. ID ordin: {state.sell_order_id}")
+                        print(f"A sell order was placed/updated at the price {sell_price} = {state.buy_price} * {proc}%. Order ID: {state.sell_order_id}")
 
                         
         for state in states[:]:  # Copy to avoid modifying the list while iterating
             if api.check_order_filled(state.sell_order_id, sym.btcsymbol):
-                print("Ordinul de vanzare a fost executat.")
+                print("The sell order was filled.")
                 u.beep(5)
                 sell_order = client.get_order(symbol=sym.btcsymbol, orderId=state.sell_order_id)
                 sell_price = float(sell_order['price'])
@@ -220,8 +220,8 @@ while True:
                 print(f"Profit net: {profit_net:.2f} USDT. Buget actual: {budget:.2f} USDT.")
                 states.remove(state)
             if state.iteration > MAX_ITERATIONS:
-                print(f"Incercam vanzarea in pierdere. interatia {state.iteration}....")
-                state.name = "pierdere"
+                print(f"Trying to sell at a loss. iteration {state.iteration}....")
+                state.name = "loss"
                 state.iteration = 0
                 state.timestamp = datetime.now()
                 state.buy_price = current_state.price
@@ -230,9 +230,9 @@ while True:
             last_state = states[-1]
 
         if (abs(changed_proc) > 0):
-            print(f"Pretul s-a schimbat cu {changed_proc:.2f}% care este mai mult de {price_change_threshold}% in intervalul de {interval_time:.2f} secunde.")
+            print(f"The price changed by {changed_proc:.2f}%, which is more than {price_change_threshold}% over the interval of {interval_time:.2f} seconds.")
             u.beep(2)
-            print(f"Anulez ordinul existent de cumparare daca exista (ID:{current_buy_order_id}).")
+            print(f"Cancelling the existing buy order if there is one (ID:{current_buy_order_id}).")
             if current_buy_order_id:#last_state.buy_order_id
                 api.cancel_order(sym.btcsymbol, current_buy_order_id)
                 current_buy_order_id = None
@@ -244,7 +244,7 @@ while True:
                 buy_price = current_state.price * 0.99
             
             btc_buy_quantity = budget / buy_price
-            print(f"Plasez ordinul de cumparare la pretul: {buy_price}, cantitate: {btc_buy_quantity}")
+            print(f"Placing the buy order at the price: {buy_price}, quantity: {btc_buy_quantity}")
             buy_order = po.place_order("BUY", sym.btcsymbol, buy_price, btc_buy_quantity)
             
             if buy_order:
@@ -257,13 +257,13 @@ while True:
                     timestamp=datetime.now()
                 )
                 current_buy_order_id = buy_order['orderId']
-                print(f"Ordin de cumparare plasat la {buy_price}. ID ordin: {current_buy_order_id}")
+                print(f"A buy order was placed at {buy_price}. Order ID: {current_buy_order_id}")
                 states.append(last_state)
 
 
     except BinanceAPIException as e:
         print(f"Eroare API Binance: {e}")
-        time.sleep(1)  # Asteapta 1 secunda inainte de a reporni incercarile
+        time.sleep(1)  # Wait 1 second before restarting the attempts.
     except Exception as e:
         print(f"Eroare: {e}")
-        time.sleep(1)  # Asteapta 1 secunda inainte de a reporni incercarile
+        time.sleep(1)  # Wait 1 second before restarting the attempts.

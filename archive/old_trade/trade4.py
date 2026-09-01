@@ -18,7 +18,7 @@ import bapi_placeorder as po
 #import priceprediction as pp
 
 
-# Intervalul de timp intre incercarile de anulare si recreere a ordinului (in secunde)
+# The time interval between attempts to cancel and recreate the order (in seconds).
 WAIT_FOR_ORDER = 22
 
 class TradingBot:
@@ -43,7 +43,7 @@ class TradingBot:
         
     def repetitive_buy(self, current_price, filled_sell_price):
         adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
-        failure_count = 0  # Adaugam un contor pentru numarul de esecuri
+        failure_count = 0  # A counter for the number of failures.
         max_failures = 5  # Definim numarul maxim de esecuri acceptabile
 
         while True:
@@ -115,7 +115,7 @@ class TradingBot:
 
     def repetitive_sell(self, current_price, filled_buy_price):
         adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
-        failure_count = 0  # Adaugam un contor pentru numarul de esecuri
+        failure_count = 0  # A counter for the number of failures.
         max_failures = 5  # Definim numarul maxim de esecuri acceptabile
 
         while True:

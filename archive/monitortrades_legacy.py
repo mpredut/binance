@@ -1,7 +1,7 @@
-# Cod legacy mutat din monitortrades.py pe 16 iun 2026 si arhivat ulterior aici.
-# NU este importat/folosit de calea activa. Botul live traieste integral in
+# Legacy code moved out of monitortrades.py on 16 Jun 2026 and archived here later.
+# It is NOT imported or used by the active path. The live bot lives entirely in
 # monitortrades.py. Singura referinta externa este tests/testdistributor.py.
-# Importurile de mai jos exista doar ca fisierul sa fie parsabil/rulabil standalone ca referinta.
+# The imports below exist only so the file stays parseable and runnable standalone as a reference.
 
 import sys
 import time
@@ -14,8 +14,8 @@ from providers.market_api import api as _mkt   # proxy unic guardat (30 iul)
 
 def _legacy_place(side, symbol, price, qty, **kw):
     """Shim compat pt codul LEGACY (nefolosit in flota — vezi monitortrades.py):
-    pastreaza ordinea (side, symbol, ...) pe care o folosesc apelurile de mai jos
-    (inclusiv thread targets), ruteaza prin proxy-ul unic guardat mkt.place()."""
+    keeps the (side, symbol, ...) order used by the calls below
+    (thread targets included), and routes through the single guarded proxy mkt.place()."""
     return _mkt.place(symbol, side, price, qty, smart=False, **kw)
 from binance_api import bapi_trades as apitrades
 from binance_api import bapi_allorders as apiorders
@@ -39,11 +39,11 @@ def calculate_target_price(filled_price, current_price, procent_defined, time_fr
     # Calculul pretului tinta initial
     target_price = filled_price * (1 + procent_adjusted)
     
-    # Daca target_price a ajuns sub current_price, il ajustam
+    # If target_price has fallen below current_price, adjust it.
     if target_price < current_price:
-        # Definim un dinamic_procent care scade treptat in timp
-        dinamic_procent = 0.01 * (1 - time_fraction) + 1  # incepe de la 1.01 si scade catre 1
-        target_price = current_price * dinamic_procent
+        # Define a dynamic percentage that decreases gradually over time.
+        dynamic_percent = 0.01 * (1 - time_fraction) + 1  # It starts at 1.01 and decreases towards 1.
+        target_price = current_price * dynamic_percent
     
     return target_price
  
@@ -72,7 +72,7 @@ def sell_order_gradually(order, start_time, end_time):
         current_price = get_current_price(symbol)
 
         if current_price is None:
-            print("Eroare la obtinerea pretului. incerc din nou in cateva secunde.")
+            print("Failed to obtain the price. Retrying in a few seconds.")
             time.sleep(monitor_interval)
             continue
 
@@ -80,44 +80,44 @@ def sell_order_gradually(order, start_time, end_time):
         time_fraction = elapsed_time / total_duration
         target_price = calculate_target_price(filled_price, current_price, procent_defined, time_fraction)
 
-        # Calculam pretul propus
+        # Compute the proposed price.
         #if current_price > filled_price:
-        #    target_price = max(filled_price * 1.01, current_price * 1.01)  # Pret mai mare cu 1%
+        #    target_price = max(filled_price * 1.01, current_price * 1.01)  # A price 1% higher.
         #else:
         #    target_price = filled_price * (1 + time_fraction * (current_price / filled_price - 1))
 
-        print(f"Vanzare graduala: target_price={target_price:.2f}, current_price={current_price:.2f}")
+        print(f"Gradual sell: target_price={target_price:.2f}, current_price={current_price:.2f}")
         print(f"Elapsed Time: {elapsed_time:.2f} seconds, Target Price: {target_price:.2f} USD")
 
-        # Anulam ordinul anterior inainte de a plasa unul nou
+        # Cancel the previous order before placing a new one.
         if order_id:
             if api.check_order_filled(order_id, symbol) :
                 return; #order filled!
             api.cancel_order(symbol, order_id)
-            print(f"Anulat ordinul anterior cu ID: {order_id}")
+            print(f"Cancelled the previous order with ID: {order_id}")
 
-        # Plasam ordinul de vanzare
+        # Place the sell order.
         new_order = _legacy_place("SELL", symbol, target_price, filled_quantity)
         if new_order:
             order_id = new_order['orderId']
-            print(f"Plasat ordin de vanzare la pretul {target_price:.2f}. New Order ID: {order_id}")
+            print(f"Placed a sell order at the price {target_price:.2f}. New Order ID: {order_id}")
         else:
-            print("Eroare la plasarea ordinului de vanzare.")
-            order_id = None  # Reseteaza ID-ul ordinului daca plasarea esueaza
+            print("Failed to place the sell order.")
+            order_id = None  # Reset the order ID if the placement fails.
         
-        # Asteptam un interval ajustat inainte de urmatoarea ajustare
+        # Wait an adjusted interval before the next adjustment.
         time.sleep(monitor_interval)
         current_time += monitor_interval
 
 
 
 def monitor_filled_buy_orders_old():
-    if threading.active_count() > 1:  # Daca sunt deja fire active (in afara de firul principal)
-        print("Fire active detectate, iesim din functie pentru a nu porni fire noi.")
+    if threading.active_count() > 1:  # If threads are already active (besides the main one).
+        print("Active threads detected, leaving the function so no new threads are started.")
         return
  
     maxage_trade_s =  3 * 24 * 3600  # Cata vechime maxima au ordinele considerate „recente"
-    # get_recent_filled_orders asteapta o DURATA (secunde), nu un timestamp absolut.
+    # get_recent_filled_orders expects a DURATION (seconds), not an absolute timestamp.
     filled_buy_orders = apiorders.get_recent_filled_orders("BUY", sym.btcsymbol, maxage_trade_s)
 
     for order in filled_buy_orders:
@@ -125,7 +125,7 @@ def monitor_filled_buy_orders_old():
         end_time = current_time + 2 * 3600  # Procesul dureaza doua ore
         print("marius")
         print(order)
-        # Pornim un fir nou pentru fiecare ordin de cumparare executat recent
+        # Start a new thread for each recently filled buy order.
         #thread = threading.Thread(target=sell_order_gradually, args=(order, current_time, end_time))
         #thread = threading.Thread(target=sell_order_gradually, args=(order, current_time, end_time, filled_price, current_price, procent_defined))      
         #thread.start()
@@ -138,7 +138,7 @@ def get_close_buy_orders_without_sell(api, maxage_trade_s, profit_percentage):
     close_buy_orders = apiorders.get_trade_orders("BUY", symbol, maxage_trade_s)
     close_sell_orders = apiorders.get_trade_orders("SELL", symbol, maxage_trade_s)
     
-    # Lista de ordere "BUY" care nu au un "SELL" asociat cu profitul dorit
+    # The list of "BUY" orders that have no "SELL" associated at the wanted profit.
     buy_orders_without_sell = []
 
     for buy_order in close_buy_orders:
@@ -146,26 +146,26 @@ def get_close_buy_orders_without_sell(api, maxage_trade_s, profit_percentage):
         symbol = buy_order['symbol']
         buy_quantity = buy_order['quantity']  # Cantitatea cumparata
         
-        # Filtreaza orderele de tip "SELL" asociate cu acest "BUY" (acelasi simbol si cu pretul dorit)
+        # Filter the "SELL" orders associated with this "BUY" (the same symbol and the wanted price).
         related_sell_orders = [
             order for order in close_sell_orders 
             if order['symbol'] == symbol and order['filled_price'] >= filled_price * (1 + profit_percentage / 100)
         ]
         
-        # Calculeaza suma cantitatii vandute pentru orderele "SELL" gasite
+        # Sum the quantity sold across the "SELL" orders found.
         total_sell_quantity = sum(order['quantity'] for order in related_sell_orders)
         
-        # Daca cantitatea totala vanduta este mai mica decat cantitatea cumparata
+        # If the total quantity sold is smaller than the quantity bought.
         if total_sell_quantity < buy_quantity:
-            # Adauga buy_order la lista de ordere care inca nu au sell complet
+            # Add buy_order to the list of orders that are not fully sold yet.
             buy_orders_without_sell.append(buy_order)
 
     return buy_orders_without_sell
     
 
 def monitor_close_orders_by_age1(maxage_trade_s):
-    if threading.active_count() > 2:  # Daca sunt deja fire active (in afara de firul principal)
-        print("Fire active detectate, iesim din functie pentru a nu porni fire noi.")
+    if threading.active_count() > 2:  # If threads are already active (besides the main one).
+        print("Active threads detected, leaving the function so no new threads are started.")
         return
  
     symbol = sym.btcsymbol
@@ -180,10 +180,10 @@ def monitor_close_orders_by_age1(maxage_trade_s):
         filled_price = order['price']
         quantity = float(order['qty']) #quantity
 
-        if current_price >= filled_price * 1.04 or u.are_close(current_price, filled_price * 1.04):  # Daca pretul curent este cu 7% mai mare
-            print(f"Pretul curent ({current_price}) este cu 4% mai mare decat pretul de cumparare ({filled_price}). Initiem vanzarea.cantitate{quantity}")
+        if current_price >= filled_price * 1.04 or u.are_close(current_price, filled_price * 1.04):  # If the current price is 7% higher.
+            print(f"The current price ({current_price}) is 4% higher than the buy price ({filled_price}). Starting the sell. quantity{quantity}")
             
-            # Pornim un fir nou pentru a vinde BTC-ul
+            # Start a new thread to sell the BTC.
             thread = threading.Thread(target=_legacy_place,
                 name="sell_monitor_close_orders_by_age1",
                 args=("SELL", symbol, current_price + 200, quantity))
@@ -191,7 +191,7 @@ def monitor_close_orders_by_age1(maxage_trade_s):
             thread.start()
             #return
         else:
-            print(f"Pretul curent ({current_price}) nu a atins inca pragul de 4% fata de pretul de cumparare ({filled_price}).")
+            print(f"The current price ({current_price}) has not reached the 4% threshold above the buy price ({filled_price}) yet.")
             #return
             
     #close_sell_orders = apitrades.get_trade_orders("SELL",  symbol, maxage_trade_s)
@@ -205,10 +205,10 @@ def monitor_close_orders_by_age1(maxage_trade_s):
         filled_price = order['price']
         quantity = float(order['qty']) #quantity
 
-        if current_price <= filled_price * 0.94 or u.are_close(current_price, filled_price * 0.94):  # Daca pretul curent este cu 7% mai mare
-            print(f"Pretul curent ({current_price}) este cu 4% mai mic decat pretul de vanzare ({filled_price}). Initiem cumpararea.cantitate{quantity}.")
+        if current_price <= filled_price * 0.94 or u.are_close(current_price, filled_price * 0.94):  # If the current price is 7% higher.
+            print(f"The current price ({current_price}) is 4% lower than the sell price ({filled_price}). Starting the buy. quantity{quantity}.")
             
-            # Pornim un fir nou pentru a vinde BTC-ul
+            # Start a new thread to sell the BTC.
             thread = threading.Thread(target=_legacy_place,
                 name="buy_monitor_close_orders_by_age1",
                 args=("BUY", symbol, current_price - 200, quantity))
@@ -216,37 +216,37 @@ def monitor_close_orders_by_age1(maxage_trade_s):
             thread.start()
             #return
         else:
-            print(f"Pretul curent ({current_price}) nu a atins inca pragul de 4% fata de pretul de vanzare ({filled_price}).")
+            print(f"The current price ({current_price}) has not reached the 4% threshold below the sell price ({filled_price}) yet.")
             #return        
 
 
 
-# Variabila globala care stocheaza timpul de inceput al monitorizarii
+# A global variable holding the time at which monitoring started.
 start_time_global = None
 
 def monitor_close_orders_by_age2(maxage_trade_s):
     global start_time_global
     
     symbol = sym.btcsymbol
-    if threading.active_count() > 2:  # Daca sunt deja fire active (in afara de firul principal)
-        print("Fire active detectate, iesim din functie pentru a nu porni fire noi.")
+    if threading.active_count() > 2:  # If threads are already active (besides the main one).
+        print("Active threads detected, leaving the function so no new threads are started.")
         return
     
-    # Initializam timpul global la prima executie
+    # Initialise the global time on the first execution.
     if start_time_global is None:
         start_time_global = time.time()
 
-    # Calculam timpul total scurs de la prima executie a functiei
+    # Compute the total time elapsed since the function first ran.
     current_time = time.time()
     elapsed_time = current_time - start_time_global
-    interval_durata = 2 * 3600  # Durata maxima (2 ore)
+    interval_duration = 2 * 3600  # Durata maxima (2 ore)
 
     # Calculam procentul in functie de timpul scurs (de la 4% pana la 0%)
-    procent_scazut = max(0, 4 - (4 * (elapsed_time / interval_durata)))
+    drop_percent = max(0, 4 - (4 * (elapsed_time / interval_duration)))
     
-    print(f"Procentul actual: {procent_scazut:.2f}%")
+    print(f"Current percentage: {drop_percent:.2f}%")
 
-    # Obtinem comenzile de cumparare
+    # Obtain the buy orders.
     #close_buy_orders = apitrades.get_trade_orders("BUY", symbol, maxage_trade_s)
     close_buy_orders = apiorders.get_trade_orders("BUY", symbol, maxage_trade_s)
     print(f"BUY ORDERS, {len(close_buy_orders)}")
@@ -257,23 +257,23 @@ def monitor_close_orders_by_age2(maxage_trade_s):
         filled_price = order['price']
         quantity = float(order['qty'])  # Cantitatea
 
-        # Verificam daca pretul curent a crescut cu procentul dinamic
-        if current_price >= filled_price * (1 + procent_scazut / 100) or u.are_close(current_price, filled_price * (1 + procent_scazut / 100)):
-            print(f"Pretul curent ({current_price}) este cu {procent_scazut:.2f}% mai mare decat pretul de cumparare ({filled_price}). Initiem vanzarea. Cantitate: {quantity}")
+        # Check whether the current price has risen by the dynamic percentage.
+        if current_price >= filled_price * (1 + drop_percent / 100) or u.are_close(current_price, filled_price * (1 + drop_percent / 100)):
+            print(f"The current price ({current_price}) is {drop_percent:.2f}% higher than the buy price ({filled_price}). Starting the sell. Quantity: {quantity}")
             
-            # Pornim un fir nou pentru a vinde BTC-ul
+            # Start a new thread to sell the BTC.
             thread = threading.Thread(target=_legacy_place,
                 name="monitor_close_orders_by_age2",
                 args=("SELL", symbol, current_price + 200, quantity))
             thread.start()
             
-            # Resetam timpul global pentru a reporni procesul
+            # Reset the global time so the process restarts.
             start_time_global = time.time()
-            return  # Iesim din functie dupa prima tranzactie
+            return  # Leave the function after the first trade.
         else:
-            print(f"Pretul curent ({current_price}) nu a atins pragul de {procent_scazut:.2f}% fata de pretul de cumparare ({filled_price}).")
+            print(f"The current price ({current_price}) has not reached the {drop_percent:.2f}% threshold above the buy price ({filled_price}).")
     
-    # Obtinem comenzile de vanzare
+    # Obtain the sell orders.
     #close_sell_orders = apitrades.get_trade_orders("SELL", symbol, maxage_trade_s)
     close_sell_orders = apiorders.get_trade_orders("SELL", symbol, maxage_trade_s)
     sorted_sell_orders = sorted(close_sell_orders, key=lambda x: x['price'])
@@ -284,21 +284,21 @@ def monitor_close_orders_by_age2(maxage_trade_s):
         filled_price = order['price']
         quantity = float(order['qty'])  # Cantitatea
 
-        # Verificam daca pretul curent a scazut cu procentul dinamic
-        if current_price <= filled_price * (1 - procent_scazut / 100) or u.are_close(current_price, filled_price * (1 - procent_scazut / 100)):
-            print(f"Pretul curent ({current_price}) este cu {procent_scazut:.2f}% mai mic decat pretul de vanzare ({filled_price}). Initiem cumpararea. Cantitate: {quantity}")
+        # Check whether the current price has fallen by the dynamic percentage.
+        if current_price <= filled_price * (1 - drop_percent / 100) or u.are_close(current_price, filled_price * (1 - drop_percent / 100)):
+            print(f"The current price ({current_price}) is {drop_percent:.2f}% lower than the sell price ({filled_price}). Starting the buy. Quantity: {quantity}")
             
-            # Pornim un fir nou pentru a cumpara BTC-ul
+            # Start a new thread to buy the BTC.
             thread = threading.Thread(target=_legacy_place, 
             name="monitor_close_orders_by_age2",
             args=("BUY", symbol, current_price - 200, quantity))
             thread.start()
 
-            # Resetam timpul global pentru a reporni procesul
+            # Reset the global time so the process restarts.
             start_time_global = time.time()
-            return  # Iesim din functie dupa prima tranzactie
+            return  # Leave the function after the first trade.
         else:
-            print(f"Pretul curent ({current_price}) nu a atins pragul de {procent_scazut:.2f}% fata de pretul de vanzare ({filled_price}).")
+            print(f"The current price ({current_price}) has not reached the {drop_percent:.2f}% threshold below the sell price ({filled_price}).")
 
 
 
@@ -431,7 +431,7 @@ class BuyTransaction:
 def update_trades(trades, symbol, maxage_trade_s, procent_desired_profit, expired_duration, min_procent):
     #new_trades = apitrades.get_trade_orders("BUY", symbol, maxage_trade_s)
     new_trades = apiorders.get_trade_orders("BUY", symbol, maxage_trade_s)
-    #TODO fiter trades care sunt prea recente sub 2 ore
+    #TODO filter out trades that are too recent, under 2 hours
     for trade in new_trades:
         if not any(t.trade_id == trade['id'] for t in trades):
             trades.append(BuyTransaction(
@@ -441,7 +441,7 @@ def update_trades(trades, symbol, maxage_trade_s, procent_desired_profit, expire
                 procent_desired_profit=procent_desired_profit,  # Procentul initial
                 min_procent=min_procent,
                 expired_duration=expired_duration,  # Durata de 2.7 ore * (3600 secunde)
-                time_trade=trade['time'] / 1000  # Convertim timpul din milisecunde in secunde
+                time_trade=trade['time'] / 1000  # Convert the time from milliseconds to seconds.
             ))
     new_trade_ids = {trade['id'] for trade in new_trades}
     trades[:] = [t for t in trades if t.trade_id in new_trade_ids]
@@ -467,13 +467,13 @@ def apply_sell_orders(trades, days, force_sell):
         count+=1
         if trade.sell_order_id and api.check_order_filled(trade.sell_order_id['orderId'], symbol):
             print(f"check_order_filled {trade.sell_order_id}")
-            trade.sell_order_id = 0  # Marcam ca executat
+            trade.sell_order_id = 0  # Mark it as executed.
         if trade.sell_order_id == 0:
-            continue  # Sarim peste tranzactiile marcate ca executate
+            continue  # Skip the trades marked as executed.
 
         sell_price = trade.get_proposed_sell_price(current_price, current_time, days=days)
         if force_sell: #disperare!!!
-            print("\nDISPERARE\n Vand la pretul curent!")
+            print("\nDESPERATION\n Selling at the current price!")
             sell_price = min(sell_price, current_price * 1.001)
 
         if trade.sell_order_id:
@@ -481,24 +481,24 @@ def apply_sell_orders(trades, days, force_sell):
             api.cancel_order(symbol, trade.sell_order_id['orderId'])
             trade.sell_order_id = None
 
-        # Verificam daca numarul de ordine a depasit 8
+        # Check whether the number of orders has exceeded 8.
         if placed_order_count < 6:
             new_sell_order_id = _legacy_place("SELL", symbol, sell_price, trade.qty)
             trade.sell_order_id = new_sell_order_id
             placed_order_count += 1
         else:
-            #print(f"Plasare un singur ordin de vazare: Cantitate {trade.qty}, Pret {sell_price}")
+            #print(f"Placing a single sell order: Quantity {trade.qty}, Price {sell_price}")
             # Adaugam tranzactia in calculul mediei ponderate
             total_weighted_price += sell_price * trade.qty
             total_quantity += trade.qty
-            trade.sell_order_id = None  # Nu plasam imediat ordinul, dar marcam ca in proces
+            trade.sell_order_id = None  # We do not place the order immediately, but mark it as in progress.
 
 
     print("\n")
-    # Daca au fost ordine suplimentare, calculam media ponderata si plasam un singur ordin
+    # If there were extra orders, compute the weighted average and place a single order.
     if total_quantity > 0:
         average_sell_price = total_weighted_price / total_quantity
-        print(f"Total: Cantitate {total_quantity}, Pret {average_sell_price}")
+        print(f"Total: Quantity {total_quantity}, Price {average_sell_price}")
         #quantity = min(api.get_asset_info("SELL", symbol), total_quantity)
         new_sell_order_id = _legacy_place("SELL", symbol, average_sell_price, total_quantity)
         #trade.sell_order_id = new_sell_order_id
@@ -506,7 +506,7 @@ def apply_sell_orders(trades, days, force_sell):
 
 
 
-# Functia principala care ruleaza periodic actualizarile si cache-ul
+# The main function that periodically runs the updates and the cache.
 def monitor_trades(filename, interval=3600, limit=1000, years_to_keep=2):
     order_type = None
     while True:
@@ -517,7 +517,7 @@ def monitor_trades(filename, interval=3600, limit=1000, years_to_keep=2):
         apitrades.load_trades_from_file(filename)   
         time.sleep(interval)
 
-# Functia pentru a porni monitorizarea periodica intr-un thread separat
+# The function that starts periodic monitoring in a separate thread.
 def start_monitoring(filename, interval=3600, limit=1000, years_to_keep=2):
     monitoring_thread = Thread(
         target=monitor_trades,

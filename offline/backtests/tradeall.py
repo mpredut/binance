@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-offline.backtests.tradeall — reia istoricul de pret deja salvat
-(cachedb/cache_price_{symbol}.jsonl, ~11 luni) prin EXACT acelasi model de
+offline.backtests.tradeall — replays the price history already saved
+(cachedb/cache_price_{symbol}.jsonl, ~11 months) through EXACTLY the same model of
 decizie ca tradeall.py (PriceWindow / WindowAnalyzer / TrendState / logic /
-logic_small), cu place_order_smart inlocuit de un stub care simuleaza
+logic_small), with place_order_smart replaced by a stub that simulates
 execution instead of hitting the Binance network. It writes ONLY into a separate
-logger/backtest/<run_id>/ — NICIODATA in logurile live folosite de
+logger/backtest/<run_id>/ — NEVER in the live logs used by
 tradeall.py real (vezi plan A5).
 
 Rulare:
@@ -25,11 +25,11 @@ from datetime import datetime
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
 
-import tradeall as ta  # reutilizam PriceWindow/WindowAnalyzer/TrendState/logic (A5) — nu reimplementam modelul
-# 23 iul: SimClock extras in providers/replay_clock.py (partajat cu
-# monitortrades — vezi UNIFIED_BACKTEST_PLAN.md §7/§8), pasat catre
-# TrendState(now_fn=...) ca fast-forward sa fie corect (A5). Alias
-# `_SimClock` pastrat pt orice referinta externa existenta (offline/research/*.py).
+import tradeall as ta  # We reuse PriceWindow/WindowAnalyzer/TrendState/logic (A5) — the model is not reimplemented.
+# 23 Jul: SimClock extracted into providers/replay_clock.py (shared with
+# monitortrades — see UNIFIED_BACKTEST_PLAN.md §7/§8), passed to
+# TrendState(now_fn=...) so that fast-forward is correct (A5). The
+# `_SimClock` alias is kept for any existing external reference (offline/research/*.py).
 from providers.replay_clock import SimClock as _SimClock  # noqa: F401
 from offline.research.monitortrades_backtest.replay_trend_source import (  # noqa: E402
     DynamicReplayTrendSource,
@@ -43,38 +43,38 @@ def _sanitize(value):
 FEE_PCT = 0.1   # comision spot Binance ~0.1% per leg (taker)
 # marime standard de pozitie pt simulare (kalman-primary + benchmark buy&hold) —
 # 21 Jul: replaces ta.api.quantities[symbol] (removed from bapi.py, it was only
-# un placeholder mereu taiat de weight-limit in live, dar aici chiar avem nevoie
-# de un NUMAR REAL, fix, ca sa comparam onest intre variante pe acelasi volum.
+# a placeholder always trimmed by the weight limit in live, but here we really do need
+# a REAL, fixed NUMBER, so that variants can be compared honestly on the same volume.
 BACKTEST_NOTIONAL_USD = 1000.0
 
 
 class BacktestBroker:
     """Stub for po.place_order_smart: it simulates execution (no network),
-    scrie in propriul folder de backtest, acelasi format pipe ca order_outcomes
-    live (Pas A2) — asa incat tradeall_observe.py sa il poata randa identic.
-    Tine si CONTABILITATE P&L: pozitie, cost mediu, realizat, comisioane."""
+    writes into its own backtest folder, the same pipe format as the live
+    order_outcomes (Step A2) — so that tradeall_observe.py can render it identically.
+    It also keeps P&L ACCOUNTING: position, average cost, realised, fees."""
     def __init__(self, out_dir, clock, trend_gate=None, trend_gate_timeout_sec=None,
                  trend_gate_max_wait_sec=3600.0):
         self.clock = clock
         self.path = os.path.join(out_dir, "order_outcomes.log")
         self.n_buy = self.n_sell = 0
         self.pos_qty = 0.0
-        self.pos_cost = 0.0       # cost total al pozitiei curente (fara fee)
+        self.pos_cost = 0.0       # Total cost of the current position (excluding fees).
         self.realized = 0.0       # realised profit/loss (excluding fees)
         self.fees = 0.0
         self.last_price = None
-        # 29 iul (idee user): gate de "asteapta un pret mai bun". FIDEL cu live
+        # 29 Jul (user's idea): a "wait for a better price" gate. FAITHFUL to live
         # (bapi_placeorder.__place_order -> _maybe_wait_trend -> wait_for_favorable_entry):
         # the gate does NOT block the order, it only DELAYS it until a favourable tick
         # (or until max_wait, then places it anyway). The P&L effect is a better
-        # intrare/iesire mai bun, NU tranzactii evitate. Ordinele amanate stau in
-        # self.pending si se executa pe tick-urile viitoare (process_pending, chemat
-        # din bucla principala). trend_gate=None => OFF (comportament vechi).
+        # a better entry/exit, NOT avoided trades. Deferred orders sit in
+        # self.pending and execute on future ticks (process_pending, called
+        # from the main loop). trend_gate=None => OFF (the old behaviour).
         self.trend_gate = trend_gate
         self.trend_gate_timeout_sec = trend_gate_timeout_sec
         self.trend_gate_max_wait_sec = float(trend_gate_max_wait_sec)
         self.pending = []          # [{side, symbol, qty_arg, motivation, deadline}]
-        self.n_waited = 0          # cate ordine au fost intarziate (apoi executate)
+        self.n_waited = 0          # How many orders were delayed (and then executed).
 
     def _execute(self, order_type, symbol, price, qty=None, motivation=None):
         """The real P&L accounting (no gate) — used directly or after waiting."""
@@ -90,7 +90,7 @@ class BacktestBroker:
             self.fees += qty * price * FEE_PCT / 100
         else:
             if self.pos_qty <= 1e-12:
-                return None            # nu avem ce vinde (spot) — refuz ca in realitate
+                return None            # Nothing to sell (spot) — refuse, as in reality.
             sell_q = min(qty, self.pos_qty)
             avg = self.pos_cost / self.pos_qty
             self.realized += (price - avg) * sell_q
@@ -101,14 +101,14 @@ class BacktestBroker:
         cols = [self.clock(), symbol, order_type, price, qty, "executed", "", "backtest", motivation]
         with open(self.path, "a", encoding="utf-8") as f:
             f.write("|".join(_sanitize(c) for c in cols) + "\n")
-        return {"orderId": -1, "backtest": True}   # obiect truthy, ca in "if order:" din logic()
+        return {"orderId": -1, "backtest": True}   # A truthy object, as in logic()'s "if order:".
 
     def place_order_smart(self, order_type, symbol, price, qty=None, motivation=None, **kwargs):
-        # Gate-ul se aplica NECONDITIONAT (si la force=True) — user (29 iul, "gatul
+        # The gate applies UNCONDITIONALLY (force=True included) — user (29 Jul, "the
         # is always welcome"), consistent with live. If the direction is NOT favourable yet,
-        # INTARZIE (nu blocheaza): inregistreaza ordinul in pending, il executa la
-        # primul tick favorabil (sau la expirarea max_wait). Ca la live, apelantul
-        # (tradeall) primeste un rezultat truthy imediat -> marcheaza fire confirmat,
+        # It DELAYS (it does not block): the order is recorded as pending and executed on the
+        # first favourable tick (or when max_wait expires). As in live, the caller
+        # (tradeall) gets a truthy result immediately -> it marks the fire confirmed,
         # exactly as after a wait_for_favorable_entry that ends in a placement.
         if (self.trend_gate is not None
                 and self.trend_gate.should_wait(symbol, order_type, self.trend_gate_timeout_sec)):
@@ -116,12 +116,12 @@ class BacktestBroker:
                 "side": order_type, "symbol": symbol, "qty_arg": qty,
                 "motivation": motivation, "deadline": self.clock() + self.trend_gate_max_wait_sec})
             self.n_waited += 1
-            return {"orderId": -1, "backtest": True, "pending": True}   # truthy, ca la live dupa wait
+            return {"orderId": -1, "backtest": True, "pending": True}   # Truthy, as in live after the wait.
         return self._execute(order_type, symbol, price, qty, motivation)
 
     def process_pending(self, symbol, ts, price):
         """Execute the delayed orders that became favourable OR expired
-        (max_wait), la pretul tick-ului curent. Chemat pe FIECARE tick din bucla."""
+        (max_wait), at the current tick's price. Called on EVERY tick of the loop."""
         if not self.pending:
             return
         still = []
@@ -168,8 +168,8 @@ def make_decision_logger(out_dir, clock):
 
 
 def load_ticks_history(symbol, start_ts, end_ts):
-    """Citeste cache_price_{symbol}.jsonl — istoric lung (~11 luni), dar RAR
-    (interval variabil, recent ~7 min/tick) — vezi caveat-ul din plan (A5)."""
+    """Reads cache_price_{symbol}.jsonl — a long history (~11 months), but SPARSE
+    (a variable interval, recently ~7 min/tick) — see the caveat in the plan (A5)."""
     path = os.path.join(ROOT, "cachedb", f"cache_price_{symbol}.jsonl")
     if not os.path.exists(path):
         raise FileNotFoundError(f"Cannot find {path} (the price history for {symbol})")
@@ -192,10 +192,10 @@ def load_ticks_history(symbol, start_ts, end_ts):
 
 def load_ticks_cache24(symbol, start_ts, end_ts, filename=None):
     """Read cache_24price_{symbol}.json (or a cache24 with long retention,
-    daca filename e dat) — rezolutie DENSA (~1s/tick, ca live), dar limitata
-    la ce a retinut acel cache (implicit doar ultimele ~24h).
+    if a filename is given) — a DENSE resolution (~1s/tick, as in live), but limited
+    to what that cache retained (by default only the last ~24h).
     .jsonl (21 iul: cache_24price_long_*.jsonl, arhivatorul — vezi
-    Cache24LongPriceManager) — format linie-cu-linie, citit integral aici
+    Cache24LongPriceManager) — a line-by-line format, read in full here
     (backtest-ul oricum parcurge tot intervalul cerut, spre deosebire de
     tradeall_observe.py, which reads only the tail for a chart)."""
     path = filename or os.path.join(ROOT, "cachedb", f"cache_24price_{symbol}.json")
@@ -230,50 +230,50 @@ def load_ticks_cache24(symbol, start_ts, end_ts, filename=None):
 def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=None, quiet=False,
                  kalman_primary=False, threshold_provider=None, trend_gate_timeout_sec=None,
                  trend_gate_max_wait_sec=3600.0):
-    """threshold_provider OPTIONAL (default None = comportament VECHI, neschimbat:
+    """threshold_provider is OPTIONAL (default None = the OLD behaviour, unchanged:
     uses the fixed ta.PRICE_CHANGE_THRESHOLD_EUR/_BIG_EUR). If given, it is a callable
     threshold_provider(window_small, window_big) -> (thr_small, thr_big), apelat la
-    FIECARE tick INAINTE de check_price_change() — asa poate un experiment sa testeze
-    praguri DINAMICE (ex. adaptive pe volatilitate) fara sa copieze bucla intreaga
-    (23 iul: offline/research/tradeall_adaptive_thresholds/ facuse exact asta inainte, cu
-    riscul ca bucla proprie sa diverga tacut de asta, "oficiala", in timp)."""
+    EVERY tick BEFORE check_price_change() — that way an experiment can test
+    DYNAMIC thresholds (e.g. adaptive on volatility) without copying the whole loop
+    (23 Jul: offline/research/tradeall_adaptive_thresholds/ had done exactly that before, with
+    the risk that its own loop would silently diverge from this, the "official" one, over time)."""
     out_dir = os.path.join(ROOT, "logger", "backtest", run_id)
-    # 23 iul: curata folderul INAINTE de a rula — mai multe fisiere de aici
+    # 23 Jul: clean the folder BEFORE running — several files here
     # (order_outcomes.log, tradeall_decisions.log, tradeall_shadow.log,
     # tradeall_price_samples.log) are written with open(..., "a") (append), so without
-    # asta o a DOUA rulare cu ACELASI run_id ar amesteca tacut istoricul vechi cu
-    # cel nou. Pana acum, fiecare caller trebuia sa-si aminteasca sa faca
+    # this, a SECOND run with the SAME run_id would silently mix the old history with
+    # the new one. Until now, every caller had to remember to do the
     # shutil.rmtree() singur (offline/research/tradeall_trigger_gate/experiment_quality_
-    # signal_v2.py o facea manual) — mutat aici o data, pt toti apelantii.
+    # signal_v2.py did it by hand) — moved here once, for every caller.
     import shutil as _shutil
     _shutil.rmtree(out_dir, ignore_errors=True)
     os.makedirs(out_dir, exist_ok=True)
     price_path = os.path.join(out_dir, "tradeall_price_samples.log")
 
     if quiet:
-        # tradeall.logic()/check_price_change() fac print() la fiecare tick, oglindit si pe
+        # tradeall.logic()/check_price_change() print() on every tick, mirrored onto
         # disc (log.py) — pe date DENSE (cache24, zeci de mii de tick-uri) asta domina timpul
         # de rulare. log.disable_print() suprima global print() (mesajele NOASTRE folosesc
-        # sys.stderr.write, care ramane vizibil).
+        # sys.stderr.write, which stays visible).
         ta.log.disable_print()
 
-    # 29 iul (idee user): gate de "asteapta un moment favorabil" pt intentiile de
-    # BUY/SELL in reincercare — DynamicReplayTrendSource izolat (nu atinge
-    # cache_instant_trend.json), alimentat tick-cu-tick mai jos, in bucla principala.
+    # 29 Jul (user's idea): a "wait for a favourable moment" gate for the
+    # BUY/SELL retry intents — an isolated DynamicReplayTrendSource (it does not touch
+    # cache_instant_trend.json), fed tick by tick below, in the main loop.
     trend_gate = DynamicReplayTrendSource([symbol]) if trend_gate_timeout_sec is not None else None
 
     clock = _SimClock()
     broker = BacktestBroker(out_dir, clock, trend_gate=trend_gate,
                             trend_gate_timeout_sec=trend_gate_timeout_sec,
                             trend_gate_max_wait_sec=trend_gate_max_wait_sec)
-    # 30 iul: tradeall._fire_order foloseste acum mkt.place(symbol, side, price, qty, ...)
-    # (proxy unic), nu po.place_order_smart(side, symbol, ...). Stub-uim ta.mkt.place cu un
+    # 30 Jul: tradeall._fire_order now uses mkt.place(symbol, side, price, qty, ...)
+    # (a single proxy), not po.place_order_smart(side, symbol, ...). We stub ta.mkt.place with a
     # an adapter that swaps the order (symbol,side)->(side,symbol) and calls the simulated broker
     # -> it does NOT touch the network. (We also patch ta.po.place_order_smart as a safety net for
-    # orice cale reziduala.)
+    # any residual path.)
     if kalman_primary:
         # PRIMARY KALMAN MODE: the old model only LOGS (its orders are not
-        # se executa); broker-ul e condus exclusiv de tranzitiile Kalman.
+        # executes); the broker is driven exclusively by the Kalman transitions.
         _old_attempts = {"n": 0}
         def _journal_only(order_type, symbol_, price_, qty_=None, motivation=None, **kw):
             _old_attempts["n"] += 1
@@ -282,7 +282,7 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
         ta.mkt.place = lambda symbol_, side_, price_, qty_=None, **kw: _journal_only(
             side_, symbol_, price_, qty_, **kw)
     else:
-        ta.po.place_order_smart = broker.place_order_smart           # stub — NU atinge reteaua
+        ta.po.place_order_smart = broker.place_order_smart           # A stub — it does NOT touch the network.
         ta.mkt.place = lambda symbol_, side_, price_, qty_=None, **kw: broker.place_order_smart(
             side_, symbol_, price_, qty_, **kw)
     ta.log_decision = make_decision_logger(out_dir, clock)            # redirect — it does NOT write into the live logs
@@ -298,13 +298,13 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
     trend_state_big = ta.TrendState(max_duration_seconds=3 * 60 * 60, expiration_trend_time=2.7 * 60,
                                      fresh_trend_time=3.7 * 60, now_fn=clock)
 
-    # SHADOW (observational, plan 17 iul): aceleasi obiecte ca live, cu ceasul
+    # SHADOW (observational, the 17 Jul plan): the same objects as live, with the clock
     # simulat; jurnal FLAT in folderul run-ului (monitorul de backtest il deseneaza).
     import shadow_signals
     shadow = shadow_signals.ShadowSet(
         journal=shadow_signals.ShadowJournal(fixed_path=os.path.join(out_dir, "tradeall_shadow.log")))
-    # KALMAN GATE si in backtest (paritate cu live), dar cu jurnalul de blocari
-    # redirectionat in folderul run-ului — NICIODATA in order_outcomes live (A5).
+    # The KALMAN GATE is in the backtest too (parity with live), but with the block journal
+    # redirected into the run's folder — NEVER into the live order_outcomes (A5).
     ta._shadow_ref = shadow
     def _bt_gate_log(symbol_, side, price_, qty, outcome, reason, motivation):
         cols = [clock(), symbol_, side, price_, qty, outcome, reason, "backtest", motivation]
@@ -323,7 +323,7 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
     prev_ktrend = 0
     with open(price_path, "a", encoding="utf-8") as price_f:
         for ts, price in tick_source:
-            clock.ts = ts   # ceasul simulat = timpul tick-ului REPLAY-uit, nu ceasul real (A5)
+            clock.ts = ts   # The simulated clock = the time of the REPLAYED tick, not the real clock (A5).
             if speed == "real" and prev_ts is not None:
                 time.sleep(max(0.0, ts - prev_ts))
             dt = ts - prev_ts if prev_ts is not None else None
@@ -336,7 +336,7 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
             window_big.process_price(price)
             if trend_gate is not None:
                 trend_gate.advance(symbol, ts, price)
-                broker.process_pending(symbol, ts, price)   # executa ordine intarziate devenite favorabile
+                broker.process_pending(symbol, ts, price)   # Execute delayed orders that became favourable.
             price_f.write(f"{ts}|{symbol}|{price}\n")
 
             if threshold_provider is not None:
@@ -351,7 +351,7 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
             slope_big, _price_diff = analyzer_big.check_price_change(thr_big)
             ta.logic("BIG", True, symbol, gradient, slope_big, trend_state_big, price)
 
-            # SHADOW: acelasi apel ca in TrendCoordinator.evaluate live, cu ceas simulat
+            # SHADOW: the same call as in the live TrendCoordinator.evaluate, with a simulated clock.
             try:
                 shadow_fields = shadow.update(symbol, ts, price,
                                                epsilon=window_small.get_noise_epsilon(),
@@ -362,12 +362,12 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
 
             if first_price is None:
                 first_price = price
-            # 23 iul: broker.last_price actualizat NECONDITIONAT, la fiecare tick — nu
+            # 23 Jul: broker.last_price is updated UNCONDITIONALLY, on every tick — not
             # only in kalman_primary mode. Bug found today: without it, mark_to_market()
             # uses the price of the LAST TRADE (not the current market price) for any
             # pozitie ramasa DESCHISA la final in modul normal (model_actual) — un BUY
-            # la 100 urmat de o urcare la 150 fara alt trade raporta mark_to_market=$0
-            # in loc de $50 (verificat izolat: net_total -$0.10 vs +$49.90 corect).
+            # at 100 followed by a rise to 150 without another trade reported mark_to_market=$0
+            # instead of $50 (verified in isolation: net_total -$0.10 versus the correct +$49.90).
             broker.last_price = price
             if kalman_primary:
                 ktrend = shadow_fields.get("kalman_trend", prev_ktrend)
@@ -382,8 +382,8 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
             n += 1
             if n % 100 == 0:
                 # Starea analizei SIMULATE — cititita de tradeall_observe.py (hover pe grafic),
-                # acelasi continut ca cache_instant_trend.json in live. La 100 tick-uri, nu
-                # per-tick (I/O ieftin chiar si in fast-forward).
+                # the same content as live's cache_instant_trend.json. Every 100 ticks, not
+                # per tick (cheap I/O even in fast-forward).
                 try:
                     state = {symbol: {
                         "current_price": price, "final_trend": gradient,
@@ -396,14 +396,14 @@ def run_backtest(symbol, start_ts, end_ts, speed, run_id, source, cache24_file=N
                 except Exception:
                     pass
             if n % 5000 == 0:
-                # sys.stderr.write, nu print(): in modul --quiet, print() e suprimat global
-                # (log.disable_print()) — mesajele NOASTRE de progres tot trebuie sa se vada.
-                sys.stderr.write(f"[tradeall_backtest] {n} tick-uri, ultimul {datetime.fromtimestamp(ts)} "
+                # sys.stderr.write, not print(): in --quiet mode, print() is suppressed globally
+                # (log.disable_print()) — OUR progress messages still have to be visible.
+                sys.stderr.write(f"[tradeall_backtest] {n} ticks, the last {datetime.fromtimestamp(ts)} "
                                  f"(BUY {broker.n_buy} / SELL {broker.n_sell})\n")
 
     pnl = broker.pnl_summary()
     if first_price and broker.last_price:
-        # benchmark: buy&hold pe aceeasi cantitate standard, acelasi interval
+        # benchmark: buy & hold on the same standard quantity, the same interval
         bh_qty = BACKTEST_NOTIONAL_USD / first_price if first_price else 0
         pnl["buy_hold_net"] = round((broker.last_price - first_price) * bh_qty
                                      - 2 * bh_qty * first_price * FEE_PCT / 100, 2)
@@ -426,28 +426,28 @@ def main():
     p.add_argument("--start", required=True, help="YYYY-MM-DD — data de start a simularii")
     p.add_argument("--end", default=None, help="YYYY-MM-DD (implicit: pana la capatul datelor salvate)")
     p.add_argument("--speed", choices=["real", "fast"], default="fast",
-                   help="real = respecta intervalele istorice; fast = fara asteptare (implicit)")
+                   help="real = honour the historical intervals; fast = no waiting (the default)")
     p.add_argument("--run-id", default=None, help="implicit: <symbol>_<start>_<timestamp>")
     p.add_argument("--source", choices=["history", "cache24"], default="history",
-                   help="history = cache_price_*.jsonl (~11 months, dar RAR, vezi caveat in plan); "
-                        "cache24 = cache_24price_*.json, rezolutie DENSA (~1s) dar doar ce a retinut "
+                   help="history = cache_price_*.jsonl (~11 months, but SPARSE, see the caveat in the plan); "
+                        "cache24 = cache_24price_*.json, a DENSE resolution (~1s) but only what was retained "
                         "that cache (by default the last ~24h, or a file with long retention if "
-                        "ruleaza deja tradeall_price_archiver.py)")
+                        "tradeall_price_archiver.py is already running)")
     p.add_argument("--cache24-file", default=None,
-                   help="cale explicita catre un fisier cache24 (ex. cache_24price_long_BTCUSDC.jsonl); "
+                   help="an explicit path to a cache24 file (e.g. cache_24price_long_BTCUSDC.jsonl); "
                         "implicit: cachedb/cache_24price_<symbol>.json")
     p.add_argument("--quiet", action="store_true",
                    help="suprima print()-urile zgomotoase ale tradeall.logic() (mult mai rapid pe "
                         "date dense/lungi); mesajele de progres proprii raman vizibile")
     p.add_argument("--kalman-primary", action="store_true",
-                   help="Kalman conduce (BUY la ->UP, SELL tot la ->DOWN); modelul vechi doar "
-                        "jurnalizeaza. Pentru A/B pe P&L fata de rularea normala.")
+                   help="Kalman drives (BUY on ->UP, SELL likewise on ->DOWN); the old model only "
+                        "journals. For an A/B on P&L against the normal run.")
     p.add_argument("--trend-gate-timeout-sec", type=float, default=None,
-                   help="29 iul: gate 'asteapta un pret mai bun' pt BUY/SELL (fidel live: "
-                        "INTARZIE pana la tick favorabil, NU blocheaza). Fereastra SCURTA "
-                        "dinamica de trend. Implicit None = OFF (comportament vechi).")
+                   help="29 Jul: a 'wait for a better price' gate for BUY/SELL (faithful to live: "
+                        "it DELAYS until a favourable tick, it does NOT block). A SHORT dynamic "
+                        "trend window. Default None = OFF (the old behaviour).")
     p.add_argument("--trend-gate-max-wait-sec", type=float, default=3600.0,
-                   help="cat asteapta max un ordin intarziat inainte sa se plaseze oricum "
+                   help="how long a delayed order waits at most before being placed anyway "
                         "(implicit 3600 = valoarea live).")
     args = p.parse_args()
 

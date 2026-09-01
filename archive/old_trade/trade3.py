@@ -29,16 +29,16 @@ class PriceTrendAnalyzer:
         self.prices = prices
 
     def linear_regression_trend(self):
-        if len(self.prices) < 2:  # Avem nevoie de cel putin doua puncte pentru regresie
-            print("Regresie Liniara: Nu sunt suficiente date pentru a calcula trendul.")
+        if len(self.prices) < 2:  # We need at least two points for a regression.
+            print("Linear regression: not enough data to compute the trend.")
             return None, None, None
 
         x = np.arange(len(self.prices))
         y = np.array(self.prices)
         
-        # Verificam variabilitatea preturilor pentru a evita NaN
+        # Check the variability of the prices in order to avoid NaN.
         if np.std(y) == 0:
-            print("Regresie Liniara: Preturile sunt constante, trendul nu poate fi determinat.")
+            print("Linear regression: the prices are constant, the trend cannot be determined.")
             return None, None, None
 
         slope, intercept, r_value, _, _ = linregress(x, y)
@@ -68,9 +68,9 @@ class PriceTrendAnalyzer:
 
     def calculate_gradient(self):
         if len(self.prices) < 2:
-            print("Gradient: Nu sunt suficiente date pentru a calcula gradientul.")
+            print("Gradient: not enough data to compute the gradient.")
             return [], 0
-        y = np.array(self.prices)  # Convertim la array pentru numpy
+        y = np.array(self.prices)  # Convert to an array for numpy.
         gradient = np.gradient(y)
         avg_gradient = np.mean(gradient)
         return gradient, avg_gradient
@@ -81,12 +81,12 @@ class PriceTrendAnalyzer:
         fig, ax1 = plt.subplots(figsize=(10, 6))
 
         # Graficul preturilor
-        ax1.plot(x, self.prices, label='Preturi', marker='o', color='blue')
+        ax1.plot(x, self.prices, label='Prices', marker='o', color='blue')
         ax1.plot(x, trend_line, label='Regresie Liniara', color='orange')
         ax1.plot(x, trend_poly, label='Regresie Polinomiala', color='purple')
         ax1.plot(x, ema, label='Media Mobila Exponentiala', color='green')
         ax1.set_xlabel("Timp")
-        ax1.set_ylabel("Pret")
+        ax1.set_ylabel("Price")
         
         # Graficul gradientului
         ax2 = ax1.twinx()
@@ -112,7 +112,7 @@ class PriceTrendAnalyzer:
 
         # Media Mobila Exponentiala
         ema = self.exponential_moving_average(span=ema_span)
-        print(f"Media Mobila Exponentiala: Ultima valoare EMA = {ema[-1]:.2f}")
+        print(f"Exponential moving average: the last EMA value = {ema[-1]:.2f}")
 
         # Gradientul
         gradient, avg_gradient = self.calculate_gradient()
@@ -122,8 +122,8 @@ class PriceTrendAnalyzer:
         # Plotarea tendintelor
         self.plot_trends(trend_line, trend_poly, ema, gradient)
 
-# Exemplu de utilizare:
-#prices = [100, 102, 101, 105, 107, 110, 108, 112, 115, 117]  # Inlocuieste cu lista ta de preturi
+# A usage example:
+#prices = [100, 102, 101, 105, 107, 110, 108, 112, 115, 117]  # Replace with your own list of prices.
 #analyzer = PriceTrendAnalyzer(prices)
 #analyzer.analyze_trends(poly_degree=2, ema_span=5)
 
@@ -136,12 +136,12 @@ class PriceWindow:
         self.sorted_prices = []
         
         if initial_prices:
-            for price in initial_prices[-self.window_size:]:  # Doar ultimele `window_size` elemente
+            for price in initial_prices[-self.window_size:]:  # Only the last `window_size` elements.
                 self.process_price(price)
 
     @classmethod
     def from_existing_window(cls, existing_prices, window_size):
-        """ Creeaza o instanta noua de PriceWindow cu ultimele `window_size` elemente din `existing_prices`. """
+        """ Create a new PriceWindow instance from the last `window_size` elements of `existing_prices`. """
         return cls(window_size, initial_prices=existing_prices)
 
     def process_price(self, price):
@@ -306,7 +306,7 @@ class PriceWindow:
         #price_diff = max_price - min_price
         price_diff_min = u.calculate_difference_percent(min_price, newest_price)
         price_diff_max = u.calculate_difference_percent(max_price, newest_price)
-        grow = price_diff_max < price_diff_min # pret curent inspre max
+        grow = price_diff_max < price_diff_min # The current price is heading towards the max.
         price_diff = max(price_diff_min, price_diff_max) ## check if abs(price_diff_min,price_diff_max) > treshold
 
         
@@ -385,7 +385,7 @@ class PriceWindow:
         ema_diff = 0
         #if len(ema) > 1:
         #    ema_diff = ema[-1] - ema[-2] 
-        #print(f"Media Mobila Exponentiala: Ultima valoare EMA = {ema[-1]:.2f} -> {'crestere' if ema_diff > 0 else 'descrestere'}")
+        #print(f"Exponential moving average: the last EMA value = {ema[-1]:.2f} -> {'rise' if ema_diff > 0 else 'fall'}")
 
         # Gradientul
         gradient_lst, avg_gradient = analyzer.calculate_gradient()
@@ -399,7 +399,7 @@ class PriceWindow:
 
 
 
-        # Calculare vot final si coeficient de crestere
+        # Compute the final vote and the growth coefficient.
         trends = [#1 if slope > 0 else -1 if slope < 0 else 0,
                   #1 if poly_trend > 0 else -1,
                   1 if ema_diff > 0 else -1,
@@ -427,10 +427,10 @@ class PriceWindow:
     
 
 TIME_SLEEP_GET_PRICE = 2  # seconds to sleep for price collection
-EXP_TIME_BUY_ORDER = (2.6 * 60) * 60 # dupa 1.6 ore
+EXP_TIME_BUY_ORDER = (2.6 * 60) * 60 # After 1.6 hours.
 EXP_TIME_SELL_ORDER = EXP_TIME_BUY_ORDER
 TIME_SLEEP_EVALUATE = TIME_SLEEP_GET_PRICE + 60  # seconds to sleep for buy/sell evaluation
-# am voie 6 ordere per perioada de expirare care este 2.6 ore. deaceea am impartit la 6
+# We are allowed 6 orders per expiry period, which is 2.6 hours; that is why it is divided by 6.
 TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + EXP_TIME_SELL_ORDER/ 6 + 4*79  # seconds to sleep for order placement
 WINDOWS_SIZE_MIN = TIME_SLEEP_GET_PRICE + 7.7 * 60  # minutes
 window_size = WINDOWS_SIZE_MIN / TIME_SLEEP_GET_PRICE
@@ -509,11 +509,11 @@ class TrendState:
         self.expired = False
         self.start_time = None  # Timpul de Inceput al trendului
         self.end_time = None  # Timpul de sfarsit al trendului
-        self.last_confirmation_time = None  # Ultimul timp de confirmare al trendului
-        self.max_duration_seconds = max_duration_seconds  # Durata maxima permisa pentru un trend
-        self.confirm_count = 0  # Contorul de confirmari pentru trend
-        self.expiration_trend_time = expiration_trend_time  # Pragul de timp Intre confirmari (In secunde)
-        self.fresh_trend_time = fresh_trend_time  # Pragul pentru a fi considerat fresh
+        self.last_confirmation_time = None  # The last confirmation time of the trend.
+        self.max_duration_seconds = max_duration_seconds  # The maximum duration allowed for a trend.
+        self.confirm_count = 0  # The confirmation counter for the trend.
+        self.expiration_trend_time = expiration_trend_time  # The time threshold between confirmations (in seconds).
+        self.fresh_trend_time = fresh_trend_time  # The threshold for being considered fresh.
       
 
     def start_trend(self, new_state):
@@ -524,7 +524,7 @@ class TrendState:
         self.state = new_state
         self.start_time = time.time()
         self.last_confirmation_time = self.start_time
-        self.confirm_count = 1  # Prima confirmare
+        self.confirm_count = 1  # The first confirmation.
         self.end_time = None  # Resetam timpul de sfarsit
         self.expired = False
         print(f"Start of {self.state} trend at {u.timeToHMS(self.start_time)}")
@@ -561,7 +561,7 @@ class TrendState:
 
     def end_trend(self):
         self.old_state = self.state
-        self.end_time = self.last_confirmation_time  # Timpul de sfarsit al trendului este ultimul timp de confirmare
+        self.end_time = self.last_confirmation_time  # The trend's end time is the last confirmation time.
         print(f"Trend ended: {self.state} at {u.timeToHMS(self.end_time)} after {self.confirm_count} confirmations.")
         self.old_confirm_count = self.confirm_count
         self.confirm_count = 0
@@ -602,7 +602,7 @@ order_ids = []
 
 
 
-# Cache-ul care va fi actualizat periodic
+# The cache that will be refreshed periodically.
 default_values_sell_recommendation = {
     "BTCUSDT": {
         'force_sell': 0,
@@ -610,12 +610,12 @@ default_values_sell_recommendation = {
         'expired_duration': 3600 * 3.7,
         'min_procent': 0.0099,
         'days_after_use_current_price': 7,
-        'slope': 0.0,      # Valoare default pentru slope
-        'pos': 0,          # Valoare default pentru pos
-        'gradient': 0.0,   # Valoare default pentru gradient
-        'tick': 0,         # Valoare default pentru tick
-        'min': 0.0,        # Valoare default pentru min
-        'max': 0.0         # Valoare default pentru max
+        'slope': 0.0,      # The default value for slope.
+        'pos': 0,          # The default value for pos.
+        'gradient': 0.0,   # The default value for gradient.
+        'tick': 0,         # The default value for tick.
+        'min': 0.0,        # The default value for min.
+        'max': 0.0         # The default value for max.
     },
     "ETHUSDT": {
         'force_sell': 0,
@@ -623,12 +623,12 @@ default_values_sell_recommendation = {
         'expired_duration': 3600 * 3.7,
         'min_procent': 0.0099,
         'days_after_use_current_price': 7,
-        'slope': 0.0,      # Valoare default pentru slope
-        'pos': 0,          # Valoare default pentru pos
-        'gradient': 0.0,   # Valoare default pentru gradient
-        'tick': 0,         # Valoare default pentru tick
-        'min': 0.0,        # Valoare default pentru min
-        'max': 0.0         # Valoare default pentru max
+        'slope': 0.0,      # The default value for slope.
+        'pos': 0,          # The default value for pos.
+        'gradient': 0.0,   # The default value for gradient.
+        'tick': 0,         # The default value for tick.
+        'min': 0.0,        # The default value for min.
+        'max': 0.0         # The default value for max.
     }
 }
 def initialize_csv_file(file_path):
@@ -726,7 +726,7 @@ while True:
             # track_and_place_order('SELL', proposed_price, current_price, order_ids=order_ids)   
 
         #
-        # Verificam schimbarile de pret si gestionam trendurile
+        # Check the price changes and manage the trends.
         #
         proposed_price = current_price
        
