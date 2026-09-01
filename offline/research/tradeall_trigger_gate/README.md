@@ -1,85 +1,75 @@
-# Investigație: declanșatoare BUY/SELL în tradeall.py (21-22 iul 2026)
+# Investigation: BUY/SELL triggers in tradeall.py (21-22 Jul 2026)
 
-Scripturi izolate folosite pentru a testa dacă merită mărită frecvența cu care
-`tradeall.py` declanșează ordine reale. **Niciunul dintre aceste scripturi nu
-modifică `tradeall.py` pe disc** — toate importă `tradeall`/`tradeall_backtest`
-și suprascriu (monkeypatch) funcții/clase în memorie, doar pentru durata
-rulării lor proprii. Sunt scripturi de cercetare, nu cod de producție — nu
-rulează niciodată împotriva rețelei reale (folosesc `offline/backtests/tradeall.py`,
-care simulează execuția).
+Isolated scripts used to test whether it is worth increasing the frequency at which
+`tradeall.py` fires real orders. **None of these scripts modifies `tradeall.py` on disk** —
+they all import `tradeall`/`tradeall_backtest` and monkeypatch functions and classes in
+memory, for the duration of their own run only. They are research scripts, not production
+code, and they never run against the real network (they use `offline/backtests/tradeall.py`,
+which simulates execution).
 
-**STATUS (28 iul): cooldown-ul recomandat (Exp 7) E LIVE** — comis 22 iul
+**STATUS (28 Jul): the recommended cooldown (Exp 7) IS LIVE** — committed on 22 July
 (`c672485`, `b6c4ec2`) in `tradeall.py::logic()`/`TrendState` (`_fire_once`,
-`fire_limit_reached`, `can_retry_fire`, `mark_confirmed`), configurabil prin
-`TRADEALL_FIRE_MAX_PER_TREND`/`TRADEALL_FIRE_MIN_RETRY_MINUTES` in
-`tradeall_config.env` (3 executii / 6 min, exact varianta recomandata). NU mai
-e doar o recomandare din research — verifica `git log -- tradeall.py` inainte
-sa presupui ca ceva de aici n-a fost actionat.
+`fire_limit_reached`, `can_retry_fire`, `mark_confirmed`), configurable through
+`TRADEALL_FIRE_MAX_PER_TREND`/`TRADEALL_FIRE_MIN_RETRY_MINUTES` in `tradeall_config.env`
+(3 executions / 6 min, exactly the recommended variant). It is no longer just a research
+recommendation — check `git log -- tradeall.py` before assuming anything here has not been
+acted upon.
 
-Concluzia completă (cifre, tabele, recomandare finală) e în memoria
-persistentă a asistentului: `tradeall-trigger-gate-investigation.md`
-(căutabilă/reference-abilă din orice sesiune viitoare Claude Code pe acest
-repo). Rezumat pe scurt: **nu s-a găsit nicio schimbare de praguri sau
-condiții care să bată varianta actuală + buy&hold, testat pe eșantioane de la
-12 ore până la 329 de zile.** Singurul lucru care a arătat o îmbunătățire
-reală (fără să schimbe deloc detecția de trend) e cooldown-ul — vezi
-Experimentul 7.
+The full conclusion (figures, tables, the final recommendation) lives in the assistant's
+persistent memory: `tradeall-trigger-gate-investigation.md` (searchable and referenceable
+from any future Claude Code session on this repository). The short summary: **no change of
+thresholds or conditions was found that beats the current variant plus buy & hold, tested on
+samples ranging from 12 hours to 329 days.** The only thing that showed a real improvement
+(without changing trend detection at all) is the cooldown — see Experiment 7.
 
-## Scripturi, în ordine cronologică
+## The scripts, in chronological order
 
-- **`experiment_trend_gate.py`** (Experiment 1) — variază pragurile de
-  CONFIRMARE/EXPIRARE ale unui trend deja pornit în `TrendState`
-  (`expiration_trend_time`, `TREND_TO_BE_OLD_SECONDS`, pragul de 24 confirmări).
-  Concluzie: relaxarea lor nu creează oportunități noi, doar prelungește
-  refirerea aceluiași eveniment.
+- **`experiment_trend_gate.py`** (Experiment 1) — varies the CONFIRMATION/EXPIRY thresholds
+  of a trend that has already started in `TrendState` (`expiration_trend_time`,
+  `TREND_TO_BE_OLD_SECONDS`, the 24-confirmation threshold). Conclusion: relaxing them
+  creates no new opportunities, it merely prolongs re-firing on the same event.
 
-- **`experiment_start_condition.py`** (Experiment 2) — variază condiția de
-  START a unui trend (`gradient>0 and slope_big<0` în `logic()`): eliminare
-  completă (doar semnul gradientului), cerință de acord în loc de divergență,
-  prag `PRICE_CHANGE_THRESHOLD_BIG_EUR` redus de 10x. Concluzie: orice
-  relaxare care chiar crește frecvența produce overtrading catastrofal
-  (zeci de mii de $ în comisioane pe doar 2-7 zile).
+- **`experiment_start_condition.py`** (Experiment 2) — varies the START condition of a trend
+  (`gradient>0 and slope_big<0` in `logic()`): removing it entirely (the gradient sign only),
+  requiring agreement instead of divergence, and a `PRICE_CHANGE_THRESHOLD_BIG_EUR` reduced
+  tenfold. Conclusion: any relaxation that genuinely increases the frequency produces
+  catastrophic overtrading (tens of thousands of dollars in fees over just 2-7 days).
 
-- **`experiment_cooldown.py`** (Experiment 3) — adaugă un cooldown fire-once
-  (cel mult un ordin per instanță de trend, nu refire la fiecare tick) peste
-  variantele din Experimentul 2. Reduce dramatic overtrading-ul, dar nu
-  transformă singur strategia într-una profitabilă dacă semnalul de bază
-  rămâne zgomotos.
+- **`experiment_cooldown.py`** (Experiment 3) — adds a fire-once cooldown (at most one order
+  per trend instance, rather than re-firing on every tick) on top of the Experiment 2
+  variants. It reduces overtrading dramatically, but on its own it does not turn the strategy
+  profitable if the underlying signal stays noisy.
 
-- **`experiment_dual_timeframe.py`** (Experiment 4) — testează ideea de
-  "acord" pe două ferestre de timp folosind aceeași derivare continuă
-  (regresie) pe fereastra mică ȘI pe cea mare (`gradient_big` în loc de
-  `slope_big`). Concluzie: cele două ferestre nu sunt semnale independente —
-  ambele sunt regresii pe fereastră glisantă, deci zgomotoase în același fel.
+- **`experiment_dual_timeframe.py`** (Experiment 4) — tests the idea of "agreement" across two
+  timeframes using the same continuous derivation (regression) on the small AND the large
+  window (`gradient_big` instead of `slope_big`). Conclusion: the two windows are not
+  independent signals — both are rolling-window regressions, so they are noisy in the same way.
 
-- **`experiment_quality_signal.py`** (Experiment 5) — un semnal de trend
-  CALITATIV diferit: regresie pe fereastră de 24h, recalculată doar la 30 min
-  (nu la fiecare tick) + cooldown pe execuție CONFIRMATĂ (nu pe simpla
-  încercare). Testat pe 7 zile — a arătat un rezultat aproape de buy&hold,
-  dar a expus un defect: reîncercări nelimitate la fiecare tick când nu exista
-  poziție de vândut (16683 încercări blocate pe BTC într-o săptămână).
+- **`experiment_quality_signal.py`** (Experiment 5) — a QUALITATIVELY different trend signal:
+  a regression over a 24h window, recomputed only every 30 minutes (not on every tick), plus a
+  cooldown on CONFIRMED execution (not on the mere attempt). Tested over 7 days, it showed a
+  result close to buy & hold, but it exposed a defect: unlimited retries on every tick when
+  there was no position to sell (16,683 blocked attempts on BTC in one week).
 
-- **`experiment_quality_signal_v2.py`** (Experiment 6) — repară defectul de
-  mai sus (interval minim de 30 min între reîncercări blocate) și testează pe
-  **329 de zile** de istoric real (`cache_price_*.jsonl`, sparse ~7 min/tick).
-  Rezultat decisiv: toate cele 4 configurații (2 ferestre × 2 simboluri) au
-  pierdut bani și au rămas sub buy&hold — rezultatul optimist de pe 7 zile
-  s-a dovedit noroc de eșantion mic.
+- **`experiment_quality_signal_v2.py`** (Experiment 6) — fixes the defect above (a minimum
+  30-minute interval between blocked retries) and tests over **329 days** of real history
+  (`cache_price_*.jsonl`, sparse at ~7 min per tick). A decisive result: all four
+  configurations (2 windows x 2 symbols) lost money and stayed below buy & hold — the
+  optimistic 7-day result turned out to be small-sample luck.
 
-- **`experiment_cooldown_only_and_tighten.py`** (Experiment 7) — testează
-  DOAR cooldown-ul (execuție confirmată + interval minim), fără nicio altă
-  schimbare de prag, aplicat pe `logic()` REALĂ din `tradeall.py` (condiția de
-  start neschimbată) — răspunde direct la întrebarea "merită comis doar
-  cooldown-ul?". Testează și o variantă ÎNĂSPRITĂ (prag de confirmări dublat,
-  24→48). **Notă metodologică importantă**: folosește arhiva DENSĂ (~1s/tick,
-  7 zile), nu istoricul sparse de 329 de zile — mecanismul original din
-  `logic()` are constante de timp scurte (expirare 2.7 min), incompatibile cu
-  eșantionarea de 7 min a istoricului lung (orice trend ar "expira" instant,
-  ca artefact al rarității datelor, nu al pieței reale).
+- **`experiment_cooldown_only_and_tighten.py`** (Experiment 7) — tests ONLY the cooldown
+  (confirmed execution plus a minimum interval), with no other threshold change, applied to
+  the REAL `logic()` from `tradeall.py` (the start condition unchanged) — answering the
+  question "is it worth committing just the cooldown?" directly. It also tests a TIGHTENED
+  variant (the confirmation threshold doubled, 24→48). **An important methodological note**:
+  it uses the DENSE archive (~1s per tick, 7 days), not the sparse 329-day history — the
+  original mechanism in `logic()` has short time constants (a 2.7-minute expiry), incompatible
+  with the long history's 7-minute sampling (any trend would "expire" instantly, an artefact
+  of the data's sparseness rather than of the real market).
 
-## Cum rulezi orice script din acest folder
+## How to run any script in this folder
 
-Toate scripturile presupun `cwd = /home/predut/binance` și folosesc `myenv`:
+Every script assumes `cwd = /home/predut/binance` and uses `myenv`:
 
 ```bash
 cd /home/predut/binance
@@ -87,6 +77,6 @@ source myenv/bin/activate
 python3 offline/research/tradeall_trigger_gate/<script>.py
 ```
 
-Scriu rezultate în `logger/backtest/experiment{N}_*/` (pnl.json, order_outcomes.log
-etc.) — același format ca backtest-urile normale, vizualizabile cu
+They write results into `logger/backtest/experiment{N}_*/` (pnl.json, order_outcomes.log and
+so on) — the same format as the normal backtests, viewable with
 `tradeall_observe.py --backtest-dir ...`.

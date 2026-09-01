@@ -1,20 +1,20 @@
 # Inventar `time.time()` — flota + boti (23 iul 2026)
 
-Pas 0 al planului din `UNIFIED_BACKTEST_PLAN.md`: gasit TOATE referintele la
-`time.time()` din flota (tradeall/monitortrades/rtrade/assetguardian) si boti
+Step 0 of the plan in `UNIFIED_BACKTEST_PLAN.md`: find ALL references to
+`time.time()` in the fleet (tradeall/monitortrades/rtrade/assetguardian) and the bots
 (kraken/hyperliquid/212trading), clasificate dupa ce inseamna sa le elimini —
-folosind timpul care vine ODATA CU PRETUL (timestamp-ul tick-ului/barei), sau
-injectat din exterior (un `Clock`, ca `_SimClock` din offline/backtests/tradeall.py).
+using the time that arrives WITH THE PRICE (the tick's or bar's timestamp), or
+injected from outside (a `Clock`, like `_SimClock` in offline/backtests/tradeall.py).
 
 Legenda:
-- 🔴 **DECIZIE** — afecteaza CE se tranzactioneaza/CAND. Trebuie injectat pt
+- 🔴 **DECISION** — it affects WHAT is traded and WHEN. It must be injected for
   backtest fidel.
-- 🟡 **INFRA-LIVE** — cache/rate-limit/polling REAL catre exchange. Nu are
+- 🟡 **LIVE INFRA** — cache, rate limit or REAL polling towards the exchange. It has no
   sens sa devina "timp simulat" — n-are ce sa simuleze (nu exista in
   backtest, unde nu se bate reteaua deloc).
 - 🟢 **DEJA REZOLVAT** — codul care il contine e deja INLOCUIT complet in
   backtest (monkeypatch/bypass), nu apelat vreodata acolo.
-- ⚠️ **NU e doar injectare** — dependinta de timp REAL e mai profunda decat
+- ⚠️ **NOT just injection** — the dependency on REAL time runs deeper than
   un parametru (bucla blocanta pe threading.Event, wait sincron pe retea).
 
 ---
@@ -25,17 +25,17 @@ Legenda:
 
 | Linie | Context | Categorie | Nota |
 |---|---|---|---|
-| 107 | `log_decision()`: `cols=[time.time(), ...]` — scrie in jurnalul de decizii | 🟢 | `offline/backtests/tradeall.py` inlocuieste FUNCTIA INTREAGA (`ta.log_decision = make_decision_logger(out_dir, clock)`) — asta de aici nu ruleaza NICIODATA in backtest. |
-| 613 | `handle_symbol()`: `"ts": time.time()` in snapshot-ul intors | 🔴 | Feed-uieste `shadow.update(symbol, snapshot["ts"], ...)` → Kalman foloseste `dt = ts - last_ts` pt scalarea zgomotului de proces. **Azi bypassed** (backtest nu cheama `handle_symbol()`, isi construieste propriul flux) — dar daca vreodata codul REAL `handle_symbol()` ruleaza pe replay (planul de unificare), acest `ts` TREBUIE sa vina din timestamp-ul pretului replay-uit, nu din wall-clock, altfel Kalman calculeaza dt gresit (amesteca timp real cu date istorice). |
-| 711 | `TrendCoordinator._is_due()`: `self._last_eval[symbol] = time.time()` | 🔴 | Gateaza CAND se re-evalueaza un simbol (throttling min/max interval). Bypassed azi (backtest nu cheama `evaluate()` prin coordonator). Injectabil simplu — un `now_fn` in loc de `time.time()` direct. |
-| 768 | `TrendCoordinator.run()`: `now = time.time()` in bucla principala | ⚠️ | **NU e doar injectare** — linia de DEASUPRA e `self._event.wait(timeout=self.max_interval)`, o ASTEPTARE REALA pe un `threading.Event`. Ca sa ruleze pe replay in fast-forward, bucla asta ar trebui INLOCUITA (nu doar cu ceas injectat), altfel un backtest de 329 zile ar dura literalmente 329 zile. |
+| 107 | `log_decision()`: `cols=[time.time(), ...]` — writes to the decision journal | 🟢 | `offline/backtests/tradeall.py` replaces the WHOLE FUNCTION (`ta.log_decision = make_decision_logger(out_dir, clock)`), so this one NEVER runs in a backtest. |
+| 613 | `handle_symbol()`: `"ts": time.time()` in the returned snapshot | 🔴 | It feeds `shadow.update(symbol, snapshot["ts"], ...)`, and Kalman uses `dt = ts - last_ts` to scale the process noise. **Bypassed today** (the backtest does not call `handle_symbol()`, it builds its own flow) — but if the REAL `handle_symbol()` code ever runs on a replay (the unification plan), this `ts` MUST come from the replayed price timestamp rather than the wall clock, otherwise Kalman computes dt wrongly (mixing real time with historical data). |
+| 711 | `TrendCoordinator._is_due()`: `self._last_eval[symbol] = time.time()` | 🔴 | It gates WHEN a symbol is re-evaluated (min/max interval throttling). Bypassed today (the backtest does not call `evaluate()` through the coordinator). Simple to inject — a `now_fn` instead of calling `time.time()` directly. |
+| 768 | `TrendCoordinator.run()`: `now = time.time()` in the main loop | ⚠️ | **NOT just injection** — the line ABOVE is `self._event.wait(timeout=self.max_interval)`, a REAL wait on a `threading.Event`. To run on a fast-forward replay, this loop would have to be REPLACED (not merely given an injected clock), otherwise a 329-day backtest would literally take 329 days. |
 
 **Concluzie tradeall.py**: azi, NIMIC din tabelul de mai sus blocheaza
 backtest-ul (tot ce conteaza e deja bypassed/inlocuit). Devine relevant DOAR
 daca planul de unificare ajunge sa refoloseasca `handle_symbol()`/
-`TrendCoordinator` insele (nu o bucla separata) — caz in care linia 768 e
+`TrendCoordinator` itself (not a separate loop) — in which case line 768 is
 obstacolul real (redesign, nu parametru), 613 e simplu (parametru), 107/711
-sunt deja rezolvate prin tiparul de substituire.
+are already solved by the substitution pattern.
 
 ### `monitortrades.py` (2 aparitii, ambele DECIZIE)
 
@@ -46,12 +46,12 @@ sunt deja rezolvate prin tiparul de substituire.
 
 **Concluzie monitortrades.py**: EXACT 2 puncte de injectat, ambele simple
 (comparatii aritmetice pe un int, nicio bucla blocanta implicata) — cel mai
-tractabil modul din toata flota pt Faza 1, confirma alegerea din
+the most tractable module in the whole fleet for Phase 1, confirming the choice in
 `UNIFIED_BACKTEST_PLAN.md` §7.
 
 ### `rtrade.py` (0 aparitii directe — caz special)
 
-Grep confirma: NICIUN `time.time()`. Rtrade NU citeste "acum" nicaieri
+Grep confirms: NOT ONE `time.time()`. Rtrade never reads "now" anywhere
 direct — temporalitatea lui e DELEGATA integral catre raspunsurile API:
 `api.check_order_filled_by_time("BUY", symbol, time_back_in_seconds=WAIT_FOR_ORDER)`
 intreaba EXCHANGE-UL "a fost umplut in ultimele X secunde?", nu compara
@@ -60,20 +60,20 @@ testabil pe replay NU e o chestiune de injectat un Clock — ar trebui simulat
 RASPUNSUL acelor apeluri API (`check_order_filled`, `check_order_filled_by_time`,
 `cancel_order`) intr-un broker fals, ca `BacktestBroker`. Confirma inca un
 motiv (pe langa BUY/SELL concurent pe thread-uri, deja notat in plan) ca
-rtrade e o provocare diferita, NU doar "acelasi tipar, alt fisier" — ramane
+rtrade is a different challenge, NOT merely "the same pattern in another file" — it stays
 justificat sa fie Faza 2.
 
 ### `assetguardian.py` (1 aparitie, DECIZIE)
 
 | Linie | Context | Categorie | Nota |
 |---|---|---|---|
-| 51 | `_get_symbol_window_extrema()`: `now_ts = float(time.time())` | 🔴 | `target_ts = now_ts - minutes_back*60` — fereastra per activ pentru minim/maxim. SELL foloseste `AG_SELL_TIERS`, iar la prima transa ingheata minimul campaniei; BUY foloseste maximul per activ.
+| 51 | `_get_symbol_window_extrema()`: `now_ts = float(time.time())` | 🔴 | `target_ts = now_ts - minutes_back*60` — the per-asset window for the low and the high. SELL uses `AG_SELL_TIERS` and freezes the campaign low at the first tranche; BUY uses the per-asset high.
 
 ---
 
 ## BOTI (pe pozitie: kraken, hyperliquid, 212trading)
 
-Tipar IDENTIC repetat in toate 3: la plasarea unui ordin, se retine
+The SAME pattern repeated in all three: when an order is placed, it records
 `"ts": time.time()`; mai tarziu, `age = (time.time() - ts) / 60` decide daca
 ordinul a stat prea mult (order-TTL, repreteaza/anuleaza). Plus cooldown-uri
 similare (`buy_backoff_until`, `_dca_gate_until`, `cooldown_until`). Odata
@@ -87,13 +87,13 @@ identice, nu 3 probleme diferite.
 |---|---|---|
 | 212, 219 | `"ts": time.time()` la plasarea unui ordin (`open_orders`) | Folosit la linia 263 pt order-TTL (`STRAT_ORDER_TTL_MIN`, reprice/anulare). |
 | 263 | `age = (time.time() - o.get("ts",0)) / 60` | Decizia de reprice/anulare a unui ordin neexecutat. |
-| 442 | `self._shadow_prices.append((time.time(), price))` | Alimenteaza `_shadow_vol_1h()` → pragul de reintrare ADAPTIV, PROMOVAT LA BANI REALI azi-sesiune (`STRAT_REENTRY_ADAPTIVE=true`). Cel mai important din tot inventarul boti — orice viitor backtest pe strategia REALA (nu `kraken/backtest.py::simulate()`, care e o alta paradigma pe bare OHLC) trebuie sa injecteze timpul aici corect, altfel volatilitatea calculata e falsa. |
+| 442 | `self._shadow_prices.append((time.time(), price))` | It feeds `_shadow_vol_1h()` and therefore the ADAPTIVE re-entry threshold, PROMOTED TO REAL MONEY in this session (`STRAT_REENTRY_ADAPTIVE=true`). The most important entry in the whole bot inventory — any future backtest of the REAL strategy (not `kraken/backtest.py::simulate()`, which is a different paradigm over OHLC bars) must inject the time correctly here, otherwise the computed volatility is false. |
 
 **Nota metodologica**: `kraken/backtest.py::simulate()` (motorul "pozitie" de
-azi) NU foloseste deloc `kraken/strategy.py` — e o reimplementare separata pe
+today) does NOT use `kraken/strategy.py` at all — it is a separate reimplementation over
 bare OHLC (deja documentat in `UNIFIED_BACKTEST_PLAN.md` §1). Randurile de
-mai sus conteaza DOAR daca planul evolueaza spre "codul REAL al strategiei
-ruleaza pe replay" (facada unificata, §6 din plan) — nu schimba nimic in
+above matters ONLY if the plan evolves towards "the REAL strategy code
+runs on the replay" (the unified facade, §6 of the plan) — it changes nothing in
 `simulate()` de azi.
 
 ### `hyperliquid/strategy.py` + `delta_neutral.py` + `signals.py` — 7 aparitii DECIZIE
@@ -103,7 +103,7 @@ Acelasi tipar (ts la ordin + age la citire) in `strategy.py:164,170,227`.
 `cooldown_until` (anti-thrash intre rebalansari) — liniile 272,315,487,495.
 `signals.py:62` — staleness generic (`if time.time()-ts > max_age`). Fara
 motor de backtest propriu azi (spre deosebire de kraken) — ar avea nevoie de
-unul nou, dupa tiparul kraken, daca se decide sa se testeze DN-ul.
+a new one, following the Kraken pattern, if DN is ever chosen for testing.
 
 ### `212trading/strategy.py` + `market_data.py` — 10 aparitii DECIZIE
 
@@ -118,18 +118,18 @@ propriu azi.
 - `kraken_cachemanager.py` (109,119,190), `kraken_client.py` (54,61),
   `kraken_xstock_watch.py` (97), `hl_client.py` (237),
   `212trading/order_manager.py` (71,73), `hyperliquid/dn_bot.py` (44) —
-  toate sunt fie (a) parametri pt apeluri REALE catre API-ul exchange-ului
+  they are all either (a) parameters for REAL calls to the exchange API
   (fereastra de lookback, cache TTL local), fie (b) o bucla de asteptare
   SINCRONA pe un raspuns real de retea. Niciunul nu exista "in timpul"
-  unui backtest (care nu bate reteaua deloc) — nu au ce sa fie injectate CU.
+  a backtest (which never touches the network) — there is nothing to inject them WITH.
 
 ### Fisiere de test (`hyperliquid/test_dn.py`, `212trading/test_launch_detect.py`)
 
 Folosesc `time.time()` ca sa construiasca fixtures (nu cod de productie).
-Daca `delta_neutral.py`/codul din `212trading` primesc un Clock injectabil,
+If `delta_neutral.py` and the `212trading` code receive an injectable Clock,
 aceste teste ar putea trece la randul lor pe un ceas fals in loc de
 `time.time() - X` — imbunatatire de determinism al testelor, dar NU
-blocheaza planul de backtest (sunt teste, nu cod care ruleaza in backtest).
+block the backtest plan (they are tests, not code that runs inside a backtest).
 
 ---
 
@@ -137,11 +137,11 @@ blocheaza planul de backtest (sunt teste, nu cod care ruleaza in backtest).
 
 | Modul | Aparitii DECIZIE reale de injectat azi | Complexitate |
 |---|---|---|
-| `tradeall.py` | 0 (tot ce conteaza e deja bypassed in backtest) — devine 2 (613 simplu, 768 redesign) DOAR daca se reutilizeaza `handle_symbol`/`TrendCoordinator` direct | Mica azi, medie daca se extinde |
+| `tradeall.py` | 0 (everything that matters is already bypassed in the backtest) — it becomes 2 (613 simple, 768 a redesign) ONLY if `handle_symbol`/`TrendCoordinator` are reused directly | Small today, medium if it grows |
 | `monitortrades.py` | 2 (liniile 294, 459) | Mica — 2 comparatii aritmetice |
 
 Concluzie: **monitortrades.py e de fapt mai simplu de injectat decat
 tradeall.py** in sensul strict (2 puncte clare, fara bucle blocante) — dar
 tradeall.py are deja infrastructura de replay (PriceWindow/TrendState cu
-`now_fn`) construita si validata azi, doar neexpusa generic. Cele doua
+`now_fn`) built and validated today, merely not exposed generically. The two
 raman candidatii corecti pt Faza 1, din motive complementare.
