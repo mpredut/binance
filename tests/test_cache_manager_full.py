@@ -13,7 +13,7 @@ Coverage:
   - get_current_price_manager (singleton)
   - WebSocket health functions
 """
-import os, sys, json, time, tempfile, unittest
+import gzip, os, sys, json, time, tempfile, unittest
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
@@ -993,6 +993,13 @@ class TestAppendJsonlPersist(unittest.TestCase):
         with m.lock:
             self.assertEqual(m.cache["SYM"], [[now_ms, 2.0]])   # Old entry removed.
 
+    def test_retention_normalizes_unix_seconds(self):
+        now_sec = int(time.time())
+        self.assertEqual(
+            ConcreteTestManager._entry_timestamp_ms({"timestamp": now_sec}),
+            now_sec * 1000,
+        )
+
     def test_rotation_archives_and_keeps_latest(self):
         fname = os.path.join(self.tmp, "r.jsonl")
         m = ConcreteTestManager(9999, ["SYM"], fname, append_persist=True)
@@ -1014,7 +1021,9 @@ class TestAppendJsonlPersist(unittest.TestCase):
     # -- Safety: rotation and maintenance do not lose data. --------------------
 
     def _count_lines(self, path):
-        return sum(1 for _ in open(path))
+        opener = gzip.open if path.endswith(".gz") else open
+        with opener(path, "rt", encoding="utf-8") as handle:
+            return sum(1 for _ in handle)
 
     def test_rotation_archive_has_FULL_history(self):
         """The archive contains every original record, so no data is lost."""
@@ -1031,9 +1040,21 @@ class TestAppendJsonlPersist(unittest.TestCase):
         archive = [os.path.join(self.tmp, f) for f in os.listdir(self.tmp) if ".archive" in f][0]
         self.assertEqual(self._count_lines(archive), 100)   # Complete history.
         self.assertEqual(self._count_lines(fname), 10)       # Newest ten percent.
-        # Rebuilding from the archive recovers every record.
-        r = ConcreteTestManager(9999, ["SYM"], archive, append_persist=True)
-        self.assertEqual(len(r.cache["SYM"]), 100)
+        # The compressed archive remains a complete, independently recoverable JSONL stream.
+        with gzip.open(archive, "rt", encoding="utf-8") as handle:
+            rows = [json.loads(line) for line in handle]
+        self.assertEqual(len(rows), 100)
+        self.assertEqual(rows[-1]["i"], [now + 99, 99.0])
+
+    def test_legacy_full_json_is_migrated_without_deleting_source(self):
+        legacy = os.path.join(self.tmp, "cache_trade.json")
+        target = legacy + "l"
+        now = int(time.time() * 1000)
+        _write_cache_file(legacy, {"SYM": [[now, 1.0]]}, {"SYM": now})
+        manager = ConcreteTestManager(9999, ["SYM"], target, append_persist=True)
+        self.assertTrue(os.path.exists(legacy))
+        self.assertTrue(os.path.exists(target))
+        self.assertEqual(manager.cache["SYM"], [[now, 1.0]])
 
     def test_maintain_noop_leaves_file_intact(self):
         """Maintenance leaves a small recent file intact and creates no archive."""

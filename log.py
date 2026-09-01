@@ -8,14 +8,27 @@ import datetime
 import logging
 import shutil
 import threading
+import time
+
+from botcore import load_dotenv, required_float_env, required_int_env
 
 
-# ── Defaults (overridable via configure()) ────────────────────────────────────
+# ── Versioned policy (overridable via configure()) ───────────────────────────
 
 _DEFAULT_LOG_FOLDER       = "logger"
-_DEFAULT_MAX_SIZE         = 10 * 1024 ** 3  # 10 GB
-_DEFAULT_CHECK_EVERY      = 100             # signal cleanup thread every N writes
-_DEFAULT_MIN_FREE_PERCENT = 5.0            # delete oldest log if disk free < 5%
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "logger_config.env"))
+_DEFAULT_MAX_SIZE = required_int_env("LOG_MAX_FOLDER_BYTES")
+_DEFAULT_CHECK_EVERY = required_int_env("LOG_CHECK_EVERY_WRITES")
+_DEFAULT_MIN_FREE_PERCENT = required_float_env("LOG_MIN_FREE_PERCENT")
+_FLUSH_EVERY_RECORDS = required_int_env("LOG_FLUSH_EVERY_RECORDS")
+_FLUSH_INTERVAL_SEC = required_float_env("LOG_FLUSH_INTERVAL_SEC")
+
+if _DEFAULT_MAX_SIZE <= 0 or _DEFAULT_CHECK_EVERY <= 0:
+    raise ValueError("Log size and check interval must be positive")
+if not 0 <= _DEFAULT_MIN_FREE_PERCENT <= 100:
+    raise ValueError("LOG_MIN_FREE_PERCENT must be between 0 and 100")
+if _FLUSH_EVERY_RECORDS <= 0 or _FLUSH_INTERVAL_SEC <= 0:
+    raise ValueError("Log flush thresholds must be positive")
 
 
 # ── ANSI ──────────────────────────────────────────────────────────────────────
@@ -300,10 +313,19 @@ class _DailyFileHandler(logging.Handler):
         self._current_path  = ""
         self._stream        = None
         self._lock          = threading.Lock()
+        self._pending_records = 0
+        self._last_flush = time.monotonic()
+
+    def _flush(self) -> None:
+        if self._stream is not None:
+            self._stream.flush()
+        self._pending_records = 0
+        self._last_flush = time.monotonic()
 
     def _open_for_date(self, folder: str, date_str: str) -> None:
         if self._stream is not None:
             try:
+                self._flush()
                 self._stream.close()
             except OSError:
                 pass
@@ -339,11 +361,15 @@ class _DailyFileHandler(logging.Handler):
 
                 try:
                     self._stream.write(self.format(record) + "\n")
-                    self._stream.flush()
+                    self._pending_records += 1
+                    if (self._pending_records >= _FLUSH_EVERY_RECORDS
+                            or time.monotonic() - self._last_flush >= _FLUSH_INTERVAL_SEC):
+                        self._flush()
                 except (FileNotFoundError, OSError, ValueError):
                     self._open_for_date(folder, today)
                     self._stream.write(self.format(record) + "\n")
-                    self._stream.flush()
+                    self._pending_records = 1
+                    self._flush()
 
         except Exception:
             self.handleError(record)
@@ -352,6 +378,7 @@ class _DailyFileHandler(logging.Handler):
         with self._lock:
             if self._stream is not None:
                 try:
+                    self._flush()
                     self._stream.close()
                 except OSError:
                     pass

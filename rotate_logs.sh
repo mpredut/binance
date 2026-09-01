@@ -12,6 +12,14 @@
 # Cron sugerat (orar, decalat sa nu se bata cu healthcheck-ul de la :*0/:*5):
 # Schedule this script through the rendered production crontab.
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+POLICY="$ROOT/logger_config.env"
+[ -r "$POLICY" ] || { echo "rotate_logs: missing mandatory policy $POLICY"; exit 1; }
+set -a
+# shellcheck disable=SC1090
+. "$POLICY"
+set +a
+: "${LOGROTATE_MAX_SIZE:?missing LOGROTATE_MAX_SIZE}"
+: "${LOGROTATE_KEEP:?missing LOGROTATE_KEEP}"
 LOGROTATE="$(command -v logrotate || echo /usr/sbin/logrotate)"
 [ -x "$LOGROTATE" ] || { echo "rotate_logs: logrotate negasit"; exit 1; }
 
@@ -47,8 +55,8 @@ $ROOT/logs/shadow_live/*.jsonl
 $ROOT/logs/hyperliquid_shadow/*.jsonl
 $ROOT/*.log
 {
-    size 20M
-    rotate 3
+    size $LOGROTATE_MAX_SIZE
+    rotate $LOGROTATE_KEEP
     missingok
     notifempty
     compress

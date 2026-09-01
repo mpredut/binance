@@ -61,11 +61,11 @@ def _symbols(raw):
         if not symbol:
             continue
         if not _SYMBOL_RE.fullmatch(symbol):
-            raise ValueError(f"simbol invalid: {symbol!r}")
+            raise ValueError(f"invalid symbol: {symbol!r}")
         if symbol not in values:
             values.append(symbol)
     if not values:
-        raise ValueError("lista de simboluri nu poate fi goala")
+        raise ValueError("the symbol list cannot be empty")
     return values
 
 
@@ -84,18 +84,12 @@ def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--symbols", default="BTCUSDC,TAOUSDC",
                     help="comma-separated list (default: BTCUSDC,TAOUSDC)")
-    p.add_argument("--months", type=float, default=12.0,
-                    help="retention, in months (implicit 12 — 21 iul, ridicat de la 6: dupa migrarea "
-                         "la JSONL costul de scriere nu mai creste cu arhiva, iar spatiul disponibil "
-                         "(14GB liber dupa curatarea logurilor) permite un istoric mai lung)")
-    p.add_argument("--sync-ts", type=float, default=0.8,
-                    help="cadenta nominala de sampling, ca la tradeall.py (implicit 0.8s)")
-    p.add_argument("--save-every", type=float, default=60.0,
-                    help="cadenta de SCRIERE pe disc a cache24_long (implicit 60s; NU sync_ts — "
-                         "acela ramane rapid pt fallback-ul HTTP al pretului curent). "
-                         "21 iul: la 0.8s (=sync_ts reutilizat gresit) rescria fisierul intreg "
-                         "(19.6MB BTC) de ~75x/minut -> 72%% CPU sustinut, crescand pe masura ce "
-                         "arhiva creste spre 6 luni.")
+    p.add_argument("--months", type=float, default=cm.CM_LONG_ARCHIVE_MONTHS,
+                    help="retention in months (default from cachemanager_config.env)")
+    p.add_argument("--sync-ts", type=float, default=cm.CM_LONG_ARCHIVE_SAMPLE_SEC,
+                    help="nominal sampling cadence (default from cachemanager_config.env)")
+    p.add_argument("--save-every", type=float, default=cm.CM_LONG_ARCHIVE_FLUSH_SEC,
+                    help="disk flush cadence (default from cachemanager_config.env)")
     args = p.parse_args()
     try:
         symbols = _symbols(args.symbols)
@@ -110,7 +104,7 @@ def main():
     stop_event = threading.Event()
 
     def request_stop(signum, _frame):
-        print(f"[tradeall_price_archiver] semnal {signum}; flush si oprire...", flush=True)
+        print(f"[tradeall_price_archiver] signal {signum}; flushing and stopping...", flush=True)
         stop_event.set()
 
     signal.signal(signal.SIGTERM, request_stop)
@@ -135,10 +129,10 @@ def main():
         caches.append(cache)
 
     print(f"[tradeall_price_archiver] started: {symbols} | retention {months} months "
-          f"({keep_hours:.0f}h) | scriere pe disc la {save_every:.0f}s", flush=True)
-    print("[tradeall_price_archiver] scriu in cachedb/cache_24price_long_<symbol>.jsonl "
-          "(separat de cache-ul live 24h al tradeall.py)")
-    print("[tradeall_price_archiver] Ctrl+C opreste.")
+          f"({keep_hours:.0f}h) | disk flush every {save_every:.0f}s", flush=True)
+    print("[tradeall_price_archiver] writing cachedb/cache_24price_long_<symbol>.jsonl "
+          "separately from tradeall.py's live 24-hour cache")
+    print("[tradeall_price_archiver] Ctrl+C stops the process.")
 
     try:
         while not stop_event.wait(60):

@@ -1,4 +1,5 @@
 import bisect
+import gzip
 import json
 import glob
 import os
@@ -9,6 +10,7 @@ import threading
 import importlib
 import builtins
 import weakref
+import shutil
 from datetime import datetime, timedelta
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
@@ -28,7 +30,12 @@ import providers.market_api as _market_api
 # Load versioned, non-secret tuning parameters using the same pattern as the other
 # component env files. ``botcore.load_dotenv`` never overwrites variables already set
 # in the real environment; it only fills missing values.
-from botcore import load_dotenv as _load_dotenv, required_bool_env, required_float_env
+from botcore import (
+    load_dotenv as _load_dotenv,
+    required_bool_env,
+    required_float_env,
+    required_int_env,
+)
 _CONFIG_ROOT = os.path.dirname(os.path.abspath(__file__))
 _load_dotenv(os.path.join(_CONFIG_ROOT, "cachemanager_config.env"))
 
@@ -38,6 +45,32 @@ _load_dotenv(os.path.join(_CONFIG_ROOT, "cachemanager_config.env"))
 CM_DYNAMIC_WINDOW_MIN_SEC = required_float_env("CM_DYNAMIC_WINDOW_MIN_SEC")
 CM_DYNAMIC_WINDOW_MAX_SEC = required_float_env("CM_DYNAMIC_WINDOW_MAX_SEC")
 LONGTREND_NONBINANCE = required_bool_env("LONGTREND_NONBINANCE")
+CM_RETENTION_DAYS = required_float_env("CM_RETENTION_DAYS")
+CM_RETENTION_CHECK_INTERVAL_SEC = required_float_env("CM_RETENTION_CHECK_INTERVAL_SEC")
+CM_APPEND_MAX_FILE_BYTES = required_int_env("CM_APPEND_MAX_FILE_BYTES")
+CM_ROTATE_KEEP_FRACTION = required_float_env("CM_ROTATE_KEEP_FRACTION")
+CM_ROTATE_ARCHIVE_COUNT = required_int_env("CM_ROTATE_ARCHIVE_COUNT")
+CM_RESYNC_INTERVAL_SEC = required_float_env("CM_RESYNC_INTERVAL_SEC")
+CM_DEDUP_WINDOW = required_int_env("CM_DEDUP_WINDOW")
+CM_LONG_ARCHIVE_MONTHS = required_float_env("CM_LONG_ARCHIVE_MONTHS")
+CM_LONG_ARCHIVE_SAMPLE_SEC = required_float_env("CM_LONG_ARCHIVE_SAMPLE_SEC")
+CM_LONG_ARCHIVE_FLUSH_SEC = required_float_env("CM_LONG_ARCHIVE_FLUSH_SEC")
+
+if not 0 < CM_ROTATE_KEEP_FRACTION <= 1:
+    raise ValueError("CM_ROTATE_KEEP_FRACTION must be in (0, 1]")
+for _name, _value in (
+    ("CM_RETENTION_DAYS", CM_RETENTION_DAYS),
+    ("CM_RETENTION_CHECK_INTERVAL_SEC", CM_RETENTION_CHECK_INTERVAL_SEC),
+    ("CM_APPEND_MAX_FILE_BYTES", CM_APPEND_MAX_FILE_BYTES),
+    ("CM_ROTATE_ARCHIVE_COUNT", CM_ROTATE_ARCHIVE_COUNT),
+    ("CM_RESYNC_INTERVAL_SEC", CM_RESYNC_INTERVAL_SEC),
+    ("CM_DEDUP_WINDOW", CM_DEDUP_WINDOW),
+    ("CM_LONG_ARCHIVE_MONTHS", CM_LONG_ARCHIVE_MONTHS),
+    ("CM_LONG_ARCHIVE_SAMPLE_SEC", CM_LONG_ARCHIVE_SAMPLE_SEC),
+    ("CM_LONG_ARCHIVE_FLUSH_SEC", CM_LONG_ARCHIVE_FLUSH_SEC),
+):
+    if _value <= 0:
+        raise ValueError(f"{_name} must be positive")
 
 #from log import PRINT_CONTEXT
 
@@ -102,13 +135,13 @@ def _should_poll_for_manager(cls_name):
 class CacheManagerInterface(ABC):
     _live_instances = weakref.WeakSet()
     # ── Periodically enforced retention and rotation policy for append caches ──
-    RETENTION_DAYS              = 730              # Remove entries older than about two years.
-    MAX_FILE_BYTES             = 1_000_000_000    # Rotate above roughly one GB.
-    RETENTION_CHECK_INTERVAL_SEC = 7 * 24 * 3600  # Check weekly.
-    ROTATE_KEEP_FRACTION       = 0.10             # Keep the latest ten percent after rotation.
-    ROTATE_ARCHIVE_COUNT       = 2                # Do not accumulate one-GB archives indefinitely.
-    RESYNC_INTERVAL_SEC        = 10 * 60          # Reconcile memory and disk every ten minutes.
-    DEDUP_WINDOW               = 100             # Compare each update only with the latest N items.
+    RETENTION_DAYS = CM_RETENTION_DAYS
+    MAX_FILE_BYTES = CM_APPEND_MAX_FILE_BYTES
+    RETENTION_CHECK_INTERVAL_SEC = CM_RETENTION_CHECK_INTERVAL_SEC
+    ROTATE_KEEP_FRACTION = CM_ROTATE_KEEP_FRACTION
+    ROTATE_ARCHIVE_COUNT = CM_ROTATE_ARCHIVE_COUNT
+    RESYNC_INTERVAL_SEC = CM_RESYNC_INTERVAL_SEC
+    DEDUP_WINDOW = CM_DEDUP_WINDOW
 
     def __init__(self, sync_ts, symbols, filename, append_mode = True, api_client=api,
                  append_persist=False):
@@ -224,6 +257,7 @@ class CacheManagerInterface(ABC):
     def load_state(self):
         print(f"[{self.cls_name}][Info] Load state from {self.filename} ...")
         if self.append_persist:
+            self._migrate_legacy_json_if_needed()
             self._load_jsonl()
             if not self.cache:
                 self.query_remote_and_update_cache()
@@ -342,6 +376,35 @@ class CacheManagerInterface(ABC):
             self.save_state_to_file_if_enabled()
 
     # ── JSONL append persistence for append-only caches ──────────────────────
+    def _migrate_legacy_json_if_needed(self):
+        """Create a JSONL cache from its legacy full-JSON sibling once.
+
+        Migration is deliberately non-destructive: the old JSON file remains available
+        for rollback, while all subsequent writes target the new JSONL path.
+        """
+        if os.path.exists(self.filename) or not self.filename.endswith(".jsonl"):
+            return
+        legacy = self.filename[:-1]
+        if not os.path.exists(legacy):
+            return
+        try:
+            with open(legacy, encoding="utf-8") as handle:
+                payload = json.load(handle)
+            items = payload.get("items", {})
+            if not isinstance(items, dict):
+                raise ValueError("legacy cache items must be a dictionary")
+            with self.lock:
+                self.cache = items
+                self.fetchtime_time_per_symbol = payload.get("fetchtime", {})
+                self._persisted_counts = {}
+            self.compact_jsonl()
+            builtins.print(
+                f"[{self.cls_name}][migration] created {self.filename} from {legacy}; "
+                "the legacy file was retained for rollback"
+            )
+        except (OSError, ValueError, TypeError) as exc:
+            raise RuntimeError(f"Cannot migrate legacy cache {legacy}: {exc}") from exc
+
     def _save_jsonl_append(self):
         """Append only items added since the last flush without rewriting the file."""
         try:
@@ -352,7 +415,9 @@ class CacheManagerInterface(ABC):
                         if start > len(items):   # The cache was cleared or shortened; resynchronize.
                             start = 0
                         for item in items[start:]:
-                            f.write(json.dumps({"s": symbol, "i": item}) + "\n")
+                            f.write(json.dumps(
+                                {"s": symbol, "i": item}, separators=(",", ":"),
+                            ) + "\n")
                         self._persisted_counts[symbol] = len(items)
         except Exception as e:
             print(f"[{self.cls_name}][Eroare] append JSONL {self.filename}: {e}")
@@ -402,7 +467,9 @@ class CacheManagerInterface(ABC):
                 with atomic_write(self.filename) as f:
                     for symbol, items in self.cache.items():
                         for item in items:
-                            f.write(json.dumps({"s": symbol, "i": item}) + "\n")
+                            f.write(json.dumps(
+                                {"s": symbol, "i": item}, separators=(",", ":"),
+                            ) + "\n")
                 self._persisted_counts = {s: len(v) for s, v in self.cache.items()}
             self._write_meta()
         except Exception as e:
@@ -412,10 +479,17 @@ class CacheManagerInterface(ABC):
     def _entry_timestamp_ms(item):
         """Extract an entry timestamp in milliseconds from a dictionary or list."""
         if isinstance(item, dict):
-            return item.get("time") or item.get("timestamp") or 0
-        if isinstance(item, (list, tuple)) and item:
-            return item[0]
-        return 0
+            value = item.get("time") or item.get("timestamp") or 0
+        elif isinstance(item, (list, tuple)) and item:
+            value = item[0]
+        else:
+            return 0
+        try:
+            value = float(value)
+        except (TypeError, ValueError, OverflowError):
+            return 0
+        # AssetValue uses Unix seconds; exchange fills and price caches use milliseconds.
+        return int(value * 1000) if 0 < value < 100_000_000_000 else int(value)
 
     def maintain_append_persist(self):
         """Perform weekly maintenance for every append-mode cache.
@@ -467,8 +541,22 @@ class CacheManagerInterface(ABC):
             self._persisted_counts = {}
             self.compact_jsonl()   # Rewrite the current file with retained entries only.
             prefix = f"{self.filename}."
+            compressed_archive = archive + ".gz"
+            compressed_tmp = compressed_archive + ".tmp"
+            try:
+                with open(archive, "rb") as source, gzip.open(compressed_tmp, "wb") as target:
+                    shutil.copyfileobj(source, target, length=1024 * 1024)
+                os.replace(compressed_tmp, compressed_archive)
+                os.remove(archive)
+                archive = compressed_archive
+            except OSError as e:
+                try:
+                    os.remove(compressed_tmp)
+                except OSError:
+                    pass
+                builtins.print(f"[{self.cls_name}][maintain] archive compression failed: {e}")
             archives = sorted(
-                (path for path in glob.glob(prefix + "*.archive")),
+                (path for path in glob.glob(prefix + "*.archive*") if not path.endswith(".tmp")),
                 key=lambda path: os.path.getmtime(path), reverse=True)
             for old_archive in archives[self.ROTATE_ARCHIVE_COUNT:]:
                 try:
@@ -635,8 +723,8 @@ class CacheManagerInterface(ABC):
 
 class CacheTradeManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
-        # Slow growth from real trades makes full rewrites acceptable.
-        super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
+        super().__init__(sync_ts, symbols, filename, append_mode=True,
+                         api_client=api_client, append_persist=True)
 
     def _is_valid_trade(self, trade):
         required_keys = ['symbol', 'id', 'orderId', 'price', 'qty', 'time', 'isBuyer']
@@ -688,7 +776,8 @@ class CacheTradeManager(CacheManagerInterface):
 
 class CacheOrderManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
-        super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
+        super().__init__(sync_ts, symbols, filename, append_mode=True,
+                         api_client=api_client, append_persist=True)
         
     def _is_valid_trade(self, trade):
        required_keys = ['orderId', 'price', 'quantity', 'timestamp', 'side']
@@ -977,8 +1066,8 @@ class CachePriceLongTrendManager(CacheManagerInterface):
 
 class CacheAssetValueManager(CacheManagerInterface):
     def __init__(self, sync_ts, symbols, filename, api_client=api):
-        # Slow growth at one sample per ten minutes makes full rewrites acceptable.
-        super().__init__(sync_ts, symbols, filename, append_mode=True, api_client=api_client)
+        super().__init__(sync_ts, symbols, filename, append_mode=True,
+                         api_client=api_client, append_persist=True)
         changed = False
         with self.lock:
             for items in self.cache.values():
@@ -1753,12 +1842,12 @@ class CacheFactory:
     _CONFIG = {
         "Trade": {
             "class": CacheTradeManager,
-            "filename": "cache_trade.json",
+            "filename": "cache_trade.jsonl",
             "sync_ts": lambda: TRADE_SYNC_INTERVAL_SEC,
         },
         "Order": {
             "class": CacheOrderManager,
-            "filename": "cache_order.json",
+            "filename": "cache_order.jsonl",
             "sync_ts": lambda: ORDER_SYNC_INTERVAL_SEC,
         },
         "Price": {
@@ -1783,7 +1872,7 @@ class CacheFactory:
         },
         "AssetValue": {
             "class": CacheAssetValueManager,
-            "filename": "cache_asset_value.json",
+            "filename": "cache_asset_value.jsonl",
             "sync_ts": lambda: ASSETVALUE_SYNC_INTERVAL_SEC,
         },
     }

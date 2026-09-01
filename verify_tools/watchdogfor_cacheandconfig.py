@@ -59,11 +59,11 @@ _STALE_OVERRIDES = {
     # Long-trend writes only for a significant Mann-Kendall result. A sideways market can
     # legitimately leave it unchanged for hours, so use a 24-hour safety-net threshold.
     "cache_price_long_trend.json": 1440,
-    "cache_asset_value.json": 60,
+    "cache_asset_value.jsonl": 60,
     "cache_T_trend.json": 11520,   # T empiric per moneda: recalc la 7 zile -> prag 8 zile
     # Event-driven content may legitimately remain unchanged for days; use 72 hours.
-    "cache_order.json": 4320,
-    "cache_trade.json": 4320,
+    "cache_order.jsonl": 4320,
+    "cache_trade.jsonl": 4320,
     "cache_trade_kraken.json": 4320,
     # market_alerts, not cacheManager, writes cache_prices_multi about every five minutes.
     # Give it an eight-minute alert-only threshold and never restart cacheManager for it.
@@ -73,7 +73,11 @@ _STALE_OVERRIDES = {
 # A fresh fast cache proves the fleet is alive, so stale event-driven fill caches then
 # mean only that no fills occurred. Suppress those alerts until a hard 30-day ceiling,
 # after which fill tracking itself is suspect. Without proof of life, fail safe and alert.
-_EVENT_DRIVEN_CACHES = {"cache_order.json", "cache_trade.json", "cache_trade_kraken.json"}
+_EVENT_DRIVEN_CACHES = {
+    "cache_order.jsonl", "cache_trade.jsonl", "cache_trade_kraken.json",
+    # Retain recognition of explicit legacy/test overrides during the JSONL migration.
+    "cache_order.json", "cache_trade.json",
+}
 _FLEET_ALIVE_CACHES = {"cache_prices_multi.json", "cache_currentprice.json", "cache_instant_trend.json"}
 _EVENT_DRIVEN_HARD_CEILING_MIN = 43200   # Fill tracking is suspect after 30 days even if fleet is alive.
 
