@@ -30,14 +30,14 @@ class PriceTrendAnalyzer:
 
     def linear_regression_trend(self):
         if len(self.prices) < 2:
-            print("Regresie Liniară: Nu sunt suficiente date pentru a calcula trendul.")
+            print("Linear regression: not enough data to compute the trend.")
             return None, None, None
 
         x = np.arange(len(self.prices))
         y = np.array(self.prices)
 
         if np.std(y) == 0:
-            print("Regresie Liniară: Prețurile sunt constante, trendul nu poate fi determinat.")
+            print("Linear regression: prices are constant, the trend cannot be determined.")
             return None, None, None
 
         slope, intercept, r_value, _, _ = linregress(x, y)
@@ -64,7 +64,7 @@ class PriceTrendAnalyzer:
 
     def calculate_gradient(self):
         if len(self.prices) < 2:
-            print("Gradient: Nu sunt suficiente date pentru a calcula gradientul.")
+            print("Gradient: not enough data to compute the gradient.")
             return [], 0
         y = np.array(self.prices)
         gradient = np.gradient(y)
@@ -261,7 +261,7 @@ class PriceWindow:
         return float(np.mean(grad))
 
     def get_noise_epsilon(self, k: float = 1.0) -> float:
-        """Prag de zgomot INFORMAT din volatilitatea ferestrei:
+        """Noise threshold INFORMED by the volatility of the window:
         epsilon = k * stddev(np.gradient(prices)).
         It adapts by symbol and over time to distinguish real movement from noise."""
         with self._lock:

@@ -225,7 +225,7 @@ class KrakenProvider(MarketDataProvider):
             pair = str(description.get("pair") or raw.get("pair") or "")
             if not pair:
                 raise ProviderError(
-                    f"open_orders({symbol}): ordin {order_id} fara pair")
+                    f"open_orders({symbol}): order {order_id} without a pair")
             if not _kraken_pair_matches(symbol, pair):
                 continue
             side = str(description.get("type") or raw.get("type") or "").upper()
@@ -244,7 +244,7 @@ class KrakenProvider(MarketDataProvider):
                     or price < 0 or original_qty <= 0 or executed_qty < 0
                     or executed_qty > original_qty):
                 raise ProviderError(
-                    f"open_orders({symbol}): cantitati/pret invalide pentru {order_id}")
+                    f"open_orders({symbol}): invalid quantities/price for {order_id}")
             normalized.append({
                 "orderId": str(order_id),
                 "clientOrderId": raw.get("cl_ord_id"),

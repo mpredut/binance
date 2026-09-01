@@ -98,12 +98,12 @@ def check_balance(client: KrakenClient, st: dict, rx: str, desktop: bool) -> Non
             notify(title=f"🎯 ALOCARE xStock: {a} = {q}",
                    body=f"A aparut {a} in contul Kraken (cantitate {q}). "
                         f"Seteaza XSTOCK_ALLOC_PRICE in config.env pt alerte de nivel "
-                        f"si STRAT_ADOPT_COST cand perechea devine tranzactionabila.",
+                        f"and STRAT_ADOPT_COST when the pair becomes tradable.",
                    source="xstock-watch", desktop=desktop)
         else:
             log(f"  ℹ activ nou in cont: {a} = {q}")
             notify(title=f"ℹ Activ nou in cont Kraken: {a} = {q}",
-                   body="Verifica daca e alocarea xStock sub alt cod decat cel asteptat.",
+                   body="Check whether the xStock allocation sits under a different code than expected.",
                    source="xstock-watch", desktop=desktop)
     st["known_assets"] = assets
 
@@ -301,7 +301,7 @@ def run_trial(client: KrakenClient, desktop: bool) -> int:
         st = _load_state()
         st["known_assets"] = {a: float(q) for a, q in bal.items()
                               if float(q) > 0 and a != asset}
-        log(f"  [proba] cobai: {asset} — il scot din snapshot ca sa 'soseasca' acum")
+        log(f"  [proba] cobai: {asset} — removing it from the snapshot so it 'arrives' now")
         check_balance(client, st, asset, desktop)                # 1. allocation detection
         verdict["alocare detectata"] = bool(st["allocated"])
         check_pairs(client, st, asset, desktop, quote)           # 2. listed pair
@@ -309,7 +309,7 @@ def run_trial(client: KrakenClient, desktop: bool) -> int:
         trial_pair = st["pair"]
         alloc = client.last_price(st["pair"]) if st["pair"] else None
         if not alloc:
-            log("  ! fara pret pt pereche — proba esuata")
+            log("  ! no price for the pair — probe failed")
             return 1
         log(f"  [proba] pret de alocare simulat: {alloc} (pretul curent)")
         maybe_start_bot(st, alloc, desktop)                      # 3. bot started in paper mode
@@ -395,8 +395,8 @@ def main() -> int:
 
     log("=== xStock watcher pornit ===")
     log(f"    regex      : {rx}")
-    log(f"    alocare    : {alloc_price if alloc_price > 0 else 'pret necunoscut (doar detectie)'}")
-    log(f"    alerte     : +{tp_pct}% / -{sl_pct}%  (pret: Kraken sau Yahoo {yahoo_sym})")
+    log(f"    alocare    : {alloc_price if alloc_price > 0 else 'price unknown (detection only)'}")
+    log(f"    alerte     : +{tp_pct}% / -{sl_pct}%  (price: Kraken or Yahoo {yahoo_sym})")
     log(f"    interval   : {args.interval} min")
     beats = 0
     while True:

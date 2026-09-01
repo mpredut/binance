@@ -294,7 +294,7 @@ def _alert_terminal(rec, status):
             title=f"🛑 order terminal {rec.get('side')} {rec.get('symbol')}",
             body=(f"Ordin {rec.get('order_id')} a devenit "
                   f"{status.venue_status or status.status}; filled={status.filled_qty}, "
-                  "restul NU este retrimis automat dupa cancel."),
+                  "the rest is NOT resent automatically after a cancel."),
             source="order_retry", symbol=str(rec.get("symbol")))
     except Exception as exc:  # noqa: BLE001
         print(f"[order_retry] alerta terminala esuata (ignor): {exc}")
@@ -306,7 +306,7 @@ def _alert_giveup(rec, now):
     try:
         alert.notify(
             title=f"🛑 order-retry RENUNT {rec.get('side')} {rec.get('symbol')}",
-            body=(f"Ordin nereplasat dupa {rec.get('attempts', 0)} incercari / {age_h:.1f}h "
+            body=(f"Order not replaced after {rec.get('attempts', 0)} attempts / {age_h:.1f}h "
                   f"(TTL depasit). qty={rec.get('qty')}. Verifica manual."),
             source="order_retry", symbol=str(rec.get("symbol")))
     except Exception as e:  # noqa: BLE001

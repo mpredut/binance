@@ -61,7 +61,7 @@ def main() -> int:
 
     ap = argparse.ArgumentParser(description="Bot DCA+TP pe Kraken.")
     ap.add_argument("--env-file", default=env_file)
-    ap.add_argument("--pair", help="Override pereche (altfel din .env KRAKEN_PAIR)")
+    ap.add_argument("--pair", help="Override the pair (otherwise from .env KRAKEN_PAIR)")
     ap.add_argument("--interval", type=int, default=poll_seconds)
     ap.add_argument("--desktop", action="store_true")
     ap.add_argument("--skip-wait", action="store_true", help="Sari peste asteptarea listarii")
@@ -100,12 +100,12 @@ def main() -> int:
         return 0
 
     if not pair:
-        log("! KRAKEN_PAIR lipsa in .env (sau --pair). Nu stiu ce sa tranzactionez.")
+        log("! KRAKEN_PAIR missing from .env (or --pair). Nothing to trade.")
         return 1
 
     log("=== Kraken bot ===")
     log(f"    pereche      : {label}  ({pair})")
-    log(f"    chei         : {'da' if os.environ.get('KRAKEN_API_KEY_BOT') else 'NU (doar public/paper)'}")
+    log(f"    chei         : {'yes' if os.environ.get('KRAKEN_API_KEY_BOT') else 'NO (public/paper only)'}")
     log(f"    executie     : {'PAPER (fara bani)' if strat_dry else '⚠ REAL — BANI ADEVARATI'}")
     log(f"    ntfy/email   : {os.environ.get('NTFY_TOPIC') or '-'} / {os.environ.get('ALERT_TO_EMAIL') or '-'}")
 
@@ -130,7 +130,7 @@ def _wait_for_listing(client, pair, label, interval, desktop) -> bool:
     if info:
         log(f"  [verify] {pair} e LISTAT si tranzactionabil — pornesc.")
         return True
-    log(f"    {pair} inca nelistat pe Kraken — astept aparitia... (Ctrl+C ca sa opresc)")
+    log(f"    {pair} not listed on Kraken yet — waiting for it... (Ctrl+C to stop)")
     try:
         while True:
             info = pair_available(client, pair)

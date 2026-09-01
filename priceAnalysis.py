@@ -54,7 +54,7 @@ def build_price_cache_manager():
 def priceLstFor(symbol: str) -> List[Tuple[int, float]]:
 
     if price_cache_manager is None:
-        raise RuntimeError("Price cache manager nu a fost inițializat. Rulează build_price_cache_manager() mai întâi.")
+        raise RuntimeError("The price cache manager was not initialised. Run build_price_cache_manager() first.")
 
     manager = price_cache_manager.get(symbol)
     if manager is None:
@@ -319,7 +319,7 @@ def getTrendLongTerm(symbol: str, window_hours: int = 24, step_hours: int = 8,
         return None
     
     if trend_ref_slope_h is None:
-        print(f"[{symbol}] trend_ref_slope_h este None, nu se poate determina direcția trendului.")
+        print(f"[{symbol}] trend_ref_slope_h is None, the trend direction cannot be determined.")
         return None        # Not enough data to calculate slope
     
     print(f"trend_block {trend_block} and trend_block_ups {trend_block_ups}")
@@ -473,7 +473,7 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
     data = [(ts, p) for ts, p in data if ts/1000 > cutoff_timestamp]
     
     if len(data) < 2:
-        print(f"[{symbol}] Insuficiente date în ultimele {lookback_days} zile")
+        print(f"[{symbol}] Not enough data in the last {lookback_days} days")
         return None
     
     timestamps, prices = zip(*data)
@@ -504,10 +504,10 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
     dur = res['duration_seconds']
     print(f"\n{'='*60}")
     print(f"[{symbol}] Trend {emoji} {direction.upper()} | slope/h={res['current_slope_h']:.4f}")
-    print(f"  Puncte (ultimele {lookback_days}z): {len(prices)} | fereastră={window_hours}h "
+    print(f"  Points (last {lookback_days}d): {len(prices)} | window={window_hours}h "
           f"pas={step_hours}h | blocuri={len(res['blocks'])}")
     print(f"  Start: {format_timestamp(res['start_timestamp'])} | "
-          f"Durată: {format_duration(dur)} ({dur/86400:.1f} zile)")
+          f"Duration: {format_duration(dur)} ({dur/86400:.1f} days)")
     print(f"{'='*60}\n")
 
     if draw:
@@ -531,7 +531,7 @@ def write_all_trends(all_trends, filename="priceanalysis.json"):
     
     for symbol, trend_data in all_trends.items():
         if trend_data is None:
-            print(f"\n{symbol}: ❌ Fără date suficiente")
+            print(f"\n{symbol}: ❌ Not enough data")
             continue
             
         direction = trend_data['direction']
@@ -548,7 +548,7 @@ def write_all_trends(all_trends, filename="priceanalysis.json"):
         print(f"\n{symbol}")
         print(f"  {emoji} {direction.upper()}")
         print(f"  Start:    {start_str}")
-        print(f"  Durată:   {duration_str} ({duration_days:.1f} zile)")
+        print(f"  Duration: {duration_str} ({duration_days:.1f} days)")
         print(f"  Estimat:  ~{future_str} ({future_days:.1f} zile)")
     
     print("\n" + "="*80 + "\n")
@@ -556,7 +556,7 @@ def write_all_trends(all_trends, filename="priceanalysis.json"):
     try:
         with open(filename, "w") as f:
             json.dump(all_trends, f, indent=2)
-        print(f"✅ Rezultatele au fost scrise în {filename}")
+        print(f"✅ Results were written to {filename}")
     except Exception as e:
         print(f"❌ Eroare scriere {filename}: {e}")
     
@@ -588,7 +588,7 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=No
 
     all_trend_data = cm.get_cache_manager("PriceLongTrend").cache
     if symbol not in all_trend_data:
-        print(f"Simbolul {symbol} nu există în trendurile citite.")
+        print(f"Symbol {symbol} is not present in the trends that were read.")
         return None
     trend = all_trend_data[symbol][0]
     if trend is None:
@@ -596,9 +596,9 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=No
         return None
     
     duration_days = trend["duration_seconds"] / 86400
-    print(f"Trend citit din manager cache pentru simbolul {symbol}: {trend}")
+    print(f"Trend read from the cache manager for symbol {symbol}: {trend}")
     print(f"   Start trend:     {format_timestamp(trend["start_timestamp"])}")
-    print(f"   Durată:          {format_duration(trend["duration_seconds"])} ({duration_days:.1f} zile)")
+    print(f"   Durată:          {format_duration(trend["duration_seconds"])} ({duration_days:.1f} days)")
     timestamp = trend['timestamp']
     # Include order type and T in the memo key because their weights differ and
     # automatic T may change after re-estimation.
@@ -630,7 +630,7 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=No
     current_weight = float(w[0])  # The slice's first value is the current weight.
 
     if np.isnan(current_weight) or current_weight <= 0:
-        print(f"[{symbol}] Pondere invalidă: {current_weight}, return None")
+        print(f"[{symbol}] Invalid weight: {current_weight}, returning None")
         return None
 
     print(f"[{symbol}] primele 5 ponderi: {w[:5]}")
@@ -672,7 +672,7 @@ def get_trade_weight(T, trend_len, trend, order_type,
     # Zone 2: an over-age but persistent trend has strong aligned momentum.
     if T < trend_len <= T_extended:
         w_val = 0.86 if aligned else max_against_trend
-        _dbg(f"[DEBUG] Zona 2: trend_len={trend_len:.2f} depășește T={T} dar e sub T_extended={T_extended}. Aligned={aligned}, return {w_val}  ")
+        _dbg(f"[DEBUG] Zona 2: trend_len={trend_len:.2f} exceeds T={T} but is below T_extended={T_extended}. Aligned={aligned}, return {w_val}  ")
         return np.array([0.0]), np.array([w_val])
 
     # Zone 3: use conservative weights in both directions for a very old trend.
@@ -699,7 +699,7 @@ def get_trade_weight(T, trend_len, trend, order_type,
         w01_full = w01_full.copy()
         w01_full[peak_i:] = 1.0
     t_seq, w01 = t_full[idx:], w01_full[idx:]
-    _dbg(f"[DEBUG] Zona 1: trend_len={trend_len:.2f}, slice de la idx={idx} până la T={T}. Aligned={aligned}, gauss01[0]={w01[0]:.4f}")
+    _dbg(f"[DEBUG] Zona 1: trend_len={trend_len:.2f}, slice from idx={idx} up to T={T}. Aligned={aligned}, gauss01[0]={w01[0]:.4f}")
 
     if aligned:
         w_seq = w01 * peak_weight
@@ -733,7 +733,7 @@ if __name__ == "__main__":
     try:
         while True:
             process = psutil.Process(os.getpid())
-            print("Memorie folosită (MB):", process.memory_info().rss / 1024**2)
+            print("Memory used (MB):", process.memory_info().rss / 1024**2)
             
             all_trends = {}
             for symbol in symbols:
@@ -749,7 +749,7 @@ if __name__ == "__main__":
             print(f"write : {all_trends}")
             time.sleep(UPDATE_AND_REFRESH_TREND)
     except KeyboardInterrupt:
-        print(f"Închidere manuală...")
+        print(f"Manual shutdown...")
 
 
 ######################

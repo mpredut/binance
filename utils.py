@@ -274,7 +274,7 @@ def _load_ed25519_signing_key():
         return nacl.signing.SigningKey(seed)
 
     except Exception as e:
-        print(f"Eroare la încărcarea cheii Ed25519: {e}")
+        print(f"Error loading the Ed25519 key: {e}")
         return None
     
 def _sign_ed25519(signing_key, payload: str) -> str:
@@ -305,12 +305,12 @@ def _sign_ed25519(signing_key, payload: str) -> str:
 
 
 """
-locul unic care decide UNDE stau fișierele de cache.
+the single place that decides WHERE the cache files live.
 
-Toate fișierele cache (cache_*.json/.jsonl + .meta) trăiesc în subfolderul
-`cachedb/`. `cache_path(name)` prefixează un nume simplu cu acel folder (creat
-la nevoie). Numele care au DEJA o cale (absolută sau cu separator — ex. teste,
-migrare) sunt lăsate neatinse.
+All cache files (cache_*.json/.jsonl + .meta) live in the
+`cachedb/` subfolder. `cache_path(name)` prefixes a plain name with that folder
+(created on demand). Names that ALREADY carry a path (absolute or with a separator
+— e.g. tests, migrations) are left untouched.
 
 Se poate suprascrie folderul prin variabila de mediu BINANCE_CACHE_DIR.
 """

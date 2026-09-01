@@ -329,7 +329,7 @@ def main() -> int:
             tr = ts.trail_pct_for(s)
             peak = st.get("peak")
             print(f"{s}: varf={peak}  trailing={tr}%  "
-                  f"vinde sub {peak * (1 - tr / 100):.4f}" if peak else f"{s}: fara varf inca")
+                  f"sells below {peak * (1 - tr / 100):.4f}" if peak else f"{s}: no peak yet")
         print(f"ENABLED={ts.enabled} (dry-run daca False)")
         return 0
     if args.once:

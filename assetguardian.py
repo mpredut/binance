@@ -138,7 +138,7 @@ def _validate_config():
             not math.isfinite(threshold) or threshold <= 0
             or not math.isfinite(allocation) or allocation <= 0
             for threshold, allocation in BUY_TIERS):
-        raise ValueError("AG_BUY_TIERS trebuie sa contina prag:alocare pozitive")
+        raise ValueError("AG_BUY_TIERS must contain positive threshold:allocation pairs")
     if len({threshold for threshold, _ in BUY_TIERS}) != len(BUY_TIERS):
         raise ValueError("AG_BUY_TIERS contine praguri duplicate")
     if sum(allocation for _, allocation in BUY_TIERS) > 1.0 + 1e-12:
@@ -147,7 +147,7 @@ def _validate_config():
             not math.isfinite(threshold) or threshold <= 0
             or not math.isfinite(allocation) or allocation <= 0
             for threshold, allocation in SELL_TIERS):
-        raise ValueError("AG_SELL_TIERS trebuie sa contina prag:alocare pozitive")
+        raise ValueError("AG_SELL_TIERS must contain positive threshold:allocation pairs")
     if len({threshold for threshold, _ in SELL_TIERS}) != len(SELL_TIERS):
         raise ValueError("AG_SELL_TIERS contine praguri duplicate")
     if not math.isclose(
@@ -158,11 +158,11 @@ def _validate_config():
             or SELL_REARM_GROWTH_PERCENT <= 0
             or SELL_REARM_GROWTH_PERCENT >= SELL_TIERS[0][0]):
         raise ValueError(
-            "AG_SELL_REARM_GROWTH_PCT trebuie sa fie > 0 si sub primul prag SELL")
+            "AG_SELL_REARM_GROWTH_PCT must be > 0 and below the first SELL threshold")
     if not math.isfinite(ORDER_MAX_AGE_SECONDS) or ORDER_MAX_AGE_SECONDS <= 0:
-        raise ValueError("AG_ORDER_MAX_AGE_SEC trebuie sa fie finit si > 0")
+        raise ValueError("AG_ORDER_MAX_AGE_SEC must be finite and > 0")
     if ORDER_MISSING_CONFIRMATIONS <= 0:
-        raise ValueError("AG_ORDER_MISSING_CONFIRMATIONS trebuie sa fie intreg si > 0")
+        raise ValueError("AG_ORDER_MISSING_CONFIRMATIONS must be an integer and > 0")
     if not TRACKED_SYMBOLS:
         raise ValueError("AG_SYMBOLS trebuie sa contina cel putin un simbol")
     unsupported = [symbol for symbol in TRACKED_SYMBOLS if symbol not in sym.symbols]
@@ -175,7 +175,7 @@ def _validate_config():
             (NEAR_TRIGGER_DISTANCE_PCT, "AG_NEAR_TRIGGER_DISTANCE_PCT"),
             (TREND_DEFER_MAX_SECONDS, "AG_TREND_DEFER_MAX_SEC")):
         if not math.isfinite(value) or value <= 0:
-            raise ValueError(f"{name} trebuie sa fie finit si > 0")
+            raise ValueError(f"{name} must be finite and > 0")
 
 
 _validate_config()

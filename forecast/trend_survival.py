@@ -229,7 +229,7 @@ def main() -> int:
     ap.add_argument("--step", type=int, default=8)
     ap.add_argument("--T", type=float, default=14.0, help="orizontul gaussienei (zile), mid=T/2")
     ap.add_argument("--estimate", action="store_true",
-                    help="doar estimeaza T (empiric+hibrid, cu cache) si iese")
+                    help="only estimate T (empirical+hybrid, cached) and exit")
     args = ap.parse_args()
 
     if args.estimate:

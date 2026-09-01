@@ -69,7 +69,7 @@ class PairPolicy:
         if not 0 < self.adjustment_fraction < 1:
             raise ValueError("adjustment_fraction trebuie sa fie in (0, 1)")
         if self.quote_ttl_sec <= 0 or self.poll_sec <= 0:
-            raise ValueError("quote_ttl_sec si poll_sec trebuie sa fie pozitive")
+            raise ValueError("quote_ttl_sec and poll_sec must be positive")
         if not 0 < self.fast_fill_ratio <= 1:
             raise ValueError("fast_fill_ratio trebuie sa fie in (0, 1]")
         if not 0 <= self.min_edge_fraction < 1:
@@ -78,7 +78,7 @@ class PairPolicy:
             raise ValueError("shock_hard_stop_fraction trebuie sa fie in (0, 1)")
         if not self.shock_hard_stop_fraction <= self.hard_stop_fraction < 1:
             raise ValueError(
-                "hard_stop_fraction trebuie sa fie >= shock_hard_stop_fraction si < 1")
+                "hard_stop_fraction must be >= shock_hard_stop_fraction and < 1")
 
 
 @dataclass(frozen=True)
@@ -152,7 +152,7 @@ def anchored_exit_price(exit_side: str, fill_price: float, current_price: float,
         market_target = current_price * (1 - adjustment_fraction)
         ceiling = fill_price * (1 - min_edge_fraction)
         return round(min(market_target, ceiling), decimals)
-    raise ValueError("exit_side trebuie sa fie BUY sau SELL")
+    raise ValueError("exit_side must be BUY or SELL")
 
 
 class PairCoordinator:
@@ -166,11 +166,11 @@ class PairCoordinator:
         self.venue = venue
         self.qty = float(qty)
         if not math.isfinite(self.qty) or self.qty <= 0:
-            raise ValueError("qty rtrade trebuie sa fie finit si pozitiv")
+            raise ValueError("rtrade qty must be finite and positive")
         self.policy = policy
         self.start_side = start_side.upper()
         if self.start_side not in {"BUY", "SELL"}:
-            raise ValueError("start_side trebuie sa fie BUY sau SELL")
+            raise ValueError("start_side must be BUY or SELL")
         self.clock = clock
         self.sleeper = sleeper
         self.pair_id_factory = pair_id_factory
@@ -188,7 +188,7 @@ class PairCoordinator:
     def start(self, mid: Optional[float] = None,
               pair_id: Optional[str] = None) -> PairOutcome:
         if self.phase not in {"idle", "complete", "expired", "failed", "hard_stop"}:
-            raise RuntimeError("runda existenta nu este terminala")
+            raise RuntimeError("the existing round is not terminal")
         mid = float(mid if mid is not None else (self.venue.current_price() or 0.0))
         if not math.isfinite(mid):
             raise ValueError("mid rtrade trebuie sa fie finit")

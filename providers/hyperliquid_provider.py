@@ -283,7 +283,7 @@ class HyperliquidProvider(MarketDataProvider):
         from hl_client import HLClient
         secret = os.environ.get("HL_SECRET_KEY")
         if not secret:
-            raise ProviderError("HL_SECRET_KEY lipsa — nu pot semna ordine HL")
+            raise ProviderError("HL_SECRET_KEY missing — HL orders cannot be signed")
         mainnet = os.environ.get("HL_MAINNET", "true").strip().lower() != "false"
         return HLClient(secret_key=secret,
                         account_address=os.environ.get("HL_ACCOUNT_ADDRESS"), mainnet=mainnet)

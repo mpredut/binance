@@ -195,7 +195,7 @@ class Strategy:
 
     # -- valuta ----------------------------------------------------------------
     def _fx_to_usd(self, currency: str) -> float:
-        """Cati USD intr-o unitate din valuta data — generic pt orice valuta Yahoo."""
+        """How many USD in one unit of the given currency — generic for any Yahoo currency."""
         if currency == "USD":
             return 1.0
         if currency == "EUR":
@@ -358,7 +358,7 @@ class Strategy:
         ]
         if len(matches) == 1 and matches[0].get("id") is not None:
             order = self._adopt_pending_submit(str(matches[0]["id"]))
-            log(f"  [STRAT] submit T212 recuperat din ordine active: {order['id']}")
+            log(f"  [STRAT] T212 submit recovered from the active orders: {order['id']}")
             return "adopted"
         if len(matches) > 1:
             log("  ! [STRAT] submit T212 ambiguu: mai multe ordine active se potrivesc — pastrez pending")
@@ -378,7 +378,7 @@ class Strategy:
             self._persist_pending_submit(pending)
             return "waiting"
         log(
-            f"  [STRAT] submit T212 absent in 2 snapshoturi si fara delta de portofoliu "
+            f"  [STRAT] T212 submit absent in 2 snapshots and no portfolio delta "
             f"({side} {self.ticker}) — eliberez pentru reevaluare/retry"
         )
         self._persist_pending_submit(None)
@@ -484,7 +484,7 @@ class Strategy:
                     kind: str = "TP", *, market: bool = False) -> bool:
         qty = round(float(qty), 2)
         if qty <= 0:
-            log("  ! [STRAT] SELL qty 0 după rotunjire — păstrez dust-ul, nu trimit ordin")
+            log("  ! [STRAT] SELL qty 0 after rounding — keeping the dust, sending no order")
             return False
         tag = f"+{level:g}%" if level is not None else ""
         if self.dry_run:
@@ -526,11 +526,11 @@ class Strategy:
             # owned amount with lower free balance must not erase a real position.
             _m = re.search(r'owned["\']?\s*[:=]\s*([0-9.]+)', message)
             if _m is None:
-                log("  ! [STRAT] selling-not-owned fara cantitatea owned — NU resetez pozitia")
+                log("  ! [STRAT] selling-not-owned without the owned quantity — NOT resetting the position")
                 return False
             _owned = float(_m.group(1))
             if _owned <= 1e-6:
-                log("  ! [STRAT] T212 confirmă owned=0 — resetez starea (poziția închisă/vândută)")
+                log("  ! [STRAT] T212 confirms owned=0 — resetting the state (position closed/sold)")
                 self.s["qty"] = 0.0
                 self.s["cost_usd"] = 0.0
                 self.s["spent_cash"] = 0.0
@@ -538,7 +538,7 @@ class Strategy:
                 self.s["locked_zero_until"] = self._now() + 300  # ignora adoptie stala 5 min
                 self._save()
             else:
-                log(f"  ! [STRAT] selling-not-owned dar owned={_owned} (free<ordin) — NU resetez pozitia")
+                log(f"  ! [STRAT] selling-not-owned but owned={_owned} (free<order) — NOT resetting the position")
             return False
         order_type = "MARKET" if market else f"@ {limit:.2f}"
         log(f"  [STRAT] SELL {kind}{tag} plasat id={order_id} {qty:.2f} {order_type}")
@@ -912,7 +912,7 @@ class Strategy:
         tr = next((o for o in self.s["orders"] if o.get("kind") == "TR"), None)
         if tr is None or (not tr.get("market") and price < tr["limit"]):
             if not self._cancel_all_orders():
-                log("  ! [STRAT] TRAILING amanat: cel putin un ordin nu a putut fi anulat")
+                log("  ! [STRAT] TRAILING deferred: at least one order could not be cancelled")
                 return True
             placed = self._place_sell(
                 self.s["qty"], round(price, 2), kind="TR", market=True,
@@ -944,7 +944,7 @@ class Strategy:
         sl = next((o for o in self.s["orders"] if o.get("kind") == "SL"), None)
         if sl is None or (not sl.get("market") and price < sl["limit"]):
             if not self._cancel_all_orders():
-                log("  ! [STRAT] STOP amanat: cel putin un ordin nu a putut fi anulat")
+                log("  ! [STRAT] STOP deferred: at least one order could not be cancelled")
                 return True
             placed = self._place_sell(
                 self.s["qty"], round(price, 2), kind="SL", market=True,
@@ -956,7 +956,7 @@ class Strategy:
             self.s["sl_alerted"] = True
             log(f"  🛑 [STRAT] STOP-LOSS: pierdere {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — VAND TOT (taie pierderea)")
             notify(title=f"🛑 SL {self.yahoo_sym} -{loss_pct:.1f}%",
-                   body=f"pierdere {loss_pct:.1f}% ≥prag{self.p.stop_loss_pct}% — vand tot",
+                   body=f"loss {loss_pct:.1f}% >=threshold{self.p.stop_loss_pct}% — selling everything",
                    source="T212", price=price, desktop=self.desktop)
         return True
 
@@ -976,9 +976,9 @@ class Strategy:
         # Do not lower it on recovery, so revisiting an alerted level does not notify again.
         # Cycle closure resets it through _new_state (loss_band=0).
         if band > self.s.get("loss_band", 0):
-            log(f"  📉 [STRAT] {self.yahoo_sym} pierdere -{loss_pct:.1f}% (prag {band*step:.0f}%)")
+            log(f"  📉 [STRAT] {self.yahoo_sym} loss -{loss_pct:.1f}% (threshold {band*step:.0f}%)")
             notify(title=f"📉 {self.yahoo_sym} -{loss_pct:.1f}%",
-                   body=f"pierdere -{loss_pct:.1f}% (peste {band*step:.0f}%) | q{self.s['qty']:.2f} a{avg:.2f} p{price:.2f}",
+                   body=f"loss -{loss_pct:.1f}% (over {band*step:.0f}%) | q{self.s['qty']:.2f} a{avg:.2f} p{price:.2f}",
                    source="T212", price=price, desktop=self.desktop)
             self.s["loss_band"] = band
 
@@ -1031,7 +1031,7 @@ class Strategy:
                 prag = lsp * (1 - rdp / 100)
                 # Treat a value close to the threshold as reached (deterministic are_close).
                 if price > prag and not are_close(price, prag, self.p.reentry_tolerance_pct):
-                    log(f"  [STRAT] reintrare blocata: {price:.2f} > prag {prag:.2f} "
+                    log(f"  [STRAT] re-entry blocked: {price:.2f} > threshold {prag:.2f} "
                         f"(vandut la {lsp:.2f}, astept -{rdp}%)")
                     return
             if self.s["spent_cash"] + self.p.entry_amount > self.p.max_budget:

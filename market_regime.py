@@ -150,7 +150,7 @@ class MarketRegimeService:
         self.cache_max = max(1, int(cache_max))
         self.clock = clock
         if not math.isfinite(self.cache_ttl_sec) or self.cache_ttl_sec < 0:
-            raise ValueError("cache_ttl_sec trebuie sa fie finit si >= 0")
+            raise ValueError("cache_ttl_sec must be finite and >= 0")
         self._cache = OrderedDict()
         self._lock = threading.Lock()
 
@@ -306,7 +306,7 @@ class MarketRegimeService:
         interval_min = int(interval_min)
         window_seconds = float(window_seconds)
         if interval_min <= 0 or not math.isfinite(window_seconds) or window_seconds <= 0:
-            raise ValueError("intervalul si fereastra regimului trebuie sa fie pozitive")
+            raise ValueError("the regime interval and window must be positive")
         key = (str(getattr(provider, "name", "unknown")).lower(),
                str(symbol), interval_min, window_seconds)
         now = self.clock()

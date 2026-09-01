@@ -267,7 +267,7 @@ class CacheManagerInterface(ABC):
                             print(f"[{self.cls_name}][warning] fetchtime_time_per_symbol is None")    
                     
             except Exception as e:
-                print(f"[{self.cls_name}][Eroare] La citirea fișierului cache {self.filename} : {e}")
+                print(f"[{self.cls_name}][Error] While reading the cache file {self.filename} : {e}")
                 self.query_remote_and_update_cache()
                 self.save_state_to_file_if_enabled()
         else :
@@ -316,7 +316,7 @@ class CacheManagerInterface(ABC):
         Refuse to overwrite newer data another process has already persisted.
         """
         if self._persisted_max_ts() > self._mem_max_ts():
-            builtins.print(f"[{self.cls_name}][resync] fișier mai nou decât memoria → "
+            builtins.print(f"[{self.cls_name}][resync] file newer than memory -> "
                            f"refuz suprascrierea cu date vechi ({self.filename})")
             return
         if self.append_persist:
@@ -332,7 +332,7 @@ class CacheManagerInterface(ABC):
                 print(f"[{self.cls_name}][info] Save cache to file {self.filename}")
             self._write_meta()
         except Exception as e:
-            print(f"[{self.cls_name}][Eroare] La salvarea fișierului cache {self.filename} / .tmp : {e}")
+            print(f"[{self.cls_name}][Error] While saving the cache file {self.filename} / .tmp : {e}")
 
     def _reload_from_disk(self):
         """Reload the cache when another process has written a newer file."""
@@ -356,7 +356,7 @@ class CacheManagerInterface(ABC):
         file_ts = self._persisted_max_ts()
         mem_ts = self._mem_max_ts()
         if file_ts > mem_ts:
-            builtins.print(f"[{self.cls_name}][resync] fișier mai nou → reîncarc ({self.filename})")
+            builtins.print(f"[{self.cls_name}][resync] file is newer -> reloading ({self.filename})")
             self._reload_from_disk()
         elif mem_ts > file_ts and self.save_state:
             self.save_state_to_file_if_enabled()
@@ -479,7 +479,7 @@ class CacheManagerInterface(ABC):
             try:
                 os.replace(self.filename, archive)   # Move complete history into the archive.
             except OSError as e:
-                builtins.print(f"[{self.cls_name}][maintain] arhivare eșuată: {e}")
+                builtins.print(f"[{self.cls_name}][maintain] archiving failed: {e}")
                 return
             for symbol, items in self.cache.items():
                 keep_n = max(1, int(len(items) * self.ROTATE_KEEP_FRACTION))
@@ -495,8 +495,8 @@ class CacheManagerInterface(ABC):
                     os.remove(old_archive)
                 except OSError:
                     pass
-        builtins.print(f"[{self.cls_name}][maintain] ROTAȚIE: arhivat → {archive}, "
-                       f"păstrat ultimele {int(self.ROTATE_KEEP_FRACTION*100)}%")
+        builtins.print(f"[{self.cls_name}][maintain] ROTATION: archived -> {archive}, "
+                       f"kept the last {int(self.ROTATE_KEEP_FRACTION*100)}%")
 
     @abstractmethod
     def get_remote_items(self, symbol, startTime):
@@ -541,7 +541,7 @@ class CacheManagerInterface(ABC):
                 # periodic compact_jsonl pass performs complete deduplication.
                 cache_copy = list(self.cache.get(symbol, []))[-self.DEDUP_WINDOW:]
                 new_items = self.filter_new_items(cache_copy, new_items)
-                print(f"[{self.cls_name}][Info] {symbol}:  Din {count_new_items} pastrez doar {len(new_items)}")
+                print(f"[{self.cls_name}][Info] {symbol}:  out of {count_new_items} keeping only {len(new_items)}")
                 new_items = [item for item in new_items if item is not None]
                 if not new_items:
                     return
@@ -551,7 +551,7 @@ class CacheManagerInterface(ABC):
               
             self.fetchtime_time_per_symbol[symbol] = current_time
 
-        print(f"[{self.cls_name}][Info] {symbol}: Adăugate {len(new_items)} items noi.")
+        print(f"[{self.cls_name}][Info] {symbol}: Added {len(new_items)} new items.")
 
     def _persist_items(self, symbol, new_items):
         """Persist one symbol to the cache by default.
@@ -677,7 +677,7 @@ class CacheTradeManager(CacheManagerInterface):
  
         existing_ids = set(str(t["id"]) for t in self.cache.get(symbol, []) if "id" in t)
         
-        print(f"[{self.cls_name}][info] Număr de trades noi: {len(new_trades)}")     
+        print(f"[{self.cls_name}][info] New trades: {len(new_trades)}")     
         unique_new_trades = []
         for t in new_trades:
             if not self._is_valid_trade(t):
@@ -689,7 +689,7 @@ class CacheTradeManager(CacheManagerInterface):
                 unique_new_trades.append(t)
                 existing_ids.add(trade_id)
 
-        print(f"[{self.cls_name}][info] Număr de unique_new_trades trades noi: {len(unique_new_trades)}")
+        print(f"[{self.cls_name}][info] New unique_new_trades trades: {len(unique_new_trades)}")
         return unique_new_trades
 
     def last_opposite_fill_price(self, symbol, order_type):
@@ -727,7 +727,7 @@ class CacheOrderManager(CacheManagerInterface):
                
         existing_ids = set(str(t["orderId"]) for t in self.cache.get(symbol, []) if "orderId" in t)
 
-        print(f"[{self.cls_name}][info] Număr de trades noi: {len(new_orders)}")
+        print(f"[{self.cls_name}][info] New orders: {len(new_orders)}")
         unique_new_orders = []
 
         for t in new_orders:
@@ -740,7 +740,7 @@ class CacheOrderManager(CacheManagerInterface):
                 unique_new_orders.append(t)
                 existing_ids.add(trade_id)
 
-        print(f"[{self.cls_name}][info] Număr de unique_new_orders orders noi: {len(unique_new_orders)}")
+        print(f"[{self.cls_name}][info] New unique_new_orders orders: {len(unique_new_orders)}")
         
         return unique_new_orders
 
@@ -977,7 +977,7 @@ class CachePriceLongTrendManager(CacheManagerInterface):
         # TODO : import priceanalysis name file
         filename = "priceanalysis.json"
         if not os.path.exists(filename):
-            print(f"[{self.cls_name}] Fișierul {self.filename} nu există.")
+            print(f"[{self.cls_name}] File {self.filename} does not exist.")
             return []
 
         try:
@@ -1029,7 +1029,7 @@ class CacheAssetValueManager(CacheManagerInterface):
             return []
 
         if not isinstance(total_usdc, (int, float)) or total_usdc <= 0:
-            print(f"[{self.cls_name}][Eroare] Valoarea totala invalidă: {total_usdc}")
+            print(f"[{self.cls_name}][Error] Invalid total value: {total_usdc}")
             return []
             
         now_sec = int(time.time())
@@ -1171,7 +1171,7 @@ class CacheCurrentPriceManager(CacheManagerInterface):
         now_ms  = int(time.time() * 1000)
         if not entries or (now_ms - last_ts) > self.STALE_THRESHOLD_MS:
             age = now_ms - last_ts if entries else -1
-            print(f"[{self.cls_name}] {symbol} stale ({age}ms) – HTTP fetch forțat")
+            print(f"[{self.cls_name}] {symbol} stale ({age}ms) - forced HTTP fetch")
             new = self.get_remote_items(symbol, None)
             if new:
                 self._push_price(symbol, new[0][1])
@@ -1620,7 +1620,7 @@ class CachePriceShortTrendManager:
         if self.is_snapshot_fresh(symbol, max_age_sec):
             return self._read_file().get(symbol)
         # A stale file triggers autonomous local calculation and writer failover.
-        builtins.print(f"[CachePriceShortTrendManager][WARN] fișier stale → "
+        builtins.print(f"[CachePriceShortTrendManager][WARN] stale file -> "
                        f"failover la calcul propriu ({symbol})")
         self.prime_from_file()
         self.start_computation(cache24_managers, current_price_mgr)
@@ -1824,10 +1824,10 @@ class CacheFactory:
                 # Use builtins.print so this warning remains visible if module logging
                 # replaces print with a no-op.
                 builtins.print(
-                    f"[CacheFactory][WARN] '{name}' există deja cu simbolurile {sorted(existing)}; "
-                    f"cererea pentru {sorted(requested)} e IGNORATĂ"
+                    f"[CacheFactory][WARN] '{name}' already exists with symbols {sorted(existing)}; "
+                    f"the request for {sorted(requested)} is IGNORED"
                     + (f" (lipsesc: {sorted(missing)})" if missing else "")
-                    + ". Singleton pe nume — folosește prima instanță.")
+                    + ". Singleton per name — the first instance is used.")
 
         created = name not in cls._instances
         if created:
@@ -2198,7 +2198,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("Oprit manual.")
     finally:
-        print("Cleanup / închidere resurse...")
+        print("Cleanup / releasing resources...")
         if _nb_poller is not None:
             _nb_poller.stop()
         if _trend_mgr is not None:

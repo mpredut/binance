@@ -823,7 +823,7 @@ class Strategy:
             # Retain orders after failed cancellation because a ghost DCA/TP can fill
             # after exit. Submit exit only when all cancellations are accepted.
             if not self._cancel_orders():
-                log("  ! [STRAT] STOP amanat: cel putin un ordin nu a putut fi anulat")
+                log("  ! [STRAT] STOP deferred: at least one order could not be cancelled")
                 return True
             placed = self._place("sell", self._dust_safe_qty(self.s["qty"]),
                                  round(price * 0.995, self.price_dec), kind="STOP", market=True)
@@ -831,7 +831,7 @@ class Strategy:
                 log("  ! [STRAT] STOP declansat, dar ordinul MARKET nu a fost acceptat — reincerc")
                 return True
             self._emit(title=f"🛑 SL {self.pair} -{loss_pct:.1f}%",
-                       body=f"pierdere {loss_pct:.1f}% ≥prag{self.p.stop_loss_pct}% — vand tot",
+                       body=f"loss {loss_pct:.1f}% >=threshold{self.p.stop_loss_pct}% — selling everything",
                        source=self.notification_source, price=price, desktop=self.desktop)
             return True
         return False
@@ -859,7 +859,7 @@ class Strategy:
             return
         if (self.s["qty"] > 1e-12 or self.s["orders"]
                 or self.s["cycle"] != 1 or self.s["spent"] > 0):
-            log("  [STRAT] adopt: starea nu e proaspata — NU adopt (ciclu in curs)")
+            log("  [STRAT] adopt: the state is not fresh — NOT adopting (cycle in progress)")
             return
         qty = self.p.adopt_qty
         if qty <= 0:  # Read quantity from the pair's base-asset balance.
@@ -1134,7 +1134,7 @@ class Strategy:
             if up:
                 return True                         # Wait for the top-up fill.
             self._cancel_open("buy")                # Signal disappeared before fill.
-            log("  [STRAT] TREND ENTER anulat: semnalul a dispărut înainte de fill")
+            log("  [STRAT] TREND ENTER cancelled: the signal vanished before the fill")
             return False                            # revine la strategia range
         if up and self.s["spent"] + self.p.trend_topup <= self._effective_max_budget():
             self._cancel_orders("buy")              # Cancel pending range orders.
@@ -1210,10 +1210,10 @@ class Strategy:
                 self.s["sl_low"] = low
                 prag_bounce = low * (1 + self.p.reentry_sl_bounce_pct / 100)
                 if sr.reentry_stop_blocked(price, low, self.p.reentry_sl_bounce_pct, self.p.reentry_tolerance_pct):
-                    log(f"  [STRAT] reintrare dupa STOP blocata: pret {price} < prag revenire "
+                    log(f"  [STRAT] re-entry after STOP blocked: price {price} < recovery threshold "
                         f"{prag_bounce:.{self.price_dec}f} (min {low}, +{self.p.reentry_sl_bounce_pct}%)")
                     return
-                log(f"  [STRAT] reintrare dupa STOP: revenire atinsa (pret {price} >= "
+                log(f"  [STRAT] re-entry after STOP: recovery reached (price {price} >= "
                     f"{prag_bounce:.{self.price_dec}f}, min {low}) — reintru")
             else:
                 # After TP, do not repurchase above the sale price; wait for a real drop.
@@ -1222,7 +1222,7 @@ class Strategy:
                     prag = lsp * (1 - drop_pct / 100)
                     # Deterministic tolerance treats a near-threshold price as reached.
                     if sr.reentry_drop_blocked(price, lsp, drop_pct, self.p.reentry_tolerance_pct):
-                        log(f"  [STRAT] reintrare blocata: pret {price} > prag {prag:.2f} [{drop_source}]"
+                        log(f"  [STRAT] re-entry blocked: price {price} > threshold {prag:.2f} [{drop_source}]"
                             f"{f' (tol {self.p.reentry_tolerance_pct}%)' if self.p.reentry_tolerance_pct else ''} "
                             f"(vandut la {lsp}, astept -{drop_pct:.2f}%)")
                         if not self.p.reentry_adaptive:
@@ -1258,8 +1258,8 @@ class Strategy:
             exit_px = round(price * 0.999, self.price_dec)
             profit_floor = self._trail_profit_floor_price(avg)
             if price <= trail_stop and profit_floor is not None and exit_px < profit_floor:
-                log(f"  [STRAT] trailing soft blocat: referința {exit_px:.{self.price_dec}f} sub pragul "
-                    f"profitabil {profit_floor:.{self.price_dec}f}; hard stop rămâne MARKET")
+                log(f"  [STRAT] soft trailing blocked: reference {exit_px:.{self.price_dec}f} below the "
+                    f"profitable floor {profit_floor:.{self.price_dec}f}; hard stop stays MARKET")
                 # Re-evaluate on the next tick. Leave no persistent order and do not open
                 # a contradictory DCA on the tick that triggered trailing.
                 return
@@ -1321,7 +1321,7 @@ class Strategy:
         effective_dca_amount = self._effective_dca_amount()
         if (self.s["dca_buys"] < self.p.max_dca_buys
                 and self.s["last_buy_price"]
-                # prag DCA + "aproape de prag" = atins (regula partajata cu backtest)
+                # DCA threshold + "close to the threshold" = reached (rule shared with the backtest)
                 and sr.dca_price_hit(
                     price, self.s["last_buy_price"], effective_dca_drop,
                     self.p.reentry_tolerance_pct,
@@ -1354,12 +1354,12 @@ class Strategy:
         if self.p.dca_spacing_growth_pct > 0:
             log(
                 "      DCA growth : +"
-                f"{self.p.dca_spacing_growth_pct}pp după fiecare DCA executat"
+                f"{self.p.dca_spacing_growth_pct}pp after each executed DCA"
             )
         if self.p.dca_vol_scale_k:
             log(
                 f"      DCA vol    : k={self.p.dca_vol_scale_k}, "
-                f"referință={self.p.dca_vol_ref}%, "
+                f"reference={self.p.dca_vol_ref}%, "
                 f"OHLC={self.p.dca_vol_interval}m"
             )
         log(f"      take-profit: +{self.p.takeprofit_pct}%" if self.p.enable_takeprofit else "      take-profit: off")

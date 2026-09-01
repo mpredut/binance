@@ -43,7 +43,7 @@ def single_instance(name: str, lockdir: str = "/tmp") -> None:
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     except OSError:
-        print(f"[{name}] ruleaza deja (lock activ: {path}) — ies.", flush=True)
+        print(f"[{name}] already running (lock held: {path}) — exiting.", flush=True)
         sys.exit(0)
     fd.write(str(os.getpid())); fd.flush()
     _LOCKS[name] = fd   # retain the reference so the lock lasts until process exit
@@ -168,7 +168,7 @@ def http_request(
     transport errors fail closed as ``(0, b"")``, matching the replaced venue helpers.
     """
     if payload is not None and form is not None:
-        raise ValueError("payload și form sunt mutual exclusive")
+        raise ValueError("payload and form are mutually exclusive")
 
     request_headers = dict(headers or {})
     data = None

@@ -44,7 +44,7 @@ def balance_cap_quantity(free_balance: Callable[[str], Optional[float]],
     side = side.upper()
     asset = base if side == "SELL" else quote
     if side not in {"BUY", "SELL"}:
-        raise ValueError("side trebuie sa fie BUY sau SELL")
+        raise ValueError("side must be BUY or SELL")
     if not asset or (side == "BUY" and price <= 0):
         return None, asset
     raw = free_balance(asset)

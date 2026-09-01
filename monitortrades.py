@@ -631,7 +631,7 @@ def main():
         try:
             _instruments = load_for("mt")   # Enabled instruments with mt parameters only.
         except Exception as _e:
-            print(f"[instruments.conf] {_e} — sar peste acest ciclu")
+            print(f"[instruments.conf] {_e} — skipping this cycle")
             _instruments = {}
         for _inst in _instruments.values():
             print(f"-----{_inst.name} ({_inst.symbol}@{_inst.provider_label})------")

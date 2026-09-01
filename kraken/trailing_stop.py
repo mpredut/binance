@@ -256,7 +256,7 @@ class KrakenTrailing:
         mode = "⚠ ACTIV (vinde real)" if self.enabled else "DRY-RUN (doar logheaza)"
         self.log(f"=== TRAILING STOP KRAKEN pornit — {mode} ===")
         self.log(f"    protejez: " + ", ".join(f"{a}={t}%" for a, t in TRAIL_PCT.items()) +
-                 "  (doar balanta LIBERA, nu pozitia botului)")
+                 "  (FREE balance only, not the bot position)")
         self.log(f"    re-buy: {'ON' if REBUY_ENABLED else 'off'} (recul +{REBUY_BOUNCE_PCT}% de la minim)")
         while True:
             self.check_once()
@@ -285,7 +285,7 @@ def main() -> int:
             peak = e.get("peak")
             rb = e.get("rebuy")
             print(f"{a}: varf={peak} trailing={t}% " +
-                  (f"vinde sub {peak*(1-t/100):.4f}" if peak else "(fara varf inca)") +
+                  (f"sells below {peak*(1-t/100):.4f}" if peak else "(no peak yet)") +
                   (f"  | re-buy ARMAT (qty {rb['qty']}, min {rb.get('low')})" if rb else ""))
         print(f"ENABLED={ts.enabled}  REBUY={REBUY_ENABLED} (bounce {REBUY_BOUNCE_PCT}%)")
         return 0

@@ -139,14 +139,14 @@ class Instrument:
         if bypass_profit_reference and side_u != "BUY":
             print(
                 f"[GARD] {side_u} {self.symbol}: bypass_profit_reference ignorat; "
-                "este permis numai pentru BUY")
+                "is allowed only for BUY")
             bypass_profit_reference = False
         # Quantity-policy bypass reduces exposure and is therefore SELL-only.
         # Ignore it on BUY so a misplaced argument can never increase exposure.
         if bypass_quantity_policy and side_u != "SELL":
             print(
                 f"[GARD] {side_u} {self.symbol}: bypass_quantity_policy ignorat; "
-                "este permis numai pentru SELL")
+                "is allowed only for SELL")
             bypass_quantity_policy = False
         if self._provider.guards_internally():
             return self._provider.place_order(self.symbol, side, price, qty, **kwargs)
@@ -250,7 +250,7 @@ class Instrument:
                     if cm.get_short_trend_manager().should_wait(side_u, self.symbol):
                         print(
                             f"[{self.symbol}] {side_u} amanat de trend; "
-                            "plasarea nu asteapta, intentia ramane pentru retry")
+                            "placement does not wait, the intent stays queued for retry")
                         reason = "trend_deferred"
                         return None
                 except Exception as e:  # noqa: BLE001 — Opportunistic gate.
@@ -304,7 +304,7 @@ class Instrument:
                                 kind=kwargs.get("kind") or kwargs.get("motivation"))
                             prequeued = order_retry.get(prequeued_record_id)
                             if prequeued is None:
-                                raise RuntimeError("intentia nu poate fi citita dupa persistare")
+                                raise RuntimeError("the intent cannot be read back after persisting")
                             prequeued_client_order_id = dict(
                                 prequeued.get("place_kwargs") or {}).get(
                                     "client_order_id")

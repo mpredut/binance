@@ -643,7 +643,7 @@ class TradingBot:
                 else:
                     buy_order = mkt.place(self.symbol, "BUY", target_buy_price, self.qty, cancelorders=True, hours=RTRADE_BUY_NORMAL_HOURS, smart=False)
             except po.WeightLimitBlock as e:
-                print(f"[{self.symbol}] Limita 24h atinsă — ies fără retry ({e})")
+                print(f"[{self.symbol}] 24h limit reached — exiting without retry ({e})")
                 return None
 
             if buy_order is None:
@@ -728,7 +728,7 @@ class TradingBot:
                 else:
                     sell_order = mkt.place(self.symbol, "SELL", target_sell_price, self.qty, cancelorders=True, hours=RTRADE_SELL_NORMAL_HOURS, smart=False)
             except po.WeightLimitBlock as e:
-                print(f"[{self.symbol}] Limita 24h atinsă (SELL) — ies fără retry ({e})")
+                print(f"[{self.symbol}] 24h limit reached (SELL) — exiting without retry ({e})")
                 return None
 
             if sell_order is None:
@@ -823,7 +823,7 @@ class TradingBot:
             raise ValueError("RTRADE_DYNAMIC_MARKET_EXIT_MODE: off|shadow|live")
         if not RTRADE_HARD_STOP_PCT <= RTRADE_EMERGENCY_HARD_STOP_PCT < 1:
             raise ValueError(
-                "RTRADE_EMERGENCY_HARD_STOP_PCT trebuie sa fie >= hard-stop si < 1")
+                "RTRADE_EMERGENCY_HARD_STOP_PCT must be >= hard-stop and < 1")
 
         # Each coordinator exclusively owns one round's order IDs and inventory. An
         # exposed round continues managing its exit without blocking other rounds up
@@ -1073,7 +1073,7 @@ if __name__ == "__main__":
 
     initial_price = float(api.get_current_price(sym.taosymbol) or 0.0)
     if initial_price <= 0:
-        raise RuntimeError(f"Pret indisponibil pentru {sym.taosymbol}")
+        raise RuntimeError(f"Price unavailable for {sym.taosymbol}")
     initial_qty = RTRADE_NOTIONAL_USDC / initial_price
     bot = TradingBot(sym.taosymbol, initial_qty,
                      DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)

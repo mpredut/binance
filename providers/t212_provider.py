@@ -235,7 +235,7 @@ class T212Provider(MarketDataProvider):
         # ExecutionAudit correlates using the venue-returned ID.
         del kind, client_order_id
         if not self._orders_live():
-            raise ProviderError("T212_LIVE_ORDERS nu este true; ordinul real este blocat")
+            raise ProviderError("T212_LIVE_ORDERS is not true; the real order is blocked")
         try:
             status, data = self._send_order(
                 symbol, side, qty, price, market=bool(market or price is None))
@@ -291,7 +291,7 @@ class T212Provider(MarketDataProvider):
         if fee and order_currency and fee_currencies != {order_currency}:
             raise ProviderError(
                 f"order_status({order_id}): fee {sorted(fee_currencies)} "
-                f"nu este in moneda ordinului {order_currency}"
+                f"is not in the order currency {order_currency}"
             )
 
         if filled_qty > 0 and cost <= 0:
@@ -315,7 +315,7 @@ class T212Provider(MarketDataProvider):
 
     def cancel_order(self, symbol: str, order_id: str) -> None:
         if not self._orders_live():
-            raise ProviderError("T212_LIVE_ORDERS nu este true; anularea reala este blocata")
+            raise ProviderError("T212_LIVE_ORDERS is not true; the real cancellation is blocked")
         try:
             if self._client().cancel_order(order_id):
                 return
@@ -332,7 +332,7 @@ class T212Provider(MarketDataProvider):
             ) from e
         if terminal not in {"closed", "canceled", "expired"}:
             raise ProviderError(
-                f"cancel_order({order_id}): ordinul este inca {terminal}"
+                f"cancel_order({order_id}): the order is still {terminal}"
             )
 
     def pair_precision(self, symbol: str) -> Optional[PairPrecision]:

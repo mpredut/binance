@@ -90,7 +90,7 @@ def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-19
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Monede de tranzacționat</title>
+        <title>Coins to trade</title>
         {stil_css}
         <script>
             let audioEnabled = true;
@@ -99,10 +99,10 @@ def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-19
         </script>
     </head>
     <body>
-        <button onclick="enableAudio()">Activează sunetul</button>
-        <button onclick="disableAudio()">Dezactivează sunetul</button>
+        <button onclick="enableAudio()">Enable sound</button>
+        <button onclick="disableAudio()">Disable sound</button>
         <div class="message">
-            {'Avem monede noi pentru tranzacționare!' if monede else 'Nicio monedă disponibilă pentru tranzacționare.'}
+            {'There are new coins to trade!' if monede else 'No coin available to trade.'}
         </div>
     """
 
@@ -116,7 +116,7 @@ def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-19
         </script>
         """
 
-    html += "<table><thead><tr><th>Monedă</th><th>Cantitate</th><th>Acțiune</th></tr></thead><tbody>"
+    html += "<table><thead><tr><th>Coin</th><th>Quantity</th><th>Action</th></tr></thead><tbody>"
     for moneda in monede:
         if moneda["watch"]:
             html += f"""
@@ -141,8 +141,8 @@ def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-19
                     body: JSON.stringify({ symbol: moneda, amount: parseFloat(cantitate) })
                 })
                 .then(response => response.json())
-                .then(data => alert(`Vândut cantitate moneda: data.message`))
-                .catch(err => console.error('Eroare la vânzare:', err));
+                .then(data => alert(`Sold coin quantity: data.message`))
+                .catch(err => console.error('Sell error:', err));
             }
             function actionBuy(moneda) {
                 const cantitate = document.getElementById(`qty-${moneda}`).value;
@@ -152,8 +152,8 @@ def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-19
                     body: JSON.stringify({ symbol: moneda, amount: parseFloat(cantitate) })
                 })
                 .then(response => response.json())
-                .then(data => alert(`Cumpărat cantitate moneda: data.message`))
-                .catch(err => console.error('Eroare la cumpărare:', err));
+                .then(data => alert(`Bought coin quantity: data.message`))
+                .catch(err => console.error('Buy error:', err));
             }
         </script>
     </body>
@@ -165,7 +165,7 @@ def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-19
 def salveaza_html(html, nume_fisier="index.html"):
     with open(nume_fisier, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"Fișierul {nume_fisier} a fost generat cu succes!")
+    print(f"File {nume_fisier} was generated successfully!")
 
 # Generate and save.
 html_content = genereaza_html(monede)

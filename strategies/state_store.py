@@ -32,7 +32,7 @@ class JsonStateStore:
             with open(self.path, "r", encoding="utf-8") as handle:
                 loaded = json.load(handle)
             if not isinstance(loaded, dict):
-                raise ValueError("radacina JSON nu este obiect")
+                raise ValueError("the JSON root is not an object")
             merged = self.default_factory()
             if not isinstance(merged, dict):
                 raise TypeError("default_factory nu a returnat dict")

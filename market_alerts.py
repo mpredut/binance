@@ -227,7 +227,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 def main():
     ap = argparse.ArgumentParser(description="Monitor alerte: monede noi + praguri pret (config-driven).")
     ap.add_argument("--config", default=os.path.join(_HERE, "market_alerts.conf"))
-    ap.add_argument("--check", action="store_true", help="valideaza configul + importurile si iese (nu porneste monitorul)")
+    ap.add_argument("--check", action="store_true", help="validate the config + imports and exit (nu porneste monitorul)")
     args = ap.parse_args()
 
     cfg = load_config(args.config)
@@ -268,7 +268,7 @@ def main():
 
     new_coins_checker = None
     if not cfg["discover_new_coins"]:
-        print("NEW COIN ALERT DEZACTIVAT din config (discover_new_coins = no) — doar watchlist")
+        print("NEW COIN ALERT DISABLED in config (discover_new_coins = no) — watchlist only")
     elif ALERT_NEW_COIN:
         print("⏳ Pornesc checker-ul de monede noi...")
         new_coins_checker = start_new_coin_checker(

@@ -744,7 +744,7 @@ class TrendCoordinator:
             # cached entry when that refresh failed.  Do not trade on that stale value
             # or on a timestamp materially in the future.
             if age_ms > max_age_ms or age_ms < -1_000:
-                print(f"[TrendCoordinator] preț stale/future {symbol}: age_ms={age_ms:.0f}")
+                print(f"[TrendCoordinator] stale/future price {symbol}: age_ms={age_ms:.0f}")
                 return None
         else:
             current_price = self.current_price_mgr.get_price_value(symbol)

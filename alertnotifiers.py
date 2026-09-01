@@ -465,7 +465,7 @@ class AlertNotifier:
             "name": f"ERORI LIMITA {channel.upper()}", "source": "notifier",
             "body": (
                 f"Canalul {channel} a fost oprit pentru restul zilei UTC: {reason}. "
-                "Alertele urgente continuă pe celelalte canale disponibile."
+                "Urgent alerts continue on the other available channels."
             ),
             "added_at": datetime.now(),
         }
@@ -599,7 +599,7 @@ def bind_notify(symbol_env_keys: tuple[str, ...], default_symbol: str):
     symbol-resolution implementations.
     """
     if not symbol_env_keys:
-        raise ValueError("bind_notify cere cel puțin o cheie de mediu")
+        raise ValueError("bind_notify requires at least one environment key")
 
     def bound_notify(
         title: str,

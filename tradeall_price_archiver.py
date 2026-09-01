@@ -50,7 +50,7 @@ _SYMBOL_RE = re.compile(r"^[A-Z0-9]{3,24}$")
 def _positive_finite(value, name, *, minimum=0.001):
     value = float(value)
     if not math.isfinite(value) or value < minimum:
-        raise ValueError(f"{name} trebuie sa fie finit si >= {minimum}")
+        raise ValueError(f"{name} must be finite and >= {minimum}")
     return value
 
 
@@ -83,7 +83,7 @@ def _shutdown(caches, current_price_mgr, ws_module=bapi_ws):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--symbols", default="BTCUSDC,TAOUSDC",
-                    help="listă separată prin virgulă (implicit: BTCUSDC,TAOUSDC)")
+                    help="comma-separated list (default: BTCUSDC,TAOUSDC)")
     p.add_argument("--months", type=float, default=12.0,
                     help="retentie, in luni (implicit 12 — 21 iul, ridicat de la 6: dupa migrarea "
                          "la JSONL costul de scriere nu mai creste cu arhiva, iar spatiul disponibil "

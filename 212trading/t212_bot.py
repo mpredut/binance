@@ -84,7 +84,7 @@ def run_asset(name: str, cfg: dict, client: T212Client, force_paper: bool, skip_
         raise ValueError("POLL_SECONDS must be at least 30")
 
     if not strat_enabled:
-        log(f"  ! [{name}] STRAT_ENABLED!=true — sar peste (t212_bot ruleaza doar strategii)"); return
+        log(f"  ! [{name}] STRAT_ENABLED!=true — skipping (t212_bot only runs strategies)"); return
 
     log(f"  ▶ [{label}] {ticker} | pret via {yahoo} | {'PAPER' if strat_dry else '⚠ REAL — BANI'} | poll {interval}s")
     while not STOP.is_set():
@@ -115,7 +115,7 @@ def run_asset(name: str, cfg: dict, client: T212Client, force_paper: bool, skip_
 def main() -> int:
     ap = argparse.ArgumentParser(description="Bot unificat T212: un proces, mai multe active (config.*.env).")
     ap.add_argument("--paper", action="store_true", help="Forteaza PAPER pe toate (test sigur)")
-    ap.add_argument("--only", metavar="NUME", help="Ruleaza doar activul cu acest nume (config.NUME.env)")
+    ap.add_argument("--only", metavar="NUME", help="Run only the asset with this name (config.NAME.env)")
     ap.add_argument("--skip-wait", action="store_true", help="Sari peste asteptarea lansarii")
     ap.add_argument("--list", action="store_true", help="Arata activele si iesi")
     ap.add_argument("--env-file", default=os.path.join(_HERE, ".env"))
