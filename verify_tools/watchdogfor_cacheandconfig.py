@@ -126,7 +126,7 @@ def cache_freshness_seconds(path):
     """
     p = Path(path)
     if not p.exists():
-        return 0.0, f"fișierul {p.name} nu există"
+        return 0.0, f"file {p.name} does not exist"
     newest = 0.0
     if p.name.endswith(".jsonl"):
         # Read only the tail of potentially large JSONL and use its latest complete line.
@@ -262,7 +262,7 @@ def check_configs_once(now=None):
         wc.save_state(STATE_FILE, state)
         return []
     if len(hist) >= CONFIG_RESTART_MAX:
-        msg = f"⛔ PLAFON config-restart ({CONFIG_RESTART_MAX} in {CONFIG_RESTART_WINDOW_H:.0f}h). {note}. NU repornesc — verifica manual."
+        msg = f"⛔ config-restart CAP reached ({CONFIG_RESTART_MAX} in {CONFIG_RESTART_WINDOW_H:.0f}h). {note}. NOT restarting — check manually."
         print(f"[watchdog] {msg}")
         wc.send_ntfy("⛔ Config-restart plafonat", msg)
         wc.save_state(STATE_FILE, state)
@@ -316,7 +316,7 @@ def check_once(now=None):
     fleet_alive = False   # A fresh fast cache proves fleet liveness.
     if not files:
         stale.append(("(niciun cache_*.json)", float("inf"), STALE_MINUTES,
-                      f"{_CACHE_DIR} gol sau lipsește"))
+                      f"{_CACHE_DIR} is empty or missing"))
     for p in files:
         freshness, detail = cache_freshness_seconds(p)
         age_min = (now - freshness) / 60.0 if freshness > 0 else float("inf")
@@ -333,7 +333,7 @@ def check_once(now=None):
                       if s[0] in _EVENT_DRIVEN_CACHES and s[1] < _EVENT_DRIVEN_HARD_CEILING_MIN]
         if suppressed:
             names = ", ".join(s[0] for s in suppressed)
-            print(f"[watchdog] {names} stale dar flota e vie (pret proaspat) — benign, nu alarmez")
+            print(f"[watchdog] {names} stale but the fleet is alive (fresh price) — benign, not alarming")
         stale = [s for s in stale if s not in suppressed]
 
     if not stale:
@@ -351,7 +351,7 @@ def check_once(now=None):
     # operator must know that a process restarted.
     last = state.get("last_alert_ts", 0)
     if (now - last) < COOLDOWN_MINUTES * 60 and not restarted:
-        print(f"[watchdog] STALE ({', '.join(s[0] for s in stale)}) dar în cooldown — nu re-alarmez")
+        print(f"[watchdog] STALE ({', '.join(s[0] for s in stale)}) but in cooldown — not re-alarming")
         wc.save_state(STATE_FILE, state)   # Persist restart history even without an alert.
         return False
 
@@ -360,10 +360,10 @@ def check_once(now=None):
         age_txt = f"{age_min:.0f} min" if age_min != float("inf") else "∞"
         lines.append(f"  • {name}: {age_txt} (prag {thr:.0f} min) — {detail}")
     title = "⚠️ Cache STALE pe server"
-    message = ("Cache-uri învechite (probabil cacheManager/priceAnalysis s-au oprit):\n"
+    message = ("Stale caches (cacheManager/priceAnalysis probably stopped):\n"
                + "\n".join(lines))
-    message += ("\n\n" + restart_note) if restart_note else "\nVerifică flota (flota_start) și repornește."
-    print(f"[watchdog] ALARMĂ:\n{message}")
+    message += ("\n\n" + restart_note) if restart_note else "\nCheck the fleet (flota_start) and restart it."
+    print(f"[watchdog] ALARM:\n{message}")
     wc.send_ntfy(title, message)
     wc.send_email(title, message)
     state["last_alert_ts"] = now

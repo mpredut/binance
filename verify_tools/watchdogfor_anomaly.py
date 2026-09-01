@@ -146,7 +146,7 @@ def check_once(now=None):
             continue
         last_alert = cooldowns.get(cat, 0)
         if (now - last_alert) < COOLDOWN_MIN * 60:
-            print(f"[anomaly] {cat}={counts[cat]} (prag {thr:.0f}) dar in cooldown — nu re-alarmez")
+            print(f"[anomaly] {cat}={counts[cat]} (threshold {thr:.0f}) but in cooldown — not re-alarming")
             continue
         fired.append(cat)
         cooldowns[cat] = now

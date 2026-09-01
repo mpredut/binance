@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Comparație robustă one-factor pentru configurația Kraken live.
+"""Robust one-factor comparison for the live Kraken configuration.
 
-Consumă raportul și CSV-urile înghețate de ``kraken_walk_forward_baseline.py``.
-Nu caută combinații și nu schimbă live config: ablațiile modifică un singur
-mecanism. Singura combinație este o confirmare predefinită a celor două
-ablații fără pierderi, nu un grid căutat după rezultat.
+It consumes the report and the CSVs frozen by ``kraken_walk_forward_baseline.py``.
+It searches no combinations and changes no live config: the ablations change a single
+mechanism. The only combination is a predefined confirmation of the two
+lossless ablations, not a grid searched for a result.
 """
 from __future__ import annotations
 
@@ -33,16 +33,16 @@ from offline.backtests.walk_forward import (  # noqa: E402
 
 
 def default_candidates() -> list[Candidate]:
-    """Vecinătate mică, interpretabilă, în jurul configurației live."""
+    """A small, interpretable neighbourhood around the live configuration."""
     return [
-        Candidate("live", "configurația live neschimbată", {}),
+        Candidate("live", "the live configuration, unchanged", {}),
         Candidate("classic_tp", "TP fix; trailing oprit", {"tp_trend_hold": False}),
         Candidate("trail_2", "trailing 2%", {"tp_trail_pct": 2.0}),
         Candidate("trail_4", "trailing 4%", {"tp_trail_pct": 4.0}),
         Candidate("trail_5", "trailing 5%", {"tp_trail_pct": 5.0}),
         Candidate("tp_4", "prag TP 4%", {"takeprofit_pct": 4.0}),
         Candidate("tp_6", "prag TP 6%", {"takeprofit_pct": 6.0}),
-        Candidate("dca_drop_1", "DCA la scădere 1%", {"dca_drop_pct": 1.0}),
+        Candidate("dca_drop_1", "DCA on a 1% drop", {"dca_drop_pct": 1.0}),
         Candidate("dca_drop_1_5", "DCA on a 1.5% drop", {"dca_drop_pct": 1.5}),
         Candidate("dca_drop_2", "DCA on a 2% drop", {"dca_drop_pct": 2.0}),
         Candidate("reentry_1_5", "re-entry after -1.5%", {"reentry_drop_pct": 1.5}),

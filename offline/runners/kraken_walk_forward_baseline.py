@@ -146,11 +146,11 @@ def main() -> int:
     parser.add_argument("--step", type=int, help="bare; implicit egal cu TEST")
     parser.add_argument(
         "--warmup", type=int, default=0,
-        help="bare anterioare pentru semnale; nu poartă poziție/P&L în segment",
+        help="preceding bars for the signals; they carry no position or P&L into the segment",
     )
     parser.add_argument(
         "--dataset", action="append", default=[], metavar="INTERVAL=CALE",
-        help="folosește un CSV înghețat în loc de API; repetabil pentru fiecare interval",
+        help="use a frozen CSV instead of the API; repeatable for every interval",
     )
     parser.add_argument(
         "--output-dir", default=str(ROOT / "offline" / "results" / "kraken_walk_forward")
@@ -162,10 +162,10 @@ def main() -> int:
     explicit_windows = (args.train, args.validation, args.test)
     if any(value is not None for value in explicit_windows) and not all(
             value is not None for value in explicit_windows):
-        parser.error("--train, --validation și --test se dau împreună sau deloc")
+        parser.error("--train, --validation and --test are given together or not at all")
     if any(value is not None and value <= 0
            for value in (*explicit_windows, args.step)):
-        parser.error("dimensiunile walk-forward trebuie să fie pozitive")
+        parser.error("the walk-forward sizes must be positive")
     if args.warmup < 0:
         parser.error("--warmup nu poate fi negativ")
     try:
@@ -178,12 +178,12 @@ def main() -> int:
     except ValueError as exc:
         parser.error(str(exc))
 
-    # Aceeași ordine ca kraken_bot.py: .env are prioritate, config.env completează.
+    # The same order as kraken_bot.py: .env takes priority, config.env fills in the rest.
     load_dotenv(args.env_file)
     load_dotenv(args.config_file)
     pair = (args.pair or os.environ.get("KRAKEN_PAIR") or "").strip().upper()
     if not pair:
-        parser.error("pereche lipsă: --pair sau KRAKEN_PAIR")
+        parser.error("missing pair: --pair or KRAKEN_PAIR")
     params = StratParams.from_env()
     supplied = _parse_dataset_specs(args.dataset)
     output_dir = Path(args.output_dir).expanduser().resolve()

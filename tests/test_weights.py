@@ -30,7 +30,7 @@ class TestAliniat(unittest.TestCase):
 
     def test_mijlocul_da_ponderea_maxima(self):
         self.assertAlmostEqual(w(7), 0.95, delta=0.02,
-                               msg="varful curbei trebuie ~0.95, nu ~0.11 (bug-ul de scara)")
+                               msg="the curve peak must be ~0.95, not ~0.11 (the scaling bug)")
 
     def test_capatul_tanar_da_pondere_mica(self):
         self.assertLess(w(0.5), 0.25, "trend tanar = posibil zgomot -> prudent")
@@ -49,7 +49,7 @@ class TestAliniat(unittest.TestCase):
         # inainte de fix: 13.9 zile -> 0.021 si 14.1 zile -> 0.86 (salt de 40x)
         self.assertGreater(w(13.5), 0.1)
         self.assertLess(w(14.1) / max(w(13.5), 1e-9), 7,
-                        "saltul Zona1->Zona2 trebuie rezonabil, nu 40x")
+                        "the Zone1->Zone2 jump must be reasonable, not 40x")
 
     def test_sell_pe_down_e_aliniat(self):
         self.assertAlmostEqual(w(7, trend="down", order_type="SELL"), 0.95, delta=0.02)
@@ -63,7 +63,7 @@ class TestContraTrend(unittest.TestCase):
 
     def test_capatul_tanar_permite_putin_cel_batran_ramane_blocat(self):
         # cu plafonul Lindy validat: trendul batran se poarta ca la mijloc,
-        # deci contra-trade-ul ramane blocat si la batranete
+        # so the counter-trade stays blocked even in old age
         self.assertGreater(w(0.5, order_type="SELL"), 0.1)
         self.assertAlmostEqual(w(13, order_type="SELL"), 0.02, delta=0.01)
 
@@ -97,13 +97,13 @@ class TestZone(unittest.TestCase):
 
 
 class TestEstimareT(unittest.TestCase):
-    """hybrid_T: empiric favorizat cand avem date, prior cand nu (fara retea)."""
+    """hybrid_T: the empirical value is favoured when we have data, the prior when we do not (no network)."""
 
     def test_multe_episoade_domina_empiricul(self):
         from forecast.trend_survival import hybrid_T
         durs = [72.0] * 100 + [160.0] * 20            # mediana 3z, P90 ~6.7z
         r = hybrid_T(durs, prior_T=14.0)
-        self.assertLessEqual(r["T"], 9, "cu n=120 episoade, T trebuie aproape de empiric (~7), nu de 14")
+        self.assertLessEqual(r["T"], 9, "with n=120 episodes, T must be close to the empirical value (~7), not 14")
         self.assertGreaterEqual(r["w"], 0.75)
 
     def test_putine_episoade_raman_la_prior(self):
@@ -120,12 +120,12 @@ class TestEstimareT(unittest.TestCase):
     def test_limitele_de_siguranta(self):
         from forecast.trend_survival import hybrid_T
         self.assertGreaterEqual(hybrid_T([10.0] * 500)["T"], 4, "T nu coboara sub 4 zile")
-        self.assertLessEqual(hybrid_T([2000.0] * 500)["T"], 30, "T nu urca peste 30 zile")
+        self.assertLessEqual(hybrid_T([2000.0] * 500)["T"], 30, "T does not rise above 30 days")
 
 
 class TestWeightForCashPermission(unittest.TestCase):
     """Fost test_weight.py (unificat 28 iul) — get_weight_for_cash_permission_at_
-    quant_time (alta functie de weight din priceAnalysis) intoarce None sau float."""
+    quant_time (another weight function in priceAnalysis) returns None or a float."""
 
     def test_requires_order_type_and_returns_none_or_float(self):
         import priceAnalysis as pa

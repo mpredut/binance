@@ -360,12 +360,12 @@ def _notify_change(full_key, symbol, old_value, new_value, winner_val, entry):
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dry-run", action="store_true",
-                     help="evalueaza si raporteaza, dar NU schimba config/restart botul")
+                     help="evaluate and report, but do NOT change the config or restart the bot")
     ap.add_argument("--only", default="",
-                     help="ruleaza DOAR cheile care contin unul din aceste substring-uri "
-                          "separate prin virgula (ex. 'maxage,hardtp' sau 'BINANCE_TAO'); gol = toate")
+                     help="run ONLY the keys containing one of these substrings "
+                          "separated by commas (e.g. 'maxage,hardtp' or 'BINANCE_TAO'); empty = all")
     ap.add_argument("--propose", action="store_true",
-                     help="mod DEV: NU aplica/reporni; scrie propunerile confirmate (valoare "
+                     help="DEV mode: do NOT apply or restart; write the confirmed proposals (value "
                           "castigatoare bruta) in --propose-out, pt fluxul git dev->prod")
     ap.add_argument("--propose-out", default=os.path.join(ROOT, "backtest_proposals.json"),
                      help="unde scrie propunerile in modul --propose (implicit backtest_proposals.json)")
@@ -376,7 +376,7 @@ def main():
         return
 
     # monitor_price_and_trade() e f-oarte "vorbaret" (print() la fiecare tick) —
-    # pilotul ruleaza zeci de variante peste sute de mii de tick-uri, deci
+    # the pilot runs dozens of variants over hundreds of thousands of ticks, so
     # suprimarea e necesara (altfel I/O-ul de consola domina timpul de rulare).
     rb.mt.log.disable_print()
 
@@ -388,7 +388,7 @@ def main():
         return
 
     # Chei INDEPENDENTE => rulare in PARALEL (ProcessPoolExecutor). Fork pe Linux =>
-    # fiecare cheie are propriul rb.mt (deci monkeypatch-ul is_trend_up din _run_one
+    # each key has its own rb.mt (so the is_trend_up monkeypatch from _run_one
     # ramane izolat per proces). Audit/proposals se colecteaza in parinte (fara race).
     proposals = []
     max_workers = min(len(keys), os.cpu_count() or 2)
@@ -420,7 +420,7 @@ def main():
     if args.propose:
         # snapshot al propunerilor curente (suprascrie — fisierul = "ce propune dev
         # ACUM"; prod le consuma si aplica cu propriile guardrail-uri). Gol = niciun
-        # semnal confirmat in acest ciclu (prod nu are ce aplica).
+        # a confirmed signal in this cycle (prod has nothing to apply).
         with open(args.propose_out, "w", encoding="utf-8") as f:
             json.dump(proposals, f, indent=2, default=str)
         print(f"\n[scheduled_pilot] {len(proposals)} propunere(i) scrise in {args.propose_out}")

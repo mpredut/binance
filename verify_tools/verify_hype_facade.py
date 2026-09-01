@@ -99,7 +99,7 @@ def main():
     avg_buy = tbv / tbq if tbq else 0.0
     net = tbq - tsq
     print(f"  buy_qty={tbq:.6f} sell_qty={tsq:.6f} net_qty={net:.6f} avg_buy={avg_buy:.4f}")
-    check("avg_buy plauzibil (0 sau pozitiv si in raza pretului)",
+    check("avg_buy is plausible (0 or positive and within price range)",
           avg_buy == 0.0 or (price and 0.2 * price <= avg_buy <= 5 * price),
           f"avg_buy={avg_buy} price={price}")
 
@@ -121,7 +121,7 @@ def main():
     else:
         print("  (no recent SPOT buys or no price — no sell decision)")
 
-    print("\n==== POARTA ORDINE: place_order trebuie sa fie DRY ====")
+    print("\n==== ORDER GATE: place_order must be DRY ====")
     os.environ.pop("HL_LIVE_ORDERS", None)   # asiguram DRY pt test
     res = mkt.place_order(HYPE, "SELL", price or 1.0, 0.0001)
     check("place_order(HYPEUSDC) DRY -> None (niciun ordin real)", res is None, repr(res))

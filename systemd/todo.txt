@@ -35,17 +35,17 @@ logging.basicConfig(level=logging.WARNING, handlers=[handler])
 #
 # Starea observata:
 # - systemd 255 suporta StaleRetentionSec;
-# - Cache=yes si StaleRetentionSec=4h sunt active in /etc/systemd/resolved.conf;
-# - serviciul a fost repornit dupa modificare si a ramas activ, fara restart loop;
-# - tun0 foloseste DNS 10.0.0.243 si domeniul-route ~.;
-# - api.binance.com, api.kraken.com si github.com se rezolva prin tun0.
+# - Cache=yes and StaleRetentionSec=4h are active in /etc/systemd/resolved.conf;
+# - the service was restarted after the change and stayed active, with no restart loop;
+# - tun0 uses DNS 10.0.0.243 and the route domain ~.;
+# - api.binance.com, api.kraken.com and github.com resolve through tun0.
 #
-# LIMITA: 1.1.1.1 si 8.8.8.8 nu raspund pe portul 53 cat timp tunelul PIA este
-# activ. FallbackDNS public ajuta dupa schimbarea rutei/caderea tunelului, dar NU
+# LIMITATION: 1.1.1.1 and 8.8.8.8 do not answer on port 53 while the PIA tunnel is
+# up. A public FallbackDNS helps after a route change or a tunnel drop, but it is NOT
 # acopera caderea lui 10.0.0.243 cu tun0 ramas activ. Cache-ul stale de 4h ramane
-# protectia efectiva pentru acel caz. Nu simula o cadere DNS pe productia live.
+# the effective protection for that case. Do not simulate a DNS outage on live production.
 
-# Pentru o instalare viitoare foloseste un drop-in idempotent, nu `tee -a` in
+# For a future install use an idempotent drop-in, not `tee -a` into
 # resolved.conf (rularile repetate ar duplica optiunile):
 sudo install -d -m 0755 /etc/systemd/resolved.conf.d
 sudo tee /etc/systemd/resolved.conf.d/20-trading-cache.conf >/dev/null <<'EOF'
