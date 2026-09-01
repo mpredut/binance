@@ -11,16 +11,15 @@ from __future__ import annotations
 
 import base64
 import json
-import os
 import threading
 import time
 
 try:
     # Package import for the generic provider or installed wheel.
-    from .ipo_common import http_get, http_post_json, log
+    from .ipo_common import http_get, http_post_json, log, required_env, required_float_env
 except ImportError:
     # Compatibility with direct launch from the 212trading directory.
-    from ipo_common import http_get, http_post_json, log
+    from ipo_common import http_get, http_post_json, log, required_env, required_float_env
 
 LIVE_BASE = "https://live.trading212.com/api/v0"
 DEMO_BASE = "https://demo.trading212.com/api/v0"
@@ -29,22 +28,28 @@ _BROWSER_UA = "Mozilla/5.0 (X11; Linux x86_64; rv:124.0) Gecko/20100101 Firefox/
 
 
 class T212Client:
-    def __init__(self, api_key: str, api_secret: str | None = None, env: str = "live"):
+    def __init__(self, api_key: str, api_secret: str | None = None, env: str | None = None,
+                 *, min_gap_sec: float | None = None,
+                 portfolio_ttl_sec: float | None = None):
         self.api_key = api_key
         self.api_secret = api_secret
-        self.env = (env or "live").lower()
+        self.env = (env if env is not None else required_env("T212_ENV")).lower()
+        if self.env not in {"live", "demo"}:
+            raise ValueError(f"Invalid T212 environment: {env!r}; expected live or demo")
         self.base = DEMO_BASE if self.env == "demo" else LIVE_BASE
         # A shared client may serve one thread per asset. Serialize and space calls
         # to avoid T212 rate limits; T212_MIN_GAP_SEC sets the minimum gap.
         self._lock = threading.Lock()
         self._last = 0.0
-        self._min_gap = float(os.environ.get("T212_MIN_GAP_SEC", "0.3"))
+        self._min_gap = (required_float_env("T212_MIN_GAP_SEC")
+                         if min_gap_sec is None else min_gap_sec)
         # Brief shared account-level caches coalesce redundant per-asset thread
         # reads. A six-second TTL stays above the approximate five-second limits
         # on portfolio and order endpoints.
         self._pf_cache: tuple[float, list] | None = None
         self._ord_cache: tuple[float, list] | None = None
-        self._pf_ttl = float(os.environ.get("T212_PORTFOLIO_TTL_SEC", "6.0"))
+        self._pf_ttl = (required_float_env("T212_PORTFOLIO_TTL_SEC")
+                        if portfolio_ttl_sec is None else portfolio_ttl_sec)
         # On TTL expiry, one thread fetches while others wait and reuse its result.
         self._fetch_lock = threading.Lock()
 

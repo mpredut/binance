@@ -1,4 +1,4 @@
-"""Trading212 replay rulează motorul live și păstrează contabilitatea parțială."""
+"""Trading 212 replay runs the live engine and preserves partial accounting."""
 
 import importlib.util
 import copy
@@ -36,8 +36,9 @@ def _params(**overrides):
     config = {
         "STRAT_CURRENCY": "USD",
         "YAHOO_SYMBOL": "TEST",
-        "STRAT_ENTRY": "100",
-        "STRAT_DCA": "50",
+        "STRATEGY_MODE": "avg_tp",
+        "STRAT_ENTRY_PCT": "20",
+        "STRAT_DCA_PCT": "10",
         "STRAT_ENTRY_DISCOUNT_PCT": "0.2",
         "STRAT_DCA_DROP_PCT": "2",
         "STRAT_TAKEPROFIT_PCT": "3",
@@ -45,6 +46,17 @@ def _params(**overrides):
         "STRAT_MAX_BUDGET": "500",
         "STRAT_FX_FEE_PCT": "0.15",
         "STRAT_STOP_LOSS_PCT": "20",
+        "STRAT_CHECK_MINUTES": "5",
+        "STRAT_ORDER_TTL_MIN": "10",
+        "STRAT_REENTRY_DROP_PCT": "0",
+        "STRAT_REENTRY_TOLERANCE_PCT": "0",
+        "STRAT_LOSS_ALERT_STEP": "1",
+        "STRAT_LADDER_MIN_FREE": "6",
+        "STRAT_SL_REBUY_ENABLED": "false",
+        "STRAT_SL_REBUY_BOUNCE_PCT": "1.2",
+        "STRAT_DCA_TREND_GATE_PCT": "0",
+        "STRAT_TRAIL_PCT": "0",
+        "STRAT_TRAIL_MIN_PROFIT_PCT": "5",
     }
     config.update({key: str(value) for key, value in overrides.items()})
     return strategy.StratParams.from_env(config)

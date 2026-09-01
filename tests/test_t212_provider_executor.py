@@ -192,7 +192,10 @@ class T212ExecutorContractTest(unittest.TestCase):
 
 class T212ClientTransportTest(unittest.TestCase):
     def test_market_payload_si_fallback_la_istoric(self):
-        client = t212_client.T212Client("dummy", "dummy", "demo")
+        client = t212_client.T212Client(
+            "dummy", "dummy", env="demo", min_gap_sec=0.0,
+            portfolio_ttl_sec=6.0,
+        )
         client._min_gap = 0.0
         with mock.patch.object(
             t212_client, "http_post_json", return_value=(200, b'{"id": 55}')

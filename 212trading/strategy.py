@@ -15,7 +15,10 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from ipo_common import log, now_str, float_env, are_close
+from ipo_common import (
+    log, now_str, are_close, required_env, required_float_env,
+    required_bool_env,
+)
 from ipo_notify import notify
 from market_data import get_eur_usd, get_usd_ron, get_price_usd, t212_to_yahoo, trend_slope_pct
 from t212_client import T212Client
@@ -65,7 +68,9 @@ class StratParams:
     def from_env(cls, env: dict | None = None) -> "StratParams":
         """Read the environment or an explicit mapping for collision-free multi-asset use."""
         e = os.environ if env is None else env
-        mode = e.get("STRATEGY_MODE", "avg_tp").strip().lower()
+        mode = required_env("STRATEGY_MODE", e).lower()
+        if mode not in {"avg_tp", "dca_only"}:
+            raise ValueError(f"Invalid STRATEGY_MODE: {mode!r}")
         # Parse scale-out ladder percentages and fractions.
         _ladder = []
         for _part in (e.get("STRAT_TP_LADDER") or "").split(","):
@@ -76,12 +81,12 @@ class StratParams:
                     _ladder.append((float(_lvl), float(_frac) / 100.0))
                 except ValueError:
                     pass
-        _budget = float_env("STRAT_MAX_BUDGET", e) or 2000.0
-        # Size entry and DCA as budget percentages or legacy absolute fallbacks.
-        _entry_pct = float_env("STRAT_ENTRY_PCT", e)
-        _entry = (_budget * _entry_pct / 100.0) if _entry_pct else (float_env("STRAT_ENTRY", e) or 300.0)
-        _dca_pct = float_env("STRAT_DCA_PCT", e)
-        _dca = (_budget * _dca_pct / 100.0) if _dca_pct else (float_env("STRAT_DCA", e) or 150.0)
+        _budget = required_float_env("STRAT_MAX_BUDGET", e)
+        # Percentage sizing is the single supported policy; no legacy hidden amounts.
+        _entry_pct = required_float_env("STRAT_ENTRY_PCT", e)
+        _entry = _budget * _entry_pct / 100.0
+        _dca_pct = required_float_env("STRAT_DCA_PCT", e)
+        _dca = _budget * _dca_pct / 100.0
         # Auto DCA count derives from budget; otherwise use an explicit value or ten.
         _mdb = (e.get("STRAT_MAX_DCA_BUYS") or "").strip().lower()
         if _mdb in ("auto", "buget", "budget"):
@@ -90,45 +95,33 @@ class StratParams:
         elif _mdb:
             _max_dca = int(float(_mdb))
         else:
-            _max_dca = 10
-        _fx_fee = float_env("STRAT_FX_FEE_PCT", e)
-        if _fx_fee is None:                 # Zero validly represents a USD account without FX.
-            _fx_fee = FX_FEE_PCT
-        _loss_step = float_env("STRAT_LOSS_ALERT_STEP", e)
-        if _loss_step is None:
-            _loss_step = 1.0
-        _ladder_free = float_env("STRAT_LADDER_MIN_FREE", e)
-        if _ladder_free is None:
-            _ladder_free = 6.0
-        _trail_minp = float_env("STRAT_TRAIL_MIN_PROFIT_PCT", e)
-        if _trail_minp is None:             # Zero validly enables immediate loss-cutting.
-            _trail_minp = 5.0               # Match the original Binance/Kraken default.
+            raise ValueError("Missing or empty mandatory setting: STRAT_MAX_DCA_BUYS")
         return cls(
-            currency           = e.get("STRAT_CURRENCY", "RON").strip().upper(),
+            currency           = required_env("STRAT_CURRENCY", e).upper(),
             entry_amount       = _entry,
-            entry_discount_pct = float_env("STRAT_ENTRY_DISCOUNT_PCT", e) or 0.2,
+            entry_discount_pct = required_float_env("STRAT_ENTRY_DISCOUNT_PCT", e),
             dca_amount         = _dca,
-            dca_drop_pct       = float_env("STRAT_DCA_DROP_PCT", e) or 2.0,
-            check_minutes      = float_env("STRAT_CHECK_MINUTES", e) or 5.0,
-            takeprofit_pct     = float_env("STRAT_TAKEPROFIT_PCT", e) or 1.5,
+            dca_drop_pct       = required_float_env("STRAT_DCA_DROP_PCT", e),
+            check_minutes      = required_float_env("STRAT_CHECK_MINUTES", e),
+            takeprofit_pct     = required_float_env("STRAT_TAKEPROFIT_PCT", e),
             max_budget         = _budget,
             max_dca_buys       = _max_dca,
             validity           = "GOOD_TILL_CANCEL",
             enable_takeprofit  = (mode != "dca_only"),
-            order_ttl_min      = float_env("STRAT_ORDER_TTL_MIN", e) or 10.0,
-            stop_loss_pct      = float_env("STRAT_STOP_LOSS_PCT", e) or 0.0,
-            yahoo_sym          = (e.get("YAHOO_SYMBOL") or "").strip(),
-            reentry_drop_pct   = float_env("STRAT_REENTRY_DROP_PCT", e) or 0.0,
-            reentry_tolerance_pct = float_env("STRAT_REENTRY_TOLERANCE_PCT", e) or 0.0,
+            order_ttl_min      = required_float_env("STRAT_ORDER_TTL_MIN", e),
+            stop_loss_pct      = required_float_env("STRAT_STOP_LOSS_PCT", e),
+            yahoo_sym          = required_env("YAHOO_SYMBOL", e),
+            reentry_drop_pct   = required_float_env("STRAT_REENTRY_DROP_PCT", e),
+            reentry_tolerance_pct = required_float_env("STRAT_REENTRY_TOLERANCE_PCT", e),
             tp_ladder          = _ladder,
-            fx_fee_pct         = _fx_fee,
-            loss_alert_step    = _loss_step,
-            ladder_min_free    = _ladder_free,
-            sl_rebuy_enabled   = (e.get("STRAT_SL_REBUY_ENABLED", "false").strip().lower() == "true"),
-            sl_rebuy_bounce_pct= float_env("STRAT_SL_REBUY_BOUNCE_PCT", e) or 1.2,
-            dca_trend_gate_pct = float_env("STRAT_DCA_TREND_GATE_PCT", e) or 0.0,
-            trail_pct          = float_env("STRAT_TRAIL_PCT", e) or 0.0,
-            trail_min_profit_pct = _trail_minp,
+            fx_fee_pct         = required_float_env("STRAT_FX_FEE_PCT", e),
+            loss_alert_step    = required_float_env("STRAT_LOSS_ALERT_STEP", e),
+            ladder_min_free    = required_float_env("STRAT_LADDER_MIN_FREE", e),
+            sl_rebuy_enabled   = required_bool_env("STRAT_SL_REBUY_ENABLED", e),
+            sl_rebuy_bounce_pct= required_float_env("STRAT_SL_REBUY_BOUNCE_PCT", e),
+            dca_trend_gate_pct = required_float_env("STRAT_DCA_TREND_GATE_PCT", e),
+            trail_pct          = required_float_env("STRAT_TRAIL_PCT", e),
+            trail_min_profit_pct = required_float_env("STRAT_TRAIL_MIN_PROFIT_PCT", e),
         )
 
 

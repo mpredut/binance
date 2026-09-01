@@ -28,7 +28,10 @@ import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ipo_common import load_dotenv, log, parse_dotenv, single_instance  # noqa: E402
+from ipo_common import (  # noqa: E402
+    load_dotenv, log, parse_dotenv, single_instance,
+    required_env, required_float_env, required_bool_env,
+)
 from ipo_notify import notify  # noqa: E402
 from listing_watcher import wait_for_launch  # noqa: E402
 from strategy import Strategy, StratParams  # noqa: E402
@@ -70,19 +73,16 @@ def verify_isin(client: T212Client, ticker: str, expected_isin: str) -> bool:
 def run_asset(name: str, cfg: dict, client: T212Client, force_paper: bool, skip_wait: bool) -> None:
     """Run an asset lifecycle in its isolated thread, catching and retrying errors
     without terminating the process or other bots."""
-    ticker = (cfg.get("T212_TICKER") or "").strip()
-    label = cfg.get("SYMBOL_LABEL") or cfg.get("YAHOO_SYMBOL") or ticker or name
-    yahoo = (cfg.get("YAHOO_SYMBOL") or "").strip() or (ticker.split("_")[0] if ticker else "")
+    ticker = required_env("T212_TICKER", cfg)
+    label = required_env("SYMBOL_LABEL", cfg)
+    yahoo = required_env("YAHOO_SYMBOL", cfg)
     isin = (cfg.get("EXPECTED_ISIN") or "").strip()
-    strat_enabled = cfg.get("STRAT_ENABLED", "false").strip().lower() == "true"
-    strat_dry = force_paper or cfg.get("STRAT_EXECUTE", "false").strip().lower() != "true"
-    try:
-        interval = max(int(float(cfg.get("POLL_SECONDS") or 60)), 30)
-    except ValueError:
-        interval = 60
+    strat_enabled = required_bool_env("STRAT_ENABLED", cfg)
+    strat_dry = force_paper or not required_bool_env("STRAT_EXECUTE", cfg)
+    interval = required_float_env("POLL_SECONDS", cfg)
+    if interval < 30:
+        raise ValueError("POLL_SECONDS must be at least 30")
 
-    if not ticker:
-        log(f"  ! [{name}] lipseste T212_TICKER — sar peste"); return
     if not strat_enabled:
         log(f"  ! [{name}] STRAT_ENABLED!=true — sar peste (t212_bot ruleaza doar strategii)"); return
 
@@ -127,6 +127,7 @@ def main() -> int:
     # secrets from 212trading/.env. Specific values load LAST and win overlaps, keeping
     # T212 credentials in their own directory rather than the repository root.
     load_dotenv(os.path.join(os.path.dirname(_HERE), ".env"))  # shared (root)
+    load_dotenv(os.path.join(_HERE, "runtime.env"))             # versioned runtime policy
     load_dotenv(args.env_file)                                 # specific (212trading/.env)
     cfg_dir = os.path.dirname(args.env_file) or _HERE
     assets = discover_assets(cfg_dir)
@@ -149,8 +150,12 @@ def main() -> int:
     key = os.environ.get("T212_API_KEY")
     if not key:
         log("! T212_API_KEY lipsa in .env — nu pot continua"); return 1
-    client = T212Client(key, os.environ.get("T212_API_SECRET"),
-                        env=os.environ.get("T212_ENV", "live").strip().lower())
+    client = T212Client(
+        key, os.environ.get("T212_API_SECRET"),
+        env=required_env("T212_ENV"),
+        min_gap_sec=required_float_env("T212_MIN_GAP_SEC"),
+        portfolio_ttl_sec=required_float_env("T212_PORTFOLIO_TTL_SEC"),
+    )
 
     log(f"=== t212_bot: {len(assets)} active intr-UN proces ({'PAPER fortat' if args.paper else 'config'}) ===")
     client.list_instruments()  # warm the cache ONCE so threads avoid the expensive call
