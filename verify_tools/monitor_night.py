@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-monitor_night.py — monitorizare de noapte a botilor de trading.
-Ruleaza via paramiko din WSL; se conecteaza la serverul real (portul 32238).
-Output: status per proces, erori recente din loguri, actiuni luate.
+monitor_night.py — overnight monitoring for the trading bots.
+Runs through Paramiko from WSL and connects to the real server on port 32238.
+Output: per-process status, recent log errors, and actions taken.
 
-Credentiale: din .env (gitignored) din radacina repo. Chei citite:
+Credentials come from the gitignored .env at the repository root. Keys read:
   MONITOR_HOST (default 192.168.0.144), MONITOR_PORT (default 32238),
-  MONITOR_USER (default predut), MONITOR_PASS (OBLIGATORIU, fara default).
+  MONITOR_USER (default predut), MONITOR_PASS (REQUIRED, no default).
 """
 import os
 import sys
@@ -17,18 +17,18 @@ from pathlib import Path
 import paramiko
 from dotenv import load_dotenv
 
-_REPO = Path(__file__).resolve().parent.parent   # verify_tools/ -> radacina repo
-load_dotenv(_REPO / ".env")                      # secrete (gitignored)
+_REPO = Path(__file__).resolve().parent.parent   # verify_tools/ -> repository root
+load_dotenv(_REPO / ".env")                      # Secrets (gitignored).
 
 HOST = os.environ.get("MONITOR_HOST", "192.168.0.144")
 PORT = int(os.environ.get("MONITOR_PORT", "32238"))
 USER = os.environ.get("MONITOR_USER", "predut")
-PASS = os.environ.get("MONITOR_PASS")  # fara default: secretul NU sta in cod
+PASS = os.environ.get("MONITOR_PASS")  # No default: the secret DOES NOT live in code.
 ROOT = os.environ.get("MONITOR_ROOT", "/home/predut/binance")
 
-# Lista de procese NU mai e hardcodata aici: se citeste live din procs.conf de pe
-# server (sursa unica de adevar, aceeasi pe care o folosesc bots_start/flota_start/
-# healthcheck). Vezi load_procs().
+# The process list is no longer hard-coded here. It is read live from the server's
+# procs.conf, the same single source of truth used by bots_start, flota_start, and
+# healthcheck. See load_procs().
 Proc = collections.namedtuple("Proc", "pat label log role")
 
 ERROR_KEYWORDS = ["Traceback", "Exception", "ERROR", "FAIL", "crash", "hung",
@@ -53,7 +53,7 @@ def connect():
 
 
 def check_errors(c, log_path):
-    """Returneaza liniile de eroare din ultimele 30 de linii de log."""
+    """Return error lines found within the last 30 log lines."""
     if not log_path:
         return []
     out = run(c, f"tail -30 {ROOT}/{log_path} 2>/dev/null")
@@ -63,7 +63,7 @@ def check_errors(c, log_path):
     for line in out.splitlines():
         if any(kw in line for kw in ERROR_KEYWORDS):
             errors.append(line.strip())
-    return errors[-5:]  # max 5 linii relevante
+    return errors[-5:]  # At most five relevant lines.
 
 
 def _rel_dir(dir_field):
@@ -73,7 +73,7 @@ def _rel_dir(dir_field):
 
 
 def _log_from_cmd(start_cmd):
-    """Extrage fisierul de log din redirectul '>> x.log' al comenzii de pornire."""
+    """Extract the log file from the startup command's '>> x.log' redirection."""
     if ">>" not in start_cmd:
         return ""
     after = start_cmd.split(">>", 1)[1].strip()
@@ -81,13 +81,13 @@ def _log_from_cmd(start_cmd):
 
 
 def load_procs(c):
-    """Citeste procs.conf de pe server si deriva pentru fiecare proces logul de scanat.
+    """Read procs.conf from the server and derive the log to scan for each process.
 
     Format procs.conf:  pat | dir | start_cmd | label | hb_log | hb_stale_s | role
-    Logul (relativ la ROOT):
-      - fleet: flota_start scrie in logs/<script>.log (script = din pat).
-      - bot:   hb_log daca exista, altfel redirectul '>> x.log' din start_cmd,
-               ambele relative la 'dir'.
+    Log path (relative to ROOT):
+      - fleet: flota_start writes logs/<script>.log (script comes from pat).
+      - bot:   hb_log when present, otherwise the '>> x.log' redirection from
+               start_cmd; both are relative to dir.
     """
     raw = run(c, f"cat {ROOT}/procs.conf 2>/dev/null")
     procs = []
@@ -129,14 +129,14 @@ def main():
         print(f"  EROARE CRITICA: nu pot conecta la server: {e}")
         return 1
 
-    # 1. Inventarul de procese: din procs.conf de pe server (sursa unica de adevar)
+    # 1. Process inventory from the server's procs.conf (single source of truth).
     procs = load_procs(c)
     if not procs:
         print("  EROARE: procs.conf gol sau necitibil pe server.")
         c.close()
         return 1
 
-    # 2. Status procese via healthcheck --check (read-only)
+    # 2. Process status through healthcheck --check (read-only).
     check_out = run(c, f"cd {ROOT} && bash healthcheck.sh --check 2>&1", wait=30)
     print("\n--- healthcheck --check ---")
     print(check_out)

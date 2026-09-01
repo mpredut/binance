@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Inventar read-only al proceselor care pot executa ordine.
+"""Read-only inventory of processes that can execute orders.
 
-Nu citește sau afișează chei API și nu blochează ordine. Corelează manifestul de
-procese cu gate-urile/configurile existente și semnalează numai doi owneri
-``primary`` activi pe același venue/account/symbol. Procesele protective
-(trailing) sunt afișate ca suprapuneri intenționate, nu conflicte.
+It neither reads nor displays API keys and does not block orders. It correlates
+the process manifest with existing gates/configuration and flags only two active
+``primary`` owners on the same venue/account/symbol. Protective processes
+(trailing) are shown as intentional overlaps rather than conflicts.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ def _truthy(value, default: bool = False) -> bool:
 
 
 def _env(*paths: Path) -> dict[str, str]:
-    """Mai târziu în listă = prioritate mai mare; valorile nu sunt raportate."""
+    """Later paths have higher priority; values are never reported."""
     result: dict[str, str] = {}
     for path in paths:
         result.update(parse_dotenv(str(path)))
@@ -126,7 +126,7 @@ def _split_symbol(symbol: str, base: str = "", quote: str = "") -> tuple[str, st
 
 
 def _python_symbols(root: Path) -> tuple[list[str], str]:
-    """Citește constantele, fără importul `symbols.py` și efectele lui API."""
+    """Read constants without importing `symbols.py` or triggering its API side effects."""
     path = root / "symbols.py"
     if not path.exists():
         return [], ""

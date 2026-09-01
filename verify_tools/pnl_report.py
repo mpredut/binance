@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Raport P&L LIVE pe toata flota — realized (cost mediu din fill-uri reale) + unrealized
-(pozitie curenta x pret curent). Surse: Binance get_filled_orders (API direct, nu cache-ul
-incomplet), stari Kraken/HL. Fereastra Binance 120z (cost-basis mai vechi -> aproximat).
-Rulare: ./myenv/bin/python verify_tools/pnl_report.py"""
+"""LIVE fleet-wide P&L report: realized P&L (average cost from real fills) plus unrealized
+P&L (current position at current price). Sources: Binance get_filled_orders (direct API,
+not the incomplete cache) and Kraken/HL state. Binance uses a 120-day window, so older
+cost basis is approximate. Run with: ./myenv/bin/python verify_tools/pnl_report.py"""
 import sys, os, time, json
 ROOT = "/home/predut/binance"
 sys.path.insert(0, ROOT); os.chdir(ROOT)
@@ -51,7 +51,7 @@ for sym in ("BTCUSDC", "TAOUSDC"):
 # Kraken HYPE (kraken_bot)
 try:
     k = json.load(open("kraken/.state_HYPEUSD.json"))
-    hy = 54.77  # ultim pret din trail_k
+    hy = 54.77  # Latest price from trail_k.
     kr, ku = k["realized_net"], (k["qty"] * hy - k["cost"] if k["qty"] > 1e-9 else 0.0)
     tot_r += kr; tot_u += ku
     print(f"{'Kraken HYPE (bot)':<22}{kr:>+11.2f}{ku:>+12.2f}{k['qty']:>10.4f}  (avg cost {k['cost']/k['qty'] if k['qty'] else 0:.2f}, cur ~{hy})")
@@ -73,11 +73,12 @@ print("\nNota: Binance realized pe fereastra de 120z (cost-basis mai vechi de-at
 print("Fara comisioane Binance in realized (fill-urile API nu le expun aici); ~0.075%/leg cu BNB.")
 
 
-# ── ATRIBUIRE PER BOT (din get_all_orders, dupa prefixul clientOrderId) ──────────
-# Separa activitatea PE BOT (RT_/TA_/MT_/AG_) vs MANUAL (and_/web_/x-). realized_own =
-# doar partea de round-trip PROPRIU (min(buy_qty,sell_qty) x (avg_sell-avg_buy)); pt boti
-# care fac schimb de inventar (tradeall cumpara TAO, rtrade vinde) net_qty arata cine
-# acumuleaza vs distribuie. Fereastra = ultimele ~1000 ordine (get_all_orders).
+# ── PER-BOT ATTRIBUTION (from get_all_orders, by clientOrderId prefix) ──────────
+# Separate PER-BOT activity (RT_/TA_/MT_/AG_) from MANUAL activity (and_/web_/x-).
+# realized_own covers only each bot's own round trip: min(buy_qty, sell_qty) times
+# (avg_sell - avg_buy). For bots that exchange inventory (tradeall buys TAO while
+# rtrade sells it), net_qty shows which one accumulates versus distributes. The
+# window contains roughly the latest 1,000 orders returned by get_all_orders.
 def _bot(cid):
     for p, n in (("RT_", "rtrade"), ("TA_", "tradeall"), ("SD_", "spot_dca"),
                  ("MT", "monitortrades"),
