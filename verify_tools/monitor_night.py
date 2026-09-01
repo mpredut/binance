@@ -141,13 +141,13 @@ def main():
     try:
         c = connect()
     except Exception as e:
-        print(f"  EROARE CRITICA: nu pot conecta la server: {e}")
+        print(f"  CRITICAL ERROR: cannot connect to the server: {e}")
         return 1
 
     # 1. Process inventory from the server's procs.conf (single source of truth).
     procs = load_procs(c)
     if not procs:
-        print("  EROARE: procs.conf gol sau necitibil pe server.")
+        print("  ERROR: procs.conf is empty or unreadable on the server.")
         c.close()
         return 1
 
@@ -157,7 +157,7 @@ def main():
     print(check_out)
 
     # 3. Analiza per-proces
-    mort = []          # [(label, role)]
+    dead = []          # [(label, role)]
     warn = []
     ok = []
 
@@ -167,36 +167,36 @@ def main():
         errors = check_errors(c, p.log)
 
         if not is_alive:
-            mort.append((p.label, p.role))
-            print(f"\n  ❌ {p.label}: MORT")
+            dead.append((p.label, p.role))
+            print(f"\n  ❌ {p.label}: DEAD")
         elif errors:
             warn.append((p.label, errors))
-            print(f"\n  ⚠  {p.label}: OK dar cu erori recente")
+            print(f"\n  ⚠  {p.label}: OK but with recent errors")
             for e in errors:
                 print(f"       {e}")
         else:
             ok.append(p.label)
             print(f"  ✅ {p.label}: OK")
 
-    # 4. Restart procese moarte (role=bot) via healthcheck --supervise
+    # 4. Restart the dead processes (role=bot) through healthcheck --supervise
     actions = []
-    if mort:
-        bot_mort = [l for l, r in mort if r == "bot"]
-        fleet_mort = [l for l, r in mort if r == "fleet"]
+    if dead:
+        bot_dead = [l for l, r in dead if r == "bot"]
+        fleet_dead = [l for l, r in dead if r == "fleet"]
 
-        if bot_mort:
-            print(f"\n--- restart boti morti: {bot_mort} ---")
+        if bot_dead:
+            print(f"\n--- restarting dead bots: {bot_dead} ---")
             sup_out = run(c, f"cd {ROOT} && bash healthcheck.sh --supervise 2>&1", wait=30)
             print(sup_out)
-            actions.append(f"RESTART: {bot_mort}")
+            actions.append(f"RESTART: {bot_dead}")
 
-        if fleet_mort:
-            print(f"\n  ⚠  FLEET dead (not restarting by hand, flota_start owns it): {fleet_mort}")
-            actions.append(f"ALERT-FLEET: {fleet_mort}")
+        if fleet_dead:
+            print(f"\n  ⚠  FLEET dead (not restarting by hand, flota_start owns it): {fleet_dead}")
+            actions.append(f"ALERT-FLEET: {fleet_dead}")
 
     # 5. Rezumat final
     print(f"\n{'='*60}")
-    print(f"  SUMMARY: OK={ok}  DEAD={[l for l,_ in mort]}  WARN={[l for l,_ in warn]}")
+    print(f"  SUMMARY: OK={ok}  DEAD={[l for l,_ in dead]}  WARN={[l for l,_ in warn]}")
     if actions:
         print(f"  ACTIONS: {actions}")
     else:

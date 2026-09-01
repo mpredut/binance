@@ -1,11 +1,11 @@
 """
-Test pt deadline-ul dur al fetch-ului de pret non-Binance (28 iul).
+A test for the hard deadline of the non-Binance price fetch (28 Jul).
 
 Incident: NonBinanceTrendPoller in cacheManager froze for 5.5h when
-get_current_price(HYPEUSD) s-a blocat pe un DNS getaddrinfo (neacoperit de
+get_current_price(HYPEUSD) blocked on a DNS getaddrinfo (not covered by
 the read timeout in hl_client). Fix: _fetch_price_with_deadline runs
-fetch-ul intr-un worker separat cu future.result(timeout) -> orice blocaj
-ridica TimeoutError in loc sa inghete poller-ul.
+the fetch in a separate worker with future.result(timeout) -> any blockage
+raises TimeoutError instead of freezing the poller.
 """
 import os
 import sys
@@ -20,8 +20,8 @@ import cacheManager as cm
 
 
 class _FakeApi:
-    """market_api fals: get_current_price fie intoarce rapid, fie se BLOCHEAZA
-    (simuleaza DNS/retea hung), dupa flag."""
+    """A fake market_api: get_current_price either returns quickly or BLOCKS
+    (simulating a DNS/network hang), depending on the flag."""
     def __init__(self, hang=False, price=55.5):
         self.hang = hang
         self.price = price
@@ -29,7 +29,7 @@ class _FakeApi:
 
     def get_current_price(self, symbol=None):
         self.calls += 1
-        # blocaj TRANZITORIU: sta blocat cat timp flag-ul e True, se deblocheaza
+        # A TRANSIENT blockage: it stays blocked while the flag is True, and unblocks
         # when the network "comes back" (hang=False) — like a DNS/socket recovering.
         waited = 0.0
         while self.hang and waited < 30:
@@ -63,7 +63,7 @@ class TestFetchDeadline(unittest.TestCase):
 
     def test_poller_survives_a_hang_and_recovers(self):
         """The poller, with a fetch that hangs and then recovers, must NOT
-        sa inghete: dupa hang, la un ciclu urmator cu fetch bun, impinge pretul."""
+        freeze: after a hang, on a later cycle with a good fetch, it pushes the price."""
         pushed = []
         api = _FakeApi(hang=True)
 
@@ -73,14 +73,14 @@ class TestFetchDeadline(unittest.TestCase):
                 pushed.append((s, p))
 
         cpm = _Cpm()
-        # interval mic + deadline scurt, ca sa observam timeout + recovery in test
+        # A small interval plus a short deadline, so we can observe the timeout and the recovery in the test.
         poller = cm._start_nonbinance_trend_poller(
             cpm, ["HYPEUSD"], interval_sec=0.3, fetch_deadline_sec=0.5)
         self.addCleanup(poller.stop)
         time.sleep(2)            # while the fetch is blocked -> timeouts, NOT pushes
         self.assertEqual(pushed, [], "while the fetch is blocked nothing must be pushed")
-        api.hang = False         # reteaua revine -> fetch-urile blocate se deblocheaza
-        time.sleep(3)            # cateva cicluri -> ar trebui sa impinga pretul
+        api.hang = False         # The network comes back -> the blocked fetches unblock.
+        time.sleep(3)            # A few cycles -> it should push the price.
         self.assertTrue(any(s == "HYPEUSD" for s, _ in pushed),
                         "once the network returns, the poller must recover and push the price")
 

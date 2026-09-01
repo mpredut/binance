@@ -1,15 +1,15 @@
 """
-Teste pentru tradeall.py — PriceWindow, PriceTrendAnalyzer, TrendState
+Tests for tradeall.py — PriceWindow, PriceTrendAnalyzer, TrendState
 and the integration with Cache24PriceManager.
 
 Acoperire:
   - PriceTrendAnalyzer: linreg, gradient, date insuficiente
-  - PriceWindow: sample_rate_sec, recent_n, process_price, get_trend (4 valori)
-  - PriceWindow.from_cache24: factory din Cache24PriceManager cu date reale
+  - PriceWindow: sample_rate_sec, recent_n, process_price, get_trend (4 values)
+  - PriceWindow.from_cache24: the factory from Cache24PriceManager with real data
   - PriceWindow._sample_rate_from_entries: rate computed from timestamps
   - TrendState: lifecycle complet
   - TrendState: cooldown per instanta de trend (fire_limit_reached/mark_confirmed
-    cu FIRE_MAX_PER_TREND executii, can_retry_fire/mark_fire_attempt cu
+    with FIRE_MAX_PER_TREND executions, can_retry_fire/mark_fire_attempt with
     FIRE_MIN_RETRY_INTERVAL_SEC, reset la start_trend nou) — 22 iul
   - CacheCurrentPriceManager: get_sample_rate / get_update_frequency
 """
@@ -299,7 +299,7 @@ class TestSampleRateFromEntries(unittest.TestCase):
                 self.assertAlmostEqual(rate, ta.TIME_SLEEP_GET_PRICE)
 
 # ═══════════════════════════════════════════════════════════════════════════
-# PriceWindow.from_cache24 — factory cu Cache24PriceManager
+# PriceWindow.from_cache24 — the factory with Cache24PriceManager
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestPriceWindowFromCache24(unittest.TestCase):
@@ -377,7 +377,7 @@ class TestPriceWindowFromCache24(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# PriceWindow — get_trend() cele 4 valori
+# PriceWindow — get_trend()'s 4 values
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestPriceWindowGetTrend(unittest.TestCase):
@@ -513,7 +513,7 @@ class TestTrendState(unittest.TestCase):
 
 class TestTrendStateCooldown(unittest.TestCase):
     """Cooldown per instanta de trend (22 iul) — vezi FIRE_MIN_RETRY_INTERVAL_SEC.
-    Ceas fals (contor mutabil) ca sa nu depindem de sleep-uri reale de 30 min."""
+    A fake clock (a mutable counter) so we do not depend on real 30-minute sleeps."""
 
     def _ts_with_clock(self):
         clock = {"t": 1000.0}
@@ -580,7 +580,7 @@ class TestCacheCurrentPriceFrequency(unittest.TestCase):
         rate = self.mgr.get_sample_rate("BTCUSDT", fallback=9.9)
         # the measured rate is approximately the real interval between the 2 updates (not the fallback)
         self.assertGreater(rate, 0.0)
-        self.assertLess(rate, 9.9)                  # nu e fallback-ul
+        self.assertLess(rate, 9.9)                  # It is not the fallback.
         self.assertLessEqual(rate, elapsed + 0.5)   # robust la jitter de scheduling
         self.assertGreater(self.mgr.get_update_frequency("BTCUSDT"), 0.0)
 
@@ -732,7 +732,7 @@ class TestPriceWindowCache24Wiring(unittest.TestCase):
         self.assertFalse(pw._subscribed_to_cache24)
         n_before = len(pw.prices)
         mgr.on_price_update("BTCUSDT", int(time.time() * 1000), 55555.0)
-        self.assertEqual(len(pw.prices), n_before)  # nu s-a actualizat
+        self.assertEqual(len(pw.prices), n_before)  # It was not updated.
 
     def test_multiple_windows_same_cache24(self):
         """Two windows (small and large) can subscribe to the same Cache24."""
@@ -759,7 +759,7 @@ class TestPriceWindowCache24Wiring(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# WindowAnalyzer — metrici mutate din PriceWindow
+# WindowAnalyzer — the metrics moved out of PriceWindow
 # ═══════════════════════════════════════════════════════════════════════════
 
 class TestWindowAnalyzer(unittest.TestCase):
@@ -984,7 +984,7 @@ class TestTrendCoordinator(unittest.TestCase):
 
     def test_manager_tick_publishes_instant_gradient(self):
         # the fast channel lives in the MANAGER: on_price_update publishes the gradient, under
-        # gradient_recent_fast (29 iul: gradient_recent e acum EXCLUSIV al caii
+        # gradient_recent_fast (29 Jul: gradient_recent now belongs EXCLUSIVELY to the
         # lente, evaluate_full — vezi cachemanager-trend-race-investigation).
         self.mgr.on_price_update("BTCUSDT", int(time.time() * 1000), 60500.0)
         snap = self.mgr.get_snapshot("BTCUSDT")

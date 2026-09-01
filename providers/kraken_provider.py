@@ -122,8 +122,8 @@ class KrakenProvider(MarketDataProvider):
         if api_key and api_secret:
             self._cli = cli
         else:
-            print("[Kraken] ⚠ STARTED FARA chei (kraken/.env missing/incomplet la primul apel de cont)"
-                  " -> citirile de cont (balance/orders) vor esua; NU cachez, reincerc la urmatorul tick.")
+            print("[Kraken] ⚠ STARTED WITHOUT keys (kraken/.env missing or incomplete at the first account call)"
+                  " -> the account reads (balance/orders) will fail; NOT caching, retrying on the next tick.")
         return cli
 
     # -- Public market data without keys. --------------------------------------
@@ -131,7 +131,7 @@ class KrakenProvider(MarketDataProvider):
         try:
             return self._client().last_price(symbol)
         except Exception as e:  # noqa: BLE001
-            print(f"[Kraken] pret {symbol}: {e}")
+            print(f"[Kraken] price {symbol}: {e}")
             return None
 
     def min_order_qty(self, symbol: str) -> float:
@@ -225,7 +225,7 @@ class KrakenProvider(MarketDataProvider):
         for order_id, raw in raw_orders.items():
             if not isinstance(raw, dict):
                 raise ProviderError(
-                    f"open_orders({symbol}): ordin {order_id} invalid")
+                    f"open_orders({symbol}): order {order_id} is invalid")
             description = raw.get("descr") or {}
             if not isinstance(description, dict):
                 raise ProviderError(
@@ -239,14 +239,14 @@ class KrakenProvider(MarketDataProvider):
             side = str(description.get("type") or raw.get("type") or "").upper()
             if side not in {"BUY", "SELL"}:
                 raise ProviderError(
-                    f"open_orders({symbol}): side invalid pentru {order_id}")
+                    f"open_orders({symbol}): an invalid side for {order_id}")
             try:
                 price = float(description.get("price", raw.get("price", 0.0)) or 0.0)
                 original_qty = float(raw.get("vol") or 0.0)
                 executed_qty = float(raw.get("vol_exec") or 0.0)
             except (TypeError, ValueError, OverflowError) as exc:
                 raise ProviderError(
-                    f"open_orders({symbol}): valori invalide pentru {order_id}") from exc
+                    f"open_orders({symbol}): invalid values for {order_id}") from exc
             if (not all(math.isfinite(value) for value in (
                     price, original_qty, executed_qty))
                     or price < 0 or original_qty <= 0 or executed_qty < 0
@@ -344,7 +344,7 @@ class KrakenProvider(MarketDataProvider):
             raise ProviderError(f"submit_order {symbol} {s}: {e}") from e
         order_id = extract_order_id(res)
         if order_id is None:
-            raise ProviderError(f"submit_order {symbol}: raspuns fara txid ({res})")
+            raise ProviderError(f"submit_order {symbol}: a response without a txid ({res})")
         return order_id
 
     def preflight_order(self, symbol: str, side: str, qty: float,
@@ -364,10 +364,10 @@ class KrakenProvider(MarketDataProvider):
             requested = float(qty)
         except (TypeError, ValueError, OverflowError) as exc:
             raise ProviderError(
-                f"preflight_order {symbol}: cantitate SELL invalida") from exc
+                f"preflight_order {symbol}: an invalid SELL quantity") from exc
         if not math.isfinite(requested) or requested <= 0:
             raise ProviderError(
-                f"preflight_order {symbol}: cantitate SELL invalida")
+                f"preflight_order {symbol}: an invalid SELL quantity")
 
         precision = self.pair_precision(symbol)
         base_asset = precision.base_asset if precision else ""
@@ -439,7 +439,7 @@ class KrakenProvider(MarketDataProvider):
             try:
                 if int(result["count"]) < 1:
                     raise ProviderError(
-                        f"cancel_order {order_id}: Kraken nu a confirmat anularea"
+                        f"cancel_order {order_id}: Kraken did not confirm the cancellation"
                     )
             except (TypeError, ValueError) as e:
                 raise ProviderError(

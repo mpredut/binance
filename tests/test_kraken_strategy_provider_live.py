@@ -1,9 +1,9 @@
-"""Faza 2 provider-unify — caile LIVE ale strategiei (dry_run=False) trec prin
+"""Phase 2 provider unification — the strategy's LIVE paths (dry_run=False) go through
 contractul StrategyExecutor: submit_order / order_status / cancel_order.
 
-GOLDEN-ul acopera deciziile (replay, dry_run); ASTA acopera exact partea pe care
-golden-ul NU o atinge: rewire-ul de la KrakenClient la contract in _place/reconcile/cancel.
-Provider FAKE (fara retea)."""
+The GOLDEN test covers the decisions (replay, dry_run); THIS one covers exactly the part the
+golden test does NOT touch: the rewiring from KrakenClient to the contract in _place/reconcile/cancel.
+A FAKE provider (no network)."""
 import os
 import sys
 import unittest
@@ -95,7 +95,7 @@ class ProviderLivePathTest(unittest.TestCase):
     def setUp(self):
         self.fake = FakeExecutor()
         self._orig_notify = strat.notify
-        strat.notify = lambda *a, **k: None      # fara push in teste
+        strat.notify = lambda *a, **k: None      # No push notifications in the tests.
         self.s = _strategy(self.fake)
 
     def tearDown(self):
@@ -141,7 +141,7 @@ class ProviderLivePathTest(unittest.TestCase):
             client_id = kwargs.get("client_order_id")
             self.fake.client_orders[client_id] = "OID-RECOVERED"
             original(*args, **kwargs)
-            raise ProviderError("timeout dupa acceptare")
+            raise ProviderError("a timeout after acceptance")
 
         self.fake.submit_order = lose_response
         self.assertFalse(
@@ -229,7 +229,7 @@ class ProviderLivePathTest(unittest.TestCase):
             raise ProviderError("Insufficient funds")
         self.fake.submit_order = boom
         self.s._place("buy", 1.0, 60.0, kind="ENTRY", amount=650.0)
-        self.assertEqual(self.s.s["orders"], [])   # esec -> niciun ordin stocat
+        self.assertEqual(self.s.s["orders"], [])   # A failure -> no order stored.
         self.assertIn("buy:ENTRY", self.s.s["placement_backoffs"])
 
     def test_insufficient_funds_preflight_has_persistent_exponential_backoff(self):
@@ -284,7 +284,7 @@ class ProviderLivePathTest(unittest.TestCase):
         self.s.reconcile(60.0)
         self.assertTrue(any(c[0] == "order_status" for c in self.fake.calls))
         self.assertAlmostEqual(self.s.s["qty"], 2.0)     # fill aplicat
-        self.assertEqual(self.s.s["orders"], [])         # ordinul consumat
+        self.assertEqual(self.s.s["orders"], [])         # The order was consumed.
 
     def test_cancel_open_cheama_cancel_order(self):
         self.s._save = MagicMock()
@@ -293,7 +293,7 @@ class ProviderLivePathTest(unittest.TestCase):
         self.s._cancel_open("buy")
         self.assertIn(("cancel_order", "HYPEUSD", "OID-7"), self.fake.calls)
         # The order stays tracked until a terminal status, so we do not lose
-        # un fill concurent cu anularea.
+        # a fill concurrent with the cancellation.
         self.assertTrue(self.s.s["orders"][0]["cancel_requested"])
         self.s._save.assert_called_once()
 

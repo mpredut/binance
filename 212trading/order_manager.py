@@ -49,7 +49,7 @@ def resolve_quantity(order_price: float,
         log(f"  [ORDER] {order_budget_ron} RON / ({order_price} USD × {rate:.2f}) = {qty:.4f} actiuni")
         if qty < 1:
             log(f"  ! [ORDER] budget < the price of one share (~{order_price*rate:.0f} RON) "
-                f"-> ordin FRACTIONAR ({qty:.4f}). T212 poate refuza fractional pe instrument nou.")
+                f"-> a FRACTIONAL order ({qty:.4f}). T212 may refuse fractional orders on a new instrument.")
         return qty
     return None
 
@@ -124,7 +124,7 @@ def _persist_marker(record: dict, path: str) -> None:
     try:
         atomic_write_json(path, record, indent=2, sort_keys=True)
     except (OSError, TypeError, ValueError) as exc:
-        raise RuntimeError(f"nu pot persista intentia T212 in {path}: {exc}") from exc
+        raise RuntimeError(f"cannot persist the T212 intent in {path}: {exc}") from exc
 
 
 def _write_marker(ticker: str, result: dict) -> None:
@@ -145,7 +145,7 @@ def poll_order_until_terminal(client: T212Client, order_id, ticker: str,
     """Observe one status snapshot and return immediately."""
     info = client.get_order_status(order_id)
     if not info:
-        log(f"  [ORDER] status {order_id} indisponibil — verific din nou la ciclul urmator")
+        log(f"  [ORDER] status {order_id} unavailable — checking again on the next cycle")
         return None
     st = str(info.get("status") or "").upper()
     log(f"  [ORDER] status {order_id}: {st or 'NECUNOSCUT'}")
@@ -155,11 +155,11 @@ def poll_order_until_terminal(client: T212Client, order_id, ticker: str,
     fp = info.get("fillPrice") or info.get("limitPrice", 0)
     if st == "FILLED":
         log(f"  [ORDER] ✓ FILLED: {fq} @ {fp} USD")
-        notify(title=f"✓ Ordin executat: {ticker}", body=f"q{fq} @ {fp}",
+        notify(title=f"✓ Order filled: {ticker}", body=f"q{fq} @ {fp}",
                source="T212 order", price=float(fp or 0), desktop=desktop)
     else:
         log(f"  [ORDER] ✗ {st}")
-        notify(title=f"✗ Ordin {st}: {ticker}", body=f"id={order_id}",
+        notify(title=f"✗ Order {st}: {ticker}", body=f"id={order_id}",
                source="T212 order", desktop=desktop)
     return info
 
@@ -273,7 +273,7 @@ def _reconcile_record(client: T212Client, record: dict, marker_path: str,
             "last_observed_at": now,
         })
         _persist_marker(record, marker_path)
-        log("  [ORDER] submit recuperat din cresterea pozitiei T212")
+        log("  [ORDER] the submit was recovered from the growth of the T212 position")
         return "complete"
 
     misses = int(record.get("lookup_misses") or 0) + 1
@@ -322,14 +322,14 @@ def place_order_with_retry(
     # Current price is informational only; do not change the user-selected limit.
     current = get_price_usd(t212_to_yahoo(ticker))
     if current:
-        log(f"  [ORDER] pret curent {t212_to_yahoo(ticker)}: {current:.2f} USD  |  limita: {price_r:.2f} USD")
+        log(f"  [ORDER] the current price of {t212_to_yahoo(ticker)}: {current:.2f} USD  |  the limit: {price_r:.2f} USD")
         if price_r < current:
-            log(f"  ! [ORDER] limita {price_r} < pret {current:.2f} -> ordinul va sta in asteptare "
+            log(f"  ! [ORDER] the limit {price_r} < the price {current:.2f} -> the order will sit waiting "
                 f"(it only executes if the price falls to {price_r}).")
 
     if dry_run:
         log(f"  [ORDER] [DRY-RUN] LIMIT BUY {ticker}  qty={qty_r}  @ {price_r} USD  validity={validity}")
-        log("  [ORDER] Dry-run — ordin NESENT. Seteaza ORDER_EXECUTE=true in .env.")
+        log("  [ORDER] Dry run — the order was NOT SENT. Set ORDER_EXECUTE=true in .env.")
         return True
 
     marker_path = _marker_path(ticker, test=not write_marker)
@@ -349,7 +349,7 @@ def place_order_with_retry(
                 info = poll_order_until_terminal(client, legacy_id, ticker, desktop)
                 record["last_status"] = (info or {}).get("status")
                 _persist_marker(record, marker_path)
-            log("  [ORDER] marker legacy existent — nu dublez ordinul")
+            log("  [ORDER] an existing legacy marker — not duplicating the order")
             return True
         same_intent = (
             str(record.get("ticker") or "").upper() == ticker.upper()
@@ -449,7 +449,7 @@ def place_order_with_retry(
         if lifecycle == "submit_pending":
             log("  ! [ORDER] order rejected; the intent stays queued for reconciliation/retry")
             return False
-        notify(title="Ordin T212 acceptat!",
+        notify(title="T212 order accepted!",
                body=f"LIMIT {ticker} qty={qty_r} @ {price_r} USD\nid={oid}",
                source="T212 order", price=price_r, desktop=desktop)
         return True

@@ -177,10 +177,10 @@ class StateTracker:
             with sell_lock:
                 sell_recommendation = new_rec
 
-            print(f"sell_recommendation actualizat din CachePriceShortTrendManager!")
+            print(f"sell_recommendation updated from CachePriceShortTrendManager!")
             self.update_states_from_sell_recommendation()
         except Exception as e:
-            print(f"Eroare update_sell_recommendation din cacheManager: {e}. Folosesc defaults.")
+            print(f"Error in update_sell_recommendation from cacheManager: {e}. Using the defaults.")
             with sell_lock:
                 sell_recommendation = default_values_sell_recommendation
 
@@ -294,7 +294,7 @@ def get_relevant_trade(trade_orders, trade_type, threshold_s, symbol, now_fn=Non
     can_trade = True
     if current_time_s - trade_time < threshold_s:
         print(f"Tranzactii de {trade_type.upper()} prea recente."
-            f"A trecut doar {u.secondsToHours(current_time_s - trade_time):.2f} h. Astept sa treaca {u.secondsToHours(threshold_s)} h.")
+            f"Only {u.secondsToHours(current_time_s - trade_time):.2f} h have passed. Waiting for {u.secondsToHours(threshold_s)} h.")
         can_trade = False
 
     return trade_price, trade_time, can_trade
@@ -343,7 +343,7 @@ HARD_TP_ENABLED    = True
 HARD_TP_PCT        = 0.17       # Gain fraction that triggers a proportional hard TP.
 HARD_TP_FRACTION   = 0.5        # Fraction of free balance to sell.
 HARD_TP_COOLDOWN_S = 6 * 3600
-TP_REFERENCE       = "last"     # "last" (ultimul buy) | "average" (media pe maxage zile)
+TP_REFERENCE       = "last"     # "last" (the last buy) | "average" (the average over maxage days)
 _hard_tp_last = {}
 
 
@@ -370,7 +370,7 @@ def _load_mt_conf(path=None):
                 elif k == "hard_tp_cooldown_h": HARD_TP_COOLDOWN_S = float(v) * 3600
                 elif k == "tp_reference":       TP_REFERENCE = v.lower()
     except (OSError, ValueError) as e:
-        print(f"monitortrades.conf: {e} — folosesc valorile din cod")
+        print(f"monitortrades.conf: {e} — using the values from the code")
 
 
 _load_mt_conf()
@@ -470,7 +470,7 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
         buy_price = position["average_buy_price"]
         print(f"POSITION (referinta=AVG {maxage_trade_s/86400:.0f}z) for {symbol} : {position}")
     else:
-        print(f"POSITION (referinta=ultimul buy {buy_price}) for {symbol} : {position}")
+        print(f"POSITION (reference=the last buy {buy_price}) for {symbol} : {position}")
     if position["average_sell_price"] > 0:
         sell_price = position["average_sell_price"]
         print(f"POSITION for {symbol} : {position}")
@@ -527,7 +527,7 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
                     _hard_tp_last[symbol] = current_time_s
                     return   # Already sold this tick; do not use stale balance below.
             else:
-                print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% dar in cooldown (the last one "
+                print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% but in cooldown (the last one "
                       f"{u.secondsToHours(current_time_s - _hard_tp_last.get(symbol, 0)):.1f}h)")
         # 3.1. Evaluate the existing SELL placement rules.
         if price_increase > gain_threshold or u.are_close(price_increase, gain_threshold, target_tolerance_percent=MT_ARE_CLOSE_TOLERANCE_PCT):
@@ -576,7 +576,7 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
                     _projected_value = _pos_value + (_buy_qty * current_price)
                     if max_budget and _projected_value > max_budget:
                         print(f"[{symbol}] budget cap depasit post-trade "
-                              f"({_projected_value:.0f} > {max_budget} USD) — nu cumpar")
+                              f"({_projected_value:.0f} > {max_budget} USD) — not buying")
                     else:
                         _place_guarded(inst, "BUY", current_price + MT_BUY_PRICE_OFFSET, _buy_qty, min_qty,
                             safeback_seconds=sbs, cancelorders=True,

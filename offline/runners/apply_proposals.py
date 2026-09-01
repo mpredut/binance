@@ -2,15 +2,15 @@
 """apply_proposals.py — PROD: trage propunerile de backtest de pe branch-ul git
 `backtest-proposals` and applies them with guardrails. It does NOT rerun the backtest
 (dev already did). The owning process is NOT restarted here — that is done by
-watchdogfor_cacheandconfig cand detecteaza schimbarea de config (decizie user).
+watchdogfor_cacheandconfig when it detects the config change (a user decision).
 
 Guardrail-uri (aplicate AICI, pe prod, unde valoarea live e autoritativa):
   - the current value is RE-READ live from prod (not taken from the proposal) — if
-    prod s-a schimbat intre timp, aplicam fata de valoarea reala;
-  - MEDIE, nu salt: new = (current_prod + winner) / 2 (amortizare, ca in pilot);
+    prod has changed in the meantime, we apply against the real value;
+  - AVERAGING, not a jump: new = (current_prod + winner) / 2 (damping, as in the pilot);
   - RATE LIMIT: the same parameter does not change more often than MIN_DAYS_BETWEEN_CHANGES;
   - AUDIT: every decision (applied or not) in logger/backtest_pilot_audit.jsonl;
-  - commit git pe main dupa fiecare schimbare (istoric + reversibil).
+  - a git commit on main after each change (history plus reversibility).
 
   --dry-run : show what it would apply, without writing config or committing
 """
@@ -43,7 +43,7 @@ _DEV_PROFILE = parse_dotenv(os.path.join(ROOT, "offline", "runners", "dev_backte
 BRANCH = os.environ.get("BACKTEST_PROPOSALS_BRANCH") or _DEV_PROFILE.get(
     "BACKTEST_PROPOSALS_BRANCH")
 if not BRANCH:
-    raise RuntimeError("Missing BACKTEST_PROPOSALS_BRANCH din dev_backtest.env")
+    raise RuntimeError("Missing BACKTEST_PROPOSALS_BRANCH in dev_backtest.env")
 
 
 def _read_proposals():
@@ -72,7 +72,7 @@ def main():
 
     proposals = _read_proposals()
     if not proposals:
-        print(f"[apply] nicio propunere pe branch {BRANCH} — nimic de facut")
+        print(f"[apply] no proposal on branch {BRANCH} — nothing to do")
         return
 
     for p in proposals:
@@ -84,9 +84,9 @@ def main():
 
         if abs(winner - current) < 1e-9:
             rec["action"] = "no_change"
-            rec["reason"] = f"castigatorul {winner} = valoarea deja configurata pe prod"
+            rec["reason"] = f"the winner {winner} = the value already configured on prod"
             sp._append_audit(rec)
-            print(f"[apply] {fk}: no_change (deja {current})")
+            print(f"[apply] {fk}: no_change (already {current})")
             continue
 
         last = sp._last_change_for(fk)
@@ -94,9 +94,9 @@ def main():
             last_ts = datetime.fromisoformat(last["ts"])
             if datetime.now() - last_ts < timedelta(days=sp.MIN_DAYS_BETWEEN_CHANGES):
                 rec["action"] = "rate_limited"
-                rec["reason"] = f"schimbat ultima data la {last['ts']} (< {sp.MIN_DAYS_BETWEEN_CHANGES}z)"
+                rec["reason"] = f"last changed at {last['ts']} (< {sp.MIN_DAYS_BETWEEN_CHANGES} days)"
                 sp._append_audit(rec)
-                print(f"[apply] {fk}: rate_limited (ultima schimbare {last['ts']})")
+                print(f"[apply] {fk}: rate_limited (the last change was {last['ts']})")
                 continue
 
         new_value = round((current + winner) / 2, 4)

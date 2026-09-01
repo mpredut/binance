@@ -168,7 +168,7 @@ def cache_freshness_seconds(path):
     if newest > 0.0:
         return newest, "continut"
     try:
-        return p.stat().st_mtime, "mtime (continut fara timestamp)"
+        return p.stat().st_mtime, "mtime (content without a timestamp)"
     except OSError:
         return 0.0, "mtime indisponibil"
 
@@ -255,8 +255,8 @@ def check_configs_once(now=None):
     note = f"config schimbat: {', '.join(changed)} -> proprietari: {', '.join(owners)}" + diff_txt
 
     if not CONFIG_RESTART:
-        print(f"[watchdog] {note} — WATCHDOG_CONFIG_RESTART=false, doar notific")
-        wc.send_ntfy("⚙️ Config schimbat", note + "\n(auto-restart OFF; reporneste manual daca e nevoie)")
+        print(f"[watchdog] {note} — WATCHDOG_CONFIG_RESTART=false, only notifying")
+        wc.send_ntfy("⚙️ Config changed", note + "\n(auto-restart is OFF; restart by hand if needed)")
         wc.save_state(STATE_FILE, state)
         return []
 
@@ -278,8 +278,8 @@ def check_configs_once(now=None):
     state["config_restart_history"] = hist
     wc.save_state(STATE_FILE, state)
 
-    msg = (f"🔄 {', '.join(changed)} s-a schimbat -> repornit {', '.join(owners)} "
-           f"(respawn prin healthcheck --supervise). Restart {len(hist)}/{CONFIG_RESTART_MAX} in {CONFIG_RESTART_WINDOW_H:.0f}h."
+    msg = (f"🔄 {', '.join(changed)} changed -> restarted {', '.join(owners)} "
+           f"(respawned through healthcheck --supervise). Restart {len(hist)}/{CONFIG_RESTART_MAX} in {CONFIG_RESTART_WINDOW_H:.0f}h."
            + diff_txt)
     print(f"[watchdog] {msg}")
     wc.send_ntfy("🔄 Config schimbat -> restart", msg)
@@ -297,19 +297,19 @@ def _maybe_auto_restart(stale, now, state):
         return False, ""
     hist = [t for t in state.get("auto_restart_history", []) if now - t < AUTO_RESTART_WINDOW_H * 3600]
     if hist and (now - max(hist)) < AUTO_RESTART_COOLDOWN_MIN * 60:
-        return False, (f"auto-restart in COOLDOWN ({AUTO_RESTART_COOLDOWN_MIN:.0f}min de la ultimul) "
-                       f"— doar alertez, cacheManager NErepornit")
+        return False, (f"the auto-restart is in COOLDOWN ({AUTO_RESTART_COOLDOWN_MIN:.0f}min since the last one) "
+                       f"— only alerting, cacheManager NOT restarted")
     if len(hist) >= AUTO_RESTART_MAX:
         return False, (f"⛔ PLAFON auto-restart atins ({AUTO_RESTART_MAX} in {AUTO_RESTART_WINDOW_H:.0f}h) "
-                       f"— INTERVENTIE MANUALA necesara, nu mai repornesc automat")
+                       f"— MANUAL INTERVENTION needed, no more automatic restarts")
     try:
         _do_restart()
         hist.append(now)
         state["auto_restart_history"] = hist
-        return True, (f"🔁 cacheManager REPORNIT automat (cache stale: {', '.join(critical)}). "
-                      f"Restart {len(hist)}/{AUTO_RESTART_MAX} in fereastra de {AUTO_RESTART_WINDOW_H:.0f}h.")
+        return True, (f"🔁 cacheManager RESTARTED automatically (stale cache: {', '.join(critical)}). "
+                      f"Restart {len(hist)}/{AUTO_RESTART_MAX} in a window of {AUTO_RESTART_WINDOW_H:.0f}h.")
     except Exception as e:  # noqa: BLE001 — restart failure must not suppress the alert.
-        return False, f"auto-restart ESUAT ({e}) — reporneste MANUAL flota"
+        return False, f"the auto-restart FAILED ({e}) — restart the fleet MANUALLY"
 
 
 def check_once(now=None):
@@ -319,7 +319,7 @@ def check_once(now=None):
     stale = []
     fleet_alive = False   # A fresh fast cache proves fleet liveness.
     if not files:
-        stale.append(("(niciun cache_*.json)", float("inf"), STALE_MINUTES,
+        stale.append(("(no cache_*.json)", float("inf"), STALE_MINUTES,
                       f"{_CACHE_DIR} is empty or missing"))
     for p in files:
         freshness, detail = cache_freshness_seconds(p)

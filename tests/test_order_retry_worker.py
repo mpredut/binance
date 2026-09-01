@@ -1,5 +1,5 @@
-"""Teste pt order_retry_worker.process_once — logica pura de golire a cozii, cu un
-`mkt` FAKE (fara retea). Coada izolata in tmp."""
+"""Tests for order_retry_worker.process_once — the pure queue-draining logic, with a
+FAKE `mkt` (no network). The queue is isolated in tmp."""
 import os
 import sys
 import time
@@ -45,7 +45,7 @@ class ProcessOnceTest(unittest.TestCase):
 
     def test_acceptance_stays_tracked_until_fill(self):
         oq.enqueue("BTCUSDC", "BUY", 1.0, {"safeback_seconds": 9, "smart": False},
-                   requested_price=63000.0, now=1000.0)   # BUY: pret curent <= cerut -> gate ok
+                   requested_price=63000.0, now=1000.0)   # BUY: the current price <= the requested one -> the gate passes.
         mkt = FakeMkt(price=63000.0, succeed=True)
         stats = worker.process_once(mkt, now=1000.0 + 400)   # due (>300s)
         self.assertEqual(stats["succeeded"], 1)
@@ -53,7 +53,7 @@ class ProcessOnceTest(unittest.TestCase):
         self.assertEqual(len(tracked), 1)
         self.assertEqual(tracked[0]["lifecycle"], "accepted")
         self.assertEqual(tracked[0]["order_id"], "1")
-        # a fost reluat cu caller_owns_retry=True, la pret CURENT, kwargs pastrate
+        # it was resumed with caller_owns_retry=True, at the CURRENT price, the kwargs preserved
         self.assertEqual(len(mkt.calls), 1)
         self.assertTrue(mkt.calls[0]["kw"]["caller_owns_retry"])
         self.assertEqual(mkt.calls[0]["price"], 63000.0)
@@ -98,7 +98,7 @@ class ProcessOnceTest(unittest.TestCase):
     def test_not_due_skipped(self):
         oq.enqueue("BTCUSDC", "BUY", 1.0, {}, now=1000.0)
         mkt = FakeMkt(succeed=True)
-        stats = worker.process_once(mkt, now=1000.0 + 100)   # < interval 300 -> nu e scadent
+        stats = worker.process_once(mkt, now=1000.0 + 100)   # < the interval of 300 -> not due.
         self.assertEqual(stats["attempted"], 0)
         self.assertEqual(len(oq.load_all()), 1)              # ramane
 
@@ -109,12 +109,12 @@ class ProcessOnceTest(unittest.TestCase):
         orig = worker.alert.notify
         worker.alert.notify = lambda **kw: alerts.append(kw)
         try:
-            stats = worker.process_once(mkt, now=1000.0 + 86400 + 10)   # peste TTL
+            stats = worker.process_once(mkt, now=1000.0 + 86400 + 10)   # past the TTL.
         finally:
             worker.alert.notify = orig
         self.assertEqual(stats["expired"], 1)
         self.assertEqual(oq.load_all(), [])          # scos
-        self.assertEqual(len(mkt.calls), 0)          # NU reincercat (expirat)
+        self.assertEqual(len(mkt.calls), 0)          # NOT retried (expired).
         self.assertEqual(len(alerts), 1)             # alerta de renuntare
 
     def test_legacy_invalid_quantity_is_discarded_without_submit(self):
@@ -134,7 +134,7 @@ class ProcessOnceTest(unittest.TestCase):
         mkt = FakeMkt(price=None, succeed=True)
         stats = worker.process_once(mkt, now=1000.0 + 400)
         self.assertEqual(stats["attempted"], 0)
-        self.assertEqual(len(oq.load_all()), 1)      # pret indisponibil -> ramane
+        self.assertEqual(len(oq.load_all()), 1)      # The price is unavailable -> it stays.
 
     def test_price_gate_skips_unfavorable(self):
         # SELL requested at 100; current price 90 (below) -> the guard stops it, no attempt
@@ -146,16 +146,16 @@ class ProcessOnceTest(unittest.TestCase):
         self.assertEqual(len(mkt.calls), 0)          # nothing was placed
         q = oq.load_all()
         self.assertEqual(len(q), 1)
-        self.assertEqual(q[0]["attempts"], 0)        # nu se numara ca incercare
+        self.assertEqual(q[0]["attempts"], 0)        # It does not count as an attempt.
 
     def test_price_gate_allows_favorable(self):
-        # SELL cerut la 100; pretul curent 101 (peste) -> gardul lasa sa treaca, se reia
+        # A SELL requested at 100; the current price is 101 (above) -> the guard lets it through and it is resumed.
         oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=100.0, now=1000.0)
         mkt = FakeMkt(price=101.0, succeed=True)
         stats = worker.process_once(mkt, now=1000.0 + 400)
         self.assertEqual(stats["succeeded"], 1)
         self.assertEqual(len(mkt.calls), 1)
-        self.assertEqual(mkt.calls[0]["price"], 101.0)   # reluat la pret CURENT
+        self.assertEqual(mkt.calls[0]["price"], 101.0)   # Resumed at the CURRENT price.
         self.assertEqual(oq.load_all()[0]["lifecycle"], "accepted")
 
     def test_leased_in_queue_during_place_and_not_due(self):
@@ -314,11 +314,11 @@ class ProcessOnceTest(unittest.TestCase):
 
     def test_failure_reenqueues_preserving_age(self):
         oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=100.0, now=1000.0)
-        mkt = FakeMkt(price=100.0, succeed=False)   # BUY gate ok (100<=100), dar esueaza
+        mkt = FakeMkt(price=100.0, succeed=False)   # The BUY gate passes (100<=100), but it fails.
         worker.process_once(mkt, now=1000.0 + 400)
         q = oq.load_all()
-        self.assertEqual(len(q), 1)                  # re-adaugata dupa esec
-        self.assertEqual(q[0]["created_ts"], 1000.0) # vechimea PASTRATA (TTL nu se reseteaza)
+        self.assertEqual(len(q), 1)                  # Re-added after the failure.
+        self.assertEqual(q[0]["created_ts"], 1000.0) # The age is PRESERVED (the TTL does not reset).
         self.assertEqual(q[0]["attempts"], 1)        # attempts+1
 
 

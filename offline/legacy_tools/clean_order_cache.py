@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Curata cache_order.json de ordinele care NU sunt tranzactii realizate.
+Cleans cache_order.json of the orders that are NOT completed trades.
 
-De ce: calea WS (_upsert_order_from_execution_report) stoca ORICE executionReport,
-inclusiv NEW/CANCELED/EXPIRED/REJECTED, iar anulatele veneau cu price=0 (bug "L or p":
-L = "0.00000000" e string truthy). Astea poluau gardul de profit (min(pret) -> 0).
-Codul a fost reparat (Order cache = doar FILLED/PARTIALLY_FILLED), dar fisierul vechi
+Why: the WS path (_upsert_order_from_execution_report) stored ANY executionReport,
+NEW/CANCELED/EXPIRED/REJECTED included, and the cancelled ones came with price=0 (the "L or p" bug:
+L = "0.00000000" is a truthy string). Those polluted the profit guard (min(price) -> 0).
+The code was fixed (the Order cache = FILLED/PARTIALLY_FILLED only), but the old file
 mai contine gunoiul. Scriptul il scoate.
 
-Criteriu de SCOATERE:  status in {CANCELED, EXPIRED, REJECTED, NEW}  SAU  price <= 0.
-Pastreaza: FILLED/PARTIALLY_FILLED si intrarile din REST (status None) cu price > 0.
+The REMOVAL criterion:  status in {CANCELED, EXPIRED, REJECTED, NEW}  OR  price <= 0.
+It keeps: FILLED/PARTIALLY_FILLED and the REST entries (status None) with price > 0.
 
-RULEAZA DOAR cu cacheManager OPRIT (altfel rescrie fisierul din memoria veche).
+RUN IT ONLY with cacheManager STOPPED (otherwise it rewrites the file from the old memory).
   python3 offline/legacy_tools/clean_order_cache.py --dry
   python3 offline/legacy_tools/clean_order_cache.py
 Idempotent.
@@ -41,7 +41,7 @@ def is_garbage(order):
 def main():
     dry = "--dry" in sys.argv
     if not os.path.exists(ORDER_FILE):
-        print(f"Nu exista {ORDER_FILE} — nimic de facut.")
+        print(f"{ORDER_FILE} does not exist — nothing to do.")
         return
 
     with open(ORDER_FILE) as f:
@@ -59,10 +59,10 @@ def main():
     print(f"TOTAL: {total} | de scos={removed} | raman={total - removed}")
 
     if dry:
-        print("[DRY] nu am scris nimic.")
+        print("[DRY] nothing was written.")
         return
     if removed == 0:
-        print("Nimic de curatat.")
+        print("Nothing to clean.")
         return
 
     bak = ORDER_FILE + f".bak.{int(time.time())}"
@@ -73,7 +73,7 @@ def main():
     with open(tmp, "w") as f:
         json.dump(data, f, indent=1)
     os.replace(tmp, ORDER_FILE)
-    print(f"Scris {ORDER_FILE} curatat ({removed} scoase).")
+    print(f"Wrote a cleaned {ORDER_FILE} ({removed} removed).")
 
 
 if __name__ == "__main__":

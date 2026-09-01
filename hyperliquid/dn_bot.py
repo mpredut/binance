@@ -53,9 +53,9 @@ def _cmd_status(client: HLClient, params: DNParams) -> int:
     if liq > 0 and szi < 0:
         dist = (liq - perp_px)/perp_px*100
         flag = "⚠ PERICOL" if dist < params.liq_alert_pct else "ok"
-        log(f"  LICHIDARE   : short la {liq:.4f}  (the price mai poate urca {dist:.1f}% pana acolo)  [{flag}]")
+        log(f"  LIQUIDATION : the short at {liq:.4f}  (the price can still rise {dist:.1f}% before that)  [{flag}]")
     else:
-        log(f"  LICHIDARE   : (fara short deschis)")
+        log(f"  LIQUIDATION : (no short open)")
     log(f"  FUNDING     : {fhr*100:+.5f}%/ora  (~{fhr*24*365*100:.1f}%/an)  est. ~${est_day:+.3f}/zi pe pozitia curenta")
     log(f"  FUNDING real: ${earned:+.4f} incasat (ultimele 7 zile)")
     log(f"  COLATERAL   : USDC ${usdc:,.2f} (unified: spot+perp impart colateralul)  perp_acct=${ms.get('accountValue',0):,.2f}  margine_folosita=${ms.get('totalMarginUsed',0):,.2f}")
@@ -79,7 +79,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
             fhr = client.funding_rate(params.coin)
             liq = float(pos.get("liquidationPx") or 0)
             if errors:
-                log(f"  [WATCH] ✓ conexiune RECUPERATA dupa {errors} incercari esuate")
+                log(f"  [WATCH] ✓ the connection RECOVERED after {errors} failed attempts")
             errors = 0
             delta_usd = abs(spot_qty + szi) * perp_px
             has_pos = abs(spot_qty) * perp_px > 5 or abs(szi) * perp_px > 5
@@ -98,7 +98,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
                     if armed["delta"]:
                         armed["delta"] = False
                         notify(title=f"👁 MONITOR {params.coin}: delta ${delta_usd:.2f} — dezechilibrat",
-                               body=f"spot {spot_qty:.2f} / perp {szi:.2f} — serverul ar trebui sa rebalanseze",
+                               body=f"spot {spot_qty:.2f} / perp {szi:.2f} — the server should rebalance",
                                source="dn-watch", desktop=desktop)
                 else:
                     armed["delta"] = True
@@ -117,7 +117,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
                     if fhr < params.exit_funding_hr and armed["fund"]:
                         armed["fund"] = False
                         notify(title=f"👁 MONITOR {params.coin}: funding negativ {fhr*100:+.4f}%/h",
-                               body="Platesti funding in loc sa incasezi. Botul de pe server decide iesirea (mediere+min-hold).",
+                               body="You are paying funding instead of collecting it. The bot on the server decides the exit (averaging plus min hold).",
                                source="dn-watch", desktop=desktop)
                     elif fhr >= 0:
                         armed["fund"] = True
@@ -150,15 +150,15 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Bot delta-neutral (funding) pe Hyperliquid.")
     ap.add_argument("--env-file", default=env_file)
     ap.add_argument("--paper", action="store_true")
-    ap.add_argument("--funding", action="store_true", help="Arata funding-ul curent si iese")
-    ap.add_argument("--status", action="store_true", help="Arata picioarele + delta si iese")
+    ap.add_argument("--funding", action="store_true", help="Show the current funding and exit")
+    ap.add_argument("--status", action="store_true", help="Show the legs plus the delta and exit")
     ap.add_argument("--watch", action="store_true",
                     help="read-only MONITOR of the real position: zero orders, alerts only. "
-                         "Sigur in paralel cu botul de pe server.")
-    ap.add_argument("--once", action="store_true", help="(cu --watch) o singura verificare si iese")
+                         "Safe to run alongside the bot on the server.")
+    ap.add_argument("--once", action="store_true", help="(with --watch) a single check, then exit")
     ap.add_argument("--close", action="store_true",
-                    help="IESIRE: vinde TOT spot-ul + acopera TOT short-ul (flat), apoi iese. "
-                         "Real daca STRAT_EXECUTE=true (altfel/--paper = simulare). "
+                    help="EXIT: sell ALL the spot plus cover ALL the short (flat), then exit. "
+                         "Real if STRAT_EXECUTE=true (otherwise, or with --paper, a simulation). "
                          "STOP the bot and watchdog first (see dn_close.sh) so they do not fight it.")
     args = ap.parse_args()
     if args.watch:
@@ -178,7 +178,7 @@ def main() -> int:
         except KeyboardInterrupt:
             return 130
         except Exception as e:  # noqa: BLE001 — retry after a network failure
-            log(f"! conexiune esuata ({e.__class__.__name__}) — reincerc in 60s")
+            log(f"! the connection failed ({e.__class__.__name__}) — retrying in 60s")
             time.sleep(60)
     params = DNParams.from_env(client)
 
@@ -201,12 +201,12 @@ def main() -> int:
             f"spot={L['spot_qty']:.4f} perp={L['perp_szi']:.4f}")
         dn._close(L, "inchidere manuala --close")
         dn._save()
-        log("  [--close] gata — verifica rezultatul cu --status.")
+        log("  [--close] done — check the result with --status.")
         return 0
 
     log("=== Hyperliquid DELTA-NEUTRAL bot ===")
     log(f"    coin={params.coin}  spot={params.spot_pair}  notional={params.notional} USDC/picior")
-    log(f"    executie: {'PAPER (fara bani)' if dry else '⚠ REAL — BANI ADEVARATI'}")
+    log(f"    execution: {'PAPER (no money)' if dry else '⚠ REAL — REAL MONEY'}")
     try:
         DeltaNeutral(client, params, dry_run=dry, desktop=False).run()
         return 0

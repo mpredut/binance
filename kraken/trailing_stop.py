@@ -227,22 +227,22 @@ class KrakenTrailing:
         return result
 
     def log_dry_sell(self, key, asset, pair, qty, price, peak, trail) -> None:
-        self.log(f"  🟡 [TRAIL-K][DRY] AR VINDE {qty} {asset} @ ~{price:.4f} "
-                 f"(varf {peak:.4f}, -{trail}%)  [KRAKEN_TRAILING_ENABLED=true ca sa execute]")
+        self.log(f"  🟡 [TRAIL-K][DRY] WOULD SELL {qty} {asset} @ ~{price:.4f} "
+                 f"(peak {peak:.4f}, -{trail}%)  [KRAKEN_TRAILING_ENABLED=true for it to execute]")
 
     def log_dry_rebuy(self, key, asset, pair, qty, price, rb) -> None:
-        self.log(f"  🟡 [TRAIL-K][DRY] AR RE-CUMPARA {qty} {asset} @ ~{price:.4f}  "
-                 f"(recul de la minim {rb['low']:.4f})  [KRAKEN_TRAILING_ENABLED=true ca sa execute]")
+        self.log(f"  🟡 [TRAIL-K][DRY] WOULD RE-BUY {qty} {asset} @ ~{price:.4f}  "
+                 f"(a pullback from the low {rb['low']:.4f})  [KRAKEN_TRAILING_ENABLED=true for it to execute]")
 
     def log_hold(self, key, asset, pair, price, peak, stop_at, trail, free) -> None:
         self.log(f"  [TRAIL-K] {asset}: {price:.4f}  varf {peak:.4f}  "
-                 f"vinde sub {stop_at:.4f} (-{trail}%)  (liber {free:.4f})")
+                 f"sells below {stop_at:.4f} (-{trail}%)  (free {free:.4f})")
 
     def log_skip_rebuy_trend(self, asset) -> None:
-        self.log(f"  [TRAIL-K] re-buy {asset} deferred — trend instant CLAR jos (nu prind cutitul)")
+        self.log(f"  [TRAIL-K] re-buy {asset} deferred — the instant trend is CLEARLY down (not catching the knife)")
 
     def log_skip_sell_trend(self, key, asset, pair, trail) -> None:
-        self.log(f"  [TRAIL-K] {asset}: -{trail}% reached dar trend instant SUS — NU vand (anti-wick)")
+        self.log(f"  [TRAIL-K] {asset}: -{trail}% reached but the instant trend is UP — NOT selling (anti-wick)")
 
     def log_tick_error(self, e) -> None:
         self.log(f"  ! [TRAIL-K] cycle failed ({e.__class__.__name__}: {e}) — reincerc")
@@ -256,7 +256,7 @@ class KrakenTrailing:
         self.log("  [TRAIL-K] heartbeat")
 
     def run(self):
-        mode = "⚠ ACTIV (vinde real)" if self.enabled else "DRY-RUN (doar logheaza)"
+        mode = "⚠ ACTIVE (it really sells)" if self.enabled else "DRY RUN (it only logs)"
         self.log(f"=== TRAILING STOP KRAKEN started — {mode} ===")
         self.log(f"    protejez: " + ", ".join(f"{a}={t}%" for a, t in TRAIL_PCT.items()) +
                  "  (FREE balance only, not the bot position)")
@@ -267,7 +267,7 @@ class KrakenTrailing:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Trailing stop disjunctor pe Kraken (cu re-buy).")
+    ap = argparse.ArgumentParser(description="A trailing-stop circuit breaker on Kraken (with a re-buy).")
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--status", action="store_true")
     args = ap.parse_args()

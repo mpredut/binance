@@ -51,7 +51,7 @@ def main():
     check("asset TAO  -> Binance (default)", mkt.provider_name_for("TAO") == "Binance",
           mkt.provider_name_for("TAO"))
 
-    print("\n==== MARKET-DATA HYPE (public, fara cheie) ====")
+    print("\n==== HYPE MARKET DATA (public, no key) ====")
     price = mkt.get_current_price(HYPE)
     print(f"  get_current_price(HYPEUSDC) = {price}")
     check("valid SPOT price (>0)", isinstance(price, (int, float)) and price and price > 0,
@@ -61,16 +61,16 @@ def main():
     n = len(hist) if hist else 0
     print(f"  get_price_history(HYPEUSDC, 3h): {n} puncte")
     if hist:
-        print(f"    primul={hist[0]}  ultimul={hist[-1]}")
+        print(f"    first={hist[0]}  last={hist[-1]}")
     asc = bool(hist) and all(hist[i]["timestamp"] <= hist[i + 1]["timestamp"]
                              for i in range(len(hist) - 1))
     pos = bool(hist) and all(p["price"] > 0 for p in hist)
-    check("history granulara, ascendenta, preturi>0", bool(hist) and asc and pos,
+    check("the history is granular, ascending, with prices>0", bool(hist) and asc and pos,
           f"n={n} asc={asc} pos={pos}")
     if price and hist:
         last = hist[-1]["price"]
         near = abs(last - price) / price < 0.10
-        check("ultimul close ~ pretul curent (<10%)", near,
+        check("the last close ~ the current price (<10%)", near,
               f"close={last} price={price}")
 
     print("\n==== CONT SPOT HYPE (citire) ====")
@@ -87,7 +87,7 @@ def main():
     print(f"  get_orders BUY={len(buys)} SELL={len(sells)} (ultimele {MAXAGE//86400} zile, SPOT)")
     shape_ok = all(set(("side", "price", "qty", "timestamp")) <= set(o) for o in (buys + sells))
     sides_ok = all(o["side"] == "BUY" for o in buys) and all(o["side"] == "SELL" for o in sells)
-    check("ordine normalizate {side,price,qty,timestamp}", shape_ok)
+    check("orders normalised to {side,price,qty,timestamp}", shape_ok)
     check("side filtrat corect (BUY/SELL)", sides_ok)
     for o in (buys[:2] + sells[:2]):
         print(f"    {o['side']} px={o['price']} qty={o['qty']} ts={o['timestamp']}")
@@ -103,28 +103,28 @@ def main():
           avg_buy == 0.0 or (price and 0.2 * price <= avg_buy <= 5 * price),
           f"avg_buy={avg_buy} price={price}")
 
-    print("\n==== DECIZIE simulata (ca monitor_price_and_trade, FARA plasare) ====")
+    print("\n==== A simulated DECISION (like monitor_price_and_trade, WITHOUT placing) ====")
     if buys and price:
         last_buy = sorted(buys, key=lambda x: x["timestamp"], reverse=True)[0]["price"]
         inc = (price - last_buy) / last_buy
-        print(f"  ultimul buy={last_buy}  pret={price}  variatie={inc*100:+.2f}%")
+        print(f"  last buy={last_buy}  price={price}  change={inc*100:+.2f}%")
         gain, lost = 0.092, 0.049
         if inc >= 0.17:
-            decizie = "HARD-TP (vinde proportie, indiferent de trend)"
+            decision = "HARD-TP (sell a fraction, regardless of the trend)"
         elif inc > gain:
-            decizie = "gain above threshold -> sell ONLY if the trend is NOT up"
+            decision = "gain above threshold -> sell ONLY if the trend is NOT up"
         elif (last_buy - price) / last_buy > lost:
-            decizie = "loss above threshold -> sell ONLY if the trend is NOT up"
+            decision = "loss above threshold -> sell ONLY if the trend is NOT up"
         else:
-            decizie = "nimic interesant"
-        print(f"  -> decizie: {decizie}")
+            decision = "nothing interesting"
+        print(f"  -> decision: {decision}")
     else:
         print("  (no recent SPOT buys or no price — no sell decision)")
 
     print("\n==== ORDER GATE: place_order must be DRY ====")
     os.environ.pop("HL_LIVE_ORDERS", None)   # asiguram DRY pt test
     res = mkt.place_order(HYPE, "SELL", price or 1.0, 0.0001)
-    check("place_order(HYPEUSDC) DRY -> None (niciun ordin real)", res is None, repr(res))
+    check("place_order(HYPEUSDC) DRY -> None (no real order)", res is None, repr(res))
 
     print("\n" + "=" * 60)
     if failures:

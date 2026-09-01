@@ -3,14 +3,14 @@ Tests for the ADAPTIVE re-entry threshold in the spot DCA engine (23 Jul).
 
 Context: investigat in offline/research/kraken_adaptive_thresholds/ — pragul adaptiv
 (K_REENTRY * vol_1h) bate pragul fix pe date reale (HYPEUSD, ~30 zile: TOTAL
-+3.26% vs +2.20%). Promovat la decizie reala prin StratParams.reentry_adaptive
-(implicit False — activat explicit via STRAT_REENTRY_ADAPTIVE=true), cu
++3.26% versus +2.20%). Promoted to a real decision through StratParams.reentry_adaptive
+(False by default — enabled explicitly through STRAT_REENTRY_ADAPTIVE=true), with
 fail-safe onto the fixed threshold when volatility cannot be computed (warm-up).
 
 Acoperire:
-  - _effective_reentry_drop_pct(): fix cand reentry_adaptive=False (mereu,
+  - _effective_reentry_drop_pct(): fixed when reentry_adaptive=False (always,
     regardless of price history); falls back to fixed when adaptive=True but
-    warm-up (<20 puncte); adaptiv cand exista destul istoric.
+    warm-up (<20 points); adaptive once there is enough history.
   - The re-entry block in step(): uses the EFFECTIVE threshold (not always the fixed one).
 """
 import os
@@ -75,7 +75,7 @@ class TestEffectiveReentryDropPct(unittest.TestCase):
 
     def test_adaptive_uses_volatility_when_enough_history(self):
         s = _make_strategy(reentry_adaptive=True, reentry_drop_pct=2.2)
-        # 30 de puncte, la 120s distanta, cu o mica variatie ciclica -> volatilitate nenula
+        # 30 points, 120s apart, with a small cyclical variation -> a non-zero volatility.
         import random
         random.seed(42)
         price = 100.0
@@ -122,7 +122,7 @@ class TestReentryGateUsesEffectivePct(unittest.TestCase):
         s.s["qty"] = 0.0
         # price 97.0 < fixed threshold (97.8) -> the re-entry must be allowed
         s.step(97.0)
-        self.assertTrue(s._has_open("buy"), "reintrarea trebuia permisa (pret sub pragul fix)")
+        self.assertTrue(s._has_open("buy"), "the re-entry should have been allowed (the price is below the fixed threshold)")
 
 
 class TestStopAwareReentry(unittest.TestCase):
@@ -146,7 +146,7 @@ class TestStopAwareReentry(unittest.TestCase):
         s.s["last_sell_price"] = 51.19
         s.s["last_exit_kind"] = "STOP"
         s.s["sl_low"] = 51.19
-        s.step(50.0)                                  # inca scade -> urmareste minimul, nu intra
+        s.step(50.0)                                  # Still falling -> it tracks the low, it does not enter.
         self.assertFalse(s._has_open("buy"))
         self.assertEqual(s.s["sl_low"], 50.0)
         s.step(50.8)                                  # +1.6% de la minim 50 -> bounce atins
@@ -158,7 +158,7 @@ class TestStopAwareReentry(unittest.TestCase):
         s.s["qty"] = 0.0
         s.s["last_sell_price"] = 100.0
         s.s["last_exit_kind"] = "TP"
-        s.step(98.5)                                  # 98.5 > prag 97.8 -> blocat (regula veche)
+        s.step(98.5)                                  # 98.5 > the threshold of 97.8 -> blocked (the old rule).
         self.assertFalse(s._has_open("buy"))
         s.step(97.0)                                  # 97.0 < 97.8 -> reintra
         self.assertTrue(s._has_open("buy"))
@@ -191,7 +191,7 @@ class TestTrailingTakeProfit(unittest.TestCase):
         self.assertEqual(s.s["trail_peak"], 105.5)
         self.assertFalse(s._has_open("sell"))
 
-        s.step(102.0)       # pullback 3.32%; este sub TP, dar trailing-ul e deja armat
+        s.step(102.0)       # A pullback of 3.32%; it is below the TP, but the trailing is already armed.
         sell = s._find_open("sell")
         self.assertIsNotNone(sell, "the armed trailing must still exit after falling back below the TP")
         self.assertEqual(sell["kind"], "TP")
@@ -216,13 +216,13 @@ class TestTrailingTakeProfit(unittest.TestCase):
             protected = s.s["trail_stop"]
             self.assertAlmostEqual(protected, 104.41)
 
-            # Volatilitatea creste si trailing-ul adaptiv s-ar largi la 3%.
+            # The volatility rises and the adaptive trailing would widen to 3%.
             # The floor already earned must not be lowered to 102.82.
             s.step(104.0)
 
         self.assertEqual(s.s["trail_stop"], protected)
         sell = s._find_open("sell")
-        self.assertIsNotNone(sell, "floor-ul ratchetat trebuie sa declanseze iesirea")
+        self.assertIsNotNone(sell, "the ratcheted floor must trigger the exit")
         self.assertTrue(sell["market"])
         self.assertEqual(sell["kind"], "TP")
 

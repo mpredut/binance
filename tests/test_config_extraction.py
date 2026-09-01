@@ -1,15 +1,15 @@
 """
-Teste CONSOLIDATE pt extragerea constantelor in fisiere de config (28 iul —
-unificate din 4 fisiere aproape identice: test_{tradeall,monitortrades,rtrade,
+CONSOLIDATED tests for extracting the constants into config files (28 Jul —
+unified from 4 nearly identical files: test_{tradeall,monitortrades,rtrade,
 assetguardian}_config_extraction.py, ~56 teste sparse -> table-driven aici).
 
 The intent is PRESERVED in full for the legacy modules and strict for AssetGuardian:
   - DEFAULTS: the values loaded from config are the expected versioned ones;
-    AssetGuardian nu mai are fallback-uri ascunse in cod.
+    AssetGuardian no longer has hidden fallbacks in the code.
   - OVERRIDE: setarea variabilei de mediu + reload chiar schimba valoarea
     (the override mechanism really works, not just apparently).
-  - Specific per modul: siguranta importului (rtrade/assetguardian NU pornesc
-    bucla live la import), cod mort eliminat (monitortrades SYMBOL_PARAMS),
+  - Per-module specifics: import safety (rtrade/assetguardian do NOT start
+    the live loop on import), dead code removed (monitortrades SYMBOL_PARAMS),
     asimetria BUY/SELL pastrata (rtrade).
 """
 import importlib
@@ -26,12 +26,12 @@ import monitortrades as mt
 import rtrade as rt
 import assetguardian as ag
 
-# Valori calculate (identice cu ce faceau fisierele originale).
+# Computed values (identical to what the original files did).
 _PC_SMALL = u.calculate_difference_percent(60000, 60000 - 310)
 _PC_BIG = u.calculate_difference_percent(97000, 95000 - 377)
 _RT_ADJ = round(u.calculate_difference_percent(60000, 60000 - 380) / 100, 4)
 
-# (modul, atribut, valoare_default_asteptata = vechea valoare hardcodata)
+# (module, attribute, expected_default_value = the old hardcoded value)
 DEFAULTS = [
     (ta, "TREND_TO_BE_OLD_SECONDS", 60 * 60 * 1.9),
     (ta, "PRICE_CHANGE_THRESHOLD_EUR", _PC_SMALL),
@@ -124,7 +124,7 @@ OVERRIDES = [
 
 
 class TestConfigDefaults(unittest.TestCase):
-    """Fiecare constanta extrasa are ca DEFAULT exact valoarea veche hardcodata."""
+    """Every extracted constant has as its DEFAULT exactly the old hardcoded value."""
 
     def test_defaults_match_old_hardcoded_values(self):
         for module, attr, expected in DEFAULTS:
@@ -152,16 +152,16 @@ class TestConfigOverrides(unittest.TestCase):
 
 
 class TestModuleSpecifics(unittest.TestCase):
-    """Verificari specifice per modul (nu se preteaza la tabel)."""
+    """Per-module checks (they do not fit the table)."""
 
     def test_rtrade_import_does_not_start_live_bot(self):
-        # rtrade rula INAINTE bot.run() (bucla LIVE) neconditionat la import;
-        # mutat sub __main__ -> importul trebuie sa fie sigur.
+        # rtrade used to run bot.run() (the LIVE loop) unconditionally on import;
+        # moved under __main__ -> the import must be safe.
         self.assertFalse(hasattr(rt, "bot"),
                          "importing rtrade must not instantiate or start the bot")
 
     def test_assetguardian_import_does_not_run_forever(self):
-        self.assertTrue(hasattr(ag, "run_forever"))   # exista, dar guard-ul __main__ nu l-a rulat
+        self.assertTrue(hasattr(ag, "run_forever"))   # It exists, but the __main__ guard did not run it.
 
     def test_assetguardian_has_no_redundant_drop_parameter(self):
         self.assertFalse(hasattr(ag, "TARGET_DROP_PERCENT"))
@@ -242,8 +242,8 @@ class TestModuleSpecifics(unittest.TestCase):
             importlib.reload(ag)
 
     def test_monitortrades_dead_symbol_params_removed(self):
-        # SYMBOL_PARAMS (linii per-simbol din monitortrades.conf) era parsat dar
-        # niciodata citit — sursa reala e instruments.conf. Eliminat.
+        # SYMBOL_PARAMS (the per-symbol lines from monitortrades.conf) was parsed but
+        # never read — the real source is instruments.conf. Removed.
         self.assertFalse(hasattr(mt, "SYMBOL_PARAMS"))
 
     def test_monitortrades_global_hardtp_fallbacks_loaded(self):
