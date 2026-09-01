@@ -30,11 +30,12 @@ import json
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from kraken_common import (load_dotenv, log, required_env, required_float_env,
+from kraken_common import (load_env_stack, log, required_env, required_float_env,
                            single_instance)
 from kraken_client import KrakenClient
 
-load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.env"))
+_HERE = os.path.dirname(os.path.abspath(__file__))
+load_env_stack(os.path.join(_HERE, ".env"))
 
 # ── mandatory configuration ──────────────────────────────────────────────────
 PAIRS = [p for p in required_env("KRAKEN_CACHE_PAIRS").split(",") if p]
@@ -211,8 +212,6 @@ def ws_loop(client):
 
 def main():
     single_instance("kraken_cachemanager")   # one instance/fetcher minimizes rate-limit usage
-    load_dotenv(".env")
-    load_dotenv("config.env")
     # The cache manager's dedicated _CACHE key has its own nonce sequence, separate from
     # _BOT/_TRAIL trading processes. Kraken requires strictly increasing nonces per key,
     # so this avoids collisions. Fall back to _BOT if _CACHE is absent.

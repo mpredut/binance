@@ -31,7 +31,7 @@ import os
 import sys
 import time
 
-from kraken_common import (load_dotenv, log, float_env, required_bool_env,
+from kraken_common import (load_dotenv, load_env_stack, log, float_env, required_bool_env,
                            required_env, required_float_env, single_instance)
 from kraken_client import KrakenClient, KrakenError
 from notify import notify
@@ -56,8 +56,10 @@ STATE_FILE = os.path.join(_HERE, "trailing_state.json")
 CACHE_TREND = os.path.join(_ROOT, "cachedb", "cache_instant_trend.json")
 
 
-# Load KEY=VALUE configuration from kraken/trailing.conf; external environment values
-# override it for ad-hoc testing. Use the shared load_dotenv implementation.
+# Match the launch order used by every Kraken process: real environment, secrets,
+# versioned policy. trailing.conf is then a dedicated policy layer that fills only
+# trailing-specific gaps.
+load_env_stack(os.path.join(_HERE, ".env"))
 load_dotenv(os.path.join(_HERE, "trailing.conf"))
 
 # Wide threshold per asset (crash circuit breaker, not a profit tool) and sale pair.
@@ -264,8 +266,6 @@ class KrakenTrailing:
 
 
 def main() -> int:
-    load_dotenv(os.path.join(_HERE, ".env"))
-    load_dotenv(os.path.join(_HERE, "config.env"))
     ap = argparse.ArgumentParser(description="Trailing stop disjunctor pe Kraken (cu re-buy).")
     ap.add_argument("--once", action="store_true")
     ap.add_argument("--status", action="store_true")

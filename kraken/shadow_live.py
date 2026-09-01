@@ -57,11 +57,15 @@ LOG_DIR = os.path.join(ROOT, "logs", "shadow_live")
 def _load_runtime_config(env_path: str | None = None,
                          config_path: str | None = None) -> None:
     """Reproduce kraken_bot load order exactly: .env takes priority, config fills gaps."""
-    from kraken_common import load_dotenv
+    from kraken_common import load_dotenv, load_env_stack
     env_path = env_path or os.environ.get("ENV_FILE", DEFAULT_ENV)
     config_path = config_path or os.path.join(os.path.dirname(env_path) or ".", "config.env")
-    load_dotenv(env_path)
-    load_dotenv(config_path)
+    if os.path.dirname(os.path.abspath(config_path)) == os.path.dirname(os.path.abspath(env_path)):
+        load_env_stack(env_path, os.path.basename(config_path))
+    else:
+        # Preserve the explicit two-path test/analysis API when files are not adjacent.
+        load_dotenv(env_path)
+        load_dotenv(config_path)
 
 
 def _variants(interval: int):

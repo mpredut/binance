@@ -35,10 +35,9 @@ LOG_DIR = os.path.join(ROOT, "logs", "hyperliquid_shadow")
 
 
 def _load_config() -> None:
-    from common import load_dotenv
+    from common import load_env_stack
 
-    load_dotenv(os.path.join(HERE, ".env"))
-    load_dotenv(os.path.join(HERE, "config.env"))
+    load_env_stack(os.path.join(HERE, ".env"))
 
 
 def _variants(interval: int):
