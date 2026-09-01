@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 """
 Experiment 2 (izolat, NU modifica tradeall.py pe disc) — cerere user: "poti sa vii
-cu o idee unde/ce sa modific sau sa faci teste si cu gradient>0 si slope_big<0,
-sa le elimini complet sau sa le modifici in diverse forme si sa rulezi test?"
+with an idea of where/what to change, or run tests with gradient>0 and slope_big<0,
+remove them entirely or change them in various ways and run a test?"
 
 Din Experiment 1 (vezi memoria tradeall-trigger-gate-investigation.md): relaxarea
-pragurilor de CONFIRMARE (24, expirare, "trend vechi" 1.9h) NU creeaza oportunitati
+the CONFIRMATION thresholds (24, expiry, "stale trend" 1.9h) does NOT create
 noi — doar prelungeste refirerea unui trend deja pornit. Adevaratul gate e
-PORNIREA trendului (start_trend, tradeall.py:389/410), care se intampla DOAR la
+the trend START (start_trend, tradeall.py:389/410), which happens ONLY at
 divergenta gradient(fereastra mica, semn -1/0/+1) vs slope_big(fereastra mare,
-aproape mereu EXACT 0 — vezi WindowAnalyzer.check_price_change, nonzero doar cand
+almost always EXACTLY 0 — see WindowAnalyzer.check_price_change, nonzero only when
 pretul trece PRICE_CHANGE_THRESHOLD_BIG_EUR fata de min/max ferestrei).
 
 Testam 4 variante ale CONDITIEI DE START (logic(), liniile ~375/396 in tradeall.py),
-prin monkeypatch pe ta.logic (functie COPIATA aici, modificata doar la conditia de
+through a monkeypatch on ta.logic (a function COPIED here, modified only at the
 start — restul functiei e IDENTIC cu originalul citit direct din tradeall.py):
 
   V0 baseline      : gradient>0 and slope_big<0   (divergenta, ca azi)
   V1 doar_gradient : gradient>0                    (ignora complet slope_big la start)
-  V2 acord         : gradient>0 and slope_big>0    (ACORD intre ferestre, nu divergenta)
+  V2 agreement     : gradient>0 and slope_big>0    (AGREEMENT between windows, not divergence)
   V3 prag_mic      : conditia ramane divergenta (ca V0), dar PRICE_CHANGE_THRESHOLD_BIG_EUR
                       e micsorat de 10x (monkeypatch pe ta.PRICE_CHANGE_THRESHOLD_BIG_EUR),
                       ca slope_big sa nu mai fie aproape mereu 0

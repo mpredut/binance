@@ -2,12 +2,12 @@
 """
 sweep_k_multiplier.py — inainte de a promova pragul adaptiv de reintrare (sau
 DCA) la decizie reala, testeaza daca multiplicatorul K curent (K_REENTRY=2.0,
-K_DCA=1.0, hardcodate in shadow_signals.py) e chiar cel mai bun, sau daca un
+K_DCA=1.0, hardcoded in shadow_signals.py) really is the best, or whether a
 K mai mare/mai mic ar da un rezultat superior — cerere user dupa rezultatele
 initiale (reintrare adaptiv castiga cu K=2.0, DCA adaptiv pierde cu K=1.0).
 
-Refoloseste EXACT motoarele de simulare din verify_adaptive_dca.py si
-verify_adaptive_reentry.py (nimic reimplementat) — doar variaza K inainte de
+It reuses EXACTLY the simulation engines from verify_adaptive_dca.py and
+verify_adaptive_reentry.py (nothing reimplemented) — it only varies K before
 a inmulti cu vol_1h.
 
 Rulare:  python3 offline/research/kraken_adaptive_thresholds/sweep_k_multiplier.py

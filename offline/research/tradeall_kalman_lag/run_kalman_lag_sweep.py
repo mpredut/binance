@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
 Investigheaza daca KALMAN_SAMPLE_SEC=60 (rata de esantionare a filtrului Kalman
-din shadow_signals.py, care alimenteaza KALMAN-PRIMAR + gate-ul din tradeall.py)
+from shadow_signals.py, which feeds the PRIMARY KALMAN plus the gate in tradeall.py)
 introduce o intarziere prea mare pt miscari rapide de pret (23 iul 2026).
 
 Context: analiza unui episod REAL (BTC, 23 iul, 10:10:13-10:12:47) a aratat ca
 o scadere de -0.53% s-a produs aproape integral INAINTE ca Kalman sa confirme
-"DOWN" (~90% din miscare deja consumata cand a tranzitionat), iar "DOWN" a
+"DOWN" (~90% of the move already consumed by the time it transitioned), and "DOWN"
 durat doar 62s inainte sa revina la "FLAT" chiar la minimul local -- exact
 inainte de o revenire a pretului (order_outcomes_2026-07-23.log confirma o
 incercare reala de SELL "kalman_primary_down" la acel moment, refuzata
@@ -22,7 +22,7 @@ compromis (latenta vs. zgomot) pe date REALE, inainte de orice schimbare.
 
 Refoloseste modul kalman_primary DEJA EXISTENT si validat in
 offline/backtests/tradeall.py (Kalman conduce direct BUY/SELL la tranzitii, prin
-broker.place_order_smart/sell_all) -- nu se construieste nicio bucla noua,
+broker.place_order_smart/sell_all) -- no new loop is built,
 doar se monkeypatch-uieste shadow_signals.KALMAN_SAMPLE_SEC inaintea fiecarei
 rulari (functiile citesc global-ul la fiecare apel, deci schimbarea are efect
 imediat, fara sa fie nevoie de reload de modul).
@@ -33,8 +33,8 @@ offline/research/tradeall_adaptive_thresholds/. Sweep pe KALMAN_SAMPLE_SEC, comp
 pe PnL net (kalman_primary) + numarul de tranzitii Kalman logate (proxy
 direct pt zgomot/palpait) + buy&hold pe acelasi interval.
 
-NU modifica tradeall.py, offline/backtests/tradeall.py sau shadow_signals.py pe disc --
-doar monkeypatch in memorie, pt durata scriptului. Nu ruleaza niciodata
+It does NOT modify tradeall.py, offline/backtests/tradeall.py or shadow_signals.py on disk --
+only an in-memory monkeypatch, for the lifetime of the script. It never runs
 impotriva retelei reale.
 """
 import os

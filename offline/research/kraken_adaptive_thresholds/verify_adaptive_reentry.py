@@ -4,20 +4,20 @@ verify_adaptive_reentry.py — merita promovat pragul de REINTRARE adaptiv
 (shadow, K_REENTRY * vol_1h — vezi _shadow_reentry_line din kraken/strategy.py,
 azi DOAR log) la decizie REALA, in locul pragului FIX (STRAT_REENTRY_DROP_PCT)?
 
-Gasit in timpul investigatiei: NICI backtest.py, NICI backtest_adaptive.py nu
-modelau bariera de reintrare — dupa ce o pozitie se inchide (take-profit sau
+Found during the investigation: NEITHER backtest.py NOR backtest_adaptive.py
+modelled the re-entry barrier — once a position closes (take-profit or
 stop-loss), simulatoarele originale reintrau IMEDIAT la urmatoarea bara, fara
 nicio asteptare. Strategia REALA (kraken/strategy.py, functia step()) asteapta
 explicit ca pretul sa scada sub last_sell_price*(1-reentry_pct/100) (cu
 toleranta are_close) inainte sa reintre.
 
-23 iul: mecanismul (scris initial DOAR aici, ca sa nu bage in unealta oficiala
+23 Jul: the mechanism (written at first ONLY here, so as not to push into the
 ceva netestat) a fost MERGE-uit inapoi in backtest.simulate() ca parametru
 OPTIONAL `reentry_arr` (default None = comportamentul vechi, neschimbat) —
-motivul e sa nu mai existe DOUA copii ale motorului DCA/TP/SL care pot diverge
-in timp (vezi offline/research/BACKTEST_CANDIDATES.md si discutia din sesiune despre
-unificarea backtest-urilor). Acest script ramane un wrapper subtire peste
-unealta oficiala, cu valorile REALE din kraken/config.env — nu mai
+the reason is to stop having TWO copies of the DCA/TP/SL engine that can drift
+apart over time (see offline/research/BACKTEST_CANDIDATES.md and the session discussion
+about unifying the backtests). This script stays a thin wrapper over the
+official tool, with the REAL values from kraken/config.env — it no longer
 redefineste motorul de simulare.
 
 Rulare:  python3 offline/research/kraken_adaptive_thresholds/verify_adaptive_reentry.py
@@ -41,7 +41,7 @@ REAL = dict(
     entry=650, dca=325, disc=0.8, tp=5.0, maxdca=10, budget=3900, fee=0.26, sl=7.0,
     drop=1.0,                     # STRAT_DCA_DROP_PCT — fix, neschimbat (nu e subiectul testului asta)
     reentry_fallback=2.2,         # STRAT_REENTRY_DROP_PCT actual
-    reentry_tolerance_pct=0.05,   # STRAT_REENTRY_TOLERANCE_PCT actual (trecut acum prin P, nu global)
+    reentry_tolerance_pct=0.05,   # the current STRAT_REENTRY_TOLERANCE_PCT (now passed through P, not global)
 )
 REENTRY_TOLERANCE_PCT = REAL["reentry_tolerance_pct"]  # pastrat ca nume, folosit doar in printul de mai jos
 

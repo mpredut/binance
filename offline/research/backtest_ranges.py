@@ -9,7 +9,7 @@ INI, monitortrades.conf):
     # BACKTEST: 5.0, 6.0, 7.0, 8.0, 9.0
     mt.gain = 7.0
 
-Genereic pe format: NU stie nimic despre .env vs INI vs monitortrades.conf —
+Generic over formats: it knows nothing about .env vs INI vs monitortrades.conf —
 cauta doar linia de comentariu "# BACKTEST: ..." IMEDIAT deasupra unei linii
 "cheie = valoare" / "cheie=valoare" (whitespace optional in jurul lui "="),
 via un regex simplu pe cheie. Comentariul trebuie sa fie chiar pe linia
@@ -23,8 +23,8 @@ aceleasi chei (ex. mt.gain apare atat in [BINANCE_BTC] cat si in
 FARA sectiuni (.env, monitortrades.conf) intorc cheia neschimbata.
 
 De ce NU YAML/JSON separat (decizie explicita user): rangul de test traieste
-LANGA valoarea reala, in acelasi fisier pe care un om il citeste oricum —
-nu intr-un sidecar separat care poate deriva tacut de valoarea reala.
+NEXT TO the real value, in the same file a human reads anyway —
+not in a separate sidecar that can silently drift from the real value.
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def scan_backtest_ranges(path: str) -> Dict[str, List[str]]:
     """Intoarce {cheie: [valori_ca_string]} pt fiecare linie "# BACKTEST: ..."
     gasita imediat deasupra unei linii cheie=valoare, in `path`. Chei din
     fisiere cu sectiuni [NUME] (instruments.conf) sunt prefixate cu sectiunea
-    ("BINANCE_BTC.mt.gain"). [] daca fisierul lipseste sau n-are nicio
+    ("BINANCE_BTC.mt.gain"). [] if the file is missing or has no
     adnotare de acest tip."""
     out: Dict[str, List[str]] = {}
     if not os.path.exists(path):

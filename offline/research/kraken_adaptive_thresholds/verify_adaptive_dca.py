@@ -6,11 +6,11 @@ kraken/strategy.py) la decizie REALA, in locul pragului FIX (STRAT_DCA_DROP_PCT)
 
 Refoloseste EXACT motorul de simulare din kraken/backtest_adaptive.py
 (simulate_variant/trailing_vol_series/fetch_candles) — nu rescrie logica.
-SARE peste partea Chronos (model ML — ar incarca memorie pe masina cu botii
+It SKIPS the Chronos part (an ML model — it would load memory on the machine
 reali activi, inutil pt aceasta intrebare specifica: fix vs shadow).
 
-Parametri = valorile REALE din kraken/config.env (NU default-urile scriptului
-original, care sunt ghicite/vechi — exact greseala prinsa intr-o sesiune
+Parameters = the REAL values from kraken/config.env (NOT the defaults of the
+original script, which are guessed or stale — exactly the mistake caught in a
 anterioara: prima rulare cu parametri gresiti a aratat un castig mare pt
 adaptiv, apoi complet inversat cu valorile reale).
 
@@ -31,7 +31,7 @@ import shadow_signals as ss
 PAIR = "HYPEUSD"
 INTERVAL = 60  # minute per bara (1h) — rezolutia formulei vol_1h_pct
 
-# Valori REALE din kraken/config.env (NU default-urile scriptului!)
+# REAL values from kraken/config.env (NOT the script defaults!)
 REAL = dict(
     entry=650, dca=325, disc=0.8, tp=5.0, maxdca=10, budget=3900, fee=0.26, sl=7.0,
     drop_fallback=1.0,   # STRAT_DCA_DROP_PCT actual

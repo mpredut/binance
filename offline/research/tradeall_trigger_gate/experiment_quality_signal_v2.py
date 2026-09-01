@@ -7,13 +7,13 @@ mentiunea ca tb partial limitat. sa testez pe mult mai multe zile din nou?"
 Doua schimbari fata de Experimentul 5:
 
 1. COOLDOWN REPARAT (limitat, nu nelimitat): Experimentul 5 a aratat ca
-   "reincearca doar daca nu a fost inca CONFIRMAT" e insuficient — fara pozitie
+   "retry only if not yet CONFIRMED" is insufficient — with no position
    de vandut, un SELL respins se reincerca la FIECARE tick (16683/3962
    incercari inutile intr-o saptamana). Fix: adaugat MIN_RETRY_INTERVAL_SEC
-   intre incercari BLOCATE (nu si intre cele confirmate — o executie reusita
+   between BLOCKED attempts (not between confirmed ones — a successful execution
    tot blocheaza pana la schimbarea de regim, ca inainte). Practic: "incearca,
-   daca esueaza asteapta macar X minute inainte sa reincerci", nu "niciodata"
-   si nu "la fiecare tick".
+   if it fails, wait at least X minutes before retrying", not "never"
+   and not "on every tick".
 
 2. ISTORIC MULT MAI LUNG: in loc de arhiva densa de 7 zile (cache24, ~1s/tick),
    folosim istoricul SPARS (`cache_price_{symbol}.jsonl`, ~7 min/tick, 329 de
@@ -43,7 +43,7 @@ import tradeall as ta
 
 STATS = {}
 
-MIN_RETRY_INTERVAL_SEC = 1800.0   # 30 min intre incercari BLOCATE (nu si intre cele confirmate)
+MIN_RETRY_INTERVAL_SEC = 1800.0   # 30 min between BLOCKED attempts (not between confirmed ones)
 
 
 class LongTrendTracker:

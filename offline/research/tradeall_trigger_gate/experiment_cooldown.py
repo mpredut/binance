@@ -8,7 +8,7 @@ producea overtrading catastrofal FARA cooldown).
 
 Intrebare: cooldown-ul elimina overtrading-ul (fees/refire) pastrand totusi
 starturile suplimentare ca oportunitati distincte utile, sau acele starturi
-suplimentare erau oricum zgomot (multe, dar fara valoare) chiar si cu cooldown?
+extra ones were noise anyway (many, but worthless) even with a cooldown?
 
 Variante (pe BTC 2 zile si TAO 12h, aceleasi ferestre ca Experimentele 1-2):
   V0_baseline_cooldown        : conditia ACTUALA (divergenta) + cooldown fire-once
@@ -19,7 +19,7 @@ Variante (pe BTC 2 zile si TAO 12h, aceleasi ferestre ca Experimentele 1-2):
 Cooldown-ul: un singur flag per TrendState per directie (_fired_up/_fired_down),
 resetat la fiecare start_trend() nou; orice bloc de FIRE (trend_confirmed,
 consistent_or_old, slope>=5.1 etc.) verifica flagul INAINTE sa cheme _fire_order
-si il seteaza dupa. Deci: cel mult UN ordin real per instanta de trend, indiferent
+and sets it afterwards. So: at most ONE real order per trend instance, regardless
 cate tick-uri ramane validat.
 """
 import os
@@ -85,7 +85,7 @@ def make_instrumented(tag):
 def make_logic_cooldown(start_up_cond, start_down_cond, label):
     """Copie a logic() din tradeall.py, cu DOUA variatii: conditia de start
     (parametrizata, ca in Experimentul 2) SI un cooldown fire-once per directie
-    per instanta de trend (gateaza TOATE blocurile de fire, nu doar unul)."""
+    per trend instance (it gates ALL firing blocks, not just one)."""
     def logic_variant(win, enable, symbol, gradient, slope, trend_state, current_price):
         d = 14
         h = 24

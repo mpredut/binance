@@ -2,7 +2,7 @@
 """
 Experiment 7 (izolat, NU modifica tradeall.py) — raspuns la 3 intrebari user
 dupa Experimentul 6:
-  1. "merita comis DOAR cooldown-ul (fara sa ating pragurile)?"
+  1. "is it worth committing ONLY the cooldown (without touching the thresholds)?"
   2. "toate experimentele arata ca varianta curenta e cea mai buna?"
   3. "sa inaspresc parametrii are sens de test?"
 
@@ -15,7 +15,7 @@ Aici testam, pe intreg istoricul disponibil (329 zile, cache_price_*.jsonl):
                                 confirmata + interval minim intre reincercari,
                                 varianta finala din Experimentul 6). Raspunde
                                 direct la intrebarea 1: ce s-ar intampla daca am
-                                comite DOAR cooldown-ul, fara nicio alta schimbare?
+                                commit ONLY the cooldown, with no other change?
 
   B. "tighten_confirm48_cooldown" : ca mai sus, dar pragul de confirmari pt
                                 is_trend_consistent_validated() DUBLAT (24->48)
@@ -25,7 +25,7 @@ Aici testam, pe intreg istoricul disponibil (329 zile, cache_price_*.jsonl):
                                 prag mai greu de atins ar putea evita intreg
                                 episodul problematic.
 
-logic() e o copie FIDELA a functiei din tradeall.py (toate blocurile, valorile
+logic() is a FAITHFUL copy of the function in tradeall.py (every block, the
 5.1 si TREND_TO_BE_OLD_SECONDS neschimbate) — SINGURA diferenta fata de codul
 real e cooldown-ul adaugat la fiecare punct unde s-ar chema _fire_order, plus
 (doar pt varianta B) suprascrierea is_trend_consistent_validated().
@@ -113,7 +113,7 @@ def make_instrumented(tag, confirm_threshold_override=None):
 
 def make_logic_real_with_cooldown(tag, stats):
     """Copie FIDELA a logic() din tradeall.py (liniile 356-471 la 21-22 iul) —
-    NIMIC schimbat in blocurile de decizie, DOAR cooldown adaugat la fiecare
+    NOTHING changed in the decision blocks, ONLY a cooldown added to each
     punct de fire (executie confirmata + interval minim intre reincercari)."""
     def logic_variant(win, enable, symbol, gradient, slope, trend_state, current_price):
         d = 14
@@ -204,7 +204,7 @@ def run_variant(tag, confirm_threshold_override, symbol, start_ts, end_ts):
     # aproape instant, ca artefact al raritatii datelor, nu al pietei reale
     # (verificat: smoke test 12h -> confirms=0, expires=1 imediat). De-asta
     # folosim arhiva DENSA (cache24, ~1s/tick, 7 zile) — singura sursa
-    # compatibila cu aceasta mecanica, chiar daca esantionul e mai mic decat
+    # compatible with this mechanism, even though the sample is smaller than
     # Experimentul 6 (acolo semnalul era recalculat rar, 30min, compatibil cu
     # sparse).
     t0 = time.time()

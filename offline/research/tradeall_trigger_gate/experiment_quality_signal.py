@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Experiment 5 (izolat, NU modifica tradeall.py) — cerere user, dupa Experimentele
-1-4: "daca sunt pe un trend general mai mare de crestere si cumpar, ar trebui
-sa fiu in castig, nu? testeaza asta."
+Experiment 5 (isolated, it does NOT modify tradeall.py) — a user request, after
+Experiments 1-4: "if I am on a larger general uptrend and I buy, I should be
+in profit, right? test that."
 
-Experimentele 1-4 au aratat ca gradient/slope_big/gradient_big sunt toate
+Experiments 1-4 showed that gradient/slope_big/gradient_big are all
 regresii pe ferestre de MINUTE-ORE, recalculate la FIECARE TICK — deci
 zgomotoase la aceeasi scara de timp, oricat de "mare" suna fereastra (2.5h).
 Niciunul nu era un trend GENUIN de lunga durata.
@@ -12,23 +12,23 @@ Niciunul nu era un trend GENUIN de lunga durata.
 Testam aici un semnal calitativ DIFERIT:
   - LongTrendTracker: regresie liniara pe o fereastra de `window_hours` ore
     (implicit 24h), dar RECALCULATA doar o data la `reeval_sec` (implicit
-    1800s = 30 min), nu la fiecare tick. Asta il face STABIL ore intregi.
+    1800s = 30 min), not on every tick. That makes it STABLE for hours.
   - Cooldown pe EXECUTIE CONFIRMATA (nu pe incercare): "deja am actionat in
-    acest regim" se seteaza DOAR daca _fire_order intoarce un rezultat real
-    (ordin plasat), nu doar pentru ca a fost apelat. Daca o incercare e
-    respinsa (gate Kalman, in live ar fi si weight-limit/buget), NU blocam
+    this regime" is set ONLY if _fire_order returns a real result
+    (an order placed), not merely because it was called. If an attempt is
+    rejected (the Kalman gate; in live also weight limit/budget), we do NOT block
     reincercari viitoare — exact cerinta user din discutia anterioara.
 
-Reguli de trading: BUY cand semnalul e pozitiv (SI n-am mai executat cu succes
-in acest regim), SELL cand e negativ (simetric). Fara TrendState-ul complex
-din tradeall.py (confirm_count/expirare) — acela era parte din problema
+Trading rules: BUY when the signal is positive (AND we have not already executed
+successfully in this regime), SELL when negative (symmetric). Without the complex
+TrendState from tradeall.py (confirm_count/expiry) — that was part of the problem
 (vezi Experimentele 1/3), inlocuit complet aici cu logica de regim de mai sus.
 
-Caveat onest: fara pozitie existenta, un SELL respins de broker (spot, nimic
+An honest caveat: with no existing position, a SELL rejected by the broker (spot,
 de vandut) NU se marcheaza ca "reincercare blocata" separat — va reincerca la
-fiecare tick pana cand semnul se schimba SAU apare o pozitie (dintr-un BUY
-anterior). In acest backtest reincercarile respinse nu costa comision (doar
-in productie ar consuma weight-limit/timp API) — deci nu afecteaza P&L-ul aici,
+every tick until the sign changes OR a position appears (from an earlier
+BUY). In this backtest rejected retries cost no commission (only in
+production would they consume weight limit/API time) — so they do not affect P&L here,
 dar merita mentionat ca simplificare fata de productie.
 """
 import os

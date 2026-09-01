@@ -2,29 +2,29 @@
 """
 Experiment 4 (izolat, NU modifica tradeall.py) — cerere user: "ce reprezinta
 fiecare variabila nu ne ajuta prea mult, as vrea sa folosim intuitia pe
-strategia simpla" — adica: daca ambele ferestre (mica SI mare) sunt de acord
+the simple strategy" — that is: if both windows (small AND large) agree
 asupra DIRECTIEI, folosind aceeasi masura CONTINUA (nu unul continuu + unul
 rar/prag), ar trebui sa fie o strategie sanatoasa de "trend-following pe doua
 orizonturi de timp".
 
 Problema gasita (raspuns la intrebarea despre are_close): slope_big NU e o
 masura continua a directiei — e EXACT 0 (sentinel "nicio miscare mare") pana
-cand pretul trece un prag fix fata de extrema ferestrei (WindowAnalyzer.
+when the price crosses a fixed threshold relative to the window extreme (WindowAnalyzer.
 check_price_change). gradient (fereastra mica) e continuu (aproape niciodata
-exact 0). "Acord" intre ele (gradient>0 si slope_big>0) cere ca un eveniment
+exactly 0). "Agreement" between them (gradient>0 and slope_big>0) requires an event
 RAR (slope_big nenul) sa coincida cu un eveniment ZGOMOTOS (semnul lui
 gradient) — de-asta Experimentul 2 a dat aproape 0 activitate pe acord.
 
 Fix testat aici: inlocuim slope_big cu gradient_big — ACEEASI derivare ca
 gradient (PriceWindow.get_instant_trend(), semn -1/0/+1 dintr-o regresie
 continua), dar calculata pe FEREASTRA MARE in loc de cea mica. Acum "acord"
-inseamna ceva onest: "trendul de scurta durata SI cel de lunga durata sunt
+means something honest: "the short-term AND the long-term trend are
 de acord asupra directiei" — o strategie dual-timeframe clasica, nu o
 coincidenta rara.
 
 Cooldown fire-once (din Experimentul 3) e mereu ACTIV aici — am demonstrat deja
-ca fara el orice crestere de frecventa duce la overtrading catastrofal; nu
-mai testam "fara cooldown" ca sa nu irosim timp pe un rezultat deja cunoscut.
+that without it any frequency increase leads to catastrophic overtrading; we do
+not retest "without cooldown" so as not to waste time on a known result.
 
 Variante (pe BTC 2 zile / TAO 12h, aceleasi ferestre ca Experimentele 1-3):
   V5_dual_timeframe_acord : gradient(mic)>0 SI gradient_big(mare)>0 -> UP
