@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """translation_audit.py — helper for the English translation of comments and docstrings.
 
-Supports the workflow described in docs/COMMENT_TRANSLATION_REMAINING.md: find what
-still has to be translated, then prove an edit touched nothing but prose.
+Two steps: find what still has to be translated, then prove an edit touched nothing but
+prose. The bulk migration is finished; this stays as a guard against regressions.
 
 Subcommands
   scan    Report comment and docstring blocks that still look Romanian, and flag

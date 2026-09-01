@@ -6,11 +6,11 @@
 must be written in English.** This applies to new files and to any line you touch
 in an existing one — no exceptions, in any Claude session.
 
-Parts of this repository still contain Romanian comments: they are legacy, and an
-active migration is translating them (`verify_tools/translation_audit.py`,
-`docs/COMMENT_TRANSLATION_REMAINING.md`). **Do not imitate them.** Matching the
-surrounding style is the usual rule, but here it works against the migration and
-adds new debt to it.
+The migration is done: the live code, the shell scripts, the tests and the documentation
+are English. What remains in Romanian is a short, deliberate list — ntfy alert bodies
+that reach the operator's phone, the detection vocabulary inside
+`verify_tools/translation_audit.py`, and a few identifiers such as `prag`. Anything else
+in Romanian is a regression; **do not imitate it**, translate it.
 
 Useful commands:
 

@@ -1,41 +1,39 @@
-# Trading212 — dataseturi înghețate și baseline live
+# Trading212 — frozen datasets and the live baseline
 
-Data: 2026-08-20
+Date: 2026-08-20
 
-CSV-urile sunt copii canonice Yahoo, fără ultima coadă de lumânări încă în
-formare. Hash-urile și intervalele sunt în `manifest.json`. Configurația fiecărui
-profil este citită direct din `212trading/config.<profile>.env`; runnerul folosește
-același `Strategy.step()` ca live și nu contactează API-ul de ordine T212.
+The CSVs are canonical Yahoo copies, without the trailing tail of candles still forming. The
+hashes and the ranges are in `manifest.json`. Each profile's configuration is read directly
+from `212trading/config.<profile>.env`; the runner uses the same `Strategy.step()` as live and
+never contacts the T212 order API.
 
-## Rezultate
+## Results
 
-| Profil | Date | Central mean/worst/DD | Stress mean/worst/DD | Cicluri central | Verdict |
+| Profile | Data | Central mean/worst/DD | Stress mean/worst/DD | Central cycles | Verdict |
 |---|---|---:|---:|---:|---|
-| NVDA | 501 bare 1d, 2 ani | +0,536% / +0,450% / 0,914% | +0,458% / +0,360% / 1,037% | 9 | baseline pozitiv, numai 3 fold-uri |
-| RGNT | 176 bare 1d, de la listare | -4,771% / -13,778% / 18,579% | -4,771% / -13,778% / 18,579% | 1 | configurația cere reevaluare; dovadă foarte rară |
-| SPCX | 3276 bare 5m, 59 zile | +1,438% / -0,621% / 1,955% | +1,440% / -0,621% / 1,952% | 0 | caracterizare: 3 fold-uri, 0 cicluri, worst-fold negativ |
+| NVDA | 501 bars 1d, 2 years | +0.536% / +0.450% / 0.914% | +0.458% / +0.360% / 1.037% | 9 | a positive baseline, but only 3 folds |
+| RGNT | 176 bars 1d, since listing | -4.771% / -13.778% / 18.579% | -4.771% / -13.778% / 18.579% | 1 | the configuration needs re-evaluation; extremely thin evidence |
+| SPCX | 3276 bars 5m, 59 days | +1.438% / -0.621% / 1.955% | +1.440% / -0.621% / 1.952% | 0 | characterisation: 3 folds, 0 cycles, a negative worst fold |
 
-Central: spread 10bps, slippage MARKET 15bps, maximum 75% fill LIMIT/bară,
-intrabar worst-case. Stress: 20bps, 30bps, maximum 50%, worst-case.
+Central: 10bps spread, 15bps MARKET slippage, at most a 75% LIMIT fill per bar, worst-case
+intrabar. Stress: 20bps, 30bps, at most 50%, worst-case.
 
-Toate profilele declară `STRAT_CURRENCY=USD`: bugetele și cantitățile sunt
-exprimate în USD. Endpointul T212 `/equity/account/info` a confirmat read-only
-`currencyCode=RON`, deci `STRAT_FX_FEE_PCT=0.15` rămâne corect și este inclus în
-baseline. Nu este necesară o serie FX istorică pentru dimensionarea unui buget
-fixat în USD; ea ar deveni necesară dacă bugetele strategiei ar fi exprimate în
-RON/EUR.
+Every profile declares `STRAT_CURRENCY=USD`: the budgets and quantities are expressed in USD.
+The T212 endpoint `/equity/account/info` confirmed read-only that `currencyCode=RON`, so
+`STRAT_FX_FEE_PCT=0.15` remains correct and is included in the baseline. A historical FX
+series is not needed to size a budget fixed in USD; it would become necessary if the
+strategy's budgets were expressed in RON or EUR.
 
-Runnerul include acum un `evidence_gate` care separă explicit problemele de
-eșantion (`folds`, zile de istoric, cicluri închise) de semnalele de risc
-(`negative_worst_fold`). SPCX rămâne `characterization_only_with_risk_flags`:
-fereastra 5m a fost extinsă de la 31 la 59 zile, maximul practic oferit de Yahoo,
-dar activul este recent listat și strategia nu a închis încă niciun ciclu. Media
-pozitivă este în principal mark-to-market al inventarului deschis, nu profit
-realizat; nu justifică schimbarea parametrilor.
+The runner now includes an `evidence_gate` that explicitly separates sample problems
+(`folds`, days of history, closed cycles) from risk signals (`negative_worst_fold`). SPCX
+remains `characterization_only_with_risk_flags`: the 5m window was extended from 31 to 59
+days, the practical maximum Yahoo offers, but the asset was listed recently and the strategy
+has not closed a single cycle yet. The positive mean is mostly mark-to-market on open
+inventory, not realised profit; it does not justify changing the parameters.
 
-Limita furnizorului nu mai taie definitiv istoricul: la refresh, `--seed-dataset`
-unește CSV-ul înghețat cu ultimele 59 zile Yahoo și produce un CSV nou, fără să îl
-suprascrie pe cel vechi. Astfel fereastra SPCX va crește în timp:
+The provider's limit no longer truncates the history permanently: on refresh, `--seed-dataset`
+merges the frozen CSV with the last 59 days from Yahoo and produces a new CSV without
+overwriting the old one. The SPCX window will therefore grow over time:
 
 ```bash
 .venv/bin/python offline/runners/t212_walk_forward_baseline.py \
@@ -43,7 +41,7 @@ suprascrie pe cel vechi. Astfel fereastra SPCX va crește în timp:
   --seed-dataset offline/research/t212_dataset/spcx/datasets/SPCX_5m_1cfe20146366.csv
 ```
 
-## Reproducere
+## Reproduction
 
 ```bash
 .venv/bin/python offline/runners/t212_walk_forward_baseline.py \
@@ -65,5 +63,5 @@ suprascrie pe cel vechi. Astfel fereastra SPCX va crește în timp:
   --partial-fill-ratio 0.75 --intrabar-policy worst_case
 ```
 
-Pentru stress se schimbă la `--spread-bps 20 --market-slippage-bps 30
---partial-fill-ratio 0.50`; datasetul și celelalte opțiuni rămân identice.
+For the stress scenario, switch to `--spread-bps 20 --market-slippage-bps 30
+--partial-fill-ratio 0.50`; the dataset and the other options stay identical.
