@@ -1,6 +1,6 @@
 """watchdog_common.send_ntfy: pe 429 (rate-limit ntfy.sh in burst) reincearca o data
 honouring Retry-After instead of losing the message. Without retries, a burst from the fleet led
-la 'push ESUAT 429' si alerte nelivrate."""
+to 'push FAILED 429' and undelivered alerts."""
 import os
 import sys
 import tempfile

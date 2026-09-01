@@ -196,7 +196,7 @@ while true; do
         pid="${PIDS[$i]}"
         state=$(ps -o state= -p "$pid" 2>/dev/null | tr -d ' ')
         # SIGSTOP/Ctrl-Z lasa PID-ul existent, iar kill -0 il considera sanatos.
-        # Incercam SIGCONT o data; daca ramane oprit, il inlocuim controlat.
+        # We try SIGCONT once; if it stays stopped, we replace it in a controlled way.
         if [[ "$state" == T* ]]; then
             echo "♻ $(date '+%H:%M:%S') ${scripts[$i]} STOPPED (PID $pid) → SIGCONT"
             kill -CONT "$pid" 2>/dev/null || true

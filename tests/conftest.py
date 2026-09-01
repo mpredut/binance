@@ -37,7 +37,7 @@ def _shutdown_runtime_threads_after_suite():
         cm._ws_bridge.stop()
 
     from binance_api import bapi_client, bapi_ws
-    assert bapi_client.stop_periodic_resync(), "BinanceTimeResync nu s-a oprit"
+    assert bapi_client.stop_periodic_resync(), "BinanceTimeResync did not stop"
     bapi_ws.bapi_ws_manager.stop()
 
     forbidden = {

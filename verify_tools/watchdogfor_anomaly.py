@@ -167,7 +167,7 @@ def check_once(now=None):
         if cat in samples:
             lines.append(f"      ex: {samples[cat]}")
     title = "⚠️ Anomalii in loguri (rata erori)"
-    message = ("Rata de erori peste prag de la ultima verificare:\n" + "\n".join(lines)
+    message = ("The error rate has been above the threshold since the last check:\n" + "\n".join(lines)
                + "\nVerifica botii afectati.")
     print(f"[anomaly] ALARMA:\n{message}")
     wc.alert(title, message)

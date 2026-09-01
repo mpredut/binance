@@ -6,11 +6,18 @@
 must be written in English.** This applies to new files and to any line you touch
 in an existing one — no exceptions, in any Claude session.
 
-The migration is done: the live code, the shell scripts, the tests and the documentation
-are English. What remains in Romanian is a short, deliberate list — ntfy alert bodies
-that reach the operator's phone, the detection vocabulary inside
-`verify_tools/translation_audit.py`, and a few identifiers such as `prag`. Anything else
-in Romanian is a regression; **do not imitate it**, translate it.
+The migration is finished. The live code, the shell scripts, the tests, the configuration
+comments, the documentation and the ntfy alert bodies are all English.
+
+Exactly two things stay Romanian, and both for a mechanical reason:
+
+- the word list in `verify_tools/translation_audit.py` — it is the scanner's own detection
+  vocabulary, so translating it would blind the tool to what it exists to find;
+- the identifier `prag` in `strategies/spot_dca_rules.py` and `212trading/strategy.py` —
+  a variable name, not prose. Renaming it is a refactor of live trading code, not a
+  translation.
+
+Anything else in Romanian is a regression. **Do not imitate it** — translate it.
 
 Useful commands:
 

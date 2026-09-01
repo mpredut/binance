@@ -83,7 +83,7 @@ def main() -> int:
     if hit and armed:
         cond = f"<= {args.below}" if hit_below else f">= {args.above}"
         title = f"{args.symbol} la {price:.2f} ({cond})"
-        body = f"{args.symbol} = {price:.2f} USD — prag {cond} atins. Zona de cumparare manuala."
+        body = f"{args.symbol} = {price:.2f} USD — threshold {cond} reached. Manual buying zone."
         log(f"  [{args.symbol}] ALERTA: {price:.2f} {cond}")
         push(topic, title, body)
         armed = False

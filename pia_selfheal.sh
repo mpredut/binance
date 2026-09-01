@@ -25,10 +25,6 @@
 #   ./pia_selfheal.sh --check   # diagnostics only, touches nothing
 #   ./pia_selfheal.sh --force   # run the recovery ladder even if things look healthy
 #
-# Note on language: comments and log lines are English, per CLAUDE.md. The ntfy
-# alert bodies stay Romanian on purpose — they land on the operator's phone next to
-# the alerts from healthcheck.sh and deadman_switch.sh, and translating them would
-# change what the operator reads, which is a behaviour change rather than a cleanup.
 
 set -u
 
@@ -204,10 +200,10 @@ rung_restart_daemon() {
             log "   dedicated IP re-registered from $DIP_TOKEN"
         else
             log "   WARNING: dedicated IP token missing/invalid -> falling back to region $FALLBACK_REGION"
-            alert "PIA fara IP dedicat ($(hostname))" \
-"Tokenul $DIP_TOKEN e invalid sau lipseste, asa ca tunelul merge pe '$FALLBACK_REGION'.
-Serverul iese pe un IP din pool, NU pe cel dedicat -> cheile Binance whitelist-uite
-vor da -2015. Genereaza token nou din contul PIA (sectiunea Dedicated IP)."
+            alert "PIA without its dedicated IP ($(hostname))" \
+"Token $DIP_TOKEN is invalid or missing, so the tunnel is running on '$FALLBACK_REGION'.
+The server exits on a pool IP, NOT the dedicated one -> the whitelisted Binance keys
+will return -2015. Generate a new token from the PIA account (the Dedicated IP section)."
         fi
     fi
 
@@ -250,8 +246,8 @@ rung_reinstall() {
     size=$(stat -c %s "$tmp/pia.run")
     if [ "$size" -lt 20000000 ] || ! head -c 100 "$tmp/pia.run" | grep -q '^#!/'; then
         log "   downloaded file looks wrong (size=$size, not an installer) -> NOT running it"
-        alert "PIA: installer invalid ($(hostname))" \
-            "Descarcarea de la $INSTALLER_URL a dat $size octeti si nu arata a script .run. Reinstaleaza manual."
+        alert "PIA: invalid installer ($(hostname))" \
+            "The download from $INSTALLER_URL returned $size bytes and does not look like a .run script. Reinstall manually."
         rm -rf "$tmp"
         return 1
     fi
@@ -280,8 +276,8 @@ rung_reinstall() {
         log "   reinstall succeeded (version: $(pia -v))"
     else
         log "   reinstall FAILED (see /tmp/pia_reinstall.out) — it probably wants a terminal"
-        alert "PIA: reinstalarea automata a esuat ($(hostname))" \
-            "$(tail -5 /tmp/pia_reinstall.out 2>/dev/null). Reinstaleaza manual versiunea $PIA_VERSION."
+        alert "PIA: the automatic reinstall failed ($(hostname))" \
+            "$(tail -5 /tmp/pia_reinstall.out 2>/dev/null). Reinstall version $PIA_VERSION manually."
         rm -rf "$tmp"
         return 1
     fi
@@ -340,10 +336,10 @@ if vpn_healthy && [ "$FORCE" = 0 ]; then
         # Recovered in the meantime: we report only now, with the real outage length.
         mins=$(( ( $(date +%s) - $(cat "$OUTAGE_MARK") ) / 60 ))
         rm -f "$OUTAGE_MARK"
-        alert "PIA restabilit ($(hostname))" \
-"Tunelul functioneaza din nou dupa ${mins} min de cadere.
-IP VPN: $(pia get vpnip) | regiune: $(pia get region)
-Verifica flota: systemctl is-active binance.service (are Requires=pia.service)."
+        alert "PIA restored ($(hostname))" \
+"The tunnel works again after ${mins} min of downtime.
+VPN IP: $(pia get vpnip) | region: $(pia get region)
+Check the fleet: systemctl is-active binance.service (it has Requires=pia.service)."
     fi
     log "OK (tun0 + HTTPS through the tunnel), region=$(pia get region) vpnip=$(pia get vpnip)"
     exit 0
@@ -366,10 +362,10 @@ for rung in $LADDER; do
         mins=$(( ( $(date +%s) - $(cat "$OUTAGE_MARK" 2>/dev/null || date +%s) ) / 60 ))
         rm -f "$OUTAGE_MARK"
         log "RECOVERED at $rung (vpnip=$(pia get vpnip))"
-        alert "PIA reparat automat ($(hostname))" \
-"Tunelul a fost restabilit de $rung dupa ~${mins} min de cadere.
-IP VPN: $(pia get vpnip) | regiune: $(pia get region)
-Daca regiunea NU e cea dedicata, Binance va da -2015 pana repui tokenul DIP."
+        alert "PIA repaired automatically ($(hostname))" \
+"The tunnel was restored by $rung after ~${mins} min of downtime.
+VPN IP: $(pia get vpnip) | region: $(pia get region)
+If the region is NOT the dedicated one, Binance will return -2015 until the DIP token is restored."
         # Rung 3 stopped pia.service; bring it back, and binance.service
         # (Requires=pia.service) starts along with it.
         systemctl start pia.service     >/dev/null 2>&1
@@ -380,9 +376,9 @@ Daca regiunea NU e cea dedicata, Binance va da -2015 pana repui tokenul DIP."
 done
 
 log "FAILURE: every rung exhausted, the VPN is still down"
-alert "PIA NEREPARABIL automat ($(hostname))" \
-"Am epuizat toate treptele (connect, reconnect, restart daemon, reinstalare) si tunelul tot nu urca.
-Stare: $(pia get connectionstate) | regiune: $(pia get region) | internet brut: $(net_raw_ok && echo OK || echo PICAT)
-ATENTIE: flota Binance e oprita cat timp pia.service e jos (binance.service are Requires=pia.service).
-Cauze tipice: cont/abonament PIA expirat (AUTH_FAILED in /opt/piavpn/var/daemon.log) sau token DIP invalid."
+alert "PIA NOT automatically repairable ($(hostname))" \
+"Every rung was exhausted (connect, reconnect, restart daemon, reinstall) and the tunnel still will not come up.
+State: $(pia get connectionstate) | region: $(pia get region) | raw internet: $(net_raw_ok && echo OK || echo DOWN)
+WARNING: the Binance fleet stays stopped while pia.service is down (binance.service has Requires=pia.service).
+Typical causes: an expired PIA account/subscription (AUTH_FAILED in /opt/piavpn/var/daemon.log) or an invalid DIP token."
 exit 1

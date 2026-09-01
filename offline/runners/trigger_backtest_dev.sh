@@ -17,7 +17,7 @@
 # (env, citit de apply_proposals.py insusi — merge si la o rulare manuala separata).
 # Kill-switch pt TOT ciclul (inclusiv backtest-ul): PILOT_DISABLED=true (scheduled_pilot).
 #
-# Ruleaza pe PROD. PILOT_ONLY (env, optional) limiteaza cheile testate (ex. "maxage,hardtp").
+# Runs on PROD. PILOT_ONLY (env, optional) limits which keys are tested (e.g. "maxage,hardtp").
 set -euo pipefail
 
 RUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

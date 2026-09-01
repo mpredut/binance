@@ -165,7 +165,7 @@ def main() -> int:
     args = parser.parse_args()
     for name in ("train", "validation", "test", "step"):
         if getattr(args, name) <= 0:
-            parser.error(f"--{name} trebuie să fie pozitiv")
+            parser.error(f"--{name} must be positive")
     if args.warmup < 0 or args.regime_threshold < 0:
         parser.error("warmup/regime-threshold nu pot fi negative")
     args.baseline = args.baseline.expanduser().resolve()

@@ -462,7 +462,7 @@ class AlertNotifier:
             "type": "bot_event", "symbol": "SYSTEM",
             "name": f"ERORI LIMITA {channel.upper()}", "source": "notifier",
             "body": (
-                f"Canalul {channel} a fost oprit pentru restul zilei UTC: {reason}. "
+                f"Channel {channel} was stopped for the rest of the UTC day: {reason}. "
                 "Urgent alerts continue on the other available channels."
             ),
             "added_at": datetime.now(),

@@ -147,7 +147,7 @@ def main():
         stop_event.set()
     finally:
         _shutdown(caches, current_price_mgr)
-        print("\n[tradeall_price_archiver] oprit dupa flush.", flush=True)
+        print("\n[tradeall_price_archiver] stopped after the flush.", flush=True)
 
 
 if __name__ == "__main__":

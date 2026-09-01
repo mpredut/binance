@@ -144,7 +144,7 @@ class TestWatcherPersistenta(Base):
         xw._save_state(st)
         st = xw._load_state()                               # restart
         xw.check_pairs(c, st, "SPCX", False, quote="USD")
-        self.assertEqual(len(self.alerts), 1, "alerta de listare nu se redubleaza")
+        self.assertEqual(len(self.alerts), 1, "the listing alert is not duplicated")
 
     def test_alerte_nivel_tp_sl_o_singura_data(self):
         c = FakeKraken(price=250.0)
@@ -156,7 +156,7 @@ class TestWatcherPersistenta(Base):
         self.assertEqual(len(self.alerts), 1, "alerta TP o singura data")
         c.price = 160.0                                        # -20% < -15%
         xw.check_levels(c, st, 200.0, 20.0, 15.0, "", False)
-        self.assertEqual(len(self.alerts), 2, "si alerta SL o singura data")
+        self.assertEqual(len(self.alerts), 2, "and the SL alert fires only once")
 
 
 # ---------------------------------------------------------------------------

@@ -67,7 +67,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
     Safe to run alongside the server bot for redundant supervision."""
     from notify import notify
     log("=== DN MONITOR (read-only — it places NO orders) ===")
-    log(f"    coin={params.coin}  verifica la {params.check_minutes} min  alerte: lichidare<{params.liq_alert_pct}%, delta, funding negativ, pozitie disparuta")
+    log(f"    coin={params.coin}  checks every {params.check_minutes} min  alerts: liquidation<{params.liq_alert_pct}%, delta, negative funding, position gone")
     armed = {"liq": True, "delta": True, "fund": True, "gone": True}
     errors = 0
     while True:

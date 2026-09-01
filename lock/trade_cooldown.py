@@ -123,7 +123,7 @@ def get_last_trade_age(symbol):
 def describe_last_trade(symbol):
     last = _cooldown().get(symbol)
     if not last or not last.get("timestamp"):
-        return f"{symbol}: niciun ordin înregistrat"
+        return f"{symbol}: no order recorded"
     age = time.time() - last["timestamp"]
     return (f"{symbol}: ultim={last.get('side')} | age={age:.1f}s | "
             f"proc={last.get('process_name')} | tid={last.get('thread_id')} | "

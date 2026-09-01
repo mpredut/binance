@@ -104,7 +104,7 @@ class KrakenClient:
 
     def _private(self, method: str, data: dict | None = None, fresh: bool = False) -> dict:
         if not self.api_key or not self.api_secret:
-            raise KrakenError("Lipsesc cheile Kraken (verifica KRAKEN_API_KEY_BOT/_TRAIL/_CACHE in kraken/.env)")
+            raise KrakenError("Missing Kraken keys (check KRAKEN_API_KEY_BOT/_TRAIL/_CACHE in kraken/.env)")
         data = dict(data or {})
         ttl = _READ_TTL.get(method)
         if ttl and not fresh:                       # serve a cacheable read from a fresh cache entry

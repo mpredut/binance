@@ -25,7 +25,7 @@ for line in sys.stdin:
     title = (m.get('title') or ''); body = (m.get('message') or '')[:100]
     ts = datetime.datetime.fromtimestamp(m.get('time', 0)).strftime('%d %H:%M')
     low = (title + ' ' + body).lower()
-    if any(k in low for k in ('moarte','hung','oprit','stale','eroare','error','fail','crash','absent')):
+    if any(k in low for k in ('dead','hung','stopped','stale','error','fail','crash','absent')):
         alarms.append(f'{ts} [{title}] {body}')
     else:
         info += 1

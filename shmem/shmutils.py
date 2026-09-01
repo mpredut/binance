@@ -14,7 +14,7 @@ def shmConnectForRead(name):
         try:
             shm = shared_memory.SharedMemory(name=name, create=False)
         except FileNotFoundError:
-            print(f"Shared memory nu există încă. Aștept...")
+            print(f"Shared memory does not exist yet. Waiting...")
             time.sleep(1)
     print(f"Conectat la shared memory {name} for read!")
     return shm

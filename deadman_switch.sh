@@ -1,5 +1,5 @@
 #!/bin/bash
-# deadman_switch.sh — alerta ntfy daca serverul Linux moare (crash/reboot/power-off),
+# deadman_switch.sh — an ntfy alert if the Linux server dies (crash/reboot/power-off),
 # not just when a bot/process dies (healthcheck.sh --supervise already covers that).
 #
 # Cum functioneaza: la fiecare rulare (cron */15 min) impingem un mesaj ntfy PROGRAMAT
@@ -27,7 +27,7 @@ HOST=$(hostname)
 # Worst-case ~4x(10s+5s)=60s, mult sub cadenta de 15 min.
 curl --fail-with-body -sS -m 10 --retry 4 --retry-delay 5 --retry-all-errors --retry-connrefused \
     -H "In: 35m" -H "Title: SERVER OPRIT ($HOST)" \
-    -d "Nu a mai trimis heartbeat de 35 minute — verifica serverul (crash / reboot / fara curent)." \
+    -d "No heartbeat for 35 minutes — check the server (crash / reboot / power loss)." \
     "https://ntfy.sh/$TOPIC/server-alive" >/dev/null \
     && echo "$(date '+%H:%M') deadman: impins (+35m)" \
     || echo "$(date '+%H:%M') deadman: EROARE curl dupa reincercari (blip DNS/net prelungit?)"

@@ -394,7 +394,7 @@ def main() -> int:
         print(f"alocare: {st['allocated'] or 'nedetectata'}")
         print(f"pereche API: {st['pair'] or 'nelistata'}")
         alive = _bot_alive(st.get("bot_pid"))
-        print(f"bot: {'RULEAZA pid ' + str(st['bot_pid']) if alive else ('cazut (pid ' + str(st['bot_pid']) + ', va fi repornit)' if st.get('bot_pid') else 'nepornit')}")
+        print(f"bot: {'RUNNING pid ' + str(st['bot_pid']) if alive else ('down (pid ' + str(st['bot_pid']) + ', will be restarted)' if st.get('bot_pid') else 'not started')}")
         return 0
 
     log("=== xStock watcher pornit ===")

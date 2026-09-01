@@ -73,7 +73,7 @@ def get_quantity_precision(symbol):
 def validate_binance_api_keys():
     try:
         client.get_account()
-        print("Cheile API sunt valide!")
+        print("The API keys are valid!")
         return True
     except Exception as e:
         print(f"Eroare la verificarea cheilor API: {e}")

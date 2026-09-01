@@ -98,7 +98,7 @@ if [ "$1" = "--alert" ]; then
     if [ -n "$missing" ]; then
         TOPIC=$(grep -hs NTFY_TOPIC "$ROOT/kraken/.env" "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '" ')
         push_ntfy "Procese pe server" \
-            "Moarte/hung:$missing  -> verifica (./bots_start.sh / flota_start)" \
+            "Dead/hung:$missing  -> check (./bots_start.sh / flota_start)" \
             || echo "$(date '+%H:%M') ALERTA NELIVRATA: eroare HTTP/retea ntfy"
         echo "$(date '+%H:%M') ALERTA: $missing"
     else
@@ -132,7 +132,7 @@ if [ "$1" = "--supervise" ]; then
             [ "$role" = bot ] && rm -f "$SUP/$label" "$SUP/$label.esc"   # sanatos -> reset backoff
             continue
         fi
-        if [ "$role" != bot ]; then          # flota: doar alerta (o tine flota_start)
+        if [ "$role" != bot ]; then          # fleet: alert only (flota_start owns it)
             alert_miss="$alert_miss $label($st)"
             continue
         fi
@@ -152,10 +152,10 @@ if [ "$1" = "--supervise" ]; then
         # (otherwise later --supervise runs find the lock held by a bot and skip forever).
         ( cd "$dir" && eval "$cmd" ) 8>&-                     # restart curat ($ROOT/$VENV expandate aici)
         cnt=$((cnt + 1)); echo "$cnt $ws" > "$SUP/$label"; rm -f "$SUP/$label.esc"
-        push "Bot repornit" "$label ($st) -> REPORNIT (incercarea $cnt/$MAX)"
+        push "Bot restarted" "$label ($st) -> RESTARTED (attempt $cnt/$MAX)"
         echo "$(date '+%H:%M') $label REPORNIT ($st, incercarea $cnt)"
     done < "$MANIFEST"
-    [ -n "$alert_miss" ] && { push "Procese de verificat" "Moarte/hung (nu le repornesc de aici):$alert_miss"; echo "$(date '+%H:%M') alerta flota:$alert_miss"; }
+    [ -n "$alert_miss" ] && { push "Processes to check" "Dead/hung (not restarted from here):$alert_miss"; echo "$(date '+%H:%M') fleet alert:$alert_miss"; }
     [ -z "$alert_miss" ] && echo "$(date '+%H:%M') supervise: flota OK"
     exit 0
 fi

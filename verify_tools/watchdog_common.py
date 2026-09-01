@@ -47,7 +47,7 @@ def save_state(state_file, state):
     try:
         atomic_write_json(state_file, state)
     except Exception as e:
-        print(f"[watchdog] nu pot scrie state: {e}")
+        print(f"[watchdog] cannot write state: {e}")
 
 
 def send_ntfy(title, message):

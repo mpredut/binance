@@ -9,7 +9,7 @@ set -euo pipefail
 
 RUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${BINANCE_REPO_ROOT:-${ROOT:-$(cd "$RUNNER_DIR/../.." && pwd)}}"
-ONLY="${PILOT_ONLY:-}"            # gol = toate cheile; ex. "maxage,hardtp"
+ONLY="${PILOT_ONLY:-}"            # empty = every key; e.g. "maxage,hardtp"
 cd "$REPO_ROOT"
 
 echo "[cycle $(date '+%F %T')] pilot --propose (only='${ONLY:-toate}')"

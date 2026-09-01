@@ -223,7 +223,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Monitor alerte: monede noi + praguri pret (config-driven).")
+    ap = argparse.ArgumentParser(description="Alert monitor: new coins plus price thresholds (config-driven).")
     ap.add_argument("--config", default=os.path.join(_HERE, "market_alerts.conf"))
     ap.add_argument("--check", action="store_true", help="validate the config + imports and exit (nu porneste monitorul)")
     args = ap.parse_args()
