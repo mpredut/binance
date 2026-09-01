@@ -37,7 +37,10 @@ while [ "$(pia get connectionstate 2>/dev/null | tr -d '\r')" != "Connected" ]; 
     fi
 done
 echo "✔ VPN activ"
-echo "IP Public: $(pia get pubip 2>/dev/null)"
+# `pubip` este IP-ul conexiunii FIZICE (linia ISP-ului) si ramane pe el si cand
+# tunelul e perfect sanatos — afisat aici parea ca flota iese neprotejata. Ce
+# conteaza pentru whitelist-ul Binance este IP-ul de iesire prin tunel: `vpnip`.
+echo "IP iesire VPN: $(pia get vpnip 2>/dev/null)  (IP fizic ISP: $(pia get pubip 2>/dev/null))"
 echo "Port Forward: $(pia get portforward 2>/dev/null)"
 
 # ===== Activare mediu virtual =====
