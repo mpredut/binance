@@ -1,20 +1,21 @@
-# Unificare provider-agnostic a motorului de strategie (Calea B)
+# Provider-agnostic unification of the strategy engine (Path B)
 
-**Scop:** motorul base v2 (DCA+TP+trailing, validat live pe HYPE) să fie independent
-de Kraken și să ruleze prin același contract pe orice venue compatibil, cu o singură
-suită de conformitate și fără a forța strategiile diferite T212/HL în același algoritm.
+**Goal:** make the base v2 engine (DCA + TP + trailing, validated live on HYPE) independent
+of Kraken and able to run through the same contract on any compatible venue, with a single
+conformance suite and without forcing the different T212/HL strategies into the same
+algorithm.
 
-**De ce B (nu adaptor):** mai puțin cod (nu apare o a 3-a abstracție) și mai testabil
-(o suită parametrizată peste toți providerii). Motorul rămâne pe contractul strict
-`StrategyExecutor`; nu este rutat prin `MarketApi.place`, ale cărui guardrail-uri nu
-fac diferența între intrări și ieșirile urgente STOP/trailing.
+**Why B (and not an adapter):** less code (no third abstraction appears) and more testable (a
+single parametrised suite across every provider). The engine stays on the strict
+`StrategyExecutor` contract; it is not routed through `MarketApi.place`, whose guardrails do
+not distinguish between entries and urgent STOP/trailing exits.
 
-## Contractul (sursa unică de adevăr)
+## The contract (the single source of truth)
 
-`providers/strategy_executor.py` — `Protocol StrategyExecutor` + `OrderStatus`,
-`PairPrecision`, `ProviderError`. Harta față de KrakenClient:
+`providers/strategy_executor.py` — the `StrategyExecutor` Protocol plus `OrderStatus`,
+`PairPrecision` and `ProviderError`. Mapped against KrakenClient:
 
-| KrakenClient (azi) | Contract agnostic | Stare în providers/ |
+| KrakenClient (today) | The agnostic contract | State in providers/ |
 |---|---|---|
 | `add_order`→txid | `submit_order(...)->order_id` | ✅ Kraken/HL/Binance/T212 |
 | `query_orders(txid)` | `order_status(symbol,id)->OrderStatus` | ✅ Kraken/HL/Binance/T212 |
@@ -24,57 +25,56 @@ fac diferența între intrări și ieșirile urgente STOP/trailing.
 | `ohlc_closes` | `ohlc_closes(symbol,interval)` | ✅ Kraken/HL/Binance/T212 |
 | ticker/quote | `get_current_price(symbol)` | ✅ Kraken/HL/Binance/T212 |
 
-Dimensiune reală în `strategy.py`: **8 call-site-uri** (`self.client.*`) + **6** `except
-KrakenError`. Backtestul (`replay.py`) folosește `MagicMock` → aproape neatins.
+The real size in `strategy.py`: **8 call sites** (`self.client.*`) plus **6** `except
+KrakenError`. The backtest (`replay.py`) uses `MagicMock`, so it is almost untouched.
 
-## Faze (fiecare cu gate)
+## Phases (each with a gate)
 
-- **Faza 0 — Contract + plasă de regresie** ✅
-  - `providers/strategy_executor.py` (contractul: 7 metode + OrderStatus/PairPrecision/ProviderError).
-  - `tests/test_kraken_strategy_golden.py` — GOLDEN: urma exactă (14 ordine, hash `69fd0a50…`) +
-    metrici base v2 pe HYPE. **Trece neschimbat după tot refactorul.**
-- **Faza 1 — Kraken pe contract** ✅ — `kraken_provider` delegă la `kraken_client` +
-  `KrakenError→ProviderError`. 12 teste conformitate.
-- **Faza 2 — Rewire `strategy.py`** ✅ · **golden BYTE-IDENTICAL** — 8 call-site → contract;
-  6 `except`→`ProviderError`; `kraken_bot` injectează `KrakenProvider`; `get_current_price`
-  adăugat în contract (gap `run()` prins). Test nou de căi live.
-- **Faza 3 — Hyperliquid** ✅ — `submit_order`(gated `HL_LIVE_ORDERS`)/`order_status`(fills)/
-  `cancel_order`/`pair_precision`/`ohlc_closes` reale. 11 teste conformitate.
-- **Faza 4 — Binance** ✅ — `submit_order`/`order_status`(get_order)/`cancel_order`/
-  `pair_precision`(filters)/`ohlc_closes`(klines). 7 teste. NB: completitudine — Binance base v2
-  se suprapune cu tradeall; `order_status.fee=0` (aprox, refinabil din get_my_trades).
-- **Faza 5 — Consolidare** ✅ — `tests/test_provider_contract_conformance.py`: gardă unică
-  parametrizată (Kraken/HL/Binance/T212 satisfac `StrategyExecutor`).
-- **Faza 5b — Motor în namespace neutru** ✅ — implementarea este în
-  `strategies/spot_dca.py`; `kraken/strategy.py` este numai shim compatibil. Directorul
-  de stare, notificatorul, sursa și eticheta venue-ului sunt injectabile. Replay-ul și
-  testele importă modulul canonic, fără coliziuni între fișierele `strategy.py` ale venue-urilor.
-- **Faza 5c — fidelitate + audit** ✅ — T212 reconciliază prețurile cumulative reale,
-  inclusiv partial fills; `AuditedStrategyExecutor` adaugă `intent_id` și jurnal JSONL
-  pentru submit/status/cancel fără să blocheze ordinele. Motorul autonom T212 folosește
-  acum același contract pentru întreg ciclul ordinului; STOP/trailing sunt MARKET și
-  replay-ul le modelează la open cu spread/slippage.
-- **Faza 6 (amânată; necesită redesign)** — NU rutează direct base v2 prin
-  `MarketApi.place`. Dacă apare nevoie cross-strategy, se introduce separat un decorator
-  intent-aware, în care STOP/trailing nu pot fi blocate de trend/cooldown/plafon.
+- **Phase 0 — the contract plus a regression net** ✅
+  - `providers/strategy_executor.py` (the contract: 7 methods plus OrderStatus/PairPrecision/ProviderError).
+  - `tests/test_kraken_strategy_golden.py` — GOLDEN: the exact trace (14 orders, hash `69fd0a50…`)
+    plus the base v2 metrics on HYPE. **It must pass unchanged after the whole refactor.**
+- **Phase 1 — Kraken on the contract** ✅ — `kraken_provider` delegates to `kraken_client` plus
+  `KrakenError→ProviderError`. 12 conformance tests.
+- **Phase 2 — rewire `strategy.py`** ✅ · **the golden is BYTE-IDENTICAL** — 8 call sites moved to
+  the contract; 6 `except` clauses moved to `ProviderError`; `kraken_bot` injects
+  `KrakenProvider`; `get_current_price` was added to the contract (a `run()` gap caught). A new
+  live-path test.
+- **Phase 3 — Hyperliquid** ✅ — real `submit_order` (gated by `HL_LIVE_ORDERS`), `order_status`
+  (fills), `cancel_order`, `pair_precision` and `ohlc_closes`. 11 conformance tests.
+- **Phase 4 — Binance** ✅ — `submit_order`, `order_status` (get_order), `cancel_order`,
+  `pair_precision` (filters), `ohlc_closes` (klines). 7 tests. Note on completeness: Binance base
+  v2 overlaps with tradeall; `order_status.fee=0` (an approximation, refinable from get_my_trades).
+- **Phase 5 — consolidation** ✅ — `tests/test_provider_contract_conformance.py`: a single
+  parametrised guard (Kraken/HL/Binance/T212 all satisfy `StrategyExecutor`).
+- **Phase 5b — the engine in a neutral namespace** ✅ — the implementation lives in
+  `strategies/spot_dca.py`; `kraken/strategy.py` is only a compatibility shim. The state
+  directory, the notifier, the source and the venue label are injectable. The replay and the
+  tests import the canonical module, with no collisions between the venues' `strategy.py` files.
+- **Phase 5c — fidelity plus audit** ✅ — T212 reconciles the real cumulative prices, including
+  partial fills; `AuditedStrategyExecutor` adds an `intent_id` and a JSONL journal for
+  submit/status/cancel without blocking orders. The autonomous T212 engine now uses the same
+  contract for the whole order cycle; STOP/trailing are MARKET, and the replay models them at the
+  open with spread and slippage.
+- **Phase 6 (deferred; it needs a redesign)** — base v2 is NOT routed directly through
+  `MarketApi.place`. If a cross-strategy need arises, an intent-aware decorator is introduced
+  separately, one in which STOP/trailing cannot be blocked by trend, cooldown or a cap.
 
-  Reaudit 2026-08-20: decizia rămâne valabilă. `MarketApi.place()` este deja
-  calea guardată pentru tradeall/rtrade/trailing și returnează rezultatul unei
-  plasări punctuale. `spot_dca` cere în schimb lifecycle durabil
-  `submit/status/cancel`, `intent_id`, partial fills și ieșiri MARKET urgente.
-  Rutarea prin `place()` ar suprapune plafonul/cooldown/trend peste bugetul și
-  state machine-ul strategiei și ar putea bloca STOP/trailing. Auditul unificat
-  există deja prin `AuditedStrategyExecutor`; fără o cerință nouă de limită
-  globală cross-strategy, Faza 6 nu aduce valoare financiară sau operațională.
+  Re-audit, 20 August 2026: the decision still holds. `MarketApi.place()` is already the guarded
+  path for tradeall/rtrade/trailing and returns the result of a one-off placement. `spot_dca`
+  instead needs a durable `submit/status/cancel` lifecycle, an `intent_id`, partial fills and
+  urgent MARKET exits. Routing through `place()` would layer the cap, the cooldown and the trend
+  on top of the strategy's own budget and state machine, and could block STOP/trailing. Unified
+  auditing already exists through `AuditedStrategyExecutor`; without a new requirement for a
+  global cross-strategy limit, Phase 6 adds no financial or operational value.
 
-## Stare de închidere
+## Closing state
 
-Fazele 0–5c sunt integrate în `main` la `f5ac673`, validate cu golden-ul
-byte-identical, benchmarkul financiar reproductibil și suita completă. Nu mai
-există un gol de contract pentru providerii Kraken, Hyperliquid, Binance sau
-Trading212. Faza 6 rămâne intenționat amânată și nu blochează închiderea
-refactorului provider-agnostic.
+Phases 0-5c are merged into `main` at `f5ac673`, validated by the byte-identical golden, the
+reproducible financial benchmark and the full suite. There is no remaining contract gap for
+the Kraken, Hyperliquid, Binance or Trading212 providers. Phase 6 stays deliberately deferred
+and does not block closing the provider-agnostic refactor.
 
-## Invariant de siguranță
-Gate-ul din Faza 2 = `tests/test_kraken_strategy_golden.py` trebuie să treacă **byte-identical**.
-Dacă pică, refactorul a schimbat deciziile base v2 live → oprește și investighează.
+## Safety invariant
+The Phase 2 gate is `tests/test_kraken_strategy_golden.py`, and it must pass **byte-identical**.
+If it fails, the refactor changed the live base v2 decisions — stop and investigate.

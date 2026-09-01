@@ -1,23 +1,23 @@
-# Hyperliquid — integrare, stare operațională și strategie HYPE
+# Hyperliquid — integration, operational state and the HYPE strategy
 
-Directorul conține trei capabilități distincte: providerul HYPE/USDC spot folosit
-de motorul comun `strategies/spot_dca`, motorul istoric PERP direcțional și motorul
-delta-neutral. Faptul că există cod și configurație nu înseamnă că un proces este
-activ în producție.
+This directory holds three distinct capabilities: the HYPE/USDC spot provider used by the
+shared `strategies/spot_dca` engine, the historical directional PERP engine, and the
+delta-neutral engine. The existence of code and configuration does not mean a process is
+active in production.
 
-## Starea producției — 21 august 2026
+## Production state — 21 August 2026
 
-- `hl_dca_bot.py` este în afara `procs.conf`, cu porțile REAL configurate, dar este
-  oprit după ce preflight-ul a găsit numai ~1.024 USDC pentru sizingul de 7.000; nu
-  este supravegheat și nu repornește automat;
-- incidentul `PAPER-1` din starea legacy Kraken a fost remediat și validat; starea
-  LIVE HL este izolată, iar ultimul ordin a fost anulat fără fill;
-- `dn_bot.py` și watcherul sunt opriți și comentați în manifest;
-- launcherul separă starea HL de Kraken și PAPER de LIVE; smoke-ul PAPER, testele
-  de reconciliere și primele două tick-uri REAL au fost validate;
-- `monitortrades` pentru HYPE/Hyperliquid rămâne dezactivat prin instrument gate.
+- `hl_dca_bot.py` sits outside `procs.conf`, with the REAL gates configured, but it is
+  stopped after the preflight found only ~1,024 USDC for a sizing of 7,000; it is not
+  supervised and does not restart automatically;
+- the `PAPER-1` incident in the legacy Kraken state was fixed and validated; the LIVE HL
+  state is isolated, and the last order was cancelled without a fill;
+- `dn_bot.py` and the watcher are stopped and commented out in the manifest;
+- the launcher separates the HL state from Kraken and PAPER from LIVE; the PAPER smoke test,
+  the reconciliation tests and the first two REAL ticks were validated;
+- `monitortrades` for HYPE/Hyperliquid remains disabled through the instrument gate.
 
-Verificarea autoritativă este întotdeauna combinația dintre:
+The authoritative check is always the combination of:
 
 ```bash
 rg -n 'hl_dca|dn_bot' procs.conf
@@ -25,149 +25,146 @@ ps -ef | grep -E '[h]l_dca_bot|[d]n_bot'
 python3 verify_tools/ownership_inventory.py --running
 ```
 
-## Entry-pointuri
+## Entrypoints
 
-| Fișier | Piață | Motor | Stare |
+| File | Market | Engine | State |
 |---|---|---|---|
-| `hl_dca_bot.py` | HYPE/USDC spot | `strategies.spot_dca` (base v2) | oprit până la finanțarea rezervei DCA |
-| `hl_bot.py` | PERP long/short | `hyperliquid/strategy.py` | legacy, neînregistrat/nepornit |
-| `dn_bot.py` | spot long + perp short | `delta_neutral.py` | oprit explicit în manifest |
-| `providers/hyperliquid_provider.py` | spot | contract `StrategyExecutor` | adaptor importat lazy |
-| `hl_client.py` | spot și perp | SDK Hyperliquid | wrapper pentru citiri/ordine |
+| `hl_dca_bot.py` | HYPE/USDC spot | `strategies.spot_dca` (base v2) | stopped until the DCA reserve is funded |
+| `hl_bot.py` | PERP long/short | `hyperliquid/strategy.py` | legacy, unregistered and not started |
+| `dn_bot.py` | spot long plus perp short | `delta_neutral.py` | explicitly stopped in the manifest |
+| `providers/hyperliquid_provider.py` | spot | the `StrategyExecutor` contract | a lazily imported adapter |
+| `hl_client.py` | spot and perp | the Hyperliquid SDK | a wrapper for reads and orders |
 
-`hl_dca_bot.py` folosește același motor financiar live/replay ca botul Kraken;
-providerul schimbă venue-ul, nu regulile strategiei.
+`hl_dca_bot.py` uses the same live/replay financial engine as the Kraken bot; the provider
+changes the venue, not the strategy's rules.
 
-## Configurație și precedență
+## Configuration and precedence
 
-Launcherul încarcă mai întâi `hyperliquid/.env`, apoi `hyperliquid/config.env`, iar
-valorile deja definite nu sunt suprascrise. Prin urmare:
-
-```text
-.env local (runtime)  >  config.env versionat  >  valorile implicite din cod
-```
-
-`config.env` și override-urile locale descriu acum profilul long-term TP5. La
-verificarea din 21 august 2026, parametrii nesensibili efectivi erau:
+The launcher loads `hyperliquid/.env` first, then `hyperliquid/config.env`, and values
+already defined are not overwritten. Therefore:
 
 ```text
-entry 1.000 USDC | DCA 600 USDC la -2% | plafon 10.000 USDC | SL 7%
-TP 5% | trend-hold activ | trailing adaptiv 1,5–8%
+local .env (runtime)  >  versioned config.env  >  the defaults in the code
 ```
 
-Cu `STRAT_MAX_DCA_BUYS=10`, expunerea maximă este `1.000 + 10×600 = 7.000 USDC`,
-nu plafonul nominal de 10.000. Snapshotul operațional avea ~1.023,68 USDC liberi și
-zero ordine; pentru activare sunt necesari minimum 7.000 USDC, recomandat 7.200.
+`config.env` and the local overrides now describe the long-term TP5 profile. At the check of
+21 August 2026, the effective non-sensitive parameters were:
 
-Nu deduce configurația live citind numai `config.env`. Pentru diagnostic, încarcă
-fișierele în aceeași ordine ca launcherul și afișează numai cheile nesensibile.
-Nu comite `.env` și nu afișa cheia agent-wallet.
+```text
+entry 1,000 USDC | DCA 600 USDC at -2% | cap 10,000 USDC | SL 7%
+TP 5% | trend-hold active | adaptive trailing 1.5-8%
+```
 
-## Porți de siguranță
+With `STRAT_MAX_DCA_BUYS=10`, the maximum exposure is `1,000 + 10x600 = 7,000 USDC`, not the
+nominal 10,000 cap. The operational snapshot had ~1,023.68 USDC free and zero orders;
+activation requires at least 7,000 USDC, 7,200 recommended.
 
-Pentru `hl_dca_bot.py`, banii reali cer simultan:
+Do not infer the live configuration by reading `config.env` alone. For diagnosis, load the
+files in the same order as the launcher and print only the non-sensitive keys. Never commit
+`.env` and never print the agent-wallet key.
 
-1. proces lansat fără `--paper`;
+## Safety gates
+
+For `hl_dca_bot.py`, real money requires all of these at once:
+
+1. the process launched without `--paper`;
 2. `STRAT_EXECUTE=true`;
 3. `HL_LIVE_ORDERS=true`;
-4. cheie agent-wallet și cont valide;
-5. ownership fără conflict cu alt proces pe același sold HYPE spot.
+4. a valid agent-wallet key and account;
+5. ownership that does not conflict with another process on the same HYPE spot balance.
 
-Lipsa oricărei porți păstrează PAPER sau face providerul să refuze ordinul. Aceste
-porți nu înlocuiesc aprobarea operațională și includerea explicită în manifest.
+A missing gate keeps it in PAPER or makes the provider refuse the order. These gates do not
+replace operational approval and explicit inclusion in the manifest.
 
-## Fee spot și implicația pentru TP
+## The spot fee and what it implies for the TP
 
-Spot și PERP au grile diferite. La tier-ul spot de bază, documentația oficială
-Hyperliquid indică aproximativ `0,040% maker` și `0,070% taker` per fill; valorile
-vechi `0,015%/0,045%` sunt pentru PERP și nu justifică un TP spot de `0,5%`.
-Tier-ul contului, staking-ul, builder fee-ul și tipul efectiv de fill pot schimba
-costul. Backtestul trebuie să modeleze separat LIMIT/MARKET și un scenariu stress.
+Spot and PERP have different fee schedules. At the base spot tier, the official Hyperliquid
+documentation gives roughly `0.040% maker` and `0.070% taker` per fill; the old values of
+`0.015%/0.045%` are for PERP and do not justify a spot TP of `0.5%`. The account tier,
+staking, the builder fee and the effective fill type can all change the cost. The backtest
+must model LIMIT and MARKET separately, plus a stress scenario.
 
-Sursă: <https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees>.
+Source: <https://hyperliquid.gitbook.io/hyperliquid-docs/trading/fees>.
 
-## Analiza long-term HYPE — 21 august 2026
+## The HYPE long-term analysis — 21 August 2026
 
-Studiul offline a folosit datasetul înghețat HYPE/USDC spot Hyperliquid: 3.772
-bare de 4h (~628 zile), walk-forward OOS cu ferestre de 15/30/60 zile, stare
-resetată per TEST, fill-uri parțiale și ordine intrabar worst-case.
+The offline study used the frozen HYPE/USDC Hyperliquid spot dataset: 3,772 bars of 4h
+(~628 days), OOS walk-forward with 15/30/60-day windows, state reset per TEST, partial fills
+and worst-case intrabar ordering.
 
-Scenariul central a folosit fee `0,04% LIMIT / 0,07% MARKET`; stress a folosit
-`0,07% / 0,10%`, spread 20 bps, slippage market 30 bps și maximum 50% fill LIMIT
-per bară. Ipotezele de execuție sunt conservatoare, dar încă necalibrate din
-fill-uri reale Hyperliquid.
+The central scenario used fees of `0.04% LIMIT / 0.07% MARKET`; the stress scenario used
+`0.07% / 0.10%`, a 20 bps spread, 30 bps of market slippage and at most a 50% LIMIT fill per
+bar. The execution assumptions are conservative but still uncalibrated against real
+Hyperliquid fills.
 
-Randamentul mediu în stress:
+Mean return under stress:
 
-| Variantă | 15 zile | 30 zile | 60 zile |
+| Variant | 15 days | 30 days | 60 days |
 |---|---:|---:|---:|
-| profil efectiv TP5 adaptiv | -0,114% | -0,114% | +0,393% |
-| **TP3 + trend-hold + trail fix 3%** | **+0,098%** | **+0,464%** | **+1,069%** |
-| TP5 + trail fix 3% | -0,002% | +0,018% | +0,526% |
+| the effective adaptive TP5 profile | -0.114% | -0.114% | +0.393% |
+| **TP3 + trend-hold + fixed 3% trail** | **+0.098%** | **+0.464%** | **+1.069%** |
+| TP5 + fixed 3% trail | -0.002% | +0.018% | +0.526% |
 
-Candidatul preferat pentru **shadow**, nu pentru live, este `long_tp3_trail3`:
-aceleași sume și SL, TP armat la 3%, trend-hold activ și trailing fix 3%. A avut
-DD stress mai mic decât profilul efectiv la toate
-orizonturile (`5,74/8,78/8,82%` față de `6,41/9,49/10,09%`). Profilul agresiv
-TP5/trail3/SL10 a avut media cea mai mare, dar DD stress a urcat la `16,7%` pe
-60 de zile, deci nu este candidatul robust.
+The preferred candidate for **shadow**, not for live, is `long_tp3_trail3`: the same amounts
+and SL, the TP armed at 3%, trend-hold active and a fixed 3% trailing. Its stress drawdown
+was lower than the effective profile's at every horizon (`5.74/8.78/8.82%` versus
+`6.41/9.49/10.09%`). The aggressive TP5/trail3/SL10 profile had the highest mean, but its
+stress drawdown rose to `16.7%` over 60 days, so it is not the robust candidate.
 
-Niciun candidat nu a trecut gate-ul formal de promovare. `long_tp3_trail3` a
-îmbunătățit media/tail/DD, dar nu a câștigat suficient de consistent fold-cu-fold
-în schema de 15 zile. Concluzia este **shadow/paper only** până la dovezi forward,
-nu modificare live.
+No candidate passed the formal promotion gate. `long_tp3_trail3` improved the mean, the tail
+and the drawdown, but it did not win consistently enough fold by fold in the 15-day scheme.
+The conclusion is **shadow/paper only** until there is forward evidence, not a live change.
 
-Forward-ul versionat rulează prin `hyperliquid/shadow_longterm.py`. Runnerul
-folosește numai candles publice HYPE spot, construiește `HLClient()` fără cheie
-și fără obiect `Exchange`, păstrează o ancoră separată și compară `current`,
-`long_tp3_trail3` și `reentry4`. Nu citește soldul/starea botului și nu poate
-plasa ordine. Pragul de reevaluare rămâne minimum 30 zile și 20 divergențe de
-decizie, nu 20 snapshoturi identice.
+The versioned forward test runs through `hyperliquid/shadow_longterm.py`. The runner uses
+only public HYPE spot candles, builds `HLClient()` without a key and without an `Exchange`
+object, keeps a separate anchor, and compares `current`, `long_tp3_trail3` and `reentry4`. It
+does not read the bot's balance or state and cannot place orders. The re-evaluation threshold
+remains at least 30 days and 20 decision divergences, not 20 identical snapshots.
 
 ```bash
 ./myenv/bin/python hyperliquid/shadow_longterm.py
 ```
 
-Rularea de confirmare a fost executată exclusiv pe hostul DEV `backtest`.
-Artefactul temporar curent este:
+The confirmation run was executed exclusively on the DEV host `backtest`. The current
+temporary artefact is:
 
 ```text
 /tmp/hl_dev_sweep_20260821.json
 ```
 
-Artefactul nu este versionat; cifrele și ipotezele durabile sunt păstrate aici și în
+The artefact is not versioned; the durable figures and assumptions are kept here and in
 `chatgpt_agent_work/OPEN_ACTIONS_PROD_FINANCIAL.md`.
 
-## Co-mingling și ownership
+## Co-mingling and ownership
 
-Soldul HYPE spot este unic pe wallet. Dacă DN ar fi repornit, piciorul lui long
-spot ar împărți soldul cu `hl_dca_bot` sau `monitortrades`; un SELL de „tot
-available” ar putea desface hedge-ul. Înaintea oricărei activări, folosește un
-subcont/wallet separat sau demonstrează ownership exclusiv. Faptul că DN este acum
-oprit elimină conflictul runtime curent, nu riscul arhitectural la repornire.
+The HYPE spot balance is a single pool per wallet. If DN were restarted, its long spot leg
+would share the balance with `hl_dca_bot` or `monitortrades`; a SELL of "everything
+available" could undo the hedge. Before any activation, use a separate subaccount or wallet,
+or demonstrate exclusive ownership. DN being stopped today removes the current runtime
+conflict, not the architectural risk on restart.
 
-## Autentificare
+## Authentication
 
-Hyperliquid folosește semnătură wallet EIP-712/ECDSA. Pentru automatizare se
-folosește un agent/API wallet aprobat, nu cheia principală:
+Hyperliquid uses an EIP-712/ECDSA wallet signature. For automation, use an approved
+agent/API wallet rather than the main key:
 
-- `HL_SECRET_KEY` — cheia privată a agentului;
-- `HL_ACCOUNT_ADDRESS` — adresa contului principal.
+- `HL_SECRET_KEY` — the agent's private key;
+- `HL_ACCOUNT_ADDRESS` — the main account's address.
 
-Secretele rămân exclusiv în `.env`, sunt excluse din Git și trebuie incluse în
-procedura de backup/disaster recovery.
+The secrets stay exclusively in `.env`, are excluded from Git, and must be included in the
+backup/disaster recovery procedure.
 
-## Comenzi sigure
+## Safe commands
 
 ```bash
-# import/provider, fără ordine (din rădăcina repo-ului)
+# import/provider, no orders (from the repository root)
 cd /home/predut/binance
 myenv/bin/python -m unittest -q tests.test_hyperliquid_provider_executor
 
-# launcher forțat PAPER; nu îl adăuga în manifest doar pentru test
+# the launcher forced into PAPER; do not add it to the manifest just for a test
 cd hyperliquid
 ../myenv/bin/python hl_dca_bot.py --paper
 ```
 
-Pornirea PAPER este tot un proces persistent; oprește-l controlat după verificare.
-Nu folosi comenzile de mai sus ca substitut pentru gate-ul de promovare.
+Starting PAPER still creates a persistent process; stop it in a controlled way after the
+check. Do not use the commands above as a substitute for the promotion gate.
