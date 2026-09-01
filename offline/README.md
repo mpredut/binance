@@ -1,17 +1,16 @@
 # Offline tooling
 
-Acest director conține doar unelte care nu fac parte din runtime-ul live.
+This directory contains only tools that are not part of the live runtime.
 
-Structură:
+Structure:
 
-- `backtests/` — engine-uri de replay/backtest care reutilizează codul runtime.
-- `research/` — experimente și documentație de cercetare.
-- `runners/` — orchestrarea backtesturilor și a fluxului prod→dev.
-- `manual/` — diagnostice lansate explicit de un operator; unele accesează API-uri reale.
-- `simulations/` — experimente locale, fără rol în pornirea flotei.
-- `legacy_tools/` — utilitare istorice și migrări manuale, păstrate pentru audit.
+- `backtests/` — replay/backtest engines that reuse the runtime code.
+- `research/` — experiments and research documentation.
+- `runners/` — orchestration of the backtests and of the prod -> dev flow.
+- `manual/` — diagnostics launched explicitly by an operator; some reach real APIs.
+- `simulations/` — local experiments, with no role in starting the fleet.
+- `legacy_tools/` — historical utilities and manual migrations, kept for auditing.
 
-Niciun modul din runtime nu trebuie să importe cod de aici. Codul offline poate
-importa engine-uri și strategii runtime, dar dependența inversă este interzisă.
-Scripturile care pot
-accesa conturi reale trebuie rulate explicit și verificate înainte de utilizare.
+No runtime module may import code from here. Offline code may import runtime engines and
+strategies, but the reverse dependency is forbidden. Scripts that can reach real accounts
+must be run explicitly and checked before use.

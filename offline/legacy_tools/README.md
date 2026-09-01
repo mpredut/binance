@@ -1,8 +1,8 @@
-# Unelte istorice
+# Historical tools
 
-Acest director înlocuiește vechiul director generic `altele/`. Conține experimente,
-convertoare și operațiuni de mentenanță care se lansează numai manual.
+This directory replaces the old generic `altele/` directory. It holds experiments,
+converters and maintenance operations that are only ever launched by hand.
 
-Unele scripturi pot accesa API-uri reale sau pot modifica fișiere din `cachedb/`.
-Pentru cele de mentenanță se folosește întâi modul dry-run, dacă există, iar procesele
-writer trebuie oprite conform instrucțiunilor din script.
+Some scripts can reach real APIs or modify files in `cachedb/`. For the maintenance ones,
+use the dry-run mode first where it exists, and stop the writer processes as the script
+instructs.

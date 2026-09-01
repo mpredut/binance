@@ -1,16 +1,16 @@
-# Profil DEV / backtest
+# The DEV / backtest profile
 
-Configurația autoritativă este `offline/runners/dev_backtest.env`; hostul,
-portul, checkout-ul și branch-urile se citesc exclusiv de acolo.
+The authoritative configuration is `offline/runners/dev_backtest.env`; the host, the port,
+the checkout and the branches are read exclusively from there.
 
-DEV nu are nevoie de cron sau servicii live proprii. PROD orchestrează:
+DEV needs no cron and no live services of its own. PROD orchestrates:
 
-- `refresh_dev.sh` la 30 minute: fast-forward `main` și rsync `cachedb/`;
-- `trigger_backtest_dev.sh` la 02:00 și 14:00;
-- DEV execută `run_backtest_cycle.sh` și publică pe `backtest-proposals`;
-- PROD aplică propunerile cu guardrail-urile din `apply_proposals.py`.
+- `refresh_dev.sh` every 30 minutes: fast-forward `main` and rsync `cachedb/`;
+- `trigger_backtest_dev.sh` at 02:00 and 14:00;
+- DEV runs `run_backtest_cycle.sh` and publishes to `backtest-proposals`;
+- PROD applies the proposals with the guardrails in `apply_proposals.py`.
 
-Refacere DEV: clonează `main` în calea configurată, creează `myenv`, instalează
-`requirements.txt`, autorizează cheia SSH a PROD și verifică manual
-`run_backtest_cycle.sh`. Nu instala `systemd/install_prod.sh` pe DEV și nu copia
-cheile exchange PROD; sunt necesare numai datele `cachedb/` sincronizate.
+Rebuilding DEV: clone `main` into the configured path, create `myenv`, install
+`requirements.txt`, authorise PROD's SSH key, and check `run_backtest_cycle.sh` by hand. Do
+not install `systemd/install_prod.sh` on DEV and do not copy the PROD exchange keys; only
+the synchronised `cachedb/` data is needed.

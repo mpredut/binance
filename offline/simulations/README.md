@@ -1,3 +1,3 @@
-# Simulări
+# Simulations
 
-Experimente locale interactive, păstrate separat de runtime și de suita automată.
+Local interactive experiments, kept separate from the runtime and from the automated suite.

@@ -1,8 +1,8 @@
-# Diagnostice WebSocket manuale
+# Manual WebSocket diagnostics
 
-Aceste fișiere sunt experimente istorice, nu teste automate. Unele folosesc
-credencialele locale și pot deschide conexiuni către API-uri reale. Nu se rulează
-prin discovery și nu trebuie importate din runtime.
+These files are historical experiments, not automated tests. Some use the local credentials
+and can open connections to real APIs. They are not run through discovery and must not be
+imported from the runtime.
 
-Rulează un script doar explicit, din rădăcina repo-ului, după verificarea endpointului
-și a cheii folosite.
+Run a script only explicitly, from the repository root, after checking the endpoint and the
+key it uses.
