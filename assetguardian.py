@@ -16,12 +16,41 @@ import symbols as sym
 from botcore import load_dotenv as _load_dotenv
 _load_dotenv("assetguardian_config.env")
 
+REQUIRED_CONFIG_KEYS = (
+    "AG_CHECK_INTERVAL_SEC",
+    "AG_REFERENCE_MINUTES_BACK",
+    "AG_BUY_USE_CASH_RATIO",
+    "AG_BUY_TIERS",
+    "AG_SELL_TIERS",
+    "AG_SELL_REARM_GROWTH_PCT",
+    "AG_ORDER_MAX_AGE_SEC",
+    "AG_SYMBOLS",
+    "AG_RECOVERY_RESET_PCT",
+    "AG_NEAR_TRIGGER_SEC",
+    "AG_ACTIVE_TRIGGER_SEC",
+    "AG_NEAR_TRIGGER_DISTANCE_PCT",
+    "AG_TREND_DEFER_MAX_SEC",
+    "AG_ORDER_MISSING_CONFIRMATIONS",
+)
+
+
+def _validate_required_config_presence():
+    """Abort startup with the complete list of missing mandatory settings."""
+    missing = [
+        name for name in REQUIRED_CONFIG_KEYS
+        if os.environ.get(name) is None or not str(os.environ[name]).strip()
+    ]
+    if missing:
+        raise ValueError(
+            "Missing or empty mandatory AssetGuardian settings: "
+            + ", ".join(missing))
+
 
 def _required_config(name):
     """Return one mandatory AG setting or abort startup on missing/empty input."""
     raw = os.environ.get(name)
     if raw is None or not str(raw).strip():
-        raise ValueError(f"Configuratie AssetGuardian lipsa sau goala: {name}")
+        raise ValueError(f"Missing or empty mandatory AssetGuardian setting: {name}")
     return str(raw).strip()
 
 
@@ -31,19 +60,20 @@ def _required_float_config(name):
         return float(raw)
     except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(
-            f"Configuratie AssetGuardian numerica invalida: {name}={raw!r}") from exc
+            f"Invalid numeric AssetGuardian setting: {name}={raw!r}") from exc
 
 
 def _required_int_config(name):
     value = _required_float_config(name)
     if not math.isfinite(value) or not value.is_integer():
         raise ValueError(
-            f"Configuratie AssetGuardian intreaga invalida: {name}={value!r}")
+            f"Invalid integer AssetGuardian setting: {name}={value!r}")
     return int(value)
 
 
 # Every financial/operational parameter is mandatory in assetguardian_config.env.
 # There are deliberately no hidden code defaults: a missing key stops startup.
+_validate_required_config_presence()
 CHECK_INTERVAL_SECONDS = _required_float_config("AG_CHECK_INTERVAL_SEC")
 ASSET_REFERENCE_MINUTES_BACK_DEFAULT = _required_float_config(
     "AG_REFERENCE_MINUTES_BACK")

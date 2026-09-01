@@ -21,6 +21,57 @@ class MemoryState:
 
 
 class AssetGuardianTest(unittest.TestCase):
+    def test_required_config_rejects_missing_and_empty_values(self):
+        key = "AG_REQUIRED_CONFIG_REGRESSION_TEST"
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(key, None)
+            with self.assertRaisesRegex(ValueError, key):
+                ag._required_config(key)
+        for value in ("", "   ", "\t"):
+            with self.subTest(value=value), mock.patch.dict(os.environ, {key: value}):
+                with self.assertRaisesRegex(ValueError, key):
+                    ag._required_config(key)
+
+    def test_required_numeric_config_has_no_implicit_fallback(self):
+        key = "AG_REQUIRED_NUMERIC_REGRESSION_TEST"
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(key, None)
+            with self.assertRaisesRegex(ValueError, key):
+                ag._required_float_config(key)
+
+    def test_config_preflight_reports_every_missing_setting(self):
+        env = {name: "1" for name in ag.REQUIRED_CONFIG_KEYS}
+        env["AG_BUY_TIERS"] = ""
+        env["AG_SELL_TIERS"] = "   "
+        with mock.patch.dict(os.environ, env, clear=True):
+            with self.assertRaises(ValueError) as raised:
+                ag._validate_required_config_presence()
+        message = str(raised.exception)
+        self.assertIn("AG_BUY_TIERS", message)
+        self.assertIn("AG_SELL_TIERS", message)
+
+    def test_every_assetguardian_setting_is_registered_as_mandatory(self):
+        self.assertEqual(
+            set(ag.REQUIRED_CONFIG_KEYS),
+            {
+                "AG_CHECK_INTERVAL_SEC",
+                "AG_REFERENCE_MINUTES_BACK",
+                "AG_BUY_USE_CASH_RATIO",
+                "AG_BUY_TIERS",
+                "AG_SELL_TIERS",
+                "AG_SELL_REARM_GROWTH_PCT",
+                "AG_ORDER_MAX_AGE_SEC",
+                "AG_SYMBOLS",
+                "AG_RECOVERY_RESET_PCT",
+                "AG_NEAR_TRIGGER_SEC",
+                "AG_ACTIVE_TRIGGER_SEC",
+                "AG_NEAR_TRIGGER_DISTANCE_PCT",
+                "AG_TREND_DEFER_MAX_SEC",
+                "AG_ORDER_MISSING_CONFIRMATIONS",
+            },
+        )
+
+
     def setUp(self):
         self.sell_provider = mock.Mock()
         self.sell_provider.open_orders.return_value = []
