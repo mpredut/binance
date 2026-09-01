@@ -92,6 +92,35 @@ class DotenvHelpersTest(unittest.TestCase):
                 self.assertEqual(os.environ["QUOTED"], "two # preserved")
                 self.assertEqual(os.environ["DUP"], "first")
 
+    def test_required_settings_reject_missing_empty_and_invalid_values(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ValueError, "REQUIRED_X"):
+                botcore.required_env("REQUIRED_X")
+        with patch.dict(os.environ, {"REQUIRED_X": " # comment"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "REQUIRED_X"):
+                botcore.required_env("REQUIRED_X")
+        with patch.dict(os.environ, {"REQUIRED_X": "infinity"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "Non-finite"):
+                botcore.required_float_env("REQUIRED_X")
+        with patch.dict(os.environ, {"REQUIRED_X": "1.5"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "integer"):
+                botcore.required_int_env("REQUIRED_X")
+        with patch.dict(os.environ, {"REQUIRED_X": "yes"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "boolean"):
+                botcore.required_bool_env("REQUIRED_X")
+
+    def test_required_settings_parse_explicit_values_and_inline_comments(self):
+        env = {
+            "TEXT": "value # explanation",
+            "FLOAT": "1.25 # seconds",
+            "INT": "4 # attempts",
+            "BOOL": "false # kill switch",
+        }
+        self.assertEqual(botcore.required_env("TEXT", env), "value")
+        self.assertEqual(botcore.required_float_env("FLOAT", env), 1.25)
+        self.assertEqual(botcore.required_int_env("INT", env), 4)
+        self.assertFalse(botcore.required_bool_env("BOOL", env))
+
 
 class BoundNotifierTest(unittest.TestCase):
     def test_explicit_symbol_then_environment_priority_then_fallback(self):

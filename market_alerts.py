@@ -23,9 +23,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 from new_coins_discovery import create_new_coins_checker, NewCoinsMonitor, NewCoinsFactory, MAX_NEW_COINS_TO_TRACK
 from alertnotifiers import AlertNotifier
+from botcore import required_bool_env
 
 load_dotenv()                                                # Shared untracked secrets.
 load_dotenv(Path(__file__).resolve().parent / "config.env")  # Versioned configuration.
+ALERT_NEW_COIN = required_bool_env("ALERT_NEW_COIN")
 
 # Route price alerts to their dedicated topic when configured. PHONE_ALERT_URL has
 # precedence in the batch notifier, so this process overrides it locally.
@@ -265,9 +267,9 @@ def main():
     cleanup_thread.start()
 
     new_coins_checker = None
-    if not cfg.get("discover_new_coins", True):
+    if not cfg["discover_new_coins"]:
         print("NEW COIN ALERT DEZACTIVAT din config (discover_new_coins = no) — doar watchlist")
-    elif os.environ.get("ALERT_NEW_COIN", "").upper() == "TRUE":
+    elif ALERT_NEW_COIN:
         print("⏳ Pornesc checker-ul de monede noi...")
         new_coins_checker = start_new_coin_checker(
             cachePriceAll, interval_seconds=cfg["new_coins_scan_seconds"],

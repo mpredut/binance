@@ -71,88 +71,80 @@ def _touch_rtrade_heartbeat(*, force=False, now=None):
 
 # Load versioned, non-secret tuning parameters before reading the environment below.
 # ``botcore.load_dotenv`` does not overwrite variables already set in the real environment.
-from botcore import load_dotenv as _load_dotenv
+from botcore import (load_dotenv as _load_dotenv, required_bool_env,
+                     required_env, required_float_env, required_int_env)
 _load_dotenv("rtrade_config.env")
 
 # Seconds between cancel-and-recreate attempts.
-WAIT_FOR_ORDER = float(os.environ.get("RTRADE_WAIT_FOR_ORDER_SEC", "32"))
-MIN_adjustment_percent = float(os.environ.get("RTRADE_MIN_ADJUSTMENT_PCT", "0.01"))
+WAIT_FOR_ORDER = required_float_env("RTRADE_WAIT_FOR_ORDER_SEC")
+MIN_adjustment_percent = required_float_env("RTRADE_MIN_ADJUSTMENT_PCT")
 
 # Express each round's budget in quote currency. Calculate TAO quantity once from
 # the round's starting price.
-RTRADE_NOTIONAL_USDC = float(os.environ.get("RTRADE_NOTIONAL_USDC", "500"))
+RTRADE_NOTIONAL_USDC = required_float_env("RTRADE_NOTIONAL_USDC")
 
 # Initial fractional spread estimate for filled prices before the first real fill.
-RTRADE_INITIAL_SPREAD_PCT = float(os.environ.get("RTRADE_INITIAL_SPREAD_PCT", "0.1"))
+RTRADE_INITIAL_SPREAD_PCT = required_float_env("RTRADE_INITIAL_SPREAD_PCT")
 
 # Relaxation rate for adjustment_percent after the opposite side fills.
 # BUY and SELL are intentionally asymmetric.
-RTRADE_BUY_DECAY_PCT = float(os.environ.get("RTRADE_BUY_DECAY_PCT", "0.005"))
-RTRADE_SELL_DECAY_PCT = float(os.environ.get("RTRADE_SELL_DECAY_PCT", "0.01"))
+RTRADE_BUY_DECAY_PCT = required_float_env("RTRADE_BUY_DECAY_PCT")
+RTRADE_SELL_DECAY_PCT = required_float_env("RTRADE_SELL_DECAY_PCT")
 
 # Base hours window, divided by failure_count, for the desperate path after the
 # opposite side fills. BUY (0.3) and SELL (0.23) are intentionally asymmetric.
-RTRADE_BUY_DESPERATE_HOURS_BASE = float(os.environ.get("RTRADE_BUY_DESPERATE_HOURS_BASE", "0.3"))
-RTRADE_SELL_DESPERATE_HOURS_BASE = float(os.environ.get("RTRADE_SELL_DESPERATE_HOURS_BASE", "0.23"))
+RTRADE_BUY_DESPERATE_HOURS_BASE = required_float_env("RTRADE_BUY_DESPERATE_HOURS_BASE")
+RTRADE_SELL_DESPERATE_HOURS_BASE = required_float_env("RTRADE_SELL_DESPERATE_HOURS_BASE")
 
 # Shared BUY/SELL lookback for the desperate path (one hour plus 60 seconds).
-RTRADE_DESPERATE_SAFEBACK_SEC = float(os.environ.get("RTRADE_DESPERATE_SAFEBACK_SEC", str(1 * 3600 + 60)))
+RTRADE_DESPERATE_SAFEBACK_SEC = required_float_env("RTRADE_DESPERATE_SAFEBACK_SEC")
 
 # Hours for the normal path before desperation. BUY waits longer than SELL.
-RTRADE_BUY_NORMAL_HOURS = float(os.environ.get("RTRADE_BUY_NORMAL_HOURS", "16"))
-RTRADE_SELL_NORMAL_HOURS = float(os.environ.get("RTRADE_SELL_NORMAL_HOURS", "12"))
+RTRADE_BUY_NORMAL_HOURS = required_float_env("RTRADE_BUY_NORMAL_HOURS")
+RTRADE_SELL_NORMAL_HOURS = required_float_env("RTRADE_SELL_NORMAL_HOURS")
 
 # Fractional price offset and hours window for the desperate follow-up immediately
 # after the opposite side fills. Shared by both directions.
-RTRADE_FOLLOWUP_OFFSET_PCT = float(os.environ.get("RTRADE_FOLLOWUP_OFFSET_PCT", "0.01"))
-RTRADE_FOLLOWUP_HOURS = float(os.environ.get("RTRADE_FOLLOWUP_HOURS", "2.7"))
+RTRADE_FOLLOWUP_OFFSET_PCT = required_float_env("RTRADE_FOLLOWUP_OFFSET_PCT")
+RTRADE_FOLLOWUP_HOURS = required_float_env("RTRADE_FOLLOWUP_HOURS")
 
 # ``are_close`` tolerance for detecting a bad day when price crosses the reference,
 # plus the adjustment multiplier used then. Shared by both directions.
-RTRADE_BAD_DAY_TOLERANCE_PCT = float(os.environ.get("RTRADE_BAD_DAY_TOLERANCE_PCT", "0.1"))
-RTRADE_BAD_DAY_MULTIPLIER = float(os.environ.get("RTRADE_BAD_DAY_MULTIPLIER", "1.7"))
+RTRADE_BAD_DAY_TOLERANCE_PCT = required_float_env("RTRADE_BAD_DAY_TOLERANCE_PCT")
+RTRADE_BAD_DAY_MULTIPLIER = required_float_env("RTRADE_BAD_DAY_MULTIPLIER")
 
 # Epsilon preventing division by zero in profit/loss ratio calculations.
-RTRADE_ZERO_EPSILON = float(os.environ.get("RTRADE_ZERO_EPSILON", "0.0001"))
+RTRADE_ZERO_EPSILON = required_float_env("RTRADE_ZERO_EPSILON")
 
 # Maximum failures accepted before abandoning a BUY or SELL order.
-RTRADE_MAX_FAILURES = int(os.environ.get("RTRADE_MAX_FAILURES", "10"))
+RTRADE_MAX_FAILURES = required_int_env("RTRADE_MAX_FAILURES")
 # Trend filter: this spread bot suffers adverse selection in a clear trend. It stays
 # idle when ``|gradient_recent| > K * epsilon`` over a short window, where epsilon is
 # the volatility-calibrated cacheManager noise floor. Controlled by a kill switch and threshold.
-RTRADE_TREND_FILTER_ENABLED = os.environ.get("RTRADE_TREND_FILTER_ENABLED", "true").strip().lower() == "true"
-RTRADE_TREND_FILTER_K = float(os.environ.get("RTRADE_TREND_FILTER_K", "2.0"))
-RTRADE_TREND_WINDOW_SEC = float(os.environ.get("RTRADE_TREND_WINDOW_SEC", "900"))
-RTRADE_TREND_OHLC_FALLBACK_ENABLED = os.environ.get(
-    "RTRADE_TREND_OHLC_FALLBACK_ENABLED", "false").strip().lower() == "true"
-RTRADE_DYNAMIC_MARKET_EXIT_MODE = os.environ.get(
-    "RTRADE_DYNAMIC_MARKET_EXIT_MODE", "shadow").strip().lower()
-RTRADE_EMERGENCY_HARD_STOP_PCT = float(os.environ.get(
-    "RTRADE_EMERGENCY_HARD_STOP_PCT", "0.12"))
+RTRADE_TREND_FILTER_ENABLED = required_bool_env("RTRADE_TREND_FILTER_ENABLED")
+RTRADE_TREND_FILTER_K = required_float_env("RTRADE_TREND_FILTER_K")
+RTRADE_TREND_WINDOW_SEC = required_float_env("RTRADE_TREND_WINDOW_SEC")
+RTRADE_TREND_OHLC_FALLBACK_ENABLED = required_bool_env("RTRADE_TREND_OHLC_FALLBACK_ENABLED")
+RTRADE_DYNAMIC_MARKET_EXIT_MODE = required_env("RTRADE_DYNAMIC_MARKET_EXIT_MODE").lower()
+RTRADE_EMERGENCY_HARD_STOP_PCT = required_float_env("RTRADE_EMERGENCY_HARD_STOP_PCT")
 
 # The new coordinator remains disabled until replay/walk-forward validation. When enabled,
 # one owner manages the pair and exposure; the legacy two-worker path remains behind the switch.
-RTRADE_PAIR_COORDINATOR_ENABLED = os.environ.get(
-    "RTRADE_PAIR_COORDINATOR_ENABLED", "false").strip().lower() == "true"
-RTRADE_PAIR_POLL_SEC = float(os.environ.get("RTRADE_PAIR_POLL_SEC", "1"))
-RTRADE_PAIR_MAX_ACTIVE_ROUNDS = int(os.environ.get(
-    "RTRADE_PAIR_MAX_ACTIVE_ROUNDS", "4"))
-RTRADE_PAIR_START_INTERVAL_SEC = float(os.environ.get(
-    "RTRADE_PAIR_START_INTERVAL_SEC", "8"))
+RTRADE_PAIR_COORDINATOR_ENABLED = required_bool_env("RTRADE_PAIR_COORDINATOR_ENABLED")
+RTRADE_PAIR_POLL_SEC = required_float_env("RTRADE_PAIR_POLL_SEC")
+RTRADE_PAIR_MAX_ACTIVE_ROUNDS = required_int_env("RTRADE_PAIR_MAX_ACTIVE_ROUNDS")
+RTRADE_PAIR_START_INTERVAL_SEC = required_float_env("RTRADE_PAIR_START_INTERVAL_SEC")
 RTRADE_PAIR_DIRECTIONS = tuple(
     side.strip().upper()
-    for side in os.environ.get("RTRADE_PAIR_DIRECTIONS", "BUY,SELL").split(",")
+    for side in required_env("RTRADE_PAIR_DIRECTIONS").split(",")
     if side.strip()
 )
-RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC = float(os.environ.get(
-    "RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC", "180"))
-RTRADE_PLACE_FAILURE_BACKOFF_SEC = float(os.environ.get(
-    "RTRADE_PLACE_FAILURE_BACKOFF_SEC", "180"))
-RTRADE_FAST_FILL_RATIO = float(os.environ.get("RTRADE_FAST_FILL_RATIO", "0.25"))
-RTRADE_MIN_EDGE_PCT = float(os.environ.get("RTRADE_MIN_EDGE_PCT", "0.0115"))
-RTRADE_SHOCK_HARD_STOP_PCT = float(os.environ.get(
-    "RTRADE_SHOCK_HARD_STOP_PCT", "0.04"))
-RTRADE_HARD_STOP_PCT = float(os.environ.get("RTRADE_HARD_STOP_PCT", "0.08"))
+RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC = required_float_env("RTRADE_INSUFFICIENT_FUNDS_BACKOFF_SEC")
+RTRADE_PLACE_FAILURE_BACKOFF_SEC = required_float_env("RTRADE_PLACE_FAILURE_BACKOFF_SEC")
+RTRADE_FAST_FILL_RATIO = required_float_env("RTRADE_FAST_FILL_RATIO")
+RTRADE_MIN_EDGE_PCT = required_float_env("RTRADE_MIN_EDGE_PCT")
+RTRADE_SHOCK_HARD_STOP_PCT = required_float_env("RTRADE_SHOCK_HARD_STOP_PCT")
+RTRADE_HARD_STOP_PCT = required_float_env("RTRADE_HARD_STOP_PCT")
 
 
 class _LivePairVenue:
@@ -1065,8 +1057,7 @@ class TradingBot:
                     time.sleep(1)
                 
                 
-_default_adj = round(u.calculate_difference_percent(60000, 60000 - 380) / 100, 4)
-DEFAULT_ADJUSTMENT_PERCENT = float(os.environ.get("RTRADE_DEFAULT_ADJUSTMENT_PCT", str(_default_adj)))
+DEFAULT_ADJUSTMENT_PERCENT = required_float_env("RTRADE_DEFAULT_ADJUSTMENT_PCT")
 print(f"[INFO] DEFAULT_ADJUSTMENT_PERCENT = {DEFAULT_ADJUSTMENT_PERCENT}")
 
 # Keep actual startup, including WebSocket setup and the infinite live order loop, under

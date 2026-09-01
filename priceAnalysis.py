@@ -16,6 +16,11 @@ from datetime import datetime
 # Local imports.
 import utils as u
 import symbols as sym
+from botcore import (load_dotenv as _load_dotenv, required_bool_env,
+                     required_int_env)
+
+_load_dotenv("cachemanager_config.env")
+_load_dotenv("priceanalysis_config.env")
 
 # Intentionally retained dead code for reference: an alternative shared-memory
 # IPC approach for trends instead of the current priceanalysis.json file.
@@ -28,7 +33,9 @@ import symbols as sym
 
 # Debug tracing for weight zones and slope tuning is off by default to keep fleet
 # logs clean. Enable PRICEANALYSIS_DEBUG when tuning.
-_DEBUG = os.environ.get("PRICEANALYSIS_DEBUG", "").strip().lower() == "true"
+_DEBUG = required_bool_env("PRICEANALYSIS_DEBUG")
+PRICEANALYSIS_DRAW_MAX_POINTS = required_int_env("PRICEANALYSIS_DRAW_MAX_POINTS")
+LONGTREND_NONBINANCE = required_bool_env("LONGTREND_NONBINANCE")
 
 
 def _dbg(*args, **kwargs):
@@ -62,10 +69,7 @@ _draw_fig = {}  # Reused symbol-to-(figure, axis) mapping; see drawPriceLst.
 
 def _draw_point_limit() -> int:
     """Return the renderer point limit; it does not affect trend calculations."""
-    try:
-        return max(2, int(os.environ.get("PRICEANALYSIS_DRAW_MAX_POINTS", "5000")))
-    except (TypeError, ValueError):
-        return 5000
+    return max(2, PRICEANALYSIS_DRAW_MAX_POINTS)
 
 
 def _bounded_plot_indices(length: int, max_points: Optional[int] = None) -> np.ndarray:
@@ -716,7 +720,7 @@ if __name__ == "__main__":
     # Gate long-term non-Binance trends behind LONGTREND_NONBINANCE. Default off
     # keeps the BTC proxy. Once enabled and enough HYPE history accumulates,
     # weight_limit automatically switches from proxy to the native HYPE trend.
-    if os.environ.get("LONGTREND_NONBINANCE", "").strip().lower() == "true":
+    if LONGTREND_NONBINANCE:
         try:
             from instruments_config import load_for
             for _inst in load_for("mt").values():

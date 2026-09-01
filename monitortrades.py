@@ -28,17 +28,18 @@ import log
 # Load versioned, non-secret global tuning parameters before reading the environment.
 # ``botcore.load_dotenv`` fills missing values without overwriting the real environment.
 # Per-instrument gain/loss/age/hard-TP configuration remains in the instrument configs.
-from botcore import load_dotenv as _load_dotenv
+from botcore import load_dotenv as _load_dotenv, required_float_env
 _load_dotenv("monitortrades_config.env")
 
-# Extracted globals preserve the old hardcoded defaults unless configuration changes.
-MT_ARE_CLOSE_TOLERANCE_PCT = float(os.environ.get("MT_ARE_CLOSE_TOLERANCE_PCT", "1.0"))
-MT_RECENT_TRADE_BLOCK_SEC = float(os.environ.get("MT_RECENT_TRADE_BLOCK_HOURS", "3")) * 3600
-MT_ALL_TRADES_BLOCK_SEC = float(os.environ.get("MT_ALL_TRADES_BLOCK_HOURS", "1")) * 3600
-MT_MAIN_LOOP_SLEEP_SEC = float(os.environ.get("MT_MAIN_LOOP_SLEEP_SEC", "48"))
-MT_BUY_PRICE_OFFSET = float(os.environ.get("MT_BUY_PRICE_OFFSET", "0.5"))
-MT_SELL_SAFEBACK_HOURS = float(os.environ.get("MT_SELL_SAFEBACK_HOURS", "2"))
-MT_BUY_SAFEBACK_HOURS = float(os.environ.get("MT_BUY_SAFEBACK_HOURS", "48"))
+# Trading parameters are mandatory; missing configuration aborts startup.
+MT_ARE_CLOSE_TOLERANCE_PCT = required_float_env("MT_ARE_CLOSE_TOLERANCE_PCT")
+MT_RECENT_TRADE_BLOCK_SEC = required_float_env("MT_RECENT_TRADE_BLOCK_HOURS") * 3600
+MT_ALL_TRADES_BLOCK_SEC = required_float_env("MT_ALL_TRADES_BLOCK_HOURS") * 3600
+MT_MAIN_LOOP_SLEEP_SEC = required_float_env("MT_MAIN_LOOP_SLEEP_SEC")
+MT_BUY_PRICE_OFFSET = required_float_env("MT_BUY_PRICE_OFFSET")
+MT_SELL_SAFEBACK_HOURS = required_float_env("MT_SELL_SAFEBACK_HOURS")
+MT_BUY_SAFEBACK_HOURS = required_float_env("MT_BUY_SAFEBACK_HOURS")
+MT_GUARD_WINDOW_DAYS = required_float_env("MT_GUARD_WINDOW_DAYS")
 
 
 # Legacy gradual-sale and monitoring code moved to archive/monitortrades_legacy.py.
@@ -618,7 +619,7 @@ def main():
     print(f"close_buy_orders {close_buy_orders}")
     print(f"close_sell_orders {close_sell_orders}")
 
-    d = int(os.environ.get("MT_GUARD_WINDOW_DAYS", "12"))  # Profit-guard window in days.
+    d = MT_GUARD_WINDOW_DAYS
     while True:
 
         print_number_of_orders(maxage_trade_s)

@@ -48,7 +48,8 @@ from providers.execution_audit import intent_client_order_id
 from order_retry import TrackedOrderLifecycle
 
 from trailing_core import TrailingCore, should_sell  # noqa: E402  (re-export should_sell for tests/compatibility)
-from botcore import load_dotenv, single_instance  # noqa: E402  (shared KEY=VALUE parser and single-instance guard)
+from botcore import (load_dotenv, required_bool_env, required_float_env,
+                     required_int_env, single_instance)  # noqa: E402
 
 DEFAULT_STATE = os.path.join(_ROOT, "cachedb", "trailing_state.json")
 
@@ -66,28 +67,29 @@ TRAIL_PCT = {
     "TAOUSDC": 22.0,
 }
 DEFAULT_TRAIL_PCT = 22.0
-SELL_FRACTION = float(os.environ.get("TRAILING_SELL_FRACTION", "1.0"))  # 1.0=all, 0.5=half
+TRAILING_ENABLED = required_bool_env("TRAILING_ENABLED")
+SELL_FRACTION = required_float_env("TRAILING_SELL_FRACTION")
 MIN_NOTIONAL_USD = 11.0
-CHECK_SECONDS = float(os.environ.get("TRAILING_CHECK_SECONDS", "60"))
+CHECK_SECONDS = required_float_env("TRAILING_CHECK_SECONDS")
 
 # Re-buy after a crash stop-loss: the trailing component that sold with a bypass also
 # buys back with a bypass, avoiding the profit guard whose long window would block
 # re-entry. Trigger when price rebounds REBUY_BOUNCE_PCT% from the post-sale low,
 # confirming the fall has stopped before entry. One tranche is supported currently;
 # REBUY_TRANCHES is reserved for a future dip-DCA extension.
-REBUY_ENABLED = os.environ.get("TRAILING_REBUY_ENABLED", "true").lower() == "true"
-REBUY_BOUNCE_PCT = float(os.environ.get("TRAILING_REBUY_BOUNCE_PCT", "1.2"))
-REBUY_TRANCHES = int(os.environ.get("TRAILING_REBUY_TRANCHES", "1"))
+REBUY_ENABLED = required_bool_env("TRAILING_REBUY_ENABLED")
+REBUY_BOUNCE_PCT = required_float_env("TRAILING_REBUY_BOUNCE_PCT")
+REBUY_TRANCHES = required_int_env("TRAILING_REBUY_TRANCHES")
 # Trend filters read cache_instant_trend through cacheManager. They act only on a
 # CLEAR opposing signal; neutral/unknown does not block, safely degrading to behavior
 # without a filter. Skip re-buy on a clear downtrend. Crash sells are unfiltered by
 # default so the circuit breaker remains reliable; enable the sell filter to avoid
 # selling while the instant trend is clearly up (anti-wick behavior).
-REBUY_SKIP_IF_TREND_DOWN = os.environ.get("TRAILING_REBUY_SKIP_IF_TREND_DOWN", "true").lower() == "true"
-SELL_SKIP_IF_TREND_UP = os.environ.get("TRAILING_SELL_SKIP_IF_TREND_UP", "false").lower() == "true"
+REBUY_SKIP_IF_TREND_DOWN = required_bool_env("TRAILING_REBUY_SKIP_IF_TREND_DOWN")
+SELL_SKIP_IF_TREND_UP = required_bool_env("TRAILING_SELL_SKIP_IF_TREND_UP")
 # Minimum profit before trailing activates (0 means immediate activation as before).
 # This prevents selling at a loss after a normal dip immediately following a purchase.
-MIN_PROFIT_PCT = float(os.environ.get("TRAILING_MIN_PROFIT_PCT", "0.0"))
+MIN_PROFIT_PCT = required_float_env("TRAILING_MIN_PROFIT_PCT")
 
 
 def _finite(value, *, name: str, minimum=None, maximum=None) -> float:
@@ -116,8 +118,7 @@ class TrailingStop:
         self.po = po
         self.sym = sym
         self.log = log
-        self.enabled = (os.environ.get("TRAILING_ENABLED", "false").lower() == "true"
-                        if enabled is None else bool(enabled))
+        self.enabled = TRAILING_ENABLED if enabled is None else bool(enabled)
         self.sell_fraction = _finite(
             sell_fraction, name="TRAILING_SELL_FRACTION", minimum=0.0, maximum=1.0)
         min_profit_pct = _finite(

@@ -10,31 +10,12 @@ Line-oriented format (# starts a full-line or inline comment):
     BTC      = 6 / 10                  # PER-COIN threshold (any symbol)
     cooldown_minutes = 30              # scalar settings (see _SETTING_KEYS)
 
-If the file or a key is absent, the defaults below are used. A short configuration
-is therefore valid and needs to contain only the desired overrides.
+The file and every operational key are mandatory. Missing or malformed configuration
+aborts startup instead of silently selecting a trading/alerting policy.
 """
 from __future__ import annotations
 
-import copy
 import os
-
-_DEFAULTS = {
-    "watch": ["BTC", "TAO", "HYPE"],
-    "sources": ["coinmarketcap", "coingecko"],
-    "discover_new_coins": True,   # no/false => watchlist only; no new-coin alerts
-    "max_monitored": 20,
-    "max_new_coins": 15,
-    "new_coins_scan_seconds": 3600,
-    "price_scan_seconds": 60,
-    # Exact PriceChecker shape: default/dynamic/cooldown/lookback plus per_coin.
-    "alert_config": {
-        "default":  {"up_percent": 4.1, "down_percent": 7.5},
-        "dynamic":  {"up_percent": 12.0, "down_percent": 25.0},
-        "per_coin": {},
-        "cooldown_minutes": 30,
-        "lookback_hours": 24,
-    },
-}
 
 # Scalar key -> (type, destination: "ac" in alert_config or "top" in cfg).
 _SETTING_KEYS = {
@@ -53,20 +34,25 @@ def _pair(val: str) -> dict:
 
 
 def load_config(path: str) -> dict:
-    cfg = copy.deepcopy(_DEFAULTS)
     if not path or not os.path.exists(path):
-        return cfg
+        raise ValueError(f"Required alert configuration file is missing: {path}")
+    cfg = {"alert_config": {"per_coin": {}}}
     ac = cfg["alert_config"]
     with open(path, encoding="utf-8") as f:
         for raw in f:
             line = raw.split("#", 1)[0].strip()
-            if not line or "=" not in line:
+            if not line:
                 continue
+            if "=" not in line:
+                raise ValueError(f"Malformed alert configuration line: {raw.rstrip()!r}")
             key, _, val = line.partition("=")
             key, val = key.strip(), val.strip()
             try:
                 if key == "discover_new_coins":
-                    cfg[key] = val.strip().lower() in ("yes", "true", "1", "on", "da")
+                    normalized = val.strip().lower()
+                    if normalized not in {"yes", "no", "true", "false", "1", "0", "on", "off"}:
+                        raise ValueError("expected an explicit boolean")
+                    cfg[key] = normalized in {"yes", "true", "1", "on"}
                 elif key in _LIST_KEYS:
                     norm = _LIST_KEYS[key]
                     cfg[key] = [norm(x.strip()) for x in val.split(",") if x.strip()]
@@ -74,14 +60,28 @@ def load_config(path: str) -> dict:
                     typ, where = _SETTING_KEYS[key]
                     v = typ(float(val))
                     (ac if where == "ac" else cfg)[key] = v
-                elif "/" in val:                          # an UP/DOWN threshold
+                elif "/" in val:                          # An UP/DOWN threshold.
                     pair = _pair(val)
                     if key in _BUCKET_ALIAS:
                         ac[_BUCKET_ALIAS[key]] = pair
-                    else:                                 # every other name is a per-coin key
+                    else:                                 # Every other name is a per-coin key.
                         ac["per_coin"][key.upper()] = pair
-            except ValueError:
-                pass  # Ignore malformed lines and retain the default.
+                else:
+                    raise ValueError(f"Unknown alert configuration key: {key}")
+            except ValueError as exc:
+                raise ValueError(
+                    f"Invalid alert configuration for {key}: {val!r}") from exc
+
+    required_top = {
+        "watch", "sources", "discover_new_coins", "max_monitored",
+        "max_new_coins", "new_coins_scan_seconds", "price_scan_seconds",
+    }
+    required_alert = {"default", "dynamic", "cooldown_minutes", "lookback_hours"}
+    missing = sorted(required_top - cfg.keys()) + sorted(required_alert - ac.keys())
+    if missing:
+        raise ValueError("Missing mandatory alert settings: " + ", ".join(missing))
+    if not cfg["watch"] or not cfg["sources"]:
+        raise ValueError("Alert watch and sources lists must not be empty")
     return cfg
 
 

@@ -32,16 +32,14 @@ from lock import trade_cooldown   # Rapid-fire gate moved into the lock package.
 # Load versioned, non-secret tuning parameters before reading the environment below.
 # ``botcore.load_dotenv`` never overwrites variables already set in the real environment;
 # it only fills missing values, matching tradeall_config.env and monitortrades_config.env.
-from botcore import load_dotenv as _load_dotenv
+from botcore import load_dotenv as _load_dotenv, required_float_env, required_int_env
 _load_dotenv("bapi_placeorder_config.env")
 
-# These values were hardcoded in function signatures. They were extracted with identical
-# defaults, so behavior changes only when config.env overrides them. See
-# bapi_placeorder_config.env for detailed parameter documentation.
-PLACE_ORDER_FEE_PCT = float(os.environ.get("PLACE_ORDER_FEE_PCT", "0.001"))
-PLACE_ORDER_HOURS = int(float(os.environ.get("PLACE_ORDER_HOURS", "5")))
-PLACE_ORDER_SAFEBACK_SEC = int(float(os.environ.get("PLACE_ORDER_SAFEBACK_SEC", str(48 * 3600 + 60))))
-PLACE_ORDER_MAX_DAILY_TRADES = int(float(os.environ.get("PLACE_ORDER_MAX_DAILY_TRADES", "25")))
+# Order policy is mandatory; missing configuration aborts startup.
+PLACE_ORDER_FEE_PCT = required_float_env("PLACE_ORDER_FEE_PCT")
+PLACE_ORDER_HOURS = required_int_env("PLACE_ORDER_HOURS")
+PLACE_ORDER_SAFEBACK_SEC = required_int_env("PLACE_ORDER_SAFEBACK_SEC")
+PLACE_ORDER_MAX_DAILY_TRADES = required_int_env("PLACE_ORDER_MAX_DAILY_TRADES")
 
 
 class WeightLimitBlock(Exception):

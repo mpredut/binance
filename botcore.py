@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import math
 import os
 import sys
 import urllib.error
@@ -105,6 +106,43 @@ def float_env(key: str, env: dict | None = None) -> float | None:
         return float(raw) if raw else None
     except ValueError:
         return None
+
+
+def required_env(key: str, env: dict | None = None) -> str:
+    """Return a mandatory setting, rejecting missing, empty, or comment-only values."""
+    src = os.environ if env is None else env
+    raw = str(src.get(key, "") or "").split("#", 1)[0].strip()
+    if not raw:
+        raise ValueError(f"Missing or empty mandatory setting: {key}")
+    return raw
+
+
+def required_float_env(key: str, env: dict | None = None) -> float:
+    """Return a mandatory finite floating-point setting."""
+    raw = required_env(key, env)
+    try:
+        value = float(raw)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"Invalid numeric setting: {key}={raw!r}") from exc
+    if not math.isfinite(value):
+        raise ValueError(f"Non-finite numeric setting: {key}={raw!r}")
+    return value
+
+
+def required_int_env(key: str, env: dict | None = None) -> int:
+    """Return a mandatory integer setting without silently truncating fractions."""
+    value = required_float_env(key, env)
+    if not value.is_integer():
+        raise ValueError(f"Invalid integer setting: {key}={value!r}")
+    return int(value)
+
+
+def required_bool_env(key: str, env: dict | None = None) -> bool:
+    """Return a mandatory strict boolean setting."""
+    raw = required_env(key, env).lower()
+    if raw not in {"true", "false"}:
+        raise ValueError(f"Invalid boolean setting: {key}={raw!r}; expected true or false")
+    return raw == "true"
 
 
 def http_request(

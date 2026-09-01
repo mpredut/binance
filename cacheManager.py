@@ -28,14 +28,15 @@ import providers.market_api as _market_api
 # Load versioned, non-secret tuning parameters using the same pattern as the other
 # component env files. ``botcore.load_dotenv`` never overwrites variables already set
 # in the real environment; it only fills missing values.
-from botcore import load_dotenv as _load_dotenv
+from botcore import load_dotenv as _load_dotenv, required_bool_env, required_float_env
 _load_dotenv("cachemanager_config.env")
 
 # Dynamic-window bounds for ``get_instant_trend_for_window``. Values below the minimum
 # provide too few samples for a meaningful slope; values above the maximum add unjustified
 # cost and exceed the 24-hour history retained by Cache24PriceManager.
-CM_DYNAMIC_WINDOW_MIN_SEC = float(os.environ.get("CM_DYNAMIC_WINDOW_MIN_SEC", "14.0"))
-CM_DYNAMIC_WINDOW_MAX_SEC = float(os.environ.get("CM_DYNAMIC_WINDOW_MAX_SEC", "21600.0"))
+CM_DYNAMIC_WINDOW_MIN_SEC = required_float_env("CM_DYNAMIC_WINDOW_MIN_SEC")
+CM_DYNAMIC_WINDOW_MAX_SEC = required_float_env("CM_DYNAMIC_WINDOW_MAX_SEC")
+LONGTREND_NONBINANCE = required_bool_env("LONGTREND_NONBINANCE")
 
 #from log import PRINT_CONTEXT
 
@@ -2159,7 +2160,7 @@ if __name__ == "__main__":
         builtins.print(f"[cacheManager] instant-trend extins cu non-Binance: {_nb_syms}")
         # LONGTREND_NONBINANCE optionally starts accumulating sparse history and long-trend
         # data. It is disabled by default until enough lookback data exists.
-        if os.environ.get("LONGTREND_NONBINANCE", "").strip().lower() == "true":
+        if LONGTREND_NONBINANCE:
             CacheFactory.get("Price", symbols=_trend_syms)
             CacheFactory.get("PriceLongTrend", symbols=_trend_syms)
             builtins.print(f"[cacheManager] trend LUNG non-Binance ACTIVAT: {_nb_syms}")

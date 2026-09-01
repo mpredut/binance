@@ -38,21 +38,22 @@ from typing import Callable, Dict, Optional
 from lock import FileLock
 from providers.strategy_executor import OrderStatus, reconciliation_capabilities_of
 
-from botcore import load_dotenv as _load_dotenv
+from botcore import (load_dotenv as _load_dotenv, required_bool_env,
+                     required_float_env, required_int_env)
 _load_dotenv("order_retry_config.env")
 
-RETRY_ENABLED = os.environ.get("RETRY_ENABLED", "true").strip().lower() == "true"
-RETRY_INTERVAL_SEC = float(os.environ.get("RETRY_INTERVAL_SEC", "300"))
-RETRY_TTL_SEC = float(os.environ.get("RETRY_TTL_SEC", str(24 * 3600)))
-RETRY_MAX_ATTEMPTS = int(float(os.environ.get("RETRY_MAX_ATTEMPTS", "0")))
+RETRY_ENABLED = required_bool_env("RETRY_ENABLED")
+RETRY_INTERVAL_SEC = required_float_env("RETRY_INTERVAL_SEC")
+RETRY_TTL_SEC = required_float_env("RETRY_TTL_SEC")
+RETRY_MAX_ATTEMPTS = required_int_env("RETRY_MAX_ATTEMPTS")
 # Retry only at an equal or more favorable current price than the original request.
-RETRY_PRICE_TOL = float(os.environ.get("RETRY_PRICE_TOL", "0.002"))
+RETRY_PRICE_TOL = required_float_env("RETRY_PRICE_TOL")
 # Optional legacy compaction. Disabled operationally so independent strategies or
 # distinct same-side intents cannot overwrite each other in the shared outbox.
-RETRY_DEDUP = os.environ.get("RETRY_DEDUP", "false").strip().lower() == "true"
+RETRY_DEDUP = required_bool_env("RETRY_DEDUP")
 # Hard queue-size bound; zero disables the bound.
-RETRY_MAX_QUEUE = int(float(os.environ.get("RETRY_MAX_QUEUE", "500")))
-RETRY_CLAIM_LEASE_SEC = float(os.environ.get("RETRY_CLAIM_LEASE_SEC", "120"))
+RETRY_MAX_QUEUE = required_int_env("RETRY_MAX_QUEUE")
+RETRY_CLAIM_LEASE_SEC = required_float_env("RETRY_CLAIM_LEASE_SEC")
 
 _ROOT = os.path.dirname(os.path.abspath(__file__))
 QUEUE_FILE = os.path.join(_ROOT, "cachedb", "order_retry_queue.jsonl")

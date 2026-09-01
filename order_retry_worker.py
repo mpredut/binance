@@ -33,10 +33,10 @@ if _ROOT not in sys.path:
 
 import order_retry as oq
 import alertnotifiers as alert
-from botcore import single_instance
+from botcore import required_float_env, single_instance
 from providers.execution_audit import ExecutionAudit
 
-WORKER_POLL_SEC = float(os.environ.get("RETRY_WORKER_POLL_SEC", "30"))
+WORKER_POLL_SEC = required_float_env("RETRY_WORKER_POLL_SEC")
 _AUDIT = ExecutionAudit()
 
 

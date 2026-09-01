@@ -37,7 +37,8 @@ from pricewindow import (PriceTrendAnalyzer, PriceWindow, WindowAnalyzer,
 # tradeall_config.env before reading any environment variables below.
 # botcore.load_dotenv does not overwrite variables already set by the real
 # environment (for example, a systemd EnvironmentFile); it only fills gaps.
-from botcore import load_dotenv as _load_dotenv
+from botcore import (load_dotenv as _load_dotenv, required_env,
+                     required_float_env, required_int_env)
 _load_dotenv("tradeall_config.env")
 
 
@@ -51,25 +52,24 @@ TIME_SLEEP_PLACE_ORDER = TIME_SLEEP_EVALUATE + EXP_TIME_SELL_ORDER/ 6 + 4*79  # 
 SELL_BUY_THRESHOLD = 5  # Threshold for the number of consecutive signals
 
 # July 23: the parameters below were hard-coded constants. They now come from
-# environment variables (the tradeall.py section of config.env), with defaults
-# identical to the previous behavior unless explicitly configured.
-TREND_TO_BE_OLD_SECONDS = float(os.environ.get("TRADEALL_TREND_OLD_HOURS", "1.9")) * 3600
+# environment variables. Missing trading configuration aborts startup.
+TREND_TO_BE_OLD_SECONDS = required_float_env("TRADEALL_TREND_OLD_HOURS") * 3600
 # These values were calculated by u.calculate_difference_percent(60000, 60000-310)
 # and (97000, 95000-377). They are stored as direct percentages with enough
 # precision to reproduce those calls exactly (0.518...% / 2.481...%).
-PRICE_CHANGE_THRESHOLD_EUR = float(os.environ.get("TRADEALL_PRICE_CHANGE_THRESHOLD_PCT", "0.5180048459"))
-PRICE_CHANGE_THRESHOLD_BIG_EUR = float(os.environ.get("TRADEALL_PRICE_CHANGE_THRESHOLD_BIG_PCT", "2.4809130428"))
+PRICE_CHANGE_THRESHOLD_EUR = required_float_env("TRADEALL_PRICE_CHANGE_THRESHOLD_PCT")
+PRICE_CHANGE_THRESHOLD_BIG_EUR = required_float_env("TRADEALL_PRICE_CHANGE_THRESHOLD_BIG_PCT")
 
 # TrendState.is_trend_a_minim_validated/is_trend_consistent_validated/is_trend_uniform_confirmed
 # These thresholds specify how thoroughly a trend must be validated before it is
 # considered reliable; see the TrendState methods below.
-TREND_MIN_VALIDATED_SECONDS = float(os.environ.get("TRADEALL_TREND_MIN_VALIDATED_SEC", "30"))
-TREND_MIN_VALIDATED_CONFIRMS = int(os.environ.get("TRADEALL_TREND_MIN_VALIDATED_CONFIRMS", "3"))
-TREND_CONSISTENT_CONFIRMS = int(os.environ.get("TRADEALL_TREND_CONSISTENT_CONFIRMS", "24"))  # Previously 8*3.
-TREND_UNIFORM_RATE_THRESHOLD = float(os.environ.get("TRADEALL_TREND_UNIFORM_RATE", "0.08"))
+TREND_MIN_VALIDATED_SECONDS = required_float_env("TRADEALL_TREND_MIN_VALIDATED_SEC")
+TREND_MIN_VALIDATED_CONFIRMS = required_int_env("TRADEALL_TREND_MIN_VALIDATED_CONFIRMS")
+TREND_CONSISTENT_CONFIRMS = required_int_env("TRADEALL_TREND_CONSISTENT_CONFIRMS")
+TREND_UNIFORM_RATE_THRESHOLD = required_float_env("TRADEALL_TREND_UNIFORM_RATE")
 # logic(): the extreme-slope threshold used at four symmetric UP/DOWN sites. It
 # bypasses normal validation and treats the trend as old for those branches.
-SLOPE_EXTREME_THRESHOLD = float(os.environ.get("TRADEALL_SLOPE_EXTREME_THRESHOLD", "5.1"))
+SLOPE_EXTREME_THRESHOLD = required_float_env("TRADEALL_SLOPE_EXTREME_THRESHOLD")
 
 # July 22: per-trend cooldown, based on real July 21-22 data and seven experiments
 # in offline/research/tradeall_trigger_gate/. logic() previously fired on every
@@ -80,14 +80,14 @@ SLOPE_EXTREME_THRESHOLD = float(os.environ.get("TRADEALL_SLOPE_EXTREME_THRESHOLD
 # The updated behavior permits up to FIRE_MAX_PER_TREND confirmed executions per
 # direction and trend, with FIRE_MIN_RETRY_INTERVAL_SEC between any two attempts,
 # whether accepted or rejected. The interval is six minutes, reduced from 30.
-FIRE_MIN_RETRY_INTERVAL_SEC = float(os.environ.get("TRADEALL_FIRE_MIN_RETRY_MINUTES", "6")) * 60
-FIRE_MAX_PER_TREND = int(os.environ.get("TRADEALL_FIRE_MAX_PER_TREND", "3"))
+FIRE_MIN_RETRY_INTERVAL_SEC = required_float_env("TRADEALL_FIRE_MIN_RETRY_MINUTES") * 60
+FIRE_MAX_PER_TREND = required_int_env("TRADEALL_FIRE_MAX_PER_TREND")
 
 # July 30: safeback_seconds for _fire_order. The same local expression previously
 # appeared three times in logic(). This day-based window controls how far
 # place_safe_order/if_place_safe_order searches own trades for the daily cap and
 # profit-guard reference; see order_guard.py and bapi_placeorder.py.
-FIRE_SAFEBACK_DAYS = float(os.environ.get("TRADEALL_FIRE_SAFEBACK_DAYS", "14"))
+FIRE_SAFEBACK_DAYS = required_float_env("TRADEALL_FIRE_SAFEBACK_DAYS")
 FIRE_SAFEBACK_SEC = FIRE_SAFEBACK_DAYS * 24 * 3600 + 60
 
 DECISIONS_LOG_DIR = "logger"
@@ -164,7 +164,8 @@ GATE_STALE_SEC = 300
 # this mapping, then strict. A four-day A/B test found TAO's Kalman signal almost
 # always FLAT because $0.10 quantization creates high uncertainty. Strict mode
 # would suppress all TAO buys, so permissive blocks only a confirmed DOWN signal.
-GATE_MODE_DEFAULTS = {"TAOUSDC": "permissive"}
+KALMAN_GATE_MODE = required_env("KALMAN_GATE_MODE").lower()
+KALMAN_GATE_MODE_TAOUSDC = required_env("KALMAN_GATE_MODE_TAOUSDC").lower()
 
 # Primary Kalman (July 19): in a four-day A/B test BTC returned +$6.62 versus $0
 # for the current model and -$3.97 buy-and-hold. Kalman initiates transition
@@ -172,13 +173,13 @@ GATE_MODE_DEFAULTS = {"TAOUSDC": "permissive"}
 # mechanisms still handle exits, and _fire_order retains every safety guard.
 # Set KALMAN_PRIMARY_SYMBOLS to a comma-separated list or empty to disable it.
 KALMAN_PRIMARY_SYMBOLS = set(
-    s.strip() for s in os.environ.get("KALMAN_PRIMARY_SYMBOLS", "BTCUSDC").split(",") if s.strip())
+    s.strip() for s in required_env("KALMAN_PRIMARY_SYMBOLS").split(",") if s.strip())
 
 
 def _kalman_gate_blocks(symbol, action):
-    mode = (os.environ.get(f"KALMAN_GATE_MODE_{symbol}")
-            or os.environ.get("KALMAN_GATE_MODE")
-            or GATE_MODE_DEFAULTS.get(symbol, "strict")).strip().lower()
+    # The symbol-specific mode is an intentional policy override; all other symbols
+    # use the explicitly configured global mode.
+    mode = KALMAN_GATE_MODE_TAOUSDC if symbol == "TAOUSDC" else KALMAN_GATE_MODE
     if mode == "off" or _shadow_ref is None:
         return False, mode, None
     try:
@@ -691,7 +692,7 @@ class TrendCoordinator:
                 state_path=os.path.join("cachedb", "shadow_state.json"))
             global _shadow_ref
             _shadow_ref = self._shadow   # _fire_order's gate reads this signal.
-            print(f"[KALMAN-GATE] activ, mode={os.environ.get('KALMAN_GATE_MODE', 'strict')}")
+            print(f"[KALMAN-GATE] active, mode={KALMAN_GATE_MODE}")
         except Exception as _e:  # noqa: BLE001
             print(f"[TrendCoordinator] shadow_signals indisponibil (continui fara): {_e}")
             self._shadow = None
