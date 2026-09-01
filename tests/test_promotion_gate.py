@@ -179,7 +179,7 @@ class RiskAdjustedPromotionGateTest(unittest.TestCase):
         baseline["scenarios"]["central"]["assumptions"] = {"spread_bps": 10}
         candidate["scenarios"]["central"]["assumptions"] = {"spread_bps": 0}
 
-        with self.assertRaisesRegex(ValueError, "ipoteze"):
+        with self.assertRaisesRegex(ValueError, "execution assumptions"):
             evaluate_dual_promotion(baseline, candidate)
 
 
