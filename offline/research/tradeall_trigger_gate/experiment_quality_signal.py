@@ -5,31 +5,31 @@ Experiments 1-4: "if I am on a larger general uptrend and I buy, I should be
 in profit, right? test that."
 
 Experiments 1-4 showed that gradient/slope_big/gradient_big are all
-regresii pe ferestre de MINUTE-ORE, recalculate la FIECARE TICK — deci
-zgomotoase la aceeasi scara de timp, oricat de "mare" suna fereastra (2.5h).
-Niciunul nu era un trend GENUIN de lunga durata.
+regressions over windows of MINUTES TO HOURS, recomputed on EVERY TICK — so
+noisy on the same time scale, however "large" the window sounds (2.5h).
+None of them was a GENUINE long-lived trend.
 
 Testam aici un semnal calitativ DIFERIT:
-  - LongTrendTracker: regresie liniara pe o fereastra de `window_hours` ore
-    (implicit 24h), dar RECALCULATA doar o data la `reeval_sec` (implicit
+  - LongTrendTracker: a linear regression over a window of `window_hours` hours
+    (24h by default), but RECOMPUTED only once every `reeval_sec` (by default
     1800s = 30 min), not on every tick. That makes it STABLE for hours.
-  - Cooldown pe EXECUTIE CONFIRMATA (nu pe incercare): "deja am actionat in
+  - A cooldown on a CONFIRMED EXECUTION (not on an attempt): "I have already acted in
     this regime" is set ONLY if _fire_order returns a real result
     (an order placed), not merely because it was called. If an attempt is
     rejected (the Kalman gate; in live also weight limit/budget), we do NOT block
-    reincercari viitoare — exact cerinta user din discutia anterioara.
+    future retries — exactly the user's requirement from the earlier discussion.
 
 Trading rules: BUY when the signal is positive (AND we have not already executed
 successfully in this regime), SELL when negative (symmetric). Without the complex
 TrendState from tradeall.py (confirm_count/expiry) — that was part of the problem
-(vezi Experimentele 1/3), inlocuit complet aici cu logica de regim de mai sus.
+(see Experiments 1/3), replaced entirely here by the regime logic above.
 
 An honest caveat: with no existing position, a SELL rejected by the broker (spot,
-de vandut) NU se marcheaza ca "reincercare blocata" separat — va reincerca la
+to sell) is NOT marked separately as a "blocked retry" — it will retry at
 every tick until the sign changes OR a position appears (from an earlier
 BUY). In this backtest rejected retries cost no commission (only in
 production would they consume weight limit/API time) — so they do not affect P&L here,
-dar merita mentionat ca simplificare fata de productie.
+but it is worth noting as a simplification against production.
 """
 import os
 import sys
@@ -158,6 +158,6 @@ if __name__ == "__main__":
     tao_start = datetime.strptime("2026-07-14 19:40:00", "%Y-%m-%d %H:%M:%S").timestamp()
 
     # 7 zile complete pt ambele simboluri — un semnal de 24h are nevoie de
-    # suficient istoric ca sa arate mai mult de 1-2 schimbari de regim.
+    # enough history to show more than 1-2 regime changes.
     run_variant("V6_trend24h_reeval30min", 24, 1800, "BTCUSDC", btc_start, None)
     run_variant("V6_trend24h_reeval30min", 24, 1800, "TAOUSDC", tao_start, None)

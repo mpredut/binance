@@ -1,41 +1,41 @@
 #!/usr/bin/env python3
 """
-Investigheaza daca KALMAN_SAMPLE_SEC=60 (rata de esantionare a filtrului Kalman
+It investigates whether KALMAN_SAMPLE_SEC=60 (the sampling rate of the Kalman filter
 from shadow_signals.py, which feeds the PRIMARY KALMAN plus the gate in tradeall.py)
-introduce o intarziere prea mare pt miscari rapide de pret (23 iul 2026).
+introduces too much delay for fast price moves (23 Jul 2026).
 
 Context: analiza unui episod REAL (BTC, 23 iul, 10:10:13-10:12:47) a aratat ca
-o scadere de -0.53% s-a produs aproape integral INAINTE ca Kalman sa confirme
+a fall of -0.53% happened almost entirely BEFORE Kalman confirmed
 "DOWN" (~90% of the move already consumed by the time it transitioned), and "DOWN"
-durat doar 62s inainte sa revina la "FLAT" chiar la minimul local -- exact
-inainte de o revenire a pretului (order_outcomes_2026-07-23.log confirma o
+lasted only 62s before returning to "FLAT" right at the local low -- exactly
+before a rebound in the price (order_outcomes_2026-07-23.log confirms a
 incercare reala de SELL "kalman_primary_down" la acel moment, refuzata
-"no_fill" -- nu s-au miscat bani reali de data asta, dar mecanismul e viu).
+"no_fill" -- no real money moved this time, but the mechanism is live).
 
-Cauza structurala: la 60s/esantion, o miscare care se consuma in ~90-150s
-(cazul de mai sus) nu poate fi vazuta mai devreme de ~1-2 perioade de
+The structural cause: at 60s/sample, a move that plays out in ~90-150s
+(the case above) cannot be seen sooner than ~1-2 periods of
 esantionare, indiferent de pragurile de incredere (CONF_ENTER/CONF_EXIT).
-KALMAN_SAMPLE_SEC=60 a fost ales explicit pe 17 iul ca sa reduca zgomotul
+KALMAN_SAMPLE_SEC=60 was chosen explicitly on 17 Jul in order to reduce the noise
 (la 1s: 2868 tranzitii/zi pe BTC -- prea multe, palpaituri). Reducerea lui
-risca sa reintroduca acel zgomot -- acest script cuantifica exact acel
-compromis (latenta vs. zgomot) pe date REALE, inainte de orice schimbare.
+risks reintroducing that noise -- this script quantifies exactly that
+trade-off (latency versus noise) on REAL data, before any change.
 
-Refoloseste modul kalman_primary DEJA EXISTENT si validat in
-offline/backtests/tradeall.py (Kalman conduce direct BUY/SELL la tranzitii, prin
+It reuses the kalman_primary mode that ALREADY EXISTS and is validated in
+offline/backtests/tradeall.py (Kalman drives BUY/SELL directly on transitions, through
 broker.place_order_smart/sell_all) -- no new loop is built,
-doar se monkeypatch-uieste shadow_signals.KALMAN_SAMPLE_SEC inaintea fiecarei
-rulari (functiile citesc global-ul la fiecare apel, deci schimbarea are efect
-imediat, fara sa fie nevoie de reload de modul).
+it only monkeypatches shadow_signals.KALMAN_SAMPLE_SEC before each
+run (the functions read the global on every call, so the change takes effect
+immediately, with no need to reload the module).
 
-Metodologie: istoric REAL 329 zile (cache_price_{symbol}.jsonl), aceeasi
-arhiva ca offline/research/tradeall_trigger_gate/Experimentul 6 si
+Methodology: a REAL 329-day history (cache_price_{symbol}.jsonl), the same
+archive as offline/research/tradeall_trigger_gate/Experiment 6 and
 offline/research/tradeall_adaptive_thresholds/. Sweep pe KALMAN_SAMPLE_SEC, comparat
 pe PnL net (kalman_primary) + numarul de tranzitii Kalman logate (proxy
-direct pt zgomot/palpait) + buy&hold pe acelasi interval.
+directly for noise/flapping) plus buy & hold over the same interval.
 
 It does NOT modify tradeall.py, offline/backtests/tradeall.py or shadow_signals.py on disk --
 only an in-memory monkeypatch, for the lifetime of the script. It never runs
-impotriva retelei reale.
+against the real network.
 """
 import os
 import sys
@@ -52,10 +52,10 @@ os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 from offline.backtests import tradeall as tb
 import shadow_signals
 
-# 60.0 = valoarea LIVE de azi (control). Restul: mai rapid (20) si mai lent
-# (90/150), ca sa vedem in ce directie se muta compromisul latenta<->zgomot.
-# Redus la 4 valori (de la 5) dupa ce sanity-check-ul a aratat ~40 min/rulare
-# pe istoricul complet (888k tick-uri/simbol) -- 4x2=8 rulari, nu 10.
+# 60.0 = today's LIVE value (the control). The rest: faster (20) and slower
+# (90/150), so we can see which way the latency<->noise trade-off moves.
+# Reduced to 4 values (from 5) after the sanity check showed ~40 min/run
+# on the full history (888k ticks/symbol) -- 4x2=8 runs, not 10.
 SAMPLE_SEC_SWEEP = [20.0, 60.0, 90.0, 150.0]
 
 

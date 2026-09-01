@@ -1,45 +1,45 @@
 #!/usr/bin/env python3
 """
-Investigatie (23 iul 2026): are sens sa promovam vol_1h_pct din shadow_signals
+An investigation (23 Jul 2026): does it make sense to promote vol_1h_pct from shadow_signals
 la o decizie REALA in tradeall.py, inlocuind pragurile FIXE de detectie a
-miscarii de pret (PRICE_CHANGE_THRESHOLD_EUR / PRICE_CHANGE_THRESHOLD_BIG_EUR,
-folosite de check_price_change() pt ferestrele SMALL/BIG) cu praguri ADAPTIVE
-(K * vol_1h_pct, aceeasi formula ca shadow_signals.vol_1h_pct)?
+of the price move (PRICE_CHANGE_THRESHOLD_EUR / PRICE_CHANGE_THRESHOLD_BIG_EUR,
+used by check_price_change() for the SMALL/BIG windows) with ADAPTIVE thresholds
+(K * vol_1h_pct, the same formula as shadow_signals.vol_1h_pct)?
 
 Context (answering the user question "did we not do this because of the backtest?"):
 There is NO earlier backtest that tests EXACTLY this idea.
 offline/research/tradeall_trigger_gate/ (21-22 iul) a testat ALTE tipuri de schimbari —
-relaxarea conditiilor de start/confirmare ale unui trend deja pornit, cooldown,
+relaxing the start/confirmation conditions of a trend that has already begun, a cooldown,
 a quality signal on a 24h regression — and none beat the current variant
 plus buy & hold over 329 days. But NONE of those variants replaced
-pragurile FIXE cu unele scalate pe volatilitatea REALIZATA — aceasta e o idee
-noua, analoaga cu promovarea reusita a pragului de reintrare adaptiv pe Kraken
-(offline/research/kraken_adaptive_thresholds/), doar aplicata altui mecanism.
+the FIXED thresholds with ones scaled on REALISED volatility — this is a new
+idea, analogous to the successful promotion of the adaptive re-entry threshold on Kraken
+(offline/research/kraken_adaptive_thresholds/), merely applied to a different mechanism.
 
-Metodologie (aceeasi rigoare ca offline/research/kraken_adaptive_thresholds/ si
-Experimentul 6 din tradeall_trigger_gate/):
+Methodology (the same rigour as offline/research/kraken_adaptive_thresholds/ and
+Experiment 6 in tradeall_trigger_gate/):
   - Istoric REAL, 329 zile (cache_price_{symbol}.jsonl, ~7 min/tick).
   - check_price_change() itself is NOT modified — only the threshold value
-    trimisa e inlocuita cu K*vol_1h_pct, calculat din EXACT aceeasi fereastra
+    sent is replaced with K*vol_1h_pct, computed from EXACTLY the same window
     BIG window also used by shadow_signals.vol_1h_pct (real history, not separately simulated).
   - FALLBACK onto the real FIXED thresholds (from config, NOT arbitrary values) when
-    warm-up (<20 puncte in fereastra BIG) — acelasi tipar fail-safe ca la
+    warm-up (<20 points in the BIG window) — the same fail-safe pattern as in
     Kraken (STRAT_REENTRY_ADAPTIVE): an unavailable signal does not stop or alter
-    trading-ul, doar cade pe valoarea fixa.
+    the trading, it merely falls back to the fixed value.
   - K_BIG = K_SMALL * RATIO, unde RATIO = pragul BIG fix / pragul SMALL fix de
-    azi (~4.79) — pastram raportul dintre ferestre ca sa nu introducem o a doua
+    today (~4.79) — we keep the ratio between the windows so as not to introduce a second
     an untested dimension in the sweep (the same principle as on Kraken: reentry and
-    DCA testate SEPARAT, fiecare cu un singur multiplicator).
+    DCA tested SEPARATELY, each with a single multiplier).
   - Comparatie: PnL net (realizat + mark-to-market - comisioane) vs varianta
-    FIXA (K implicit) si vs buy&hold, pe AMBELE simboluri (BTC, TAO).
+    the FIXED one (the default K) and against buy & hold, on BOTH symbols (BTC, TAO).
 
-Refoloseste offline.backtests.tradeall.run_backtest() prin hook-ul `threshold_provider`
-(adaugat 23 iul, ca parte a acestei investigatii) — NU mai copiaza bucla de
+It reuses offline.backtests.tradeall.run_backtest() through the `threshold_provider` hook
+(added 23 Jul as part of this investigation) — it no longer copies the
 tick. Before this hook, this file had its own copy of the loop from
-run_backtest() (risc de derapaj tacut fata de motorul "oficial" daca acesta
+run_backtest() (a risk of silent drift from the "official" engine if that one
 changes later — see offline/research/BACKTEST_CANDIDATES.md and the discussion in
-sesiune despre unificarea backtest-urilor). Refactorizarea a fost verificata
-sa reproduca BIT-FOR-BIT rezultatele buclei vechi, pe date reale, inainte de
+session about unifying the backtests). The refactor was verified to
+reproduce the old loop's results BIT FOR BIT, on real data, before
 a inlocui vechea implementare.
 """
 import os
@@ -57,17 +57,17 @@ from offline.backtests import tradeall as tb
 import shadow_signals
 
 # Today's REAL FIXED values (from tradeall_config.env, not arbitrary constants) —
-# folosite ca (a) fallback in warm-up si (b) baseline "FIX" de comparat.
+# used as (a) the warm-up fallback and (b) the "FIXED" baseline to compare against.
 FIXED_SMALL = 0.5180048459
 FIXED_BIG = 2.4809130428
 RATIO = FIXED_BIG / FIXED_SMALL   # ~4.79
 
 
 def run_adaptive(symbol, start_ts, end_ts, k_small, run_id):
-    """Wrapper subtire peste offline.backtests.tradeall.run_backtest(): construieste un
-    threshold_provider care intoarce K*vol_1h_pct (adaptiv) in loc de pragul fix,
-    cu fallback pe FIXED_SMALL/FIXED_BIG in warm-up. k_small=None => rulare de
-    control cu pragurile FIXE (echivalent cu run_backtest() normal, fara hook)."""
+    """A thin wrapper over offline.backtests.tradeall.run_backtest(): it builds a
+    threshold_provider that returns K*vol_1h_pct (adaptive) instead of the fixed threshold,
+    falling back to FIXED_SMALL/FIXED_BIG during the warm-up. k_small=None => a control
+    run with the FIXED thresholds (equivalent to a normal run_backtest(), without the hook)."""
     k_big = None if k_small is None else k_small * RATIO
     warmup = {"n": 0}
 
@@ -97,15 +97,15 @@ def run_adaptive(symbol, start_ts, end_ts, k_small, run_id):
 if __name__ == "__main__":
     hist_start = datetime.strptime("2025-08-27", "%Y-%m-%d").timestamp()
     # 23 iul, RECALIBRAT: sweep-ul initial [None,1.0,2.0,3.0] s-a dovedit
-    # miscalibrat — K=2.0/3.0 au dat ZERO tranzactii pe toata istoria (praguri
+    # miscalibrated — K=2.0/3.0 gave ZERO trades over the whole history (thresholds
     # mult prea mari fata de vol_1h_pct reala), iar K=1.0 abia a tranzactionat
-    # (1 pe BTC, 3 pe TAO, fata de 186/1405 la FIX) — nicio comparatie corecta
-    # de frecventa. Redus la un interval mult mai jos, ca sa gasim zona unde
+    # (1 on BTC, 3 on TAO, against 186/1405 for FIXED) — no correct comparison
+    # of frequency. Reduced to a much lower interval, so as to find the zone where
     # the trading frequency is comparable to FIXED (not merely "almost idle").
-    # 28 iul: env-configurabil (K_SWEEP="0.6,0.7,0.8,0.9") ca sa reluam ZONA DE
+    # 28 Jul: configurable through the environment (K_SWEEP="0.6,0.7,0.8,0.9") so that the
     # TRANZITIE 0.5-1.0 — netestata: {0.1-0.5} au dat overtrading, {1.0-3.0} zero
-    # tranzactii, dar mijlocul (0.6-0.9) unde frecventa ar putea fi comparabila cu
-    # FIX n-a fost incercat. Verdictul "catastrofal" a sarit peste posibila zona utila.
+    # trades, but the middle (0.6-0.9) where the frequency might be comparable with
+    # FIXED was never tried. The "catastrophic" verdict skipped over a possibly useful zone.
     _k_env = os.environ.get("K_SWEEP", "0.1,0.2,0.3,0.5")
     K_SWEEP = [None] + [float(x) for x in _k_env.split(",") if x.strip()]   # None = control (FIX)
 

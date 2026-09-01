@@ -1,28 +1,28 @@
 """
 backtest_ranges.py — parseaza rangurile de test scrise ca text SIMPLU,
-DIRECT deasupra unui parametru din orice fisier de config (23 iul,
-offline/research/UNIFIED_BACKTEST_PLAN.md, decizie user: text simplu, NU YAML/JSON).
+DIRECTLY above a parameter in any config file (23 Jul,
+offline/research/UNIFIED_BACKTEST_PLAN.md, a user decision: plain text, NOT YAML/JSON).
 
-Format (o linie, deasupra parametrului, in ORICE fisier — .env, .conf tip
+The format (one line, above the parameter, in ANY file — .env, a .conf of the
 INI, monitortrades.conf):
 
     # BACKTEST: 5.0, 6.0, 7.0, 8.0, 9.0
     mt.gain = 7.0
 
 Generic over formats: it knows nothing about .env vs INI vs monitortrades.conf —
-cauta doar linia de comentariu "# BACKTEST: ..." IMEDIAT deasupra unei linii
-"cheie = valoare" / "cheie=valoare" (whitespace optional in jurul lui "="),
-via un regex simplu pe cheie. Comentariul trebuie sa fie chiar pe linia
-anterioara — orice alta linie intre ele (alt comentariu, o linie goala) il
-anuleaza, ca sa nu se atribuie gresit unui parametru diferit.
+it only looks for the comment line "# BACKTEST: ..." IMMEDIATELY above a line
+"key = value" / "key=value" (whitespace around "=" is optional),
+through a simple regex on the key. The comment must be on the very previous
+line — any other line between them (another comment, a blank line)
+cancels it, so that it is not wrongly attributed to a different parameter.
 
-Fisiere de tip INI (instruments.conf) au sectiuni `[NUME]` care REFOLOSESC
-aceleasi chei (ex. mt.gain apare atat in [BINANCE_BTC] cat si in
-[BINANCE_TAO]) — cheia intoarsa e prefixata cu sectiunea curenta
-("BINANCE_BTC.mt.gain"), ca sa nu se confunde/suprascrie una pe alta. Fisiere
-FARA sectiuni (.env, monitortrades.conf) intorc cheia neschimbata.
+INI-style files (instruments.conf) have `[NAME]` sections that REUSE
+the same keys (e.g. mt.gain appears both in [BINANCE_BTC] and in
+[BINANCE_TAO]) — the key returned is prefixed with the current section
+("BINANCE_BTC.mt.gain"), so that they cannot be confused or overwrite one another. Files
+WITHOUT sections (.env, monitortrades.conf) return the key unchanged.
 
-De ce NU YAML/JSON separat (decizie explicita user): rangul de test traieste
+Why NOT a separate YAML/JSON (an explicit user decision): the test range lives
 NEXT TO the real value, in the same file a human reads anyway —
 not in a separate sidecar that can silently drift from the real value.
 """
@@ -38,11 +38,11 @@ _KEY_RE = re.compile(r'^\s*([A-Za-z0-9_.]+)\s*=\s*(.+?)\s*$')
 
 
 def scan_backtest_ranges(path: str) -> Dict[str, List[str]]:
-    """Intoarce {cheie: [valori_ca_string]} pt fiecare linie "# BACKTEST: ..."
-    gasita imediat deasupra unei linii cheie=valoare, in `path`. Chei din
-    fisiere cu sectiuni [NUME] (instruments.conf) sunt prefixate cu sectiunea
+    """Returns {key: [values_as_strings]} for every "# BACKTEST: ..." line
+    found immediately above a key=value line, in `path`. Keys from
+    files with [NAME] sections (instruments.conf) are prefixed with the section
     ("BINANCE_BTC.mt.gain"). [] if the file is missing or has no
-    adnotare de acest tip."""
+    annotation of this kind."""
     out: Dict[str, List[str]] = {}
     if not os.path.exists(path):
         return out
@@ -67,13 +67,13 @@ def scan_backtest_ranges(path: str) -> Dict[str, List[str]]:
                 out[full_key] = pending
                 pending = None
             else:
-                # orice alta linie (goala, alt comentariu, alta cheie fara
-                # adnotare) rupe legatura -- comentariul trebuie sa fie CHIAR
-                # deasupra, nu "undeva mai sus".
+                # any other line (blank, another comment, another key without
+                # an annotation) breaks the link -- the comment must be RIGHT
+                # above, not "somewhere further up".
                 pending = None
     return out
 
 
 def scan_all(paths: List[str]) -> Dict[str, Dict[str, List[str]]]:
-    """{path: {cheie: [valori]}} pt o lista de fisiere de config."""
+    """{path: {key: [values]}} for a list of config files."""
     return {p: scan_backtest_ranges(p) for p in paths}

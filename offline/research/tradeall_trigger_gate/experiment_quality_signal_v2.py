@@ -1,30 +1,30 @@
 #!/usr/bin/env python3
 """
-Experiment 6 (izolat, NU modifica tradeall.py) — continuarea Experimentului 5,
-pe cererea userului: "hai sa facem 3 [repara defectul de cooldown] dar cu
-mentiunea ca tb partial limitat. sa testez pe mult mai multe zile din nou?"
+Experiment 6 (isolated, it does NOT modify tradeall.py) — the continuation of Experiment 5,
+at the user's request: "let's do 3 [fix the cooldown defect] but with
+the note that it has to be partly limited. should I test over many more days again?"
 
 Doua schimbari fata de Experimentul 5:
 
-1. COOLDOWN REPARAT (limitat, nu nelimitat): Experimentul 5 a aratat ca
+1. THE COOLDOWN FIXED (limited, not unlimited): Experiment 5 showed that
    "retry only if not yet CONFIRMED" is insufficient — with no position
-   de vandut, un SELL respins se reincerca la FIECARE tick (16683/3962
-   incercari inutile intr-o saptamana). Fix: adaugat MIN_RETRY_INTERVAL_SEC
+   to sell, a rejected SELL was retried on EVERY tick (16683/3962
+   pointless attempts in a week). The fix: MIN_RETRY_INTERVAL_SEC added
    between BLOCKED attempts (not between confirmed ones — a successful execution
-   tot blocheaza pana la schimbarea de regim, ca inainte). Practic: "incearca,
+   it still blocks until the regime changes, as before). In practice: "try,
    if it fails, wait at least X minutes before retrying", not "never"
    and not "on every tick".
 
 2. ISTORIC MULT MAI LUNG: in loc de arhiva densa de 7 zile (cache24, ~1s/tick),
-   folosim istoricul SPARS (`cache_price_{symbol}.jsonl`, ~7 min/tick, 329 de
-   zile disponibile — verificat: 2025-08-27 -> azi). Semnalul testat (regresie
-   pe 12-24h, recalculata rar) nu are nevoie de rezolutie de secunda — 7 min e
-   suficient de fin pt o fereastra de ore. Scop: un singur test de 7 zile poate
+   we use the SPARSE history (`cache_price_{symbol}.jsonl`, ~7 min/tick, 329
+   days available — verified: 2025-08-27 -> today). The signal being tested (a regression
+   over 12-24h, recomputed rarely) does not need second-level resolution — 7 min is
+   fine enough for a window of hours. The goal: a single 7-day test can
    fi noroc/ghinion; 329 de zile acopera multe regimuri diferite de piata.
 
-Variante (pe BTC si TAO, istoric COMPLET disponibil):
-  V7_trend24h_reeval30min_retrylimit  : fereastra 24h, reevaluare 30 min (ca Exp5)
-  V7_trend12h_reeval15min_retrylimit  : fereastra 12h, reevaluare 15 min (mai rapid)
+Variants (on BTC and TAO, the COMPLETE history available):
+  V7_trend24h_reeval30min_retrylimit  : a 24h window, re-evaluation every 30 min (as in Exp5)
+  V7_trend12h_reeval15min_retrylimit  : a 12h window, re-evaluation every 15 min (faster)
 
 MIN_RETRY_INTERVAL_SEC = 1800 (30 min) pt incercarile blocate, pe ambele variante.
 """
@@ -175,6 +175,6 @@ if __name__ == "__main__":
         run_variant("V7_trend24h_reeval30min_retrylimit", 24, 1800, symbol, hist_start, None)
         run_variant("V7_trend12h_reeval15min_retrylimit", 12, 900, symbol, hist_start, None)
 
-    sys.stderr.write("\n\n===== TOATE RULARILE TERMINATE =====\n")
+    sys.stderr.write("\n\n===== ALL RUNS FINISHED =====\n")
     for tag, st in STATS.items():
         sys.stderr.write(f"{tag}: {st}\n")

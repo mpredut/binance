@@ -1,34 +1,34 @@
 #!/usr/bin/env python3
 """
-Experiment 7 (izolat, NU modifica tradeall.py) — raspuns la 3 intrebari user
-dupa Experimentul 6:
+Experiment 7 (isolated, it does NOT modify tradeall.py) — an answer to 3 user questions
+after Experiment 6:
   1. "is it worth committing ONLY the cooldown (without touching the thresholds)?"
-  2. "toate experimentele arata ca varianta curenta e cea mai buna?"
-  3. "sa inaspresc parametrii are sens de test?"
+  2. "do all the experiments show that the current variant is the best?"
+  3. "does tightening the parameters make sense as a test?"
 
 Aici testam, pe intreg istoricul disponibil (329 zile, cache_price_*.jsonl):
 
-  A. "current_cooldown"      : logic() REALA din tradeall.py (conditia de start
-                                divergenta gradient/slope_big NESCHIMBATA, toate
+  A. "current_cooldown"      : the REAL logic() from tradeall.py (the start condition,
+                                the gradient/slope_big divergence, UNCHANGED, all
                                 pragurile 5.1/24-confirmari/TREND_TO_BE_OLD_SECONDS
-                                NESCHIMBATE) + DOAR cooldown-ul (executie
-                                confirmata + interval minim intre reincercari,
-                                varianta finala din Experimentul 6). Raspunde
-                                direct la intrebarea 1: ce s-ar intampla daca am
+                                UNCHANGED) plus ONLY the cooldown (a confirmed
+                                execution plus a minimum interval between retries,
+                                the final variant from Experiment 6). It answers
+                                question 1 directly: what would happen if we
                                 commit ONLY the cooldown, with no other change?
 
-  B. "tighten_confirm48_cooldown" : ca mai sus, dar pragul de confirmari pt
+  B. "tighten_confirm48_cooldown" : as above, but the confirmation threshold for
                                 is_trend_consistent_validated() DUBLAT (24->48)
-                                — testeaza intrebarea 3 (inasprire, nu relaxare).
+                                — it tests question 3 (tightening, not relaxing).
                                 Motivatie: TAO a acumulat 99 confirmari intr-un
-                                singur trend si a atins usor pragul de 24; un
+                                a single trend and easily reached the threshold of 24; a
                                 prag mai greu de atins ar putea evita intreg
                                 episodul problematic.
 
 logic() is a FAITHFUL copy of the function in tradeall.py (every block, the
-5.1 si TREND_TO_BE_OLD_SECONDS neschimbate) — SINGURA diferenta fata de codul
-real e cooldown-ul adaugat la fiecare punct unde s-ar chema _fire_order, plus
-(doar pt varianta B) suprascrierea is_trend_consistent_validated().
+5.1 and TREND_TO_BE_OLD_SECONDS unchanged) — the ONLY difference from the real
+code is the cooldown added at every point where _fire_order would be called, plus
+(for variant B only) overriding is_trend_consistent_validated().
 """
 import os
 import sys
@@ -44,7 +44,7 @@ import tradeall as ta
 
 STATS = {}
 
-MIN_RETRY_INTERVAL_SEC = 1800.0   # 30 min intre incercari BLOCATE (ca in Exp6)
+MIN_RETRY_INTERVAL_SEC = 1800.0   # 30 min between BLOCKED attempts (as in Exp6).
 
 
 def make_instrumented(tag, confirm_threshold_override=None):
@@ -112,9 +112,9 @@ def make_instrumented(tag, confirm_threshold_override=None):
 
 
 def make_logic_real_with_cooldown(tag, stats):
-    """Copie FIDELA a logic() din tradeall.py (liniile 356-471 la 21-22 iul) —
+    """A FAITHFUL copy of logic() from tradeall.py (lines 356-471 on 21-22 Jul) —
     NOTHING changed in the decision blocks, ONLY a cooldown added to each
-    punct de fire (executie confirmata + interval minim intre reincercari)."""
+    fire point (a confirmed execution plus a minimum interval between retries)."""
     def logic_variant(win, enable, symbol, gradient, slope, trend_state, current_price):
         d = 14
         h = 24
@@ -200,12 +200,12 @@ def run_variant(tag, confirm_threshold_override, symbol, start_ts, end_ts):
 
     # IMPORTANT: logic() reala are constante de timp SCURTE (expirare 2.7min,
     # fresh 3.7min) — gandite pt tick-uri dese (~1s, ca in live). Istoricul
-    # SPARS (cache_price_*.jsonl, ~7min/tick) ar face orice trend sa "expire"
-    # aproape instant, ca artefact al raritatii datelor, nu al pietei reale
-    # (verificat: smoke test 12h -> confirms=0, expires=1 imediat). De-asta
-    # folosim arhiva DENSA (cache24, ~1s/tick, 7 zile) — singura sursa
+    # SPARSE (cache_price_*.jsonl, ~7min/tick) would make any trend "expire"
+    # almost instantly, an artefact of the data's sparseness rather than of the real market
+    # (verified: a 12h smoke test -> confirms=0, expires=1 immediately). That is why
+    # we use the DENSE archive (cache24, ~1s/tick, 7 days) — the only source
     # compatible with this mechanism, even though the sample is smaller than
-    # Experimentul 6 (acolo semnalul era recalculat rar, 30min, compatibil cu
+    # Experiment 6 (there the signal was recomputed rarely, every 30 min, compatible with
     # sparse).
     t0 = time.time()
     tb.run_backtest(symbol, start_ts, end_ts, "fast", run_id, "cache24",

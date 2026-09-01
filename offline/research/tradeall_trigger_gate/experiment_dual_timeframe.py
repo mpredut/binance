@@ -1,34 +1,34 @@
 #!/usr/bin/env python3
 """
-Experiment 4 (izolat, NU modifica tradeall.py) — cerere user: "ce reprezinta
-fiecare variabila nu ne ajuta prea mult, as vrea sa folosim intuitia pe
+Experiment 4 (isolated, it does NOT modify tradeall.py) — a user request: "what each
+variable represents does not help us much, I would like to use intuition on
 the simple strategy" — that is: if both windows (small AND large) agree
-asupra DIRECTIEI, folosind aceeasi masura CONTINUA (nu unul continuu + unul
-rar/prag), ar trebui sa fie o strategie sanatoasa de "trend-following pe doua
+about the DIRECTION, using the same CONTINUOUS measure (not one continuous plus one
+rare/threshold-based), ought to be a sound "trend-following on two
 orizonturi de timp".
 
-Problema gasita (raspuns la intrebarea despre are_close): slope_big NU e o
-masura continua a directiei — e EXACT 0 (sentinel "nicio miscare mare") pana
+The problem found (an answer to the question about are_close): slope_big is NOT a
+continuous measure of direction — it is EXACTLY 0 (the "no large move" sentinel) until
 when the price crosses a fixed threshold relative to the window extreme (WindowAnalyzer.
-check_price_change). gradient (fereastra mica) e continuu (aproape niciodata
+check_price_change). gradient (the small window) is continuous (almost never
 exactly 0). "Agreement" between them (gradient>0 and slope_big>0) requires an event
-RAR (slope_big nenul) sa coincida cu un eveniment ZGOMOTOS (semnul lui
+RARE event (a non-zero slope_big) to coincide with a NOISY event (the sign of
 gradient) — de-asta Experimentul 2 a dat aproape 0 activitate pe acord.
 
-Fix testat aici: inlocuim slope_big cu gradient_big — ACEEASI derivare ca
+The fix tested here: replace slope_big with gradient_big — the SAME derivation as
 gradient (PriceWindow.get_instant_trend(), semn -1/0/+1 dintr-o regresie
-continua), dar calculata pe FEREASTRA MARE in loc de cea mica. Acum "acord"
+continuous), but computed on the LARGE WINDOW instead of the small one. Now "agreement"
 means something honest: "the short-term AND the long-term trend are
-de acord asupra directiei" — o strategie dual-timeframe clasica, nu o
+agree on the direction" — a classic dual-timeframe strategy, not a
 coincidenta rara.
 
-Cooldown fire-once (din Experimentul 3) e mereu ACTIV aici — am demonstrat deja
+The fire-once cooldown (from Experiment 3) is always ACTIVE here — it has already been shown
 that without it any frequency increase leads to catastrophic overtrading; we do
 not retest "without cooldown" so as not to waste time on a known result.
 
-Variante (pe BTC 2 zile / TAO 12h, aceleasi ferestre ca Experimentele 1-3):
-  V5_dual_timeframe_acord : gradient(mic)>0 SI gradient_big(mare)>0 -> UP
-                            gradient(mic)<0 SI gradient_big(mare)<0 -> DOWN
+Variants (on BTC over 2 days / TAO over 12h, the same windows as Experiments 1-3):
+  V5_dual_timeframe_agreement : gradient(small)>0 AND gradient_big(large)>0 -> UP
+                            gradient(small)<0 AND gradient_big(large)<0 -> DOWN
                             + cooldown fire-once (ca Experimentul 3)
 """
 import os
@@ -49,10 +49,10 @@ _OrigWindowAnalyzer = ta.WindowAnalyzer
 
 
 class GradientBigWindowAnalyzer(_OrigWindowAnalyzer):
-    """check_price_change() intoarce acum gradient_big (semn continuu, aceeasi
-    derivare ca PriceWindow.get_instant_trend() folosit pt fereastra mica) in
+    """check_price_change() now returns gradient_big (a continuous sign, the same
+    derivation as PriceWindow.get_instant_trend() used for the small window) in
     loc de slope_big (rar, prag-gated). Semnatura pastrata (val, pos) — pos
-    (al doilea element) nu e folosit de logic()."""
+    (the second element) is not used by logic()."""
     def check_price_change(self, threshold):
         final_trend, growth_coefficient, slope_full, gradient_recent = self.window.get_instant_trend()
         return final_trend, 0
@@ -104,8 +104,8 @@ def make_instrumented(tag):
 
 
 def make_logic_cooldown(start_up_cond, start_down_cond, label):
-    """Identic cu Experimentul 3 (copie logic() + cooldown fire-once) — reluat
-    aici ca sa ramana script independent, fara dependenta de fisierul anterior."""
+    """Identical to Experiment 3 (a copy of logic() plus the fire-once cooldown) — repeated
+    here so the script stays independent, without depending on the previous file."""
     def logic_variant(win, enable, symbol, gradient, slope, trend_state, current_price):
         d = 14
         h = 24
@@ -212,8 +212,8 @@ if __name__ == "__main__":
     run_variant("V5_dual_timeframe_acord", "BTCUSDC", btc_start, btc_end)
     run_variant("V5_dual_timeframe_acord", "TAOUSDC", tao_start, tao_end)
 
-    # fereastra mai lunga pe BTC (7 zile complete, aceeasi arhiva ca backtest-urile
-    # A/B principale) — 2 zile arata prea putine date ca sa distingem "strategie
-    # sanatoasa, rara" de "strategie moarta"; pe 7 zile avem un test mult mai onest.
+    # a longer window on BTC (7 full days, the same archive as the main A/B
+    # backtests) — 2 days show too little data to distinguish "a sound,
+    # rare strategy" from "a dead strategy"; over 7 days the test is far more honest.
     btc7_start = datetime.strptime("2026-07-14", "%Y-%m-%d").timestamp()
     run_variant("V5_dual_timeframe_acord_7d", "BTCUSDC", btc7_start, None)

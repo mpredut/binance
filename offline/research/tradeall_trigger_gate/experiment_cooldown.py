@@ -1,24 +1,24 @@
 #!/usr/bin/env python3
 """
-Experiment 3 (izolat, NU modifica tradeall.py) — testeaza chiar fix-ul propus
+Experiment 3 (isolated, it does NOT modify tradeall.py) — it tests the very fix proposed
 in raport (memoria tradeall-trigger-gate-investigation.md): un cooldown
-"fire o singura data per instanta de trend" (edge-triggered, nu level-triggered
-cum e acum), combinat cu o conditie de START mai larga (care in Experimentul 2
-producea overtrading catastrofal FARA cooldown).
+"fire only once per trend instance" (edge-triggered, not level-triggered
+as it is now), combined with a wider START condition (which in Experiment 2
+produced catastrophic overtrading WITHOUT a cooldown).
 
 Intrebare: cooldown-ul elimina overtrading-ul (fees/refire) pastrand totusi
-starturile suplimentare ca oportunitati distincte utile, sau acele starturi
+the extra starts as distinct, useful opportunities, or whether those starts
 extra ones were noise anyway (many, but worthless) even with a cooldown?
 
-Variante (pe BTC 2 zile si TAO 12h, aceleasi ferestre ca Experimentele 1-2):
+Variants (on BTC over 2 days and TAO over 12h, the same windows as Experiments 1-2):
   V0_baseline_cooldown        : conditia ACTUALA (divergenta) + cooldown fire-once
-  V1_doar_gradient_cooldown   : conditia V1 (doar semn gradient) + cooldown fire-once
+  V1_gradient_only_cooldown   : the V1 condition (the gradient sign only) plus the fire-once cooldown
   V3a_prag_big_jum_cooldown   : PRICE_CHANGE_THRESHOLD_BIG_EUR /2  + cooldown fire-once
   V3b_prag_big_treime_cooldown: PRICE_CHANGE_THRESHOLD_BIG_EUR /3  + cooldown fire-once
 
 Cooldown-ul: un singur flag per TrendState per directie (_fired_up/_fired_down),
-resetat la fiecare start_trend() nou; orice bloc de FIRE (trend_confirmed,
-consistent_or_old, slope>=5.1 etc.) verifica flagul INAINTE sa cheme _fire_order
+reset on every new start_trend(); every FIRE block (trend_confirmed,
+consistent_or_old, slope>=5.1 and so on) checks the flag BEFORE calling _fire_order
 and sets it afterwards. So: at most ONE real order per trend instance, regardless
 cate tick-uri ramane validat.
 """
@@ -83,8 +83,8 @@ def make_instrumented(tag):
 
 
 def make_logic_cooldown(start_up_cond, start_down_cond, label):
-    """Copie a logic() din tradeall.py, cu DOUA variatii: conditia de start
-    (parametrizata, ca in Experimentul 2) SI un cooldown fire-once per directie
+    """A copy of logic() from tradeall.py, with TWO variations: the start condition
+    (parameterised, as in Experiment 2) AND a fire-once cooldown per direction
     per trend instance (it gates ALL firing blocks, not just one)."""
     def logic_variant(win, enable, symbol, gradient, slope, trend_state, current_price):
         d = 14

@@ -65,7 +65,7 @@ class TestWatchdog(unittest.TestCase):
 class TestEventDrivenGating(unittest.TestCase):
     """Gating flota-vie pt cache-urile event-driven (order/trade) — 28 iul.
     A stale fill cache must NOT alarm while the fleet is demonstrably
-    vie (un cache de pret rapid e proaspat)."""
+    alive (a fast price cache is fresh)."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -78,17 +78,17 @@ class TestEventDrivenGating(unittest.TestCase):
 
     def test_fill_cache_stale_but_fleet_alive_no_alarm(self):
         now = time.time()
-        _write_cache(self.price, int(now * 1000))                        # pret PROASPAT -> flota vie
-        _write_cache(self.order, int((now - 90 * 3600) * 1000),          # fill vechi de 90h (>72h prag)
+        _write_cache(self.price, int(now * 1000))                        # A FRESH price -> the fleet is alive.
+        _write_cache(self.order, int((now - 90 * 3600) * 1000),          # A fill 90h old (>the 72h threshold).
                      mtime_sec=now - 90 * 3600)
         with patch.object(wd.wc, "send_ntfy") as ntfy, patch.object(wd.wc, "send_email") as email:
-            self.assertFalse(wd.check_once(now=now), "flota vie -> fill stale benign, fara alarma")
+            self.assertFalse(wd.check_once(now=now), "a live fleet -> a stale fill is benign, no alarm")
             ntfy.assert_not_called()
             email.assert_not_called()
 
     def test_fill_cache_stale_and_fleet_dead_alarms(self):
         now = time.time()
-        # AMBELE stale: pret vechi (flota moarta) + fill vechi -> alarma (fail-safe)
+        # BOTH stale: an old price (a dead fleet) plus an old fill -> an alarm (fail-safe).
         _write_cache(self.price, int((now - 3600) * 1000), mtime_sec=now - 3600)
         _write_cache(self.order, int((now - 90 * 3600) * 1000), mtime_sec=now - 90 * 3600)
         with patch.object(wd.wc, "send_ntfy", return_value=True) as ntfy, \
@@ -99,18 +99,18 @@ class TestEventDrivenGating(unittest.TestCase):
     def test_fill_cache_beyond_hard_ceiling_alarms_even_if_fleet_alive(self):
         now = time.time()
         _write_cache(self.price, int(now * 1000))                        # flota vie
-        # fill mai vechi decat plafonul dur (30 zile) -> alarma oricum
+        # A fill older than the hard cap (30 days) -> an alarm regardless.
         old = now - (wd._EVENT_DRIVEN_HARD_CEILING_MIN + 60) * 60
         _write_cache(self.order, int(old * 1000), mtime_sec=old)
         with patch.object(wd.wc, "send_ntfy", return_value=True) as ntfy, \
              patch.object(wd.wc, "send_email", return_value=True):
-            self.assertTrue(wd.check_once(now=now), "peste plafonul dur -> alarma chiar cu flota vie")
+            self.assertTrue(wd.check_once(now=now), "above the hard cap -> an alarm even with a live fleet")
             ntfy.assert_called_once()
 
 
 class TestFastPriceThreshold(unittest.TestCase):
     """A dedicated tight threshold (5min) plus restart eligibility ONLY for the
-    de pret rapide (~1s), scrise chiar de cacheManager.py. Arhiva sparse .jsonl
+    fast price caches (~1s), written by cacheManager.py itself. The sparse .jsonl archive
     stays on the general threshold and does NOT trigger a restart (28 Jul)."""
 
     def test_fast_price_caches_classified(self):
@@ -127,10 +127,10 @@ class TestFastPriceThreshold(unittest.TestCase):
             self.assertFalse(wd._is_fast_price_cache(n), n)
 
     def test_cache_prices_multi_reclassified_slow_override(self):
-        """30 iul: cache_prices_multi.json e scris de market_alerts.py (~5min
+        """30 Jul: cache_prices_multi.json is written by market_alerts.py (~5 min
         cadence), NOT by cacheManager.py — it is no longer a "fast price" (it was classified
-        gresit, pragul de 5min strans cauza alarme false pe cadenta lui normala
-        de ~5:03-5:04min, si restart-ul cacheManager n-avea niciun efect asupra
+        wrongly, the tight 5-min threshold caused false alarms on its normal cadence
+        of ~5:03-5:04 min, and restarting cacheManager had no effect at all on
         as such). Now: its own threshold (8min) via _STALE_OVERRIDES, with NO restart."""
         self.assertFalse(wd._is_fast_price_cache("cache_prices_multi.json"))
         self.assertEqual(wd._threshold_for("cache_prices_multi.json"), 8)
@@ -157,8 +157,8 @@ class TestFastPriceThreshold(unittest.TestCase):
 
 
 class TestAutoRestart(unittest.TestCase):
-    """Auto-restart pe stall REAL de pret (28 iul). _do_restart e mock-uit —
-    NU se atinge niciun proces real in teste."""
+    """Auto-restart on a REAL price stall (28 Jul). _do_restart is mocked —
+    NO real process is touched in the tests."""
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -170,10 +170,10 @@ class TestAutoRestart(unittest.TestCase):
         wd.AUTO_RESTART_COOLDOWN_MIN = 15
         wd.AUTO_RESTART_MAX = 3
         wd.AUTO_RESTART_WINDOW_H = 6
-        # 30 iul: cache_currentprice.json (nu cache_prices_multi.json — vezi
+        # 30 Jul: cache_currentprice.json (not cache_prices_multi.json — see
         # test_cache_prices_multi_is_not_restart_eligible mai jos, acela e al
         # market_alerts.py, not cacheManager.py, so it no longer triggers a restart).
-        self.price = os.path.join(self.tmp, "cache_currentprice.json")   # cache RAPID, scris de cacheManager
+        self.price = os.path.join(self.tmp, "cache_currentprice.json")   # The FAST cache, written by cacheManager.
         self.order = os.path.join(self.tmp, "cache_order.json")          # event-driven (in overrides)
 
     def _stale_price(self, now):
@@ -199,7 +199,7 @@ class TestAutoRestart(unittest.TestCase):
             restart.assert_not_called()
 
     def test_slow_cache_stall_does_not_restart(self):
-        """Un cache din _STALE_OVERRIDES (event-driven/slow) stale, dar FLOTA MOARTA
+        """A cache from _STALE_OVERRIDES (event-driven/slow) is stale, but THE FLEET IS DEAD
         (no fresh price) -> alarm, but NO restart (fill staleness does not
         justifica repornirea procesului critic)."""
         now = time.time()
@@ -211,18 +211,18 @@ class TestAutoRestart(unittest.TestCase):
             restart.assert_not_called()
 
     def test_cache_prices_multi_is_not_restart_eligible(self):
-        """30 iul: cache_prices_multi.json (market_alerts.py, NU cacheManager.py)
+        """30 Jul: cache_prices_multi.json (market_alerts.py, NOT cacheManager.py)
         stale -> alarm (its own 8min threshold from _STALE_OVERRIDES), but NEVER
-        restart -- restart-ul targeteaza cacheManager.py, care n-are nicio
-        legatura cu acest fisier (era bug-ul gasit live 30 iul: 2 restart-uri
-        irosite pe alarme false + target gresit, inainte sa loveasca plafonul)."""
+        restart -- the restart targets cacheManager.py, which has nothing
+        to do with this file (that was the bug found live on 30 Jul: 2 restarts
+        wasted on false alarms plus the wrong target, before it hit the cap)."""
         now = time.time()
         multi = os.path.join(self.tmp, "cache_prices_multi.json")
         _write_cache(multi, int((now - 3600) * 1000), mtime_sec=now - 3600)  # 1h stale
         with patch.object(wd, "_do_restart", return_value=True) as restart, \
              patch.object(wd.wc, "send_ntfy", return_value=True), \
              patch.object(wd.wc, "send_email", return_value=True):
-            self.assertTrue(wd.check_once(now=now), "tot trebuie sa alarmeze")
+            self.assertTrue(wd.check_once(now=now), "it must still alarm")
             restart.assert_not_called()
 
     def test_cooldown_blocks_second_restart(self):
@@ -232,8 +232,8 @@ class TestAutoRestart(unittest.TestCase):
              patch.object(wd.wc, "send_ntfy", return_value=True), \
              patch.object(wd.wc, "send_email", return_value=True):
             wd.check_once(now=now)                       # restart 1
-            wd.check_once(now=now + 5 * 60)              # +5min < cooldown 15min -> NU
-            self.assertEqual(restart.call_count, 1, "cooldown trebuie sa blocheze al 2-lea restart")
+            wd.check_once(now=now + 5 * 60)              # +5min < the 15min cooldown -> NO.
+            self.assertEqual(restart.call_count, 1, "the cooldown must block the 2nd restart")
             wd.check_once(now=now + 20 * 60)             # +20min > cooldown -> restart 2
             self.assertEqual(restart.call_count, 2)
 
@@ -244,10 +244,10 @@ class TestAutoRestart(unittest.TestCase):
              patch.object(wd.wc, "send_ntfy", return_value=True), \
              patch.object(wd.wc, "send_email", return_value=True):
             wd.check_once(now=now)                   # 1
-            wd.check_once(now=now + 16 * 60)         # 2 (peste cooldown)
+            wd.check_once(now=now + 16 * 60)         # 2 (past the cooldown)
             wd.check_once(now=now + 32 * 60)         # 3
-            wd.check_once(now=now + 48 * 60)         # al 4-lea: PLAFON -> NU repornim
-            self.assertEqual(restart.call_count, 3, "plafonul de 3/fereastra trebuie respectat")
+            wd.check_once(now=now + 48 * 60)         # The 4th: THE CAP -> no restart.
+            self.assertEqual(restart.call_count, 3, "the cap of 3 per window must be honoured")
 
 
 class TestConfigWatch(unittest.TestCase):
@@ -259,7 +259,7 @@ class TestConfigWatch(unittest.TestCase):
         wd.STATE_FILE = os.path.join(self.tmp, ".state.json")
         wd._CONFIG_OWNERS = {"fake.conf": ["fakeproc.py"]}
         wd.CONFIG_RESTART = True
-        wd.CONFIG_RESTART_COOLDOWN_MIN = 0   # fara cooldown in test
+        wd.CONFIG_RESTART_COOLDOWN_MIN = 0   # No cooldown in the test.
         with open(self.cfg, "w") as f:
             f.write("val = 1\n")
 
@@ -277,7 +277,7 @@ class TestConfigWatch(unittest.TestCase):
                 f.write("val = 2\n")
             self.assertEqual(wd.check_configs_once(), ["fakeproc.py"])
             restart.assert_called_once_with("fakeproc.py")
-            # 3) neschimbat -> debounce, fara al doilea restart
+            # 3) unchanged -> debounce, no second restart
             restart.reset_mock()
             self.assertEqual(wd.check_configs_once(), [])
             restart.assert_not_called()
@@ -286,8 +286,8 @@ class TestConfigWatch(unittest.TestCase):
         with patch.object(wd, "_do_restart") as restart, \
              patch.object(wd.wc, "send_ntfy"), patch.object(wd.wc, "send_email"):
             wd.check_configs_once()                       # baseline
-            os.utime(self.cfg, (time.time() + 100, time.time() + 100))  # doar mtime, continut identic
-            self.assertEqual(wd.check_configs_once(), [])  # hash identic -> nimic
+            os.utime(self.cfg, (time.time() + 100, time.time() + 100))  # Only mtime, identical content.
+            self.assertEqual(wd.check_configs_once(), [])  # An identical hash -> nothing.
             restart.assert_not_called()
 
     def test_kill_switch_off_detects_but_no_restart(self):
@@ -297,7 +297,7 @@ class TestConfigWatch(unittest.TestCase):
             wd.check_configs_once()                       # baseline
             with open(self.cfg, "w") as f:
                 f.write("val = 3\n")
-            self.assertEqual(wd.check_configs_once(), [])  # detecteaza dar NU reporneste
+            self.assertEqual(wd.check_configs_once(), [])  # It detects but does NOT restart.
             restart.assert_not_called()
 
 

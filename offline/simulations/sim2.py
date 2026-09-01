@@ -1,4 +1,4 @@
-"""Simulare manuala; nu face parte din runtime-ul live."""
+"""A manual simulation; it is not part of the live runtime."""
 
 import random
 import time
@@ -8,29 +8,29 @@ from collections import deque
 class PriceWindow:
     def __init__(self, window_size, max_index=1000000, epsilon=1e-5):
         self.window_size = window_size
-        self.prices = deque()  # Pastreaza toate preturile din fereastra
+        self.prices = deque()  # Keeps every price in the window.
         self.min_deque = deque()  # Gestionarea minimului
         self.max_deque = deque()  # Gestionarea maximului
-        self.current_index = 0  # Contor intern pentru a urmari indexul
-        self.max_index = max_index  # Pragul la care se face normalizarea
-        self.epsilon = epsilon  # Toleranta pentru minimurile aproximativ egale
+        self.current_index = 0  # An internal counter tracking the index.
+        self.max_index = max_index  # The threshold at which normalisation happens.
+        self.epsilon = epsilon  # The tolerance for approximately equal lows.
 
     def normalize_indices(self):
-        """Normalizare indicilor cand se atinge max_index."""
+        """Normalise the indices when max_index is reached."""
         min_index = self.min_deque[0][0] if self.min_deque else 0
         self.min_deque = deque([(index - min_index, price) for index, price in self.min_deque])
         self.max_deque = deque([(index - min_index, price) for index, price in self.max_deque])
         self.current_index -= min_index  # Ajustam indexul curent
 
     def process_price(self, price):
-        # Adaugam noul pret la lista de preturi
+        # Add the new price to the price list.
         self.prices.append(price)
 
-        # Eliminam preturile care ies din fereastra
+        # Remove the prices that fall out of the window.
         if len(self.prices) > self.window_size:
             self.prices.popleft()
 
-        # Gestionarea minimului si maximului curent
+        # Handling of the current low and high.
         self._manage_minimum(price)
         self._manage_maximum(price)
 
@@ -38,46 +38,46 @@ class PriceWindow:
         self.current_index += 1
 
     def _manage_minimum(self, price):
-        """Gestionarea minimului curent din fereastra."""
-        # Normalizam indicii daca atingem max_index
+        """Handling of the current low in the window."""
+        # Normalise the indices if max_index is reached.
         if self.current_index >= self.max_index:
             self.normalize_indices()
 
-        # Eliminam elementele care sunt in afara ferestrei (prea vechi)
+        # Remove the elements that are outside the window (too old).
         if self.min_deque and self.min_deque[0][0] <= self.current_index - self.window_size:
             self.min_deque.popleft()
 
-        # Verificam daca pretul curent este aproximativ egal cu oricare pret existent in `min_deque`
+        # Check whether the current price is approximately equal to any price already in `min_deque`.
         for index, existing_price in self.min_deque:
             if abs(existing_price - price) <= self.epsilon:
-                return  # Nu adaugam pretul curent daca exista deja un echivalent
+                return  # Do not add the current price if an equivalent already exists.
         
-        # Eliminam elementele din spate mai mari decat pretul curent
+        # Remove the trailing elements that are larger than the current price.
         while self.min_deque and self.min_deque[-1][1] > price:
             self.min_deque.pop()
 
-        # Adaugam pretul curent
+        # Add the current price.
         self.min_deque.append((self.current_index, price))
 
     def _manage_maximum(self, price):
-        """Gestionarea maximului curent din fereastra."""
-        # Normalizam indicii daca atingem max_index
+        """Handling of the current high in the window."""
+        # Normalise the indices if max_index is reached.
         if self.current_index >= self.max_index:
             self.normalize_indices()
 
-        # Eliminam elementele care sunt in afara ferestrei (prea vechi)
+        # Remove the elements that are outside the window (too old).
         if self.max_deque and self.max_deque[0][0] <= self.current_index - self.window_size:
             self.max_deque.popleft()
 
-        # Eliminam elementele din spate mai mici decat pretul curent (pentru a pastra ultimul maxim)
+        # Remove the trailing elements that are smaller than the current price (to keep the latest high).
         while self.max_deque and self.max_deque[-1][1] <= price:
             self.max_deque.pop()
 
-        # Adaugam pretul curent
+        # Add the current price.
         self.max_deque.append((self.current_index, price))
 
     def get_min(self):
-        """Returneaza minimul curent din fereastra si pozitia relativa."""
+        """Return the current low in the window and its relative position."""
         if not self.min_deque:
             return None, None
         min_index, min_price = self.min_deque[0]
@@ -85,7 +85,7 @@ class PriceWindow:
         return min_price, relative_position
 
     def get_max(self):
-        """Returneaza maximul curent din fereastra si pozitia relativa."""
+        """Return the current high in the window and its relative position."""
         if not self.max_deque:
             return None, None
         max_index, max_price = self.max_deque[0]
@@ -93,11 +93,11 @@ class PriceWindow:
         return max_price, relative_position
 
     def get_prices(self):
-        """Returneaza toate preturile curente din fereastra."""
+        """Return every current price in the window."""
         return list(self.prices)
 
 def plot_graphs(price_window, full_prices):
-    """Ploteaza graficele cu toate preturile si fereastra curenta."""
+    """Plot the charts with every price and the current window."""
     # Curatam graficele anterioare
     plt.clf()
 
@@ -132,21 +132,21 @@ def plot_graphs(price_window, full_prices):
     plt.tight_layout()
     plt.pause(0.1)
 
-# Simularea in timp real cu valori aleatorii si vizualizarea completa + fereastra
+# The real-time simulation with random values plus the full view and the window.
 window_size = 10
 max_full_prices = 500
 price_window = PriceWindow(window_size)
-full_prices = deque(maxlen=max_full_prices)  # Pastram pana la 500 de valori
+full_prices = deque(maxlen=max_full_prices)  # We keep up to 500 values.
 
-plt.ion()  # Activam modul interactiv pentru a vizualiza graficele in timp real
+plt.ion()  # Enable interactive mode so the charts can be watched in real time.
 
-# Bucla de simulare cu preturi infinite
+# The simulation loop with an endless price stream.
 try:
     while True:
         price = random.uniform(1, 100)
-        full_prices.append(price)  # Adaugam pretul la graficul complet
+        full_prices.append(price)  # Add the price to the full chart.
         price_window.process_price(price)
         plot_graphs(price_window, full_prices)
-        time.sleep(1.2)  # Mic delay pentru a simula timp real
+        time.sleep(1.2)  # A small delay to simulate real time.
 except KeyboardInterrupt:
     print("Simulare oprita manual.")

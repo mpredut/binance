@@ -1,13 +1,13 @@
 """
-Teste pentru Instrument.place() — cele 4 protectii AGNOSTICE nou-adaugate (30 iul,
-cerere user: "guardrail-urile din bapi_placeorder ca implementare comuna pt toti
+Tests for Instrument.place() — the 4 newly added AGNOSTIC protections (30 Jul,
+a user request: "the guardrails from bapi_placeorder as a shared implementation for every
 providerii"): plafon zilnic + anti-spam (order_guard.daily_limit_guard), cooldown
-anti-rapid-fire (lock/trade_cooldown, deja generic), trend-gate instantaneu
-(cacheManager) si jurnalul FLEET-WIDE
-(order_outcomes_log). Se aplica DOAR providerilor cu guards_internally()==False
+anti-rapid-fire (lock/trade_cooldown, already generic), the instantaneous trend gate
+(cacheManager) and the FLEET-WIDE journal
+(order_outcomes_log). They apply ONLY to providers with guards_internally()==False
 (Binance ramane neatins, isi pastreaza propria implementare — vezi bapi_placeorder.py).
 
-Provider FALS (nu Binance/Kraken reali) — izoleaza complet de retea; `guards_internally`
+A FAKE provider (not the real Binance/Kraken) — fully isolated from the network; `guards_internally`
 implicit False, exact ca Kraken/Hyperliquid azi.
 """
 import os
@@ -50,7 +50,7 @@ class _FakeProvider(MarketDataProvider):
         return False
 
     def free_balance(self, asset):
-        return 1_000_000.0   # suficient cat sa nu limiteze artificial qty in teste
+        return 1_000_000.0   # Enough that it never limits qty artificially in the tests.
 
     def get_orders(self, symbol, side, since_s):
         cutoff_ms = time.time() * 1000 - since_s * 1000
@@ -77,7 +77,7 @@ class _FakeProvider(MarketDataProvider):
 
 
 class _GuardsInternallyProvider(_FakeProvider):
-    """Ca Binance: are deja propriul lant de gard -> Instrument.place() trebuie sa
+    """Like Binance: it already has its own guard chain -> Instrument.place() must
     SKIPS all 4 agnostic protections entirely (no cooldown, no daily limit)."""
     def guards_internally(self):
         return True
@@ -85,19 +85,19 @@ class _GuardsInternallyProvider(_FakeProvider):
 
 class InstrumentGuardsTestCase(unittest.TestCase):
     def setUp(self):
-        # Cooldown: state/lock izolate (tiparul din test_trade_cooldown.py) — altfel
+        # Cooldown: isolated state and lock (the pattern from test_trade_cooldown.py) — otherwise
         # testul ar atinge lock/trade_cooldown.json REAL.
         self._tmp = tempfile.mkdtemp()
         tc.STATE_FILE = os.path.join(self._tmp, "trade_cooldown.json")
         tc.LOCK_FILE = os.path.join(self._tmp, "trade_cooldown.lock")
-        # Jurnal outcome: director izolat — altfel testul ar scrie in logger/ REAL,
-        # citit de tradeall_observe.py in productie.
+        # The outcome journal: an isolated directory — otherwise the test would write into the REAL
+        # logger/, which tradeall_observe.py reads in production.
         self._log_tmp = tempfile.mkdtemp()
         self._orig_log_dir = outcomes_log.ORDER_OUTCOMES_LOG_DIR
         outcomes_log.ORDER_OUTCOMES_LOG_DIR = self._log_tmp
-        # Coada de re-plasare: izolata — Instrument.place() face enqueue pe esec, iar
-        # aceste teste declanseaza multe esecuri asteptate (cooldown/daily-limit) -> NU
-        # trebuie sa polueze cachedb/order_retry_queue.jsonl real.
+        # The re-placement queue: isolated — Instrument.place() enqueues on failure, and
+        # these tests trigger many expected failures (cooldown/daily-limit) -> they must NOT
+        # pollute the real cachedb/order_retry_queue.jsonl.
         import order_retry as _oq
         _oq.QUEUE_FILE = os.path.join(self._tmp, "order_retry_queue.jsonl")
         _oq.LOCK_FILE = os.path.join(self._tmp, "order_retry_queue.lock")
@@ -136,9 +136,9 @@ class InstrumentGuardsTestCase(unittest.TestCase):
     def test_daily_limit_blocks_after_threshold(self):
         p = _FakeProvider()
         inst = self._inst(p)
-        # safeback explicit (48h) ca testul sa fie independent de defaultul din config
+        # An explicit safeback (48h) so the test is independent of the default in config.
         # (schimbat 30 iul la 14 zile). backdays = ceil(48h/86400) = 3 -> prag 25*3=75;
-        # 90 tranzactii vechi (>3min, sub pragul anti-spam) il depasesc.
+        # 90 old trades (>3min, under the anti-spam threshold) exceed it.
         for _ in range(90):
             p.seed_trade("BUY", age_sec=4000.0)
         order = inst.place("BUY", 100.0, 1.0, safeback_seconds=48 * 3600 + 60)
@@ -148,14 +148,14 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         self.assertTrue(any("|refused|daily_limit|" in l for l in lines), lines)
 
     def test_safeback_seconds_default_window_misses_old_trades(self):
-        # 30 iul, fix: monitortrades.py (sbs=MT_GUARD_WINDOW_DAYS, implicit 12 ZILE) si
-        # tradeall.py (14 zile) suprascriu safeback_seconds la fiecare apel real — defaultul
-        # din config (48h) e aproape niciodata folosit efectiv. instruments.conf are deja
+        # 30 Jul, a fix: monitortrades.py (sbs=MT_GUARD_WINDOW_DAYS, 12 DAYS by default) and
+        # tradeall.py (14 days) overwrite safeback_seconds on every real call — the default
+        # from config (48h) is almost never actually used. instruments.conf already has
         # [KRAKEN_HYPE] enabled=yes under "mt", so the same sbs applies there too.
         p = _FakeProvider()
         inst = self._inst(p)
         for _ in range(60):
-            p.seed_trade("BUY", age_sec=5 * 24 * 3600)   # 5 zile in urma -> AFARA din 48h implicit
+            p.seed_trade("BUY", age_sec=5 * 24 * 3600)   # 5 days ago -> OUTSIDE the default 48h.
         order = inst.place("BUY", 100.0, 1.0)   # No override -> the default (48h) does not see them
         self.assertIsNotNone(order)
 
@@ -166,13 +166,13 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         # prag 25*15=375; 400 tranzactii il depasesc.
         for _ in range(400):
             p.seed_trade("BUY", age_sec=5 * 24 * 3600)   # 5 zile in urma
-        # override explicit de 14 zile (identic cu tradeall.py: d=14, h=24) -> ACUM le vede -> blocat
+        # An explicit 14-day override (identical to tradeall.py: d=14, h=24) -> NOW it sees them -> blocked.
         order = inst.place("BUY", 100.0, 1.0, safeback_seconds=14 * 24 * 3600 + 60)
         self.assertIsNone(order)
 
     def test_recent_transaction_blocks(self):
         p = _FakeProvider()
-        p.seed_trade("BUY", age_sec=5.0)   # acum 5s, sub pragul implicit de 180s
+        p.seed_trade("BUY", age_sec=5.0)   # 5s ago, under the default threshold of 180s.
         inst = self._inst(p)
         order = inst.place("BUY", 100.0, 1.0)
         self.assertIsNone(order)
@@ -185,7 +185,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
             p.seed_trade("BUY", age_sec=4000.0)
         inst = self._inst(p)
         order = inst.place("BUY", 100.0, 1.0, safeback_seconds=48 * 3600 + 60, bypass_profit_guard=True)
-        self.assertIsNone(order)   # plafonul zilnic ramane activ chiar si cu bypass
+        self.assertIsNone(order)   # The daily cap stays active even with the bypass.
 
     def test_reference_only_bypass_keeps_quantity_policy_active(self):
         quantity_calls = []
@@ -233,7 +233,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
             bypass_profit_reference=True,
             caller_owns_retry=True)
 
-        self.assertIsNone(order, "SELL sub referinta BUY trebuie blocat")
+        self.assertIsNone(order, "a SELL below the BUY reference must be blocked")
         self.assertEqual(p.placed, [])
         lines = self._log_lines()
         self.assertTrue(any("|refused|profit_guard|" in line for line in lines), lines)
@@ -259,7 +259,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
 
         self.assertIsNone(loss, "the quantity bypass must not skip the profit guard")
         self.assertIsNotNone(profit)
-        self.assertEqual(policy_calls, [], "weight policy trebuie sarita numai la SELL")
+        self.assertEqual(policy_calls, [], "the weight policy must be skipped only on a SELL")
         self.assertEqual(p.placed[0][3], 1.0)
 
     def test_quantity_policy_bypass_is_ignored_for_buy(self):
@@ -371,9 +371,9 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         inst = self._inst(p)
         first = inst.place("BUY", 100.0, 1.0)
         self.assertIsNotNone(first)
-        second = inst.place("SELL", 101.0, 1.0)   # < cooldown_sec dupa primul
+        second = inst.place("SELL", 101.0, 1.0)   # < cooldown_sec after the first one.
         self.assertIsNone(second)
-        self.assertEqual(len(p.placed), 1)   # doar primul a ajuns la provider
+        self.assertEqual(len(p.placed), 1)   # Only the first one reached the provider.
         lines = self._log_lines()
         self.assertTrue(any("|refused|cooldown|" in l for l in lines), lines)
 
@@ -407,13 +407,13 @@ class InstrumentGuardsTestCase(unittest.TestCase):
 
     def test_facade_place_routes_through_pipeline(self):
         # MarketApi.place() (proxy unic guardat, inlocuitorul lui place_order_smart):
-        # construieste Instrument efemer + ruleaza pipeline-ul (cooldown blocheaza al 2-lea).
+        # It builds an ephemeral Instrument and runs the pipeline (the cooldown blocks the 2nd).
         p = _FakeProvider()
         mkt = MarketApi([p])
         first = mkt.place(SYMBOL, "BUY", 100.0, 1.0)
         self.assertIsNotNone(first)
         self.assertEqual(len(p.placed), 1)
-        second = mkt.place(SYMBOL, "SELL", 101.0, 1.0)   # < cooldown -> blocat
+        second = mkt.place(SYMBOL, "SELL", 101.0, 1.0)   # < cooldown -> blocked.
         self.assertIsNone(second)
         self.assertEqual(len(p.placed), 1)
 
@@ -486,9 +486,9 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         inst = Instrument(name="ZZZFAKE", symbol=SYMBOL, provider=p.name.lower(),
                           base="ZZZFAKE", quote="USD", api=MarketApi([p]))
         inst.place("BUY", 100.0, 1.0, smart=True)
-        self.assertEqual(len(calls), 1, "smart=True trebuie sa cheme adjust_order_price")
+        self.assertEqual(len(calls), 1, "smart=True must call adjust_order_price")
         calls.clear()
-        # cooldown ar bloca al 2-lea pe acelasi symbol -> alt symbol pt smart=False
+        # The cooldown would block the 2nd one on the same symbol -> a different symbol for smart=False.
         inst2 = Instrument(name="ZZZFAKE2", symbol="ZZZFAKEUSD2", provider=p.name.lower(),
                            base="ZZZFAKE2", quote="USD", api=MarketApi([p]))
         inst2.place("BUY", 100.0, 1.0, smart=False)
@@ -513,7 +513,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
     # ── fidelitate financiara MARKET ──────────────────────────────────────────
     def test_market_order_profit_guard_uses_current_price_not_ignored_target(self):
         p = _FakeProvider(price=100.0)
-        # Ultimul BUY este referinta SELL. Tinta declarata 102 trece marja de
+        # The last BUY is the SELL reference. The declared target of 102 passes the margin of
         # 1.15%, but MARKET would fill at 100 and only produce costs.
         p.seed_trade("BUY", age_sec=400.0, price=100.0)
 
@@ -611,7 +611,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         order = inst.place("BUY", 100.0, 1.0)
         self.assertIsNotNone(order)
         self.assertEqual(len(p.placed), 1)
-        # niciun log FLEET-WIDE nou (Binance isi loga singur, ca sa nu duplice)
+        # No new FLEET-WIDE log (Binance logged for itself, so as not to duplicate).
         self.assertEqual(self._log_lines(), [])
         # The second immediate placement is NOT blocked by the cooldown (guards_internally skips it)
         order2 = inst.place("SELL", 101.0, 1.0)

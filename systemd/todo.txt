@@ -30,8 +30,8 @@ logging.basicConfig(level=logging.WARNING, handlers=[handler])
 
 
 # REFERINTA/ROLLBACK — taskul DNS 7 este inchis la 2026-08-21.
-# Nu executa aceste comenzi in afara unei ferestre explicite de mentenanta.
-# DNS / systemd-resolved — verificat read-only pe productie la 2026-08-21
+# Do not run these commands outside an explicit maintenance window.
+# DNS / systemd-resolved — checked read-only on production on 2026-08-21
 #
 # Starea observata:
 # - systemd 255 suporta StaleRetentionSec;
@@ -42,7 +42,7 @@ logging.basicConfig(level=logging.WARNING, handlers=[handler])
 #
 # LIMITATION: 1.1.1.1 and 8.8.8.8 do not answer on port 53 while the PIA tunnel is
 # up. A public FallbackDNS helps after a route change or a tunnel drop, but it is NOT
-# acopera caderea lui 10.0.0.243 cu tun0 ramas activ. Cache-ul stale de 4h ramane
+# covers the loss of 10.0.0.243 with tun0 still up. The 4h stale cache remains
 # the effective protection for that case. Do not simulate a DNS outage on live production.
 
 # For a future install use an idempotent drop-in, not `tee -a` into
@@ -54,16 +54,16 @@ Cache=yes
 StaleRetentionSec=4h
 EOF
 
-# Verifica configuratia efectiva INAINTE de restart.
+# Check the effective configuration BEFORE restarting.
 systemd-analyze cat-config systemd/resolved.conf
 
-# Aplicarea necesita fereastra operationala si verificare imediata a VPN-ului.
+# Applying it requires an operational window and an immediate check of the VPN.
 sudo systemctl restart systemd-resolved
 systemctl is-active systemd-resolved
 resolvectl status | grep -A6 'Link .* (tun0)'
 getent hosts api.binance.com
 getent hosts api.kraken.com
 
-# Rollback pentru drop-in:
+# Rollback for the drop-in:
 sudo rm /etc/systemd/resolved.conf.d/20-trading-cache.conf
 sudo systemctl restart systemd-resolved

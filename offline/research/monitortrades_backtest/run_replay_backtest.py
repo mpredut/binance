@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-Backtest monitortrades.py (Faza 1, pas 2 din UNIFIED_BACKTEST_PLAN.md) pe
+A monitortrades.py backtest (Phase 1, step 2 of UNIFIED_BACKTEST_PLAN.md) over
 istoric REAL BTC/TAO, folosind ReplayMarketDataProvider — raspunde la
 candidates #4-5 from BACKTEST_CANDIDATES.md: are the per-symbol gain/lost/maxage
 (instruments.conf) buni?
 
-Metodologie (necesara, nu artefact): monitor_price_and_trade() GESTIONEAZA o
+Methodology (necessary, not an artefact): monitor_price_and_trade() MANAGES an
 an EXISTING position — it never initiates the first BUY without a prior SELL to
-care sa reactioneze (verificat in cod: `if not (trade_orders_buy or
+to react to (verified in the code: `if not (trade_orders_buy or
 trade_orders_sell): return`). Un backtest "de la zero" ar sta degeaba tot
 time. We simulate holding a position CONTINUOUSLY: every time there is NO
-exista NICIO tranzactie (BUY sau SELL) in fereastra de varsta
+there is NO trade (BUY or SELL) at all in the age window
 (mt.maxage_days) — that is, a cycle has just closed (normal TP or HARD-TP)
 OR the previous position "expired" with nothing happening — it is re-seeded
-un BUY nou la pretul curent, cu acelasi notional fix. Asta produce MULTE
+a new BUY at the current price, with the same fixed notional. That produces MANY
 independent cycles over 329 days (not just one), comparable as a method
-cu sweep-urile Kraken/tradeall din aceeasi sesiune.
+with the Kraken/tradeall sweeps from the same session.
 
 It uses the REAL values from instruments.conf (not arbitrary constants):
   BTCUSDC: gain=7.0% lost=3.3% maxage=7z hardtp=17%/0.5/6h
@@ -44,16 +44,16 @@ from offline.research.monitortrades_backtest.replay_trend_source import (
 )
 
 SEED_NOTIONAL_USD = 1000.0
-SBS = 12 * 24 * 3600 + 60   # acelasi default ca live (MT_GUARD_WINDOW_DAYS=12)
+SBS = 12 * 24 * 3600 + 60   # The same default as live (MT_GUARD_WINDOW_DAYS=12).
 FEE_PCT = 0.1
 
 
 def _live_mt_params(section):
     """Read the CURRENT mt.* parameters from a section of instruments.conf —
     NOT a hardcoded copy (found today, 23 Jul: SYMBOLS was a frozen copy from
-    dinainte sa adaugam mt.buy_budget/mt.max_budget — scheduled_pilot.py testa
-    fara acea protectie, producand un rezultat catastrofal fals -$200k pe un
-    "buy again" cu qty=1 BTC intreg, nemodelat corect din cauza asta)."""
+    from before mt.buy_budget/mt.max_budget were added — scheduled_pilot.py tested
+    without that protection, producing a false catastrophic result of -$200k on a
+    "buy again" with qty=1 whole BTC, which was not modelled correctly because of it)."""
     import configparser
     cp = configparser.ConfigParser()
     cp.read(os.path.join(ROOT, "instruments.conf"))
@@ -63,7 +63,7 @@ def _live_mt_params(section):
 
 
 class _LiveSymbols:
-    """dict-like: SYMBOLS[symbol]["params"] citeste instruments.conf LA FIECARE
+    """dict-like: SYMBOLS[symbol]["params"] reads instruments.conf ON EVERY
     ACCESS (not at import), so it cannot become a stale copy again."""
     _SECTIONS = {"BTCUSDC": ("BINANCE_BTC", "BTC"), "TAOUSDC": ("BINANCE_TAO", "TAO")}
 
@@ -79,16 +79,16 @@ SYMBOLS = _LiveSymbols()
 
 
 def _neutral_is_trend_up(symbol):
-    """PASTRAT ca referinta/fallback manual (nu mai e default-ul lui run_symbol,
-    vezi ReplayTrendSource mai jos) — inca folosit de scheduled_pilot.py::_run_one
-    (loop separat, propriu, NEATINS in aceasta trecere — vezi 29 iul). Determinist,
+    """KEPT as a reference/manual fallback (it is no longer run_symbol's default,
+    see ReplayTrendSource below) — still used by scheduled_pilot.py::_run_one
+    (a separate loop of its own, UNTOUCHED in this pass — see 29 Jul). Deterministic,
     Backtest ONLY: no trend signal (neutral). FOUND 23 Jul: is_trend_up()
-    reala citeste cacheManager.get_short_trend_manager() — pt simboluri REALE
-    (BTCUSDC/TAOUSDC), asta e cache-ul LIVE, actualizat CHIAR ACUM de
+    the real one reads cacheManager.get_short_trend_manager() — for REAL symbols
+    (BTCUSDC/TAOUSDC), that is the LIVE cache, updated RIGHT NOW by
     tradeall.py/cacheManager.py, which run on the same machine. Running the same
-    backtest de 2 ori a dat rezultate DIFERITE, pt ca trendul "live" citit se
-    schimba intre rulari, contaminand un replay istoric cu starea REALA, curenta
-    a pietei. False = exact ce ar intoarce is_trend_up() oricum pt un symbol FARA
+    backtest twice gave DIFFERENT results, because the "live" trend being read
+    changes between runs, contaminating a historical replay with the REAL, current state
+    of the market. False = exactly what is_trend_up() would return anyway for a symbol WITHOUT
     snapshot in the cache (already the "safe" default in the code: "no snapshot ->
     neutral, it does not block a profitable sale")."""
     return False
@@ -98,7 +98,7 @@ def run_symbol(symbol, params, base, quiet=True, trend_window_seconds=DEFAULT_WI
     path = os.path.join(ROOT, "cachedb", f"cache_price_{symbol}.jsonl")
     series = load_price_series(path, symbol)
     if not series:
-        sys.stderr.write(f"[{symbol}] fara istoric la {path}\n")
+        sys.stderr.write(f"[{symbol}] no history at {path}\n")
         return None
 
     if quiet:
@@ -114,8 +114,8 @@ def run_symbol(symbol, params, base, quiet=True, trend_window_seconds=DEFAULT_WI
     # 29 Jul: is_trend_up() REPLICATED from the replayed history (ReplayTrendSource),
     # neutralizat — vezi replay_trend_source.py pt de ce (cursa fast/slow investigata
     # and fixed live in cacheManager.py; tradeall.py ALWAYS runs live, so
-    # semnalul e mereu disponibil, la fel ca aici). trend_window_seconds parametrizabil
-    # pt teste A/B pe alt orizont (instant/mediu/lung), fara sa schimbe default-ul.
+    # the signal is always available, just as it is here). trend_window_seconds is parameterised
+    # for A/B tests on another horizon (instant/medium/long), without changing the default.
     trend_source = ReplayTrendSource([symbol], window_seconds=trend_window_seconds)
 
     orig_is_trend_up = mt.is_trend_up
@@ -136,7 +136,7 @@ def run_symbol(symbol, params, base, quiet=True, trend_window_seconds=DEFAULT_WI
                 break
             last_price = price
             n_ticks += 1
-            # Alimenteaza fereastra de trend INAINTE de decizie — asa semnalul
+            # Feed the trend window BEFORE the decision — that way the signal
             # it reflects only what would have been visible up to this tick (no look-ahead).
             trend_source.advance(symbol, provider.now(symbol), price)
 
@@ -184,7 +184,7 @@ if __name__ == "__main__":
                      help="run ONLY this symbol (default: BTCUSDC + TAOUSDC)")
     ap.add_argument("--trend-window-sec", type=float, default=DEFAULT_WINDOW_SECONDS,
                      help=f"orizontul ferestrei pt ReplayTrendSource (secunde), implicit "
-                          f"{DEFAULT_WINDOW_SECONDS:.0f}s (~instant, 3.7min, ce citeste "
+                          f"{DEFAULT_WINDOW_SECONDS:.0f}s (~instant, 3.7min, what is read by "
                           f"is_trend_up() azi pe live). Pt teste A/B: mic 60-420 (1-7 min), "
                           f"mediu 5400-21600 (1.5-6h, ca slope_big al lui tradeall).")
     args = ap.parse_args()
