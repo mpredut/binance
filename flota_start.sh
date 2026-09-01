@@ -18,8 +18,8 @@ fi
 VPN_RETRY_TIMEOUT=60
 PIA_CLI_TIMEOUT="${PIA_CLI_TIMEOUT:-6}"
 SLEEP_AFTER_VPN_CONNECT=3
-SLEEP_AFTER_KILL=5
-PYTHON_START_WAIT=5   # Seconds to wait after starting before checking.
+SLEEP_AFTER_KILL=1
+PYTHON_START_WAIT=3   # Seconds to wait after starting before checking.
 
 # ===== Check and start the VPN =====
 echo "🔐 Verific conexiunea VPN..."
@@ -179,6 +179,18 @@ cleanup() {
     echo "🛑 Oprire..."
     remove_watchdog
     for pid in "${PIDS[@]}"; do kill "$pid" 2>/dev/null; done
+    # Give cache writers a short graceful window, then terminate only the children
+    # started by this supervisor. This avoids systemd waiting for its 90-second
+    # default when one Python process ignores SIGTERM during a restart.
+    for _ in 1 2 3 4 5; do
+        alive=0
+        for pid in "${PIDS[@]}"; do
+            kill -0 "$pid" 2>/dev/null && alive=1
+        done
+        [ "$alive" -eq 0 ] && break
+        sleep 1
+    done
+    for pid in "${PIDS[@]}"; do kill -9 "$pid" 2>/dev/null; done
     exit 0
 }
 trap cleanup INT TERM
