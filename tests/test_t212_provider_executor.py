@@ -63,7 +63,7 @@ class T212ExecutorContractTest(unittest.TestCase):
         self.previous_live = os.environ.get("T212_LIVE_ORDERS")
         os.environ["T212_LIVE_ORDERS"] = "true"
         self.fake = FakeT212Client()
-        self.provider = T212Provider()
+        self.provider = T212Provider(order_validity="DAY")
         self.provider._cli = self.fake
 
     def tearDown(self):
@@ -102,7 +102,9 @@ class T212ExecutorContractTest(unittest.TestCase):
 
     def test_poarta_live_poate_fi_injectata_de_launcherul_autonom(self):
         os.environ["T212_LIVE_ORDERS"] = "false"
-        explicit_live = T212Provider(client=self.fake, live_enabled=True)
+        explicit_live = T212Provider(
+            client=self.fake, live_enabled=True, order_validity="DAY",
+        )
         self.assertEqual(
             explicit_live.submit_order("NVDA_US_EQ", "buy", 0.5, price=119.25),
             "712",

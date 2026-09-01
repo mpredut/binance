@@ -447,13 +447,19 @@ class KrakenProvider(MarketDataProvider):
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"pair_precision {symbol}: {e}") from e
         if not info:
-            return None                      # Not listed yet; strategy uses its default.
+            return None
         try:
+            required = ("pair_decimals", "lot_decimals", "ordermin", "base")
+            missing = [key for key in required if key not in info or info[key] in (None, "")]
+            if missing:
+                raise ProviderError(
+                    f"pair_precision {symbol}: missing metadata {', '.join(missing)}"
+                )
             return PairPrecision(
-                price_decimals=int(info.get("pair_decimals", 2)),
-                volume_decimals=int(info.get("lot_decimals", 8)),
-                order_min=float(info.get("ordermin", 0) or 0.0),
-                base_asset=str(info.get("base", "")),
+                price_decimals=int(info["pair_decimals"]),
+                volume_decimals=int(info["lot_decimals"]),
+                order_min=float(info["ordermin"]),
+                base_asset=str(info["base"]),
             )
         except (TypeError, ValueError) as e:
             raise ProviderError(f"pair_precision {symbol}: info malformat ({e})") from e

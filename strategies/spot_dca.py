@@ -308,15 +308,19 @@ class Strategy:
         # It is rebuilt after restart and never enters persistent state.
         self._shadow_prices = deque(maxlen=90)
         # Pair precision normalized by the provider.
-        self.price_dec, self.vol_dec, self.ordermin = 5, 8, 0.0
         try:
             precision = client.pair_precision(pair)
-            if precision:
-                self.price_dec = precision.price_decimals
-                self.vol_dec = precision.volume_decimals
-                self.ordermin = precision.order_min
-        except ProviderError:
-            log("  ! nu pot citi precizia perechii — folosesc valori implicite")
+        except ProviderError as exc:
+            raise RuntimeError(
+                f"Cannot start {pair}: venue precision is unavailable"
+            ) from exc
+        if precision is None:
+            raise RuntimeError(f"Cannot start {pair}: venue returned no pair metadata")
+        self.price_dec = precision.price_decimals
+        self.vol_dec = precision.volume_decimals
+        self.ordermin = precision.order_min
+        if self.price_dec < 0 or self.vol_dec < 0 or self.ordermin < 0:
+            raise RuntimeError(f"Cannot start {pair}: invalid venue precision {precision!r}")
         self._order_lifecycle = TrackedOrderLifecycle(
             StrategyExecutorLifecycleApi(client),
             provider_name=self.venue_label,

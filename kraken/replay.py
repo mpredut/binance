@@ -16,6 +16,7 @@ from offline.backtests.execution import (
 )
 from offline.backtests.metrics import calculate_performance_metrics
 from strategies import spot_dca as _strat
+from providers.strategy_executor import PairPrecision
 
 
 def _silent(*_args, **_kwargs):
@@ -88,9 +89,9 @@ def _run_once(
     include_decision_trace: bool,
 ) -> dict:
     client = MagicMock()
-    # Strategy reads precision through the agnostic pair_precision contract. None uses
-    # the legacy default (5,8,0.0), matching the former pair_info=None behavior.
-    client.pair_precision.return_value = None
+    # Replay declares its synthetic execution precision explicitly; live engines
+    # must obtain this metadata from the venue.
+    client.pair_precision.return_value = PairPrecision(5, 8, 0.0, "REPLAY")
     original_notify = _strat.notify
     _strat.notify = _silent
     try:

@@ -27,7 +27,7 @@ def params(**over) -> DNParams:
                 entry_funding_hr=0.0, exit_funding_hr=-0.00005, funding_window_h=4.0,
                 min_hold_h=6.0, rebalance_pct=5.0, check_minutes=5.0, sz_decimals=2,
                 liq_alert_pct=20.0, auto_protect=True, reduce_pct=25.0, perp_leverage=1,
-                allow_scale_up=False)
+                allow_scale_up=False, fee_pct=0.035)
     base.update(over)
     return DNParams(**base)
 

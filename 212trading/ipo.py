@@ -183,10 +183,11 @@ def main() -> int:
     order_price      = float_env("ORDER_PRICE")
     order_qty        = float_env("ORDER_QTY")
     order_budget_ron = float_env("ORDER_BUDGET_RON")
-    _val             = os.environ.get("ORDER_VALIDITY", "DAY").strip().upper()
+    _val             = required_env("ORDER_VALIDITY").upper()
+    if _val not in {"DAY", "GTC", "GOOD_TILL_CANCEL"}:
+        raise ValueError(f"Invalid ORDER_VALIDITY: {_val!r}")
     order_validity   = "GOOD_TILL_CANCEL" if _val in ("GTC", "GOOD_TILL_CANCEL") else "DAY"
-    order_dry        = args.paper or not (args.execute or
-                                          os.environ.get("ORDER_EXECUTE", "false").lower() == "true")
+    order_dry        = args.paper or not (args.execute or required_bool_env("ORDER_EXECUTE"))
     interval         = max(args.interval, 30)
 
     # --- one-shot commands ---

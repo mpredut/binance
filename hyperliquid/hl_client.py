@@ -99,10 +99,16 @@ class HLClient:
         return self._meta_cache
 
     def sz_decimals(self, coin: str) -> int:
-        return int(self._meta().get(coin, {}).get("szDecimals", 2))
+        meta = self._meta().get(coin)
+        if not meta or "szDecimals" not in meta:
+            raise HLError(f"Missing size precision metadata for {coin}")
+        return int(meta["szDecimals"])
 
     def max_leverage(self, coin: str) -> int:
-        return int(self._meta().get(coin, {}).get("maxLeverage", 1))
+        meta = self._meta().get(coin)
+        if not meta or "maxLeverage" not in meta:
+            raise HLError(f"Missing leverage metadata for {coin}")
+        return int(meta["maxLeverage"])
 
     def coin_listed(self, coin: str) -> bool:
         return coin in self._meta()

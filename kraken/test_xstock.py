@@ -89,6 +89,7 @@ class Base(unittest.TestCase):
         os.remove(path)
         self.state_path = path
         os.environ["XSTOCK_STATE_FILE"] = path
+        os.environ.update(parse_dotenv(os.path.join(KRAKEN_DIR, "config.env")))
         self.alerts: list[str] = []
         self._xw_notify = xw.notify
         self._st_notify = strategy.notify

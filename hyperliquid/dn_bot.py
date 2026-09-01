@@ -19,7 +19,7 @@ import sys
 
 import time
 
-from common import load_dotenv, log, single_instance
+from common import load_dotenv, log, single_instance, required_bool_env
 from hl_client import HLClient, HLError
 from delta_neutral import DeltaNeutral, DNParams
 
@@ -135,7 +135,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
 
 
 def _client(need_wallet: bool) -> HLClient:
-    mainnet = os.environ.get("HL_MAINNET", "true").strip().lower() != "false"
+    mainnet = required_bool_env("HL_MAINNET")
     secret = os.environ.get("HL_SECRET_KEY") if need_wallet else None
     return HLClient(secret_key=secret, account_address=os.environ.get("HL_ACCOUNT_ADDRESS"), mainnet=mainnet)
 
@@ -167,7 +167,7 @@ def main() -> int:
     elif not (args.once or args.status or args.close):
         single_instance("dn_bot")
 
-    dry = args.paper or not (os.environ.get("STRAT_EXECUTE", "false").lower() == "true")
+    dry = args.paper or not required_bool_env("STRAT_EXECUTE")
     need_wallet = not dry and not (args.funding or args.status or args.watch)
     # RESILIENCE: retry startup DNS/connection failures instead of terminating.
     while True:

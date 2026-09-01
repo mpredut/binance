@@ -16,11 +16,12 @@ sys.path.insert(0, ROOT)
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
 from strategies import spot_dca as strat  # noqa: E402
+from providers.strategy_executor import PairPrecision  # noqa: E402
 
 
 def _make_strategy(*, replay_mode=False, **overrides):
     client = MagicMock()
-    client.pair_precision.return_value = None
+    client.pair_precision.return_value = PairPrecision(2, 6, 0.01, "TEST")
     defaults = dict(
         currency="USD", entry_amount=100.0, entry_discount_pct=0.2,
         dca_amount=50.0, dca_drop_pct=2.0, check_minutes=2.0,

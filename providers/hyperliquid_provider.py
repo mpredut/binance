@@ -36,6 +36,15 @@ _HL_DIR = os.path.join(_REPO_ROOT, "hyperliquid")
 _LIVE_ENV = "HL_LIVE_ORDERS"
 
 
+def _mainnet_setting() -> bool:
+    raw = str(os.environ.get("HL_MAINNET", "")).strip().lower()
+    if raw not in {"true", "false"}:
+        raise ProviderError(
+            "HL_MAINNET is mandatory and must be exactly true or false"
+        )
+    return raw == "true"
+
+
 def _hype_symbol(symbol: str) -> bool:
     """Return whether this provider serves the given HYPE symbol variant."""
     if not symbol:
@@ -100,7 +109,7 @@ class HyperliquidProvider(MarketDataProvider):
                 if _HL_DIR not in sys.path:
                     sys.path.insert(0, _HL_DIR)
                 from hl_client import HLClient  # hyperliquid/hl_client.py (reutilizat)
-                mainnet = os.environ.get("HL_MAINNET", "true").strip().lower() != "false"
+                mainnet = _mainnet_setting()
                 addr = os.environ.get("HL_ACCOUNT_ADDRESS")
                 # secret=None creates a read-only Info client; public data needs no address.
                 self._client = HLClient(secret_key=None, account_address=addr, mainnet=mainnet)
@@ -261,7 +270,7 @@ class HyperliquidProvider(MarketDataProvider):
             if not secret:
                 print("[HL] place_order: HL_SECRET_KEY lipsa — nu pot semna")
                 return None
-            mainnet = os.environ.get("HL_MAINNET", "true").strip().lower() != "false"
+            mainnet = _mainnet_setting()
             signer = HLClient(secret_key=secret,
                               account_address=os.environ.get("HL_ACCOUNT_ADDRESS"),
                               mainnet=mainnet)
@@ -284,7 +293,7 @@ class HyperliquidProvider(MarketDataProvider):
         secret = os.environ.get("HL_SECRET_KEY")
         if not secret:
             raise ProviderError("HL_SECRET_KEY missing — HL orders cannot be signed")
-        mainnet = os.environ.get("HL_MAINNET", "true").strip().lower() != "false"
+        mainnet = _mainnet_setting()
         return HLClient(secret_key=secret,
                         account_address=os.environ.get("HL_ACCOUNT_ADDRESS"), mainnet=mainnet)
 

@@ -10,11 +10,12 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 from strategies import spot_dca  # noqa: E402
+from providers.strategy_executor import PairPrecision  # noqa: E402
 
 
 class _Executor:
     def pair_precision(self, _symbol):
-        return None
+        return PairPrecision(2, 4, 0.01, "ASSET")
 
 
 def _params():
@@ -30,6 +31,15 @@ def _params():
 
 
 class SpotDcaModuleBoundaryTest(unittest.TestCase):
+    def test_missing_venue_precision_fails_before_strategy_start(self):
+        executor = _Executor()
+        executor.pair_precision = lambda _symbol: None
+        with self.assertRaisesRegex(RuntimeError, "no pair metadata"):
+            spot_dca.Strategy(
+                executor, "ASSETUSD", _params(), dry_run=False,
+                initial_state=spot_dca._new_state(),
+            )
+
     def test_legacy_kraken_module_reexports_canonical_engine(self):
         path = os.path.join(ROOT, "kraken", "strategy.py")
         spec = importlib.util.spec_from_file_location("legacy_kraken_strategy", path)

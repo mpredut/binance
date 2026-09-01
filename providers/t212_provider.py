@@ -88,7 +88,9 @@ class T212Provider(MarketDataProvider):
         if not key:
             raise RuntimeError("Lipseste T212_API_KEY (212trading/.env sau env)")
         secret = os.environ.get("T212_API_SECRET") or env_value(_T212_DIR, "T212_API_SECRET")
-        env = os.environ.get("T212_ENV") or env_value(_T212_DIR, "T212_ENV") or "live"
+        env = os.environ.get("T212_ENV") or env_value(_T212_DIR, "T212_ENV")
+        if not env:
+            raise RuntimeError("T212_ENV is missing (212trading/.env or environment)")
         self._cli = T212Client(key, secret, env)
         return self._cli
 
@@ -197,9 +199,11 @@ class T212Provider(MarketDataProvider):
         configured = (
             self._order_validity
             if self._order_validity is not None
-            else os.environ.get("T212_ORDER_VALIDITY", "DAY")
+            else os.environ.get("T212_ORDER_VALIDITY")
         )
-        validity = str(configured).strip().upper() or "DAY"
+        if configured is None or not str(configured).strip():
+            raise ProviderError("T212_ORDER_VALIDITY is mandatory for limit orders")
+        validity = str(configured).strip().upper()
         if validity not in {"DAY", "GOOD_TILL_CANCEL"}:
             raise ProviderError(f"T212_ORDER_VALIDITY invalid: {validity!r}")
         return self._client().place_limit_order(symbol, signed, price_f, validity=validity)

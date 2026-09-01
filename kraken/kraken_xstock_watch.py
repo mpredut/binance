@@ -28,7 +28,10 @@ import sys
 import time
 import urllib.request
 
-from kraken_common import log, load_dotenv, float_env, single_instance
+from kraken_common import (
+    log, load_dotenv, single_instance, required_env,
+    required_float_env, required_bool_env,
+)
 from notify import notify
 from kraken_client import KrakenClient, KrakenError
 
@@ -170,7 +173,7 @@ def check_levels(client: KrakenClient, st: dict, alloc_price: float,
                body=f"Valoare estimata: {qty * price:.0f} (alocat la {alloc_price}). "
                     f"Ia in calcul vanzarea partiala / pornirea botului cu adoptare.",
                source="xstock-watch", price=price, desktop=desktop)
-    tp2 = float_env("XSTOCK_TP2_ALERT_PCT") or 0.0   # second tranche (manual staged sale)
+    tp2 = required_float_env("XSTOCK_TP2_ALERT_PCT")
     if tp2 and not st.get("alerted_tp2") and chg >= tp2:
         st["alerted_tp2"] = True
         notify(title=f"📈📈 TRANSA 2: xStock {chg:+.1f}% ({price})",
@@ -221,7 +224,7 @@ def maybe_start_bot(st: dict, alloc_price: float, desktop: bool) -> None:
     strategy resumes its per-pair state and therefore does not duplicate the
     position.
     """
-    if os.environ.get("XSTOCK_AUTOSTART", "true").strip().lower() != "true":
+    if not required_bool_env("XSTOCK_AUTOSTART"):
         return
     if not (st["allocated"] and st["pair"]):
         return
@@ -249,7 +252,7 @@ def maybe_start_bot(st: dict, alloc_price: float, desktop: bool) -> None:
         if os.environ.get(src):
             env[dst] = os.environ[src]
     cmd = [sys.executable, BOT_SCRIPT, "--pair", st["pair"]]
-    if os.environ.get("XSTOCK_BOT_PAPER", "false").strip().lower() == "true":
+    if required_bool_env("XSTOCK_BOT_PAPER"):
         cmd.append("--paper")
     try:
         with open(BOT_LOG, "a", encoding="utf-8") as logf:
@@ -367,17 +370,17 @@ def main() -> int:
                     help="PROBA end-to-end cu bani ZERO: activ existent ca alocare simulata, bot PAPER, watchdog testat, curatenie la final")
     ap.add_argument("--desktop", action="store_true")
     ap.add_argument("--interval", type=float,
-                    default=float_env("XSTOCK_CHECK_MINUTES") or 10.0, help="minute")
+                    default=required_float_env("XSTOCK_CHECK_MINUTES"), help="minute")
     args = ap.parse_args()
     if not (args.once or args.status):
         single_instance("kraken_xstock_watch")
 
-    rx = os.environ.get("XSTOCK_REGEX", "SPCX|SPACEX")
-    quote = os.environ.get("XSTOCK_QUOTE", "USD")
-    alloc_price = float_env("XSTOCK_ALLOC_PRICE") or 0.0
-    tp_pct = float_env("XSTOCK_TP_ALERT_PCT") or 20.0
-    sl_pct = float_env("XSTOCK_SL_ALERT_PCT") or 15.0
-    yahoo_sym = os.environ.get("XSTOCK_YAHOO", "SPCX")
+    rx = required_env("XSTOCK_REGEX")
+    quote = required_env("XSTOCK_QUOTE")
+    alloc_price = required_float_env("XSTOCK_ALLOC_PRICE")
+    tp_pct = required_float_env("XSTOCK_TP_ALERT_PCT")
+    sl_pct = required_float_env("XSTOCK_SL_ALERT_PCT")
+    yahoo_sym = required_env("XSTOCK_YAHOO")
 
     client = KrakenClient(os.environ.get("KRAKEN_API_KEY_BOT"), os.environ.get("KRAKEN_API_SECRET_BOT"))
     if args.trial:

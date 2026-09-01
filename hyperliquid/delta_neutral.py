@@ -19,12 +19,14 @@ import os
 import time
 from dataclasses import dataclass
 
-from common import log, now_str, float_env
+from common import (
+    log, now_str, required_env, defined_env, required_float_env,
+    required_int_env, required_bool_env,
+)
 from notify import notify
 from hl_client import HLClient, HLError
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-HL_FEE_PCT = float_env("HL_FEE_PCT") or 0.035
 MIN_ORDER_USD = 10.5          # Do not submit orders below Hyperliquid's ~$10 minimum.
 _OLD_STATE = os.path.join(_HERE, ".state_dn.json")   # Legacy single-coin state name.
 
@@ -53,39 +55,42 @@ class DNParams:
     reduce_pct: float    # Percentage removed from both legs per intervention.
     perp_leverage: int   # Low leverage leaves more margin and distant liquidation.
     allow_scale_up: bool # Scale a live position toward notional with collateral guard.
+    fee_pct: float       # Configured fee estimate used for accounting.
 
     @classmethod
     def from_env(cls, client: HLClient | None = None) -> "DNParams":
-        coin = os.environ.get("HL_COIN", "HYPE").strip()
-        szd = 2
-        if client is not None:
-            try: szd = client.sz_decimals(coin)
-            except HLError: pass
-        spot_token = os.environ.get("HL_SPOT_TOKEN", coin).strip()
-        spot_pair = os.environ.get("HL_SPOT_PAIR", "").strip()
+        coin = required_env("HL_COIN")
+        if client is None:
+            raise ValueError("A Hyperliquid client is required to resolve size precision")
+        szd = client.sz_decimals(coin)
+        spot_token = required_env("HL_SPOT_TOKEN")
+        spot_pair = defined_env("HL_SPOT_PAIR")
         if not spot_pair and client is not None:       # Empty resolves automatically from spotMeta.
             spot_pair = client.resolve_spot_pair(spot_token) or ""
             if spot_pair:
                 log(f"  [DN] pereche spot rezolvata automat: {spot_token} -> {spot_pair}")
         if not spot_pair:
-            spot_pair = "@107"                          # Historical HYPE/USDC fallback.
+            raise ValueError(
+                f"Unable to resolve HL_SPOT_PAIR for configured token {spot_token!r}"
+            )
         return cls(
             coin        = coin,
             spot_pair   = spot_pair,
             spot_token  = spot_token,
-            notional    = float_env("DN_NOTIONAL") or 100.0,
-            entry_funding_hr = (float_env("DN_ENTRY_FUNDING_HR_PCT") if float_env("DN_ENTRY_FUNDING_HR_PCT") is not None else 0.0) / 100.0,
-            exit_funding_hr  = (float_env("DN_EXIT_FUNDING_HR_PCT") if float_env("DN_EXIT_FUNDING_HR_PCT") is not None else -0.005) / 100.0,
-            funding_window_h = float_env("DN_FUNDING_WINDOW_H") or 4.0,
-            min_hold_h       = float_env("DN_MIN_HOLD_H") or 6.0,
-            rebalance_pct  = float_env("DN_REBALANCE_PCT") or 5.0,
-            check_minutes  = float_env("DN_CHECK_MINUTES") or 5.0,
+            notional    = required_float_env("DN_NOTIONAL"),
+            entry_funding_hr = required_float_env("DN_ENTRY_FUNDING_HR_PCT") / 100.0,
+            exit_funding_hr  = required_float_env("DN_EXIT_FUNDING_HR_PCT") / 100.0,
+            funding_window_h = required_float_env("DN_FUNDING_WINDOW_H"),
+            min_hold_h       = required_float_env("DN_MIN_HOLD_H"),
+            rebalance_pct  = required_float_env("DN_REBALANCE_PCT"),
+            check_minutes  = required_float_env("DN_CHECK_MINUTES"),
             sz_decimals = szd,
-            liq_alert_pct = float_env("DN_LIQ_ALERT_PCT") or 20.0,
-            auto_protect  = os.environ.get("DN_AUTO_PROTECT", "true").strip().lower() == "true",
-            reduce_pct    = float_env("DN_REDUCE_PCT") or 25.0,
-            perp_leverage = int(float_env("DN_PERP_LEVERAGE") or 1),
-            allow_scale_up = os.environ.get("DN_ALLOW_SCALE_UP", "false").strip().lower() == "true",
+            liq_alert_pct = required_float_env("DN_LIQ_ALERT_PCT"),
+            auto_protect  = required_bool_env("DN_AUTO_PROTECT"),
+            reduce_pct    = required_float_env("DN_REDUCE_PCT"),
+            perp_leverage = required_int_env("DN_PERP_LEVERAGE"),
+            allow_scale_up = required_bool_env("DN_ALLOW_SCALE_UP"),
+            fee_pct      = required_float_env("HL_FEE_PCT"),
         )
 
 
@@ -188,7 +193,7 @@ class DeltaNeutral:
         """Count consecutive failures and accrue fees only on success."""
         if ok:
             self.s["order_fails"] = 0
-            self.s["fees_paid"] += (HL_FEE_PCT/100) * sz * px
+            self.s["fees_paid"] += (self.p.fee_pct/100) * sz * px
         else:
             self.s["order_fails"] = self.s.get("order_fails", 0) + 1
             if self.s["order_fails"] == 3:

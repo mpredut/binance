@@ -17,7 +17,7 @@ sys.path.insert(0, ROOT)
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
 from strategies import spot_dca as strat  # noqa: E402
-from providers.strategy_executor import OrderStatus, ProviderError  # noqa: E402
+from providers.strategy_executor import OrderStatus, PairPrecision, ProviderError  # noqa: E402
 from botcore import parse_dotenv  # noqa: E402
 
 _CONFIG_ENV = parse_dotenv(os.path.join(ROOT, "kraken", "config.env"))
@@ -39,7 +39,7 @@ def _params(**overrides):
 
 def _strategy(*, state=None, **param_overrides):
     client = MagicMock()
-    client.pair_precision.return_value = None
+    client.pair_precision.return_value = PairPrecision(2, 6, 0.01, "TEST")
     engine = strat.Strategy(
         client, "TESTPAIR_LIVE_RECONCILE", _params(**param_overrides),
         dry_run=False, initial_state=state or strat._new_state(),
@@ -238,7 +238,7 @@ class KrakenStatePersistenceTest(unittest.TestCase):
     @staticmethod
     def _client():
         client = MagicMock()
-        client.pair_precision.return_value = None
+        client.pair_precision.return_value = PairPrecision(2, 6, 0.01, "TEST")
         return client
 
     def test_corrupt_state_fails_closed_in_real_mode(self):

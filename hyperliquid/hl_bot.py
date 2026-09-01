@@ -22,17 +22,17 @@ import os
 import sys
 import time
 
-from common import load_dotenv, log, now_str, float_env
+from common import (
+    load_dotenv, log, now_str, required_env, required_int_env,
+    required_bool_env,
+)
 from hl_client import HLClient, HLError
 from market_data import get_price, coin_available
 from notify import notify
 from strategy import Strategy, StratParams
 
-POLL_SECONDS = 60
-
-
 def _build_client(need_wallet: bool) -> HLClient:
-    mainnet = os.environ.get("HL_MAINNET", "true").strip().lower() != "false"
+    mainnet = required_bool_env("HL_MAINNET")
     secret = os.environ.get("HL_SECRET_KEY") if need_wallet else None
     addr = os.environ.get("HL_ACCOUNT_ADDRESS")
     return HLClient(secret_key=secret, account_address=addr, mainnet=mainnet)
@@ -49,7 +49,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Bot DCA+TP pe Hyperliquid (perp long-only).")
     ap.add_argument("--env-file", default=env_file)
     ap.add_argument("--coin", help="Override moneda (altfel din .env HL_COIN)")
-    ap.add_argument("--interval", type=int, default=POLL_SECONDS)
+    ap.add_argument("--interval", type=int, default=required_int_env("HL_POLL_SECONDS"))
     ap.add_argument("--desktop", action="store_true")
     ap.add_argument("--skip-wait", action="store_true")
     ap.add_argument("--paper", action="store_true", help="PAPER (fara bani, fara wallet)")
@@ -60,10 +60,10 @@ def main() -> int:
     ap.add_argument("--test-strategy", metavar="COIN")
     args = ap.parse_args()
 
-    coin      = (args.coin or os.environ.get("HL_COIN") or "HYPE").strip()
+    coin      = (args.coin or required_env("HL_COIN")).strip()
     label     = os.environ.get("SYMBOL_LABEL") or coin
-    leverage  = int(float_env("HL_LEVERAGE") or 1)
-    strat_dry = args.paper or not (os.environ.get("STRAT_EXECUTE", "false").lower() == "true")
+    leverage  = required_int_env("HL_LEVERAGE")
+    strat_dry = args.paper or not required_bool_env("STRAT_EXECUTE")
     interval  = max(args.interval, 15)
 
     # A wallet is required only for real trading.

@@ -190,16 +190,21 @@ class BinanceProvider(MarketDataProvider):
             raise ProviderError(f"pair_precision({symbol}): {e}") from e
         if not info:
             return None
-        price_dec = vol_dec = 0
-        omin = 0.0
+        price_dec = vol_dec = None
+        omin = None
         for f in info.get("filters", []):
             if f.get("filterType") == "PRICE_FILTER":
                 price_dec = _step_decimals(f.get("tickSize", "0"))
             elif f.get("filterType") == "LOT_SIZE":
                 vol_dec = _step_decimals(f.get("stepSize", "0"))
                 omin = float(f.get("minQty", 0) or 0.0)
+        base_asset = str(info.get("baseAsset", "")).strip()
+        if price_dec is None or vol_dec is None or omin is None or not base_asset:
+            raise ProviderError(
+                f"pair_precision({symbol}): incomplete Binance symbol filters"
+            )
         return PairPrecision(price_decimals=price_dec, volume_decimals=vol_dec,
-                             order_min=omin, base_asset=str(info.get("baseAsset", "")))
+                             order_min=omin, base_asset=base_asset)
 
     def ohlc_closes(self, symbol: str, interval_min: int) -> list:
         iv = {1: "1m", 5: "5m", 15: "15m", 60: "1h", 240: "4h", 1440: "1d"}.get(int(interval_min), "1h")
