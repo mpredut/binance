@@ -18,13 +18,31 @@ vpn_healthy() {
 
 # Configurare PIA
 
+DIP_TOKEN="${PIA_DIP_TOKEN:-/home/predut/piatoken.txt}"
+
 sleep 5
 
-if ! piactl get region 2>/dev/null | grep -q "^dedicated-"; then
-    piactl dedicatedip add /home/predut/piatoken.txt || exit 1
+# `piactl connect` este ignorat IN TACERE cand nu ruleaza clientul grafic; pe server
+# nu ruleaza niciodata, deci modul background este obligatoriu (1 sep 2026: fara el
+# daemonul accepta RPC-ul "connectVPN" si ramane senin Disconnected).
+piactl background enable
+
+# Regiunea NU se mai hardcodeaza: la fiecare logout PIA sterge inregistrarea IP-ului
+# dedicat, iar la re-adaugare tokenul poate intoarce ALT IP (1 sep 2026: .86 -> .79).
+# Un id hardcodat devine atunci "Unknown region", `set region` esueaza si tunelul urca
+# pe un IP din pool -> Binance raspunde -2015. Deci intrebam daemonul care e regiunea.
+if ! piactl get regions 2>/dev/null | grep -q "^dedicated-"; then
+    piactl dedicatedip add "$DIP_TOKEN" || exit 1
+    sleep 3
 fi
+DEDICATED=$(piactl get regions 2>/dev/null | tr -d '\r' | grep -m1 "^dedicated-")
+if [ -z "$DEDICATED" ]; then
+    echo "Niciun IP dedicat inregistrat (token $DIP_TOKEN invalid?); systemd va reincerca."
+    exit 1
+fi
+
 piactl set protocol openvpn
-piactl set region dedicated-belgium-85.122.194.86
+piactl set region "$DEDICATED"
 piactl set requestportforward true
 piactl connect
 
