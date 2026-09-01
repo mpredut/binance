@@ -74,7 +74,7 @@ class OhlcDatasetContractTest(unittest.TestCase):
             align_previous_values([10, 19, 20, 30], fx),
             [0.20, 0.20, 0.25, 0.25],
         )
-        with self.assertRaisesRegex(ValueError, "extinde datasetul FX"):
+        with self.assertRaisesRegex(ValueError, "extend the FX dataset"):
             align_previous_values([9], fx)
 
     def test_round_trip_is_canonical_and_hashed(self):
