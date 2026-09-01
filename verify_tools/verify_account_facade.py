@@ -38,7 +38,7 @@ def free_direct(base):
 
 
 def position_from(buy_orders, sell_orders):
-    """Logica get_position_stats: avg_buy + net_qty din liste de ordine."""
+    """The get_position_stats logic: avg_buy + net_qty derived from order lists."""
     tq = sum(float(o["qty"]) for o in buy_orders)
     tv = sum(float(o["price"]) * float(o["qty"]) for o in buy_orders)
     sq = sum(float(o["qty"]) for o in sell_orders)
@@ -67,11 +67,11 @@ def main():
         if balance_available and not same_free:
             failures.append(f"{s}: free_balance direct={fd!r} != facada={ff!r}")
         if not balance_available:
-            print("  restul comparației private este omis; două liste goale după erori API "
-                  "nu constituie dovadă de paritate")
+            print("  the rest of the private comparison is skipped; two empty lists after API "
+                  "errors are not proof of parity")
             continue
 
-        # 2) ordine BUY/SELL: numar + camp-cu-camp -----------------------------
+        # 2) BUY/SELL orders: count plus a field-by-field comparison -----------
         direct = {}
         facade = {}
         for side in ("BUY", "SELL"):
@@ -93,7 +93,7 @@ def main():
                 failures.append(f"{s} {side}: {mism} ordine cu campuri diferite")
             print(f"  {side}: n={len(raw)}  camp-cu-camp -> {'OK' if mism == 0 else f'{mism} DIFERA'}")
 
-        # 3) avg_buy / net_qty din ambele surse --------------------------------
+        # 3) avg_buy / net_qty from both sources ------------------------------
         avg_d, net_d = position_from(direct["BUY"], direct["SELL"])
         avg_f, net_f = position_from(facade["BUY"], facade["SELL"])
         same_pos = (avg_d == avg_f and net_d == net_f)
@@ -108,7 +108,7 @@ def main():
         for f in failures:
             print(f"  - {f}")
         sys.exit(1)
-    print("PASS — diferențele confirmabile între fațadă și accesul legacy sunt zero.")
+    print("PASS — there are zero confirmable differences between the facade and legacy access.")
     sys.exit(0)
 
 

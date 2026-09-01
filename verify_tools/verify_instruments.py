@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 # verify_instruments.py
-"""Verifica fundatia (pasii 1-3): registry pe nume + Instrument + instruments.conf.
+"""Verify the foundation (steps 1-3): name registry + Instrument + instruments.conf.
 
-NU atinge flota. Confirma:
-  1. instruments.conf se incarca; BTC/TAO/HYPE prezente, provider/symbol/base corecte.
-  2. params mt.* OGLINDESC monitortrades.conf (behavior-preserving) — diff real.
-  3. rutarea explicita pe venue: TAO->Binance, HYPE->Hyperliquid (provider_by_name).
-  4. operatii generice prin Instrument == facada directa (pret, sold).
-Exit 0 daca tot trece.
+It does not touch the fleet. It confirms:
+  1. instruments.conf loads; BTC/TAO/HYPE present, provider/symbol/base correct.
+  2. the mt.* params MIRROR monitortrades.conf (behaviour-preserving) — a real diff.
+  3. explicit per-venue routing: TAO->Binance, HYPE->Hyperliquid (provider_by_name).
+  4. generic operations through Instrument == the facade directly (price, balance).
+Exits 0 when everything passes.
 """
 import os
 import re
 import sys
 
-# rulat din verify_tools/ -> pune RADACINA repo pe path pt importurile de mai jos
+# Run from verify_tools/ -> put the repo ROOT on the path for the imports below.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from providers.market_api import api
@@ -141,7 +141,7 @@ check(all(i.enabled for i in mt.values()) and
       "load_for('mt') = doar instrumente enabled + cu params mt.*", str(sorted(mt.keys())))
 check(hype is None or not hype.enabled, "HYPE_HL e enabled=no in config")
 check("HYPE_HL" not in mt, "HYPE_HL (enabled=no) NU apare in load_for")
-try:                                  # pret public Kraken (informativ, tolerant la retea)
+try:                                  # Public Kraken price (informational, tolerant of network failures).
     print(f"  [info] Kraken HYPEUSD price = {kp.get_current_price('HYPEUSD') if kp else None}")
 except Exception as _e:  # noqa: BLE001
     print(f"  [info] Kraken price indisponibil: {_e}")

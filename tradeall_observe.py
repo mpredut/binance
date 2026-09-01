@@ -106,7 +106,7 @@ def _read_pipe_log(path, ncols):
         if same_file and not same_size_rewrite and stat.st_size >= cached[0]:
             offset, rows = cached[0], list(cached[2])
         else:
-            offset, rows = 0, []               # fisier nou/trunchiat -> de la zero
+            offset, rows = 0, []               # New or truncated file -> start over
         try:
             stream.seek(offset)
             chunk = stream.read()

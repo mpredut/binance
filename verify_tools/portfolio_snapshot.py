@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""portfolio_snapshot.py — vedere UNIFICATA cross-motor (Kraken base v2 + HL long-hold).
+"""portfolio_snapshot.py — UNIFIED cross-engine view (Kraken base v2 + HL long-hold).
 
-Monitorizare read-only: citeste starile boților + pretul curent si raporteaza pozitii,
-P&L realizat + nerealizat, expunere si drawdown per-motor + total. NU atinge nimic.
+Read-only monitoring: reads the bot states plus the current price and reports
+positions, realised + unrealised P&L, exposure and drawdown per engine and in
+total. It touches nothing.
 
-  ./myenv/bin/python verify_tools/portfolio_snapshot.py            # o data (tabel)
-  ./myenv/bin/python verify_tools/portfolio_snapshot.py --json     # linie JSON (pt cron/log)
+  ./myenv/bin/python verify_tools/portfolio_snapshot.py            # one shot (table)
+  ./myenv/bin/python verify_tools/portfolio_snapshot.py --json     # one JSON line (for cron/logs)
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KRAKEN_DIR = os.path.join(ROOT, "kraken")
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
-# perechi Kraken monitorizate (pair -> eticheta, e_paper)
+# Monitored Kraken pairs (pair -> label, is_paper).
 KRAKEN_PAIRS = [("HYPEUSD", "HYPE", False), ("TAOUSD", "TAO", False), ("ADAUSD", "ADA", True)]
 
 
@@ -39,7 +40,7 @@ def _kraken_price(pair: str):
         sys.path.insert(0, KRAKEN_DIR)
         from kraken_client import KrakenClient
         return KrakenClient().last_price(pair)
-    except Exception:  # noqa: BLE001 — snapshot nu trebuie sa moara pe un pret ratat
+    except Exception:  # noqa: BLE001 — the snapshot must not die on one missed price
         return None
 
 
@@ -60,7 +61,7 @@ def kraken_rows() -> list[dict]:
         cost = _f(s.get("cost"))
         px = _kraken_price(pair) or 0.0
         upnl = (px - cost / qty) * qty if qty > 1e-12 and px else 0.0
-        # drawdown nerealizat ca % din cost (declanseaza risk-alert)
+        # Unrealised drawdown as a % of cost (this triggers the risk alert).
         dd_pct = (upnl / cost * 100.0) if cost > 1e-9 else 0.0
         rows.append({
             "engine": f"Kraken {label}" + (" (paper)" if paper else ""),
@@ -84,8 +85,8 @@ def hl_row() -> dict | None:
     import io
     try:
         sys.path.insert(0, os.path.join(ROOT, "hyperliquid"))
-        # load_dotenv/HLClient scriu log-uri pe stdout — le suprimam ca sa nu
-        # polueze iesirea --json (jsonl de cron).
+        # load_dotenv/HLClient write logs to stdout — we suppress them so they do not
+        # pollute the --json output (the cron jsonl).
         with contextlib.redirect_stdout(io.StringIO()):
             from common import load_dotenv
             load_dotenv(os.path.join(ROOT, "hyperliquid", ".env"))
@@ -107,10 +108,10 @@ ALERT_STATE = os.path.join(ROOT, "logs", ".risk_alert_state.json")
 
 
 def _ntfy(title: str, body: str) -> None:
-    """Trimite o notificare ntfy (best-effort, fara dependinte externe)."""
+    """Send an ntfy notification (best-effort, no external dependencies)."""
     topic = os.environ.get("NTFY_TOPIC")
     if not topic:
-        # citeste din kraken/config.env daca nu e in mediu
+        # Read from kraken/config.env when it is not in the environment.
         cfg = os.path.join(KRAKEN_DIR, "config.env")
         if os.path.exists(cfg):
             with open(cfg, encoding="utf-8") as fh:
@@ -126,7 +127,7 @@ def _ntfy(title: str, body: str) -> None:
         headers={"Title": title, "Priority": "high", "Tags": "warning"})
     try:
         urllib.request.urlopen(req, timeout=10)
-    except Exception:  # noqa: BLE001 — alerta best-effort, nu blocam snapshot-ul
+    except Exception:  # noqa: BLE001 — best-effort alert, we do not block the snapshot
         pass
 
 
@@ -147,10 +148,10 @@ def _save_alert_state(st: dict) -> None:
 
 
 def run_alerts(kr: list[dict]) -> list[str]:
-    """Verifica drawdown-ul per pozitie REALA si trimite ntfy la depasire prag.
+    """Check the drawdown of every REAL position and send an ntfy alert past the threshold.
 
-    Prag: RISK_DD_ALERT_PCT (implicit 8%). De-dup: re-alerteaza doar daca au
-    trecut >6h SAU DD-ul s-a inrautatit cu >=2pp fata de ultima alerta.
+    Threshold: RISK_DD_ALERT_PCT (8% by default). De-duplication: it re-alerts only
+    if >6h have passed OR the drawdown worsened by >=2pp since the last alert.
     """
     threshold = _f(os.environ.get("RISK_DD_ALERT_PCT"), 8.0)
     now = datetime.now(timezone.utc)
@@ -159,9 +160,9 @@ def run_alerts(kr: list[dict]) -> list[str]:
     for r in kr:
         if r["paper"] or r["qty"] <= 1e-9:
             continue
-        dd = r["dd_pct"]  # negativ = pierdere
+        dd = r["dd_pct"]  # Negative means a loss.
         if dd > -threshold:
-            st.pop(r["engine"], None)  # revenit sub prag -> reseteaza
+            st.pop(r["engine"], None)  # Back under the threshold -> reset.
             continue
         prev = st.get(r["engine"], {})
         prev_dd = prev.get("dd", 0.0)
@@ -185,10 +186,10 @@ def run_alerts(kr: list[dict]) -> list[str]:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Snapshot portofoliu cross-motor (read-only).")
-    ap.add_argument("--json", action="store_true", help="o linie JSON (pt cron/log)")
+    ap = argparse.ArgumentParser(description="Cross-engine portfolio snapshot (read-only).")
+    ap.add_argument("--json", action="store_true", help="one JSON line (for cron/logs)")
     ap.add_argument("--alert", action="store_true",
-                    help="verifica drawdown per pozitie si trimite ntfy la depasire prag")
+                    help="check per-position drawdown and send an ntfy alert past the threshold")
     args = ap.parse_args()
 
     kr = kraken_rows()

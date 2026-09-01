@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-trade_watch.py — stare rapida a deciziei de trade (TAO/BTC) pt MONITORIZARE LIVE.
+trade_watch.py — quick view of the trade decision (TAO/BTC) for LIVE MONITORING.
 
-Citeste semnale NE-bufferate (sursa de adevar, nu logul bufferat):
-  - trend instant din managerul de cache (gradient_recent, up-to-date cu cache_instant_trend.json)
-  - sold liber real (api.get_account_assets_balances)
-  - avg buy + pozitie neta din trade-urile Binance
-Arata si pragurile: HARD-TP (+18%) si vanzarea normala (gain>9.2% SI trend DOWN).
+Reads UN-buffered signals (the source of truth, not the buffered log):
+  - instant trend from the cache manager (gradient_recent, in sync with cache_instant_trend.json)
+  - the real free balance (api.get_account_assets_balances)
+  - avg buy + net position from the Binance trades
+It also shows the thresholds: HARD-TP (+18%) and the normal sell (gain>9.2% AND trend DOWN).
 
   ~/binance/myenv/bin/python trade_watch.py
 """
@@ -58,7 +58,7 @@ def main():
         gr = float(snap.get("gradient_recent", 0.0) or 0.0)
         avg, net, n_sells, last_buy = position(s)
         free = free_qty(s)
-        ref = last_buy or avg   # botul foloseste ULTIMUL buy ca referinta (TP_REFERENCE="last")
+        ref = last_buy or avg   # The bot uses the LAST buy as its reference (TP_REFERENCE="last").
         gain = (px - ref) / ref * 100 if ref else 0.0
         trend = "UP  " if gr > 0 else ("DOWN" if gr < 0 else "flat")
         hard_px = ref * (1 + HARD_TP_PCT / 100) if ref else 0.0

@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""watchdog_common.py — infrastructura PARTAJATA de alertare pentru watchdog-uri
-(watchdogfor_cache, watchdogfor_anomaly): incarca env-ul, trimite push (ntfy) + email,
-si tine starea de cooldown. Extras din watchdogfor_cache ca sa nu duplicam (DRY).
+"""watchdog_common.py — SHARED alerting infrastructure for the watchdogs
+(watchdogfor_cache, watchdogfor_anomaly): loads the env, sends push (ntfy) + email,
+and keeps the cooldown state. Extracted from watchdogfor_cache to avoid duplication.
 
-Variabile de mediu (din .env / config.env din radacina):
-  PHONE_ALERT_URL / NTFY_TOPIC                    — canal push
+Environment variables (from .env / config.env in the repository root):
+  PHONE_ALERT_URL / NTFY_TOPIC                    — push channel
   SMTP_USERNAME / SMTP_PASSWORD / ALERT_TO_EMAIL  — email (optional)
-  SMTP_SERVER / SMTP_PORT                         — server email (default gmail:587)
+  SMTP_SERVER / SMTP_PORT                         — email server (default gmail:587)
 """
 import os
 import json
@@ -28,7 +28,7 @@ def _watchdog_event(title, message):
 
 
 def load_env():
-    """Incarca .env (secrete gitignored) + config.env (versionat) din radacina."""
+    """Load .env (gitignored secrets) + config.env (versioned) from the repository root."""
     try:
         from dotenv import load_dotenv
         load_dotenv(ROOT / ".env")
@@ -77,7 +77,7 @@ def send_email(subject, body):
 
 
 def alert(title, message):
-    """Trimite push + email. Intoarce True daca cel putin unul a reusit."""
+    """Send push + email. Returns True if at least one of them succeeded."""
     ok_push = send_ntfy(title, message)
     ok_mail = send_email(title, message)
     return bool(ok_push or ok_mail)

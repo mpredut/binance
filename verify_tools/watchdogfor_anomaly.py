@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""log_anomaly_watchdog.py — detecteaza ANOMALII in logurile botilor (Binance/Kraken/HL/
-T212) si alarmeaza cand RATA de erori depaseste un prag. Complementar cache_watchdog:
-acela verifica prospetimea cache-urilor; asta verifica *semnalele de eroare* din loguri
-(429, auth, 'zbor orb', tracebacks, stale) — bugurile pe care le-am facut observabile.
+"""log_anomaly_watchdog.py — detects ANOMALIES in the bot logs (Binance/Kraken/HL/
+T212) and alarms when the error RATE crosses a threshold. Complements cache_watchdog:
+that one checks cache freshness, this one checks the *error signals* in the logs
+(429, auth, 'blind flying', tracebacks, stale) — the bugs we made observable.
 
-Ruleaza ca task scurt din cron (la fiecare 5 min). Citeste DOAR liniile NOI din fiecare log
-(offset persistat in state, ca logrotate) -> fereastra naturala 'de la ultima rulare',
-fara parsare de timestamp. Alerteaza (ntfy+email) per categorie, cu cooldown.
+Runs as a short cron task (every 5 min). It reads ONLY the NEW lines of each log
+(offset persisted in state, logrotate-aware) -> a natural 'since the last run' window,
+with no timestamp parsing. It alerts (ntfy+email) per category, with a cooldown.
 
-Env (din .env / config.env din radacina):
-  ANOMALY_WINDOW_FILES_MIN   (default 30) — scaneaza doar loguri atinse in ultimele X min
-  ANOMALY_COOLDOWN_MINUTES   (default 30) — nu re-alarma aceeasi categorie mai des
-  ANOMALY_THRESH_<CAT>       — prag per categorie (vezi _THRESH); override din env
+Env (from .env / config.env in the repository root):
+  ANOMALY_WINDOW_FILES_MIN   (default 30) — scan only logs touched in the last X min
+  ANOMALY_COOLDOWN_MINUTES   (default 30) — do not re-alarm the same category sooner
+  ANOMALY_THRESH_<CAT>       — per-category threshold (see _THRESH); env override
 """
 import os
 import re
@@ -30,8 +30,8 @@ wc.load_env()
 WINDOW_FILES_MIN = float(os.environ.get("ANOMALY_WINDOW_FILES_MIN", "30"))
 COOLDOWN_MIN = float(os.environ.get("ANOMALY_COOLDOWN_MINUTES", "30"))
 
-# Categorii de anomalii: (regex case-insensitive, prag implicit de aparitii/fereastra).
-# Pragul e cat de multe aparitii NOI (de la ultima rulare) declanseaza alerta.
+# Anomaly categories: (case-insensitive regex, default threshold of hits per window).
+# The threshold is how many NEW hits (since the last run) trigger the alert.
 _CATS = {
     "rate_limit": (re.compile(r"\b429\b|rate limit|too ?many ?requests", re.I), 30),
     "auth":       (re.compile(r"auth esuat|lipsesc cheile|unauthorized|forbidden|"
@@ -39,25 +39,25 @@ _CATS = {
     "blind":      (re.compile(r"indisponibil|sar reconcilierea|zbor orb", re.I), 25),
     "traceback":  (re.compile(r"traceback \(most recent|unhandledexception|\bfatal\b", re.I), 1),
 }
-# Regex-urile sunt SPECIFICE intentionat (calibrate pe loguri reale):
-#  - fara categorie generica 'error' (eroare/esuat) -> pe loguri uriase (rtrade sute MB/zi)
-#    ar da mii de potriviri benigne (retry-uri) -> alarma falsa.
-#  - 'auth' cere context HTTP (nu bare 40[13], care prindea preturi/cantitati '401').
-#  - fara categorie 'stale': staleness-ul e treaba lui watchdogfor_cache (ar dubla alerta;
-#    'portfolio stale' din strategy.py e benign, nu anomalie).
+# The regexes are deliberately SPECIFIC (calibrated on real logs):
+#  - no generic 'error' category -> on huge logs (rtrade, hundreds of MB/day) it would
+#    produce thousands of benign matches (retries) -> a false alarm.
+#  - 'auth' needs HTTP context (not bare 40[13], which matched prices/quantities '401').
+#  - no 'stale' category: staleness belongs to watchdogfor_cache (it would double the
+#    alert; 'portfolio stale' from strategy.py is benign, not an anomaly).
 
-# Fisiere de log de scanat (doar cele atinse recent -> active).
+# Log files to scan (only the recently touched ones -> active).
 _LOG_GLOBS = ["logger/*.log", "logs/*.log", "212trading/*.log", "hyperliquid/*.log", "kraken/*.log"]
-# Plafon octeti cititi per fisier per rulare: logurile mari (rtrade) cresc cu MB/min;
-# fara plafon, un gap urias ar incarca sute de MB in RAM (OOM). Citim doar coada.
+# Byte cap per file per run: the big logs (rtrade) grow by MB/min; without a cap, a
+# huge gap would load hundreds of MB into RAM (OOM). We only read the tail.
 _MAX_READ_BYTES = int(os.environ.get("ANOMALY_MAX_READ_BYTES", str(4 * 1024 * 1024)))
 
 
-# Loguri DEV/backtest: tracebacks aici sunt de pe masina de test (pilot backtest pe
-# runner.py, sync dev) — NU probleme de flota LIVE. Excluse din scanare ca sa nu
-# alerteze fals "Verifica botii afectati" pentru esecuri de pe dev.
-# Include si logurile de test (unittest/pytest via runner.py, ex "python -m
-# unittest_<data>.log"): un esec de test in dezvoltare NU e un bot afectat.
+# DEV/backtest logs: tracebacks here come from the test machine (backtest pilot on
+# runner.py, dev sync) — NOT LIVE fleet problems. Excluded from the scan so they do
+# not falsely alert "check the affected bots" for dev failures.
+# This also covers the test logs (unittest/pytest via runner.py, e.g. "python -m
+# unittest_<date>.log"): a failing test in development is NOT an affected bot.
 _EXCLUDE_BASENAMES = {"backtest_cycle.log", "refresh_dev.log", "trigger_backtest_dev.log"}
 
 
@@ -83,15 +83,15 @@ def _active_logs():
 
 
 def _new_lines(path, offsets):
-    """Liniile aparute de la ultima rulare (offset persistat). Gestioneaza logrotate:
-    daca fisierul s-a micsorat (rotit/truncat), reia de la 0. Prima data cand vedem un
-    fisier, il baseline-uim la EOF (nu-i numaram ISTORICUL -> fara alerta falsa la primul
-    run / la un log nou de zi)."""
+    """The lines that appeared since the last run (persisted offset). Handles logrotate:
+    if the file shrank (rotated/truncated), start over from 0. The first time we see a
+    file we baseline it at EOF (we do not count its HISTORY -> no false alert on the
+    first run or on a new daily log)."""
     try:
         size = os.path.getsize(path)
     except OSError:
         return []
-    if path not in offsets:              # fisier nou -> baseline la EOF, fara istoricul
+    if path not in offsets:              # New file -> baseline at EOF, skip the history.
         offsets[path] = size
         return []
     last = offsets[path]
@@ -116,7 +116,7 @@ def check_once(now=None):
     offsets = state.get("offsets", {})
     cooldowns = state.get("cooldowns", {})
 
-    # numara aparitii per categorie + retine un exemplu si fisierele implicate
+    # Count hits per category, keeping one sample and the files involved.
     counts = {c: 0 for c in _CATS}
     samples = {}
     files_hit = {c: set() for c in _CATS}
@@ -133,7 +133,7 @@ def check_once(now=None):
     state["offsets"] = offsets
     state["last_run"] = now
 
-    # decide alertele (peste prag + nu in cooldown)
+    # Decide the alerts (over threshold and not in cooldown).
     fired = []
     for cat, (rx, default_thr) in _CATS.items():
         thr = float(os.environ.get(f"ANOMALY_THRESH_{cat.upper()}", default_thr))

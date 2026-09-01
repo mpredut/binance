@@ -1,4 +1,4 @@
-"""Decizia unica provider-neutral pentru sold si cantitatea unui ordin spot."""
+"""The single provider-neutral decision on balance and quantity for a spot order."""
 from __future__ import annotations
 
 from dataclasses import dataclass

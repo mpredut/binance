@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""verify_hype_facade.py — sanity DRY-RUN al facadei pt HYPE (Hyperliquid SPOT).
+"""verify_hype_facade.py — DRY-RUN sanity check of the HYPE facade (Hyperliquid SPOT).
 
-Ruleaza ZERO ordine reale. Verifica, prin facada market_api (singleton `mkt`):
-  - RUTARE pe symbol: HYPEUSDC -> Hyperliquid; BTCUSDC/TAOUSDC -> Binance;
-    asset bare BTC/TAO -> Binance (default behavior-preserving); HYPE -> Hyperliquid.
-  - get_current_price(HYPEUSDC) -> pret SPOT sanatos (>0).
-  - get_price_history(HYPEUSDC) -> serie granulara ascendenta, preturi >0.
-  - free_balance(HYPE) -> sold SPOT liber (total-hold).
-  - get_orders(HYPEUSDC, BUY/SELL) -> normalizate {side,price,qty,timestamp}; doar SPOT.
-  - get_position_stats (avg_buy/net) reproduse din ordinele facadei.
-  - DECIZIA pe care ar lua-o monitor_price_and_trade pt HYPE (fara sa plaseze).
-  - place_order(HYPEUSDC, SELL) e DRY (HL_LIVE_ORDERS neactiv) -> None, fara ordin.
+Places ZERO real orders. Through the market_api facade (the `mkt` singleton) it checks:
+  - symbol ROUTING: HYPEUSDC -> Hyperliquid; BTCUSDC/TAOUSDC -> Binance;
+    bare assets BTC/TAO -> Binance (behaviour-preserving default); HYPE -> Hyperliquid.
+  - get_current_price(HYPEUSDC) -> a sane SPOT price (>0).
+  - get_price_history(HYPEUSDC) -> a fine-grained ascending series, prices >0.
+  - free_balance(HYPE) -> the free SPOT balance (total minus hold).
+  - get_orders(HYPEUSDC, BUY/SELL) -> normalised {side,price,qty,timestamp}; SPOT only.
+  - get_position_stats (avg_buy/net) reproduced from the facade's orders.
+  - the DECISION monitor_price_and_trade would take for HYPE (without placing it).
+  - place_order(HYPEUSDC, SELL) is DRY (HL_LIVE_ORDERS off) -> None, no order sent.
 
-Ruleaza local cu venv-ul care are SDK-ul HL:
+Run it locally with the venv that has the HL SDK:
   ~/binance/.venv/bin/python verify_hype_facade.py
-Iese cu cod !=0 daca ceva e clar nesanatos (rutare gresita, pret invalid, ordin real).
+Exits non-zero if anything is clearly unhealthy (wrong routing, invalid price, real order).
 """
 import os
 import sys
@@ -54,7 +54,7 @@ def main():
     print("\n==== MARKET-DATA HYPE (public, fara cheie) ====")
     price = mkt.get_current_price(HYPE)
     print(f"  get_current_price(HYPEUSDC) = {price}")
-    check("pret SPOT valid (>0)", isinstance(price, (int, float)) and price and price > 0,
+    check("valid SPOT price (>0)", isinstance(price, (int, float)) and price and price > 0,
           repr(price))
 
     hist = mkt.get_price_history(HYPE, 3)
@@ -112,14 +112,14 @@ def main():
         if inc >= 0.17:
             decizie = "HARD-TP (vinde proportie, indiferent de trend)"
         elif inc > gain:
-            decizie = "castig peste prag -> vinde DOAR daca trend NU e up"
+            decizie = "gain above threshold -> sell ONLY if the trend is NOT up"
         elif (last_buy - price) / last_buy > lost:
-            decizie = "pierdere peste prag -> vinde DOAR daca trend NU e up"
+            decizie = "loss above threshold -> sell ONLY if the trend is NOT up"
         else:
             decizie = "nimic interesant"
         print(f"  -> decizie: {decizie}")
     else:
-        print("  (fara buy-uri SPOT recente sau fara pret — nicio decizie de vanzare)")
+        print("  (no recent SPOT buys or no price — no sell decision)")
 
     print("\n==== POARTA ORDINE: place_order trebuie sa fie DRY ====")
     os.environ.pop("HL_LIVE_ORDERS", None)   # asiguram DRY pt test
