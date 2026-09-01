@@ -38,7 +38,7 @@ async def test_ws():
     
     print("Conectare la User Data Stream...")
     async with bm.user_socket() as stream:
-        print("✅ Conectat! Plasează un order din app acum...")
+        print("✅ Conectat! Plaseaza un order din app acum...")
         while True:
             event = await stream.recv()
             print(f"EVENT: {event}")

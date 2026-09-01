@@ -19,6 +19,15 @@ Exactly two things stay Romanian, and both for a mechanical reason:
 
 Anything else in Romanian is a regression. **Do not imitate it** — translate it.
 
+## No Romanian diacritics, anywhere
+
+Never write `ă â î ș ț` into a file in this repository. The only exception is the
+diacritic set inside `verify_tools/translation_audit.py`, which is the detector itself.
+
+The files travel between Windows, WSL and the Linux server through plink, PowerShell and
+9P mounts, and diacritics are the first thing those layers mangle. A mangled byte in a
+`.sh` or a `.conf` is a runtime failure, not a cosmetic one.
+
 Useful commands:
 
 ```bash

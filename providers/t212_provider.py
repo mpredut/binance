@@ -159,9 +159,9 @@ class T212Provider(MarketDataProvider):
             avg = float(p.get("averagePrice"))
             qty = float(p.get("quantity") or 0.0)
         except (TypeError, ValueError) as e:
-            raise ProviderError(f"portfolio({symbol}): pozitie invalida") from e
+            raise ProviderError(f"portfolio({symbol}): invalid position") from e
         if not math.isfinite(avg) or not math.isfinite(qty) or avg <= 0 or qty < 0:
-            raise ProviderError(f"portfolio({symbol}): pozitie invalida")
+            raise ProviderError(f"portfolio({symbol}): invalid position")
         if qty <= 0:
             return []
         return [_normalize_order({
@@ -183,7 +183,7 @@ class T212Provider(MarketDataProvider):
             return qty_f
         if side_u in {"SELL", "S"}:
             return -qty_f
-        raise ProviderError(f"directie T212 invalida: {side!r}")
+        raise ProviderError(f"invalid T212 side: {side!r}")
 
     def _send_order(self, symbol: str, side: str, qty: float,
                     price: Optional[float], *, market: bool) -> tuple[int, dict]:
@@ -253,7 +253,7 @@ class T212Provider(MarketDataProvider):
             raise ProviderError(f"submit_order({symbol}): T212 HTTP {status}: {data}")
         order_id = data.get("id") if isinstance(data, dict) else None
         if order_id is None:
-            raise ProviderError(f"submit_order({symbol}): raspuns fara id: {data}")
+            raise ProviderError(f"submit_order({symbol}): response without an id: {data}")
         return str(order_id)
 
     def order_status(self, symbol: str, order_id: str) -> OrderStatus:
@@ -278,7 +278,7 @@ class T212Provider(MarketDataProvider):
             normalized = _STATUS_MAP.get(venue_status)
         if normalized is None:
             raise ProviderError(
-                f"order_status({order_id}): status T212 necunoscut {venue_status!r}")
+                f"order_status({order_id}): unknown T212 status {venue_status!r}")
 
         try:
             filled_qty = abs(float(raw.get("filledQuantity") or 0.0))
@@ -308,7 +308,7 @@ class T212Provider(MarketDataProvider):
                 cost = abs(float(fill_price)) * filled_qty
             except (TypeError, ValueError):
                 raise ProviderError(
-                    f"order_status({order_id}): fill {filled_qty} fara cost executat"
+                    f"order_status({order_id}): fill {filled_qty} without an executed cost"
                 ) from None
 
         return OrderStatus(

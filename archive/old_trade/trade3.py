@@ -29,16 +29,16 @@ class PriceTrendAnalyzer:
         self.prices = prices
 
     def linear_regression_trend(self):
-        if len(self.prices) < 2:  # Avem nevoie de cel puțin două puncte pentru regresie
-            print("Regresie Liniară: Nu sunt suficiente date pentru a calcula trendul.")
+        if len(self.prices) < 2:  # Avem nevoie de cel putin doua puncte pentru regresie
+            print("Regresie Liniara: Nu sunt suficiente date pentru a calcula trendul.")
             return None, None, None
 
         x = np.arange(len(self.prices))
         y = np.array(self.prices)
         
-        # Verificăm variabilitatea prețurilor pentru a evita NaN
+        # Verificam variabilitatea preturilor pentru a evita NaN
         if np.std(y) == 0:
-            print("Regresie Liniară: Prețurile sunt constante, trendul nu poate fi determinat.")
+            print("Regresie Liniara: Preturile sunt constante, trendul nu poate fi determinat.")
             return None, None, None
 
         slope, intercept, r_value, _, _ = linregress(x, y)
@@ -56,11 +56,11 @@ class PriceTrendAnalyzer:
         return trend_poly, model.coef_
 
     def exponential_moving_average(self, span=5):
-        prices_list = list(self.prices)  # Convertim deque în listă
+        prices_list = list(self.prices)  # Convertim deque in lista
         ema = [prices_list[0]]
         alpha = 2 / (span + 1)
         
-        for price in prices_list[1:]:  # Parcurgem prețurile începând de la al doilea element
+        for price in prices_list[1:]:  # Parcurgem preturile incepand de la al doilea element
             ema.append(alpha * price + (1 - alpha) * ema[-1])
     
         return ema
@@ -80,13 +80,13 @@ class PriceTrendAnalyzer:
 
         fig, ax1 = plt.subplots(figsize=(10, 6))
 
-        # Graficul prețurilor
-        ax1.plot(x, self.prices, label='Prețuri', marker='o', color='blue')
-        ax1.plot(x, trend_line, label='Regresie Liniară', color='orange')
-        ax1.plot(x, trend_poly, label='Regresie Polinomială', color='purple')
-        ax1.plot(x, ema, label='Media Mobilă Exponențială', color='green')
+        # Graficul preturilor
+        ax1.plot(x, self.prices, label='Preturi', marker='o', color='blue')
+        ax1.plot(x, trend_line, label='Regresie Liniara', color='orange')
+        ax1.plot(x, trend_poly, label='Regresie Polinomiala', color='purple')
+        ax1.plot(x, ema, label='Media Mobila Exponentiala', color='green')
         ax1.set_xlabel("Timp")
-        ax1.set_ylabel("Preț")
+        ax1.set_ylabel("Pret")
         
         # Graficul gradientului
         ax2 = ax1.twinx()
@@ -94,36 +94,36 @@ class PriceTrendAnalyzer:
         ax2.set_ylabel("Gradient", color='red')
 
         fig.legend(loc="upper left")
-        plt.title("Analiza Tendinței Prețurilor")
+        plt.title("Analiza Tendintei Preturilor")
         plt.show()
     
     def analyze_trends(self, poly_degree=2, ema_span=5):
-        # Regresie liniară
+        # Regresie liniara
         trend_line, slope, r_value = self.linear_regression_trend()
         if not slope is None:
-            lin_trend = "creștere" if slope > 0 else "descreștere"
+            lin_trend = "crestere" if slope > 0 else "descrestere"
         lin_trend = "nedefinit"
-        print(f"Regresie Liniară: Slope = {slope:.2f}, R = {r_value:.2f} -> Tendință estimată de {lin_trend}")
+        print(f"Regresie Liniara: Slope = {slope:.2f}, R = {r_value:.2f} -> Tendinta estimata de {lin_trend}")
 
-        # Regresie polinomială
+        # Regresie polinomiala
         trend_poly, poly_coef = self.polynomial_regression_trend(degree=poly_degree)
-        poly_trend = "creștere" if poly_coef[-1] > 0 else "descreștere"
-        print(f"Regresie Polinomială (grad {poly_degree}): Coeficient final = {poly_coef[-1]:.2f} -> Tendință de {poly_trend}")
+        poly_trend = "crestere" if poly_coef[-1] > 0 else "descrestere"
+        print(f"Regresie Polinomiala (grad {poly_degree}): Coeficient final = {poly_coef[-1]:.2f} -> Tendinta de {poly_trend}")
 
-        # Media Mobilă Exponențială
+        # Media Mobila Exponentiala
         ema = self.exponential_moving_average(span=ema_span)
-        print(f"Media Mobilă Exponențială: Ultima valoare EMA = {ema[-1]:.2f}")
+        print(f"Media Mobila Exponentiala: Ultima valoare EMA = {ema[-1]:.2f}")
 
         # Gradientul
         gradient, avg_gradient = self.calculate_gradient()
         grad_trend = "1" if avg_gradient > 0 else "-1"
-        print(f"Gradient Mediu: {avg_gradient:.2f} -> Tendință locală de {grad_trend}")
+        print(f"Gradient Mediu: {avg_gradient:.2f} -> Tendinta locala de {grad_trend}")
 
-        # Plotarea tendințelor
+        # Plotarea tendintelor
         self.plot_trends(trend_line, trend_poly, ema, gradient)
 
 # Exemplu de utilizare:
-#prices = [100, 102, 101, 105, 107, 110, 108, 112, 115, 117]  # Înlocuiește cu lista ta de prețuri
+#prices = [100, 102, 101, 105, 107, 110, 108, 112, 115, 117]  # Inlocuieste cu lista ta de preturi
 #analyzer = PriceTrendAnalyzer(prices)
 #analyzer.analyze_trends(poly_degree=2, ema_span=5)
 
@@ -141,7 +141,7 @@ class PriceWindow:
 
     @classmethod
     def from_existing_window(cls, existing_prices, window_size):
-        """ Creează o instanță nouă de PriceWindow cu ultimele `window_size` elemente din `existing_prices`. """
+        """ Creeaza o instanta noua de PriceWindow cu ultimele `window_size` elemente din `existing_prices`. """
         return cls(window_size, initial_prices=existing_prices)
 
     def process_price(self, price):
@@ -235,7 +235,7 @@ class PriceWindow:
         min_proximity = (current_price - min_price) / (max_price - min_price)
         max_proximity = (max_price - current_price) / (max_price - min_price)
         
-        # Asigurăm că valorile de proximitate sunt pozitive
+        # Asiguram ca valorile de proximitate sunt pozitive
         return max(min_proximity, 0), max(max_proximity, 0)
 
     def calculate_positions(self):
@@ -371,35 +371,35 @@ class PriceWindow:
         '''
         trend_line, slope, r_value = analyzer.linear_regression_trend()
         lin_trend = slope if slope is not None else 0
-        print(f"Regresie Liniară: Slope = {slope:.2f} -> {'creștere' if slope > 0 else 'descreștere' if slope < 0 else 'nedefinit'}")
+        print(f"Regresie Liniara: Slope = {slope:.2f} -> {'crestere' if slope > 0 else 'descrestere' if slope < 0 else 'nedefinit'}")
         
         poly_degree = 2
         trend_poly, poly_coef = analyzer.polynomial_regression_trend(degree=poly_degree)
         poly_trend = poly_coef[-1]
-        print(f"Regresie Polinomială (grad {poly_degree}): Coeficient final = {poly_trend:.2f} -> {'creștere' if poly_trend > 0 else 'descreștere'}")
+        print(f"Regresie Polinomiala (grad {poly_degree}): Coeficient final = {poly_trend:.2f} -> {'crestere' if poly_trend > 0 else 'descrestere'}")
         '''
         
-        # Media Mobilă Exponențială
+        # Media Mobila Exponentiala
         #ema_span = 5
         #ema = analyzer.exponential_moving_average(span=ema_span)
         ema_diff = 0
         #if len(ema) > 1:
         #    ema_diff = ema[-1] - ema[-2] 
-        #print(f"Media Mobilă Exponențială: Ultima valoare EMA = {ema[-1]:.2f} -> {'creștere' if ema_diff > 0 else 'descreștere'}")
+        #print(f"Media Mobila Exponentiala: Ultima valoare EMA = {ema[-1]:.2f} -> {'crestere' if ema_diff > 0 else 'descrestere'}")
 
         # Gradientul
         gradient_lst, avg_gradient = analyzer.calculate_gradient()
-        print(f"Gradient Mediu: {avg_gradient:.2f} -> {'creștere' if avg_gradient > 0 else 'descreștere'}")
+        print(f"Gradient Mediu: {avg_gradient:.2f} -> {'crestere' if avg_gradient > 0 else 'descrestere'}")
         gradient = 0
         if len(gradient_lst) >= 3:
             gradient = np.mean(gradient_lst[:3])
         else:
             gradient = np.mean(gradient_lst)
-        #print(f"Gradient local: {gradient:.2f} -> {'creștere' if gradient > 0 else 'descreștere'}")
+        #print(f"Gradient local: {gradient:.2f} -> {'crestere' if gradient > 0 else 'descrestere'}")
 
 
 
-        # Calculare vot final și coeficient de creștere
+        # Calculare vot final si coeficient de crestere
         trends = [#1 if slope > 0 else -1 if slope < 0 else 0,
                   #1 if poly_trend > 0 else -1,
                   1 if ema_diff > 0 else -1,
@@ -418,7 +418,7 @@ class PriceWindow:
         else:
             final_trend = 0
 
-        print(f"Tendință de {'creștere' if final_trend == 1 else 'descreștere' if final_trend == -1 else 'nedefinit'}")
+        print(f"Tendinta de {'crestere' if final_trend == 1 else 'descrestere' if final_trend == -1 else 'nedefinit'}")
         print(f"Coeficient : {growth_coefficient:.2f}")
 
         return final_trend, growth_coefficient
@@ -504,11 +504,11 @@ def track_and_place_order(action, symbol, count, proposed_price, current_price, 
 
 class TrendState:
     def __init__(self, max_duration_seconds, expiration_trend_time, fresh_trend_time):
-        self.state = 'HOLD'  # Inițial, starea este 'HOLD'
+        self.state = 'HOLD'  # Initial, starea este 'HOLD'
         self.old_state = self.state 
         self.expired = False
         self.start_time = None  # Timpul de Inceput al trendului
-        self.end_time = None  # Timpul de sfârsit al trendului
+        self.end_time = None  # Timpul de sfarsit al trendului
         self.last_confirmation_time = None  # Ultimul timp de confirmare al trendului
         self.max_duration_seconds = max_duration_seconds  # Durata maxima permisa pentru un trend
         self.confirm_count = 0  # Contorul de confirmari pentru trend
@@ -518,14 +518,14 @@ class TrendState:
 
     def start_trend(self, new_state):
         
-        #self.end_trend()  # Marcheaza sfârsitul trendului anterior
+        #self.end_trend()  # Marcheaza sfarsitul trendului anterior
         
         self.old_state = self.state
         self.state = new_state
         self.start_time = time.time()
         self.last_confirmation_time = self.start_time
         self.confirm_count = 1  # Prima confirmare
-        self.end_time = None  # Resetam timpul de sfârsit
+        self.end_time = None  # Resetam timpul de sfarsit
         self.expired = False
         print(f"Start of {self.state} trend at {u.timeToHMS(self.start_time)}")
         return self.old_state
@@ -561,7 +561,7 @@ class TrendState:
 
     def end_trend(self):
         self.old_state = self.state
-        self.end_time = self.last_confirmation_time  # Timpul de sfârsit al trendului este ultimul timp de confirmare
+        self.end_time = self.last_confirmation_time  # Timpul de sfarsit al trendului este ultimul timp de confirmare
         print(f"Trend ended: {self.state} at {u.timeToHMS(self.end_time)} after {self.confirm_count} confirmations.")
         self.old_confirm_count = self.confirm_count
         self.confirm_count = 0
@@ -726,7 +726,7 @@ while True:
             # track_and_place_order('SELL', proposed_price, current_price, order_ids=order_ids)   
 
         #
-        # Verificam schimbarile de preț si gestionam trendurile
+        # Verificam schimbarile de pret si gestionam trendurile
         #
         proposed_price = current_price
        

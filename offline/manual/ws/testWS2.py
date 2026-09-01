@@ -29,7 +29,7 @@ async def test_ws():
     
     url = f"wss://stream.binance.com:9443/ws/{listen_key}"
     async with websockets.connect(url, ping_interval=20) as ws:
-        print("✅ Conectat! Plasează un order din app acum...")
+        print("✅ Conectat! Plaseaza un order din app acum...")
         while True:
             try:
                 msg = await asyncio.wait_for(ws.recv(), timeout=15)

@@ -5,7 +5,7 @@ import base64, time, json, asyncio, websockets
 from keys.apikeys import api_key_ws
 
 
-# Extragere corectă din PKCS8 DER
+# Extragere corecta din PKCS8 DER
 with open("ed25519_private.pem", "r") as f:
     pem_data = f.read()
 
@@ -14,12 +14,12 @@ b64 = re.search(r"-----BEGIN PRIVATE KEY-----(.+?)-----END PRIVATE KEY-----", pe
 der_bytes = base64.b64decode(b64.group(1).strip())
 
 # PKCS8 Ed25519 = 48 bytes total, seed-ul e ultimii 32
-# dar uneori e la offset 16, verifică ambele
+# dar uneori e la offset 16, verifica ambele
 print(f"DER length: {len(der_bytes)}")
 seed = der_bytes[-32:]  
 signing_key = nacl.signing.SigningKey(seed)
 
-# Verificare — public key trebuie să coincidă cu ce ai în Binance
+# Verificare — public key trebuie sa coincida cu ce ai in Binance
 verify_key = signing_key.verify_key
 pub_b64 = base64.b64encode(bytes(verify_key)).decode()
 print(f"Public key raw base64: {pub_b64}")
@@ -53,7 +53,7 @@ async def test_ws():
 
         if resp.get("status") == 200:
             await ws.send(json.dumps({"id": "sub", "method": "userDataStream.subscribe"}))
-            print("Subscribed! Plasează un order...")
+            print("Subscribed! Plaseaza un order...")
             while True:
                 try:
                     msg = await asyncio.wait_for(ws.recv(), timeout=30)

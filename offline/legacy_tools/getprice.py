@@ -1,4 +1,4 @@
-"""Diagnostic istoric de preț; poate accesa API-ul real."""
+"""Diagnostic istoric de pret; poate accesa API-ul real."""
 
 from binance.client import Client
 from binance.websockets import BinanceSocketManager

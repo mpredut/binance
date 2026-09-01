@@ -1882,7 +1882,7 @@
     "stress": {
       "assumptions": {
         "name": "stress",
-        "description": "fee/spread/slippage adverse și maximum 50% fill LIMIT per bară",
+        "description": "adverse fee/spread/slippage and at most a 50% LIMIT fill per bar",
         "fees": {
           "limit_fee_pct": 0.26,
           "market_fee_pct": 0.4

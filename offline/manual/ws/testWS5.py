@@ -21,7 +21,7 @@ async def test_ws():
     async with websockets.connect(url, ping_interval=20) as ws:
         print("✅ Conectat!")
 
-        # Varianta 1 — signed session login mai întâi
+        # Varianta 1 — signed session login mai intai
         timestamp = int(time.time() * 1000)
         params = f"apiKey={api_key}&timestamp={timestamp}"
         signature = sign(params)
@@ -39,13 +39,13 @@ async def test_ws():
         resp = await ws.recv()
         print(f"Login response: {resp}")
 
-        # Varianta 2 — subscribe după login
+        # Varianta 2 — subscribe dupa login
         subscribe = {
             "id": "sub",
             "method": "userDataStream.subscribe"
         }
         await ws.send(json.dumps(subscribe))
-        print("Subscribe trimis, plasează un order!")
+        print("Subscribe trimis, plaseaza un order!")
 
         while True:
             try:

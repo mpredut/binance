@@ -6,7 +6,7 @@ from datetime import datetime
 
  
 
-# Funcție pentru generarea fișei de pontaj
+# Functie pentru generarea fisei de pontaj
 
 def genereaza_fisa_pontaj(luna, an):
 
@@ -14,7 +14,7 @@ def genereaza_fisa_pontaj(luna, an):
 
    
 
-    # Template pentru pontaj, adaptat conform modelului tău
+    # Template pentru pontaj, adaptat conform modelului tau
 
     pontaj_data = {
 
@@ -22,13 +22,13 @@ def genereaza_fisa_pontaj(luna, an):
 
         'Ziua': zile_luna.strftime('%A'),
 
-        'Ora Inceput': ['09:00' for _ in range(len(zile_luna))],  # Poți ajusta aceste valori
+        'Ora Inceput': ['09:00' for _ in range(len(zile_luna))],  # Poti ajusta aceste valori
 
-        'Ora Sfarsit': ['17:00' for _ in range(len(zile_luna))],  # Poți ajusta aceste valori
+        'Ora Sfarsit': ['17:00' for _ in range(len(zile_luna))],  # Poti ajusta aceste valori
 
-        'Ore lucrate': [8 for _ in range(len(zile_luna))],  # Poți ajusta numărul de ore
+        'Ore lucrate': [8 for _ in range(len(zile_luna))],  # Poti ajusta numarul de ore
 
-        'Observații': ['' for _ in range(len(zile_luna))]
+        'Observatii': ['' for _ in range(len(zile_luna))]
 
     }
 
@@ -38,13 +38,13 @@ def genereaza_fisa_pontaj(luna, an):
 
    
 
-    # Salvare fișier Excel cu numele specificat
+    # Salvare fisier Excel cu numele specificat
 
     file_name = f'fisa_pontaj_{luna}_{an}.xlsx'
 
     df.to_excel(file_name, index=False)
 
-    print(f'Fișa de pontaj pentru {luna}/{an} a fost generată: {file_name}')
+    print(f'Fisa de pontaj pentru {luna}/{an} a fost generata: {file_name}')
 
  
 

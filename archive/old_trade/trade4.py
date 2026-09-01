@@ -18,14 +18,14 @@ import bapi_placeorder as po
 #import priceprediction as pp
 
 
-# Intervalul de timp între încercările de anulare și recreere a ordinului (în secunde)
+# Intervalul de timp intre incercarile de anulare si recreere a ordinului (in secunde)
 WAIT_FOR_ORDER = 22
 
 class TradingBot:
     def __init__(self, symbol, qty, DEFAULT_ADJUSTMENT_PERCENT):
         self.symbol = symbol
         self.qty = qty
-        self.transaction_state = "COMPLETED"  # Starea inițială
+        self.transaction_state = "COMPLETED"  # Starea initiala
         current_price = api.get_current_price(symbol)
         self.filled_buy_price = round(current_price * (1 - 0.1), 4)
         self.filled_sell_price = round(current_price * (1 + 0.1), 4)
@@ -43,8 +43,8 @@ class TradingBot:
         
     def repetitive_buy(self, current_price, filled_sell_price):
         adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
-        failure_count = 0  # Adaugăm un contor pentru numărul de eșecuri
-        max_failures = 5  # Definim numărul maxim de eșecuri acceptabile
+        failure_count = 0  # Adaugam un contor pentru numarul de esecuri
+        max_failures = 5  # Definim numarul maxim de esecuri acceptabile
 
         while True:
             target_buy_price = round(current_price * (1 - adjustment_percent), 4)
@@ -115,8 +115,8 @@ class TradingBot:
 
     def repetitive_sell(self, current_price, filled_buy_price):
         adjustment_percent = self.DEFAULT_ADJUSTMENT_PERCENT
-        failure_count = 0  # Adaugăm un contor pentru numărul de eșecuri
-        max_failures = 5  # Definim numărul maxim de eșecuri acceptabile
+        failure_count = 0  # Adaugam un contor pentru numarul de esecuri
+        max_failures = 5  # Definim numarul maxim de esecuri acceptabile
 
         while True:
             target_sell_price = round(current_price * (1 + adjustment_percent), 4)
@@ -135,7 +135,7 @@ class TradingBot:
                 print(f"[{self.symbol}] Order SELL failed, retrying...")
                 api.cancel_recent_orders("SELL", self.symbol, WAIT_FOR_ORDER)
                 time.sleep(WAIT_FOR_ORDER)
-                failure_count += 1  # Incrementăm contorul de eșecuri
+                failure_count += 1  # Incrementam contorul de esecuri
                 if failure_count >= max_failures:
                     print(f"[{self.symbol}] Order SELL failed {failure_count} times. Exiting.")
                     self.mark_sell_filled()

@@ -37,7 +37,7 @@ async def test_ws():
         }
         
         await ws.send(json.dumps(request))
-        print("Subscribe trimis, aștept events... Plasează un order din app!")
+        print("Subscribe trimis, astept events... Plaseaza un order din app!")
         
         while True:
             try:

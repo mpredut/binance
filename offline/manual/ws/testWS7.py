@@ -41,7 +41,7 @@ async def test_ws():
 
         if resp.get("status") == 200:
             await ws.send(json.dumps({"id": "sub", "method": "userDataStream.subscribe"}))
-            print("Subscribed! Plasează un order...")
+            print("Subscribed! Plaseaza un order...")
             while True:
                 try:
                     msg = await asyncio.wait_for(ws.recv(), timeout=30)

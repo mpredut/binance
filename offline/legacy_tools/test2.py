@@ -9,7 +9,7 @@ def fetch_data():
     end_time = int(datetime.datetime.now().timestamp() * 1000)
     start_time = end_time - 30 * 24 * 60 * 60 * 1000  # Ultimele 30 de zile
 
-    # Ajustăm pentru a obține date în mai multe cereri, deoarece Binance limitează numărul de date returnate
+    # Ajustam pentru a obtine date in mai multe cereri, deoarece Binance limiteaza numarul de date returnate
     df_list = []
     while start_time < end_time:
         url = f'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime={start_time}&endTime={end_time}&limit=1000'
@@ -26,7 +26,7 @@ def fetch_data():
         
         df_list.append(df)
         
-        start_time = int(df.index[-1].timestamp() * 1000) + 60000  # Trece la următorul minut după ultimul timestamp
+        start_time = int(df.index[-1].timestamp() * 1000) + 60000  # Trece la urmatorul minut dupa ultimul timestamp
         
     full_df = pd.concat(df_list)
     return full_df
@@ -43,11 +43,11 @@ def analyze_drops_with_distribution(df):
         drop_percent = (start_price - end_price) / start_price * 100
         drops.append(drop_percent)
 
-    # Verificăm distribuția scăderilor
+    # Verificam distributia scaderilor
     plt.hist(drops, bins=50, edgecolor='black')
-    plt.title('Distribuția scăderilor procentuale în 2*60 de minute')
-    plt.xlabel('Procent de scădere')
-    plt.ylabel('Frecvență')
+    plt.title('Distributia scaderilor procentuale in 2*60 de minute')
+    plt.xlabel('Procent de scadere')
+    plt.ylabel('Frecventa')
     plt.show()
 
     count_drops_5 = sum(1 for drop in drops if drop >= 5)
@@ -65,10 +65,10 @@ df = fetch_data()
 # Analyze with distribution
 count_drops_5, probability_5, count_drops_3, probability_3, count_drops_2, probability_2 = analyze_drops_with_distribution(df)
 
-print(f"Număr de scăderi de 5% în 20 de minute: {count_drops_5}")
-print(f"Probabilitatea unei scăderi de 5% în 20 de minute: {probability_5:.2f}%")
-print(f"Număr de scăderi de 3% în 20 de minute: {count_drops_3}")
-print(f"Probabilitatea unei scăderi de 3% în 20 de minute: {probability_3:.2f}%")
-print(f"Număr de scăderi de 2% în 20 de minute: {count_drops_2}")
-print(f"Probabilitatea unei scăderi de 2% în 20 de minute: {probability_2:.2f}%")
+print(f"Numar de scaderi de 5% in 20 de minute: {count_drops_5}")
+print(f"Probabilitatea unei scaderi de 5% in 20 de minute: {probability_5:.2f}%")
+print(f"Numar de scaderi de 3% in 20 de minute: {count_drops_3}")
+print(f"Probabilitatea unei scaderi de 3% in 20 de minute: {probability_3:.2f}%")
+print(f"Numar de scaderi de 2% in 20 de minute: {count_drops_2}")
+print(f"Probabilitatea unei scaderi de 2% in 20 de minute: {probability_2:.2f}%")
 

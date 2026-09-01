@@ -4,13 +4,13 @@ Migrare cache_price_<SYM>.json (vechi, full-rewrite) → cache_price_<SYM>.jsonl
 
 La refactor s-a trecut de la .json la .jsonl + .meta, dar datele vechi din .json
 nu au fost migrate. Acest script:
-  • citește punctele din .json vechi și din .jsonl existent (dacă există),
-  • le îmbină per simbol, deduplică pe timestamp, sortează crescător,
-  • rescrie .jsonl atomic + regenerează .meta,
-  • redenumește .json vechi → .json.bak (poți șterge .bak după verificare).
+  • citeste punctele din .json vechi si din .jsonl existent (daca exista),
+  • le imbina per simbol, deduplica pe timestamp, sorteaza crescator,
+  • rescrie .jsonl atomic + regenereaza .meta,
+  • redenumeste .json vechi → .json.bak (poti sterge .bak dupa verificare).
 
-RULEAZĂ DOAR cu procesele writer (priceAnalysis etc.) OPRITE, ca să nu existe
-scriere concurentă pe .jsonl. Idempotent (re-rularea nu duplică).
+RULEAZA DOAR cu procesele writer (priceAnalysis etc.) OPRITE, ca sa nu existe
+scriere concurenta pe .jsonl. Idempotent (re-rularea nu duplica).
 """
 import os
 import sys
@@ -18,9 +18,9 @@ import json
 import glob
 import time
 
-# offline/legacy_tools/ este la două niveluri sub rădăcina repo-ului.
+# offline/legacy_tools/ este la doua niveluri sub radacina repo-ului.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# Fișierele de cache stau în <repo>/cachedb/ (suprascris de BINANCE_CACHE_DIR sau --dir).
+# Fisierele de cache stau in <repo>/cachedb/ (suprascris de BINANCE_CACHE_DIR sau --dir).
 CACHE_DIR = os.environ.get("BINANCE_CACHE_DIR", os.path.join(REPO_ROOT, "cachedb"))
 
 
@@ -33,7 +33,7 @@ def _atomic_write_lines(path, lines):
 
 
 def _entry_ts(item):
-    # item e [ts, price] (listă) — folosim primul element ca timestamp
+    # item e [ts, price] (lista) — folosim primul element ca timestamp
     if isinstance(item, (list, tuple)) and item:
         return item[0]
     if isinstance(item, dict):
@@ -79,7 +79,7 @@ def migrate_file(json_path, dry_run=False):
     added_total = 0
     for sym in symbols:
         by_ts = {}
-        for item in new.get(sym, []):          # întâi noile (au prioritate la duplicat)
+        for item in new.get(sym, []):          # intai noile (au prioritate la duplicat)
             by_ts[_entry_ts(item)] = item
         before = len(by_ts)
         for item in old.get(sym, []):
@@ -110,7 +110,7 @@ def migrate_file(json_path, dry_run=False):
         json.dump({"max_ts": max_ts, "saved_at": int(time.time() * 1000),
                    "fetchtime": fetchtime, "counts": counts}, mf)
     os.replace(jsonl_path + ".meta.tmp", jsonl_path + ".meta")
-    os.replace(json_path, json_path + ".bak")     # backup, nu ștergem direct
+    os.replace(json_path, json_path + ".bak")     # backup, nu stergem direct
     return added_total
 
 
@@ -126,24 +126,24 @@ def main():
     dry_run = "--dry-run" in sys.argv
     work_dir = _arg_value("--dir", CACHE_DIR)   # implicit cachedb/ (sau --dir / BINANCE_CACHE_DIR)
     # cache_price_long_trend.json e cache-ul PriceLongTrend (full-rewrite json, NU
-    # per-simbol append) → rămâne .json, îl excludem din migrare.
+    # per-simbol append) → ramane .json, il excludem din migrare.
     EXCLUDE = {"long_trend"}
     files = sorted(glob.glob(os.path.join(work_dir, "cache_price_*.json")))
     files = [f for f in files
              if not f.endswith(".bak")
              and os.path.basename(f)[len("cache_price_"):-len(".json")] not in EXCLUDE]
     if not files:
-        print("Nu există fișiere cache_price_*.json de migrat.")
+        print("Nu exista fisiere cache_price_*.json de migrat.")
         return
-    print(f"{'DRY-RUN' if dry_run else 'MIGRARE'}: {len(files)} fișiere\n")
+    print(f"{'DRY-RUN' if dry_run else 'MIGRARE'}: {len(files)} fisiere\n")
     for f in files:
         try:
             migrate_file(f, dry_run=dry_run)
         except Exception as e:
             print(f"[EROARE] {os.path.basename(f)}: {e}")
     if not dry_run:
-        print("\nGata. Fișierele .json au fost redenumite în .json.bak "
-              "(șterge-le după ce verifici .jsonl).")
+        print("\nGata. Fisierele .json au fost redenumite in .json.bak "
+              "(sterge-le dupa ce verifici .jsonl).")
 
 
 if __name__ == "__main__":

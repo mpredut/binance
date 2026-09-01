@@ -43,6 +43,6 @@ def analyze_drops(df):
 df = fetch_data()
 count_drops, total_intervals, probability = analyze_drops(df)
 
-print(f"Număr de scăderi de 5% în 20 de minute: {count_drops}")
-print(f"Total intervale de 20 de minute în 30 de zile: {total_intervals}")
-print(f"Probabilitatea unei scăderi de 5% în 20 de minute: {probability:.2f}%")
+print(f"Numar de scaderi de 5% in 20 de minute: {count_drops}")
+print(f"Total intervale de 20 de minute in 30 de zile: {total_intervals}")
+print(f"Probabilitatea unei scaderi de 5% in 20 de minute: {probability:.2f}%")

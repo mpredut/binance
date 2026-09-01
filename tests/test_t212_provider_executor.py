@@ -97,7 +97,7 @@ class T212ExecutorContractTest(unittest.TestCase):
             self.provider.submit_order("NVDA_US_EQ", "buy", 0.5, price=119.25)
 
         os.environ["T212_LIVE_ORDERS"] = "true"
-        with self.assertRaisesRegex(ProviderError, "cantitate"):
+        with self.assertRaisesRegex(ProviderError, "quantity"):
             self.provider.submit_order("NVDA_US_EQ", "buy", 0.001, price=119.25)
 
     def test_poarta_live_poate_fi_injectata_de_launcherul_autonom(self):
@@ -158,11 +158,11 @@ class T212ExecutorContractTest(unittest.TestCase):
         self.fake.status_result = {
             "ticker": "NVDA_US_EQ", "status": "FILLED", "filledQuantity": 1.0,
         }
-        with self.assertRaisesRegex(ProviderError, "fara cost"):
+        with self.assertRaisesRegex(ProviderError, "without an executed cost"):
             self.provider.order_status("NVDA_US_EQ", "712")
 
         self.fake.status_result = {"ticker": "NVDA_US_EQ", "status": "MYSTERY"}
-        with self.assertRaisesRegex(ProviderError, "necunoscut"):
+        with self.assertRaisesRegex(ProviderError, "unknown"):
             self.provider.order_status("NVDA_US_EQ", "712")
 
         self.fake.status_result = {

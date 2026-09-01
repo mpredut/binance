@@ -21,7 +21,7 @@ import sys
 import json
 import time
 
-# offline/legacy_tools/ este la două niveluri sub rădăcina repo-ului.
+# offline/legacy_tools/ este la doua niveluri sub radacina repo-ului.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CACHE_DIR = os.environ.get("BINANCE_CACHE_DIR", os.path.join(REPO_ROOT, "cachedb"))
 ORDER_FILE = os.path.join(CACHE_DIR, "cache_order.json")

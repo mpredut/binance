@@ -70,7 +70,7 @@ TIME_QUANT =  3600  # Example: 1 hour
 
 def price_changed(old_price, new_price):
     change = (new_price - old_price) / old_price
-    changed_proc = change * 100  # În procente
+    changed_proc = change * 100  # In procente
     return changed_proc
 
 def ready_to_buy(old_state, new_state, threshold, max_threshold, time_limit_seconds):
@@ -138,12 +138,12 @@ def check_and_close_orders(symbol):
         print(f"check {order_price}  < {(current_price) + 300}")
         #Verificam daca pretul ordinului este cu 2% mai mic decat pretul curent
         #api.cancel_order(order_id) 
-        #print(f"Ordinul {order_id} a fost închis deoarece pretul sau ({order_price}) este sub 2% din pretul curent ({current_price}).{(order_price) + 300 < (current_price)}")
+        #print(f"Ordinul {order_id} a fost inchis deoarece pretul sau ({order_price}) este sub 2% din pretul curent ({current_price}).{(order_price) + 300 < (current_price)}")
         if (order_price)  < (current_price) + 300:
             api.cancel_order(symbol, order_id) 
-            print(f"Ordinul {order_id} a fost închis deoarece pretul sau ({order_price}) este sub 2% din pretul curent ({current_price}).")
+            print(f"Ordinul {order_id} a fost inchis deoarece pretul sau ({order_price}) este sub 2% din pretul curent ({current_price}).")
         if (order_price)  > 59500:
-            print(f"Ordinul {order_id} a fost închis deoarece pretul sau ({order_price}) este foarte mare fata de  ({current_price}).")
+            print(f"Ordinul {order_id} a fost inchis deoarece pretul sau ({order_price}) este foarte mare fata de  ({current_price}).")
             api.cancel_order(symbol, order_id) 
             
             
@@ -168,7 +168,7 @@ while True:
     try:
         current_state = State("none", api.get_current_price(sym.btcsymbol), timestamp=datetime.now())
         if current_state.price is None:
-            print("Eroare la obtinerea pretului. Încerc din nou în cateva secunde.")
+            print("Eroare la obtinerea pretului. Incerc din nou in cateva secunde.")
             time.sleep(1)
             continue
         check_orders("BTCUSDT")
@@ -263,7 +263,7 @@ while True:
 
     except BinanceAPIException as e:
         print(f"Eroare API Binance: {e}")
-        time.sleep(1)  # Asteapta 1 secunda înainte de a reporni încercarile
+        time.sleep(1)  # Asteapta 1 secunda inainte de a reporni incercarile
     except Exception as e:
         print(f"Eroare: {e}")
-        time.sleep(1)  # Asteapta 1 secunda înainte de a reporni încercarile
+        time.sleep(1)  # Asteapta 1 secunda inainte de a reporni incercarile
