@@ -96,6 +96,11 @@ protected by characterisation tests.
 T212 additionally requires different recovery capabilities: active orders and the portfolio
 delta, because client order ID lookup is not universally available.
 
+`active_intents.py` provides the safe first stage of a common ledger: a read-only,
+normalized index over the existing strategy-owned files. It performs no writes and has no
+submit, cancel, retry, or policy authority. Missing or malformed sources are reported as read
+errors rather than repaired. Strategy files remain the only financial source of truth.
+
 T212 now reuses the common typed and audited submit boundary. Its venue-specific recovery
 is intentionally retained: one unique matching active order proves acceptance, while a
 portfolio delta independently proves execution. Absence is confirmed across snapshots before

@@ -263,7 +263,7 @@ def maybe_start_bot(st: dict, alloc_price: float, desktop: bool) -> None:
         log(f"  ! nu pot porni botul: {e}")
         return
     st["bot_pid"] = proc.pid
-    verb = "REPORNIT (era cazut)" if relaunch else "PORNIT AUTOMAT"
+    verb = "RESTARTED (was down)" if relaunch else "AUTO-STARTED"
     log(f"  🤖 BOT {verb}: pid {proc.pid}  pair {st['pair']}  adopt @ {alloc_price}  (log: {BOT_LOG})")
     notify(title=f"🤖 BOT {verb} pe {st['pair']} (adopt @ {alloc_price})",
            body=f"kraken_bot gestioneaza alocarea: TP/DCA/stop-loss. pid {proc.pid}, log {BOT_LOG}",
@@ -327,7 +327,7 @@ def run_trial(client: KrakenClient, desktop: bool) -> int:
         verdict["moartea botului detectata"] = not _bot_alive(bot_pid)
         maybe_start_bot(st, alloc, desktop)
         bot_pid = st.get("bot_pid")
-        verdict["bot REPORNIT de watchdog"] = _bot_alive(bot_pid)
+        verdict["bot restarted by watchdog"] = _bot_alive(bot_pid)
         try:
             with open(BOT_LOG, encoding="utf-8") as f:
                 tail = [ln.rstrip() for ln in f.readlines()[-14:]]
