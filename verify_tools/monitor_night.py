@@ -5,8 +5,13 @@ Runs through Paramiko from WSL and connects to the real server on port 32238.
 Output: per-process status, recent log errors, and actions taken.
 
 Credentials come from the gitignored .env at the repository root. Keys read:
-  MONITOR_HOST (default 192.168.0.144), MONITOR_PORT (default 32238),
-  MONITOR_USER (default predut), MONITOR_PASS (REQUIRED, no default).
+  MONITOR_HOST (REQUIRED, no default), MONITOR_PASS (REQUIRED, no default),
+  MONITOR_PORT (default 32238), MONITOR_USER (default predut),
+  MONITOR_ROOT (default /home/predut/binance).
+
+MONITOR_HOST deliberately has no default. A built-in address does not fail when
+configuration is missing: it connects to whatever lives at that address today and
+reports its processes as if they were the trading server's.
 """
 import os
 import sys
@@ -20,7 +25,7 @@ from dotenv import load_dotenv
 _REPO = Path(__file__).resolve().parent.parent   # verify_tools/ -> repository root
 load_dotenv(_REPO / ".env")                      # Secrets (gitignored).
 
-HOST = os.environ.get("MONITOR_HOST", "192.168.0.144")
+HOST = os.environ.get("MONITOR_HOST")  # no default: an address must be configured
 PORT = int(os.environ.get("MONITOR_PORT", "32238"))
 USER = os.environ.get("MONITOR_USER", "predut")
 PASS = os.environ.get("MONITOR_PASS")  # No default: the secret DOES NOT live in code.
@@ -113,9 +118,15 @@ def load_procs(c):
 
 
 def main():
-    if not PASS:
-        print("  EROARE: MONITOR_PASS lipseste din .env (parola serverului). "
-              "Adauga MONITOR_PASS=... in .env langa monitor_night.py.")
+    # Fail loudly on missing configuration instead of falling back to a builtin
+    # address: a wrong default connects to the wrong machine and reports its
+    # processes as if they were the trading server's.
+    missing = [name for name, value in (("MONITOR_HOST", HOST), ("MONITOR_PASS", PASS))
+               if not value]
+    if missing:
+        print(f"  ERROR: {', '.join(missing)} missing from .env "
+              f"(server address / password). Add them to the .env file next to "
+              f"monitor_night.py.")
         return 2
 
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
