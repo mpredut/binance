@@ -21,8 +21,12 @@ Anything else in Romanian is a regression. **Do not imitate it** — translate i
 
 ## No Romanian diacritics, anywhere
 
-Never write `ă â î ș ț` into a file in this repository. The only exception is the
-diacritic set inside `verify_tools/translation_audit.py`, which is the detector itself.
+Never write Romanian diacritics into a file in this repository: write `a` for `ă`/`â`,
+`i` for `î`, `s` for `s-comma`, `t` for `t-comma`.
+
+Exactly two files legitimately contain them, and neither is a mistake to fix: the
+diacritic set inside `verify_tools/translation_audit.py`, which is the detector itself,
+and the line above, which has to name the characters it forbids.
 
 The files travel between Windows, WSL and the Linux server through plink, PowerShell and
 9P mounts, and diacritics are the first thing those layers mangle. A mangled byte in a
