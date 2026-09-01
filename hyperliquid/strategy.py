@@ -23,14 +23,16 @@ import os
 import time
 from dataclasses import dataclass
 
-from common import log, now_str, float_env, are_close
+from common import (
+    log, now_str, are_close, required_env, required_float_env,
+    required_int_env, required_bool_env,
+)
 from notify import notify
 from hl_client import HLClient, HLError
 from market_data import get_price
 from signals import get_signal
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-HL_FEE_PCT = float_env("HL_FEE_PCT") or 0.035
 
 
 def state_path_for(coin: str, direction: str) -> str:
@@ -59,26 +61,28 @@ class StratParams:
 
     @classmethod
     def from_env(cls) -> "StratParams":
-        mode = os.environ.get("STRATEGY_MODE", "avg_tp").strip().lower()
-        direction = os.environ.get("HL_DIRECTION", "long").strip().lower()
+        mode = required_env("STRATEGY_MODE").lower()
+        if mode not in {"avg_tp", "dca_only"}:
+            raise ValueError(f"Invalid STRATEGY_MODE: {mode!r}")
+        direction = required_env("HL_DIRECTION").lower()
         if direction not in ("long", "short"):
-            direction = "long"
+            raise ValueError(f"Invalid HL_DIRECTION: {direction!r}")
         return cls(
-            currency           = os.environ.get("STRAT_CURRENCY", "USDC").strip().upper(),
+            currency           = required_env("STRAT_CURRENCY").upper(),
             direction          = direction,
-            entry_amount       = float_env("STRAT_ENTRY") or 50.0,
-            entry_discount_pct = float_env("STRAT_ENTRY_DISCOUNT_PCT") or 0.2,
-            dca_amount         = float_env("STRAT_DCA") or 30.0,
-            dca_drop_pct       = float_env("STRAT_DCA_DROP_PCT") or 2.0,
-            check_minutes      = float_env("STRAT_CHECK_MINUTES") or 1.0,
-            takeprofit_pct     = float_env("STRAT_TAKEPROFIT_PCT") or 0.5,
-            max_budget         = float_env("STRAT_MAX_BUDGET") or 500.0,
-            max_dca_buys       = int(float_env("STRAT_MAX_DCA_BUYS") or 10),
+            entry_amount       = required_float_env("STRAT_ENTRY"),
+            entry_discount_pct = required_float_env("STRAT_ENTRY_DISCOUNT_PCT"),
+            dca_amount         = required_float_env("STRAT_DCA"),
+            dca_drop_pct       = required_float_env("STRAT_DCA_DROP_PCT"),
+            check_minutes      = required_float_env("STRAT_CHECK_MINUTES"),
+            takeprofit_pct     = required_float_env("STRAT_TAKEPROFIT_PCT"),
+            max_budget         = required_float_env("STRAT_MAX_BUDGET"),
+            max_dca_buys       = required_int_env("STRAT_MAX_DCA_BUYS"),
             enable_takeprofit  = (mode != "dca_only"),
-            order_ttl_min      = float_env("STRAT_ORDER_TTL_MIN") or 10.0,
-            signal_gate        = os.environ.get("HL_SIGNAL_GATE", "false").strip().lower() == "true",
-            stop_loss_pct      = float_env("STRAT_STOP_LOSS_PCT") or 0.0,
-            reentry_tolerance_pct = float_env("STRAT_REENTRY_TOLERANCE_PCT") or 0.0,
+            order_ttl_min      = required_float_env("STRAT_ORDER_TTL_MIN"),
+            signal_gate        = required_bool_env("HL_SIGNAL_GATE"),
+            stop_loss_pct      = required_float_env("STRAT_STOP_LOSS_PCT"),
+            reentry_tolerance_pct = required_float_env("STRAT_REENTRY_TOLERANCE_PCT"),
         )
 
 

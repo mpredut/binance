@@ -24,15 +24,15 @@ import os
 import statistics
 import time
 
-from common import log, float_env
+from common import log, required_env, required_float_env, required_int_env
 
 NEUTRAL = {"trend": "neutral", "confidence": 0.0, "source": "neutral"}
 
 
 def _builtin_trend(client, coin: str) -> dict:
-    fast = int(float_env("SIGNAL_FAST_H") or 12)
-    slow = int(float_env("SIGNAL_SLOW_H") or 48)
-    band = (float_env("SIGNAL_BAND_PCT") or 0.3) / 100
+    fast = required_int_env("SIGNAL_FAST_H")
+    slow = required_int_env("SIGNAL_SLOW_H")
+    band = required_float_env("SIGNAL_BAND_PCT") / 100
     candles = client.candles(coin, "1h", lookback_hours=slow + 6)
     closes = [float(c["c"]) for c in candles if "c" in c]
     if len(closes) < slow:
@@ -56,7 +56,7 @@ def _file_signal(path: str) -> dict:
         log(f"  ! semnal fisier invalid: {e}")
         return {**NEUTRAL, "source": "file(corupt)"}
     ts = d.get("ts") or d.get("timestamp")
-    max_age = (float_env("SIGNAL_MAX_AGE_MIN") or 60) * 60
+    max_age = required_float_env("SIGNAL_MAX_AGE_MIN") * 60
     if ts:
         try:
             if time.time() - float(ts) > max_age:
@@ -74,12 +74,14 @@ def _file_signal(path: str) -> dict:
 
 
 def get_signal(client, coin: str) -> dict:
-    src = os.environ.get("SIGNAL_SOURCE", "off").strip().lower()
+    src = required_env("SIGNAL_SOURCE").lower()
     if src == "builtin":
         return _builtin_trend(client, coin)
     if src == "analysis":               # ported WMA/time-window slope analysis
         from price_analysis import signal as analysis_signal
         return analysis_signal(client, coin)
     if src == "file":
-        return _file_signal(os.environ.get("SIGNAL_FILE", "signal.json"))
-    return {**NEUTRAL, "source": "off"}
+        return _file_signal(required_env("SIGNAL_FILE"))
+    if src == "off":
+        return {**NEUTRAL, "source": "off"}
+    raise ValueError(f"Invalid SIGNAL_SOURCE: {src!r}")

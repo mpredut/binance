@@ -24,7 +24,9 @@ for _p in (_ROOT, _HERE):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-from common import load_dotenv, log, single_instance   # hyperliquid/common.py
+from common import (  # hyperliquid/common.py
+    load_dotenv, log, single_instance, required_env, required_bool_env,
+)
 from strategies.spot_dca import Strategy, StratParams
 from providers.hyperliquid_provider import HyperliquidProvider
 
@@ -45,12 +47,12 @@ def main() -> int:
 
     ap = argparse.ArgumentParser(description="base v2 (spot_dca) pe Hyperliquid HYPE.")
     ap.add_argument("--paper", action="store_true", help="Forteaza PAPER (fara bani)")
-    ap.add_argument("--token", default=os.environ.get("HL_SPOT_TOKEN") or "HYPE")
+    ap.add_argument("--token", default=None)
     args = ap.parse_args()
 
-    token = (args.token or "HYPE").upper()
-    strategy_enabled = os.environ.get("STRAT_EXECUTE", "false").lower() == "true"
-    venue_enabled = os.environ.get("HL_LIVE_ORDERS", "false").lower() == "true"
+    token = (args.token or required_env("HL_SPOT_TOKEN")).upper()
+    strategy_enabled = required_bool_env("STRAT_EXECUTE")
+    venue_enabled = required_bool_env("HL_LIVE_ORDERS")
     strat_dry = args.paper or not (strategy_enabled and venue_enabled)
     if not any(a in sys.argv for a in ()):  # reserved for future one-shot commands
         single_instance(f"hl_dca_bot_{token}")   # one instance per token, independent of dn/hl_bot
