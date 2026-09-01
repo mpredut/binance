@@ -114,6 +114,33 @@ def valid_record(rec):
     )
 
 
+def _same_deferred_stream(left, right):
+    """Return whether two pending trend deferrals represent one current intent.
+
+    Missing provider names in legacy records act as routed wildcards for the same
+    symbol. Signal kind remains part of the identity so independent strategies never
+    overwrite each other. Quantities are deliberately not summed: the latest strategy
+    decision replaces stale desired exposure instead of accumulating phantom orders.
+    """
+    if any(
+            str(item.get("lifecycle") or "submit_pending").lower()
+            != "submit_pending"
+            or item.get("last_failure_reason") != "trend_deferred"
+            for item in (left, right)):
+        return False
+    left_provider = str(left.get("provider_name") or "").strip().lower()
+    right_provider = str(right.get("provider_name") or "").strip().lower()
+    provider_matches = (
+        not left_provider or not right_provider or left_provider == right_provider)
+    return bool(
+        provider_matches
+        and left.get("symbol") == right.get("symbol")
+        and str(left.get("side") or "").upper()
+        == str(right.get("side") or "").upper()
+        and (left.get("kind") or None) == (right.get("kind") or None)
+    )
+
+
 def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_price=None,
             now=None, created_ts=None, attempts=0, last_attempt_ts=0.0,
             failure_reason=None, *, provider_name=None, intent_id=None, kind=None):
@@ -175,6 +202,18 @@ def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_pric
     _ensure_dir()
     with FileLock(LOCK_FILE):
         existing = _read_nolock()
+        if failure_reason == "trend_deferred":
+            superseded = [
+                item for item in existing if _same_deferred_stream(item, rec)
+            ]
+            if superseded:
+                superseded_ids = {id(item) for item in superseded}
+                existing = [
+                    item for item in existing if id(item) not in superseded_ids
+                ]
+                print(
+                    f"[order_retry] consolidated {len(superseded)} older "
+                    f"trend-deferred {side_u} {symbol} record(s) into the latest intent")
         if RETRY_DEDUP:
             for e in existing:
                 if (e.get("symbol") == symbol

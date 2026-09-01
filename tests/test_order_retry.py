@@ -98,19 +98,61 @@ class OrderRetryStoreTest(unittest.TestCase):
 
     def test_dedup_off_appends_always(self):
         oq.RETRY_DEDUP = False
-        oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63000.0, now=1000.0)
-        oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63000.0, now=1001.0)
+        oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63000.0,
+                   now=1000.0, failure_reason="network")
+        oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63000.0,
+                   now=1001.0, failure_reason="network")
         self.assertEqual(len(oq.load_all()), 2)
+
+    def test_trend_deferred_stream_keeps_only_latest_desired_exposure(self):
+        oq.RETRY_DEDUP = False
+        first = oq.enqueue(
+            "TAOUSDC", "SELL", 5.0, {}, requested_price=250.0, now=1000.0,
+            failure_reason="trend_deferred", provider_name="binance",
+            kind="trend_confirmed_down")
+        latest = oq.enqueue(
+            "TAOUSDC", "SELL", 2.0, {}, requested_price=240.0, now=1001.0,
+            failure_reason="trend_deferred", provider_name="Binance",
+            kind="trend_confirmed_down")
+        records = oq.load_all()
+        self.assertEqual(len(records), 1)
+        self.assertNotEqual(first, latest)
+        self.assertEqual(records[0]["id"], latest)
+        self.assertEqual(records[0]["qty"], 2.0)
+        self.assertEqual(records[0]["requested_price"], 240.0)
+
+    def test_trend_consolidation_preserves_independent_signal_kinds(self):
+        oq.RETRY_DEDUP = False
+        for kind in ("kalman_primary_down", "trend_confirmed_down"):
+            oq.enqueue(
+                "TAOUSDC", "SELL", 1.0, {}, requested_price=240.0,
+                now=1000.0, failure_reason="trend_deferred", kind=kind)
+        self.assertEqual(len(oq.load_all()), 2)
+
+    def test_trend_consolidation_never_replaces_accepted_record(self):
+        oq.RETRY_DEDUP = False
+        accepted_id = oq.enqueue(
+            "TAOUSDC", "SELL", 1.0, {}, requested_price=240.0, now=1000.0,
+            failure_reason="trend_deferred")
+        records = oq.load_all()
+        records[0]["lifecycle"] = "accepted"
+        records[0]["order_id"] = "venue-1"
+        oq.rewrite(records)
+        latest = oq.enqueue(
+            "TAOUSDC", "SELL", 2.0, {}, requested_price=241.0, now=1001.0,
+            failure_reason="trend_deferred")
+        self.assertEqual(
+            {record["id"] for record in oq.load_all()}, {accepted_id, latest})
 
     def test_full_queue_replaces_oldest_pending_record(self):
         oq.RETRY_MAX_QUEUE = 2
         oq.RETRY_DEDUP = False   # so it is not collapsed by dedup
         oldest = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0,
-                            now=1000.0, failure_reason="trend_deferred")
+                            now=1000.0, failure_reason="trend_deferred", kind="a")
         retained = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=2.0,
-                              now=1001.0, failure_reason="trend_deferred")
+                              now=1001.0, failure_reason="trend_deferred", kind="b")
         newest = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=3.0,
-                            now=1002.0, failure_reason="trend_deferred")
+                            now=1002.0, failure_reason="trend_deferred", kind="c")
         self.assertIsNotNone(newest)
         ids = {record["id"] for record in oq.load_all()}
         self.assertNotIn(oldest, ids)
