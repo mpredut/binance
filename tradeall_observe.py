@@ -184,7 +184,7 @@ def sample_current_prices(symbols):
                 f.write(f"{sample_ts}|{_sanitize_field(symbol)}|{current_price}\n")
                 _LAST_SAMPLED_TS[symbol] = sample_ts
     except OSError as e:
-        print(f"[tradeall_observe] eroare scriere esantioane pret: {e}")
+        print(f"[tradeall_observe] error writing the price samples: {e}")
 
 
 # -- Load logs (steps A / A2). -------------------------------------------------
@@ -589,7 +589,7 @@ def render_chart(symbol, window_label, window_start, window_end,
             vis_ts = vis_ts[::stride]
             vis_px = vis_px[::stride]
         ax.plot([datetime.fromtimestamp(t) for t in vis_ts], vis_px,
-                color="#1f6feb", lw=0.8, label="pret")
+                color="#1f6feb", lw=0.8, label="price")
     else:
         ax.text(0.5, 0.5, "No price samples yet\n(let the monitor run for a while)",
                 ha="center", va="center", transform=ax.transAxes, color="#888888")
@@ -625,9 +625,9 @@ def render_chart(symbol, window_label, window_start, window_end,
 
     summary = (
         f"BUY  acceptat: {sum(1 for e in accepted if e['side'] == 'BUY')}   "
-        f"refuzat: {sum(1 for e in refused if e['side'] == 'BUY')}\n"
+        f"refused: {sum(1 for e in refused if e['side'] == 'BUY')}\n"
         f"SELL acceptat: {sum(1 for e in accepted if e['side'] == 'SELL')}   "
-        f"refuzat: {sum(1 for e in refused if e['side'] == 'SELL')}"
+        f"refused: {sum(1 for e in refused if e['side'] == 'SELL')}"
     )
     ax.text(0.01, 0.98, summary, transform=ax.transAxes, va="top", fontsize=9,
             family="monospace", bbox=dict(boxstyle="round", fc="white", ec="#cccccc", alpha=0.9))
@@ -659,7 +659,7 @@ def format_state_text(entry, header):
     trend_map = {1: "UP", -1: "DOWN", 0: "FLAT"}
     text = (
         f"{header}\n"
-        f"pret:      {entry.get('current_price', '?')}\n"
+        f"price:     {entry.get('current_price', '?')}\n"
         f"trend:     {trend_map.get(entry.get('final_trend'), '?')}\n"
         f"grad rec:  {entry.get('gradient_recent', 0):+.4f}\n"
         f"slope mic: {entry.get('slope_small', 0):+.3f}\n"
@@ -698,7 +698,7 @@ def build_analysis_state_text(symbol):
     except (OSError, json.JSONDecodeError):
         pass
     age = time.time() - entry.get("ts", 0)
-    return format_state_text(entry, f"ANALIZA ACUM ({age:.0f}s in urma)")
+    return format_state_text(entry, f"ANALYSIS NOW ({age:.0f}s ago)")
 
 
 def build_backtest_state_text(directory, symbol):
@@ -786,7 +786,7 @@ def render_symbol_chart_backtest(symbol, directory, out_path, window_hours=None)
     elif window_hours:
         window_end = max(all_ts)
         window_start = window_end - window_hours * 3600
-        label = (f"fereastra glisanta {window_hours}h (ceas simulat: "
+        label = (f"a sliding window of {window_hours}h (simulated clock: "
                  f"{datetime.fromtimestamp(window_end).strftime('%Y-%m-%d %H:%M')})")
     else:
         window_start, window_end = min(all_ts), max(all_ts)
@@ -930,26 +930,26 @@ def main():
     parser.add_argument("--symbols", default="BTCUSDC,TAOUSDC",
                          help="comma-separated list (default: BTCUSDC,TAOUSDC)")
     parser.add_argument("--interval", type=float, default=2.0,
-                         help="secunde intre cicluri (live + stare analiza; implicit 2)")
+                         help="seconds between cycles (live plus the analysis state; default 2)")
     parser.add_argument("--live-minutes", type=float, default=60.0,
-                         help="fereastra tabului Live, in minute (implicit 60; TAO se misca rar "
-                              "— la 30min fereastra arata mai mult gol decat semnal)")
+                         help="the Live tab's window, in minutes (default 60; TAO moves rarely "
+                              "— at 30 min the window shows more emptiness than signal)")
     parser.add_argument("--day-refresh", type=float, default=30.0,
-                         help="la cate secunde se redeseneaza graficul pe ZI (implicit 30)")
+                         help="how often, in seconds, the DAY chart is redrawn (default 30)")
     parser.add_argument("--week-refresh", type=float, default=300.0,
-                         help="la cate secunde se redeseneaza graficul pe SAPTAMANA (implicit 300)")
+                         help="how often, in seconds, the WEEK chart is redrawn (default 300)")
     parser.add_argument("--backtest-dir", default=None,
-                         help="daca e dat: mod BACKTEST — randeaza folderul unui run "
-                              "offline/backtests/tradeall.py in loc sa ruleze live")
+                         help="if given: BACKTEST mode — it renders the folder of an "
+                              "offline/backtests/tradeall.py run instead of running live")
     parser.add_argument("--frame-hours", type=float, default=None,
-                         help="cu --backtest-dir: in loc de UN grafic dens cu tot intervalul, "
+                         help="with --backtest-dir: instead of ONE dense chart covering the whole interval, "
                               "genereaza o SERIE de cadre STATICE (imagini), cate unul per N ore. "
                               "Generate once and exit (it does not loop).")
     parser.add_argument("--window-hours", type=float, default=None,
-                         help="cu --backtest-dir (fara --frame-hours): fereastra GLISANTA de N ore, "
-                              "ancorata la ceasul simulat curent — ruleaza in bucla (ca live), "
-                              "aluneca pe masura ce offline/backtests/tradeall.py scrie date noi in paralel; "
-                              "evenimentele apar pe cadru exact cand backtester-ul ajunge la ele")
+                         help="with --backtest-dir (without --frame-hours): a SLIDING window of N hours, "
+                              "anchored to the current simulated clock — it runs in a loop (like live), "
+                              "sliding as offline/backtests/tradeall.py writes new data in parallel; "
+                              "the events appear on the frame exactly when the backtester reaches them)")
     args = parser.parse_args()
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
 
@@ -966,7 +966,7 @@ def main():
         directory = os.path.abspath(args.backtest_dir)
         write_backtest_html(directory, symbols)
         html_path = os.path.join(directory, "tradeall_live_backtest.html")
-        mode = f"fereastra glisanta {args.window_hours}h" if args.window_hours else "tot intervalul"
+        mode = f"a sliding window of {args.window_hours}h" if args.window_hours else "the whole interval"
         print(f"[tradeall_observe] BACKTEST ({mode}): {directory} | simboluri: {symbols} | "
               f"randare la {args.interval}s")
         print(f"[tradeall_observe] deschide in browser: {html_path}")

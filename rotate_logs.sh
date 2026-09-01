@@ -1,15 +1,15 @@
 #!/bin/bash
 # rotate_logs.sh — roteste logurile de CONSOLA (nohup > *.log).
 #
-# De ce: logurile facute de logging.py se rotesc singure; ASTEA (redirectul de
+# Why: the logs made by logging.py rotate themselves; THESE (the redirect from
 # nohup console output) are NOT rotated and grow without bound. We cap them here.
 #
-# Cum: generam un config logrotate cu cai derivate din locatia scriptului ($ROOT,
+# How: we generate a logrotate config with paths derived from the script's location ($ROOT,
 # so it is portable between server and local) and let logrotate do the work. copytruncate is
 # MANDATORY: the bots hold the file open through a redirect, so we copy + truncate IN
 # PLACE (no rename), otherwise the bot would keep writing to the renamed old file.
 #
-# Cron sugerat (orar, decalat sa nu se bata cu healthcheck-ul de la :*0/:*5):
+# A suggested cron (hourly, offset so it does not clash with the healthcheck at :*0/:*5):
 # Schedule this script through the rendered production crontab.
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 POLICY="$ROOT/logger_config.env"
@@ -25,21 +25,21 @@ LOGROTATE="$(command -v logrotate || echo /usr/sbin/logrotate)"
 
 CONF="$(mktemp)"
 trap 'rm -f "$CONF"' EXIT
-# GLOB per director cunoscut (nu lista hardcodata -> orice log nou e acoperit AUTOMAT,
+# A GLOB per known directory (not a hardcoded list -> any new log is covered AUTOMATICALLY,
 # without having to be added by hand, including one we forget or one written by
-# script viitor). Directoare distincte => fara suprapuneri (logrotate da eroare la
-# fisier dublu). NU folosim */*.log (ar prinde myenv/venv). copytruncate: procesele
+# a future script). Distinct directories => no overlaps (logrotate errors on a
+# duplicate file). We do NOT use */*.log (it would catch myenv/venv). copytruncate: the processes
 # hold the file open, we do not want them writing to the renamed old file.
 #
 # logger/*.log is included GENERALLY (not just a few known names) — 21 Jul: found a
-# fisier cu nume fix (tradeall_price_archiver.log, redirect nohup) crescut la
-# 324MB in 4.5 ore, neacoperit, pt ca inainte excludeam tot logger/ presupunand
-# ca fisierele cu data se auto-gestioneaza. size 20M + copytruncate e SIGUR si pt
-# fisierele cu data (tradeall_2026-07-21.log etc.): daca depasesc pragul in
-# aceeasi zi, se comprima o bucata si scriitorul continua in acelasi fisier —
-# nu strica deloc conventia "fisier nou la miezul noptii". Asa, orice fisier nou
+# a file with a fixed name (tradeall_price_archiver.log, a nohup redirect) grew to
+# 324MB in 4.5 hours, uncovered, because we used to exclude the whole of logger/ assuming
+# that dated files manage themselves. size 20M plus copytruncate is SAFE for the
+# dated files too (tradeall_2026-07-21.log and so on): if they pass the threshold on the
+# same day, a chunk is compressed and the writer continues in the same file —
+# it does not break the "a new file at midnight" convention at all. That way any new file
 # ever appearing in logger/ (this script or another, today or in a year) is
-# acoperit AUTOMAT, fara sa mai trebuiasca adaugat manual la o lista.
+# is covered AUTOMATICALLY, without having to be added to a list by hand.
 {
     cat <<EOF
 $ROOT/logs/*.log

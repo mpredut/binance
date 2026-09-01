@@ -63,7 +63,7 @@ def _save_state(st: dict) -> None:
     try:
         atomic_write_json(_state_file(), st, indent=2)
     except OSError as e:
-        log(f"  ! nu pot salva starea: {e}")
+        log(f"  ! cannot save the state: {e}")
 
 
 # -- underlying price (Yahoo) until the pair appears on the API ---------------
@@ -86,7 +86,7 @@ def check_balance(client: KrakenClient, st: dict, rx: str, desktop: bool) -> Non
     try:
         bal = client.balance()
     except KrakenError as e:
-        log(f"  ! balanta indisponibila ({e}) — continui doar cu watch-ul public")
+        log(f"  ! the balance is unavailable ({e}) — continuing with the public watch only")
         return
     assets = {a: float(q) for a, q in bal.items() if float(q) > 0}
     if not st["known_assets"]:
@@ -100,7 +100,7 @@ def check_balance(client: KrakenClient, st: dict, rx: str, desktop: bool) -> Non
             st["allocated"] = {"asset": a, "qty": q, "ts": time.time()}
             log(f"  🎯 ALOCARE DETECTATA: {a} = {q}")
             notify(title=f"🎯 ALOCARE xStock: {a} = {q}",
-                   body=f"There appeared {a} in the Kraken account (cantitate {q}). "
+                   body=f"There appeared {a} in the Kraken account (quantity {q}). "
                         f"Seteaza XSTOCK_ALLOC_PRICE in config.env pt alerte de nivel "
                         f"and STRAT_ADOPT_COST when the pair becomes tradable.",
                    source="xstock-watch", desktop=desktop)
@@ -143,9 +143,9 @@ def check_pairs(client: KrakenClient, st: dict, rx: str, desktop: bool,
             px = client.last_price(k)
         except KrakenError:
             pass
-        log(f"  🚀 PERECHE LISTATA pe API: {name} (pret {px})")
+        log(f"  🚀 PAIR LISTED on the API: {name} (price {px})")
         notify(title=f"🚀 {name} LISTAT pe Kraken API" + (f" @ {px}" if px else ""),
-               body=f"Poti porni botul cu adoptarea alocarii:\n"
+               body=f"You can start the bot and adopt the allocation:\n"
                     f"STRAT_ADOPT_COST=<pret_alocare> python3 kraken_bot.py --pair {k}",
                source="xstock-watch", price=px, desktop=desktop)
 
@@ -166,25 +166,25 @@ def check_levels(client: KrakenClient, st: dict, alloc_price: float,
     if not price:
         return
     chg = (price - alloc_price) / alloc_price * 100
-    log(f"  pret {price} vs alocare {alloc_price} ({chg:+.1f}%)")
+    log(f"  price {price} vs allocation {alloc_price} ({chg:+.1f}%)")
     qty = st["allocated"].get("qty", 0)
     if not st["alerted_tp"] and chg >= tp_pct:
         st["alerted_tp"] = True
-        notify(title=f"📈 xStock {chg:+.1f}% peste alocare ({price})",
+        notify(title=f"📈 xStock {chg:+.1f}% above the allocation ({price})",
                body=f"Estimated value: {qty * price:.0f} (allocated at {alloc_price}). "
-                    f"Ia in calcul vanzarea partiala / pornirea botului cu adoptare.",
+                    f"Consider a partial sale or starting the bot with adoption.",
                source="xstock-watch", price=price, desktop=desktop)
     tp2 = required_float_env("XSTOCK_TP2_ALERT_PCT")
     if tp2 and not st.get("alerted_tp2") and chg >= tp2:
         st["alerted_tp2"] = True
         notify(title=f"📈📈 TRANSA 2: xStock {chg:+.1f}% ({price})",
-               body=f"A doua tinta atinsa — sell the rest. Valoare: {qty * price:.0f}.",
+               body=f"The second target is reached — sell the rest. Value: {qty * price:.0f}.",
                source="xstock-watch", price=price, desktop=desktop)
     if not st["alerted_sl"] and chg <= -sl_pct:
         st["alerted_sl"] = True
         notify(title=f"📉 xStock {chg:+.1f}% sub alocare ({price})",
                body=f"Estimated value: {qty * price:.0f} (allocated at {alloc_price}). "
-                    f"Decide: tii (DCA) sau tai pierderea.",
+                    f"Decide: hold (DCA) or cut the loss.",
                source="xstock-watch", price=price, desktop=desktop)
 
 
@@ -233,9 +233,9 @@ def maybe_start_bot(st: dict, alloc_price: float, desktop: bool) -> None:
         if not st["alerted_need_price"]:
             st["alerted_need_price"] = True
             notify(title="⚠ xStock: completeaza XSTOCK_ALLOC_PRICE",
-                   body=f"Alocarea {st['allocated']['asset']} e in cont si perechea "
-                        f"{st['pair']} e listata, dar nu stiu pretul alocarii. "
-                        f"Seteaza XSTOCK_ALLOC_PRICE in config.env ca sa pornesc botul automat.",
+                   body=f"The allocation {st['allocated']['asset']} is in the account and the pair "
+                        f"{st['pair']} is listed, but I do not know the allocation price. "
+                        f"Set XSTOCK_ALLOC_PRICE in config.env so I can start the bot automatically.",
                    source="xstock-watch", desktop=desktop)
         return
     if _bot_alive(st.get("bot_pid")):
@@ -260,7 +260,7 @@ def maybe_start_bot(st: dict, alloc_price: float, desktop: bool) -> None:
             proc = subprocess.Popen(cmd, cwd=_HERE, env=env, stdout=logf,
                                     stderr=subprocess.STDOUT, start_new_session=True)
     except OSError as e:
-        log(f"  ! nu pot porni botul: {e}")
+        log(f"  ! cannot start the bot: {e}")
         return
     st["bot_pid"] = proc.pid
     verb = "RESTARTED (was down)" if relaunch else "AUTO-STARTED"
@@ -297,7 +297,7 @@ def run_trial(client: KrakenClient, desktop: bool) -> int:
         try:
             bal = client.balance()
         except KrakenError as e:
-            log(f"  ! nu pot citi balanta: {e}")
+            log(f"  ! cannot read the balance: {e}")
             return 1
         if float(bal.get(asset, 0) or 0) <= 0:
             log(f"  ! n-ai {asset} in cont — alege alt activ: XSTOCK_TRIAL_ASSET=...")
@@ -309,7 +309,7 @@ def run_trial(client: KrakenClient, desktop: bool) -> int:
         check_balance(client, st, asset, desktop)                # 1. allocation detection
         verdict["alocare detectata"] = bool(st["allocated"])
         check_pairs(client, st, asset, desktop, quote)           # 2. listed pair
-        verdict["pereche gasita"] = bool(st["pair"])
+        verdict["pair found"] = bool(st["pair"])
         trial_pair = st["pair"]
         alloc = client.last_price(st["pair"]) if st["pair"] else None
         if not alloc:
@@ -318,7 +318,7 @@ def run_trial(client: KrakenClient, desktop: bool) -> int:
         log(f"  [proba] simulated allocation price: {alloc} (the current price)")
         maybe_start_bot(st, alloc, desktop)                      # 3. bot started in paper mode
         bot_pid = st.get("bot_pid")
-        verdict["bot pornit (PAPER)"] = _bot_alive(bot_pid)
+        verdict["bot started (PAPER)"] = _bot_alive(bot_pid)
         _save_state(st)
         log("  [proba] waiting 12s for it to adopt the position and place the paper TP...")
         time.sleep(12)
@@ -331,7 +331,7 @@ def run_trial(client: KrakenClient, desktop: bool) -> int:
         try:
             with open(BOT_LOG, encoding="utf-8") as f:
                 tail = [ln.rstrip() for ln in f.readlines()[-14:]]
-            log("  [proba] log-ul botului (ce a facut cu 'alocarea'):")
+            log("  [drill] the bot's log (what it did with the 'allocation'):")
             for ln in tail:
                 print("      " + ln)
         except OSError:
@@ -356,7 +356,7 @@ def run_trial(client: KrakenClient, desktop: bool) -> int:
     log("=== VERDICT PROBA ===")
     for k, v in verdict.items():
         log(f"    {'✅' if v else '❌'} {k}")
-    log(f"=== PROBA {'REUSITA — lantul intreg functioneaza' if ok else 'ESUATA — vezi mai sus'} ===")
+    log(f"=== DRILL {'PASSED — the whole chain works' if ok else 'FAILED — see above'} ===")
     return 0 if ok else 1
 
 
@@ -364,10 +364,10 @@ def main() -> int:
     load_env_stack(os.path.join(_HERE, ".env"))
 
     ap = argparse.ArgumentParser(description="Watcher alocare xStocks (Kraken).")
-    ap.add_argument("--once", action="store_true", help="o singura verificare si iese")
-    ap.add_argument("--status", action="store_true", help="arata starea si iese")
+    ap.add_argument("--once", action="store_true", help="a single check, then exit")
+    ap.add_argument("--status", action="store_true", help="show the state and exit")
     ap.add_argument("--trial", action="store_true",
-                    help="PROBA end-to-end cu bani ZERO: activ existent ca alocare simulata, bot PAPER, watchdog testat, curatenie la final")
+                    help="an end-to-end DRILL with ZERO money: an existing asset as a simulated allocation, a PAPER bot, the watchdog tested, cleanup at the end")
     ap.add_argument("--desktop", action="store_true")
     ap.add_argument("--interval", type=float,
                     default=required_float_env("XSTOCK_CHECK_MINUTES"), help="minute")

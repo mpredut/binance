@@ -66,11 +66,11 @@ for attempt in $(seq 1 12); do
     echo "Still waiting for an IP ($attempt/12)..."
 done
 if [ "$connected" -ne 1 ]; then
-    echo "PIA nu a primit IP in 60s; systemd va reincerca."
+    echo "PIA did not receive an IP within 60s; systemd will retry."
     exit 1
 fi
 
-echo "VPN conectat cu IP dedicat:"
+echo "VPN connected with a dedicated IP:"
 pia get vpnip
 
 sleep 2
@@ -85,7 +85,7 @@ while true; do
     sleep "$HEALTH_INTERVAL"
     if vpn_healthy; then
         if [ "$failures" -gt 0 ]; then
-            echo "PIA recuperat dupa $failures probe esuate"
+            echo "PIA recovered after $failures failed probes"
         fi
         failures=0
         echo "PIA healthy (tun0 + DNS + HTTPS)"

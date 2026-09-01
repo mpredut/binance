@@ -95,13 +95,13 @@ def start_trading(client, t212_ticker, label, strat_enabled, strat_dry,
     if order_price:
         qty = resolve_quantity(order_price, order_qty, order_budget_ron)
         if not qty or qty <= 0:
-            log("  ! qty/budget invalid — ordin NESENT")
+            log("  ! invalid qty/budget — the order was NOT SENT")
             return 1
         ok = place_order_with_retry(client, t212_ticker, qty, order_price,
                                     order_validity, order_dry, desktop=desktop)
         return 0 if ok else 1
 
-    log("  ! nici STRAT_ENABLED, nici ORDER_PRICE — nimic de tranzactionat.")
+    log("  ! neither STRAT_ENABLED nor ORDER_PRICE — nothing to trade.")
     return 1
 
 
@@ -133,10 +133,10 @@ def main() -> int:
 
     ap = argparse.ArgumentParser(description="Watcher + auto-trade generic pe T212.")
     ap.add_argument("--profile", "-p",     required=True, metavar="NUME",
-                    help="OBLIGATORIU: profil de config -> incarca config.<NUME>.env (ex: spcx, nvda)")
+                    help="REQUIRED: the config profile -> it loads config.<NAME>.env (e.g. spcx, nvda)")
     ap.add_argument("--env-file",          default=env_file)
     ap.add_argument("--symbol",            metavar="T212_TICKER",
-                    help="Override instrument (altfel din .env T212_TICKER)")
+                    help="Override the instrument (otherwise T212_TICKER from .env)")
     ap.add_argument("--interval",          type=float,
                     default=required_float_env("POLL_SECONDS"))
     ap.add_argument("--desktop",           action="store_true")
@@ -144,7 +144,7 @@ def main() -> int:
     ap.add_argument("--skip-wait",         action="store_true",
                     help="Skip the launch check (start straight away even if the feed says it is not trading yet)")
     ap.add_argument("--paper",             action="store_true",
-                    help="Forteaza PAPER (test sigur, fara bani), indiferent de .env")
+                    help="Force PAPER (a safe test, no money), whatever .env says")
     ap.add_argument("--execute",           action="store_true",
                     help="Override: a real order (single-order mode)")
     ap.add_argument("--test-notify",       choices=["market", "trade", "all"], metavar="WHAT")
@@ -153,7 +153,7 @@ def main() -> int:
     ap.add_argument("--test-strategy",     metavar="T212_TICKER",
                     help="Run the strategy NOW on the given ticker (paper if STRAT_EXECUTE!=true)")
     ap.add_argument("--find-ticker",       metavar="NUME",
-                    help="Cauta instrument in T212 dupa nume/simbol")
+                    help="Search for an instrument on T212 by name or symbol")
     args = ap.parse_args()
     # The one-shot lifecycle marker is namespaced by profile. Preserve the CLI
     # identity explicitly so parallel profiles/accounts never share one marker.
@@ -206,10 +206,10 @@ def main() -> int:
         log("! T212_TICKER missing from .env (or use --symbol). Nothing to trade.")
         return 1
     log("=== Watcher T212 ===")
-    log(f"    instrument   : {label}  ({t212_ticker}, pret via {yahoo_symbol})")
+    log(f"    instrument   : {label}  ({t212_ticker}, price through {yahoo_symbol})")
     log(f"    mediu T212   : {t212_env.upper()}")
-    log(f"    mod          : {'STRATEGIE (DCA+TP)' if strat_enabled else 'ordin unic'}")
-    log(f"    executie     : {'PAPER (fara bani)' if (strat_dry if strat_enabled else order_dry) else '⚠ REAL — BANI ADEVARATI'}")
+    log(f"    mode         : {'STRATEGY (DCA+TP)' if strat_enabled else 'a single order'}")
+    log(f"    execution    : {'PAPER (no money)' if (strat_dry if strat_enabled else order_dry) else '⚠ REAL — REAL MONEY'}")
     log(f"    lansare      : checking until {label} is launched (already listed: immediately; IPO: at the open)")
     log(f"    ntfy/email   : {os.environ.get('NTFY_TOPIC') or '-'} / {os.environ.get('ALERT_TO_EMAIL') or '-'}")
 
@@ -254,9 +254,9 @@ def _wait_for_launch(args, yahoo_symbol, label, interval) -> bool:
             # zero-volume SPCX IPO placeholder waits for actual trading to begin.
             if m and m.get("launched"):
                 ts = now_str()
-                now_open = "se tranzactioneaza ACUM" if m.get("trading") else f"piata {m.get('state')}"
+                now_open = "trading NOW" if m.get("trading") else f"the market is {m.get('state')}"
                 body = (f"{label} e DISPONIBIL pe {m.get('exchange')} ({now_open}).\n"
-                        f"Pret: {m['price']} {m.get('currency') or ''}  "
+                        f"Price: {m['price']} {m.get('currency') or ''}  "
                         f"(vol {m.get('volume')}, {m.get('state')})\n{ts}")
                 log("############################################")
                 log(f">>> {label} E DISPONIBIL — pornesc tranzactionarea <<<")
@@ -267,7 +267,7 @@ def _wait_for_launch(args, yahoo_symbol, label, interval) -> bool:
                        desktop=args.desktop)
                 return True
             if m:
-                log(f"ping - waiting for the launch  |  pret={m.get('price')} vol={m.get('volume')} "
+                log(f"ping - waiting for the launch  |  price={m.get('price')} vol={m.get('volume')} "
                     f"state={m.get('state')} age={m.get('age_min')}min")
             else:
                 log("ping - simbol indisponibil pe feed")
@@ -284,7 +284,7 @@ def _cmd_find_ticker(client: T212Client, query: str) -> int:
     log(f"[FIND] Caut '{query}' in instrumentele T212...")
     instruments = client.list_instruments()
     if instruments is None:
-        log("! nu pot lista instrumentele (auth/retea)")
+        log("! cannot list the instruments (auth/network)")
         return 1
     q = query.lower()
     hits = [i for i in instruments
@@ -303,10 +303,10 @@ def _cmd_test_notify(what: str, label: str, desktop: bool) -> int:
     ts = now_str()
     if what in ("market", "all"):
         notify(title=f"[TEST] {label} a inceput tranzactionarea!",
-               body=f"{label} SE TRANZACTIONEAZA.\nLast price: 99.99 USD\n{ts}",
+               body=f"{label} IS TRADING.\nLast price: 99.99 USD\n{ts}",
                source="market", price=99.99, desktop=desktop)
     if what in ("trade", "all"):
-        notify(title=f"[TEST] Ordin {label} plasat pe T212!",
+        notify(title=f"[TEST] Order {label} placed on T212!",
                body=f"LIMIT qty=0.5 @ 99 USD\n{ts}", source="trade", desktop=desktop)
     log("[TEST] Gata.")
     return 0

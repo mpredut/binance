@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Migrare cache_price_<SYM>.json (vechi, full-rewrite) → cache_price_<SYM>.jsonl (append).
+Migrates cache_price_<SYM>.json (old, full rewrite) -> cache_price_<SYM>.jsonl (append).
 
-La refactor s-a trecut de la .json la .jsonl + .meta, dar datele vechi din .json
-nu au fost migrate. Acest script:
-  • citeste punctele din .json vechi si din .jsonl existent (daca exista),
+During the refactor we moved from .json to .jsonl plus .meta, but the old data in .json
+was never migrated. This script:
+  • reads the points from the old .json and from the existing .jsonl (if there is one),
   • le imbina per simbol, deduplica pe timestamp, sorteaza crescator,
   • rescrie .jsonl atomic + regenereaza .meta,
-  • redenumeste .json vechi → .json.bak (poti sterge .bak dupa verificare).
+  • renames the old .json -> .json.bak (you can delete the .bak after checking).
 
-RULEAZA DOAR cu procesele writer (priceAnalysis etc.) OPRITE, ca sa nu existe
-scriere concurenta pe .jsonl. Idempotent (re-rularea nu duplica).
+RUN IT ONLY with the writer processes (priceAnalysis and so on) STOPPED, so there is no
+concurrent write on the .jsonl. Idempotent (re-running does not duplicate).
 """
 import os
 import sys
@@ -20,7 +20,7 @@ import time
 
 # offline/legacy_tools/ este la doua niveluri sub radacina repo-ului.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-# Fisierele de cache stau in <repo>/cachedb/ (suprascris de BINANCE_CACHE_DIR sau --dir).
+# The cache files live in <repo>/cachedb/ (overridden by BINANCE_CACHE_DIR or --dir).
 CACHE_DIR = os.environ.get("BINANCE_CACHE_DIR", os.path.join(REPO_ROOT, "cachedb"))
 
 
@@ -33,7 +33,7 @@ def _atomic_write_lines(path, lines):
 
 
 def _entry_ts(item):
-    # item e [ts, price] (lista) — folosim primul element ca timestamp
+    # An item is [ts, price] (a list) — we use the first element as the timestamp.
     if isinstance(item, (list, tuple)) and item:
         return item[0]
     if isinstance(item, dict):
@@ -50,7 +50,7 @@ def _load_old_json(path):
 
 
 def _load_jsonl(path):
-    """{SYM: [items]} din liniile {'s': SYM, 'i': item}."""
+    """{SYM: [items]} from the lines {'s': SYM, 'i': item}."""
     out = {}
     if not os.path.exists(path):
         return out
@@ -100,7 +100,7 @@ def migrate_file(json_path, dry_run=False):
 
     print(f"[{sym_from_name}] old={sum(len(v) for v in old.values())} "
           f"jsonl={sum(len(v) for v in new.values())} → merged={sum(counts.values())} "
-          f"(+{added_total} din vechi)")
+          f"(+{added_total} from the old one)")
 
     if dry_run:
         return added_total
@@ -110,7 +110,7 @@ def migrate_file(json_path, dry_run=False):
         json.dump({"max_ts": max_ts, "saved_at": int(time.time() * 1000),
                    "fetchtime": fetchtime, "counts": counts}, mf)
     os.replace(jsonl_path + ".meta.tmp", jsonl_path + ".meta")
-    os.replace(json_path, json_path + ".bak")     # backup, nu stergem direct
+    os.replace(json_path, json_path + ".bak")     # A backup; we do not delete directly.
     return added_total
 
 
@@ -124,18 +124,18 @@ def _arg_value(flag, default=None):
 
 def main():
     dry_run = "--dry-run" in sys.argv
-    work_dir = _arg_value("--dir", CACHE_DIR)   # implicit cachedb/ (sau --dir / BINANCE_CACHE_DIR)
-    # cache_price_long_trend.json e cache-ul PriceLongTrend (full-rewrite json, NU
-    # per-simbol append) → ramane .json, il excludem din migrare.
+    work_dir = _arg_value("--dir", CACHE_DIR)   # cachedb/ by default (or --dir / BINANCE_CACHE_DIR)
+    # cache_price_long_trend.json is the PriceLongTrend cache (a full-rewrite json, NOT
+    # a per-symbol append) -> it stays .json, and we exclude it from the migration.
     EXCLUDE = {"long_trend"}
     files = sorted(glob.glob(os.path.join(work_dir, "cache_price_*.json")))
     files = [f for f in files
              if not f.endswith(".bak")
              and os.path.basename(f)[len("cache_price_"):-len(".json")] not in EXCLUDE]
     if not files:
-        print("Nu exista fisiere cache_price_*.json de migrat.")
+        print("There are no cache_price_*.json files to migrate.")
         return
-    print(f"{'DRY-RUN' if dry_run else 'MIGRARE'}: {len(files)} fisiere\n")
+    print(f"{'DRY RUN' if dry_run else 'MIGRATION'}: {len(files)} files\n")
     for f in files:
         try:
             migrate_file(f, dry_run=dry_run)
@@ -143,7 +143,7 @@ def main():
             print(f"[EROARE] {os.path.basename(f)}: {e}")
     if not dry_run:
         print("\nGata. Fisierele .json au fost redenumite in .json.bak "
-              "(sterge-le dupa ce verifici .jsonl).")
+              "(delete them once you have checked the .jsonl).")
 
 
 if __name__ == "__main__":

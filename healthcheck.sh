@@ -1,16 +1,16 @@
 #!/bin/bash
-# healthcheck.sh — supraveghere + raport consolidat pentru boti/flota (HL/Kraken/T212).
+# healthcheck.sh — supervision plus a consolidated report for the bots/fleet (HL/Kraken/T212).
 #
-# SURSA UNICA DE ADEVAR: procs.conf (citit si de bots_start.sh + flota_start.sh).
+# THE SINGLE SOURCE OF TRUTH: procs.conf (also read by bots_start.sh plus flota_start.sh).
 # There are NO hardcoded process lists here any more. DOUBLE detection: absence (pgrep) AND
-# hang (proces viu dar log inghetat, heartbeat pe mtime) — inlocuieste dn_watchdog.sh.
+# a hang (the process is alive but the log is frozen, a heartbeat on mtime) — it replaces dn_watchdog.sh.
 #   --supervise  (cron */5): restarts dead/frozen bots (role=bot) with backoff; the fleet is alert-only.
 #   --alert      : alert only if something is missing or hung (no restart).
 #   --check      : READ-ONLY preview (what --supervise would do) — safe, touches nothing.
-#   (fara arg)   : raport complet (procese + conturi HL/Kraken/T212).
+#   (no arg)     : the full report (processes plus the HL/Kraken/T212 accounts).
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 MANIFEST="$ROOT/procs.conf"
-# python cu SDK Hyperliquid (eth_account): prefera venv, cade pe python3
+# python with the Hyperliquid SDK (eth_account): it prefers the venv and falls back to python3
 VENV=""
 for _d in ".venv" "myenv"; do [ -f "$ROOT/$_d/bin/activate" ] && VENV="$_d" && break; done
 HLPY="$ROOT/$VENV/bin/python"
@@ -72,7 +72,7 @@ proc_state() {
     echo ok
 }
 
-# ===== MOD --check: preview READ-ONLY (nu atinge nimic) ====================
+# ===== --check MODE: a READ-ONLY preview (it touches nothing) ==============
 if [ "$1" = "--check" ]; then
     echo "=== CHECK (read-only) $(date '+%H:%M:%S') — sursa: $MANIFEST ==="
     vpn=$(vpn_state)
@@ -131,7 +131,7 @@ EOF
     exit 0
 fi
 
-# ===== MOD --supervise (cron */5): reporneste boti morti/inghetati + alerta flota =====
+# ===== --supervise MODE (cron */5): restart dead/frozen bots plus a fleet alert =====
 if [ "$1" = "--supervise" ]; then
     # Supervision can start live bots. Enable it explicitly in the production
     # scheduler instead of guessing the environment from a username or path.
@@ -168,15 +168,15 @@ EOF
         fi
         # role=bot, stare absent|hung
         if [ "$st" = hung ]; then
-            echo "$(date '+%H:%M') $label HUNG (heartbeat vechi) -> kill"
+            echo "$(date '+%H:%M') $label HUNG (an old heartbeat) -> kill"
             pkill -f "$pat" 2>/dev/null; sleep 2; pkill -9 -f "$pat" 2>/dev/null
         fi
         cnt=0; ws=$now
         [ -f "$SUP/$label" ] && read -r cnt ws < "$SUP/$label"
-        [ $((now - ws)) -gt $WINDOW ] && { cnt=0; ws=$now; }   # fereastra noua
+        [ $((now - ws)) -gt $WINDOW ] && { cnt=0; ws=$now; }   # a new window
         if [ "$cnt" -ge "$MAX" ]; then
-            [ -f "$SUP/$label.esc" ] || { push "Bot in CRASH-LOOP" "$label ($st) de ${cnt}x in 30min — NU mai repornesc, interventie manuala"; touch "$SUP/$label.esc"; }
-            echo "$(date '+%H:%M') $label CRASH-LOOP (nu repornesc)"; continue
+            [ -f "$SUP/$label.esc" ] || { push "Bot in a CRASH LOOP" "$label ($st) ${cnt}x in 30min — no longer restarting, manual intervention needed"; touch "$SUP/$label.esc"; }
+            echo "$(date '+%H:%M') $label CRASH LOOP (not restarting)"; continue
         fi
         # 8>&- : the started bot does NOT inherit fd 8 (the supervise lock) -> no lock leak
         # (otherwise later --supervise runs find the lock held by a bot and skip forever).
@@ -215,7 +215,7 @@ b = c.balance()
 print("  cash ZUSD %.0f + USDC %.0f | HYPE %s @ %s" % (
     float(b.get("ZUSD", 0)), float(b.get("USDC", 0)), b.get("HYPE"), c.last_price("HYPEUSD")))
 oo = c.open_orders()
-print("  ordine: %d %s" % (len(oo), [o.get("descr", {}).get("order") for o in oo.values()]))
+print("  orders: %d %s" % (len(oo), [o.get("descr", {}).get("order") for o in oo.values()]))
 sp = float(b.get("SPCXx.T", 0))
 if sp:
     px = yahoo_last("SPCX") or 0
@@ -238,7 +238,7 @@ for _ in range(3):
     time.sleep(2)
 for p in (pf or []):
     if any(s in p.get("ticker", "") for s in ("NVDA", "SPCX")):
-        print("  %s qty %s avg %s pret %s P&L %s" % (
+        print("  %s qty %s avg %s price %s P&L %s" % (
             p.get("ticker"), p.get("quantity"), p.get("averagePrice"),
             p.get("currentPrice"), p.get("ppl")))
 if not pf:

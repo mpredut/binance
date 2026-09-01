@@ -2,7 +2,7 @@
 # deploy_providers.sh — DEPLOY sigur de cod: git pull -> GATE de import (facada) -> restart
 # fleet -> verification. The only script that deploys (flota_start/bots_start are launchers,
 # healthcheck is the supervisor). The fleet list comes from procs.conf (role=fleet), not hardcoded.
-# Restart flota = pkill procesele role=fleet; flota_start (systemd) le reia in <=30s cu codul nou.
+# A fleet restart = pkill the role=fleet processes; flota_start (systemd) brings them back in <=30s with the new code.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 PY="$ROOT/myenv/bin/python"; [ -x "$PY" ] || PY="$ROOT/.venv/bin/python"
@@ -17,11 +17,11 @@ ls providers/market_api.py binance_api/trailing_stop.py >/dev/null && echo "  pr
 ls market_api.py 2>/dev/null && echo "  ⚠ ROOT STILL has market_api.py" || echo "  root is clean, ok"
 
 echo "=== facade import GATE (no restart if it does not load) ==="
-"$PY" -c 'from providers.market_api import api; print("  facada OK -", len(api._providers), "provideri:", [p.name for p in api._providers])' || { echo "  GATE FAILED — NU repornesc"; exit 1; }
+"$PY" -c 'from providers.market_api import api; print("  facade OK -", len(api._providers), "providers:", [p.name for p in api._providers])' || { echo "  GATE FAILED — NOT restarting"; exit 1; }
 
 # The fleet list comes from the SINGLE manifest (role=fleet), not hardcoded.
 fleet="$(awk -F'|' '!/^#/ && $7=="fleet" {print $1}' "$MANIFEST")"
-[ -n "$fleet" ] || { echo "fara role=fleet in $MANIFEST"; exit 1; }
+[ -n "$fleet" ] || { echo "no role=fleet in $MANIFEST"; exit 1; }
 
 echo "=== RESTART FLOTA (pkill; flota_start le reia) ==="
 for p in $fleet; do pkill -f "$p" 2>/dev/null || true; done

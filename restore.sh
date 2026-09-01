@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # restore.sh — DISASTER RECOVERY: reface TOTUL pe o masina noua, dintr-o comanda.
 #
-# Presupune: repo deja clonat (ai nevoie de el ca sa rulezi scriptul) + folderul de
-# SECRETE copiat de pe backup-ul tau (NU e in git — facut cu ./backup_secrets.sh).
+# It assumes: the repo is already cloned (you need it in order to run the script) plus the folder of
+# SECRETS copied from your backup (it is NOT in git — made with ./backup_secrets.sh).
 #
 #   git clone <repository-url> /srv/trading/current
 #   cd /srv/trading/current && ./restore.sh /path/to/secrets-backup
@@ -15,11 +15,11 @@ SECRETS="${1:-}"
 fail() { echo "❌ $*" >&2; exit 1; }
 
 echo "===== RESTORE binance @ $ROOT ====="
-[ -n "$SECRETS" ] || fail "Uz: $0 <folder_secrete>  (facut cu ./backup_secrets.sh)"
-[ -d "$SECRETS" ] || fail "Folderul de secrete nu exista: $SECRETS"
-command -v python3 >/dev/null || fail "python3 lipseste (apt install python3 python3-venv)"
+[ -n "$SECRETS" ] || fail "Usage: $0 <secrets_folder>  (made with ./backup_secrets.sh)"
+[ -d "$SECRETS" ] || fail "The secrets folder does not exist: $SECRETS"
+command -v python3 >/dev/null || fail "python3 is missing (apt install python3 python3-venv)"
 
-echo "--- [1/5] restore secrete + stare din $SECRETS ---"
+echo "--- [1/5] restoring the secrets plus the state from $SECRETS ---"
 # _machine holds data external to the repo and is restored separately.
 tar cf - --exclude='./_machine' -C "$SECRETS" . | tar xf - -C "$ROOT"
 if [ -f "$SECRETS/_machine/piatoken.txt" ]; then
@@ -28,9 +28,9 @@ fi
 echo "    ✔ restaurat (.env, keys/, .state*, cachedb/, token PIA)"
 
 echo "--- [2/5] venv (myenv) + dependinte ---"
-[ -x "$ROOT/myenv/bin/python" ] || python3 -m venv "$ROOT/myenv" || fail "nu pot crea venv"
+[ -x "$ROOT/myenv/bin/python" ] || python3 -m venv "$ROOT/myenv" || fail "cannot create the venv"
 "$ROOT/myenv/bin/pip" install -q --upgrade pip
-"$ROOT/myenv/bin/pip" install -q -r "$ROOT/requirements.txt" || fail "pip install esuat"
+"$ROOT/myenv/bin/pip" install -q -r "$ROOT/requirements.txt" || fail "pip install failed"
 echo "    ✔ dependinte instalate"
 
 echo "--- [3/5] systemd + DNS + SSH + cron (cere sudo) ---"
@@ -40,7 +40,7 @@ if sudo -v 2>/dev/null; then
         bash "$ROOT/systemd/install_prod.sh"
     echo "    ✔ profil PROD instalat"
 else
-    echo "    ! fara sudo — manual: sudo bash systemd/install_prod.sh"
+    echo "    ! no sudo — by hand: sudo bash systemd/install_prod.sh"
 fi
 
 echo "--- [4/5] verificare cron ---"

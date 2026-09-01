@@ -1,18 +1,18 @@
-"""test_backtest_annotations.py — valideaza adnotarile "# BACKTEST: ..." din
+"""test_backtest_annotations.py — it validates the "# BACKTEST: ..." annotations in
 the config files (UNIFIED_BACKTEST_PLAN.md §5: "a simple test that checks
-ca fiecare cheie din adnotare chiar exista in config + grila e bine formata").
+that every key in an annotation really exists in the config plus the grid is well formed").
 
 It guards the SILENT errors that would make the pilot (scheduled_pilot.py) run on
-o grila stricata fara sa se observe:
+a broken grid without anyone noticing:
   - an annotated key that no longer exists / a typo (scan returns nothing -> nothing
-    dar verificam ca fiecare cheie intoarsa are o valoare LIVE citibila);
+    but we check that every key returned has a readable LIVE value);
   - a grid with non-numeric values or fewer than 2 values (nothing to sweep);
-  - DERIVA: valoarea LIVE de azi a iesit din intervalul testat [min, max] al
-    grilei — semnal ca grila a ramas in urma (NU cerem apartenenta EXACTA: pilotul
-    aplica media, ex. TAO mt.lost=5.25 nu e punct de grila, dar e in interval).
+  - DRIFT: today's LIVE value has left the tested interval [min, max] of the
+    grid — a sign that the grid has fallen behind (we do NOT require EXACT membership: the pilot
+    applies the midpoint, e.g. TAO mt.lost=5.25 is not a grid point, but it is inside the interval).
 
-Azi doar instruments.conf are adnotari; testul e structurat sa acopere automat
-orice fisier INI adaugat in _INI_CONFIGS pe viitor.
+Today only instruments.conf has annotations; the test is structured to cover automatically
+any INI file added to _INI_CONFIGS in the future.
 """
 import configparser
 import os
@@ -24,7 +24,7 @@ sys.path.insert(0, ROOT)
 
 from offline.research.backtest_ranges import scan_backtest_ranges  # noqa: E402
 
-# Fisiere INI (sectiuni [NUME]) cu adnotari — cheile scan-uite vin ca "SECTION.key".
+# INI files ([NAME] sections) with annotations — the keys scanned come back as "SECTION.key".
 _INI_CONFIGS = [os.path.join(ROOT, "instruments.conf")]
 
 
@@ -42,23 +42,23 @@ class TestBacktestAnnotations(unittest.TestCase):
             for full_key, grid in ranges.items():
                 seen_any = True
                 with self.subTest(config=os.path.basename(path), key=full_key):
-                    # grila numerica, >= 2 valori
+                    # a numeric grid, >= 2 values
                     self.assertGreaterEqual(len(grid), 2,
-                                            f"{full_key}: grila are < 2 valori: {grid}")
+                                            f"{full_key}: the grid has < 2 values: {grid}")
                     try:
                         vals = [float(v) for v in grid]
                     except ValueError as e:
-                        self.fail(f"{full_key}: grila are valori ne-numerice ({grid}): {e}")
+                        self.fail(f"{full_key}: the grid has non-numeric values ({grid}): {e}")
 
-                    # cheia exista LIVE si e citibila (typo / cheie stearsa)
+                    # the key exists LIVE and is readable (a typo or a deleted key)
                     current = self._current_ini_value(path, full_key)
 
                     # deriva: valoarea live e in [min, max] al grilei testate
                     lo, hi = min(vals), max(vals)
                     self.assertTrue(lo <= current <= hi,
-                                    f"{full_key}: valoarea LIVE {current} a iesit din "
+                                    f"{full_key}: the LIVE value {current} has left the "
                                     f"intervalul grilei [{lo}, {hi}] {grid} — grila stale?")
-        self.assertTrue(seen_any, "nicio adnotare # BACKTEST gasita — scan/config stricat?")
+        self.assertTrue(seen_any, "no # BACKTEST annotation found — is the scan or the config broken?")
 
 
 if __name__ == "__main__":

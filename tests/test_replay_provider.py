@@ -1,20 +1,20 @@
 """
-Teste pentru ReplayMarketDataProvider (23 iul, offline/research/UNIFIED_BACKTEST_PLAN.md
+Tests for ReplayMarketDataProvider (23 Jul, offline/research/UNIFIED_BACKTEST_PLAN.md
 Faza 1 — pas 1 de implementare: monitortrades.py testabil pe date istorice,
-fara sa bata reteaua).
+without touching the network).
 
 Acoperire:
   - load_price_series: parseaza corect formatul real cache_price_{symbol}.jsonl.
   - ReplayMarketDataProvider: avansare, get_current_price, now() (= timestamp-ul
     the last price read, NOT wall clock), get_orders/free_balance after BUY/SELL.
-  - Integrare: monitortrades.monitor_price_and_trade() ruleaza un ciclu complet
+  - Integration: monitortrades.monitor_price_and_trade() runs a complete cycle
     (an old BUY -> the price rises past gain_threshold -> SELL) through an Instrument
-    construit cu api=MarketApi([replay]) — FARA nicio schimbare la codul real
+    built with api=MarketApi([replay]) — WITHOUT any change to the real code
     from monitortrades.py (only now_fn injected, already added today).
 
-Folosim un symbol SINTETIC ("ZZZTESTUSDC") — nu unul real urmarit de flota live
-(BTCUSDC/TAOUSDC) — ca is_trend_up() sa fie determinist FALSE (cacheManager nu
-are niciun snapshot pt un symbol inexistent), nu dependent de trendul REAL de pe
+We use a SYNTHETIC symbol ("ZZZTESTUSDC") — not a real one tracked by the live fleet
+(BTCUSDC/TAOUSDC) — so that is_trend_up() is deterministically FALSE (cacheManager has
+no snapshot for a non-existent symbol) rather than depending on the REAL trend on
 piata in momentul rularii testului.
 """
 import os
@@ -33,7 +33,7 @@ SYMBOL = "ZZZTESTUSDC"
 
 
 def _make_provider(prices, start_ts=1_000_000.0, step_s=60.0):
-    """prices: lista de preturi -> serie (ts, price) cu pas fix de step_s secunde."""
+    """prices: a list of prices -> a (ts, price) series with a fixed step of step_s seconds."""
     series = [(start_ts + i * step_s, p) for i, p in enumerate(prices)]
     return ReplayMarketDataProvider({SYMBOL: series})
 
@@ -106,7 +106,7 @@ class TestReplayMarketDataProvider(unittest.TestCase):
         p.place_order(SYMBOL, "BUY", 100.0, 1.0)
         for _ in range(4):
             p.advance(SYMBOL)                    # avanseaza pana la ts=1_014_400 (4h mai tarziu)
-        recent = p.get_orders(SYMBOL, "BUY", since_s=2 * 3600)   # doar ultimele 2h
+        recent = p.get_orders(SYMBOL, "BUY", since_s=2 * 3600)   # only the last 2h
         self.assertEqual(recent, [])             # BUY-ul e la 4h in urma -> in afara ferestrei
         all_buys = p.get_orders(SYMBOL, "BUY", since_s=10 * 3600)
         self.assertEqual(len(all_buys), 1)
@@ -118,7 +118,7 @@ class TestReplayMarketDataProvider(unittest.TestCase):
 
 class TestNowFnDefaultsToRealTime(unittest.TestCase):
     """Regression: without now_fn (the LIVE path, unchanged), get_relevant_trade and
-    monitor_price_and_trade trebuie sa foloseasca in continuare time.time()
+    monitor_price_and_trade must keep using time.time()
     real — verified directly, not merely assumed by reading the code."""
 
     def test_get_relevant_trade_uses_real_time_by_default(self):
@@ -130,27 +130,27 @@ class TestNowFnDefaultsToRealTime(unittest.TestCase):
 
 
 class TestMonitorPriceAndTradeIntegration(unittest.TestCase):
-    """Ciclu complet prin monitortrades.monitor_price_and_trade(), pe un
-    Instrument construit cu api=replay — FARA nicio schimbare de cod in
-    monitortrades.py (doar now_fn, deja injectat azi)."""
+    """A complete cycle through monitortrades.monitor_price_and_trade(), on an
+    Instrument built with api=replay — WITHOUT any code change in
+    monitortrades.py (only now_fn, already injected today)."""
 
     def test_full_cycle_buy_then_gain_triggers_sell(self):
-        # Pret: 100 (BUY aici) -> ramane 100 cateva pasi -> urca la 115 (+15%,
+        # Price: 100 (a BUY here) -> it stays at 100 for a few steps -> it rises to 115 (+15%,
         # above the default gain_threshold of 7%) -> monitor_price_and_trade must
-        # sa vanda (is_trend_up e determinist False: symbol sintetic, fara
+        # to sell (is_trend_up is deterministically False: a synthetic symbol, with no
         # snapshot in cacheManager).
         prices = [100.0, 100.0, 100.0, 115.0]
         provider = _make_provider(prices, start_ts=2_000_000.0, step_s=3600.0)
-        provider.advance(SYMBOL)                              # ts=2_000_000, pret=100
-        provider.place_order(SYMBOL, "BUY", 100.0, 1.0)        # BUY vechi, inregistrat
+        provider.advance(SYMBOL)                              # ts=2_000_000, price=100
+        provider.place_order(SYMBOL, "BUY", 100.0, 1.0)        # an old BUY, recorded
 
         api = MarketApi([provider])
         inst = Instrument(name="ZZZTEST", symbol=SYMBOL, provider="replay",
                           base="ZZZTEST", quote="USDC", api=api)
 
         provider.advance(SYMBOL)                              # ts+3600, price=100 (no change)
-        provider.advance(SYMBOL)                              # ts+7200, pret=100
-        provider.advance(SYMBOL)                              # ts+10800, pret=115 (+15%)
+        provider.advance(SYMBOL)                              # ts+7200, price=100
+        provider.advance(SYMBOL)                              # ts+10800, price=115 (+15%)
 
         mt.monitor_price_and_trade(inst, sbs=3600, maxage_trade_s=100000,
                                     now_fn=lambda: provider.now(SYMBOL))
@@ -180,7 +180,7 @@ class TestSimClock(unittest.TestCase):
 
     def test_tradeall_backtest_uses_shared_class(self):
         """tradeall_backtest._SimClock must be the SAME type as
-        providers.replay_clock.SimClock (nu o reimplementare separata)."""
+        providers.replay_clock.SimClock (not a separate reimplementation)."""
         from offline.backtests import tradeall as tb
         from providers.replay_clock import SimClock
         self.assertIs(tb._SimClock, SimClock)

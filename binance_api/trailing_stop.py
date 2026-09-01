@@ -97,13 +97,13 @@ def _finite(value, *, name: str, minimum=None, maximum=None) -> float:
     try:
         result = float(value)
     except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError(f"{name} trebuie sa fie numeric") from exc
+        raise ValueError(f"{name} must be numeric") from exc
     if not math.isfinite(result):
-        raise ValueError(f"{name} trebuie sa fie finit")
+        raise ValueError(f"{name} must be finite")
     if minimum is not None and result < minimum:
-        raise ValueError(f"{name} trebuie sa fie >= {minimum}")
+        raise ValueError(f"{name} must be >= {minimum}")
     if maximum is not None and result > maximum:
-        raise ValueError(f"{name} trebuie sa fie <= {maximum}")
+        raise ValueError(f"{name} must be <= {maximum}")
     return result
 
 
@@ -126,7 +126,7 @@ class TrailingStop:
         _finite(CHECK_SECONDS, name="TRAILING_CHECK_SECONDS", minimum=0.1)
         _finite(REBUY_BOUNCE_PCT, name="TRAILING_REBUY_BOUNCE_PCT", minimum=0.0)
         if REBUY_TRANCHES != 1:
-            raise ValueError("TRAILING_REBUY_TRANCHES suporta momentan doar valoarea 1")
+            raise ValueError("TRAILING_REBUY_TRANCHES currently supports only the value 1")
         self.state_file = state_file
         self._balances = []
         self.core = TrailingCore(
@@ -269,23 +269,23 @@ class TrailingStop:
         return result
 
     def log_dry_sell(self, key, asset, pair, qty, price, peak, trail) -> None:
-        self.log(f"  🟡 [TRAIL][DRY] AR VINDE {pair} {qty} @ ~{price:.4f} "
+        self.log(f"  🟡 [TRAIL][DRY] WOULD SELL {pair} {qty} @ ~{price:.4f} "
                  f"(varf {peak:.4f}, scadere >= {trail}%)  "
-                 f"[seteaza TRAILING_ENABLED=true ca sa execute]")
+                 f"[set TRAILING_ENABLED=true for it to execute]")
 
     def log_dry_rebuy(self, key, asset, pair, qty, price, rb) -> None:
-        self.log(f"  🟡 [TRAIL][DRY] AR RE-CUMPARA {pair} {qty} @ ~{price:.4f}  "
-                 f"(recul de la minim {rb['low']:.4f})  [TRAILING_ENABLED=true ca sa execute]")
+        self.log(f"  🟡 [TRAIL][DRY] WOULD RE-BUY {pair} {qty} @ ~{price:.4f}  "
+                 f"(a pullback from the low {rb['low']:.4f})  [TRAILING_ENABLED=true for it to execute]")
 
     def log_hold(self, key, asset, pair, price, peak, stop_at, trail, free) -> None:
         self.log(f"  [TRAIL] {pair}: {price:.4f}  varf {peak:.4f}  "
-                 f"vinde sub {stop_at:.4f} (-{trail}%)")
+                 f"sells below {stop_at:.4f} (-{trail}%)")
 
     def log_skip_rebuy_trend(self, asset) -> None:
-        self.log(f"  [TRAIL] re-buy {asset} deferred — trend instant CLAR jos (nu prind cutitul)")
+        self.log(f"  [TRAIL] re-buy {asset} deferred — the instant trend is CLEARLY down (not catching the knife)")
 
     def log_skip_sell_trend(self, key, asset, pair, trail) -> None:
-        self.log(f"  [TRAIL] {pair}: -{trail}% reached dar trend instant SUS — NU vand (anti-wick)")
+        self.log(f"  [TRAIL] {pair}: -{trail}% reached but the instant trend is UP — NOT selling (anti-wick)")
 
     def log_item_error(self, key, e) -> None:
         self.log(f"  ! [TRAIL] {key}: {e}")
@@ -295,9 +295,9 @@ class TrailingStop:
         self.core.check_once()
 
     def run(self):
-        mode = "⚠ ACTIV (vinde real)" if self.enabled else "DRY-RUN (doar logheaza)"
+        mode = "⚠ ACTIVE (it really sells)" if self.enabled else "DRY RUN (it only logs)"
         self.log(f"=== TRAILING STOP started — {mode} ===")
-        self.log(f"    monede/praguri: " +
+        self.log(f"    coins/thresholds: " +
                  ", ".join(f"{s}={self.trail_pct_for(s)}%" for s in self.sym.symbols))
         while True:
             try:
@@ -311,8 +311,8 @@ class TrailingStop:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Trailing stop per-moneda (Binance).")
-    ap.add_argument("--once", action="store_true", help="o verificare si iese")
-    ap.add_argument("--status", action="store_true", help="varfuri + praguri curente")
+    ap.add_argument("--once", action="store_true", help="one check, then exit")
+    ap.add_argument("--status", action="store_true", help="the current peaks and thresholds")
     args = ap.parse_args()
     if not args.status:
         single_instance("binance_trailing")
@@ -330,7 +330,7 @@ def main() -> int:
             peak = st.get("peak")
             print(f"{s}: varf={peak}  trailing={tr}%  "
                   f"sells below {peak * (1 - tr / 100):.4f}" if peak else f"{s}: no peak yet")
-        print(f"ENABLED={ts.enabled} (dry-run daca False)")
+        print(f"ENABLED={ts.enabled} (a dry run if False)")
         return 0
     if args.once:
         ts.check_once()

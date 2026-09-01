@@ -262,7 +262,7 @@ rung_reinstall() {
     if [ "$actual_sha256" != "$INSTALLER_SHA256" ]; then
         log "   SHA-256 mismatch -> NOT running the installer"
         alert "PIA: checksum installer invalid ($(hostname))" \
-            "SHA-256 primit: $actual_sha256; asteptat: $INSTALLER_SHA256. Installerul NU a fost executat."
+            "SHA-256 received: $actual_sha256; expected: $INSTALLER_SHA256. The installer was NOT executed."
         rm -rf "$tmp"
         return 1
     fi

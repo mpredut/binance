@@ -26,9 +26,9 @@ class FakeApi:
 
 
 class FakePo:
-    # 30 iul: TrailingStop foloseste acum proxy-ul unic guardat (.place(symbol, side,...)),
-    # nu place_safe_order. Fake-ul expune ambele (place nou + place_safe_order legacy)
-    # ca sa ramana robust; execute_sell/rebuy cheama .place().
+    # 30 Jul: TrailingStop now uses the single guarded proxy (.place(symbol, side,...)),
+    # not place_safe_order. The fake exposes both (the new place plus the legacy place_safe_order)
+    # so it stays robust; execute_sell/rebuy call .place().
     def __init__(self):
         self.orders = []
         self.result = {"orderId": 1}
@@ -82,9 +82,9 @@ class TestLogica(unittest.TestCase):
     def test_should_sell(self):
         self.assertTrue(should_sell(90, 100, 10))      # exact -10%
         self.assertTrue(should_sell(89, 100, 10))
-        self.assertFalse(should_sell(91, 100, 10))     # doar -9%
+        self.assertFalse(should_sell(91, 100, 10))     # only -9%
         self.assertFalse(should_sell(100, 100, 10))
-        self.assertFalse(should_sell(50, 0, 10))       # fara varf
+        self.assertFalse(should_sell(50, 0, 10))       # no peak
 
 
 class TestTrailing(Base):
@@ -120,10 +120,10 @@ class TestTrailing(Base):
         ts.check_once()
         self.assertEqual(len(self.po.orders), 1)
         self.assertEqual(self.po.orders[0]["side"], "SELL")
-        self.assertTrue(self.po.orders[0]["force"], "trebuie force=True ca sa ocoleasca weight-ul")
+        self.assertTrue(self.po.orders[0]["force"], "force=True is required so it bypasses the weight")
         self.assertTrue(
             self.po.orders[0]["bypass_profit_guard"],
-            "iesirea protectoare trebuie sa ocoleasca explicit profit guard",
+            "the protective exit must bypass the profit guard explicitly",
         )
 
     def test_sell_refuzat_pastreaza_varful_si_nu_armeaza_rebuy(self):
@@ -171,7 +171,7 @@ class TestTrailing(Base):
         api = FakeApi(260.0)
         self.ts(api).check_once()                      # varf 260, instanta 1
         api.price = 200.0                              # -23% de la 260 (prag 22%)
-        self.ts(api).check_once()                      # instanta 2 (restart) — citeste varful
+        self.ts(api).check_once()                      # instance 2 (a restart) — it reads the peak
         self.assertEqual(len(self.po.orders), 1, "varful 260 supravietuieste restartului")
 
     def test_vanzare_partiala(self):
@@ -180,13 +180,13 @@ class TestTrailing(Base):
         ts.check_once()
         api.price = 190.0
         ts.check_once()
-        self.assertAlmostEqual(self.po.orders[0]["qty"], 2.0)   # 50% din 4
+        self.assertAlmostEqual(self.po.orders[0]["qty"], 2.0)   # 50% of 4
 
     def test_re_armeaza_dupa_vanzare(self):
         api = FakeApi(250.0)
         ts = self.ts(api)
         ts.check_once()
-        api.price = 190.0; ts.check_once()             # vinde, varf se reseteaza la 190
+        api.price = 190.0; ts.check_once()             # it sells, the peak resets to 190
         ts.check_once()                                # status terminal confirmat
         import json
         self.assertEqual(json.load(open(self.sf))["TAOUSDC"]["peak"], 190.0)
@@ -215,15 +215,15 @@ class TestPerMoneda(Base):
 
 
 class TestMinProfit(Base):
-    """Prag minim de profit inainte sa se activeze trailing-ul."""
+    """The minimum profit threshold before the trailing activates."""
 
     def test_warming_up_nu_vinde_sub_prag(self):
         api = FakeApi(250.0)
         ts = self.ts(api, min_profit_pct=5.0)
         ts.check_once()                    # initial=250, activ la 262.5
-        api.price = 190.0                  # crash -24% dar sub pragul de activare
+        api.price = 190.0                  # a crash of -24% but below the activation threshold
         ts.check_once()
-        self.assertEqual(self.po.orders, [], "nu vinde inainte sa atinga pragul de profit")
+        self.assertEqual(self.po.orders, [], "it does not sell before the profit threshold is reached")
 
     def test_activ_dupa_prag_vinde(self):
         api = FakeApi(250.0)
@@ -233,24 +233,24 @@ class TestMinProfit(Base):
         ts.check_once()                    # peak=263
         api.price = 200.0                  # -23.9% de la peak 263 (prag TAO 22%)
         ts.check_once()
-        self.assertEqual(len(self.po.orders), 1, "vinde dupa ce a trecut de pragul de profit")
+        self.assertEqual(len(self.po.orders), 1, "it sells once the profit threshold is passed")
         self.assertEqual(self.po.orders[0]["side"], "SELL")
 
     def test_initial_se_reseteaza_la_rebuy(self):
-        """Dupa un crash-sell + re-buy, initial se reseteaza la pretul de re-buy."""
+        """After a crash sell plus a re-buy, it initially resets to the re-buy price."""
         api = FakeApi(250.0)
         ts = self.ts(api, min_profit_pct=5.0)
         ts.check_once()                    # initial=250, peak=250
         api.price = 263.0; ts.check_once() # trece de prag -> activ
-        api.price = 200.0; ts.check_once() # crash -23.9% -> vinde; armeaza rebuy
+        api.price = 200.0; ts.check_once() # a crash of -23.9% -> it sells; it arms the rebuy
         self.assertEqual(len(self.po.orders), 1)
-        ts.check_once()                    # confirma fill-ul SELL si armeaza re-buy
-        # simuleaza rebuy: pretul urca 1.2% de la 200 -> 202.4
+        ts.check_once()                    # it confirms the SELL fill and arms the re-buy
+        # simulate the rebuy: the price rises 1.2% from 200 -> 202.4
         api.price = 199.0; ts.check_once() # low=199
         api.price = 201.5; ts.check_once() # +1.26% de la 199 -> re-buy; initial=201.5
-        ts.check_once()                    # confirma fill-ul REBUY si seteaza warmup
-        # acum trailing inactiv pana la 201.5*1.05=211.6
-        api.price = 180.0; ts.check_once() # crash de la 201.5 dar sub pragul de activare
+        ts.check_once()                    # it confirms the REBUY fill and sets the warmup
+        # now the trailing is inactive until 201.5*1.05=211.6
+        api.price = 180.0; ts.check_once() # a crash from 201.5 but below the activation threshold
         # the orders: 1 sell + 1 re-buy; the third does NOT execute (warming up)
         sells = [o for o in self.po.orders if o["side"] == "SELL"]
         self.assertEqual(len(sells), 1, "the second crash does not trigger a sell (warming up after the rebuy)")

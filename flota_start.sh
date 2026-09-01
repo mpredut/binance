@@ -5,7 +5,7 @@
 # "supervision war": each revives the processes the other kills -> DUPLICATION.
 # The second instance does not get the lock -> it exits immediately.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"   # The repository root is the script directory.
-mkdir -p "$SCRIPT_DIR/logs"   # loguri de consola in folder dedicat (nu mai in root)
+mkdir -p "$SCRIPT_DIR/logs"   # Console logs in a dedicated folder (no longer in the root).
 LOCK_PATH="$SCRIPT_DIR/flota_start.lock"
 exec 9>"$LOCK_PATH" || exit 1
 if ! flock -n 9; then
@@ -32,7 +32,7 @@ while [ "$(pia get connectionstate 2>/dev/null | tr -d '\r')" != "Connected" ]; 
     sleep $SLEEP_AFTER_VPN_CONNECT
     SECONDS_PASSED=$((SECONDS_PASSED + SLEEP_AFTER_VPN_CONNECT))
     if [ "$SECONDS_PASSED" -ge "$VPN_RETRY_TIMEOUT" ]; then
-        echo "❌ VPN nu s-a conectat in $VPN_RETRY_TIMEOUT sec!"
+        echo "❌ the VPN did not connect within $VPN_RETRY_TIMEOUT sec!"
         exit 1
     fi
 done
@@ -64,8 +64,8 @@ if [[ "$PYTHON_BIN" != *"$VENV_DIR"* ]]; then
 fi
 echo "✔ Python activ: $PYTHON_BIN"
 
-# ===== Lista flotei din manifestul UNIC procs.conf (role=fleet) =====
-# Sursa unica de adevar (acelasi fisier citit de bots_start.sh + healthcheck.sh).
+# ===== The fleet list from the SINGLE manifest procs.conf (role=fleet) =====
+# The single source of truth (the same file read by bots_start.sh plus healthcheck.sh).
 # To add/remove a fleet process, edit procs.conf, not this file.
 MANIFEST="$SCRIPT_DIR/procs.conf"
 scripts=()
@@ -156,7 +156,7 @@ ps aux | grep '[p]ython'
 # Runs ONLY on this machine (the one starting the monitor). The paths are derived
 # from the current environment (SCRIPT_DIR + the activated venv python), so it is portable.
 WATCHDOG_PY="$(command -v python)"
-# Doua watchdog-uri: prospetime cache + anomalii (rata erori din loguri).
+# Two watchdogs: cache freshness plus anomalies (the error rate in the logs).
 _WD_CACHE="*/2 * * * * cd $SCRIPT_DIR && $WATCHDOG_PY $SCRIPT_DIR/verify_tools/watchdogfor_cacheandconfig.py >> $SCRIPT_DIR/logs/watchdog.log 2>&1"
 _WD_ANOM="*/5 * * * * cd $SCRIPT_DIR && $WATCHDOG_PY $SCRIPT_DIR/verify_tools/watchdogfor_anomaly.py >> $SCRIPT_DIR/logs/anomaly_watchdog.log 2>&1"
 # Markers to clean from crontab (including OLD names, so nothing is orphaned after a rename).
@@ -183,7 +183,7 @@ cleanup() {
 }
 trap cleanup INT TERM
 
-echo "All good. Supervizez procesele (repornesc orice cade). <ctrl c> = stop."
+echo "All good. Supervising the processes (restarting anything that falls over). <ctrl c> = stop."
 
 # ===== SUPERVISION loop =====
 # Instead of `wait` (which returns only when ALL processes die), we check each

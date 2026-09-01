@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# backup_secrets.sh — backup COMPLET al a tot ce NU e in git (secrete + stare boti/provideri),
-# descoperit AUTOMAT din git (nimic hardcodat) minus regenerabilele (venv/log/pyc/lock/html).
-# Prinde: .env-uri, keys/, TOATE .state_* (HL/Kraken/T212/xstock/trailing), cachedb/,
-# .watchdog_state, trade_cooldown, priceanalysis.json etc. — si fisiere viitoare, automat.
+# backup_secrets.sh — a COMPLETE backup of everything that is NOT in git (secrets plus the bot/provider state),
+# discovered AUTOMATICALLY from git (nothing hardcoded) minus the regenerable parts (venv/log/pyc/lock/html).
+# It catches: the .env files, keys/, ALL the .state_* files (HL/Kraken/T212/xstock/trailing), cachedb/,
+# .watchdog_state, trade_cooldown, priceanalysis.json and so on — and future files, automatically.
 # Rezultat: folder + tarball IN AFARA repo-ului. Copiaza tarball-ul OFF-MACHINE.
 #
 #   ./backup_secrets.sh                 # -> ~/<checkout>-secrets-backup/ + .tar.gz
@@ -10,7 +10,7 @@
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 OUT="${1:-$HOME/$(basename "$ROOT")-secrets-backup}"
-case "$OUT" in "$ROOT"|"$ROOT"/*) echo "❌ destinatia NU poate fi in repo (s-ar comite secrete): $OUT"; exit 1;; esac
+case "$OUT" in "$ROOT"|"$ROOT"/*) echo "❌ the destination can NOT be inside the repo (secrets would be committed): $OUT"; exit 1;; esac
 
 cd "$ROOT"
 # Anything gitignored is not in git, so it needs a backup. Only regenerable files are excluded.
@@ -35,14 +35,14 @@ chmod -R go-rwx "$OUT" 2>/dev/null || true
 chmod 600 "$OUT.tar.gz"
 
 # HISTORY: also keep a DATED copy (the last KEEP days). Without history, a corruption or
-# stergere de secrete intra in backup la 03:30 si SUPRASCRIE unica copie buna.
+# a deletion of secrets would enter the backup at 03:30 and OVERWRITE the only good copy.
 KEEP="${BACKUP_KEEP:-7}"
 DATED="$OUT-$(date +%Y%m%d).tar.gz"
 cp -p "$OUT.tar.gz" "$DATED" && chmod 600 "$DATED"
 ls -1t "$OUT"-????????.tar.gz 2>/dev/null | tail -n +"$((KEEP + 1))" | xargs -r rm -f
 
 N="$(find "$OUT" -type f | wc -l)"
-echo "=== backup COMPLET: $N fisiere (secrete + stare) ==="
+echo "=== a COMPLETE backup: $N files (secrets plus state) ==="
 printf '%s\n' "$LIST" | sed 's/^/    /'
 echo "Folder : $OUT"
 echo "Tarball: $OUT.tar.gz (600)  + istoric: $DATED (pastrez ultimele $KEEP)"
