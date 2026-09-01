@@ -205,7 +205,10 @@ def get_recent_filled_orders(order_type, symbol, max_age_seconds):
 
 def get_trade_orders(order_type, symbol, max_age_seconds):
     import cacheManager as cm
-    cache_order_manager = cm.get_cache_manager("Order")
+    # Consumer processes read the cache written by the dedicated cacheManager process.
+    # Starting a second polling loop here duplicates API traffic and mixes cache logs
+    # into callers such as order_retry_worker.
+    cache_order_manager = cm.get_cache_manager("Order", start_sync=False)
 
     sym.validate_ordertype(order_type)
     sym.validate_symbols(symbol)

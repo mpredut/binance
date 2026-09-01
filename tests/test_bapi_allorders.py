@@ -1,5 +1,5 @@
 import os, sys, unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from binance_api import bapi_allorders as ao
@@ -23,10 +23,10 @@ class TestPaginateMyTrades(unittest.TestCase):
         page2 = [{"id": 1000 + i, "time": 1} for i in range(500)]
         client.get_my_trades.side_effect = [page1, page2]
         out = ao.paginate_my_trades(client, "BTCUSDC", 0, limit=1000)
-        self.assertEqual(len(out), 1500)                        # nu trunchiat la 1000
+        self.assertEqual(len(out), 1500)                        # Not truncated at 1000.
         self.assertEqual(client.get_my_trades.call_count, 2)
         _, kw2 = client.get_my_trades.call_args_list[1]
-        self.assertEqual(kw2.get("fromId"), 1000)               # id ultimului (999) + 1
+        self.assertEqual(kw2.get("fromId"), 1000)               # Last ID (999) plus one.
         self.assertNotIn("startTime", kw2)
 
     def test_empty(self):
@@ -41,6 +41,15 @@ class TestPaginateMyTrades(unittest.TestCase):
         out = ao.paginate_my_trades(client, "X", 0, limit=2)
         self.assertEqual(len(out), 2)
         self.assertEqual(client.get_my_trades.call_count, 2)
+
+
+class TestCachedOrders(unittest.TestCase):
+    def test_reader_does_not_start_a_duplicate_polling_loop(self):
+        manager = MagicMock()
+        manager.cache = {"BTCUSDC": []}
+        with patch("cacheManager.get_cache_manager", return_value=manager) as get_manager:
+            self.assertEqual(ao.get_trade_orders("BUY", "BTCUSDC", 60), [])
+        get_manager.assert_called_once_with("Order", start_sync=False)
 
 
 if __name__ == "__main__":
