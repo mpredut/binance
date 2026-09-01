@@ -146,7 +146,7 @@ class ShadowLiveTest(unittest.TestCase):
                 "PAIR", 1, 100,
                 [(100, 1.0, 2.0, 0.5, 1.5), (160, 1.5, 2.5, 1.0, 2.0)],
             )
-            with self.assertRaisesRegex(RuntimeError, "gol"):
+            with self.assertRaisesRegex(RuntimeError, "gap"):
                 shadow._merge_forward_history(
                     "PAIR", 1, 100, [(400, 4.0, 5.0, 3.5, 4.5)],
                 )

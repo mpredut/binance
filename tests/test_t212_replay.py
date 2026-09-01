@@ -198,7 +198,7 @@ class T212ReplayTest(unittest.TestCase):
 
     def test_trend_gate_refuses_wrong_cadence(self):
         params = _params(STRAT_DCA_TREND_GATE_PCT="0.1")
-        with self.assertRaisesRegex(ValueError, "5 minute"):
+        with self.assertRaisesRegex(ValueError, "5-minute bars"):
             replay.run_replay([(100, 101, 99, 100)], params, bar_minutes=1440)
 
 
