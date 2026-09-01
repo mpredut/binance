@@ -52,6 +52,9 @@ REINSTALL_COOLDOWN="${PIA_REINSTALL_COOLDOWN:-86400}"  # At most one reinstall p
 # Bumping it is a single line in .env.
 PIA_VERSION="${PIA_VERSION:-3.7.2-08420}"
 INSTALLER_URL="${PIA_INSTALLER_URL:-https://installers.privateinternetaccess.com/download/pia-linux-${PIA_VERSION}.run}"
+# Published by PIA for pia-linux-3.7.2-08420.run. A version override must also
+# override this digest; otherwise the mismatch fails closed before execution.
+INSTALLER_SHA256="${PIA_INSTALLER_SHA256:-08a88af04462a9e078aeef52b26bcdb56f0a9b087a0fb7606f98b7eb79bb3dd9}"
 
 MODE="${1:-}"
 CHECK_ONLY=0; FORCE=0
@@ -122,31 +125,34 @@ alert() {  # $1=title $2=body
     if ntfy_push "$1" "$2"; then
         log "alert sent: $1"
     else
+        # Keep each alert on one spool line so replay cannot split a multi-line
+        # diagnostic into unrelated notifications.
+        local spool_body="${2//$'\n'/ | }"
         if [ -f "$SPOOL" ] && [ "$(stat -c %s "$SPOOL" 2>/dev/null || echo 0)" -ge "$SPOOL_MAX_BYTES" ]; then
             mv -f "$SPOOL" "$SPOOL.previous"
         fi
-        printf '%s\t%s\t%s\n' "$(date '+%Y-%m-%d %H:%M')" "$1" "$2" >> "$SPOOL"
+        printf '%s\t%s\t%s\n' "$(date '+%Y-%m-%d %H:%M')" "$1" "$spool_body" >> "$SPOOL"
         log "alert spooled (no connectivity): $1"
     fi
 }
 
 flush_spool() {
-    if [ -s "$SPOOL.previous" ]; then
-        if ntfy_push "PIA: alerte intarziate ($(hostname))" "$(tail -c "$SPOOL_MAX_BYTES" "$SPOOL.previous")"; then
-            rm -f "$SPOOL.previous"
-        else
-            return 1
-        fi
-    fi
-    [ -s "$SPOOL" ] || return 0
     net_raw_ok || return 1
-    local n body
-    n=$(wc -l < "$SPOOL")
-    body=$(cat "$SPOOL")
-    if ntfy_push "PIA: $n alerte intarziate ($(hostname))" "$body"; then
-        rm -f "$SPOOL"
-        log "spool drained ($n alerts delivered retroactively)"
-    fi
+    local file line delivered=0 remainder
+    for file in "$SPOOL.previous" "$SPOOL"; do
+        while [ -s "$file" ]; do
+            IFS= read -r line < "$file" || [ -n "$line" ] || break
+            # One stored alert per request keeps the push body comfortably below
+            # mobile push limits. Remove a line only after an HTTP-confirmed send.
+            ntfy_push "PIA: alerta intarziata ($(hostname))" "$line" || return 1
+            remainder="$file.remainder.$$"
+            tail -n +2 "$file" > "$remainder"
+            mv -f "$remainder" "$file"
+            delivered=$((delivered + 1))
+        done
+        [ -e "$file" ] && [ ! -s "$file" ] && rm -f "$file"
+    done
+    [ "$delivered" -gt 0 ] && log "spool drained ($delivered alerts delivered retroactively)"
 }
 
 # ===== RECOVERY RUNGS =====================================================
@@ -243,6 +249,22 @@ rung_reinstall() {
         rm -rf "$tmp"
         return 1
     fi
+
+    if [ -z "$INSTALLER_SHA256" ]; then
+        log "   no trusted SHA-256 configured -> NOT running the installer"
+        rm -rf "$tmp"
+        return 1
+    fi
+    local actual_sha256
+    actual_sha256=$(sha256sum "$tmp/pia.run" | awk '{print $1}')
+    if [ "$actual_sha256" != "$INSTALLER_SHA256" ]; then
+        log "   SHA-256 mismatch -> NOT running the installer"
+        alert "PIA: checksum installer invalid ($(hostname))" \
+            "SHA-256 primit: $actual_sha256; asteptat: $INSTALLER_SHA256. Installerul NU a fost executat."
+        rm -rf "$tmp"
+        return 1
+    fi
+    log "   SHA-256 verified against the pinned PIA release checksum"
 
     date +%s > "$REINSTALL_MARK"
     chmod +x "$tmp/pia.run"

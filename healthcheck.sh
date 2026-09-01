@@ -16,6 +16,31 @@ for _d in ".venv" "myenv"; do [ -f "$ROOT/$_d/bin/activate" ] && VENV="$_d" && b
 HLPY="$ROOT/$VENV/bin/python"
 { [ -x "$HLPY" ] && "$HLPY" -c "import eth_account" 2>/dev/null; } || HLPY=python3
 now=$(date +%s)
+PIA_CLI_TIMEOUT="${PIA_CLI_TIMEOUT:-6}"
+VPN_PROBE_TIMEOUT="${PIA_PROBE_TIMEOUT:-8}"
+
+pia() { timeout "$PIA_CLI_TIMEOUT" piactl "$@" 2>/dev/null | tr -d '\r'; }
+
+# Return a concise reason instead of only Connected/DOWN. Every external probe is
+# bounded, and HTTPS is explicitly bound to tun0 so it cannot escape via the ISP.
+vpn_state() {
+    [ "$(pia get connectionstate)" = "Connected" ] || { echo piactl; return; }
+    ip link show dev tun0 2>/dev/null | grep -q '<[^>]*UP[^>]*>' \
+        || { echo tun0; return; }
+    resolvectl query -i tun0 api.binance.com >/dev/null 2>&1 \
+        || { echo dns; return; }
+    curl -4 --interface tun0 --connect-timeout 4 --max-time "$VPN_PROBE_TIMEOUT" \
+        --fail --silent --show-error https://api.binance.com/api/v3/time \
+        >/dev/null 2>&1 || { echo https; return; }
+    echo ok
+}
+
+push_ntfy() {
+    local title="$1" body="$2"
+    [ -n "${TOPIC:-}" ] || return 1
+    curl --fail-with-body -sS -m 10 --retry 2 --retry-all-errors \
+        -H "Title: $title" -d "$body" "https://ntfy.sh/$TOPIC" >/dev/null
+}
 
 # Starea unei linii: ok | absent | stopped | zombie | hung.
 proc_state() {
@@ -38,6 +63,9 @@ proc_state() {
 # ===== MOD --check: preview READ-ONLY (nu atinge nimic) ====================
 if [ "$1" = "--check" ]; then
     echo "=== CHECK (read-only) $(date '+%H:%M:%S') — sursa: $MANIFEST ==="
+    vpn=$(vpn_state)
+    [ "$vpn" = ok ] && echo "  VPN              ok (piactl + tun0 + DNS + Binance HTTPS)" \
+        || echo "  VPN              FAULT ($vpn)"
     while IFS='|' read -r pat dir cmd label hblog hbstale role; do
         [ -z "$pat" ] && continue
         case "$pat" in \#*) continue;; esac
@@ -58,6 +86,8 @@ fi
 # ===== MOD --alert: DOAR alerta (ntfy) daca lipseste/e hung ceva ===========
 if [ "$1" = "--alert" ]; then
     missing=""
+    vpn=$(vpn_state)
+    [ "$vpn" != ok ] && missing="$missing VPN($vpn)"
     while IFS='|' read -r pat dir cmd label hblog hbstale role; do
         [ -z "$pat" ] && continue
         case "$pat" in \#*) continue;; esac
@@ -67,8 +97,9 @@ if [ "$1" = "--alert" ]; then
     done < "$MANIFEST"
     if [ -n "$missing" ]; then
         TOPIC=$(grep -hs NTFY_TOPIC "$ROOT/kraken/.env" "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '" ')
-        [ -n "$TOPIC" ] && curl -s -m 10 -H "Title: Procese pe server" \
-            -d "Moarte/hung:$missing  -> verifica (./bots_start.sh / flota_start)" "https://ntfy.sh/$TOPIC" >/dev/null
+        push_ntfy "Procese pe server" \
+            "Moarte/hung:$missing  -> verifica (./bots_start.sh / flota_start)" \
+            || echo "$(date '+%H:%M') ALERTA NELIVRATA: eroare HTTP/retea ntfy"
         echo "$(date '+%H:%M') ALERTA: $missing"
     else
         echo "$(date '+%H:%M') OK (toate proceselele ruleaza)"
@@ -87,8 +118,10 @@ if [ "$1" = "--supervise" ]; then
     flock -n 8 || { echo "$(date '+%H:%M') supervise deja ruleaza — sar (anti-dublare)"; exit 0; }
     SUP=/tmp/binance_sup; mkdir -p "$SUP"; WINDOW=1800; MAX=3
     TOPIC=$(grep -hs NTFY_TOPIC "$ROOT/kraken/.env" "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '" ')
-    push(){ [ -n "$TOPIC" ] && curl -s -m 10 -H "Title: $1" -d "$2" "https://ntfy.sh/$TOPIC" >/dev/null; }
+    push(){ push_ntfy "$1" "$2"; }
     alert_miss=""
+    vpn=$(vpn_state)
+    [ "$vpn" != ok ] && alert_miss=" VPN($vpn)"
     while IFS='|' read -r pat dir cmd label hblog hbstale role; do
         [ -z "$pat" ] && continue
         case "$pat" in \#*) continue;; esac
