@@ -63,7 +63,7 @@ class FinancialBenchmarkTest(unittest.TestCase):
         self.assertEqual(result["total_test_bars"], 270)
 
     def test_missing_financial_fields_fail_fast(self):
-        with self.assertRaisesRegex(ValueError, "incompletă"):
+        with self.assertRaisesRegex(ValueError, "incomplete"):
             aggregate_financial_windows([{"key": "x"}], initial_capital=3900.0)
 
 

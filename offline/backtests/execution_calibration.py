@@ -1,4 +1,4 @@
-"""Agregări pure pentru calibrarea modelului de execuție din auditul real."""
+"""Pure aggregations for calibrating the execution model from the real audit."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ _CLIENT_ORDER_ID_PATTERNS = {
 
 
 def _client_order_id_valid(venue: object, client_order_id: object) -> bool | None:
-    """Valideaza doar venue-urile cu suport; T212/necunoscut nu intra in gate."""
+    """Validate only supported venues; T212/unknown do not enter the gate."""
     pattern = _CLIENT_ORDER_ID_PATTERNS.get(str(venue or "").strip().lower())
     if pattern is None:
         return None
@@ -48,7 +48,7 @@ def distribution(values: list[float]) -> dict:
 
 
 def calibrate_execution_events(events: list[dict]) -> dict:
-    """Corelează evenimentele pe ``intent_id`` fără a presupune fill-uri lipsă."""
+    """Correlate the events by ``intent_id`` without assuming missing fills."""
     intents: dict[str, list[dict]] = {}
     for event in sorted(events, key=lambda item: float(item.get("ts") or 0.0)):
         intent_id = str(event.get("intent_id") or "").strip()
@@ -224,11 +224,11 @@ def calibrate_execution_events(events: list[dict]) -> dict:
             ),
             "can_calibrate_market_slippage": False,
             "market_slippage_blocker": (
-                "shortfall-ul decizie-fill include mișcarea pieței, spread și slippage; "
-                "auditul nu le poate separa fără bid/ask/mid la submit"
+                "the decision-to-fill shortfall includes market movement, spread and slippage; "
+                "the audit cannot separate them without bid/ask/mid at submit time"
             ),
             "can_calibrate_spread": False,
-            "spread_blocker": "auditul nu conține bid/ask la momentul deciziei",
+            "spread_blocker": "the audit holds no bid/ask at decision time",
         },
         "client_order_id_validation": {
             "supported_accepted_orders": len(supported_client_ids),

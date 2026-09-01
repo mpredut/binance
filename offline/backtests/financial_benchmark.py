@@ -1,4 +1,4 @@
-"""Scenarii și agregări pentru benchmarkuri financiare reproductibile."""
+"""Scenarios and aggregations for reproducible financial benchmarks."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from offline.backtests.walk_forward import summarize_test_windows
 
 @dataclass(frozen=True)
 class BenchmarkScenario:
-    """Ipotezele de cost/fill ale unui scenariu, fără parametri de strategie."""
+    """The cost/fill assumptions of a scenario, without strategy parameters."""
 
     name: str
     description: str
@@ -49,7 +49,7 @@ def default_scenarios() -> tuple[BenchmarkScenario, BenchmarkScenario]:
         BenchmarkScenario(
             name="stress",
             description=(
-                "fee/spread/slippage adverse și maximum 50% fill LIMIT per bară"
+                "adverse fee/spread/slippage and at most a 50% LIMIT fill per bar"
             ),
             fees=FeeModel(limit_fee_pct=0.26, market_fee_pct=0.40),
             execution=ExecutionModel(
@@ -100,18 +100,18 @@ def aggregate_financial_windows(
     initial_capital: float,
     regime_threshold_pct: float = 3.0,
 ) -> dict:
-    """Agregă TEST OOS fără a transforma reseturile în profit garantat.
+    """Aggregate OOS TEST without turning the resets into guaranteed profit.
 
-    ``sum_reset_net_pnl_usd`` adună fold-uri care pornesc fiecare cu același
-    buget și aceeași stare goală. Nu este compunere și nu simulează continuitatea
-    poziției între fold-uri; denumirea explicită previne interpretarea greșită.
+    ``sum_reset_net_pnl_usd`` adds up folds that each start with the same budget
+    and the same empty state. It is not compounding and does not simulate position
+    continuity across folds; the explicit name prevents the misreading.
     """
     if initial_capital <= 0:
-        raise ValueError("initial_capital trebuie să fie pozitiv")
+        raise ValueError("initial_capital must be positive")
     if regime_threshold_pct < 0:
         raise ValueError("regime_threshold_pct nu poate fi negativ")
     if not windows:
-        raise ValueError("benchmarkul cere cel puțin o fereastră TEST")
+        raise ValueError("the benchmark requires at least one TEST window")
 
     required = {
         "key", "return_pct", "max_drawdown_pct", "buy_hold_return_pct",
@@ -120,7 +120,7 @@ def aggregate_financial_windows(
     for window in windows:
         missing = required.difference(window)
         if missing:
-            raise ValueError(f"fereastră financiară incompletă: {sorted(missing)}")
+            raise ValueError(f"incomplete financial window: {sorted(missing)}")
 
     summary = summarize_test_windows(windows)
     metrics = [window["metrics"] for window in windows]

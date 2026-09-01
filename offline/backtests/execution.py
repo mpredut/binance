@@ -1,7 +1,7 @@
-"""Model de execuție OHLC comun adaptoarelor de replay.
+"""OHLC execution model shared by the replay adapters.
 
 Strategiile decid ordinele; acest modul descrie numai cum pot fi executate:
-spread, slippage pentru market, ordine intrabar și tranșe asincrone. Valorile
+spread, market slippage, intrabar ordering and asynchronous tranches. The values
 implicite reproduc comportamentul istoric al backtesterelor.
 """
 
@@ -17,7 +17,7 @@ _POLICIES = {"buy_first", "sell_first", "worst_case"}
 
 @dataclass(frozen=True)
 class FeeModel:
-    """Fee procentual per fill, separat pentru LIMIT și MARKET."""
+    """Percentage fee per fill, separate for LIMIT and MARKET."""
 
     limit_fee_pct: float
     market_fee_pct: float
@@ -28,7 +28,7 @@ class FeeModel:
             ("market_fee_pct", self.market_fee_pct),
         ):
             if not math.isfinite(value) or value < 0 or value >= 100:
-                raise ValueError(f"{name} trebuie să fie în intervalul [0, 100)")
+                raise ValueError(f"{name} must be within [0, 100)")
 
     def rate_pct(self, *, market: bool) -> float:
         return self.market_fee_pct if market else self.limit_fee_pct
@@ -36,7 +36,7 @@ class FeeModel:
 
 @dataclass(frozen=True)
 class ExecutionModel:
-    """Ipoteze de fill, exprimate explicit și serializabil."""
+    """Fill assumptions, stated explicitly and serialisably."""
 
     spread_bps: float = 0.0
     market_slippage_bps: float = 0.0
@@ -49,15 +49,15 @@ class ExecutionModel:
         if not math.isfinite(self.market_slippage_bps) or self.market_slippage_bps < 0:
             raise ValueError("market_slippage_bps nu poate fi negativ")
         if not math.isfinite(self.partial_fill_ratio) or not 0 < self.partial_fill_ratio <= 1:
-            raise ValueError("partial_fill_ratio trebuie să fie în intervalul (0, 1]")
+            raise ValueError("partial_fill_ratio must be within (0, 1]")
         if self.spread_bps >= 20_000:
-            raise ValueError("spread_bps trebuie să fie sub 20.000")
+            raise ValueError("spread_bps must be below 20,000")
         if self.spread_bps / 2.0 + self.market_slippage_bps >= 10_000:
-            raise ValueError("costul advers market trebuie să fie sub 100%")
+            raise ValueError("the adverse market cost must be below 100%")
         if self.intrabar_policy not in _POLICIES:
             raise ValueError(
                 f"intrabar_policy invalid: {self.intrabar_policy}; "
-                f"așteptat {sorted(_POLICIES)}"
+                f"expected {sorted(_POLICIES)}"
             )
 
     def with_policy(self, policy: str) -> "ExecutionModel":
@@ -76,7 +76,7 @@ class ExecutionModel:
         low: float,
         limit: float,
     ) -> bool:
-        """Evaluează limita contra bid/ask estimate din OHLC-ul observat."""
+        """Evaluate the limit against bid/ask estimated from the observed OHLC."""
         half_spread = self.spread_bps / 20_000.0
         if side.lower() == "buy":
             return float(low) * (1.0 + half_spread) <= float(limit)
@@ -85,7 +85,7 @@ class ExecutionModel:
         raise ValueError(f"side invalid: {side}")
 
     def market_price(self, side: str, open_price: float) -> float:
-        """Preț market advers: jumătate de spread plus slippage."""
+        """Adverse market price: half a spread plus slippage."""
         adverse = (self.spread_bps / 2.0 + self.market_slippage_bps) / 10_000.0
         if side.lower() == "buy":
             return float(open_price) * (1.0 + adverse)
@@ -102,10 +102,10 @@ def split_order_fill(
     amount_key: str | None = None,
     force_full: bool = False,
 ) -> tuple[dict, float, bool]:
-    """Extrage o tranșă și păstrează restul pe ordinul original.
+    """Take one tranche and keep the remainder on the original order.
 
-    Raportul este aplicat cantității inițiale, nu repetat cantității rămase;
-    astfel ``0.25`` închide ordinul în cel mult patru evenimente eligibile.
+    The ratio applies to the initial quantity, not repeatedly to the remainder,
+    so ``0.25`` closes the order in at most four eligible events.
     """
     remaining = float(order[quantity_key])
     if remaining <= 0:
@@ -128,7 +128,7 @@ def split_order_fill(
     complete = order[quantity_key] <= max(1e-12, original * 1e-12)
     already_filled = bool(order.get("_replay_had_fill"))
     order["_replay_had_fill"] = True
-    # DCA/trend sunt evenimente de ordin, nu câte un eveniment per partial fill.
+    # DCA/trend are order events, not one event per partial fill.
     if already_filled and fill.get("side", "").lower() == "buy":
         if fill.get("kind") in {"DCA", "TREND_ENTRY"}:
             fill["kind"] = f"{fill['kind']}_PARTIAL"
@@ -139,7 +139,7 @@ def choose_intrabar_scenario(
     model: ExecutionModel,
     run_once: Callable[[ExecutionModel], dict[str, Any]],
 ) -> dict[str, Any]:
-    """Rulează extremele deterministe și alege randamentul mai slab."""
+    """Run the deterministic extremes and pick the worse return."""
     if model.intrabar_policy != "worst_case":
         return run_once(model)
 

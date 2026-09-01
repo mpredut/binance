@@ -1,7 +1,7 @@
-"""Candidați HYPE preînregistrați, partajați de runnerele offline.
+"""Pre-registered HYPE candidates, shared by the offline runners.
 
-Lista este intenționat mică și fixă. Nu este un grid de optimizare și ordinea ei
-nu reprezintă un clasament. Fiecare schimbare rămâne implicit oprită în live.
+The list is deliberately small and fixed. It is not an optimisation grid and its
+order is not a ranking. Every change stays off by default in live.
 """
 
 from __future__ import annotations
@@ -21,13 +21,13 @@ def _tp4(name: str) -> Candidate:
 
 
 def _dca15(name: str) -> Candidate:
-    return Candidate(name, "DCA la scădere 1,5%", {"dca_drop_pct": 1.5})
+    return Candidate(name, "DCA on a 1.5% drop", {"dca_drop_pct": 1.5})
 
 
 def _dca_vol_m1(name: str) -> Candidate:
     return Candidate(
         name,
-        "mărime DCA scalată cu volatilitatea: k=-1, referință 2%",
+        "DCA size scaled by volatility: k=-1, reference 2%",
         {
             "dca_vol_scale_k": -1.0,
             "dca_vol_ref": 2.0,
@@ -51,7 +51,7 @@ def _adaptive_trail(name: str) -> Candidate:
 
 def _dca_brake(name: str) -> Candidate:
     return Candidate(
-        name, "blochează DCA în downtrend confirmat",
+        name, "block DCA in a confirmed downtrend",
         {
             "dca_trend_brake": True,
             "dca_brake_min_pct": 1.5,
@@ -73,9 +73,9 @@ def _overlay650t8() -> Candidate:
 
 
 def hype_240_candidates() -> list[Candidate]:
-    """Setul istoric al comparatorului walk-forward; păstrează numele rapoartelor."""
+    """The historical set of the walk-forward comparator; keeps the report names."""
     return [
-        Candidate("live", "configurația live neschimbată", {}),
+        Candidate("live", "the live configuration, unchanged", {}),
         Candidate(
             "overlay_orig", "overlay original: top-up 2000, trail 5%",
             {"trend_overlay": True, "trend_topup": 2000.0,
@@ -90,19 +90,19 @@ def hype_240_candidates() -> list[Candidate]:
 
 
 def financial_priority_candidates() -> list[Candidate]:
-    """Candidații care trec prin scenariile central/stress și promotion gate."""
+    """The candidates that go through the central/stress scenarios and the promotion gate."""
     return [
-        Candidate("live", "configurația live neschimbată", {}),
+        Candidate("live", "the live configuration, unchanged", {}),
         Candidate(
             "reentry4",
-            "reintrare numai după recul de 4%; candidat HLC cross-venue shadow",
+            "re-entry only after a 4% pullback; HLC cross-venue shadow candidate",
             {"reentry_drop_pct": 4.0},
         ),
         _tp4("tp4"),
         _dca15("dca15"),
         Candidate(
             "dca_progressive025",
-            "DCA 1,25% inițial, apoi +0,25pp după fiecare DCA executat",
+            "DCA 1.25% initially, then +0.25pp after each executed DCA",
             {"dca_spacing_growth_pct": 0.25},
         ),
         _dca_vol_m1("dca_vol_m1"),

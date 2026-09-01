@@ -1,9 +1,9 @@
 """Evaluator generic walk-forward pentru adaptoare de strategie.
 
-Strategia rămâne specifică venue-ului. Contractul comun este o funcție pură
-``replay(ohlc, warmup_ohlc, context) -> metrics``; astfel Kraken și Trading212
-pot folosi propriul engine live fără să copieze logica de ferestre, buy-and-hold
-și agregare. Contextul păstrează timestamp-urile necesare FX-ului istoric.
+The strategy stays venue-specific. The shared contract is a pure function
+``replay(ohlc, warmup_ohlc, context) -> metrics``, so Kraken and Trading212 can
+use their own live engine without copying the window, buy-and-hold and
+aggregation logic. The context carries the timestamps the historical FX needs.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ Ohlc = list[tuple[float, float, float, float]]
 
 @dataclass(frozen=True)
 class ReplayContext:
-    """Identitatea temporală păstrată separat de tuplele OHLC ale strategiei."""
+    """The temporal identity, kept separate from the strategy's OHLC tuples."""
 
     timestamps: tuple[int, ...]
     warmup_timestamps: tuple[int, ...]
@@ -35,14 +35,14 @@ def assess_decision_evidence(
     minimum_folds: int = 20, minimum_history_days: float = 90.0,
     minimum_cycles: int = 3,
 ) -> dict[str, Any]:
-    """Separă lipsa dovezii statistice de semnalele financiare nefavorabile.
+    """Separate a lack of statistical evidence from unfavourable financial signals.
 
-    Un worst-fold negativ nu devine automat motiv de optimizare: este un risk flag.
-    Un istoric/fold count/cycle count prea mic face rezultatul doar caracterizare,
-    indiferent dacă media este pozitivă.
+    A negative worst fold is not automatically a reason to optimise: it is a risk flag.
+    Too little history, too few folds or too few cycles makes the result mere
+    characterisation, even if the mean is positive.
     """
     if not records:
-        raise ValueError("evaluarea dovezii cere cel puțin o bară")
+        raise ValueError("evaluating the evidence requires at least one bar")
     history_days = max(
         0.0,
         (int(records[-1]["timestamp"]) - int(records[0]["timestamp"])) / 86_400.0,
@@ -87,7 +87,7 @@ def assess_decision_evidence(
 def automatic_window_sizes(sample_count: int) -> tuple[int, int, int, int]:
     """Trei fold-uri aproximative: 45% train, 10% validation, 15% test."""
     if sample_count < 20:
-        raise ValueError("sunt necesare minimum 20 de bare pentru ferestre automate")
+        raise ValueError("at least 20 bars are required for automatic windows")
     train = max(1, int(sample_count * 0.45))
     validation = max(1, int(sample_count * 0.10))
     test = max(1, int(sample_count * 0.15))

@@ -99,7 +99,7 @@ class OhlcDatasetContractTest(unittest.TestCase):
         self.assertEqual(merged[1]["close"], 12.5)
 
     def test_rejects_gap_duplicate_and_invalid_ohlc(self):
-        with self.assertRaisesRegex(ValueError, "cadență"):
+        with self.assertRaisesRegex(ValueError, "cadence"):
             validate_dataset([_rows()[0], {**_rows()[1], "timestamp": 7200}], interval_minutes=60)
         with self.assertRaisesRegex(ValueError, "duplicat"):
             validate_dataset([_rows()[0], {**_rows()[1], "timestamp": 0}])

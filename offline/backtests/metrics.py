@@ -1,7 +1,7 @@
-"""Metrici financiare comune pentru comparații de strategie.
+"""Common financial metrics for strategy comparisons.
 
-Funcțiile sunt pure și nu citesc date, config sau stare runtime. Toate randamentele
-sunt calculate din equity mark-to-market, nu doar din tranzacțiile închise.
+The functions are pure and read no data, config or runtime state. All returns are
+computed from mark-to-market equity, not only from closed trades.
 """
 
 from __future__ import annotations
@@ -21,20 +21,20 @@ def calculate_performance_metrics(
     turnover_notional: float = 0.0,
     cvar_confidence: float = 0.95,
 ) -> dict:
-    """Calculează metrici comparabile pentru o curbă de equity.
+    """Compute comparable metrics for an equity curve.
 
-    ``equity_curve`` trebuie să includă capitalul inițial ca primul punct.
-    Sharpe/Sortino/Calmar sunt ``None`` fără frecvența reală a barelor; această
-    alegere împiedică compararea falsă a seriilor de 1h cu cele de 4h/1d.
+    ``equity_curve`` must include the initial capital as its first point.
+    Sharpe/Sortino/Calmar are ``None`` without the real bar frequency; that choice
+    prevents falsely comparing 1h series with 4h/1d ones.
     """
     if initial_capital <= 0:
         raise ValueError("initial_capital trebuie să fie pozitiv")
     if not 0 < cvar_confidence < 1:
-        raise ValueError("cvar_confidence trebuie să fie între 0 și 1")
+        raise ValueError("cvar_confidence must be between 0 and 1")
 
     curve = [float(value) for value in equity_curve]
     if not curve:
-        raise ValueError("equity_curve nu poate fi goală")
+        raise ValueError("equity_curve cannot be empty")
     if not math.isclose(curve[0], initial_capital, rel_tol=1e-9, abs_tol=1e-9):
         raise ValueError("primul punct din equity_curve trebuie să fie initial_capital")
 
