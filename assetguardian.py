@@ -78,6 +78,11 @@ def _parse_symbols(raw):
 
 BUY_TIERS = _parse_tiers(BUY_TIERS_RAW)
 SELL_TIERS = _parse_tiers(SELL_TIERS_RAW)
+# Only the shallowest buy tier (the first, smallest drawdown) respects the historical
+# price anti-chasing guard, so it will not chase a shallow dip that is still near a
+# recent high (as happened on the 241 TAO buy). Deeper tiers keep bypassing it: a large
+# drawdown is a genuine entry regardless of the recent-sell reference window.
+GUARDED_BUY_THRESHOLD = min((t for t, _ in BUY_TIERS), default=None)
 TRACKED_SYMBOLS = _parse_symbols(TRACKED_SYMBOLS_RAW)
 LEGACY_BUY_SYMBOL = "BTCUSDC"
 ORDER_MISSING_CONFIRMATIONS = _required_int_config(
@@ -288,7 +293,8 @@ def sell_asset(symbol, qty, current_price, client_order_id, tier_threshold):
 
 
 def buy_with_all_cash(buy_symbol, cash_ratio=BUY_USE_CASH_RATIO,
-                      cash_amount=None, client_order_id=None):
+                      cash_amount=None, client_order_id=None,
+                      respect_guard=False):
     try:
         _, quote_asset = resolve_assets(buy_symbol)
         cash_ratio = _finite_float(cash_ratio, positive=True)
@@ -331,10 +337,13 @@ def buy_with_all_cash(buy_symbol, cash_ratio=BUY_USE_CASH_RATIO,
         f"(safe cap {cash_ratio*100:.2f}% of free cash), qty={qty:.8f}"
     )
     try:
+        # respect_guard=True keeps the historical-price anti-chasing guard active
+        # (bypass_profit_reference=False), so a shallow-dip tier will not buy far above
+        # the recent sell reference. Deeper tiers pass respect_guard=False and bypass it.
         order = mkt.place(
             buy_symbol, "BUY", current_price, qty,
             force=False, smart=False, caller_owns_retry=True,
-            bypass_profit_reference=True,
+            bypass_profit_reference=not respect_guard,
             wait_for_trend=False,
             client_order_id=client_order_id,
             motivation="assetguardian_drawdown_buy")
@@ -931,6 +940,9 @@ def _submit_sell_tier(symbol, current_price, tier, state):
 
 def _submit_buy_tier(symbol, current_price, cash_amount, tier, state):
     threshold, allocation = tier
+    # Only the first/shallowest dip tier respects the anti-chasing guard.
+    respect_guard = (GUARDED_BUY_THRESHOLD is not None
+                     and threshold == GUARDED_BUY_THRESHOLD)
     key = _tier_key(threshold)
     attempts = dict(state.get("attempts_by_tier") or {})
     attempt = int(attempts.get(key) or 0) + 1
@@ -964,6 +976,7 @@ def _submit_buy_tier(symbol, current_price, cash_amount, tier, state):
                 buy_symbol=symbol,
                 cash_amount=cash_amount,
                 client_order_id=client_order_id,
+                respect_guard=respect_guard,
             ),
         )
     except Exception as exc:
