@@ -73,7 +73,8 @@ def _touch_rtrade_heartbeat(*, force=False, now=None):
 # ``botcore.load_dotenv`` does not overwrite variables already set in the real environment.
 from botcore import (load_dotenv as _load_dotenv, required_bool_env,
                      required_env, required_float_env, required_int_env)
-_load_dotenv("rtrade_config.env")
+_load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "rtrade_config.env"))
 
 # Seconds between cancel-and-recreate attempts.
 WAIT_FOR_ORDER = required_float_env("RTRADE_WAIT_FOR_ORDER_SEC")

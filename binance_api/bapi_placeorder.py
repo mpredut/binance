@@ -33,7 +33,8 @@ from lock import trade_cooldown   # Rapid-fire gate moved into the lock package.
 # ``botcore.load_dotenv`` never overwrites variables already set in the real environment;
 # it only fills missing values, matching tradeall_config.env and monitortrades_config.env.
 from botcore import load_dotenv as _load_dotenv, required_float_env, required_int_env
-_load_dotenv("bapi_placeorder_config.env")
+_load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                          "bapi_placeorder_config.env"))
 
 # Order policy is mandatory; missing configuration aborts startup.
 PLACE_ORDER_FEE_PCT = required_float_env("PLACE_ORDER_FEE_PCT")

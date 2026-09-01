@@ -19,8 +19,9 @@ import symbols as sym
 from botcore import (load_dotenv as _load_dotenv, required_bool_env,
                      required_int_env)
 
-_load_dotenv("cachemanager_config.env")
-_load_dotenv("priceanalysis_config.env")
+_CONFIG_ROOT = os.path.dirname(os.path.abspath(__file__))
+_load_dotenv(os.path.join(_CONFIG_ROOT, "cachemanager_config.env"))
+_load_dotenv(os.path.join(_CONFIG_ROOT, "priceanalysis_config.env"))
 
 # Intentionally retained dead code for reference: an alternative shared-memory
 # IPC approach for trends instead of the current priceanalysis.json file.

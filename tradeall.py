@@ -39,7 +39,8 @@ from pricewindow import (PriceTrendAnalyzer, PriceWindow, WindowAnalyzer,
 # environment (for example, a systemd EnvironmentFile); it only fills gaps.
 from botcore import (load_dotenv as _load_dotenv, required_env,
                      required_float_env, required_int_env)
-_load_dotenv("tradeall_config.env")
+_load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "tradeall_config.env"))
 
 
 TIME_SLEEP_GET_PRICE = 0.8       # Nominal price-collection sleep interval in seconds.

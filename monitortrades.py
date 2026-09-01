@@ -29,7 +29,8 @@ import log
 # ``botcore.load_dotenv`` fills missing values without overwriting the real environment.
 # Per-instrument gain/loss/age/hard-TP configuration remains in the instrument configs.
 from botcore import load_dotenv as _load_dotenv, required_float_env
-_load_dotenv("monitortrades_config.env")
+_load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "monitortrades_config.env"))
 
 # Trading parameters are mandatory; missing configuration aborts startup.
 MT_ARE_CLOSE_TOLERANCE_PCT = required_float_env("MT_ARE_CLOSE_TOLERANCE_PCT")

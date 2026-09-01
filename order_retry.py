@@ -40,7 +40,8 @@ from providers.strategy_executor import OrderStatus, reconciliation_capabilities
 
 from botcore import (load_dotenv as _load_dotenv, required_bool_env,
                      required_float_env, required_int_env)
-_load_dotenv("order_retry_config.env")
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+_load_dotenv(os.path.join(_ROOT, "order_retry_config.env"))
 
 RETRY_ENABLED = required_bool_env("RETRY_ENABLED")
 RETRY_INTERVAL_SEC = required_float_env("RETRY_INTERVAL_SEC")
@@ -55,7 +56,6 @@ RETRY_DEDUP = required_bool_env("RETRY_DEDUP")
 RETRY_MAX_QUEUE = required_int_env("RETRY_MAX_QUEUE")
 RETRY_CLAIM_LEASE_SEC = required_float_env("RETRY_CLAIM_LEASE_SEC")
 
-_ROOT = os.path.dirname(os.path.abspath(__file__))
 QUEUE_FILE = os.path.join(_ROOT, "cachedb", "order_retry_queue.jsonl")
 LOCK_FILE = os.path.join(_ROOT, "cachedb", "order_retry_queue.lock")
 

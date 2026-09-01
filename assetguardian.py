@@ -14,7 +14,8 @@ import symbols as sym
 # Load tunable parameters from the versioned, secret-free config before reading
 # environment variables below. load_dotenv does not overwrite real environment.
 from botcore import load_dotenv as _load_dotenv
-_load_dotenv("assetguardian_config.env")
+_load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "assetguardian_config.env"))
 
 REQUIRED_CONFIG_KEYS = (
     "AG_CHECK_INTERVAL_SEC",

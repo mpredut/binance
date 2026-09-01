@@ -29,7 +29,8 @@ import providers.market_api as _market_api
 # component env files. ``botcore.load_dotenv`` never overwrites variables already set
 # in the real environment; it only fills missing values.
 from botcore import load_dotenv as _load_dotenv, required_bool_env, required_float_env
-_load_dotenv("cachemanager_config.env")
+_CONFIG_ROOT = os.path.dirname(os.path.abspath(__file__))
+_load_dotenv(os.path.join(_CONFIG_ROOT, "cachemanager_config.env"))
 
 # Dynamic-window bounds for ``get_instant_trend_for_window``. Values below the minimum
 # provide too few samples for a meaningful slope; values above the maximum add unjustified
