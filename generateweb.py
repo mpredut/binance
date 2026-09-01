@@ -21,7 +21,7 @@ import json
     # {"name": "ETHUSDT", "quantity": 1.5, "watch": False}
 # ]
 
-monede_empty = [
+coins_empty = [
 ]
 
 
@@ -66,7 +66,7 @@ def trebuie_sa_scoata_sunet():
         # The list is unchanged and the three-sound limit has been exceeded.
         return False
 
-def genereaza_html(coins, refresh_interval=10, base_url="https://5499-85-122-194-86.ngrok-free.app/"):
+def generate_html(coins, refresh_interval=10, base_url="https://5499-85-122-194-86.ngrok-free.app/"):
     sunet_activ = trebuie_sa_scoata_sunet()
     
     # Minimal CSS styling.
@@ -162,11 +162,11 @@ def genereaza_html(coins, refresh_interval=10, base_url="https://5499-85-122-194
     return html
 
 # Save output.
-def salveaza_html(html, nume_fisier="index.html"):
-    with open(nume_fisier, "w", encoding="utf-8") as f:
+def save_html(html, file_name="index.html"):
+    with open(file_name, "w", encoding="utf-8") as f:
         f.write(html)
-    print(f"File {nume_fisier} was generated successfully!")
+    print(f"File {file_name} was generated successfully!")
 
 # Generate and save.
-html_content = genereaza_html(coins)
-salveaza_html(html_content, "index.html")
+html_content = generate_html(coins)
+save_html(html_content, "index.html")

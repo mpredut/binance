@@ -218,7 +218,7 @@ class TestModuleSpecifics(unittest.TestCase):
         previous = os.environ.get(key)
         os.environ[key] = "15:0.30,25:0.30"
         try:
-            with self.assertRaisesRegex(ValueError, "exact 1"):
+            with self.assertRaisesRegex(ValueError, "exactly 1"):
                 importlib.reload(ag)
         finally:
             if previous is None:

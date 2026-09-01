@@ -464,7 +464,7 @@ class TrendState:
 def logic_small(win, enable, symbol, gradient, slope, trend_state, current_price) :
     # July 30: removed dead d/h/proposed_price locals discovered while extracting
     # FIRE_SAFEBACK_SEC from logic().
-    print(f" SE ACTIVEAZA DUPA 3.5 la slope: gradient={gradient}, slope={slope}")
+    print(f" ACTIVATES AFTER 3.5 on slope: gradient={gradient}, slope={slope}")
     if gradient < 0 and slope < -3.5:
         if enable:
             print(f"FINISH FORCE place_order_smart SELL")
@@ -622,9 +622,9 @@ def handle_symbol(symbol, current_price, price_window, price_window_big,
     slope_big, price_diff = analyzer_big.check_price_change(PRICE_CHANGE_THRESHOLD_BIG_EUR)
     logic("BIG", True, symbol, gradient, slope_big, trend_state_big, current_price)
 
-    for moneda in web.monede:
-        if moneda["nume"] == symbol:
-            moneda["watch"] = True if slope_big != 0 else False
+    for coin in web.coins:
+        if coin["name"] == symbol:
+            coin["watch"] = True if slope_big != 0 else False
 
     # Cross-process snapshot. ``monitortrades`` consumes only ``slope_small`` and
     # ``final_trend`` through ``is_trend_up``; other fields serve other consumers.
@@ -695,7 +695,7 @@ class TrendCoordinator:
             _shadow_ref = self._shadow   # _fire_order's gate reads this signal.
             print(f"[KALMAN-GATE] active, mode={KALMAN_GATE_MODE}")
         except Exception as _e:  # noqa: BLE001
-            print(f"[TrendCoordinator] shadow_signals indisponibil (continui fara): {_e}")
+            print(f"[TrendCoordinator] shadow_signals unavailable (continuing without it): {_e}")
             self._shadow = None
 
         self.trend_states = {}
@@ -829,10 +829,10 @@ class TrendCoordinator:
                 try:
                     self.evaluate(symbol)
                 except Exception as e:
-                    print(f"[TrendCoordinator] Eroare la evaluare {symbol}: {e}")
+                    print(f"[TrendCoordinator] Error while evaluating {symbol}: {e}")
             try:
-                html_content = web.genereaza_html(web.monede)
-                web.salveaza_html(html_content, "index.html")
+                html_content = web.generate_html(web.coins)
+                web.save_html(html_content, "index.html")
             except Exception as e:
                 print(f"[TrendCoordinator] Eroare la generare HTML: {e}")
 
