@@ -34,7 +34,7 @@ class RuntimeImportSafetyTest(unittest.TestCase):
 
             from binance_api import bapi_ws
             if bapi_ws.api_key_ws:
-                raise AssertionError("testul a incarcat o cheie privata")
+                raise AssertionError("the test loaded a private key")
             """
         )
         result = subprocess.run(

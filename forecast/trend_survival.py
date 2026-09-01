@@ -241,7 +241,7 @@ def main() -> int:
 
     ts, px = fetch_klines(args.symbol, args.days)
     if len(ts) < 100:
-        print(f"! prea putine date pt {args.symbol}"); return 1
+        print(f"! not enough data pt {args.symbol}"); return 1
     print(f"=== {args.symbol}: {len(ts)} lumanari 1h ({(ts[-1]-ts[0])/86400:.0f} zile), "
           f"fereastra={args.window}h pas={args.step}h ===")
     bt, bs = block_slopes(ts, px, args.window, args.step)

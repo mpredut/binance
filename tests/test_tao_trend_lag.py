@@ -57,9 +57,9 @@ class TestTrendLagPeDeclin(unittest.TestCase):
                 print(f"   +{after:>2}h       | {self.px[i]:.1f} | {d}")
             if d == "down" and flip_h is None:
                 flip_h = after
-        print(f"\n=> Trendul a ramas 'up' inca ~{flip_h}h DUPA varf, cat pretul scadea "
+        print(f"\n=> The trend stayed 'up' for another ~{flip_h}h AFTER the peak, while the price was falling "
               f"de la {self.px[self.peak_i]:.1f} la {self.px[self.peak_i + (flip_h or 0)]:.1f}.")
-        print("   In tot acest interval, TP-ul a fost blocat de 'not is_trend_up'.")
+        print("   Throughout that interval the TP was blocked by 'not is_trend_up'.")
 
     def test_chiar_la_varf_e_up(self):
         # fix la varf, inca urca pe 24h -> 'up' (corect, dar aici incepe problema)

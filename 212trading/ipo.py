@@ -68,7 +68,7 @@ def verify_instrument(client: T212Client, ticker: str, expected_isin: str) -> bo
         return True
     match = next((i for i in instruments if str(i.get("ticker", "")).upper() == ticker.upper()), None)
     if not match:
-        log(f"  ! {ticker} nu apare in metadata T212 inca — continui (poate fi intarziere)")
+        log(f"  ! {ticker} does not appear in the T212 metadata yet — continuing (it may be a delay)")
         return True
     if str(match.get("isin", "")) != expected_isin:
         log(f"  ! ISIN {match.get('isin')} != asteptat {expected_isin} — OPRESC (instrument gresit).")
@@ -125,7 +125,7 @@ def main() -> int:
         if not os.path.exists(cfg):
             avail = sorted(os.path.basename(p)[7:-4]
                            for p in glob.glob(os.path.join(cfg_dir, "config.*.env")))
-            log(f"! profil necunoscut '{profile}' (lipseste {cfg})")
+            log(f"! unknown profile '{profile}' (is missing {cfg})")
             log(f"  profile disponibile: {', '.join(avail) or '(niciunul)'}")
             return 2
         profile_file = cfg
@@ -210,7 +210,7 @@ def main() -> int:
     log(f"    mediu T212   : {t212_env.upper()}")
     log(f"    mod          : {'STRATEGIE (DCA+TP)' if strat_enabled else 'ordin unic'}")
     log(f"    executie     : {'PAPER (fara bani)' if (strat_dry if strat_enabled else order_dry) else '⚠ REAL — BANI ADEVARATI'}")
-    log(f"    lansare      : verific pana {label} e lansat (deja-listat: imediat; IPO: la deschidere)")
+    log(f"    lansare      : checking until {label} is launched (already listed: immediately; IPO: at the open)")
     log(f"    ntfy/email   : {os.environ.get('NTFY_TOPIC') or '-'} / {os.environ.get('ALERT_TO_EMAIL') or '-'}")
 
     # --- PRE-FLIGHT: verify the instrument at STARTUP so configuration errors are caught
@@ -236,13 +236,13 @@ def main() -> int:
                              order_price, order_qty, order_budget_ron, order_validity,
                              order_dry, args.desktop)
     except KeyboardInterrupt:
-        log("Oprit manual.")
+        log("Stopped manually.")
         return 130
 
 
 def _wait_for_launch(args, yahoo_symbol, label, interval) -> bool:
     """Wait until the symbol is actually trading; return False if interrupted."""
-    log(f"    Astept lansarea {label}... (Ctrl+C ca sa opresc)")
+    log(f"    Waiting for the launch {label}... (Ctrl+C to stop)")
     try:
         while True:
             if args.market_hours_only and not in_market_window():
@@ -267,13 +267,13 @@ def _wait_for_launch(args, yahoo_symbol, label, interval) -> bool:
                        desktop=args.desktop)
                 return True
             if m:
-                log(f"ping - astept lansarea  |  pret={m.get('price')} vol={m.get('volume')} "
+                log(f"ping - waiting for the launch  |  pret={m.get('price')} vol={m.get('volume')} "
                     f"state={m.get('state')} age={m.get('age_min')}min")
             else:
                 log("ping - simbol indisponibil pe feed")
             time.sleep(interval)
     except KeyboardInterrupt:
-        log("Oprit manual.")
+        log("Stopped manually.")
         return False
 
 
@@ -295,7 +295,7 @@ def _cmd_find_ticker(client: T212Client, query: str) -> int:
         log(f"  ticker={h.get('ticker'):<20} name={h.get('name')}  "
             f"currency={h.get('currencyCode')}  isin={h.get('isin')}")
     if not hits:
-        log(f"  Niciun rezultat pentru '{query}'")
+        log(f"  No result for '{query}'")
     return 0
 
 
@@ -315,12 +315,12 @@ def _cmd_test_notify(what: str, label: str, desktop: bool) -> int:
 def _cmd_test_order(client, ticker, order_price, order_qty, order_budget_ron,
                     order_validity, order_dry, desktop) -> int:
     if not order_price:
-        log("! ORDER_PRICE lipsa in .env"); return 1
+        log("! ORDER_PRICE missing in .env"); return 1
     if not order_qty and not order_budget_ron:
         log("! ORDER_QTY or ORDER_BUDGET_RON missing from .env"); return 1
     qty = resolve_quantity(order_price, order_qty, order_budget_ron)
     if not qty or qty <= 0:
-        log("! cantitate invalida"); return 1
+        log("! invalid quantity"); return 1
     ok = place_order_with_retry(client, ticker, qty, order_price, order_validity,
                                 order_dry, desktop=desktop, write_marker=False)
     return 0 if ok else 1

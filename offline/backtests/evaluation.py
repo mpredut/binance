@@ -114,7 +114,7 @@ def evaluate_segment(
     warmup_records: Sequence[dict] = (),
 ) -> dict:
     if not records:
-        raise ValueError("segmentul de evaluare nu poate fi gol")
+        raise ValueError("segmentul de evaluare cannot be empty")
     metrics = replay(
         to_ohlc(records),
         to_ohlc(warmup_records),

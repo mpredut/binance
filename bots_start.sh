@@ -16,7 +16,7 @@ MANIFEST="$ROOT/procs.conf"
 VENV=""
 for _d in ".venv" "myenv"; do [ -f "$ROOT/$_d/bin/activate" ] && VENV="$_d" && break; done
 
-[ -f "$MANIFEST" ] || { echo "❌ lipseste $MANIFEST"; exit 1; }
+[ -f "$MANIFEST" ] || { echo "❌ is missing $MANIFEST"; exit 1; }
 
 # Curatenie legacy: vechile procese 'ipo.py --profile' (inlocuite de t212_bot.py)
 pkill -f "ipo.py --profile" 2>/dev/null || true

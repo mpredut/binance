@@ -126,7 +126,7 @@ def main() -> int:
     if fails:
         print(f"=== {len(fails)} VERIFICARI ESUATE ===")
         return 1
-    print("=== TOATE VERIFICARILE AU TRECUT ===")
+    print("=== ALL CHECKS PASSED ===")
     return 0
 
 

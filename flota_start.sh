@@ -77,7 +77,7 @@ if [ -f "$MANIFEST" ]; then
     done < "$MANIFEST"
 fi
 if [ "${#scripts[@]}" -eq 0 ]; then
-    echo "❌ Nicio intrare role=fleet in $MANIFEST. Abort!"
+    echo "❌ No role=fleet entry in $MANIFEST. Abort!"
     exit 1
 fi
 
@@ -130,7 +130,7 @@ for i in "${!scripts[@]}"; do
     log="${LOGS[$i]}"
 
     if kill -0 "$PID" 2>/dev/null; then
-        echo "✔ Pornit $script (PID=$PID) → $log"
+        echo "✔ Started $script (PID=$PID) → $log"
     else
         echo "❌ $script crashed on startup! See the log:"
         tail -20 "$log"
@@ -149,7 +149,7 @@ fi
 
 # Show every running Python process.
 echo
-echo "Procese Python active:"
+echo "Active Python processes:"
 ps aux | grep '[p]ython'
 
 # ===== Watchdog (cron la 5 min) — instalat/refresh idempotent =====

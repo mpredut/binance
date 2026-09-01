@@ -18,5 +18,5 @@ def coin_available(client: HLClient, coin: str) -> bool:
     try:
         return client.coin_listed(coin) and client.mid(coin) is not None
     except Exception as e:  # noqa: BLE001
-        log(f"  ! coin_available({coin}) esuat: {e}")
+        log(f"  ! coin_available({coin}) failed: {e}")
         return False

@@ -584,7 +584,7 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=No
                   f"mediana={est.get('median_d')}z, P90={est.get('p90_d')}z)")
         except Exception as e:
             T_quanta = 14
-            print(f"[{symbol}] estimarea T a esuat ({e}) — folosesc prior T=14")
+            print(f"[{symbol}] estimarea T failed ({e}) — using the prior T=14")
 
     all_trend_data = cm.get_cache_manager("PriceLongTrend").cache
     if symbol not in all_trend_data:
@@ -624,7 +624,7 @@ def get_weight_for_cash_permission_at_quant_time(symbol, order_type, T_quanta=No
     )
 
     if len(w) == 0:
-        print(f"[{symbol}] w gol, return None")
+        print(f"[{symbol}] w is empty, returning None")
         return None
 
     current_weight = float(w[0])  # The slice's first value is the current weight.

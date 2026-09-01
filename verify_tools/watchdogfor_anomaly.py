@@ -155,7 +155,7 @@ def check_once(now=None):
 
     if not fired:
         wc.save_state(STATE_FILE, state)
-        print(f"[anomaly] OK — {scanned} linii noi scanate; "
+        print(f"[anomaly] OK — {scanned} new lines scanned; "
               + ", ".join(f"{c}={counts[c]}" for c in _CATS))
         return False
 

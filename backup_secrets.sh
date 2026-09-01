@@ -17,7 +17,7 @@ cd "$ROOT"
 LIST="$(git ls-files --others --ignored --exclude-standard \
     | grep -vE '^(myenv|\.venv)/' \
     | grep -vE '(__pycache__|\.pyc$|\.log($|\.)|\.lock$|^index\.html$|^\.claude/)')"
-[ -n "$LIST" ] || { echo "❌ nimic de salvat (git ls-files gol?)"; exit 1; }
+[ -n "$LIST" ] || { echo "❌ nothing to save (git ls-files gol?)"; exit 1; }
 
 rm -rf "$OUT"; mkdir -p "$OUT"
 printf '%s\n' "$LIST" | tar cf - -C "$ROOT" -T - | tar xf - -C "$OUT"

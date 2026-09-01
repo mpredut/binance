@@ -48,7 +48,7 @@ def resolve_quantity(order_price: float,
         qty = order_budget_ron / (order_price * rate)
         log(f"  [ORDER] {order_budget_ron} RON / ({order_price} USD × {rate:.2f}) = {qty:.4f} actiuni")
         if qty < 1:
-            log(f"  ! [ORDER] buget < pretul unei actiuni (~{order_price*rate:.0f} RON) "
+            log(f"  ! [ORDER] budget < the price of one share (~{order_price*rate:.0f} RON) "
                 f"-> ordin FRACTIONAR ({qty:.4f}). T212 poate refuza fractional pe instrument nou.")
         return qty
     return None
@@ -134,7 +134,7 @@ def _write_marker(ticker: str, result: dict) -> None:
         "lifecycle": "accepted", "order_id": result.get("id"),
         "venue_status": result.get("status"), "order": result,
     }, _marker_path(ticker))
-    log(f"  [ORDER] marker scris: {_marker_path(ticker)}")
+    log(f"  [ORDER] marker written: {_marker_path(ticker)}")
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +258,7 @@ def _reconcile_record(client: T212Client, record: dict, marker_path: str,
         log(f"  [ORDER] raspuns pierdut recuperat: id={record['order_id']}")
         return "waiting"
     if len(matches) > 1:
-        log("  ! [ORDER] mai multe ordine T212 se potrivesc intentiei — pastrez pending")
+        log("  ! [ORDER] several T212 orders match the intent — keeping it pending")
         return "waiting"
 
     before_qty = record.get("before_qty")
@@ -357,7 +357,7 @@ def place_order_with_retry(
             and abs(float(record.get("limit_price") or 0.0) - price_r) <= 0.011
         )
         if not same_intent:
-            log("  ! [ORDER] alta intentie exista deja in marker — NU suprascriu")
+            log("  ! [ORDER] another intent already exists in the marker — NOT overwriting")
             return False
         lifecycle = str(record.get("lifecycle") or "").lower()
         if lifecycle == "filled":

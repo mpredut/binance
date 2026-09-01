@@ -409,13 +409,13 @@ class _LivePairVenue:
         side = side.upper()
         price = float(self.current_price() or 0.0)
         if price <= 0:
-            print(f"[{self.symbol}] {side} hard-stop BLOCAT: pret indisponibil")
+            print(f"[{self.symbol}] {side} hard-stop BLOCKED: price unavailable")
             return None
         decision = decide_quantity(
             self.executor, self.symbol, side, price, qty, apply_policy=False)
         final_qty = float(decision.final_qty)
         if final_qty <= 0:
-            print(f"[{self.symbol}] {side} hard-stop BLOCAT: "
+            print(f"[{self.symbol}] {side} hard-stop BLOCKED: "
                   f"{decision.refuse_reason} asset={decision.balance_asset}")
             return None
         precision = self.audited_executor.pair_precision(self.symbol)
@@ -423,7 +423,7 @@ class _LivePairVenue:
             quantum = Decimal(1).scaleb(-int(precision.volume_decimals))
             final_qty = float(Decimal(str(final_qty)).quantize(quantum, rounding=ROUND_DOWN))
             if final_qty <= 0 or final_qty < float(precision.order_min or 0.0):
-                print(f"[{self.symbol}] {side} hard-stop BLOCAT: qty {final_qty} "
+                print(f"[{self.symbol}] {side} hard-stop BLOCKED: qty {final_qty} "
                       f"sub minim {precision.order_min}")
                 return None
         kind = f"rtrade:{reason}:{pair_id or 'unknown-pair'}"
@@ -466,7 +466,7 @@ class _LivePairVenue:
                     break
             return True
         except Exception as exc:  # noqa: BLE001 — the coordinator decides how to fail closed.
-            print(f"[{self.symbol}] pair cancel {order_id} esuat: {exc}")
+            print(f"[{self.symbol}] pair cancel {order_id} failed: {exc}")
             return False
 
 
@@ -872,7 +872,7 @@ class TradingBot:
                     }
                     pair_store.checkpoint(record["pair_id"], state, terminal=False)
                 except Exception as exc:
-                    print(f"[{self.symbol}] RECOVERY BLOCAT: pair={record.get('pair_id')} {exc}")
+                    print(f"[{self.symbol}] RECOVERY BLOCKED: pair={record.get('pair_id')} {exc}")
                     recovery_blocked = True
                     continue
             try:
@@ -881,7 +881,7 @@ class TradingBot:
                 print(f"[{self.symbol}] pair={coordinator.pair_id} adoptat "
                       f"phase={coordinator.phase} tickets={len(coordinator.tickets)}")
             except Exception as exc:
-                print(f"[{self.symbol}] RECOVERY BLOCAT: {exc}")
+                print(f"[{self.symbol}] RECOVERY BLOCKED: {exc}")
                 recovery_blocked = True
 
         try:
@@ -901,7 +901,7 @@ class TradingBot:
                 # An RT_ order without local intent cannot be safely associated with a
                 # round because its ID is hashed. Cancel it instead of inventing state.
                 venue.executor.cancel_order(self.symbol, order_id)
-                print(f"[{self.symbol}] recovery: ordin RT_ orfan anulat "
+                print(f"[{self.symbol}] recovery: orphaned RT_ order cancelled "
                       f"order_id={order_id} client_id={client_id}")
             if orphan_orders:
                 remaining = {
@@ -913,11 +913,11 @@ class TradingBot:
                     if str(order["orderId"]) in remaining
                 ]
                 if not_canceled:
-                    print(f"[{self.symbol}] RECOVERY BLOCAT: anulare neconfirmata "
+                    print(f"[{self.symbol}] RECOVERY BLOCKED: unconfirmed cancellation "
                           f"pentru ordinele RT_ {not_canceled}")
                     recovery_blocked = True
         except Exception as exc:
-            print(f"[{self.symbol}] RECOVERY BLOCAT: inventar exchange indisponibil ({exc})")
+            print(f"[{self.symbol}] RECOVERY BLOCKED: exchange inventory unavailable ({exc})")
             recovery_blocked = True
         last_start_at = float("-inf")
         next_direction = 0

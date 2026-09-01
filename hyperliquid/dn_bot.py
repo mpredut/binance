@@ -53,7 +53,7 @@ def _cmd_status(client: HLClient, params: DNParams) -> int:
     if liq > 0 and szi < 0:
         dist = (liq - perp_px)/perp_px*100
         flag = "⚠ PERICOL" if dist < params.liq_alert_pct else "ok"
-        log(f"  LICHIDARE   : short la {liq:.4f}  (pretul mai poate urca {dist:.1f}% pana acolo)  [{flag}]")
+        log(f"  LICHIDARE   : short la {liq:.4f}  (the price mai poate urca {dist:.1f}% pana acolo)  [{flag}]")
     else:
         log(f"  LICHIDARE   : (fara short deschis)")
     log(f"  FUNDING     : {fhr*100:+.5f}%/ora  (~{fhr*24*365*100:.1f}%/an)  est. ~${est_day:+.3f}/zi pe pozitia curenta")
@@ -125,7 +125,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
                 f"liq={'%.2f' % liq if liq else '-'} funding={fhr*100:+.4f}%/h px={perp_px:.4f}"
                 if fhr is not None else f"  [WATCH] spot={spot_qty:.4f} perp={szi:.4f} (funding indisponibil)")
         except KeyboardInterrupt:
-            log("  [WATCH] oprit manual."); return 0
+            log("  [WATCH] stopped manually."); return 0
         except Exception as e:  # noqa: BLE001 — one error must not terminate the monitor
             errors += 1
             log(f"  ! [WATCH] eroare (#{errors}): {e!r} — continui")
@@ -211,7 +211,7 @@ def main() -> int:
         DeltaNeutral(client, params, dry_run=dry, desktop=False).run()
         return 0
     except KeyboardInterrupt:
-        log("Oprit manual."); return 130
+        log("Stopped manually."); return 130
 
 
 if __name__ == "__main__":

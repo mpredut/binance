@@ -30,7 +30,7 @@ def main():
             except json.JSONDecodeError:
                 continue
     if not rows:
-        print(f"[slice] {src} gol/lipsa", file=sys.stderr)
+        print(f"[slice] {src} gol/missing", file=sys.stderr)
         sys.exit(1)
 
     def ts_of(r):

@@ -52,7 +52,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders=None):
         print("Eroare la obtinerea pretului...")
         return
     
-    print(f"Pretul curent : {current_price:.2f}")
+    print(f"The current price : {current_price:.2f}")
     
     initial_prices = initial_sell_prices if order_type == "SELL" else initial_buy_prices
     
@@ -77,7 +77,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders=None):
             difference_percent = abs(current_price - initial_prices[order_id]) / initial_prices[order_id] * 100
             are_close = u.are_close(current_price, initial_prices[order_id], MAX_PROC)
             if not are_close:
-                print(f"Totusi pretul s-a modificat prea mult ({difference_percent}%) fata de pretul initial ({initial_prices[order_id]}). Nu se mai modifica ordinul.")
+                print(f"However the price moved too much ({difference_percent}%) compared with the initial price ({initial_prices[order_id]}). The order is no longer modified.")
                 continue
             else:
                 print(f"Current price {current_price} and initial {order_type} price {initial_prices[order_id]} are close!")

@@ -198,9 +198,9 @@ def main():
     print(f"\n{'='*60}")
     print(f"  SUMMARY: OK={ok}  DEAD={[l for l,_ in mort]}  WARN={[l for l,_ in warn]}")
     if actions:
-        print(f"  ACTIUNI: {actions}")
+        print(f"  ACTIONS: {actions}")
     else:
-        print(f"  ACTIUNI: nicio interventie necesara")
+        print(f"  ACTIONS: no intervention needed")
     print(f"{'='*60}\n")
 
     c.close()

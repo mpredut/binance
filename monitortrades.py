@@ -273,7 +273,7 @@ def is_trend_up(symbol):
             gradient = float(snap.get('final_trend', 0.0) or 0.0)
             return slope > 0 or (slope == 0 and gradient > 0)
     except Exception as e:
-        print(f"is_trend_up: snapshot direct esuat ({e}) — tratez ca neutru")
+        print(f"is_trend_up: snapshot direct failed ({e}) — treating it as neutral")
     return False   # Missing or stale data is neutral and does not block a profitable sale.
 
 
@@ -527,7 +527,7 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
                     _hard_tp_last[symbol] = current_time_s
                     return   # Already sold this tick; do not use stale balance below.
             else:
-                print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% dar in cooldown (ultimul acum "
+                print(f"[HARD-TP] {symbol} +{price_increase*100:.1f}% dar in cooldown (the last one "
                       f"{u.secondsToHours(current_time_s - _hard_tp_last.get(symbol, 0)):.1f}h)")
         # 3.1. Evaluate the existing SELL placement rules.
         if price_increase > gain_threshold or u.are_close(price_increase, gain_threshold, target_tolerance_percent=MT_ARE_CLOSE_TOLERANCE_PCT):
@@ -575,7 +575,7 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
                     _pos_value = avail_qty * current_price
                     _projected_value = _pos_value + (_buy_qty * current_price)
                     if max_budget and _projected_value > max_budget:
-                        print(f"[{symbol}] plafon buget depasit post-trade "
+                        print(f"[{symbol}] budget cap depasit post-trade "
                               f"({_projected_value:.0f} > {max_budget} USD) — nu cumpar")
                     else:
                         _place_guarded(inst, "BUY", current_price + MT_BUY_PRICE_OFFSET, _buy_qty, min_qty,

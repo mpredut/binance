@@ -79,7 +79,7 @@ def run_replay(
     reads five-minute Yahoo bars and rejects other cadences.
     """
     if not ohlc:
-        raise ValueError("ohlc nu poate fi gol")
+        raise ValueError("ohlc cannot be empty")
     if params.dca_trend_gate_pct > 0 and bar_minutes != 5:
         raise ValueError(
             "dca_trend_gate_pct requires 5-minute bars, the same cadence as the live Yahoo signal"

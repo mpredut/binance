@@ -116,7 +116,7 @@ if [ "$1" = "--supervise" ]; then
         exit 0
     }
     exec 8>/tmp/binance_supervise.lock
-    flock -n 8 || { echo "$(date '+%H:%M') supervise deja ruleaza — sar (anti-dublare)"; exit 0; }
+    flock -n 8 || { echo "$(date '+%H:%M') supervise is already running — skipping (anti-duplication)"; exit 0; }
     SUP=/tmp/binance_sup; mkdir -p "$SUP"; WINDOW=1800; MAX=3
     TOPIC=$(grep -hs NTFY_TOPIC "$ROOT/kraken/.env" "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '" ')
     push(){ push_ntfy "$1" "$2"; }
@@ -153,7 +153,7 @@ if [ "$1" = "--supervise" ]; then
         ( cd "$dir" && eval "$cmd" ) 8>&-                     # restart curat ($ROOT/$VENV expandate aici)
         cnt=$((cnt + 1)); echo "$cnt $ws" > "$SUP/$label"; rm -f "$SUP/$label.esc"
         push "Bot restarted" "$label ($st) -> RESTARTED (attempt $cnt/$MAX)"
-        echo "$(date '+%H:%M') $label REPORNIT ($st, incercarea $cnt)"
+        echo "$(date '+%H:%M') $label RESTARTED ($st, attempt $cnt)"
     done < "$MANIFEST"
     [ -n "$alert_miss" ] && { push "Processes to check" "Dead/hung (not restarted from here):$alert_miss"; echo "$(date '+%H:%M') fleet alert:$alert_miss"; }
     [ -z "$alert_miss" ] && echo "$(date '+%H:%M') supervise: flota OK"
@@ -161,7 +161,7 @@ if [ "$1" = "--supervise" ]; then
 fi
 
 echo "============ HEALTHCHECK $(date '+%Y-%m-%d %H:%M') ============"
-echo "=== PROCESE (etime = de cat ruleaza) ==="
+echo "=== PROCESSES (etime = how long they have run) ==="
 ps -eo etime,args | grep -E "dn_bot|kraken_bot|kraken_xstock_watch|t212_bot|ipo.py|trailing_stop|cacheManager|priceAnalysis|tradeall|rtrade|monitortrades|market_alerts|run_price_monitor|assetguardian" | grep -v grep
 
 echo "=== HYPERLIQUID DN ==="

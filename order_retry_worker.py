@@ -119,7 +119,7 @@ def process_once(mkt, now=None):
         try:
             price = mkt.get_current_price(symbol)
         except Exception as e:  # noqa: BLE001
-            print(f"[order_retry] pret indisponibil {symbol} ({e}) — sar, ramane in coada")
+            print(f"[order_retry] price unavailable {symbol} ({e}) — sar, it stays in the queue")
             continue
         if price is None:
             continue   # unavailable price: retain in queue and retry next time
@@ -241,7 +241,7 @@ def process_once(mkt, now=None):
                 attempt=int(r.get("attempts") or 0) + 1)
             order = mkt.place(symbol, r.get("side"), price, r.get("qty"), **kwargs)
         except Exception as e:  # noqa: BLE001
-            print(f"[order_retry] retry {r.get('side')} {symbol} a aruncat ({e}) — tratez ca esec")
+            print(f"[order_retry] retry {r.get('side')} {symbol} a aruncat ({e}) — treating it as a failure")
             order = None
         accepted = _accepted_order(order)
         if not accepted:
@@ -333,7 +333,7 @@ def main():
     # Re-enabling already requires a process restart because RETRY_ENABLED is read at
     # import, so remain idle until the next fleet restart without spamming supervision.
     if not oq.RETRY_ENABLED:
-        print("[order_retry] RETRY_ENABLED=false — worker VIU dar inactiv (idle).")
+        print("[order_retry] RETRY_ENABLED=false — worker ALIVE but inactive (idle).")
         while True:
             time.sleep(60)
 

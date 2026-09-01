@@ -42,7 +42,7 @@ def _install_retry(cl):
         cl.session.mount("https://", adapter)
         cl.session.mount("http://", adapter)
     except Exception as e:  # noqa: BLE001 — a timeout still provides protection if setup fails.
-        print(f"[bapi_client] _install_retry esuat (ignor, ramane timeout): {e}")
+        print(f"[bapi_client] _install_retry failed (ignor, ramane timeout): {e}")
 
 
 def sync_time(safety_margin_ms=TIME_SAFETY_MARGIN_MS):

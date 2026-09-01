@@ -89,7 +89,7 @@ class T212Client:
             log("  ! T212 rate limit (429)")
             return None
         if status in (401, 403):
-            log(f"  ! T212 auth esuat ({status}) - verifica cheia")
+            log(f"  ! T212 auth failed ({status}) - check the key")
             return None
         if status != 200 or not body:
             return None
@@ -277,7 +277,7 @@ class T212Client:
         if status == 429:
             log(f"  ! T212 {what}: rate limit (429) — indisponibil temporar")
         elif status in (401, 403):
-            log(f"  ! T212 {what}: auth esuat ({status}) — verifica cheia")
+            log(f"  ! T212 {what}: auth failed ({status}) — check the key")
         elif status == 0:
             log(f"  ! T212 {what}: timeout/retea (status 0)")
         else:

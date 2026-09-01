@@ -153,7 +153,7 @@ def main() -> int:
 
     ohlc = fetch_candles(args.pair, args.interval)
     if len(ohlc) < 40:
-        print(f"! prea putine date ({len(ohlc)})"); return 1
+        print(f"! not enough data ({len(ohlc)})"); return 1
     closes = [x[3] for x in ohlc]
     bh = (closes[-1] - closes[0]) / closes[0] * 100
     print(f"=== {args.pair} interval={args.interval}m ({len(ohlc)} bare) — buy&hold {bh:+.1f}% ===")

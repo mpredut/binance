@@ -160,7 +160,7 @@ def main() -> int:
     ap.add_argument("--disc", type=float, default=0.2); ap.add_argument("--drop", type=float, default=2.0)
     ap.add_argument("--tp", type=float, default=1.9); ap.add_argument("--maxdca", type=int, default=10)
     ap.add_argument("--budget", type=float, default=1000); ap.add_argument("--fee", type=float, default=0.25)
-    ap.add_argument("--sl", type=float, default=10.0, help="stop-loss %% (0=oprit)")
+    ap.add_argument("--sl", type=float, default=10.0, help="stop-loss %% (0=stopped)")
     ap.add_argument("--fast", action="store_true",
                     help="simulate() rapid (fill OHLC aproximativ, optimist pe stop) in loc de motorul LIVE faithful")
     args = ap.parse_args()
@@ -179,7 +179,7 @@ def main() -> int:
     except Exception as e:  # noqa: BLE001
         print(f"! eroare date: {e}"); return 1
     if len(ohlc) < 20:
-        print(f"! prea putine date ({len(ohlc)})"); return 1
+        print(f"! not enough data ({len(ohlc)})"); return 1
     closes = [x[3] for x in ohlc]
     bh = (closes[-1] - closes[0]) / closes[0] * 100
     base = dict(entry=args.entry, dca=args.dca, disc=args.disc, drop=args.drop,
@@ -193,7 +193,7 @@ def main() -> int:
         wr = 100*m["wins"]/m["cycles"] if m["cycles"] else 0
         print(f"=== BACKTEST KRAKEN {args.pair} interval={args.interval}m ({len(ohlc)} bare) [{engine}] ===")
         print(f"  params: entry={args.entry} dca={args.dca} drop={args.drop}% tp={args.tp}% sl={args.sl}% fee={args.fee}%/leg")
-        print(f"  TOTAL REAL: {tot:+.2f}% din buget  ⇐ realizat ${m['realized']:+.2f} + pozitie deschisa ${m['final_upnl']:+.2f} - fee ${m['fees']:.2f}")
+        print(f"  TOTAL REAL: {tot:+.2f}% din budget  ⇐ realizat ${m['realized']:+.2f} + pozitie deschisa ${m['final_upnl']:+.2f} - fee ${m['fees']:.2f}")
         print(f"  (realizat singur: {m['net']/args.budget*100:+.2f}%)")
         print(f"  cicluri: {m['cycles']}  win-rate {wr:.0f}%   max drawdown ${m['maxdd']:.2f}")
         if not args.fast:

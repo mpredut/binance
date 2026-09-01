@@ -189,12 +189,12 @@ class TrailingStop:
             # empty account identically is safe because there is nothing to protect.
             if not isinstance(balances, list) or not balances:
                 self._balances = []
-                self.log("  ! [TRAIL] snapshot balante gol/invalid — sar tick-ul")
+                self.log("  ! [TRAIL] empty or invalid balance snapshot — skipping the tick")
                 return False
             self._balances = balances
             return True
         except Exception as e:  # noqa: BLE001
-            self.log(f"  ! [TRAIL] balante indisponibile ({e}) — sar tick-ul")
+            self.log(f"  ! [TRAIL] balante indisponibile ({e}) — skipping the tick")
             return False
 
     def free_qty(self, asset: str) -> float:
@@ -282,10 +282,10 @@ class TrailingStop:
                  f"vinde sub {stop_at:.4f} (-{trail}%)")
 
     def log_skip_rebuy_trend(self, asset) -> None:
-        self.log(f"  [TRAIL] re-buy {asset} amanat — trend instant CLAR jos (nu prind cutitul)")
+        self.log(f"  [TRAIL] re-buy {asset} deferred — trend instant CLAR jos (nu prind cutitul)")
 
     def log_skip_sell_trend(self, key, asset, pair, trail) -> None:
-        self.log(f"  [TRAIL] {pair}: -{trail}% atins dar trend instant SUS — NU vand (anti-wick)")
+        self.log(f"  [TRAIL] {pair}: -{trail}% reached dar trend instant SUS — NU vand (anti-wick)")
 
     def log_item_error(self, key, e) -> None:
         self.log(f"  ! [TRAIL] {key}: {e}")
@@ -296,7 +296,7 @@ class TrailingStop:
 
     def run(self):
         mode = "⚠ ACTIV (vinde real)" if self.enabled else "DRY-RUN (doar logheaza)"
-        self.log(f"=== TRAILING STOP pornit — {mode} ===")
+        self.log(f"=== TRAILING STOP started — {mode} ===")
         self.log(f"    monede/praguri: " +
                  ", ".join(f"{s}={self.trail_pct_for(s)}%" for s in self.sym.symbols))
         while True:

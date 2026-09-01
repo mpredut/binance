@@ -1330,7 +1330,7 @@ class CachePriceShortTrendManager:
             c24.subscribe_price(self)                       # tick signal to the fast channel
             print(f"[InstantTrend][{s}] " + " ".join(parts))
           except Exception as _e:
-            builtins.print(f"[InstantTrend][{s}] setup esuat ({_e}) — sar peste, Binance neafectat")
+            builtins.print(f"[InstantTrend][{s}] setup failed ({_e}) — skipping, Binance neafectat")
         self._computing = True
         self._start_flush_loop()        # Decouple file I/O into a background thread.
         if run_full_eval:
@@ -1450,7 +1450,7 @@ class CachePriceShortTrendManager:
         try:
             entries = c24.get_recent_entries(symbol, last_seconds=clamped)
         except Exception as e:
-            print(f"[get_instant_trend_for_window] {symbol}: get_recent_entries a esuat ({e})")
+            print(f"[get_instant_trend_for_window] {symbol}: get_recent_entries failed ({e})")
             return None
         if len(entries) < 3:
             return None   # Too few samples means unknown, not a noisy assumption.
@@ -2042,7 +2042,7 @@ def _initialize_once():
         return
     sys.modules["_cacheManager_initialized"] = True
     enable_real_ws_event_sync()
-    print("⚙️ cacheManager: WS user-data bridge pornit (execution reports).")
+    print("⚙️ cacheManager: WS user-data bridge started (execution reports).")
 
 # The user-data WebSocket bridge is opt-in and does not start during import. Processes
 # that need real-time execution reports enable it explicitly:
@@ -2102,7 +2102,7 @@ def _start_nonbinance_trend_poller(cpm, symbols, interval_sec=20,
                     if p is not None and float(p) > 0:
                         cpm._push_price(s, float(p))
                 except _futures.TimeoutError:
-                    builtins.print(f"[NB-trend] {s}: fetch BLOCAT >{fetch_deadline_sec}s "
+                    builtins.print(f"[NB-trend] {s}: fetch BLOCKED >{fetch_deadline_sec}s "
                                    f"(deadline dur — probabil DNS/retea) — sar peste, reincerc ciclul urmator")
                 except Exception as _e:
                     builtins.print(f"[NB-trend] {s}: {_e}")
@@ -2166,7 +2166,7 @@ if __name__ == "__main__":
         _trend_cache24 = CacheFactory.get("Price24")
         _trend_mgr = get_short_trend_manager(symbols=_trend_syms, writer=True)   # Sole file writer.
         _trend_mgr.start_computation(_trend_cache24, _trend_cpm, run_full_eval=True)
-        print("⚙️ cacheManager: calcul trend complet pornit (cache_instant_trend.json).")
+        print("⚙️ cacheManager: full trend computation started (cache_instant_trend.json).")
         if _nb_syms:   # WebSocket covers Binance only; push other prices manually.
             _nb_poller = _start_nonbinance_trend_poller(_trend_cpm, _nb_syms, interval_sec=20)
     except Exception as e:
@@ -2176,7 +2176,7 @@ if __name__ == "__main__":
         for t in threads:
             t.join()
     except KeyboardInterrupt:
-        print("Oprit manual.")
+        print("Stopped manually.")
     finally:
         print("Cleanup / releasing resources...")
         if _nb_poller is not None:

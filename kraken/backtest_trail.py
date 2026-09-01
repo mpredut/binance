@@ -116,7 +116,7 @@ def run_compare(pairs, intervals):
             except Exception as e:  # noqa: BLE001
                 print(f"{pair:<9} {iv:<5} EROARE: {e}"); continue
             if len(ohlc) < 30:
-                print(f"{pair:<9} {iv:<5} prea putine date ({len(ohlc)})"); continue
+                print(f"{pair:<9} {iv:<5} not enough data ({len(ohlc)})"); continue
             h = bh(ohlc)
             f = simulate(ohlc, P)["total"]/P["budget"]*100
             t = simulate_trail(ohlc, P)["total"]/P["budget"]*100

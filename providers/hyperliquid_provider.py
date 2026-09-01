@@ -94,7 +94,7 @@ class HyperliquidProvider(MarketDataProvider):
             from common import load_env_stack  # hyperliquid/common.py
             load_env_stack(os.path.join(_HL_DIR, ".env"))
         except Exception as e:  # noqa: BLE001 — Without env files, use public data only.
-            print(f"[HL] _load_env esuat: {e}")
+            print(f"[HL] _load_env failed: {e}")
 
     def _new_client(self, secret_key=None):
         """Build one consistently configured SDK client for reads or signing."""
@@ -134,7 +134,7 @@ class HyperliquidProvider(MarketDataProvider):
         try:
             self._spot_pair = c.resolve_spot_pair(self._token)
         except Exception as e:  # noqa: BLE001
-            print(f"[HL] resolve_spot_pair({self._token}) esuat: {e}")
+            print(f"[HL] resolve_spot_pair({self._token}) failed: {e}")
         return self._spot_pair
 
     # -- Public market data without a key. -------------------------------------
@@ -146,7 +146,7 @@ class HyperliquidProvider(MarketDataProvider):
         try:
             return c.spot_mid(pair)
         except Exception as e:  # noqa: BLE001
-            print(f"[HL] get_current_price({symbol}) esuat: {e}")
+            print(f"[HL] get_current_price({symbol}) failed: {e}")
             return None
 
     def get_price_history(self, symbol: str, lookback_h: float) -> Optional[List]:
@@ -170,7 +170,7 @@ class HyperliquidProvider(MarketDataProvider):
             out.sort(key=lambda x: x["timestamp"])
             return out
         except Exception as e:  # noqa: BLE001
-            print(f"[HL] get_price_history({symbol}) esuat: {e}")
+            print(f"[HL] get_price_history({symbol}) failed: {e}")
             return None
 
     # -- Read-only spot account access. ----------------------------------------
@@ -190,7 +190,7 @@ class HyperliquidProvider(MarketDataProvider):
                     return max(total - hold, 0.0)
             return 0.0
         except Exception as e:  # noqa: BLE001
-            print(f"[HL] free_balance({asset}) esuat: {e}")
+            print(f"[HL] free_balance({asset}) failed: {e}")
             return None
 
     def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:
@@ -227,7 +227,7 @@ class HyperliquidProvider(MarketDataProvider):
                 }))
             return out
         except Exception as e:  # noqa: BLE001
-            print(f"[HL] get_orders({symbol},{side}) esuat: {e}")
+            print(f"[HL] get_orders({symbol},{side}) failed: {e}")
             return []
 
     def open_orders(self, symbol: str) -> List[dict]:
@@ -247,7 +247,7 @@ class HyperliquidProvider(MarketDataProvider):
                 }))
             return out
         except Exception as e:  # noqa: BLE001
-            print(f"[HL] open_orders({symbol}) esuat: {e}")
+            print(f"[HL] open_orders({symbol}) failed: {e}")
             return []
 
     # -- Spot order placement, dry by default due to wallet co-mingling. --------
@@ -271,7 +271,7 @@ class HyperliquidProvider(MarketDataProvider):
         try:
             secret = os.environ.get("HL_SECRET_KEY")
             if not secret:
-                print("[HL] place_order: HL_SECRET_KEY lipsa — nu pot semna")
+                print("[HL] place_order: HL_SECRET_KEY missing — cannot sign")
                 return None
             signer = self._new_client(secret)
             sz_dec = signer.sz_decimals(self._token)
@@ -280,7 +280,7 @@ class HyperliquidProvider(MarketDataProvider):
             print(f"[HL] place_order {side} {symbol} -> ok={ok} oid={oid} ({msg})")
             return {"orderId": oid, "ok": ok, "msg": msg} if ok else None
         except Exception as e:  # noqa: BLE001
-            print(f"[HL] place_order({side} {symbol}) esuat: {e}")
+            print(f"[HL] place_order({side} {symbol}) failed: {e}")
             return None
 
     # -- StrategyExecutor contract using the real Hyperliquid API. -------------
@@ -335,7 +335,7 @@ class HyperliquidProvider(MarketDataProvider):
         if market or px is None:
             mid = self.get_current_price(symbol)
             if not mid:
-                raise ProviderError(f"submit_order({symbol}) market: pret indisponibil")
+                raise ProviderError(f"submit_order({symbol}) market: price unavailable")
             px = mid * (1.05 if is_buy else 0.95)               # Aggressive limit for immediate fill.
         self.preflight_order(
             symbol, side, qty, px, market=market, kind=kind,
@@ -375,7 +375,7 @@ class HyperliquidProvider(MarketDataProvider):
         if price is None:
             mid = self.get_current_price(symbol)
             if not mid:
-                raise ProviderError(f"preflight_order({symbol}): pret indisponibil")
+                raise ProviderError(f"preflight_order({symbol}): price unavailable")
             price = mid * (1.05 if market else 1.0)
         required = float(qty) * float(price)
         available = self.free_balance("USDC")
@@ -435,7 +435,7 @@ class HyperliquidProvider(MarketDataProvider):
             raise ProviderError(f"order_status({order_id}): client/pereche indisponibile")
         addr = os.environ.get("HL_ACCOUNT_ADDRESS")
         if not addr:
-            raise ProviderError("order_status: HL_ACCOUNT_ADDRESS lipsa")
+            raise ProviderError("order_status: HL_ACCOUNT_ADDRESS missing")
         try:
             oid = int(order_id)
             query = getattr(c.info, "query_order_by_oid", None)

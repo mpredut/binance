@@ -629,7 +629,7 @@ def validate_keys_in_trades(trades):
     for idx, trade in enumerate(trades):
         for key in required_keys:
             if key not in trade:
-                raise ValueError(f"Tranzactia {idx} este invalida. Lipseste cheia '{key}'. Date: {trade}")
+                raise ValueError(f"Trade {idx} este invalida. Missing cheia '{key}'. Date: {trade}")
 
 
 def print_trade(trade):

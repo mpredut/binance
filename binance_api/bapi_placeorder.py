@@ -214,7 +214,7 @@ def place_BUY_order_at_market(symbol, qty, client_order_id=None):
         )
 
         if BUY_order:
-            print(f"BUY order de market executat cu succes: {BUY_order['orderId']} clientId {client_order_id}")
+            print(f"BUY order de market executed successfully: {BUY_order['orderId']} clientId {client_order_id}")
         else:
             print(f"Eroare la plasarea ordinului de BUY de market")
         
@@ -239,7 +239,7 @@ def place_SELL_order_at_market(symbol, qty, client_order_id=None):
         )
 
         if SELL_order:
-            print(f"SELL order de market executat cu succes: {SELL_order['orderId']} clientId {client_order_id}")
+            print(f"SELL order de market executed successfully: {SELL_order['orderId']} clientId {client_order_id}")
         else:
             print(f"Eroare la plasarea ordinului de SELL de market")
         

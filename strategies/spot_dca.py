@@ -578,14 +578,14 @@ class Strategy:
                 )
                 return False
             txid = str(tracked.intent["order_id"])
-            log(f"  [STRAT] {side.upper()} {kind} plasat txid={txid} {vol} @ {price}")
+            log(f"  [STRAT] {side.upper()} {kind} placed txid={txid} {vol} @ {price}")
             self._clear_placement_backoff(side, kind)
             self._adopt_pending_order(tracked.intent)
             return True
         except (ProviderError, RuntimeError, ValueError) as e:
             if not market and self._insufficient_funds_error(e):
                 self._record_placement_backoff(side, kind, e)
-            log(f"  ! [STRAT] {side} {kind} esuat: {e}")
+            log(f"  ! [STRAT] {side} {kind} failed: {e}")
             return False
 
     def _cancel_order(self, o: dict) -> bool:
@@ -596,7 +596,7 @@ class Strategy:
         """
         if self.dry_run or str(o["txid"]).startswith("PAPER"):
             self._remove(o)
-            log(f"  [STRAT] anulat {o['side']} {o['txid']}")
+            log(f"  [STRAT] cancelled {o['side']} {o['txid']}")
             return True
         if o.get("cancel_requested"):
             return True
@@ -610,13 +610,13 @@ class Strategy:
             else:
                 self.client.cancel_order(self.pair, o["txid"])
         except ProviderError as e:
-            log(f"  ! [STRAT] cancel esuat pentru {o['txid']}: {e} — ordinul ramane urmarit")
+            log(f"  ! [STRAT] cancel failed pentru {o['txid']}: {e} — the order stays tracked")
             return False
         o["cancel_requested"] = True
         o["cancel_ts"] = time.time()
         # Persist cancellation intent across restart and track through terminal status.
         self._save()
-        log(f"  [STRAT] cancel solicitat {o['side']} {o['txid']} — astept status terminal")
+        log(f"  [STRAT] cancel requested {o['side']} {o['txid']} — waiting for a terminal status")
         return True
 
     def _cancel_open(self, side: str) -> bool:
@@ -673,7 +673,7 @@ class Strategy:
                     else:
                         status = self.client.order_status(self.pair, o["txid"])
                 except ProviderError as e:
-                    log(f"  ! [STRAT] status {o['txid']} esuat: {e} — pastrez ordinul")
+                    log(f"  ! [STRAT] status {o['txid']} failed: {e} — pastrez ordinul")
                     continue
                 st = status.status
                 terminal = st in ("closed", "canceled", "expired")
@@ -873,7 +873,7 @@ class Strategy:
                 log(f"  ! [STRAT] adopt: nu pot citi balanta ({e})")
                 return
         if qty <= 1e-12:
-            log("  [STRAT] adopt: balanta 0 pe activul de baza — astept alocarea")
+            log("  [STRAT] adopt: balance 0 on the base asset — waiting for the allocation")
             return
         if self.p.adopt_qty <= 0:
             qty = self._dust_safe_qty(qty)
@@ -1082,7 +1082,7 @@ class Strategy:
         try:
             return self.client.ohlc_closes(self.pair, self.p.trend_interval)
         except Exception as e:  # noqa: BLE001 — no signal simply means no trend entry.
-            log(f"  [STRAT] trend OHLC fetch esuat ({e}) — trend nedeterminat")
+            log(f"  [STRAT] trend OHLC fetch failed ({e}) — trend undetermined")
             return []
 
     def _trend_up_series(self, closes: list) -> bool:
@@ -1123,7 +1123,7 @@ class Strategy:
                 exit_px = round(price * 0.999, self.price_dec)
                 if not self._has_pending_market_exit():
                     if not self._cancel_orders("sell", exclude_market=True):
-                        log("  ! [STRAT] TREND EXIT amanat: un SELL nu a putut fi anulat")
+                        log("  ! [STRAT] TREND EXIT deferred: un SELL could not be cancelled")
                         return True
                     if self._place("sell", self._dust_safe_qty(self.s["qty"]), exit_px,
                                    kind="TP", market=True):
@@ -1233,7 +1233,7 @@ class Strategy:
             entry_amt = self._effective_entry_amount()
             budget = self._effective_max_budget()
             if self.s["spent"] + entry_amt > budget:
-                log(f"  [STRAT] plafon {budget:.0f} {self.ccy} atins — nu intru")
+                log(f"  [STRAT] plafon {budget:.0f} {self.ccy} reached — nu intru")
                 return
             self._place("buy", self._qty_for(entry_amt, entry_px),
                         entry_px, kind="ENTRY", amount=entry_amt)
@@ -1267,7 +1267,7 @@ class Strategy:
                 return
             if price <= trail_stop:
                 if not self._cancel_orders("sell", exclude_market=True):
-                    log("  ! [STRAT] trailing exit amanat: un SELL nu a putut fi anulat")
+                    log("  ! [STRAT] trailing exit deferred: un SELL could not be cancelled")
                     return
                 if self._place("sell", self._dust_safe_qty(self.s["qty"]), exit_px,
                                kind="TP", market=True):
@@ -1373,7 +1373,7 @@ class Strategy:
             while True:
                 price = self.client.get_current_price(self.pair)
                 if price is None:
-                    log("  [STRAT] pret indisponibil — reincerc")
+                    log("  [STRAT] price unavailable — reincerc")
                     time.sleep(self.p.check_minutes * 60)
                     continue
                 try:
@@ -1395,5 +1395,5 @@ class Strategy:
                     f"fee {self.s['fees_total']:.2f}) {self.ccy}  ord={len(self.s['orders'])}")
                 time.sleep(self.p.check_minutes * 60)
         except KeyboardInterrupt:
-            log("  [STRAT] oprit manual.")
+            log("  [STRAT] stopped manually.")
             self._save()

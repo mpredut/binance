@@ -225,7 +225,7 @@ def main() -> int:
         print(f"  risk-alert: {'; '.join(fired) if fired else 'nothing over the threshold'}")
 
     print(f"=== PORTOFOLIU {snap['ts']} ===")
-    print(f"  {'motor':<22}{'qty':>12}{'valoare$':>11}{'realizat$':>11}{'nereal$':>10}{'buget':>10}")
+    print(f"  {'engine':<22}{'qty':>12}{'value$':>11}{'realised$':>11}{'unreal$':>10}{'budget':>10}")
     for r in kr:
         print(f"  {r['engine']:<22}{r['qty']:>12.4f}{r['value_usd']:>11.2f}"
               f"{r['realized_net']:>11.2f}{r['unrealized']:>10.2f}{str(r['spent'])+'':>10}")

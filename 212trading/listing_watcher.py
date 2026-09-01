@@ -44,7 +44,7 @@ def wait_for_launch(yahoo_symbol: str, label: str, interval: int = 60, *,
     Return True at launch and False if `stop` is set first. Optional `on_launch(info)`
     receives the market dictionary at launch, for example to send a notification.
     """
-    log(f"    [{label}] astept lansarea... (poll {interval}s)")
+    log(f"    [{label}] waiting for the launch... (poll {interval}s)")
     while not (stop is not None and stop.is_set()):
         if market_hours_only and not in_market_window():
             _wait(stop, min(interval * 5, 600))
@@ -59,10 +59,10 @@ def wait_for_launch(yahoo_symbol: str, label: str, interval: int = 60, *,
                 try:
                     on_launch(m)
                 except Exception as e:  # noqa: BLE001
-                    log(f"    ! [{label}] on_launch a esuat: {e}")
+                    log(f"    ! [{label}] on_launch failed: {e}")
             return True
         if m:
-            log(f"    [{label}] ping — astept lansarea | pret={m.get('price')} "
+            log(f"    [{label}] ping — waiting for the launch | pret={m.get('price')} "
                 f"vol={m.get('volume')} state={m.get('state')} age={m.get('age_min')}min")
         else:
             log(f"    [{label}] ping — simbol indisponibil pe feed")

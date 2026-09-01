@@ -121,4 +121,4 @@ print("\n=== ATRIBUIRE PER BOT (clientOrderId; realized_own = doar round-trip pr
 for _sym in ("BTCUSDC", "TAOUSDC"):
     per_bot(_sym)
 print("Note: bots that trade inventory between themselves (tradeall buys / rtrade sells the same TAO)")
-print("NU au realized separabil curat — net_qty arata cine acumuleaza (+) vs distribuie (-).")
+print("have no cleanly separable realized — net_qty shows who accumulates (+) versus who distributes (-).")

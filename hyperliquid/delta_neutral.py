@@ -252,9 +252,9 @@ class DeltaNeutral:
             for o in self.client.open_orders():
                 if o.get("coin") in (self.p.coin, self.p.spot_pair):
                     self.client.cancel(o.get("coin"), o.get("oid"))
-                    log(f"  [DN] ordin ramas anulat: {o.get('coin')} oid={o.get('oid')}")
+                    log(f"  [DN] ordin ramas cancelled: {o.get('coin')} oid={o.get('oid')}")
         except Exception as e:  # noqa: BLE001
-            log(f"  ! [DN] curatenia ordinelor a esuat ({e}) — continui")
+            log(f"  ! [DN] curatenia ordinelor failed ({e}) — continui")
 
     # -- High-level actions. ---------------------------------------------------
     def _open(self, L: dict):
@@ -412,7 +412,7 @@ class DeltaNeutral:
                         "This instance stopped itself so it would not duplicate the orders.",
                    source="dn", desktop=self.desktop)
             return
-        log("  === DELTA-NEUTRAL PORNIT ===")
+        log("  === DELTA-NEUTRAL STARTED ===")
         log(f"      coin={self.p.coin} spot={self.p.spot_pair}  notional={self.p.notional} USDC/picior  {'[PAPER]' if self.dry_run else '⚠ REAL'}")
         log(f"      intrare funding>= {self.p.entry_funding_hr*100:.4f}%/ora  | iesire funding< {self.p.exit_funding_hr*100:.4f}%/ora")
         log(f"      mediere {self.p.funding_window_h}h  | tin minim {self.p.min_hold_h}h  | rebalans la {self.p.rebalance_pct}% delta")
@@ -427,7 +427,7 @@ class DeltaNeutral:
                     errors = 0
                 self._save()
             except KeyboardInterrupt:
-                log("  [DN] oprit manual."); self._save(); return
+                log("  [DN] stopped manually."); self._save(); return
             except Exception as e:  # noqa: BLE001 — Keep the autonomous bot alive.
                 errors += 1
                 log(f"  ! [DN] eroare neasteptata (#{errors} consecutiv): {e!r} — botul continua")
@@ -464,7 +464,7 @@ class DeltaNeutral:
                 # report zero even when spot USDC exists.
                 free = self.client.spot_balance("USDC")
             except Exception as e:  # noqa: BLE001
-                log(f"  ! [DN] scale-up: nu pot citi colateralul ({e}) — amanat"); return
+                log(f"  ! [DN] scale-up: nu pot citi colateralul ({e}) — deferred"); return
             if free < add * L["spot_px"]:                 # Scale partially when full size is unaffordable.
                 aff = self._round((free * 0.95) / L["spot_px"])
                 if aff <= 0:

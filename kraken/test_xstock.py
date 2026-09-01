@@ -207,7 +207,7 @@ class TestAutoStart(Base):
         xw.maybe_start_bot(self.st, 200.0, False)
         self.assertNotEqual(self.st["bot_pid"], pid)
         self.assertTrue(xw._bot_alive(self.st["bot_pid"]))
-        self.assertIn("REPORNIT", self.alerts[-1])
+        self.assertIn("RESTARTED", self.alerts[-1])
 
     def test_nu_porneste_fara_pret_dar_cere_pretul_o_data(self):
         xw.maybe_start_bot(self.st, 0.0, False)

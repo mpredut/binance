@@ -176,9 +176,9 @@ class T212Provider(MarketDataProvider):
         try:
             qty_f = round(abs(float(qty)), _VOLUME_DECIMALS)
         except (TypeError, ValueError) as e:
-            raise ProviderError(f"cantitate T212 invalida: {qty!r}") from e
+            raise ProviderError(f"invalid T212 quantity: {qty!r}") from e
         if not math.isfinite(qty_f) or qty_f < _ORDER_MIN:
-            raise ProviderError(f"cantitate T212 invalida: {qty!r}")
+            raise ProviderError(f"invalid T212 quantity: {qty!r}")
         if side_u in {"BUY", "B"}:
             return qty_f
         if side_u in {"SELL", "S"}:

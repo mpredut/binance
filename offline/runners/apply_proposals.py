@@ -43,7 +43,7 @@ _DEV_PROFILE = parse_dotenv(os.path.join(ROOT, "offline", "runners", "dev_backte
 BRANCH = os.environ.get("BACKTEST_PROPOSALS_BRANCH") or _DEV_PROFILE.get(
     "BACKTEST_PROPOSALS_BRANCH")
 if not BRANCH:
-    raise RuntimeError("Lipseste BACKTEST_PROPOSALS_BRANCH din dev_backtest.env")
+    raise RuntimeError("Missing BACKTEST_PROPOSALS_BRANCH din dev_backtest.env")
 
 
 def _read_proposals():

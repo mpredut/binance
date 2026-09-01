@@ -44,7 +44,7 @@ class JsonStateStore:
             message = f"stare {self.label} invalida in {self.path}: {exc}"
             if self.fail_closed:
                 raise StatePersistenceError(message) from exc
-            self.logger(f"  ! [STRAT] {message}; reset permis doar in PAPER")
+            self.logger(f"  ! [STRAT] {message}; reset allowed only in PAPER")
             return self.default_factory()
 
     def save(self, state: dict) -> bool:

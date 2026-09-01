@@ -429,7 +429,7 @@ def main():
                    help="real = respecta intervalele istorice; fast = fara asteptare (implicit)")
     p.add_argument("--run-id", default=None, help="implicit: <symbol>_<start>_<timestamp>")
     p.add_argument("--source", choices=["history", "cache24"], default="history",
-                   help="history = cache_price_*.jsonl (~11 luni, dar RAR, vezi caveat in plan); "
+                   help="history = cache_price_*.jsonl (~11 months, dar RAR, vezi caveat in plan); "
                         "cache24 = cache_24price_*.json, rezolutie DENSA (~1s) dar doar ce a retinut "
                         "that cache (by default the last ~24h, or a file with long retention if "
                         "ruleaza deja tradeall_price_archiver.py)")

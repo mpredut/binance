@@ -17,7 +17,7 @@ DEST="${REMOTE}${BACKUP_NAME}.tar.gz"
 echo "$(date '+%F %T') === backup_remote ==="
 # 1. backup local proaspat (folder + tarball) — refoloseste scriptul existent
 "$ROOT/backup_secrets.sh" >/dev/null
-[ -f "$TAR" ] || { echo "❌ tarball local lipsa: $TAR"; exit 1; }
+[ -f "$TAR" ] || { echo "❌ local tarball missing: $TAR"; exit 1; }
 
 # 2. upload CRIPTAT in Storj (suprascrie ultima versiune)
 "$RCLONE" copyto "$TAR" "$DEST" --transfers 1

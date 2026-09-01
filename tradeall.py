@@ -209,18 +209,18 @@ def _fire_order(symbol, action, price, reason, **kwargs):
     try:
         price = float(price)
     except (TypeError, ValueError):
-        print(f"[TRADEALL] ordin refuzat: price invalid {price!r}")
+        print(f"[TRADEALL] order refused: price invalid {price!r}")
         return None
     if action not in {"BUY", "SELL"}:
-        print(f"[TRADEALL] ordin refuzat: side invalid {action!r}")
+        print(f"[TRADEALL] order refused: side invalid {action!r}")
         return None
     if not math.isfinite(price) or price <= 0:
-        print(f"[TRADEALL] ordin refuzat: price invalid {price!r}")
+        print(f"[TRADEALL] order refused: price invalid {price!r}")
         return None
 
     blocked, mode, trend = _kalman_gate_blocks(symbol, action)
     if blocked:
-        print(f"[KALMAN-GATE] {action} {symbol} BLOCAT (kalman_trend={trend}, mode={mode}, motiv={reason})")
+        print(f"[KALMAN-GATE] {action} {symbol} BLOCKED (kalman_trend={trend}, mode={mode}, reason={reason})")
         try:
             logger_fn = GATE_OUTCOME_LOG or po._log_order_outcome
             logger_fn(symbol, action, price, None,

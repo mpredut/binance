@@ -258,7 +258,7 @@ def check_configs_once(now=None):
 
     hist = [t for t in state.get("config_restart_history", []) if now - t < CONFIG_RESTART_WINDOW_H * 3600]
     if hist and (now - max(hist)) < CONFIG_RESTART_COOLDOWN_MIN * 60:
-        print(f"[watchdog] {note} — dar in COOLDOWN ({CONFIG_RESTART_COOLDOWN_MIN:.0f}min), nu repornesc acum")
+        print(f"[watchdog] {note} — but in COOLDOWN ({CONFIG_RESTART_COOLDOWN_MIN:.0f}min), not restarting now")
         wc.save_state(STATE_FILE, state)
         return []
     if len(hist) >= CONFIG_RESTART_MAX:

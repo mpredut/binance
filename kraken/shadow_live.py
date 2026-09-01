@@ -271,7 +271,7 @@ def _eval_block(ohlc4, interval, fee_pct, *, include_decision_trace=False):
 def snapshot(pair: str, interval: int, fee_pct: float, quiet: bool = False) -> dict:
     bars = _fetch_with_ts(pair, interval)
     if not bars:
-        raise RuntimeError(f"fetch({pair},{interval}) a intors gol")
+        raise RuntimeError(f"fetch({pair},{interval}) returned empty")
     anchor = _get_anchor(pair, interval, bars[-1][0])
     full4 = [(o, h, l, c) for (_t, o, h, l, c) in bars]
     fwd_bars = _merge_forward_history(pair, interval, anchor, bars)
@@ -336,7 +336,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description="Live shadow test: current vs pre-registered candidates (read-only)."
     )
-    ap.add_argument("--interval", type=int, default=60, help="minute per bara (60/240/1440)")
+    ap.add_argument("--interval", type=int, default=60, help="minute per bar (60/240/1440)")
     ap.add_argument("--fee", type=float, default=0.26, help="comision per leg %%")
     ap.add_argument("--pair", default=None, help="implicit KRAKEN_PAIR din .env/config.env")
     ap.add_argument("--loop", type=float, default=0.0, help="minute intre rulari (0=single-shot)")

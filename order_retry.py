@@ -217,7 +217,7 @@ def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_pric
                     _write_nolock(existing)
                     return e.get("id")
         if RETRY_MAX_QUEUE > 0 and len(existing) >= RETRY_MAX_QUEUE:
-            print(f"[order_retry] coada plina ({len(existing)}/{RETRY_MAX_QUEUE}) "
+            print(f"[order_retry] the queue is full ({len(existing)}/{RETRY_MAX_QUEUE}) "
                   f"— NU adaug {side_u} {symbol}")
             return None
         _write_nolock(existing + [rec])

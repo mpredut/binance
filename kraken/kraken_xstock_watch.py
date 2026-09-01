@@ -100,7 +100,7 @@ def check_balance(client: KrakenClient, st: dict, rx: str, desktop: bool) -> Non
             st["allocated"] = {"asset": a, "qty": q, "ts": time.time()}
             log(f"  🎯 ALOCARE DETECTATA: {a} = {q}")
             notify(title=f"🎯 ALOCARE xStock: {a} = {q}",
-                   body=f"A aparut {a} in contul Kraken (cantitate {q}). "
+                   body=f"There appeared {a} in the Kraken account (cantitate {q}). "
                         f"Seteaza XSTOCK_ALLOC_PRICE in config.env pt alerte de nivel "
                         f"and STRAT_ADOPT_COST when the pair becomes tradable.",
                    source="xstock-watch", desktop=desktop)
@@ -171,19 +171,19 @@ def check_levels(client: KrakenClient, st: dict, alloc_price: float,
     if not st["alerted_tp"] and chg >= tp_pct:
         st["alerted_tp"] = True
         notify(title=f"📈 xStock {chg:+.1f}% peste alocare ({price})",
-               body=f"Valoare estimata: {qty * price:.0f} (alocat la {alloc_price}). "
+               body=f"Estimated value: {qty * price:.0f} (allocated at {alloc_price}). "
                     f"Ia in calcul vanzarea partiala / pornirea botului cu adoptare.",
                source="xstock-watch", price=price, desktop=desktop)
     tp2 = required_float_env("XSTOCK_TP2_ALERT_PCT")
     if tp2 and not st.get("alerted_tp2") and chg >= tp2:
         st["alerted_tp2"] = True
         notify(title=f"📈📈 TRANSA 2: xStock {chg:+.1f}% ({price})",
-               body=f"A doua tinta atinsa — vinde restul. Valoare: {qty * price:.0f}.",
+               body=f"A doua tinta atinsa — sell the rest. Valoare: {qty * price:.0f}.",
                source="xstock-watch", price=price, desktop=desktop)
     if not st["alerted_sl"] and chg <= -sl_pct:
         st["alerted_sl"] = True
         notify(title=f"📉 xStock {chg:+.1f}% sub alocare ({price})",
-               body=f"Valoare estimata: {qty * price:.0f} (alocat la {alloc_price}). "
+               body=f"Estimated value: {qty * price:.0f} (allocated at {alloc_price}). "
                     f"Decide: tii (DCA) sau tai pierderea.",
                source="xstock-watch", price=price, desktop=desktop)
 
@@ -315,12 +315,12 @@ def run_trial(client: KrakenClient, desktop: bool) -> int:
         if not alloc:
             log("  ! no price for the pair — probe failed")
             return 1
-        log(f"  [proba] pret de alocare simulat: {alloc} (pretul curent)")
+        log(f"  [proba] simulated allocation price: {alloc} (the current price)")
         maybe_start_bot(st, alloc, desktop)                      # 3. bot started in paper mode
         bot_pid = st.get("bot_pid")
         verdict["bot pornit (PAPER)"] = _bot_alive(bot_pid)
         _save_state(st)
-        log("  [proba] astept 12s sa adopte pozitia si sa puna TP-ul paper...")
+        log("  [proba] waiting 12s for it to adopt the position and place the paper TP...")
         time.sleep(12)
         os.kill(int(bot_pid), 15)                                # 4. watchdog
         time.sleep(1.0)
@@ -397,7 +397,7 @@ def main() -> int:
         print(f"bot: {'RUNNING pid ' + str(st['bot_pid']) if alive else ('down (pid ' + str(st['bot_pid']) + ', will be restarted)' if st.get('bot_pid') else 'not started')}")
         return 0
 
-    log("=== xStock watcher pornit ===")
+    log("=== xStock watcher started ===")
     log(f"    regex      : {rx}")
     log(f"    alocare    : {alloc_price if alloc_price > 0 else 'price unknown (detection only)'}")
     log(f"    alerte     : +{tp_pct}% / -{sl_pct}%  (price: Kraken or Yahoo {yahoo_sym})")
@@ -413,7 +413,7 @@ def main() -> int:
         except KeyboardInterrupt:
             return 0
         except Exception as e:  # noqa: BLE001 — resilience: retry network/DNS failures
-            log(f"  ! ciclu esuat ({e.__class__.__name__}: {e}) — reincerc la urmatorul")
+            log(f"  ! cycle failed ({e.__class__.__name__}: {e}) — retrying on the next one")
         if args.once:
             return 0
         beats += 1                       # keep-alive pulse: one tail-visible dot per cycle

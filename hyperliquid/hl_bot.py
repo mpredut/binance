@@ -123,14 +123,14 @@ def main() -> int:
                  desktop=args.desktop, leverage=leverage).run()
         return 0
     except KeyboardInterrupt:
-        log("Oprit manual."); return 130
+        log("Stopped manually."); return 130
 
 
 def _wait_for_listing(client, coin, label, interval, desktop) -> bool:
     if coin_available(client, coin):
         log(f"  [verify] {coin} e disponibil pe Hyperliquid — pornesc.")
         return True
-    log(f"    {coin} indisponibil pe Hyperliquid — astept... (Ctrl+C ca sa opresc)")
+    log(f"    {coin} indisponibil pe Hyperliquid — astept... (Ctrl+C to stop)")
     try:
         while True:
             if coin_available(client, coin):
@@ -142,7 +142,7 @@ def _wait_for_listing(client, coin, label, interval, desktop) -> bool:
             log(f"ping - astept {coin}...")
             time.sleep(interval)
     except KeyboardInterrupt:
-        log("Oprit manual."); return False
+        log("Stopped manually."); return False
 
 
 if __name__ == "__main__":

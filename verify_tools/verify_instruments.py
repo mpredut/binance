@@ -121,7 +121,7 @@ if hype:
     f_hp = api.provider_by_name("hyperliquid").free_balance("HYPE")
     check(f_h is not None and f_h == f_hp, "HYPE free() == HL direct", f"instr={f_h} hl={f_hp}")
 
-print("\n==== 5. provideri noi (Kraken, T212) — explicit-only + multi-venue ====")
+print("\n==== 5. new providers (Kraken, T212) — explicit-only + multi-venue ====")
 kp = api.provider_by_name("kraken")
 tp = api.provider_by_name("t212")
 check(kp is not None, "provider_by_name('kraken')")
@@ -148,7 +148,7 @@ except Exception as _e:  # noqa: BLE001
 
 print("\n" + "=" * 56)
 if FAIL:
-    print(f"ESEC — {len(FAIL)} verificari picate: {FAIL}")
+    print(f"ESEC — {len(FAIL)} checks failed: {FAIL}")
     sys.exit(1)
 print("PASS — fundatia Instrument (pasii 1-3) e sanatoasa.")
 sys.exit(0)

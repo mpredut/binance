@@ -52,13 +52,13 @@ def main() -> int:
     # PRICE alerts use the dedicated NTFY_TOPIC_PRICE, falling back to the generic topic.
     topic = args.topic or os.environ.get("NTFY_TOPIC_PRICE") or os.environ.get("NTFY_TOPIC")
     if not topic:
-        log("! niciun topic ntfy (--topic / NTFY_TOPIC_PRICE / NTFY_TOPIC in .env)"); return 1
+        log("! no ntfy topic (--topic / NTFY_TOPIC_PRICE / NTFY_TOPIC in .env)"); return 1
     if args.below is None and args.above is None:
         log("! da macar --below sau --above"); return 1
 
     price = get_price_usd(args.symbol)
     if price is None:
-        log(f"  [{args.symbol}] pret indisponibil — sar"); return 0
+        log(f"  [{args.symbol}] price unavailable — sar"); return 0
 
     state_path = args.state or os.path.join(_HERE, f".alert_{args.symbol}.json")
     st = {}

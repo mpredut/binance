@@ -126,7 +126,7 @@ class TrailingCore:
         if result.outcome == "terminal":
             self._finish_pending(st, result, price)
             if not self.save(state):
-                raise RuntimeError("statusul terminal trailing nu a putut fi salvat")
+                raise RuntimeError("the trailing terminal status could not be saved")
         # active waits; absent/retryable were already cleared by lifecycle and the
         # strategy may recreate the same deterministic intent on a later tick.
         return True

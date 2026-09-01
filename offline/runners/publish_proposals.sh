@@ -16,7 +16,7 @@ WT="${WT:-$(dirname "$REPO_ROOT")/binance-proposals}"
 BRANCH="$BACKTEST_PROPOSALS_BRANCH"
 SRC_FILE="$REPO_ROOT/backtest_proposals.json"
 
-[ -f "$SRC_FILE" ] || { echo "[publish] lipseste $SRC_FILE — ruleaza intai pilotul --propose"; exit 1; }
+[ -f "$SRC_FILE" ] || { echo "[publish] is missing $SRC_FILE — ruleaza intai pilotul --propose"; exit 1; }
 
 git -C "$REPO_ROOT" fetch -q origin || true
 

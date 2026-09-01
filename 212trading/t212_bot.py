@@ -66,7 +66,7 @@ def verify_isin(client: T212Client, ticker: str, expected_isin: str) -> bool:
     if str(match.get("isin", "")) != expected_isin:
         log(f"  ! [{ticker}] ISIN {match.get('isin')} != asteptat {expected_isin} — NU tranzactionez")
         notify(title=f"⚠ {ticker}: ISIN nepotrivit", source="T212",
-               body=f"Gasit {match.get('isin')}, asteptam {expected_isin}.", symbol=ticker)
+               body=f"Found {match.get('isin')}, we expected {expected_isin}.", symbol=ticker)
         return False
     return True
 
@@ -110,7 +110,7 @@ def run_asset(name: str, cfg: dict, client: T212Client, force_paper: bool, skip_
         except Exception as e:  # noqa: BLE001 — resilience: one asset cannot terminate the process
             log(f"  ! [{label}] eroare ciclu ({e.__class__.__name__}: {e}) — reincerc in 60s")
             STOP.wait(60)
-    log(f"  ⏹ [{label}] oprit")
+    log(f"  ⏹ [{label}] stopped")
 
 
 def main() -> int:
@@ -130,7 +130,7 @@ def main() -> int:
     if args.only:
         assets = [(n, p) for (n, p) in assets if n == args.only]
     if not assets:
-        log(f"! niciun config.*.env gasit in {cfg_dir}" + (f" pt '{args.only}'" if args.only else ""))
+        log(f"! no config.*.env found in {cfg_dir}" + (f" pt '{args.only}'" if args.only else ""))
         return 1
 
     if args.list:
@@ -151,7 +151,7 @@ def main() -> int:
         portfolio_ttl_sec=required_float_env("T212_PORTFOLIO_TTL_SEC"),
     )
 
-    log(f"=== t212_bot: {len(assets)} active intr-UN proces ({'PAPER fortat' if args.paper else 'config'}) ===")
+    log(f"=== t212_bot: {len(assets)} assets in ONE process ({'PAPER forced' if args.paper else 'config'}) ===")
     client.list_instruments()  # warm the cache ONCE so threads avoid the expensive call
     signal.signal(signal.SIGTERM, lambda *_: STOP.set())
     threads = []

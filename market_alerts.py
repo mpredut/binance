@@ -249,7 +249,7 @@ def main():
     print("\n⏳ Init cache preturi...")
     cachePriceAll = create_cachePriceAll(cmc_api_key=CMC_API_KEY,
                                          symbols=cfg["watch"], max_symbols=cfg["max_monitored"])
-    print("⏳ Astept primul sync de pret (5s)...")
+    print("⏳ Waiting for the first price sync (5s)...")
     time.sleep(5)
 
     print("⏳ Pornesc verificatorul de praguri de pret...")
@@ -278,7 +278,7 @@ def main():
     try:
         while True:
             time.sleep(160)
-            print("\n👉 Astept alerte... (Ctrl+C pt oprire)\n")
+            print("\n👉 Waiting for alerts... (Ctrl+C to stop)\n")
     except KeyboardInterrupt:
         print("\n🛑 Opresc sistemul...")
         if new_coins_checker is not None:

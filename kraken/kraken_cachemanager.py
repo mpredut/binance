@@ -159,7 +159,7 @@ def ws_loop(client):
         _fetch_rest_into(client, cache)      # initial snapshot
         _atomic_write(CACHE_FILE, cache)
     except Exception as e:
-        log(f"[kraken_cache][ws] seed REST esuat: {e}")
+        log(f"[kraken_cache][ws] REST seed failed: {e}")
 
     def on_open(ws):
         try:
@@ -169,7 +169,7 @@ def ws_loop(client):
             }))
             log("[kraken_cache][ws] subscribed ownTrades")
         except Exception as e:
-            log(f"[kraken_cache][ws] subscribe esuat: {e}")
+            log(f"[kraken_cache][ws] subscribe failed: {e}")
 
     def on_message(ws, msg):
         try:

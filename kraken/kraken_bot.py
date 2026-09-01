@@ -68,7 +68,7 @@ def main() -> int:
     ap.add_argument("--skip-wait", action="store_true", help="Sari peste asteptarea listarii")
     ap.add_argument("--paper", action="store_true", help="Forteaza PAPER (fara bani)")
     ap.add_argument("--find-pair", metavar="TERM", help="Cauta perechi pe Kraken")
-    ap.add_argument("--price", action="store_true", help="Arata pretul curent si iese")
+    ap.add_argument("--price", action="store_true", help="Arata the current price si iese")
     ap.add_argument("--balance", action="store_true", help="Arata soldurile (necesita chei)")
     ap.add_argument("--test-strategy", metavar="PAIR", help="Ruleaza strategia ACUM pe perechea data")
     args = ap.parse_args()
@@ -123,7 +123,7 @@ def main() -> int:
                  desktop=args.desktop).run()
         return 0
     except KeyboardInterrupt:
-        log("Oprit manual.")
+        log("Stopped manually.")
         return 130
 
 
@@ -146,10 +146,10 @@ def _wait_for_listing(client, pair, label, interval, desktop) -> bool:
                 notify(title=f"{label} listat pe Kraken!", body=body,
                        source="kraken", price=p, desktop=desktop)
                 return True
-            log(f"ping - astept listarea {pair}...")
+            log(f"ping - waiting for the listing {pair}...")
             time.sleep(interval)
     except KeyboardInterrupt:
-        log("Oprit manual.")
+        log("Stopped manually.")
         return False
 
 

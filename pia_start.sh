@@ -54,7 +54,7 @@ pia set region "$DEDICATED" || exit 1
 pia set requestportforward true || exit 1
 pia connect || exit 1
 
-echo "Astept asignarea IP..."
+echo "Waiting for the IP assignment..."
 sleep 2
 connected=0
 for attempt in $(seq 1 12); do
@@ -63,7 +63,7 @@ for attempt in $(seq 1 12); do
         break
     fi
     sleep 5
-    echo "Inca astept IP ($attempt/12)..."
+    echo "Still waiting for an IP ($attempt/12)..."
 done
 if [ "$connected" -ne 1 ]; then
     echo "PIA nu a primit IP in 60s; systemd va reincerca."

@@ -22,7 +22,7 @@ pid="$(pgrep -fa 'dn_bot\.py' | grep -v -- '--watch' | grep -v -e 'bash' -e 'dn_
 if [ -n "$pid" ]; then
   kill "$pid" 2>/dev/null; sleep 3
   if kill -0 "$pid" 2>/dev/null; then kill -9 "$pid" 2>/dev/null; sleep 2; fi
-  echo "  oprit PID $pid"
+  echo "  stopped PID $pid"
 else
   echo "  (rebalansarea nu rula)"
 fi

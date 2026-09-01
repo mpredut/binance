@@ -990,7 +990,7 @@ def main():
                     last_memory_trim = monotonic_now
                 time.sleep(args.interval)
         except KeyboardInterrupt:
-            print("\n[tradeall_observe] oprit.")
+            print("\n[tradeall_observe] stopped.")
         return
 
     write_html(symbols, live_minutes=args.live_minutes)
@@ -1052,7 +1052,7 @@ def main():
                 last_memory_trim = monotonic_now
             time.sleep(args.interval)
     except KeyboardInterrupt:
-        print("\n[tradeall_observe] oprit.")
+        print("\n[tradeall_observe] stopped.")
 
 
 if __name__ == "__main__":

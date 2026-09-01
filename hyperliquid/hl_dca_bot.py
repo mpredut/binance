@@ -64,7 +64,7 @@ def main() -> int:
     log("=== HL base v2 bot (spot_dca) ===")
     log(f"    token      : {token} (HYPE spot pe Hyperliquid)")
     log(f"    executie   : {'PAPER (fara bani)' if strat_dry else '⚠ REAL — BANI ADEVARATI'}")
-    log("    motor      : strategies.spot_dca (IDENTIC cu kraken_bot)")
+    log("    engine      : strategies.spot_dca (IDENTIC cu kraken_bot)")
     Strategy(
         provider, token, StratParams.from_env(), dry_run=strat_dry,
         state_dir=state_dir_for(strat_dry),

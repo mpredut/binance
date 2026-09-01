@@ -76,7 +76,7 @@ async def sell(request: TradeRequest):
 @app.post("/trade/buy")
 async def buy(request: TradeRequest):
     # Submit a guarded limit buy one percent below the current Binance price.
-    print(f"Cumparat {request.amount} din {request.symbol}")
+    print(f"Bought {request.amount} din {request.symbol}")
     current_price = api.get_current_price(str(request.symbol))
     sell_price = current_price * (1 - 0.01 )
     print(f"Pret BTC {current_price} {sell_price}")

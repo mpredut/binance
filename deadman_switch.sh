@@ -16,7 +16,7 @@ ROOT="$(cd "$(dirname "$0")" && pwd)"
 TOPIC=$(grep -hs '^NTFY_TOPIC_ERROR=' "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '" ')
 [ -z "$TOPIC" ] && TOPIC=$(grep -hs '^NTFY_TOPIC=' "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '" ')
 if [ -z "$TOPIC" ]; then
-    echo "$(date '+%H:%M') deadman: niciun NTFY_TOPIC(_ERROR) gasit in $ROOT/.env"
+    echo "$(date '+%H:%M') deadman: no NTFY_TOPIC(_ERROR) found in $ROOT/.env"
     exit 1
 fi
 

@@ -74,7 +74,7 @@ def validate_dataset(records: Iterable[Mapping], *, interval_minutes: int | None
     """Validate ordering, cadence and OHLC invariants; return the normalised form."""
     rows = [normalize_record(record) for record in records]
     if not rows:
-        raise ValueError("dataset-ul OHLC nu poate fi gol")
+        raise ValueError("dataset-ul OHLC cannot be empty")
     if interval_minutes is not None and interval_minutes <= 0:
         raise ValueError("interval_minutes must be positive")
 

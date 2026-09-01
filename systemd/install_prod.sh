@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="${TRADING_ROOT:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 SYSTEMD_DIR="$ROOT/systemd"
 
-test -d "$ROOT/.git" || { echo "Repo lipsa: $ROOT"; exit 1; }
+test -d "$ROOT/.git" || { echo "Repo missing: $ROOT"; exit 1; }
 
 TRADING_USER="${TRADING_USER:-${SUDO_USER:-$(stat -c %U "$ROOT")}}"
 id "$TRADING_USER" >/dev/null 2>&1 || {

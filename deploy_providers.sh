@@ -14,7 +14,7 @@ git pull --ff-only origin main 2>&1 | tail -5
 
 echo "=== SANITY (structura providers) ==="
 ls providers/market_api.py binance_api/trailing_stop.py >/dev/null && echo "  providers ok"
-ls market_api.py 2>/dev/null && echo "  ⚠ ROOT INCA are market_api.py" || echo "  root curat ok"
+ls market_api.py 2>/dev/null && echo "  ⚠ ROOT STILL has market_api.py" || echo "  root is clean, ok"
 
 echo "=== facade import GATE (no restart if it does not load) ==="
 "$PY" -c 'from providers.market_api import api; print("  facada OK -", len(api._providers), "provideri:", [p.name for p in api._providers])' || { echo "  GATE FAILED — NU repornesc"; exit 1; }
@@ -25,11 +25,11 @@ fleet="$(awk -F'|' '!/^#/ && $7=="fleet" {print $1}' "$MANIFEST")"
 
 echo "=== RESTART FLOTA (pkill; flota_start le reia) ==="
 for p in $fleet; do pkill -f "$p" 2>/dev/null || true; done
-echo "  killed; astept 95s..."; sleep 95
+echo "  killed; waiting 95s..."; sleep 95
 
 echo "=== VERIFICARE ==="
 "$PY" verify_tools/check_cache_coherence.py >/tmp/coh.log 2>&1 || true
 echo "  coherence: $(tail -1 /tmp/coh.log 2>/dev/null)"
 for p in $fleet; do printf '  %-22s viu=%s\n' "$p" "$(pgrep -fc "$p")"; done
 echo "  Traceback (monitortrades/cacheManager): $(grep -a -c Traceback logs/monitortrades.log logs/cacheManager.log 2>/dev/null | paste -sd' ')"
-echo "  trailing viu=$(pgrep -fc trailing_stop.py)"
+echo "  trailing alive=$(pgrep -fc trailing_stop.py)"

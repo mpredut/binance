@@ -168,11 +168,11 @@ class Strategy:
             return
         ok, oid, msg = self.client.place_limit(self.coin, side == "buy", sz, px, reduce_only=reduce_only)
         if ok:
-            log(f"  [STRAT] {role.upper()}({side}) {kind} plasat oid={oid} {sz} @ {px:.4f} ({msg})")
+            log(f"  [STRAT] {role.upper()}({side}) {kind} placed oid={oid} {sz} @ {px:.4f} ({msg})")
             self.s["orders"].append({"oid": oid, "role": role, "side": side, "sz": sz, "px": px,
                                      "amount": amount, "kind": kind, "ts": time.time()})
         else:
-            log(f"  ! [STRAT] {role} {kind} esuat: {msg}")
+            log(f"  ! [STRAT] {role} {kind} failed: {msg}")
 
     def _cancel_close(self) -> None:
         o = self._close_order()
@@ -181,7 +181,7 @@ class Strategy:
         if not self.dry_run and not str(o["oid"]).startswith("PAPER"):
             self.client.cancel(self.coin, o["oid"])
         self._remove(o)
-        log(f"  [STRAT] anulat close {o['oid']}")
+        log(f"  [STRAT] cancelled close {o['oid']}")
 
     # -- reconciliation --------------------------------------------------------
     def reconcile(self, price: float) -> None:
@@ -311,7 +311,7 @@ class Strategy:
                     return
                 log(f"  [STRAT] semnal={sig['trend']} favorabil pt {self.p.direction} — intru")
             if self.s["spent"] + self.p.entry_amount > self.p.max_budget:
-                log(f"  [STRAT] plafon {self.p.max_budget} {self.ccy} atins"); return
+                log(f"  [STRAT] plafon {self.p.max_budget} {self.ccy} reached"); return
             px = price * (1 - self.sign * d)
             self._place("open", self._sz_for(self.p.entry_amount, px), px, "ENTRY", self.p.entry_amount)
             return
@@ -362,7 +362,7 @@ class Strategy:
             while True:
                 price = get_price(self.client, self.coin)
                 if price is None:
-                    log("  [STRAT] pret indisponibil"); time.sleep(self.p.check_minutes*60); continue
+                    log("  [STRAT] price unavailable"); time.sleep(self.p.check_minutes*60); continue
                 self.reconcile(price); self.step(price); self._save()
                 avg = self._avg()
                 pos = f"qty={self.s['qty']:.6f} avg={avg:.4f}" if avg else "qty=0 (astept intrare)"
@@ -370,4 +370,4 @@ class Strategy:
                     f"NET={self.s['realized_net']:+.2f} (brut {self.s['realized_gross']:+.2f}, fee {self.s['fees_total']:.2f}) {self.ccy}  ord={len(self.s['orders'])}")
                 time.sleep(self.p.check_minutes*60)
         except KeyboardInterrupt:
-            log("  [STRAT] oprit manual."); self._save()
+            log("  [STRAT] stopped manually."); self._save()

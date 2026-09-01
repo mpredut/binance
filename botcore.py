@@ -84,7 +84,7 @@ def load_dotenv(path: str = ".env") -> None:
     for key, value in pairs:
         if key and key not in os.environ:
             os.environ[key] = value
-    log(f"  .env incarcat din {path}")
+    log(f"  .env loaded from {path}")
 
 
 def load_env_stack(env_file: str, config_name: str = "config.env") -> None:

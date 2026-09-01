@@ -85,7 +85,7 @@ def main():
     p.add_argument("--symbols", default="BTCUSDC,TAOUSDC",
                     help="comma-separated list (default: BTCUSDC,TAOUSDC)")
     p.add_argument("--months", type=float, default=12.0,
-                    help="retentie, in luni (implicit 12 — 21 iul, ridicat de la 6: dupa migrarea "
+                    help="retention, in months (implicit 12 — 21 iul, ridicat de la 6: dupa migrarea "
                          "la JSONL costul de scriere nu mai creste cu arhiva, iar spatiul disponibil "
                          "(14GB liber dupa curatarea logurilor) permite un istoric mai lung)")
     p.add_argument("--sync-ts", type=float, default=0.8,
@@ -134,7 +134,7 @@ def main():
         current_price_mgr.subscribe_price(cache)
         caches.append(cache)
 
-    print(f"[tradeall_price_archiver] pornit: {symbols} | retentie {months} luni "
+    print(f"[tradeall_price_archiver] started: {symbols} | retention {months} months "
           f"({keep_hours:.0f}h) | scriere pe disc la {save_every:.0f}s", flush=True)
     print("[tradeall_price_archiver] scriu in cachedb/cache_24price_long_<symbol>.jsonl "
           "(separat de cache-ul live 24h al tradeall.py)")

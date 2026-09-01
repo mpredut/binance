@@ -25,7 +25,7 @@ def _silent(*_args, **_kwargs):
 
 def _validate_replay(ohlc, params, bar_minutes: float | None) -> None:
     if not ohlc:
-        raise ValueError("ohlc nu poate fi gol")
+        raise ValueError("ohlc cannot be empty")
     if (params.trend_overlay or params.dca_trend_brake) and (
             bar_minutes is None or float(bar_minutes) != float(params.trend_interval)):
         raise ValueError(

@@ -36,7 +36,7 @@ def pair_available(client: KrakenClient, pair: str) -> dict | None:
     # Status 'online' means tradable; Kraken also reports cancel/post/limit/reduce-only.
     status = info.get("status", "online")
     if status not in ("online", "limit_only", "post_only"):
-        log(f"  [market] {pair} listat dar status={status} (inca netranzactionabil)")
+        log(f"  [market] {pair} listed but status={status} (still not tradable)")
         return None
     return info
 

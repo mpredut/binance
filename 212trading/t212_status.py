@@ -61,7 +61,7 @@ def main() -> int:
         ppl = cash.get("ppl", 0); pie = cash.get("pieCash", 0)
         print(f"  INVESTIT (cost)   : {inv:>10.2f}")
         print(f"  DISPONIBIL (liber): {free:>10.2f}   <- cu astia poti plasa ordine noi")
-        print(f"  BLOCAT            : {blk:>10.2f}   <- prins in ordine pending/in curs")
+        print(f"  BLOCKED            : {blk:>10.2f}   <- locked in pending or in-flight orders")
         print(f"  cash in pie-uri   : {pie:>10.2f}")
         print(f"  P&L nerealizat    : {ppl:>+10.2f}")
         print(f"  TOTAL cont        : {tot:>10.2f}")

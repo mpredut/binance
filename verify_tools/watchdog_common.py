@@ -60,7 +60,7 @@ def send_ntfy(title, message):
         print("[watchdog] fara PHONE_ALERT_URL/NTFY_TOPIC — sar push-ul")
         return False
     ok = AlertNotifier.send_phone_webhook_batch([_watchdog_event(title, message)], webhook_url=url)
-    print(f"[watchdog] push {'OK' if ok else 'ESUAT'}")
+    print(f"[watchdog] push {'OK' if ok else 'FAILED'}")
     return ok
 
 
@@ -68,7 +68,7 @@ def send_email(subject, body):
     ok = AlertNotifier.send_email_batch(
         [_watchdog_event(subject, body)], subject=subject,
     )
-    print(f"[watchdog] email {'trimis' if ok else 'omis/esuat'}")
+    print(f"[watchdog] email {'trimis' if ok else 'omis/failed'}")
     return ok
 
 

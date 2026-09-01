@@ -239,13 +239,13 @@ class KrakenTrailing:
                  f"vinde sub {stop_at:.4f} (-{trail}%)  (liber {free:.4f})")
 
     def log_skip_rebuy_trend(self, asset) -> None:
-        self.log(f"  [TRAIL-K] re-buy {asset} amanat — trend instant CLAR jos (nu prind cutitul)")
+        self.log(f"  [TRAIL-K] re-buy {asset} deferred — trend instant CLAR jos (nu prind cutitul)")
 
     def log_skip_sell_trend(self, key, asset, pair, trail) -> None:
-        self.log(f"  [TRAIL-K] {asset}: -{trail}% atins dar trend instant SUS — NU vand (anti-wick)")
+        self.log(f"  [TRAIL-K] {asset}: -{trail}% reached dar trend instant SUS — NU vand (anti-wick)")
 
     def log_tick_error(self, e) -> None:
-        self.log(f"  ! [TRAIL-K] ciclu esuat ({e.__class__.__name__}: {e}) — reincerc")
+        self.log(f"  ! [TRAIL-K] cycle failed ({e.__class__.__name__}: {e}) — reincerc")
 
     # -- one step / loop -------------------------------------------------------
     def check_once(self) -> None:
@@ -257,7 +257,7 @@ class KrakenTrailing:
 
     def run(self):
         mode = "⚠ ACTIV (vinde real)" if self.enabled else "DRY-RUN (doar logheaza)"
-        self.log(f"=== TRAILING STOP KRAKEN pornit — {mode} ===")
+        self.log(f"=== TRAILING STOP KRAKEN started — {mode} ===")
         self.log(f"    protejez: " + ", ".join(f"{a}={t}%" for a, t in TRAIL_PCT.items()) +
                  "  (FREE balance only, not the bot position)")
         self.log(f"    re-buy: {'ON' if REBUY_ENABLED else 'off'} (recul +{REBUY_BOUNCE_PCT}% de la minim)")

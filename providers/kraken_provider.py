@@ -121,7 +121,7 @@ class KrakenProvider(MarketDataProvider):
         if api_key and api_secret:
             self._cli = cli
         else:
-            print("[Kraken] ⚠ PORNIT FARA chei (kraken/.env lipsa/incomplet la primul apel de cont)"
+            print("[Kraken] ⚠ STARTED FARA chei (kraken/.env missing/incomplet la primul apel de cont)"
                   " -> citirile de cont (balance/orders) vor esua; NU cachez, reincerc la urmatorul tick.")
         return cli
 
@@ -393,7 +393,7 @@ class KrakenProvider(MarketDataProvider):
             raise ProviderError(f"order_status {order_id}: {e}") from e
         info = res.get(order_id)
         if info is None:
-            raise ProviderError(f"order_status: ordinul {order_id} nu a fost gasit")
+            raise ProviderError(f"order_status: ordinul {order_id} was not found")
         return OrderStatus(
             status=str(info.get("status", "")),
             filled_qty=float(info.get("vol_exec") or 0.0),

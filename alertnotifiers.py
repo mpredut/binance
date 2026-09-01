@@ -574,14 +574,14 @@ def notify(title: str, body: str, source: str, symbol: str,
     try:
         AlertNotifier.send_phone_webhook_batch([alert], webhook_url=ntfy_url)
     except Exception as e:  # noqa: BLE001
-        print(f"  ! notify ntfy esuat: {e}")
+        print(f"  ! notify ntfy failed: {e}")
     if email is None:   # Automatic email requires an urgent marker; fills/balances/prices do not qualify.
         email = any(m in title.upper() for m in _URGENT_MARKERS)
     if email and os.environ.get("ALERT_TO_EMAIL"):
         try:
             AlertNotifier.send_email_batch([alert])
         except Exception as e:  # noqa: BLE001
-            print(f"  ! notify email esuat: {e}")
+            print(f"  ! notify email failed: {e}")
     if desktop:
         try:
             subprocess.run(["notify-send", "-u", "critical", title, body], check=False)

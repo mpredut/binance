@@ -37,7 +37,7 @@ class JsonStateStoreTest(unittest.TestCase):
 
             paper, messages = self._store(path, fail_closed=False)
             self.assertEqual(paper.load(), _defaults())
-            self.assertIn("reset permis doar in PAPER", messages[-1])
+            self.assertIn("reset allowed only in PAPER", messages[-1])
 
     def test_save_replaces_atomically_without_temporary_residue(self):
         with tempfile.TemporaryDirectory() as directory:

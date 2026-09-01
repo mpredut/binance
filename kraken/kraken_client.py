@@ -260,7 +260,7 @@ if __name__ == "__main__":
                 "8MPtnRfp32bAb0nmbRn6H8ndwLUQ==")
     got = KrakenClient._signature("/0/private/AddOrder", data, secret)
     ok = got == expected
-    log(f"semnatura self-test: {'OK ✅' if ok else 'ESUAT ❌'}")
+    log(f"signature self-test: {'OK ✅' if ok else 'FAILED ❌'}")
     if not ok:
         log(f"  asteptat: {expected}")
         log(f"  obtinut : {got}")

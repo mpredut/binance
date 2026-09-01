@@ -234,7 +234,7 @@ class Instrument:
                 )
                 qty = decision.final_qty
                 if qty <= 0:
-                    print(f"[{self.symbol}] {side_u} qty refuzat: "
+                    print(f"[{self.symbol}] {side_u} qty refused: "
                           f"{decision.refuse_reason} asset={decision.balance_asset}")
                     reason = decision.refuse_reason or "qty_zero_after_weight"
                     return None
@@ -264,7 +264,7 @@ class Instrument:
                 if is_market:
                     guard_price = self._provider.get_current_price(self.symbol)
                     if guard_price is None or float(guard_price) <= 0:
-                        print(f"[{self.symbol}] {side_u} MARKET BLOCAT: pret curent indisponibil")
+                        print(f"[{self.symbol}] {side_u} MARKET BLOCKED: current price unavailable")
                         reason = "market_price_unavailable"
                         return None
                     guard_price = float(guard_price)
@@ -281,7 +281,7 @@ class Instrument:
                     side_u, self.symbol, pair_id=cooldown_pair_id) as slot:
                 if not slot.allowed:
                     age = time.time() - slot.info.get("timestamp", 0)
-                    print(f"[{self.symbol}] {side_u} BLOCAT de cooldown: ultim ordin "
+                    print(f"[{self.symbol}] {side_u} BLOCKED de cooldown: last order "
                           f"({slot.info.get('side')}) acum {age:.0f}s")
                     reason = "cooldown"
                     return None
@@ -340,7 +340,7 @@ class Instrument:
                     order = None
                 return order
         except Exception as e:  # noqa: BLE001 — Fail closed when guards cannot be verified.
-            print(f"[{self.symbol}] {side_u} BLOCAT (fail-closed): {e}")
+            print(f"[{self.symbol}] {side_u} BLOCKED (fail-closed): {e}")
             reason = reason or "guard_check_failed"
             return None
         finally:
@@ -381,7 +381,7 @@ class Instrument:
                                 order_id=_order_id_from_payload(order),
                             )
                 except Exception as _e:  # noqa: BLE001
-                    print(f"[{self.symbol}] {side_u} tracking accepted esuat: {_e}")
+                    print(f"[{self.symbol}] {side_u} tracking accepted failed: {_e}")
             # Persist a failed intent unless this is already a retry. Queue handling
             # is best effort and never changes the placement return value.
             elif order is None and not caller_owns_retry:
@@ -424,7 +424,7 @@ class Instrument:
                                 intent_id=kwargs.get("intent_id"),
                                 kind=kwargs.get("kind") or kwargs.get("motivation"))
                 except Exception as _e:  # noqa: BLE001
-                    print(f"[{self.symbol}] {side_u} enqueue retry esuat (ignor): {_e}")
+                    print(f"[{self.symbol}] {side_u} enqueue retry failed (ignored): {_e}")
 
     def min_qty(self) -> float:
         """Return the venue minimum order quantity; ``0`` means no known minimum."""

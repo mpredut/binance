@@ -172,7 +172,7 @@ _ws_started = False
 def startWSevents(handler=None, interval_sec=47):
     global _ws_started
     if _ws_started:
-        print("⚠️ Polling deja pornit! Ignor apelul duplicat.")
+        print("⚠️ Polling already started! Ignoring the duplicate call.")
         return
     _ws_started = True
 

@@ -85,7 +85,7 @@ def update_price(symbol):
         ticker = client.get_symbol_ticker(symbol=symbol)
         cprice[symbol] = float(ticker['price'])
     except Exception as e:
-        print(f"update_price: A aparut o eroare neasteptata: {e}")
+        print(f"update_price: There appeared o eroare neasteptata: {e}")
 
     cprice_time[symbol] = time.time()
     cprice_refresh_int[symbol] = 11
@@ -105,7 +105,7 @@ def get_current_price(symbol):
     
     except BinanceAPIException as e:
         print(f"Eroare la obtinerea pretului curent de la Binance API: {e}")
-        print(f"Folosesc pretul obtinut prin websocket, {symbol}: {cprice.get(symbol, 'N/A')}")
+        print(f"Folosesc the price obtained over the websocket, {symbol}: {cprice.get(symbol, 'N/A')}")
         _cprice = cprice.get(symbol, None)  # Return None when the symbol is absent.
         if _cprice is None:
             print(f"get_current_price: the price for {symbol} is unavailable over WebSocket. Returning None.")
@@ -236,7 +236,7 @@ def cancel_order(symbol, order_id):
         if not order_id:
             return False
         client.cancel_order(symbol=symbol, orderId=order_id)
-        print(f"Ordinul cu ID {order_id} a fost anulat.")
+        print(f"Ordinul cu ID {order_id} was cancelled.")
         return True
     except Exception as e:
         print(f"Eroare la anularea ordinului: {order_id} {e}")

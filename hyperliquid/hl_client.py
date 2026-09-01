@@ -125,13 +125,13 @@ class HLClient:
             v = mids.get(coin)
             return float(v) if v is not None else None
         except Exception as e:  # noqa: BLE001
-            log(f"  ! mid({coin}) esuat: {e}")
+            log(f"  ! mid({coin}) failed: {e}")
             return None
 
     # ----- account (read-only, address only) ----------------------------------
     def _user_state(self) -> dict:
         if not self.address:
-            raise HLError("HL_ACCOUNT_ADDRESS lipsa")
+            raise HLError("HL_ACCOUNT_ADDRESS missing")
         return self.info.user_state(self.address)
 
     def position_strict(self, coin: str) -> tuple[float, float]:
@@ -152,7 +152,7 @@ class HLClient:
         except HLError:
             raise
         except Exception as e:  # noqa: BLE001
-            log(f"  ! position({coin}) esuat: {e}")
+            log(f"  ! position({coin}) failed: {e}")
         return 0.0, 0.0
 
     def withdrawable(self) -> float:
@@ -167,7 +167,7 @@ class HLClient:
         try:
             oo = self.info.open_orders(self.address)
         except Exception as e:  # noqa: BLE001
-            log(f"  ! open_orders esuat: {e}")
+            log(f"  ! open_orders failed: {e}")
             return []
         return [o for o in oo if coin is None or o.get("coin") == coin]
 
@@ -185,7 +185,7 @@ class HLClient:
                 if u.get("tokens") == [ti, usdc]:
                     return u.get("name")
         except Exception as e:  # noqa: BLE001
-            log(f"  ! resolve_spot_pair({token}) esuat: {e}")
+            log(f"  ! resolve_spot_pair({token}) failed: {e}")
         return None
 
     def spot_mid(self, pair: str) -> float | None:
@@ -194,13 +194,13 @@ class HLClient:
             v = self.info.all_mids().get(pair)
             return float(v) if v is not None else None
         except Exception as e:  # noqa: BLE001
-            log(f"  ! spot_mid({pair}) esuat: {e}")
+            log(f"  ! spot_mid({pair}) failed: {e}")
             return None
 
     def spot_balance_strict(self, token: str) -> float:
         """Return spot balance while propagating API errors; see position_strict."""
         if not self.address:
-            raise HLError("HL_ACCOUNT_ADDRESS lipsa")
+            raise HLError("HL_ACCOUNT_ADDRESS missing")
         for b in self.info.spot_user_state(self.address).get("balances", []):
             if b.get("coin") == token:
                 return float(b.get("total") or 0)
@@ -212,7 +212,7 @@ class HLClient:
         try:
             return self.spot_balance_strict(token)
         except Exception as e:  # noqa: BLE001
-            log(f"  ! spot_balance({token}) esuat: {e}")
+            log(f"  ! spot_balance({token}) failed: {e}")
         return 0.0
 
     def funding_rate(self, coin: str) -> float | None:
@@ -223,7 +223,7 @@ class HLClient:
                 if a["name"] == coin:
                     return float(ctxs[i].get("funding") or 0)
         except Exception as e:  # noqa: BLE001
-            log(f"  ! funding_rate({coin}) esuat: {e}")
+            log(f"  ! funding_rate({coin}) failed: {e}")
         return None
 
     def position_full(self, coin: str) -> dict | None:
@@ -234,7 +234,7 @@ class HLClient:
                 if p.get("coin") == coin:
                     return p
         except Exception as e:  # noqa: BLE001
-            log(f"  ! position_full esuat: {e}")
+            log(f"  ! position_full failed: {e}")
         return None
 
     def margin_summary(self) -> dict:
@@ -255,7 +255,7 @@ class HLClient:
         try:
             return self.info.user_funding_history(self.address, start_ms)
         except Exception as e:  # noqa: BLE001
-            log(f"  ! funding_history esuat: {e}")
+            log(f"  ! funding_history failed: {e}")
             return []
 
     def candles(self, coin: str, interval: str = "1h", lookback_hours: int = 60) -> list[dict]:
@@ -265,7 +265,7 @@ class HLClient:
         try:
             return self.info.candles_snapshot(coin, interval, start, end)
         except Exception as e:  # noqa: BLE001
-            log(f"  ! candles({coin}) esuat: {e}")
+            log(f"  ! candles({coin}) failed: {e}")
             return []
 
     def spot_order(self, pair: str, is_buy: bool, sz: float, px: float,
@@ -306,7 +306,7 @@ class HLClient:
             self.exchange.update_leverage(leverage, coin, is_cross=True)
             log(f"  [HL] levier {coin} setat la {leverage}x")
         except Exception as e:  # noqa: BLE001
-            log(f"  ! set_leverage esuat: {e}")
+            log(f"  ! set_leverage failed: {e}")
 
     def place_limit(self, coin: str, is_buy: bool, sz: float, px: float,
                     reduce_only: bool = False) -> tuple[bool, int | None, str]:
@@ -338,5 +338,5 @@ class HLClient:
             res = self.exchange.cancel(coin, oid)
             return res.get("status") == "ok"
         except Exception as e:  # noqa: BLE001
-            log(f"  ! cancel esuat: {e}")
+            log(f"  ! cancel failed: {e}")
             return False

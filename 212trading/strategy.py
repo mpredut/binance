@@ -361,7 +361,7 @@ class Strategy:
             log(f"  [STRAT] T212 submit recovered from the active orders: {order['id']}")
             return "adopted"
         if len(matches) > 1:
-            log("  ! [STRAT] submit T212 ambiguu: mai multe ordine active se potrivesc — pastrez pending")
+            log("  ! [STRAT] submit T212 ambiguu: mai multe ordine active se potrivesc — keeping it pending")
             return "waiting"
 
         before = float(pending.get("before_qty") or 0.0)
@@ -434,7 +434,7 @@ class Strategy:
                 self.s["last_sell_price"] = price   # Reentry rule: do not buy back higher.
                 if was_sl and self.p.sl_rebuy_enabled:
                     self.s["sl_rebuy"] = {"low": price, "sell_price": price}
-                    log(f"  🟢 [STRAT] re-buy pe recul ARMAT dupa stop-loss "
+                    log(f"  🟢 [STRAT] re-buy pe recul ARMED dupa stop-loss "
                         f"(asteptam +{self.p.sl_rebuy_bounce_pct}% de la minim)")
                 log(f"  [STRAT] === ciclu inchis, reincep (ciclu {nxt}) ===")
 
@@ -452,7 +452,7 @@ class Strategy:
                                      "ts": self._now()})
             return
         if self.s.get("pending_submit"):
-            log(f"  [STRAT] BUY {kind} amanat — exista deja un submit T212 pending")
+            log(f"  [STRAT] BUY {kind} deferred — exista deja un submit T212 pending")
             return
         pending = self._new_pending_submit(
             side="BUY", qty=qty, limit=limit, amount=amount, kind=kind,
@@ -472,12 +472,12 @@ class Strategy:
                 log(f"  ! [STRAT] BUY {kind} respins explicit: {exc}")
             else:
                 self._persist_pending_submit(pending)
-                log(f"  ! [STRAT] BUY {kind} raspuns ambiguu: {exc} — pastrez pending")
+                log(f"  ! [STRAT] BUY {kind} raspuns ambiguu: {exc} — keeping it pending")
             if "insufficient" in str(exc).lower():
                 self.s["buy_backoff_until"] = self._now() + 1800
                 log("  [STRAT] fonduri insuficiente — pauza cumparari 30 min (alimenteaza contul)")
             return
-        log(f"  [STRAT] BUY {kind} plasat id={order_id} {qty} @ {limit:.2f}")
+        log(f"  [STRAT] BUY {kind} placed id={order_id} {qty} @ {limit:.2f}")
         self._adopt_pending_submit(order_id)
 
     def _place_sell(self, qty: float, limit: float, level: float | None = None,
@@ -497,7 +497,7 @@ class Strategy:
                                      "ts": self._now()})
             return True
         if self.s.get("pending_submit"):
-            log(f"  [STRAT] SELL {kind}{tag} amanat — exista deja un submit T212 pending")
+            log(f"  [STRAT] SELL {kind}{tag} deferred — exista deja un submit T212 pending")
             return False
         pending = self._new_pending_submit(
             side="SELL", qty=qty, limit=limit, amount=None, kind=kind,
@@ -519,7 +519,7 @@ class Strategy:
                 log(f"  ! [STRAT] SELL {kind}{tag} respins explicit: {message}")
             else:
                 self._persist_pending_submit(pending)
-                log(f"  ! [STRAT] SELL {kind}{tag} raspuns ambiguu: {message} — pastrez pending")
+                log(f"  ! [STRAT] SELL {kind}{tag} raspuns ambiguu: {message} — keeping it pending")
             if "selling-equity-not-owned" not in message:
                 return not definitive
             # Reset only when the venue confirms owned is effectively zero. A positive
@@ -541,7 +541,7 @@ class Strategy:
                 log(f"  ! [STRAT] selling-not-owned but owned={_owned} (free<order) — NOT resetting the position")
             return False
         order_type = "MARKET" if market else f"@ {limit:.2f}"
-        log(f"  [STRAT] SELL {kind}{tag} plasat id={order_id} {qty:.2f} {order_type}")
+        log(f"  [STRAT] SELL {kind}{tag} placed id={order_id} {qty:.2f} {order_type}")
         self._adopt_pending_submit(order_id)
         return True
 
@@ -554,7 +554,7 @@ class Strategy:
     def _cancel_specific(self, o: dict) -> bool:
         if self.dry_run or str(o["id"]).startswith("PAPER"):
             self._remove_order(o)
-            log(f"  [STRAT] anulat ordin {o.get('side', '?')} {o['id']}")
+            log(f"  [STRAT] cancelled ordin {o.get('side', '?')} {o['id']}")
             return True
         if o.get("cancel_requested"):
             return True
@@ -564,12 +564,12 @@ class Strategy:
                 self.ticker, str(o["id"]),
             )
         except ProviderError as exc:
-            log(f"  ! [STRAT] cancel esuat pentru {o['id']}: {exc} — ordinul ramane urmarit")
+            log(f"  ! [STRAT] cancel failed pentru {o['id']}: {exc} — the order stays tracked")
             return False
         o["cancel_requested"] = True
         o["cancel_ts"] = self._now()
         self._save()
-        log(f"  [STRAT] cancel solicitat {o.get('side', '?')} {o['id']} — astept status terminal")
+        log(f"  [STRAT] cancel requested {o.get('side', '?')} {o['id']} — waiting for a terminal status")
         return True
 
     def _cancel_all_orders(self) -> bool:
@@ -800,7 +800,7 @@ class Strategy:
                 "ADOPTAT" if is_adoption
                 else str((source_order or {}).get("kind") or ("DCA" if prev_qty > 1e-9 else "ENTRY"))
             )
-            log(f"  [STRAT] BUY EXECUTAT {fq:.4f} @ {fp:.2f} USD "
+            log(f"  [STRAT] BUY EXECUTED {fq:.4f} @ {fp:.2f} USD "
                 f"({kind_label})  qty={real_qty:.4f} avg={real_avg:.2f}")
             notify(title=f"{self.yahoo_sym} {'ADOPTAT' if is_adoption else 'BUY'} {fq:.4f}@a{real_avg:.2f}",
                    body=(f"{kind_label} | q{real_qty:.4f} a{real_avg:.2f} p~{fp:.2f} | "
@@ -824,7 +824,7 @@ class Strategy:
             self.s["spent_cash"] = round(real_qty * real_avg / self.fx_to_usd, 2)
             self.s["last_sell_price"] = sell_price
             approx = "" if exact_price is not None else "~"
-            log(f"  [STRAT] SELL EXECUTAT {sold:.4f} @ {approx}{sell_price:.2f} USD  "
+            log(f"  [STRAT] SELL EXECUTED {sold:.4f} @ {approx}{sell_price:.2f} USD  "
                 f"brut={gross:+.2f}  fee={fee:.2f}  net={net:+.2f} USD")
             notify(title=f"{self.yahoo_sym} SELL {sold:.4f}@{approx}{sell_price:.2f} N{net:+.2f}$",
                    body=f"a{prev_avg:.2f} · br{gross:+.2f} fee{fee:.2f} N{net:+.2f}$ | Ntot{self.s['realized_net_usd']:+.2f}$",
@@ -872,7 +872,7 @@ class Strategy:
             self.s["last_sell_price"] = exit_price
             if was_sl and self.p.sl_rebuy_enabled:   # Rebuy on a bounce, not below the sale, to catch recovery.
                 self.s["sl_rebuy"] = {"low": exit_price, "sell_price": exit_price}
-                log(f"  🟢 [STRAT] re-buy pe recul ARMAT dupa stop-loss (asteptam +{self.p.sl_rebuy_bounce_pct}% de la minim)")
+                log(f"  🟢 [STRAT] re-buy pe recul ARMED dupa stop-loss (we expected +{self.p.sl_rebuy_bounce_pct}% de la minim)")
             log(f"  [STRAT] === ciclu inchis, reincep (ciclu {nxt}) ===")
 
     # -- decision step ---------------------------------------------------------
@@ -899,7 +899,7 @@ class Strategy:
                 return False                    # Warming up: do not track a peak or sell.
             self.s["tr_armed"] = True
             self.s["pos_peak"] = price          # Start the peak at the activation price.
-            log(f"  [STRAT] trailing ARMAT: pret {price:.2f} ≥ avg{(avg or 0):.2f}+{minp}% — protejez de-acum (-{self.p.trail_pct}% de la peak)")
+            log(f"  [STRAT] trailing ARMED: pret {price:.2f} ≥ avg{(avg or 0):.2f}+{minp}% — protecting from now on (-{self.p.trail_pct}% de la peak)")
         peak = self.s.get("pos_peak", 0.0) or 0.0
         if price > peak:
             self.s["pos_peak"] = peak = price   # Track the high while holding the position.
@@ -997,7 +997,7 @@ class Strategy:
             return                                            # Wait until the bounce is confirmed.
         self.s.pop("sl_rebuy", None)                          # Consume the one-tranche reentry arm.
         if self.s["spent_cash"] + self.p.entry_amount > self.p.max_budget:
-            log(f"  [STRAT] re-buy SL anulat — plafon buget {self.p.max_budget:.0f} {self.ccy} atins")
+            log(f"  [STRAT] re-buy SL cancelled — budget cap {self.p.max_budget:.0f} {self.ccy} reached")
             return
         disc = 1 - self.p.entry_discount_pct / 100
         log(f"  🟢 [STRAT] RE-BUY dupa SL: recul +{self.p.sl_rebuy_bounce_pct}% de la minim {rb['low']:.2f} — reintru ENTRY")
@@ -1035,7 +1035,7 @@ class Strategy:
                         f"(vandut la {lsp:.2f}, astept -{rdp}%)")
                     return
             if self.s["spent_cash"] + self.p.entry_amount > self.p.max_budget:
-                log(f"  [STRAT] plafon buget {self.p.max_budget:.0f} {self.ccy} atins — nu intru")
+                log(f"  [STRAT] budget cap {self.p.max_budget:.0f} {self.ccy} reached — nu intru")
                 return
             self._place_buy(self.p.entry_amount, price * disc, kind="ENTRY")
             return
@@ -1082,7 +1082,7 @@ class Strategy:
                 slope = self._trend_slope_provider(self.yahoo_sym)
                 if slope is not None and slope < -self.p.dca_trend_gate_pct:
                     self._dca_gate_until = self._now() + 300
-                    log(f"  [STRAT] DCA BLOCAT de trend: panta {slope:+.3f}%/bara "
+                    log(f"  [STRAT] DCA BLOCKED de trend: slope {slope:+.3f}%/bar "
                         f"< -{self.p.dca_trend_gate_pct}% (downtrend) — re-verific in 5 min")
                     return
             log(f"  [STRAT] dip: {price:.2f} <= {self.s['last_buy_price']:.2f}"
@@ -1110,7 +1110,7 @@ class Strategy:
             while True:
                 price = get_price_usd(self.yahoo_sym)
                 if price is None:
-                    log("  [STRAT] pret indisponibil — reincerc")
+                    log("  [STRAT] price unavailable — reincerc")
                     time.sleep(self.p.check_minutes * 60)
                     continue
                 try:
@@ -1140,5 +1140,5 @@ class Strategy:
                         f"(astept intrare)")
                 time.sleep(self.p.check_minutes * 60)
         except KeyboardInterrupt:
-            log("  [STRAT] oprit manual.")
+            log("  [STRAT] stopped manually.")
             self._save()

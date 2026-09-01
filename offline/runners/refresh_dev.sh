@@ -38,7 +38,7 @@ rc=0
 rsync -a --info=stats1 --exclude '*.tmp' -e "$SSH" \
   "$REPO_ROOT/cachedb/" "$DEV_USER@$DEV_HOST:$DEV_PATH/cachedb/" 2>&1 | sed 's/^/  /' || rc=$?
 if [ "$rc" != 0 ] && [ "$rc" != 24 ] && [ "$rc" != 23 ]; then
-  echo "[refresh_dev] rsync a esuat cu cod $rc"; exit "$rc"
+  echo "[refresh_dev] rsync failed cu cod $rc"; exit "$rc"
 fi
 
 echo "[refresh_dev $(date '+%F %T')] gata"
