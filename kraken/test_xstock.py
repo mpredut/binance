@@ -19,6 +19,7 @@ from types import SimpleNamespace
 
 KRAKEN_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, KRAKEN_DIR)
+from kraken_common import parse_dotenv  # noqa: E402
 
 # `strategy.py`, `market_data.py` and `notify.py` also exist in other venue
 # directories.  Temporarily hide already-collected variants while importing
@@ -247,6 +248,7 @@ class TestAdoptare(Base):
 
     def setUp(self):
         super().setUp()
+        os.environ.update(parse_dotenv(os.path.join(KRAKEN_DIR, "config.env")))
         os.environ["STRAT_ADOPT_COST"] = "200"
         sp = state_path_for(self.PAIR)
         if os.path.exists(sp):
@@ -270,7 +272,10 @@ class TestAdoptare(Base):
         self.assertLess(s.s["qty"], 37.5 + 1e-12, "nu vinde niciodata peste ledger")
         self.assertAlmostEqual(s.s["cost"] / s.s["qty"], 200.0)
         sells = [o for o in s.s["orders"] if o["side"] == "sell" and o["kind"] == "TP"]
-        self.assertEqual(len(sells), 1, "TP plasat imediat dupa adoptare")
+        self.assertEqual(
+            len(sells), 0,
+            "configured trend-hold waits for the TP threshold before trailing",
+        )
 
     def test_asteapta_alocarea_fara_sa_cumpere(self):
         c = FakeKraken(bal={"ZUSD": "100"})                 # inca fara alocare

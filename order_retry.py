@@ -36,7 +36,9 @@ from dataclasses import dataclass
 from typing import Callable, Dict, Optional
 
 from lock import FileLock
-from providers.strategy_executor import OrderStatus, reconciliation_capabilities_of
+from providers.strategy_executor import (
+    OrderStatus, ProviderError, reconciliation_capabilities_of,
+)
 
 from botcore import (load_dotenv as _load_dotenv, required_bool_env,
                      required_float_env, required_int_env)
@@ -835,7 +837,7 @@ def _status_from_terminal_payload(payload) -> Optional[OrderStatus]:
     return status if status.terminal else None
 
 
-class OrderSubmissionRefused(RuntimeError):
+class OrderSubmissionRefused(ProviderError, RuntimeError):
     """Signal that a local pre-submit guard refused an owned intent.
 
     This is materially different from an exception or a response without an

@@ -17,7 +17,10 @@ from dataclasses import dataclass
 from typing import Callable
 
 from alertnotifiers import bind_notify
-from botcore import are_close, float_env, log
+from botcore import (
+    are_close, float_env, log, defined_env, required_env,
+    required_float_env, required_int_env, required_bool_env,
+)
 from providers.execution_audit import intent_client_order_id
 from providers.strategy_executor import ProviderError, StrategyExecutor
 from order_retry import (
@@ -168,60 +171,59 @@ class StratParams:
 
     @classmethod
     def from_env(cls) -> "StratParams":
-        mode = os.environ.get("STRATEGY_MODE", "avg_tp").strip().lower()
-        reentry_sl_bounce = float_env("STRAT_REENTRY_SL_BOUNCE_PCT")
+        mode = required_env("STRATEGY_MODE").lower()
+        if mode not in {"avg_tp", "dca_only"}:
+            raise ValueError(f"Invalid STRATEGY_MODE: {mode!r}")
         return cls(
-            currency           = os.environ.get("STRAT_CURRENCY", "EUR").strip().upper(),
-            entry_amount       = float_env("STRAT_ENTRY") or 50.0,
-            entry_discount_pct = float_env("STRAT_ENTRY_DISCOUNT_PCT") or 0.2,
-            dca_amount         = float_env("STRAT_DCA") or 30.0,
-            dca_drop_pct       = float_env("STRAT_DCA_DROP_PCT") or 2.0,
-            check_minutes      = float_env("STRAT_CHECK_MINUTES") or 2.0,
-            takeprofit_pct     = float_env("STRAT_TAKEPROFIT_PCT") or 1.0,
-            max_budget         = float_env("STRAT_MAX_BUDGET") or 500.0,
-            # Do not use ``or 10``: explicit zero validly disables DCA while managing exits.
-            max_dca_buys       = int(float_env("STRAT_MAX_DCA_BUYS")) if float_env("STRAT_MAX_DCA_BUYS") is not None else 10,
-            total_budget       = float_env("STRAT_TOTAL_BUDGET") or 0.0,
-            alloc_pct          = float_env("STRAT_ALLOC_PCT") or 0.0,
-            entry_pct          = float_env("STRAT_ENTRY_PCT") or 0.0,
-            dca_pct            = float_env("STRAT_DCA_PCT") or 0.0,
+            currency           = required_env("STRAT_CURRENCY").upper(),
+            entry_amount       = required_float_env("STRAT_ENTRY"),
+            entry_discount_pct = required_float_env("STRAT_ENTRY_DISCOUNT_PCT"),
+            dca_amount         = required_float_env("STRAT_DCA"),
+            dca_drop_pct       = required_float_env("STRAT_DCA_DROP_PCT"),
+            check_minutes      = required_float_env("STRAT_CHECK_MINUTES"),
+            takeprofit_pct     = required_float_env("STRAT_TAKEPROFIT_PCT"),
+            max_budget         = required_float_env("STRAT_MAX_BUDGET"),
+            max_dca_buys       = required_int_env("STRAT_MAX_DCA_BUYS"),
+            total_budget       = required_float_env("STRAT_TOTAL_BUDGET"),
+            alloc_pct          = required_float_env("STRAT_ALLOC_PCT"),
+            entry_pct          = required_float_env("STRAT_ENTRY_PCT"),
+            dca_pct            = required_float_env("STRAT_DCA_PCT"),
             enable_takeprofit  = (mode != "dca_only"),
-            order_ttl_min      = float_env("STRAT_ORDER_TTL_MIN") or 10.0,
-            stop_loss_pct      = float_env("STRAT_STOP_LOSS_PCT") or 0.0,
-            adopt_cost         = float_env("STRAT_ADOPT_COST") or 0.0,
-            adopt_qty          = float_env("STRAT_ADOPT_QTY") or 0.0,
-            reentry_drop_pct   = float_env("STRAT_REENTRY_DROP_PCT") or 0.0,
-            reentry_tolerance_pct = float_env("STRAT_REENTRY_TOLERANCE_PCT") or 0.0,
-            reentry_adaptive   = os.environ.get("STRAT_REENTRY_ADAPTIVE", "false").strip().lower() == "true",
-            # Explicit zero disables bounce reentry after STOP and retains the classic rule.
-            reentry_sl_bounce_pct = 1.5 if reentry_sl_bounce is None else reentry_sl_bounce,
-            tp_tranches        = _parse_tranches(os.environ.get("STRAT_TP_TRANCHES", "")),
-            tp_trend_hold      = os.environ.get("STRAT_TP_TREND_HOLD", "false").strip().lower() == "true",
-            tp_trend_min_pct   = float_env("STRAT_TP_TREND_MIN_PCT") or 0.5,
-            tp_trail_pct       = float_env("STRAT_TP_TRAIL_PCT") or 2.0,
+            order_ttl_min      = required_float_env("STRAT_ORDER_TTL_MIN"),
+            stop_loss_pct      = required_float_env("STRAT_STOP_LOSS_PCT"),
+            adopt_cost         = required_float_env("STRAT_ADOPT_COST"),
+            adopt_qty          = required_float_env("STRAT_ADOPT_QTY"),
+            reentry_drop_pct   = required_float_env("STRAT_REENTRY_DROP_PCT"),
+            reentry_tolerance_pct = required_float_env("STRAT_REENTRY_TOLERANCE_PCT"),
+            reentry_adaptive   = required_bool_env("STRAT_REENTRY_ADAPTIVE"),
+            reentry_sl_bounce_pct = required_float_env("STRAT_REENTRY_SL_BOUNCE_PCT"),
+            tp_tranches        = _parse_tranches(defined_env("STRAT_TP_TRANCHES")),
+            tp_trend_hold      = required_bool_env("STRAT_TP_TREND_HOLD"),
+            tp_trend_min_pct   = required_float_env("STRAT_TP_TREND_MIN_PCT"),
+            tp_trail_pct       = required_float_env("STRAT_TP_TRAIL_PCT"),
             tp_trail_profit_floor_pct = max(
-                0.0, float_env("STRAT_TP_TRAIL_PROFIT_FLOOR_PCT") or 0.0,
+                0.0, required_float_env("STRAT_TP_TRAIL_PROFIT_FLOOR_PCT"),
             ),
-            trend_overlay      = os.environ.get("STRAT_TREND_OVERLAY", "false").strip().lower() == "true",
-            trend_sma_n        = int(float_env("STRAT_TREND_SMA_N") or 30),
-            trend_interval     = int(float_env("STRAT_TREND_INTERVAL") or 240),
-            trend_confirm_bars = int(float_env("STRAT_TREND_CONFIRM_BARS") or 3),
-            trend_topup        = float_env("STRAT_TREND_TOPUP") or 2000.0,
-            trend_trail_pct    = float_env("STRAT_TREND_TRAIL_PCT") or 5.0,
-            trend_exit_break   = os.environ.get("STRAT_TREND_EXIT_BREAK", "false").strip().lower() == "true",
-            tp_trail_adaptive  = os.environ.get("STRAT_TP_TRAIL_ADAPTIVE", "false").strip().lower() == "true",
-            tp_trail_k         = float_env("STRAT_TP_TRAIL_K") or 2.0,
-            tp_trail_min       = float_env("STRAT_TP_TRAIL_MIN") or 1.5,
-            tp_trail_max       = float_env("STRAT_TP_TRAIL_MAX") or 8.0,
-            tp_trail_vol_interval = int(float_env("STRAT_TP_TRAIL_VOL_INTERVAL") or 240),
-            dca_trend_brake    = os.environ.get("STRAT_DCA_TREND_BRAKE", "false").strip().lower() == "true",
-            dca_brake_min_pct  = float_env("STRAT_DCA_BRAKE_MIN_PCT") or 1.5,
+            trend_overlay      = required_bool_env("STRAT_TREND_OVERLAY"),
+            trend_sma_n        = required_int_env("STRAT_TREND_SMA_N"),
+            trend_interval     = required_int_env("STRAT_TREND_INTERVAL"),
+            trend_confirm_bars = required_int_env("STRAT_TREND_CONFIRM_BARS"),
+            trend_topup        = required_float_env("STRAT_TREND_TOPUP"),
+            trend_trail_pct    = required_float_env("STRAT_TREND_TRAIL_PCT"),
+            trend_exit_break   = required_bool_env("STRAT_TREND_EXIT_BREAK"),
+            tp_trail_adaptive  = required_bool_env("STRAT_TP_TRAIL_ADAPTIVE"),
+            tp_trail_k         = required_float_env("STRAT_TP_TRAIL_K"),
+            tp_trail_min       = required_float_env("STRAT_TP_TRAIL_MIN"),
+            tp_trail_max       = required_float_env("STRAT_TP_TRAIL_MAX"),
+            tp_trail_vol_interval = required_int_env("STRAT_TP_TRAIL_VOL_INTERVAL"),
+            dca_trend_brake    = required_bool_env("STRAT_DCA_TREND_BRAKE"),
+            dca_brake_min_pct  = required_float_env("STRAT_DCA_BRAKE_MIN_PCT"),
             dca_spacing_growth_pct = max(
-                0.0, float_env("STRAT_DCA_SPACING_GROWTH_PCT") or 0.0,
+                0.0, required_float_env("STRAT_DCA_SPACING_GROWTH_PCT"),
             ),
-            dca_vol_scale_k    = float_env("STRAT_DCA_VOL_SCALE_K") or 0.0,
-            dca_vol_ref        = float_env("STRAT_DCA_VOL_REF") or 2.0,
-            dca_vol_interval   = int(float_env("STRAT_DCA_VOL_INTERVAL") or 240),
+            dca_vol_scale_k    = required_float_env("STRAT_DCA_VOL_SCALE_K"),
+            dca_vol_ref        = required_float_env("STRAT_DCA_VOL_REF"),
+            dca_vol_interval   = required_int_env("STRAT_DCA_VOL_INTERVAL"),
         )
 
 
@@ -548,6 +550,16 @@ class Strategy:
                 intent, persist=self._persist_pending_intent, submit=submit)
             if not tracked.order_known:
                 submit_error = tracked.intent.get("submit_error")
+                if tracked.outcome == "refused":
+                    refusal = tracked.intent.get("refusal_reason") or "venue refusal"
+                    self._persist_pending_intent(None)
+                    if self._insufficient_funds_error(refusal):
+                        self._record_placement_backoff(side, kind, refusal)
+                    log(
+                        f"  ! [STRAT] {side} {kind} rejected definitively; "
+                        "the intent was released for safe reevaluation"
+                    )
+                    return False
                 if (not market
                         and self._insufficient_funds_error(submit_error)):
                     self._record_placement_backoff(

@@ -169,6 +169,16 @@ class HLExecutorContractTest(unittest.TestCase):
             {"orderId": "42", "status": "open"},
         )
 
+    def test_order_by_client_id_converts_hex_string_to_sdk_cloid(self):
+        cloid = "0x0123456789abcdef0123456789abcdef"
+        observed = []
+        self.p._client.info.query_order_by_cloid = lambda _addr, value: (
+            observed.append(value) or {"status": "unknownOid"}
+        )
+        self.assertIsNone(self.p.order_by_client_id("HYPE", cloid))
+        self.assertEqual(str(observed[0]), cloid)
+        self.assertTrue(hasattr(observed[0], "to_raw"))
+
     def test_order_status_open_include_fill_partial(self):
         self.p._client = FakeRead(
             fills=[{"oid": 999, "sz": "0.4", "px": "60", "fee": "0.02"}],

@@ -14,6 +14,7 @@ sys.path.insert(0, ROOT)
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
 from strategies import spot_dca as strat  # noqa: E402
+from order_retry import OrderSubmissionRefused  # noqa: E402
 from providers.strategy_executor import (  # noqa: E402
     OrderReconciliationCapabilities,
     OrderStatus,
@@ -150,6 +151,15 @@ class ProviderLivePathTest(unittest.TestCase):
         submits = [call for call in self.fake.calls if call[0] == "submit_order"]
         self.assertEqual(len(submits), 1)
         self.assertEqual(self.s.s["orders"][0]["txid"], "OID-RECOVERED")
+        self.assertIsNone(self.s.s["pending_intent"])
+
+    def test_definitive_venue_refusal_releases_pending_intent(self):
+        self.fake.submit_order = MagicMock(
+            side_effect=OrderSubmissionRefused("Insufficient spot balance"),
+        )
+        self.assertFalse(
+            self.s._place("sell", 1.0, 60.0, kind="TP", market=True)
+        )
         self.assertIsNone(self.s.s["pending_intent"])
 
     def test_audited_market_submit_receives_observational_reference_price(self):

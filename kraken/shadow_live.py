@@ -65,6 +65,7 @@ def _load_runtime_config(env_path: str | None = None,
 
 
 def _variants(interval: int):
+    _load_runtime_config()
     from strategies import spot_dca as strat
     base = strat.StratParams.from_env()
     variants = {

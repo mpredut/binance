@@ -13,7 +13,9 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ipo_common import http_get, load_dotenv  # noqa: E402
+from ipo_common import (  # noqa: E402
+    http_get, load_dotenv, required_env, required_float_env,
+)
 from t212_client import T212Client  # noqa: E402
 
 
@@ -31,12 +33,17 @@ def _retry(fn, tries=4, pause=2):
 
 
 def main() -> int:
-    load_dotenv(".env")
-    load_dotenv("config.env")
+    here = os.path.dirname(os.path.abspath(__file__))
+    load_dotenv(os.path.join(here, "runtime.env"))
+    load_dotenv(os.path.join(here, ".env"))
     key = os.environ.get("T212_API_KEY")
     if not key:
         print("! lipseste T212_API_KEY (.env)"); return 1
-    c = T212Client(key, os.environ.get("T212_API_SECRET"), env="live")
+    c = T212Client(
+        key, os.environ.get("T212_API_SECRET"), env=required_env("T212_ENV"),
+        min_gap_sec=required_float_env("T212_MIN_GAP_SEC"),
+        portfolio_ttl_sec=required_float_env("T212_PORTFOLIO_TTL_SEC"),
+    )
 
     # --- CASH ---
     def get_cash():

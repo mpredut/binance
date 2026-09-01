@@ -42,6 +42,9 @@ def _load_config() -> None:
 
 
 def _variants(interval: int):
+    if interval != 240:
+        raise ValueError("shadow_longterm accepts only the native 240m interval")
+    _load_config()
     from strategies.spot_dca import StratParams
 
     base = StratParams.from_env()
@@ -68,8 +71,6 @@ def _variants(interval: int):
             trend_exit_break=False,
         ),
     }
-    if interval != 240:
-        raise ValueError("shadow_longterm acceptă numai intervalul nativ 240m")
     return variants
 
 

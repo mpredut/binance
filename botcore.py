@@ -117,6 +117,14 @@ def required_env(key: str, env: dict | None = None) -> str:
     return raw
 
 
+def defined_env(key: str, env: dict | None = None) -> str:
+    """Return a setting that must exist but may intentionally be empty."""
+    src = os.environ if env is None else env
+    if key not in src:
+        raise ValueError(f"Missing mandatory setting: {key}")
+    return str(src[key] or "").split("#", 1)[0].strip()
+
+
 def required_float_env(key: str, env: dict | None = None) -> float:
     """Return a mandatory finite floating-point setting."""
     raw = required_env(key, env)

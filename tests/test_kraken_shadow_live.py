@@ -53,6 +53,8 @@ class ShadowLiveTest(unittest.TestCase):
             dca_vol_scale_k: float = 0.0
             dca_vol_ref: float = 2.0
             dca_vol_interval: int = 240
+            dca_trend_brake: bool = False
+            dca_brake_min_pct: float = 1.5
             tp_trail_adaptive: bool = False
             tp_trail_k: float = 2.0
             tp_trail_min: float = 1.5
@@ -64,10 +66,9 @@ class ShadowLiveTest(unittest.TestCase):
             trend_trail_pct: float = 5.0
             trend_exit_break: bool = False
 
-        fake_strategy = SimpleNamespace(
-            StratParams=SimpleNamespace(from_env=lambda: Params()),
-        )
-        with patch.dict(sys.modules, {"strategy": fake_strategy}):
+        with patch(
+            "strategies.spot_dca.StratParams.from_env", return_value=Params(),
+        ), patch.object(shadow, "_load_runtime_config"):
             variants_60 = shadow._variants(60)
             variants_240 = shadow._variants(240)
 

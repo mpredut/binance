@@ -18,6 +18,9 @@ os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
 from strategies import spot_dca as strat  # noqa: E402
 from providers.strategy_executor import OrderStatus, ProviderError  # noqa: E402
+from botcore import parse_dotenv  # noqa: E402
+
+_CONFIG_ENV = parse_dotenv(os.path.join(ROOT, "kraken", "config.env"))
 
 
 def _params(**overrides):
@@ -215,22 +218,19 @@ class KrakenLiveReconciliationTest(unittest.TestCase):
 
 class KrakenConfigParsingTest(unittest.TestCase):
     def test_explicit_zero_disables_stop_reentry_bounce(self):
-        with patch.dict(os.environ, {"STRAT_REENTRY_SL_BOUNCE_PCT": "0"}, clear=False):
+        env = {**_CONFIG_ENV, "STRAT_REENTRY_SL_BOUNCE_PCT": "0"}
+        with patch.dict(os.environ, env, clear=True):
             params = strat.StratParams.from_env()
         self.assertEqual(params.reentry_sl_bounce_pct, 0.0)
 
     def test_trailing_profit_floor_is_explicit_and_clamped_non_negative(self):
-        with patch.dict(
-            os.environ,
-            {"STRAT_TP_TRAIL_PROFIT_FLOOR_PCT": "1.0"},
-            clear=False,
-        ):
+        with patch.dict(os.environ, {
+            **_CONFIG_ENV, "STRAT_TP_TRAIL_PROFIT_FLOOR_PCT": "1.0",
+        }, clear=True):
             self.assertEqual(strat.StratParams.from_env().tp_trail_profit_floor_pct, 1.0)
-        with patch.dict(
-            os.environ,
-            {"STRAT_TP_TRAIL_PROFIT_FLOOR_PCT": "-2.0"},
-            clear=False,
-        ):
+        with patch.dict(os.environ, {
+            **_CONFIG_ENV, "STRAT_TP_TRAIL_PROFIT_FLOOR_PCT": "-2.0",
+        }, clear=True):
             self.assertEqual(strat.StratParams.from_env().tp_trail_profit_floor_pct, 0.0)
 
 

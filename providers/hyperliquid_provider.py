@@ -350,7 +350,11 @@ class HyperliquidProvider(MarketDataProvider):
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"submit_order({symbol}): {e}") from e
         if not ok or oid is None:
-            raise ProviderError(f"submit_order({symbol}) respins: {msg}")
+            # ``spot_order`` returned a synchronous venue rejection, proving that
+            # no order was accepted. Mark it definitive so durable lifecycle state
+            # does not wait forever for a CLOID that cannot exist.
+            from order_retry import OrderSubmissionRefused
+            raise OrderSubmissionRefused(f"submit_order({symbol}) rejected: {msg}")
         return str(oid)
 
     def preflight_order(self, symbol: str, side: str, qty: float,
@@ -393,7 +397,8 @@ class HyperliquidProvider(MarketDataProvider):
         try:
             query = getattr(c.info, "query_order_by_cloid", None)
             if callable(query):
-                raw = query(addr, str(client_order_id)) or {}
+                from hyperliquid.utils.types import Cloid
+                raw = query(addr, Cloid.from_str(str(client_order_id))) or {}
                 payload = raw.get("order") if raw.get("status") == "order" else None
                 order = (payload or {}).get("order") or {}
                 oid = order.get("oid", (payload or {}).get("oid"))

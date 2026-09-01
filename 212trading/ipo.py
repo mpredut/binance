@@ -33,15 +33,15 @@ import os
 import sys
 import time
 
-from ipo_common import load_dotenv, log, now_str, float_env, ET
+from ipo_common import (
+    load_dotenv, log, now_str, float_env, ET, required_env,
+    required_float_env, required_bool_env,
+)
 from market_data import check_market, t212_to_yahoo
 from t212_client import T212Client
 from ipo_notify import notify
 from order_manager import resolve_quantity, place_order_with_retry
 from strategy import Strategy, StratParams
-
-POLL_SECONDS = 60
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -109,13 +109,15 @@ def start_trading(client, t212_ticker, label, strat_enabled, strat_dry,
 # ---------------------------------------------------------------------------
 def main() -> int:
     import glob
-    env_file = os.environ.get("ENV_FILE", ".env")
+    here = os.path.dirname(os.path.abspath(__file__))
+    env_file = os.environ.get("ENV_FILE", os.path.join(here, ".env"))
     profile = os.environ.get("IPO_PROFILE")
     for i, a in enumerate(sys.argv):
         if a == "--env-file" and i + 1 < len(sys.argv):
             env_file = sys.argv[i + 1]
         if a in ("--profile", "-p") and i + 1 < len(sys.argv):
             profile = sys.argv[i + 1]
+    load_dotenv(os.path.join(here, "runtime.env"))          # shared versioned policy
     load_dotenv(env_file)                                   # shared gitignored secrets
     if profile:                                            # versioned per-profile config: config.<profile>.env
         cfg_dir = os.path.dirname(env_file) or "."
@@ -134,7 +136,8 @@ def main() -> int:
     ap.add_argument("--env-file",          default=env_file)
     ap.add_argument("--symbol",            metavar="T212_TICKER",
                     help="Override instrument (altfel din .env T212_TICKER)")
-    ap.add_argument("--interval",          type=int, default=POLL_SECONDS)
+    ap.add_argument("--interval",          type=float,
+                    default=required_float_env("POLL_SECONDS"))
     ap.add_argument("--desktop",           action="store_true")
     ap.add_argument("--market-hours-only", action="store_true")
     ap.add_argument("--skip-wait",         action="store_true",
@@ -158,11 +161,15 @@ def main() -> int:
     # --- .env configuration ---
     t212_key    = os.environ.get("T212_API_KEY")
     t212_secret = os.environ.get("T212_API_SECRET")
-    t212_env    = os.environ.get("T212_ENV", "live").strip().lower()
+    t212_env    = required_env("T212_ENV").lower()
     if not t212_key:
         log("! T212_API_KEY lipsa in .env — nu pot continua.")
         return 1
-    client = T212Client(t212_key, t212_secret, env=t212_env)
+    client = T212Client(
+        t212_key, t212_secret, env=t212_env,
+        min_gap_sec=required_float_env("T212_MIN_GAP_SEC"),
+        portfolio_ttl_sec=required_float_env("T212_PORTFOLIO_TTL_SEC"),
+    )
 
     # Generic instrument.
     t212_ticker  = (args.symbol or os.environ.get("T212_TICKER") or "").strip()
@@ -171,8 +178,8 @@ def main() -> int:
     expected_isin = os.environ.get("EXPECTED_ISIN", "").strip()
 
     # Strategy / order.
-    strat_enabled = os.environ.get("STRAT_ENABLED", "false").strip().lower() == "true"
-    strat_dry     = args.paper or not (os.environ.get("STRAT_EXECUTE", "false").lower() == "true")
+    strat_enabled = required_bool_env("STRAT_ENABLED")
+    strat_dry     = args.paper or not required_bool_env("STRAT_EXECUTE")
     order_price      = float_env("ORDER_PRICE")
     order_qty        = float_env("ORDER_QTY")
     order_budget_ron = float_env("ORDER_BUDGET_RON")

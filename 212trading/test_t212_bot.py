@@ -19,20 +19,55 @@ from t212_bot import discover_assets  # noqa: E402
 NVDA = """
 T212_TICKER=NVDA_US_EQ
 YAHOO_SYMBOL=NVDA
-STRAT_ENTRY=450
+STRATEGY_MODE=avg_tp
+STRAT_ENTRY_PCT=20
+STRAT_DCA_PCT=10
 STRAT_TAKEPROFIT_PCT=1.5
 STRAT_CURRENCY=EUR
 STRAT_REENTRY_DROP_PCT=1.5
 STRAT_CHECK_MINUTES=0.4  # comentariu inline
+STRAT_ENTRY_DISCOUNT_PCT=0.2
+STRAT_DCA_DROP_PCT=2
+STRAT_MAX_DCA_BUYS=3
+STRAT_MAX_BUDGET=500
+STRAT_FX_FEE_PCT=0.15
+STRAT_STOP_LOSS_PCT=20
+STRAT_ORDER_TTL_MIN=10
+STRAT_REENTRY_TOLERANCE_PCT=0
+STRAT_LOSS_ALERT_STEP=1
+STRAT_LADDER_MIN_FREE=6
+STRAT_SL_REBUY_ENABLED=false
+STRAT_SL_REBUY_BOUNCE_PCT=1.2
+STRAT_DCA_TREND_GATE_PCT=0
+STRAT_TRAIL_PCT=0
+STRAT_TRAIL_MIN_PROFIT_PCT=5
 """
 
 SPCX = """
 T212_TICKER=SPCX_US_EQ
 YAHOO_SYMBOL=SPCX
-STRAT_ENTRY=120
+STRATEGY_MODE=avg_tp
+STRAT_ENTRY_PCT=30
+STRAT_DCA_PCT=10
 STRAT_TAKEPROFIT_PCT=5.0
 STRAT_CURRENCY=EUR
 STRAT_REENTRY_DROP_PCT=2
+STRAT_CHECK_MINUTES=1
+STRAT_ENTRY_DISCOUNT_PCT=0.2
+STRAT_DCA_DROP_PCT=2
+STRAT_MAX_DCA_BUYS=3
+STRAT_MAX_BUDGET=400
+STRAT_FX_FEE_PCT=0.15
+STRAT_STOP_LOSS_PCT=20
+STRAT_ORDER_TTL_MIN=10
+STRAT_REENTRY_TOLERANCE_PCT=0
+STRAT_LOSS_ALERT_STEP=1
+STRAT_LADDER_MIN_FREE=6
+STRAT_SL_REBUY_ENABLED=false
+STRAT_SL_REBUY_BOUNCE_PCT=1.2
+STRAT_DCA_TREND_GATE_PCT=0
+STRAT_TRAIL_PCT=0
+STRAT_TRAIL_MIN_PROFIT_PCT=5
 """
 
 
@@ -80,7 +115,7 @@ class TestIzolareParams(unittest.TestCase):
         sp = parse_dotenv(_tmp(SPCX))
         pn = StratParams.from_env(nv)
         ps = StratParams.from_env(sp)
-        self.assertEqual(pn.entry_amount, 450.0)
+        self.assertEqual(pn.entry_amount, 100.0)
         self.assertEqual(ps.entry_amount, 120.0)
         self.assertEqual(pn.takeprofit_pct, 1.5)
         self.assertEqual(ps.takeprofit_pct, 5.0)
@@ -93,13 +128,9 @@ class TestIzolareParams(unittest.TestCase):
         pn = StratParams.from_env(parse_dotenv(_tmp(NVDA)))
         self.assertEqual(pn.check_minutes, 0.4)  # nu 'NaN' din comentariul inline
 
-    def test_backward_compat_environ(self):
-        """Fara argument citeste tot din os.environ (calea veche, neschimbata)."""
-        os.environ["STRAT_ENTRY"] = "999"
-        try:
-            self.assertEqual(StratParams.from_env().entry_amount, 999.0)
-        finally:
-            del os.environ["STRAT_ENTRY"]
+    def test_missing_environment_fails_instead_of_using_defaults(self):
+        with self.assertRaisesRegex(ValueError, "mandatory setting"):
+            StratParams.from_env({})
 
 
 class TestDiscover(unittest.TestCase):
