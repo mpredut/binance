@@ -133,7 +133,7 @@ class TestCitiriEsuate(Base):
 class TestPiciorOrfan(Base):
     def test_un_tick_suspect_nu_actioneaza(self):
         d = self.make(); self.opened(d)
-        d.tick(L(spot_qty=2.0, perp_szi=0.0))      # perp "disparut" — o singura citire
+        d.tick(L(spot_qty=2.0, perp_szi=0.0))      # The perp is absent in one reading.
         self.assertEqual(self.c.orders, [], "anti-glitch: it does not act on the first reading")
         self.assertEqual(d.s["orphan_count"], 1)
 
@@ -142,10 +142,10 @@ class TestPiciorOrfan(Base):
         d.tick(L(spot_qty=2.0, perp_szi=0.0))
         d.tick(L(spot_qty=2.0, perp_szi=0.0))      # confirmat
         sells = [o for o in self.c.orders if o[0] == "spot" and o[1] == "sell"]
-        self.assertEqual(len(sells), 1, "vinde spotul ramas (de-risk)")
+        self.assertEqual(len(sells), 1, "sell the remaining spot leg to de-risk")
         self.assertEqual(d.s["status"], "flat")
         self.assertGreater(d.s["cooldown_until"], time.time(), "cooldown anti-thrash")
-        self.assertTrue(any("picior disparut" in a for a in self.alerts))
+        self.assertTrue(any("a leg is gone" in a for a in self.alerts))
 
     def test_glitch_recuperat_reseteaza_contorul(self):
         d = self.make(); self.opened(d)
@@ -166,7 +166,7 @@ class TestPiciorOrfan(Base):
         d.tick(L(spot_qty=2.0, perp_szi=0.0))
         d.tick(L(spot_qty=2.0, perp_szi=0.0))
         self.assertEqual(self.c.orders, [])
-        self.assertTrue(any("INTERVENTIE MANUALA" in a for a in self.alerts))
+        self.assertTrue(any("MANUAL INTERVENTION" in a for a in self.alerts))
 
 
 class TestDriftSiDust(Base):
@@ -196,7 +196,7 @@ class TestOrdineEsuate(Base):
         self.c.fail_orders = True
         for _ in range(3):
             d._buy_spot(1.0, 50.0)
-        self.assertTrue(any("3 ordine esuate" in a for a in self.alerts))
+        self.assertTrue(any("3 consecutive failed orders" in a for a in self.alerts))
         self.c.fail_orders = False
         d._buy_spot(1.0, 50.0)
         self.assertEqual(d.s["order_fails"], 0, "succesul reseteaza contorul")

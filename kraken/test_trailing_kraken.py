@@ -121,13 +121,13 @@ class TestTrailingKraken(Base):
 
 
 class TestMinProfitKraken(Base):
-    """Prag minim de profit inainte sa se activeze trailing-ul (Kraken)."""
+    """Require minimum profit before Kraken trailing activates."""
 
     def test_warming_up_nu_vinde_sub_prag(self):
         c = FakeK(60.0)
         ts = self.ts(c, min_profit_pct=5.0)
         ts.check_once()                    # initial=60, activ la 63.0
-        c.price = 48.0                     # crash -20% dar sub pragul de activare
+        c.price = 48.0                     # A 20% crash is below the activation threshold.
         ts.check_once()
         self.assertEqual(c.orders, [], "nu vinde inainte sa atinga pragul de profit")
 

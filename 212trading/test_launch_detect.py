@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Teste pt detectia de lansare (market_data.check_market) — cazul SPCX: meta
-statuta dar serie intraday live. Fara retea (http_get monkeypatch-uit)."""
+"""Test SPCX launch detection with stale metadata but a live intraday series.
+
+The HTTP getter is patched, so the test performs no network access.
+"""
 from __future__ import annotations
 
 import json
@@ -60,7 +62,7 @@ class TestLansare(Base):
         self.assertEqual(m["price"], 166.0, "the price is the last live bar, not the 135 from meta")
 
     def test_miscare_de_pret_fara_volum_e_lansat(self):
-        # unele feed-uri nu dau volum; pretul in miscare proaspat = tranzactioneaza
+        # Some feeds omit volume; a fresh moving price still proves that it trades.
         self.feed(chart(price=135.0, meta_vol=0, meta_age_s=55 * 3600,
                         series=[(300, 164.0, None), (60, 167.0, None)]))
         self.assertTrue(md.check_market("SPCX")["launched"])

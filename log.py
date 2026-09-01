@@ -8,7 +8,7 @@ import datetime
 import logging
 import shutil
 import threading
-import time
+from time import monotonic as _monotonic
 
 from botcore import load_dotenv, required_float_env, required_int_env
 
@@ -314,13 +314,13 @@ class _DailyFileHandler(logging.Handler):
         self._stream        = None
         self._lock          = threading.Lock()
         self._pending_records = 0
-        self._last_flush = time.monotonic()
+        self._last_flush = _monotonic()
 
     def _flush(self) -> None:
         if self._stream is not None:
             self._stream.flush()
         self._pending_records = 0
-        self._last_flush = time.monotonic()
+        self._last_flush = _monotonic()
 
     def _open_for_date(self, folder: str, date_str: str) -> None:
         if self._stream is not None:
@@ -363,7 +363,7 @@ class _DailyFileHandler(logging.Handler):
                     self._stream.write(self.format(record) + "\n")
                     self._pending_records += 1
                     if (self._pending_records >= _FLUSH_EVERY_RECORDS
-                            or time.monotonic() - self._last_flush >= _FLUSH_INTERVAL_SEC):
+                            or _monotonic() - self._last_flush >= _FLUSH_INTERVAL_SEC):
                         self._flush()
                 except (FileNotFoundError, OSError, ValueError):
                     self._open_for_date(folder, today)

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Verificare sl_rebuy (re-buy pe recul dupa stop-loss de catastrofa) pe calea REALA.
+"""Exercise catastrophe-stop rebuy through the real execution path.
 
-Reproduce scenariul live (dry_run=False, stub fara retea):
-  1. detinem o pozitie, SL de catastrofa tocmai a vandut tot  -> ciclu inchis
-  2. _reconcile_real vede portofoliu=0 cu sl_pending  -> ARMEAZA sl_rebuy
-  3. pretul continua sa cada                          -> NU cumpara (urmareste fundul)
-  4. recul < bounce_pct                               -> inca NU cumpara
-  5. recul >= bounce_pct de la minim                  -> plaseaza BUY ENTRY (1 transa)
-  6. armarea e consumata                              -> nu mai recumpara
+The network-free stub reproduces the live scenario with ``dry_run=False``:
+  1. the catastrophe stop sells the complete position and closes the cycle;
+  2. reconciliation sees zero holdings plus ``sl_pending`` and arms the rebuy;
+  3. a deeper fall updates the low without buying;
+  4. a bounce below ``bounce_pct`` still does not buy;
+  5. a sufficient bounce from the low places one BUY ENTRY tranche;
+  6. consuming the arm prevents another rebuy.
 """
 from __future__ import annotations
 
@@ -84,7 +84,7 @@ def main() -> int:
     s.s["entry_price"] = 100.0
     s.s["last_buy_price"] = 100.0
     s.s["spent_cash"] = 100.0
-    s.s["sl_pending"] = True            # marcat de _check_stop_loss inainte ca SL-ul sa execute
+    s.s["sl_pending"] = True            # Marked before the stop executes.
 
     # 1+2. SL-ul a executat -> portofoliu 0; reconcilierea vede inchiderea de catastrofa
     client.portfolio = [{"ticker": TICK, "quantity": 0.0, "averagePrice": 0.0}]
@@ -96,7 +96,7 @@ def main() -> int:
     check(s.s["qty"] <= 1e-9, "pozitie inchisa (qty 0) dupa SL")
     n_after_arm = len(client.placed)
 
-    # 3. pretul cade mai adanc -> urmareste fundul, NU cumpara
+    # 3. A deeper fall tracks the low and does not buy.
     s.step(92.0)
     check(s.s.get("sl_rebuy") is not None, "inca armat in caderea adanca (92)")
     check(abs(s.s["sl_rebuy"]["low"] - 92.0) < 1e-9, "minimul urmarit cobora la 92")
@@ -114,7 +114,7 @@ def main() -> int:
         last = client.placed[-1]
         check(last["quantity"] > 0, "ordinul plasat e BUY (qty>0)")
 
-    # 6. armarea consumata -> nu mai recumpara la urmatorul recul
+    # 6. The consumed arm prevents another buy on the next bounce.
     s.step(92.0 * 1.02)
     check(s.s.get("sl_rebuy") is None, "armarea CONSUMATA (1 transa) dupa re-buy")
     check(len(client.placed) == n_after_arm + 1, "fara al doilea buy (armare consumata)")

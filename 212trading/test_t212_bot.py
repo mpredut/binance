@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Teste pt botul unificat T212: izolarea config-ului per activ + descoperire.
+"""Test per-asset configuration isolation and discovery in the unified T212 bot.
 
-The key to the redesign: two assets in the same process MUST have
-diferiti, fara sa se calce pe os.environ.
+Two assets in one process must retain distinct settings without colliding through
+``os.environ``.
 """
 from __future__ import annotations
 

@@ -1,1 +1,4 @@
-"""API Binance-specific (mutat din radacina). Folosit ca: from binance_api import bapi as api."""
+"""Binance-specific API moved from the repository root.
+
+Import it with ``from binance_api import bapi as api``.
+"""

@@ -279,7 +279,7 @@ class TestAdoptare(Base):
         )
 
     def test_asteapta_alocarea_fara_sa_cumpere(self):
-        c = FakeKraken(bal={"ZUSD": "100"})                 # inca fara alocare
+        c = FakeKraken(bal={"ZUSD": "100"})                 # Allocation is still unavailable.
         s = self._strategy(c)
         s.step(100.0)
         self.assertEqual(s.s["orders"], [], "it does NOT buy a new entry while waiting")

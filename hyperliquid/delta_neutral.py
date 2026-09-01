@@ -332,12 +332,12 @@ class DeltaNeutral:
             if self.s["gone_count"] < 2:
                 log("  [DN] both legs look gone — waiting for confirmation (anti-glitch)")
                 return True
-            log("  [DN] pozitia a disparut de pe cont (inchisa manual?)")
+            log("  [DN] the position disappeared from the account (closed manually?)")
             self._cancel_open_orders()
-            notify(title=f"DN {self.p.coin}: pozitia a disparut — trec pe flat",
+            notify(title=f"DN {self.p.coin}: the position disappeared — moving to flat",
                    body=f"both legs gone (closed manually?) — clearing the orders, 1h cooldown",
                    source="dn", desktop=self.desktop)
-            self._go_flat("ambele picioare disparute")
+            self._go_flat("both legs disappeared")
             return True
         if spot_gone != perp_gone:                    # Exactly one missing leg creates directional risk.
             self.s["orphan_count"] = self.s.get("orphan_count", 0) + 1
@@ -354,11 +354,11 @@ class DeltaNeutral:
                 if spot_gone and pq > 0:
                     self._cover_perp(pq, L["perp_px"])
                 notify(title=f"🛡 DN {self.p.coin}: a leg is gone — closed the rest too",
-                       body=f"{what} — lichidat piciorul ramas (elimin riscul directional), cooldown 1h",
+                       body=f"{what} — closed the remaining leg to remove directional risk; 1h cooldown",
                        source="dn", desktop=self.desktop)
-                self._go_flat("picior orfan inchis")
+                self._go_flat("orphaned leg closed")
             else:
-                notify(title=f"⚠ DN {self.p.coin}: picior disparut — INTERVENTIE MANUALA",
+                notify(title=f"⚠ DN {self.p.coin}: a leg is gone — MANUAL INTERVENTION",
                        body=f"{what}, DN_AUTO_PROTECT=false: not acting alone — the remaining position is DIRECTIONAL!",
                        source="dn", desktop=self.desktop)
             return True
@@ -391,12 +391,12 @@ class DeltaNeutral:
             if self.p.auto_protect:
                 cut = self._round(abs(L["perp_szi"]) * self.p.reduce_pct / 100)
                 if cut > 0:
-                    log(f"  🛡 [DN] AUTO-PROTECT: reduc ambele picioare cu {cut} (de-risk, raman neutru)")
+                    log(f"  🛡 [DN] AUTO-PROTECT: reducing both legs by {cut} (de-risk, remain neutral)")
                     self._cover_perp(cut, perp_px)
                     self._sell_spot(cut, L["spot_px"])
                     self.s["target_sz"] = max(0.0, self.s["target_sz"] - cut)
                     notify(title=f"🛡 {self.p.coin}: am redus preventiv pozitia",
-                           body=f"aproape de lichidare — redus {cut} pe ambele picioare, raman neutru",
+                           body=f"near liquidation — reduced both legs by {cut}, remaining neutral",
                            source="dn", desktop=self.desktop)
                     return True
         elif dist_pct > self.p.liq_alert_pct * 1.5:

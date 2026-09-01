@@ -341,7 +341,7 @@ class DexScreenerSource(NewCoinsSource):
         return [token for token in self._cache if token['added_at'] and token['added_at'] >= cutoff_date][:50]
 
 # ============================================
-# Factory pentru surse de monede noi
+# Factory for new-coin data sources.
 # ============================================
 
 class NewCoinsFactory:
