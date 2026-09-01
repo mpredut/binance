@@ -1,54 +1,54 @@
-# ARCHITECTURE — decuplare & provideri (note de referință)
+# ARCHITECTURE — decoupling and providers (reference notes)
 
-Snapshot de design (mijloc 2026). Verifică specificul în cod.
+A design snapshot (mid-2026). Check the specifics in the code.
 
-## Helper-e runtime comune
+## Shared runtime helpers
 
-`botcore.py` este sursa unică pentru `.env`, conversii numerice, single-instance,
-ceas/log și transportul HTTP stdlib (`GET`, JSON, form și metode generice).
-`kraken/kraken_common.py`, `hyperliquid/common.py` și
-`212trading/ipo_common.py` păstrează numai particularități reale de afișare sau
-runtime și re-exportă API-ul vechi pentru compatibilitate.
+`botcore.py` is the single source for `.env`, numeric conversions, single-instance
+locking, the clock/log and the stdlib HTTP transport (`GET`, JSON, form and generic
+methods). `kraken/kraken_common.py`, `hyperliquid/common.py` and
+`212trading/ipo_common.py` keep only genuine display or runtime particularities and
+re-export the old API for compatibility.
 
-`alertnotifiers.bind_notify()` centralizează alegerea simbolului din environment.
-Fișierele `notify.py` ale venue-urilor sunt shim-uri subțiri, necesare momentan
-pentru entrypoint-urile istorice; rutarea ntfy/email rămâne o singură implementare.
-Aceeași componentă aplică deduplicare și bugete zilnice persistente cross-process
-(implicit ntfy 100 cu 20 rezervate urgențelor; email 40 cu 10 rezervate). Starea
-runtime este în `logs/notification_delivery_state.json` și se resetează zilnic UTC.
+`alertnotifiers.bind_notify()` centralises how the symbol is chosen from the environment.
+The per-venue `notify.py` files are thin shims, still needed for the historical
+entrypoints; ntfy/email routing remains a single implementation. The same component
+applies deduplication and persistent daily budgets across processes (by default ntfy 100
+with 20 reserved for urgent alerts; email 40 with 10 reserved). The runtime state lives in
+`logs/notification_delivery_state.json` and resets daily at UTC midnight.
 
-## Engine comun, entrypoint-uri separate
+## A shared engine, separate entrypoints
 
-Separarea entrypoint-ului live de cel offline nu înseamnă două strategii:
+Separating the live entrypoint from the offline one does not mean two strategies:
 
 ```text
-                         strategy engine comun
+                         shared strategy engine
                         /                      \
-live entrypoint ─► StrategyExecutor real   replay entrypoint ─► executor OHLC
-  config/secrete     ordine/reconciliere      dataset/hash       fill model/report
-  loop/heartbeat     state persistent         fără rețea privată  stare controlată
+live entrypoint ─► real StrategyExecutor   replay entrypoint ─► OHLC executor
+  config/secrets     orders/reconciliation     dataset/hash       fill model/report
+  loop/heartbeat     persistent state          no private network controlled state
 ```
 
-Motorul, regulile, parametrii și tranzițiile financiare trebuie importate din
-același modul. Se separă numai orchestration-ul și capabilitățile: procesul offline
-nu primește client cu drept de tranzacționare, iar procesul live nu conține selecție
-de dataset sau metrici de cercetare. Un renderer comun poate fi folosit de două
-entrypoint-uri subțiri live/offline fără duplicarea logicii.
+The engine, the rules, the parameters and the financial transitions must be imported from
+the same module. Only orchestration and capabilities are separated: the offline process
+gets no client with trading rights, and the live process contains no dataset selection or
+research metrics. A shared renderer can be used by two thin live/offline entrypoints
+without duplicating the logic.
 
-## Ownership inventory și execution audit
+## Ownership inventory and execution audit
 
-Sistemul nu folosește allocation ledger cât timp conturile sunt izolate și
-suprapunerile de execuție sunt rare. Două unelte read-only acoperă nevoia actuală:
+The system uses no allocation ledger while the accounts are isolated and execution
+overlaps are rare. Two read-only tools cover the current need:
 
-- execution audit: cine a cerut ordinul, pe ce venue/simbol, de ce, ce status/fill a avut;
-- `verify_tools/ownership_inventory.py`: ce owner poate executa pe fiecare
-  `venue + account_ref + symbol` și unde există suprapuneri configurate/rulate.
+- the execution audit: who requested the order, on which venue/symbol, why, what status and fill it got;
+- `verify_tools/ownership_inventory.py`: which owner may execute on each
+  `venue + account_ref + symbol`, and where configured or running overlaps exist.
 
-Inventarul nu citește și nu afișează chei, nu blochează ordine și nu schimbă live.
-Un `account_ref` explicit, nesensibil, poate fi setat per owner sau prin
-`ownership.account_ref` pe un instrument; fallback-ul este `<venue>:default`.
-Două strategii primary din același pipeline coordonat sunt doar `INFO`; două
-domenii de execuție independente pe aceeași cheie sunt `WARNING`.
+The inventory neither reads nor displays keys, blocks no orders and changes nothing live.
+An explicit, non-sensitive `account_ref` can be set per owner or through
+`ownership.account_ref` on an instrument; the fallback is `<venue>:default`.
+Two primary strategies from the same coordinated pipeline are only `INFO`; two
+independent execution domains on the same key are a `WARNING`.
 
 ```bash
 .venv/bin/python verify_tools/ownership_inventory.py
@@ -56,113 +56,118 @@ domenii de execuție independente pe aceeași cheie sunt `WARNING`.
 .venv/bin/python verify_tools/ownership_inventory.py --running --json
 ```
 
-Ledger-ul se reconsideră numai dacă devine intenționată tranzacționarea frecventă
-din mai multe procese independente pe aceeași balanță.
+The ledger is reconsidered only if frequent trading from several independent processes on
+the same balance ever becomes intentional.
 
-## Facadă market/cont — decuplare de Binance
-`providers/market_api.py` = facadă care rutează pe **symbol** către provideri (scopul: trade-
-monitorul devine generic, nu doar Binance).
-- Interfața `MarketDataProvider`: `get_current_price`, `get_price_history`, `free_balance(asset)`,
+## The market/account facade — decoupling from Binance
+`providers/market_api.py` is the facade that routes by **symbol** to the providers (the goal:
+the trade monitor becomes generic, not Binance-only).
+- The `MarketDataProvider` interface: `get_current_price`, `get_price_history`, `free_balance(asset)`,
   `get_orders(symbol, side, since)`, `get_trades`, `open_orders`,
   `place_order(symbol, side, price, qty, **kwargs)`.
-- Provideri: `BinanceProvider`, `HyperliquidProvider`, `kraken_provider`, `t212_provider`.
-- `MarketApi([providers])` alege primul provider cu `supports_symbol(symbol)`; dacă niciunul
-  nu revendică → **default = primul = Binance** (behavior-preserving). Singleton `api`.
-- `monitortrades` folosește facada pentru preț, trend, sold, ordine + `place_order`. Binance
-  rămâne identic (BinanceProvider deleagă la `bapi`/`bapi_placeorder`).
-- Instrument generic + `instruments.conf` (rezolvare `provider_by_name`); BTC/TAO pe Binance neschimbate.
+- Providers: `BinanceProvider`, `HyperliquidProvider`, `kraken_provider`, `t212_provider`.
+- `MarketApi([providers])` picks the first provider whose `supports_symbol(symbol)` matches; if none
+  claims it, the **default is the first, Binance** (behaviour-preserving). The `api` singleton.
+- `monitortrades` uses the facade for price, trend, balance, orders and `place_order`. Binance
+  stays identical (BinanceProvider delegates to `bapi`/`bapi_placeorder`).
+- A generic Instrument plus `instruments.conf` (resolved through `provider_by_name`); BTC/TAO on Binance unchanged.
 
-## Motor spot DCA/trailing
+## The spot DCA/trailing engine
 
-`strategies/spot_dca.py` conține decizia financiară base v2 și depinde numai de
-`StrategyExecutor`. Kraken injectează `KrakenProvider`, iar replay-ul injectează
-executorul offline; ambele rulează aceeași clasă. `kraken/strategy.py` rămâne shim
-pentru comenzile istorice. Directorul stării, notificatorul și eticheta venue-ului
-sunt injectabile, dar fallback-ul Kraken păstrează exact fișierul de stare existent.
+`strategies/spot_dca.py` holds the base v2 financial decision and depends only on
+`StrategyExecutor`. Kraken injects `KrakenProvider`, and the replay injects the offline
+executor; both run the same class. `kraken/strategy.py` remains a shim for the historical
+commands. The state directory, the notifier and the venue label are injectable, but the
+Kraken fallback keeps exactly the existing state file.
 
-`hl_dca_bot.py` injectează `HyperliquidProvider` în același motor `spot_dca`.
-T212, motorul PERP legacy și delta-neutral nu sunt alias-uri ale lui: providerii
-pot satisface același contract mecanic, dar strategiile financiare distincte rămân separate.
+`hl_dca_bot.py` injects `HyperliquidProvider` into the same `spot_dca` engine.
+T212, the legacy PERP engine and delta-neutral are not aliases of it: providers may
+satisfy the same mechanical contract, but distinct financial strategies stay separate.
 
-`strategies/state_store.py` centralizează snapshot-urile financiare pentru motorul
-spot și T212. Scrierea este atomică (`fsync` urmat de `os.replace`); în mod real,
-starea coruptă sau nesalvabilă oprește deciziile, în timp ce PAPER poate porni curat.
+`strategies/state_store.py` centralises the financial snapshots for the spot engine and
+T212. Writing is atomic (`fsync` followed by `os.replace`); in real mode, corrupt or
+unsaveable state stops the decisions, while PAPER may start clean.
 
-Motorul T212 păstrează local un ordin până când venue-ul raportează status terminal,
-inclusiv după acceptarea cererii de anulare. Dacă anularea eșuează sau este încă în curs,
-nu plasează repricing/scară TP peste ordinul posibil activ; STOP/trailing poate trimite
-ieșirea urgentă după acceptarea anulărilor, dar ambele ordine rămân reconciliate.
+The T212 engine keeps an order locally until the venue reports a terminal status,
+including after a cancellation request has been accepted. If the cancellation fails or is
+still in flight, it places no repricing or TP ladder on top of the possibly active order;
+STOP/trailing may send the urgent exit once the cancellations are accepted, but both
+orders stay reconciled.
 
-Motorul T212 folosește `T212Provider` pentru întreg ciclul submit/status/cancel, dar își
-păstrează regulile financiare distincte și feed-ul Yahoo. Cantitatea poziției rămâne
-ancorată în portofoliu, iar prețul/P&L-ul se ia din fill-urile cumulative reale numai
-când delta ordinelor corespunde deltei portofoliului. Partial fill-urile sunt aplicate
-o singură dată; dacă statusul este temporar indisponibil, ordinul rămâne urmărit.
-STOP și trailing sunt ordine MARKET; replay-ul le umple la open-ul barei următoare și
-poate aplica spread/slippage advers.
+The T212 engine uses `T212Provider` for the whole submit/status/cancel cycle, while
+keeping its own financial rules and the Yahoo feed. The position quantity stays anchored
+in the portfolio, and price and P&L come from the real cumulative fills only when the
+order delta matches the portfolio delta. Partial fills are applied once; if the status is
+temporarily unavailable, the order stays tracked. STOP and trailing are MARKET orders; the
+replay fills them at the next bar's open and may apply adverse spread and slippage.
 
-`providers/execution_audit.py` este un decorator strict observațional peste
-`StrategyExecutor`. Fiecare intenție live primește `intent_id`, păstrat în starea
-ordinului, iar submit/status/cancel sunt scrise JSONL în `logger/execution_audit/`.
-Eșecul auditului nu poate refuza și nu poate modifica un ordin.
+`providers/execution_audit.py` is a strictly observational decorator over
+`StrategyExecutor`. Every live intent gets an `intent_id`, kept in the order state, and
+submit/status/cancel are written as JSONL into `logger/execution_audit/`.
+A failure of the audit can neither refuse nor modify an order.
 
-### HYPE pe Hyperliquid (SPOT)
+### HYPE on Hyperliquid (SPOT)
 `providers/hyperliquid_provider.py`:
-- preț/history **public** HL (perechea @index, ex `@107` = HYPE/USDC);
-- `free_balance` = SPOT (`total − hold`); `get_orders`/`get_trades` = fill-uri SPOT
-  (`coin == @index`; fill-urile PERP `coin=HYPE` sunt EXCLUSE → DN-ul nu se amestecă);
-- refolosește `hyperliquid/hl_client.py` (SDK), cu **import LAZY** — fleet-ul NU pică dacă
-  SDK-ul HL lipsește din venv-ul lui (Binance neafectat).
-- **Porți separate:** `MT_HYPE_ENABLED` revendică HYPE în `monitortrades`, iar
-  `HL_LIVE_ORDERS` permite providerului să trimită ordine. Valorile pot fi suprascrise
-  de `.env`; starea reală se stabilește din manifest + procese + environment, nu din
-  `config.env` singur.
-- La auditul din 21 august 2026, incidentul `PAPER-1` din fallback-ul legacy
-  Kraken a fost remediat: launcherul izolează starea HL și separă PAPER de LIVE.
-  Procesul este acum oprit și absent din manifest; profilul scalat 1.000/600 poate
-  desfășura maximum 7.000 USDC, peste soldul disponibil de ~1.024 USDC.
-- ⚠ **Co-mingling spot** (vezi [OPERATIONS.md](OPERATIONS.md) §3): dacă DN sau mai mulți
-  owneri sunt reactivați, același sold HYPE spot poate fi vândut de motorul greșit.
+- **public** HL price/history (the @index pair, e.g. `@107` = HYPE/USDC);
+- `free_balance` is SPOT (`total − hold`); `get_orders`/`get_trades` are SPOT fills
+  (`coin == @index`; PERP fills with `coin=HYPE` are EXCLUDED, so DN does not get mixed in);
+- it reuses `hyperliquid/hl_client.py` (the SDK) with a **LAZY import** — the fleet does NOT fall over
+  if the HL SDK is missing from its venv (Binance unaffected).
+- **Separate gates:** `MT_HYPE_ENABLED` claims HYPE in `monitortrades`, while
+  `HL_LIVE_ORDERS` lets the provider send orders. The values can be overridden by
+  `.env`; the real state is established from the manifest plus the processes plus the
+  environment, not from `config.env` alone.
+- At the audit of 21 August 2026, the `PAPER-1` incident from the legacy Kraken fallback
+  was fixed: the launcher isolates the HL state and separates PAPER from LIVE.
+  The process is now stopped and absent from the manifest; the scaled 1,000/600 profile
+  can deploy up to 7,000 USDC, above the ~1,024 USDC available balance.
+- ⚠ **Spot co-mingling** (see [OPERATIONS.md](OPERATIONS.md) §3): if DN or several owners
+  are reactivated, the same HYPE spot balance can be sold by the wrong engine.
 
-## Kraken multi-proces (cacheManager replicat)
-Pentru 2–3 procese de trading HYPE pe Kraken (același symbol `HYPEUSD`), pe UN singur cont:
-- **`kraken/kraken_cachemanager.py`** = proces SEPARAT (izolare de Binance: Kraken jos ≠ Binance jos)
-  care ține fill-urile într-un cache cu NAMESPACE separat (`cachedb/cache_trade_kraken.json`);
-  `kraken_provider.get_orders` CITEȘTE din el (gard de profit corect cross-proces + un singur
-  feed = rate-limit ok), cu fallback pe `TradesHistory`.
-  - mod **poll** (default, ~5s) / mod **ws** (`KRAKEN_CACHE_MODE=ws`, `ownTrades` real-time —
-    cod gata dar neactiv; pt scalping sub 5s, cere `websocket-client`).
-- **Nonce Kraken e per-CHEIE** strict crescător → fiecare proces are PERECHEA lui de chei
-  (`KRAKEN_API_KEY` / `_WS`), altfel „Invalid nonce". Cheile DOAR în `kraken/.env*`.
-- **Balanță:** un cont → toate procesele văd același `free_balance` (risc over-sell pe același
-  symbol); mitigat de weight-cap + cooldown + respingerea bursei. Extra (doar la nevoie):
-  strat de rezervare de balanță în cache-ul comun.
+## Multi-process Kraken (a replicated cacheManager)
+For 2-3 HYPE trading processes on Kraken (the same `HYPEUSD` symbol) on ONE account:
+- **`kraken/kraken_cachemanager.py`** is a SEPARATE process (isolation from Binance: Kraken down
+  is not Binance down) that keeps the fills in a cache with its own NAMESPACE
+  (`cachedb/cache_trade_kraken.json`); `kraken_provider.get_orders` READS from it (a correct
+  cross-process profit guard plus a single feed, so the rate limit is fine), falling back to
+  `TradesHistory`.
+  - **poll** mode (default, ~5s) / **ws** mode (`KRAKEN_CACHE_MODE=ws`, real-time `ownTrades` —
+    the code is ready but inactive; for scalping under 5s it needs `websocket-client`).
+- **The Kraken nonce is per KEY** and strictly increasing, so each process needs its own key
+  pair (`KRAKEN_API_KEY` / `_WS`), otherwise "Invalid nonce". The keys live ONLY in `kraken/.env*`.
+- **Balance:** one account means every process sees the same `free_balance` (a risk of over-selling
+  the same symbol); mitigated by the weight cap, the cooldown and the exchange's own rejection.
+  Extra, only if needed: a balance reservation layer in the shared cache.
 
-## Trailing stop (core partajat + adaptoare per provider)
-Disjunctor de CRASH pe holdingurile manuale (NU alfa): prag LARG (Binance 20–22%, Kraken 15%)
-se declanșează doar la colaps susținut. Refactor 2026-06: logica era duplicată ~linie-cu-linie
-în cele 2 `trailing_stop.py` → mutată în `trailing_core.TrailingCore` (scrisă o singură dată).
-- **`trailing_core.py`** = mașina de stări (provider-agnostic): warmup → urmărește vârful →
-  vinde la −trail% → re-buy pe recul de la minim. **`binance_api/trailing_stop.py`** +
-  **`kraken/trailing_stop.py`** = ADAPTOARE subțiri (clasele `TrailingStop`/`KrakenTrailing`),
-  doar API-ul lor + log/notify. Rămân **2 fișiere = 2 procese**/config/stări separate (dedup ≠ 1 fișier).
-- **Contract adaptor** (duck-typing): `assets()→(key,asset,pair,trail)`, `begin_tick()→bool`,
+## Trailing stop (a shared core plus per-provider adapters)
+A CRASH breaker on the manual holdings (NOT alpha): a WIDE threshold (Binance 20-22%, Kraken 15%)
+fires only on a sustained collapse. Refactor, June 2026: the logic was duplicated almost
+line-for-line across the two `trailing_stop.py` files, so it moved into
+`trailing_core.TrailingCore` (written once).
+- **`trailing_core.py`** is the state machine (provider-agnostic): warmup -> track the peak ->
+  sell at -trail% -> re-buy on a bounce from the low. **`binance_api/trailing_stop.py`** and
+  **`kraken/trailing_stop.py`** are thin ADAPTERS (the `TrailingStop`/`KrakenTrailing` classes),
+  carrying only their API plus log/notify. They stay **2 files = 2 processes** with separate
+  configs and states (deduplication is not the same as a single file).
+- **The adapter contract** (duck-typed): `assets()→(key,asset,pair,trail)`, `begin_tick()→bool`,
   `free_qty(asset)`, `price(pair)`, `trend(pair)`, `execute_sell(...)→bool`, `execute_rebuy(...)→bool`,
-  + `log_*` (wording specific). Provider nou = doar aceste metode; logica de decizie NU se rescrie.
-- **Mașina de stări** (`_process`, per activ/tick): (1) **warmup** dacă `min_profit_pct>0` (nu
-  armează până `price≥entry·(1+min%)` — evită sell în pierdere după un dip imediat ce-ai cumpărat);
-  (2) **re-buy** pending (recul `+bounce%` de la minim, sări dacă trend clar jos); (3) sub notional →
-  sări; (4) `price>peak` → urcă vârful; (5) `price≤peak·(1−trail%)` → vinde `free·sell_fraction`,
-  re-armează vârf + armează `rebuy`.
-- **Stare persistată** (schemă neschimbată de refactor): `{"<key>": {"peak", "rebuy":{qty,sell_price,low}?, "warmup_at"?}}`.
-  Binance `cachedb/trailing_state.json` (cheie=symbol), Kraken `kraken/trailing_state.json` (cheie=asset).
-  Supraviețuiește restartului (vârful nu se resetează).
-- **`item_isolation`** (model de erori, diferă real): Binance `True` = try per-monedă + save mereu;
-  Kraken `False` = try pe tot tick-ul, fără save la eroare.
-- **Config**: `*/trailing.conf` — `(KRAKEN_)TRAILING_ENABLED`=LIVE (default dry-run), `_REBUY_*`,
-  `_MIN_PROFIT_PCT`; praguri/`CHECK_SECONDS` în cod (Binance 60s, Kraken 120s).
-  **Notify**: Kraken cheamă `notify()` (ntfy+email, `source=kraken-trail`) la sell/rebuy; **Binance NU
-  notifică** (doar log `trail_b.log`, care e block-buffered → confirmă via state file / `--status`).
-- **Teste** (garantează echivalența refactorului): `tests/test_trailing_stop.py`,
-  `kraken/test_trailing_kraken.py`. CLI: `--once`, `--status`. Lansare din `bots_start.sh`,
-  supravegheat de `healthcheck.sh --supervise` (vezi [OPERATIONS.md](OPERATIONS.md)).
+  plus `log_*` (venue-specific wording). A new provider only implements these methods; the decision
+  logic is never rewritten.
+- **The state machine** (`_process`, per asset per tick): (1) **warmup** if `min_profit_pct>0` (it does
+  not arm until `price≥entry·(1+min%)`, which avoids selling at a loss after a dip right after you
+  bought); (2) a pending **re-buy** (a `+bounce%` recovery from the low, skipped if the trend is
+  clearly down); (3) below notional -> skip; (4) `price>peak` -> raise the peak;
+  (5) `price≤peak·(1−trail%)` -> sell `free·sell_fraction`, re-arm the peak and arm the `rebuy`.
+- **Persisted state** (the schema is unchanged by the refactor): `{"<key>": {"peak", "rebuy":{qty,sell_price,low}?, "warmup_at"?}}`.
+  Binance uses `cachedb/trailing_state.json` (keyed by symbol), Kraken `kraken/trailing_state.json` (keyed by asset).
+  It survives a restart (the peak is not reset).
+- **`item_isolation`** (the error model, a genuine difference): Binance `True` = a try per coin plus
+  always saving; Kraken `False` = one try for the whole tick, with no save on error.
+- **Config**: `*/trailing.conf` — `(KRAKEN_)TRAILING_ENABLED` means LIVE (dry run by default), `_REBUY_*`,
+  `_MIN_PROFIT_PCT`; the thresholds and `CHECK_SECONDS` are in the code (Binance 60s, Kraken 120s).
+  **Notification**: Kraken calls `notify()` (ntfy plus email, `source=kraken-trail`) on sell and rebuy;
+  **Binance does NOT notify** (only the `trail_b.log` log, which is block-buffered, so confirm through
+  the state file or `--status`).
+- **Tests** (they guarantee the refactor's equivalence): `tests/test_trailing_stop.py`,
+  `kraken/test_trailing_kraken.py`. CLI: `--once`, `--status`. Launched from `bots_start.sh`,
+  supervised by `healthcheck.sh --supervise` (see [OPERATIONS.md](OPERATIONS.md)).

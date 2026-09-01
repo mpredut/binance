@@ -1,156 +1,154 @@
-# rtrade — politică financiară, execuție și operare
+# rtrade — financial policy, execution and operations
 
-Document de referință pentru `rtrade.py`, `strategies/rtrade_pair.py` și
-`rtrade_pair_store.py`. Configurația efectivă rămâne `rtrade_config.env`; valorile de
-mai jos descriu profilul live din 23 august 2026.
+A reference document for `rtrade.py`, `strategies/rtrade_pair.py` and
+`rtrade_pair_store.py`. The effective configuration remains `rtrade_config.env`; the values
+below describe the live profile as of 23 August 2026.
 
-## Verdict financiar
+## Financial verdict
 
-rtrade este un market-making/spread bot spot pe `TAOUSDC`. Mecanica urmărește să
-încaseze diferența dintre un BUY sub prețul median și un SELL peste acesta, reducând
-riscul operațional al ordinelor nepereche. **Nu există însă dovadă că strategia are
-randament pozitiv sau că maximizează profitul.**
+rtrade is a spot market-making/spread bot on `TAOUSDC`. The mechanics aim to capture the
+difference between a BUY below the median price and a SELL above it, while reducing the
+operational risk of unpaired orders. **There is, however, no evidence that the strategy has
+a positive return or that it maximises profit.**
 
-Backtestul exploratoriu pe cache-ul TAO a fost negativ pentru toate combinațiile
-testate de spread și stop. Datele aveau pas median de aproximativ 19 secunde și nu
-puteau valida clasificarea fast-fill de 8 secunde. Activarea live trebuie deci tratată
-ca observație forward cu capital real și limite de risc, nu ca edge demonstrat.
+The exploratory backtest on the TAO cache was negative for every combination of spread and
+stop that was tested. The data had a median step of roughly 19 seconds and could not
+validate the 8-second fast-fill classification. Enabling it live must therefore be treated
+as a forward observation with real capital and risk limits, not as a demonstrated edge.
 
-Mecanismele de mai jos au două roluri distincte:
+The mechanisms below serve two distinct purposes:
 
-- profit-seeking: spread, profit guard și exit ancorat în fill;
-- loss/risk control: ownership per rundă, reconcilierea fillurilor, plafonul de
-  concurență, backoff și ieșirea de urgență.
+- profit-seeking: the spread, the profit guard and the fill-anchored exit;
+- loss/risk control: per-round ownership, fill reconciliation, the concurrency cap,
+  backoff and the emergency exit.
 
-Un control de risc poate reduce pierderile accidentale, dar nu transformă singur o
-strategie fără edge într-una profitabilă.
+A risk control can reduce accidental losses, but on its own it does not turn a strategy
+without an edge into a profitable one.
 
-## Intrarea și ținta de profit
+## Entry and profit target
 
-- Coordinatorul este activ, cu maximum 4 runde simultane.
-- O rundă nouă poate porni la minimum 8 secunde.
-- Direcțiile alternează `BUY-first` și `SELL-first`.
-- Notionalul cerut este 500 USDC/rundă; cantitatea finală poate fi mai mică.
-- Ajustarea curentă este 0,64% pe fiecare parte a midului. Teoretic, înainte de
-  rotunjire, comisioane și slippage, distanța BUY–SELL este aproximativ 1,28% din mid.
-- Marja minimă a exitului este 1,15%, iar fee-cap-ul Binance folosește estimarea de
-  0,1% pe ordin. Aceste praguri protejează prețul cerut, dar fill probability,
-  selecția adversă și slippage-ul pot elimina câștigul teoretic.
+- The coordinator is active, with at most 4 concurrent rounds.
+- A new round may start after a minimum of 8 seconds.
+- The directions alternate `BUY-first` and `SELL-first`.
+- The requested notional is 500 USDC per round; the final quantity may be smaller.
+- The current adjustment is 0.64% on each side of the mid. In theory, before rounding,
+  fees and slippage, the BUY-SELL distance is about 1.28% of the mid.
+- The minimum exit margin is 1.15%, and the Binance fee cap uses an estimate of 0.1% per
+  order. These thresholds protect the requested price, but fill probability, adverse
+  selection and slippage can wipe out the theoretical gain.
 
-SELL-first pe Binance Spot nu deschide short cu împrumut. Vinde numai TAO disponibil
-în cont și apoi încearcă buyback. În ledgerul rundei apare expunere `SOLD`, dar la
-nivelul contului aceasta înseamnă că inventarul TAO a fost redus. Riscul financiar
-este recumpărarea mai scumpă într-o piață ascendentă.
+SELL-first on Binance Spot does not open a borrowed short. It sells only TAO available in
+the account and then attempts a buyback. The round's ledger shows a `SOLD` exposure, but at
+account level this means the TAO inventory was reduced. The financial risk is buying back
+more expensively in a rising market.
 
-## Ciclul unei runde
+## The cycle of one round
 
-1. Calculează un BUY și un SELL în jurul midului.
-2. Plasează ambele ordine prin `mkt.place` → `Instrument.place` → provider Binance.
-3. Atașează un `pair_id` și client-order-ID determinist `RT_...` fiecărui picior.
-4. Dacă al doilea picior nu poate fi plasat, primul este anulat.
-5. Fără fill până la TTL (32 secunde), ambele sunt anulate și starea este recitită
-   pentru a închide cursa fill-versus-cancel.
-6. Cu un singur fill sau partial fill, remainder-ul de entry este anulat, expunerea
-   netă este recalculată din fillurile exchange-ului, iar exitul opus este
-   redimensionat la acea cantitate.
-7. Alte runde pot porni între timp; fiecare își deține separat ordinele și ledgerul.
-8. Runda devine terminală numai la pereche completă, expirare fără fill, eșec
-   controlat sau hard-stop executat.
+1. Compute a BUY and a SELL around the mid.
+2. Place both orders through `mkt.place` -> `Instrument.place` -> the Binance provider.
+3. Attach a `pair_id` and a deterministic `RT_...` client order ID to each leg.
+4. If the second leg cannot be placed, the first is cancelled.
+5. With no fill by the TTL (32 seconds), both are cancelled and the state is re-read to
+   close the fill-versus-cancel race.
+6. With a single fill or a partial fill, the entry remainder is cancelled, the net exposure
+   is recomputed from the exchange's fills, and the opposite exit is resized to that quantity.
+7. Other rounds may start meanwhile; each owns its orders and its ledger separately.
+8. A round becomes terminal only on a complete pair, expiry without a fill, a controlled
+   failure, or an executed hard stop.
 
-Rundele nu rezervă sold între ele. Pipeline-ul recalculează soldul înainte de fiecare
-submit, deci concurența produce clamp/refuz controlat, dar poate reduce probabilitatea
-ca ambele picioare ale aceleiași runde să fie acceptate.
+Rounds reserve no balance between them. The pipeline recomputes the balance before each
+submit, so concurrency produces a controlled clamp or refusal, but it can reduce the
+probability that both legs of the same round are accepted.
 
-## Guard-uri și cantitate
+## Guards and quantity
 
-Ordinele limit normale trec prin pipeline-ul comun:
+Normal limit orders go through the shared pipeline:
 
 ```text
 requested_qty
   -> balance_cap
   -> daily/weight policy_cap
   -> fee_cap
-  -> precizie și minimum Binance
-  -> final_qty sau refuse_reason
+  -> Binance precision and minimum
+  -> final_qty or refuse_reason
 ```
 
-Se aplică profit guard, plafon zilnic, trend-wait, cooldown per `pair_id`, sold liber,
-fee-cap și validările Binance. La sold zero sau alt refuz, direcția intră în backoff
-180 secunde. `caller_owns_retry=True` exclude ordinele rtrade din outbox-ul global;
-coordonatorul este singurul owner al retry/reconcile.
+The profit guard, the daily cap, trend-wait, the per-`pair_id` cooldown, the free balance,
+the fee cap and the Binance validations all apply. On a zero balance or another refusal,
+the direction enters a 180-second backoff. `caller_owns_retry=True` excludes rtrade orders
+from the global outbox; the coordinator is the sole owner of retry and reconciliation.
 
-Aceste garduri sunt conservative. Ele pot evita tranzacții dezavantajoase, dar pot și
-reduce mult numărul de filluri. De exemplu, atingerea plafonului zilnic poate lăsa
-rtrade sănătos, dar fără ordine active.
+These guards are conservative. They can avoid disadvantageous trades, but they can also
+greatly reduce the number of fills. For instance, reaching the daily cap can leave rtrade
+healthy but with no active orders.
 
-## Expunere, trend și stop
+## Exposure, trend and stop
 
-După un fill unilateral, exitul limită este ancorat în prețul mediu real al intrării
-și în edge-ul minim; nu urmărește automat piața în pierdere.
+After a one-sided fill, the limit exit is anchored to the real average entry price and to
+the minimum edge; it does not automatically chase the market into a loss.
 
-Pragurile curente sunt:
+The current thresholds are:
 
-- fast-fill/shock: fill în maximum 25% din TTL, adică aproximativ 8 secunde;
-- prag de evaluare hard-stop shock: 4%;
-- prag de evaluare hard-stop normal: 8%;
-- prag de urgență: 12%.
+- fast-fill/shock: a fill within at most 25% of the TTL, that is roughly 8 seconds;
+- shock hard-stop evaluation threshold: 4%;
+- normal hard-stop evaluation threshold: 8%;
+- emergency threshold: 12%.
 
-În `RTRADE_DYNAMIC_MARKET_EXIT_MODE=live`, 4% și 8% **nu garantează** un ordin MARKET.
-La aceste praguri, MARKET este permis numai dacă `MarketRegimeDecision` confirmă trend
-advers expunerii. Dacă nu confirmă, runda păstrează exitul ancorat și așteaptă. La 12%,
-urgența permite MARKET indiferent de semnal. Aceasta reduce vânzarea panicată într-o
-mișcare temporară, dar asumă explicit tail-risk între pragul inițial și 12% dacă
-detectorul de trend greșește sau întârzie.
+Under `RTRADE_DYNAMIC_MARKET_EXIT_MODE=live`, 4% and 8% do **not** guarantee a MARKET order.
+At those thresholds MARKET is permitted only if `MarketRegimeDecision` confirms a trend
+adverse to the exposure. If it does not, the round keeps the anchored exit and waits. At
+12%, the emergency permits MARKET regardless of the signal. This reduces panic selling into
+a temporary move, but it explicitly accepts tail risk between the initial threshold and 12%
+if the trend detector is wrong or late.
 
-MARKET este permis doar pentru reducerea unei expuneri deja create. Cantitatea este
-reconciliată din nou cu soldul, fee-cap-ul, precizia și minimul venue-ului.
+MARKET is permitted only to reduce an exposure that already exists. The quantity is
+reconciled once more against the balance, the fee cap, the precision and the venue minimum.
 
-## Persistență și recovery
+## Persistence and recovery
 
-`cachedb/rtrade_pairs.json` păstrează intenția canonică înainte de submit, valorile
-cerute și acceptate, order ID-ul și checkpointul coordonatorului. Ordinele LIMIT trec
-prin `order_retry.TrackedOrderLifecycle`, dar rămân în state-ul rtrade și nu în
-outbox-ul global. Fiecare apel lifecycle face un singur submit și nu așteaptă
-terminalul. Dacă răspunsul nu conține order ID, rtrade face un lookup imediat; numai
-absența confirmată permite un al doilea apel cu același client ID. Nu există loop de
-submit sau așteptare activă. La restart:
+`cachedb/rtrade_pairs.json` keeps the canonical intent before the submit, the requested and
+accepted values, the order ID and the coordinator checkpoint. LIMIT orders go through
+`order_retry.TrackedOrderLifecycle`, but they stay in the rtrade state rather than the
+global outbox. Each lifecycle call performs a single submit and does not wait for a
+terminal status. If the response carries no order ID, rtrade performs an immediate lookup;
+only a confirmed absence permits a second call with the same client ID. There is no submit
+loop and no busy waiting. On restart:
 
-- intenție + ordin existent: ordinul este adoptat;
-- intenție fără ordin după absență confirmată: un submit idempotent cu același client ID;
-- răspuns de submit pierdut: lookup după client ID, fără submit concurent;
-- ordin `RT_` fără ownership local: anulare și confirmare automată;
-- stare ambiguă/API indisponibil: fail-closed, fără ordin speculativ.
+- intent plus an existing order: the order is adopted;
+- an intent without an order after a confirmed absence: an idempotent submit with the same client ID;
+- a lost submit response: a lookup by client ID, with no concurrent submit;
+- an `RT_` order without local ownership: automatic cancellation and confirmation;
+- an ambiguous state or an unavailable API: fail-closed, with no speculative order.
 
-Sunt păstrate maximum 200 de runde terminale. Checkpointurile active sunt scrise în
-batch, ordinele terminale cu fill zero sunt compactate, iar cache-urile auxiliare au
-plafoane de memorie.
+At most 200 terminal rounds are kept. Active checkpoints are written in batches, terminal
+orders with zero fills are compacted, and the auxiliary caches have memory caps.
 
-Lifecycle-ul comun rezolvă mecanica de persistență, lookup și status. `PairCoordinator`
-rămâne ownerul politicii de TTL, cancel/reprice, partial fill și hard-stop. Calea
-legacy `repetitive_buy`/`repetitive_sell` rămâne disponibilă în spatele feature
-flagului și nu este consumată de workerul global.
+The shared lifecycle solves the mechanics of persistence, lookup and status.
+`PairCoordinator` remains the owner of the TTL, cancel/reprice, partial fill and hard-stop
+policy. The legacy `repetitive_buy`/`repetitive_sell` path stays available behind the
+feature flag and is not consumed by the global worker.
 
-## Invariante operaționale
+## Operational invariants
 
-- maximum 4 coordonatoare active și minimum 8 secunde între runde;
-- exact un owner (`pair_id`) pentru fiecare picior rtrade;
-- nicio ieșire MARKET în afara unei expuneri existente și a politicii de stop;
-- P&L și `net_qty` calculate din filluri, nu din cantitatea cerută;
-- aceeași intenție produce același client-order-ID după restart;
-- rtrade nu folosește simultan retry-ul local și outbox-ul global;
-- lipsa certitudinii despre exchange blochează submitul nou, nu inventează stare.
+- at most 4 active coordinators and a minimum of 8 seconds between rounds;
+- exactly one owner (`pair_id`) for each rtrade leg;
+- no MARKET exit outside an existing exposure and the stop policy;
+- P&L and `net_qty` computed from fills, not from the requested quantity;
+- the same intent produces the same client order ID after a restart;
+- rtrade never uses the local retry and the global outbox at the same time;
+- a lack of certainty about the exchange blocks a new submit rather than inventing state.
 
-## Ce trebuie urmărit pentru validare financiară
+## What to watch for financial validation
 
-- P&L net după comisioane și slippage, nu cashflow brut;
-- rata rundelor complet pereche și timpul mediu de expunere unilaterală;
-- pierderea condiționată de BUY-first versus SELL-first;
-- fill probability la spreadul de 0,64%;
-- câte intrări sunt refuzate de profit guard/plafon zilnic;
-- drawdown și pierderea la percentilele extreme;
-- deciziile de trend la pragurile 4%/8% și execuțiile de urgență la 12%;
-- rezultate forward suficiente înainte de mărirea notionalului sau concurenței.
+- net P&L after fees and slippage, not gross cashflow;
+- the rate of fully paired rounds and the average time spent one-sided;
+- the loss conditional on BUY-first versus SELL-first;
+- fill probability at the 0.64% spread;
+- how many entries are refused by the profit guard or the daily cap;
+- drawdown and the loss at the extreme percentiles;
+- the trend decisions at the 4%/8% thresholds and the emergency executions at 12%;
+- enough forward results before increasing the notional or the concurrency.
 
-Testele deterministe validează mecanica și recovery-ul, nu profitabilitatea. Orice
-schimbare a spreadului, stopurilor, notionalului sau numărului de runde cere replay,
-testele complete și observație forward.
+The deterministic tests validate the mechanics and the recovery, not profitability. Any
+change to the spread, the stops, the notional or the number of rounds requires a replay,
+the full test suite and forward observation.

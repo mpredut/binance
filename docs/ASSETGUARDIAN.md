@@ -1,154 +1,145 @@
-# assetguardian — politică financiară și limite
+# assetguardian — financial policy and limits
 
-`assetguardian.py` evaluează independent fiecare simbol configurat prin
-`AG_SYMBOLS` (`BTCUSDC,TAOUSDC` în configurația versionată) la fiecare 54 secunde.
-Toate cheile `AG_*` sunt obligatorii; lipsa sau o valoare goală/invalidă oprește
-procesul la pornire. Nu există valori implicite ascunse în cod. Nu este un
-stop-loss: protecția de crash aparține modulului trailing stop. Guardianul
-implementează două semnale contrariene rare, calculate din prețul fiecărui activ,
-nu din valoarea totală a portofoliului.
+`assetguardian.py` evaluates each symbol configured through `AG_SYMBOLS`
+(`BTCUSDC,TAOUSDC` in the versioned configuration) independently, every 54 seconds.
+All `AG_*` keys are mandatory; a missing, empty or invalid value stops the process at
+startup. There are no hidden defaults in the code. It is not a stop-loss: crash protection
+belongs to the trailing stop module. The Guardian implements two rare contrarian signals,
+computed from each asset's own price rather than from the total portfolio value.
 
-## Semnale per activ
+## Per-asset signals
 
-- Growth exit în tranșe: la +15%/+25%/+35% față de minimul propriu încearcă SELL
-  pe același activ cu 30%/30%/40% din cantitatea liberă capturată la începutul
-  campaniei. La prima tranșă se îngheață minimul ferestrei și cantitatea inițială;
-  pragurile nu se mută când fereastra mobilă avansează. Profit guard-ul SELL rămâne
-  activ, deoarece creșterea față de minim nu dovedește automat profit față de cost.
-- Drawdown buy în tranșe: la -7%/-10%/-14% față de maximul propriu al activului din
-  ultimele 24h, încearcă BUY pe același simbol, cu 35%/35%/30% din bugetul campaniei
-  acelui simbol. Bugetul inițial este 99,5% din USDC liber când începe
-  campania. Submitul nu completează tranșa: numai un status terminal `closed` cu
-  cantitate executată o marchează completă. Campania acelui activ se rearmează după
-  recuperarea drawdown-ului sub 3%, dar niciodată cât o intenție BUY este pending.
+- Growth exit in tranches: at +15%/+25%/+35% above its own low it attempts a SELL on that
+  same asset, for 30%/30%/40% of the free quantity captured at the start of the campaign.
+  At the first tranche the window low and the initial quantity are frozen; the thresholds
+  do not move as the rolling window advances. The SELL profit guard stays active, because a
+  rise above the low does not automatically prove a profit above cost.
+- Drawdown buy in tranches: at -7%/-10%/-14% below the asset's own 24h high it attempts a
+  BUY on the same symbol, for 35%/35%/30% of that symbol's campaign budget. The initial
+  budget is 99.5% of the free USDC when the campaign begins. A submit does not complete the
+  tranche: only a terminal `closed` status with an executed quantity marks it complete. That
+  asset's campaign re-arms once the drawdown recovers below 3%, but never while a BUY intent
+  is pending.
 
-Exemplu: o scădere TAOUSDC de la 242 la 225 este aproximativ -7,02% și poate emite
-o intenție BUY TAOUSDC. Nu mai poate produce o intenție BTC doar fiindcă TAO a
-scăzut. În oglindă, o creștere TAO peste prag poate vinde numai tranșa TAO
-corespunzătoare, nu BTC și nu întregul portofoliu la primul prag.
+Example: a TAOUSDC fall from 242 to 225 is roughly -7.02% and may emit a BUY TAOUSDC intent.
+It can no longer produce a BTC intent merely because TAO fell. Mirrored, a TAO rise past the
+threshold can sell only the corresponding TAO tranche, not BTC and not the whole portfolio
+at the first threshold.
 
-`AG_SELL_REARM_GROWTH_PCT=5` se raportează la minimul înghețat, nu la un minim
-mobil nou. Dacă minimul înghețat este 100, campania se rearmează când prețul revine
-la cel mult 105. Starea SELL este atunci ștearsă; numai o campanie viitoare va citi
-și va îngheța minimul curent din fereastra mobilă. Histereza împiedică oscilația
-imediată în jurul primului prag de +15%.
+`AG_SELL_REARM_GROWTH_PCT=5` is measured against the frozen low, not a new rolling one. If
+the frozen low is 100, the campaign re-arms when the price returns to at most 105. The SELL
+state is then cleared; only a future campaign will read and freeze the current low of the
+rolling window. The hysteresis prevents immediate oscillation around the first +15% threshold.
 
-Minimul și maximul vin din cache-ul comun `Price24`, iar fiecare rând este validat
-pentru simbol, timestamp și preț finit pozitiv. Un baseline lipsă, stătut sau format
-numai din eșantionul curent nu poate produce ordin.
+The low and the high come from the shared `Price24` cache, and each row is validated for
+symbol, timestamp and a finite positive price. A baseline that is missing, stale or made up
+solely of the current sample cannot produce an order.
 
-## Execuție și retry
+## Execution and retry
 
-Ordinele trec prin `mkt.place`/`Instrument.place`. BUY-ul AssetGuardian setează
-`bypass_profit_reference=True`: sare numai comparația cu vechea referință SELL,
-fiindcă semnalul valid este drawdown-ul per activ față de propriul maxim. Noul flag
-nu este `bypass_profit_guard=True`; quantity/weight policy continuă să plafoneze
-cantitatea. SELL-ul setează `bypass_quantity_policy=True`, permis de nucleu numai
-pentru SELL: tranșa explicită înlocuiește plafonul dinamic weight, dar nu sare
-profit-reference, soldul real sau fee-cap. Rămân active plafonul zilnic, anti-spam,
-cooldown-ul, reconcilierea soldului și mecanica Binance. Nici BUY, nici SELL nu
-folosesc bypass-ul larg `bypass_profit_guard=True`.
+Orders go through `mkt.place`/`Instrument.place`. The AssetGuardian BUY sets
+`bypass_profit_reference=True`: it skips only the comparison against the old SELL reference,
+because the valid signal is the per-asset drawdown from its own high. The new flag is not
+`bypass_profit_guard=True`; the quantity/weight policy keeps capping the quantity. The SELL
+sets `bypass_quantity_policy=True`, which the core permits for SELL only: the explicit
+tranche replaces the dynamic weight cap, but it does not skip the profit reference, the real
+balance or the fee cap. The daily cap, anti-spam, the cooldown, balance reconciliation and
+the Binance mechanics all stay active. Neither BUY nor SELL uses the broad
+`bypass_profit_guard=True`.
 
-`Instrument.place` nu mai folosește niciun `sleep`/polling pentru trend: gate-ul
-comun face o singură verificare instantanee și, dacă refuză, întoarce imediat
-controlul; outboxul comun va reîncerca într-un tick ulterior. AssetGuardian își
-gestionează separat aceeași semantică prin
-`AG_TREND_DEFER_MAX_SEC=180`, care persistă o amânare non-blocantă per
-simbol/side/tranșă. La fiecare 15–30 s recitește trendul, prețul, semnalul, soldul și
-ordinele; plasează mai devreme dacă trendul devine favorabil sau după maximum 180 s
-numai dacă semnalul este încă valid. Nicio funcție de plasare nu ține procesul într-o
-buclă de așteptare.
+`Instrument.place` no longer uses any `sleep` or polling for the trend: the shared gate
+performs a single instant check and, if it refuses, returns control immediately; the shared
+outbox will retry on a later tick. AssetGuardian manages the same semantics separately
+through `AG_TREND_DEFER_MAX_SEC=180`, which persists a non-blocking deferral per
+symbol/side/tranche. Every 15-30s it re-reads the trend, the price, the signal, the balance
+and the orders; it places earlier if the trend turns favourable, or after at most 180s and
+only if the signal is still valid. No placement function holds the process in a wait loop.
 
-Guardianul setează `caller_owns_retry=True`: nu introduce ordine în outbox. Atât BUY,
-cât și SELL folosesc componenta generică `TrackedOrderLifecycle`, disponibilă prin
-`MarketApi.tracked_order_lifecycle`. Strategia persistă intenția cu
-`client_order_id` determinist înainte de submit; componenta comună face lookup,
-status, TTL cancel și audit provider-neutral. `mkt.place` rămâne apelul sincron de
-politică/mecanică și nu așteaptă fill-ul.
+The Guardian sets `caller_owns_retry=True`: it puts no orders into the outbox. Both BUY and
+SELL use the generic `TrackedOrderLifecycle` component, available through
+`MarketApi.tracked_order_lifecycle`. The strategy persists the intent with a deterministic
+`client_order_id` before the submit; the shared component handles lookup, status, TTL cancel
+and a provider-neutral audit. `mkt.place` remains the synchronous policy/mechanics call and
+does not wait for the fill.
 
-`NEW` și `PARTIALLY_FILLED` rămân pending; o tranșă devine completă numai după status
-terminal `closed/FILLED` cu `filled_qty>0`. Un SELL terminal parțial păstrează
-cantitatea executată, iar un BUY terminal parțial păstrează costul și fee-ul real;
-un ciclu ulterior poate cere numai restul tranșei. Dacă răspunsul submit se pierde,
-intenția este căutată după client ID. O confirmare explicită că ordinul lipsește o
-eliberează fără a completa tranșa și permite reevaluare/retry imediat în același
-ciclu. Nici absența, nici o eroare de lookup nu sunt interpretate ca fill.
+`NEW` and `PARTIALLY_FILLED` stay pending; a tranche is complete only after a terminal
+`closed/FILLED` status with `filled_qty>0`. A partially terminal SELL keeps the executed
+quantity, and a partially terminal BUY keeps the real cost and fee; a later cycle may
+request only the remainder of the tranche. If the submit response is lost, the intent is
+looked up by client ID. An explicit confirmation that the order is missing releases it
+without completing the tranche and permits re-evaluation or a retry immediately in the same
+cycle. Neither an absence nor a lookup error is interpreted as a fill.
 
-Pentru AssetGuardian este activată explicit politica „at least once” cerută de
-operator: atât absența confirmată, cât și indisponibilitatea lookup-ului eliberează
-intenția pentru revalidarea completă a strategiei și retransmitere în același/următorul
-ciclu. Retransmiterea aceleiași încercări refolosește același `client_order_id`;
-exchange-ul poate astfel deduplica, dar în cazul unei citiri externe fals-negative
-politica acceptă riscul unei cereri duplicate în locul pierderii intenției. Nici acest
-caz nu completează tranșa fără fill terminal confirmat.
+For AssetGuardian the "at least once" policy requested by the operator is explicitly
+enabled: both a confirmed absence and an unavailable lookup release the intent for a full
+strategy revalidation and resend in the same or the next cycle. Resending the same attempt
+reuses the same `client_order_id`, so the exchange can deduplicate; but in the case of a
+false-negative external read, the policy accepts the risk of a duplicate request rather than
+losing the intent. Even this case does not complete the tranche without a confirmed terminal
+fill.
 
-Un ordin limit BUY/SELL propriu rămas deschis peste
-`AG_ORDER_MAX_AGE_SEC=900` (15 minute) este reinterogat și primește maximum o
-cerere de anulare. Marcajul `cancel_attempted_at` este persistat înainte de apelul
-API. După cancel se cere din nou statusul: un fill parțial terminal este contabilizat
-și numai restul poate fi reîncercat într-un ciclu ulterior. Dacă anularea sau
-statusul sunt ambigue, intenția rămâne pending și blochează orice înlocuitor. Acest
-TTL se aplică exclusiv ordinului identificat de `client_order_id` al Guardianului;
-un SELL deschis de alt modul blochează Guardianul, dar nu este anulat de el.
+A limit BUY/SELL order of the Guardian's own that stays open past
+`AG_ORDER_MAX_AGE_SEC=900` (15 minutes) is re-queried and receives at most one cancellation
+request. The `cancel_attempted_at` marker is persisted before the API call. After the cancel
+the status is requested again: a terminal partial fill is accounted for, and only the
+remainder may be retried in a later cycle. If the cancellation or the status is ambiguous,
+the intent stays pending and blocks any replacement. This TTL applies exclusively to the
+order identified by the Guardian's `client_order_id`; a SELL opened by another module blocks
+the Guardian but is not cancelled by it.
 
-Parametrii legacy `cancelorders=True` și `hours=...` încă apar la alți caller-i,
-însă în pipeline-ul consolidat sunt doar metadate pentru politica de cantitate și
-nu apelează funcția veche `cancel_orders_old_or_outlier`. Nu sunt reactivați global
-prin această schimbare, pentru a nu modifica pe ascuns ownership-ul ordinelor
-`rtrade`, `tradeall` sau `monitortrades`.
+The legacy parameters `cancelorders=True` and `hours=...` still appear at other call sites,
+but in the consolidated pipeline they are only metadata for the quantity policy and do not
+call the old `cancel_orders_old_or_outlier` function. They are not globally reactivated by
+this change, so that ownership of `rtrade`, `tradeall` or `monitortrades` orders is not
+quietly altered.
 
-Un refuz sau o absență confirmată determină recalcularea semnalului, prețului,
-soldului și stării, fără outbox generic. Intervalul este dinamic: 54s normal, 30s la
-cel mult două puncte procentuale de următoarea tranșă și 15s cât timp o
-tranșă/intenție sau amânare pe trend este activă. Nu există MARKET sau `force=True`
-în acest modul.
+A refusal or a confirmed absence triggers a recomputation of the signal, the price, the
+balance and the state, without the generic outbox. The interval is dynamic: 54s normally,
+30s when within two percentage points of the next tranche, and 15s while a tranche, an
+intent or a trend deferral is active. There is no MARKET and no `force=True` in this module.
 
-Pentru a limita concurența pe cash-ul USDC comun, evaluatorul oprește ciclul după
-primul ordin acceptat. Ordinea din `AG_SYMBOLS` decide ce semnal este evaluat primul;
-următorul ciclu reevaluează toate simbolurile din starea actuală. Un ordin SELL
-ori BUY acceptat nu este numit fill și nu completează tranșa fără reconcilierea
-exchange.
+To limit contention over the shared USDC cash, the evaluator stops the cycle after the first
+accepted order. The order of `AG_SYMBOLS` decides which signal is evaluated first; the next
+cycle re-evaluates every symbol from the current state. An accepted SELL or BUY order is not
+called a fill and does not complete the tranche without exchange reconciliation.
 
-## Stare persistentă
+## Persistent state
 
-Starea este versiunea 3 și păstrează sub fiecare simbol campanii `buy` și `sell`
-separate. BUY reține peak-ul, cash-ul inițial, costul/fee-ul executat per tranșă,
-intenția pending și ordinele terminale. SELL reține
-trough-ul înghețat, cantitatea inițială, tranșele completate, cantitățile executate,
-intenția pending și maximum 20 de ordine terminale pentru audit. Starea v2 per
-simbol și starea globală legacy sunt migrate conservator numai ca stare BUY;
-legacy-ul global aparține numai simbolului istoric BTCUSDC.
+The state is version 3 and keeps separate `buy` and `sell` campaigns under each symbol. BUY
+retains the peak, the initial cash, the executed cost/fee per tranche, the pending intent
+and the terminal orders. SELL retains the frozen trough, the initial quantity, the completed
+tranches, the executed quantities, the pending intent and at most 20 terminal orders for
+auditing. The per-symbol v2 state and the legacy global state are migrated conservatively as
+BUY state only; the global legacy belongs solely to the historical BTCUSDC symbol.
 
-## Riscuri și verdict
+## Risks and verdict
 
-- BUY la drawdown este mean-reversion/catch-the-dip, nu protecție. Poate cumpăra un
-  activ care continuă să cadă.
-- Campaniile sunt separate, dar cash-ul este comun. Primul semnal acceptat reduce
-  soldul disponibil pentru celelalte active; fiecare ordin recitește soldul real și
-  este plafonat la acesta.
-- Configurația permite cumulat până la 99,5% din cash-ul disponibil pentru campania
-  unui activ. Tranșele reduc riscul de timing, nu riscul de concentrare.
-- Guard-urile comune, în afară de referința BUY și quantity-policy SELL exceptate
-  îngust și explicit, pot refuza ordinul; aceasta este comportare fail-closed.
-- Profitabilitatea strategiei nu este demonstrată. Schimbarea repară atribuirea
-  semnalului și ordinului la același activ, nu garantează câștig.
+- Buying into a drawdown is mean reversion / catching the dip, not protection. It can buy an
+  asset that keeps falling.
+- The campaigns are separate, but the cash is shared. The first accepted signal reduces the
+  balance available to the other assets; each order re-reads the real balance and is capped by it.
+- The configuration allows up to a cumulative 99.5% of the available cash for one asset's
+  campaign. The tranches reduce timing risk, not concentration risk.
+- The shared guards — apart from the BUY reference and the SELL quantity policy, exempted
+  narrowly and explicitly — can refuse the order; that is fail-closed behaviour.
+- The strategy's profitability is not demonstrated. The change fixes the attribution of the
+  signal and the order to the same asset; it does not guarantee a gain.
 
-## Invariante operaționale
+## Operational invariants
 
-- toate cheile `AG_*` trebuie să existe și să fie valide; nu există fallback-uri;
-- fiecare decizie este `preț simbol -> ordin pe același simbol`;
-- baseline lipsă sau sold/preț indisponibil => fără ordin;
-- rândurile cache invalide, viitoare, stătute, `NaN` sau infinite sunt ignorate;
-- evaluarea citește atomic un snapshot al cache-ului, fără concurență cu threadul de
-  sincronizare;
-- maximum un ordin acceptat per ciclu și niciun ordin în outbox-ul global;
-- aceeași tranșă nu este contabilizată de două ori; submitul ei poate fi repetat cu
-  același ID după un rezultat absent/neverificabil;
-- orice intenție BUY/SELL pending este reconciliată înainte de citirea unui semnal
-  nou, chiar dacă feedul de preț este momentan indisponibil;
-- numai ordinul pending deținut de Guardian poate primi o singură anulare la
-  depășirea TTL-ului; rezultat ambiguu => pending, fără resubmit;
-- un ordin SELL deschis existent blochează crearea unei campanii/ordine duplicate;
-- un trigger BUY/SELL raportează submit acceptat separat de confirmarea fill-ului;
-- cantitățile sunt reconciliate în pipeline-ul comun înainte de Binance;
-- logurile sunt gestionate de rotația comună a flotei.
+- every `AG_*` key must exist and be valid; there are no fallbacks;
+- each decision is `symbol price -> order on the same symbol`;
+- a missing baseline or an unavailable balance/price means no order;
+- cache rows that are invalid, in the future, stale, `NaN` or infinite are ignored;
+- the evaluation reads an atomic snapshot of the cache, without racing the sync thread;
+- at most one accepted order per cycle, and no order in the global outbox;
+- the same tranche is never accounted twice; its submit may be repeated with the same ID
+  after an absent or unverifiable result;
+- any pending BUY/SELL intent is reconciled before a new signal is read, even if the price
+  feed is momentarily unavailable;
+- only a pending order owned by the Guardian may receive a single cancellation once the TTL
+  is exceeded; an ambiguous result means pending, with no resubmit;
+- an existing open SELL order blocks the creation of a duplicate campaign or order;
+- a BUY/SELL trigger reports an accepted submit separately from the fill confirmation;
+- quantities are reconciled in the shared pipeline before Binance;
+- the logs are handled by the fleet's shared rotation.
