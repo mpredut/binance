@@ -117,7 +117,7 @@ class ExecutionAuditTest(unittest.TestCase):
         self.assertNotIn(("ABC", "OID-0"), self.wrapped._intent_by_order)
         self.assertNotIn(("ABC", "OID-0"), self.wrapped._last_status)
 
-    def test_submit_error_is_audited_and_original_exception_is_preserved(self):
+    def test_submit_error_is_audited_as_unknown_and_compatibility_raises(self):
         self.executor.submit_error = ProviderError("venue down")
         with self.assertRaisesRegex(ProviderError, "venue down"):
             self.wrapped.submit_order_with_intent(
@@ -126,8 +126,9 @@ class ExecutionAuditTest(unittest.TestCase):
             )
         rows = self._events()
         self.assertEqual([row["event"] for row in rows],
-                         ["submit_requested", "submit_rejected"])
-        self.assertEqual(rows[-1]["error_type"], "ProviderError")
+                         ["submit_requested", "submit_unknown"])
+        self.assertEqual(rows[-1]["submission_state"], "unknown")
+        self.assertIn("ProviderError: venue down", rows[-1]["reason"])
         self.assertTrue(rows[-1]["market"])
         self.assertEqual(rows[-1]["reference_price"], 99.5)
         submit = [call for call in self.executor.calls if call[0] == "submit"]

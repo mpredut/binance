@@ -305,6 +305,28 @@ class Strategy:
         self._save()
         return order
 
+    def _submit_pending_order(self, pending: dict):
+        """Persist once, submit through the common typed contract, and adopt acceptance."""
+        self._persist_pending_submit(pending)
+        market = bool(pending.get("market"))
+        limit = float(pending["limit"])
+        outcome = self.executor.submit_outcome_with_intent(
+            pending["intent_id"], self.ticker, pending["side"].lower(),
+            float(pending["qty"]), None if market else limit,
+            market=market, kind=pending.get("kind"),
+            reference_price=limit if market else None,
+        )
+        pending["submission_outcome"] = outcome.state
+        if outcome.state == "accepted":
+            self._adopt_pending_submit(outcome.order_id)
+        elif outcome.state == "refused":
+            pending["submit_error"] = outcome.reason
+            self._persist_pending_submit(None)
+        else:
+            pending["submit_error"] = outcome.reason
+            self._persist_pending_submit(pending)
+        return outcome
+
     @staticmethod
     def _active_order_identity(order: dict) -> tuple[str, str, float | None, float | None]:
         instrument = order.get("instrument")
@@ -458,27 +480,17 @@ class Strategy:
             side="BUY", qty=qty, limit=limit, amount=amount, kind=kind,
             level=None, market=False,
         )
-        self._persist_pending_submit(pending)
-        try:
-            order_id = self.executor.submit_order_with_intent(
-                pending["intent_id"], self.ticker, "buy", qty, round(limit, 2),
-                market=False, kind=kind,
-            )
-        except ProviderError as exc:
-            definitive = self._definitive_submit_rejection(exc)
-            pending["submit_error"] = f"{exc.__class__.__name__}: {exc}"
-            if definitive:
-                self._persist_pending_submit(None)
-                log(f"  ! [STRAT] BUY {kind} respins explicit: {exc}")
+        outcome = self._submit_pending_order(pending)
+        if outcome.state != "accepted":
+            if outcome.state == "refused":
+                log(f"  ! [STRAT] BUY {kind} explicitly refused: {outcome.reason}")
             else:
-                self._persist_pending_submit(pending)
-                log(f"  ! [STRAT] BUY {kind} raspuns ambiguu: {exc} — keeping it pending")
-            if "insufficient" in str(exc).lower():
+                log(f"  ! [STRAT] BUY {kind} outcome unknown: {outcome.reason}; keeping pending")
+            if "insufficient" in outcome.reason.lower():
                 self.s["buy_backoff_until"] = self._now() + 1800
-                log("  [STRAT] fonduri insuficiente — pauza cumparari 30 min (alimenteaza contul)")
+                log("  [STRAT] insufficient funds — pausing buys for 30 minutes")
             return
-        log(f"  [STRAT] BUY {kind} placed id={order_id} {qty} @ {limit:.2f}")
-        self._adopt_pending_submit(order_id)
+        log(f"  [STRAT] BUY {kind} placed id={outcome.order_id} {qty} @ {limit:.2f}")
 
     def _place_sell(self, qty: float, limit: float, level: float | None = None,
                     kind: str = "TP", *, market: bool = False) -> bool:
@@ -503,23 +515,14 @@ class Strategy:
             side="SELL", qty=qty, limit=limit, amount=None, kind=kind,
             level=level, market=market,
         )
-        self._persist_pending_submit(pending)
-        try:
-            order_id = self.executor.submit_order_with_intent(
-                pending["intent_id"], self.ticker, "sell", qty,
-                None if market else round(limit, 2), market=market, kind=kind,
-                reference_price=round(limit, 2) if market else None,
-            )
-        except ProviderError as exc:
-            message = str(exc)
-            definitive = self._definitive_submit_rejection(exc)
-            pending["submit_error"] = f"{exc.__class__.__name__}: {exc}"
+        outcome = self._submit_pending_order(pending)
+        if outcome.state != "accepted":
+            message = outcome.reason
+            definitive = outcome.state == "refused"
             if definitive:
-                self._persist_pending_submit(None)
-                log(f"  ! [STRAT] SELL {kind}{tag} respins explicit: {message}")
+                log(f"  ! [STRAT] SELL {kind}{tag} explicitly refused: {message}")
             else:
-                self._persist_pending_submit(pending)
-                log(f"  ! [STRAT] SELL {kind}{tag} raspuns ambiguu: {message} — keeping it pending")
+                log(f"  ! [STRAT] SELL {kind}{tag} outcome unknown: {message}; keeping pending")
             if "selling-equity-not-owned" not in message:
                 return not definitive
             # Reset only when the venue confirms owned is effectively zero. A positive
@@ -541,8 +544,7 @@ class Strategy:
                 log(f"  ! [STRAT] selling-not-owned but owned={_owned} (free<order) — NOT resetting the position")
             return False
         order_type = "MARKET" if market else f"@ {limit:.2f}"
-        log(f"  [STRAT] SELL {kind}{tag} placed id={order_id} {qty:.2f} {order_type}")
-        self._adopt_pending_submit(order_id)
+        log(f"  [STRAT] SELL {kind}{tag} placed id={outcome.order_id} {qty:.2f} {order_type}")
         return True
 
     def _cancel_open(self, side: str) -> bool:

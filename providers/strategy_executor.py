@@ -13,11 +13,80 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Optional, Protocol, runtime_checkable
+from typing import Callable, Optional, Protocol, runtime_checkable
 
 
 class ProviderError(Exception):
     """Venue-neutral error raised by strict strategy-execution adapters."""
+
+
+class SubmissionRefused(ProviderError, RuntimeError):
+    """The order was definitively refused before or during synchronous submit."""
+
+    def __init__(self, reason: str):
+        self.reason = str(reason or "").strip()
+        if not self.reason:
+            raise ValueError("submission refusal reason is required")
+        super().__init__(self.reason)
+
+
+@dataclass(frozen=True)
+class SubmissionOutcome:
+    """Typed result of one submit attempt, without implying that acceptance is a fill.
+
+    ``unknown`` means the caller cannot prove whether the venue accepted the order.
+    It must be reconciled, never blindly retried. ``refused`` proves that no accepted
+    order exists. Existing adapters may still return a native ID; ``capture_submission``
+    provides the compatibility boundary while they are migrated incrementally.
+    """
+
+    state: str
+    order_id: Optional[str] = None
+    reason: str = ""
+    native: object = None
+
+    def __post_init__(self):
+        if self.state not in {"accepted", "refused", "unknown"}:
+            raise ValueError(f"invalid submission outcome: {self.state!r}")
+        order_id = None if self.order_id is None else str(self.order_id).strip()
+        if self.state == "accepted" and not order_id:
+            raise ValueError("accepted submission requires order_id")
+        if self.state != "accepted" and order_id:
+            raise ValueError(f"{self.state} submission cannot carry order_id")
+        object.__setattr__(self, "order_id", order_id)
+        object.__setattr__(self, "reason", str(self.reason or "").strip())
+
+    @property
+    def accepted(self) -> bool:
+        return self.state == "accepted"
+
+
+def capture_submission(submit: Callable[[], object]) -> SubmissionOutcome:
+    """Normalize the current strict-adapter contract into a typed outcome."""
+    try:
+        native = submit()
+    except SubmissionRefused as exc:
+        return SubmissionOutcome("refused", reason=exc.reason)
+    except Exception as exc:  # transport/provider ambiguity stays recoverable
+        return SubmissionOutcome(
+            "unknown", reason=f"{exc.__class__.__name__}: {exc}")
+    if isinstance(native, SubmissionOutcome):
+        return native
+    order_id = None
+    if isinstance(native, dict):
+        order_id = native.get("orderId", native.get("order_id", native.get("id")))
+        if order_id is None:
+            txid = native.get("txid")
+            if isinstance(txid, (list, tuple)):
+                order_id = next((item for item in txid if str(item).strip()), None)
+            else:
+                order_id = txid
+    elif not isinstance(native, bool) and native is not None and str(native).strip():
+        order_id = native
+    if order_id is None or not str(order_id).strip():
+        return SubmissionOutcome(
+            "unknown", reason="response_without_order_id", native=native)
+    return SubmissionOutcome("accepted", order_id=str(order_id), native=native)
 
 
 @dataclass(frozen=True)

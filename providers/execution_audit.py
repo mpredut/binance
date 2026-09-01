@@ -16,7 +16,10 @@ from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Callable, Optional
 
-from .strategy_executor import OrderStatus, reconciliation_capabilities_of
+from .strategy_executor import (
+    OrderStatus, ProviderError, SubmissionOutcome, SubmissionRefused,
+    capture_submission, reconciliation_capabilities_of,
+)
 
 try:  # Linux live: cross-process serialization; safe per-process fallback.
     import fcntl
@@ -151,21 +154,52 @@ class AuditedStrategyExecutor:
         }
         self.audit.record("submit_requested", intent_id=intent_id, venue=self.name,
                           symbol=symbol, **fields)
-        try:
-            submit_kwargs = {"market": market, "kind": kind}
-            if client_order_id is not None:
-                submit_kwargs["client_order_id"] = client_order_id
-            order_id = self._executor.submit_order(symbol, side, qty, price, **submit_kwargs)
-        except Exception as exc:
-            self.audit.record(
-                "submit_rejected", intent_id=intent_id, venue=self.name, symbol=symbol,
-                error_type=exc.__class__.__name__, error=str(exc), **fields,
-            )
-            raise
-        self._remember(symbol, str(order_id), intent_id)
-        self.audit.record("submit_accepted", intent_id=intent_id, venue=self.name,
-                          symbol=symbol, order_id=str(order_id), **fields)
-        return str(order_id)
+        outcome = self.submit_outcome_with_intent(
+            intent_id, symbol, side, qty, price, market=market, kind=kind,
+            reference_price=reference_price, client_order_id=client_order_id,
+            _requested_recorded=True,
+        )
+        if outcome.state == "refused":
+            raise SubmissionRefused(outcome.reason)
+        if outcome.state == "unknown":
+            raise ProviderError(outcome.reason or "submission outcome is unknown")
+        return str(outcome.order_id)
+
+    def submit_outcome_with_intent(
+            self, intent_id: str, symbol: str, side: str, qty: float,
+            price: Optional[float] = None, *, market: bool = False,
+            kind: Optional[str] = None, reference_price: Optional[float] = None,
+            client_order_id: Optional[str] = None,
+            _requested_recorded: bool = False) -> SubmissionOutcome:
+        """Submit once and retain refusal versus response-loss ambiguity."""
+        client_order_id = client_order_id or intent_client_order_id(self.name, intent_id)
+        fields = {
+            "side": str(side).lower(), "qty": qty, "price": price,
+            "market": bool(market), "kind": kind,
+            "reference_price": reference_price,
+            "client_order_id": client_order_id,
+        }
+        if not _requested_recorded:
+            self.audit.record("submit_requested", intent_id=intent_id, venue=self.name,
+                              symbol=symbol, **fields)
+        submit_kwargs = {"market": market, "kind": kind}
+        if client_order_id is not None:
+            submit_kwargs["client_order_id"] = client_order_id
+        outcome = capture_submission(
+            lambda: self._executor.submit_order(
+                symbol, side, qty, price, **submit_kwargs))
+        if outcome.state == "accepted":
+            self._remember(symbol, str(outcome.order_id), intent_id)
+            event = "submit_accepted"
+        elif outcome.state == "refused":
+            event = "submit_refused"
+        else:
+            event = "submit_unknown"
+        self.audit.record(event, intent_id=intent_id, venue=self.name,
+                          symbol=symbol, order_id=outcome.order_id,
+                          submission_state=outcome.state,
+                          reason=outcome.reason, **fields)
+        return outcome
 
     def submit_order(self, symbol: str, side: str, qty: float,
                      price: Optional[float] = None, *, market: bool = False,

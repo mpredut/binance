@@ -263,6 +263,7 @@ def process_once(mkt, now=None):
                   f"orderId={oq.order_id_from_response(order)}")
         else:
             refusal_reason = outcome_context.get("reason")
+            submission_state = outcome_context.get("state") or "unknown"
             if refusal_reason == "trend_deferred":
                 # A trend gate is a non-blocking deferral, not a failed attempt.
                 # Keep retrying indefinitely at the normal worker cadence.
@@ -272,7 +273,9 @@ def process_once(mkt, now=None):
                 oq.complete_claim(r, "failure", now,
                                   failure_reason=refusal_reason)
             _audit_event(
-                r, "submit_rejected", qty=r.get("qty"), price=price,
+                r, "submit_refused" if submission_state == "refused" else "submit_unknown",
+                qty=r.get("qty"), price=price,
+                submission_state=submission_state,
                 failure_reason=refusal_reason)
 
     return {"attempted": attempted,

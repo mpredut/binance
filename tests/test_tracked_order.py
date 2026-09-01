@@ -3,7 +3,7 @@ import copy
 import unittest
 from unittest import mock
 
-from providers.strategy_executor import OrderStatus
+from providers.strategy_executor import OrderStatus, SubmissionOutcome
 from order_retry import OrderSubmissionRefused, TrackedOrderLifecycle
 from providers import tracked_order as compatibility_module
 
@@ -107,6 +107,28 @@ class TrackedOrderLifecycleTest(unittest.TestCase):
         self.assertEqual(result.intent["submitted_qty"], 2.75)
         self.assertEqual(result.intent["submitted_price"], 114.25)
         self.assertEqual(self.store.value["submitted_price"], 114.25)
+
+    def test_typed_acceptance_is_persisted_without_equating_it_to_fill(self):
+        result = self.lifecycle.submit(
+            self.intent(), persist=self.store.persist,
+            submit=lambda: SubmissionOutcome("accepted", order_id="OID-9"),
+        )
+
+        self.assertEqual(result.outcome, "active")
+        self.assertEqual(result.intent["submission_outcome"], "accepted")
+        self.assertEqual(result.intent["order_id"], "OID-9")
+        self.assertNotIn("terminal_status", result.intent)
+
+    def test_typed_unknown_stays_persisted_for_reconciliation(self):
+        result = self.lifecycle.submit(
+            self.intent(), persist=self.store.persist,
+            submit=lambda: SubmissionOutcome("unknown", reason="socket timeout"),
+        )
+
+        self.assertEqual(result.outcome, "active")
+        self.assertFalse(result.order_known)
+        self.assertEqual(result.intent["submission_outcome"], "unknown")
+        self.assertEqual(result.intent["submit_error"], "socket timeout")
 
     def test_pre_submit_refusal_is_not_classified_as_ambiguous(self):
         result = self.lifecycle.submit(

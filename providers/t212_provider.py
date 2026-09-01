@@ -23,6 +23,7 @@ from .strategy_executor import (
     OrderStatus,
     PairPrecision,
     ProviderError,
+    SubmissionRefused,
 )
 from credentials import t212_credentials
 
@@ -43,6 +44,13 @@ _STATUS_MAP = {
     "REJECTED": "expired",
     "EXPIRED": "expired",
 }
+
+
+def _definitive_submit_failure(status: int, payload) -> bool:
+    """Return whether a synchronous T212 response proves non-acceptance."""
+    if 400 <= int(status) < 500 and int(status) not in {408, 425, 429}:
+        return True
+    return "rejected" in str(payload or "").lower()
 
 
 def _live() -> bool:
@@ -250,7 +258,10 @@ class T212Provider(MarketDataProvider):
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"submit_order({symbol}): {e}") from e
         if status not in (200, 201):
-            raise ProviderError(f"submit_order({symbol}): T212 HTTP {status}: {data}")
+            message = f"submit_order({symbol}): T212 HTTP {status}: {data}"
+            if _definitive_submit_failure(status, data):
+                raise SubmissionRefused(message)
+            raise ProviderError(message)
         order_id = data.get("id") if isinstance(data, dict) else None
         if order_id is None:
             raise ProviderError(f"submit_order({symbol}): response without an id: {data}")

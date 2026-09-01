@@ -537,8 +537,17 @@ class Strategy:
                 kind=kind,
                 metadata={"amount": amount, "market": market},
             )
+            submit_outcome = getattr(type(self.client), "submit_outcome_with_intent", None)
             submit_with_intent = getattr(type(self.client), "submit_order_with_intent", None)
             def submit():
+                if callable(submit_outcome):
+                    return submit_outcome(
+                        self.client, intent_id, self.pair, side, vol,
+                        None if market else price,
+                        market=market, kind=kind,
+                        reference_price=price if market else None,
+                        client_order_id=client_order_id,
+                    )
                 if callable(submit_with_intent):
                     return submit_with_intent(
                         self.client, intent_id, self.pair, side, vol,

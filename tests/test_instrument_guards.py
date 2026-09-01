@@ -327,7 +327,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         self.assertEqual(tracked[0]["lifecycle"], "accepted")
         self.assertEqual(tracked[0]["order_id"], "persisted-1")
 
-    def test_truthy_payload_without_order_id_is_refused_and_remains_queued(self):
+    def test_truthy_payload_without_order_id_is_unknown_and_remains_queued(self):
         import order_retry as oq
 
         class _AmbiguousProvider(_FakeProvider):
@@ -343,7 +343,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         self.assertEqual(len(queued), 1)
         self.assertEqual(queued[0]["last_failure_reason"],
                          "response_without_order_id")
-        self.assertTrue(any("|refused|response_without_order_id|" in line
+        self.assertTrue(any("|unknown|response_without_order_id|" in line
                             for line in self._log_lines()))
 
     def test_submit_response_loss_keeps_pre_submit_intent_with_same_client_id(self):

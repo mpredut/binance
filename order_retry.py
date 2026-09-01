@@ -37,7 +37,8 @@ from typing import Callable, Dict, Optional
 
 from lock import FileLock
 from providers.strategy_executor import (
-    OrderStatus, ProviderError, reconciliation_capabilities_of,
+    OrderStatus, ProviderError, SubmissionOutcome, SubmissionRefused,
+    capture_submission, reconciliation_capabilities_of,
 )
 
 from botcore import (load_dotenv as _load_dotenv, required_bool_env,
@@ -837,20 +838,8 @@ def _status_from_terminal_payload(payload) -> Optional[OrderStatus]:
     return status if status.terminal else None
 
 
-class OrderSubmissionRefused(ProviderError, RuntimeError):
-    """Signal that a local pre-submit guard refused an owned intent.
-
-    This is materially different from an exception or a response without an
-    order ID: the provider was never called, so venue lookup/resubmission would
-    manufacture response-loss ambiguity where none exists.
-    """
-
-    def __init__(self, reason: str):
-        reason = str(reason or "").strip()
-        if not reason:
-            raise ValueError("submission refusal reason is required")
-        self.reason = reason
-        super().__init__(reason)
+# Backwards-compatible import name for existing providers and external scripts.
+OrderSubmissionRefused = SubmissionRefused
 
 
 class TrackedOrderLifecycle:
@@ -959,6 +948,18 @@ class TrackedOrderLifecycle:
 
     @staticmethod
     def _order_fields(response) -> dict:
+        if isinstance(response, SubmissionOutcome):
+            fields = {"submission_outcome": response.state}
+            if response.order_id:
+                fields["order_id"] = response.order_id
+            if response.reason:
+                fields["submission_reason"] = response.reason
+            response = response.native
+            if response is None:
+                return fields
+            native_fields = TrackedOrderLifecycle._order_fields(response)
+            fields.update(native_fields)
+            return fields
         if isinstance(response, dict):
             order_id = (response.get("orderId") or response.get("order_id")
                         or response.get("id") or response.get("txid"))
@@ -992,26 +993,26 @@ class TrackedOrderLifecycle:
             "submit_requested", pending,
             qty=pending["requested_qty"], price=pending.get("requested_price"),
         )
-        try:
-            response = submit()
-        except OrderSubmissionRefused as exc:
-            pending["refusal_reason"] = exc.reason
+        outcome = capture_submission(submit)
+        pending["submission_outcome"] = outcome.state
+        if outcome.state == "refused":
+            pending["refusal_reason"] = outcome.reason
             pending["submit_status"] = "refused_before_submit"
             persist(dict(pending))
             self._audit(
-                "submit_refused", pending, reason=exc.reason,
+                "submit_refused", pending, reason=outcome.reason,
             )
             return TrackedOrderResult("refused", pending)
-        except Exception as exc:
-            pending["submit_error"] = f"{exc.__class__.__name__}: {exc}"
+        if outcome.state == "unknown":
+            pending["submit_error"] = outcome.reason
             persist(dict(pending))
             self._audit(
                 "submit_ambiguous", pending,
-                error_type=exc.__class__.__name__, error=str(exc),
+                error=outcome.reason,
             )
             return TrackedOrderResult("active", pending)
 
-        fields = self._order_fields(response)
+        fields = self._order_fields(outcome)
         pending.update(fields)
         persist(dict(pending))
         if pending.get("order_id"):

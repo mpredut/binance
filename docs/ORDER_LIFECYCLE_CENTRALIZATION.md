@@ -26,6 +26,7 @@ imports the lifecycle types directly from `order_retry`.
 
 ## What is centralised
 
+- the typed submit outcome: accepted, definitively refused, or unknown;
 - validating the `intent_id` / `client_order_id` identity;
 - persistence before the submit;
 - the distinction between acceptance and fill;
@@ -94,6 +95,19 @@ protected by characterisation tests.
 
 T212 additionally requires different recovery capabilities: active orders and the portfolio
 delta, because client order ID lookup is not universally available.
+
+T212 now reuses the common typed and audited submit boundary. Its venue-specific recovery
+is intentionally retained: one unique matching active order proves acceptance, while a
+portfolio delta independently proves execution. Absence is confirmed across snapshots before
+the strategy is allowed to re-evaluate the same financial decision.
+
+## Typed submit outcomes do not change retry policy
+
+The common boundary records `accepted` only when a venue order ID exists, `refused` only
+when the adapter can prove synchronous non-acceptance, and `unknown` for transport errors or
+responses without an order ID. Existing retry cadence, TTL, price gates, attempt limits and
+terminal-state decisions are unchanged. The richer state prevents an unknown submit from
+being mislabeled as a refusal; recovery still queries venue truth before another submit.
 
 ## The future contract for the terminal policy — deferred
 

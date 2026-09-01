@@ -157,6 +157,7 @@ class Instrument:
         orig_price = price   # Requested price preserves caller intent for the retry guard.
         reason = None
         order = None
+        submit_attempted = False
         prequeued_record_id = None
         prequeued_client_order_id = None
         prequeued_intent_id = None
@@ -329,6 +330,7 @@ class Instrument:
                         kind=kwargs.get("kind") or kwargs.get("motivation"),
                         client_order_id=prequeued_client_order_id,
                     )
+                submit_attempted = True
                 response = self._provider.place_order(
                     self.symbol, side, price, qty, **kwargs)
                 if _accepted_order_payload(response):
@@ -347,12 +349,20 @@ class Instrument:
             if outcome_context is not None:
                 outcome_context["accepted"] = order is not None
                 outcome_context["reason"] = None if order is not None else reason
+                outcome_context["state"] = (
+                    "accepted" if order is not None else
+                    "unknown" if submit_attempted else "refused"
+                )
             try:
                 caller = os.path.basename(sys._getframe(1).f_code.co_filename)
             except Exception:
                 caller = None
+            submission_state = (
+                "accepted" if order is not None else
+                "unknown" if submit_attempted else "refused"
+            )
             _outcomes_log.log_order_outcome(
-                self.symbol, side_u, price, qty, "accepted" if order else "refused",
+                self.symbol, side_u, price, qty, submission_state,
                 None if order else reason, kwargs.get("motivation"), caller=caller)
             # Acceptance is not a fill. Preserve the venue ID in the exact outbox
             # record so the single worker follows open/partial/terminal state. If
@@ -389,7 +399,8 @@ class Instrument:
                     import order_retry
                     if prequeued_intent_id:
                         _EXECUTION_AUDIT.record(
-                            "submit_ambiguous", intent_id=prequeued_intent_id,
+                            "submit_unknown" if submit_attempted else "submit_refused",
+                            intent_id=prequeued_intent_id,
                             venue=self.provider_name, symbol=self.symbol,
                             side=side_u.lower(), qty=qty, price=price,
                             market=is_market,
