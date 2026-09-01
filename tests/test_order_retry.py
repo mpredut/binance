@@ -1,5 +1,5 @@
 """Teste pt order_retry.py — store-ul outbox al cozii de re-plasare (enqueue/load/rewrite
-+ logica is_due/is_expired). Fisiere izolate in tmp (nu atinge cachedb/ real)."""
+plus the is_due/is_expired logic). The files are isolated in tmp (it does not touch the real cachedb/)."""
 import os
 import sys
 import time
@@ -37,7 +37,7 @@ class OrderRetryStoreTest(unittest.TestCase):
         self.assertEqual(r["qty"], 1.0)
         self.assertEqual(r["place_kwargs"]["safeback_seconds"], 999)
         self.assertEqual(r["attempts"], 0)
-        self.assertNotIn("price", r)   # pretul NU se salveaza ca valoare de trimis
+        self.assertNotIn("price", r)   # The price is NOT saved as a value to send.
 
     def test_enqueue_captures_price_intent(self):
         oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63000.0, ref_price=62950.0,
@@ -83,7 +83,7 @@ class OrderRetryStoreTest(unittest.TestCase):
                          rec["place_kwargs"]["client_order_id"])
 
     def test_dedup_collapses_ladder_any_distance(self):
-        # chiar la preturi MULT diferite (fostul "ladder") -> tot o singura intentie/side
+        # even at VERY different prices (the former "ladder") -> still a single intent per side
         oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63000.0, now=1000.0)
         oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=70000.0, now=1001.0)
         self.assertEqual(len(oq.load_all()), 1)
@@ -115,14 +115,14 @@ class OrderRetryStoreTest(unittest.TestCase):
         self.assertTrue(oq.price_gate_ok(rec, 100.0))         # egal -> ok
         self.assertTrue(oq.price_gate_ok(rec, 101.0))         # mai sus -> ok (vinzi mai bine)
         self.assertTrue(oq.price_gate_ok(rec, 99.9))          # in toleranta 0.2%
-        self.assertFalse(oq.price_gate_ok(rec, 95.0))         # mult sub -> asteapta
+        self.assertFalse(oq.price_gate_ok(rec, 95.0))         # Far below -> it waits.
         self.assertFalse(oq.price_gate_ok(rec, None))         # no price -> we do not decide
 
     def test_price_gate_buy(self):
         rec = {"side": "BUY", "requested_price": 100.0}
         self.assertTrue(oq.price_gate_ok(rec, 100.0))
         self.assertTrue(oq.price_gate_ok(rec, 99.0))          # mai jos -> ok (cumperi mai ieftin)
-        self.assertFalse(oq.price_gate_ok(rec, 105.0))        # mult peste -> asteapta
+        self.assertFalse(oq.price_gate_ok(rec, 105.0))        # Far above -> it waits.
 
     def test_price_gate_no_intent_skips(self):
         # no captured requested_price (old/abnormal entry) -> conservative, do NOT retry blind
@@ -146,7 +146,7 @@ class OrderRetryStoreTest(unittest.TestCase):
         oq.enqueue("BTCUSDC", "BUY", 1.0, {}, now=1000.0)
         oq.enqueue("TAOUSDC", "SELL", 2.0, {}, now=1001.0)
         items = oq.load_all()
-        oq.rewrite([items[1]])   # pastreaza doar al doilea
+        oq.rewrite([items[1]])   # Keep only the second one.
         rem = oq.load_all()
         self.assertEqual(len(rem), 1)
         self.assertEqual(rem[0]["symbol"], "TAOUSDC")
@@ -356,7 +356,7 @@ class OrderRetryStoreTest(unittest.TestCase):
         self.assertEqual(remaining, {("BTCUSDC", "SELL"), ("TAOUSDC", "BUY")})
 
     def test_reenqueue_preserves_created_ts(self):
-        # workerul re-adauga un esec pastrand vechimea -> TTL nu se reseteaza la fiecare esec
+        # the worker re-adds a failure preserving the age -> the TTL does not reset on every failure
         oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0,
                    now=5000.0, created_ts=1000.0, attempts=2)
         r = oq.load_all()[0]

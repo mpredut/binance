@@ -237,7 +237,7 @@ def main():
     print(f"   new_coin  : up +{ac['dynamic']['up_percent']}% / down -{ac['dynamic']['down_percent']}%")
     if ac["per_coin"]:
         pc = ", ".join(f"{k}(+{v['up_percent']}/-{v['down_percent']})" for k, v in ac["per_coin"].items())
-        print(f"   per-moneda: {pc}")
+        print(f"   per-coin: {pc}")
     print(f"   cooldown {ac['cooldown_minutes']}min | lookback {ac['lookback_hours']}h | "
           f"scan pret {cfg['price_scan_seconds']}s | scan monede noi {cfg['new_coins_scan_seconds']}s")
     print("=" * 70)

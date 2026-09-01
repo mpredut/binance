@@ -134,7 +134,7 @@ class Strategy:
         try:
             atomic_write_json(self.state_file, self.s, indent=2)
         except OSError as e:
-            log(f"  ! [STRAT] nu pot salva: {e}")
+            log(f"  ! [STRAT] cannot save: {e}")
 
     # -- helpers ---------------------------------------------------------------
     def _avg(self) -> float | None:
@@ -229,7 +229,7 @@ class Strategy:
                 self._remove(o)
             elif o["role"] == "open" and (time.time()-o.get("ts",0))/60 > self.p.order_ttl_min \
                     and self.sign*(price - o["px"]) > 0.003*o["px"]:
-                log(f"  [STRAT] open {o['oid']} neexecutat, pret a fugit — anulez & reasez")
+                log(f"  [STRAT] open {o['oid']} unfilled, the price ran away — cancelling and re-placing")
                 self.client.cancel(self.coin, o["oid"]); self._remove(o)
 
     def _apply_open(self, fq, fp, amount, kind, real_qty=None, real_avg=None):
@@ -281,7 +281,7 @@ class Strategy:
             return False
         loss_pct = -self.sign * (price - avg) / avg * 100   # positive while losing
         if loss_pct >= self.p.stop_loss_pct:
-            log(f"  🛑 [STRAT] STOP-LOSS: pierdere {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — INCHID tot (taie pierderea)")
+            log(f"  🛑 [STRAT] STOP-LOSS: loss {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — CLOSING everything (cutting the loss)")
             # Cancel every pending order, including DCA, so the position cannot refill.
             for o in list(self.s["orders"]):
                 if not self.dry_run and not str(o["oid"]).startswith("PAPER"):
@@ -307,7 +307,7 @@ class Strategy:
                 want = "up" if self.sign > 0 else "down"   # long requires up; short requires down
                 if sig["trend"] != want:
                     log(f"  [STRAT] semnal={sig['trend']} (conf {sig['confidence']}, {sig['source']}) "
-                        f"!= {want} pt {self.p.direction} — NU intru (astept trend favorabil)")
+                        f"!= {want} for {self.p.direction} — NOT entering (waiting for a favourable trend)")
                     return
                 log(f"  [STRAT] semnal={sig['trend']} favorabil pt {self.p.direction} — intru")
             if self.s["spent"] + self.p.entry_amount > self.p.max_budget:
@@ -343,7 +343,7 @@ class Strategy:
                 and self.s["spent"] + self.p.dca_amount <= self.p.max_budget
                 and not self._open_pending()):
             px = price * (1 - self.sign * d)
-            log(f"  [STRAT] pret contra ({moved*100:.2f}%) — DCA")
+            log(f"  [STRAT] the price moved against us ({moved*100:.2f}%) — DCA")
             self._place("open", self._sz_for(self.p.dca_amount, px), px, "DCA", self.p.dca_amount)
 
     # -- loop ------------------------------------------------------------------
@@ -365,8 +365,8 @@ class Strategy:
                     log("  [STRAT] price unavailable"); time.sleep(self.p.check_minutes*60); continue
                 self.reconcile(price); self.step(price); self._save()
                 avg = self._avg()
-                pos = f"qty={self.s['qty']:.6f} avg={avg:.4f}" if avg else "qty=0 (astept intrare)"
-                log(f"  [STRAT] pret={price:.4f} [{self.p.direction}]  {pos}  "
+                pos = f"qty={self.s['qty']:.6f} avg={avg:.4f}" if avg else "qty=0 (waiting for an entry)"
+                log(f"  [STRAT] price={price:.4f} [{self.p.direction}]  {pos}  "
                     f"NET={self.s['realized_net']:+.2f} (brut {self.s['realized_gross']:+.2f}, fee {self.s['fees_total']:.2f}) {self.ccy}  ord={len(self.s['orders'])}")
                 time.sleep(self.p.check_minutes*60)
         except KeyboardInterrupt:

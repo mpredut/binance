@@ -65,12 +65,12 @@ def main() -> int:
     ap.add_argument("--pair", help="Override the pair (otherwise from .env KRAKEN_PAIR)")
     ap.add_argument("--interval", type=int, default=poll_seconds)
     ap.add_argument("--desktop", action="store_true")
-    ap.add_argument("--skip-wait", action="store_true", help="Sari peste asteptarea listarii")
-    ap.add_argument("--paper", action="store_true", help="Forteaza PAPER (fara bani)")
+    ap.add_argument("--skip-wait", action="store_true", help="Skip waiting for the listing")
+    ap.add_argument("--paper", action="store_true", help="Force PAPER (no money)")
     ap.add_argument("--find-pair", metavar="TERM", help="Cauta perechi pe Kraken")
-    ap.add_argument("--price", action="store_true", help="Arata the current price si iese")
+    ap.add_argument("--price", action="store_true", help="Show the current price and exit")
     ap.add_argument("--balance", action="store_true", help="Arata soldurile (necesita chei)")
-    ap.add_argument("--test-strategy", metavar="PAIR", help="Ruleaza strategia ACUM pe perechea data")
+    ap.add_argument("--test-strategy", metavar="PAIR", help="Run the strategy NOW on the given pair")
     args = ap.parse_args()
     if args.test_strategy:
         single_instance(f"kraken_bot_{args.test_strategy.strip()}")
@@ -109,7 +109,7 @@ def main() -> int:
     log("=== Kraken bot ===")
     log(f"    pereche      : {label}  ({pair})")
     log(f"    chei         : {'yes' if os.environ.get('KRAKEN_API_KEY_BOT') else 'NO (public/paper only)'}")
-    log(f"    executie     : {'PAPER (fara bani)' if strat_dry else '⚠ REAL — BANI ADEVARATI'}")
+    log(f"    execution    : {'PAPER (no money)' if strat_dry else '⚠ REAL — REAL MONEY'}")
     log(f"    ntfy/email   : {os.environ.get('NTFY_TOPIC') or '-'} / {os.environ.get('ALERT_TO_EMAIL') or '-'}")
 
     # --- wait until the pair is LISTED and tradable, analogous to launch ---
@@ -131,7 +131,7 @@ def _wait_for_listing(client, pair, label, interval, desktop) -> bool:
     # Preflight: start immediately if the pair is already listed.
     info = pair_available(client, pair)
     if info:
-        log(f"  [verify] {pair} e LISTAT si tranzactionabil — pornesc.")
+        log(f"  [verify] {pair} is LISTED and tradable — starting.")
         return True
     log(f"    {pair} not listed on Kraken yet — waiting for it... (Ctrl+C to stop)")
     try:
@@ -139,7 +139,7 @@ def _wait_for_listing(client, pair, label, interval, desktop) -> bool:
             info = pair_available(client, pair)
             if info:
                 p = get_price(client, pair)
-                body = f"{label} ({pair}) disponibil pe Kraken, pret {p}"
+                body = f"{label} ({pair}) is available on Kraken, price {p}"
                 log("############################################")
                 log(f">>> {label} LISTAT PE KRAKEN — pornesc <<<")
                 log("############################################")

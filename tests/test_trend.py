@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Teste pt detect_long_term_trend (priceAnalysis) — cazurile care au produs
+Tests for detect_long_term_trend (priceAnalysis) — the cases that produced
 raportari gresite (ex. TAO: 4 zile scadere raportate ca trend UP).
 
   /home/mariusp/binance/.venv/bin/python test_trend.py -v
@@ -21,7 +21,7 @@ H = 3600.0
 
 
 def series(*segments):
-    """segments = liste de preturi orare; intoarce (timestamps, prices)."""
+    """segments = lists of hourly prices; it returns (timestamps, prices)."""
     px = [p for seg in segments for p in seg]
     ts = [i * H for i in range(len(px))]
     return np.array(ts), np.array(px, float)
@@ -43,7 +43,7 @@ def up(h, start=100.0, rate=0.3):
 
 
 class TestCazulTAO(unittest.TestCase):
-    """Cazul raportat: panta descrescatoare de 4 zile dar 'current trend' UP."""
+    """The reported case: a falling slope over 4 days but a 'current trend' of UP."""
 
     def test_bounce_de_o_zi_contra_scaderii_nu_e_trend_up(self):
         d = down(96)                                  # 4 zile scadere
@@ -78,7 +78,7 @@ class TestDurata(unittest.TestCase):
 
 class TestZgomot(unittest.TestCase):
     def test_zgomot_in_toleranta_nu_rupe_trendul(self):
-        # scadere 2 zile + fereastra de zgomot (urcare 16h) + scadere alte 2 zile
+        # a 2-day fall plus a noise window (a 16h rise) plus another 2-day fall
         a = down(48)
         z = up(16, start=a[-1], rate=0.1)
         b = down(48, start=z[-1])
@@ -104,7 +104,7 @@ class TestLagDetectie(unittest.TestCase):
         self.assertIsNotNone(r)
         self.assertLessEqual(r["duration_seconds"], ts[-1] - ts[0] + 1,
                              "the lag must not push the duration beyond the existing data")
-        self.assertGreater(r["duration_seconds"] / 3600, 90, "plafonat la span, nu taiat sub")
+        self.assertGreater(r["duration_seconds"] / 3600, 90, "capped at the span, not cut below it")
 
     def test_lag_se_adauga_cand_incape_in_span(self):
         d = down(96)
@@ -113,7 +113,7 @@ class TestLagDetectie(unittest.TestCase):
         self.assertIsNotNone(r)
         self.assertEqual(r["direction"], "up")
         dur_h = r["duration_seconds"] / 3600
-        self.assertGreater(dur_h, 95, "durata trebuie sa includa lag-ul (+48h)")
+        self.assertGreater(dur_h, 95, "the duration must include the lag (+48h)")
         self.assertLess(dur_h, 135)
 
     def test_fara_lag_durata_e_strict_confirmata(self):
@@ -127,7 +127,7 @@ class TestLagDetectie(unittest.TestCase):
 
 class TestGapuri(unittest.TestCase):
     def test_gap_in_date_opreste_confirmarea(self):
-        # 2 zile down, GAP de 2 zile (fara puncte), apoi 2 zile down recente
+        # 2 days down, a 2-day GAP (no points), then 2 recent days down
         old = down(48, start=130)
         recent = down(48, start=115)
         ts_old = [i * H for i in range(48)]

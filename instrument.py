@@ -206,7 +206,7 @@ class Instrument:
             if not bypass:
                 if bypass_profit_reference:
                     print(
-                        f"[GARD] {side_u} {self.symbol}: referinta istorica de pret "
+                        f"[GUARD] {side_u} {self.symbol}: the historical price reference "
                         "ocolita explicit; quantity/weight guard ramane activ")
                 else:
                     profit_margin = order_guard.margin_for(self._provider.name)
@@ -283,7 +283,7 @@ class Instrument:
                 if not slot.allowed:
                     age = time.time() - slot.info.get("timestamp", 0)
                     print(f"[{self.symbol}] {side_u} BLOCKED de cooldown: last order "
-                          f"({slot.info.get('side')}) acum {age:.0f}s")
+                          f"({slot.info.get('side')}) {age:.0f}s ago")
                     reason = "cooldown"
                     return None
                 # Persist the exact intent before the external side effect.  This
@@ -311,12 +311,12 @@ class Instrument:
                                     "client_order_id")
                             prequeued_intent_id = prequeued.get("intent_id")
                             if not prequeued_client_order_id:
-                                raise RuntimeError("intentia persistata nu are client_order_id")
+                                raise RuntimeError("the persisted intent has no client_order_id")
                             kwargs["client_order_id"] = prequeued_client_order_id
                     except Exception as exc:
                         print(
-                            f"[{self.symbol}] {side_u} BLOCAT: intentia nu poate fi "
-                            f"persistata inainte de submit ({exc})")
+                            f"[{self.symbol}] {side_u} BLOCKED: the intent cannot be "
+                            f"persisted before the submit ({exc})")
                         reason = "pre_submit_persist_failed"
                         return None
 
@@ -378,8 +378,8 @@ class Instrument:
                             client_order_id=prequeued_client_order_id)
                         if not tracked:
                             print(
-                                f"[{self.symbol}] {side_u} acceptat, dar tracking-ul "
-                                "nu a putut fi actualizat; intentia ramane pending")
+                                f"[{self.symbol}] {side_u} accepted, but the tracking "
+                                "could not be updated; the intent stays pending")
                         elif prequeued_intent_id:
                             _EXECUTION_AUDIT.record(
                                 "submit_accepted", intent_id=prequeued_intent_id,

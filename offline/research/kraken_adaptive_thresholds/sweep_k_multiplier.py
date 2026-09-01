@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-sweep_k_multiplier.py — inainte de a promova pragul adaptiv de reintrare (sau
-DCA) la decizie reala, testeaza daca multiplicatorul K curent (K_REENTRY=2.0,
+sweep_k_multiplier.py — before promoting the adaptive re-entry (or DCA)
+threshold to a real decision, it tests whether the current multiplier K (K_REENTRY=2.0,
 K_DCA=1.0, hardcoded in shadow_signals.py) really is the best, or whether a
-K mai mare/mai mic ar da un rezultat superior — cerere user dupa rezultatele
-initiale (reintrare adaptiv castiga cu K=2.0, DCA adaptiv pierde cu K=1.0).
+a larger or smaller K would give a better result — a user request after the initial
+results (the adaptive re-entry wins with K=2.0, the adaptive DCA loses with K=1.0).
 
 It reuses EXACTLY the simulation engines from verify_adaptive_dca.py and
 verify_adaptive_reentry.py (nothing reimplemented) — it only varies K before
-a inmulti cu vol_1h.
+multiplying by vol_1h.
 
 Rulare:  python3 offline/research/kraken_adaptive_thresholds/sweep_k_multiplier.py
 """
@@ -56,7 +56,7 @@ def main():
               f"cicluri={m['cycles']:<3} maxDD=${m['maxdd']:.2f}  medie_prag={np.nanmean(arr):.2f}%{marker}")
         if tot > best_tot_re:
             best_k_re, best_tot_re = k, tot
-    print(f"  => cel mai bun K_REENTRY din sweep: {best_k_re} (TOTAL {best_tot_re:+.2f}%)")
+    print(f"  => the best K_REENTRY in the sweep: {best_k_re} (TOTAL {best_tot_re:+.2f}%)")
 
     print(f"\n--- SWEEP DCA (fix live = {REAL_DCA['drop_fallback']}%) ---")
     fixed_arr_dca = np.full(len(ohlc), REAL_DCA["drop_fallback"])
@@ -74,7 +74,7 @@ def main():
               f"cicluri={m['cycles']:<3} maxDD=${m['maxdd']:.2f}  medie_prag={np.nanmean(arr):.2f}%{marker}")
         if tot > best_tot_dca:
             best_k_dca, best_tot_dca = k, tot
-    print(f"  => cel mai bun K_DCA din sweep: {best_k_dca} (TOTAL {best_tot_dca:+.2f}%)")
+    print(f"  => the best K_DCA in the sweep: {best_k_dca} (TOTAL {best_tot_dca:+.2f}%)")
 
     print(f"\n=== REZUMAT ===")
     print(f"Reintrare: FIX {tot_fix_re:+.2f}%  |  cel mai bun adaptiv (K={best_k_re}) {best_tot_re:+.2f}%")

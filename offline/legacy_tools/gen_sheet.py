@@ -1,4 +1,4 @@
-"""Generator istoric de raport; nu face parte din runtime."""
+"""A historical report generator; it is not part of the runtime."""
 
 import pandas as pd
 
@@ -6,29 +6,29 @@ from datetime import datetime
 
  
 
-# Functie pentru generarea fisei de pontaj
+# A function that generates the timesheet.
 
-def genereaza_fisa_pontaj(luna, an):
+def genereaza_fisa_pontaj(month, year):
 
-    zile_luna = pd.date_range(start=f'{an}-{luna}-01', end=f'{an}-{luna}-{pd.Timestamp(f"{an}-{luna}-01").days_in_month}')
+    month_days = pd.date_range(start=f'{year}-{month}-01', end=f'{year}-{month}-{pd.Timestamp(f"{year}-{month}-01").days_in_month}')
 
    
 
-    # Template pentru pontaj, adaptat conform modelului tau
+    # The timesheet template, adapted to your model.
 
     pontaj_data = {
 
-        'Data': zile_luna.strftime('%d.%m.%Y'),
+        'Data': month_days.strftime('%d.%m.%Y'),
 
-        'Ziua': zile_luna.strftime('%A'),
+        'Ziua': month_days.strftime('%A'),
 
-        'Ora Inceput': ['09:00' for _ in range(len(zile_luna))],  # Poti ajusta aceste valori
+        'Start time': ['09:00' for _ in range(len(month_days))],  # You can adjust these values.
 
-        'Ora Sfarsit': ['17:00' for _ in range(len(zile_luna))],  # Poti ajusta aceste valori
+        'End time': ['17:00' for _ in range(len(month_days))],  # You can adjust these values.
 
-        'Ore lucrate': [8 for _ in range(len(zile_luna))],  # Poti ajusta numarul de ore
+        'Ore lucrate': [8 for _ in range(len(month_days))],  # Poti ajusta numarul de ore
 
-        'Observatii': ['' for _ in range(len(zile_luna))]
+        'Observatii': ['' for _ in range(len(month_days))]
 
     }
 
@@ -38,13 +38,13 @@ def genereaza_fisa_pontaj(luna, an):
 
    
 
-    # Salvare fisier Excel cu numele specificat
+    # Save the Excel file under the given name.
 
-    file_name = f'fisa_pontaj_{luna}_{an}.xlsx'
+    file_name = f'fisa_pontaj_{month}_{year}.xlsx'
 
     df.to_excel(file_name, index=False)
 
-    print(f'Fisa de pontaj pentru {luna}/{an} a fost generata: {file_name}')
+    print(f'The timesheet for {month}/{year} was generated: {file_name}')
 
  
 

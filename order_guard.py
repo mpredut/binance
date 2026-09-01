@@ -112,7 +112,7 @@ def weight_limit(provider, symbol, order_type, price, required_qty, *, available
             import priceAnalysis as pa
             return pa.get_weight_for_cash_permission_at_quant_time(sym, order_type)
         except Exception as e:
-            print(f"[WEIGHT] {sym}: nu pot calcula gauss ({e})")
+            print(f"[WEIGHT] {sym}: cannot compute the gauss value ({e})")
             return None
 
     weight = _gauss(symbol)                                 # own Gaussian weight when a long trend exists
@@ -122,7 +122,7 @@ def weight_limit(provider, symbol, order_type, price, required_qty, *, available
             pw = _gauss(proxy)
             if _ok(pw):
                 weight = pw
-                print(f"[WEIGHT] {symbol}: fara trend propriu -> proxy {proxy} (weight={weight})")
+                print(f"[WEIGHT] {symbol}: no trend of its own -> proxy {proxy} (weight={weight})")
     if not _ok(weight):                                     # no valid proxy: use conservative default
         weight = 0.03
     recent = provider.get_orders(symbol, order_type, 86400) or []      # same side over the last 24 hours
@@ -187,14 +187,14 @@ def daily_limit_guard(provider, symbol, order_type, max_daily_trades=None,
     backdays = max(math.ceil(safeback_sec / 86400.0), 1)
     if len(trades) / backdays > max_daily_trades:
         print(f"[DAILY-LIMIT] {order_type} {symbol}: {len(trades)} tranzactii in "
-              f"{safeback_sec/3600:.1f}h, plafon {max_daily_trades}/zi -> BLOCAT")
+              f"{safeback_sec/3600:.1f}h, a cap of {max_daily_trades}/day -> BLOCKED")
         return False, "daily_limit"
     cutoff_ms = time.time() * 1000 - recent_transaction_sec * 1000
     for t in trades:
         ts = t.get("timestamp")
         if ts is not None and float(ts) >= cutoff_ms:
             print(f"[DAILY-LIMIT] {order_type} {symbol}: tranzactie recenta "
-                  f"(<{recent_transaction_sec:.0f}s) -> BLOCAT")
+                  f"(<{recent_transaction_sec:.0f}s) -> BLOCKED")
             return False, "recent_transaction"
     return True, None
 
@@ -212,11 +212,11 @@ def profit_guard(provider, symbol, order_type, price, profit_percentage, window_
         diff = u.value_diff_to_percent(ref, price)   # (ref_SELL - BUY_price) / ref_SELL
     else:
         diff = u.value_diff_to_percent(price, ref)   # (SELL_price - ref_BUY) / SELL_price
-    src = "fereastra" if window_ref is not None else "provider"
-    print(f"[GARD] {order_type} {symbol}: ref {ref} ({src}), pret {price}, "
+    src = "the window" if window_ref is not None else "the provider"
+    print(f"[GUARD] {order_type} {symbol}: ref {ref} ({src}), price {price}, "
           f"diff {diff:.2f}%, prag {profit_percentage}%")
     if diff < profit_percentage:
         print(f"Diferenta procentuala ({diff:.2f}%) sub prag {profit_percentage}%. "
-              f"Ordinul de {order_type} BLOCAT.")
+              f"The {order_type} order is BLOCKED.")
         return False
     return True

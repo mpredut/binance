@@ -47,7 +47,7 @@ def main() -> int:
 
     ap = argparse.ArgumentParser(description="Bot DCA+TP pe Hyperliquid (perp long-only).")
     ap.add_argument("--env-file", default=env_file)
-    ap.add_argument("--coin", help="Override moneda (altfel din .env HL_COIN)")
+    ap.add_argument("--coin", help="Override the coin (otherwise HL_COIN from .env)")
     ap.add_argument("--interval", type=int, default=required_int_env("HL_POLL_SECONDS"))
     ap.add_argument("--desktop", action="store_true")
     ap.add_argument("--skip-wait", action="store_true")
@@ -83,7 +83,7 @@ def main() -> int:
         except KeyboardInterrupt:
             return 130
         except Exception as e:  # noqa: BLE001
-            log(f"! conexiune esuata ({e.__class__.__name__}) — reincerc in 60s")
+            log(f"! the connection failed ({e.__class__.__name__}) — retrying in 60s")
             time.sleep(60)
 
     if args.price:
@@ -111,7 +111,7 @@ def main() -> int:
     log("=== Hyperliquid bot ===")
     log(f"    coin         : {label}  ({coin} perp, levier {leverage}x)")
     log(f"    wallet       : {'yes' if os.environ.get('HL_SECRET_KEY') else 'NO (public/paper only)'}")
-    log(f"    executie     : {'PAPER (fara bani)' if strat_dry else '⚠ REAL — BANI ADEVARATI'}")
+    log(f"    execution    : {'PAPER (no money)' if strat_dry else '⚠ REAL — REAL MONEY'}")
     log(f"    ntfy/email   : {os.environ.get('NTFY_TOPIC') or '-'} / {os.environ.get('ALERT_TO_EMAIL') or '-'}")
 
     if not args.skip_wait:
@@ -130,16 +130,16 @@ def _wait_for_listing(client, coin, label, interval, desktop) -> bool:
     if coin_available(client, coin):
         log(f"  [verify] {coin} e disponibil pe Hyperliquid — pornesc.")
         return True
-    log(f"    {coin} indisponibil pe Hyperliquid — astept... (Ctrl+C to stop)")
+    log(f"    {coin} is unavailable on Hyperliquid — waiting... (Ctrl+C to stop)")
     try:
         while True:
             if coin_available(client, coin):
                 p = get_price(client, coin)
-                log(f">>> {label} disponibil pe Hyperliquid (pret {p}) — pornesc <<<")
+                log(f">>> {label} is available on Hyperliquid (price {p}) — starting <<<")
                 notify(title=f"{label} disponibil pe Hyperliquid!",
-                       body=f"{coin} pret {p}", source="hyperliquid", price=p, desktop=desktop)
+                       body=f"{coin} price {p}", source="hyperliquid", price=p, desktop=desktop)
                 return True
-            log(f"ping - astept {coin}...")
+            log(f"ping - waiting for {coin}...")
             time.sleep(interval)
     except KeyboardInterrupt:
         log("Stopped manually."); return False

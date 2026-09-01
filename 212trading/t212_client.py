@@ -178,12 +178,12 @@ class T212Client:
             headers=self._headers(),
         )
         if status != 200 or not body:
-            self._log_read_fail("istoric ordine", status)
+            self._log_read_fail("order history", status)
             return None
         try:
             payload = json.loads(body)
         except ValueError:
-            self._log_read_fail("istoric ordine (JSON invalid)", status)
+            self._log_read_fail("order history (invalid JSON)", status)
             return None
         items = payload.get("items", []) if isinstance(payload, dict) else payload
         matches = []
@@ -237,12 +237,12 @@ class T212Client:
         if status == 404:
             return self.get_historical_order(order_id)
         if status != 200:
-            self._log_read_fail("status ordin", status)
+            self._log_read_fail("order status", status)
             return None
         try:
             return json.loads(body)
         except ValueError:
-            self._log_read_fail("status ordin (JSON invalid)", status)
+            self._log_read_fail("order status (invalid JSON)", status)
             return None
 
     def cancel_order(self, order_id) -> bool:
@@ -255,7 +255,7 @@ class T212Client:
                                  headers=self._headers())
         ok = status in (200, 201, 204)
         if not ok:
-            log(f"  ! [T212] cancel ordin {order_id} -> HTTP {status}")
+            log(f"  ! [T212] cancel order {order_id} -> HTTP {status}")
         with self._lock:
             self._ord_cache = None   # Order list changed; force a fresh read.
         return ok
@@ -325,4 +325,4 @@ class T212Client:
         reconciliation immediately sees new orders instead of incorrectly dropping
         them or marking a take-profit tranche as sold.
         """
-        return self._read_cached("_ord_cache", "/equity/orders", "ordine active")
+        return self._read_cached("_ord_cache", "/equity/orders", "active orders")

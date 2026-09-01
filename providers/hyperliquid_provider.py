@@ -261,7 +261,7 @@ class HyperliquidProvider(MarketDataProvider):
         live = os.environ.get(_LIVE_ENV, "false").strip().lower() == "true"
         if not live:
             print(f"[HL][DRY] as plasa {side} {symbol} qty={qty} @ {price} "
-                  f"(real dezactivat; seteaza {_LIVE_ENV}=true pt ordine reale)")
+                  f"(real orders disabled; set {_LIVE_ENV}=true for real orders)")
             return None
         # -- Gated live path. ---------------------------------------------------
         pair = self._pair()
@@ -326,7 +326,7 @@ class HyperliquidProvider(MarketDataProvider):
                      client_order_id: Optional[str] = None) -> str:
         # Safety: real orders require HL_LIVE_ORDERS due to spot/DN co-mingling.
         if os.environ.get(_LIVE_ENV, "false").strip().lower() != "true":
-            raise ProviderError(f"HL_LIVE_ORDERS=false — refuz ordin real pe HL ({side} {symbol})")
+            raise ProviderError(f"HL_LIVE_ORDERS=false — refusing a real order on HL ({side} {symbol})")
         pair = self._pair()
         if pair is None:
             raise ProviderError(f"submit_order({symbol}): perechea spot indisponibila")
@@ -381,13 +381,13 @@ class HyperliquidProvider(MarketDataProvider):
         available = self.free_balance("USDC")
         if available is None:
             raise ProviderError(
-                f"preflight_order({symbol}): soldul USDC nu poate fi confirmat"
+                f"preflight_order({symbol}): the USDC balance cannot be confirmed"
             )
         tolerance = max(1e-9, required * 1e-12)
         if float(available) + tolerance < required:
             raise ProviderError(
                 f"preflight_order({symbol}) {kind or 'BUY'}: sold USDC insuficient "
-                f"({float(available):.8f} < {required:.8f}) — ordin netrimis"
+                f"({float(available):.8f} < {required:.8f}) — the order was not sent"
             )
 
     def order_by_client_id(self, symbol: str, client_order_id: str):
@@ -441,7 +441,7 @@ class HyperliquidProvider(MarketDataProvider):
             query = getattr(c.info, "query_order_by_oid", None)
             if not callable(query):
                 raise ProviderError(
-                    "SDK Hyperliquid prea vechi: lipseste query_order_by_oid"
+                    "The Hyperliquid SDK is too old: query_order_by_oid is missing"
                 )
             raw_status = query(addr, oid) or {}
             if raw_status.get("status") != "order":
@@ -479,7 +479,7 @@ class HyperliquidProvider(MarketDataProvider):
                 remaining = float(order_payload.get("sz") or 0.0)
             except (TypeError, ValueError) as e:
                 raise ProviderError(
-                    f"order_status({order_id}): dimensiuni ordin invalide"
+                    f"order_status({order_id}): invalid order sizes"
                 ) from e
             expected_filled = max(0.0, original - remaining)
             tolerance = max(1e-12, original * 1e-9)
@@ -513,7 +513,7 @@ class HyperliquidProvider(MarketDataProvider):
             canceled = self._signer().cancel(pair, int(order_id))
             if not canceled:
                 raise ProviderError(
-                    f"cancel_order({order_id}): venue-ul nu a confirmat anularea"
+                    f"cancel_order({order_id}): the venue did not confirm the cancellation"
                 )
         except ProviderError:
             raise

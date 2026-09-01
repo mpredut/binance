@@ -295,12 +295,12 @@ def _alert_terminal(rec, status):
     try:
         alert.notify(
             title=f"🛑 order terminal {rec.get('side')} {rec.get('symbol')}",
-            body=(f"Ordin {rec.get('order_id')} a devenit "
+            body=(f"Order {rec.get('order_id')} became "
                   f"{status.venue_status or status.status}; filled={status.filled_qty}, "
                   "the rest is NOT resent automatically after a cancel."),
             source="order_retry", symbol=str(rec.get("symbol")))
     except Exception as exc:  # noqa: BLE001
-        print(f"[order_retry] alerta terminala esuata (ignor): {exc}")
+        print(f"[order_retry] the terminal alert failed (ignored): {exc}")
 
 
 def _alert_giveup(rec, now):
@@ -310,20 +310,20 @@ def _alert_giveup(rec, now):
         alert.notify(
             title=f"🛑 order-retry RENUNT {rec.get('side')} {rec.get('symbol')}",
             body=(f"Order not replaced after {rec.get('attempts', 0)} attempts / {age_h:.1f}h "
-                  f"(TTL depasit). qty={rec.get('qty')}. Verifica manual."),
+                  f"(the TTL was exceeded). qty={rec.get('qty')}. Check by hand."),
             source="order_retry", symbol=str(rec.get("symbol")))
     except Exception as e:  # noqa: BLE001
-        print(f"[order_retry] alerta giveup esuata (ignor): {e}")
+        print(f"[order_retry] the giveup alert failed (ignored): {e}")
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--once", action="store_true", help="un singur pas si iese")
+    ap.add_argument("--once", action="store_true", help="a single step, then exit")
     args = ap.parse_args()
 
     if args.once:
         if not oq.RETRY_ENABLED:
-            print("[order_retry] RETRY_ENABLED=false — nimic de facut (--once).")
+            print("[order_retry] RETRY_ENABLED=false — nothing to do (--once).")
             return 0
         from providers.market_api import api as mkt
         print(f"[order_retry] pas unic: {process_once(mkt)}")

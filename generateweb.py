@@ -26,9 +26,9 @@ monede_empty = [
 
 
 # Initial coin list (top 10).
-monede = [
-    {"nume": "BTCUSDC", "cantitate": 0.5, "watch": True},
-    {"nume": "TAOUSDC", "cantitate": 0.5, "watch": True}
+coins = [
+    {"name": "BTCUSDC", "quantity": 0.5, "watch": True},
+    {"name": "TAOUSDC", "quantity": 0.5, "watch": True}
 ]
 
 # File that stores the latest configuration.
@@ -50,23 +50,23 @@ def trebuie_sa_scoata_sunet():
     watch_list_anterioara = config_anterioara.get("watch_list", [])
     repeat_count = config_anterioara.get("repeat_count", 0)
     
-    watch_list_actuala = [moneda["nume"] for moneda in monede if moneda["watch"]]
+    current_watch_list = [coin["name"] for coin in coins if coin["watch"]]
     
-    if watch_list_actuala != watch_list_anterioara:
+    if current_watch_list != watch_list_anterioara:
         # The list changed; reset the counter and play the sound.
-        config_nou = {"watch_list": watch_list_actuala, "repeat_count": 1}
+        config_nou = {"watch_list": current_watch_list, "repeat_count": 1}
         salveaza_config_actuala(config_nou)
         return True
     elif repeat_count < 3:
         # The list is unchanged, but the sound may play up to three more times.
-        config_nou = {"watch_list": watch_list_actuala, "repeat_count": repeat_count + 1}
+        config_nou = {"watch_list": current_watch_list, "repeat_count": repeat_count + 1}
         salveaza_config_actuala(config_nou)
         return True
     else:
         # The list is unchanged and the three-sound limit has been exceeded.
         return False
 
-def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-194-86.ngrok-free.app/"):
+def genereaza_html(coins, refresh_interval=10, base_url="https://5499-85-122-194-86.ngrok-free.app/"):
     sunet_activ = trebuie_sa_scoata_sunet()
     
     # Minimal CSS styling.
@@ -102,7 +102,7 @@ def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-19
         <button onclick="enableAudio()">Enable sound</button>
         <button onclick="disableAudio()">Disable sound</button>
         <div class="message">
-            {'There are new coins to trade!' if monede else 'No coin available to trade.'}
+            {'There are new coins to trade!' if coins else 'No coin available to trade.'}
         </div>
     """
 
@@ -117,15 +117,15 @@ def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-19
         """
 
     html += "<table><thead><tr><th>Coin</th><th>Quantity</th><th>Action</th></tr></thead><tbody>"
-    for moneda in monede:
-        if moneda["watch"]:
+    for coin in coins:
+        if coin["watch"]:
             html += f"""
             <tr>
-                <td>{moneda['nume']}</td>
-                <td><input type="number" value="{moneda['cantitate']}" id="qty-{moneda['nume']}"></td>
+                <td>{coin['name']}</td>
+                <td><input type="number" value="{coin['quantity']}" id="qty-{coin['name']}"></td>
                 <td>
-                    <button class="btn-sell" onclick="actionSell('{moneda['nume']}')">Sell</button>
-                    <button class="btn-buy" onclick="actionBuy('{moneda['nume']}')">Buy</button>
+                    <button class="btn-sell" onclick="actionSell('{coin['name']}')">Sell</button>
+                    <button class="btn-buy" onclick="actionBuy('{coin['name']}')">Buy</button>
                 </td>
             </tr>
             """
@@ -133,23 +133,23 @@ def genereaza_html(monede, refresh_interval=10, base_url="https://5499-85-122-19
     html += """
         </tbody></table>
         <script>
-            function actionSell(moneda) {
-                const cantitate = document.getElementById(`qty-${moneda}`).value;
+            function actionSell(coin) {
+                const quantity = document.getElementById(`qty-${coin}`).value;
                 fetch('{base_url}trade/sell', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ symbol: moneda, amount: parseFloat(cantitate) })
+                    body: JSON.stringify({ symbol: coin, amount: parseFloat(quantity) })
                 })
                 .then(response => response.json())
                 .then(data => alert(`Sold coin quantity: data.message`))
                 .catch(err => console.error('Sell error:', err));
             }
-            function actionBuy(moneda) {
-                const cantitate = document.getElementById(`qty-${moneda}`).value;
+            function actionBuy(coin) {
+                const quantity = document.getElementById(`qty-${coin}`).value;
                 fetch('{base_url}trade/buy', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ symbol: moneda, amount: parseFloat(cantitate) })
+                    body: JSON.stringify({ symbol: coin, amount: parseFloat(quantity) })
                 })
                 .then(response => response.json())
                 .then(data => alert(`Bought coin quantity: data.message`))
@@ -168,5 +168,5 @@ def salveaza_html(html, nume_fisier="index.html"):
     print(f"File {nume_fisier} was generated successfully!")
 
 # Generate and save.
-html_content = genereaza_html(monede)
+html_content = genereaza_html(coins)
 salveaza_html(html_content, "index.html")

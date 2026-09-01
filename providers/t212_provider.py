@@ -200,13 +200,13 @@ class T212Provider(MarketDataProvider):
         if market:
             return self._client().place_market_order(symbol, signed, extended_hours=False)
         if price is None:
-            raise ProviderError("ordinul T212 LIMIT necesita pret")
+            raise ProviderError("a T212 LIMIT order requires a price")
         try:
             price_f = float(price)
         except (TypeError, ValueError) as e:
-            raise ProviderError(f"pret T212 invalid: {price!r}") from e
+            raise ProviderError(f"invalid T212 price: {price!r}") from e
         if not math.isfinite(price_f) or price_f <= 0:
-            raise ProviderError(f"pret T212 invalid: {price!r}")
+            raise ProviderError(f"invalid T212 price: {price!r}")
         configured = (
             self._order_validity
             if self._order_validity is not None
@@ -274,7 +274,7 @@ class T212Provider(MarketDataProvider):
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"order_status({order_id}): {e}") from e
         if not isinstance(raw, dict):
-            raise ProviderError(f"order_status({order_id}): ordin indisponibil")
+            raise ProviderError(f"order_status({order_id}): the order is unavailable")
 
         instrument = raw.get("instrument")
         instrument_ticker = instrument.get("ticker") if isinstance(instrument, dict) else ""
@@ -298,7 +298,7 @@ class T212Provider(MarketDataProvider):
             cost = abs(float(filled_value_raw or 0.0))
             fee = float(raw.get("fee", raw.get("commission", 0.0)) or 0.0)
         except (TypeError, ValueError) as e:
-            raise ProviderError(f"order_status({order_id}): valori de fill invalide") from e
+            raise ProviderError(f"order_status({order_id}): invalid fill values") from e
 
         fee_currencies = {
             str(currency).strip().upper()
@@ -346,7 +346,7 @@ class T212Provider(MarketDataProvider):
             terminal = self.order_status(symbol, order_id).status
         except ProviderError as e:
             raise ProviderError(
-                f"cancel_order({order_id}): T212 nu a confirmat anularea"
+                f"cancel_order({order_id}): T212 did not confirm the cancellation"
             ) from e
         if terminal not in {"closed", "canceled", "expired"}:
             raise ProviderError(

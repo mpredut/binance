@@ -2,9 +2,9 @@
 Teste pt MECANICA de plasare Binance extrasa (30 iul) — adjust_price_and_cancel_opposite
 + place_order_mechanics — and for the BinanceProvider hooks that expose them to the
 agnostic (Instrument.place). Reteaua e mock-uita integral (patch pe binance_api.bapi +
-functiile de dispatch); NICIUN apel real.
+the dispatch functions); NO real call.
 
-Scop: acopera FLIP-ul (guards_internally=False -> Binance prin pipeline agnostic),
+The goal: to cover the FLIP (guards_internally=False -> Binance through the agnostic pipeline),
 which the existing suite does not cover (FakeProvider / replay).
 """
 import os
@@ -32,10 +32,10 @@ class TestAdjustPriceAndCancelOpposite(unittest.TestCase):
              patch.object(po.api, "get_open_orders", return_value={"1": {"price": 90.0}, "2": {"price": 110.0}}) as goo, \
              patch.object(po.api, "cancel_order", return_value=True) as cancel:
             out = po.adjust_price_and_cancel_opposite("BUY", SYMBOL, 105.0, cancel_opposite=True)
-        # pret cerut 105 > current 100 -> clamp la 100, apoi *0.999 -> round(99.9)=100
+        # A requested price of 105 > current 100 -> clamped to 100, then *0.999 -> round(99.9)=100.
         self.assertEqual(out, round(min(105.0, 100.0) * 0.999, 0))
         goo.assert_called_once_with("SELL", SYMBOL)
-        # anuleaza DOAR SELL-ul sub pretul cerut (90 < 105); 110 ramane
+        # It cancels ONLY the SELL below the requested price (90 < 105); 110 stays.
         cancel.assert_called_once_with(SYMBOL, "1")
 
     def test_sell_nudges_up_and_cancels_high_buys(self):
@@ -43,7 +43,7 @@ class TestAdjustPriceAndCancelOpposite(unittest.TestCase):
              patch.object(po.api, "get_open_orders", return_value={"1": {"price": 110.0}, "2": {"price": 90.0}}), \
              patch.object(po.api, "cancel_order", return_value=True) as cancel:
             out = po.adjust_price_and_cancel_opposite("SELL", SYMBOL, 95.0, cancel_opposite=True)
-        # pret cerut 95 < current 100 -> clamp la 100, apoi *1.001 -> round
+        # A requested price of 95 < current 100 -> clamped to 100, then *1.001 -> round.
         self.assertEqual(out, round(max(95.0, 100.0) * 1.001, 0))
         cancel.assert_called_once_with(SYMBOL, "1")   # only the BUY above the price (110)
 
@@ -99,7 +99,7 @@ class TestPlaceOrderMechanics(unittest.TestCase):
         self.assertTrue(pmkt.called)
 
     def test_min_notional_rejected(self):
-        # qty*price sub 100 -> refuz (None), fara dispatch
+        # qty*price below 100 -> a refusal (None), without dispatch.
         with patch.object(po.api, "get_current_price", return_value=100.0), \
              patch.object(po.api, "get_free_balance", return_value=1000.0), \
              patch.object(po, "place_BUY_order", return_value={"orderId": 1}) as pbuy:
@@ -121,7 +121,7 @@ class TestBinanceProviderHooks(unittest.TestCase):
         self.p = BinanceProvider()
 
     def test_guards_internally_false(self):
-        # FLIP-ul: Binance trece acum prin pipeline-ul agnostic Instrument.place().
+        # THE FLIP: Binance now goes through the agnostic Instrument.place() pipeline.
         self.assertFalse(self.p.guards_internally())
 
     def test_adjust_order_price_delegates(self):
@@ -141,7 +141,7 @@ class TestBinanceProviderHooks(unittest.TestCase):
         with patch.object(order_guard, "window_reference", return_value=123.0) as f:
             out = self.p.profit_guard_window_ref(SYMBOL, "BUY", 14 * 24 * 3600)
         self.assertEqual(out, 123.0)
-        # a doua pozitionala = safeback trecut (nu window_for config)
+        # The second positional = the safeback passed in (not window_for config).
         args = f.call_args[0]
         self.assertEqual(args[3], 14 * 24 * 3600)
 

@@ -1,20 +1,20 @@
 """
-Teste pentru parsarea instruments.conf (23 iul).
+Tests for parsing instruments.conf (23 Jul).
 
 Reason: a real bug found during the session — configparser.ConfigParser() does NOT
-taie comentariile INLINE (pe aceeasi linie cu valoarea) by default, doar cele
-pe linie proprie. KRAKEN_HYPE avea "mt.buy_budget = 200  # comentariu" -> se
+strip INLINE comments (on the same line as the value) by default, only the ones
+on their own line. KRAKEN_HYPE had "mt.buy_budget = 200  # a comment" -> so
 parsa literal ca string-ul "200  # comentariu", float() esua in
 Instrument.param(cast=float), cadea tacut pe default (None) -> "protectia"
-de buy_budget/max_budget nu functiona niciodata, desi parea configurata.
+the buy_budget/max_budget protection never worked, although it looked configured.
 
 Acoperire:
-  - Fiecare parametru NUMERIC mt.* (gain/lost/maxage_days/hardtp/
+  - Every NUMERIC mt.* parameter (gain/lost/maxage_days/hardtp/
     hardtp_fraction/hardtp_cooldown_h/buy_budget/max_budget) al oricarui
     ENABLED instrument, IF present in the file, must parse to a valid
     float (not None because of a stray inline comment).
   - Regresie directa: BINANCE_BTC/BINANCE_TAO (buy_budget=250, max_budget=3500,
-    adaugate azi) si KRAKEN_HYPE (buy_budget=200, max_budget=700, reparate azi).
+    added today) and KRAKEN_HYPE (buy_budget=200, max_budget=700, fixed today).
 """
 import os
 import sys
@@ -30,7 +30,7 @@ NUMERIC_MT_KEYS = ["gain", "lost", "maxage_days", "hardtp", "hardtp_fraction",
 
 
 class TestNoInlineCommentCorruption(unittest.TestCase):
-    """Pentru fiecare instrument mt.*, orice cheie NUMERICA prezenta in
+    """For every mt.* instrument, any NUMERIC key present in
     instruments.conf must parse to a float — if it is missing entirely that is
     fine (param() returns the code default), but if the file DOES have the
     line, it must not be corrupted by a stray inline comment."""
@@ -47,7 +47,7 @@ class TestNoInlineCommentCorruption(unittest.TestCase):
                     continue
                 value = inst.param("mt", key, None, float)
                 self.assertIsNotNone(
-                    value, f"[{name}] mt.{key} e prezent in instruments.conf dar "
+                    value, f"[{name}] mt.{key} is present in instruments.conf but "
                             f"param(cast=float) a intors None — probabil comentariu inline scapat")
 
     def test_budget_regressions(self):

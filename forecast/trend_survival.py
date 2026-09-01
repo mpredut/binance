@@ -101,7 +101,7 @@ def survival_report(durs_h: list[float], label: str, t_grid_days, horizon_h=24.0
     print(f"    durate: mediana={np.median(d)/24:.1f}z  medie={d.mean()/24:.1f}z  "
           f"P75={np.percentile(d,75)/24:.1f}z  P90={np.percentile(d,90)/24:.1f}z  max={d.max()/24:.1f}z")
     cont = {}
-    print(f"    P(mai tine inca 1 zi | a tinut t zile):")
+    print(f"    P(it lasts another day | it has lasted t days):")
     row = []
     for t_days in t_grid_days:
         t_h = t_days * 24.0
@@ -124,7 +124,7 @@ def verdict(cont: dict, mid: float) -> str:
     ym, om = float(np.mean(young)), float(np.mean(old))
     print(f"    continuare medie: TANAR(<{mid:.0f}z)={ym:.2f}  BATRAN(>={mid:.0f}z)={om:.2f}")
     if om >= ym - 0.05:
-        return "VALIDAT: trendul batran continua la fel de probabil ca la mijloc (Lindy) — plafonare dupa varf justificata"
+        return "VALIDATED: an old trend continues just as probably as at the middle (Lindy) — capping after the peak is justified"
     return "INVALIDAT: trendurile batrane mor mai repede — caderea gaussienei e justificata"
 
 
@@ -224,7 +224,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="Supravietuirea empirica a trendurilor.")
     ap.add_argument("--symbol", default="BTCUSDC")
     ap.add_argument("--days", type=int, default=700)
-    ap.add_argument("--window", type=int, default=24, help="ore/fereastra (productie: 16)")
+    ap.add_argument("--window", type=int, default=24, help="hours per window (production: 16)")
     ap.add_argument("--step", type=int, default=8)
     ap.add_argument("--T", type=float, default=14.0, help="orizontul gaussienei (zile), mid=T/2")
     ap.add_argument("--estimate", action="store_true",
@@ -235,7 +235,7 @@ def main() -> int:
         est = estimate_T(args.symbol, days=args.days, window_h=args.window,
                          step_h=args.step, prior_T=args.T)
         print(f"[{args.symbol}] T estimat = {est['T']} zile  "
-              f"(empiric {est.get('T_emp')}z din n={est['n']} episoade, pondere empiric w={est['w']}, "
+              f"(empirically {est.get('T_emp')} days from n={est['n']} episodes, empirical weight w={est['w']}, "
               f"mediana {est.get('median_d')}z, P90 {est.get('p90_d')}z, sursa {est.get('source_symbol')})")
         return 0
 
@@ -243,18 +243,18 @@ def main() -> int:
     if len(ts) < 100:
         print(f"! not enough data pt {args.symbol}"); return 1
     print(f"=== {args.symbol}: {len(ts)} lumanari 1h ({(ts[-1]-ts[0])/86400:.0f} zile), "
-          f"fereastra={args.window}h pas={args.step}h ===")
+          f"window={args.window}h step={args.step}h ===")
     bt, bs = block_slopes(ts, px, args.window, args.step)
     eps = episodes(bt, bs, args.window)
     t_grid = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 17, 21]
 
     all_d = [e["dur_h"] for e in eps]
-    cont = survival_report(all_d, "TOATE trendurile", t_grid)
+    cont = survival_report(all_d, "ALL the trends", t_grid)
     if cont:
         print("    " + verdict(cont, args.T / 2))
     for direction in ("up", "down"):
         dd = [e["dur_h"] for e in eps if e["dir"] == direction]
-        c = survival_report(dd, f"doar {direction.upper()}", t_grid)
+        c = survival_report(dd, f"only {direction.upper()}", t_grid)
         if c:
             print("    " + verdict(c, args.T / 2))
     return 0

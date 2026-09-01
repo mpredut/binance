@@ -128,19 +128,19 @@ _local_price_samples = {symbol: [] for symbol in TRACKED_SYMBOLS}
 
 def _validate_config():
     if not math.isfinite(CHECK_INTERVAL_SECONDS) or CHECK_INTERVAL_SECONDS <= 0:
-        raise ValueError("AG_CHECK_INTERVAL_SEC trebuie sa fie > 0")
+        raise ValueError("AG_CHECK_INTERVAL_SEC must be > 0")
     if (not math.isfinite(ASSET_REFERENCE_MINUTES_BACK_DEFAULT)
             or ASSET_REFERENCE_MINUTES_BACK_DEFAULT <= 0):
-        raise ValueError("AG_REFERENCE_MINUTES_BACK trebuie sa fie > 0")
+        raise ValueError("AG_REFERENCE_MINUTES_BACK must be > 0")
     if not math.isfinite(BUY_USE_CASH_RATIO) or not 0 < BUY_USE_CASH_RATIO <= 1:
-        raise ValueError("AG_BUY_USE_CASH_RATIO trebuie sa fie in (0, 1]")
+        raise ValueError("AG_BUY_USE_CASH_RATIO must be in (0, 1]")
     if not BUY_TIERS or any(
             not math.isfinite(threshold) or threshold <= 0
             or not math.isfinite(allocation) or allocation <= 0
             for threshold, allocation in BUY_TIERS):
         raise ValueError("AG_BUY_TIERS must contain positive threshold:allocation pairs")
     if len({threshold for threshold, _ in BUY_TIERS}) != len(BUY_TIERS):
-        raise ValueError("AG_BUY_TIERS contine praguri duplicate")
+        raise ValueError("AG_BUY_TIERS contains duplicate thresholds")
     if sum(allocation for _, allocation in BUY_TIERS) > 1.0 + 1e-12:
         raise ValueError("suma ponderilor AG_BUY_TIERS depaseste 1")
     if not SELL_TIERS or any(
@@ -149,11 +149,11 @@ def _validate_config():
             for threshold, allocation in SELL_TIERS):
         raise ValueError("AG_SELL_TIERS must contain positive threshold:allocation pairs")
     if len({threshold for threshold, _ in SELL_TIERS}) != len(SELL_TIERS):
-        raise ValueError("AG_SELL_TIERS contine praguri duplicate")
+        raise ValueError("AG_SELL_TIERS contains duplicate thresholds")
     if not math.isclose(
             sum(allocation for _, allocation in SELL_TIERS), 1.0,
             rel_tol=0.0, abs_tol=1e-12):
-        raise ValueError("suma ponderilor AG_SELL_TIERS trebuie sa fie exact 1")
+        raise ValueError("the AG_SELL_TIERS weights must sum to exactly 1")
     if (not math.isfinite(SELL_REARM_GROWTH_PERCENT)
             or SELL_REARM_GROWTH_PERCENT <= 0
             or SELL_REARM_GROWTH_PERCENT >= SELL_TIERS[0][0]):
@@ -164,7 +164,7 @@ def _validate_config():
     if ORDER_MISSING_CONFIRMATIONS <= 0:
         raise ValueError("AG_ORDER_MISSING_CONFIRMATIONS must be an integer and > 0")
     if not TRACKED_SYMBOLS:
-        raise ValueError("AG_SYMBOLS trebuie sa contina cel putin un simbol")
+        raise ValueError("AG_SYMBOLS must contain at least one symbol")
     unsupported = [symbol for symbol in TRACKED_SYMBOLS if symbol not in sym.symbols]
     if unsupported:
         raise ValueError(f"AG_SYMBOLS contine simboluri nepermise: {unsupported}")
