@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # backup_remote.sh — backup local (backup_secrets.sh) + upload CRIPTAT off-site, descentralizat (Storj).
-# Criptarea o face rclone (remote 'crypt' care impacheteaza remote-ul Storj) -> in Storj ajunge
+# rclone does the encryption (a 'crypt' remote wrapping the Storj remote) -> what reaches Storj is
 # DOAR ciphertext. Parola de crypt o tii SEPARAT (off-server) ca sa poti decripta la restore.
 # Suprascrie ultima versiune (fara bloat). Vezi docs/DISASTER_RECOVERY.md pt config + restore.
 #

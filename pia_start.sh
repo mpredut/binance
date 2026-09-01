@@ -74,9 +74,9 @@ sleep 2
 PORT=$(pia get portforward)
 echo "Port Forward: $PORT"
 
-# piactl Connected singur nu este suficient: in timpul unui flap PIA poate
-# raporta Connected desi tun0/DNS/HTTPS sunt deja nefunctionale. Proba este
-# legata explicit de tun0, deci traficul nu cade pe conexiunea fizica.
+# `piactl Connected` alone is not enough: during a flap PIA can report
+# Connected while tun0/DNS/HTTPS are already broken. The probe is bound
+# explicitly to tun0, so the traffic cannot fall back to the physical link.
 # Trei esecuri consecutive evita restartul la un timeout izolat.
 while true; do
     sleep "$HEALTH_INTERVAL"

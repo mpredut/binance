@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # run_backtest_cycle.sh — un ciclu complet de backtest pe DEV: ruleaza pilotul in
-# mod --propose (nu aplica nimic) si publica propunerile pe branch-ul git. Ruleaza
+# --propose mode (it applies nothing) and publishes the proposals to the git branch. Runs
 # pe DEV. Declansat de pe prod (trigger_backtest_dev.sh via ssh) sau manual.
 #
-# Datele (cachedb) si codul (git pull) sunt aduse la zi de refresh_dev.sh RULAT DE
-# PE PROD inainte de a declansa acest ciclu — aici doar rulam si publicam.
+# The data (cachedb) and the code (git pull) are brought up to date by refresh_dev.sh RUN
+# ON PROD before this cycle is triggered — here we only run and publish.
 set -euo pipefail
 
 RUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

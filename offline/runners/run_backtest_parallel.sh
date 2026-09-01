@@ -8,7 +8,7 @@
 # Fiecare comanda ruleaza in propriul proces, cu output in
 #   logs/backtest_parallel/<timestamp>/NN.log  (+ manifest.tsv cu maparea NN->comanda).
 #
-# Ruleaza pe DEV (masina de backtest). NU atinge configul/procesele live.
+# Runs on DEV (the backtest machine). It does NOT touch the live config or processes.
 set -uo pipefail
 
 RUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

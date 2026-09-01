@@ -2,12 +2,12 @@
 # rotate_logs.sh — roteste logurile de CONSOLA (nohup > *.log).
 #
 # De ce: logurile facute de logging.py se rotesc singure; ASTEA (redirectul de
-# consola al lui nohup) NU se rotesc si cresc nelimitat. Le marginim aici.
+# nohup console output) are NOT rotated and grow without bound. We cap them here.
 #
 # Cum: generam un config logrotate cu cai derivate din locatia scriptului ($ROOT,
-# deci portabil server/local) si lasam logrotate sa faca treaba. copytruncate e
-# OBLIGATORIU: botii tin fisierul deschis prin redirect, deci copiem + truncam IN
-# LOC (nu rename), altfel botul ar scrie in fisierul vechi redenumit.
+# so it is portable between server and local) and let logrotate do the work. copytruncate is
+# MANDATORY: the bots hold the file open through a redirect, so we copy + truncate IN
+# PLACE (no rename), otherwise the bot would keep writing to the renamed old file.
 #
 # Cron sugerat (orar, decalat sa nu se bata cu healthcheck-ul de la :*0/:*5):
 #   17 * * * * /home/predut/binance/rotate_logs.sh >/dev/null 2>&1
@@ -18,19 +18,19 @@ LOGROTATE="$(command -v logrotate || echo /usr/sbin/logrotate)"
 CONF="$(mktemp)"
 trap 'rm -f "$CONF"' EXIT
 # GLOB per director cunoscut (nu lista hardcodata -> orice log nou e acoperit AUTOMAT,
-# fara sa trebuiasca adaugat manual, inclusiv unul pe care-l uitam sau il scrie un
+# without having to be added by hand, including one we forget or one written by
 # script viitor). Directoare distincte => fara suprapuneri (logrotate da eroare la
 # fisier dublu). NU folosim */*.log (ar prinde myenv/venv). copytruncate: procesele
-# tin fisierul deschis, nu vrem sa scrie in fisierul vechi redenumit.
+# hold the file open, we do not want them writing to the renamed old file.
 #
-# logger/*.log e inclus GENERAL (nu doar cateva nume stiute) — 21 iul: gasit un
+# logger/*.log is included GENERALLY (not just a few known names) — 21 Jul: found a
 # fisier cu nume fix (tradeall_price_archiver.log, redirect nohup) crescut la
 # 324MB in 4.5 ore, neacoperit, pt ca inainte excludeam tot logger/ presupunand
 # ca fisierele cu data se auto-gestioneaza. size 20M + copytruncate e SIGUR si pt
 # fisierele cu data (tradeall_2026-07-21.log etc.): daca depasesc pragul in
 # aceeasi zi, se comprima o bucata si scriitorul continua in acelasi fisier —
 # nu strica deloc conventia "fisier nou la miezul noptii". Asa, orice fisier nou
-# aparut vreodata in logger/ (scriptul asta sau altul, azi sau peste un an) e
+# ever appearing in logger/ (this script or another, today or in a year) is
 # acoperit AUTOMAT, fara sa mai trebuiasca adaugat manual la o lista.
 {
     cat <<EOF

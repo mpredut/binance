@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # dn_close.sh — IESIRE SIGURA din pozitia delta-neutral, intr-o singura comanda.
 # Ordinea conteaza ca botul sa NU se bata cu inchiderea:
-#   1. scoate watchdog-ul din cron (altfel reporneste botul imediat dupa ce-l oprim)
-#   2. opreste botul de rebalansare (dn_bot.py, NU monitorul --watch)
+#   1. remove the watchdog from cron (otherwise it restarts the bot right after we stop it)
+#   2. stop the rebalancing bot (dn_bot.py, NOT the --watch monitor)
 #   3. inchide pozitia: vinde TOT spot + acopera TOT short  (dn_bot.py --close)
 #
-# Implicit REAL (foloseste STRAT_EXECUTE din config.env). Simulare:  ./dn_close.sh --paper
-# Dupa, ca sa reactivezi DN-ul: porneste botul si ruleaza din nou ./dn_watchdog.sh --install
+# REAL by default (uses STRAT_EXECUTE from config.env). Simulation:  ./dn_close.sh --paper
+# Afterwards, to re-enable DN: start the bot and run ./dn_watchdog.sh --install again
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -14,7 +14,7 @@ PY="${DN_PY:-$HERE/../myenv/bin/python}"
 PAPER=""
 [ "${1:-}" = "--paper" ] && PAPER="--paper"
 
-echo "[dn_close] 1/3 scot watchdog-ul din cron (sa nu reporneasca botul)..."
+echo "[dn_close] 1/3 removing the watchdog from cron (so it does not restart the bot)..."
 "$HERE/dn_watchdog.sh" --uninstall || true
 
 echo "[dn_close] 2/3 opresc botul de rebalansare..."
@@ -34,5 +34,5 @@ rc=$?
 
 echo "[dn_close] gata (rc=$rc). Verifica: $PY dn_bot.py --status"
 echo "[dn_close] NB: watchdog-ul a fost SCOS din cron. Ca sa reactivezi DN-ul mai tarziu:"
-echo "           porneste botul si ruleaza:  $HERE/dn_watchdog.sh --install"
+echo "           start the bot and run:  $HERE/dn_watchdog.sh --install"
 exit "$rc"

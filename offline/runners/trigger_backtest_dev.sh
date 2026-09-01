@@ -9,11 +9,11 @@
 #      APLICA automat, cu TOATE guardrail-urile existente (confirmare pe 2 ferestre pe
 #      dev + marja minima vs valoarea inerta, medie/amortizare cu valoarea live curenta,
 #      rate-limit 7 zile/cheie, audit persistent, notificare). Watchdogfor_cacheandconfig
-#      (cron separat) detecteaza schimbarea de instruments.conf si reporneste
-#      monitortrades.py automat. NIMIC din asta nu ocoleste guardrail-urile — doar
-#      elimina pasul manual "ruleaza apply_proposals.py cand vezi notificarea".
+#      (a separate cron) detects the instruments.conf change and restarts
+#      monitortrades.py automatically. NONE of this bypasses the guardrails — it only
+#      removes the manual step "run apply_proposals.py when you see the notification".
 #
-# Kill-switch pt DOAR pasul de aplicare (backtest+propunerile tot ruleaza): APPLY_DISABLED=true
+# Kill switch for the apply step ONLY (backtest + proposals still run): APPLY_DISABLED=true
 # (env, citit de apply_proposals.py insusi — merge si la o rulare manuala separata).
 # Kill-switch pt TOT ciclul (inclusiv backtest-ul): PILOT_DISABLED=true (scheduled_pilot).
 #

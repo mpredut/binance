@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # publish_proposals.sh — publica backtest_proposals.json (scris de scheduled_pilot
-# --propose) pe branch-ul git dedicat `backtest-proposals`, prin push. Ruleaza pe
-# DEV. Foloseste un git WORKTREE separat (~/binance-proposals) ca sa NU atinga
+# --propose) to the dedicated `backtest-proposals` git branch, by pushing. Runs on
+# DEV. It uses a separate git WORKTREE (~/binance-proposals) so it does NOT touch
 # working-tree-ul de pe main (unde ruleaza backtestele).
 #
 # Fluxul (UNIFIED_BACKTEST_PLAN.md §9): dev -> github (branch propuneri) -> prod
@@ -20,7 +20,7 @@ SRC_FILE="$REPO_ROOT/backtest_proposals.json"
 
 git -C "$REPO_ROOT" fetch -q origin || true
 
-# Creeaza worktree-ul daca lipseste: din origin/$BRANCH daca exista pe remote,
+# Create the worktree if missing: from origin/$BRANCH if it exists on the remote,
 # altfel un branch nou pornit din origin/main.
 if ! git -C "$REPO_ROOT" worktree list --porcelain | grep -q "worktree $WT"; then
   rm -rf "$WT"

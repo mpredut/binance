@@ -9,7 +9,7 @@
 #
 # Folderul de secrete OGLINDESTE structura repo-ului (.env, hyperliquid/.env, keys/, ...).
 # Cale repo presupusa: aceeasi ca productia (~/binance, user predut). Daca difera,
-# seteaza TRADING_ROOT si adapteaza profilul systemd/ daca este necesar.
+# set TRADING_ROOT and adapt the systemd/ profile if needed.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 SECRETS="${1:-}"
@@ -21,7 +21,7 @@ echo "===== RESTORE binance @ $ROOT ====="
 command -v python3 >/dev/null || fail "python3 lipseste (apt install python3 python3-venv)"
 
 echo "--- [1/5] restore secrete + stare din $SECRETS ---"
-# _machine contine date externe repo-ului si este restaurat separat.
+# _machine holds data external to the repo and is restored separately.
 tar cf - --exclude='./_machine' -C "$SECRETS" . | tar xf - -C "$ROOT"
 if [ -f "$SECRETS/_machine/piatoken.txt" ]; then
     install -m 0600 "$SECRETS/_machine/piatoken.txt" "$HOME/piatoken.txt"
@@ -46,6 +46,6 @@ echo "--- [4/5] verificare cron ---"
 crontab -l >/dev/null 2>&1 && echo "    ✔ cron instalat de profilul PROD"
 
 echo "--- [5/5] GATA ---"
-echo "Mai trebuie (o singura data): instaleaza aplicația PIA și autentifică-te, apoi:"
-echo "    sudo systemctl start pia binance     # flota porneste; botii vin prin cron"
-echo "    ./healthcheck.sh --check             # verifica ca toate sunt 'ok'"
+echo "Still needed (once): install the PIA application and log in, then:"
+echo "    sudo systemctl start pia binance     # the fleet starts; the bots arrive through cron"
+echo "    ./healthcheck.sh --check             # check that everything is 'ok'"

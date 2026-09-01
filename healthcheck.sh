@@ -2,11 +2,11 @@
 # healthcheck.sh — supraveghere + raport consolidat pentru boti/flota (HL/Kraken/T212).
 #
 # SURSA UNICA DE ADEVAR: procs.conf (citit si de bots_start.sh + flota_start.sh).
-# Aici NU mai exista liste de procese hardcodate. Detectie DUBLA: absenta (pgrep) SI
+# There are NO hardcoded process lists here any more. DOUBLE detection: absence (pgrep) AND
 # hang (proces viu dar log inghetat, heartbeat pe mtime) — inlocuieste dn_watchdog.sh.
-#   --supervise  (cron */5): reporneste botii (role=bot) morti/inghetati cu backoff; flota = doar alerta.
-#   --alert      : doar alerta daca lipseste/e hung ceva (nu reporneste).
-#   --check      : preview READ-ONLY (ce ar face --supervise) — sigur, nu atinge nimic.
+#   --supervise  (cron */5): restarts dead/frozen bots (role=bot) with backoff; the fleet is alert-only.
+#   --alert      : alert only if something is missing or hung (no restart).
+#   --check      : READ-ONLY preview (what --supervise would do) — safe, touches nothing.
 #   (fara arg)   : raport complet (procese + conturi HL/Kraken/T212).
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 MANIFEST="$ROOT/procs.conf"
@@ -83,7 +83,7 @@ if [ "$1" = "--check" ]; then
     exit 0
 fi
 
-# ===== MOD --alert: DOAR alerta (ntfy) daca lipseste/e hung ceva ===========
+# ===== MODE --alert: ntfy alert ONLY, if something is missing or hung ======
 if [ "$1" = "--alert" ]; then
     missing=""
     vpn=$(vpn_state)
@@ -102,14 +102,14 @@ if [ "$1" = "--alert" ]; then
             || echo "$(date '+%H:%M') ALERTA NELIVRATA: eroare HTTP/retea ntfy"
         echo "$(date '+%H:%M') ALERTA: $missing"
     else
-        echo "$(date '+%H:%M') OK (toate proceselele ruleaza)"
+        echo "$(date '+%H:%M') OK (all processes are running)"
     fi
     exit 0
 fi
 
 # ===== MOD --supervise (cron */5): reporneste boti morti/inghetati + alerta flota =====
 if [ "$1" = "--supervise" ]; then
-    # Garda statie locala: --supervise PORNESTE boti cu cheile reale. Din checkout-ul
+    # Local-workstation guard: --supervise STARTS bots with the real keys. From the
     # de dezvoltare (WSL, /home/mariusp) refuzam. Serverul (/home/predut) ramane activ.
     case "$ROOT" in
         /home/mariusp/*) echo "$(date '+%H:%M') supervise dezactivat pe statia locala ($ROOT)"; exit 0;;
@@ -147,8 +147,8 @@ if [ "$1" = "--supervise" ]; then
             [ -f "$SUP/$label.esc" ] || { push "Bot in CRASH-LOOP" "$label ($st) de ${cnt}x in 30min — NU mai repornesc, interventie manuala"; touch "$SUP/$label.esc"; }
             echo "$(date '+%H:%M') $label CRASH-LOOP (nu repornesc)"; continue
         fi
-        # 8>&- : botul pornit NU mosteneste fd 8 (lock-ul supervise) -> fara scurgere de lock
-        # (altfel viitoarele --supervise gasesc lock-ul tinut de bot si sar "deja ruleaza" la infinit).
+        # 8>&- : the started bot does NOT inherit fd 8 (the supervise lock) -> no lock leak
+        # (otherwise later --supervise runs find the lock held by a bot and skip forever).
         ( cd "$dir" && eval "$cmd" ) 8>&-                     # restart curat ($ROOT/$VENV expandate aici)
         cnt=$((cnt + 1)); echo "$cnt $ws" > "$SUP/$label"; rm -f "$SUP/$label.esc"
         push "Bot repornit" "$label ($st) -> REPORNIT (incercarea $cnt/$MAX)"

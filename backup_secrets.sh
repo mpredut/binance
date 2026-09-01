@@ -13,7 +13,7 @@ OUT="${1:-$HOME/binance-secrets-backup}"
 case "$OUT" in "$ROOT"|"$ROOT"/*) echo "❌ destinatia NU poate fi in repo (s-ar comite secrete): $OUT"; exit 1;; esac
 
 cd "$ROOT"
-# Tot ce e gitignored = nu e in git = trebuie backup. Excludem doar regenerabilele.
+# Anything gitignored is not in git, so it needs a backup. Only regenerable files are excluded.
 LIST="$(git ls-files --others --ignored --exclude-standard \
     | grep -vE '^(myenv|\.venv)/' \
     | grep -vE '(__pycache__|\.pyc$|\.log($|\.)|\.lock$|^index\.html$|^\.claude/)')"
@@ -23,7 +23,7 @@ rm -rf "$OUT"; mkdir -p "$OUT"
 printf '%s\n' "$LIST" | tar cf - -C "$ROOT" -T - | tar xf - -C "$OUT"
 
 # Date de masina aflate intentionat in afara repo-ului. Tokenul PIA este secret
-# si este necesar pentru refacerea dedicated IP pe o instalare noua.
+# and it is required to restore the dedicated IP on a fresh install.
 mkdir -p "$OUT/_machine"
 if [ -f /home/predut/piatoken.txt ]; then
     install -m 0600 /home/predut/piatoken.txt "$OUT/_machine/piatoken.txt"
@@ -33,7 +33,7 @@ tar czf "$OUT.tar.gz" -C "$OUT" .   # latest, cale stabila pt pull-ul Windows
 chmod -R go-rwx "$OUT" 2>/dev/null || true
 chmod 600 "$OUT.tar.gz"
 
-# ISTORIC: pastreaza si o copie DATATA (ultimele KEEP zile). Fara istoric, o corupere/
+# HISTORY: also keep a DATED copy (the last KEEP days). Without history, a corruption or
 # stergere de secrete intra in backup la 03:30 si SUPRASCRIE unica copie buna.
 KEEP="${BACKUP_KEEP:-7}"
 DATED="$OUT-$(date +%Y%m%d).tar.gz"
@@ -45,4 +45,4 @@ echo "=== backup COMPLET: $N fisiere (secrete + stare) ==="
 printf '%s\n' "$LIST" | sed 's/^/    /'
 echo "Folder : $OUT"
 echo "Tarball: $OUT.tar.gz (600)  + istoric: $DATED (pastrez ultimele $KEEP)"
-echo "⚠ Copiaza tarball-ul OFF-MACHINE. Contine cheia wallet HL + toate cheile API. NU in git!"
+echo "⚠ Copy the tarball OFF-MACHINE. It holds the HL wallet key + every API key. NOT in git!"

@@ -1,33 +1,33 @@
 #!/bin/bash
 
-# ===== SINGLE-INSTANCE (flock) — împiedică două instanțe să ruleze simultan =====
-# Fără asta, o a doua instanță (ex. systemd + lansare manuală) intra în „război de
-# supervizare": fiecare reînvie procesele pe care le omoară cealaltă → DUPLICARE.
-# A doua instanță nu obține lock-ul → iese imediat.
+# ===== SINGLE INSTANCE (flock) — stops two instances from running at once =====
+# Without it, a second instance (e.g. systemd plus a manual launch) starts a
+# "supervision war": each revives the processes the other kills -> DUPLICATION.
+# The second instance does not get the lock -> it exits immediately.
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"   # radacina = locul scriptului (portabil, fara /home/predut hardcodat)
 mkdir -p "$SCRIPT_DIR/logs"   # loguri de consola in folder dedicat (nu mai in root)
 LOCK_PATH="$SCRIPT_DIR/flota_start.lock"
 exec 9>"$LOCK_PATH" || exit 1
 if ! flock -n 9; then
-    echo "❌ flota_start.sh rulează deja (lock activ: $LOCK_PATH)."
-    echo "   Pentru restart: 'systemctl restart binance' sau oprește instanța existentă."
+    echo "❌ flota_start.sh is already running (lock held: $LOCK_PATH)."
+    echo "   To restart: 'systemctl restart binance' or stop the existing instance."
     exit 1
 fi
-# lock-ul (fd 9) e ținut cât trăiește scriptul; se eliberează automat la ieșire.
+# The lock (fd 9) is held for the life of the script and released automatically on exit.
 
 VPN_RETRY_TIMEOUT=60
 PIA_CLI_TIMEOUT="${PIA_CLI_TIMEOUT:-6}"
 SLEEP_AFTER_VPN_CONNECT=3
 SLEEP_AFTER_KILL=5
-PYTHON_START_WAIT=5   # secunde să așteptăm după pornire înainte să verificăm
+PYTHON_START_WAIT=5   # Seconds to wait after starting before checking.
 
-# ===== Verific și pornesc VPN =====
+# ===== Check and start the VPN =====
 echo "🔐 Verific conexiunea VPN..."
 SECONDS_PASSED=0
 sleep 5
 pia() { timeout "$PIA_CLI_TIMEOUT" piactl "$@"; }
 while [ "$(pia get connectionstate 2>/dev/null | tr -d '\r')" != "Connected" ]; do
-    echo "⏳ VPN nu este conectat. Încerc reconectare..."
+    echo "⏳ VPN is not connected. Trying to reconnect..."
     pia connect >/dev/null 2>&1 || true
     sleep $SLEEP_AFTER_VPN_CONNECT
     SECONDS_PASSED=$((SECONDS_PASSED + SLEEP_AFTER_VPN_CONNECT))
@@ -51,22 +51,22 @@ for _d in ".venv" "myenv"; do
 done
 VENV_PATH="$SCRIPT_DIR/$VENV_DIR/bin/activate"
 if [ -z "$VENV_DIR" ] || [ ! -f "$VENV_PATH" ]; then
-    echo "❌ Niciun venv găsit (.venv / myenv) în $SCRIPT_DIR. Abort!"
+    echo "❌ No venv found (.venv / myenv) in $SCRIPT_DIR. Abort!"
     exit 1
 fi
 source "$VENV_PATH"
 
-# Verifică că python e cel din venv
+# Check that python is the one from the venv.
 PYTHON_BIN=$(which python)
 if [[ "$PYTHON_BIN" != *"$VENV_DIR"* ]]; then
-    echo "❌ Python activ nu e din venv: $PYTHON_BIN. Abort!"
+    echo "❌ The active python is not from the venv: $PYTHON_BIN. Abort!"
     exit 1
 fi
 echo "✔ Python activ: $PYTHON_BIN"
 
 # ===== Lista flotei din manifestul UNIC procs.conf (role=fleet) =====
 # Sursa unica de adevar (acelasi fisier citit de bots_start.sh + healthcheck.sh).
-# Adaugi/scoti un proces de flota -> editezi procs.conf, nu acest fisier.
+# To add/remove a fleet process, edit procs.conf, not this file.
 MANIFEST="$SCRIPT_DIR/procs.conf"
 scripts=()
 if [ -f "$MANIFEST" ]; then
@@ -81,16 +81,16 @@ if [ "${#scripts[@]}" -eq 0 ]; then
     exit 1
 fi
 
-echo "🔍 Verific existența scripturilor..."
+echo "🔍 Checking that the scripts exist..."
 for script in "${scripts[@]}"; do
     if [ ! -f "$SCRIPT_DIR/$script" ]; then
-        echo "❌ Script lipsă: $SCRIPT_DIR/$script. Abort!"
+        echo "❌ Missing script: $SCRIPT_DIR/$script. Abort!"
         exit 1
     fi
 done
-echo "✔ Toate scripturile există."
+echo "✔ All scripts are present."
 
-# ===== Omoară procesele existente =====
+# ===== Kill the existing processes =====
 for script in "${scripts[@]}"; do
     pids=$(pgrep -f "$script")
     if [ -n "$pids" ]; then
@@ -98,7 +98,7 @@ for script in "${scripts[@]}"; do
         kill $pids
         sleep 1
         if pgrep -f "$script" > /dev/null; then
-            echo "⚠ Forțez kill -9 pentru $script"
+            echo "⚠ Forcing kill -9 on $script"
             kill -9 $pids
         fi
     fi
@@ -123,7 +123,7 @@ done
 
 sleep "$PYTHON_START_WAIT"
 
-# Verificăm fiecare proces
+# Check each process.
 for i in "${!scripts[@]}"; do
     script="${scripts[$i]}"
     PID="${PIDS[$i]}"
@@ -132,7 +132,7 @@ for i in "${!scripts[@]}"; do
     if kill -0 "$PID" 2>/dev/null; then
         echo "✔ Pornit $script (PID=$PID) → $log"
     else
-        echo "❌ $script a crăpat la pornire! Vezi log-ul:"
+        echo "❌ $script crashed on startup! See the log:"
         tail -20 "$log"
         FAILED+=("$script")
     fi
@@ -141,25 +141,25 @@ done
 
 # ===== Raport final =====
 if [ ${#FAILED[@]} -eq 0 ]; then
-    echo "🎯 Toate scripturile rulează!"
+    echo "🎯 All scripts are running!"
 else
-    echo "⚠ Scripturi eșuate: ${FAILED[*]}"
+    echo "⚠ Failed scripts: ${FAILED[*]}"
     exit 1
 fi
 
-# Afișăm toate procesele Python care rulează
+# Show every running Python process.
 echo
 echo "Procese Python active:"
 ps aux | grep '[p]ython'
 
 # ===== Watchdog (cron la 5 min) — instalat/refresh idempotent =====
-# Rulează DOAR pe această mașină (cea care pornește monitorul). Căile sunt derivate
-# din mediul curent (SCRIPT_DIR + python-ul din venv activat), deci e corect oriunde.
+# Runs ONLY on this machine (the one starting the monitor). The paths are derived
+# from the current environment (SCRIPT_DIR + the activated venv python), so it is portable.
 WATCHDOG_PY="$(command -v python)"
 # Doua watchdog-uri: prospetime cache + anomalii (rata erori din loguri).
 _WD_CACHE="*/2 * * * * cd $SCRIPT_DIR && $WATCHDOG_PY $SCRIPT_DIR/verify_tools/watchdogfor_cacheandconfig.py >> $SCRIPT_DIR/logs/watchdog.log 2>&1"
 _WD_ANOM="*/5 * * * * cd $SCRIPT_DIR && $WATCHDOG_PY $SCRIPT_DIR/verify_tools/watchdogfor_anomaly.py >> $SCRIPT_DIR/logs/anomaly_watchdog.log 2>&1"
-# Markere de curatat din crontab (inclusiv numele VECHI, ca sa nu ramana orfane dupa rename).
+# Markers to clean from crontab (including OLD names, so nothing is orphaned after a rename).
 _WD_STRIP='cache_watchdog\.py|log_anomaly_watchdog\.py|watchdogfor_cache\.py|watchdogfor_cacheandconfig\.py|watchdogfor_anomaly\.py|price_monitor_watchdog\.py'
 
 install_watchdog() {
@@ -172,8 +172,8 @@ remove_watchdog() {
 }
 install_watchdog
 
-# La Ctrl+C / SIGTERM: oprim procesele ȘI scoatem watchdog-ul, ca o oprire INTENȚIONATĂ
-# să nu declanșeze alarma „monitorul s-a oprit". Repornirea îl reinstalează.
+# On Ctrl+C / SIGTERM: stop the processes AND remove the watchdog, so an INTENTIONAL
+# shutdown does not trigger the "monitor stopped" alarm. Restarting reinstalls it.
 cleanup() {
     echo
     echo "🛑 Oprire..."
@@ -185,11 +185,11 @@ trap cleanup INT TERM
 
 echo "All good. Supervizez procesele (repornesc orice cade). <ctrl c> = stop."
 
-# ===== Buclă de SUPERVIZARE =====
-# În loc de `wait` (care se întoarce doar dacă mor TOATE procesele), verificăm
-# periodic fiecare PID și repornim individual orice proces mort. Așa, dacă pică
-# UN singur script (ex. market_alerts), e repornit în max SUPERVISE_INTERVAL,
-# nu rămâne mort până cad toate. systemd rămâne plasa de siguranță pt „a căzut tot".
+# ===== SUPERVISION loop =====
+# Instead of `wait` (which returns only when ALL processes die), we check each
+# PID periodically and restart any dead process individually. That way, if a
+# SINGLE script dies (e.g. market_alerts) it is restarted within SUPERVISE_INTERVAL,
+# not left dead until everything falls. systemd stays the safety net for "everything died".
 SUPERVISE_INTERVAL=30
 while true; do
     for i in "${!scripts[@]}"; do

@@ -1,15 +1,15 @@
 #!/bin/bash
-# bots_start.sh — porneste TOTI botii (role=bot) din manifestul UNIC procs.conf.
+# bots_start.sh — starts ALL bots (role=bot) from the SINGLE manifest procs.conf.
 # Sursa unica de adevar (acelasi fisier citit de flota_start.sh + healthcheck.sh):
-# adaugi/scoti/modifici un bot -> editezi procs.conf, NU acest fisier.
+# To add/remove/change a bot, edit procs.conf, NOT this file.
 #
 # NOTE pastrate din versiunea per-bot:
-#  - NU stergem fisiere de stare (.state_*.json): botii isi reiau pozitia din ele
-#    (un start "curat" ar cumpara o intrare noua peste pozitia veche). Aici doar pkill+restart.
+#  - We do NOT delete state files (.state_*.json): the bots resume their position from
+#    them (a "clean" start would buy a new entry on top of the old position). Just pkill+restart.
 #  - Ordinea din procs.conf conteaza: kraken_cachemanager INAINTEA kraken_bot (fisierul de
 #    fills trebuie sa existe la prima citire).
 #  - dn_bot / binance trailing au nevoie de venv (eth_account / SDK Binance) — comanda lor
-#    din manifest face 'source $VENV/bin/activate' inline; kraken/t212 merg pe python3 de sistem.
+#    from the manifest does 'source $VENV/bin/activate' inline; kraken/t212 run on system python3.
 ROOT="$HOME/binance"
 MANIFEST="$ROOT/procs.conf"
 # venv cu SDK-urile (prefera .venv, cade pe myenv) — expandat in comenzile din manifest ($VENV)

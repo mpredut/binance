@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # deploy_providers.sh — DEPLOY sigur de cod: git pull -> GATE de import (facada) -> restart
-# flota -> verificare. Singurul script care face deploy (flota_start/bots_start=launchere,
-# healthcheck=supervizor). Lista flotei vine din procs.conf (role=fleet) — NU mai e hardcodata.
+# fleet -> verification. The only script that deploys (flota_start/bots_start are launchers,
+# healthcheck is the supervisor). The fleet list comes from procs.conf (role=fleet), not hardcoded.
 # Restart flota = pkill procesele role=fleet; flota_start (systemd) le reia in <=30s cu codul nou.
 set -uo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -16,10 +16,10 @@ echo "=== SANITY (structura providers) ==="
 ls providers/market_api.py binance_api/trailing_stop.py >/dev/null && echo "  providers ok"
 ls market_api.py 2>/dev/null && echo "  ⚠ ROOT INCA are market_api.py" || echo "  root curat ok"
 
-echo "=== GATE import facada (nu repornesc daca nu se incarca) ==="
+echo "=== facade import GATE (no restart if it does not load) ==="
 "$PY" -c 'from providers.market_api import api; print("  facada OK -", len(api._providers), "provideri:", [p.name for p in api._providers])' || { echo "  GATE FAILED — NU repornesc"; exit 1; }
 
-# Lista flotei din manifestul UNIC (role=fleet), nu hardcodata.
+# The fleet list comes from the SINGLE manifest (role=fleet), not hardcoded.
 fleet="$(awk -F'|' '!/^#/ && $7=="fleet" {print $1}' "$MANIFEST")"
 [ -n "$fleet" ] || { echo "fara role=fleet in $MANIFEST"; exit 1; }
 

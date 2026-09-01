@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ruleaza hl_bot.py (strategia directionala HL) cu venv-ul care are SDK-ul
+# Runs hl_bot.py (the directional HL strategy) with the venv that has the SDK
 # Hyperliquid (eth_account). Portabil: myenv (server) -> .venv (local) -> python3.
 #   ./hl_run.sh --price     ./hl_run.sh --paper     ./hl_run.sh --balance
 HERE="$(cd "$(dirname "$0")" && pwd)"

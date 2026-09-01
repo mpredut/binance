@@ -1,6 +1,6 @@
 #!/bin/bash
 # deadman_switch.sh — alerta ntfy daca serverul Linux moare (crash/reboot/power-off),
-# nu doar daca un bot/proces cade (asta il face deja healthcheck.sh --supervise).
+# not just when a bot/process dies (healthcheck.sh --supervise already covers that).
 #
 # Cum functioneaza: la fiecare rulare (cron */15 min) impingem un mesaj ntfy PROGRAMAT
 # (In: 35m) mai departe in timp, folosind acelasi sequence-id in URL
@@ -9,8 +9,8 @@
 # limita gratuita. 96/zi lasa loc alertelor reale. Pattern-ul este documentat ca
 # "dead man's switch": https://docs.ntfy.sh/publish/#scheduled-delivery
 #
-# Daca serverul moare (sau doar cronul), nimeni nu mai vine sa impinga mesajul din
-# coada ntfy si acesta se livreaza singur peste 35 minute — alerta ajunge chiar daca
+# If the server dies (or just cron does), nobody pushes the queued ntfy message
+# further out and it delivers itself 35 minutes later — the alert arrives even if
 # masina e complet oprita/fara curent.
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 TOPIC=$(grep -hs '^NTFY_TOPIC_ERROR=' "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '" ')
@@ -22,8 +22,8 @@ fi
 
 HOST=$(hostname)
 # --retry 4 --retry-all-errors (8 aug): reincearca push-ul si la blip-uri DNS/retea tranzitorii
-# (NameResolutionError), nu doar la 5xx. Un blip tipic (~30-40s) e depasit intr-o singura rulare
-# -> evita o alertă falsă când server-ul e viu, dar rezolvarea DNS a picat temporar.
+# (NameResolutionError), not only on 5xx. A typical blip (~30-40s) is ridden out in one run
+# -> avoids a false alert when the server is alive but DNS resolution dropped briefly.
 # Worst-case ~4x(10s+5s)=60s, mult sub cadenta de 15 min.
 curl --fail-with-body -sS -m 10 --retry 4 --retry-delay 5 --retry-all-errors --retry-connrefused \
     -H "In: 35m" -H "Title: SERVER OPRIT ($HOST)" \
