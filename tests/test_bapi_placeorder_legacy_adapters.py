@@ -1,6 +1,6 @@
 """Caracterizare pentru API-urile legacy de plasare Binance.
 
-Aceste functii raman compatibile pentru cod extern/arhivat, dar trebuie sa intre
+These functions stay compatible for external/archived code, but they must go
 prin acelasi pipeline guardat ca apelantii moderni ai ``MarketApi.place``.
 """
 

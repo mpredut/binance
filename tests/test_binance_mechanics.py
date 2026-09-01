@@ -1,11 +1,11 @@
 """
 Teste pt MECANICA de plasare Binance extrasa (30 iul) — adjust_price_and_cancel_opposite
-+ place_order_mechanics — si pt hook-urile BinanceProvider care le expun catre pipeline-ul
++ place_order_mechanics — and for the BinanceProvider hooks that expose them to the
 agnostic (Instrument.place). Reteaua e mock-uita integral (patch pe binance_api.bapi +
 functiile de dispatch); NICIUN apel real.
 
 Scop: acopera FLIP-ul (guards_internally=False -> Binance prin pipeline agnostic),
-care nu e atins de suita existenta (FakeProvider / replay).
+which the existing suite does not cover (FakeProvider / replay).
 """
 import os
 import sys
@@ -45,7 +45,7 @@ class TestAdjustPriceAndCancelOpposite(unittest.TestCase):
             out = po.adjust_price_and_cancel_opposite("SELL", SYMBOL, 95.0, cancel_opposite=True)
         # pret cerut 95 < current 100 -> clamp la 100, apoi *1.001 -> round
         self.assertEqual(out, round(max(95.0, 100.0) * 1.001, 0))
-        cancel.assert_called_once_with(SYMBOL, "1")   # doar BUY-ul peste pret (110)
+        cancel.assert_called_once_with(SYMBOL, "1")   # only the BUY above the price (110)
 
     def test_no_cancel_when_disabled(self):
         with patch.object(po.api, "get_current_price", return_value=100.0), \

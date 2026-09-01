@@ -90,7 +90,7 @@ class PriceAlertLinkTests(unittest.TestCase):
 
 
 class TestNewCoinDictRobustness(unittest.TestCase):
-    """Alertele de monedă nouă sunt dict-uri (nu PriceAlert) — nu trebuie să crape."""
+    """New-coin alerts are dicts (not PriceAlert) — they must not crash."""
 
     NEW_COIN = {
         "type": "new_coin_discovered", "source": "coinmarketcap",
@@ -117,16 +117,16 @@ class TestNewCoinDictRobustness(unittest.TestCase):
         self.assertIn("TAO", msg)
 
     def test_send_does_not_raise_on_dict(self):
-        # file activ, fără rețea — nu trebuie excepție pe dict
+        # File channel active, no network — a dict must not raise
         AlertNotifier.send(self.NEW_COIN, enable_console=False, enable_file=True,
                            enable_email=False, enable_phone_webhook=False)
 
     def test_non_ascii_symbol_preserved(self):
-        # simbol non-ASCII (ex. '小蝌蚪') trebuie păstrat, nu eliminat
+        # A non-ASCII symbol (e.g. '小蝌蚪') must be preserved, not stripped
         coin = dict(self.NEW_COIN, symbol="小蝌蚪", name="小蝌蚪 Coin")
         self.assertEqual(AlertNotifier.alert_symbol(coin), "小蝌蚪")
         self.assertIn("小蝌蚪", AlertNotifier.format_batch_message([coin]))
-        # header UTF-8 passthrough: octeții UTF-8 trecuți prin latin-1, decodabili înapoi
+        # UTF-8 header passthrough: UTF-8 bytes carried through latin-1, decodable back
         hdr = AlertNotifier.utf8_header("(1): 小蝌蚪")
         self.assertEqual(hdr.encode("latin-1").decode("utf-8"), "(1): 小蝌蚪")
 

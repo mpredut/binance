@@ -3,11 +3,11 @@ Teste CONSOLIDATE pt extragerea constantelor in fisiere de config (28 iul —
 unificate din 4 fisiere aproape identice: test_{tradeall,monitortrades,rtrade,
 assetguardian}_config_extraction.py, ~56 teste sparse -> table-driven aici).
 
-Intentia PASTRATA integral pentru modulele legacy si stricta pentru AssetGuardian:
-  - DEFAULTS: valorile incarcate din config sunt cele versionate asteptate;
+The intent is PRESERVED in full for the legacy modules and strict for AssetGuardian:
+  - DEFAULTS: the values loaded from config are the expected versioned ones;
     AssetGuardian nu mai are fallback-uri ascunse in cod.
   - OVERRIDE: setarea variabilei de mediu + reload chiar schimba valoarea
-    (mecanismul de override functioneaza real, nu doar aparent).
+    (the override mechanism really works, not just apparently).
   - Specific per modul: siguranta importului (rtrade/assetguardian NU pornesc
     bucla live la import), cod mort eliminat (monitortrades SYMBOL_PARAMS),
     asimetria BUY/SELL pastrata (rtrade).
@@ -158,7 +158,7 @@ class TestModuleSpecifics(unittest.TestCase):
         # rtrade rula INAINTE bot.run() (bucla LIVE) neconditionat la import;
         # mutat sub __main__ -> importul trebuie sa fie sigur.
         self.assertFalse(hasattr(rt, "bot"),
-                         "import rtrade nu trebuie sa instantieze/porneasca botul")
+                         "importing rtrade must not instantiate or start the bot")
 
     def test_assetguardian_import_does_not_run_forever(self):
         self.assertTrue(hasattr(ag, "run_forever"))   # exista, dar guard-ul __main__ nu l-a rulat

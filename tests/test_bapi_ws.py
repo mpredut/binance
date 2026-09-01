@@ -22,7 +22,7 @@ class BapiWsShutdownHandlingTests(unittest.TestCase):
 
 
 class TestUserDataClassify(unittest.TestCase):
-    """_classify decide între ping / răspuns comandă / eveniment real."""
+    """_classify decides between ping / command reply / real event."""
     C = staticmethod(bapi_ws.BinanceUserDataStream._classify)
 
     def test_control_messages(self):
@@ -47,12 +47,12 @@ class TestUserDataClassify(unittest.TestCase):
 
 class TestWSBaseAndUserData(unittest.TestCase):
     def test_market_manager_no_autostart_on_import(self):
-        # importul NU pornește socket-ul (side-effect eliminat)
+        # The import does NOT start the socket (side effect removed)
         self.assertFalse(bapi_ws.bapi_ws_manager.is_running)
 
     def test_userdata_callbacks_default_noop(self):
         s = bapi_ws.BinanceUserDataStream(on_event=lambda payload: None)
-        s.on_available(True); s.on_healthy(); s.on_unhealthy()   # nu trebuie să arunce
+        s.on_available(True); s.on_healthy(); s.on_unhealthy()   # must not raise
 
     def test_userdata_health_marks_call_callbacks(self):
         seen = {}

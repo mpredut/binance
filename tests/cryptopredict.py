@@ -13,14 +13,14 @@ class CryptoPredictor:
         """
         Constructorul clasei CryptoPredictor.
         :param symbol: Simbolul criptomonedei (ex. "BTC/USDT").
-        :param timeframe: Intervalul de timp pentru datele colectate (ex. "20m" pentru 20 de minute).
-        :param look_back: Numărul de minute istorice folosite pentru predicție.
-        :param model_path: Calea fișierului unde este salvat modelul.
-        :param update_interval: Intervalul de timp (în secunde) pentru actualizarea modelului.
-        :param predict_interval: Intervalul de timp (în secunde) pentru a face o predicție.
+        :param timeframe: Time interval of the collected data (e.g. "20m" for 20 minutes).
+        :param look_back: Number of historical minutes used for the prediction.
+        :param model_path: Path of the file where the model is saved.
+        :param update_interval: Interval (in seconds) at which the model is updated.
+        :param predict_interval: Interval (in seconds) at which a prediction is made.
         """
         self.symbol = symbol
-        self.timeframe = timeframe  # Modifică aici la "20m" pentru datele de 20 minute
+        self.timeframe = timeframe  # Change this to "20m" for 20-minute data.
         self.look_back = look_back
         self.model_path = model_path
         self.scaler = MinMaxScaler(feature_range=(0, 1))
@@ -29,7 +29,7 @@ class CryptoPredictor:
         self.predict_interval = predict_interval
 
     def fetch_data(self, limit=500):
-        """ Colectează datele istorice de la Binance """
+        """ Collect the historical data from Binance """
         exchange = ccxt.binance()
         ohlcv = exchange.fetch_ohlcv(self.symbol, timeframe=self.timeframe, limit=limit)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
@@ -37,7 +37,7 @@ class CryptoPredictor:
         return df
 
     def preprocess_data(self, data):
-        """ Normalizează și structurează datele pentru antrenarea LSTM """
+        """ Normalise and shape the data for LSTM training """
         data_close = data[['close']].values
         scaled_data = self.scaler.fit_transform(data_close)
         
@@ -51,7 +51,7 @@ class CryptoPredictor:
         return X, y
 
     def build_model(self):
-        """ Construiește modelul LSTM cu Dropout """
+        """ Build the LSTM model with Dropout """
         model = Sequential()
         model.add(LSTM(units=50, return_sequences=True, input_shape=(self.look_back, 1)))
         model.add(Dropout(0.2))
@@ -65,7 +65,7 @@ class CryptoPredictor:
         self.model = model
 
     def train_model(self, epochs=50, batch_size=32):
-        """ Antrenează modelul și salvează-l la final """
+        """ Train the model and save it at the end """
         data = self.fetch_data()
         X_train, y_train = self.preprocess_data(data)
         
@@ -74,50 +74,50 @@ class CryptoPredictor:
         
         self.model.fit(X_train, y_train, epochs=epochs, batch_size=batch_size)
         self.model.save(self.model_path)
-        print("Modelul a fost antrenat și salvat.")
+        print("The model was trained and saved.")
 
     def load_model(self):
-        """ Încarcă modelul salvat pentru predicții """
+        """ Load the saved model for predictions """
         if os.path.exists(self.model_path):
             self.model = load_model(self.model_path)
-            print("Modelul a fost încărcat.")
+            print("The model was loaded.")
         else:
-            print("Modelul nu a fost găsit. Antrenează-l mai întâi.")
+            print("The model was not found. Train it first.")
 
     def predict_next(self):
-        """ Predicția prețului pentru următoarea perioadă de 20 de minute """
+        """ Price prediction for the next 20-minute period """
         data = self.fetch_data(limit=self.look_back)
         data_close = data[['close']].values
         scaled_data = self.scaler.transform(data_close)
         
-        last_days = scaled_data[-self.look_back:]  # Ultimele 60 de minute pentru predicție
+        last_days = scaled_data[-self.look_back:]  # The last 60 minutes, used for the prediction.
         last_days = np.reshape(last_days, (1, self.look_back, 1))
         
         predicted_price = self.model.predict(last_days)
-        predicted_price = self.scaler.inverse_transform(predicted_price)  # Inversează normalizarea
+        predicted_price = self.scaler.inverse_transform(predicted_price)  # Undo the normalisation.
         return predicted_price[0][0]
 
     def start_update_service(self):
-        """ Actualizează modelul periodic """
+        """ Update the model periodically """
         while True:
             print("Actualizare model...")
-            self.train_model(epochs=1, batch_size=32)  # Antrenează periodic
+            self.train_model(epochs=1, batch_size=32)  # Train periodically.
             time.sleep(self.update_interval)
 
     def start_prediction_service(self):
-        """ Serviciu de predicție periodică """
+        """ Periodic prediction service """
         while True:
             predicted_price = self.predict_next()
-            print(f"Prețul estimat pentru următoarea perioadă: {predicted_price}")
+            print(f"Estimated price for the next period: {predicted_price}")
             time.sleep(self.predict_interval)
 
 # Crearea obiectului CryptoPredictor
 predictor = CryptoPredictor()
 
-# Încarcă modelul salvat
+# Load the saved model.
 predictor.load_model()
 
-# Rulează serviciul de actualizare periodică și cel de predicție în paralel
+# Run the periodic update service and the prediction service in parallel.
 update_thread = threading.Thread(target=predictor.start_update_service, name="start_update_service")
 predict_thread = threading.Thread(target=predictor.start_prediction_service, name="start_prediction_service")
 

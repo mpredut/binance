@@ -1,13 +1,13 @@
 """
-Teste pentru binance_api.bapi_placeorder.if_place_safe_order() dupa refactor-ul de
+Tests for binance_api.bapi_placeorder.if_place_safe_order() after the refactor of
 30 iul (delegare la order_guard.daily_limit_guard() in loc de o a doua implementare
 inline a plafonului zilnic + anti-spam — vezi order_guard.py, commit-ul care a facut
 Binance sa foloseasca aceeasi functie ca Kraken/Hyperliquid prin Instrument.place()).
 
-Nicio functie testata aici nu atinge reteaua: get_trade_orders si get_current_price
+No function tested here touches the network: get_trade_orders and get_current_price
 sunt mock-uite direct (patch pe modulul-sursa binance_api.bapi_allorders/binance_api.bapi
-— BinanceProvider.get_orders() e doar un wrapper subtire peste EXACT acelasi apel,
-deci patch-ul afecteaza ambele cai, cea veche (apiorders direct) si cea noua
+— BinanceProvider.get_orders() is only a thin wrapper over EXACTLY the same call,
+so the patch covers both paths, the old one (apiorders directly) and the new one
 (prin BinanceProvider)."""
 import os
 import sys
@@ -39,7 +39,7 @@ class IfPlaceSafeOrderDailyLimitTestCase(unittest.TestCase):
         with patch("binance_api.bapi_allorders.get_trade_orders", side_effect=fake_get_trade_orders), \
              patch("binance_api.bapi.get_current_price", return_value=100.0):
             # bypass_profit_guard=True: izoleaza plafonul zilnic/anti-spam de gardul
-            # de profit (care ar cere si mock pe last_opposite_fill) — comportament
+            # profit guard (which would also need last_opposite_fill mocked) — behaviour
             # PREEXISTENT: bypass_profit_guard sare DOAR profit_guard, plafonul zilnic
             # ramane activ (vezi docstring if_place_safe_order).
             return po.if_place_safe_order("BUY", SYMBOL, 100.0, 1.0,

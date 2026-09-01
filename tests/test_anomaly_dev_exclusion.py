@@ -1,7 +1,7 @@
 """watchdogfor_anomaly: logurile DEV/backtest (backtest_cycle.log, refresh_dev.log,
-backtest*.log) sunt excluse din scanare — tracebacks de acolo sunt de pe masina de
-test (pilot backtest pe runner.py), NU probleme de flota LIVE. Fara excludere,
-anomaly-watchdog alerta fals 'Verifica botii afectati' pentru esecuri de pe dev."""
+backtest*.log) are excluded from the scan — tracebacks there come from the test
+machine (backtest pilot on runner.py), NOT LIVE fleet problems. Without the
+exclusion the anomaly watchdog falsely alerted about dev failures."""
 import os
 import sys
 import unittest

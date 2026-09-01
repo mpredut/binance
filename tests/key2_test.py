@@ -1,13 +1,13 @@
 """
-Teste pentru helper-ele simple peste clientul Binance.
-Rulează cu mock (fără rețea/chei) → deterministe. Pentru un smoke REAL pe API,
-rulează direct: `python tests/key2_test.py` (vezi blocul __main__).
+Tests for the small helpers around the Binance client.
+Runs with mocks (no network/keys) -> deterministic. For a REAL API smoke test,
+run it directly: `python tests/key2_test.py` (see the __main__ block).
 """
 import unittest
 from unittest.mock import MagicMock
 
 
-# ─── funcții testabile (clientul e injectat → mockabil) ───────────────────────
+# ─── testable functions (the client is injected -> mockable) ────────────────
 def get_btc_price(client):
     return client.get_symbol_ticker(symbol="BTCUSDT")["price"]
 
@@ -47,7 +47,7 @@ class TestBinanceHelpers(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    # smoke REAL pe API (necesită chei/rețea) — o singură citire, fără buclă infinită
+    # REAL API smoke test (needs keys/network) — a single read, no infinite loop
     import time
     from binance.client import Client
     from keys.apikeys import api_key, api_secret

@@ -1,7 +1,7 @@
 """
 Test pentru crearea unui userDataStream (listenKey) la Binance.
-Rulează cu mock (fără rețea/chei) → determinist. Pentru un smoke REAL pe API,
-rulează direct: `python tests/key_test.py` (vezi blocul __main__).
+Runs with mocks (no network/keys) -> deterministic. For a REAL API smoke test,
+run it directly: `python tests/key_test.py` (see the __main__ block).
 """
 import unittest
 from unittest.mock import patch, MagicMock
@@ -9,9 +9,9 @@ from unittest.mock import patch, MagicMock
 import requests
 
 
-# ─── funcție testabilă ────────────────────────────────────────────────────────
+# ─── testable function ──────────────────────────────────────────────────────
 def create_user_data_stream(api_key):
-    """POST /api/v3/userDataStream cu header-ul X-MBX-APIKEY → întoarce JSON-ul."""
+    """POST /api/v3/userDataStream with the X-MBX-APIKEY header -> returns the JSON."""
     response = requests.post(
         "https://api.binance.com/api/v3/userDataStream",
         headers={"X-MBX-APIKEY": api_key},
@@ -36,6 +36,6 @@ class TestUserDataStream(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    # smoke REAL pe API (necesită cheie/rețea)
+    # REAL API smoke test (needs a key/network)
     from keys.apikeys import api_key
     print(create_user_data_stream(api_key))

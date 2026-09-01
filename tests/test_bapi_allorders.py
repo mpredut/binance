@@ -11,8 +11,8 @@ class TestPaginateMyTrades(unittest.TestCase):
         client.get_my_trades.return_value = [{"id": i, "time": 1} for i in range(10)]
         out = ao.paginate_my_trades(client, "BTCUSDC", 0, limit=1000)
         self.assertEqual(len(out), 10)
-        self.assertEqual(client.get_my_trades.call_count, 1)   # < limit → o singură cerere
-        # prima pagină pe startTime, fără fromId
+        self.assertEqual(client.get_my_trades.call_count, 1)   # < limit -> a single request
+        # First page by startTime, without fromId
         _, kw = client.get_my_trades.call_args_list[0]
         self.assertEqual(kw.get("startTime"), 0)
         self.assertNotIn("fromId", kw)
@@ -37,7 +37,7 @@ class TestPaginateMyTrades(unittest.TestCase):
     def test_exact_multiple_of_limit_stops_on_empty(self):
         client = MagicMock()
         page1 = [{"id": i, "time": 1} for i in range(2)]
-        client.get_my_trades.side_effect = [page1, []]          # exact limit → mai cere o dată
+        client.get_my_trades.side_effect = [page1, []]          # Exactly at the limit -> it asks once more
         out = ao.paginate_my_trades(client, "X", 0, limit=2)
         self.assertEqual(len(out), 2)
         self.assertEqual(client.get_my_trades.call_count, 2)

@@ -1,4 +1,4 @@
-"""Caracterizare: importurile runtime nu pornesc rețea/cache-uri în fundal."""
+"""Characterisation: runtime imports do not start network or caches in the background."""
 
 import os
 import subprocess
@@ -16,7 +16,7 @@ class RuntimeImportSafetyTest(unittest.TestCase):
             import importlib
 
             # Simuleaza checkout-ul CI: pachetul keys poate exista, dar fisierul
-            # secret keys/apikeys.py nu este versionat.
+            # The secret keys/apikeys.py is not versioned.
             keys = types.ModuleType("keys")
             keys.__path__ = []
             sys.modules["keys"] = keys
@@ -30,7 +30,7 @@ class RuntimeImportSafetyTest(unittest.TestCase):
                 raise AssertionError("Binance bapi a fost importat eager")
             T212Provider()  # constructie lazy, fara chei T212/Binance
             if market_api.api.provider_by_name("t212") is None:
-                raise AssertionError("T212 lipseste din registry dupa import direct")
+                raise AssertionError("T212 is missing from the registry after a direct import")
 
             from binance_api import bapi_ws
             if bapi_ws.api_key_ws:

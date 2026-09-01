@@ -47,7 +47,7 @@ class HypeCandidatesTest(unittest.TestCase):
             by_name["trail_profit_floor_sl18"].overrides,
             {"tp_trail_profit_floor_pct": 1.0, "stop_loss_pct": 18.0},
         )
-        # decuplat: doar profit-floor, fara override de stop (mosteneste 12.5 baseline)
+        # Decoupled: profit floor only, no stop override (inherits the 12.5 baseline)
         self.assertEqual(
             by_name["trail_profit_floor_sl125"].overrides,
             {"tp_trail_profit_floor_pct": 1.0},

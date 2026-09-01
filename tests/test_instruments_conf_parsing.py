@@ -11,8 +11,8 @@ de buy_budget/max_budget nu functiona niciodata, desi parea configurata.
 Acoperire:
   - Fiecare parametru NUMERIC mt.* (gain/lost/maxage_days/hardtp/
     hardtp_fraction/hardtp_cooldown_h/buy_budget/max_budget) al oricarui
-    instrument ENABLED, DACA e prezent in fisier, trebuie sa parseze la un
-    float valid (nu None din cauza unui comentariu inline scapat).
+    ENABLED instrument, IF present in the file, must parse to a valid
+    float (not None because of a stray inline comment).
   - Regresie directa: BINANCE_BTC/BINANCE_TAO (buy_budget=250, max_budget=3500,
     adaugate azi) si KRAKEN_HYPE (buy_budget=200, max_budget=700, reparate azi).
 """
@@ -31,9 +31,9 @@ NUMERIC_MT_KEYS = ["gain", "lost", "maxage_days", "hardtp", "hardtp_fraction",
 
 class TestNoInlineCommentCorruption(unittest.TestCase):
     """Pentru fiecare instrument mt.*, orice cheie NUMERICA prezenta in
-    instruments.conf trebuie sa parseze la un float — daca lipseste complet,
-    e OK (param() intoarce default-ul din cod), dar daca fisierul CHIAR are
-    linia, ea nu trebuie sa fie corupta de un comentariu inline scapat."""
+    instruments.conf must parse to a float — if it is missing entirely that is
+    fine (param() returns the code default), but if the file DOES have the
+    line, it must not be corrupted by a stray inline comment."""
 
     def test_all_enabled_mt_instruments_parse_numeric_params(self):
         instruments = ic.load_instruments()
@@ -65,9 +65,9 @@ class TestNoInlineCommentCorruption(unittest.TestCase):
 
 
 def _raw_param_presence():
-    """Citeste instruments.conf DIRECT (nu prin Instrument) ca sa stim, per
-    sectiune, ce chei mt.* sunt DECLARATE in fisier (indiferent daca parseaza
-    corect sau nu) — folosit doar ca sa nu testam chei care lipsesc intentionat."""
+    """Read instruments.conf DIRECTLY (not through Instrument) so we know, per
+    section, which mt.* keys are DECLARED in the file (whether or not they parse
+    correctly) — used only so we do not test keys that are intentionally absent."""
     import configparser
     path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "instruments.conf")
     cp = configparser.ConfigParser()

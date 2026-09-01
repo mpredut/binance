@@ -9,13 +9,13 @@ with open(old_file, "r") as f:
 
 old_items = old_data.get("items", [])
 
-# transformăm lista de liste în lista de dict-uri
+# Turn the list of lists into a list of dicts.
 new_items = [
     {"timestamp": ts, "price": price}
     for ts, price in old_items
 ]
 
-# determinăm ultimul timestamp pentru fetchtime
+# Determine the last timestamp used for fetchtime.
 last_ts = new_items[-1]["timestamp"] if new_items else 0
 
 new_data = {
@@ -30,5 +30,5 @@ new_data = {
 with open(new_file, "w") as f:
     json.dump(new_data, f, indent=2)
 
-print(f"Conversie completă → {new_file}")
+print(f"Conversion complete -> {new_file}")
 

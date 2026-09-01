@@ -1,12 +1,12 @@
 """test_backtest_annotations.py — valideaza adnotarile "# BACKTEST: ..." din
-fisierele de config (UNIFIED_BACKTEST_PLAN.md §5: "un test simplu care verifica
+the config files (UNIFIED_BACKTEST_PLAN.md §5: "a simple test that checks
 ca fiecare cheie din adnotare chiar exista in config + grila e bine formata").
 
-Pazeste erorile TACUTE care ar face pilotul (scheduled_pilot.py) sa ruleze pe
+It guards the SILENT errors that would make the pilot (scheduled_pilot.py) run on
 o grila stricata fara sa se observe:
-  - cheie adnotata care nu mai exista / typo (scan nu o intoarce -> nimic de testat,
+  - an annotated key that no longer exists / a typo (scan returns nothing -> nothing
     dar verificam ca fiecare cheie intoarsa are o valoare LIVE citibila);
-  - grila cu valori ne-numerice sau cu < 2 valori (nu are ce sweepui);
+  - a grid with non-numeric values or fewer than 2 values (nothing to sweep);
   - DERIVA: valoarea LIVE de azi a iesit din intervalul testat [min, max] al
     grilei — semnal ca grila a ramas in urma (NU cerem apartenenta EXACTA: pilotul
     aplica media, ex. TAO mt.lost=5.25 nu e punct de grila, dar e in interval).

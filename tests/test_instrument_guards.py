@@ -36,7 +36,7 @@ class _FakeProvider(MarketDataProvider):
         self._name = name
         self._price = price
         self._orders = []   # [{"side","price","qty","timestamp"(ms)}]
-        self.placed = []    # apeluri REALE catre place_order (dupa toate gate-urile)
+        self.placed = []    # REAL calls to place_order (after every gate)
         self.status_calls = []
 
     @property
@@ -78,7 +78,7 @@ class _FakeProvider(MarketDataProvider):
 
 class _GuardsInternallyProvider(_FakeProvider):
     """Ca Binance: are deja propriul lant de gard -> Instrument.place() trebuie sa
-    SARA complet peste cele 4 protectii agnostice (fara cooldown, fara daily-limit)."""
+    SKIPS all 4 agnostic protections entirely (no cooldown, no daily limit)."""
     def guards_internally(self):
         return True
 
@@ -101,7 +101,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         import order_retry as _oq
         _oq.QUEUE_FILE = os.path.join(self._tmp, "order_retry_queue.jsonl")
         _oq.LOCK_FILE = os.path.join(self._tmp, "order_retry_queue.lock")
-        # pin explicit — testele nu trebuie sa depinda de kill-switch-ul din config live
+        # Explicit pin — the tests must not depend on the kill switch in the live config
         _oq.RETRY_ENABLED = True
         _oq.RETRY_DEDUP = True
 
@@ -151,12 +151,12 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         # 30 iul, fix: monitortrades.py (sbs=MT_GUARD_WINDOW_DAYS, implicit 12 ZILE) si
         # tradeall.py (14 zile) suprascriu safeback_seconds la fiecare apel real — defaultul
         # din config (48h) e aproape niciodata folosit efectiv. instruments.conf are deja
-        # [KRAKEN_HYPE] enabled=yes sub "mt", deci acelasi sbs se aplica si acolo.
+        # [KRAKEN_HYPE] enabled=yes under "mt", so the same sbs applies there too.
         p = _FakeProvider()
         inst = self._inst(p)
         for _ in range(60):
             p.seed_trade("BUY", age_sec=5 * 24 * 3600)   # 5 zile in urma -> AFARA din 48h implicit
-        order = inst.place("BUY", 100.0, 1.0)   # fara override -> defaultul (48h) nu le vede
+        order = inst.place("BUY", 100.0, 1.0)   # No override -> the default (48h) does not see them
         self.assertIsNotNone(order)
 
     def test_safeback_seconds_override_sees_older_trades_and_blocks(self):
@@ -206,7 +206,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
             "BUY", 101.0, 1.0, smart=False, caller_owns_retry=True,
             bypass_profit_reference=True)
 
-        self.assertIsNone(blocked, "gardul normal trebuie sa blocheze BUY peste SELL")
+        self.assertIsNone(blocked, "the normal guard must block a BUY above a SELL")
         self.assertIsNotNone(allowed)
         self.assertEqual(len(quantity_calls), 1)
         self.assertEqual(p.placed[0][3], 0.25)
@@ -257,7 +257,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
             "SELL", 102.0, 1.0, smart=False, caller_owns_retry=True,
             bypass_quantity_policy=True)
 
-        self.assertIsNone(loss, "quantity bypass nu trebuie sa sara profit guard")
+        self.assertIsNone(loss, "the quantity bypass must not skip the profit guard")
         self.assertIsNotNone(profit)
         self.assertEqual(policy_calls, [], "weight policy trebuie sarita numai la SELL")
         self.assertEqual(p.placed[0][3], 1.0)
@@ -436,7 +436,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         inst = self._inst(p)
         order = inst.place("BUY", 100.0, 1.0, caller_owns_retry=True)
         self.assertIsNone(order)
-        self.assertEqual(_oq.load_all(), [])   # NU se re-enqueue-aza (fara recursie)
+        self.assertEqual(_oq.load_all(), [])   # It is NOT re-enqueued (no recursion)
 
     def test_success_remains_tracked_until_terminal(self):
         import order_retry as _oq
@@ -473,7 +473,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
 
     def test_smart_flag_gates_price_adjust(self):
         # CORECTIE 30 iul: place_order_smart (SMART: cancel-opuse + nudge) vs place_safe_order
-        # (SAFE: fara). smart=True cheama adjust_order_price; smart=False NU (pastreaza semantica
+        # (SAFE: none). smart=True calls adjust_order_price; smart=False does NOT (it keeps
         # fostului place_safe_order pt rtrade normal/assetguardian/trailing_stop/monitororder).
         calls = []
 
@@ -492,7 +492,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         inst2 = Instrument(name="ZZZFAKE2", symbol="ZZZFAKEUSD2", provider=p.name.lower(),
                            base="ZZZFAKE2", quote="USD", api=MarketApi([p]))
         inst2.place("BUY", 100.0, 1.0, smart=False)
-        self.assertEqual(calls, [], "smart=False NU trebuie sa cheme adjust_order_price")
+        self.assertEqual(calls, [], "smart=False must NOT call adjust_order_price")
 
     def test_cancelorders_and_hours_reach_quantity_hook(self):
         calls = []
@@ -514,7 +514,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
     def test_market_order_profit_guard_uses_current_price_not_ignored_target(self):
         p = _FakeProvider(price=100.0)
         # Ultimul BUY este referinta SELL. Tinta declarata 102 trece marja de
-        # 1.15%, dar MARKET s-ar executa la 100 si ar produce doar costuri.
+        # 1.15%, but MARKET would fill at 100 and only produce costs.
         p.seed_trade("BUY", age_sec=400.0, price=100.0)
 
         order = self._inst(p).place("SELL", 102.0, 1.0, force=True, smart=False)
@@ -605,7 +605,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
     def test_guards_internally_provider_bypasses_new_gates(self):
         p = _GuardsInternallyProvider()
         inst = self._inst(p)
-        # seed care AR bloca daily-limit daca s-ar aplica -> nu trebuie sa blocheze
+        # A seed that WOULD trip the daily limit if it applied -> it must not block
         for _ in range(60):
             p.seed_trade("BUY", age_sec=4000.0)
         order = inst.place("BUY", 100.0, 1.0)
@@ -613,7 +613,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         self.assertEqual(len(p.placed), 1)
         # niciun log FLEET-WIDE nou (Binance isi loga singur, ca sa nu duplice)
         self.assertEqual(self._log_lines(), [])
-        # a doua plasare imediata NU e blocata de cooldown (guards_internally sare peste el)
+        # The second immediate placement is NOT blocked by the cooldown (guards_internally skips it)
         order2 = inst.place("SELL", 101.0, 1.0)
         self.assertIsNotNone(order2)
 

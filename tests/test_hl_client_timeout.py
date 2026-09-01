@@ -1,4 +1,4 @@
-"""Regresie pentru blocajele Hyperliquid produse de timeout=None din SDK."""
+"""Regression for the Hyperliquid hangs caused by timeout=None in the SDK."""
 
 from __future__ import annotations
 

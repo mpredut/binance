@@ -18,7 +18,7 @@ def convert_price_cache(input_file: str, output_file: str):
             if isinstance(rec, dict):
                 new_items[symbol].append([rec["timestamp"], rec["price"]])
             else:
-                # dacă e deja listă, o las neschimbată
+                # Already a list: leave it unchanged.
                 new_items[symbol].append(rec)
 
     new_data = {"items": new_items}
@@ -26,6 +26,6 @@ def convert_price_cache(input_file: str, output_file: str):
     with open(output_file, "w") as f:
         json.dump(new_data, f, indent=2)
 
-    print(f"Conversie completă: {input_file} -> {output_file}")
+    print(f"Conversion complete: {input_file} -> {output_file}")
 
 convert_price_cache(old_file, new_file)

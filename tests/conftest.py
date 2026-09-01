@@ -8,7 +8,7 @@ import pytest
 
 
 # Setat la import, inainte de colectarea modulelor de test. Astfel nici apelurile
-# facute la import si nici subprocess-urile pornite de teste nu pot trimite
+# made at import time, and subprocesses started by tests cannot send
 # notificari reale catre ntfy/email/desktop.
 os.environ["DISABLE_EXTERNAL_NOTIFICATIONS"] = "1"
 
@@ -47,5 +47,5 @@ def _shutdown_runtime_threads_after_suite():
     }
     leaked = sorted(thread.name for thread in threading.enumerate()
                     if thread.name in forbidden)
-    assert not leaked, f"thread-uri runtime rămase după suită: {leaked}"
+    assert not leaked, f"runtime threads left behind after the suite: {leaked}"
     _execution_audit_tmp.cleanup()
