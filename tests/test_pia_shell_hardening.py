@@ -1,4 +1,8 @@
+import os
 from pathlib import Path
+import subprocess
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -6,6 +10,47 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _text(name):
     return (ROOT / name).read_text(encoding="utf-8")
+
+
+def _executable(path, body):
+    path.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _healthcheck_env(tmp_path, failing=None):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    commands = {
+        "piactl": "echo Connected",
+        "ip": "echo '2: tun0: <POINTOPOINT,UP,LOWER_UP>'",
+        "resolvectl": "exit 0",
+        "curl": "exit 0",
+    }
+    if failing == "piactl":
+        commands["piactl"] = "echo Disconnected"
+    elif failing in commands:
+        commands[failing] = "exit 1"
+    for name, body in commands.items():
+        _executable(fake_bin / name, body)
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
+    env["PIA_CLI_TIMEOUT"] = "1"
+    env["PIA_PROBE_TIMEOUT"] = "1"
+    return env, fake_bin
+
+
+def _run_healthcheck(tmp_path, failing=None, mode="--check"):
+    env, fake_bin = _healthcheck_env(tmp_path, failing)
+    result = subprocess.run(
+        ["bash", str(ROOT / "healthcheck.sh"), mode],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    return result, fake_bin
 
 
 def test_all_runtime_piactl_calls_are_bounded():
@@ -50,6 +95,39 @@ def test_healthcheck_probes_the_required_vpn_path():
     assert "--interface tun0" in text
     assert "https://api.binance.com/api/v3/time" in text
     assert 'VPN($vpn)' in text
+
+
+@pytest.mark.parametrize(
+    ("failing", "reason"),
+    [("piactl", "piactl"), ("ip", "tun0"), ("resolvectl", "dns"), ("curl", "https")],
+)
+def test_healthcheck_reports_each_simulated_vpn_failure(tmp_path, failing, reason):
+    result, _ = _run_healthcheck(tmp_path, failing)
+    assert result.returncode == 0, result.stderr
+    assert f"VPN              FAULT ({reason})" in result.stdout
+
+
+def test_healthcheck_accepts_a_fully_working_simulated_vpn(tmp_path):
+    result, _ = _run_healthcheck(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert "VPN              ok (piactl + tun0 + DNS + Binance HTTPS)" in result.stdout
+
+
+def test_healthcheck_surfaces_ntfy_http_failure(tmp_path):
+    env, fake_bin = _healthcheck_env(tmp_path)
+    _executable(fake_bin / "pgrep", "exit 1")
+    _executable(fake_bin / "curl", "exit 22")
+    result = subprocess.run(
+        ["bash", str(ROOT / "healthcheck.sh"), "--alert"],
+        cwd=ROOT,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "ALERTA NELIVRATA" in result.stdout
 
 
 def test_selfheal_is_part_of_reproducible_root_cron():
