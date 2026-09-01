@@ -29,6 +29,14 @@
 set -u
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+CONFIG="$ROOT/pia_selfheal_config.env"
+[ -r "$CONFIG" ] || { echo "missing required configuration: $CONFIG" >&2; exit 1; }
+set -a
+. "$CONFIG"
+set +a
+: "${PIA_RESOLVED_CPU_THRESHOLD:?missing PIA_RESOLVED_CPU_THRESHOLD}"
+: "${PIA_RESOLVED_CPU_CONSECUTIVE:?missing PIA_RESOLVED_CPU_CONSECUTIVE}"
+: "${PIA_RESOLVED_CPU_SAMPLE_SEC:?missing PIA_RESOLVED_CPU_SAMPLE_SEC}"
 STATE_DIR="/var/lib/pia_selfheal"
 SPOOL="$STATE_DIR/alert_spool"          # Alerts that could not be delivered.
 OUTAGE_MARK="$STATE_DIR/outage_since"   # Timestamp of when the outage started.
@@ -104,6 +112,46 @@ wait_healthy() {
         vpn_healthy && return 0
     done
     return 1
+}
+
+resolved_cpu_percent() {
+    local pid p1 p2 s1 s2 cpus
+    pid=$(systemctl show -p MainPID --value systemd-resolved.service 2>/dev/null)
+    [ "${pid:-0}" -gt 0 ] && [ -r "/proc/$pid/stat" ] || return 1
+    p1=$(awk '{print $14+$15}' "/proc/$pid/stat")
+    s1=$(awk '{for(i=2;i<=NF;i++) n+=$i; print n}' /proc/stat | head -1)
+    sleep "$PIA_RESOLVED_CPU_SAMPLE_SEC"
+    [ -r "/proc/$pid/stat" ] || return 1
+    p2=$(awk '{print $14+$15}' "/proc/$pid/stat")
+    s2=$(awk '{for(i=2;i<=NF;i++) n+=$i; print n}' /proc/stat | head -1)
+    cpus=$(getconf _NPROCESSORS_ONLN)
+    awk -v dp="$((p2-p1))" -v ds="$((s2-s1))" -v n="$cpus" \
+        'BEGIN { if (ds <= 0) exit 1; printf "%.1f", dp * n * 100 / ds }'
+}
+
+check_resolved_cpu() {
+    local cpu count_file="$STATE_DIR/resolved_high_cpu_count" count=0
+    cpu=$(resolved_cpu_percent) || { log "WARNING: cannot sample systemd-resolved CPU"; return 0; }
+    [ -f "$count_file" ] && read -r count < "$count_file"
+    if awk -v cpu="$cpu" -v threshold="$PIA_RESOLVED_CPU_THRESHOLD" \
+        'BEGIN { exit !(cpu >= threshold) }'; then
+        count=$((count + 1)); printf '%s\n' "$count" > "$count_file"
+        log "systemd-resolved CPU high: ${cpu}% (${count}/${PIA_RESOLVED_CPU_CONSECUTIVE})"
+        if [ "$count" -ge "$PIA_RESOLVED_CPU_CONSECUTIVE" ]; then
+            alert "DNS resolver restarted ($(hostname))" \
+                "systemd-resolved stayed above ${PIA_RESOLVED_CPU_THRESHOLD}% CPU for $count checks (last ${cpu}%). Restarting it before DNS stalls the trading fleet."
+            systemctl restart systemd-resolved.service
+            sleep 3
+            printf '0\n' > "$count_file"
+            resolvectl query -i tun0 api.binance.com >/dev/null 2>&1 && vpn_healthy && return 0
+            log "DNS/VPN health did not recover after resolver restart; escalating through PIA recovery"
+            return 1
+        fi
+    else
+        [ "$count" -eq 0 ] || log "systemd-resolved CPU recovered: ${cpu}%"
+        printf '0\n' > "$count_file"
+    fi
+    return 0
 }
 
 # ===== ALERTS =============================================================
@@ -301,6 +349,7 @@ if [ "$CHECK_ONLY" = 1 ]; then
     echo "  dedicated IP   : $(pia get regions | grep -m1 '^dedicated-' || echo 'NOT REGISTERED')"
     echo "  raw internet   : $(net_raw_ok && echo OK || echo DOWN)"
     echo "  vpn_healthy    : $(vpn_healthy && echo YES || echo NO)"
+    echo "  resolved CPU   : $(resolved_cpu_percent 2>/dev/null || echo unavailable)%"
     echo "  spooled alerts : $([ -f "$SPOOL" ] && wc -l < "$SPOOL" || echo 0)"
     exit 0
 fi
@@ -331,7 +380,7 @@ if [ "$UPTIME" -lt "${PIA_BOOT_GRACE:-300}" ] && [ "$FORCE" = 0 ]; then
     exit 0
 fi
 
-if vpn_healthy && [ "$FORCE" = 0 ]; then
+if vpn_healthy && [ "$FORCE" = 0 ] && check_resolved_cpu; then
     if [ -f "$OUTAGE_MARK" ]; then
         # Recovered in the meantime: we report only now, with the real outage length.
         mins=$(( ( $(date +%s) - $(cat "$OUTAGE_MARK") ) / 60 ))

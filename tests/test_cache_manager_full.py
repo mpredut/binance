@@ -797,6 +797,14 @@ class TestCacheFactory(unittest.TestCase):
 
     def tearDown(self):
         cm.CacheFactory.shutdown_all()
+
+    def test_read_only_creation_can_be_promoted_to_periodic_sync(self):
+        with patch.object(cm.CacheTradeManager, "periodic_sync") as periodic:
+            first = cm.CacheFactory.get("Trade", symbols=["BTC"], start_sync=False)
+            periodic.assert_not_called()
+            second = cm.CacheFactory.get("Trade", symbols=["BTC"], start_sync=True)
+            self.assertIs(first, second)
+            periodic.assert_called_once()
         cm._current_price_instance = None
 
     def test_unknown_name_raises(self):

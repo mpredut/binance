@@ -84,7 +84,7 @@ class TestArchiverLifecycle(unittest.TestCase):
                 except OSError:
                     pass
 
-    def test_long_archive_compaction_is_batched(self):
+    def test_long_archive_trimming_never_compacts_from_the_memory_tail(self):
         fd, path = tempfile.mkstemp(suffix=".jsonl")
         os.close(fd)
         try:
@@ -97,12 +97,34 @@ class TestArchiverLifecycle(unittest.TestCase):
                 manager._trim_old_data("BTCUSDC")
                 compact.assert_not_called()
                 manager._trim_old_data("BTCUSDC")
-                compact.assert_called_once()
+                compact.assert_not_called()
         finally:
             try:
                 os.remove(path)
             except OSError:
                 pass
+
+    def test_long_archive_memory_is_bounded_without_truncating_disk_history(self):
+        fd, path = tempfile.mkstemp(suffix=".jsonl")
+        os.close(fd)
+        total = cm.CM_LONG_ARCHIVE_MEMORY_ROWS + 25
+        try:
+            with open(path, "w", encoding="utf-8") as handle:
+                for index in range(total):
+                    handle.write(json.dumps({"s": "BTCUSDC", "i": [index + 1, 10.0]}) + "\n")
+            manager = cm.Cache24LongPriceManager(60, ["BTCUSDC"], path)
+            manager.KEEP_HOURS = 10**9
+            self.assertEqual(len(manager.cache["BTCUSDC"]), cm.CM_LONG_ARCHIVE_MEMORY_ROWS)
+            manager.on_price_update("BTCUSDC", total + 1, 11.0)
+            manager.save_state_to_file()
+            with open(path, encoding="utf-8") as handle:
+                self.assertEqual(sum(1 for line in handle if line.strip()), total + 1)
+        finally:
+            for suffix in ("", ".meta"):
+                try:
+                    os.remove(path + suffix)
+                except OSError:
+                    pass
 
 
 if __name__ == "__main__":

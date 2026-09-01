@@ -55,6 +55,7 @@ CM_DEDUP_WINDOW = required_int_env("CM_DEDUP_WINDOW")
 CM_LONG_ARCHIVE_MONTHS = required_float_env("CM_LONG_ARCHIVE_MONTHS")
 CM_LONG_ARCHIVE_SAMPLE_SEC = required_float_env("CM_LONG_ARCHIVE_SAMPLE_SEC")
 CM_LONG_ARCHIVE_FLUSH_SEC = required_float_env("CM_LONG_ARCHIVE_FLUSH_SEC")
+CM_LONG_ARCHIVE_MEMORY_ROWS = required_int_env("CM_LONG_ARCHIVE_MEMORY_ROWS")
 
 if not 0 < CM_ROTATE_KEEP_FRACTION <= 1:
     raise ValueError("CM_ROTATE_KEEP_FRACTION must be in (0, 1]")
@@ -68,6 +69,7 @@ for _name, _value in (
     ("CM_LONG_ARCHIVE_MONTHS", CM_LONG_ARCHIVE_MONTHS),
     ("CM_LONG_ARCHIVE_SAMPLE_SEC", CM_LONG_ARCHIVE_SAMPLE_SEC),
     ("CM_LONG_ARCHIVE_FLUSH_SEC", CM_LONG_ARCHIVE_FLUSH_SEC),
+    ("CM_LONG_ARCHIVE_MEMORY_ROWS", CM_LONG_ARCHIVE_MEMORY_ROWS),
 ):
     if _value <= 0:
         raise ValueError(f"{_name} must be positive")
@@ -992,7 +994,54 @@ class Cache24LongPriceManager(Cache24PriceManager):
         with self.lock:
             self.cache = {s: v for s, v in self.cache.items() if s in self.symbols}
 
+    @staticmethod
+    def _tail_lines(path, limit, block_size=1024 * 1024):
+        """Read at most the last complete ``limit`` lines without scanning the file."""
+        with open(path, "rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            position = handle.tell()
+            chunks = []
+            newline_count = 0
+            while position > 0 and newline_count <= limit:
+                size = min(block_size, position)
+                position -= size
+                handle.seek(position)
+                chunk = handle.read(size)
+                chunks.append(chunk)
+                newline_count += chunk.count(b"\n")
+        return b"".join(reversed(chunks)).splitlines()[-limit:]
+
+    def _load_jsonl(self):
+        """Load only a recent working set; the JSONL file remains the full archive."""
+        with self.lock:
+            self.cache = {}
+            if os.path.exists(self.filename):
+                for raw_line in self._tail_lines(self.filename, CM_LONG_ARCHIVE_MEMORY_ROWS):
+                    try:
+                        rec = json.loads(raw_line)
+                        if rec.get("s") in self.symbols:
+                            self.cache.setdefault(rec["s"], []).append(rec["i"])
+                    except (json.JSONDecodeError, KeyError, TypeError):
+                        continue
+            self._persisted_counts = {s: len(v) for s, v in self.cache.items()}
+            metaf = self.filename + ".meta"
+            if os.path.exists(metaf):
+                try:
+                    with open(metaf) as handle:
+                        self.fetchtime_time_per_symbol = json.load(handle).get("fetchtime", {})
+                except (OSError, ValueError, TypeError):
+                    pass
+
     def _trim_old_data(self, symbol):
+        # Bound the in-process working set on every tick. Removed rows are already at
+        # the head and remain in the append-only disk archive.
+        with self.lock:
+            entries = self.cache.get(symbol, [])
+            overflow = max(0, len(entries) - CM_LONG_ARCHIVE_MEMORY_ROWS)
+            if overflow:
+                self.cache[symbol] = entries[overflow:]
+                self._persisted_counts[symbol] = max(
+                    0, self._persisted_counts.get(symbol, len(entries)) - overflow)
         now = time.monotonic()
         if now - self._last_long_trim < self.LONG_TRIM_INTERVAL_SEC:
             return
@@ -1005,7 +1054,66 @@ class Cache24LongPriceManager(Cache24PriceManager):
         if after < before:
             removed = before - after
             self._persisted_counts[symbol] = max(0, self._persisted_counts.get(symbol, before) - removed)
-            self.compact_jsonl()
+
+    def maintain_append_persist(self):
+        """Prune the full disk archive with bounded memory, then reload its recent tail."""
+        cutoff_ms = int((time.time() - self.RETENTION_DAYS * 86400) * 1000)
+        if not os.path.exists(self.filename):
+            return
+        changed = False
+        try:
+            with self.lock:
+                with atomic_write(self.filename) as target, open(self.filename, encoding="utf-8") as source:
+                    for line in source:
+                        try:
+                            rec = json.loads(line)
+                            keep = self._entry_timestamp_ms(rec.get("i")) >= cutoff_ms
+                        except (json.JSONDecodeError, TypeError, ValueError):
+                            keep = False
+                        if keep:
+                            target.write(line if line.endswith("\n") else line + "\n")
+                        else:
+                            changed = True
+                self._load_jsonl()
+            if changed:
+                builtins.print(f"[{self.cls_name}][maintain] pruned expired/corrupt disk records")
+            if os.path.getsize(self.filename) > self.MAX_FILE_BYTES:
+                self._rotate_disk_archive()
+        except OSError as exc:
+            builtins.print(f"[{self.cls_name}][Eroare] streaming maintenance {self.filename}: {exc}")
+
+    def compact_jsonl(self):
+        """Never rebuild an existing long archive from its bounded memory tail."""
+        if os.path.exists(self.filename):
+            self.maintain_append_persist()
+        else:
+            super().compact_jsonl()  # Legacy JSON migration still starts from full memory.
+
+    def _rotate_disk_archive(self):
+        """Archive an oversized file while retaining a complete-line tail on disk."""
+        with self.lock:
+            archive = f"{self.filename}.{int(time.time())}.archive"
+            os.replace(self.filename, archive)
+            keep_bytes = max(1, int(os.path.getsize(archive) * self.ROTATE_KEEP_FRACTION))
+            with open(archive, "rb") as source:
+                source.seek(max(0, os.path.getsize(archive) - keep_bytes))
+                if source.tell() > 0:
+                    source.readline()
+                tail = source.read()
+            with atomic_write(self.filename) as target:
+                target.write(tail.decode("utf-8", errors="ignore"))
+            self._load_jsonl()
+            with open(archive, "rb") as source, gzip.open(archive + ".gz.tmp", "wb") as target:
+                shutil.copyfileobj(source, target, length=1024 * 1024)
+            os.replace(archive + ".gz.tmp", archive + ".gz")
+            os.remove(archive)
+            archives = sorted(
+                glob.glob(f"{self.filename}.*.archive.gz"),
+                key=os.path.getmtime,
+                reverse=True,
+            )
+            for old_archive in archives[self.ROTATE_ARCHIVE_COUNT:]:
+                os.remove(old_archive)
 
     # Inherit get_remote_items from Cache24PriceManager, including real observation timestamps.
 
@@ -1840,6 +1948,7 @@ ASSETVALUE_SYNC_INTERVAL_SEC = 10 * 60  # 10 minutes
 
 class CacheFactory:
     _instances = {}
+    _sync_started = set()
 
     _CONFIG = {
         "Trade": {
@@ -1880,7 +1989,7 @@ class CacheFactory:
     }
 
     @classmethod
-    def get(cls, name, symbols=None):
+    def get(cls, name, symbols=None, *, start_sync=True):
         if name not in cls._CONFIG:
             raise ValueError(f"Unknown cache type: {name}")
 
@@ -1937,8 +2046,18 @@ class CacheFactory:
             managers = (cls._instances[name].values()
                         if isinstance(cls._instances[name], dict)
                         else (cls._instances[name],))
+            if start_sync:
+                for manager in managers:
+                    manager.periodic_sync(sync_ts, False)
+                cls._sync_started.add(name)
+
+        elif start_sync and name not in cls._sync_started:
+            value = cls._instances[name]
+            managers = value.values() if isinstance(value, dict) else (value,)
+            sync_ts = cls._CONFIG[name]["sync_ts"]()
             for manager in managers:
                 manager.periodic_sync(sync_ts, False)
+            cls._sync_started.add(name)
 
         return cls._instances[name]
 
@@ -1951,12 +2070,14 @@ class CacheFactory:
         results = [manager.shutdown(timeout=timeout) for manager in managers
                    if hasattr(manager, "shutdown")]
         cls._instances = {}
+        cls._sync_started = set()
         return all(results) if results else True
 
     @classmethod
     def remove(cls, name, timeout=5.0):
         """Remove a singleton cleanly after stopping all threads it owns."""
         value = cls._instances.pop(name, None)
+        cls._sync_started.discard(name)
         if value is None:
             return True
         managers = value.values() if isinstance(value, dict) else (value,)
@@ -1964,8 +2085,8 @@ class CacheFactory:
                    if hasattr(manager, "shutdown")]
         return all(results) if results else True
         
-def get_cache_manager(name, symbols=None):
-    return CacheFactory.get(name, symbols)
+def get_cache_manager(name, symbols=None, *, start_sync=True):
+    return CacheFactory.get(name, symbols, start_sync=start_sync)
 
 
 # ######

@@ -136,3 +136,12 @@ def test_selfheal_is_part_of_reproducible_root_cron():
     assert "pia_selfheal.sh" in cron
     assert 'render "$SYSTEMD_DIR/crontab.root.prod.txt"' in installer
     assert 'crontab -u root "$TMP_DIR/crontab.root.prod.txt"' in installer
+
+
+def test_selfheal_watches_resolver_cpu_and_requires_versioned_policy():
+    text = _text("pia_selfheal.sh")
+    config = _text("pia_selfheal_config.env")
+    assert 'CONFIG="$ROOT/pia_selfheal_config.env"' in text
+    assert "resolved_cpu_percent" in text
+    assert "PIA_RESOLVED_CPU_CONSECUTIVE" in config
+    assert "systemctl restart systemd-resolved.service" in text

@@ -172,7 +172,9 @@ def _last_opposite_fill_price(symbol, order_type):
     WebSocket fills without an API call.
     """
     import cacheManager as cm
-    return cm.get_cache_manager("Trade").last_opposite_fill_price(symbol, order_type)
+    # Retry workers only read the persisted/WS-produced trade cache. Starting another
+    # API polling loop here duplicates cacheManager's work and contaminates worker logs.
+    return cm.get_cache_manager("Trade", start_sync=False).last_opposite_fill_price(symbol, order_type)
 
 
 def _last_opposite_fill_price_api(symbol, order_type):
