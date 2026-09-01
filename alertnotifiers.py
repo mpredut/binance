@@ -436,6 +436,19 @@ class AlertNotifier:
                             wait = 3.0
                         print(f"[Notifier] ntfy 429 tranzitoriu; reincerc dupa {wait:.0f}s")
                         time.sleep(wait)
+                # A stale account token must not break a topic that explicitly permits
+                # anonymous publishing. Retry once without credentials; private topics
+                # still reject the request, so their access control is not bypassed.
+                if response.status_code in {401, 403} and _tok:
+                    print("[Notifier] ntfy token rejected; retrying without credentials")
+                    anonymous_headers = dict(_hdr)
+                    anonymous_headers.pop("Authorization", None)
+                    response = requests.post(
+                        webhook_url,
+                        data=message.encode("utf-8"),
+                        headers=anonymous_headers,
+                        timeout=10,
+                    )
                 if _is_provider_daily_limit(response):
                     if _mark_provider_daily_limit("ntfy"):
                         AlertNotifier._send_budget_warning("ntfy", "provider_daily_limit")

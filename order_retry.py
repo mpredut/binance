@@ -122,7 +122,8 @@ def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_pric
     With deduplication enabled, one record is retained per symbol and side. A match
     receives the newest target price, quantity, and options while preserving the
     oldest creation time and highest attempt counters. Returns the new or retained
-    record ID, or ``None`` when retries are disabled or the queue is full.
+    record ID, or ``None`` when retries are disabled or a full queue contains only
+    accepted venue orders that cannot be evicted safely.
     """
     if not RETRY_ENABLED:
         return None
@@ -211,9 +212,48 @@ def enqueue(symbol, side, qty, place_kwargs=None, requested_price=None, ref_pric
                     _write_nolock(existing)
                     return e.get("id")
         if RETRY_MAX_QUEUE > 0 and len(existing) >= RETRY_MAX_QUEUE:
-            print(f"[order_retry] the queue is full ({len(existing)}/{RETRY_MAX_QUEUE}) "
-                  f"— NU adaug {side_u} {symbol}")
-            return None
+            # A venue-accepted record represents a real order and must remain tracked.
+            # Prefer replacing the oldest trend-deferred submission; if none exists,
+            # replace the oldest other unaccepted submission. This keeps fresh intent
+            # flowing without silently losing reconciliation state.
+            pending = [
+                (index, item) for index, item in enumerate(existing)
+                if str(item.get("lifecycle") or "submit_pending").lower()
+                == "submit_pending"
+            ]
+            deferred = [
+                pair for pair in pending
+                if pair[1].get("last_failure_reason") == "trend_deferred"
+            ]
+            candidates = deferred or pending
+            if not candidates:
+                print(
+                    f"[order_retry] queue full ({len(existing)}/{RETRY_MAX_QUEUE}); "
+                    f"cannot enqueue {side_u} {symbol} because every record is accepted")
+                return None
+
+            def _created(pair):
+                try:
+                    value = float(pair[1].get("created_ts", 0))
+                    return value if math.isfinite(value) else 0.0
+                except (TypeError, ValueError, OverflowError):
+                    return 0.0
+
+            remove_count = len(existing) - RETRY_MAX_QUEUE + 1
+            victims = sorted(candidates, key=_created)[:remove_count]
+            if len(victims) < remove_count:
+                print(
+                    f"[order_retry] queue over capacity ({len(existing)}/{RETRY_MAX_QUEUE}); "
+                    f"cannot enqueue {side_u} {symbol} without evicting accepted orders")
+                return None
+            victim_ids = {id(item) for _, item in victims}
+            existing = [item for item in existing if id(item) not in victim_ids]
+            evicted = victims[0][1]
+            print(
+                f"[order_retry] queue full ({len(existing) + len(victims)}/"
+                f"{RETRY_MAX_QUEUE}); replaced {len(victims)} oldest pending record(s), "
+                f"starting with {evicted.get('side')} {evicted.get('symbol')} "
+                f"id={evicted.get('id')}, with {side_u} {symbol}")
         _write_nolock(existing + [rec])
     return rec["id"]
 

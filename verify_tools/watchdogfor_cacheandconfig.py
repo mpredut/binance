@@ -111,7 +111,20 @@ def _cache_files():
     """List tracked JSON and JSONL cache files, excluding backups, temporaries, and metadata."""
     patterns = ("cache_*.json", "cache_*.jsonl")
     files = {p for pat in patterns for p in _CACHE_DIR.glob(pat)}
-    return sorted(p for p in files if not p.name.endswith((".bak", ".tmp", ".meta")))
+    files = {p for p in files if not p.name.endswith((".bak", ".tmp", ".meta"))}
+    # Migration deliberately leaves rollback copies beside the active cache. Once the
+    # active counterpart exists, do not monitor the frozen legacy file as live state.
+    legacy_when_active = {
+        "cache_order.jsonl": "cache_order.json",
+        "cache_trade.json": "cache_trade.jsonl",
+        "cache_asset_value.json": "cache_asset_value.jsonl",
+    }
+    files = {
+        p for p in files
+        if not (p.name in legacy_when_active
+                and (_CACHE_DIR / legacy_when_active[p.name]).exists())
+    }
+    return sorted(files)
 
 
 def _normalize_ts_seconds(value):

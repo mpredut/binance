@@ -126,6 +126,27 @@ class TestFastPriceThreshold(unittest.TestCase):
                   "cache_price_long_trend.json", "cache_order.json", "cache_asset_value.json"):
             self.assertFalse(wd._is_fast_price_cache(n), n)
 
+    def test_active_migrated_cache_hides_frozen_legacy_sibling(self):
+        import tempfile
+        tmp = tempfile.mkdtemp()
+        original = wd._CACHE_DIR
+        try:
+            wd._CACHE_DIR = Path(tmp)
+            for name in (
+                    "cache_order.json", "cache_order.jsonl",
+                    "cache_trade.json", "cache_trade.jsonl",
+                    "cache_asset_value.json", "cache_asset_value.jsonl"):
+                (wd._CACHE_DIR / name).write_text("{}", encoding="utf-8")
+            names = {path.name for path in wd._cache_files()}
+            self.assertIn("cache_order.json", names)
+            self.assertIn("cache_trade.jsonl", names)
+            self.assertIn("cache_asset_value.jsonl", names)
+            self.assertNotIn("cache_order.jsonl", names)
+            self.assertNotIn("cache_trade.json", names)
+            self.assertNotIn("cache_asset_value.json", names)
+        finally:
+            wd._CACHE_DIR = original
+
     def test_cache_prices_multi_reclassified_slow_override(self):
         """30 Jul: cache_prices_multi.json is written by market_alerts.py (~5 min
         cadence), NOT by cacheManager.py — it is no longer a "fast price" (it was classified

@@ -13,6 +13,12 @@ class _Response:
     text = "ok"
 
 
+class _RejectedResponse:
+    status_code = 401
+    headers = {}
+    text = "unauthorized"
+
+
 def _event(title="FILL BUY", body="qty=1", source="kraken"):
     return {
         "type": "bot_event", "symbol": "HYPE", "name": title,
@@ -58,6 +64,18 @@ class NotificationDeliveryPolicyTest(unittest.TestCase):
         with open(os.environ["NOTIFICATION_STATE_FILE"], encoding="utf-8") as handle:
             state = json.load(handle)
         self.assertEqual(state["channels"]["ntfy"]["sent"], 2)
+
+    @mock.patch("alertnotifiers._ntfy_token", return_value="stale-token")
+    @mock.patch("alertnotifiers.requests.post",
+                side_effect=[_RejectedResponse(), _Response()])
+    def test_rejected_ntfy_token_retries_once_without_credentials(self, post, token):
+        self.assertTrue(AlertNotifier.send_phone_webhook_batch([_event()]))
+        self.assertEqual(post.call_count, 2)
+        self.assertEqual(
+            post.call_args_list[0].kwargs["headers"]["Authorization"],
+            "Bearer stale-token")
+        self.assertNotIn(
+            "Authorization", post.call_args_list[1].kwargs["headers"])
 
     @mock.patch("alertnotifiers.smtplib.SMTP")
     def test_email_uses_same_cross_process_dedup_policy(self, smtp):

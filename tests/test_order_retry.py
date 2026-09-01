@@ -102,13 +102,33 @@ class OrderRetryStoreTest(unittest.TestCase):
         oq.enqueue("BTCUSDC", "SELL", 1.0, {}, requested_price=63000.0, now=1001.0)
         self.assertEqual(len(oq.load_all()), 2)
 
-    def test_max_queue_cap(self):
+    def test_full_queue_replaces_oldest_pending_record(self):
         oq.RETRY_MAX_QUEUE = 2
         oq.RETRY_DEDUP = False   # so it is not collapsed by dedup
-        self.assertIsNotNone(oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0))
-        self.assertIsNotNone(oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=2.0))
-        self.assertIsNone(oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=3.0))  # plin
-        self.assertEqual(len(oq.load_all()), 2)
+        oldest = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=1.0,
+                            now=1000.0, failure_reason="trend_deferred")
+        retained = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=2.0,
+                              now=1001.0, failure_reason="trend_deferred")
+        newest = oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=3.0,
+                            now=1002.0, failure_reason="trend_deferred")
+        self.assertIsNotNone(newest)
+        ids = {record["id"] for record in oq.load_all()}
+        self.assertNotIn(oldest, ids)
+        self.assertIn(retained, ids)
+        self.assertIn(newest, ids)
+
+    def test_full_queue_never_evicts_accepted_orders(self):
+        oq.RETRY_MAX_QUEUE = 1
+        oq.RETRY_DEDUP = False
+        accepted_id = oq.enqueue(
+            "BTCUSDC", "BUY", 1.0, {}, requested_price=1.0, now=1000.0)
+        records = oq.load_all()
+        records[0]["lifecycle"] = "accepted"
+        records[0]["order_id"] = "venue-1"
+        oq.rewrite(records)
+        self.assertIsNone(oq.enqueue(
+            "TAOUSDC", "SELL", 1.0, {}, requested_price=2.0, now=1001.0))
+        self.assertEqual([record["id"] for record in oq.load_all()], [accepted_id])
 
     def test_price_gate_sell(self):
         rec = {"side": "SELL", "requested_price": 100.0}
