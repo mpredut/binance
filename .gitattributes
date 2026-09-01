@@ -1,10 +1,28 @@
-# Repo-ul ruleaza pe Linux (serverul de trading), dar se editeaza si de pe Windows,
-# unde core.autocrlf=true poate strecura CRLF in blob-uri. Un singur \r intr-un .sh
-# il face neexecutabil pe server ("bad interpreter"), iar in .conf/.env strica
-# valorile citite cu cut/grep. Fortam LF pentru tot ce ajunge sa fie interpretat.
-*.sh   text eol=lf
-*.py   text eol=lf
-*.conf text eol=lf
-*.env  text eol=lf
-*.txt  text eol=lf
-*.md   text eol=lf
+# Repo-ul RULEAZA pe Linux (serverul de trading), dar se editeaza si de pe Windows,
+# unde core.autocrlf=true strecoara CRLF. Un singur \r intr-un .sh il face
+# neexecutabil pe server ("bad interpreter"), iar in .conf/.env strica valorile
+# citite cu cut/grep. Deci: LF peste tot, indiferent de unde se editeaza.
+* text=auto eol=lf
+
+# Binarele NU se convertesc niciodata — au octeti 0x0D legitimi in continut, iar o
+# normalizare de linii i-ar corupe ireversibil.
+*.h5     binary
+*.mp3    binary
+*.wav    binary
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.ico    binary
+*.pdf    binary
+*.zip    binary
+*.gz     binary
+*.7z     binary
+*.tar    binary
+*.xlsx   binary
+*.db     binary
+*.sqlite binary
+*.pkl    binary
+*.npy    binary
+*.woff   binary
+*.woff2  binary

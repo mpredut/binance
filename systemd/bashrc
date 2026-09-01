@@ -5,16 +5,26 @@ export DISPLAY=192.168.0.104:0
 alias python='python3'
 cd /home/predut/binance
 
-#PIA
-#piactl dedicatedip add ../token.txt
-#piactl set region dedicated-belgium-85.122.194.86
+# piactl FARA timeout atarna la login: daca pia-daemon e agatat (s-a intamplat
+# 34 de zile, aug-sep 2026), fiecare apel blocheaza ~5s si orice sesiune SSH devine
+# lenta exact cand ai nevoie sa intri ca sa depanezi. Vezi systemd/PIA.md.
+pia() { timeout 5 piactl "$@" 2>/dev/null; }
+
+#PIA — regiunea NU se hardcodeaza: tokenul re-adaugat poate intoarce alt IP
+#      (sep 2026: .86 -> .79), iar un id fix devine "Unknown region".
+#piactl dedicatedip add ~/piatoken.txt
+#piactl set region "$(piactl get regions | grep -m1 '^dedicated-')"
 #piactl set requestportforward true
 #piactl connect
 #
 
-printf "🔐 VPN State      : %s\n" "$(piactl get connectionstate)"
-printf "🔌 Port Forward   : %s\n" "$(piactl get portforward)"
-printf "🌍 Public IP      : %s\n" "$(piactl get pubip)"
+# `pubip` este IP-ul conexiunii FIZICE (linia ISP-ului) si ramane pe el si cand
+# tunelul e perfect sanatos — afisat singur, parea ca serverul iese neprotejat.
+# Pentru whitelist-ul cheilor Binance conteaza `vpnip`: IP-ul prin care ies cererile.
+printf "🔐 VPN State      : %s\n" "$(pia get connectionstate)"
+printf "🔌 Port Forward   : %s\n" "$(pia get portforward)"
+printf "🌍 IP iesire VPN  : %s\n" "$(pia get vpnip)"
+printf "🏠 IP fizic ISP   : %s\n" "$(pia get pubip)"
 
 #source myenv/bin/activate && python demon.py && deactivate
 #nohup python3 demon.py &
@@ -23,4 +33,3 @@ printf "🌍 Public IP      : %s\n" "$(piactl get pubip)"
 #
 ps -aux | grep binance
 ps -aux | grep python
-"~/.bashrc" 143L, 4414B         
