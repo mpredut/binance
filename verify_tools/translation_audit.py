@@ -34,14 +34,29 @@ from typing import Iterable, List, Tuple
 # Detection dictionary. Diacritics are conclusive on their own; the word list holds
 # Romanian tokens that are unlikely to appear in English prose or in identifiers.
 RO_DIACRITICS = set("ăâîșțĂÂÎȘȚşţŞŢ")
+
+# The list below was widened deliberately after the narrow version reported the
+# migration finished three times while Romanian lines were still in the tree. It
+# missed everything written without diacritics and with only one Romanian word per
+# line: "esuat", "lipsa", "astept", "pretul", "coada plina". Over-reporting costs a
+# glance; under-reporting is what let those through.
 RO_WORDS = frozenset("""
 si sa se doar dar daca cand care este sunt nu pentru cu din sau mai foarte trebuie
-adica deci astfel verifica calculeaza returneaza foloseste folosim avem
-pretul pret ordine ordin cumparare vanzare vinde cumpara pierdere castig
-fisier fisierul fereastra ferestre valoare valori toate toti fiecare acelasi aceeasi
-inainte dupa acum mereu niciodata poate putem trebuia facem face facut
-nou noua vechi veche prima primul ultima ultimul intre peste sub
-scrie citeste sterge adauga porneste opreste ruleaza incarca salveaza
+adica deci astfel verifica verificat calculeaza calculat returneaza foloseste folosim
+folosit avem aveam vrem putem poate trebuia facem face facut facuta facute
+pretul pret preturi ordine ordin ordinul cumparare vanzare vinde vandut cumpara
+cumparat pierdere pierderi castig castiguri prag praguri cadere sold soldul
+fisier fisierul fisiere fereastra ferestre valoare valori cantitate cantitati
+toate toti toata fiecare acelasi aceeasi acest aceasta aceste acesti niciun nicio
+inainte dupa acum mereu niciodata deja inca apoi atunci astfel
+nou noua noi vechi veche prima primul ultima ultimul intre peste sub langa
+scrie scris citeste citit sterge sters adauga adaugat porneste pornit opreste oprit
+reporneste repornit incarca incarcat salveaza salvat trimite trimis primeste primit
+ruleaza rulat plaseaza plasat executa executat anuleaza anulat blocheaza blocat
+permite permis refuza refuzat esuat esuata esec reusit gasit gasita lipsa lipseste
+astept asteapta asteptare gol goala plina mort moarte viu curat coada
+fara catre dintre despre prin asupra impotriva orice oricare nimic nimeni
+motiv motive cauza scop rand randuri linie linii pas pasi etapa etape exemplu exemple
 """.split())
 
 DOC_OWNERS = (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
