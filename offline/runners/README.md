@@ -1,19 +1,19 @@
-# Runnere offline
+# Offline runners
 
-Orchestrarea backtesturilor și a fluxului prod→dev. Scripturile se rulează din
-rădăcina repo-ului sau prin căile absolute actualizate în `systemd/crontab.prod.txt`.
+Orchestration of the backtests and of the prod -> dev flow. The scripts are run from the
+repository root, or through the absolute paths kept up to date in `systemd/crontab.prod.txt`.
 
-## Baseline generic prin adaptoare
+## A generic baseline through adapters
 
-Datasetul, ferestrele walk-forward și metricile sunt comune în
-`offline/backtests/`. Engine-ul de decizie nu este comun: fiecare venue rulează
-strategia sa live printr-un adaptor de replay.
+The dataset, the walk-forward windows and the metrics are shared in `offline/backtests/`.
+The decision engine is not shared: each venue runs its own live strategy through a replay
+adapter.
 
 ```text
-OHLC canonic + hash
+canonical OHLC + hash
         │
         ▼
-evaluator walk-forward comun
+shared walk-forward evaluator
         │
         ├── Kraken adapter ─────► kraken/Strategy.step
         └── Trading212 adapter ─► 212trading/Strategy.step
@@ -25,63 +25,63 @@ Kraken:
 .venv/bin/python offline/runners/kraken_walk_forward_baseline.py
 ```
 
-Trading212, folosind direct configurația versionată a profilului:
+Trading212, using the profile's versioned configuration directly:
 
 ```bash
 .venv/bin/python offline/runners/t212_walk_forward_baseline.py \
   --profile nvda --range 2y --interval 1d
 
-# SPCX are gate live pe bare Yahoo 5m; replay-ul refuză alte cadențe:
+# SPCX has a live gate on Yahoo 5m bars; the replay refuses other cadences:
 .venv/bin/python offline/runners/t212_walk_forward_baseline.py \
   --profile spcx --range 1mo --interval 5m
 ```
 
-Runnerul Trading212 nu accesează API-ul de ordine și nu poate plasa tranzacții.
-Pentru profile non-USD descarcă și îngheață automat seria FX istorică; un CSV
-propriu poate fi dat prin `--fx-dataset`. `--fx-to-usd` este doar override fix.
+The Trading212 runner does not touch the order API and cannot place trades. For non-USD
+profiles it automatically downloads and freezes the historical FX series; your own CSV can be
+supplied through `--fx-dataset`. `--fx-to-usd` is only a fixed override.
 
-## Stres de execuție
+## Execution stress
 
-Aceleași opțiuni există pe ambele runnere:
+The same options exist on both runners:
 
 ```bash
-# HYPE: scenariu conservator, nu estimare calibrată a costurilor reale
+# HYPE: a conservative scenario, not a calibrated estimate of the real costs
 .venv/bin/python offline/runners/kraken_walk_forward_baseline.py \
   --spread-bps 20 --market-slippage-bps 30 \
   --partial-fill-ratio 0.5 --intrabar-policy worst_case
 
-# Trading212: ordinele actuale sunt limit; spread-ul afectează touch-ul,
-# iar tranșa rămasă continuă în bara următoare
+# Trading212: the current orders are limit orders; the spread affects the touch,
+# and the remaining tranche continues in the next bar
 .venv/bin/python offline/runners/t212_walk_forward_baseline.py \
   --profile nvda --range 2y --interval 1d \
   --spread-bps 10 --partial-fill-ratio 0.5 \
   --intrabar-policy worst_case
 ```
 
-Comparatorul Kraken citește modelul din raportul baseline și îl aplică identic
-tuturor candidaților și scenariilor de fee.
+The Kraken comparator reads the model from the baseline report and applies it identically to
+every candidate and every fee scenario.
 
-## Benchmark financiar HYPE și gate de promovare
+## The HYPE financial benchmark and the promotion gate
 
-Golden-ul verifică dacă motorul ia aceleași decizii după un refactor. Benchmark-ul
-financiar măsoară separat randamentul și riscul OOS al unui profil fix în două
-scenarii de execuție. Nu actualiza golden-ul pentru a „accepta” un candidat și nu
-promova un candidat doar pentru că păstrează golden-ul.
+The golden checks whether the engine takes the same decisions after a refactor. The financial
+benchmark separately measures the OOS return and risk of a fixed profile under two execution
+scenarios. Do not update the golden in order to "accept" a candidate, and do not promote a
+candidate merely because it preserves the golden.
 
 ```bash
 .venv/bin/python offline/runners/kraken_financial_benchmark.py \
   --output offline/research/hype_dataset/financial_baseline_v1.json \
   --markdown chatgpt_agent_work/HYPE_FINANCIAL_BENCHMARK.md
 
-# Reproducere exactă a baseline-ului versionat
+# An exact reproduction of the versioned baseline
 .venv/bin/python offline/runners/kraken_financial_benchmark.py \
   --verify offline/research/hype_dataset/financial_baseline_v1.json \
   --output /tmp/hype_financial_verify.json \
   --markdown /tmp/hype_financial_verify.md
 ```
 
-Pentru un candidat, `--params-report` citește un obiect `strategy_params` și
-`--compare-to` atașează verdictul la raport. Gate-ul poate fi rulat și separat:
+For a candidate, `--params-report` reads a `strategy_params` object and `--compare-to`
+attaches the verdict to the report. The gate can also be run on its own:
 
 ```bash
 .venv/bin/python offline/runners/financial_promotion_gate.py \
@@ -89,29 +89,29 @@ Pentru un candidat, `--params-report` citește un obiect `strategy_params` și
   offline/results/hype_financial/candidate.json
 ```
 
-Gate-ul are două căi etichetate. `RETURN` cere avantaj de medie de minimum
-`0,10pp`, minimum 10 ferestre active, mai multe ferestre câștigate decât pierdute,
-sign-test exact cu `p <= 0,10` și păstrarea worst-fold/DD. `DEFENSIVE` cere return
-non-inferior, Calmar median calculat pe fold-uri mai bun cu minimum 15%, Sortino
-păstrat, worst-DD mai mic cu minimum `1pp`, CVaR mai bun, expunere necrescută și
-minimum 10 ferestre cu schimbare de DD susținută de sign-test. Un candidat este
-eligibil prin `RETURN` sau `DEFENSIVE`, dar păstrează eticheta și trece separat
-prin shadow. Egalitățile nu sunt dovezi. Valorile de cost sunt provizorii până
-la calibrarea din fill-uri Kraken reale.
+The gate has two labelled paths. `RETURN` requires a mean advantage of at least `0.10pp`, at
+least 10 active windows, more windows won than lost, an exact sign test with `p <= 0.10`, and
+that the worst fold and the drawdown are preserved. `DEFENSIVE` requires a non-inferior
+return, a median Calmar computed per fold that is at least 15% better, a preserved Sortino, a
+worst drawdown smaller by at least `1pp`, a better CVaR, exposure that has not grown, and at
+least 10 windows whose drawdown change is supported by the sign test. A candidate is eligible
+through `RETURN` or `DEFENSIVE`, but it keeps its label and goes through shadow separately.
+Ties are not evidence. The cost values are provisional until they are calibrated from real
+Kraken fills.
 
-Setul HYPE prioritar (`tp4`, `dca15`, spacing progresiv, sizing DCA pe
-volatilitate, A, B și `overlay650t8`) se rulează batch, fără grid search și fără
-modificarea configurației live:
+The priority HYPE set (`tp4`, `dca15`, progressive spacing, volatility-based DCA sizing, A, B
+and `overlay650t8`) is run as a batch, with no grid search and without changing the live
+configuration:
 
 ```bash
 .venv/bin/python offline/runners/kraken_financial_compare.py
 ```
 
-Runnerul reproduce mai întâi baseline-ul live versionat și oprește comparația
-dacă acesta diferă. Apoi aplică promotion gate fiecărui candidat în scenariile
-central și stress.
+The runner first reproduces the versioned live baseline and stops the comparison if it
+differs. It then applies the promotion gate to every candidate in the central and stress
+scenarios.
 
-Auditul real poate fi agregat read-only înainte de calibrarea costurilor:
+The real audit can be aggregated read-only before the costs are calibrated:
 
 ```bash
 .venv/bin/python offline/runners/calibrate_execution_audit.py \
@@ -120,7 +120,7 @@ Auditul real poate fi agregat read-only înainte de calibrarea costurilor:
   --markdown /tmp/kraken_execution_calibration.md
 ```
 
-Raportul măsoară fee, latență, partial fills, abaterea fill-urilor LIMIT și, pentru
-ordinele MARKET noi, shortfall-ul total dintre prețul deciziei și fill. Acest
-shortfall include laolaltă mișcarea pieței, spread și slippage; raportul nu
-pretinde că le poate separa fără bid/ask/mid salvat la decizie.
+The report measures fees, latency, partial fills, the deviation of LIMIT fills and, for new
+MARKET orders, the total shortfall between the decision price and the fill. That shortfall
+lumps together market movement, spread and slippage; the report does not claim it can
+separate them without the bid/ask/mid saved at decision time.
