@@ -25,6 +25,7 @@ sys.path.insert(0, _ROOT)
 from ipo_common import load_dotenv, log  # noqa: E402
 from market_data import get_price_usd  # noqa: E402
 from alertnotifiers import AlertNotifier  # noqa: E402
+from state_io import atomic_write_json  # noqa: E402
 
 
 def push(topic: str, title: str, body: str) -> bool:
@@ -90,7 +91,7 @@ def main() -> int:
         log(f"  [{args.symbol}] pret {price:.2f} (below={args.below} above={args.above} armat={armed})")
 
     try:
-        json.dump({"armed": armed, "last": price}, open(state_path, "w"))
+        atomic_write_json(state_path, {"armed": armed, "last": price})
     except OSError:
         pass
     return 0

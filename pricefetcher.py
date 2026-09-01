@@ -4,6 +4,7 @@ import time
 import threading
 import requests
 import os
+from state_io import atomic_write_json
 from datetime import datetime
 from typing import Dict, Optional, List, Set, Tuple
 from abc import ABC, abstractmethod
@@ -682,23 +683,20 @@ class CacheAllPriceFetcherManager(CacheManagerInterface):
         self.cleanup_old_symbols(max_age_days=PRICE_HISTORY_RETENTION_DAYS)
         try:
             with self.lock:
-                tmp_file = self.filename + ".tmp"
-                with open(tmp_file, "w") as f:
-                    json.dump({
-                        "items": self.cache,
-                        "fetchtime": self.fetchtime_time_per_symbol,
-                        "metadata": {
-                            "last_cleanup": time.time(),
-                            "retention_days": PRICE_HISTORY_RETENTION_DAYS,
-                            "symbols_count": len(self.cache),
-                            "total_entries": sum(len(v) for v in self.cache.values())
-                        },
-                        "symbol_metadata": {
-                            "added_time": self.symbol_added_time,
-                            "active_symbols": list(self.active_symbols)
-                        }
-                    }, f, indent=1)
-                os.replace(tmp_file, self.filename)
+                atomic_write_json(self.filename, {
+                    "items": self.cache,
+                    "fetchtime": self.fetchtime_time_per_symbol,
+                    "metadata": {
+                        "last_cleanup": time.time(),
+                        "retention_days": PRICE_HISTORY_RETENTION_DAYS,
+                        "symbols_count": len(self.cache),
+                        "total_entries": sum(len(v) for v in self.cache.values())
+                    },
+                    "symbol_metadata": {
+                        "added_time": self.symbol_added_time,
+                        "active_symbols": list(self.active_symbols)
+                    }
+                }, indent=1)
                 print(f"[{self.cls_name}][info] Save cache to file {self.filename}")
         except Exception as e:
             print(f"[{self.cls_name}][Error] Saving cache file {self.filename}: {e}")

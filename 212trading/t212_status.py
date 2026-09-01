@@ -14,7 +14,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ipo_common import (  # noqa: E402
-    http_get, load_dotenv, required_env, required_float_env,
+    http_get, load_t212_environment, required_env, required_float_env,
 )
 from t212_client import T212Client  # noqa: E402
 
@@ -34,8 +34,7 @@ def _retry(fn, tries=4, pause=2):
 
 def main() -> int:
     here = os.path.dirname(os.path.abspath(__file__))
-    load_dotenv(os.path.join(here, "runtime.env"))
-    load_dotenv(os.path.join(here, ".env"))
+    load_t212_environment(os.path.join(here, ".env"))
     key = os.environ.get("T212_API_KEY")
     if not key:
         print("! lipseste T212_API_KEY (.env)"); return 1

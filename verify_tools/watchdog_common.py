@@ -18,6 +18,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from alertnotifiers import AlertNotifier  # noqa: E402
+from botcore import (  # noqa: E402
+    load_env_stack, required_bool_env, required_float_env, required_int_env,
+)
+from state_io import atomic_write_json  # noqa: E402
 
 
 def _watchdog_event(title, message):
@@ -29,12 +33,7 @@ def _watchdog_event(title, message):
 
 def load_env():
     """Load .env (gitignored secrets) + config.env (versioned) from the repository root."""
-    try:
-        from dotenv import load_dotenv
-        load_dotenv(ROOT / ".env")
-        load_dotenv(ROOT / "config.env")
-    except Exception:
-        pass
+    load_env_stack(str(ROOT / ".env"))
 
 
 def load_state(state_file):
@@ -46,10 +45,7 @@ def load_state(state_file):
 
 def save_state(state_file, state):
     try:
-        tmp = str(state_file) + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(state, f)
-        os.replace(tmp, state_file)
+        atomic_write_json(state_file, state)
     except Exception as e:
         print(f"[watchdog] nu pot scrie state: {e}")
 

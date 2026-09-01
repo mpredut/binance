@@ -21,23 +21,23 @@ wc.load_env()
 # Caches live in cachedb unless BINANCE_CACHE_DIR overrides it.
 _CACHE_DIR = Path(os.environ.get("BINANCE_CACHE_DIR", _ROOT / "cachedb"))
 STATE_FILE = _ROOT / ".watchdog_state.json"
-STALE_MINUTES = float(os.environ.get("WATCHDOG_STALE_MINUTES", "20"))
-COOLDOWN_MINUTES = float(os.environ.get("WATCHDOG_COOLDOWN_MINUTES", "60"))
+STALE_MINUTES = wc.required_float_env("WATCHDOG_STALE_MINUTES")
+COOLDOWN_MINUTES = wc.required_float_env("WATCHDOG_COOLDOWN_MINUTES")
 
 # Auto-restart applies only when a fast cache written by cacheManager is genuinely stale.
 # Cooldown and a rolling-window cap prevent loops; exceeding them requires manual action.
-AUTO_RESTART = os.environ.get("WATCHDOG_AUTO_RESTART", "false").strip().lower() in ("1", "true", "yes", "on", "da")
-AUTO_RESTART_COOLDOWN_MIN = float(os.environ.get("WATCHDOG_AUTO_RESTART_COOLDOWN_MIN", "15"))
-AUTO_RESTART_MAX = int(os.environ.get("WATCHDOG_AUTO_RESTART_MAX", "3"))
-AUTO_RESTART_WINDOW_H = float(os.environ.get("WATCHDOG_AUTO_RESTART_WINDOW_H", "6"))
+AUTO_RESTART = wc.required_bool_env("WATCHDOG_AUTO_RESTART")
+AUTO_RESTART_COOLDOWN_MIN = wc.required_float_env("WATCHDOG_AUTO_RESTART_COOLDOWN_MIN")
+AUTO_RESTART_MAX = wc.required_int_env("WATCHDOG_AUTO_RESTART_MAX")
+AUTO_RESTART_WINDOW_H = wc.required_float_env("WATCHDOG_AUTO_RESTART_WINDOW_H")
 AUTO_RESTART_TARGET = "python cacheManager.py"   # pgrep/pkill pattern; fleet supervision respawns it.
 
 # Config watch restarts an owner only after a content-hash change, avoiding false restarts
 # from touching a file. Targets in procs.conf are respawn-safe under healthcheck supervision.
-CONFIG_RESTART = os.environ.get("WATCHDOG_CONFIG_RESTART", "false").strip().lower() in ("1", "true", "yes", "on", "da")
-CONFIG_RESTART_COOLDOWN_MIN = float(os.environ.get("WATCHDOG_CONFIG_COOLDOWN_MIN", "5"))
-CONFIG_RESTART_MAX = int(os.environ.get("WATCHDOG_CONFIG_MAX", "5"))
-CONFIG_RESTART_WINDOW_H = float(os.environ.get("WATCHDOG_CONFIG_WINDOW_H", "6"))
+CONFIG_RESTART = wc.required_bool_env("WATCHDOG_CONFIG_RESTART")
+CONFIG_RESTART_COOLDOWN_MIN = wc.required_float_env("WATCHDOG_CONFIG_COOLDOWN_MIN")
+CONFIG_RESTART_MAX = wc.required_int_env("WATCHDOG_CONFIG_MAX")
+CONFIG_RESTART_WINDOW_H = wc.required_float_env("WATCHDOG_CONFIG_WINDOW_H")
 # Map root-relative configs to owner-process kill patterns. Shared secret/global configs
 # are deliberately excluded because restarting the whole fleet requires a human decision.
 _CONFIG_OWNERS = {
@@ -80,7 +80,7 @@ _EVENT_DRIVEN_HARD_CEILING_MIN = 43200   # Fill tracking is suspect after 30 day
 # Truly fast one-second price caches use a tighter threshold. Only these trigger automatic
 # cacheManager restart because that process writes them. Sparse JSONL history keeps the
 # general threshold and additional margin.
-_FAST_PRICE_THRESHOLD_MIN = float(os.environ.get("WATCHDOG_FAST_PRICE_MINUTES", "5"))
+_FAST_PRICE_THRESHOLD_MIN = wc.required_float_env("WATCHDOG_FAST_PRICE_MINUTES")
 
 
 def _is_fast_price_cache(name):

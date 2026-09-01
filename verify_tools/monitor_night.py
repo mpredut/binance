@@ -6,7 +6,7 @@ Output: per-process status, recent log errors, and actions taken.
 
 Credentials come from the gitignored .env at the repository root. Keys read:
   MONITOR_HOST (REQUIRED, no default), MONITOR_PASS (REQUIRED, no default),
-  MONITOR_PORT (default 32238), MONITOR_USER (REQUIRED),
+  MONITOR_PORT (REQUIRED in versioned config), MONITOR_USER (REQUIRED),
   MONITOR_ROOT (REQUIRED remote repository path).
 
 MONITOR_HOST deliberately has no default. A built-in address does not fail when
@@ -20,13 +20,14 @@ import datetime
 from pathlib import Path
 
 import paramiko
-from dotenv import load_dotenv
 
 _REPO = Path(__file__).resolve().parent.parent   # verify_tools/ -> repository root
-load_dotenv(_REPO / ".env")                      # Secrets (gitignored).
+sys.path.insert(0, str(_REPO))
+from botcore import load_env_stack, required_int_env  # noqa: E402
+load_env_stack(str(_REPO / ".env"))
 
 HOST = os.environ.get("MONITOR_HOST")  # no default: an address must be configured
-PORT = int(os.environ.get("MONITOR_PORT", "32238"))
+PORT = required_int_env("MONITOR_PORT")
 USER = os.environ.get("MONITOR_USER")
 PASS = os.environ.get("MONITOR_PASS")  # No default: the secret DOES NOT live in code.
 ROOT = os.environ.get("MONITOR_ROOT")

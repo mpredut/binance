@@ -34,6 +34,7 @@ from kraken_common import (
 )
 from notify import notify
 from kraken_client import KrakenClient, KrakenError
+from state_io import atomic_write_json
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -59,8 +60,7 @@ def _load_state() -> dict:
 
 def _save_state(st: dict) -> None:
     try:
-        with open(_state_file(), "w", encoding="utf-8") as f:
-            json.dump(st, f, indent=2)
+        atomic_write_json(_state_file(), st, indent=2)
     except OSError as e:
         log(f"  ! nu pot salva starea: {e}")
 

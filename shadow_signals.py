@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 import os
+from state_io import atomic_write_json
 from datetime import date
 
 import numpy as np
@@ -208,11 +209,7 @@ class ShadowSet:
         if not self.state_path or (now - self._last_state_write) < self.state_min_interval:
             return
         try:
-            tmp = self.state_path + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                import json
-                json.dump(self._state, f)
-            os.replace(tmp, self.state_path)
+            atomic_write_json(self.state_path, self._state)
             self._last_state_write = now
         except Exception as e:  # noqa: BLE001
             print(f"[shadow_signals] eroare scriere stare shadow: {e}")

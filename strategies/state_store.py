@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable
+from state_io import atomic_write_json
 
 
 class StatePersistenceError(RuntimeError):
@@ -50,20 +51,11 @@ class JsonStateStore:
             return self.default_factory()
 
     def save(self, state: dict) -> bool:
-        temporary = f"{self.path}.tmp.{os.getpid()}"
         try:
-            with open(temporary, "w", encoding="utf-8") as handle:
-                json.dump(state, handle, indent=2)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary, self.path)
+            atomic_write_json(self.path, state, indent=2)
             return True
         except (OSError, TypeError, ValueError) as exc:
             self.logger(f"  ! [STRAT] nu pot salva starea: {exc}")
-            try:
-                os.remove(temporary)
-            except OSError:
-                pass
             if self.fail_closed:
                 raise StatePersistenceError(
                     f"persistenta starii {self.label} a esuat: {exc}"

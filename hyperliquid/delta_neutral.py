@@ -25,6 +25,7 @@ from common import (
 )
 from notify import notify
 from hl_client import HLClient, HLError
+from state_io import atomic_write_json
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 MIN_ORDER_USD = 10.5          # Do not submit orders below Hyperliquid's ~$10 minimum.
@@ -133,10 +134,7 @@ class DeltaNeutral:
 
     def _save(self):
         try:
-            tmp = self.state_file + ".tmp"   # Atomic write prevents mid-write corruption.
-            with open(tmp, "w") as f:
-                json.dump(self.s, f, indent=2)
-            os.replace(tmp, self.state_file)
+            atomic_write_json(self.state_file, self.s, indent=2)
         except OSError as e:
             log(f"  ! [DN] nu pot salva: {e}")
 

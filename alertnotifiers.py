@@ -12,6 +12,7 @@ import time
 from datetime import datetime, timezone
 from email.mime.text import MIMEText
 from pathlib import Path
+from state_io import atomic_write_json
 from typing import Any, Optional
 
 # Import your modules
@@ -55,12 +56,9 @@ def _load_delivery_state(path: Path, today: str) -> dict:
 
 def _save_delivery_state(path: Path, state: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    temporary.write_text(
-        json.dumps(state, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
-        encoding="utf-8",
+    atomic_write_json(
+        path, state, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     )
-    os.replace(temporary, path)
 
 
 def _alert_identity(alert: Any) -> dict:

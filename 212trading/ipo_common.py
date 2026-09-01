@@ -21,6 +21,22 @@ from botcore import (  # noqa: E402,F401  (re-export: compat `from ipo_common im
 ET = timezone(timedelta(hours=-4))        # US Eastern summer time (EDT)
 
 
+def load_t212_environment(env_file: str, *, profile_file: str | None = None) -> None:
+    """Load T212 configuration using one explicit precedence policy.
+
+    Existing process values win, followed by T212 secrets, shared repository
+    secrets, an optional instrument profile, and versioned runtime policy.
+    ``load_dotenv`` keeps the first value, so later layers only fill gaps.
+    """
+    here = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(here)
+    load_dotenv(os.path.abspath(env_file))
+    load_dotenv(os.path.join(root, ".env"))
+    if profile_file:
+        load_dotenv(os.path.abspath(profile_file))
+    load_dotenv(os.path.join(here, "runtime.env"))
+
+
 def now_str() -> str:
     """Return a clear timestamp in ET and Bucharest time."""
     n = datetime.now(timezone.utc)

@@ -91,9 +91,8 @@ class HyperliquidProvider(MarketDataProvider):
         try:
             if _HL_DIR not in sys.path:
                 sys.path.insert(0, _HL_DIR)
-            from common import load_dotenv  # hyperliquid/common.py
-            load_dotenv(os.path.join(_HL_DIR, ".env"))
-            load_dotenv(os.path.join(_HL_DIR, "config.env"))
+            from common import load_env_stack  # hyperliquid/common.py
+            load_env_stack(os.path.join(_HL_DIR, ".env"))
         except Exception as e:  # noqa: BLE001 — Without env files, use public data only.
             print(f"[HL] _load_env esuat: {e}")
 

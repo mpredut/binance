@@ -134,6 +134,9 @@ def verdict(cont: dict, mid: float) -> str:
 import os
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # forecast/ -> repository root
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+from state_io import atomic_write_json  # noqa: E402
 T_CACHE_FILE = os.path.join(_ROOT, "cachedb", "cache_T_trend.json")
 
 
@@ -211,11 +214,7 @@ def estimate_T(symbol: str, days: int = 540, window_h: int = 24, step_h: int = 8
     res["ts"] = time.time()
     cache[symbol] = res
     try:
-        os.makedirs(os.path.dirname(T_CACHE_FILE), exist_ok=True)
-        tmp = T_CACHE_FILE + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(cache, f, indent=2)
-        os.replace(tmp, T_CACHE_FILE)
+        atomic_write_json(T_CACHE_FILE, cache, indent=2)
     except OSError:
         pass
     return res

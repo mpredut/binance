@@ -34,7 +34,7 @@ import sys
 import time
 
 from ipo_common import (
-    load_dotenv, log, now_str, float_env, ET, required_env,
+    load_t212_environment, log, now_str, float_env, ET, required_env,
     required_float_env, required_bool_env,
 )
 from market_data import check_market, t212_to_yahoo
@@ -117,8 +117,7 @@ def main() -> int:
             env_file = sys.argv[i + 1]
         if a in ("--profile", "-p") and i + 1 < len(sys.argv):
             profile = sys.argv[i + 1]
-    load_dotenv(os.path.join(here, "runtime.env"))          # shared versioned policy
-    load_dotenv(env_file)                                   # shared gitignored secrets
+    profile_file = None
     if profile:                                            # versioned per-profile config: config.<profile>.env
         cfg_dir = os.path.dirname(env_file) or "."
         cfg = os.path.join(cfg_dir, f"config.{profile}.env")
@@ -128,7 +127,8 @@ def main() -> int:
             log(f"! profil necunoscut '{profile}' (lipseste {cfg})")
             log(f"  profile disponibile: {', '.join(avail) or '(niciunul)'}")
             return 2
-        load_dotenv(cfg)
+        profile_file = cfg
+    load_t212_environment(env_file, profile_file=profile_file)
 
     ap = argparse.ArgumentParser(description="Watcher + auto-trade generic pe T212.")
     ap.add_argument("--profile", "-p",     required=True, metavar="NUME",

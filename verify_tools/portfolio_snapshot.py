@@ -18,7 +18,18 @@ from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 KRAKEN_DIR = os.path.join(ROOT, "kraken")
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+from botcore import parse_dotenv, required_float_env  # noqa: E402
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
+from state_io import atomic_write_json  # noqa: E402
+
+_ROOT_CONFIG = parse_dotenv(os.path.join(ROOT, "config.env"))
+
+
+def _policy_float(key: str) -> float:
+    value = os.environ.get(key, _ROOT_CONFIG.get(key))
+    return required_float_env(key, {key: value})
 
 # Monitored Kraken pairs (pair -> label, is_paper).
 KRAKEN_PAIRS = [("HYPEUSD", "HYPE", False), ("TAOUSD", "TAO", False), ("ADAUSD", "ADA", True)]
@@ -88,9 +99,8 @@ def hl_row() -> dict | None:
         # load_dotenv/HLClient write logs to stdout — we suppress them so they do not
         # pollute the --json output (the cron jsonl).
         with contextlib.redirect_stdout(io.StringIO()):
-            from common import load_dotenv
-            load_dotenv(os.path.join(ROOT, "hyperliquid", ".env"))
-            load_dotenv(os.path.join(ROOT, "hyperliquid", "config.env"))
+            from common import load_env_stack
+            load_env_stack(os.path.join(ROOT, "hyperliquid", ".env"))
             from hl_client import HLClient
             addr = os.environ.get("HL_ACCOUNT_ADDRESS")
             c = HLClient(secret_key=None, account_address=addr, mainnet=True)
@@ -141,8 +151,7 @@ def _alert_state() -> dict:
 
 def _save_alert_state(st: dict) -> None:
     try:
-        with open(ALERT_STATE, "w", encoding="utf-8") as fh:
-            json.dump(st, fh)
+        atomic_write_json(ALERT_STATE, st)
     except OSError:
         pass
 
@@ -150,10 +159,11 @@ def _save_alert_state(st: dict) -> None:
 def run_alerts(kr: list[dict]) -> list[str]:
     """Check the drawdown of every REAL position and send an ntfy alert past the threshold.
 
-    Threshold: RISK_DD_ALERT_PCT (8% by default). De-duplication: it re-alerts only
-    if >6h have passed OR the drawdown worsened by >=2pp since the last alert.
+    Threshold and re-alert policy are mandatory values from root config.env.
     """
-    threshold = _f(os.environ.get("RISK_DD_ALERT_PCT"), 8.0)
+    threshold = _policy_float("RISK_DD_ALERT_PCT")
+    realert_hours = _policy_float("RISK_DD_REALERT_HOURS")
+    worsen_pct = _policy_float("RISK_DD_WORSEN_PCT")
     now = datetime.now(timezone.utc)
     st = _alert_state()
     fired = []
@@ -170,10 +180,12 @@ def run_alerts(kr: list[dict]) -> list[str]:
         stale = True
         if prev_ts:
             try:
-                stale = (now - datetime.fromisoformat(prev_ts)).total_seconds() > 6 * 3600
+                stale = (
+                    now - datetime.fromisoformat(prev_ts)
+                ).total_seconds() > realert_hours * 3600
             except ValueError:
                 stale = True
-        if stale or dd <= prev_dd - 2.0:
+        if stale or dd <= prev_dd - worsen_pct:
             _ntfy(
                 f"⚠️ Risc {r['engine']}: DD {dd:.1f}%",
                 f"{r['engine']} drawdown nerealizat {dd:.1f}% "

@@ -4,10 +4,10 @@ from __future__ import annotations
 import json
 import hashlib
 import os
-import tempfile
 import time
 
 from lock import FileLock
+from state_io import atomic_write_json
 
 
 def rtrade_client_order_id(pair_id, side, kind="limit"):
@@ -31,17 +31,9 @@ class RTradePairStore:
             return {"version": 1, "pairs": {}}
 
     def _write(self, data):
-        os.makedirs(os.path.dirname(self.path), exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(self.path), suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump(data, handle, sort_keys=True, separators=(",", ":"))
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(tmp, self.path)
-        finally:
-            if os.path.exists(tmp):
-                os.unlink(tmp)
+        atomic_write_json(
+            self.path, data, sort_keys=True, separators=(",", ":"),
+        )
 
     def mutate(self, fn):
         with FileLock(self.lock_path):

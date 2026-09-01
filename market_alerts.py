@@ -19,14 +19,12 @@ from alerts_config import load_config
 from pricechecker import start_price_alert_checker
 from pricefetcher import create_cachePriceAll
 # Alert orchestration formerly lived in ``run_price_monitor.py``.
-from pathlib import Path
-from dotenv import load_dotenv
 from new_coins_discovery import create_new_coins_checker, NewCoinsMonitor, NewCoinsFactory, MAX_NEW_COINS_TO_TRACK
 from alertnotifiers import AlertNotifier
-from botcore import required_bool_env
+from botcore import load_env_stack, required_bool_env
 
-load_dotenv()                                                # Shared untracked secrets.
-load_dotenv(Path(__file__).resolve().parent / "config.env")  # Versioned configuration.
+_ROOT = os.path.dirname(os.path.abspath(__file__))
+load_env_stack(os.path.join(_ROOT, ".env"))
 ALERT_NEW_COIN = required_bool_env("ALERT_NEW_COIN")
 
 # Route price alerts to their dedicated topic when configured. PHONE_ALERT_URL has

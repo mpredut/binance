@@ -29,7 +29,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from ipo_common import (  # noqa: E402
-    load_dotenv, log, parse_dotenv, single_instance,
+    load_t212_environment, log, parse_dotenv, single_instance,
     required_env, required_float_env, required_bool_env,
 )
 from ipo_notify import notify  # noqa: E402
@@ -123,12 +123,7 @@ def main() -> int:
     if not args.list:
         single_instance("t212_bot")   # one instance prevents duplicate trading
 
-    # Load SHARED fleet secrets (NTFY/SMTP/etc.) from root binance/.env, then T212-SPECIFIC
-    # secrets from 212trading/.env. Specific values load LAST and win overlaps, keeping
-    # T212 credentials in their own directory rather than the repository root.
-    load_dotenv(os.path.join(os.path.dirname(_HERE), ".env"))  # shared (root)
-    load_dotenv(os.path.join(_HERE, "runtime.env"))             # versioned runtime policy
-    load_dotenv(args.env_file)                                 # specific (212trading/.env)
+    load_t212_environment(args.env_file)
     cfg_dir = os.path.dirname(args.env_file) or _HERE
     assets = discover_assets(cfg_dir)
     if args.only:

@@ -46,8 +46,11 @@ from datetime import datetime, timezone
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
-sys.path.insert(0, HERE)
-os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
+from state_io import atomic_text_writer  # noqa: E402
+from shadow_runtime import (  # noqa: E402
+    load_shadow_environment, prepare_shadow_runtime,
+)
+prepare_shadow_runtime(ROOT, HERE)
 
 CONFIG_ENV = os.path.join(HERE, "config.env")
 DEFAULT_ENV = os.path.join(HERE, ".env")
@@ -57,15 +60,9 @@ LOG_DIR = os.path.join(ROOT, "logs", "shadow_live")
 def _load_runtime_config(env_path: str | None = None,
                          config_path: str | None = None) -> None:
     """Reproduce kraken_bot load order exactly: .env takes priority, config fills gaps."""
-    from kraken_common import load_dotenv, load_env_stack
     env_path = env_path or os.environ.get("ENV_FILE", DEFAULT_ENV)
     config_path = config_path or os.path.join(os.path.dirname(env_path) or ".", "config.env")
-    if os.path.dirname(os.path.abspath(config_path)) == os.path.dirname(os.path.abspath(env_path)):
-        load_env_stack(env_path, os.path.basename(config_path))
-    else:
-        # Preserve the explicit two-path test/analysis API when files are not adjacent.
-        load_dotenv(env_path)
-        load_dotenv(config_path)
+    load_shadow_environment(env_path, config_path)
 
 
 def _variants(interval: int):
@@ -184,11 +181,9 @@ def _load_history(pair: str, interval: int) -> list[tuple[int, float, float, flo
 def _save_history(pair: str, interval: int, bars) -> None:
     os.makedirs(LOG_DIR, exist_ok=True)
     path = _history_path(pair, interval)
-    tmp_path = f"{path}.tmp"
-    with open(tmp_path, "w", encoding="utf-8") as fh:
+    with atomic_text_writer(path) as fh:
         json.dump(bars, fh, separators=(",", ":"))
         fh.write("\n")
-    os.replace(tmp_path, path)
 
 
 def _merge_forward_history(pair: str, interval: int, anchor: int, fetched):

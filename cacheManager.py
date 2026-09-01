@@ -2,7 +2,6 @@ import bisect
 import json
 import glob
 import os
-import contextlib
 import time
 import datetime
 import asyncio
@@ -14,6 +13,7 @@ from datetime import datetime, timedelta
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
 from typing import Optional
+from state_io import atomic_text_writer, atomic_write_json as _atomic_write_json
 
 #my imports
 import log
@@ -48,34 +48,14 @@ LONGTREND_NONBINANCE = required_bool_env("LONGTREND_NONBINANCE")
 #log.print = lambda *args, **kwargs: None
 
 
-@contextlib.contextmanager
 def atomic_write(path):
-    """Yield a unique temporary file handle and atomically replace ``path`` on success.
-
-    On failure, remove the temporary file and re-raise. Cross-process readers therefore
-    see either the old file or the complete new file, never a partial JSON/JSONL file.
-    """
-    # A process-and-thread-specific temporary name prevents concurrent writers from
-    # sharing a temporary file. ``os.replace`` remains atomic and last-writer-wins.
-    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.tmp"
-    f = open(tmp, "w")
-    try:
-        yield f
-        f.close()
-        os.replace(tmp, path)
-    except BaseException:
-        f.close()
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
+    """Compatibility wrapper around the repository-wide atomic writer."""
+    return atomic_text_writer(path)
 
 
 def atomic_write_json(path, obj, indent=None):
     """Atomically write JSON through ``atomic_write`` and propagate failures."""
-    with atomic_write(path) as f:
-        json.dump(obj, f, indent=indent)
+    _atomic_write_json(path, obj, indent=indent)
 
 #log.disable_print()
 

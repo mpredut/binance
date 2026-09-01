@@ -6,6 +6,7 @@ import sys
 import json
 import threading
 from datetime import datetime, timedelta
+from state_io import atomic_write_json
 
 ####Binance
 #from binance.exceptions import BinanceAPIException
@@ -481,8 +482,7 @@ def save_trades_to_file(order_type, symbol, filename, limit=1000, years_to_keep=
         all_trades_list.extend(updated_trades)
 
         # Persist the updated list.
-        with open(filename, 'w') as f:
-            json.dump(all_trades_list, f)
+        atomic_write_json(filename, all_trades_list)
 
         print(f"Updated file with {len(updated_trades)} new trades for {symbol}.")
     else:

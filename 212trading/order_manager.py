@@ -16,6 +16,7 @@ import os
 import re
 import time
 import uuid
+from state_io import atomic_write_json
 
 from ipo_common import log, now_str
 from ipo_notify import notify
@@ -120,18 +121,9 @@ def _read_or_migrate_marker(ticker: str, marker_path: str) -> dict | None:
 
 
 def _persist_marker(record: dict, path: str) -> None:
-    temporary = f"{path}.tmp.{os.getpid()}"
     try:
-        with open(temporary, "w", encoding="utf-8") as handle:
-            json.dump(record, handle, indent=2, sort_keys=True)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        atomic_write_json(path, record, indent=2, sort_keys=True)
     except (OSError, TypeError, ValueError) as exc:
-        try:
-            os.remove(temporary)
-        except OSError:
-            pass
         raise RuntimeError(f"nu pot persista intentia T212 in {path}: {exc}") from exc
 
 

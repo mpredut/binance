@@ -33,6 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from kraken_common import (load_env_stack, log, required_env, required_float_env,
                            single_instance)
 from kraken_client import KrakenClient
+from state_io import atomic_write_json
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 load_env_stack(os.path.join(_HERE, ".env"))
@@ -67,11 +68,7 @@ def _normalize(txid, tr):
 
 
 def _atomic_write(path, obj):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(obj, f, indent=1)
-    os.replace(tmp, path)            # atomic: readers never see a partially written file
+    atomic_write_json(path, obj, indent=1)
 
 
 def _ledger_to_fills(ledger):

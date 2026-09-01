@@ -28,6 +28,7 @@ from common import (
     required_int_env, required_bool_env,
 )
 from notify import notify
+from state_io import atomic_write_json
 from hl_client import HLClient, HLError
 from market_data import get_price
 from signals import get_signal
@@ -132,8 +133,7 @@ class Strategy:
 
     def _save(self) -> None:
         try:
-            with open(self.state_file, "w", encoding="utf-8") as f:
-                json.dump(self.s, f, indent=2)
+            atomic_write_json(self.state_file, self.s, indent=2)
         except OSError as e:
             log(f"  ! [STRAT] nu pot salva: {e}")
 

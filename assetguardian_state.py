@@ -1,7 +1,7 @@
 """Minimal atomic state store for Assetguardian tranches."""
 import json
 import os
-import tempfile
+from state_io import atomic_write_json
 
 from lock import FileLock
 
@@ -25,13 +25,6 @@ class AssetGuardianState:
         with FileLock(self.lock_path):
             directory = os.path.dirname(self.path)
             os.makedirs(directory, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(dir=directory, suffix=".tmp")
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                    json.dump(value, handle, sort_keys=True, separators=(",", ":"))
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(tmp, self.path)
-            finally:
-                if os.path.exists(tmp):
-                    os.unlink(tmp)
+            atomic_write_json(
+                self.path, value, sort_keys=True, separators=(",", ":"),
+            )

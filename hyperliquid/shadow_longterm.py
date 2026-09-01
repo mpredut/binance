@@ -22,11 +22,13 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 KRAKEN_DIR = os.path.join(ROOT, "kraken")
-for path in (ROOT, HERE, KRAKEN_DIR):
-    if path not in sys.path:
-        sys.path.insert(0, path)
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
 
-os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
+from shadow_runtime import (  # noqa: E402
+    load_shadow_environment, prepare_shadow_runtime, require_shadow_interval,
+)
+prepare_shadow_runtime(ROOT, HERE, KRAKEN_DIR)
 
 import shadow_live as shadow  # noqa: E402
 
@@ -35,14 +37,11 @@ LOG_DIR = os.path.join(ROOT, "logs", "hyperliquid_shadow")
 
 
 def _load_config() -> None:
-    from common import load_env_stack
-
-    load_env_stack(os.path.join(HERE, ".env"))
+    load_shadow_environment(os.path.join(HERE, ".env"))
 
 
 def _variants(interval: int):
-    if interval != 240:
-        raise ValueError("shadow_longterm accepts only the native 240m interval")
+    require_shadow_interval(interval, 240, "shadow_longterm")
     _load_config()
     from strategies.spot_dca import StratParams
 
@@ -74,8 +73,7 @@ def _variants(interval: int):
 
 
 def _fetch_with_ts(_pair: str, interval: int):
-    if interval != 240:
-        raise ValueError("candles HLC long-term sunt validate numai la 240m")
+    require_shadow_interval(interval, 240, "shadow_longterm candles")
     from hl_client import HLClient
 
     token = os.environ.get("HL_SPOT_TOKEN") or "HYPE"

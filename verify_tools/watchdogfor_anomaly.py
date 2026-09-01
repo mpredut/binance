@@ -9,9 +9,9 @@ Runs as a short cron task (every 5 min). It reads ONLY the NEW lines of each log
 with no timestamp parsing. It alerts (ntfy+email) per category, with a cooldown.
 
 Env (from .env / config.env in the repository root):
-  ANOMALY_WINDOW_FILES_MIN   (default 30) — scan only logs touched in the last X min
-  ANOMALY_COOLDOWN_MINUTES   (default 30) — do not re-alarm the same category sooner
-  ANOMALY_THRESH_<CAT>       — per-category threshold (see _THRESH); env override
+  ANOMALY_WINDOW_FILES_MIN   — scan only logs touched in the last X minutes
+  ANOMALY_COOLDOWN_MINUTES   — do not re-alarm the same category sooner
+  ANOMALY_THRESH_<CAT>       — mandatory per-category threshold
 """
 import os
 import re
@@ -27,8 +27,8 @@ ROOT = wc.ROOT
 STATE_FILE = ROOT / ".anomaly_watchdog_state.json"
 wc.load_env()
 
-WINDOW_FILES_MIN = float(os.environ.get("ANOMALY_WINDOW_FILES_MIN", "30"))
-COOLDOWN_MIN = float(os.environ.get("ANOMALY_COOLDOWN_MINUTES", "30"))
+WINDOW_FILES_MIN = wc.required_float_env("ANOMALY_WINDOW_FILES_MIN")
+COOLDOWN_MIN = wc.required_float_env("ANOMALY_COOLDOWN_MINUTES")
 
 # Anomaly categories: (case-insensitive regex, default threshold of hits per window).
 # The threshold is how many NEW hits (since the last run) trigger the alert.
@@ -55,7 +55,7 @@ _CATS = {
 _LOG_GLOBS = ["logger/*.log", "logs/*.log", "212trading/*.log", "hyperliquid/*.log", "kraken/*.log"]
 # Byte cap per file per run: the big logs (rtrade) grow by MB/min; without a cap, a
 # huge gap would load hundreds of MB into RAM (OOM). We only read the tail.
-_MAX_READ_BYTES = int(os.environ.get("ANOMALY_MAX_READ_BYTES", str(4 * 1024 * 1024)))
+_MAX_READ_BYTES = wc.required_int_env("ANOMALY_MAX_READ_BYTES")
 
 
 # DEV/backtest logs: tracebacks here come from the test machine (backtest pilot on
@@ -141,7 +141,7 @@ def check_once(now=None):
     # Decide the alerts (over threshold and not in cooldown).
     fired = []
     for cat, (rx, default_thr) in _CATS.items():
-        thr = float(os.environ.get(f"ANOMALY_THRESH_{cat.upper()}", default_thr))
+        thr = wc.required_float_env(f"ANOMALY_THRESH_{cat.upper()}")
         if counts[cat] < thr:
             continue
         last_alert = cooldowns.get(cat, 0)
@@ -161,7 +161,7 @@ def check_once(now=None):
 
     lines = []
     for cat in fired:
-        thr = float(os.environ.get(f"ANOMALY_THRESH_{cat.upper()}", _CATS[cat][1]))
+        thr = wc.required_float_env(f"ANOMALY_THRESH_{cat.upper()}")
         lines.append(f"  • {cat}: {counts[cat]} aparitii (prag {thr:.0f}) in "
                      f"{', '.join(sorted(files_hit[cat])) or '?'}")
         if cat in samples:
