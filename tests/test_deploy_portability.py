@@ -71,3 +71,10 @@ def test_deploy_templates_render_for_the_current_checkout(tmp_path):
     assert "TRADING_SUPERVISE_ENABLED=true" in (
         tmp_path / "crontab.prod.txt"
     ).read_text()
+    rendered_crontab = (tmp_path / "crontab.prod.txt").read_text()
+    portfolio_line = next(
+        line for line in rendered_crontab.splitlines()
+        if "portfolio_snapshot.py" in line
+    )
+    assert "/usr/bin/flock -n" in portfolio_line
+    assert "/usr/bin/timeout --signal=TERM --kill-after=5s 90s" in portfolio_line

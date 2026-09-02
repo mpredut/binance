@@ -12,7 +12,7 @@
 0 2,14 * * * @TRADING_ROOT@/offline/runners/trigger_backtest_dev.sh >> @TRADING_ROOT@/logs/backtest_cycle.log 2>&1
 7 * * * * @TRADING_PYTHON@ @TRADING_ROOT@/kraken/shadow_live.py --interval 240 >> @TRADING_ROOT@/logs/shadow_live.log 2>&1
 37 * * * * @TRADING_PYTHON@ @TRADING_ROOT@/kraken/shadow_live.py --interval 60 >> @TRADING_ROOT@/logs/shadow_live.log 2>&1
-*/20 * * * * @TRADING_PYTHON@ @TRADING_ROOT@/verify_tools/portfolio_snapshot.py --alert --json >> @TRADING_ROOT@/logs/portfolio_snapshot.jsonl 2>/dev/null
+*/20 * * * * /usr/bin/flock -n @TRADING_ROOT@/logs/.portfolio_snapshot.lock /usr/bin/timeout --signal=TERM --kill-after=5s 90s @TRADING_PYTHON@ @TRADING_ROOT@/verify_tools/portfolio_snapshot.py --alert --json >> @TRADING_ROOT@/logs/portfolio_snapshot.jsonl 2>/dev/null
 27 * * * * @TRADING_PYTHON@ @TRADING_ROOT@/hyperliquid/shadow_longterm.py --quiet >> @TRADING_ROOT@/logs/hyperliquid_shadow.log 2>&1
 */2 * * * * cd @TRADING_ROOT@ && @TRADING_PYTHON@ @TRADING_ROOT@/verify_tools/watchdogfor_cacheandconfig.py >> @TRADING_ROOT@/logs/watchdog.log 2>&1
 */5 * * * * cd @TRADING_ROOT@ && @TRADING_PYTHON@ @TRADING_ROOT@/verify_tools/watchdogfor_anomaly.py >> @TRADING_ROOT@/logs/anomaly_watchdog.log 2>&1

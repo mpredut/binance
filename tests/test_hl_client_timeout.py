@@ -6,6 +6,7 @@ import importlib.util
 from pathlib import Path
 import sys
 import unittest
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +36,34 @@ class _Api:
 
 
 class HyperliquidTimeoutTest(unittest.TestCase):
+    def test_timeouts_are_passed_before_sdk_constructors_run(self):
+        info = _Api(timeout=module.INFO_TIMEOUT_SECONDS)
+        exchange = _Api(timeout=module.EXCHANGE_TIMEOUT_SECONDS)
+        wallet = object()
+
+        with (
+            patch.object(module, "Info", return_value=info) as info_constructor,
+            patch.object(module, "Exchange", return_value=exchange) as exchange_constructor,
+            patch.object(module.eth_account.Account, "from_key", return_value=wallet),
+        ):
+            client = module.HLClient(
+                secret_key="secret", account_address="0xaccount", mainnet=True,
+            )
+
+        info_constructor.assert_called_once_with(
+            module.constants.MAINNET_API_URL,
+            skip_ws=True,
+            timeout=module.INFO_TIMEOUT_SECONDS,
+        )
+        exchange_constructor.assert_called_once_with(
+            wallet,
+            module.constants.MAINNET_API_URL,
+            account_address="0xaccount",
+            timeout=module.EXCHANGE_TIMEOUT_SECONDS,
+        )
+        self.assertIs(client.info, info)
+        self.assertIs(client.exchange, exchange)
+
     def test_replaces_sdk_timeout_none_on_api_and_request(self):
         api = _Api(timeout=None)
 

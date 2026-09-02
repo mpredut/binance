@@ -34,6 +34,10 @@ class HLError(Exception):
     pass
 
 
+INFO_TIMEOUT_SECONDS = 10.0
+EXCHANGE_TIMEOUT_SECONDS = 30.0
+
+
 def _round_px(px: float, sz_decimals: int, is_perp: bool = True) -> float:
     """Round an HL price to 5 significant figures and at most (6/8 - szDecimals) decimals."""
     if px <= 0:
@@ -75,20 +79,25 @@ class HLClient:
             raise HLError(f"SDK Hyperliquid indisponibil: {_SDK_ERR} "
                           f"(run it with the python from .venv)")
         self.base = constants.MAINNET_API_URL if mainnet else constants.TESTNET_API_URL
-        self.info = Info(self.base, skip_ws=True)
-        # RESILIENCE: the SDK has no read timeout. Fail Info reads (mid/spot_mid/
-        # position/funding) after 10 seconds. During HL 502/504 incidents, chained
-        # 30-second calls exceeded dn_bot's 600-second heartbeat window, causing the
-        # health check to declare it hung and terminate it. Ten seconds fails quickly
-        # enough for the loop to refresh its heartbeat.
-        _force_timeout(self.info, seconds=10)
+        # Info fetches metadata in its constructor, so the timeout must be passed
+        # during construction. Applying it afterwards leaves startup able to hang.
+        self.info = Info(
+            self.base, skip_ws=True, timeout=INFO_TIMEOUT_SECONDS,
+        )
+        _force_timeout(self.info, seconds=INFO_TIMEOUT_SECONDS)
         self.address = account_address
         self.exchange = None
         if secret_key:
             wallet = eth_account.Account.from_key(secret_key)
             self.address = account_address or wallet.address
-            self.exchange = Exchange(wallet, self.base, account_address=self.address)
-            _force_timeout(self.exchange)
+            # Exchange also builds an Info client internally during construction.
+            self.exchange = Exchange(
+                wallet,
+                self.base,
+                account_address=self.address,
+                timeout=EXCHANGE_TIMEOUT_SECONDS,
+            )
+            _force_timeout(self.exchange, seconds=EXCHANGE_TIMEOUT_SECONDS)
         self._meta_cache: dict[str, dict] = {}
 
     @classmethod
