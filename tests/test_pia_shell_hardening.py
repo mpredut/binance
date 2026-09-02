@@ -127,7 +127,7 @@ def test_healthcheck_surfaces_ntfy_http_failure(tmp_path):
         check=False,
     )
     assert result.returncode == 0, result.stderr
-    assert "ALERTA NELIVRATA" in result.stdout
+    assert "ALERT NOT DELIVERED" in result.stdout
 
 
 def test_selfheal_is_part_of_reproducible_root_cron():
