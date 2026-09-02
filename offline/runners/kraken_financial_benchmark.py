@@ -282,6 +282,12 @@ def _projection(report: dict) -> dict:
     strategy_params.setdefault("dca_vol_ref", 2.0)
     strategy_params.setdefault("dca_vol_interval", 240)
     strategy_params.setdefault("tp_trail_profit_floor_pct", 0.0)
+    # Percentage-sizing fields were added after the baseline artefact. Normalise
+    # their disabled all-zero state so metadata-only differences do not fail.
+    strategy_params.setdefault("total_budget", 0.0)
+    strategy_params.setdefault("alloc_pct", 0.0)
+    strategy_params.setdefault("entry_pct", 0.0)
+    strategy_params.setdefault("dca_pct", 0.0)
     return {
         "schema_version": report.get("schema_version"),
         "strategy_params": strategy_params,

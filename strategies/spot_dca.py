@@ -102,7 +102,7 @@ class StratParams:
                                       # k<0 means larger DCA (aggressive harvesting). Safe warm-up fallback.
     dca_vol_ref: float = 2.0          # reference vol_1h percentage for scaling
     dca_vol_interval: int = 240       # Identical OHLC cadence in live and replay.
-    # --- PERCENTAGE SIZING (optional; total_budget=0 or alloc_pct=0 keeps fixed values) ---
+    # --- PERCENTAGE SIZING (optional; all four zero values preserve fixed sizing) ---
     total_budget: float = 0.0   # venue's TOTAL budget, e.g. the whole Kraken account
     alloc_pct: float = 0.0      # percentage allocated to THIS coin; venue allocations total 100
     entry_pct: float = 0.0      # Entry is this percentage of the asset allocation.
