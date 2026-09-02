@@ -21,14 +21,24 @@ from lock import FileLock
 
 BASE_DIR = Path(__file__).resolve().parent
 
+# Matched against title.upper(). Bilingual ON PURPOSE, and it stays that way (owner's
+# decision, same reasoning as verify_tools/watchdogfor_anomaly.py): every alert title is
+# English today, but one written in Romanian by mistake would silently stop being urgent
+# — it would be routed to the routine topic and skip the email, with no error anywhere.
+# An extra tuple entry costs nothing; a missed liquidation alert costs money.
 _URGENT_MARKERS = (
     "🛑", "🛡", "LIQUID", "STOP-LOSS", "STOP_LOSS", "TRAILING", "FAILED",
     "MANUAL", "ERROR", "CATASTROPH", "CRASH", "GONE", "IMBALANC",
+    "LICHID", "ESUAT", "ERORI", "DISPARUT", "DEZECHILIBR", "CATASTROF",
 )
 _GUARD_MARKERS = (
     "🛑", "🛡", "STOP-LOSS", "STOP_LOSS", "TRAILING", "LIQUID", "CATASTROPH", "CRASH",
+    "LICHID", "CATASTROF",
 )
-_OPS_MARKERS = ("FAILED", "ERROR", "MANUAL", "GONE", "IMBALANC")
+_OPS_MARKERS = (
+    "FAILED", "ERROR", "MANUAL", "GONE", "IMBALANC",
+    "ESUAT", "ERORI", "DISPARUT", "DEZECHILIBR",
+)
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -115,8 +125,8 @@ def _reserve_delivery(channel: str, alerts: list[Any], *, urgent: bool) -> tuple
     """Atomically reserve one delivery across processes.
 
     Return ``(allowed, reason, warn_once)``. A network attempt conservatively consumes
-    local budget because a timeout can occur after
-    ce furnizorul a acceptat mesajul.
+    local budget because a timeout can occur after the provider has already accepted
+    the message.
     """
     now = time.time()
     today = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
@@ -524,7 +534,8 @@ def _topic_for(title: str, source: str) -> Optional[str]:
     return os.environ.get(f"NTFY_TOPIC_{cat}") or os.environ.get("NTFY_TOPIC")
 # Do not include 📉, which is also used by informational loss alerts such as ``📉 SPCX -8%``,
 # or a lone ⚠, which is too broad. ``TRAILING`` identifies trailing events. Urgent DN events
-# also include LIQUID/ERROR/MANUAL in their titles. Override with email=True/False when needed.
+# also include LIQUID/ERROR/MANUAL in their titles (or their Romanian equivalents, see the
+# marker tuples). Override with email=True/False when needed.
 
 
 _NTFY_TOKEN_CACHE = None
