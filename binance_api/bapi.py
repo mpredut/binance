@@ -1,4 +1,5 @@
 
+import os
 import time
 import datetime
 import math
@@ -11,13 +12,13 @@ import json
 #from twisted.internet import reactor
 
 ####Binance
-from binance.exceptions import BinanceAPIException
 #from binance.streams import BinanceSocketManager
 #from binance.streams import BinanceSocketManager
 #print(dir(BinanceSocketManager))
 
 
 ####MYLIB
+from botcore import load_dotenv as _load_dotenv, required_float_env
 import utils as u
 import symbols as sym
 
@@ -27,6 +28,18 @@ import binance
 print(binance.__version__)
 
 from . import bapi_ws
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_load_dotenv(os.path.join(_ROOT, "cachemanager_config.env"))
+BINANCE_REST_PRICE_CACHE_TTL_SEC = required_float_env(
+    "CM_BINANCE_REST_PRICE_CACHE_TTL_SEC"
+)
+if (
+    not math.isfinite(BINANCE_REST_PRICE_CACHE_TTL_SEC)
+    or BINANCE_REST_PRICE_CACHE_TTL_SEC <= 0
+):
+    raise ValueError(
+        "CM_BINANCE_REST_PRICE_CACHE_TTL_SEC must be finite and positive")
 
 # Function to handle Ctrl+C and shut down the WebSocket properly
 def signal_handler(sig, frame):
@@ -78,42 +91,36 @@ def get_symbol_limits(symbol):
 
 cprice = {}
 cprice_time = {}
-cprice_refresh_int = {}
 
 def update_price(symbol):
+    """Refresh one REST quote without making an older value look fresh."""
     try:
         ticker = client.get_symbol_ticker(symbol=symbol)
-        cprice[symbol] = float(ticker['price'])
+        price = float(ticker["price"])
+        if not math.isfinite(price) or price <= 0:
+            raise ValueError(f"invalid ticker price: {price!r}")
     except Exception as e:
-        print(f"update_price: There appeared o eroare neasteptata: {e}")
+        print(f"update_price: An unexpected error occurred: {e}")
+        return None
 
+    # Publish value and success time together only after complete validation.
+    cprice[symbol] = price
     cprice_time[symbol] = time.time()
-    cprice_refresh_int[symbol] = 11
-    return cprice.get(symbol)
+    return price
 
 def get_current_price(symbol):
-    global cprice
-    global cprice_refresh_int
-    try:     
-        if (symbol not in cprice_time
-                or cprice_time[symbol] + cprice_refresh_int.get(symbol, 11) <= time.time()):
-            return update_price(symbol)
-        _cprice  = cprice.get(symbol, None)
-        if _cprice is None:
-            print(f"get_current_price: the price for {symbol} is unavailable. Returning None.")
-        return  _cprice
-    
-    except BinanceAPIException as e:
-        print(f"Eroare la obtinerea pretului curent de la Binance API: {e}")
-        print(f"Folosesc the price obtained over the websocket, {symbol}: {cprice.get(symbol, 'N/A')}")
-        _cprice = cprice.get(symbol, None)  # Return None when the symbol is absent.
-        if _cprice is None:
-            print(f"get_current_price: the price for {symbol} is unavailable over WebSocket. Returning None.")
-        return _cprice
-#    except Exception as e:
-#        print(f"get_current_price: An unexpected error occurred: {e}")
-#        print(f"Using the WebSocket price for {symbol}: {cprice.get(symbol, 'N/A')}")
-#        return cprice.get(symbol, None)  # Return None when the symbol is absent.
+    """Return a bounded-age REST quote, failing closed after refresh failure."""
+    now = time.time()
+    cached_at = cprice_time.get(symbol)
+    cached = cprice.get(symbol)
+    if cached_at is not None and cached is not None:
+        age = now - cached_at
+        if 0 <= age < BINANCE_REST_PRICE_CACHE_TTL_SEC:
+            return cached
+
+    # A failed refresh returns None. It deliberately does not extend the timestamp
+    # of an older quote, so repeated outages cannot keep stale data apparently fresh.
+    return update_price(symbol)
 
 currenttime = time.time()       
 def get_current_time():
@@ -127,7 +134,7 @@ def split_symbol(symbol: str):
    from providers.quantity import resolve_assets
    base, quote = resolve_assets(symbol)
    if not quote:
-       raise ValueError(f"Simbol necunoscut: {symbol}")
+       raise ValueError(f"Unknown symbol: {symbol}")
    return base, quote
 
 
@@ -164,7 +171,7 @@ def get_account_assets_balances():
             )
         return result
     except Exception as e:
-        print(f"get_account_assets_balances: Eroare la citirea balantelor: {e}")
+        print(f"get_account_assets_balances: Error reading balances: {e}")
         return []
 
 
@@ -208,7 +215,7 @@ def cancel_orders_old_or_outlier(order_type, symbol, required_quantity, hours=5,
 
 
 
-def get_open_orders(order_type, symbol):
+def get_open_orders(order_type, symbol, *, strict=False):
 
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol)
@@ -216,18 +223,27 @@ def get_open_orders(order_type, symbol):
     try:
         open_orders = client.get_open_orders(symbol=symbol)
         #print(open_orders)
-        filtered_orders = {
-            order['orderId']: {
+        filtered_orders = {}
+        for order in open_orders:
+            if order['side'] != order_type.upper():
+                continue
+            original_qty = float(order['origQty'])
+            executed_qty = float(order.get('executedQty') or 0.0)
+            filtered_orders[order['orderId']] = {
                 'price': float(order['price']),
-                'quantity': float(order['origQty']),
+                # Preserve the legacy field while exposing the financially correct
+                # unfilled quantity to cancel-and-replace consumers.
+                'quantity': original_qty,
+                'executedQty': executed_qty,
+                'remainingQty': max(0.0, original_qty - executed_qty),
                 'timestamp': order['time'] / 1000
             }
-            for order in open_orders if order['side'] == order_type.upper()
-        }
         
         return filtered_orders
     except Exception as e:
         print(f"Error getting open {order_type} orders: {e}")
+        if strict:
+            raise
         return {}
  
           
@@ -239,7 +255,7 @@ def cancel_order(symbol, order_id):
         print(f"The order with ID {order_id} was cancelled.")
         return True
     except Exception as e:
-        print(f"Eroare la anularea ordinului: {order_id} {e}")
+        print(f"Error canceling order {order_id}: {e}")
         return False
 
 def cancel_open_orders(order_type, symbol):
@@ -318,7 +334,7 @@ def check_order_filled(order_id, symbol):
         from providers.market_api import api as market_api
         return market_api.order_status(symbol, str(order_id)).fully_filled
     except Exception as e:
-        print(f"Eroare la verificarea starii ordinului: {e}")
+        print(f"Error checking order status: {e}")
         return False
 
 

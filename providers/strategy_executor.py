@@ -186,6 +186,7 @@ class OrderReconciliationCapabilities:
     status_by_order_id: bool = False
     cancel_by_order_id: bool = False
     list_open_orders: bool = False
+    not_found_reliable_for_seconds: Optional[float] = None
 
     def __post_init__(self):
         for field_name in (
@@ -193,6 +194,25 @@ class OrderReconciliationCapabilities:
                 "cancel_by_order_id", "list_open_orders"):
             if type(getattr(self, field_name)) is not bool:
                 raise TypeError(f"{field_name} capability must be bool")
+        horizon = self.not_found_reliable_for_seconds
+        if horizon is None:
+            return
+        if isinstance(horizon, bool):
+            raise TypeError(
+                "not_found_reliable_for_seconds must be a positive number")
+        try:
+            horizon = float(horizon)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise TypeError(
+                "not_found_reliable_for_seconds must be a positive number"
+            ) from exc
+        if not math.isfinite(horizon) or horizon <= 0:
+            raise ValueError(
+                "not_found_reliable_for_seconds must be finite and > 0")
+        if not self.lookup_by_client_order_id:
+            raise ValueError(
+                "a NOT_FOUND reliability horizon requires client-ID lookup")
+        object.__setattr__(self, "not_found_reliable_for_seconds", horizon)
 
 
 def reconciliation_capabilities_of(provider) -> OrderReconciliationCapabilities:

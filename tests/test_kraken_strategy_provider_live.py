@@ -1,9 +1,8 @@
-"""Phase 2 provider unification — the strategy's LIVE paths (dry_run=False) go through
-contractul StrategyExecutor: submit_order / order_status / cancel_order.
+"""Exercise live strategy paths through the StrategyExecutor contract.
 
-The GOLDEN test covers the decisions (replay, dry_run); THIS one covers exactly the part the
-golden test does NOT touch: the rewiring from KrakenClient to the contract in _place/reconcile/cancel.
-A FAKE provider (no network)."""
+Golden tests cover replay and dry-run decisions. This module covers the adapter
+calls from place, reconcile, and cancel without accessing the network.
+"""
 import os
 import sys
 import unittest
@@ -21,10 +20,11 @@ from providers.strategy_executor import (  # noqa: E402
     PairPrecision,
     ProviderError,
 )
+from providers.kraken_provider import KrakenProvider  # noqa: E402
 
 
 class FakeExecutor:
-    """Implementeaza contractul StrategyExecutor, inregistreaza apelurile."""
+    """Implement the StrategyExecutor contract and record every call."""
     def __init__(self):
         self.calls = []
         self.next_status = OrderStatus("open", 0.0, 0.0, 0.0)
@@ -104,7 +104,7 @@ class ProviderLivePathTest(unittest.TestCase):
     def test_init_reads_the_precision_through_the_contract(self):
         self.assertEqual((self.s.price_dec, self.s.vol_dec), (2, 8))
 
-    def test_dust_safe_lasa_un_singur_tick_la_precizie_mica(self):
+    def test_dust_safe_leaves_one_tick_at_low_precision(self):
         self.s.vol_dec = 2
         self.assertEqual(self.s._dust_safe_qty(13.4), 13.39)
 
@@ -119,11 +119,38 @@ class ProviderLivePathTest(unittest.TestCase):
         self.assertGreaterEqual(self.s._save.call_count, 2)
         self.assertIsNone(self.s.s["pending_intent"])
 
-    def test_place_market_propaga_flagul(self):
+    def test_spot_dca_provider_path_releases_intent_when_live_gate_is_off(self):
+        class KrakenClient:
+            def __init__(self):
+                self.calls = []
+
+            def pair_info(self, _pair):
+                return {
+                    "pair_decimals": 2, "lot_decimals": 8,
+                    "ordermin": "0.01", "base": "HYPE",
+                }
+
+            def add_order(self, *args, **kwargs):
+                self.calls.append((args, kwargs))
+                return {"txid": ["unexpected-live-order"]}
+
+        client = KrakenClient()
+        provider = KrakenProvider(client=client)
+        with patch.dict(os.environ, {"KRAKEN_LIVE_ORDERS": "false"}):
+            strategy = _strategy(provider)
+            strategy._save = MagicMock()
+            placed = strategy._place(
+                "buy", 1.0, 60.0, kind="ENTRY", amount=60.0)
+
+        self.assertFalse(placed)
+        self.assertEqual(client.calls, [])
+        self.assertIsNone(strategy.s["pending_intent"])
+
+    def test_place_market_propagates_flag(self):
         self.s.s["qty"] = 5.0
         self.s._place("sell", 5.0, 59.0, kind="STOP", market=True)
         sub = [c for c in self.fake.calls if c[0] == "submit_order"][-1]
-        self.assertTrue(sub[5])                  # market=True propagat
+        self.assertTrue(sub[5])                  # market=True is propagated.
 
     def test_the_intent_is_persisted_before_the_submit(self):
         observed = []
@@ -283,10 +310,10 @@ class ProviderLivePathTest(unittest.TestCase):
         self.fake.next_status = OrderStatus("closed", filled_qty=2.0, cost=120.0, fee=0.31)
         self.s.reconcile(60.0)
         self.assertTrue(any(c[0] == "order_status" for c in self.fake.calls))
-        self.assertAlmostEqual(self.s.s["qty"], 2.0)     # fill aplicat
+        self.assertAlmostEqual(self.s.s["qty"], 2.0)     # The fill was applied.
         self.assertEqual(self.s.s["orders"], [])         # The order was consumed.
 
-    def test_cancel_open_cheama_cancel_order(self):
+    def test_cancel_open_calls_cancel_order(self):
         self.s._save = MagicMock()
         self.s.s["orders"] = [{"txid": "OID-7", "side": "buy", "vol": 1.0, "price": 60.0,
                                "amount": 60.0, "kind": "ENTRY", "ts": 0}]

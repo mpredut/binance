@@ -12,8 +12,10 @@ The legacy ``place_order`` path submits validation-only requests unless
 strict and always sends a real request; its caller's dry-run policy is the controlling
 gate. Importing this module does not eagerly initialize the Kraken client.
 """
+import hashlib
 import json
 import os
+import re
 import sys
 import math
 import time
@@ -25,6 +27,7 @@ from .strategy_executor import (
     OrderStatus,
     PairPrecision,
     ProviderError,
+    SubmissionRefused,
     extract_order_id,
 )
 from credentials import CredentialProfileMissingError, kraken_credentials
@@ -55,12 +58,35 @@ def _kraken_pair_matches(expected: str, actual: str) -> bool:
     return bool(actual) and _kraken_pair_key(expected) == _kraken_pair_key(actual)
 
 
+_KRAKEN_CLIENT_ID_RE = re.compile(r"^[0-9a-fA-F]{32}$")
+
+
+def _kraken_client_order_id(client_order_id: str) -> str:
+    """Map one durable client ID to Kraken's 128-bit hexadecimal UUID form."""
+    raw = str(client_order_id or "").strip()
+    if not raw or len(raw) > 128:
+        raise ProviderError("Kraken client_order_id must contain 1-128 characters")
+    try:
+        encoded = raw.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ProviderError("Kraken client_order_id must be ASCII") from exc
+    if _KRAKEN_CLIENT_ID_RE.fullmatch(raw):
+        return raw.lower()
+    return hashlib.sha256(
+        b"assertguardian:kraken:cloid:v1\0" + encoded).hexdigest()[:32]
+
+
 def _live() -> bool:
     # os.environ takes precedence, with kraken/.env as the API-key-style fallback.
     v = os.environ.get("KRAKEN_LIVE_ORDERS")
     if v is None:
         v = env_value(_KRAKEN_DIR, "KRAKEN_LIVE_ORDERS")
     return (v or "false").strip().lower() == "true"
+
+
+def kraken_strategy_dry_run(force_paper: bool, strategy_execute: bool) -> bool:
+    """Combine the strategy and provider gates for Kraken orchestration."""
+    return bool(force_paper or not strategy_execute or not _live())
 
 
 class KrakenProvider(MarketDataProvider):
@@ -74,9 +100,16 @@ class KrakenProvider(MarketDataProvider):
     def name(self) -> str:
         return "Kraken"
 
+    def execution_enabled(self) -> bool:
+        """Return whether the generic pipeline may create a real Kraken order."""
+        return _live()
+
     def reconciliation_capabilities(self) -> OrderReconciliationCapabilities:
         return OrderReconciliationCapabilities(
-            lookup_by_client_order_id=True,
+            # ClosedOrders is bounded and therefore cannot prove that an older
+            # client ID was never accepted. Keep automatic resubmission disabled;
+            # the forwarded cl_ord_id remains useful for manual reconciliation.
+            lookup_by_client_order_id=False,
             status_by_order_id=True,
             cancel_by_order_id=True,
             list_open_orders=True,
@@ -229,7 +262,8 @@ class KrakenProvider(MarketDataProvider):
             description = raw.get("descr") or {}
             if not isinstance(description, dict):
                 raise ProviderError(
-                    f"open_orders({symbol}): descriere {order_id} invalida")
+                    f"open_orders({symbol}): invalid description for order "
+                    f"{order_id}")
             pair = str(description.get("pair") or raw.get("pair") or "")
             if not pair:
                 raise ProviderError(
@@ -305,28 +339,43 @@ class KrakenProvider(MarketDataProvider):
 
     # -- Placement remains dry until KRAKEN_LIVE_ORDERS=true. ------------------
     def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
-        live = _live()
+        live = self.execution_enabled()
         s = (side or "").lower()
         s = "buy" if s.startswith("b") else "sell"
+        market = bool(kwargs.get("force", False))
+        ordertype = "market" if market else "limit"
+        submit_price = None if market else price
+        client_order_id = kwargs.get("client_order_id")
+        try:
+            cl_ord_id = (
+                _kraken_client_order_id(client_order_id)
+                if client_order_id is not None else None)
+        except ProviderError as exc:
+            print(f"[Kraken] place_order {symbol}: {exc}")
+            return None
         if not live:
-            print(f"[Kraken][DRY] as plasa {side} {symbol} qty={qty} @ {price} "
-                  f"(real off; seteaza KRAKEN_LIVE_ORDERS=true)")
-            try:                                 # Server-side validation without placement.
-                return self._client().add_order(symbol, s, qty, price, ordertype="limit", validate=True)
+            print(f"[Kraken][DRY] would place {side} {symbol} qty={qty} @ {price} "
+                  f"(real orders are disabled; set KRAKEN_LIVE_ORDERS=true)")
+            try:  # Server-side validation without placement.
+                return self._client().add_order(
+                    symbol, s, qty, submit_price, ordertype=ordertype, validate=True,
+                    cl_ord_id=cl_ord_id)
             except Exception as e:  # noqa: BLE001
                 print(f"[Kraken][DRY] validate {symbol}: {e}")
                 return None
         try:
             print(f"[Kraken][LIVE] {side} {symbol} qty={qty} @ {price}")
-            return self._client().add_order(symbol, s, qty, price, ordertype="limit", validate=False)
+            return self._client().add_order(
+                symbol, s, qty, submit_price, ordertype=ordertype, validate=False,
+                cl_ord_id=cl_ord_id)
         except Exception as e:  # noqa: BLE001
             print(f"[Kraken] place_order {symbol}: {e}")
             return None
 
     # -- StrategyExecutor contract delegated to kraken_client. -----------------
-    # Unlike place_order, this raw method has no KRAKEN_LIVE_ORDERS gate, returns
-    # an order id, and raises ProviderError so strategy reconciliation sees failure.
-    # The strategy's own dry_run setting governs it.
+    # Unlike place_order, this raw method returns an order id and raises typed
+    # errors so strategy reconciliation can distinguish a disabled live gate from
+    # a venue failure. The provider gate remains authoritative for every caller.
     def submit_order(self, symbol: str, side: str, qty: float,
                      price: Optional[float] = None, *, market: bool = False,
                      kind: Optional[str] = None,
@@ -336,10 +385,19 @@ class KrakenProvider(MarketDataProvider):
         try:
             order_kwargs = {"ordertype": ordertype, "validate": False}
             if client_order_id is not None:
-                order_kwargs["cl_ord_id"] = client_order_id
+                order_kwargs["cl_ord_id"] = _kraken_client_order_id(
+                    client_order_id)
+            # This is the final authoritative gate for every raw executor path,
+            # including SpotDCA and trailing stop. Recheck next to the API call so
+            # a switch change after orchestration cannot create a live order.
+            if not self.execution_enabled():
+                raise SubmissionRefused(
+                    "KRAKEN_LIVE_ORDERS is not true; real execution is disabled")
             res = self._client().add_order(
                 symbol, s, qty, None if ordertype == "market" else price,
                 **order_kwargs) or {}
+        except SubmissionRefused:
+            raise
         except Exception as e:  # noqa: BLE001 — Normalize venue errors.
             raise ProviderError(f"submit_order {symbol} {s}: {e}") from e
         order_id = extract_order_id(res)
@@ -373,11 +431,11 @@ class KrakenProvider(MarketDataProvider):
         base_asset = precision.base_asset if precision else ""
         if not base_asset:
             raise ProviderError(
-                f"preflight_order {symbol}: activul de baza este indisponibil")
+                f"preflight_order {symbol}: base asset is unavailable")
         available = self.free_balance(base_asset)
         if available is None or not math.isfinite(float(available)):
             raise ProviderError(
-                f"preflight_order {symbol}: balanta {base_asset} indisponibila")
+                f"preflight_order {symbol}: {base_asset} balance is unavailable")
         available = max(0.0, float(available))
         decimals = precision.volume_decimals if precision else 8
         tolerance = 0.5 * (10.0 ** -max(0, decimals))
@@ -405,7 +463,7 @@ class KrakenProvider(MarketDataProvider):
 
     def order_by_client_id(self, symbol: str, client_order_id: str):
         """Recover an open or recently terminal Kraken order by ``cl_ord_id``."""
-        wanted = str(client_order_id).lower()
+        wanted = _kraken_client_order_id(client_order_id)
         try:
             groups = (self._client().open_orders(), self._client().closed_orders())
         except Exception as e:  # noqa: BLE001
@@ -443,7 +501,7 @@ class KrakenProvider(MarketDataProvider):
                     )
             except (TypeError, ValueError) as e:
                 raise ProviderError(
-                    f"cancel_order {order_id}: raspuns invalid ({result})"
+                    f"cancel_order {order_id}: invalid response ({result})"
                 ) from e
 
     def cancel_order(self, symbol: str, order_id: str) -> None:  # contract StrategyExecutor

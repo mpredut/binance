@@ -1,5 +1,4 @@
-"""Faza 4 provider-unify — BinanceProvider satisface contractul StrategyExecutor
-(the bapi wiring). _bapi is patched with a fake (no real Binance client or keys)."""
+"""Verify the BinanceProvider StrategyExecutor contract with a fake API."""
 import os
 import sys
 import unittest
@@ -12,7 +11,9 @@ os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 from providers import market_api  # noqa: E402
 from providers.market_api import BinanceProvider  # noqa: E402
 from providers.strategy_executor import (  # noqa: E402
-    StrategyExecutor, OrderStatus, PairPrecision, ProviderError)
+    StrategyExecutor, OrderStatus, PairPrecision, ProviderError,
+    SubmissionRefused,
+)
 
 
 class FakeClient:
@@ -74,12 +75,34 @@ class BinanceExecutorContractTest(unittest.TestCase):
         self.fake = FakeBapi()
         self._patch = mock.patch.object(market_api, "_bapi", self.fake)
         self._patch.start()
+        from binance_api import bapi_placeorder
+        self.placeorder = bapi_placeorder
+        self._trade_enabled_patch = mock.patch.object(
+            bapi_placeorder.cfg, "is_trade_enabled", return_value=True,
+        )
+        self._freshness_patch = mock.patch.object(
+            bapi_placeorder.binance_cache_health, "require_fresh_account_cache",
+            return_value=bapi_placeorder.binance_cache_health.CacheHealthStatus(
+                ready=True, reason="ok", order_age_sec=1.0,
+                trade_age_sec=1.0,
+                order_cache_version="order-v1",
+                trade_cache_version="trade-v1",
+            ),
+        )
+        self._trade_enabled_patch.start()
+        self.freshness_gate = self._freshness_patch.start()
+        self._reader_patch = mock.patch(
+            "cacheManager.ensure_account_cache_readers")
+        self.reader_gate = self._reader_patch.start()
         self.p = BinanceProvider()
 
     def tearDown(self):
+        self._freshness_patch.stop()
+        self._reader_patch.stop()
+        self._trade_enabled_patch.stop()
         self._patch.stop()
 
-    def test_satisface_protocolul(self):
+    def test_satisfies_protocol(self):
         self.assertIsInstance(self.p, StrategyExecutor)
 
     def test_pair_precision(self):
@@ -87,7 +110,7 @@ class BinanceExecutorContractTest(unittest.TestCase):
         self.assertEqual(pp, PairPrecision(price_decimals=2, volume_decimals=3,
                                            order_min=0.001, base_asset="BTC"))
 
-    def test_ohlc_closes_exclude_bara_in_formare(self):
+    def test_ohlc_closes_exclude_forming_bar(self):
         self.assertEqual(self.p.ohlc_closes("BTCUSDC", 240), [10.0, 11.0])
 
     def test_order_status_filled(self):
@@ -97,11 +120,26 @@ class BinanceExecutorContractTest(unittest.TestCase):
         self.assertAlmostEqual(st.cost, 120.0)
         self.assertAlmostEqual(st.fee, 0.12)
 
-    def test_submit_order_market_intoarce_order_id(self):
+    def test_order_status_expired_in_match_is_terminal_with_remainder(self):
+        self.fake.client.get_order = lambda **_kwargs: {
+            "status": "EXPIRED_IN_MATCH",
+            "executedQty": "0.75",
+            "cummulativeQuoteQty": "45.0",
+        }
+        self.fake.client.get_my_trades = lambda **_kwargs: []
+
+        status = self.p.order_status("BTCUSDC", "42")
+
+        self.assertEqual(status.status, "expired")
+        self.assertEqual(status.venue_status, "EXPIRED_IN_MATCH")
+        self.assertTrue(status.terminal)
+        self.assertAlmostEqual(2.0 - status.filled_qty, 1.25)
+
+    def test_submit_order_market_returns_order_id(self):
         oid = self.p.submit_order("BTCUSDC", "buy", 0.01, price=None, market=True)
         self.assertEqual(oid, "555")
 
-    def test_submit_order_market_propaga_client_order_id(self):
+    def test_submit_order_market_propagates_client_order_id(self):
         client_id = "SD_0123456789abcdef0123456789abcdef"
         self.p.submit_order(
             "BTCUSDC", "buy", 0.01, market=True,
@@ -116,11 +154,22 @@ class BinanceExecutorContractTest(unittest.TestCase):
         with self.assertRaises(ProviderError):
             self.p.submit_order("BTCUSDC", "buy", 0.01, market=True)
 
-    def test_cancel_deleaga(self):
+    def test_stale_account_cache_refusal_reaches_caller_without_submission(self):
+        self.freshness_gate.side_effect = (
+            self.placeorder.binance_cache_health.AccountCacheNotReady(
+                "trade_cache_stale")
+        )
+        with self.assertRaisesRegex(
+                SubmissionRefused, "account_cache_not_fresh") as raised:
+            self.p.submit_order("BTCUSDC", "buy", 0.01, market=True)
+        self.assertEqual(raised.exception.__cause__.reason, "trade_cache_stale")
+        self.assertEqual(self.fake.client.order_calls, [])
+
+    def test_cancel_delegates(self):
         self.p.cancel_order("BTCUSDC", "42")
         self.assertIn(("BTCUSDC", 42), self.fake.calls)
 
-    def test_cancel_neconfirmat_ridica(self):
+    def test_unconfirmed_cancel_raises(self):
         self.fake.cancel_result = False
         with self.assertRaises(ProviderError):
             self.p.cancel_order("BTCUSDC", "42")

@@ -2,7 +2,7 @@
 
 import os
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from .strategy_executor import OrderReconciliationCapabilities
 
@@ -82,6 +82,29 @@ class MarketDataProvider(ABC):
         """
         return OrderReconciliationCapabilities()
 
+    def preflight_order(self, symbol: str, side: str, qty: float,
+                        price=None, *, market: bool = False,
+                        kind: Optional[str] = None) -> Any:
+        """Validate venue state and optionally return opaque submit authorization."""
+        return None
+
+    def execution_enabled(self) -> bool:
+        """Return whether this provider may create a real venue order now.
+
+        Providers with an explicit dry/live switch override this hook. The shared
+        placement pipeline checks it before creating durable retry state so a dry
+        validation cannot become a live order after a later configuration change.
+        """
+        return True
+
+    def prepare_order_state(self) -> Any:
+        """Synchronize provider state used by shared pre-submit policy checks."""
+        return None
+
+    def validate_order_state(self, expected_state: Any) -> Any:
+        """Require that policy checks still describe the prepared provider state."""
+        return expected_state
+
     def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
         return None
 
@@ -110,6 +133,11 @@ class MarketDataProvider(ABC):
     def adjust_order_price(self, symbol: str, side: str, price: float,
                            cancel_opposite: bool = True) -> float:
         return price
+
+    def cancel_opposite_orders(self, symbol: str, side: str,
+                               requested_price: float) -> None:
+        """Cancel adverse opposing orders when the venue implements this policy."""
+        return None
 
     def profit_guard_window_ref(self, symbol: str, side: str, safeback_sec):
         import order_guard

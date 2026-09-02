@@ -3,7 +3,8 @@ import json
 import pytest
 
 from state_io import (
-    StateReadError, atomic_text_writer, atomic_write_json, load_json_state,
+    StateReadError, atomic_snapshot_file, atomic_text_writer,
+    atomic_write_json, load_json_state,
 )
 
 
@@ -15,6 +16,31 @@ def test_atomic_write_json_replaces_complete_document(tmp_path):
     assert list(path.parent.glob("*.tmp")) == []
 
 
+def test_atomic_writer_fsyncs_directory_after_replace(tmp_path, monkeypatch):
+    path = tmp_path / "state.json"
+    events = []
+    real_replace = __import__("os").replace
+
+    def observed_replace(source, destination):
+        real_replace(source, destination)
+        events.append(("replace", destination))
+
+    def observed_directory_fsync(destination):
+        assert path.read_text(encoding="utf-8") == '{"safe": true}'
+        events.append(("directory_fsync", destination))
+
+    monkeypatch.setattr("state_io.os.replace", observed_replace)
+    monkeypatch.setattr(
+        "state_io._fsync_parent_directory", observed_directory_fsync)
+
+    with atomic_text_writer(path) as handle:
+        handle.write('{"safe": true}')
+
+    assert [event[0] for event in events] == [
+        "replace", "directory_fsync",
+    ]
+
+
 def test_atomic_writer_preserves_previous_file_on_failure(tmp_path):
     path = tmp_path / "state.json"
     path.write_text('{"safe": true}', encoding="utf-8")
@@ -24,6 +50,34 @@ def test_atomic_writer_preserves_previous_file_on_failure(tmp_path):
             raise RuntimeError("interrupted")
     assert path.read_text(encoding="utf-8") == '{"safe": true}'
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_atomic_snapshot_preserves_replaced_source_generation(tmp_path):
+    source = tmp_path / "current.jsonl"
+    snapshot = tmp_path / "current.jsonl.previous"
+    source.write_text("old-generation\n", encoding="utf-8")
+
+    atomic_snapshot_file(source, snapshot)
+    with atomic_text_writer(source) as handle:
+        handle.write("new-generation\n")
+
+    assert source.read_text(encoding="utf-8") == "new-generation\n"
+    assert snapshot.read_text(encoding="utf-8") == "old-generation\n"
+
+
+def test_atomic_snapshot_falls_back_to_copy(tmp_path, monkeypatch):
+    source = tmp_path / "current.jsonl"
+    snapshot = tmp_path / "current.jsonl.previous"
+    source.write_text("certified\n", encoding="utf-8")
+
+    def unavailable_hard_link(*_args, **_kwargs):
+        raise OSError("hard links unavailable")
+
+    monkeypatch.setattr("state_io.os.link", unavailable_hard_link)
+    atomic_snapshot_file(source, snapshot)
+
+    assert snapshot.read_text(encoding="utf-8") == "certified\n"
+    assert [path for path in tmp_path.iterdir() if path.is_dir()] == []
 
 
 def test_missing_state_is_a_clean_first_start(tmp_path):

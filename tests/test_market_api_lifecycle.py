@@ -1,5 +1,6 @@
 import unittest
 import time
+from unittest.mock import patch
 
 from providers.base import MarketDataProvider
 from providers.market_api import MarketApi
@@ -30,6 +31,10 @@ class FakeProvider(MarketDataProvider):
 
     def cancel_order(self, symbol, order_id):
         self.canceled = (symbol, order_id)
+
+    def preflight_order(self, symbol, side, qty, price=None, *, market=False,
+                        kind=None):
+        self.preflighted = (symbol, side, qty, price, market, kind)
 
     def get_trades(self, symbol, since_s):
         return [
@@ -70,6 +75,27 @@ class MarketApiLifecycleTest(unittest.TestCase):
         self.assertEqual(self.provider.canceled, ("ABCUSD", "8"))
         self.assertEqual(
             self.api.latest_fill_price("ABCUSD", "SELL", 60), 11.0)
+
+    def test_preflight_routes_through_common_facade(self):
+        self.api.preflight_order(
+            "ABCUSD", "SELL", 2.0, 11.0,
+            market=False, kind="replacement")
+        self.assertEqual(
+            self.provider.preflighted,
+            ("ABCUSD", "SELL", 2.0, 11.0, False, "replacement"))
+
+    def test_place_honors_explicit_provider_for_overlapping_symbol(self):
+        second = FakeProvider()
+        second.name = "Second"
+        api = MarketApi([self.provider, second])
+        with patch(
+                "instrument.Instrument.place",
+                lambda instrument, *args, **kwargs: instrument.provider_name):
+            selected = api.place(
+                "ABCUSD", "BUY", 10.0, 2.0,
+                provider_name="Second")
+
+        self.assertEqual(selected, "Second")
 
     def test_unsupported_reconciliation_operations_fail_closed(self):
         capabilities = self.api.reconciliation_capabilities("ABCUSD")

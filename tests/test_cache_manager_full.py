@@ -13,7 +13,7 @@ Coverage:
   - get_current_price_manager (singleton)
   - WebSocket health functions
 """
-import gzip, os, sys, json, time, tempfile, unittest
+import gzip, os, sys, json, time, tempfile, threading, unittest
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
@@ -228,6 +228,150 @@ class TestCacheManagerInterface(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# 2. Cache persistence durability
+# ═══════════════════════════════════════════════════════════════════════════════
+class TestCachePersistenceDurability(unittest.TestCase):
+    """Keep durable rows, cursors, and metadata on one coherent snapshot."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def _make_manager(self, *, append_persist):
+        suffix = "jsonl" if append_persist else "json"
+        manager = ConcreteTestManager(
+            9999,
+            ["SYM"],
+            _tmp_file(self.tmp.name, f"durable.{suffix}"),
+            append_mode=True,
+            append_persist=append_persist,
+            remote_items={"SYM": []},
+        )
+        manager.cache = {"SYM": [[1000, 1.0]]}
+        manager.fetchtime_time_per_symbol = {"SYM": 1000}
+        manager._persisted_counts = {}
+        return manager
+
+    @staticmethod
+    def _read_jsonl(path):
+        with open(path, encoding="utf-8") as handle:
+            return [json.loads(line) for line in handle if line.strip()]
+
+    def test_partial_jsonl_write_rolls_back_cursor_and_retries_all_rows(self):
+        manager = self._make_manager(append_persist=True)
+        manager.cache = {
+            "AAA": [[1000, 1.0]],
+            "BBB": [[2000, 2.0]],
+        }
+        manager.fetchtime_time_per_symbol = {"AAA": 1000, "BBB": 2000}
+        real_dumps = cm.json.dumps
+        calls = 0
+
+        def fail_second_dump(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("simulated partial write failure")
+            return real_dumps(*args, **kwargs)
+
+        with patch.object(cm.json, "dumps", side_effect=fail_second_dump):
+            self.assertFalse(manager.save_state_to_file())
+
+        self.assertEqual(manager._persisted_counts, {})
+        self.assertEqual(os.path.getsize(manager.filename), 0)
+        self.assertTrue(manager.save_state_to_file())
+        rows = self._read_jsonl(manager.filename)
+        self.assertEqual([row["s"] for row in rows], ["AAA", "BBB"])
+        self.assertEqual(manager._persisted_counts, {"AAA": 1, "BBB": 1})
+
+    def test_jsonl_fsync_failure_rolls_back_and_retry_persists_every_row(self):
+        manager = self._make_manager(append_persist=True)
+
+        with patch.object(
+                cm.os, "fsync", side_effect=[OSError("simulated fsync failure"), None]):
+            self.assertFalse(manager.save_state_to_file())
+
+        self.assertEqual(manager._persisted_counts, {})
+        self.assertEqual(os.path.getsize(manager.filename), 0)
+        self.assertTrue(manager.save_state_to_file())
+        rows = self._read_jsonl(manager.filename)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["i"], [1000, 1.0])
+
+    def test_metadata_failure_does_not_duplicate_durable_jsonl_rows_on_retry(self):
+        manager = self._make_manager(append_persist=True)
+
+        with patch.object(manager, "_write_meta", return_value=False):
+            self.assertFalse(manager.save_state_to_file())
+
+        self.assertEqual(manager._persisted_counts, {"SYM": 1})
+        self.assertEqual(len(self._read_jsonl(manager.filename)), 1)
+        self.assertTrue(manager.save_state_to_file())
+        self.assertEqual(len(self._read_jsonl(manager.filename)), 1)
+        with open(manager.filename + ".meta", encoding="utf-8") as handle:
+            metadata = json.load(handle)
+        self.assertEqual(metadata["counts"], {"SYM": 1})
+
+    def _save_while_update_attempts_to_cross_metadata(self, manager):
+        real_atomic_write_json = cm.atomic_write_json
+        mutation_started = threading.Event()
+        mutation_finished = threading.Event()
+        mutation_threads = []
+        blocked_during_metadata = []
+
+        def mutate_cache():
+            mutation_started.set()
+            manager.on_items_update("SYM", [[2000, 2.0]])
+            mutation_finished.set()
+
+        def observe_metadata_write(path, payload, indent=None):
+            if path == manager.filename + ".meta":
+                mutation_thread = threading.Thread(target=mutate_cache)
+                mutation_threads.append(mutation_thread)
+                mutation_thread.start()
+                self.assertTrue(mutation_started.wait(1))
+                blocked_during_metadata.append(not mutation_finished.wait(0.1))
+            return real_atomic_write_json(path, payload, indent=indent)
+
+        with patch.object(
+                cm, "atomic_write_json", side_effect=observe_metadata_write):
+            self.assertTrue(manager.save_state_to_file())
+
+        self.assertEqual(blocked_during_metadata, [True])
+        for mutation_thread in mutation_threads:
+            mutation_thread.join(timeout=2)
+            self.assertFalse(mutation_thread.is_alive())
+        self.assertTrue(mutation_finished.is_set())
+
+    def test_jsonl_metadata_cannot_advance_past_durable_rows(self):
+        manager = self._make_manager(append_persist=True)
+        self._save_while_update_attempts_to_cross_metadata(manager)
+
+        rows = self._read_jsonl(manager.filename)
+        with open(manager.filename + ".meta", encoding="utf-8") as handle:
+            metadata = json.load(handle)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(metadata["counts"], {"SYM": 1})
+        self.assertEqual(metadata["fetchtime"], {"SYM": 1000})
+        self.assertEqual(len(manager.cache["SYM"]), 2)
+
+    def test_full_snapshot_metadata_cannot_advance_past_durable_data(self):
+        manager = self._make_manager(append_persist=False)
+        self._save_while_update_attempts_to_cross_metadata(manager)
+
+        with open(manager.filename, encoding="utf-8") as handle:
+            data = json.load(handle)
+        with open(manager.filename + ".meta", encoding="utf-8") as handle:
+            metadata = json.load(handle)
+        self.assertEqual(data["items"], {"SYM": [[1000, 1.0]]})
+        self.assertEqual(data["fetchtime"], metadata["fetchtime"])
+        self.assertEqual(metadata["counts"], {"SYM": 1})
+        self.assertEqual(manager.cache["SYM"], [[1000, 1.0], [2000, 2.0]])
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # 2. CacheTradeManager
 # ═══════════════════════════════════════════════════════════════════════════════
 class TestCacheTradeManager(unittest.TestCase):
@@ -308,6 +452,147 @@ class TestCacheOrderManager(unittest.TestCase):
         reloaded = self._make()
         self.assertEqual(reloaded.cache["BTC"][0]["status"], "FILLED")
         self.assertEqual(reloaded.cache["BTC"][0]["quantity"], "1.0")
+
+
+class TestAccountCacheHealthPublication(unittest.TestCase):
+    """Publish freshness only after a complete, durable account-cache sync."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.managers = []
+
+    def tearDown(self):
+        for manager in self.managers:
+            manager.shutdown()
+        self.tmp.cleanup()
+
+    def _make_manager(self, manager_class, symbols):
+        filename = _tmp_file(
+            self.tmp.name, f"{manager_class.__name__}_health.json")
+        if manager_class is cm.CacheTradeManager:
+            with open(filename, "w", encoding="utf-8") as handle:
+                for index, symbol in enumerate(symbols, start=1):
+                    handle.write(json.dumps({
+                        "s": symbol,
+                        "i": {
+                            "symbol": symbol,
+                            "id": index,
+                            "orderId": index,
+                            "price": "1",
+                            "qty": "1",
+                            "time": 1,
+                            "isBuyer": True,
+                        },
+                    }) + "\n")
+            with open(filename + ".meta", "w", encoding="utf-8") as handle:
+                json.dump({
+                    "fetchtime": {symbol: 1 for symbol in symbols},
+                    "counts": {symbol: 1 for symbol in symbols},
+                }, handle)
+        else:
+            _write_cache_file(
+                filename, {symbol: [] for symbol in symbols},
+                {symbol: 1 for symbol in symbols})
+        with patch("binance_api.bapi_allorders.paginate_my_trades", return_value=[]), \
+             patch("binance_api.bapi_allorders.get_filled_orders", return_value=[]):
+            manager = manager_class(
+                3600, symbols, filename, api_client=MagicMock())
+        manager._first_sleep = False
+        self.managers.append(manager)
+        return manager
+
+    def _run_one_iteration(self, manager, *, canonical_symbols,
+                           query_result=True, query_error=None,
+                           persisted=True, should_poll=True):
+        iteration_complete = threading.Event()
+
+        def query_once():
+            if query_error is not None:
+                iteration_complete.set()
+                raise query_error
+            if query_result:
+                manager._last_complete_sync_at_ms = 123456
+            return query_result
+        def persist_once():
+            iteration_complete.set()
+            if persisted:
+                manager._persisted_data_version = "test-cache-version"
+            return persisted
+
+        query = MagicMock(side_effect=query_once)
+        persist = MagicMock(side_effect=persist_once)
+        persist_method = (
+            "_save_account_trade_append_if_current_generation_locked"
+            if manager.cls_name == "CacheTradeManager"
+            else "save_state_to_file_if_enabled"
+        )
+        with patch.object(manager, "_should_poll", return_value=should_poll), \
+             patch.object(manager, "query_remote_and_update_cache", query), \
+             patch.object(manager, persist_method, persist), \
+             patch.object(cm.sym, "symbols", canonical_symbols), \
+             patch.object(
+                 cm.account_cache_health, "record_successful_sync") as publish:
+            manager.periodic_sync(sync_ts=3600, save_state=True)
+            self.assertTrue(
+                iteration_complete.wait(2),
+                "cache-manager synchronization iteration did not complete")
+            self.assertTrue(manager.shutdown())
+        return query, persist, publish
+
+    def test_order_and_trade_publish_after_complete_persisted_sync(self):
+        symbols = ["BTC", "ETH"]
+        for manager_class in (cm.CacheOrderManager, cm.CacheTradeManager):
+            with self.subTest(manager=manager_class.__name__):
+                manager = self._make_manager(manager_class, symbols)
+                query, persist, publish = self._run_one_iteration(
+                    manager, canonical_symbols=symbols)
+                query.assert_called_once_with()
+                persist.assert_called_once_with()
+                publish.assert_called_once_with(
+                    manager_class.__name__,
+                    "test-cache-version",
+                    now_ms=123456,
+                )
+
+    def test_failed_remote_sync_does_not_publish(self):
+        manager = self._make_manager(cm.CacheOrderManager, ["BTC"])
+        query, persist, publish = self._run_one_iteration(
+            manager,
+            canonical_symbols=["BTC"],
+            query_error=RuntimeError("remote sync failed"),
+        )
+        query.assert_called_once_with()
+        persist.assert_not_called()
+        publish.assert_not_called()
+
+    def test_incomplete_remote_sync_does_not_publish(self):
+        manager = self._make_manager(cm.CacheTradeManager, ["BTC"])
+        _, persist, publish = self._run_one_iteration(
+            manager, canonical_symbols=["BTC"], query_result=False)
+        persist.assert_called_once_with()
+        publish.assert_not_called()
+
+    def test_persistence_failure_does_not_publish(self):
+        manager = self._make_manager(cm.CacheOrderManager, ["BTC"])
+        _, persist, publish = self._run_one_iteration(
+            manager, canonical_symbols=["BTC"], persisted=False)
+        persist.assert_called_once_with()
+        publish.assert_not_called()
+
+    def test_restricted_symbol_manager_does_not_publish(self):
+        manager = self._make_manager(cm.CacheTradeManager, ["BTC"])
+        _, persist, publish = self._run_one_iteration(
+            manager, canonical_symbols=["BTC", "ETH"])
+        persist.assert_called_once_with()
+        publish.assert_not_called()
+
+    def test_non_polling_iteration_does_not_publish(self):
+        manager = self._make_manager(cm.CacheOrderManager, ["BTC"])
+        query, persist, publish = self._run_one_iteration(
+            manager, canonical_symbols=["BTC"], should_poll=False)
+        query.assert_not_called()
+        persist.assert_called_once_with()
+        publish.assert_not_called()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -639,7 +924,7 @@ class TestCacheCurrentPriceManager(unittest.TestCase):
         mgr, api_mock = self._make()
         api_mock.get_current_price.return_value = 65000.0
         with mgr.lock:
-            mgr.cache["BTC"] = [[0, 50000.0]]   # timestamp=0 → stale garantat
+            mgr.cache["BTC"] = [[0, 50000.0]]   # A zero timestamp is always stale.
         api_mock.get_current_price.reset_mock()
         entry = mgr.get_price("BTC")
         api_mock.get_current_price.assert_called()
@@ -662,6 +947,18 @@ class TestCacheCurrentPriceManager(unittest.TestCase):
             mgr.cache = {}
         val = mgr.get_price_value("BTC")
         self.assertIsNone(val)
+
+    def test_get_price_does_not_return_stale_row_after_http_failure(self):
+        mgr, api_mock = self._make()
+        api_mock.get_current_price.return_value = None
+        stale = [0, 50000.0]
+        with mgr.lock:
+            mgr.cache["BTC"] = [stale]
+
+        self.assertIsNone(mgr.get_price("BTC"))
+        api_mock.get_current_price.assert_called()
+        with mgr.lock:
+            self.assertEqual([stale], mgr.cache["BTC"])
 
     # ── subscribe_price / unsubscribe_price ───────────────────────────────────
 
@@ -799,7 +1096,8 @@ class TestCacheFactory(unittest.TestCase):
         cm.CacheFactory.shutdown_all()
 
     def test_read_only_creation_can_be_promoted_to_periodic_sync(self):
-        with patch.object(cm.CacheTradeManager, "periodic_sync") as periodic:
+        with patch.object(cm.CacheTradeManager, "periodic_sync") as periodic, \
+             patch("binance_api.bapi_allorders.paginate_my_trades", return_value=[]):
             first = cm.CacheFactory.get("Trade", symbols=["BTC"], start_sync=False)
             periodic.assert_not_called()
             second = cm.CacheFactory.get("Trade", symbols=["BTC"], start_sync=True)
@@ -1253,7 +1551,7 @@ class TestAtomicWrite(unittest.TestCase):
         cm.atomic_write_json(p, {"v": "old"})
         with self.assertRaises(ValueError):
             with cm.atomic_write(p) as f:
-                f.write("nou-incomplet")
+                f.write("new-incomplete")
                 raise ValueError("boom")
         with open(p) as f:
             self.assertEqual(json.load(f), {"v": "old"})   # Previous content remains intact.

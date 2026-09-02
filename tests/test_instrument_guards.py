@@ -1,20 +1,19 @@
-"""
-Tests for Instrument.place() — the 4 newly added AGNOSTIC protections (30 Jul,
-a user request: "the guardrails from bapi_placeorder as a shared implementation for every
-providerii"): plafon zilnic + anti-spam (order_guard.daily_limit_guard), cooldown
-anti-rapid-fire (lock/trade_cooldown, already generic), the instantaneous trend gate
-(cacheManager) and the FLEET-WIDE journal
-(order_outcomes_log). They apply ONLY to providers with guards_internally()==False
-(Binance ramane neatins, isi pastreaza propria implementare — vezi bapi_placeorder.py).
+"""Tests for the provider-agnostic safeguards in Instrument.place.
 
-A FAKE provider (not the real Binance/Kraken) — fully isolated from the network; `guards_internally`
-implicit False, exact ca Kraken/Hyperliquid azi.
+Coverage includes the daily cap and anti-spam guard, rapid-fire cooldown,
+instantaneous trend gate, and fleet-wide outcome journal. These checks apply to
+providers whose guards_internally() returns False. Providers that explicitly own
+their guard chain bypass this shared layer.
+
+The minimal in-memory fake provider is fully isolated from the network and uses
+the default guards_internally() == False contract.
 """
 import os
 import sys
 import time
 import glob
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -22,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
 from providers.market_api import MarketApi, MarketDataProvider
+from providers.strategy_executor import OrderReconciliationCapabilities
 from instrument import Instrument
 import order_outcomes_log as outcomes_log
 from lock import trade_cooldown as tc
@@ -30,7 +30,7 @@ SYMBOL = "ZZZFAKEUSD"
 
 
 class _FakeProvider(MarketDataProvider):
-    """Provider minimal, in-memorie — guards_internally()=False (ca Kraken/HL)."""
+    """Minimal in-memory provider whose guards are handled by Instrument."""
 
     def __init__(self, name="FakeVenue", price=100.0):
         self._name = name
@@ -77,21 +77,18 @@ class _FakeProvider(MarketDataProvider):
 
 
 class _GuardsInternallyProvider(_FakeProvider):
-    """Like Binance: it already has its own guard chain -> Instrument.place() must
-    SKIPS all 4 agnostic protections entirely (no cooldown, no daily limit)."""
+    """Provider with its own guard chain; Instrument must skip shared guards."""
     def guards_internally(self):
         return True
 
 
 class InstrumentGuardsTestCase(unittest.TestCase):
     def setUp(self):
-        # Cooldown: isolated state and lock (the pattern from test_trade_cooldown.py) — otherwise
-        # testul ar atinge lock/trade_cooldown.json REAL.
+        # Isolate cooldown state and locking so the test never touches live state.
         self._tmp = tempfile.mkdtemp()
         tc.STATE_FILE = os.path.join(self._tmp, "trade_cooldown.json")
         tc.LOCK_FILE = os.path.join(self._tmp, "trade_cooldown.lock")
-        # The outcome journal: an isolated directory — otherwise the test would write into the REAL
-        # logger/, which tradeall_observe.py reads in production.
+        # Isolate the outcome journal from the production logger directory.
         self._log_tmp = tempfile.mkdtemp()
         self._orig_log_dir = outcomes_log.ORDER_OUTCOMES_LOG_DIR
         outcomes_log.ORDER_OUTCOMES_LOG_DIR = self._log_tmp
@@ -129,15 +126,102 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         api = MarketApi([first, second])
 
         self.assertEqual(api.free_balance_for("second", "USDC"), 22.0)
-        with self.assertRaisesRegex(ValueError, "Provider necunoscut"):
+        with self.assertRaisesRegex(ValueError, "Unknown provider"):
             api.free_balance_for("missing", "USDC")
 
-    # ── plafon zilnic + anti-spam ───────────────────────────────────────────────
+    def test_disabled_execution_never_creates_a_later_live_retry(self):
+        import order_retry as oq
+        import order_retry_worker as worker
+
+        class SwitchableProvider(_FakeProvider):
+            live = False
+
+            def execution_enabled(self):
+                return self.live
+
+        provider = SwitchableProvider()
+        instrument = self._inst(provider)
+
+        self.assertIsNone(instrument.place("BUY", 100.0, 1.0))
+        self.assertEqual(provider.placed, [])
+        self.assertEqual(oq.load_all(), [])
+
+        provider.live = True
+        stats = worker.process_once(MarketApi([provider]), now=time.time() + 1000.0)
+        self.assertEqual(stats["attempted"], 0)
+        self.assertEqual(provider.placed, [])
+        self.assertEqual(oq.load_all(), [])
+
+    def test_live_producer_retains_sole_submit_after_lease_expiry(self):
+        import order_retry as oq
+        import order_retry_worker as worker
+
+        entered_provider = threading.Event()
+        release_provider = threading.Event()
+
+        class BlockingRecoverableProvider(_FakeProvider):
+            def reconciliation_capabilities(self):
+                return OrderReconciliationCapabilities(
+                    lookup_by_client_order_id=True,
+                    status_by_order_id=True,
+                    cancel_by_order_id=True,
+                    list_open_orders=True,
+                )
+
+            def place_order(self, symbol, side, price, qty, **kwargs):
+                entered_provider.set()
+                if not release_provider.wait(timeout=2.0):
+                    raise TimeoutError("test did not release the provider")
+                self.placed.append((symbol, side, price, qty, kwargs))
+                return {"orderId": "producer-only"}
+
+        provider = BlockingRecoverableProvider(name="Recoverable")
+        instrument = self._inst(provider)
+        result = {}
+        errors = []
+
+        def produce():
+            try:
+                result["order"] = instrument.place(
+                    "BUY", 100.0, 1.0, smart=False,
+                    wait_for_trend=False, bypass_profit_guard=True)
+            except BaseException as exc:  # noqa: BLE001 - Captured for the assertion.
+                errors.append(exc)
+
+        producer = threading.Thread(target=produce, name="instrument-producer")
+        producer.start()
+        self.assertTrue(entered_provider.wait(timeout=1.0))
+        pending = oq.load_all()[0]
+
+        # Advance beyond the complete producer lease without sleeping. The PID and
+        # process-start identity still prove that the original producer is alive,
+        # so the worker must not perform a second external submission.
+        stats = worker.process_once(
+            MarketApi([provider]),
+            now=max(
+                float(pending["claim_until"]) + 1.0,
+                float(pending["created_ts"]) + oq.RETRY_INTERVAL_SEC + 1.0,
+            ))
+        self.assertEqual(stats["attempted"], 0)
+        self.assertEqual(provider.placed, [])
+
+        release_provider.set()
+        producer.join(timeout=2.0)
+        self.assertFalse(producer.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(result["order"]["orderId"], "producer-only")
+        self.assertEqual(len(provider.placed), 1)
+        tracked = oq.load_all()
+        self.assertEqual(len(tracked), 1)
+        self.assertEqual(tracked[0]["lifecycle"], "accepted")
+        self.assertEqual(tracked[0]["order_id"], "producer-only")
+
+    # -- Daily cap and anti-spam. ---------------------------------------------
     def test_daily_limit_blocks_after_threshold(self):
         p = _FakeProvider()
         inst = self._inst(p)
         # An explicit safeback (48h) so the test is independent of the default in config.
-        # (schimbat 30 iul la 14 zile). backdays = ceil(48h/86400) = 3 -> prag 25*3=75;
+        # backdays = ceil(48h/86400) = 3, so the threshold is 25*3=75;
         # 90 old trades (>3min, under the anti-spam threshold) exceed it.
         for _ in range(90):
             p.seed_trade("BUY", age_sec=4000.0)
@@ -162,10 +246,10 @@ class InstrumentGuardsTestCase(unittest.TestCase):
     def test_safeback_seconds_override_sees_older_trades_and_blocks(self):
         p = _FakeProvider()
         inst = self._inst(p)
-        # backdays = math.ceil(14 zile + 60s / 86400) = 15 zile (rotunjit in SUS) ->
-        # prag 25*15=375; 400 tranzactii il depasesc.
+        # backdays = ceil((14 days + 60 seconds) / 86400) = 15, so the
+        # threshold is 25*15=375; 400 trades exceed it.
         for _ in range(400):
-            p.seed_trade("BUY", age_sec=5 * 24 * 3600)   # 5 zile in urma
+            p.seed_trade("BUY", age_sec=5 * 24 * 3600)   # Five days ago.
         # An explicit 14-day override (identical to tradeall.py: d=14, h=24) -> NOW it sees them -> blocked.
         order = inst.place("BUY", 100.0, 1.0, safeback_seconds=14 * 24 * 3600 + 60)
         self.assertIsNone(order)
@@ -181,7 +265,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
 
     def test_bypass_profit_guard_does_not_skip_daily_limit(self):
         p = _FakeProvider()
-        for _ in range(90):   # vezi test_daily_limit_blocks_after_threshold (safeback 48h -> prag 75)
+        for _ in range(90):   # See the 48-hour threshold of 75 tested above.
             p.seed_trade("BUY", age_sec=4000.0)
         inst = self._inst(p)
         order = inst.place("BUY", 100.0, 1.0, safeback_seconds=48 * 3600 + 60, bypass_profit_guard=True)
@@ -384,7 +468,8 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         inst_b = Instrument(name="B", symbol="ZZZFAKEUSD_B", provider=p.name.lower(),
                             base="B", quote="USD", api=MarketApi([p]))
         self.assertIsNotNone(inst_a.place("BUY", 100.0, 1.0))
-        self.assertIsNotNone(inst_b.place("BUY", 100.0, 1.0))   # alt symbol -> neafectat
+        self.assertIsNotNone(
+            inst_b.place("BUY", 100.0, 1.0))  # A different symbol is unaffected.
 
     def test_pair_id_allows_only_the_opposite_leg_through_cooldown(self):
         p = _FakeProvider()
@@ -406,7 +491,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         self.assertEqual(len(p.placed), 2)
 
     def test_facade_place_routes_through_pipeline(self):
-        # MarketApi.place() (proxy unic guardat, inlocuitorul lui place_order_smart):
+        # MarketApi.place is the single guarded proxy replacing place_order_smart.
         # It builds an ephemeral Instrument and runs the pipeline (the cooldown blocks the 2nd).
         p = _FakeProvider()
         mkt = MarketApi([p])
@@ -420,7 +505,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
     def test_failed_order_enqueued_for_retry(self):
         import order_retry as _oq
         p = _FakeProvider()
-        p.seed_trade("BUY", age_sec=5.0)   # anti-spam -> refuz
+        p.seed_trade("BUY", age_sec=5.0)   # Anti-spam refusal.
         inst = self._inst(p)
         order = inst.place("BUY", 100.0, 1.0)
         self.assertIsNone(order)
@@ -432,7 +517,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
     def test_retry_flag_prevents_reenqueue(self):
         import order_retry as _oq
         p = _FakeProvider()
-        p.seed_trade("BUY", age_sec=5.0)   # refuz
+        p.seed_trade("BUY", age_sec=5.0)   # Expected refusal.
         inst = self._inst(p)
         order = inst.place("BUY", 100.0, 1.0, caller_owns_retry=True)
         self.assertIsNone(order)
@@ -472,9 +557,8 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         )
 
     def test_smart_flag_gates_price_adjust(self):
-        # CORECTIE 30 iul: place_order_smart (SMART: cancel-opuse + nudge) vs place_safe_order
-        # (SAFE: none). smart=True calls adjust_order_price; smart=False does NOT (it keeps
-        # fostului place_safe_order pt rtrade normal/assetguardian/trailing_stop/monitororder).
+        # Smart placement adjusts price; safe placement does not. This preserves
+        # the former place_safe_order behavior for lifecycle-owning callers.
         calls = []
 
         class _SpyProvider(_FakeProvider):
@@ -510,7 +594,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         self.assertIsNotNone(order)
         self.assertEqual(calls, [(True, 2.7)])
 
-    # ── fidelitate financiara MARKET ──────────────────────────────────────────
+    # -- Financial fidelity for market orders. -------------------------------
     def test_market_order_profit_guard_uses_current_price_not_ignored_target(self):
         p = _FakeProvider(price=100.0)
         # The last BUY is the SELL reference. The declared target of 102 passes the margin of
@@ -601,7 +685,7 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         self.assertIsNotNone(order)
         manager.assert_not_called()
 
-    # ── guards_internally (Binance-style) — sare TOT stratul agnostic ───────────
+    # -- guards_internally skips the complete provider-agnostic layer. --------
     def test_guards_internally_provider_bypasses_new_gates(self):
         p = _GuardsInternallyProvider()
         inst = self._inst(p)

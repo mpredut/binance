@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import shutil
 import tempfile
 from collections.abc import Iterator
 from typing import Any
@@ -17,6 +18,65 @@ from typing import Any
 
 class StateReadError(RuntimeError):
     """Persisted runtime state cannot be trusted."""
+
+
+def _fsync_parent_directory(path: str) -> None:
+    """Best-effort directory fsync after publishing a new directory entry."""
+    directory = os.path.dirname(os.path.abspath(os.fspath(path)))
+    try:
+        descriptor = os.open(directory, os.O_RDONLY)
+        try:
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+    except OSError:
+        # Directory handles are not portable (notably on native Windows).
+        pass
+
+
+def durable_replace_file(source: str, destination: str) -> None:
+    """Atomically replace ``destination`` and durably publish the new entry."""
+    source = os.path.abspath(os.fspath(source))
+    destination = os.path.abspath(os.fspath(destination))
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    os.replace(source, destination)
+    with open(destination, "rb") as handle:
+        os.fsync(handle.fileno())
+    _fsync_parent_directory(destination)
+
+
+def atomic_snapshot_file(source: str, destination: str) -> None:
+    """Atomically preserve one immutable file generation at ``destination``.
+
+    A hard link avoids copying a potentially large generation when supported;
+    otherwise the bytes are copied and fsynced. Callers must publish subsequent
+    source generations by replacement rather than mutating the source in place.
+    """
+    source = os.path.abspath(os.fspath(source))
+    destination = os.path.abspath(os.fspath(destination))
+    directory = os.path.dirname(destination)
+    os.makedirs(directory, exist_ok=True)
+    staging_directory = tempfile.mkdtemp(
+        dir=directory, prefix=f".{os.path.basename(destination)}."
+    )
+    staged = os.path.join(staging_directory, "generation")
+    try:
+        try:
+            os.link(source, staged)
+        except OSError:
+            shutil.copyfile(source, staged)
+            with open(staged, "rb") as handle:
+                os.fsync(handle.fileno())
+        durable_replace_file(staged, destination)
+    finally:
+        try:
+            os.unlink(staged)
+        except OSError:
+            pass
+        try:
+            os.rmdir(staging_directory)
+        except OSError:
+            pass
 
 
 def load_json_state(path: str, *, default_factory, fail_closed: bool,
@@ -59,6 +119,7 @@ def atomic_text_writer(path: str, *, encoding: str = "utf-8") -> Iterator[Any]:
         os.fsync(handle.fileno())
         handle.close()
         os.replace(temporary, destination)
+        _fsync_parent_directory(destination)
     except BaseException:
         handle.close()
         try:

@@ -1,11 +1,7 @@
-"""
-Teste pt MECANICA de plasare Binance extrasa (30 iul) — adjust_price_and_cancel_opposite
-+ place_order_mechanics — and for the BinanceProvider hooks that expose them to the
-agnostic (Instrument.place). Reteaua e mock-uita integral (patch pe binance_api.bapi +
-the dispatch functions); NO real call.
+"""Tests for extracted Binance placement mechanics and provider hooks.
 
-The goal: to cover the FLIP (guards_internally=False -> Binance through the agnostic pipeline),
-which the existing suite does not cover (FakeProvider / replay).
+The network and dispatch functions are fully mocked. Coverage includes the
+guards_internally=False route through the provider-neutral Instrument pipeline.
 """
 import os
 import sys
@@ -21,7 +17,9 @@ sys.modules.setdefault("bapi_trades", MagicMock())
 sys.modules.setdefault("bapi_allorders", MagicMock())
 
 from binance_api import bapi_placeorder as po
+from binance_api import bapi
 from providers.market_api import BinanceProvider
+from providers.strategy_executor import SubmissionRefused
 
 SYMBOL = "BTCUSDC"
 
@@ -34,7 +32,7 @@ class TestAdjustPriceAndCancelOpposite(unittest.TestCase):
             out = po.adjust_price_and_cancel_opposite("BUY", SYMBOL, 105.0, cancel_opposite=True)
         # A requested price of 105 > current 100 -> clamped to 100, then *0.999 -> round(99.9)=100.
         self.assertEqual(out, round(min(105.0, 100.0) * 0.999, 0))
-        goo.assert_called_once_with("SELL", SYMBOL)
+        goo.assert_called_once_with("SELL", SYMBOL, strict=True)
         # It cancels ONLY the SELL below the requested price (90 < 105); 110 stays.
         cancel.assert_called_once_with(SYMBOL, "1")
 
@@ -54,6 +52,51 @@ class TestAdjustPriceAndCancelOpposite(unittest.TestCase):
             po.adjust_price_and_cancel_opposite("BUY", SYMBOL, 105.0, cancel_opposite=False)
         goo.assert_not_called()
         cancel.assert_not_called()
+
+    def test_cancel_failure_refuses_replacement(self):
+        with patch.object(
+                po.api, "get_open_orders",
+                return_value={"1": {"price": 90.0}}), \
+             patch.object(po.api, "cancel_order", return_value=False):
+            with self.assertRaisesRegex(
+                    SubmissionRefused, "opposing_cancel_unconfirmed"):
+                po.cancel_opposite_orders("BUY", SYMBOL, 105.0)
+
+    def test_discovery_failure_refuses_replacement(self):
+        with patch.object(
+                po.api, "get_open_orders",
+                side_effect=RuntimeError("venue unavailable")):
+            with self.assertRaisesRegex(
+                    SubmissionRefused, "opposing_order_discovery_unavailable"):
+                po.cancel_opposite_orders("BUY", SYMBOL, 105.0)
+
+
+class TestOpenOrderRemainingQuantity(unittest.TestCase):
+    def test_preserves_original_and_exposes_unfilled_quantity(self):
+        native = [{
+            "orderId": 7,
+            "side": "SELL",
+            "price": "100",
+            "origQty": "2",
+            "executedQty": "0.75",
+            "time": 1_000,
+        }]
+        fake_client = MagicMock()
+        fake_client.get_open_orders.return_value = native
+        with patch.object(bapi, "client", fake_client):
+            order = bapi.get_open_orders("SELL", SYMBOL)[7]
+
+        self.assertEqual(order["quantity"], 2.0)
+        self.assertEqual(order["executedQty"], 0.75)
+        self.assertEqual(order["remainingQty"], 1.25)
+
+    def test_strict_discovery_propagates_api_failure(self):
+        fake_client = MagicMock()
+        fake_client.get_open_orders.side_effect = RuntimeError(
+            "venue unavailable")
+        with patch.object(bapi, "client", fake_client):
+            with self.assertRaisesRegex(RuntimeError, "venue unavailable"):
+                bapi.get_open_orders("SELL", SYMBOL, strict=True)
 
 
 class TestPlaceOrderMechanics(unittest.TestCase):
@@ -75,28 +118,40 @@ class TestPlaceOrderMechanics(unittest.TestCase):
     def test_buy_dispatches_limit(self):
         with patch.object(po.api, "get_current_price", return_value=100.0), \
              patch.object(po.api, "get_free_balance", return_value=1000.0), \
-             patch.object(po, "place_BUY_order", return_value={"orderId": 42}) as pbuy:
+             patch.object(
+                 po, "_submit_binance_order",
+                 return_value={"orderId": 42}) as submit:
             order = po.place_order_mechanics("BUY", SYMBOL, 100.0, 5.0, force=False)
         self.assertEqual(order, {"orderId": 42})
-        self.assertTrue(pbuy.called)
+        submit.assert_called_once()
+        self.assertEqual(submit.call_args.args, ("BUY", SYMBOL, 5.0))
+        self.assertEqual(submit.call_args.kwargs["price"], 100.0)
+        self.assertFalse(submit.call_args.kwargs["market"])
 
     def test_client_order_id_reaches_limit_dispatch(self):
         client_id = "SD_0123456789abcdef0123456789abcdef"
         with patch.object(po.api, "get_current_price", return_value=100.0), \
              patch.object(po.api, "get_free_balance", return_value=1000.0), \
-             patch.object(po, "place_BUY_order", return_value={"orderId": 42}) as pbuy:
+             patch.object(
+                 po, "_submit_binance_order",
+                 return_value={"orderId": 42}) as submit:
             po.place_order_mechanics(
                 "BUY", SYMBOL, 100.0, 5.0, client_order_id=client_id,
             )
-        pbuy.assert_called_once_with(SYMBOL, 100.0, 5.0, client_id)
+        submit.assert_called_once()
+        self.assertEqual(
+            submit.call_args.kwargs["client_order_id"], client_id)
 
     def test_sell_market_when_force(self):
         with patch.object(po.api, "get_current_price", return_value=100.0), \
              patch.object(po.api, "get_free_balance", return_value=10.0), \
-             patch.object(po, "place_SELL_order_at_market", return_value={"orderId": 7}) as pmkt:
+             patch.object(
+                 po, "_submit_binance_order",
+                 return_value={"orderId": 7}) as submit:
             order = po.place_order_mechanics("SELL", SYMBOL, 100.0, 5.0, force=True)
         self.assertEqual(order, {"orderId": 7})
-        self.assertTrue(pmkt.called)
+        submit.assert_called_once()
+        self.assertTrue(submit.call_args.kwargs["market"])
 
     def test_min_notional_rejected(self):
         # qty*price below 100 -> a refusal (None), without dispatch.

@@ -1,14 +1,19 @@
-"""Faza 3 provider-unify — hyperliquid_provider satisface contractul StrategyExecutor
-(the HL API wiring). A FAKE HL client is injected (no SDK, no network, no keys)."""
+"""Hyperliquid StrategyExecutor contract tests with fake SDK clients."""
 import os
 import sys
 import unittest
+from unittest.mock import patch
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
+from instrument import Instrument  # noqa: E402
+import instrument as instrument_module  # noqa: E402
+import order_guard  # noqa: E402
+from providers import hyperliquid_provider as hl_provider  # noqa: E402
 from providers.hyperliquid_provider import HyperliquidProvider  # noqa: E402
+from providers.market_api import MarketApi  # noqa: E402
 from providers.strategy_executor import (  # noqa: E402
     StrategyExecutor, OrderStatus, PairPrecision, ProviderError)
 
@@ -94,8 +99,9 @@ class HLExecutorContractTest(unittest.TestCase):
 
     def tearDown(self):
         os.environ.pop("HL_LIVE_ORDERS", None)
+        os.environ.pop("HL_SECRET_KEY", None)
 
-    def test_satisface_protocolul(self):
+    def test_satisfies_protocol(self):
         self.assertIsInstance(self.p, StrategyExecutor)
 
     def test_pair_precision(self):
@@ -104,21 +110,21 @@ class HLExecutorContractTest(unittest.TestCase):
         self.assertEqual(pp, PairPrecision(price_decimals=6, volume_decimals=2,
                                            order_min=0.0, base_asset="HYPE"))
 
-    def test_ohlc_closes_exclude_bara_in_formare(self):
+    def test_ohlc_closes_exclude_forming_bar(self):
         self.assertEqual(self.p.ohlc_closes("HYPE", 240), [10.0, 11.0])
 
-    def test_submit_order_gated_pe_HL_LIVE_ORDERS(self):
+    def test_submit_order_is_gated_by_hl_live_orders(self):
         # by default HL_LIVE_ORDERS is missing -> a refusal (DN co-mingling safety)
         with self.assertRaises(ProviderError):
             self.p.submit_order("HYPE", "buy", 1.0, price=60.0)
 
-    def test_submit_order_live_intoarce_order_id(self):
+    def test_live_submit_returns_order_id(self):
         os.environ["HL_LIVE_ORDERS"] = "true"
         oid = self.p.submit_order("HYPE", "buy", 1.0, price=60.0)
         self.assertEqual(oid, "12345")
         self.assertEqual(self.signer.calls[-1][:3], ("spot_order", "@107", True))
 
-    def test_submit_order_propaga_cloid(self):
+    def test_submit_order_propagates_cloid(self):
         os.environ["HL_LIVE_ORDERS"] = "true"
         cloid = "0x0123456789abcdef0123456789abcdef"
         self.p.submit_order(
@@ -130,9 +136,10 @@ class HLExecutorContractTest(unittest.TestCase):
         os.environ["HL_LIVE_ORDERS"] = "true"
         self.p.submit_order("HYPE", "sell", 1.0, price=None, market=True)
         px = self.signer.calls[-1][4]
-        self.assertAlmostEqual(px, 60.0 * 0.95)     # sell market -> sub mid, fill imediat
+        self.assertAlmostEqual(
+            px, 60.0 * 0.95)  # A market sell crosses below mid for immediate fill.
 
-    def test_submit_order_respins_ridica(self):
+    def test_submit_order_rejection_raises(self):
         os.environ["HL_LIVE_ORDERS"] = "true"
         self.p._signer = lambda: FakeSigner(order_res=(False, None, "Insufficient"))
         with self.assertRaises(ProviderError):
@@ -143,7 +150,8 @@ class HLExecutorContractTest(unittest.TestCase):
         self.p._client = FakeRead(balances=[
             {"coin": "USDC", "total": "10", "hold": "0"},
         ])
-        with self.assertRaisesRegex(ProviderError, "sold USDC insuficient"):
+        with self.assertRaisesRegex(
+                ProviderError, "insufficient USDC balance"):
             self.p.submit_order("HYPE", "buy", 1.0, price=60.0, kind="DCA")
         self.assertEqual(self.signer.calls, [])
 
@@ -159,15 +167,75 @@ class HLExecutorContractTest(unittest.TestCase):
         st = self.p.order_status("HYPE", "999")
         self.assertEqual(st.status, "open")
 
-    def test_order_by_client_id_recovers_from_open_orders(self):
+    def test_order_by_client_id_uses_authoritative_cloid_query(self):
         cloid = "0x0123456789abcdef0123456789abcdef"
-        self.p._client = FakeRead(opens=[{
-            "oid": 42, "cloid": cloid, "status": "open",
-        }])
+        self.p._client.info.query_order_by_cloid = lambda _addr, _cloid: {
+            "status": "order",
+            "order": {"status": "open", "order": {"oid": 42}},
+        }
         self.assertEqual(
             self.p.order_by_client_id("HYPE", cloid),
             {"orderId": "42", "status": "open"},
         )
+
+    def test_instrument_place_submit_and_lookup_share_deterministic_cloid(self):
+        os.environ["HL_LIVE_ORDERS"] = "true"
+        os.environ["HL_SECRET_KEY"] = "test-only-secret"
+        raw_client_id = "OR_0123456789abcdef01234567_0"
+        expected = hl_provider._cloid_for_client_order_id(raw_client_id)
+        observed_lookup = []
+        self.p._new_client = lambda _secret=None: self.signer
+        self.p._client.info.query_order_by_cloid = lambda _addr, value: (
+            observed_lookup.append(str(value)) or {
+                "status": "order",
+                "order": {"status": "open", "order": {"oid": 12345}},
+            }
+        )
+        instrument = Instrument(
+            "HYPE", "HYPE", "Hyperliquid", base="HYPE", quote="USDC",
+            api=MarketApi([self.p]))
+
+        class AllowedSlot:
+            allowed = True
+            info = {}
+
+            def commit(self, _order_id=None):
+                return None
+
+        class SlotContext:
+            def __enter__(self):
+                return AllowedSlot()
+
+            def __exit__(self, *_args):
+                return False
+
+        with (
+            patch.object(order_guard, "daily_limit_guard",
+                         return_value=(True, None)),
+            patch.object(order_guard, "margin_for", return_value=0.01),
+            patch.object(order_guard, "profit_guard", return_value=True),
+            patch.object(self.p, "policy_cap_quantity",
+                         side_effect=lambda _s, _o, _p, qty, _a, **_k: qty),
+            patch.object(self.p, "fee_cap_quantity",
+                         side_effect=lambda _s, _o, _p, available: available),
+            patch("instrument.trade_cooldown.trade_slot",
+                  return_value=SlotContext()),
+            patch.object(instrument_module._outcomes_log, "log_order_outcome"),
+        ):
+            placed = instrument.place(
+                "BUY", 60.0, 1.0, smart=False, wait_for_trend=False,
+                caller_owns_retry=True, client_order_id=raw_client_id)
+
+        self.assertEqual(placed["orderId"], 12345)
+        self.assertEqual(self.signer.calls[-1][-1], expected)
+        self.p.submit_order(
+            "HYPE", "buy", 1.0, price=60.0,
+            client_order_id=raw_client_id)
+        self.assertEqual(self.signer.calls[-1][-1], expected)
+        self.assertEqual(
+            self.p.order_by_client_id("HYPE", raw_client_id)["orderId"],
+            "12345")
+        self.assertEqual(observed_lookup, [expected])
 
     def test_order_by_client_id_converts_hex_string_to_sdk_cloid(self):
         cloid = "0x0123456789abcdef0123456789abcdef"
@@ -179,7 +247,7 @@ class HLExecutorContractTest(unittest.TestCase):
         self.assertEqual(str(observed[0]), cloid)
         self.assertTrue(hasattr(observed[0], "to_raw"))
 
-    def test_order_status_open_include_fill_partial(self):
+    def test_open_order_status_includes_partial_fill(self):
         self.p._client = FakeRead(
             fills=[{"oid": 999, "sz": "0.4", "px": "60", "fee": "0.02"}],
             status="open",
@@ -190,7 +258,7 @@ class HLExecutorContractTest(unittest.TestCase):
         self.assertAlmostEqual(st.cost, 24.0)
         self.assertAlmostEqual(st.fee, 0.02)
 
-    def test_order_status_closed_agrega_fills(self):
+    def test_closed_order_status_aggregates_fills(self):
         self.p._client = FakeRead(
             fills=[
                 {"oid": 5, "sz": "1.5", "px": "60", "fee": "0.1"},
@@ -220,7 +288,7 @@ class HLExecutorContractTest(unittest.TestCase):
         st = self.p.order_status("HYPE", "77")
         self.assertEqual(st.status, "canceled")
 
-    def test_order_status_necunoscut_ramane_nedeterminat(self):
+    def test_unknown_order_status_remains_indeterminate(self):
         self.p._client = FakeRead(status="unknownOid")
         with self.assertRaises(ProviderError):
             self.p.order_status("HYPE", "77")
@@ -238,11 +306,11 @@ class HLExecutorContractTest(unittest.TestCase):
         with self.assertRaisesRegex(ProviderError, "fills incomplete"):
             self.p.order_status("HYPE", "77")
 
-    def test_cancel_deleaga_la_signer(self):
+    def test_cancel_delegates_to_signer(self):
         self.p.cancel_order("HYPE", "5")
         self.assertIn(("cancel", "@107", 5), self.signer.calls)
 
-    def test_cancel_neconfirmat_ridica(self):
+    def test_unconfirmed_cancel_raises(self):
         self.p._signer = lambda: FakeSigner(cancel_res=False)
         with self.assertRaises(ProviderError):
             self.p.cancel_order("HYPE", "5")

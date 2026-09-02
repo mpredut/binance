@@ -38,7 +38,10 @@ from strategies.spot_dca import Strategy, StratParams
 # Provider-agnostic path B requires the StrategyExecutor contract. Wrap the _BOT client
 # in KrakenProvider so Strategy shares its connection/nonce. Balance/find/price CLI
 # commands continue using KrakenClient directly.
-from providers.kraken_provider import KrakenProvider  # noqa: E402
+from providers.kraken_provider import (  # noqa: E402
+    KrakenProvider,
+    kraken_strategy_dry_run,
+)
 from providers.execution_audit import AuditedStrategyExecutor  # noqa: E402
 from credentials import kraken_credentials  # noqa: E402
 
@@ -60,16 +63,20 @@ def main() -> int:
     load_env_stack(env_file)
     poll_seconds = required_int_env("KRAKEN_BOT_POLL_SEC")
 
-    ap = argparse.ArgumentParser(description="Bot DCA+TP pe Kraken.")
+    ap = argparse.ArgumentParser(description="Kraken DCA and take-profit bot.")
     ap.add_argument("--env-file", default=env_file)
     ap.add_argument("--pair", help="Override the pair (otherwise from .env KRAKEN_PAIR)")
     ap.add_argument("--interval", type=int, default=poll_seconds)
     ap.add_argument("--desktop", action="store_true")
     ap.add_argument("--skip-wait", action="store_true", help="Skip waiting for the listing")
-    ap.add_argument("--paper", action="store_true", help="Force PAPER (no money)")
-    ap.add_argument("--find-pair", metavar="TERM", help="Cauta perechi pe Kraken")
+    ap.add_argument(
+        "--paper", action="store_true",
+        help="Force paper mode without using real money")
+    ap.add_argument("--find-pair", metavar="TERM", help="Search Kraken pairs")
     ap.add_argument("--price", action="store_true", help="Show the current price and exit")
-    ap.add_argument("--balance", action="store_true", help="Arata soldurile (necesita chei)")
+    ap.add_argument(
+        "--balance", action="store_true",
+        help="Show balances (requires API credentials)")
     ap.add_argument("--test-strategy", metavar="PAIR", help="Run the strategy NOW on the given pair")
     args = ap.parse_args()
     if args.test_strategy:
@@ -84,7 +91,8 @@ def main() -> int:
 
     pair        = (args.pair or required_env("KRAKEN_PAIR")).strip()
     label       = required_env("SYMBOL_LABEL")
-    strat_dry   = args.paper or not required_bool_env("STRAT_EXECUTE")
+    strategy_execution = required_bool_env("STRAT_EXECUTE")
+    strat_dry = kraken_strategy_dry_run(args.paper, strategy_execution)
     interval    = max(args.interval, 15)
 
     # --- one-shot commands ---
@@ -97,7 +105,9 @@ def main() -> int:
     if args.balance:
         return _cmd_balance(client)
     if args.test_strategy:
-        log(f"[TEST] strategie pe {args.test_strategy}  {'PAPER' if strat_dry else '⚠ REAL'}")
+        log(
+            f"[TEST] strategy for {args.test_strategy}  "
+            f"{'PAPER' if strat_dry else '⚠ REAL'}")
         Strategy(_build_executor(client), args.test_strategy, StratParams.from_env(),
                  dry_run=strat_dry, desktop=args.desktop).run()
         return 0
@@ -107,8 +117,10 @@ def main() -> int:
         return 1
 
     log("=== Kraken bot ===")
-    log(f"    pereche      : {label}  ({pair})")
-    log(f"    chei         : {'yes' if os.environ.get('KRAKEN_API_KEY_BOT') else 'NO (public/paper only)'}")
+    log(f"    pair         : {label}  ({pair})")
+    log(
+        f"    credentials  : "
+        f"{'yes' if os.environ.get('KRAKEN_API_KEY_BOT') else 'NO (public/paper only)'}")
     log(f"    execution    : {'PAPER (no money)' if strat_dry else '⚠ REAL — REAL MONEY'}")
     log(f"    ntfy/email   : {os.environ.get('NTFY_TOPIC') or '-'} / {os.environ.get('ALERT_TO_EMAIL') or '-'}")
 
@@ -141,9 +153,9 @@ def _wait_for_listing(client, pair, label, interval, desktop) -> bool:
                 p = get_price(client, pair)
                 body = f"{label} ({pair}) is available on Kraken, price {p}"
                 log("############################################")
-                log(f">>> {label} LISTAT PE KRAKEN — pornesc <<<")
+                log(f">>> {label} LISTED ON KRAKEN — STARTING <<<")
                 log("############################################")
-                notify(title=f"{label} listat pe Kraken!", body=body,
+                notify(title=f"{label} listed on Kraken!", body=body,
                        source="kraken", price=p, desktop=desktop)
                 return True
             log(f"ping - waiting for the listing {pair}...")
@@ -162,12 +174,12 @@ def _cmd_find_pair(client: KrakenClient, term: str) -> int:
     t = term.upper()
     hits = [(k, v) for k, v in pairs.items()
             if t in (k + str(v.get("altname")) + str(v.get("wsname")) + str(v.get("base"))).upper()]
-    log(f"[FIND] '{term}' — {len(hits)} rezultate:")
+    log(f"[FIND] '{term}' — {len(hits)} results:")
     for k, v in hits[:20]:
         log(f"  altname={v.get('altname'):<12} wsname={v.get('wsname'):<14} "
             f"base={v.get('base')} quote={v.get('quote')} status={v.get('status')}")
     if not hits:
-        log("  (niciuna)")
+        log("  (none)")
     return 0
 
 
@@ -177,7 +189,7 @@ def _cmd_balance(client: KrakenClient) -> int:
     except KrakenError as e:
         log(f"! balance: {e}")
         return 1
-    log("=== Solduri Kraken ===")
+    log("=== Kraken balances ===")
     for asset, amt in bal.items():
         if float(amt) > 0:
             log(f"  {asset:<8} {amt}")

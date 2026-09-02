@@ -10,14 +10,17 @@ when no base is configured). ``place()`` either delegates to an internally guard
 provider or runs the shared policy pipeline before provider mechanics.
 """
 import os
+import math
 import sys
 import time
 from typing import Optional, List, Callable, Any
 
 from providers.market_api import api as _default_api
 from providers.execution_audit import ExecutionAudit
+from providers.strategy_executor import SubmissionRefused
 import order_guard
 import order_outcomes_log as _outcomes_log
+import accepted_order_persistence
 from lock import trade_cooldown
 
 
@@ -64,17 +67,17 @@ class Instrument:
         self.base = base
         self.quote = quote
         self.enabled = enabled
-        self.isolation = isolation          # 'dedicated' | 'own_ledger' (vezi designul)
+        self.isolation = isolation          # 'dedicated' | 'own_ledger' (see design)
         self.market_hours = market_hours    # '24x7' | 'rth' | ...
         self.params = dict(params or {})
         self._api = api or _default_api
         self._provider = self._api.provider_by_name(provider)
         if self._provider is None:
             raise ValueError(
-                f"Instrument {name!r} ({symbol}): provider necunoscut {provider!r}. "
-                f"Inregistrat in market_api?")
+                f"Instrument {name!r} ({symbol}): unknown provider {provider!r}. "
+                "Is it registered in market_api?")
 
-    # ── identitate / acces provider ────────────────────────────────────────────
+    # -- Provider identity and access. -----------------------------------------
     @property
     def provider(self):
         return self._provider
@@ -83,7 +86,7 @@ class Instrument:
     def provider_label(self) -> str:
         return self._provider.name
 
-    # ── market-data (delegat la provider, pe symbolul instrumentului) ──────────
+    # -- Market data delegated to the provider for this instrument symbol. -----
     def price(self) -> Optional[float]:
         return self._provider.get_current_price(self.symbol)
 
@@ -126,6 +129,16 @@ class Instrument:
         outcome_context = kwargs.pop("_outcome_context", None)
         if outcome_context is not None and not isinstance(outcome_context, dict):
             raise TypeError("_outcome_context must be a dict")
+        # This process-local value is deliberately removed before any retry,
+        # outbox, or audit payload is built. It authorizes one immediate Binance
+        # submit only and is never durable state.
+        cache_permit = kwargs.pop("cache_permit", None)
+        caller_supplied_cache_permit = cache_permit is not None
+        retry_requested_price_raw = kwargs.pop("_retry_requested_price", None)
+        retry_price_tolerance_raw = kwargs.pop("_retry_price_tolerance", None)
+        retry_constraint_supplied = (
+            retry_requested_price_raw is not None
+            or retry_price_tolerance_raw is not None)
         bypass = bool(kwargs.pop("bypass_profit_guard", False))
         bypass_profit_reference = bool(kwargs.pop("bypass_profit_reference", False))
         bypass_quantity_policy = bool(kwargs.pop("bypass_quantity_policy", False))
@@ -138,17 +151,52 @@ class Instrument:
         # weaken the exit guard.
         if bypass_profit_reference and side_u != "BUY":
             print(
-                f"[GARD] {side_u} {self.symbol}: bypass_profit_reference ignorat; "
+                f"[GUARD] {side_u} {self.symbol}: bypass_profit_reference ignored; "
                 "is allowed only for BUY")
             bypass_profit_reference = False
         # Quantity-policy bypass reduces exposure and is therefore SELL-only.
         # Ignore it on BUY so a misplaced argument can never increase exposure.
         if bypass_quantity_policy and side_u != "SELL":
             print(
-                f"[GARD] {side_u} {self.symbol}: bypass_quantity_policy ignorat; "
+                f"[GUARD] {side_u} {self.symbol}: bypass_quantity_policy ignored; "
                 "is allowed only for SELL")
             bypass_quantity_policy = False
+        is_binance = str(self._provider.name).casefold() == "binance"
+        if cache_permit is not None and not is_binance:
+            reason = "invalid_cache_permit_provider"
+            print(f"[{self.symbol}] {side_u} BLOCKED (pre-submit): {reason}")
+            if outcome_context is not None:
+                outcome_context.update(
+                    accepted=False, reason=reason, state="refused")
+            return None
+        execution_enabled = getattr(self._provider, "execution_enabled", None)
+        try:
+            provider_execution_enabled = (
+                True if not callable(execution_enabled)
+                else bool(execution_enabled()))
+        except Exception as exc:  # noqa: BLE001 - An unreadable gate must fail closed.
+            reason = "execution_gate_unavailable"
+            print(
+                f"[{self.symbol}] {side_u} BLOCKED (pre-submit): "
+                f"{reason} ({exc})")
+            if outcome_context is not None:
+                outcome_context.update(
+                    accepted=False, reason=reason, state="refused")
+            return None
+        if not provider_execution_enabled:
+            reason = "execution_disabled"
+            print(f"[{self.symbol}] {side_u} DRY: real provider execution is disabled")
+            if outcome_context is not None:
+                outcome_context.update(
+                    accepted=False, reason=reason, state="refused")
+            return None
         if self._provider.guards_internally():
+            if retry_constraint_supplied:
+                reason = "retry_price_constraint_unsupported"
+                if outcome_context is not None:
+                    outcome_context.update(
+                        accepted=False, reason=reason, state="refused")
+                return None
             return self._provider.place_order(self.symbol, side, price, qty, **kwargs)
 
         # Capture the original uncapped quantity, requested price, and reproducible
@@ -159,8 +207,10 @@ class Instrument:
         order = None
         submit_attempted = False
         prequeued_record_id = None
+        prequeued_claim = None
         prequeued_client_order_id = None
         prequeued_intent_id = None
+        guarded_order_state = None
         # safeback_seconds is explicitly overridden by monitortrades (normally 12
         # days) and tradeall (14 days), so Binance rarely uses the 48-hour config
         # default. Apply the same window to enabled Kraken instruments. Retain it
@@ -188,14 +238,49 @@ class Instrument:
         is_market = bool(kwargs.get("force", False))
         profit_margin = None
         profit_window_ref = None
+        retry_requested_price = None
+        retry_price_tolerance = None
         try:
-            # 0. For smart placement only, apply venue price mechanics and remove
-            # opposing orders before the profit guard so it sees the submitted price.
-            # Safe placement leaves price unchanged here; final submission still
-            # clamps and rounds it through place_order_mechanics.
+            if retry_constraint_supplied:
+                try:
+                    retry_requested_price = float(retry_requested_price_raw)
+                    retry_price_tolerance = float(retry_price_tolerance_raw)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise SubmissionRefused(
+                        "invalid_retry_price_constraint") from exc
+                if (not math.isfinite(retry_requested_price)
+                        or retry_requested_price <= 0
+                        or not math.isfinite(retry_price_tolerance)
+                        or not 0 <= retry_price_tolerance < 1):
+                    raise SubmissionRefused("invalid_retry_price_constraint")
+            preflight_order = getattr(self._provider, "preflight_order", None)
+            if is_binance and smart and caller_supplied_cache_permit:
+                # Smart cancellation accepts only the exact permit issued inside
+                # this pipeline after its guards. External replacement flows use
+                # smart=False and own their durable cancel/recovery lifecycle.
+                raise SubmissionRefused(
+                    "external_cache_permit_not_allowed_for_smart_cancel")
+            if is_binance and cache_permit is None:
+                prepare_order_state = getattr(
+                    self._provider, "prepare_order_state", None)
+                if not callable(prepare_order_state):
+                    raise SubmissionRefused("account_cache_not_fresh")
+                guarded_order_state = prepare_order_state()
+                if guarded_order_state is None:
+                    raise SubmissionRefused("account_cache_not_fresh")
+            if not is_binance and callable(preflight_order):
+                preflight_order(
+                    self.symbol, side_u, qty, price, market=is_market,
+                    kind=kwargs.get("kind") or kwargs.get("motivation"))
+
+            # 0. Compute smart venue pricing before the guards. Binance defers the
+            # separate opposing-order cancellation until after finite quantity
+            # resolution, durable intent persistence, and exact permit issuance.
+            # Other providers retain their existing combined hook behavior.
             if smart:
-                price = self._provider.adjust_order_price(self.symbol, side_u, price,
-                                                          cancel_opposite=True)
+                price = self._provider.adjust_order_price(
+                    self.symbol, side_u, price,
+                    cancel_opposite=not is_binance)
 
             # 1. Provider-agnostic daily cap and anti-spam, never bypassed.
             ok, reason = order_guard.daily_limit_guard(self._provider, self.symbol, side_u,
@@ -207,7 +292,7 @@ class Instrument:
                 if bypass_profit_reference:
                     print(
                         f"[GUARD] {side_u} {self.symbol}: the historical price reference "
-                        "ocolita explicit; quantity/weight guard ramane activ")
+                        "was explicitly bypassed; the quantity/weight guard remains active")
                 else:
                     profit_margin = order_guard.margin_for(self._provider.name)
                     # Tier-one min/max reference comes from the provider hook. Kraken
@@ -250,25 +335,27 @@ class Instrument:
                     import cacheManager as cm
                     if cm.get_short_trend_manager().should_wait(side_u, self.symbol):
                         print(
-                            f"[{self.symbol}] {side_u} amanat de trend; "
+                            f"[{self.symbol}] {side_u} deferred by trend; "
                             "placement does not wait, the intent stays queued for retry")
                         reason = "trend_deferred"
                         return None
                 except Exception as e:  # noqa: BLE001 — Opportunistic gate.
-                    print(f"[{self.symbol}] {side_u} trend-gate indisponibil: {e}")
+                    print(f"[{self.symbol}] {side_u} trend gate unavailable: {e}")
 
-            # Market orders must use the current quote rather than the caller's
-            # decorative limit. Explicit bypass remains available for protective
-            # exits that must accept a loss.
+            # An early executable-price check avoids persisting an intent that is
+            # already known to be unprofitable. It is repeated at the final dispatch
+            # boundary because cooldown, persistence, and cache validation can take
+            # long enough for a market quote to move.
             if not bypass and not bypass_profit_reference and is_market:
-                guard_price = price
-                if is_market:
-                    guard_price = self._provider.get_current_price(self.symbol)
-                    if guard_price is None or float(guard_price) <= 0:
-                        print(f"[{self.symbol}] {side_u} MARKET BLOCKED: current price unavailable")
-                        reason = "market_price_unavailable"
-                        return None
+                guard_price = self._provider.get_current_price(self.symbol)
+                try:
                     guard_price = float(guard_price)
+                except (TypeError, ValueError, OverflowError):
+                    guard_price = float("nan")
+                if not math.isfinite(guard_price) or guard_price <= 0:
+                    print(f"[{self.symbol}] {side_u} MARKET BLOCKED: current price unavailable")
+                    reason = "market_price_unavailable"
+                    return None
                 ok = order_guard.profit_guard(
                     self._provider, self.symbol, side_u, guard_price, profit_margin,
                     window_ref=profit_window_ref)
@@ -282,10 +369,14 @@ class Instrument:
                     side_u, self.symbol, pair_id=cooldown_pair_id) as slot:
                 if not slot.allowed:
                     age = time.time() - slot.info.get("timestamp", 0)
-                    print(f"[{self.symbol}] {side_u} BLOCKED de cooldown: last order "
+                    print(f"[{self.symbol}] {side_u} BLOCKED by cooldown: last order "
                           f"({slot.info.get('side')}) {age:.0f}s ago")
                     reason = "cooldown"
                     return None
+                if callable(execution_enabled) and not bool(execution_enabled()):
+                    # Recheck next to the durability boundary. A disabled dry-run
+                    # must never leave an intent that a later live worker can send.
+                    raise SubmissionRefused("execution_disabled")
                 # Persist the exact intent before the external side effect.  This
                 # closes the process-crash/response-loss gap for every normal caller
                 # of Instrument.place. Lifecycle-owned callers already persist in
@@ -296,16 +387,17 @@ class Instrument:
                         if order_retry.RETRY_ENABLED:
                             prequeue_kwargs = dict(retry_kwargs)
                             prequeue_kwargs["smart"] = smart
-                            prequeued_record_id = order_retry.enqueue(
+                            prequeued_claim = order_retry.enqueue_claimed(
                                 self.symbol, side_u, qty, prequeue_kwargs,
                                 requested_price=orig_price, ref_price=price,
                                 failure_reason="submit_pending",
                                 provider_name=self.provider_name,
                                 intent_id=kwargs.get("intent_id"),
                                 kind=kwargs.get("kind") or kwargs.get("motivation"))
-                            prequeued = order_retry.get(prequeued_record_id)
-                            if prequeued is None:
+                            if prequeued_claim is None:
                                 raise RuntimeError("the intent cannot be read back after persisting")
+                            prequeued_record_id = prequeued_claim.get("id")
+                            prequeued = prequeued_claim
                             prequeued_client_order_id = dict(
                                 prequeued.get("place_kwargs") or {}).get(
                                     "client_order_id")
@@ -320,7 +412,6 @@ class Instrument:
                         reason = "pre_submit_persist_failed"
                         return None
 
-                reason = "submit_ambiguous"
                 if prequeued_intent_id:
                     _EXECUTION_AUDIT.record(
                         "submit_requested", intent_id=prequeued_intent_id,
@@ -330,9 +421,92 @@ class Instrument:
                         kind=kwargs.get("kind") or kwargs.get("motivation"),
                         client_order_id=prequeued_client_order_id,
                     )
+
+                permit_requested_price = None if is_market else orig_price
+                if is_binance and cache_permit is None:
+                    if not callable(preflight_order):
+                        raise SubmissionRefused("account_cache_not_fresh")
+                    cache_permit = preflight_order(
+                        self.symbol, side_u, qty, price, market=is_market,
+                        kind=kwargs.get("kind") or kwargs.get("motivation"))
+                    if cache_permit is None:
+                        raise SubmissionRefused("account_cache_not_fresh")
+                    permit_requested_price = None if is_market else price
+                    validate_order_state = getattr(
+                        self._provider, "validate_order_state", None)
+                    if not callable(validate_order_state):
+                        raise SubmissionRefused("account_cache_not_fresh")
+                    validate_order_state(guarded_order_state)
+
+                # Market profitability is a dispatch-time property. Re-read the
+                # executable quote after final cache/version validation and before
+                # any Binance cancellation. Protective bypasses intentionally
+                # remain exempt.
+                final_profit_check = (
+                    not bypass and not bypass_profit_reference and is_market)
+                if is_market and (final_profit_check
+                                  or retry_constraint_supplied):
+                    final_market_price = self._provider.get_current_price(
+                        self.symbol)
+                    try:
+                        final_market_price = float(final_market_price)
+                    except (TypeError, ValueError, OverflowError):
+                        final_market_price = float("nan")
+                    if (not math.isfinite(final_market_price) or
+                            final_market_price <= 0):
+                        reason = "market_price_unavailable"
+                        print(
+                            f"[{self.symbol}] {side_u} MARKET BLOCKED at dispatch: "
+                            "current price unavailable")
+                        return None
+                    if retry_constraint_supplied:
+                        favorable = (
+                            final_market_price
+                            >= retry_requested_price
+                            * (1.0 - retry_price_tolerance)
+                            if side_u == "SELL" else
+                            final_market_price
+                            <= retry_requested_price
+                            * (1.0 + retry_price_tolerance)
+                        )
+                        if not favorable:
+                            reason = "retry_price_unfavorable"
+                            return None
+                    if final_profit_check and not order_guard.profit_guard(
+                            self._provider, self.symbol, side_u,
+                            final_market_price, profit_margin,
+                            window_ref=profit_window_ref):
+                        reason = "profit_guard"
+                        return None
+                if callable(execution_enabled) and not bool(execution_enabled()):
+                    # The switch can change while guards and persistence run. This
+                    # final check converts that race into a terminal pre-submit
+                    # refusal under the producer's exact durable claim.
+                    raise SubmissionRefused("execution_disabled")
+                if prequeued_claim is not None:
+                    # Revalidate exact durable ownership next to the external side
+                    # effect. An expired/stolen/revision-changed claim must never
+                    # race a worker or allow two provider submissions.
+                    import order_retry
+                    refreshed_claim = order_retry.begin_claimed_submit(
+                        prequeued_claim)
+                    if refreshed_claim is None:
+                        raise SubmissionRefused("producer_claim_lost")
+                    prequeued_claim = refreshed_claim
+                reason = "submit_ambiguous"
                 submit_attempted = True
+                provider_kwargs = dict(kwargs)
+                if cache_permit is not None:
+                    provider_kwargs["permit_requested_price"] = permit_requested_price
+                    provider_kwargs["cache_permit"] = cache_permit
+                if smart and is_binance:
+                    # The Binance low-level dispatch consumes the exact permit
+                    # before applying this cancellation prerequisite. Keeping the
+                    # two venue side effects together leaves no local policy gate
+                    # between a successful cancellation and the replacement.
+                    provider_kwargs["_cancel_opposite_requested_price"] = orig_price
                 response = self._provider.place_order(
-                    self.symbol, side, price, qty, **kwargs)
+                    self.symbol, side, price, qty, **provider_kwargs)
                 if _accepted_order_payload(response):
                     order = response
                     reason = None
@@ -341,6 +515,11 @@ class Instrument:
                     reason = "response_without_order_id"
                     order = None
                 return order
+        except SubmissionRefused as exc:
+            reason = exc.reason
+            submit_attempted = False
+            print(f"[{self.symbol}] {side_u} BLOCKED (pre-submit): {reason}")
+            return None
         except Exception as e:  # noqa: BLE001 — Fail closed when guards cannot be verified.
             print(f"[{self.symbol}] {side_u} BLOCKED (fail-closed): {e}")
             reason = reason or "guard_check_failed"
@@ -371,11 +550,12 @@ class Instrument:
             if order is not None and not caller_owns_retry:
                 try:
                     import order_retry
-                    if prequeued_record_id is not None:
-                        tracked = order_retry.mark_accepted(
-                            prequeued_record_id,
-                            order,
-                            client_order_id=prequeued_client_order_id)
+                    if prequeued_claim is not None:
+                        tracked = (
+                            accepted_order_persistence.complete_accepted_claim(
+                                order_retry, prequeued_claim, order=order,
+                                provider_name=self.provider_name,
+                                symbol=self.symbol, side=side_u))
                         if not tracked:
                             print(
                                 f"[{self.symbol}] {side_u} accepted, but the tracking "
@@ -394,7 +574,9 @@ class Instrument:
                     print(f"[{self.symbol}] {side_u} tracking accepted failed: {_e}")
             # Persist a failed intent unless this is already a retry. Queue handling
             # is best effort and never changes the placement return value.
-            elif order is None and not caller_owns_retry:
+            elif (order is None and not caller_owns_retry
+                  and (prequeued_record_id is not None
+                       or reason != "account_cache_not_fresh")):
                 try:
                     import order_retry
                     if prequeued_intent_id:
@@ -409,10 +591,18 @@ class Instrument:
                             failure_reason=reason,
                         )
                     if order_retry.RETRY_ENABLED:
-                        if prequeued_record_id is not None:
-                            order_retry.mark_failure(
-                                prequeued_record_id, reason,
-                                client_order_id=prequeued_client_order_id)
+                        if prequeued_claim is not None:
+                            claim_outcome = (
+                                "success" if reason in {
+                                    "execution_disabled", "trading_disabled"} else
+                                "deferred" if order_retry.is_non_failure_deferral(reason)
+                                else "failure")
+                            order_retry.complete_claim(
+                                prequeued_claim, claim_outcome,
+                                failure_reason=reason,
+                                submission_state=(
+                                    "unknown" if submit_attempted
+                                    else "refused"))
                         else:
                             # Capture best-effort market price only when enqueueing,
                             # for retry price guarding and deduplication.

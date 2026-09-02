@@ -72,6 +72,10 @@ class T212Provider(MarketDataProvider):
     def _orders_live(self) -> bool:
         return _live() if self._live_enabled is None else bool(self._live_enabled)
 
+    def execution_enabled(self) -> bool:
+        """Return whether the generic pipeline may create a real T212 order."""
+        return self._orders_live()
+
     @property
     def name(self) -> str:
         return "T212"
@@ -110,7 +114,7 @@ class T212Provider(MarketDataProvider):
         try:
             port = self._client().get_portfolio()
             if port is None:
-                raise ProviderError("portofoliul T212 este indisponibil")
+                raise ProviderError("the T212 portfolio is unavailable")
             for p in port:
                 if str(p.get("ticker", "")) == symbol:
                     return p
@@ -221,8 +225,9 @@ class T212Provider(MarketDataProvider):
 
     def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
         if not self._orders_live():
-            print(f"[T212][DRY] as plasa {side} {symbol} qty={qty} @ {price} "
-                  f"(real off; seteaza T212_LIVE_ORDERS=true)")
+            print(
+                f"[T212][DRY] would place {side} {symbol} qty={qty} @ {price} "
+                "(real orders disabled; set T212_LIVE_ORDERS=true)")
             return None
         try:
             print(f"[T212][LIVE] {side} {symbol} qty={qty} @ {price}")

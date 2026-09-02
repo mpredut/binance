@@ -46,7 +46,7 @@ def get_filled_orders_bed(order_type, symbol, backdays=3, limit=1000):
                     limit=limit
                 ) or []
             except Exception as api_err:
-                print(f"[Eroare Binance] {symbol}: {api_err}")
+                print(f"[Binance error] {symbol}: {api_err}")
                 orders = []
 
             # One request is capped at ``limit``. Larger intervals are truncated because
@@ -85,7 +85,8 @@ def get_filled_orders_bed(order_type, symbol, backdays=3, limit=1000):
 from collections import defaultdict
 
 
-def paginate_my_trades(api_client, symbol, start_time_ms, limit=1000):
+def paginate_my_trades(api_client, symbol, start_time_ms, limit=1000, *,
+                       strict=False):
     """Fetch every fill from ``start_time_ms`` through now using pagination.
 
     The first page uses ``startTime`` and later pages use the previous final fill ID
@@ -96,9 +97,16 @@ def paginate_my_trades(api_client, symbol, start_time_ms, limit=1000):
     while True:
         try:
             if from_id is None:
-                batch = api_client.get_my_trades(symbol=symbol, startTime=start_time_ms, limit=limit) or []
+                batch = api_client.get_my_trades(
+                    symbol=symbol, startTime=start_time_ms, limit=limit)
             else:
-                batch = api_client.get_my_trades(symbol=symbol, fromId=from_id, limit=limit) or []
+                batch = api_client.get_my_trades(
+                    symbol=symbol, fromId=from_id, limit=limit)
+            if batch is None:
+                if strict:
+                    raise RuntimeError(
+                        f"Binance returned no trade page for {symbol}")
+                batch = []
         except BinanceAPIException as api_err:
             err_msg = str(api_err)
             if getattr(api_err, "code", None) == -1003 or "too much request weight" in err_msg.lower():
@@ -106,6 +114,8 @@ def paginate_my_trades(api_client, symbol, start_time_ms, limit=1000):
                 time.sleep(60)
                 continue
             print(f"[paginate_my_trades] {symbol}: {api_err}")
+            if strict:
+                raise
             break
         if not batch:
             break
@@ -117,7 +127,7 @@ def paginate_my_trades(api_client, symbol, start_time_ms, limit=1000):
     return out
 
 
-def get_filled_orders(order_type, symbol, startTime, limit=1000):
+def get_filled_orders(order_type, symbol, startTime, limit=1000, *, strict=False):
     try:
         sym.validate_symbols(symbol)
         sym.validate_ordertype(order_type)
@@ -125,7 +135,8 @@ def get_filled_orders(order_type, symbol, startTime, limit=1000):
         end_time = int(time.time() * 1000)  # ms
 
         # Pagination prevents truncation above 1,000 fills.
-        trades = paginate_my_trades(client, symbol, startTime, limit)
+        trades = paginate_my_trades(
+            client, symbol, startTime, limit, strict=strict)
 
         filtered = [
             {
@@ -177,6 +188,8 @@ def get_filled_orders(order_type, symbol, startTime, limit=1000):
 
     except Exception as e:
         print(f"Unexpected error in get_filled_orders: {e}")
+        if strict:
+            raise
         return []
 
 
@@ -213,11 +226,13 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
     sym.validate_ordertype(order_type)
     sym.validate_symbols(symbol)
 
-    if not cache_order_manager.cache:  # Handles both None and an empty cache.
-        return []
-        
-    # Extract the list for this symbol.
-    orders_for_symbol = cache_order_manager.cache.get(symbol, [])
+    # A WebSocket can update a partially filled order in place. Copy each row
+    # under the manager lock so financial totals never observe a torn mutation.
+    with cache_order_manager.lock:
+        orders_for_symbol = [
+            dict(order) for order in cache_order_manager.cache.get(symbol, [])
+            if isinstance(order, dict)
+        ]
     if not orders_for_symbol:
         return []
 
@@ -242,7 +257,7 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
     #print(f" filtered_orders {filtered_orders} , current_time_ms {current_time_ms} timestamp  max_age+ms {max_age_ms}")
     return filtered_orders
 
-# (default: ultimele 24h).
+# The default aggregation window is the previous 24 hours.
 def get_total_traded_stats(symbol, period_seconds=86400):
     
     trades = get_trade_orders(order_type=None, symbol=symbol, max_age_seconds=period_seconds)
@@ -259,7 +274,7 @@ def get_total_traded_stats(symbol, period_seconds=86400):
             stats[side]['total_value'] += t['price'] * t['quantity']
             stats[side]['trade_count'] += 1
 
-    # Rotunjim valorile
+    # Round the accumulated values once, after all rows are included.
     for side in stats:
         stats[side]['total_quantity'] = round(stats[side]['total_quantity'], 8)
         stats[side]['total_value'] = round(stats[side]['total_value'], 8)

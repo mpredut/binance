@@ -66,10 +66,10 @@ def test_place_order_smart_delegates_to_common_pipeline_with_motivation():
     )
 
 
-def test_legacy_adapter_resolves_none_quantity_before_delegating():
+def test_legacy_adapter_preserves_none_quantity_for_common_decision():
     with (patch.object(po, "_resolve_qty", return_value=3.25) as resolve,
           patch.object(po, "_guarded_market_place", return_value=None) as place):
         po.place_safe_order("BUY", SYMBOL, 225.0, None)
 
-    resolve.assert_called_once_with(None)
-    assert place.call_args.args[:4] == (SYMBOL, "BUY", 225.0, 3.25)
+    resolve.assert_not_called()
+    assert place.call_args.args[:4] == (SYMBOL, "BUY", 225.0, None)

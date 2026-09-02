@@ -14,7 +14,7 @@ eagerly importing modules that lead back to ``cacheManager`` would create a cycl
 """
 import math
 import time
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from .base import MarketDataProvider, _normalize_order, env_value
 from .binance_filters import BinanceFilterError, BinanceOrderRules, decimal_places
@@ -23,6 +23,7 @@ from .strategy_executor import (
     OrderStatus,
     PairPrecision,
     ProviderError,
+    SubmissionRefused,
     candle_interval,
     extract_order_id,
     reconciliation_capabilities_of,
@@ -39,6 +40,11 @@ from market_regime import (
 # Keep these variables patchable in tests.
 _bapi = None
 _allorders = None
+
+# Binance documents that some zero-fill canceled/expired orders are archived
+# after 90 days. This is an upper bound on a NOT_FOUND response's usefulness;
+# the retry worker applies the lower operator-configured safety horizon.
+_BINANCE_NOT_FOUND_RELIABLE_FOR_SECONDS = 90 * 24 * 60 * 60
 
 
 def _get_bapi():
@@ -74,12 +80,19 @@ class BinanceProvider(MarketDataProvider):
     def name(self) -> str:
         return "Binance"
 
+    def execution_enabled(self) -> bool:
+        """Return the authoritative Binance live-order feature gate."""
+        import config as cfg
+        return bool(cfg.is_trade_enabled())
+
     def reconciliation_capabilities(self) -> OrderReconciliationCapabilities:
         return OrderReconciliationCapabilities(
             lookup_by_client_order_id=True,
             status_by_order_id=True,
             cancel_by_order_id=True,
             list_open_orders=True,
+            not_found_reliable_for_seconds=(
+                _BINANCE_NOT_FOUND_RELIABLE_FOR_SECONDS),
         )
 
     def get_current_price(self, symbol: str) -> Optional[float]:
@@ -133,7 +146,39 @@ class BinanceProvider(MarketDataProvider):
             raise ProviderError(
                 f"order_by_client_id({symbol},{client_order_id}): {exc}") from exc
 
-    def place_order(self, symbol: str, side: str, price: float, qty: float, force: bool = False, **kwargs):
+    def preflight_order(self, symbol: str, side: str, qty: float,
+                        price=None, *, market: bool = False,
+                        kind: Optional[str] = None) -> Any:
+        from binance_api import bapi_placeorder as _po
+        return _po.issue_account_cache_submit_permit(
+            symbol, side, qty, price, market=market, kind=kind,
+            api_client=_get_bapi().client)
+
+    @staticmethod
+    def _account_cache_state(status) -> tuple[str, str]:
+        return (
+            str(status.order_cache_version),
+            str(status.trade_cache_version),
+        )
+
+    def prepare_order_state(self):
+        """Synchronize Binance account readers before shared policy checks."""
+        from binance_api import bapi_placeorder as _po
+        status = _po.require_account_cache_for_submit()
+        return self._account_cache_state(status)
+
+    def validate_order_state(self, expected_state):
+        """Refuse when policy checks raced with a newer account-cache snapshot."""
+        from binance_api import bapi_placeorder as _po
+        status = _po.require_account_cache_for_submit()
+        current_state = self._account_cache_state(status)
+        if current_state != tuple(expected_state or ()):
+            raise SubmissionRefused("account_cache_snapshot_changed")
+        return current_state
+
+    def place_order(self, symbol: str, side: str, price: float, qty: float,
+                    force: bool = False, cache_permit=None,
+                    permit_requested_price=None, **kwargs):
         # Mechanics only: fee/balance, minimum notional, and dispatch. Instrument.place
         # applies daily, profit, quantity, trend, cooldown, and logging policies via
         # provider-neutral hooks. Only force affects market versus limit here.
@@ -141,12 +186,29 @@ class BinanceProvider(MarketDataProvider):
         mechanics_kwargs = {"force": force}
         if kwargs.get("client_order_id") is not None:
             mechanics_kwargs["client_order_id"] = kwargs["client_order_id"]
+        cancel_requested_price = kwargs.get(
+            "_cancel_opposite_requested_price")
+        if cancel_requested_price is not None:
+            mechanics_kwargs["cancel_opposite_requested_price"] = (
+                cancel_requested_price)
+        if cache_permit is not None:
+            mechanics_kwargs["cache_permit"] = cache_permit
+            mechanics_kwargs["permit_requested_price"] = (
+                price if permit_requested_price is None and not force
+                else permit_requested_price)
+            mechanics_kwargs["kind"] = (
+                kwargs.get("kind") or kwargs.get("motivation"))
         return _po.place_order_mechanics(
             side, symbol, price, qty, **mechanics_kwargs)
 
     def adjust_order_price(self, symbol: str, side: str, price: float, cancel_opposite: bool = True) -> float:
         from binance_api import bapi_placeorder as _po
         return _po.adjust_price_and_cancel_opposite(side, symbol, price, cancel_opposite=cancel_opposite)
+
+    def cancel_opposite_orders(self, symbol: str, side: str,
+                               requested_price: float) -> None:
+        from binance_api import bapi_placeorder as _po
+        _po.cancel_opposite_orders(side, symbol, requested_price)
 
     def profit_guard_window_ref(self, symbol: str, side: str, safeback_sec):
         # Use the Order-cache safeback window as tier-one reference. When the caller
@@ -170,7 +232,9 @@ class BinanceProvider(MarketDataProvider):
                             qty: float, available_qty: float, **kwargs) -> float:
         from binance_api import bapi_placeorder as _po
         return _po.apply_weight_limit(
-            symbol, side, price, qty, available_qty)
+            symbol, side, price,
+            None if math.isinf(float(qty)) else qty,
+            available_qty)
 
     def fee_cap_quantity(self, symbol: str, side: str, price: float,
                          available_qty: float) -> float:
@@ -213,8 +277,10 @@ class BinanceProvider(MarketDataProvider):
     def submit_order(self, symbol: str, side: str, qty: float,
                      price: Optional[float] = None, *, market: bool = False,
                      kind: Optional[str] = None,
-                     client_order_id: Optional[str] = None) -> str:
+                     client_order_id: Optional[str] = None,
+                     cache_permit=None) -> str:
         order_type = "BUY" if (side or "").lower().startswith("b") else "SELL"
+        permit_requested_price = price
         try:
             client = _get_bapi().client
             rules = BinanceOrderRules.from_symbol_info(client.get_symbol_info(symbol))
@@ -225,19 +291,28 @@ class BinanceProvider(MarketDataProvider):
             )
             qty = float(normalized_qty)
             price = None if normalized_price is None else float(normalized_price)
+            from binance_api import bapi_placeorder as _po
             if market or price is None:
-                fn = (client.order_market_buy if order_type == "BUY"
-                      else client.order_market_sell)
-                kwargs = {"symbol": symbol, "quantity": qty}
-                if client_order_id is not None:
-                    kwargs["newClientOrderId"] = client_order_id
-                res = fn(**kwargs)
+                res = _po._submit_binance_order(
+                    order_type, symbol, qty, market=True,
+                    client_order_id=client_order_id, api_client=client,
+                    cache_permit=cache_permit,
+                    permit_requested_price=permit_requested_price,
+                    kind=kind)
             else:
-                from binance_api import bapi_placeorder as _po
                 kwargs = {"force": False}
                 if client_order_id is not None:
                     kwargs["client_order_id"] = client_order_id
-                res = _po.place_order_mechanics(order_type, symbol, price, qty, **kwargs)
+                if cache_permit is not None:
+                    kwargs.update({
+                        "cache_permit": cache_permit,
+                        "permit_requested_price": permit_requested_price,
+                        "kind": kind,
+                    })
+                res = _po.place_order_mechanics(
+                    order_type, symbol, price, qty, **kwargs)
+        except SubmissionRefused:
+            raise
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"submit_order({symbol}): {e}") from e
         oid = extract_order_id(res)
@@ -286,8 +361,15 @@ class BinanceProvider(MarketDataProvider):
             raise
         except Exception as e:  # noqa: BLE001
             raise ProviderError(f"order_status({order_id}): {e}") from e
-        st_map = {"FILLED": "closed", "CANCELED": "canceled", "EXPIRED": "expired",
-                  "REJECTED": "canceled", "NEW": "open", "PARTIALLY_FILLED": "open"}
+        st_map = {
+            "FILLED": "closed",
+            "CANCELED": "canceled",
+            "EXPIRED": "expired",
+            "EXPIRED_IN_MATCH": "expired",
+            "REJECTED": "canceled",
+            "NEW": "open",
+            "PARTIALLY_FILLED": "open",
+        }
         venue_status = str(o.get("status") or "").upper()
         return OrderStatus(
             status=st_map.get(o.get("status"), "open"),
@@ -332,7 +414,7 @@ class MarketApi:
             return self._provider_for(symbol)
         provider = self.provider_by_name(provider_name)
         if provider is None:
-            raise ValueError(f"Provider necunoscut: {provider_name!r}")
+            raise ValueError(f"Unknown provider: {provider_name!r}")
         return provider
 
     def _provider_for(self, symbol: str) -> MarketDataProvider:
@@ -370,7 +452,7 @@ class MarketApi:
         """Read free balance explicitly from the requested unambiguous venue."""
         provider = self.provider_by_name(provider_name)
         if provider is None:
-            raise ValueError(f"Provider necunoscut: {provider_name!r}")
+            raise ValueError(f"Unknown provider: {provider_name!r}")
         return provider.free_balance(asset)
 
     def get_orders(self, symbol: str, side: Optional[str], since_s: float) -> List[dict]:
@@ -408,7 +490,7 @@ class MarketApi:
                 continue
             try:
                 timestamp = float(trade.get("timestamp") or 0.0)
-                if 0 < timestamp < 10_000_000_000:  # secunde -> milisecunde
+                if 0 < timestamp < 10_000_000_000:  # Seconds to milliseconds.
                     timestamp *= 1000.0
                 price = float(trade.get("price") or 0.0)
                 qty = float(trade.get("qty", trade.get("quantity", 0.0)) or 0.0)
@@ -568,6 +650,14 @@ class MarketApi:
         return service.compose(
             asset_short, asset_long, context, use_case=use_case, weights=weights)
 
+    def preflight_order(self, symbol: str, side: str, qty: float,
+                        price=None, *, market: bool = False,
+                        kind: Optional[str] = None, provider_name=None) -> Any:
+        """Validate routed venue state before cancellation or submission."""
+        provider = self._provider_explicit_or_routed(symbol, provider_name)
+        return provider.preflight_order(
+            symbol, side, qty, price, market=market, kind=kind)
+
     def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
         # Mechanics-only provider dispatch without guards. Real placement must use
         # guarded .place(); this remains for internal and dry-run cases.
@@ -583,7 +673,10 @@ class MarketApi:
         """
         from instrument import Instrument
         import utils as u
-        prov_name = self.provider_name_for(symbol)
+        explicit_provider_name = kwargs.pop("provider_name", None)
+        provider = self._provider_explicit_or_routed(
+            symbol, explicit_provider_name)
+        prov_name = provider.name
         if base is None:
             try:
                 base = u.base_asset(symbol)
@@ -630,6 +723,6 @@ for _modname, _clsname in (("hyperliquid_provider", "HyperliquidProvider"),
         _mod = __import__("providers." + _modname, fromlist=[_clsname])
         _extra_providers.append(getattr(_mod, _clsname)())
     except Exception as _e:  # noqa: BLE001
-        print(f"market_api: {_clsname} indisponibil ({_e})")
+        print(f"market_api: {_clsname} unavailable ({_e})")
 
 api = MarketApi([BinanceProvider()] + _extra_providers)

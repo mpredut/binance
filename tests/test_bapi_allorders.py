@@ -1,4 +1,5 @@
 import os, sys, unittest
+import time
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -42,6 +43,18 @@ class TestPaginateMyTrades(unittest.TestCase):
         self.assertEqual(len(out), 2)
         self.assertEqual(client.get_my_trades.call_count, 2)
 
+    def test_none_response_remains_empty_for_legacy_readers(self):
+        client = MagicMock()
+        client.get_my_trades.return_value = None
+        self.assertEqual(ao.paginate_my_trades(client, "X", 0), [])
+
+    def test_none_response_fails_a_strict_reconciliation(self):
+        client = MagicMock()
+        client.get_my_trades.return_value = None
+        with self.assertRaisesRegex(
+                RuntimeError, "Binance returned no trade page"):
+            ao.paginate_my_trades(client, "X", 0, strict=True)
+
 
 class TestCachedOrders(unittest.TestCase):
     def test_reader_does_not_start_a_duplicate_polling_loop(self):
@@ -50,6 +63,33 @@ class TestCachedOrders(unittest.TestCase):
         with patch("cacheManager.get_cache_manager", return_value=manager) as get_manager:
             self.assertEqual(ao.get_trade_orders("BUY", "BTCUSDC", 60), [])
         get_manager.assert_called_once_with("Order", start_sync=False)
+
+    def test_reader_copies_mutable_order_rows_under_manager_lock(self):
+        now_ms = int(time.time() * 1000)
+        manager = MagicMock()
+        manager.cache = {
+            "BTCUSDC": [{
+                "orderId": 7,
+                "price": 100.0,
+                "quantity": 0.5,
+                "timestamp": now_ms,
+                "side": "BUY",
+            }],
+        }
+
+        class MutatingLock:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                manager.cache["BTCUSDC"][0]["price"] = 999.0
+
+        manager.lock = MutatingLock()
+        with patch("cacheManager.get_cache_manager", return_value=manager):
+            result = ao.get_trade_orders("BUY", "BTCUSDC", 60)
+
+        self.assertEqual(result[0]["price"], 100.0)
+        self.assertEqual(manager.cache["BTCUSDC"][0]["price"], 999.0)
 
 
 if __name__ == "__main__":

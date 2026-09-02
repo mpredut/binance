@@ -13,7 +13,9 @@ does not require the SDK or credentials. Unavailable read dependencies generally
 """
 from __future__ import annotations
 
+import hashlib
 import os
+import re
 import sys
 import threading
 import time
@@ -54,6 +56,25 @@ def _hype_symbol(symbol: str) -> bool:
     return s == "HYPE" or s.startswith("HYPE")
 
 
+_CLOID_RE = re.compile(r"^0x[0-9a-fA-F]{32}$")
+
+
+def _cloid_for_client_order_id(client_order_id: str) -> str:
+    """Map one durable client ID to Hyperliquid's exact 128-bit CLOID form."""
+    raw = str(client_order_id or "").strip()
+    if not raw or len(raw) > 128:
+        raise ProviderError("Hyperliquid client_order_id must contain 1-128 characters")
+    try:
+        encoded = raw.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ProviderError("Hyperliquid client_order_id must be ASCII") from exc
+    if _CLOID_RE.fullmatch(raw):
+        return raw.lower()
+    digest = hashlib.sha256(
+        b"assertguardian:hyperliquid:cloid:v1\0" + encoded).hexdigest()
+    return "0x" + digest[:32]
+
+
 class HyperliquidProvider(MarketDataProvider):
     """Provide HYPE spot access through the lazily loaded Hyperliquid SDK."""
 
@@ -69,6 +90,10 @@ class HyperliquidProvider(MarketDataProvider):
     @property
     def name(self) -> str:
         return "Hyperliquid"
+
+    def execution_enabled(self) -> bool:
+        """Return whether the generic pipeline may create a real spot order."""
+        return os.environ.get(_LIVE_ENV, "false").strip().lower() == "true"
 
     def reconciliation_capabilities(self) -> OrderReconciliationCapabilities:
         return OrderReconciliationCapabilities(
@@ -120,7 +145,7 @@ class HyperliquidProvider(MarketDataProvider):
                 # A missing secret creates a read-only Info client.
                 self._client = self._new_client()
             except Exception as e:  # noqa: BLE001
-                print(f"[HL] client indisponibil (SDK/conexiune): {e}")
+                print(f"[HL] client unavailable (SDK/connection): {e}")
                 self._client = None
         return self._client
 
@@ -258,25 +283,30 @@ class HyperliquidProvider(MarketDataProvider):
         delta-neutral wallet co-mingling, which could otherwise unwind its spot leg.
         """
         side = (side or "").upper()
-        live = os.environ.get(_LIVE_ENV, "false").strip().lower() == "true"
+        live = self.execution_enabled()
         if not live:
-            print(f"[HL][DRY] as plasa {side} {symbol} qty={qty} @ {price} "
+            print(f"[HL][DRY] would place {side} {symbol} qty={qty} @ {price} "
                   f"(real orders disabled; set {_LIVE_ENV}=true for real orders)")
             return None
         # -- Gated live path. ---------------------------------------------------
         pair = self._pair()
         if pair is None:
-            print(f"[HL] place_order: perechea spot indisponibila pt {symbol}")
+            print(f"[HL] place_order: spot pair unavailable for {symbol}")
             return None
         try:
+            client_order_id = kwargs.get("client_order_id")
+            cloid = (
+                _cloid_for_client_order_id(client_order_id)
+                if client_order_id is not None else None)
             secret = os.environ.get("HL_SECRET_KEY")
             if not secret:
                 print("[HL] place_order: HL_SECRET_KEY missing — cannot sign")
                 return None
             signer = self._new_client(secret)
             sz_dec = signer.sz_decimals(self._token)
-            ok, oid, msg = signer.spot_order(pair, side == "BUY", float(qty), float(price),
-                                             sz_decimals=sz_dec)
+            ok, oid, msg = signer.spot_order(
+                pair, side == "BUY", float(qty), float(price),
+                sz_decimals=sz_dec, cloid=cloid)
             print(f"[HL] place_order {side} {symbol} -> ok={ok} oid={oid} ({msg})")
             return {"orderId": oid, "ok": ok, "msg": msg} if ok else None
         except Exception as e:  # noqa: BLE001
@@ -310,7 +340,8 @@ class HyperliquidProvider(MarketDataProvider):
         c = self._hl()
         pair = self._pair()
         if c is None or pair is None:
-            raise ProviderError(f"ohlc_closes({symbol}): client/pereche indisponibile")
+            raise ProviderError(
+                f"ohlc_closes({symbol}): client/pair unavailable")
         iv = candle_interval(interval_min)
         lookback_h = max(1, int(90 * int(interval_min) / 60))   # About 90 bars, as on Kraken.
         try:
@@ -325,11 +356,12 @@ class HyperliquidProvider(MarketDataProvider):
                      kind: Optional[str] = None,
                      client_order_id: Optional[str] = None) -> str:
         # Safety: real orders require HL_LIVE_ORDERS due to spot/DN co-mingling.
-        if os.environ.get(_LIVE_ENV, "false").strip().lower() != "true":
+        if not self.execution_enabled():
             raise ProviderError(f"HL_LIVE_ORDERS=false — refusing a real order on HL ({side} {symbol})")
         pair = self._pair()
         if pair is None:
-            raise ProviderError(f"submit_order({symbol}): perechea spot indisponibila")
+            raise ProviderError(
+                f"submit_order({symbol}): spot pair unavailable")
         is_buy = (side or "").lower().startswith("b")
         px = price
         if market or px is None:
@@ -345,7 +377,8 @@ class HyperliquidProvider(MarketDataProvider):
             szd = signer.sz_decimals(self._token)
             order_kwargs = {"sz_decimals": szd}
             if client_order_id is not None:
-                order_kwargs["cloid"] = client_order_id
+                order_kwargs["cloid"] = _cloid_for_client_order_id(
+                    client_order_id)
             ok, oid, msg = signer.spot_order(
                 pair, is_buy, float(qty), float(px), **order_kwargs,
             )
@@ -386,7 +419,7 @@ class HyperliquidProvider(MarketDataProvider):
         tolerance = max(1e-9, required * 1e-12)
         if float(available) + tolerance < required:
             raise ProviderError(
-                f"preflight_order({symbol}) {kind or 'BUY'}: sold USDC insuficient "
+                f"preflight_order({symbol}) {kind or 'BUY'}: insufficient USDC balance "
                 f"({float(available):.8f} < {required:.8f}) — the order was not sent"
             )
 
@@ -397,31 +430,30 @@ class HyperliquidProvider(MarketDataProvider):
         addr = os.environ.get("HL_ACCOUNT_ADDRESS")
         if c is None or pair is None or not addr:
             raise ProviderError(
-                "order_by_client_id: client/pereche/adresa indisponibila")
+                "order_by_client_id: client/pair/address unavailable")
         try:
+            cloid = _cloid_for_client_order_id(client_order_id)
             query = getattr(c.info, "query_order_by_cloid", None)
-            if callable(query):
-                from hyperliquid.utils.types import Cloid
-                raw = query(addr, Cloid.from_str(str(client_order_id))) or {}
-                payload = raw.get("order") if raw.get("status") == "order" else None
-                order = (payload or {}).get("order") or {}
-                oid = order.get("oid", (payload or {}).get("oid"))
-                if oid is not None:
-                    return {
-                        "orderId": str(oid),
-                        "status": (payload or {}).get("status"),
-                    }
-            for order in c.open_orders(pair) or []:
-                if (str(order.get("cloid") or "").lower()
-                        != str(client_order_id).lower()):
-                    continue
-                oid = order.get("oid")
-                if oid is not None:
-                    return {
-                        "orderId": str(oid),
-                        "status": order.get("status") or "open",
-                    }
-            return None
+            if not callable(query):
+                raise ProviderError(
+                    "The Hyperliquid SDK lacks authoritative CLOID lookup")
+            from hyperliquid.utils.types import Cloid
+            raw = query(addr, Cloid.from_str(cloid)) or {}
+            if raw.get("status") == "unknownOid":
+                return None
+            if raw.get("status") != "order":
+                raise ProviderError(
+                    f"order_by_client_id({symbol}): indeterminate status {raw}")
+            payload = raw.get("order") or {}
+            order = payload.get("order") or {}
+            oid = order.get("oid", payload.get("oid"))
+            if oid is None:
+                raise ProviderError(
+                    f"order_by_client_id({symbol}): response without order ID")
+            return {
+                "orderId": str(oid),
+                "status": payload.get("status"),
+            }
         except ProviderError:
             raise
         except Exception as e:  # noqa: BLE001
@@ -432,7 +464,8 @@ class HyperliquidProvider(MarketDataProvider):
         c = self._hl()
         pair = self._pair()
         if c is None or pair is None:
-            raise ProviderError(f"order_status({order_id}): client/pereche indisponibile")
+            raise ProviderError(
+                f"order_status({order_id}): client/pair unavailable")
         addr = os.environ.get("HL_ACCOUNT_ADDRESS")
         if not addr:
             raise ProviderError("order_status: HL_ACCOUNT_ADDRESS missing")
@@ -446,7 +479,7 @@ class HyperliquidProvider(MarketDataProvider):
             raw_status = query(addr, oid) or {}
             if raw_status.get("status") != "order":
                 raise ProviderError(
-                    f"order_status({order_id}): status nedeterminat ({raw_status})"
+                    f"order_status({order_id}): indeterminate status ({raw_status})"
                 )
             status_payload = raw_status.get("order") or {}
             venue_status = str(status_payload.get("status") or "")
@@ -472,7 +505,7 @@ class HyperliquidProvider(MarketDataProvider):
                     fee += raw_fee
                 else:
                     raise ProviderError(
-                        f"order_status({order_id}): feeToken necunoscut {fee_token!r}"
+                        f"order_status({order_id}): unknown feeToken {fee_token!r}"
                     )
             try:
                 original = float(order_payload.get("origSz") or 0.0)
@@ -508,7 +541,8 @@ class HyperliquidProvider(MarketDataProvider):
     def cancel_order(self, symbol: str, order_id: str) -> None:
         pair = self._pair()
         if pair is None:
-            raise ProviderError(f"cancel_order({order_id}): perechea indisponibila")
+            raise ProviderError(
+                f"cancel_order({order_id}): pair unavailable")
         try:
             canceled = self._signer().cancel(pair, int(order_id))
             if not canceled:

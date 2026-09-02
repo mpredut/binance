@@ -14,6 +14,9 @@ import uuid
 from typing import Callable, Optional, Protocol
 
 
+_MAX_LIMIT_REVISION = 1_000_000
+
+
 @dataclass
 class OrderTicket:
     order_id: str
@@ -22,13 +25,16 @@ class OrderTicket:
     qty: float
     active: bool = True
     pair_id: Optional[str] = None
+    revision: int = 0
 
     def __post_init__(self):
         self.side = str(self.side).upper()
         self.price = float(self.price)
         self.qty = float(self.qty)
+        self.revision = int(self.revision)
         if (self.side not in {"BUY", "SELL"} or not math.isfinite(self.price)
-                or self.price <= 0 or not math.isfinite(self.qty) or self.qty <= 0):
+                or self.price <= 0 or not math.isfinite(self.qty) or self.qty <= 0
+                or not 0 <= self.revision <= _MAX_LIMIT_REVISION):
             raise ValueError("ticket rtrade invalid")
 
 
@@ -44,7 +50,7 @@ class OrderSnapshot:
             raise ValueError(f"invalid rtrade order status: {self.status}")
         if any(not math.isfinite(float(value)) or float(value) < 0
                for value in (self.filled_qty, self.cost, self.fee)):
-            raise ValueError("snapshot financiar rtrade invalid")
+            raise ValueError("invalid rtrade financial snapshot")
 
 
 @dataclass(frozen=True)
@@ -101,15 +107,26 @@ class PairOutcome:
 
 class PairVenue(Protocol):
     def current_price(self) -> Optional[float]: ...
+    def preflight_order(self, side: str, qty: float, price: Optional[float] = None,
+                        *, market: bool = False,
+                        kind: Optional[str] = None) -> object: ...
     def place_limit(self, side: str, price: float, qty: float,
-                    pair_id: str) -> Optional[OrderTicket]: ...
+                    pair_id: str, *,
+                    cache_permit=None,
+                    revision: int = 0) -> Optional[OrderTicket]: ...
     def place_market_exit(self, side: str, qty: float,
                           reason: str,
-                          pair_id: Optional[str] = None) -> Optional[OrderTicket]: ...
+                          pair_id: Optional[str] = None, *,
+                          cache_permit=None,
+                          revision: int = 0) -> Optional[OrderTicket]: ...
     def market_exit_allowed(self, exposure_side: str, loss_fraction: float,
                             reason: str) -> bool: ...
     def order_status(self, order_id: str) -> OrderSnapshot: ...
     def cancel(self, order_id: str) -> bool: ...
+
+
+def _is_recovery_pending(reason: Optional[str]) -> bool:
+    return str(reason or "").split(":", 1)[0].endswith("_recovery_pending")
 
 
 def _place_failure_reason(venue: PairVenue, side: str) -> str:
@@ -184,6 +201,9 @@ class PairCoordinator:
         self.tickets: list[OrderTicket] = []
         self.snapshots: dict[str, OrderSnapshot] = {}
         self.stop_ticket: Optional[OrderTicket] = None
+        self.limit_revisions = {"BUY": 0, "SELL": 0}
+        self.hard_stop_revision = 0
+        self.hard_stop_reason: Optional[str] = None
 
     def start(self, mid: Optional[float] = None,
               pair_id: Optional[str] = None) -> PairOutcome:
@@ -203,24 +223,80 @@ class PairCoordinator:
         self.tickets = []
         self.snapshots = {}
         self.stop_ticket = None
+        self.limit_revisions = {"BUY": 0, "SELL": 0}
+        self.hard_stop_revision = 0
+        self.hard_stop_reason = None
 
         prices = {"BUY": buy_price, "SELL": sell_price}
         first_side = self.start_side
         second_side = "SELL" if first_side == "BUY" else "BUY"
-        first = self.venue.place_limit(
-            first_side, prices[first_side], self.qty, self.pair_id)
+        try:
+            first = self.venue.place_limit(
+                first_side, prices[first_side], self.qty, self.pair_id,
+                revision=self.limit_revisions[first_side])
+        except Exception as exc:  # noqa: BLE001 - Submission may be ambiguous.
+            print(
+                f"[rtrade_pair] first {first_side} leg raised before its "
+                f"response was known: {exc}")
+            first = None
+            first_exception = True
+        else:
+            first_exception = False
         if first is None:
+            placement_reason = _place_failure_reason(self.venue, first_side)
+            if (first_exception or _is_recovery_pending(placement_reason)
+                    or bool(getattr(self.venue, "recovery_blocked", False))):
+                self.phase = "startup_recovery"
+                self.reason = (
+                    placement_reason if _is_recovery_pending(placement_reason)
+                    else f"{first_side.lower()}_recovery_pending")
+                return self.outcome()
             self.phase = "failed"
-            self.reason = _place_failure_reason(self.venue, first_side)
+            self.reason = placement_reason
             return self.outcome()
         self.tickets.append(first)
 
-        second = self.venue.place_limit(
-            second_side, prices[second_side], self.qty, self.pair_id)
+        try:
+            second = self.venue.place_limit(
+                second_side, prices[second_side], self.qty, self.pair_id,
+                revision=self.limit_revisions[second_side])
+        except Exception as exc:  # noqa: BLE001 - The accepted first leg must remain managed.
+            print(
+                f"[rtrade_pair] second {second_side} leg raised after the "
+                f"first leg was accepted: {exc}")
+            second = None
+            second_exception = True
+        else:
+            second_exception = False
         if second is None:
-            self._cancel(first)
+            placement_reason = _place_failure_reason(self.venue, second_side)
+            _snapshot, cancel_reason = self._cancel_and_reconcile(first)
+            recovery_pending = (
+                second_exception or _is_recovery_pending(placement_reason)
+                or bool(getattr(self.venue, "recovery_blocked", False))
+            )
+            if cancel_reason is not None:
+                # The first order may still be live or may have filled despite a
+                # lost cancel response. Keep the round nonterminal and checkpointable.
+                self.phase = "startup_recovery"
+                self.reason = placement_reason
+                return self.outcome()
+            if recovery_pending:
+                # The second order may have been accepted despite response loss.
+                # Keep its persisted intent active even after the first is canceled.
+                self.phase = "startup_recovery"
+                self.reason = (
+                    placement_reason if _is_recovery_pending(placement_reason)
+                    else f"{second_side.lower()}_recovery_pending")
+                return self.outcome()
+            if abs(self._net_qty()) > 1e-8:
+                # A fill won the cancel race. The next step will build the exit
+                # from the reconciled net exposure rather than forgetting the leg.
+                self.phase = "exposed"
+                self.reason = placement_reason
+                return self.outcome()
             self.phase = "failed"
-            self.reason = _place_failure_reason(self.venue, second_side)
+            self.reason = placement_reason
             return self.outcome()
         self.tickets.append(second)
         self.phase = "quoting"
@@ -237,6 +313,11 @@ class PairCoordinator:
                 None if self.first_fill_at is None
                 else max(0.0, self.first_fill_at - self.started_at)),
             "first_fill_side": self.first_fill_side,
+            "stop_order_id": (
+                None if self.stop_ticket is None else self.stop_ticket.order_id),
+            "limit_revisions": dict(self.limit_revisions),
+            "hard_stop_revision": self.hard_stop_revision,
+            "hard_stop_reason": self.hard_stop_reason,
             "tickets": [vars(ticket).copy() for ticket in self.tickets],
             "snapshots": {
                 str(order_id): vars(snapshot).copy()
@@ -249,7 +330,7 @@ class PairCoordinator:
                    clock=time.monotonic, sleeper=time.sleep):
         required = {"pair_id", "qty", "start_side", "phase", "tickets"}
         if not required.issubset(state or {}):
-            raise ValueError("checkpoint rtrade incomplet")
+            raise ValueError("incomplete rtrade checkpoint")
         obj = cls(venue, state["qty"], policy, start_side=state["start_side"],
                   clock=clock, sleeper=sleeper)
         obj.pair_id = str(state["pair_id"])
@@ -266,6 +347,24 @@ class PairCoordinator:
             str(order_id): OrderSnapshot(**snapshot)
             for order_id, snapshot in state.get("snapshots", {}).items()
         }
+        stop_order_id = state.get("stop_order_id")
+        obj.stop_ticket = next(
+            (ticket for ticket in obj.tickets
+             if ticket.order_id == str(stop_order_id)), None)
+        if obj.stop_ticket is None and obj.phase == "stopping" and obj.tickets:
+            # Backward-compatible adoption of checkpoints written before the
+            # explicit stop-order field existed: the market exit was appended last.
+            obj.stop_ticket = obj.tickets[-1]
+        stored_limit_revisions = state.get("limit_revisions") or {}
+        obj.limit_revisions = {}
+        for side in ("BUY", "SELL"):
+            revision = int(stored_limit_revisions.get(side, 0) or 0)
+            if not 0 <= revision <= _MAX_LIMIT_REVISION:
+                raise ValueError(f"invalid {side} limit revision: {revision}")
+            obj.limit_revisions[side] = revision
+        obj.hard_stop_revision = max(
+            0, int(state.get("hard_stop_revision", 0) or 0))
+        obj.hard_stop_reason = state.get("hard_stop_reason")
         return obj
 
     def _cancel(self, ticket: OrderTicket) -> bool:
@@ -276,12 +375,96 @@ class PairCoordinator:
             ticket.active = False
         return ok
 
+    @staticmethod
+    def _intent_revision(kind: str, prefix: str) -> Optional[int]:
+        kind = str(kind)
+        if kind == prefix:
+            return 0
+        marker = f"{prefix}_"
+        if not kind.startswith(marker):
+            return None
+        suffix = kind[len(marker):]
+        if not suffix.isdigit():
+            return None
+        revision = int(suffix)
+        return revision if 0 < revision <= _MAX_LIMIT_REVISION else None
+
+    def _recover_persisted_intents(self) -> bool:
+        """Adopt venue-confirmed intents without issuing another submit."""
+        recover = getattr(self.venue, "recover_pair_intents", None)
+        if not callable(recover):
+            return False
+        try:
+            recovered = recover(self.pair_id)
+        except Exception as exc:  # noqa: BLE001 - Recovery must remain fail closed.
+            print(
+                f"[rtrade_pair] intent recovery remains blocked for "
+                f"{self.pair_id}: {exc}")
+            return False
+        for ticket, snapshot, kind in recovered:
+            existing = next(
+                (known for known in self.tickets
+                 if known.order_id == ticket.order_id),
+                None,
+            )
+            if existing is None:
+                ticket.pair_id = self.pair_id
+                self.tickets.append(ticket)
+                existing = ticket
+            existing.active = snapshot.status == "open"
+            self.snapshots[existing.order_id] = snapshot
+            limit_revision = self._intent_revision(kind, "limit")
+            if limit_revision is not None:
+                existing.revision = limit_revision
+                self.limit_revisions[existing.side] = max(
+                    self.limit_revisions[existing.side], limit_revision)
+            stop_revision = self._intent_revision(kind, "hard_stop")
+            if stop_revision is not None:
+                existing.revision = stop_revision
+                self.hard_stop_revision = max(
+                    self.hard_stop_revision, stop_revision)
+                self.stop_ticket = existing
+                self.hard_stop_reason = (
+                    self.hard_stop_reason or "inventory_hard_stop")
+                self.phase = "stopping"
+        blocked = getattr(self.venue, "pair_recovery_blocked", None)
+        if callable(blocked):
+            return not bool(blocked(self.pair_id))
+        return not bool(getattr(self.venue, "recovery_blocked", False))
+
+    def _cancel_and_reconcile(self, ticket: OrderTicket):
+        """Return the terminal post-cancel snapshot, or a fail-closed reason.
+
+        A successful cancel response is not a quantity snapshot: fills may race
+        it. Keep the ticket active until a final venue read proves it terminal.
+        """
+        try:
+            if not self.venue.cancel(ticket.order_id):
+                return None, "cancel_failed"
+        except Exception:  # noqa: BLE001 - The caller must defer on ambiguity.
+            return None, "cancel_failed"
+        try:
+            snapshot = self.venue.order_status(ticket.order_id)
+        except Exception:  # noqa: BLE001 - Do not replace an ambiguous live order.
+            ticket.active = True
+            return None, "status_unavailable"
+        self.snapshots[ticket.order_id] = snapshot
+        ticket.active = snapshot.status == "open"
+        if not snapshot.status in {"closed", "canceled", "expired"}:
+            return None, "status_unconfirmed"
+        return snapshot, None
+
+    def _net_qty(self) -> float:
+        buy_qty, _bc, _bf, sell_qty, _sc, _sf = self._totals()
+        return buy_qty - sell_qty
+
     def _refresh(self) -> None:
         for ticket in self.tickets:
             snap = self.venue.order_status(ticket.order_id)
             self.snapshots[ticket.order_id] = snap
-            if snap.status in {"closed", "canceled", "expired"}:
-                ticket.active = False
+            # Venue truth overrides both stale checkpoints and an optimistic
+            # cancel acknowledgement that has not reached a terminal state.
+            ticket.active = snap.status == "open"
         self._compact_zero_fill_history()
 
     def _compact_zero_fill_history(self) -> None:
@@ -291,10 +474,24 @@ class PairCoordinator:
         every filled order required for accounting, but prevent zero-fill cancellations
         from growing memory and checkpoints without bound.
         """
+        latest_limit_ticket = {}
+        for ticket in reversed(self.tickets):
+            if ticket is self.stop_ticket:
+                continue
+            latest_limit_ticket.setdefault(ticket.side.upper(), ticket)
+        has_fill_history = any(
+            self.snapshots.get(
+                ticket.order_id, OrderSnapshot()).filled_qty > 0
+            for ticket in self.tickets)
         kept = []
         for ticket in self.tickets:
             snap = self.snapshots.get(ticket.order_id, OrderSnapshot())
-            if ticket.active or snap.filled_qty > 0:
+            if (ticket.active or snap.filled_qty > 0
+                    or ticket is self.stop_ticket
+                    or (has_fill_history
+                        and ticket is latest_limit_ticket.get(
+                            ticket.side.upper()))
+                    or self.phase == "startup_recovery"):
                 kept.append(ticket)
             else:
                 self.snapshots.pop(ticket.order_id, None)
@@ -335,12 +532,19 @@ class PairCoordinator:
                 return ticket
         return None
 
-    def _cancel_entry_remainder(self, exposure_side: str) -> None:
+    def _cancel_entry_remainder(self, exposure_side: str) -> bool:
         # Once exposure exists, prevent the same side from increasing it further.
         entry_side = "BUY" if exposure_side == "LONG" else "SELL"
         for ticket in self.tickets:
             if ticket.side.upper() == entry_side and ticket.active:
-                self._cancel(ticket)
+                _snapshot, cancel_reason = self._cancel_and_reconcile(ticket)
+                if cancel_reason is not None:
+                    self.reason = (
+                        "entry_cancel_failed"
+                        if cancel_reason == "cancel_failed"
+                        else "entry_cancel_ambiguous")
+                    return False
+        return True
 
     def _has_active_tickets(self) -> bool:
         return any(ticket.active for ticket in self.tickets)
@@ -355,6 +559,12 @@ class PairCoordinator:
             self.policy.price_decimals,
         )
         ticket = self._active_ticket(exit_side)
+        latest_exit = next(
+            (candidate for candidate in reversed(self.tickets)
+             if candidate.side.upper() == exit_side
+             and candidate is not self.stop_ticket),
+            None,
+        )
         remaining = 0.0
         if ticket is not None:
             filled = self.snapshots.get(ticket.order_id, OrderSnapshot()).filled_qty
@@ -366,15 +576,66 @@ class PairCoordinator:
             remaining, abs(net_qty), rel_tol=1e-6, abs_tol=1e-8)
         if adequate_price and adequate_qty:
             return True
-        if ticket is not None and not self._cancel(ticket):
-            self.reason = "exit_cancel_failed"
-            return False
+        cache_permit = None
+        replacement_qty = abs(net_qty)
+        if ticket is not None:
+            cache_permit = self.venue.preflight_order(
+                exit_side, replacement_qty, target, market=False,
+                kind="rtrade_pair_quote")
+            _snapshot, cancel_reason = self._cancel_and_reconcile(ticket)
+            if cancel_reason is not None:
+                self.reason = (
+                    "exit_cancel_failed" if cancel_reason == "cancel_failed"
+                    else "exit_cancel_ambiguous")
+                return False
+            final_net = self._net_qty()
+            if abs(final_net) <= 1e-8:
+                self.phase = "complete"
+                self.reason = None
+                return True
+            final_exit_side = "SELL" if final_net > 0 else "BUY"
+            replacement_qty = abs(final_net)
+            current_revision = self.limit_revisions[exit_side]
+            if current_revision >= _MAX_LIMIT_REVISION:
+                self.reason = "exit_revision_exhausted"
+                return False
+            # Advance only after the old order is confirmed terminal. If submit
+            # later fails, retries and restart reuse this same new revision/CID.
+            self.limit_revisions[exit_side] = current_revision + 1
+            if (final_exit_side != exit_side
+                    or replacement_qty > abs(net_qty) + 1e-8):
+                self.reason = "exit_exposure_changed_during_cancel"
+                return False
+        elif latest_exit is not None:
+            latest_snapshot = self.snapshots.get(
+                latest_exit.order_id, OrderSnapshot())
+            if latest_snapshot.status not in {"closed", "canceled", "expired"}:
+                self.reason = "exit_status_unconfirmed"
+                return False
+            current_revision = self.limit_revisions[exit_side]
+            represented_revision = int(latest_exit.revision)
+            if represented_revision > current_revision:
+                current_revision = represented_revision
+                self.limit_revisions[exit_side] = current_revision
+            if represented_revision == current_revision:
+                if current_revision >= _MAX_LIMIT_REVISION:
+                    self.reason = "exit_revision_exhausted"
+                    return False
+                # The terminal client ID is never reused. Advancing the state
+                # first also makes a refused/ambiguous submit reuse this new slot
+                # on the next tick instead of incrementing repeatedly.
+                self.limit_revisions[exit_side] = current_revision + 1
         replacement = self.venue.place_limit(
-            exit_side, target, abs(net_qty), self.pair_id)
+            exit_side, target, replacement_qty, self.pair_id,
+            cache_permit=cache_permit,
+            revision=self.limit_revisions[exit_side])
         if replacement is None:
             self.reason = "exit_place_failed"
             return False
-        self.tickets.append(replacement)
+        if not any(
+                known.order_id == replacement.order_id
+                for known in self.tickets):
+            self.tickets.append(replacement)
         return True
 
     def _submit_hard_stop(self, exposure_side: str, net_qty: float,
@@ -402,19 +663,104 @@ class PairCoordinator:
             return False
         exit_side = "SELL" if exposure_side == "LONG" else "BUY"
         exit_ticket = self._active_ticket(exit_side)
-        if exit_ticket is not None and not self._cancel(exit_ticket):
-            self.reason = "hard_stop_cancel_failed"
-            return False
+        cache_permit = None
+        exit_qty = abs(net_qty)
+        if exit_ticket is not None:
+            cache_permit = self.venue.preflight_order(
+                exit_side, exit_qty, None, market=True,
+                kind=f"rtrade:{reason}:{self.pair_id}")
+            _snapshot, cancel_reason = self._cancel_and_reconcile(exit_ticket)
+            if cancel_reason is not None:
+                self.reason = (
+                    "hard_stop_cancel_failed"
+                    if cancel_reason == "cancel_failed"
+                    else "hard_stop_cancel_ambiguous")
+                return False
+            final_net = self._net_qty()
+            if abs(final_net) <= 1e-8:
+                self.reason = reason
+                self.phase = "hard_stop"
+                return True
+            final_exit_side = "SELL" if final_net > 0 else "BUY"
+            exit_qty = abs(final_net)
+            if (final_exit_side != exit_side
+                    or exit_qty > abs(net_qty) + 1e-8):
+                self.reason = "hard_stop_exposure_changed_during_cancel"
+                return False
         market = self.venue.place_market_exit(
-            exit_side, abs(net_qty),
+            exit_side, exit_qty,
             reason=reason,
-            pair_id=self.pair_id)
+            pair_id=self.pair_id,
+            cache_permit=cache_permit,
+            revision=self.hard_stop_revision)
         if market is None:
-            self.reason = "hard_stop_place_failed"
+            if (bool(getattr(self.venue, "recovery_blocked", False))
+                    or _is_recovery_pending(
+                        _place_failure_reason(self.venue, exit_side))):
+                self.phase = "hard_stop_recovery"
+                self.reason = "hard_stop_recovery_pending"
+            else:
+                self.reason = "hard_stop_place_failed"
             return False
-        self.tickets.append(market)
+        if not any(
+                known.order_id == market.order_id
+                for known in self.tickets):
+            self.tickets.append(market)
+        self.stop_ticket = market
+        self.hard_stop_reason = reason
+        self.phase = "stopping"
+        return True
+
+    def _retry_terminal_hard_stop(self, net_qty: float) -> bool:
+        """Submit one bounded new revision for a terminal stop remainder.
+
+        The original client ID may already identify a canceled or expired venue
+        order, so the retry uses revision one. A second terminal remainder is kept
+        in explicit nonterminal recovery instead of creating an unbounded order loop.
+        """
+        if abs(net_qty) <= 1e-8:
+            return False
+        if self.hard_stop_revision >= 1:
+            self.phase = "hard_stop_recovery"
+            self.reason = "hard_stop_terminal_with_exposure"
+            print(
+                f"[rtrade_pair] hard-stop recovery required for {self.pair_id}: "
+                f"residual net quantity {net_qty}")
+            return False
+        exit_side = "SELL" if net_qty > 0 else "BUY"
+        exit_qty = abs(net_qty)
+        reason = self.hard_stop_reason or (
+            "fast_fill_hard_stop" if self.shock else "inventory_hard_stop")
+        next_revision = self.hard_stop_revision + 1
+        kind = f"rtrade:{reason}:{self.pair_id}:revision:{next_revision}"
+        try:
+            cache_permit = self.venue.preflight_order(
+                exit_side, exit_qty, None, market=True, kind=kind)
+            market = self.venue.place_market_exit(
+                exit_side, exit_qty, reason=reason, pair_id=self.pair_id,
+                cache_permit=cache_permit, revision=next_revision)
+        except Exception as exc:  # noqa: BLE001 - Keep residual exposure recoverable.
+            print(
+                f"[rtrade_pair] hard-stop revision {next_revision} failed for "
+                f"{self.pair_id}: {exc}")
+            market = None
+        if market is None:
+            self.phase = "hard_stop_recovery"
+            if (bool(getattr(self.venue, "recovery_blocked", False))
+                    or _is_recovery_pending(
+                        _place_failure_reason(self.venue, exit_side))):
+                self.reason = "hard_stop_recovery_pending"
+            else:
+                self.reason = "hard_stop_retry_failed"
+            return False
+        self.hard_stop_revision = next_revision
+        if not any(
+                known.order_id == market.order_id
+                for known in self.tickets):
+            self.tickets.append(market)
         self.stop_ticket = market
         self.phase = "stopping"
+        self.reason = reason
         return True
 
     def step(self, now: Optional[float] = None) -> PairOutcome:
@@ -428,24 +774,73 @@ class PairCoordinator:
         self._record_first_fill(now, bq, sq)
         net = bq - sq
 
+        if self.phase == "startup_recovery":
+            if _is_recovery_pending(self.reason):
+                if not self._recover_persisted_intents():
+                    return self.outcome()
+            for ticket in self.tickets:
+                if not ticket.active:
+                    continue
+                _snapshot, cancel_reason = self._cancel_and_reconcile(ticket)
+                if cancel_reason is not None:
+                    return self.outcome()
+            bq, bc, _bf, sq, sc, _sf = self._totals()
+            net = bq - sq
+            if abs(net) <= 1e-8:
+                self.phase = "failed"
+                return self.outcome()
+            self.phase = "exposed"
+
+        if self.phase == "hard_stop_recovery":
+            if self.reason == "hard_stop_retry_failed":
+                self._retry_terminal_hard_stop(net)
+                return self.outcome()
+            if not _is_recovery_pending(self.reason):
+                return self.outcome()
+            if not self._recover_persisted_intents():
+                return self.outcome()
+            bq, bc, _bf, sq, sc, _sf = self._totals()
+            net = bq - sq
+            if abs(net) <= 1e-8:
+                self.phase = "hard_stop"
+                self.reason = (
+                    self.hard_stop_reason or "inventory_hard_stop")
+                return self.outcome()
+            if self.stop_ticket is None:
+                self.reason = "hard_stop_recovery_missing_order"
+                return self.outcome()
+            self.phase = "stopping"
+
         if self.phase == "stopping":
             if abs(net) <= 1e-8:
                 self.phase = "hard_stop"
                 self.reason = ("fast_fill_hard_stop" if self.shock
                                else "inventory_hard_stop")
+                return self.outcome()
+            stop_snapshot = (
+                None if self.stop_ticket is None
+                else self.snapshots.get(self.stop_ticket.order_id))
+            if (stop_snapshot is not None
+                    and stop_snapshot.status in {"closed", "canceled", "expired"}):
+                self._retry_terminal_hard_stop(net)
             return self.outcome()
 
         if bq > 0 or sq > 0:
             if abs(net) <= 1e-8:
+                cancel_ambiguous = False
                 for ticket in self.tickets:
-                    self._cancel(ticket)
+                    if not ticket.active:
+                        continue
+                    _snapshot, cancel_reason = self._cancel_and_reconcile(ticket)
+                    cancel_ambiguous = (
+                        cancel_ambiguous or cancel_reason is not None)
                 # Cancellation may race with a fill or fail. Confirm venue state
                 # before declaring the round terminal.
                 self._refresh()
                 bq, bc, _bf, sq, sc, _sf = self._totals()
                 net = bq - sq
                 if abs(net) <= 1e-8:
-                    if self._has_active_tickets():
+                    if cancel_ambiguous or self._has_active_tickets():
                         self.phase = "closing"
                         self.reason = "balanced_cancel_pending"
                         return self.outcome()
@@ -455,14 +850,31 @@ class PairCoordinator:
 
             exposure_side = "LONG" if net > 0 else "SOLD"
             self.phase = "exposed"
-            self._cancel_entry_remainder(exposure_side)
+            if not self._cancel_entry_remainder(exposure_side):
+                return self.outcome()
             # Reconcile after cancellation because an order may fill during the race.
             self._refresh()
             bq, bc, _bf, sq, sc, _sf = self._totals()
             net = bq - sq
             if abs(net) <= 1e-8:
-                self.phase = "complete"
-                return self.outcome()
+                self.phase = "closing"
+                cancel_ambiguous = False
+                for ticket in self.tickets:
+                    if not ticket.active:
+                        continue
+                    _snapshot, cancel_reason = self._cancel_and_reconcile(ticket)
+                    cancel_ambiguous = (
+                        cancel_ambiguous or cancel_reason is not None)
+                self._refresh()
+                bq, bc, _bf, sq, sc, _sf = self._totals()
+                net = bq - sq
+                if abs(net) <= 1e-8:
+                    if cancel_ambiguous or self._has_active_tickets():
+                        self.reason = "balanced_cancel_pending"
+                        return self.outcome()
+                    self.phase = "complete"
+                    self.reason = None
+                    return self.outcome()
             exposure_side = "LONG" if net > 0 else "SOLD"
             entry_avg = (bc / bq) if exposure_side == "LONG" else (sc / sq)
             current = float(self.venue.current_price() or 0.0)
@@ -470,6 +882,11 @@ class PairCoordinator:
                 self.reason = "current_price_unavailable"
                 return self.outcome()
             if self._submit_hard_stop(exposure_side, net, entry_avg, current):
+                return self.outcome()
+            if self.reason in {
+                    "hard_stop_cancel_ambiguous",
+                    "hard_stop_exposure_changed_during_cancel",
+                    "hard_stop_recovery_pending"}:
                 return self.outcome()
             self._ensure_anchored_exit(exposure_side, net, entry_avg, current)
             return self.outcome()

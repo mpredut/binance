@@ -1,3 +1,4 @@
+import json
 import os
 import tempfile
 import unittest
@@ -22,6 +23,118 @@ class RTradePairStoreTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def _assert_existing_invalid_store_is_preserved(self, payload):
+        original = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        with open(self.store.path, "wb") as handle:
+            handle.write(original)
+
+        with self.assertRaises(ValueError):
+            self.store.active("TAOUSDC")
+        self.assertEqual(open(self.store.path, "rb").read(), original)
+
+        with self.assertRaises(ValueError):
+            self.store.begin("TAOUSDC", "new-pair", "BUY", 1.0)
+        self.assertEqual(open(self.store.path, "rb").read(), original)
+
+    def test_existing_invalid_roots_fail_closed_without_rewrite(self):
+        for payload in (
+                [], {}, {"version": 1, "pairs": []}, {"pairs": []},
+                {"version": 2, "pairs": {}}):
+            with self.subTest(payload=payload):
+                self._assert_existing_invalid_store_is_preserved(payload)
+
+    def test_existing_malformed_active_pair_fails_closed_without_rewrite(self):
+        self._assert_existing_invalid_store_is_preserved({
+            "version": 1,
+            "pairs": {
+                "pair-1": {
+                    "symbol": "TAOUSDC",
+                    "pair_id": "another-pair",
+                    "start_side": "BUY",
+                    "qty": 1.0,
+                    "phase": "reserved",
+                    "terminal": False,
+                    "intents": {},
+                    "state": None,
+                    "created_ts": 100.0,
+                    "updated_ts": 100.0,
+                },
+            },
+        })
+
+    def test_existing_malformed_intent_identity_fails_closed_without_rewrite(self):
+        self._assert_existing_invalid_store_is_preserved({
+            "version": 1,
+            "pairs": {
+                "pair-1": {
+                    "symbol": "TAOUSDC",
+                    "pair_id": "pair-1",
+                    "start_side": "BUY",
+                    "qty": 1.0,
+                    "phase": "reserved",
+                    "terminal": False,
+                    "intents": {
+                        "limit:BUY": {
+                            "side": "SELL",
+                            "kind": "limit",
+                            "qty": 1.0,
+                            "price": 100.0,
+                            "client_order_id": "RT_invalid",
+                            "order_id": None,
+                        },
+                    },
+                    "state": None,
+                    "created_ts": 100.0,
+                    "updated_ts": 100.0,
+                },
+            },
+        })
+
+    def test_valid_legacy_v1_record_loads_and_gains_only_requested_checkpoint(self):
+        legacy = {
+            "version": 1,
+            "pairs": {
+                "pair-v1": {
+                    "symbol": "TAOUSDC",
+                    "pair_id": "pair-v1",
+                    "start_side": "BUY",
+                    "qty": 1.0,
+                    "phase": "reserved",
+                    "terminal": False,
+                    "intents": {
+                        "limit:BUY": {
+                            "side": "BUY",
+                            "kind": "limit",
+                            "qty": 1.0,
+                            "price": 99.0,
+                            "client_order_id": "RT_legacy",
+                            "order_id": None,
+                        },
+                    },
+                    "state": None,
+                    "created_ts": 100.0,
+                    "updated_ts": 100.0,
+                },
+            },
+        }
+        with open(self.store.path, "w", encoding="utf-8", newline="\n") as handle:
+            json.dump(legacy, handle, separators=(",", ":"))
+
+        loaded = self.store.active("TAOUSDC")
+        self.assertEqual(loaded[0]["intents"]["limit:BUY"]["qty"], 1.0)
+
+        state = {
+            "pair_id": "pair-v1",
+            "qty": 1.0,
+            "start_side": "BUY",
+            "phase": "quoting",
+            "tickets": [],
+        }
+        self.store.checkpoint("pair-v1", state, terminal=False)
+        updated = self.store.active("TAOUSDC")[0]
+        self.assertEqual(updated["state"], state)
+        self.assertNotIn("limit_revisions", updated["state"])
+
     def test_intent_is_durable_before_acceptance_and_checkpoint(self):
         self.store.begin("TAOUSDC", "pair-1", "BUY", 2.0)
         self.store.intent(
@@ -30,7 +143,10 @@ class RTradePairStoreTest(unittest.TestCase):
         self.assertIsNone(pending["intents"]["limit:BUY"]["order_id"])
 
         self.store.accepted("pair-1", "BUY", "77", kind="limit")
-        state = {"pair_id": "pair-1", "phase": "quoting", "tickets": []}
+        state = {
+            "pair_id": "pair-1", "qty": 2.0, "start_side": "BUY",
+            "phase": "quoting", "tickets": [],
+        }
         self.store.checkpoint("pair-1", state, terminal=False)
         adopted = self.store.active("TAOUSDC")[0]
         self.assertEqual(adopted["intents"]["limit:BUY"]["order_id"], "77")
@@ -85,7 +201,10 @@ class RTradePairStoreTest(unittest.TestCase):
         for pair_id in ("p1", "p2"):
             self.store.begin("TAOUSDC", pair_id, "BUY", 1.0)
         self.store.checkpoint_many([
-            ("p1", {"phase": "quoting"}, False),
+            ("p1", {
+                "pair_id": "p1", "qty": 1.0, "start_side": "BUY",
+                "phase": "quoting", "tickets": [],
+            }, False),
             ("p2", {"phase": "complete"}, True),
         ])
         active = self.store.active("TAOUSDC")

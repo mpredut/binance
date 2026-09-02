@@ -4,7 +4,7 @@ changes a signature), this test fails -> base v2 never gets to crash on that ven
 
 Parametrised over kraken / hyperliquid / binance / Trading212. Instantiated without network (the clients are
 lazy); we check ONLY that the interface exists and is callable, not the behaviour (that lives in
-testele per-provider test_*_provider_executor.py)."""
+the per-provider test_*_provider_executor.py modules)."""
 import os
 import sys
 import unittest
@@ -22,7 +22,7 @@ from providers.hyperliquid_provider import HyperliquidProvider  # noqa: E402
 from providers.market_api import BinanceProvider  # noqa: E402
 from providers.t212_provider import T212Provider  # noqa: E402
 
-# Metodele cerute de strategies/spot_dca.py (motorul base v2), agnostice de venue.
+# Methods required by the venue-agnostic strategies/spot_dca.py engine.
 CONTRACT_METHODS = (
     "get_current_price", "submit_order", "order_status", "cancel_order",
     "pair_precision", "free_balance", "ohlc_closes",
@@ -30,9 +30,10 @@ CONTRACT_METHODS = (
 )
 
 EXPECTED_RECONCILIATION = {
-    "kraken": OrderReconciliationCapabilities(True, True, True, True),
+    "kraken": OrderReconciliationCapabilities(False, True, True, True),
     "hyperliquid": OrderReconciliationCapabilities(True, True, True, True),
-    "binance": OrderReconciliationCapabilities(True, True, True, True),
+    "binance": OrderReconciliationCapabilities(
+        True, True, True, True, 90 * 24 * 60 * 60),
     "trading212": OrderReconciliationCapabilities(False, True, True, False),
 }
 
@@ -60,7 +61,7 @@ class ProviderContractConformanceTest(unittest.TestCase):
                     self.assertTrue(callable(getattr(prov, meth, None)),
                                     f"{name}.{meth} is missing or not callable")
 
-    def test_capabilitatile_de_reconciliere_sunt_declarate_explicit(self):
+    def test_reconciliation_capabilities_are_declared_explicitly(self):
         for name, provider in _providers():
             with self.subTest(provider=name):
                 self.assertEqual(

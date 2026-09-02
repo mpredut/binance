@@ -35,7 +35,9 @@ def init_cache_trade_manager():
     with _cache_trade_manager_lock:
         if cache_trade_manager is None:
             import cacheManager as cm
-            cache_trade_manager = cm.get_cache_manager("Trade")
+            # Trading processes are read-only consumers. Only the central
+            # cacheManager process may poll Binance and publish cache versions.
+            cache_trade_manager = cm.get_cache_manager("Trade", start_sync=False)
     return cache_trade_manager
 
 trade_cache = []
@@ -541,14 +543,14 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
     
     manager = init_cache_trade_manager()
 
-    # Validate cache availability.
-    if not manager.cache:
-        return []
-    if symbol not in manager.cache:
+    # Copy one coherent snapshot while the manager may reload a new generation.
+    with manager.lock:
+        trades = [dict(trade) for trade in manager.cache.get(symbol, [])]
+    if not trades:
         return []
         
     current_time_ms = int(time.time() * 1000)
-    max_age_ms = max_age_seconds * 1000 #convert to ms
+    max_age_ms = max_age_seconds * 1000  # Convert to milliseconds.
     
     filtered_trades = [
         {
@@ -566,7 +568,7 @@ def get_trade_orders(order_type, symbol, max_age_seconds):
             #'isMaker': trade['isMaker'],
             #'isBestMatch': trade['isBestMatch']
         }
-        for trade in manager.cache.get(symbol, [])
+        for trade in trades
         #if trade['symbol'] == symbol
         if (order_type is None or trade['isBuyer'] == (order_type == "BUY"))  # Apply side filtering only when requested.
         and (current_time_ms - trade['time']) <= max_age_ms
@@ -585,10 +587,10 @@ def get_trade_orders_for_day_24(order_type, symbol, day_back):
     
     manager = init_cache_trade_manager()
 
-    # Validate cache availability.
-    if not manager.cache:
-        return []
-    if symbol not in manager.cache:
+    # Copy one coherent snapshot while the manager may reload a new generation.
+    with manager.lock:
+        trades = [dict(trade) for trade in manager.cache.get(symbol, [])]
+    if not trades:
         return []
         
     # Calculate the selected historical day's boundaries.
@@ -605,7 +607,7 @@ def get_trade_orders_for_day_24(order_type, symbol, day_back):
             key: (float(value) if isinstance(value, str) and value.replace('.', '', 1).isdigit() else value)
             for key, value in trade.items()
         }
-        for trade in manager.cache.get(symbol, [])
+        for trade in trades
         #if trade.get('symbol') == symbol
         if (order_type is None or trade.get('isBuyer') == (order_type == "BUY"))  # Apply side filtering only when requested.
         and start_timestamp <= trade.get('time', 0) <= end_timestamp
@@ -629,7 +631,8 @@ def validate_keys_in_trades(trades):
     for idx, trade in enumerate(trades):
         for key in required_keys:
             if key not in trade:
-                raise ValueError(f"Trade {idx} este invalida. Missing cheia '{key}'. Date: {trade}")
+                raise ValueError(
+                    f"Trade {idx} is invalid. Missing key '{key}'. Data: {trade}")
 
 
 def print_trade(trade):
@@ -666,7 +669,7 @@ def compare_trade_sources(symbol, order_type="BUY", max_age_seconds=3600, limit=
         api_raw = api.client.get_my_trades(symbol=symbol, limit=limit)
         api_map = filter_trades(api_raw)
     except Exception as e:
-        print(f"❌ Eroare la interogarea Binance API: {e}")
+        print(f"❌ Binance API query failed: {e}")
         return
 
     # Fill-ID sets.

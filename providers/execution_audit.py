@@ -14,7 +14,7 @@ import time
 import uuid
 from collections import OrderedDict
 from datetime import datetime, timezone
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from .strategy_executor import (
     OrderStatus, ProviderError, SubmissionOutcome, SubmissionRefused,
@@ -144,7 +144,8 @@ class AuditedStrategyExecutor:
                                  price: Optional[float] = None, *, market: bool = False,
                                  kind: Optional[str] = None,
                                  reference_price: Optional[float] = None,
-                                 client_order_id: Optional[str] = None) -> str:
+                                 client_order_id: Optional[str] = None,
+                                 cache_permit=None) -> str:
         client_order_id = client_order_id or intent_client_order_id(self.name, intent_id)
         fields = {
             "side": str(side).lower(), "qty": qty, "price": price,
@@ -157,7 +158,7 @@ class AuditedStrategyExecutor:
         outcome = self.submit_outcome_with_intent(
             intent_id, symbol, side, qty, price, market=market, kind=kind,
             reference_price=reference_price, client_order_id=client_order_id,
-            _requested_recorded=True,
+            cache_permit=cache_permit, _requested_recorded=True,
         )
         if outcome.state == "refused":
             raise SubmissionRefused(outcome.reason)
@@ -170,6 +171,7 @@ class AuditedStrategyExecutor:
             price: Optional[float] = None, *, market: bool = False,
             kind: Optional[str] = None, reference_price: Optional[float] = None,
             client_order_id: Optional[str] = None,
+            cache_permit=None,
             _requested_recorded: bool = False) -> SubmissionOutcome:
         """Submit once and retain refusal versus response-loss ambiguity."""
         client_order_id = client_order_id or intent_client_order_id(self.name, intent_id)
@@ -185,6 +187,8 @@ class AuditedStrategyExecutor:
         submit_kwargs = {"market": market, "kind": kind}
         if client_order_id is not None:
             submit_kwargs["client_order_id"] = client_order_id
+        if cache_permit is not None:
+            submit_kwargs["cache_permit"] = cache_permit
         outcome = capture_submission(
             lambda: self._executor.submit_order(
                 symbol, side, qty, price, **submit_kwargs))
@@ -204,10 +208,12 @@ class AuditedStrategyExecutor:
     def submit_order(self, symbol: str, side: str, qty: float,
                      price: Optional[float] = None, *, market: bool = False,
                      kind: Optional[str] = None,
-                     client_order_id: Optional[str] = None) -> str:
+                     client_order_id: Optional[str] = None,
+                     cache_permit=None) -> str:
         return self.submit_order_with_intent(
             new_intent_id(self.name, symbol, kind), symbol, side, qty, price,
             market=market, kind=kind, client_order_id=client_order_id,
+            cache_permit=cache_permit,
         )
 
     def order_status_with_intent(self, intent_id: str, symbol: str,
@@ -281,6 +287,11 @@ class AuditedStrategyExecutor:
         """Preserve the wrapped adapter's venue facts through decoration."""
         return reconciliation_capabilities_of(self._executor)
 
+    def execution_enabled(self) -> bool:
+        """Preserve the wrapped adapter's live-order gate through decoration."""
+        method = getattr(self._executor, "execution_enabled", None)
+        return True if not callable(method) else bool(method())
+
     def get_current_price(self, symbol: str):
         return self._executor.get_current_price(symbol)
 
@@ -292,13 +303,14 @@ class AuditedStrategyExecutor:
 
     def preflight_order(self, symbol: str, side: str, qty: float,
                         price=None, *, market: bool = False,
-                        kind: Optional[str] = None) -> None:
+                        kind: Optional[str] = None) -> Any:
         """Run the adapter's optional preflight before a submit is audited."""
         preflight = getattr(self._executor, "preflight_order", None)
         if callable(preflight):
-            preflight(
+            return preflight(
                 symbol, side, qty, price, market=market, kind=kind,
             )
+        return None
 
     def ohlc_closes(self, symbol: str, interval_min: int):
         return self._executor.ohlc_closes(symbol, interval_min)

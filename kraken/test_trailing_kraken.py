@@ -43,9 +43,15 @@ class FakeK:
 
 class Base(unittest.TestCase):
     def setUp(self):
+        self.previous_live = os.environ.get("KRAKEN_LIVE_ORDERS")
+        os.environ["KRAKEN_LIVE_ORDERS"] = "true"
         fd, self.sf = tempfile.mkstemp(suffix=".json"); os.close(fd); os.remove(self.sf)
         ts_mod.notify = lambda **kw: None
     def tearDown(self):
+        if self.previous_live is None:
+            os.environ.pop("KRAKEN_LIVE_ORDERS", None)
+        else:
+            os.environ["KRAKEN_LIVE_ORDERS"] = self.previous_live
         for p in (self.sf, self.sf + ".tmp"):
             if os.path.exists(p):
                 os.remove(p)
@@ -93,6 +99,17 @@ class TestTrailingKraken(Base):
         ts = self.ts(c, enabled=False); ts.check_once()
         c.price = 48.0
         ts.check_once()
+        self.assertEqual(c.orders, [])
+
+    def test_live_switch_flip_blocks_the_final_trailing_submit(self):
+        c = FakeK(60.0)
+        trailing = self.ts(c)
+        trailing.check_once()
+        c.price = 48.0
+        os.environ["KRAKEN_LIVE_ORDERS"] = "false"
+
+        trailing.check_once()
+
         self.assertEqual(c.orders, [])
 
     def test_the_peak_survives_a_restart(self):

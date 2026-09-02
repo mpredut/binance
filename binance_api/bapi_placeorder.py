@@ -3,6 +3,8 @@ import time
 import datetime
 import math
 import sys
+import threading
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 import signal
@@ -28,6 +30,8 @@ from . import order_id_context as rc   # client_order_id and tag context moved i
 from . import bapi as api
 from .bapi_client import client
 from lock import trade_cooldown   # Rapid-fire gate moved into the lock package.
+from providers.strategy_executor import SubmissionRefused
+import binance_cache_health
 
 # Load versioned, non-secret tuning parameters before reading the environment below.
 # ``botcore.load_dotenv`` never overwrites variables already set in the real environment;
@@ -47,6 +51,77 @@ PLACE_ORDER_MIN_NOTIONAL = required_float_env("PLACE_ORDER_MIN_NOTIONAL")
 class WeightLimitBlock(Exception):
     """Raised when the 24-hour trade limit makes retrying pointless."""
     pass
+
+
+_CACHE_SUBMIT_PERMIT_TTL_SEC = binance_cache_health.SUBMIT_PERMIT_TTL_SEC
+_CACHE_SUBMIT_PERMIT_ISSUER = object()
+
+
+@dataclass(frozen=True, slots=True)
+class _AccountCacheSubmitScope:
+    """Immutable financial scope carried by an in-process submit permit."""
+
+    pid: int
+    issued_at: float
+    expires_at: float
+    expires_at_wall: float
+    order_cache_version: str
+    trade_cache_version: str
+    symbol: str
+    side: str
+    max_qty: float
+    requested_price: float | None
+    price_tick_size: float
+    market: bool
+    kind: str
+
+
+class _AccountCacheSubmitPermit:
+    """Opaque, process-local authorization for one exact Binance submission.
+
+    Replacement flows obtain this permit immediately before cancelling an existing
+    order. The final submit may then rely on the already-validated cache snapshot
+    during a strictly bounded window, avoiding a cancel/second-preflight race.
+    """
+
+    __slots__ = ("_scope", "_consumed", "_lock")
+
+    def __init__(self, issuer, *, status, symbol, side, qty, price,
+                 price_tick_size, market, kind):
+        if issuer is not _CACHE_SUBMIT_PERMIT_ISSUER:
+            raise TypeError("account-cache submit permits are issued internally")
+        issued_at = time.monotonic()
+        issued_at_wall = time.time()
+        object.__setattr__(self, "_scope", _AccountCacheSubmitScope(
+            pid=os.getpid(),
+            issued_at=issued_at,
+            expires_at=issued_at + _CACHE_SUBMIT_PERMIT_TTL_SEC,
+            expires_at_wall=issued_at_wall + _CACHE_SUBMIT_PERMIT_TTL_SEC,
+            order_cache_version=str(status.order_cache_version),
+            trade_cache_version=str(status.trade_cache_version),
+            symbol=str(symbol).upper(),
+            side=str(side).upper(),
+            max_qty=float(qty),
+            requested_price=None if market else float(price),
+            price_tick_size=float(price_tick_size),
+            market=bool(market),
+            kind=str(kind or ""),
+        ))
+        object.__setattr__(self, "_consumed", False)
+        object.__setattr__(self, "_lock", threading.Lock())
+
+    def __setattr__(self, name, value):
+        raise AttributeError("account-cache submit permits are immutable")
+
+    @property
+    def pid(self):
+        """Expose process identity read-only for diagnostics and tests."""
+        return self._scope.pid
+
+    @property
+    def expires_at(self):
+        """Expose monotonic expiry read-only for diagnostics and tests."""
+        return self._scope.expires_at
 
 
 def _resolve_qty(qty):
@@ -75,64 +150,261 @@ def _fresh_price(symbol):
 
 def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
     from . import bapi_allorders as apiorders
-    required_qty = _resolve_qty(required_qty)
+    auto_qty = required_qty is None
     try:
-        # Obtain the weight from permission analysis.
-        weight = pa.get_weight_for_cash_permission_at_quant_time(symbol, order_type)
-        if weight is None or math.isnan(weight):
-            print("Weight is None, set it at default 0.03")
-            weight = 0.03
+        price = float(price)
+        available_qty = float(available_qty)
+        required_qty = float(_resolve_qty(required_qty))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise SubmissionRefused("invalid_weight_policy_inputs") from exc
+    if (not math.isfinite(price) or price <= 0 or
+            not math.isfinite(available_qty) or available_qty <= 0 or
+            math.isnan(required_qty) or required_qty <= 0 or
+            (math.isinf(required_qty) and not auto_qty)):
+        raise SubmissionRefused("invalid_weight_policy_inputs")
+    # ``qty=None`` is represented by positive infinity until policy and balance
+    # caps are known. Resolve only that internal sentinel to the already-validated
+    # finite balance cap; explicit invalid values still fail closed above.
+    if auto_qty:
+        required_qty = available_qty
 
-        # 2. Calculate already-traded quote value over the previous 24 hours.
+    try:
+        weight = float(pa.get_weight_for_cash_permission_at_quant_time(
+            symbol, order_type))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise SubmissionRefused("weight_policy_unavailable") from exc
+    except Exception as exc:
+        raise SubmissionRefused("weight_policy_unavailable") from exc
+    if not math.isfinite(weight) or not 0 < weight <= 1:
+        raise SubmissionRefused("invalid_weight_policy_weight")
+
+    try:
         stats = apiorders.get_total_traded_stats(symbol)
-        traded_value = stats.get(order_type.upper(), {}).get('total_value', 0)
+        side_stats = stats[order_type.upper()]
+        traded_value = float(side_stats["total_value"])
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise SubmissionRefused("trade_stats_unavailable") from exc
+    except Exception as exc:
+        raise SubmissionRefused("trade_stats_unavailable") from exc
+    if not math.isfinite(traded_value) or traded_value < 0:
+        raise SubmissionRefused("invalid_trade_stats")
 
-        # 3. Calculate total tradable value: already traded plus available.
-        total_value_reference = traded_value + available_qty * price
-        # 4. Calculate the weight-based maximum quote allowance.
-        max_trade_value = total_value_reference * weight
-        #max_trade_value = available_qty * price * weight
+    total_value_reference = traded_value + available_qty * price
+    max_trade_value = total_value_reference * weight
+    remaining_trade_value = max(0.0, max_trade_value - traded_value)
+    remaining_trade_qty = remaining_trade_value / price
+    adjusted_qty = min(required_qty, remaining_trade_qty)
+    if not all(math.isfinite(value) for value in (
+            total_value_reference, max_trade_value, remaining_trade_value,
+            remaining_trade_qty, adjusted_qty)):
+        raise SubmissionRefused("invalid_weight_policy_result")
 
-        # 5. Calculate the remaining tradable quote value in USDC.
-        remaining_trade_value = max(0, max_trade_value - traded_value)
-
-        # Convert the maximum allowance to base-asset quantity.
-        remaining_trade_qty = remaining_trade_value / price if price else 0
-
-        # Select the smaller of requested and permitted quantity.
-        adjusted_qty = min(required_qty, remaining_trade_qty)
-
-        print(f"apply_weight_limit → {order_type} {symbol}, "
-              f"Available qty {available_qty:.8f}, "
-              f"Weight {weight}, "
-              f"Traded in 24h {traded_value:.2f} USDC, "
-              f"Max trade allowed (24h): {max_trade_value:.2f} USDC, "
-              f"Remaining: {remaining_trade_value:.2f} USDC, "
-              f"Required qty: {required_qty:.8f}, "
-              f"Final qty: {adjusted_qty:.8f}")
+    print(f"apply_weight_limit → {order_type} {symbol}, "
+          f"Available qty {available_qty:.8f}, "
+          f"Weight {weight}, "
+          f"Traded in 24h {traded_value:.2f} USDC, "
+          f"Max trade allowed (24h): {max_trade_value:.2f} USDC, "
+          f"Remaining: {remaining_trade_value:.2f} USDC, "
+          f"Required qty: {required_qty:.8f}, "
+          f"Final qty: {adjusted_qty:.8f}")
+    return adjusted_qty
 
 
-        return adjusted_qty
+def require_account_cache_for_submit():
+    """Fail closed unless the central Binance account caches are current."""
+    if not cfg.is_trade_enabled():
+        raise SubmissionRefused("trading_disabled")
+    try:
+        import cacheManager as cm
+        # A Trade history reload can take long enough for the original marker to
+        # become stale or advance. Re-read it after loading and accept only the
+        # exact versions now present in memory. One bounded retry tolerates a writer
+        # publication that races the first load without creating a wait loop.
+        for _attempt in range(2):
+            requested = binance_cache_health.require_fresh_account_cache()
+            cm.ensure_account_cache_readers(requested)
+            confirmed = binance_cache_health.require_fresh_account_cache()
+            requested_versions = (
+                requested.order_cache_version,
+                requested.trade_cache_version,
+            )
+            confirmed_versions = (
+                confirmed.order_cache_version,
+                confirmed.trade_cache_version,
+            )
+            if requested_versions == confirmed_versions:
+                return confirmed
+        raise binance_cache_health.AccountCacheNotReady(
+            "account_cache_changed_during_reader_sync")
+    except binance_cache_health.AccountCacheNotReady as exc:
+        print(f"[BINANCE][GUARD] account cache is not fresh: {exc.reason}")
+        raise SubmissionRefused("account_cache_not_fresh") from exc
 
-    except Exception as e:
-        print(f"apply_weight_limit: Error: {e}, order_type {order_type} and {symbol}")
-        return required_qty
+
+def _require_submit_permit_headroom(status):
+    cache_ages = (status.order_age_sec, status.trade_age_sec)
+    if (any(age is None for age in cache_ages)
+            or max(float(age) for age in cache_ages)
+            + _CACHE_SUBMIT_PERMIT_TTL_SEC
+            > binance_cache_health.MAX_AGE_SEC):
+        # Refuse before cancellation unless the validated snapshot remains inside
+        # its freshness time bound for the permit's entire configured lifetime.
+        raise SubmissionRefused("account_cache_not_fresh")
+    return status
+
+
+def issue_account_cache_submit_permit(symbol, side, qty, price=None, *,
+                                      market=False, kind=None, api_client=None):
+    """Authorize one narrowly scoped submit after a complete cache validation."""
+    side = str(side).upper()
+    symbol = str(symbol).upper()
+    try:
+        qty = float(qty)
+        price = None if market else float(price)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise SubmissionRefused("invalid_order_parameters") from exc
+    if (side not in {"BUY", "SELL"} or not symbol
+            or not math.isfinite(qty) or qty <= 0
+            or (not market and (not math.isfinite(price) or price <= 0))):
+        raise SubmissionRefused("invalid_order_parameters")
+    if not cfg.is_trade_enabled():
+        raise SubmissionRefused("trading_disabled")
+    # Reject near-stale state before metadata I/O, then charge that I/O by
+    # validating again immediately before the permit is constructed.
+    _require_submit_permit_headroom(require_account_cache_for_submit())
+    price_tick_size = 0.0
+    if not market:
+        try:
+            from providers.binance_filters import BinanceOrderRules
+            target_client = api_client or client
+            rules = BinanceOrderRules.from_symbol_info(
+                target_client.get_symbol_info(symbol))
+            price_tick_size = float(rules.tick_size)
+        except Exception as exc:
+            raise SubmissionRefused("binance_symbol_rules_unavailable") from exc
+    status = _require_submit_permit_headroom(
+        require_account_cache_for_submit())
+    return _AccountCacheSubmitPermit(
+        _CACHE_SUBMIT_PERMIT_ISSUER,
+        status=status,
+        symbol=symbol,
+        side=side,
+        qty=qty,
+        price=price,
+        market=market,
+        price_tick_size=price_tick_size,
+        kind=kind,
+    )
+
+
+def _consume_account_cache_submit_permit(
+        permit, *, symbol, side, qty, actual_price, requested_price,
+        market, kind):
+    """Consume a matching permit once or refuse before any client side effect."""
+    if not isinstance(permit, _AccountCacheSubmitPermit):
+        raise SubmissionRefused("account_cache_not_fresh")
+    with permit._lock:
+        if permit._consumed:
+            raise SubmissionRefused("account_cache_not_fresh")
+        # Burn malformed or expired permits as well, preventing later reuse.
+        object.__setattr__(permit, "_consumed", True)
+        scope = permit._scope
+        try:
+            actual_qty = float(qty)
+            if market:
+                submitted_price = scoped_price = None
+            else:
+                submitted_price = float(actual_price)
+                scoped_price = float(requested_price)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise SubmissionRefused("account_cache_not_fresh") from exc
+        price_is_safe = scope.market or (
+            math.isfinite(submitted_price)
+            and submitted_price > 0
+            and math.isfinite(scoped_price)
+            and scoped_price == scope.requested_price
+            and ((scope.side == "BUY" and submitted_price <= scoped_price)
+                or (
+                    scope.side == "SELL"
+                    and submitted_price + scope.price_tick_size >= scoped_price
+                )
+            )
+        )
+        matches = (
+            scope.pid == os.getpid()
+            and time.monotonic() <= scope.expires_at
+            and time.time() <= scope.expires_at_wall
+            and bool(scope.order_cache_version)
+            and bool(scope.trade_cache_version)
+            and scope.symbol == str(symbol).upper()
+            and scope.side == str(side).upper()
+            and scope.market is bool(market)
+            and scope.kind == str(kind or "")
+            and math.isfinite(actual_qty)
+            and 0 < actual_qty <= scope.max_qty
+            and price_is_safe
+        )
+        if not matches:
+            raise SubmissionRefused("account_cache_not_fresh")
+
 
 def _submit_binance_order(order_type, symbol, qty, *, price=None, market=False,
-                          client_order_id=None):
+                          client_order_id=None, api_client=None,
+                          cache_permit=None, permit_requested_price=None,
+                          kind=None, cancel_opposite_requested_price=None):
     """Single low-level dispatch after common filter normalization."""
     side = str(order_type).upper()
-    if side not in {"BUY", "SELL"} or not cfg.is_trade_enabled():
-        return None
+    cancel_price = None
+    if cancel_opposite_requested_price is not None:
+        try:
+            cancel_price = float(cancel_opposite_requested_price)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise SubmissionRefused("invalid_opposing_cancel_request") from exc
+        if not math.isfinite(cancel_price) or cancel_price <= 0:
+            raise SubmissionRefused("invalid_opposing_cancel_request")
+        if cache_permit is None:
+            # Smart cancellation is authorized only as part of the exact
+            # permit-bound replacement dispatch.
+            raise SubmissionRefused("account_cache_not_fresh")
+
+    target_client = api_client or client
     client_order_id = client_order_id or rc.create_client_order_id()
+    if market:
+        method = (
+            target_client.order_market_buy
+            if side == "BUY" else target_client.order_market_sell
+        )
+        submit_kwargs = {"symbol": symbol, "quantity": qty}
+    else:
+        method = (
+            target_client.order_limit_buy
+            if side == "BUY" else target_client.order_limit_sell
+        )
+        submit_kwargs = {
+            "symbol": symbol, "quantity": qty, "price": str(price)}
+    if cache_permit is None:
+        if side not in {"BUY", "SELL"} or not cfg.is_trade_enabled():
+            return None
+        require_account_cache_for_submit()
+        if not cfg.is_trade_enabled():
+            raise SubmissionRefused("trading_disabled")
+    else:
+        _consume_account_cache_submit_permit(
+            cache_permit,
+            symbol=symbol,
+            side=side,
+            qty=qty,
+            actual_price=price,
+            requested_price=permit_requested_price,
+            market=market,
+            kind=kind,
+        )
+        if not cfg.is_trade_enabled():
+            raise SubmissionRefused("trading_disabled")
+    if cancel_price is not None:
+        cancel_opposite_orders(side, symbol, cancel_price)
     try:
-        if market:
-            method = client.order_market_buy if side == "BUY" else client.order_market_sell
-            kwargs = {"symbol": symbol, "quantity": qty}
-        else:
-            method = client.order_limit_buy if side == "BUY" else client.order_limit_sell
-            kwargs = {"symbol": symbol, "quantity": qty, "price": str(price)}
-        order = method(**kwargs, newClientOrderId=client_order_id)
+        order = method(**submit_kwargs, newClientOrderId=client_order_id)
         if order:
             print(f"{side} order placed successfully: {order['orderId']} clientId {client_order_id}")
         return order
@@ -234,7 +506,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
         oposite_trades = apiorders.get_trade_orders(opposite_order_type, symbol, max_age_seconds=time_back_in_seconds)  # current data
         print(f"I have {len(oposite_trades)} trades of type {opposite_order_type} for {backdays} days. ")
 
-        time_limit = float(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
+        time_limit = float(time.time() * 1000) - (time_back_in_seconds * 1000)  # milliseconds
         # Keep opposite trades in the requested interval. Requiring price > 0 remains a
         # defensive safety net even though canceled orders no longer enter the cache.
         recent_opposite_trades = [trade for trade in oposite_trades
@@ -261,7 +533,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
         return True, None
 
     except BinanceAPIException as e:
-        print(f"Eroare la verificare if place safe order {order_type}: {e}")
+        print(f"Error checking whether the {order_type} order is safe: {e}")
         return False, "guard_check_api_exception"
     except Exception as e:
         # Data or manager errors fail closed unless the crash circuit breaker explicitly bypasses.
@@ -288,8 +560,11 @@ def place_safe_order(order_type, symbol, price, qty=None,
                      bypass_profit_guard=False, _reason_out=None):
     """Adapt the compatible safe API to the common pipeline without smart repricing."""
     order_type = order_type.upper()
-    qty = _resolve_qty(qty)
-    sym.validate_params(order_type, symbol, price, qty)
+    # ``None`` is the legacy "maximum permitted" request. Preserve it until the
+    # shared QuantityDecision has loaded balance and policy caps; a synthetic
+    # infinity here would be indistinguishable from an invalid explicit value.
+    sym.validate_params(
+        order_type, symbol, price, 1.0 if qty is None else qty)
     order = _guarded_market_place(
         symbol, order_type, price, qty,
         smart=False,
@@ -330,8 +605,8 @@ def _log_order_outcome(symbol, side, price, qty, outcome, refuse_reason, motivat
 # intentionally ignored legacy code; do not remove it without updating those callers.
 def place_order_smart(order_type, symbol, price, qty=None, safeback_seconds=PLACE_ORDER_SAFEBACK_SEC, force=False, cancelorders=True, hours=PLACE_ORDER_HOURS, pair=None, motivation=None):
     order_type = order_type.upper()
-    qty = _resolve_qty(qty)
-    sym.validate_params(order_type, symbol, price, qty)
+    sym.validate_params(
+        order_type, symbol, price, 1.0 if qty is None else qty)
     return _guarded_market_place(
         symbol, order_type, price, qty,
         smart=True,
@@ -350,38 +625,61 @@ def place_order_smart(order_type, symbol, price, qty=None, safeback_seconds=PLAC
 # profit/weight/trend/cooldown guards, and journaling belong to the agnostic layer.
 # ============================================================================
 
-def adjust_price_and_cancel_opposite(order_type, symbol, price, cancel_opposite=True):
-    """Apply Binance price mechanics and optionally cancel adverse opposite orders.
-
-    Cancel SELL below a BUY price or BUY above a SELL price, then clamp to current
-    price with a rounded 0.1% nudge. Instrument.place runs this before the profit guard
-    so the guard sees the same price as the legacy chain.
-    """
+def cancel_opposite_orders(order_type, symbol, requested_price):
+    """Cancel adverse opposing Binance orders without changing the target price."""
     order_type = order_type.upper()
+    if order_type == "BUY":
+        try:
+            open_orders = api.get_open_orders("SELL", symbol, strict=True)
+        except Exception as exc:
+            raise SubmissionRefused(
+                "opposing_order_discovery_unavailable") from exc
+        for order_id, order_details in open_orders.items():
+            if order_details["price"] < requested_price:
+                try:
+                    canceled = api.cancel_order(symbol, order_id)
+                except Exception as exc:
+                    raise SubmissionRefused(
+                        "opposing_cancel_unconfirmed") from exc
+                if not canceled:
+                    raise SubmissionRefused("opposing_cancel_unconfirmed")
+    elif order_type == "SELL":
+        try:
+            open_orders = api.get_open_orders("BUY", symbol, strict=True)
+        except Exception as exc:
+            raise SubmissionRefused(
+                "opposing_order_discovery_unavailable") from exc
+        for order_id, order_details in open_orders.items():
+            if order_details["price"] > requested_price:
+                try:
+                    canceled = api.cancel_order(symbol, order_id)
+                except Exception as exc:
+                    raise SubmissionRefused(
+                        "opposing_cancel_unconfirmed") from exc
+                if not canceled:
+                    raise SubmissionRefused("opposing_cancel_unconfirmed")
+
+
+def adjust_price_and_cancel_opposite(order_type, symbol, price,
+                                     cancel_opposite=True):
+    """Apply Binance price mechanics and optionally cancel opposing orders."""
+    order_type = order_type.upper()
+    if cancel_opposite:
+        cancel_opposite_orders(order_type, symbol, price)
     current_price = api.get_current_price(symbol)
     if order_type == "BUY":
-        if cancel_opposite:
-            open_SELL_orders = api.get_open_orders("SELL", symbol)
-            for order_id, order_details in open_SELL_orders.items():
-                if order_details['price'] < price:
-                    if not api.cancel_order(symbol, order_id):
-                        print(f"Fail cancel order {order_id} prep. for BUY (low SELL price).")
         price = min(price, current_price)
         price = round(price * 0.999, 0)
     elif order_type == "SELL":
-        if cancel_opposite:
-            open_BUY_orders = api.get_open_orders("BUY", symbol)
-            for order_id, order_details in open_BUY_orders.items():
-                if order_details['price'] > price:
-                    if not api.cancel_order(symbol, order_id):
-                        print(f"Fail cancel order {order_id} prep. for SELL (high BUY price).")
         price = max(price, current_price)
         price = round(price * (1 + 0.001), 0)
     return price
 
 
 def place_order_mechanics(order_type, symbol, price, qty, force=False,
-                          client_order_id=None):
+                          client_order_id=None, cache_permit=None,
+                          permit_requested_price=None, kind=None,
+                          cancel_opposite_requested_price=None):
     """Execute Binance-specific submission mechanics.
 
     Clamp to real balance after fees, enforce the 100 USDC minimum notional, round,
@@ -436,18 +734,14 @@ def place_order_mechanics(order_type, symbol, price, qty, force=False,
 
         print(f"Trying to place {order_type} {symbol} qty {qty:.8f} at "
               f"{'market price' if force else f'price {price}'}")
-        if order_type == 'SELL':
-            if force:
-                return (place_SELL_order_at_market(symbol, qty, client_order_id)
-                        if client_order_id else place_SELL_order_at_market(symbol, qty))
-            return (place_SELL_order(symbol, price, qty, client_order_id)
-                    if client_order_id else place_SELL_order(symbol, price, qty))
-        elif order_type == 'BUY':
-            if force:
-                return (place_BUY_order_at_market(symbol, qty, client_order_id)
-                        if client_order_id else place_BUY_order_at_market(symbol, qty))
-            return (place_BUY_order(symbol, price, qty, client_order_id)
-                    if client_order_id else place_BUY_order(symbol, price, qty))
+        if order_type in {"BUY", "SELL"}:
+            return _submit_binance_order(
+                order_type, symbol, qty, price=None if force else price,
+                market=bool(force), client_order_id=client_order_id,
+                cache_permit=cache_permit,
+                permit_requested_price=permit_requested_price, kind=kind,
+                cancel_opposite_requested_price=(
+                    cancel_opposite_requested_price))
         print(f"Invalid order type: {order_type}")
         return None
     except BinanceAPIException as e:

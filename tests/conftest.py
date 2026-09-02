@@ -21,6 +21,17 @@ _execution_audit_tmp = tempfile.TemporaryDirectory(
 os.environ["EXECUTION_AUDIT_DIR"] = _execution_audit_tmp.name
 
 
+@pytest.fixture(autouse=True)
+def _isolate_order_retry_queue(tmp_path, monkeypatch):
+    """Keep every test away from the ignored operational retry outbox."""
+    import order_retry
+
+    monkeypatch.setattr(
+        order_retry, "QUEUE_FILE", str(tmp_path / "order_retry_queue.jsonl"))
+    monkeypatch.setattr(
+        order_retry, "LOCK_FILE", str(tmp_path / "order_retry_queue.lock"))
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _shutdown_runtime_threads_after_suite():
     yield
