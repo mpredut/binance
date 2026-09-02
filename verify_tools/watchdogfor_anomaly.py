@@ -34,14 +34,16 @@ COOLDOWN_MIN = wc.required_float_env("ANOMALY_COOLDOWN_MINUTES")
 # The threshold is how many NEW hits (since the last run) trigger the alert.
 _CATS = {
     "rate_limit": (re.compile(r"\b429\b|rate limit|too ?many ?requests", re.I), 30),
-    # The migration to English is finished, so these patterns are English-only. If a
-    # Romanian log line ever reappears, translate the line rather than widening the pattern
-    # back — a bilingual pattern hides exactly the regression it would be matching.
-    "auth":       (re.compile(r"auth failed|missing keys|"
+    # Bilingual ON PURPOSE, and it stays that way (owner's decision). The code is fully
+    # English, but a future log line could be written in Romanian by mistake — and an
+    # English-only pattern would then stop firing SILENTLY, which is the one failure mode
+    # a watchdog must not have. The Romanian alternatives cost one regex branch; missing a
+    # real auth failure or a blind-flying window costs money.
+    "auth":       (re.compile(r"auth esuat|auth failed|lipsesc cheile|missing keys|"
                              r"unauthorized|forbidden|"
                              r"http\s*40[13]\b|status[=\s]*40[13]\b|\(40[13]\)|invalid.*api.*key", re.I), 3),
-    "blind":      (re.compile(r"unavailable|"
-                             r"skipping reconciliation|blind flying", re.I), 25),
+    "blind":      (re.compile(r"indisponibil|unavailable|sar reconcilierea|"
+                             r"skipping reconciliation|zbor orb|blind flying", re.I), 25),
     "traceback":  (re.compile(r"traceback \(most recent|unhandledexception|\bfatal\b", re.I), 1),
 }
 # The regexes are deliberately SPECIFIC (calibrated on real logs):

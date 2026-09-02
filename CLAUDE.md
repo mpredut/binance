@@ -24,10 +24,12 @@ Two consequences worth remembering, both learned the hard way:
 - **after translating any string, run the test suite.** Tests match live wording through
   `assertRaisesRegex`/`assertIn`, so a translated message can break a test that has
   nothing to do with the file you edited.
-- **patterns that match log text must follow the text.** The alert markers in
-  `alertnotifiers.py` and the anomaly regexes in `verify_tools/watchdogfor_anomaly.py`
-  are English now. If a Romanian log line ever reappears, translate the line rather than
-  widening the pattern back — a bilingual pattern hides the regression it would match.
+- **patterns that match log text are a separate case.** `verify_tools/watchdogfor_anomaly.py`
+  keeps its Romanian alternatives DELIBERATELY (owner's decision) and must stay bilingual:
+  the code is English, but a log line could still be written in Romanian by mistake, and an
+  English-only pattern would then stop firing silently — the one failure mode a watchdog
+  must not have. Do not "clean it up". The alert markers in `alertnotifiers.py` are
+  English-only today; they follow the alert titles, which are all English.
 
 Anything else in Romanian is a regression. **Do not imitate it** — translate it.
 
