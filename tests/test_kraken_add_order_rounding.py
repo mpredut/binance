@@ -54,7 +54,7 @@ class AddOrderRoundingTest(unittest.TestCase):
         )
         self.assertEqual(sent["cl_ord_id"], client_id.lower())
 
-        with self.assertRaisesRegex(ValueError, "128 biti"):
+        with self.assertRaisesRegex(ValueError, "128-bit hex UUID"):
             c.add_order("HYPEUSD", "buy", 1.0, 60.0, cl_ord_id="prea-scurt")
 
 

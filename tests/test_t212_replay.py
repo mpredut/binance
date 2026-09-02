@@ -256,7 +256,7 @@ class T212StatePersistenceTest(unittest.TestCase):
                         if dry_run:
                             engine._save()
                         else:
-                            with self.assertRaisesRegex(RuntimeError, "persistenta"):
+                            with self.assertRaisesRegex(RuntimeError, "persisting the"):
                                 engine._save()
                     self.assertTrue(engine._state_write_failed)
 

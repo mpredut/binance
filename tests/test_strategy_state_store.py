@@ -55,7 +55,7 @@ class JsonStateStoreTest(unittest.TestCase):
             path = os.path.join(directory, "state.json")
             store, _messages = self._store(path, fail_closed=True)
             with patch("strategies.state_store.os.replace", side_effect=OSError("disk")):
-                with self.assertRaisesRegex(StatePersistenceError, "persistenta"):
+                with self.assertRaisesRegex(StatePersistenceError, "persisting the"):
                     store.save(_defaults())
             self.assertEqual(os.listdir(directory), [])
 
