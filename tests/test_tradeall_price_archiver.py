@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 import os
 import tempfile
 import unittest
@@ -46,6 +47,10 @@ class _WsModule:
 
 
 class TestArchiverLifecycle(unittest.TestCase):
+    def test_main_never_starts_the_private_account_stream(self):
+        source = inspect.getsource(archiver.main)
+        self.assertNotIn("enable_real_ws_event_sync", source)
+
     def test_symbols_are_normalized_deduplicated_and_validated(self):
         self.assertEqual(archiver._symbols(" btcusdc,TAOUSDC,BTCUSDC "),
                          ["BTCUSDC", "TAOUSDC"])

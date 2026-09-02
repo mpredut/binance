@@ -111,7 +111,8 @@ def main():
     signal.signal(signal.SIGINT, request_stop)
 
     os.makedirs(CACHEDB_DIR, exist_ok=True)
-    cm.enable_real_ws_event_sync()
+    # This process consumes only the public market stream. The private account stream
+    # belongs to the dedicated cache process and would start redundant order/trade caches.
     current_price_mgr = cm.get_current_price_manager(
         ws_manager=bapi_ws.get_ws_manager(),
         sync_ts=sync_ts,
