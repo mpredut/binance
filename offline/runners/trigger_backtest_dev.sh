@@ -34,4 +34,4 @@ $SSH "$DEV_USER@$DEV_HOST" "PILOT_ONLY='${PILOT_ONLY:-}' ~/$DEV_PATH/offline/run
 echo "[trigger $(date '+%F %T')] 3/3 aplica propunerile pe PROD (guardrail-uri: rate-limit/medie/audit)"
 cd "$REPO_ROOT" && ./myenv/bin/python offline/runners/apply_proposals.py
 
-echo "[trigger $(date '+%F %T')] gata."
+echo "[trigger $(date '+%F %T')] done."

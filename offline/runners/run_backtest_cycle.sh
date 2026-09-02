@@ -20,4 +20,4 @@ args=(--propose)
 echo "[cycle $(date '+%F %T')] publish propuneri pe git"
 "$REPO_ROOT/offline/runners/publish_proposals.sh"
 
-echo "[cycle $(date '+%F %T')] gata"
+echo "[cycle $(date '+%F %T')] done"

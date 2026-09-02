@@ -74,7 +74,7 @@ proc_state() {
 
 # ===== --check MODE: a READ-ONLY preview (it touches nothing) ==============
 if [ "$1" = "--check" ]; then
-    echo "=== CHECK (read-only) $(date '+%H:%M:%S') — sursa: $MANIFEST ==="
+    echo "=== CHECK (read-only) $(date '+%H:%M:%S') — source: $MANIFEST ==="
     vpn=$(vpn_state)
     [ "$vpn" = ok ] && echo "  VPN              ok (piactl + tun0 + DNS + Binance HTTPS)" \
         || echo "  VPN              FAULT ($vpn)"
@@ -123,7 +123,7 @@ EOF
         TOPIC=$(grep -hs NTFY_TOPIC "$ROOT/kraken/.env" "$ROOT/.env" 2>/dev/null | head -1 | cut -d= -f2 | tr -d '" ')
         push_ntfy "Procese pe server" \
             "Dead/hung:$missing  -> check (./bots_start.sh / flota_start)" \
-            || echo "$(date '+%H:%M') ALERTA NELIVRATA: eroare HTTP/retea ntfy"
+            || echo "$(date '+%H:%M') ALERT NOT DELIVERED: an ntfy HTTP or network error"
         echo "$(date '+%H:%M') ALERTA: $missing"
     else
         echo "$(date '+%H:%M') OK (all processes are running)"

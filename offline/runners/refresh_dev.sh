@@ -41,4 +41,4 @@ if [ "$rc" != 0 ] && [ "$rc" != 24 ] && [ "$rc" != 23 ]; then
   echo "[refresh_dev] rsync failed with code $rc"; exit "$rc"
 fi
 
-echo "[refresh_dev $(date '+%F %T')] gata"
+echo "[refresh_dev $(date '+%F %T')] done"

@@ -17,7 +17,7 @@ PAPER=""
 echo "[dn_close] 1/3 removing the watchdog from cron (so it does not restart the bot)..."
 "$HERE/dn_watchdog.sh" --uninstall || true
 
-echo "[dn_close] 2/3 opresc botul de rebalansare..."
+echo "[dn_close] 2/3 stopping the rebalancing bot..."
 pid="$(pgrep -fa 'dn_bot\.py' | grep -v -- '--watch' | grep -v -e 'bash' -e 'dn_watchdog' -e 'dn_close' | awk '{print $1}' | head -n1)"
 if [ -n "$pid" ]; then
   kill "$pid" 2>/dev/null; sleep 3

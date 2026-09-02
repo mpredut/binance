@@ -2,8 +2,8 @@
 # run_backtest_parallel.sh — runs backtests IN PARALLEL on dev (N cores).
 # The backtest is CPU-bound and independent per parameter => embarrassingly parallel.
 #
-# Usage: offline/runners/run_backtest_parallel.sh <fisier_comenzi> [JOBS]
-#   <fisier_comenzi>: o comanda pe linie (# = comentariu, liniile goale ignorate).
+# Usage: offline/runners/run_backtest_parallel.sh <command_file> [JOBS]
+#   <command_file>: one command per line (# = a comment, blank lines are ignored).
 #   JOBS: cate deodata (implicit nproc).
 # Each command runs in its own process, with the output in
 #   logs/backtest_parallel/<timestamp>/NN.log  (plus manifest.tsv with the NN->command mapping).

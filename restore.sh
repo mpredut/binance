@@ -46,7 +46,7 @@ fi
 echo "--- [4/5] verificare cron ---"
 crontab -l >/dev/null 2>&1 && echo "    ✔ cron instalat de profilul PROD"
 
-echo "--- [5/5] GATA ---"
+echo "--- [5/5] DONE ---"
 echo "Still needed (once): install the PIA application and log in, then:"
 echo "    sudo systemctl start pia binance     # the fleet starts; the bots arrive through cron"
 echo "    ./healthcheck.sh --check             # check that everything is 'ok'"

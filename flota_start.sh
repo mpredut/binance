@@ -22,7 +22,7 @@ SLEEP_AFTER_KILL=1
 PYTHON_START_WAIT=3   # Seconds to wait after starting before checking.
 
 # ===== Check and start the VPN =====
-echo "🔐 Verific conexiunea VPN..."
+echo "🔐 Checking the VPN connection..."
 SECONDS_PASSED=0
 sleep 5
 pia() { timeout "$PIA_CLI_TIMEOUT" piactl "$@"; }
@@ -110,7 +110,7 @@ declare -a PIDS
 declare -a LOGS
 FAILED=()
 
-echo "🚀 Pornesc scripturile Python..."
+echo "🚀 Starting the Python scripts..."
 # Pornim scripturile
 for script in "${scripts[@]}"; do
     log="$SCRIPT_DIR/logs/${script%.py}.log"
