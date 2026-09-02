@@ -92,7 +92,7 @@ DEFAULTS = [
     (ag, "TREND_DEFER_MAX_SECONDS", 3 * 60),
 ]
 
-# (modul, env_var, valoare_str, atribut, valoare_asteptata_dupa_override)
+# (module, env_var, value_str, attribute, expected_value_after_the_override)
 OVERRIDES = [
     (ta, "TRADEALL_SLOPE_EXTREME_THRESHOLD", "9.9", "SLOPE_EXTREME_THRESHOLD", 9.9),
     (ta, "TRADEALL_FIRE_MAX_PER_TREND", "7", "FIRE_MAX_PER_TREND", 7),

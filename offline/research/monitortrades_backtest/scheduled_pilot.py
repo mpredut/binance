@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-scheduled_pilot.py — PILOT (un singur modul: monitortrades.py, decizie user
+scheduled_pilot.py — A PILOT (a single module: monitortrades.py, a user decision on
 23 Jul: "for now we run a pilot test and do not extend it to all modules").
 
 It reads the test ranges from the "# BACKTEST: ..." annotations written DIRECTLY in
@@ -19,10 +19,10 @@ one configuration and -$5279 in another, on the SAME history):
      treated as noise, not signal.
   2. ONLY values from the grid (never extrapolation).
   3. AVERAGING, not a direct jump (a user decision): the value actually applied =
-     (valoare_configurata_azi + valoare_castigatoare_backtest) / 2 —
-     amortizeaza exact genul de instabilitate demonstrat azi.
+     (value_configured_today + winning_backtest_value) / 2 —
+     it damps exactly the kind of instability demonstrated today.
   4. RATE LIMIT: a parameter does not change more often than once every
-     PILOT_MIN_DAYS_BETWEEN_CHANGES zile (implicit 7) — jurnal persistent.
+     PILOT_MIN_DAYS_BETWEEN_CHANGES days (7 by default) — a persistent journal.
   5. AUDIT: every run writes a line into the journal (what was tested, both windows,
      decision, reason) — whether or not anything changed.
   6. NOTIFICATION (alertnotifiers.notify, the channel the fleet already uses): ONLY
@@ -131,7 +131,7 @@ def _current_value(section, key):
 
 
 def _edge(pnl):
-    """net - buy_hold — masura de "cat mai bine decat simpla detinere",
+    """net - buy_hold — a measure of "how much better than simply holding",
     comparable between different windows (unlike the raw net)."""
     return pnl["net"] - pnl["buy_hold"]
 
@@ -282,7 +282,7 @@ def evaluate_key(full_key, symbol, base, key, dry_run=True, propose=False):
     # Mod DEV (--propose): castigatorul a trecut de guardrail-uri (confirmat pe 2
     # windows plus beating the current value by a margin). We do NOT apply or rate-limit here —
     # we propose the RAW winning value; PROD decides at application time (averaging with
-    # valoarea LUI live, rate-limit, audit). Vezi UNIFIED_BACKTEST_PLAN.md §9.
+    # ITS live value, a rate limit, an audit). See UNIFIED_BACKTEST_PLAN.md §9.
     if propose:
         entry["winner_value"] = winner_val
         entry["action"] = "proposed"

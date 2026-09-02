@@ -198,16 +198,16 @@ class OrderRetryStoreTest(unittest.TestCase):
 
     def test_price_gate_sell(self):
         rec = {"side": "SELL", "requested_price": 100.0}
-        self.assertTrue(oq.price_gate_ok(rec, 100.0))         # egal -> ok
-        self.assertTrue(oq.price_gate_ok(rec, 101.0))         # mai sus -> ok (vinzi mai bine)
-        self.assertTrue(oq.price_gate_ok(rec, 99.9))          # in toleranta 0.2%
+        self.assertTrue(oq.price_gate_ok(rec, 100.0))         # Equal -> ok.
+        self.assertTrue(oq.price_gate_ok(rec, 101.0))         # Higher -> ok (you sell better).
+        self.assertTrue(oq.price_gate_ok(rec, 99.9))          # Within the 0.2% tolerance.
         self.assertFalse(oq.price_gate_ok(rec, 95.0))         # Far below -> it waits.
         self.assertFalse(oq.price_gate_ok(rec, None))         # no price -> we do not decide
 
     def test_price_gate_buy(self):
         rec = {"side": "BUY", "requested_price": 100.0}
         self.assertTrue(oq.price_gate_ok(rec, 100.0))
-        self.assertTrue(oq.price_gate_ok(rec, 99.0))          # mai jos -> ok (cumperi mai ieftin)
+        self.assertTrue(oq.price_gate_ok(rec, 99.0))          # Lower -> ok (you buy cheaper).
         self.assertFalse(oq.price_gate_ok(rec, 105.0))        # Far above -> it waits.
 
     def test_price_gate_no_intent_skips(self):

@@ -18,7 +18,7 @@ import json
 import glob
 import time
 
-# offline/legacy_tools/ este la doua niveluri sub radacina repo-ului.
+# offline/legacy_tools/ sits two levels below the repository root.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # The cache files live in <repo>/cachedb/ (overridden by BINANCE_CACHE_DIR or --dir).
 CACHE_DIR = os.environ.get("BINANCE_CACHE_DIR", os.path.join(REPO_ROOT, "cachedb"))

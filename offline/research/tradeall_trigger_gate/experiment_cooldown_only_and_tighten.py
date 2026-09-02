@@ -20,10 +20,10 @@ Aici testam, pe intreg istoricul disponibil (329 zile, cache_price_*.jsonl):
   B. "tighten_confirm48_cooldown" : as above, but the confirmation threshold for
                                 is_trend_consistent_validated() DUBLAT (24->48)
                                 — it tests question 3 (tightening, not relaxing).
-                                Motivatie: TAO a acumulat 99 confirmari intr-un
+                                The motivation: TAO accumulated 99 confirmations in
                                 a single trend and easily reached the threshold of 24; a
-                                prag mai greu de atins ar putea evita intreg
-                                episodul problematic.
+                                threshold that is harder to reach might avoid the whole
+                                problematic episode.
 
 logic() is a FAITHFUL copy of the function in tradeall.py (every block, the
 5.1 and TREND_TO_BE_OLD_SECONDS unchanged) — the ONLY difference from the real

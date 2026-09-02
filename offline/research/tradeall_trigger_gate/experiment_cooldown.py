@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Experiment 3 (isolated, it does NOT modify tradeall.py) — it tests the very fix proposed
-in raport (memoria tradeall-trigger-gate-investigation.md): un cooldown
+in the report (the memory note tradeall-trigger-gate-investigation.md): a cooldown,
 "fire only once per trend instance" (edge-triggered, not level-triggered
 as it is now), combined with a wider START condition (which in Experiment 2
 produced catastrophic overtrading WITHOUT a cooldown).
@@ -13,8 +13,8 @@ extra ones were noise anyway (many, but worthless) even with a cooldown?
 Variants (on BTC over 2 days and TAO over 12h, the same windows as Experiments 1-2):
   V0_baseline_cooldown        : conditia ACTUALA (divergenta) + cooldown fire-once
   V1_gradient_only_cooldown   : the V1 condition (the gradient sign only) plus the fire-once cooldown
-  V3a_prag_big_jum_cooldown   : PRICE_CHANGE_THRESHOLD_BIG_EUR /2  + cooldown fire-once
-  V3b_prag_big_treime_cooldown: PRICE_CHANGE_THRESHOLD_BIG_EUR /3  + cooldown fire-once
+  V3a_big_threshold_half_cooldown   : PRICE_CHANGE_THRESHOLD_BIG_EUR /2  + cooldown fire-once
+  V3b_big_threshold_third_cooldown: PRICE_CHANGE_THRESHOLD_BIG_EUR /3  + cooldown fire-once
 
 Cooldown-ul: un singur flag per TrendState per directie (_fired_up/_fired_down),
 reset on every new start_trend(); every FIRE block (trend_confirmed,
@@ -151,8 +151,8 @@ def make_logic_cooldown(start_up_cond, start_down_cond, label):
 VARIANTS = {
     "V0_baseline_cooldown": (lambda g, s: g > 0 and s < 0, lambda g, s: g < 0 and s > 0, None),
     "V1_doar_gradient_cooldown": (lambda g, s: g > 0, lambda g, s: g < 0, None),
-    "V3a_prag_big_jum_cooldown": (lambda g, s: g > 0 and s < 0, lambda g, s: g < 0 and s > 0, 2.0),
-    "V3b_prag_big_treime_cooldown": (lambda g, s: g > 0 and s < 0, lambda g, s: g < 0 and s > 0, 3.0),
+    "V3a_big_threshold_half_cooldown": (lambda g, s: g > 0 and s < 0, lambda g, s: g < 0 and s > 0, 2.0),
+    "V3b_big_threshold_third_cooldown": (lambda g, s: g > 0 and s < 0, lambda g, s: g < 0 and s > 0, 3.0),
 }
 
 

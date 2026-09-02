@@ -31,14 +31,14 @@ class StratRulesTest(unittest.TestCase):
     def test_reentry_drop(self):
         # sold at 100, drop 2% -> threshold 98; above it = blocked
         self.assertTrue(sr.reentry_drop_blocked(99.0, 100.0, 2.0, 0.0))
-        self.assertFalse(sr.reentry_drop_blocked(97.0, 100.0, 2.0, 0.0))  # sub prag -> intra
+        self.assertFalse(sr.reentry_drop_blocked(97.0, 100.0, 2.0, 0.0))  # Below the threshold -> it enters.
         self.assertFalse(sr.reentry_drop_blocked(99.0, 100.0, 0.0, 0.0))  # drop 0 -> no barrier.
         self.assertFalse(sr.reentry_drop_blocked(99.0, 0.0, 2.0, 0.0))    # A missing last_sell.
 
     def test_dca_price_hit(self):
-        # last_buy 100, drop 2% -> prag 98
-        self.assertTrue(sr.dca_price_hit(98.0, 100.0, 2.0, 0.0))    # exact la prag
-        self.assertTrue(sr.dca_price_hit(97.0, 100.0, 2.0, 0.0))    # sub prag
+        # last_buy 100, drop 2% -> a threshold of 98
+        self.assertTrue(sr.dca_price_hit(98.0, 100.0, 2.0, 0.0))    # Exactly at the threshold.
+        self.assertTrue(sr.dca_price_hit(97.0, 100.0, 2.0, 0.0))    # Below the threshold.
         self.assertFalse(sr.dca_price_hit(99.0, 100.0, 2.0, 0.0))   # above the threshold, no tolerance
         self.assertTrue(sr.dca_price_hit(98.04, 100.0, 2.0, 0.05))  # in toleranta 0.05%
 
