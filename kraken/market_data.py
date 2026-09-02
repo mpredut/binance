@@ -18,7 +18,7 @@ def get_price(client: KrakenClient, pair: str) -> float | None:
     try:
         return client.last_price(pair)
     except KrakenError as e:
-        log(f"  ! pret {pair} indisponibil: {e}")
+        log(f"  ! the price of {pair} is unavailable: {e}")
         return None
 
 

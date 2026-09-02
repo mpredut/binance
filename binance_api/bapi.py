@@ -137,7 +137,7 @@ def get_free_balance(asset: str):
         asset_info = client.get_asset_balance(asset=asset)
         return float((asset_info or {}).get("free", 0))
     except Exception as e:
-        print(f"get_free_balance: Eroare pentru {asset}: {e}")
+        print(f"get_free_balance: Error for {asset}: {e}")
         return None
 
 
@@ -236,7 +236,7 @@ def cancel_order(symbol, order_id):
         if not order_id:
             return False
         client.cancel_order(symbol=symbol, orderId=order_id)
-        print(f"Ordinul cu ID {order_id} was cancelled.")
+        print(f"The order with ID {order_id} was cancelled.")
         return True
     except Exception as e:
         print(f"Eroare la anularea ordinului: {order_id} {e}")

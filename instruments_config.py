@@ -42,7 +42,7 @@ def load_instruments(path: Optional[str] = None, api=None) -> Dict[str, Instrume
     for section in cp.sections():
         d = dict(cp.items(section))
         if "provider" not in d or "symbol" not in d:
-            raise ValueError(f"instruments.conf [{section}]: is missing 'provider' sau 'symbol'")
+            raise ValueError(f"instruments.conf [{section}]: is missing 'provider' or 'symbol'")
         params = {k: v for k, v in d.items() if k not in _CORE}
         out[section] = Instrument(
             name=section,

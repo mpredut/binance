@@ -1,5 +1,5 @@
 """Faza 4 provider-unify — BinanceProvider satisface contractul StrategyExecutor
-(cablare bapi). _bapi patch-uit cu un fake (fara client/chei Binance reale)."""
+(the bapi wiring). _bapi is patched with a fake (no real Binance client or keys)."""
 import os
 import sys
 import unittest

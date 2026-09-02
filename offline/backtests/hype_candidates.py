@@ -116,7 +116,7 @@ def financial_priority_candidates() -> list[Candidate]:
         ),
         Candidate(
             "trail_profit_floor_sl125",
-            "DECUPLAT: profit-floor +1% brut, dar hard stop la 12.5% (baseline) "
+            "DECOUPLED: a gross profit floor of +1%, but a hard stop at 12.5% (the baseline) "
             "— izoleaza upside-ul profit-floor de penalizarea de DD a stop-ului larg",
             {"tp_trail_profit_floor_pct": 1.0},
         ),

@@ -107,8 +107,8 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders=None):
                 print(f"Updated order from {price} to {new_price}. New ID: {new_order['orderId']}")
             else:
                 print(
-                    f"Inlocuirea {order_type} nu a fost acceptata imediat; "
-                    "intentia persistata ramane in outboxul comun pentru retry."
+                    f"The {order_type} replacement was not accepted immediately; "
+                    "the persisted intent stays in the shared outbox for a retry."
                 )
     
 

@@ -72,7 +72,7 @@ def _dotenv_pairs(path: str) -> tuple[list[tuple[str, str]], bool]:
                 pairs.append((key, val))
         return pairs, True
     except OSError as e:
-        log(f"  ! nu pot citi {path}: {e}")
+        log(f"  ! cannot read {path}: {e}")
         return [], False
 
 

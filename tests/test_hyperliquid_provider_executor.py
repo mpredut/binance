@@ -1,5 +1,5 @@
 """Faza 3 provider-unify — hyperliquid_provider satisface contractul StrategyExecutor
-(cablare API HL). Client HL FAKE injectat (fara SDK/retea/chei)."""
+(the HL API wiring). A FAKE HL client is injected (no SDK, no network, no keys)."""
 import os
 import sys
 import unittest
@@ -108,7 +108,7 @@ class HLExecutorContractTest(unittest.TestCase):
         self.assertEqual(self.p.ohlc_closes("HYPE", 240), [10.0, 11.0])
 
     def test_submit_order_gated_pe_HL_LIVE_ORDERS(self):
-        # implicit HL_LIVE_ORDERS lipseste -> refuz (siguranta co-mingling DN)
+        # by default HL_LIVE_ORDERS is missing -> a refusal (DN co-mingling safety)
         with self.assertRaises(ProviderError):
             self.p.submit_order("HYPE", "buy", 1.0, price=60.0)
 

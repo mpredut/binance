@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sursa unica pentru profilul DEV/backtest folosit de runnerele shell.
+# The single source for the DEV/backtest profile used by the shell runners.
 
 RUNNER_DIR="${RUNNER_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
 DEV_PROFILE="${DEV_BACKTEST_ENV:-$RUNNER_DIR/dev_backtest.env}"

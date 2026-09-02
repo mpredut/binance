@@ -43,7 +43,7 @@ def main() -> int:
     ap.add_argument("symbol")
     ap.add_argument("--below", type=float, help="alert when the price <= this threshold")
     ap.add_argument("--above", type=float, help="alert when the price >= this threshold")
-    ap.add_argument("--topic", default=None, help="topic ntfy (altfel NTFY_TOPIC din .env)")
+    ap.add_argument("--topic", default=None, help="the ntfy topic (otherwise NTFY_TOPIC from .env)")
     ap.add_argument("--state", default=None)
     ap.add_argument("--env-file", default=os.path.join(_HERE, ".env"))
     args = ap.parse_args()
@@ -54,7 +54,7 @@ def main() -> int:
     if not topic:
         log("! no ntfy topic (--topic / NTFY_TOPIC_PRICE / NTFY_TOPIC in .env)"); return 1
     if args.below is None and args.above is None:
-        log("! da macar --below sau --above"); return 1
+        log("! give at least --below or --above"); return 1
 
     price = get_price_usd(args.symbol)
     if price is None:
@@ -88,7 +88,7 @@ def main() -> int:
         push(topic, title, body)
         armed = False
     else:
-        log(f"  [{args.symbol}] pret {price:.2f} (below={args.below} above={args.above} armat={armed})")
+        log(f"  [{args.symbol}] price {price:.2f} (below={args.below} above={args.above} armed={armed})")
 
     try:
         atomic_write_json(state_path, {"armed": armed, "last": price})

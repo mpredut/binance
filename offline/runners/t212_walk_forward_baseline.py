@@ -50,7 +50,7 @@ def parse_interval_minutes(value: str) -> int:
     try:
         minutes = int(value[:-1]) * units[value[-1].lower()]
     except (KeyError, ValueError, IndexError) as exc:
-        raise argparse.ArgumentTypeError("interval Yahoo invalid; exemple: 5m, 1h, 1d") from exc
+        raise argparse.ArgumentTypeError("an invalid Yahoo interval; examples: 5m, 1h, 1d") from exc
     if minutes <= 0:
         raise argparse.ArgumentTypeError("the interval must be positive")
     return minutes
@@ -96,7 +96,7 @@ def fetch_yahoo_candles(symbol: str, range_: str, interval: str) -> list[dict]:
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:300]
         raise RuntimeError(
-            f"Yahoo a refuzat {symbol} {range_}/{interval}: HTTP {exc.code} {detail}"
+            f"Yahoo refused {symbol} {range_}/{interval}: HTTP {exc.code} {detail}"
         ) from exc
     result = (payload.get("chart", {}).get("result") or [None])[0]
     if not result:
@@ -201,7 +201,7 @@ def main() -> int:
         parser.error("the walk-forward sizes must be positive")
     warmup = (12 if params.dca_trend_gate_pct > 0 else 0) if args.warmup is None else args.warmup
     if warmup < 0:
-        parser.error("--warmup nu poate fi negativ")
+        parser.error("--warmup cannot be negative")
 
     source = args.dataset.expanduser().resolve() if args.dataset else None
     seed_source = args.seed_dataset.expanduser().resolve() if args.seed_dataset else None
@@ -330,7 +330,7 @@ def main() -> int:
     report_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
 
     aggregate = result["aggregate_test"]
-    print(f"Baseline salvat: {report_path}")
+    print(f"Baseline saved: {report_path}")
     print(
         f"{args.profile}/{symbol} | folds={aggregate['fold_count']} "
         f"mean={aggregate['mean_return_pct']:+.3f}% "

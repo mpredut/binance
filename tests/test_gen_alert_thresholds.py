@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Teste pt modelul de sugerare praguri (partea PURA, fara retea)."""
+"""Tests for the threshold-suggestion model (the PURE part, no network)."""
 from __future__ import annotations
 
 import os
@@ -18,7 +18,7 @@ class TestThresholds(unittest.TestCase):
         self.assertEqual(upm, 0.0)
 
     def test_a_volatile_market_gives_wide_thresholds(self):
-        # serie cu swing-uri ~10-30% -> praguri peste floor
+        # a series with ~10-30% swings -> thresholds above the floor
         prices = [100, 90, 115, 88, 130, 85, 120] * 6
         up, down, _, _ = thresholds_from_prices(prices, window=4)
         self.assertGreater(up, FLOOR)

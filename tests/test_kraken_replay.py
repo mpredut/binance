@@ -115,7 +115,7 @@ class ReplayEngineTest(unittest.TestCase):
         self.assertEqual(replayed, clean)
 
     def test_order_created_at_close_cannot_fill_on_same_bar(self):
-        # Low-ul 1 ar umple orice BUY, dar ordinul este decis abia la close=100.
+        # A low of 1 would fill any BUY, but the order is only decided at close=100.
         # The harness must only be able to execute it on the next bar.
         first_bar = (100.0, 200.0, 1.0, 100.0)
         one_bar = rp.run_replay([first_bar], _params(), fee_pct=0.26)

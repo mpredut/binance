@@ -232,7 +232,7 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
             return False, reason
 
         oposite_trades = apiorders.get_trade_orders(opposite_order_type, symbol, max_age_seconds=time_back_in_seconds)  # current data
-        print(f"Am {len(oposite_trades)} trades de tip {opposite_order_type} pentru {backdays} zile. ")
+        print(f"I have {len(oposite_trades)} trades of type {opposite_order_type} for {backdays} days. ")
 
         time_limit = float(time.time() * 1000) - (time_back_in_seconds * 1000)  # in milisecunde
         # Keep opposite trades in the requested interval. Requiring price > 0 remains a
@@ -265,8 +265,8 @@ def if_place_safe_order(order_type, symbol, price, qty, time_back_in_seconds,
         return False, "guard_check_api_exception"
     except Exception as e:
         # Data or manager errors fail closed unless the crash circuit breaker explicitly bypasses.
-        print(f"[GARD] {order_type} {symbol}: verificare esuata ({e}) -> "
-              f"{'TREC (bypass)' if bypass_profit_guard else 'BLOCAT (fail-closed)'}")
+        print(f"[GUARD] {order_type} {symbol}: the check failed ({e}) -> "
+              f"{'PASSING (bypass)' if bypass_profit_guard else 'BLOCKED (fail-closed)'}")
         return bool(bypass_profit_guard), (None if bypass_profit_guard else "guard_check_failed")
 
 

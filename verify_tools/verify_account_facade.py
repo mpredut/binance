@@ -79,7 +79,7 @@ def main():
             nrm = mkt.get_orders(s, side, MAXAGE) or []
             direct[side], facade[side] = raw, nrm
             if len(raw) != len(nrm):
-                failures.append(f"{s} {side}: numar ordine direct={len(raw)} != facada={len(nrm)}")
+                failures.append(f"{s} {side}: order count direct={len(raw)} != facade={len(nrm)}")
                 print(f"  {side}: COUNT DIFERA direct={len(raw)} facada={len(nrm)}")
                 continue
             mism = 0
@@ -90,8 +90,8 @@ def main():
                         or (r.get("side") or "").upper() != (n.get("side") or "").upper()):
                     mism += 1
             if mism:
-                failures.append(f"{s} {side}: {mism} ordine cu campuri diferite")
-            print(f"  {side}: n={len(raw)}  camp-cu-camp -> {'OK' if mism == 0 else f'{mism} DIFERA'}")
+                failures.append(f"{s} {side}: {mism} orders with different fields")
+            print(f"  {side}: n={len(raw)}  field by field -> {'OK' if mism == 0 else f'{mism} DIFFER'}")
 
         # 3) avg_buy / net_qty from both sources ------------------------------
         avg_d, net_d = position_from(direct["BUY"], direct["SELL"])

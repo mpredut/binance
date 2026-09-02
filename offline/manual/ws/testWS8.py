@@ -1,11 +1,11 @@
-"""Diagnostic WebSocket manual; poate accesa API-ul real."""
+"""A manual WebSocket diagnostic; it may reach the real API."""
 
 import nacl.signing
 import base64, time, json, asyncio, websockets
 from keys.apikeys import api_key_ws
 
 
-# Extragere corecta din PKCS8 DER
+# The correct extraction from PKCS8 DER.
 with open("ed25519_private.pem", "r") as f:
     pem_data = f.read()
 
@@ -14,12 +14,12 @@ b64 = re.search(r"-----BEGIN PRIVATE KEY-----(.+?)-----END PRIVATE KEY-----", pe
 der_bytes = base64.b64decode(b64.group(1).strip())
 
 # PKCS8 Ed25519 = 48 bytes total, seed-ul e ultimii 32
-# dar uneori e la offset 16, verifica ambele
+# but sometimes it is at offset 16, so check both
 print(f"DER length: {len(der_bytes)}")
 seed = der_bytes[-32:]  
 signing_key = nacl.signing.SigningKey(seed)
 
-# Verificare — public key trebuie sa coincida cu ce ai in Binance
+# A check — the public key must match the one you have in Binance.
 verify_key = signing_key.verify_key
 pub_b64 = base64.b64encode(bytes(verify_key)).decode()
 print(f"Public key raw base64: {pub_b64}")
@@ -53,7 +53,7 @@ async def test_ws():
 
         if resp.get("status") == 200:
             await ws.send(json.dumps({"id": "sub", "method": "userDataStream.subscribe"}))
-            print("Subscribed! Plaseaza un order...")
+            print("Subscribed! Place an order...")
             while True:
                 try:
                     msg = await asyncio.wait_for(ws.recv(), timeout=30)

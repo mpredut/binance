@@ -1,4 +1,4 @@
-"""GOLDEN REGRESSION — blocheaza comportamentul base v2 (kraken/strategy.py) INAINTE de
+"""A GOLDEN REGRESSION — it locks the base v2 behaviour (kraken/strategy.py) BEFORE
 refactorul provider-agnostic (Calea B: unificare pe MarketDataProvider).
 
 Runs the LIVE strategy through the faithful engine (replay.run_replay) over a
@@ -26,8 +26,8 @@ sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(ROOT, "kraken"))
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
-# Venue-urile au module legacy cu aceleasi nume (`strategy`, `replay`,
-# `notify`). Incarcam graful Kraken sub un nume unic si restauram cache-ul,
+# The venues have legacy modules with the same names (`strategy`, `replay`,
+# `notify`). We load the Kraken graph under a unique name and restore the cache,
 # so the result does not depend on the order in which pytest collects the files.
 _COLLIDING = ("strategy", "replay", "market_data", "notify")
 _PRELOADED = {name: sys.modules.pop(name) for name in _COLLIDING if name in sys.modules}
@@ -112,7 +112,7 @@ class BaseV2GoldenTest(unittest.TestCase):
     def test_decision_trace_is_byte_identical(self):
         trace, _ = self._run_with_trace()
         self.assertEqual(len(trace), GOLDEN_ORDERS,
-                         "numarul de ordine plasate s-a schimbat -> regresie de comportament")
+                         "the number of orders placed changed -> a behaviour regression")
         digest = hashlib.sha256(repr(trace).encode()).hexdigest()[:16]
         self.assertEqual(digest, GOLDEN_TRACE_HASH,
                          "urma exacta de decizii s-a schimbat -> refactorul a alterat base v2")

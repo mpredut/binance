@@ -273,7 +273,7 @@ class HLClient:
                    cloid: str | None = None) -> tuple[bool, int | None, str]:
         """Place a spot LIMIT order; pair is the @index name such as @107."""
         if not self.exchange:
-            raise HLError("Fara agent wallet (HL_SECRET_KEY)")
+            raise HLError("No agent wallet (HL_SECRET_KEY)")
         sz = round(sz, sz_decimals)
         px = _round_px(px, sz_decimals, is_perp=False)
         try:

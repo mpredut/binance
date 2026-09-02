@@ -124,7 +124,7 @@ def main() -> int:
 
     print()
     if fails:
-        print(f"=== {len(fails)} VERIFICARI ESUATE ===")
+        print(f"=== {len(fails)} CHECKS FAILED ===")
         return 1
     print("=== ALL CHECKS PASSED ===")
     return 0

@@ -1,7 +1,7 @@
 """kraken_client._public: un rezultat GOL ({}) de la un endpoint public (AssetPairs/
 Ticker) is NOT cached — it is always a transient failed fetch, not a valid state.
-Daca s-ar cache-ui (TTL AssetPairs=1h), pair_info->None->ordermin=0 dezactiva gardul
-anti-'volume minimum not met' ~1h -> churn de ordine respinse pe praf (HYPE 0.0175<0.1)."""
+If it were cached (an AssetPairs TTL of 1h), pair_info->None->ordermin=0 would disable the
+anti-'volume minimum not met' guard for ~1h -> churn of orders rejected on dust (HYPE 0.0175<0.1)."""
 import os
 import sys
 import unittest
@@ -31,7 +31,7 @@ class PublicCacheTest(unittest.TestCase):
             r2 = client._public("AssetPairs", {"pair": "HYPEUSD"})
             self.assertIn("HYPEUSD", r2)                   # a RE-FETCH-uit (gol necache-uit)
             self.assertEqual(mget.call_count, 2)
-            # acum rezultatul plin E cache-uit -> fara fetch nou
+            # now the full result IS cached -> no new fetch
             r3 = client._public("AssetPairs", {"pair": "HYPEUSD"})
             self.assertIn("HYPEUSD", r3)
             self.assertEqual(mget.call_count, 2)

@@ -1,4 +1,4 @@
-"""Contractul comun de persistenta pentru motoarele financiare."""
+"""The shared persistence contract for the financial engines."""
 
 import json
 import os
@@ -65,7 +65,7 @@ class JsonStateStoreTest(unittest.TestCase):
             store, messages = self._store(path, fail_closed=False)
             with patch("strategies.state_store.os.replace", side_effect=OSError("disk")):
                 self.assertFalse(store.save(_defaults()))
-            self.assertIn("nu pot salva starea", messages[-1])
+            self.assertIn("cannot save the state", messages[-1])
             self.assertEqual(os.listdir(directory), [])
 
 

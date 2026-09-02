@@ -1,5 +1,5 @@
 """rtrade _trend_too_strong: the trend filter that makes the spread bot stand aside
-cand activul trend-uieste clar (|gradient_recent| > K*epsilon). Fail-OPEN + kill-switch.
+when the asset is clearly trending (|gradient_recent| > K*epsilon). Fail-OPEN plus a kill switch.
 cacheManager e injectat fake in sys.modules (import lazy in _trend_too_strong)."""
 import os
 import sys
@@ -61,11 +61,11 @@ class TrendFilterTest(unittest.TestCase):
             raise RuntimeError("cm down")
         m.get_short_trend_manager = boom
         sys.modules["cacheManager"] = m
-        self.assertFalse(rtrade._trend_too_strong("TAOUSDC"))         # eroare -> nu blocheaza
+        self.assertFalse(rtrade._trend_too_strong("TAOUSDC"))         # An error -> it does not block.
 
 class FollowupForceTest(unittest.TestCase):
     """Follow-up (flip after a fill): force=market ONLY if the trend is not adverse. Adverse:
-    SELL in declin / BUY in urcus -> False (limita rabdatoare, nu dumpeaza la piata)."""
+    A SELL into a decline / a BUY into a rise -> False (a patient limit, it does not dump into the market)."""
     def setUp(self):
         self._en = rtrade.RTRADE_TREND_FILTER_ENABLED
         self._k = rtrade.RTRADE_TREND_FILTER_K
@@ -106,7 +106,7 @@ class FollowupForceTest(unittest.TestCase):
     def test_disabled_or_unavailable_forces(self):
         rtrade.RTRADE_TREND_FILTER_ENABLED = False
         self._fake_cm({"gradient_recent": -0.5, "epsilon": 0.1})
-        self.assertTrue(rtrade._followup_force("TAOUSDC", "SELL"))    # kill-switch off -> ca inainte
+        self.assertTrue(rtrade._followup_force("TAOUSDC", "SELL"))    # kill switch off -> as before
         rtrade.RTRADE_TREND_FILTER_ENABLED = True
         self._fake_cm(None)
         self.assertTrue(rtrade._followup_force("TAOUSDC", "SELL"))    # indisponibil -> force (fail-open)

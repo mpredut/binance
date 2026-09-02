@@ -69,17 +69,17 @@ async def sell(request: TradeRequest):
     print(f"Sold {request.amount} of {request.symbol}")
     current_price = api.get_current_price(str(request.symbol))
     sell_price = current_price * (1 + 0.01 )
-    print(f"Pret BTC {current_price} {sell_price}")
+    print(f"BTC price {current_price} {sell_price}")
     mkt.place(str(request.symbol), "SELL", sell_price, request.amount)   # proxy unic guardat
     return {"message": f"Sold {request.amount} of {request.symbol}"}
 
 @app.post("/trade/buy")
 async def buy(request: TradeRequest):
     # Submit a guarded limit buy one percent below the current Binance price.
-    print(f"Bought {request.amount} din {request.symbol}")
+    print(f"Bought {request.amount} of {request.symbol}")
     current_price = api.get_current_price(str(request.symbol))
     sell_price = current_price * (1 - 0.01 )
-    print(f"Pret BTC {current_price} {sell_price}")
+    print(f"BTC price {current_price} {sell_price}")
     mkt.place(str(request.symbol), "BUY", sell_price, request.amount)   # proxy unic guardat
     return {"message": f"Bought {request.amount} of {request.symbol}"}
 

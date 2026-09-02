@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Teste pt trend_stats (Mann-Kendall + Hurst) si integrarea filtrului MK in detector.
+Tests for trend_stats (Mann-Kendall plus Hurst) and the integration of the MK filter in the detector.
 
   /home/mariusp/binance/.venv/bin/python test_trend_stats.py -v
 """
@@ -39,7 +39,7 @@ class TestMannKendall(unittest.TestCase):
 class TestHurst(unittest.TestCase):
     @staticmethod
     def _series(phi: float, n: int = 2000, seed: int = 7):
-        """preturi cu log-randamente AR(1): phi>0 persistent, phi<0 anti-persistent"""
+        """prices with AR(1) log returns: phi>0 persistent, phi<0 anti-persistent"""
         rng = np.random.default_rng(seed)
         r = np.zeros(n)
         for i in range(1, n):
@@ -77,11 +77,11 @@ class TestFiltruMKInDetector(unittest.TestCase):
 
     def test_zgomotul_e_filtrat(self):
         rng = np.random.default_rng(3)
-        base = [100 - 0.3 * i for i in range(72)]            # istoric cu trend
-        noise = list(base[-1] + rng.normal(0, 0.8, 24))      # fereastra curenta = zgomot pur
+        base = [100 - 0.3 * i for i in range(72)]            # a history with a trend
+        noise = list(base[-1] + rng.normal(0, 0.8, 24))      # the current window = pure noise
         ts, px = self._mk_series(base + noise)
         r = detect_long_term_trend(ts, px, 24, 8, 3, 2, 5, mk_alpha=0.05)
-        self.assertIsNone(r, "fereastra curenta fara trend semnificativ -> None")
+        self.assertIsNone(r, "a current window with no significant trend -> None")
 
     def test_without_the_filter_the_old_behaviour(self):
         ts, px = self._mk_series([100 - 0.3 * i for i in range(96)])

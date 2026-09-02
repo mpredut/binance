@@ -28,5 +28,5 @@ for m in MODS:
         fails += 1
         print(f"FAIL {m}: {e.__class__.__name__}: {e}")
 
-print(f"\n=== {len(MODS)-fails}/{len(MODS)} OK, {fails} esuate ===")
+print(f"\n=== {len(MODS)-fails}/{len(MODS)} OK, {fails} failed ===")
 sys.exit(1 if fails else 0)

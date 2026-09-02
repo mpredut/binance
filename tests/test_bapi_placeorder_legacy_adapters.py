@@ -1,4 +1,4 @@
-"""Caracterizare pentru API-urile legacy de plasare Binance.
+"""Characterisation for the legacy Binance order-placement APIs.
 
 These functions stay compatible for external/archived code, but they must go
 through the same guarded pipeline as the modern callers of ``MarketApi.place``.

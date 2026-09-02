@@ -57,7 +57,7 @@ def send_ntfy(title, message):
     if not url and os.environ.get("NTFY_TOPIC"):
         url = f"https://ntfy.sh/{os.environ['NTFY_TOPIC']}"
     if not url:
-        print("[watchdog] fara PHONE_ALERT_URL/NTFY_TOPIC — sar push-ul")
+        print("[watchdog] no PHONE_ALERT_URL/NTFY_TOPIC — skipping the push")
         return False
     ok = AlertNotifier.send_phone_webhook_batch([_watchdog_event(title, message)], webhook_url=url)
     print(f"[watchdog] push {'OK' if ok else 'FAILED'}")
@@ -68,7 +68,7 @@ def send_email(subject, body):
     ok = AlertNotifier.send_email_batch(
         [_watchdog_event(subject, body)], subject=subject,
     )
-    print(f"[watchdog] email {'trimis' if ok else 'omis/failed'}")
+    print(f"[watchdog] email {'sent' if ok else 'skipped/failed'}")
     return ok
 
 

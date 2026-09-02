@@ -1,11 +1,11 @@
-"""Experiment offline istoric; nu este test automat."""
+"""A historical offline experiment; it is not an automated test."""
 
 import pandas as pd
 import requests
 import datetime
 
 def fetch_data():
-    # API pentru datele istorice (Exemplu: Binance API)
+    # The API for the historical data (for example: the Binance API).
     end_time = int(datetime.datetime.now().timestamp() * 1000)
     start_time = end_time - 30 * 24 * 60 * 60 * 1000  # Ultimele 30 de zile
     end_time = int(datetime.datetime.now().timestamp() * 1000)

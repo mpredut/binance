@@ -66,7 +66,7 @@ def fetch_all_trades(cli):
         pages += 1; ofs += len(batch)
         if len(all_trades) >= total or len(batch) < 50:
             break
-        time.sleep(2.0)                            # bland cu rate-limit-ul (cost 20/apel)
+        time.sleep(2.0)                            # Gentle on the rate limit (a cost of 20 per call).
     return all_trades, total
 
 

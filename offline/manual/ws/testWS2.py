@@ -1,4 +1,4 @@
-"""Diagnostic WebSocket manual; poate accesa API-ul real."""
+"""A manual WebSocket diagnostic; it may reach the real API."""
 
 import asyncio
 import requests
@@ -29,7 +29,7 @@ async def test_ws():
     
     url = f"wss://stream.binance.com:9443/ws/{listen_key}"
     async with websockets.connect(url, ping_interval=20) as ws:
-        print("✅ Conectat! Plaseaza un order din app acum...")
+        print("✅ Connected! Place an order from the app now...")
         while True:
             try:
                 msg = await asyncio.wait_for(ws.recv(), timeout=15)

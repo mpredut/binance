@@ -1,4 +1,4 @@
-"""Faza 5 provider-unify — GARDA UNICA: TOTI providerii de venue satisfac contractul
+"""Phase 5 provider unification — A SINGLE GUARD: EVERY venue provider satisfies the
 StrategyExecutor. If someone adds a method to the contract but forgets a provider (or
 changes a signature), this test fails -> base v2 never gets to crash on that venue.
 
@@ -51,7 +51,7 @@ class ProviderContractConformanceTest(unittest.TestCase):
         for name, prov in _providers():
             with self.subTest(provider=name):
                 self.assertIsInstance(prov, StrategyExecutor,
-                                      f"{name} NU satisface contractul StrategyExecutor")
+                                      f"{name} does NOT satisfy the StrategyExecutor contract")
 
     def test_every_contract_method_exists_and_is_callable(self):
         for name, prov in _providers():

@@ -311,7 +311,7 @@ class TestCacheOrderManager(unittest.TestCase):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 4. CacheSparsePriceManager (redenumit din CachePriceManager, 21 iul)
+# 4. CacheSparsePriceManager (renamed from CachePriceManager, 21 Jul)
 # ═══════════════════════════════════════════════════════════════════════════════
 class TestCacheSparsePriceManager(unittest.TestCase):
 
@@ -1250,13 +1250,13 @@ class TestAtomicWrite(unittest.TestCase):
 
     def test_atomic_write_preserves_old_on_error(self):
         p = os.path.join(self.tmp, "c.json")
-        cm.atomic_write_json(p, {"v": "vechi"})
+        cm.atomic_write_json(p, {"v": "old"})
         with self.assertRaises(ValueError):
             with cm.atomic_write(p) as f:
                 f.write("nou-incomplet")
                 raise ValueError("boom")
         with open(p) as f:
-            self.assertEqual(json.load(f), {"v": "vechi"})   # Previous content remains intact.
+            self.assertEqual(json.load(f), {"v": "old"})   # Previous content remains intact.
 
 
 if __name__ == "__main__":

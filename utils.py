@@ -312,7 +312,7 @@ All cache files (cache_*.json/.jsonl + .meta) live in the
 (created on demand). Names that ALREADY carry a path (absolute or with a separator
 — e.g. tests, migrations) are left untouched.
 
-Se poate suprascrie folderul prin variabila de mediu BINANCE_CACHE_DIR.
+The folder can be overridden through the environment variable BINANCE_CACHE_DIR.
 """
 import os
 

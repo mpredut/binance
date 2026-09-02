@@ -1,5 +1,5 @@
-"""Teste pt KrakenClient.add_order — protectie de MECANICA centralizata: rotunjeste pretul
-la precizia reala a perechii (pair_decimals). Fara retea (pair_info + _private mock-uite).
+"""Tests for KrakenClient.add_order — a centralised MECHANICS protection: it rounds the price
+to the pair's real precision (pair_decimals). No network (pair_info plus _private are mocked).
 Regresie pt bug-ul '(504/EOrder) Invalid price: HYPE/USD price can only be specified up to
 2 decimals' that made Kraken trailing fail on sell/rebuy (1353 rejections)."""
 import os

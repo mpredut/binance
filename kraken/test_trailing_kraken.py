@@ -129,7 +129,7 @@ class TestMinProfitKraken(Base):
         ts.check_once()                    # initial=60, activ la 63.0
         c.price = 48.0                     # A 20% crash is below the activation threshold.
         ts.check_once()
-        self.assertEqual(c.orders, [], "nu vinde inainte sa atinga pragul de profit")
+        self.assertEqual(c.orders, [], "it does not sell before reaching the profit threshold")
 
     def test_active_past_the_threshold_sells(self):
         c = FakeK(60.0)
@@ -137,7 +137,7 @@ class TestMinProfitKraken(Base):
         ts.check_once()                    # initial=60
         c.price = 64.0; ts.check_once()   # +6.7% > 5% -> trailing activ, peak=64
         c.price = 52.0; ts.check_once()   # -18.8% de la peak 64 (prag HYPE 18%)
-        self.assertEqual(len(c.orders), 1, "vinde dupa ce a trecut pragul de profit")
+        self.assertEqual(len(c.orders), 1, "it sells once the profit threshold is passed")
         self.assertEqual(c.orders[0]["side"], "sell")
 
 

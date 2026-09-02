@@ -56,7 +56,7 @@ def main() -> int:
     intra, meta = fetch_ohlc(sym, "1d", "5m")
     daily, _ = fetch_ohlc(sym, "1mo", "1d")
     if not intra:
-        print(f"! fara date intraday pt {sym} (simbol Yahoo gresit?)"); return 1
+        print(f"! no intraday data for {sym} (a wrong Yahoo symbol?)"); return 1
 
     o0 = intra[0][1]; last = intra[-1][4]
     hi = max(b[2] for b in intra); lo = min(b[3] for b in intra)
@@ -67,7 +67,7 @@ def main() -> int:
     dips = pullbacks(closes)
 
     print(f"========== VOLATILITATE {sym} ==========")
-    print(f"  pret curent {last:.2f} {meta.get('currency','')}  | exchange {meta.get('exchangeName','?')}")
+    print(f"  current price {last:.2f} {meta.get('currency','')}  | exchange {meta.get('exchangeName','?')}")
     print(f"  AZI: open {o0:.2f} -> last {last:.2f}  ({pct(last,o0):+.1f}%)  | range zi {pct(hi,lo):.1f}% (lo {lo:.2f} / hi {hi:.2f})")
     print(f"  spike max (lo->hi azi): {pct(hi,lo):+.1f}%")
     print(f"\n  --- bare 5min ({len(intra)} bare) ---")
@@ -93,7 +93,7 @@ def main() -> int:
     daily_rng = statistics.mean([pct(b[2], b[3]) for b in daily[-10:]]) if daily else 10
     stop = round(min(max(daily_rng * 1.3, tp * 2.5), 25), 0)      # above a typical daily swing, capped at 25%
     print(f"\n  ===> SUGESTIE (euristic, pt budget $3000):")
-    print(f"       TP            = {tp}%   (fee {fee}% + 2xATR5 {2*atr5:.1f}% sau 1.3x dip median)")
+    print(f"       TP            = {tp}%   (a fee of {fee}% plus 2xATR5 {2*atr5:.1f}%, or 1.3x the median dip)")
     print(f"       DCA_DROP_PCT  = {drop}%")
     print(f"       STOP_LOSS_PCT = {stop:.0f}%")
     print("=========================================")

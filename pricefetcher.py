@@ -263,7 +263,7 @@ class CoinMarketCapPricePlatform(PricePlatformInterface):
             self._last_refresh = time.time()
         except Exception as e:
             print(f"[CMCPlatform] Error loading symbols: {e}")
-            self._last_refresh = time.time()  # nu retesta imediat; respecta _refresh_interval (3600s)
+            self._last_refresh = time.time()  # Do not retest immediately; honour _refresh_interval (3600s).
 
     def refresh_symbols(self):
         if self.api_key and time.time() - self._last_refresh > self._refresh_interval:
@@ -411,7 +411,7 @@ class PricePlatformFactory:
         ]
         if cmc_api_key:
             self._platforms.append(CoinMarketCapPricePlatform(cmc_api_key))
-        self._platforms.append(StockYahooPricePlatform())   # ULTIMUL: stocks tokenizate (SPCX...)
+        self._platforms.append(StockYahooPricePlatform())   # LAST: tokenised stocks (SPCX...).
         self._symbol_platform_cache: Dict[str, str] = {}
         self._discover_all_symbols()
     

@@ -15,7 +15,7 @@ from unittest.mock import MagicMock
 
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
-# mock minim pentru import-ul modulului
+# A minimal mock for importing the module.
 _module_mock = MagicMock()
 _module_mock.get_current_price = MagicMock(return_value=50000.0)
 sys.modules.setdefault("bapi", _module_mock)
@@ -119,7 +119,7 @@ class TestFallbackThreadBehavior(unittest.TestCase):
         api_mock.get_current_price.return_value = 55000.0
 
         mgr = self._manager(fname, sync_ts=1, api_mock=api_mock)
-        mgr._ws_last_event_ts = 0.0   # WS mort explicit
+        mgr._ws_last_event_ts = 0.0   # The WS is explicitly dead.
 
         time.sleep(2.5)
 
@@ -136,7 +136,7 @@ class TestFallbackThreadBehavior(unittest.TestCase):
         api_mock.get_current_price.return_value = 55000.0
 
         mgr = self._manager(fname, sync_ts=1, api_mock=api_mock)
-        mgr._ws_last_event_ts = 0.0   # WS mort → va polua
+        mgr._ws_last_event_ts = 0.0   # The WS is dead -> it will poll.
 
         time.sleep(1.5)
         self.assertGreater(

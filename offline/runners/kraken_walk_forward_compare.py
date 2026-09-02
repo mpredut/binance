@@ -36,7 +36,7 @@ def default_candidates() -> list[Candidate]:
     """A small, interpretable neighbourhood around the live configuration."""
     return [
         Candidate("live", "the live configuration, unchanged", {}),
-        Candidate("classic_tp", "TP fix; trailing oprit", {"tp_trend_hold": False}),
+        Candidate("classic_tp", "a fixed TP; the trailing is off", {"tp_trend_hold": False}),
         Candidate("trail_2", "trailing 2%", {"tp_trail_pct": 2.0}),
         Candidate("trail_4", "trailing 4%", {"tp_trail_pct": 4.0}),
         Candidate("trail_5", "trailing 5%", {"tp_trail_pct": 5.0}),
@@ -47,7 +47,7 @@ def default_candidates() -> list[Candidate]:
         Candidate("dca_drop_2", "DCA on a 2% drop", {"dca_drop_pct": 2.0}),
         Candidate("reentry_1_5", "re-entry after -1.5%", {"reentry_drop_pct": 1.5}),
         Candidate("reentry_3", "re-entry after -3%", {"reentry_drop_pct": 3.0}),
-        Candidate("sl_off", "stop-loss oprit", {"stop_loss_pct": 0.0}),
+        Candidate("sl_off", "the stop-loss is off", {"stop_loss_pct": 0.0}),
         Candidate("sl_10", "stop-loss 10%", {"stop_loss_pct": 10.0}),
         Candidate("sl_15", "stop-loss 15%", {"stop_loss_pct": 15.0}),
         Candidate("max_dca_6", "maximum 6 DCA", {"max_dca_buys": 6}),
@@ -67,7 +67,7 @@ def _load_report(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as handle:
         report = json.load(handle)
     if report.get("schema_version") != 1 or not report.get("intervals"):
-        raise ValueError("raport baseline incompatibil sau gol")
+        raise ValueError("an incompatible or empty baseline report")
     return report
 
 
@@ -81,7 +81,7 @@ def _load_datasets(report: dict) -> dict[int, tuple[list[dict], dict, int]]:
         expected_hash = section["dataset"]["sha256"]
         if actual_hash != expected_hash:
             raise ValueError(
-                f"hash dataset diferit pentru {interval}m: {actual_hash} != {expected_hash}"
+                f"a different dataset hash for {interval}m: {actual_hash} != {expected_hash}"
             )
         datasets[interval] = (
             records,
@@ -274,7 +274,7 @@ def main() -> int:
     for fee_text in args.fee_stress.split(","):
         fee = float(fee_text.strip())
         if fee < 0:
-            parser.error("fee-ul nu poate fi negativ")
+            parser.error("the fee cannot be negative")
         windows = _candidate_windows(datasets, base_params, fee, execution)
         fee_stress[f"{fee:.2f}"] = {
             "summary": summarize_test_windows(windows),

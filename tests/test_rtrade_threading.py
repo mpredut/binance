@@ -615,7 +615,7 @@ class RTradeThreadingTest(unittest.TestCase):
         def run_owner(executor):
             try:
                 bot._run_pair(executor, 100.0)
-            except Exception as exc:  # noqa: BLE001 - capturat pentru asertiune
+            except Exception as exc:  # noqa: BLE001 - captured for the assertion
                 errors.append(exc)
             finally:
                 owner_finished.set()

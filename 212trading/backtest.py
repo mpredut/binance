@@ -97,8 +97,8 @@ def main() -> int:
         wr = 100*m["wins"]/m["cycles"] if m["cycles"] else 0
         print(f"=== BACKTEST T212 {args.sym} {args.range}/{args.interval} ({len(ohlc)} bare) ===")
         print(f"  params: entry={args.entry} dca={args.dca} drop={args.drop}% tp={args.tp}% sl={args.sl}% fee={args.fee}%/leg")
-        print(f"  TOTAL REAL: {tot:+.2f}% din budget  ⇐ realizat ${m['realized']:+.2f} + pozitie deschisa ${m['final_upnl']:+.2f} - fee ${m['fees']:.2f}")
-        print(f"  (realizat singur: {m['net']/args.budget*100:+.2f}% — inselator daca ramane pozitie pierzatoare)")
+        print(f"  REAL TOTAL: {tot:+.2f}% of the budget  ⇐ realised ${m['realized']:+.2f} + the open position ${m['final_upnl']:+.2f} - fees ${m['fees']:.2f}")
+        print(f"  (the realised part alone: {m['net']/args.budget*100:+.2f}% — misleading if a losing position remains)")
         print(f"  cicluri: {m['cycles']}  win-rate {wr:.0f}%   max drawdown ${m['maxdd']:.2f}")
         print(f"  buy&hold: {bh:+.2f}%   pozitie la final: {m['open_qty']:.4f}")
         return 0

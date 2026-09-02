@@ -88,7 +88,7 @@ class PricePrediction:
         return
         # Train the LSTM model.
         self.model.fit(X, y, epochs=100, verbose=1)
-        ##print("Modelul LSTM a fost antrenat cu succes!")
+        ##print("The LSTM model was trained successfully!")
 
     def predict_next_price_old(self):
         if self.trained == False:

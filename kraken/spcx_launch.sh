@@ -3,7 +3,7 @@
 # Run it when the 🚀 listing alert arrives (it carries the exact pair key):
 #   ./spcx_launch.sh SPCXXUSD
 # Sume aprobate 12 iun 2026: intrare $800, DCA $500 la -4%, plafon $5.000,
-# TP +12%, stop-loss 18%, reintrare doar la -3% sub pretul vandut.
+# A TP of +12%, a stop-loss of 18%, and a re-entry only 3% below the price sold at.
 # Theoretical maximum loss per cycle ~ $900 (18% of the $5,000 deployed).
 PAIR="${1:?Missing perechea. Ex: ./spcx_launch.sh SPCXXUSD (the key comes in the listing alert)}"
 cd "$(dirname "$0")"

@@ -117,7 +117,7 @@ class Base(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-class TestCitiriEsuate(Base):
+class TestFailedReads(Base):
     def test_an_account_api_error_does_not_guess_and_does_not_trade(self):
         d = self.make()
         self.c.raise_account = True
@@ -190,7 +190,7 @@ class TestDriftSiDust(Base):
         self.assertEqual(self.c.orders, [])
 
 
-class TestOrdineEsuate(Base):
+class TestFailedOrders(Base):
     def test_alerts_after_3_consecutive_failures(self):
         d = self.make(); self.opened(d)
         self.c.fail_orders = True
@@ -264,7 +264,7 @@ class TestInfrastructura(Base):
         self.assertEqual(self.c.orders, [], "adoption places no new orders")
 
 
-class TestProtectieLichidare(Base):
+class TestLiquidationProtection(Base):
     def test_auto_protect_reduces_both_legs(self):
         d = self.make(); self.opened(d)
         self.c.liq_px = 55.0                         # A price of 50, liquidation at 55 -> 10% < 20%.
@@ -272,7 +272,7 @@ class TestProtectieLichidare(Base):
         covers = [o for o in self.c.orders if o[0] == "perp" and o[1] == "buy"]
         sells = [o for o in self.c.orders if o[0] == "spot" and o[1] == "sell"]
         self.assertEqual((len(covers), len(sells)), (1, 1), "reduce ambele picioare")
-        self.assertTrue(any("LICHIDARE" in a or "redus" in a for a in self.alerts))
+        self.assertTrue(any("LIQUIDATION" in a or "reduced" in a for a in self.alerts))
 
 
 class TestScaleUp(Base):

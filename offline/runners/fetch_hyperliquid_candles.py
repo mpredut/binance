@@ -195,7 +195,7 @@ def main() -> int:
             coin, interval, start_ms=start_ms, end_ms=end_ms,
         )
         if not records:
-            raise RuntimeError(f"dataset gol pentru {coin} {interval}m")
+            raise RuntimeError(f"an empty dataset for {coin} {interval}m")
         validate_continuity(records, interval)
         raw = canonical_bytes(records)
         digest = dataset_sha256(records)

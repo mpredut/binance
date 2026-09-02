@@ -394,7 +394,7 @@ class KrakenProvider(MarketDataProvider):
             raise ProviderError(f"order_status {order_id}: {e}") from e
         info = res.get(order_id)
         if info is None:
-            raise ProviderError(f"order_status: ordinul {order_id} was not found")
+            raise ProviderError(f"order_status: the order {order_id} was not found")
         return OrderStatus(
             status=str(info.get("status", "")),
             filled_qty=float(info.get("vol_exec") or 0.0),

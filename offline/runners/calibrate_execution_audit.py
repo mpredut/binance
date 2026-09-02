@@ -79,7 +79,7 @@ def markdown_report(report: dict, paths: list[Path]) -> str:
         "", "Spread: indisponibil — " + ready["spread_blocker"] + ".", "",
         "The report is observational and does not automatically change the backtest scenarios.", "",
         "## Client order ID", "",
-        f"Ordine acceptate pe venue-uri cu suport: "
+        f"Orders accepted on venues with support: "
         f"{client_ids['supported_accepted_orders']}; "
         f"ID prezent: {client_ids['with_client_order_id']}; "
         f"valid: {client_ids['valid_client_order_ids']}; "

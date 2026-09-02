@@ -1,4 +1,4 @@
-"""Diagnostic WebSocket manual; poate accesa API-ul real."""
+"""A manual WebSocket diagnostic; it may reach the real API."""
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from cryptography.hazmat.primitives.serialization import load_pem_private_key
@@ -11,7 +11,7 @@ from cryptography.hazmat.backends import default_backend
 with open("ed25519_private.pem", "rb") as f:
     private_key = load_pem_private_key(f.read(), password=None, backend=default_backend())
 
-# Forteaza versiunea din .local, nu din sistem
+# Force the version from .local, not the system one.
 import sys
 sys.path.insert(0, '/home/marius/.local/lib/python3.8/site-packages')
 
@@ -49,7 +49,7 @@ async def test_ws():
 
         if resp.get("status") == 200:
             await ws.send(json.dumps({"id": "sub", "method": "userDataStream.subscribe"}))
-            print("Subscribed! Plaseaza un order...")
+            print("Subscribed! Place an order...")
             while True:
                 try:
                     msg = await asyncio.wait_for(ws.recv(), timeout=30)

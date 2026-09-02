@@ -94,7 +94,7 @@ def _scenario_windows(records: list[dict], params: StratParams, scenario, *,
         test_size=test, step_size=step,
     )
     if not folds:
-        raise ValueError("dataset insuficient pentru schema walk-forward")
+        raise ValueError("the dataset is too small for the walk-forward schema")
 
     original_log = kraken_replay._strat.log
     kraken_replay._strat.log = lambda *_args, **_kwargs: None
@@ -319,7 +319,7 @@ def main() -> int:
         if getattr(args, name) <= 0:
             parser.error(f"--{name} must be positive")
     if args.warmup < 0 or args.regime_threshold < 0:
-        parser.error("warmup/regime-threshold nu pot fi negative")
+        parser.error("warmup and regime-threshold cannot be negative")
     args.dataset = args.dataset.expanduser().resolve()
     args.manifest = args.manifest.expanduser().resolve()
     if args.params_report:

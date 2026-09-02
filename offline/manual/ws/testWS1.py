@@ -1,4 +1,4 @@
-"""Diagnostic WebSocket manual; poate accesa API-ul real."""
+"""A manual WebSocket diagnostic; it may reach the real API."""
 
 import asyncio
 import asyncio
@@ -19,7 +19,7 @@ def get_listen_key(api_key):
 
 
 async def test_ws():
-    # AsyncClient separat — nu reutiliza clientul sync
+    # A separate AsyncClient — do not reuse the sync client.
     #async_client = await AsyncClient.create(
     #    api_key=api.client.API_KEY,
     #    api_secret=api.client.API_SECRET,
@@ -38,7 +38,7 @@ async def test_ws():
     
     print("Conectare la User Data Stream...")
     async with bm.user_socket() as stream:
-        print("✅ Conectat! Plaseaza un order din app acum...")
+        print("✅ Connected! Place an order from the app now...")
         while True:
             event = await stream.recv()
             print(f"EVENT: {event}")

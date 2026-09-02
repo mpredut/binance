@@ -1,4 +1,4 @@
-"""Dataset OHLC canonic, partajat de toate backtesterele offline.
+"""The canonical OHLC dataset, shared by every offline backtester.
 
 The module knows nothing about venues or strategies. It fixes only the data contract,
 the reproducible hash, and the validations that must be identical for Kraken,

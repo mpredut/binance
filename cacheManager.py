@@ -2350,7 +2350,7 @@ if __name__ == "__main__":
         # Extend the persisted CurrentPrice factory instance with non-Binance symbols
         # polled through the facade, keeping cache_currentprice.json coherent.
         CacheFactory.get("CurrentPrice", symbols=_trend_syms)
-        builtins.print(f"[cacheManager] instant-trend extins cu non-Binance: {_nb_syms}")
+        builtins.print(f"[cacheManager] instant-trend extended with non-Binance: {_nb_syms}")
         # LONGTREND_NONBINANCE optionally starts accumulating sparse history and long-trend
         # data. It is disabled by default until enough lookback data exists.
         if LONGTREND_NONBINANCE:

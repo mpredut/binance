@@ -186,9 +186,9 @@ def main() -> int:
         total, m, wr = run(args.coin, ohlc, ts, fund, sig, base, args.direction, args.budget)
         log(f"=== BACKTEST COMPLET {args.coin} {args.days}z {args.direction} semnal={args.signal} ===")
         log(f"  params: entry={args.entry} dca={args.dca} disc={args.disc}% drop={args.drop}% tp={args.tp}% maxdca={args.maxdca}")
-        log(f"  TOTAL REAL: {total:+.2f}% din budget  ⇐ realizat ${m['realized']:+.2f} + funding ${m['funding']:+.2f} + pozitie deschisa ${m['final_upnl']:+.2f} - fee ${m['fees']:.2f}")
-        log(f"  (realizat singur: {m['net']/args.budget*100:+.2f}% — INSELATOR daca ramane pozitie pierzatoare)")
-        log(f"  cicluri : {m['cycles']}  win-rate {wr:.0f}%   max drawdown ${m['maxdd']:.2f}  ({m['maxdd']/args.budget*100:.0f}% din budget)")
+        log(f"  REAL TOTAL: {total:+.2f}% of the budget  ⇐ realised ${m['realized']:+.2f} + funding ${m['funding']:+.2f} + the open position ${m['final_upnl']:+.2f} - fees ${m['fees']:.2f}")
+        log(f"  (the realised part alone: {m['net']/args.budget*100:+.2f}% — MISLEADING if a losing position remains)")
+        log(f"  cycles  : {m['cycles']}  win rate {wr:.0f}%   max drawdown ${m['maxdd']:.2f}  ({m['maxdd']/args.budget*100:.0f}% of the budget)")
         log(f"  buy&hold: {bh:+.2f}%   pozitie deschisa la final: {m['open_qty']:.4f} ({'PIERZATOARE' if m['final_upnl']<-1 else 'ok'})")
         return 0
 

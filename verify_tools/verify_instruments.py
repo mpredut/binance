@@ -127,20 +127,20 @@ tp = api.provider_by_name("t212")
 check(kp is not None, "provider_by_name('kraken')")
 check(tp is not None, "provider_by_name('t212')")
 check(kp is not None and kp.supports_symbol("HYPEUSD") is False,
-      "Kraken explicit-only (supports_symbol=False, nu fura rutarea facadei)")
+      "Kraken is explicit-only (supports_symbol=False, it does not steal the facade's routing)")
 hk = inst.get("KRAKEN_HYPE")
 if hk and hype:
     check(hk.provider_label == "Kraken" and hype.provider_label == "Hyperliquid",
-          "ACELASI activ HYPE rutat pe 2 venue-uri", f"Kraken={hk.symbol} / HL={hype.symbol}")
+          "the SAME HYPE asset routed to 2 venues", f"Kraken={hk.symbol} / HL={hype.symbol}")
 ts = inst.get("T212_SPCX")
 if ts:
     check(ts.provider_label == "T212" and ts.market_hours == "rth", "T212_SPCX -> T212 (rth)")
 mt = load_for("mt")
 check(all(i.enabled for i in mt.values()) and
       all(any(k.startswith("mt.") for k in i.params) for i in mt.values()),
-      "load_for('mt') = doar instrumente enabled + cu params mt.*", str(sorted(mt.keys())))
+      "load_for('mt') = only enabled instruments that have mt.* params", str(sorted(mt.keys())))
 check(hype is None or not hype.enabled, "HYPE_HL e enabled=no in config")
-check("HYPE_HL" not in mt, "HYPE_HL (enabled=no) NU apare in load_for")
+check("HYPE_HL" not in mt, "HYPE_HL (enabled=no) does NOT appear in load_for")
 try:                                  # Public Kraken price (informational, tolerant of network failures).
     print(f"  [info] Kraken HYPEUSD price = {kp.get_current_price('HYPEUSD') if kp else None}")
 except Exception as _e:  # noqa: BLE001
@@ -148,7 +148,7 @@ except Exception as _e:  # noqa: BLE001
 
 print("\n" + "=" * 56)
 if FAIL:
-    print(f"ESEC — {len(FAIL)} checks failed: {FAIL}")
+    print(f"FAILED — {len(FAIL)} checks failed: {FAIL}")
     sys.exit(1)
 print("PASS — fundatia Instrument (pasii 1-3) e sanatoasa.")
 sys.exit(0)

@@ -49,7 +49,7 @@ def _cmd_status(client: HLClient, params: DNParams) -> int:
     log("=== STATUS DELTA-NEUTRAL ===")
     log(f"  SPOT (long) : {spot_qty:.4f} {params.spot_token}  (~${spot_qty*spot_px:,.2f})  px={spot_px:.4f}")
     log(f"  PERP (short): {szi:.4f} {coin}  entry={entry:.4f}  uPnL={upnl:+.2f}  (~${perp_notional:,.2f})  px={perp_px:.4f}")
-    log(f"  DELTA NET   : {delta:+.4f} {coin}  ({'HEDGE OK' if abs(delta)*perp_px < 5 else 'DEZECHILIBRAT — rebalanseaza!'})")
+    log(f"  NET DELTA   : {delta:+.4f} {coin}  ({'HEDGE OK' if abs(delta)*perp_px < 5 else 'IMBALANCED — rebalance!'})")
     if liq > 0 and szi < 0:
         dist = (liq - perp_px)/perp_px*100
         flag = "⚠ PERICOL" if dist < params.liq_alert_pct else "ok"
@@ -88,7 +88,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
             if not has_pos:
                 if armed["gone"]:
                     armed["gone"] = False
-                    notify(title=f"👁 MONITOR {params.coin}: pozitia DN a disparut",
+                    notify(title=f"👁 MONITOR {params.coin}: the DN position is GONE",
                            body="No leg is visible on the account any more. Check the bot on the server!",
                            source="dn-watch", desktop=desktop)
             else:
@@ -97,7 +97,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
                 if delta_usd > max(5.0, params.notional * params.rebalance_pct / 100):
                     if armed["delta"]:
                         armed["delta"] = False
-                        notify(title=f"👁 MONITOR {params.coin}: delta ${delta_usd:.2f} — dezechilibrat",
+                        notify(title=f"👁 MONITOR {params.coin}: delta ${delta_usd:.2f} — imbalanced",
                                body=f"spot {spot_qty:.2f} / perp {szi:.2f} — the server should rebalance",
                                source="dn-watch", desktop=desktop)
                 else:
@@ -107,7 +107,7 @@ def _cmd_watch(client: HLClient, params: DNParams, desktop: bool, once: bool = F
                     dist = (liq - perp_px) / perp_px * 100
                     if 0 < dist <= params.liq_alert_pct and armed["liq"]:
                         armed["liq"] = False
-                        notify(title=f"👁 MONITOR {params.coin}: short la {dist:.1f}% de LICHIDARE",
+                        notify(title=f"👁 MONITOR {params.coin}: the short is {dist:.1f}% from LIQUIDATION",
                                body=f"p{perp_px:.2f} liq{liq:.2f} — if the server does not reduce on its own, step in!",
                                source="dn-watch", desktop=desktop)
                     elif dist > params.liq_alert_pct * 1.5:

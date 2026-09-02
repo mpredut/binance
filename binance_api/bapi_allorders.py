@@ -113,7 +113,7 @@ def paginate_my_trades(api_client, symbol, start_time_ms, limit=1000):
         if len(batch) < limit:          # Final page.
             break
         from_id = batch[-1]["id"] + 1   # Continue from the next fill ID.
-        time.sleep(0.2)                 # politicos cu rate-limit-ul
+        time.sleep(0.2)                 # Polite towards the rate limit.
     return out
 
 

@@ -6,16 +6,28 @@
 must be written in English.** This applies to new files and to any line you touch
 in an existing one — no exceptions, in any Claude session.
 
-The migration is finished. The live code, the shell scripts, the tests, the configuration
-comments, the documentation and the ntfy alert bodies are all English.
+The migration is finished, everywhere. The live code, the shell scripts, the tests
+(unittest method names included), the configuration comments, the research documents,
+the archived and dead code, the ntfy alert bodies and the argparse help strings are all
+English.
 
 Exactly two things stay Romanian, and both for a mechanical reason:
 
 - the word list in `verify_tools/translation_audit.py` — it is the scanner's own detection
   vocabulary, so translating it would blind the tool to what it exists to find;
-- the identifier `prag` in `strategies/spot_dca_rules.py` and `212trading/strategy.py` —
-  a variable name, not prose. Renaming it is a refactor of live trading code, not a
-  translation.
+- the identifier `prag` in `strategies/spot_dca_rules.py`, `strategies/spot_dca.py` and
+  `212trading/strategy.py` — a variable name, not prose. Renaming it is a refactor of live
+  trading code, not a translation.
+
+Two consequences worth remembering, both learned the hard way:
+
+- **after translating any string, run the test suite.** Tests match live wording through
+  `assertRaisesRegex`/`assertIn`, so a translated message can break a test that has
+  nothing to do with the file you edited.
+- **patterns that match log text must follow the text.** The alert markers in
+  `alertnotifiers.py` and the anomaly regexes in `verify_tools/watchdogfor_anomaly.py`
+  are English now. If a Romanian log line ever reappears, translate the line rather than
+  widening the pattern back — a bilingual pattern hides the regression it would match.
 
 Anything else in Romanian is a regression. **Do not imitate it** — translate it.
 
@@ -39,13 +51,9 @@ verify_tools/translation_audit.py scan            # what still looks Romanian
 verify_tools/translation_audit.py verify <file>   # prove an edit touched prose only
 ```
 
-Romanian text is expected in exactly two places, and must stay there:
-
-- **user-facing runtime output** the operator reads on the phone or in a terminal
-  (ntfy alert bodies, banners printed by the start scripts) — translating those
-  changes what the operator sees, which is a behaviour change, not a cleanup;
-- **argparse help strings reused as CLI text** — `translation_audit.py scan` flags
-  these explicitly so they are not translated as if they were ordinary prose.
+`scan` still flags module docstrings that are reused as runtime CLI text (argparse).
+Those are now English like everything else, but the flag remains useful: translating
+one of them changes what the operator sees, so it is a behaviour change, not a cleanup.
 
 ## Line endings
 

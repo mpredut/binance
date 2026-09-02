@@ -60,7 +60,7 @@ _STALE_OVERRIDES = {
     # legitimately leave it unchanged for hours, so use a 24-hour safety-net threshold.
     "cache_price_long_trend.json": 1440,
     "cache_asset_value.jsonl": 60,
-    "cache_T_trend.json": 11520,   # T empiric per moneda: recalc la 7 zile -> prag 8 zile
+    "cache_T_trend.json": 11520,   # An empirical T per coin: recomputed every 7 days -> a threshold of 8 days.
     # Event-driven content may legitimately remain unchanged for days; use 72 hours.
     "cache_order.json": 4320,
     "cache_trade.jsonl": 4320,
@@ -219,12 +219,12 @@ def _config_kv(path):
 
 
 def _diff_config(old_kv, new_kv):
-    """Linii 'KEY: old->new' pt cheile schimbate/adaugate/scoase."""
+    """Lines of 'KEY: old->new' for the keys changed, added or removed."""
     lines = []
     for k in sorted(set(old_kv) | set(new_kv)):
         o, n = old_kv.get(k), new_kv.get(k)
         if o != n:
-            lines.append(f"{k}: {o if o is not None else '(nou)'} -> {n if n is not None else '(scos)'}")
+            lines.append(f"{k}: {o if o is not None else '(new)'} -> {n if n is not None else '(removed)'}")
     return lines
 
 
@@ -375,7 +375,7 @@ def check_once(now=None):
     lines = []
     for name, age_min, thr, detail in stale:
         age_txt = f"{age_min:.0f} min" if age_min != float("inf") else "∞"
-        lines.append(f"  • {name}: {age_txt} (prag {thr:.0f} min) — {detail}")
+        lines.append(f"  • {name}: {age_txt} (threshold {thr:.0f} min) — {detail}")
     title = "⚠️ Cache STALE pe server"
     message = ("Stale caches (cacheManager/priceAnalysis probably stopped):\n"
                + "\n".join(lines))

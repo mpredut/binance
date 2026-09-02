@@ -45,7 +45,7 @@ def main() -> int:
     load_env_stack(os.path.join(_HERE, ".env"))
 
     ap = argparse.ArgumentParser(description="base v2 (spot_dca) pe Hyperliquid HYPE.")
-    ap.add_argument("--paper", action="store_true", help="Forteaza PAPER (fara bani)")
+    ap.add_argument("--paper", action="store_true", help="Force PAPER (no money)")
     ap.add_argument("--token", default=None)
     args = ap.parse_args()
 
@@ -63,8 +63,8 @@ def main() -> int:
     )
     log("=== HL base v2 bot (spot_dca) ===")
     log(f"    token      : {token} (HYPE spot pe Hyperliquid)")
-    log(f"    executie   : {'PAPER (fara bani)' if strat_dry else '⚠ REAL — BANI ADEVARATI'}")
-    log("    engine      : strategies.spot_dca (IDENTIC cu kraken_bot)")
+    log(f"    execution  : {'PAPER (no money)' if strat_dry else '⚠ REAL — REAL MONEY'}")
+    log("    engine      : strategies.spot_dca (IDENTICAL to kraken_bot)")
     Strategy(
         provider, token, StratParams.from_env(), dry_run=strat_dry,
         state_dir=state_dir_for(strat_dry),

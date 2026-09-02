@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Teste pt logica de clasare a scanner-ului de funding (pur, fara API)."""
+"""Tests for the funding scanner's ranking logic (pure, no API)."""
 from __future__ import annotations
 
 import os
@@ -14,20 +14,20 @@ class TestRank(unittest.TestCase):
     def setUp(self):
         self.uni = [{"name": "AAA"}, {"name": "BBB"}, {"name": "CCC"}, {"name": "DDD"}]
         self.ctxs = [
-            {"funding": "0.00005", "dayNtlVlm": "50000000", "markPx": "10", "openInterest": "1000"},  # 43.8%/an, lichid
-            {"funding": "0.0001",  "dayNtlVlm": "1000000",  "markPx": "5",  "openInterest": "200"},   # 87%/an dar ILICHID
-            {"funding": "0.00002", "dayNtlVlm": "80000000", "markPx": "60", "openInterest": "500"},   # 17.5%/an, lichid
+            {"funding": "0.00005", "dayNtlVlm": "50000000", "markPx": "10", "openInterest": "1000"},  # 43.8%/year, liquid
+            {"funding": "0.0001",  "dayNtlVlm": "1000000",  "markPx": "5",  "openInterest": "200"},   # 87%/year but ILLIQUID
+            {"funding": "0.00002", "dayNtlVlm": "80000000", "markPx": "60", "openInterest": "500"},   # 17.5%/year, liquid
             {"funding": "-0.0001", "dayNtlVlm": "90000000", "markPx": "3",  "openInterest": "100"},   # funding NEGATIV
         ]
 
     def test_filtreaza_ilichid(self):
         r = rank(self.uni, self.ctxs, min_vol_usd=10_000_000)
         coins = [x["coin"] for x in r]
-        self.assertNotIn("BBB", coins, "ilichidul (1M < 10M) trebuie filtrat desi are funding mare")
+        self.assertNotIn("BBB", coins, "the illiquid one (1M < 10M) must be filtered out despite its high funding")
 
     def test_filtreaza_funding_negativ(self):
         r = rank(self.uni, self.ctxs, min_vol_usd=0)
-        self.assertNotIn("DDD", [x["coin"] for x in r], "funding negativ nu se incaseaza ca short")
+        self.assertNotIn("DDD", [x["coin"] for x in r], "negative funding is not collected as a short")
 
     def test_claseaza_desc_pe_funding(self):
         r = rank(self.uni, self.ctxs, min_vol_usd=10_000_000)

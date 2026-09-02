@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# run_backtest_cycle.sh — un ciclu complet de backtest pe DEV: ruleaza pilotul in
+# run_backtest_cycle.sh — a complete backtest cycle on DEV: it runs the pilot in
 # --propose mode (it applies nothing) and publishes the proposals to the git branch. Runs
-# pe DEV. Declansat de pe prod (trigger_backtest_dev.sh via ssh) sau manual.
+# on DEV. Triggered from prod (trigger_backtest_dev.sh through ssh) or by hand.
 #
 # The data (cachedb) and the code (git pull) are brought up to date by refresh_dev.sh RUN
 # ON PROD before this cycle is triggered — here we only run and publish.
@@ -12,7 +12,7 @@ REPO_ROOT="${BINANCE_REPO_ROOT:-${ROOT:-$(cd "$RUNNER_DIR/../.." && pwd)}}"
 ONLY="${PILOT_ONLY:-}"            # empty = every key; e.g. "maxage,hardtp"
 cd "$REPO_ROOT"
 
-echo "[cycle $(date '+%F %T')] pilot --propose (only='${ONLY:-toate}')"
+echo "[cycle $(date '+%F %T')] pilot --propose (only='${ONLY:-all}')"
 args=(--propose)
 [ -n "$ONLY" ] && args+=(--only "$ONLY")
 ./myenv/bin/python offline/research/monitortrades_backtest/scheduled_pilot.py "${args[@]}"

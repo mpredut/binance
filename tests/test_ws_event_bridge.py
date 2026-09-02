@@ -8,8 +8,8 @@ Pastrat AICI (unic, neacoperit altundeva):
      -> Cache24PriceManager (propagarea unui eveniment WS pe tot lantul).
 
 ELIMINAT de aici (era REDUNDANT): testele izolate pt CacheCurrentPriceManager
-si Cache24PriceManager — test_cache_manager_full.py are versiuni SUPERSET ale
-lor (acopera aceleasi comportamente + multe altele). Nu se pierde coverage.
+and Cache24PriceManager — test_cache_manager_full.py has SUPERSET versions of
+them (they cover the same behaviours plus many more). No coverage is lost.
 """
 import os, sys, tempfile, unittest
 from unittest.mock import MagicMock, patch
@@ -102,8 +102,8 @@ def _make_cache24_manager(tmp_dir):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 2. Integrare end-to-end: WS -> CurrentPrice -> Cache24 (UNIC — nu e in
-#    test_cache_manager_full.py, care testeaza managerii IZOLAT)
+# 2. End-to-end integration: WS -> CurrentPrice -> Cache24 (UNIQUE — it is not in
+#    test_cache_manager_full.py, which tests the managers IN ISOLATION)
 # ═══════════════════════════════════════════════════════════════════════════════
 class TestIntegration(unittest.TestCase):
 

@@ -1,4 +1,4 @@
-"""Invariante pentru reconcilierea ordinelor Kraken reale.
+"""Invariants for reconciling real Kraken orders.
 
 Kraken reports execution cumulatively through QueryOrders. The live engine must
 apply only the new delta and keep the order locally until the exchange marks it

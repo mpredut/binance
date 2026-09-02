@@ -124,7 +124,7 @@ class T212ReplayTest(unittest.TestCase):
             (100, 101, 99, 100),  # decide ENTRY
             (100, 101, 99, 100),  # fill ENTRY
             (70, 71, 69, 70),     # decide STOP MARKET la close
-            (65, 66, 64, 65),     # fill STOP la open, chiar dupa gap
+            (65, 66, 64, 65),     # A STOP fill at the open, right after the gap.
         ]
         base = replay.run_replay(bars, params, bar_minutes=1440)
         stressed = replay.run_replay(
@@ -326,7 +326,7 @@ class T212ExactFillReconciliationTest(unittest.TestCase):
             with patch.object(strategy, "notify"):
                 engine._reconcile_real(160.0)
 
-            # A doua jumatate s-a executat la 114; total brut = 5 + 7, nu la 150/160.
+            # The second half executed at 114; the gross total = 5 + 7, not at 150/160.
             self.assertAlmostEqual(engine.s["realized_pnl_usd"], 12.0)
             self.assertAlmostEqual(engine.s["last_sell_price"], 114.0)
             self.assertEqual(engine.s["qty"], 0.0)
@@ -395,8 +395,8 @@ class T212ExactFillReconciliationTest(unittest.TestCase):
             self.assertTrue(engine._cancel_specific(order))
             self.assertIn(order, engine.s["orders"])
 
-            # O jumatate se executa chiar in cursa cu anularea. Statusul terminal
-            # trebuie citit inainte sa uitam ordinul, altfel P&L-ul ar folosi poll price.
+            # One half executes in the very race with the cancellation. The terminal status
+            # must be read before we forget the order, otherwise the P&L would use the poll price.
             client.portfolio = [{
                 "ticker": "TEST_US_EQ", "quantity": 0.5, "averagePrice": 100.0,
             }]
@@ -550,7 +550,7 @@ class T212CancellationLifecycleTest(unittest.TestCase):
         engine._save = MagicMock()
 
         self.assertTrue(engine._place_sell(1.0, 110.0))
-        self.assertEqual(engine._save.call_count, 2)  # pending pre-submit, apoi order id
+        self.assertEqual(engine._save.call_count, 2)  # pending pre-submit, then the order id
 
         engine._save.reset_mock()
         order = engine.s["orders"][0]

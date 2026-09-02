@@ -1,15 +1,15 @@
-"""Experiment offline istoric; nu este test automat."""
+"""A historical offline experiment; it is not an automated test."""
 
 import pandas as pd
 import requests
 import datetime
 
 def fetch_data():
-    # API pentru datele istorice (Exemplu: Binance API)
+    # The API for the historical data (for example: the Binance API).
     end_time = int(datetime.datetime.now().timestamp() * 1000)
     start_time = end_time - 30 * 24 * 60 * 60 * 1000  # Ultimele 30 de zile
 
-    # Ajustam pentru a obtine date in mai multe cereri, deoarece Binance limiteaza numarul de date returnate
+    # We adjust so the data is fetched in several requests, because Binance limits how much it returns.
     df_list = []
     while start_time < end_time:
         url = f'https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&startTime={start_time}&endTime={end_time}&limit=1000'
@@ -26,7 +26,7 @@ def fetch_data():
         
         df_list.append(df)
         
-        start_time = int(df.index[-1].timestamp() * 1000) + 60000  # Trece la urmatorul minut dupa ultimul timestamp
+        start_time = int(df.index[-1].timestamp() * 1000) + 60000  # Move to the next minute after the last timestamp.
         
     full_df = pd.concat(df_list)
     return full_df

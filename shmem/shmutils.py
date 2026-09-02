@@ -57,7 +57,7 @@ def shmWrite(shm, data: dict):
         
     payload = json.dumps(data).encode("utf-8")
     if len(payload) >= BUF_SIZE - 4:
-        raise ValueError("Mesaj prea mare pentru buffer")
+        raise ValueError("The message is too large for the buffer")
 
     if payload is None:
         print(f"json dump encoded fail !!!!")

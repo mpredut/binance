@@ -46,7 +46,7 @@ class TestKalmanTrendGapReset(unittest.TestCase):
         ts, price, out = self._warm_up_uptrend(kf, 1_000_000.0, 100.0)
         self.assertEqual(out["trend"], 1, "precondition: an UP trend established before the gap")
 
-        # gol de 1h (> GAP_RESET_SEC=300s), pretul revine neschimbat fata de ultimul cunoscut
+        # a 1h gap (> GAP_RESET_SEC=300s), the price returns unchanged from the last known one
         ts_after_gap = ts + 3600.0
         out_after = kf.update(ts_after_gap, price, epsilon=0.01)
 
@@ -60,11 +60,11 @@ class TestKalmanTrendGapReset(unittest.TestCase):
         self.assertEqual(out["trend"], 1)
 
         ts_after_gap = ts + 30.0
-        price += 0.05 * 30       # trendul UP continua peste gol
+        price += 0.05 * 30       # the UP trend continues past the gap
         out_after = kf.update(ts_after_gap, price, epsilon=0.01)
 
         self.assertNotEqual(out_after["vel"], 0.0, "a short gap must not reset the velocity to 0")
-        self.assertEqual(out_after["trend"], 1, "trendul UP trebuie sa supravietuiasca unui gol scurt")
+        self.assertEqual(out_after["trend"], 1, "the UP trend must survive a short gap")
 
     def test_gap_reset_does_not_crash_on_first_ever_update(self):
         """The first observation (self.x is None) must stay unaffected by the new gap branch."""

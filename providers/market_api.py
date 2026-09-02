@@ -242,7 +242,7 @@ class BinanceProvider(MarketDataProvider):
             raise ProviderError(f"submit_order({symbol}): {e}") from e
         oid = extract_order_id(res)
         if oid is None:
-            raise ProviderError(f"submit_order({symbol}): raspuns fara orderId ({res})")
+            raise ProviderError(f"submit_order({symbol}): a response without an orderId ({res})")
         return oid
 
     def _order_fee_quote(self, symbol: str, order_id: int) -> float:
@@ -271,7 +271,7 @@ class BinanceProvider(MarketDataProvider):
                 conversion = _get_bapi().get_current_price(f"{asset}{quote}")
                 if not conversion:
                     raise ProviderError(
-                        f"order_status({order_id}): nu pot converti fee {asset}->{quote}"
+                        f"order_status({order_id}): cannot convert the fee {asset}->{quote}"
                     )
                 total += commission * float(conversion)
         return total
@@ -302,7 +302,7 @@ class BinanceProvider(MarketDataProvider):
             canceled = _get_bapi().cancel_order(symbol, int(order_id))
             if not canceled:
                 raise ProviderError(
-                    f"cancel_order({order_id}): venue-ul nu a confirmat anularea"
+                    f"cancel_order({order_id}): the venue did not confirm the cancellation"
                 )
         except ProviderError:
             raise
@@ -319,7 +319,7 @@ class MarketApi:
 
     def __init__(self, providers: List[MarketDataProvider]):
         if not providers:
-            raise ValueError("MarketApi: lista de provideri nu poate fi goala")
+            raise ValueError("MarketApi: the provider list cannot be empty")
         self._providers: List[MarketDataProvider] = list(providers)
         self._route: dict = {}   # Lock-free, idempotent symbol-to-provider memoization.
         # Name registry enables explicit venue routing for Instrument rather than

@@ -61,7 +61,7 @@ class MarketRegimeEvaluator:
     def __init__(self, strength_threshold: float = 2.0):
         threshold = float(strength_threshold)
         if not math.isfinite(threshold) or threshold <= 0:
-            raise ValueError("strength_threshold trebuie sa fie pozitiv")
+            raise ValueError("strength_threshold must be positive")
         self.strength_threshold = threshold
 
     def unknown(self, reason: str = "signal_unavailable") -> MarketRegimeDecision:

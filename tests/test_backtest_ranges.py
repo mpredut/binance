@@ -1,5 +1,5 @@
-"""Teste pentru offline/research/backtest_ranges.py — parsarea rangurilor de
-test scrise ca text simplu deasupra unui parametru, in orice fisier de config."""
+"""Tests for offline/research/backtest_ranges.py — parsing the test ranges
+written as plain text above a parameter, in any config file."""
 import os
 import sys
 import unittest
@@ -53,9 +53,9 @@ class TestScanBacktestRanges(unittest.TestCase):
         self.assertEqual(result, {"mt.gain": ["5.0", "7.0", "9.0"], "mt.lost2": ["2.3", "3.3", "4.3"]})
 
     def test_ini_sections_disambiguate_same_key_name(self):
-        """instruments.conf refoloseste mt.gain in fiecare sectiune [NUME] —
-        fara prefixare, a doua sectiune ar suprascrie tacut prima (bug real
-        gasit azi pe fisierul REAL)."""
+        """instruments.conf reuses mt.gain in every [NAME] section —
+        without prefixing, the second section would silently overwrite the first (a real bug
+        found today on the REAL file)."""
         self._write(
             "[BINANCE_BTC]\n"
             "# BACKTEST: 5.0, 7.0, 8.0, 9.0\n"

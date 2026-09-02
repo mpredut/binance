@@ -31,7 +31,7 @@ class BenchmarkScenario:
 
 
 def default_scenarios() -> tuple[BenchmarkScenario, BenchmarkScenario]:
-    """Central provizoriu + stress; valorile nu pretind calibrare live."""
+    """A provisional central case plus stress; the values do not claim live calibration."""
     return (
         BenchmarkScenario(
             name="central",
@@ -109,7 +109,7 @@ def aggregate_financial_windows(
     if initial_capital <= 0:
         raise ValueError("initial_capital must be positive")
     if regime_threshold_pct < 0:
-        raise ValueError("regime_threshold_pct nu poate fi negativ")
+        raise ValueError("regime_threshold_pct cannot be negative")
     if not windows:
         raise ValueError("the benchmark requires at least one TEST window")
 

@@ -56,7 +56,7 @@ def _fx_rates(value: float | Sequence[float], count: int) -> list[float]:
     else:
         rates = [float(rate) for rate in value]
         if len(rates) != count:
-            raise ValueError(f"seria FX are {len(rates)} valori pentru {count} bare")
+            raise ValueError(f"the FX series has {len(rates)} values for {count} bars")
     if any(rate <= 0 for rate in rates):
         raise ValueError("all fx_to_usd values must be positive")
     return rates

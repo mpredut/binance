@@ -23,7 +23,7 @@ import cacheManager as cm  # noqa: E402
 import symbols as sym  # noqa: E402
 
 SYMBOLS = [sym.taosymbol, sym.btcsymbol]
-HARD_TP_PCT = 17.0   # tine sincron cu monitortrades.conf (hard_tp_pct)
+HARD_TP_PCT = 17.0   # Keep in sync with monitortrades.conf (hard_tp_pct).
 GAIN_PCT = 9.2
 
 
@@ -66,13 +66,13 @@ def main():
         print(f"      trend_instant={trend} ({gr:+.4f})  |  free={free:.4f}  net={net:.4f}  sells={n_sells}")
         flags = []
         if gain >= HARD_TP_PCT:
-            flags.append(f"HARD-TP ARMAT (vinde 50%={free*0.5:.3f})")
+            flags.append(f"HARD-TP ARMED (it sells 50%={free*0.5:.3f})")
         elif gain >= GAIN_PCT and gr < 0:
-            flags.append("VANZARE NORMALA ARMATA (gain>9.2% + trend DOWN -> vinde TOT)")
+            flags.append("A NORMAL SALE IS ARMED (gain>9.2% plus a DOWN trend -> it sells EVERYTHING)")
         elif gain >= GAIN_PCT and gr >= 0:
-            flags.append(f"in profit dar trend UP -> tine (HARD-TP la px {hard_px:.2f})")
+            flags.append(f"in profit but the trend is UP -> holding (HARD-TP at px {hard_px:.2f})")
         else:
-            flags.append(f"sub praguri (HARD-TP la px {hard_px:.2f})")
+            flags.append(f"below the thresholds (HARD-TP at px {hard_px:.2f})")
         print(f"      => {'; '.join(flags)}")
     print("=" * 50)
 

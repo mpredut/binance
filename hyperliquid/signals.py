@@ -48,12 +48,12 @@ def _builtin_trend(client, coin: str) -> dict:
 
 def _file_signal(path: str) -> dict:
     if not os.path.exists(path):
-        return {**NEUTRAL, "source": "file(lipsa)"}
+        return {**NEUTRAL, "source": "file(missing)"}
     try:
         with open(path, "r", encoding="utf-8") as f:
             d = json.load(f)
     except (OSError, ValueError) as e:
-        log(f"  ! semnal fisier invalid: {e}")
+        log(f"  ! an invalid signal file: {e}")
         return {**NEUTRAL, "source": "file(corupt)"}
     ts = d.get("ts") or d.get("timestamp")
     max_age = required_float_env("SIGNAL_MAX_AGE_MIN") * 60

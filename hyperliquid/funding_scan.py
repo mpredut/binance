@@ -86,8 +86,8 @@ def main() -> int:
     print(f"=== FUNDING SCAN Hyperliquid (vol 24h >= ${args.min_vol/1e6:.0f}M) ===")
     print("  #  moneda    funding/an   funding/ora   vol 24h    DN-fezabil   ")
     for i, r in enumerate(rows, 1):
-        dn = "✓ spot" if r["coin"] in spot_ok else "✗ fara spot"
-        mark = " <-- DN-ul tau acum" if r["coin"] == cur else ""
+        dn = "✓ spot" if r["coin"] in spot_ok else "✗ no spot"
+        mark = " <-- your DN right now" if r["coin"] == cur else ""
         print(f"  {i:<2d} {r['coin']:<8s}  {r['apr']:+6.1f}%/an   {r['funding_hr_pct']:+.4f}%/h   "
               f"${r['vol']/1e6:6.1f}M   {dn:<11s}{mark}")
     # Context for HYPE's ranking.
@@ -96,7 +96,7 @@ def main() -> int:
         print(f"\n  {cur} (DN-ul tau): {hype['apr']:+.1f}%/an. "
               f"If a DN-feasible coin above pays visibly more AND is liquid,")
         print("  poti muta DN-ul acolo: schimbi HL_COIN in config.env + inchizi/redeschizi DN-ul.")
-    print("\n  ⚠ funding mare = risc mai mare. Alege lichid + monede vetate, nu maximul orb.")
+    print("\n  ⚠ high funding = higher risk. Pick a liquid, vetted coin, not the blind maximum.")
     return 0
 
 

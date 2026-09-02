@@ -226,7 +226,7 @@ class KrakenClient:
             data["price"] = f"{price}"
         if cl_ord_id is not None:
             if not re.fullmatch(r"[0-9a-fA-F]{32}", str(cl_ord_id)):
-                raise ValueError("cl_ord_id Kraken trebuie sa fie UUID hex pe 128 biti")
+                raise ValueError("a Kraken cl_ord_id must be a 128-bit hex UUID")
             data["cl_ord_id"] = str(cl_ord_id).lower()
         if validate:
             data["validate"] = "true"

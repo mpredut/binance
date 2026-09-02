@@ -15,7 +15,7 @@ class RuntimeImportSafetyTest(unittest.TestCase):
             import types
             import importlib
 
-            # Simuleaza checkout-ul CI: pachetul keys poate exista, dar fisierul
+            # It simulates the CI checkout: the keys package may exist, but the file
             # The secret keys/apikeys.py is not versioned.
             keys = types.ModuleType("keys")
             keys.__path__ = []
@@ -28,7 +28,7 @@ class RuntimeImportSafetyTest(unittest.TestCase):
 
             if market_api._bapi is not None:
                 raise AssertionError("Binance bapi a fost importat eager")
-            T212Provider()  # constructie lazy, fara chei T212/Binance
+            T212Provider()  # a lazy construction, without T212/Binance keys
             if market_api.api.provider_by_name("t212") is None:
                 raise AssertionError("T212 is missing from the registry after a direct import")
 

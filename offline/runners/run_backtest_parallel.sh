@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# run_backtest_parallel.sh — ruleaza backtesturi IN PARALEL pe dev (N core-uri).
-# Backtestul e CPU-bound si independent per param => embarrassingly parallel.
+# run_backtest_parallel.sh — runs backtests IN PARALLEL on dev (N cores).
+# The backtest is CPU-bound and independent per parameter => embarrassingly parallel.
 #
 # Usage: offline/runners/run_backtest_parallel.sh <fisier_comenzi> [JOBS]
 #   <fisier_comenzi>: o comanda pe linie (# = comentariu, liniile goale ignorate).
 #   JOBS: cate deodata (implicit nproc).
-# Fiecare comanda ruleaza in propriul proces, cu output in
-#   logs/backtest_parallel/<timestamp>/NN.log  (+ manifest.tsv cu maparea NN->comanda).
+# Each command runs in its own process, with the output in
+#   logs/backtest_parallel/<timestamp>/NN.log  (plus manifest.tsv with the NN->command mapping).
 #
 # Runs on DEV (the backtest machine). It does NOT touch the live config or processes.
 set -uo pipefail
@@ -14,7 +14,7 @@ set -uo pipefail
 RUNNER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${BINANCE_REPO_ROOT:-${ROOT:-$(cd "$RUNNER_DIR/../.." && pwd)}}"
 cd "$REPO_ROOT"
-CMDFILE="${1:?dai un fisier cu comenzi (una pe linie)}"
+CMDFILE="${1:?give a file with commands (one per line)}"
 JOBS="${2:-$(nproc)}"
 STAMP="$(date +%Y%m%d_%H%M%S)"
 OUTDIR="$REPO_ROOT/logs/backtest_parallel/$STAMP"; mkdir -p "$OUTDIR"

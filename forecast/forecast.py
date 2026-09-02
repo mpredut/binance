@@ -143,13 +143,13 @@ def live_forecast(px: np.ndarray, X, y_dir, y_mag, rep: dict, symbol: str) -> di
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Estimare paralela trend+pret viitor (test).")
+    ap = argparse.ArgumentParser(description="A parallel estimate of the trend plus the future price (a test).")
     ap.add_argument("--symbol", default="TAOUSDC")
     ap.add_argument("--days", type=int, default=400)
-    ap.add_argument("--eval", action="store_true", help="doar raportul walk-forward")
-    ap.add_argument("--forecast", action="store_true", help="scrie forecast.json")
+    ap.add_argument("--eval", action="store_true", help="the walk-forward report only")
+    ap.add_argument("--forecast", action="store_true", help="write forecast.json")
     ap.add_argument("--out", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "forecast.json"))
-    ap.add_argument("--loop", type=float, default=0, help="minute intre prognoze (0 = o data)")
+    ap.add_argument("--loop", type=float, default=0, help="minutes between forecasts (0 = once)")
     args = ap.parse_args()
 
     while True:

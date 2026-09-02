@@ -1,4 +1,4 @@
-"""Experiment istoric manual; poate accesa API-ul real."""
+"""A historical manual experiment; it may reach the real API."""
 
 import os
 import time

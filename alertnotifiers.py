@@ -22,13 +22,13 @@ from lock import FileLock
 BASE_DIR = Path(__file__).resolve().parent
 
 _URGENT_MARKERS = (
-    "🛑", "🛡", "LICHID", "STOP-LOSS", "STOP_LOSS", "TRAILING", "ESUAT",
-    "MANUAL", "ERORI", "CATASTROF", "CRASH", "DISPARUT", "DEZECHILIBR",
+    "🛑", "🛡", "LIQUID", "STOP-LOSS", "STOP_LOSS", "TRAILING", "FAILED",
+    "MANUAL", "ERROR", "CATASTROPH", "CRASH", "GONE", "IMBALANC",
 )
 _GUARD_MARKERS = (
-    "🛑", "🛡", "STOP-LOSS", "STOP_LOSS", "TRAILING", "LICHID", "CATASTROF", "CRASH",
+    "🛑", "🛡", "STOP-LOSS", "STOP_LOSS", "TRAILING", "LIQUID", "CATASTROPH", "CRASH",
 )
-_OPS_MARKERS = ("ESUAT", "ERORI", "MANUAL", "DISPARUT", "DEZECHILIBR")
+_OPS_MARKERS = ("FAILED", "ERROR", "MANUAL", "GONE", "IMBALANC")
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -418,7 +418,7 @@ class AlertNotifier:
                         "Priority": "urgent" if urgent else os.environ.get("NTFY_PRIORITY", "high"),
                         "Tags": "warning" if urgent else tags,
                     }
-                    _tok = _ntfy_token()  # cont ntfy.sh -> cota per-cont, nu per-IP anonim
+                    _tok = _ntfy_token()  # An ntfy.sh account -> a per-account quota, not a per-IP anonymous one.
                     if _tok:
                         _hdr["Authorization"] = f"Bearer {_tok}"
                     response = requests.post(
@@ -434,7 +434,7 @@ class AlertNotifier:
                             wait = min(float(response.headers.get("Retry-After", 3) or 3), 8.0)
                         except (AttributeError, TypeError, ValueError):
                             wait = 3.0
-                        print(f"[Notifier] ntfy 429 tranzitoriu; reincerc dupa {wait:.0f}s")
+                        print(f"[Notifier] a transient ntfy 429; retrying after {wait:.0f}s")
                         time.sleep(wait)
                 # A stale account token must not break a topic that explicitly permits
                 # anonymous publishing. Retry once without credentials; private topics
@@ -524,7 +524,7 @@ def _topic_for(title: str, source: str) -> Optional[str]:
     return os.environ.get(f"NTFY_TOPIC_{cat}") or os.environ.get("NTFY_TOPIC")
 # Do not include 📉, which is also used by informational loss alerts such as ``📉 SPCX -8%``,
 # or a lone ⚠, which is too broad. ``TRAILING`` identifies trailing events. Urgent DN events
-# also include LICHID/ERORI/MANUAL in their titles. Override with email=True/False when needed.
+# also include LIQUID/ERROR/MANUAL in their titles. Override with email=True/False when needed.
 
 
 _NTFY_TOKEN_CACHE = None

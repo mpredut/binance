@@ -72,7 +72,7 @@ class FakeClient:
 
 def _provider(fake):
     p = KrakenProvider()
-    p._cli = fake                    # scurtcircuiteaza _client() (fara chei/retea)
+    p._cli = fake                    # It short-circuits _client() (no keys, no network).
     return p
 
 
@@ -87,7 +87,7 @@ class KrakenExecutorContractTest(unittest.TestCase):
     def test_submit_order_limit_intoarce_order_id(self):
         oid = self.p.submit_order("HYPEUSD", "buy", 2.5, price=60.0)
         self.assertEqual(oid, "OABC-123")
-        # a delegat corect: limit, pret pasat, validate=False
+        # it delegated correctly: limit, the price passed through, validate=False
         self.assertEqual(self.fake.calls[-1],
                          ("add_order", "HYPEUSD", "buy", 2.5, 60.0, "limit", False, None))
 
@@ -102,10 +102,10 @@ class KrakenExecutorContractTest(unittest.TestCase):
         self.p.submit_order("HYPEUSD", "sell", 1.0, price=59.0, market=True)
         c = self.fake.calls[-1]
         self.assertEqual(c[5], "market")     # ordertype
-        self.assertIsNone(c[4])              # pretul e None la market
+        self.assertIsNone(c[4])              # The price is None on a market order.
 
     def test_submit_order_without_a_txid_raises(self):
-        self.fake.add_order = lambda *a, **k: {"descr": {}}   # raspuns fara txid
+        self.fake.add_order = lambda *a, **k: {"descr": {}}   # A response without a txid.
         with self.assertRaises(ProviderError):
             self.p.submit_order("HYPEUSD", "buy", 1.0, price=60.0)
 
@@ -140,7 +140,7 @@ class KrakenExecutorContractTest(unittest.TestCase):
         self.assertEqual(st.fee, 0.39)
 
     def test_a_missing_order_status_raises(self):
-        self.fake.query_orders = lambda txids: {}      # ordinul nu apare
+        self.fake.query_orders = lambda txids: {}      # The order does not appear.
         with self.assertRaises(ProviderError):
             self.p.order_status("HYPEUSD", "NOPE")
 

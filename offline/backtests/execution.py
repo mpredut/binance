@@ -1,6 +1,6 @@
 """OHLC execution model shared by the replay adapters.
 
-Strategiile decid ordinele; acest modul descrie numai cum pot fi executate:
+The strategies decide the orders; this module describes only how they can be executed:
 spread, market slippage, intrabar ordering and asynchronous tranches. The values
 implicite reproduc comportamentul istoric al backtesterelor.
 """
@@ -45,9 +45,9 @@ class ExecutionModel:
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.spread_bps) or self.spread_bps < 0:
-            raise ValueError("spread_bps nu poate fi negativ")
+            raise ValueError("spread_bps cannot be negative")
         if not math.isfinite(self.market_slippage_bps) or self.market_slippage_bps < 0:
-            raise ValueError("market_slippage_bps nu poate fi negativ")
+            raise ValueError("market_slippage_bps cannot be negative")
         if not math.isfinite(self.partial_fill_ratio) or not 0 < self.partial_fill_ratio <= 1:
             raise ValueError("partial_fill_ratio must be within (0, 1]")
         if self.spread_bps >= 20_000:
@@ -109,7 +109,7 @@ def split_order_fill(
     """
     remaining = float(order[quantity_key])
     if remaining <= 0:
-        raise ValueError("ordinul nu mai are cantitate de executat")
+        raise ValueError("the order has no quantity left to execute")
     original_key = f"_replay_original_{quantity_key}"
     original = float(order.setdefault(original_key, remaining))
     chunk = remaining if force_full else min(remaining, original * ratio)

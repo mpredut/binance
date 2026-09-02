@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """slice_dense_archive.py — extrage ultimele N zile dintr-o arhiva DENSA
-(cachedb/cache_24price_long_{symbol}.jsonl) intr-un fisier mic, pt sweep-uri
-RAPIDE pe parametri cu constante de timp SCURTE (fire-retry/cooldown), unde
+(cachedb/cache_24price_long_{symbol}.jsonl) into a small file, for FAST sweeps
+on parameters with SHORT time constants (fire-retry/cooldown), where
 istoricul lung/sparse ar produce artefacte (vezi offline/research/tradeall_trigger_gate/
-README.md, Exp 6/7) SI arhiva densa completa a crescut prea mult ca sa fie
+README.md, Exp 6/7) AND the complete dense archive has grown too large to be
 rulata intreaga (14 iul->azi: ~1M puncte/simbol, ~8h/rulare la rata observata).
 
 Usage: slice_dense_archive.py <symbol> <days> [out_path]

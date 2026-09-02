@@ -69,7 +69,7 @@ except Exception as e:
 
 print("-" * 57)
 print(f"{'TOTAL':<22}{tot_r:>+11.2f}{tot_u:>+12.2f}   -> NET {tot_r+tot_u:+.2f} USD")
-print("\nNota: Binance realized pe fereastra de 120z (cost-basis mai vechi de-atat = aproximat).")
+print("\nNote: the Binance realised figure covers a 120-day window (a cost basis older than that is approximated).")
 print("No Binance fees in realized (the API fills do not expose them here); ~0.075%/leg with BNB.")
 
 
@@ -107,7 +107,7 @@ def per_bot(symbol):
             a["bq"] += eq; a["bv"] += cqq
         else:
             a["sq"] += eq; a["sv"] += cqq
-    print(f"\n  {symbol} (ultimele {len(orders)} ordine):")
+    print(f"\n  {symbol} (the last {len(orders)} orders):")
     print(f"    {'sursa':<16}{'buy$':>9}{'sell$':>9}{'net_qty':>12}{'realized_own':>14}")
     for b, a in sorted(g.items(), key=lambda x: -(x[1]["bq"] + x[1]["sq"])):
         avg_b = a["bv"] / a["bq"] if a["bq"] else 0.0
@@ -117,7 +117,7 @@ def per_bot(symbol):
         print(f"    {b:<16}{a['bv']:>9.0f}{a['sv']:>9.0f}{a['bq'] - a['sq']:>+12.4f}{realized_own:>+14.2f}")
 
 
-print("\n=== ATRIBUIRE PER BOT (clientOrderId; realized_own = doar round-trip propriu) ===")
+print("\n=== ATTRIBUTION PER BOT (clientOrderId; realized_own = only its own round trips) ===")
 for _sym in ("BTCUSDC", "TAOUSDC"):
     per_bot(_sym)
 print("Note: bots that trade inventory between themselves (tradeall buys / rtrade sells the same TAO)")

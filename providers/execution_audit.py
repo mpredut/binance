@@ -108,7 +108,7 @@ class ExecutionAudit:
                             fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
             return True
         except Exception as exc:  # noqa: BLE001 - auditing must never stop trading
-            print(f"[execution_audit] scriere esuata: {exc}")
+            print(f"[execution_audit] the write failed: {exc}")
             return False
 
 

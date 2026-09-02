@@ -166,7 +166,7 @@ def run_intraday(pair, tz_offset=3):
         if o > 0:
             by_hour[hr].append((c-o)/o*100)
     print(f"=== INTRADAY {pair} (ora LOCALA UTC+{tz_offset}, {len(rows)} bare orare) ===")
-    print(f"{'ora':<5} {'n':<5} {'rand.mediu/ora':>14} {'% bare pozitive':>16}")
+    print(f"{'hour':<5} {'n':<5} {'avg.return/hour':>14} {'% positive bars':>16}")
     cum = 0.0
     for hr in range(24):
         v = by_hour.get(hr, [])
@@ -187,7 +187,7 @@ def run_intraday(pair, tz_offset=3):
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--wf", metavar="PAIR", help="walk-forward pe o pereche")
-    ap.add_argument("--intraday", metavar="PAIR", help="pattern pe ora din zi")
+    ap.add_argument("--intraday", metavar="PAIR", help="the pattern by hour of day")
     ap.add_argument("--interval", type=int, default=60)
     args = ap.parse_args()
     if args.wf:

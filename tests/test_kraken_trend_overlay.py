@@ -1,4 +1,4 @@
-"""Caracterizare pentru overlay-ul de trend Kraken.
+"""Characterisation for the Kraken trend overlay.
 
 The overlay is experimental and off by default, but it must preserve the same
 financial invariants as the range engine: an order is not a position until it fills,

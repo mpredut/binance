@@ -1005,7 +1005,7 @@ class Strategy:
         log(f"  🟢 [STRAT] RE-BUY after the SL: a +{self.p.sl_rebuy_bounce_pct}% pullback from the low {rb['low']:.2f} — re-entering ENTRY")
         notify(title=f"🟢 {self.yahoo_sym} RE-BUY after the stop-loss",
                body=(f"recul +{self.p.sl_rebuy_bounce_pct}% de la min {rb['low']:.2f} — "
-                     f"reintru cu {self.p.entry_amount:.0f}{self.ccy}"),
+                     f"re-entering with {self.p.entry_amount:.0f}{self.ccy}"),
                source="T212", price=price, desktop=self.desktop)
         self._place_buy(self.p.entry_amount, price * disc, kind="ENTRY")
 

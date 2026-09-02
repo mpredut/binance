@@ -54,7 +54,7 @@ push_ntfy() {
         -H "Title: $title" -d "$body" "https://ntfy.sh/$TOPIC" >/dev/null
 }
 
-# Starea unei linii: ok | absent | stopped | zombie | hung.
+# The state of one line: ok | absent | stopped | zombie | hung.
 proc_state() {
     local pat="$1" dir="$2" hblog="$3" hbstale="$4"
     local pids states
@@ -180,7 +180,7 @@ EOF
         fi
         # 8>&- : the started bot does NOT inherit fd 8 (the supervise lock) -> no lock leak
         # (otherwise later --supervise runs find the lock held by a bot and skip forever).
-        ( cd "$dir" && eval "$cmd" ) 8>&-                     # restart curat ($ROOT/$VENV expandate aici)
+        ( cd "$dir" && eval "$cmd" ) 8>&-                     # A clean restart ($ROOT/$VENV are expanded here).
         cnt=$((cnt + 1)); echo "$cnt $ws" > "$SUP/$label"; rm -f "$SUP/$label.esc"
         push "Bot restarted" "$label ($st) -> RESTARTED (attempt $cnt/$MAX)"
         echo "$(date '+%H:%M') $label RESTARTED ($st, attempt $cnt)"

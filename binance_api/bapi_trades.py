@@ -640,7 +640,7 @@ def print_trade(trade):
 # Dead diagnostic code; its only call site in ``bapi_placeorder`` is commented out.
 def compare_trade_sources(symbol, order_type="BUY", max_age_seconds=3600, limit=1000):
     
-    print(f"\n🔍 Comparare pentru simbolul {symbol}, order_type {order_type}")
+    print(f"\n🔍 A comparison for the symbol {symbol}, order_type {order_type}")
 
     current_time_ms = int(time.time() * 1000)
     max_age_ms = max_age_seconds * 1000

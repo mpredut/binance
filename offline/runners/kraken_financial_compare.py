@@ -140,7 +140,7 @@ def markdown_report(report: dict) -> str:
         "", "## Verdict", "",
         "Promotable: " + (
             ", ".join(f"`{name}`" for name in report["promotable"])
-            if report["promotable"] else "niciun candidat"
+            if report["promotable"] else "no candidate"
         ), "",
         "The result is screening on a Hyperliquid proxy; Kraken execution calibration "
         "and the forward shadow remain separate gates.", "",
@@ -167,7 +167,7 @@ def main() -> int:
         if getattr(args, name) <= 0:
             parser.error(f"--{name} must be positive")
     if args.warmup < 0 or args.regime_threshold < 0:
-        parser.error("warmup/regime-threshold nu pot fi negative")
+        parser.error("warmup and regime-threshold cannot be negative")
     args.baseline = args.baseline.expanduser().resolve()
     args.dataset = args.dataset.expanduser().resolve()
     args.manifest = args.manifest.expanduser().resolve()

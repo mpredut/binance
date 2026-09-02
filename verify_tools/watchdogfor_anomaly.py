@@ -34,14 +34,14 @@ COOLDOWN_MIN = wc.required_float_env("ANOMALY_COOLDOWN_MINUTES")
 # The threshold is how many NEW hits (since the last run) trigger the alert.
 _CATS = {
     "rate_limit": (re.compile(r"\b429\b|rate limit|too ?many ?requests", re.I), 30),
-    # Both languages on purpose: the logs are mid-migration to English, and a pattern
-    # that only matches Romanian stops firing SILENTLY as each log line is translated.
-    # Keep the Romanian alternatives until no untranslated log line is left.
-    "auth":       (re.compile(r"auth esuat|auth failed|lipsesc cheile|missing keys|"
+    # The migration to English is finished, so these patterns are English-only. If a
+    # Romanian log line ever reappears, translate the line rather than widening the pattern
+    # back — a bilingual pattern hides exactly the regression it would be matching.
+    "auth":       (re.compile(r"auth failed|missing keys|"
                              r"unauthorized|forbidden|"
                              r"http\s*40[13]\b|status[=\s]*40[13]\b|\(40[13]\)|invalid.*api.*key", re.I), 3),
-    "blind":      (re.compile(r"indisponibil|unavailable|sar reconcilierea|"
-                             r"skipping reconciliation|zbor orb|blind flying", re.I), 25),
+    "blind":      (re.compile(r"unavailable|"
+                             r"skipping reconciliation|blind flying", re.I), 25),
     "traceback":  (re.compile(r"traceback \(most recent|unhandledexception|\bfatal\b", re.I), 1),
 }
 # The regexes are deliberately SPECIFIC (calibrated on real logs):

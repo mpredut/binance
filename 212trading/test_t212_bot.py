@@ -98,7 +98,7 @@ class TestParseDotenv(unittest.TestCase):
 class TestFloatEnvDict(unittest.TestCase):
     def test_from_a_dict(self):
         self.assertEqual(float_env("A", {"A": "12.5"}), 12.5)
-        self.assertIsNone(float_env("LIPSA", {"A": "1"}))
+        self.assertIsNone(float_env("MISSING", {"A": "1"}))
 
     def test_environ_by_default(self):
         os.environ["TST_FLT_9"] = "3.3"
@@ -110,7 +110,7 @@ class TestFloatEnvDict(unittest.TestCase):
 
 class TestIzolareParams(unittest.TestCase):
     def test_two_assets_with_different_parameters(self):
-        """Inima redesign-ului: from_env(dict) izoleaza — fara coliziune pe environ."""
+        """The heart of the redesign: from_env(dict) isolates — no collision on environ."""
         nv = parse_dotenv(_tmp(NVDA))
         sp = parse_dotenv(_tmp(SPCX))
         pn = StratParams.from_env(nv)
@@ -138,9 +138,9 @@ class TestDiscover(unittest.TestCase):
         d = tempfile.mkdtemp()
         for n in ("nvda", "spcx", "rgnt"):
             open(os.path.join(d, f"config.{n}.env"), "w").close()
-        open(os.path.join(d, ".env"), "w").close()  # NU e activ
+        open(os.path.join(d, ".env"), "w").close()  # NOT an asset.
         names = [n for n, _ in discover_assets(d)]
-        self.assertEqual(names, ["nvda", "rgnt", "spcx"])  # sortat, fara .env
+        self.assertEqual(names, ["nvda", "rgnt", "spcx"])  # sorted, without .env
 
 
 def _tmp(content: str) -> str:

@@ -33,7 +33,7 @@ class JsonStateStore:
             )
             merged = self.default_factory()
             if not isinstance(merged, dict):
-                raise TypeError("default_factory nu a returnat dict")
+                raise TypeError("default_factory did not return a dict")
             merged.update(loaded)
             self.logger(
                 f"  [STRAT] stare incarcata (ciclu {merged.get('cycle')}, "
@@ -52,9 +52,9 @@ class JsonStateStore:
             atomic_write_json(self.path, state, indent=2)
             return True
         except (OSError, TypeError, ValueError) as exc:
-            self.logger(f"  ! [STRAT] nu pot salva starea: {exc}")
+            self.logger(f"  ! [STRAT] cannot save the state: {exc}")
             if self.fail_closed:
                 raise StatePersistenceError(
-                    f"persistenta starii {self.label} a esuat: {exc}"
+                    f"persisting the {self.label} state failed: {exc}"
                 ) from exc
             return False

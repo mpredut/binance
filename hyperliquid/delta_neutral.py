@@ -384,7 +384,7 @@ class DeltaNeutral:
             if not self.s.get("liq_alerted"):
                 self.s["liq_alerted"] = True
                 log(f"  ⚠ [DN] SHORT close to LIQUIDATION! price={perp_px:.4f} liq={liq:.4f} ({dist_pct:.1f}% away)")
-                notify(title=f"⚠ {self.p.coin}: short aproape de LICHIDARE!",
+                notify(title=f"⚠ {self.p.coin}: the short is close to LIQUIDATION!",
                        body=f"p{perp_px:.2f} liq{liq:.2f} (dist {dist_pct:.1f}%)",
                        source="dn", desktop=self.desktop)
             # Reduce both legs to shrink the short and move liquidation farther away.
@@ -395,7 +395,7 @@ class DeltaNeutral:
                     self._cover_perp(cut, perp_px)
                     self._sell_spot(cut, L["spot_px"])
                     self.s["target_sz"] = max(0.0, self.s["target_sz"] - cut)
-                    notify(title=f"🛡 {self.p.coin}: am redus preventiv pozitia",
+                    notify(title=f"🛡 {self.p.coin}: I reduced the position pre-emptively",
                            body=f"near liquidation — reduced both legs by {cut}, remaining neutral",
                            source="dn", desktop=self.desktop)
                     return True

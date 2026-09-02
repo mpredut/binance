@@ -235,7 +235,7 @@ class PairCoordinatorTest(unittest.TestCase):
         self.assertEqual(outcome.first_fill_side, "BUY")
         self.assertAlmostEqual(outcome.net_qty, 1.0)
         self.assertEqual(venue.canceled, [])
-        self.assertEqual(len(venue.orders), 2, "ask-ul initial este deja exit profitabil")
+        self.assertEqual(len(venue.orders), 2, "the initial ask is already a profitable exit")
 
     def test_partial_fill_cancels_entry_remainder_and_resizes_exit(self):
         venue = FakeVenue(current=99.0)

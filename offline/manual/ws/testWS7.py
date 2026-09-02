@@ -1,4 +1,4 @@
-"""Diagnostic WebSocket manual; poate accesa API-ul real."""
+"""A manual WebSocket diagnostic; it may reach the real API."""
 
 import nacl.signing
 import base64, time, json, asyncio, websockets
@@ -7,7 +7,7 @@ from keys.apikeys import api_key
 with open("ed25519_private.pem", "r") as f:
     pem_data = f.read()
 
-# Extrage raw bytes din PEM
+# Extract the raw bytes from the PEM.
 import re
 b64 = re.search(r"-----BEGIN PRIVATE KEY-----(.+?)-----END PRIVATE KEY-----", pem_data, re.DOTALL)
 raw = base64.b64decode(b64.group(1).strip())
@@ -41,7 +41,7 @@ async def test_ws():
 
         if resp.get("status") == 200:
             await ws.send(json.dumps({"id": "sub", "method": "userDataStream.subscribe"}))
-            print("Subscribed! Plaseaza un order...")
+            print("Subscribed! Place an order...")
             while True:
                 try:
                     msg = await asyncio.wait_for(ws.recv(), timeout=30)

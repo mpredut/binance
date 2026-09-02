@@ -25,12 +25,12 @@ class TestTradeCooldown(unittest.TestCase):
         ok, _ = tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)
         self.assertTrue(ok)
         ok2, last = tc.reserve_trade("SELL", "BTCUSDC", cooldown_sec=180)
-        self.assertFalse(ok2)                       # < 3 min → blocat
+        self.assertFalse(ok2)                       # < 3 min -> blocked
         self.assertEqual(last["side"], "BUY")
 
     def test_per_symbol_independent(self):
         self.assertTrue(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)[0])
-        # alt simbol NU e blocat de cooldown-ul BTC
+        # another symbol is NOT blocked by BTC's cooldown
         self.assertTrue(tc.reserve_trade("BUY", "TAOUSDC", cooldown_sec=180)[0])
 
     def test_allowed_after_cooldown(self):
@@ -46,7 +46,7 @@ class TestTradeCooldown(unittest.TestCase):
     def test_release_unblocks(self):
         self.assertTrue(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)[0])
         tc.release_trade("BTCUSDC")                 # failed order -> released
-        self.assertTrue(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)[0])  # din nou permis
+        self.assertTrue(tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)[0])  # allowed again
 
     def test_update_binance_order_id(self):
         tc.reserve_trade("BUY", "BTCUSDC", cooldown_sec=180)
@@ -90,7 +90,7 @@ class TestTradeCooldown(unittest.TestCase):
     def test_slot_commit_keeps_reservation(self):
         with tc.trade_slot("BUY", "BTCUSDC", cooldown_sec=180) as slot:
             self.assertTrue(slot.allowed)
-            slot.commit(999)                         # ordin plasat
+            slot.commit(999)                         # the order was placed
         # commit -> the reservation STAYS -> the second one is blocked
         self.assertFalse(tc.reserve_trade("SELL", "BTCUSDC", cooldown_sec=180)[0])
 
@@ -163,7 +163,7 @@ class TestTradeCooldown(unittest.TestCase):
         with tc.trade_slot("SELL", "TAOUSDC", cooldown_sec=180,
                            pair_id="pair-1") as sell:
             self.assertTrue(sell.allowed)
-            # fara commit -> rollback numai SELL
+            # without a commit -> only the SELL is rolled back
 
         state = tc._cooldown().get("TAOUSDC")
         self.assertEqual(state["group_members"], ["BUY"])

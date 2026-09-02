@@ -77,7 +77,7 @@ class TrailingCore:
             atomic_write_json(self.state_file, state, indent=2)
             return True
         except OSError as e:
-            self.log(f"  ! [TRAIL] nu pot salva starea: {e}")
+            self.log(f"  ! [TRAIL] cannot save the state: {e}")
             return False
 
     def _pending_persist(self, state: dict, st: dict):
@@ -88,7 +88,7 @@ class TrailingCore:
             else:
                 st["pending_order"] = dict(pending)
             if not self.save(state):
-                raise RuntimeError("starea trailing pending nu a putut fi persistata")
+                raise RuntimeError("the pending trailing state could not be persisted")
         return persist
 
     def _finish_pending(self, st: dict, result, price: float) -> None:

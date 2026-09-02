@@ -1,4 +1,4 @@
-"""Evaluator generic walk-forward pentru adaptoare de strategie.
+"""A generic walk-forward evaluator for strategy adapters.
 
 The strategy stays venue-specific. The shared contract is a pure function
 ``replay(ohlc, warmup_ohlc, context) -> metrics``, so Kraken and Trading212 can
@@ -126,7 +126,7 @@ def evaluate_segment(
     required = {"return_pct", "max_drawdown_pct", "cycles", "fills"}
     missing = required.difference(metrics)
     if missing:
-        raise ValueError(f"adaptorul replay nu a furnizat metricile: {sorted(missing)}")
+        raise ValueError(f"the replay adapter did not supply the metrics: {sorted(missing)}")
     first_close = float(records[0]["close"])
     last_close = float(records[-1]["close"])
     buy_hold_pct = (last_close / first_close - 1.0) * 100.0 if first_close > 0 else None
@@ -151,7 +151,7 @@ def evaluate_walk_forward(
     warmup_bars: int = 0,
 ) -> dict:
     if warmup_bars < 0:
-        raise ValueError("warmup_bars nu poate fi negativ")
+        raise ValueError("warmup_bars cannot be negative")
     folds = walk_forward_splits(
         len(records),
         train_size=train_size,
@@ -162,7 +162,7 @@ def evaluate_walk_forward(
     )
     if not folds:
         raise ValueError(
-            f"date insuficiente: {len(records)} bare pentru train={train_size}, "
+            f"not enough data: {len(records)} bars for train={train_size}, "
             f"validation={validation_size}, test={test_size}"
         )
 

@@ -75,7 +75,7 @@ def stop_config_watcher():
 
 load_config()
 
-# Exemplu de utilizare
+# A usage example
 if __name__ == "__main__":
     start_config_watcher()
     print("Watching the configuration file...")

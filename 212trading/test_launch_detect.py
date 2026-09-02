@@ -58,7 +58,7 @@ class TestLansare(Base):
         self.feed(chart(price=135.0, meta_vol=0, meta_age_s=55 * 3600,
                         series=[(600, 164.0, 100), (300, 165.0, 200), (60, 166.0, 150)]))
         m = md.check_market("SPCX")
-        self.assertTrue(m["launched"], "seria live trebuie sa declare lansarea")
+        self.assertTrue(m["launched"], "a live series must declare the launch")
         self.assertEqual(m["price"], 166.0, "the price is the last live bar, not the 135 from meta")
 
     def test_a_price_move_without_volume_counts_as_launched(self):

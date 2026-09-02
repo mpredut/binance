@@ -160,7 +160,7 @@ class Cooldown:
             return True, entry
 
     def commit_group_member(self, key, group_id, member, **fields):
-        """Confirma membrul rezervat si pastreaza rezultatul lui separat."""
+        """Confirm the reserved member and keep its result separately."""
         group_id = str(group_id)
         member = str(member).upper()
         with FileLock(self.lock_path):

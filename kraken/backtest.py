@@ -193,7 +193,7 @@ def main() -> int:
         wr = 100*m["wins"]/m["cycles"] if m["cycles"] else 0
         print(f"=== BACKTEST KRAKEN {args.pair} interval={args.interval}m ({len(ohlc)} bare) [{engine}] ===")
         print(f"  params: entry={args.entry} dca={args.dca} drop={args.drop}% tp={args.tp}% sl={args.sl}% fee={args.fee}%/leg")
-        print(f"  TOTAL REAL: {tot:+.2f}% din budget  ⇐ realizat ${m['realized']:+.2f} + pozitie deschisa ${m['final_upnl']:+.2f} - fee ${m['fees']:.2f}")
+        print(f"  REAL TOTAL: {tot:+.2f}% of the budget  ⇐ realised ${m['realized']:+.2f} + the open position ${m['final_upnl']:+.2f} - fees ${m['fees']:.2f}")
         print(f"  (realizat singur: {m['net']/args.budget*100:+.2f}%)")
         print(f"  cicluri: {m['cycles']}  win-rate {wr:.0f}%   max drawdown ${m['maxdd']:.2f}")
         if not args.fast:

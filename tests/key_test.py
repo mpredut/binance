@@ -1,5 +1,5 @@
 """
-Test pentru crearea unui userDataStream (listenKey) la Binance.
+A test for creating a userDataStream (listenKey) on Binance.
 Runs with mocks (no network/keys) -> deterministic. For a REAL API smoke test,
 run it directly: `python tests/key_test.py` (see the __main__ block).
 """

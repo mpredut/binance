@@ -1,4 +1,4 @@
-"""Convertor istoric manual; nu face parte din runtime."""
+"""A historical manual converter; it is not part of the runtime."""
 
 import json
 
@@ -20,7 +20,7 @@ def convert_price_cache(input_file: str, output_file: str, symbol: str):
     with open(output_file, "w") as f:
         json.dump(new_data, f, indent=2, separators=(",", ": "))
 
-    print(f"[INFO] Convertit pentru {symbol} si salvat in {output_file}")
+    print(f"[INFO] Converted for {symbol} and saved into {output_file}")
 
 
 

@@ -147,7 +147,7 @@ def main() -> int:
     ap.add_argument("--tp", type=float, default=1.9); ap.add_argument("--maxdca", type=int, default=10)
     ap.add_argument("--budget", type=float, default=1000); ap.add_argument("--fee", type=float, default=0.25)
     ap.add_argument("--sl", type=float, default=10.0)
-    ap.add_argument("--refresh", type=int, default=6, help="ore intre update-uri Chronos (cadenta daemon)")
+    ap.add_argument("--refresh", type=int, default=6, help="hours between Chronos updates (the daemon's cadence)")
     ap.add_argument("--horizon", type=int, default=24)
     args = ap.parse_args()
 

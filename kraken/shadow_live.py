@@ -305,7 +305,7 @@ def _print_block(title: str, blk: dict) -> None:
     bh_s = f"{bh:+.2f}%" if bh is not None else "n/a"
     print(f"  [{title}] {blk['bars']} bare  buy&hold {bh_s}")
     if not r:
-        print("    (insuficiente bare — se acumuleaza)")
+        print("    (not enough bars — they are accumulating)")
         return
     cur = r["current"]["total_pct"]
     print(f"    {'config':<20} {'net%':>8} {'total%':>8} {'maxDD%':>8} "
@@ -322,7 +322,7 @@ def _print_block(title: str, blk: dict) -> None:
 def _print(snap: dict) -> None:
     print(f"[{snap['ts']}] {snap['pair']} {snap['interval_min']}m  last={snap['last_close']}")
     _print_block("FORWARD (de la ancora)", snap["forward"])
-    _print_block("window (context, fereastra completa)", snap["window"])
+    _print_block("window (context, the complete window)", snap["window"])
 
 
 def _append_jsonl(pair: str, interval: int, snap: dict) -> None:
@@ -338,8 +338,8 @@ def main() -> int:
     )
     ap.add_argument("--interval", type=int, default=60, help="minute per bar (60/240/1440)")
     ap.add_argument("--fee", type=float, default=0.26, help="comision per leg %%")
-    ap.add_argument("--pair", default=None, help="implicit KRAKEN_PAIR din .env/config.env")
-    ap.add_argument("--loop", type=float, default=0.0, help="minute intre rulari (0=single-shot)")
+    ap.add_argument("--pair", default=None, help="KRAKEN_PAIR from .env/config.env by default")
+    ap.add_argument("--loop", type=float, default=0.0, help="minutes between runs (0=single shot)")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args()
 

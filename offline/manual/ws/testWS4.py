@@ -1,5 +1,5 @@
 
-"""Diagnostic WebSocket manual; poate accesa API-ul real."""
+"""A manual WebSocket diagnostic; it may reach the real API."""
 
 import asyncio
 import websockets
@@ -21,7 +21,7 @@ async def test_ws():
         }
         
         await ws.send(json.dumps(request))
-        print("Subscribe trimis, plaseaza un order din app!")
+        print("Subscribe sent, place an order from the app!")
         
         while True:
             try:
