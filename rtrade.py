@@ -882,7 +882,7 @@ def _market_regime_decision(symbol) -> MarketRegimeDecision:
     """Adapt the existing cache source to the provider-neutral regime evaluator."""
     if not RTRADE_TREND_FILTER_ENABLED:
         return mkt.market_regime(
-            symbol, horizon="short", snapshot={},
+            symbol, horizon="short", snapshot={}, snapshot_source="cache24_dynamic",
             strength_threshold=RTRADE_TREND_FILTER_K, allow_fallback=False)
     try:
         import cacheManager as cm
@@ -890,11 +890,12 @@ def _market_regime_decision(symbol) -> MarketRegimeDecision:
             symbol, RTRADE_TREND_WINDOW_SEC)
     except Exception as exc:
         return mkt.market_regime(
-            symbol, horizon="short", snapshot={},
+            symbol, horizon="short", snapshot={}, snapshot_source="cache24_dynamic",
             strength_threshold=RTRADE_TREND_FILTER_K,
             allow_fallback=RTRADE_TREND_OHLC_FALLBACK_ENABLED)
     return mkt.market_regime(
         symbol, horizon="short", snapshot=dyn or {},
+        snapshot_source="cache24_dynamic",
         strength_threshold=RTRADE_TREND_FILTER_K,
         allow_fallback=RTRADE_TREND_OHLC_FALLBACK_ENABLED)
 

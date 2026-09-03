@@ -326,6 +326,9 @@ class KrakenExecutorContractTest(unittest.TestCase):
     def test_ohlc_closes_delegates(self):
         self.assertEqual(self.p.ohlc_closes("HYPEUSD", 240), [10.0, 11.0, 12.0])
 
+        series = self.p.ohlc_series("HYPEUSD", 240)
+        self.assertEqual(series.closes, (10.0, 11.0, 12.0))
+        self.assertIsNone(series.last_closed_at)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

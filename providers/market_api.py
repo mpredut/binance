@@ -29,8 +29,11 @@ from .strategy_executor import (
     reconciliation_capabilities_of,
 )
 from market_regime import (
+    ClosedPriceSeries,
     CompositeMarketRegimeDecision,
     MarketRegimeDecision,
+    MarketRegimeBundle,
+    MarketRegimeResolution,
     MarketRegimeService,
 )
 
@@ -265,14 +268,30 @@ class BinanceProvider(MarketDataProvider):
             order_min=float(rules.lot_min), base_asset=rules.base_asset,
         )
 
-    def ohlc_closes(self, symbol: str, interval_min: int) -> list:
+    def ohlc_series(self, symbol: str, interval_min: int) -> ClosedPriceSeries:
         iv = candle_interval(interval_min)
         try:
-            kl = _get_bapi().client.get_klines(symbol=symbol, interval=iv, limit=91)
-        except Exception as e:  # noqa: BLE001
-            raise ProviderError(f"ohlc_closes({symbol}): {e}") from e
-        closes = [float(k[4]) for k in (kl or [])]     # k[4] is the close.
-        return closes[:-1] if closes else []           # Exclude the forming bar.
+            klines = _get_bapi().client.get_klines(
+                symbol=symbol, interval=iv, limit=91)
+        except Exception as exc:
+            raise ProviderError(f"ohlc_series({symbol}): {exc}") from exc
+        completed = list(klines or ())[:-1]
+        closes = tuple(float(item[4]) for item in completed)
+        timestamps = (
+            tuple(float(item[6]) / 1000.0 for item in completed)
+            if completed and all(len(item) > 6 for item in completed)
+            else ()
+        )
+        observed_at = timestamps[-1] if timestamps else None
+        return ClosedPriceSeries(
+            closes,
+            int(interval_min),
+            observed_at,
+            timestamps,
+        )
+
+    def ohlc_closes(self, symbol: str, interval_min: int) -> list:
+        return list(self.ohlc_series(symbol, interval_min).closes)
 
     def submit_order(self, symbol: str, side: str, qty: float,
                      price: Optional[float] = None, *, market: bool = False,
@@ -601,54 +620,203 @@ class MarketApi:
             clock=clock,
         )
 
+    def _regime_service_for(self, strength_threshold=None):
+        service = self._regime_service
+        if strength_threshold is None:
+            return service
+        return MarketRegimeService(
+            strength_threshold,
+            cache_ttl_sec=service.cache_ttl_sec,
+            negative_cache_ttl_sec=service.negative_cache_ttl_sec,
+            cache_max=service.cache_max,
+            clock=service.clock,
+        )
+
+    def market_regime_resolution(
+        self,
+        symbol: str,
+        *,
+        provider_name=None,
+        horizon="short",
+        interval_min=None,
+        window_seconds=None,
+        snapshot=None,
+        snapshot_source="snapshot",
+        snapshot_max_age_seconds=None,
+        ohlc_max_age_seconds=None,
+        strength_threshold=None,
+        allow_fallback=True,
+        include_alternates=False,
+        role=None,
+        now=None,
+    ) -> MarketRegimeResolution:
+        """Return the selected decision and every source examined for its horizon."""
+        service = self._regime_service_for(strength_threshold)
+        provider = self._provider_explicit_or_routed(symbol, provider_name)
+        return service.resolve_with_evidence(
+            provider,
+            symbol,
+            horizon=horizon,
+            interval_min=interval_min,
+            window_seconds=window_seconds,
+            snapshot=snapshot,
+            snapshot_source=snapshot_source,
+            snapshot_max_age_seconds=snapshot_max_age_seconds,
+            ohlc_max_age_seconds=ohlc_max_age_seconds,
+            allow_fallback=allow_fallback,
+            include_alternates=include_alternates,
+            role=role,
+            now=now,
+        )
+
     def market_regime(self, symbol: str, *, provider_name=None, horizon="short",
                       interval_min=None, window_seconds=None, snapshot=None,
-                      strength_threshold=None,
+                      snapshot_source="snapshot", snapshot_max_age_seconds=None,
+                      ohlc_max_age_seconds=None, strength_threshold=None,
                       allow_fallback=True) -> MarketRegimeDecision:
         """Return a common regime with explicit horizon and source fallback."""
-        service = self._regime_service
-        if strength_threshold is not None:
-            service = MarketRegimeService(
-                strength_threshold, cache_ttl_sec=service.cache_ttl_sec,
-                cache_max=service.cache_max)
-        provider = self._provider_explicit_or_routed(symbol, provider_name)
-        return service.resolve(
-            provider, symbol, horizon=horizon, snapshot=snapshot,
-            interval_min=interval_min, window_seconds=window_seconds,
-            allow_fallback=allow_fallback)
+        return self.market_regime_resolution(
+            symbol,
+            provider_name=provider_name,
+            horizon=horizon,
+            interval_min=interval_min,
+            window_seconds=window_seconds,
+            snapshot=snapshot,
+            snapshot_source=snapshot_source,
+            snapshot_max_age_seconds=snapshot_max_age_seconds,
+            ohlc_max_age_seconds=ohlc_max_age_seconds,
+            strength_threshold=strength_threshold,
+            allow_fallback=allow_fallback,
+        ).decision
 
-    def composite_market_regime(self, symbol: str, *, benchmarks=(),
-                                provider_name=None, use_case="balanced", weights=None,
-                                strength_threshold=None,
-                                allow_fallback=True) -> CompositeMarketRegimeDecision:
+    def market_regime_bundle(
+        self,
+        symbol: str,
+        *,
+        benchmarks=(),
+        provider_name=None,
+        benchmark_provider_name=None,
+        use_case="balanced",
+        weights=None,
+        snapshot=None,
+        snapshot_source="snapshot",
+        snapshot_max_age_seconds=None,
+        ohlc_max_age_seconds=None,
+        strength_threshold=None,
+        allow_fallback=True,
+        include_alternates=False,
+        now=None,
+    ) -> MarketRegimeBundle:
+        """Collect evidence and select only fresh, usable directional sources."""
+        service = self._regime_service_for(strength_threshold)
+        provider = self._provider_explicit_or_routed(symbol, provider_name)
+        evaluated_at = time.time() if now is None else now
+        if snapshot_max_age_seconds is None:
+            snapshot_max_age_seconds = (
+                service.default_snapshot_max_age_seconds())
+        if ohlc_max_age_seconds is None:
+            ohlc_max_age_seconds = service.default_ohlc_max_age_seconds()
+
+        if isinstance(benchmarks, str):
+            benchmark_candidates = (benchmarks,)
+        else:
+            benchmark_candidates = tuple(benchmarks or ())
+        normalized_benchmarks = []
+        seen_benchmarks = set()
+        for item in benchmark_candidates:
+            benchmark = str(item or "").strip()
+            if not benchmark:
+                raise ValueError("benchmark symbols must be non-empty")
+            identity = benchmark.upper()
+            if identity not in seen_benchmarks:
+                normalized_benchmarks.append(benchmark)
+                seen_benchmarks.add(identity)
+
+        def resolve(
+            source_provider,
+            target,
+            horizon,
+            role,
+            source_snapshot=None,
+        ):
+            return service.resolve_with_evidence(
+                source_provider,
+                target,
+                horizon=horizon,
+                snapshot=source_snapshot,
+                snapshot_source=snapshot_source,
+                snapshot_max_age_seconds=snapshot_max_age_seconds,
+                ohlc_max_age_seconds=ohlc_max_age_seconds,
+                allow_fallback=allow_fallback,
+                include_alternates=include_alternates,
+                role=role,
+                now=evaluated_at,
+            )
+
+        asset_short = resolve(
+            provider, symbol, "short", "asset_short", snapshot)
+        asset_long = resolve(provider, symbol, "long", "asset_long")
+        benchmark_resolutions = []
+        for benchmark in normalized_benchmarks:
+            if benchmark_provider_name is not None:
+                benchmark_provider = self._provider_explicit_or_routed(
+                    benchmark, benchmark_provider_name)
+            elif provider_name is not None:
+                benchmark_provider = provider
+            else:
+                benchmark_provider = self._provider_explicit_or_routed(
+                    benchmark, None)
+            short = resolve(
+                benchmark_provider, benchmark, "short", "benchmark_short")
+            long = resolve(
+                benchmark_provider, benchmark, "long", "benchmark_long")
+            benchmark_resolutions.append((benchmark, short, long))
+
+        all_evidence = (
+            tuple(asset_short.evidence)
+            + tuple(asset_long.evidence)
+            + tuple(
+                item
+                for _benchmark, short, long in benchmark_resolutions
+                for item in (*short.evidence, *long.evidence)
+            )
+        )
+        composite = service.compose_evidence(
+            all_evidence,
+            asset_symbol=symbol,
+            use_case=use_case,
+            weights=weights,
+        )
+        return MarketRegimeBundle(
+            composite,
+            asset_short,
+            asset_long,
+            tuple(benchmark_resolutions),
+        )
+
+    def composite_market_regime(
+        self,
+        symbol: str,
+        *,
+        benchmarks=(),
+        provider_name=None,
+        benchmark_provider_name=None,
+        use_case="balanced",
+        weights=None,
+        strength_threshold=None,
+        allow_fallback=True,
+    ) -> CompositeMarketRegimeDecision:
         """Blend asset horizons with explicitly configured crypto benchmarks."""
-        service = self._regime_service
-        if strength_threshold is not None:
-            service = MarketRegimeService(
-                strength_threshold, cache_ttl_sec=service.cache_ttl_sec,
-                cache_max=service.cache_max)
-        asset_short = self.market_regime(
-            symbol, provider_name=provider_name, horizon="short",
-            strength_threshold=strength_threshold, allow_fallback=allow_fallback)
-        asset_long = self.market_regime(
-            symbol, provider_name=provider_name, horizon="long",
-            strength_threshold=strength_threshold, allow_fallback=allow_fallback)
-        context = []
-        for benchmark in tuple(benchmarks or ()):
-            benchmark = str(benchmark)
-            context.append((
-                benchmark,
-                self.market_regime(
-                    benchmark, provider_name=provider_name, horizon="short",
-                    strength_threshold=strength_threshold,
-                    allow_fallback=allow_fallback),
-                self.market_regime(
-                    benchmark, provider_name=provider_name, horizon="long",
-                    strength_threshold=strength_threshold,
-                    allow_fallback=allow_fallback),
-            ))
-        return service.compose(
-            asset_short, asset_long, context, use_case=use_case, weights=weights)
+        return self.market_regime_bundle(
+            symbol,
+            benchmarks=benchmarks,
+            provider_name=provider_name,
+            benchmark_provider_name=benchmark_provider_name,
+            use_case=use_case,
+            weights=weights,
+            strength_threshold=strength_threshold,
+            allow_fallback=allow_fallback,
+        ).composite
 
     def preflight_order(self, symbol: str, side: str, qty: float,
                         price=None, *, market: bool = False,

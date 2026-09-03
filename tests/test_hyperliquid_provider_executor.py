@@ -113,6 +113,33 @@ class HLExecutorContractTest(unittest.TestCase):
     def test_ohlc_closes_exclude_forming_bar(self):
         self.assertEqual(self.p.ohlc_closes("HYPE", 240), [10.0, 11.0])
 
+    def test_ohlc_series_preserves_last_completed_timestamp(self):
+        self.p._client.candles = lambda *_args: [
+            {"c": "10", "T": 1_000},
+            {"c": "11", "T": 2_000},
+            {"c": "12", "T": 3_000},
+        ]
+        series = self.p.ohlc_series("HYPE", 240)
+        self.assertEqual(series.closes, (10.0, 11.0))
+        self.assertEqual(series.last_closed_at, 2.0)
+        self.assertEqual(series.timestamps, (1.0, 2.0))
+
+    def test_ohlc_rejects_non_hype_symbol_before_reading_cached_pair(self):
+        calls = []
+        self.p._client.candles = lambda *args: calls.append(args)
+        for symbol in ("BTCUSDC", "HYPERUSDC", "HYPEFAKE", "HYPEUSD"):
+            with self.subTest(symbol=symbol):
+                with self.assertRaisesRegex(ProviderError, "unsupported"):
+                    self.p.ohlc_closes(symbol, 240)
+        self.assertEqual(calls, [])
+
+    def test_exact_hyperliquid_spot_aliases_are_supported(self):
+        self.assertTrue(self.p.supports_symbol("HYPE"))
+        self.assertTrue(self.p.supports_symbol("HYPEUSDC"))
+        self.assertTrue(self.p.supports_symbol("HYPE/USDC"))
+        self.assertFalse(self.p.supports_symbol("HYPEUSD"))
+        self.assertFalse(self.p.supports_symbol("HYPEFAKE"))
+
     def test_submit_order_is_gated_by_hl_live_orders(self):
         # by default HL_LIVE_ORDERS is missing -> a refusal (DN co-mingling safety)
         with self.assertRaises(ProviderError):

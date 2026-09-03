@@ -31,6 +31,7 @@ from .strategy_executor import (
     extract_order_id,
 )
 from credentials import CredentialProfileMissingError, kraken_credentials
+from market_regime import ClosedPriceSeries
 
 _KRAKEN_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "kraken")
 # Shared cross-process fill cache produced by kraken_cachemanager.py.
@@ -530,8 +531,31 @@ class KrakenProvider(MarketDataProvider):
         except (TypeError, ValueError) as e:
             raise ProviderError(f"pair_precision {symbol}: info malformat ({e})") from e
 
-    def ohlc_closes(self, symbol: str, interval_min: int) -> list:
+    def ohlc_series(self, symbol: str, interval_min: int) -> ClosedPriceSeries:
         try:
-            return self._client().ohlc_closes(symbol, interval_min)
-        except Exception as e:  # noqa: BLE001
-            raise ProviderError(f"ohlc_closes {symbol}: {e}") from e
+            client = self._client()
+            series_reader = getattr(
+                client, "ohlc_closes_with_timestamps", None)
+            if callable(series_reader):
+                closes, timestamps = series_reader(symbol, interval_min)
+                timestamps = tuple(timestamps or ())
+                observed_at = timestamps[-1] if timestamps else None
+            else:
+                reader = getattr(client, "ohlc_closes_with_timestamp", None)
+                if callable(reader):
+                    closes, observed_at = reader(symbol, interval_min)
+                else:
+                    closes = client.ohlc_closes(symbol, interval_min)
+                    observed_at = None
+                timestamps = ()
+            return ClosedPriceSeries(
+                tuple(closes or ()),
+                int(interval_min),
+                observed_at,
+                timestamps,
+            )
+        except Exception as exc:
+            raise ProviderError(f"ohlc_series {symbol}: {exc}") from exc
+
+    def ohlc_closes(self, symbol: str, interval_min: int) -> list:
+        return list(self.ohlc_series(symbol, interval_min).closes)

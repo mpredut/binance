@@ -1,6 +1,11 @@
 import unittest
 
-from market_regime import MarketRegimeEvaluator, MarketRegimeService
+from market_regime import (
+    ClosedPriceSeries,
+    MarketRegimeEvidence,
+    MarketRegimeEvaluator,
+    MarketRegimeService,
+)
 
 
 class MarketRegimeEvaluatorTest(unittest.TestCase):
@@ -34,6 +39,379 @@ class MarketRegimeEvaluatorTest(unittest.TestCase):
         invalid = self.evaluator.evaluate({"gradient_recent": "bad", "epsilon": 1})
         self.assertEqual((invalid.regime, invalid.fresh, invalid.reason),
                          ("unknown", False, "invalid_signal"))
+
+    def test_incomplete_snapshot_is_explicit_unknown(self):
+        decision = self.evaluator.evaluate({"gradient_recent": 0.5, "ts": 1000})
+        self.assertEqual(
+            (decision.regime, decision.fresh, decision.reason),
+            ("unknown", False, "missing_signal_fields"),
+        )
+
+    def test_invalid_snapshot_metadata_is_explicit_unknown(self):
+        invalid_samples = self.evaluator.evaluate({
+            "gradient_recent": 0.5,
+            "epsilon": 0.1,
+            "n_samples": float("nan"),
+        })
+        invalid_window = self.evaluator.evaluate({
+            "gradient_recent": 0.5,
+            "epsilon": 0.1,
+            "window_seconds": -1,
+        })
+
+        self.assertEqual(invalid_samples.reason, "invalid_signal_metadata")
+        self.assertEqual(invalid_window.reason, "invalid_window_metadata")
+        self.assertFalse(invalid_samples.fresh)
+        self.assertFalse(invalid_window.fresh)
+
+    def test_incomplete_snapshot_is_retained_before_ohlc_fallback(self):
+        class Provider:
+            name = "Binance"
+
+            def __init__(self):
+                self.calls = []
+
+            def ohlc_closes(self, _symbol, interval):
+                self.calls.append(interval)
+                return [100, 101, 102, 103, 104, 105]
+
+        provider = Provider()
+        resolution = MarketRegimeService().resolve_with_evidence(
+            provider,
+            "TAOUSDC",
+            snapshot={"gradient_recent": 0.5, "ts": 1000},
+            now=1000,
+        )
+
+        self.assertEqual(provider.calls, [1])
+        self.assertEqual(len(resolution.evidence), 2)
+        self.assertEqual(
+            resolution.evidence[0].decision.reason,
+            "missing_signal_fields",
+        )
+        self.assertEqual(resolution.primary.decision.source, "ohlc:1m")
+
+    def test_stale_snapshot_falls_back_and_remains_observable(self):
+        class Provider:
+            name = "Binance"
+
+            def __init__(self):
+                self.calls = []
+
+            def ohlc_closes(self, _symbol, interval):
+                self.calls.append(interval)
+                return [100, 101, 102, 103, 104, 105]
+
+        provider = Provider()
+        resolution = MarketRegimeService().resolve_with_evidence(
+            provider,
+            "TAOUSDC",
+            snapshot={"gradient_recent": 0.5, "epsilon": 0.1, "ts": 900},
+            snapshot_max_age_seconds=30,
+            now=1000,
+        )
+
+        self.assertEqual(provider.calls, [1])
+        self.assertEqual(resolution.evidence[0].temporal_state, "stale")
+        self.assertFalse(resolution.evidence[0].usable)
+        self.assertEqual(resolution.selected_index, 1)
+        self.assertEqual(resolution.primary.decision.source, "ohlc:1m")
+
+    def test_stale_snapshot_without_fallback_has_no_selected_source(self):
+        resolution = MarketRegimeService().resolve_with_evidence(
+            object(),
+            "TAOUSDC",
+            snapshot={"gradient_recent": 0.5, "epsilon": 0.1, "ts": 900},
+            snapshot_max_age_seconds=30,
+            allow_fallback=False,
+            now=1000,
+        )
+
+        self.assertIsNone(resolution.selected_index)
+        self.assertIsNone(resolution.primary)
+        self.assertFalse(resolution.decision.fresh)
+        self.assertEqual(resolution.decision.reason, "stale_source")
+
+    def test_snapshot_observed_at_falls_back_to_valid_ts(self):
+        resolution = MarketRegimeService().resolve_with_evidence(
+            object(),
+            "TAOUSDC",
+            snapshot={
+                "gradient_recent": 0.5,
+                "epsilon": 0.1,
+                "observed_at": None,
+                "ts": 990,
+            },
+            snapshot_max_age_seconds=30,
+            allow_fallback=False,
+            now=1000,
+        )
+
+        self.assertEqual(resolution.primary.observed_at, 990)
+        self.assertEqual(resolution.primary.temporal_state, "fresh")
+
+    def test_snapshot_at_exact_age_limit_remains_fresh(self):
+        resolution = MarketRegimeService().resolve_with_evidence(
+            object(),
+            "TAOUSDC",
+            snapshot={"gradient_recent": 0.5, "epsilon": 0.1, "ts": 970},
+            snapshot_max_age_seconds=30,
+            allow_fallback=False,
+            now=1000,
+        )
+
+        self.assertEqual(resolution.primary.temporal_state, "fresh")
+        self.assertTrue(resolution.primary.usable)
+
+    def test_interval_specific_age_limits_select_fresh_fallback(self):
+        class Provider:
+            name = "Kraken"
+
+            def ohlc_series(self, _symbol, interval):
+                observed_at = 900 if interval == 1 else 980
+                return ClosedPriceSeries(
+                    (100, 101, 102, 103, 104, 105),
+                    interval,
+                    observed_at,
+                )
+
+        resolution = MarketRegimeService().resolve_with_evidence(
+            Provider(),
+            "HYPEUSD",
+            horizon="short",
+            ohlc_max_age_seconds={1: 30, 5: 60},
+            now=1000,
+        )
+
+        self.assertEqual(resolution.selected_index, 1)
+        self.assertEqual(resolution.primary.interval_min, 5)
+        self.assertEqual(
+            [item.max_age_seconds for item in resolution.evidence],
+            [30.0, 60.0],
+        )
+        self.assertEqual(
+            [item.temporal_state for item in resolution.evidence],
+            ["stale", "fresh"],
+        )
+
+    def test_gap_outside_consumed_window_does_not_invalidate_series(self):
+        class Provider:
+            name = "Kraken"
+
+            def ohlc_series(self, _symbol, interval):
+                timestamps = [100 + index * 60 for index in range(20)]
+                timestamps[2] += 30
+                return ClosedPriceSeries(
+                    tuple(range(100, 120)),
+                    interval,
+                    timestamps[-1],
+                    tuple(timestamps),
+                )
+
+        resolution = MarketRegimeService().resolve_with_evidence(
+            Provider(),
+            "HYPEUSD",
+            allow_fallback=False,
+            ohlc_max_age_seconds={1: 30},
+            now=1250,
+        )
+
+        self.assertIsNotNone(resolution.primary)
+        self.assertTrue(resolution.primary.continuous_candles)
+
+    def test_alternate_collection_is_explicit_and_does_not_change_selection(self):
+        class Provider:
+            name = "Kraken"
+
+            def __init__(self):
+                self.calls = []
+
+            def ohlc_closes(self, _symbol, interval):
+                self.calls.append(interval)
+                return [100, 101, 102, 103, 104, 105]
+
+        primary_provider = Provider()
+        primary = MarketRegimeService().resolve_with_evidence(
+            primary_provider, "HYPEUSD", horizon="short", now=1000)
+        alternate_provider = Provider()
+        with_alternates = MarketRegimeService().resolve_with_evidence(
+            alternate_provider,
+            "HYPEUSD",
+            horizon="short",
+            include_alternates=True,
+            now=1000,
+        )
+
+        self.assertEqual(primary_provider.calls, [1])
+        self.assertEqual(alternate_provider.calls, [1, 5])
+        self.assertEqual(primary.decision, with_alternates.decision)
+        self.assertEqual(with_alternates.selected_index, 0)
+        self.assertEqual(len(with_alternates.evidence), 2)
+        self.assertEqual(
+            len({item.correlation_key for item in with_alternates.evidence}),
+            1,
+        )
+
+    def test_benchmark_context_cannot_create_or_reverse_asset_direction(self):
+        service = MarketRegimeService()
+        bull = self.evaluator.evaluate({"gradient_recent": 0.6, "epsilon": 0.1})
+        bear = self.evaluator.evaluate({"gradient_recent": -0.6, "epsilon": 0.1})
+        sideways = self.evaluator.evaluate(
+            {"gradient_recent": 0.0, "epsilon": 0.1})
+        unknown = self.evaluator.unknown()
+
+        context_only = service.compose(
+            sideways, unknown, (("BTC", bull, bull),))
+        self.assertTrue(context_only.actionable)
+        self.assertEqual(context_only.regime, "sideways")
+        self.assertEqual(context_only.score, 0.0)
+
+        unavailable_asset = service.compose(
+            unknown, unknown, (("BTC", bull, bull),))
+        self.assertFalse(unavailable_asset.actionable)
+        self.assertEqual(unavailable_asset.regime, "unknown")
+
+        hostile_context = service.compose(
+            bull,
+            bull,
+            (("BTC", bear, bear),),
+            weights={
+                "asset_short": 0.1,
+                "asset_long": 0.1,
+                "benchmark_short": 0.4,
+                "benchmark_long": 0.4,
+            },
+        )
+        self.assertEqual(hostile_context.regime, "sideways")
+        self.assertNotEqual(hostile_context.regime, "bear")
+        self.assertTrue(hostile_context.conflict)
+
+        weak_bull = self.evaluator.evaluate({
+            "gradient_recent": 0.21,
+            "epsilon": 0.1,
+        })
+        aligned_context = service.compose(
+            unknown,
+            weak_bull,
+            (("BTC", bull, bull),),
+        )
+        self.assertEqual(aligned_context.regime, "bull")
+        self.assertGreater(aligned_context.score, 0.15)
+
+    def test_timestamped_closed_series_propagates_verified_freshness(self):
+        class Provider:
+            name = "Hyperliquid"
+
+            def ohlc_series(self, _symbol, interval):
+                return ClosedPriceSeries(
+                    (100, 101, 102, 103, 104, 105),
+                    interval,
+                    980,
+                    (680, 740, 800, 860, 920, 980),
+                )
+
+        resolution = MarketRegimeService().resolve_with_evidence(
+            Provider(),
+            "HYPE",
+            now=1000,
+            ohlc_max_age_seconds=30,
+        )
+
+        self.assertEqual(resolution.primary.observed_at, 980)
+        self.assertEqual(resolution.primary.temporal_state, "fresh")
+        self.assertTrue(resolution.primary.time_verified)
+        self.assertTrue(resolution.primary.closed_candles)
+
+    def test_candle_gap_is_retained_but_not_selected(self):
+        class Provider:
+            name = "Gap"
+
+            def ohlc_series(self, _symbol, interval):
+                return ClosedPriceSeries(
+                    (100, 101, 102),
+                    interval,
+                    980,
+                    (800, 860, 980),
+                )
+
+        resolution = MarketRegimeService().resolve_with_evidence(
+            Provider(),
+            "ABCUSD",
+            allow_fallback=False,
+            ohlc_max_age_seconds={1: 60},
+            now=1000,
+        )
+
+        self.assertIsNone(resolution.primary)
+        self.assertFalse(resolution.decision.fresh)
+        self.assertIn("candle_gap", resolution.decision.reason)
+        self.assertFalse(resolution.evidence[0].continuous_candles)
+
+    def test_unknown_provider_result_uses_short_backoff_then_recovers(self):
+        class Provider:
+            name = "Recovering"
+
+            def __init__(self):
+                self.calls = 0
+
+            def ohlc_closes(self, _symbol, _interval):
+                self.calls += 1
+                if self.calls == 1:
+                    raise RuntimeError("temporary")
+                return [100, 101, 102, 103, 104, 105]
+
+        provider = Provider()
+        current = [0.0]
+        service = MarketRegimeService(
+            cache_ttl_sec=60,
+            negative_cache_ttl_sec=2,
+            clock=lambda: current[0],
+        )
+        first = service.evaluate_provider(provider, "ABCUSD")
+        backed_off = service.evaluate_provider(provider, "ABCUSD")
+        current[0] = 2.1
+        recovered = service.evaluate_provider(provider, "ABCUSD")
+
+        self.assertEqual(first.regime, "unknown")
+        self.assertEqual(backed_off.regime, "unknown")
+        self.assertEqual(recovered.regime, "bull")
+        self.assertEqual(provider.calls, 2)
+
+    def test_compose_evidence_ignores_non_directional_families(self):
+        bull = self.evaluator.evaluate({
+            "gradient_recent": 0.6,
+            "epsilon": 0.1,
+        })
+        bear = self.evaluator.evaluate({
+            "gradient_recent": -0.6,
+            "epsilon": 0.1,
+        })
+
+        def item(role, decision, family="price_trend"):
+            return MarketRegimeEvidence(
+                role=role,
+                family=family,
+                classifier="test",
+                provider="Kraken",
+                symbol="HYPEUSD",
+                decision=decision,
+                evaluated_at=1000,
+                observed_at=990,
+                max_age_seconds=30,
+                correlation_key=f"HYPEUSD:{role}:{family}",
+            )
+
+        decision = MarketRegimeService().compose_evidence(
+            (
+                item("asset_short", bull),
+                item("asset_short", bear, family="persistence"),
+                item("asset_long", bull),
+            ),
+            asset_symbol="HYPEUSD",
+        )
+
+        self.assertEqual(decision.regime, "bull")
+        self.assertEqual(len(decision.components), 2)
 
     def test_common_service_derives_regime_from_provider_ohlc(self):
         class Provider:

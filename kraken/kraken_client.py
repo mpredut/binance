@@ -40,7 +40,8 @@ _CACHE = {}                       # (method, params_key) -> (expiry_ts, result)
 _CACHE_LOCK = threading.Lock()
 _CACHE_MAX = 1024
 _READ_TTL = {                     # seconds; unlisted methods are not cached (e.g. QueryOrders)
-    "Ticker": 3.0, "AssetPairs": 3600.0, "OHLC": 900.0,   # OHLC for the long-trend signal (15 min)
+    # OHLC is capped at 15 minutes; _read_ttl shortens it for short intervals.
+    "Ticker": 3.0, "AssetPairs": 3600.0, "OHLC": 900.0,
     "Balance": 15.0, "TradesHistory": 20.0, "ClosedOrders": 20.0, "OpenOrders": 5.0,
 }
 _WRITE_METHODS = ("AddOrder", "CancelOrder", "CancelAll")
@@ -49,6 +50,18 @@ _INVALIDATE_ON_WRITE = ("Balance", "TradesHistory", "ClosedOrders", "OpenOrders"
 
 def _params_key(params: dict) -> tuple:
     return tuple(sorted((str(k), str(v)) for k, v in params.items() if k != "nonce"))
+
+
+def _read_ttl(method: str, params: dict) -> float | None:
+    """Return an interval-aware TTL for cacheable reads."""
+    ttl = _READ_TTL.get(method)
+    if not ttl or method != "OHLC":
+        return ttl
+    try:
+        interval = max(1.0, float(params.get("interval", 1)))
+    except (TypeError, ValueError, OverflowError):
+        interval = 1.0
+    return min(float(ttl), max(3.0, interval * 30.0))
 
 
 def _cache_get(method: str, params: dict):
@@ -106,7 +119,7 @@ class KrakenClient:
         if not self.api_key or not self.api_secret:
             raise KrakenError("Missing Kraken keys (check KRAKEN_API_KEY_BOT/_TRAIL/_CACHE in kraken/.env)")
         data = dict(data or {})
-        ttl = _READ_TTL.get(method)
+        ttl = _read_ttl(method, data)
         if ttl and not fresh:                       # serve a cacheable read from a fresh cache entry
             ok, val = _cache_get(method, data)
             if ok:
@@ -128,7 +141,7 @@ class KrakenClient:
 
     def _public(self, method: str, params: dict | None = None, fresh: bool = False) -> dict:
         params = dict(params or {})
-        ttl = _READ_TTL.get(method)
+        ttl = _read_ttl(method, params)
         if ttl and not fresh:
             ok, val = _cache_get(method, params)
             if ok:
@@ -173,15 +186,29 @@ class KrakenClient:
         res = self._public("Ticker", {"pair": pair})
         return next(iter(res.values())) if res else None
 
-    def ohlc_closes(self, pair: str, interval: int) -> list:
-        """Return OHLC closing prices, cached for 15 minutes, for the overlay's
-        LONG-trend signal. Interval is in minutes (60=1h, 240=4h, 1440=1d), matching
-        the backtest time scale and bars."""
+    def ohlc_closes_with_timestamps(
+        self, pair: str, interval: int,
+    ) -> tuple[list, tuple]:
+        """Return completed OHLC closes and every corresponding close timestamp."""
         res = self._public("OHLC", {"pair": pair, "interval": interval})
-        key = next((k for k in res if k != "last"), None)
-        # The last row may be a candle still forming. The live signal must decide only
-        # on closed bars; otherwise it can oscillate intrabar.
-        return [float(x[4]) for x in res[key][:-1]] if key else []
+        key = next((key for key in res if key != "last"), None)
+        rows = list(res[key])[:-1] if key else []
+        closes = [float(row[4]) for row in rows]
+        timestamps = tuple(
+            float(row[0]) + int(interval) * 60 for row in rows)
+        return closes, timestamps
+
+    def ohlc_closes_with_timestamp(
+        self, pair: str, interval: int,
+    ) -> tuple[list, float | None]:
+        """Return completed closes and the newest close timestamp."""
+        closes, timestamps = self.ohlc_closes_with_timestamps(pair, interval)
+        return closes, timestamps[-1] if timestamps else None
+
+    def ohlc_closes(self, pair: str, interval: int) -> list:
+        """Return completed OHLC closes while preserving the legacy list API."""
+        closes, _last_closed_at = self.ohlc_closes_with_timestamp(pair, interval)
+        return closes
 
     def last_price(self, pair: str) -> float | None:
         t = self.ticker(pair)

@@ -29,6 +29,7 @@ from .strategy_executor import (
     ProviderError,
     candle_interval,
 )
+from market_regime import ClosedPriceSeries
 
 # Repository root and hyperliquid directory for bare common/hl_client imports.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # providers/ -> root
@@ -48,12 +49,13 @@ def _mainnet_setting() -> bool:
     return raw == "true"
 
 
-def _hype_symbol(symbol: str) -> bool:
-    """Return whether this provider serves the given HYPE symbol variant."""
-    if not symbol:
+def _hype_symbol(symbol: str, token: str = "HYPE") -> bool:
+    """Return whether a symbol is an exact alias of the configured USDC pair."""
+    if not symbol or not token:
         return False
-    s = symbol.upper()
-    return s == "HYPE" or s.startswith("HYPE")
+    normalized = str(symbol).upper().replace("/", "").replace("-", "")
+    base = str(token).upper()
+    return normalized in {base, f"{base}USDC"}
 
 
 _CLOID_RE = re.compile(r"^0x[0-9a-fA-F]{32}$")
@@ -104,8 +106,8 @@ class HyperliquidProvider(MarketDataProvider):
         )
 
     def supports_symbol(self, symbol: str) -> bool:
-        # Claim only HYPE, leaving Binance pairs and bare assets on the default.
-        return _hype_symbol(symbol)
+        # Claim only exact aliases of this provider's configured USDC spot pair.
+        return _hype_symbol(symbol, self._token)
 
     # -- Lazy infrastructure. --------------------------------------------------
     def _load_env(self) -> None:
@@ -336,20 +338,40 @@ class HyperliquidProvider(MarketDataProvider):
         return PairPrecision(price_decimals=max(8 - szd, 0), volume_decimals=szd,
                              order_min=0.0, base_asset=self._token)
 
-    def ohlc_closes(self, symbol: str, interval_min: int) -> list:
-        c = self._hl()
-        pair = self._pair()
-        if c is None or pair is None:
+    def ohlc_series(self, symbol: str, interval_min: int) -> ClosedPriceSeries:
+        if not self.supports_symbol(symbol):
             raise ProviderError(
-                f"ohlc_closes({symbol}): client/pair unavailable")
-        iv = candle_interval(interval_min)
-        lookback_h = max(1, int(90 * int(interval_min) / 60))   # About 90 bars, as on Kraken.
+                f"ohlc_series({symbol}): unsupported Hyperliquid spot symbol")
+        client = self._hl()
+        pair = self._pair()
+        if client is None or pair is None:
+            raise ProviderError(
+                f"ohlc_series({symbol}): client/pair unavailable")
+        interval = int(interval_min)
+        lookback_h = max(1, int(90 * interval / 60))
         try:
-            candles = c.candles(pair, iv, lookback_h) or []
-            closes = [float(k.get("c")) for k in candles if k.get("c") is not None]
-            return closes[:-1] if closes else []                # Exclude the forming bar.
-        except Exception as e:  # noqa: BLE001
-            raise ProviderError(f"ohlc_closes({symbol}): {e}") from e
+            completed = list(
+                client.candles(pair, candle_interval(interval), lookback_h) or ()
+            )[:-1]
+            valid = [
+                item for item in completed if item.get("c") is not None
+            ]
+            closes = tuple(float(item["c"]) for item in valid)
+            raw_timestamps = [item.get("T") for item in valid]
+            timestamps = (
+                tuple(float(value) / 1000.0 for value in raw_timestamps)
+                if raw_timestamps and all(
+                    value is not None for value in raw_timestamps)
+                else ()
+            )
+            observed_at = timestamps[-1] if timestamps else None
+            return ClosedPriceSeries(
+                closes, interval, observed_at, timestamps)
+        except Exception as exc:
+            raise ProviderError(f"ohlc_series({symbol}): {exc}") from exc
+
+    def ohlc_closes(self, symbol: str, interval_min: int) -> list:
+        return list(self.ohlc_series(symbol, interval_min).closes)
 
     def submit_order(self, symbol: str, side: str, qty: float,
                      price: Optional[float] = None, *, market: bool = False,

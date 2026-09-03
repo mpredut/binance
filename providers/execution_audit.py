@@ -314,3 +314,14 @@ class AuditedStrategyExecutor:
 
     def ohlc_closes(self, symbol: str, interval_min: int):
         return self._executor.ohlc_closes(symbol, interval_min)
+
+    def ohlc_series(self, symbol: str, interval_min: int):
+        """Preserve optional candle timestamps without expanding the protocol."""
+        reader = getattr(self._executor, "ohlc_series", None)
+        if callable(reader):
+            return reader(symbol, interval_min)
+        from market_regime import ClosedPriceSeries
+        return ClosedPriceSeries(
+            tuple(self._executor.ohlc_closes(symbol, interval_min) or ()),
+            int(interval_min),
+        )

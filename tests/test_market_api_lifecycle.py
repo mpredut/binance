@@ -2,6 +2,7 @@ import unittest
 import time
 from unittest.mock import patch
 
+from market_regime import ClosedPriceSeries
 from providers.base import MarketDataProvider
 from providers.market_api import MarketApi
 from providers.strategy_executor import (
@@ -45,6 +46,17 @@ class FakeProvider(MarketDataProvider):
 
     def ohlc_closes(self, symbol, interval_min):
         return list(range(10, 50))
+
+    def ohlc_series(self, symbol, interval_min):
+        closes = tuple(self.ohlc_closes(symbol, interval_min))
+        observed_at = getattr(self, "series_now", time.time())
+        step = int(interval_min) * 60
+        timestamps = tuple(
+            observed_at - (len(closes) - index - 1) * step
+            for index in range(len(closes))
+        )
+        return ClosedPriceSeries(
+            closes, int(interval_min), observed_at, timestamps)
 
 
 class MarketApiLifecycleTest(unittest.TestCase):
@@ -125,12 +137,109 @@ class MarketApiLifecycleTest(unittest.TestCase):
         self.assertEqual(decision.horizon, "short")
         self.assertEqual(decision.source, "ohlc:1m")
 
+    def test_plain_market_regime_can_reject_stale_ohlc(self):
+        self.provider.series_now = time.time() - 120
+        decision = self.api.market_regime(
+            "ABCUSD",
+            allow_fallback=False,
+            ohlc_max_age_seconds={1: 30},
+        )
+
+        self.assertFalse(decision.fresh)
+        self.assertIn("stale_source", decision.reason)
+
     def test_composite_market_regime_supports_multiple_crypto_benchmarks(self):
         decision = self.api.composite_market_regime(
             "ABCUSD", benchmarks=("BTCUSD", "ETHUSD"))
         self.assertTrue(decision.actionable)
         self.assertEqual(decision.regime, "bull")
         self.assertEqual(len(decision.components), 6)
+
+    def test_benchmarks_route_independently_and_single_string_is_normalized(self):
+        asset = FakeProvider()
+        asset.name = "Asset"
+        benchmark = FakeProvider()
+        benchmark.name = "Benchmark"
+        benchmark.supports_symbol = lambda symbol: symbol == "BTCUSD"
+        api = MarketApi([asset, benchmark])
+
+        bundle = api.market_regime_bundle("ABCUSD", benchmarks="BTCUSD")
+
+        self.assertEqual(
+            {item.provider for item in bundle.asset_short.evidence},
+            {"Asset"},
+        )
+        benchmark_evidence = bundle.benchmarks[0][1].evidence
+        self.assertEqual(
+            {item.provider for item in benchmark_evidence},
+            {"Benchmark"},
+        )
+        self.assertEqual(len(bundle.composite.components), 4)
+
+    def test_asset_does_not_reinforce_itself_as_a_benchmark(self):
+        bundle = self.api.market_regime_bundle(
+            "ABCUSD", benchmarks=("abcusd",)
+        )
+
+        self.assertEqual(len(bundle.composite.components), 2)
+
+    def test_timestamp_unknown_bundle_is_not_actionable(self):
+        provider = FakeProvider()
+        provider.ohlc_series = None
+        api = MarketApi([provider])
+        bundle = api.market_regime_bundle("ABCUSD")
+
+        self.assertFalse(bundle.composite.actionable)
+        self.assertIsNone(bundle.asset_short.primary)
+        self.assertEqual(
+            bundle.asset_short.evidence[0].temporal_state,
+            "unknown",
+        )
+        self.assertTrue(api.market_regime("ABCUSD").fresh)
+
+    def test_regime_bundle_alternates_are_observational_only(self):
+        def build_api():
+            provider = FakeProvider()
+            provider.ohlc_calls = []
+            provider.series_now = 10_000_000
+
+            def closes(_symbol, interval):
+                provider.ohlc_calls.append(interval)
+                return list(range(10, 50))
+
+            provider.ohlc_closes = closes
+            return provider, MarketApi([provider])
+
+        snapshot = {
+            "gradient_recent": 0.6,
+            "epsilon": 0.1,
+            "ts": 10_000_000,
+        }
+        primary_provider, primary_api = build_api()
+        primary = primary_api.market_regime_bundle(
+            "ABCUSD",
+            snapshot=snapshot,
+            snapshot_max_age_seconds=30,
+            now=10_000_000,
+        )
+        alternate_provider, alternate_api = build_api()
+        alternate = alternate_api.market_regime_bundle(
+            "ABCUSD",
+            snapshot=snapshot,
+            snapshot_max_age_seconds=30,
+            include_alternates=True,
+            now=10_000_000,
+        )
+
+        self.assertEqual(primary_provider.ohlc_calls, [240])
+        self.assertEqual(
+            alternate_provider.ohlc_calls,
+            [1, 5, 240, 1440],
+        )
+        self.assertEqual(primary.composite, alternate.composite)
+        self.assertEqual(len(primary.evidence), 2)
+        self.assertEqual(len(alternate.evidence), 5)
+        self.assertEqual(len(alternate.composite.components), 2)
 
     def test_latest_fill_rejects_nonfinite_inputs(self):
         with self.assertRaises(ValueError):

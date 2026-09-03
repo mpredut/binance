@@ -84,6 +84,12 @@ class ExecutionAuditTest(unittest.TestCase):
                 rows.extend(json.loads(line) for line in handle if line.strip())
         return rows
 
+    def test_ohlc_series_falls_back_to_legacy_closes(self):
+        series = self.wrapped.ohlc_series("ABC", 240)
+        self.assertEqual(series.closes, (99.0, 100.0))
+        self.assertEqual(series.interval_min, 240)
+        self.assertIsNone(series.last_closed_at)
+
     def test_lifecycle_uses_one_intent_and_suppresses_identical_status_polls(self):
         self.assertIsInstance(self.wrapped, StrategyExecutor)
         oid = self.wrapped.submit_order_with_intent(
@@ -105,7 +111,7 @@ class ExecutionAuditTest(unittest.TestCase):
         self.assertEqual(rows[0]["client_order_id"], client_id)
         self.assertEqual(self.executor.calls[0][-1], client_id)
 
-    def test_cache_urile_de_corelare_sunt_lru_plafonate(self):
+    def test_correlation_caches_are_lru_bounded(self):
         with mock.patch.object(execution_audit_module, "_CACHE_MAX", 2):
             for index in range(3):
                 order_id = f"OID-{index}"

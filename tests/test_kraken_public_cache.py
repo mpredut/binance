@@ -1,7 +1,9 @@
-"""kraken_client._public: un rezultat GOL ({}) de la un endpoint public (AssetPairs/
-Ticker) is NOT cached — it is always a transient failed fetch, not a valid state.
-If it were cached (an AssetPairs TTL of 1h), pair_info->None->ordermin=0 would disable the
-anti-'volume minimum not met' guard for ~1h -> churn of orders rejected on dust (HYPE 0.0175<0.1)."""
+"""Kraken public reads never cache an empty result.
+
+An empty AssetPairs or Ticker response represents a transient failed fetch. Caching
+it for the one-hour AssetPairs TTL would hide order minimums and permit rejected
+dust-order churn until the cache expired.
+"""
 import os
 import sys
 import unittest
@@ -27,11 +29,11 @@ class PublicCacheTest(unittest.TestCase):
             mget.side_effect = [EMPTY, FULL]
             client = kc.KrakenClient()
             r1 = client._public("AssetPairs", {"pair": "HYPEUSD"})
-            self.assertEqual(r1, {})                       # gol
+            self.assertEqual(r1, {})                       # Empty response.
             r2 = client._public("AssetPairs", {"pair": "HYPEUSD"})
-            self.assertIn("HYPEUSD", r2)                   # a RE-FETCH-uit (gol necache-uit)
+            self.assertIn("HYPEUSD", r2)                   # Refetched after empty.
             self.assertEqual(mget.call_count, 2)
-            # now the full result IS cached -> no new fetch
+            # The complete result is cached, so no new fetch is needed.
             r3 = client._public("AssetPairs", {"pair": "HYPEUSD"})
             self.assertIn("HYPEUSD", r3)
             self.assertEqual(mget.call_count, 2)
@@ -40,24 +42,35 @@ class PublicCacheTest(unittest.TestCase):
         with mock.patch.object(kc, "http_get") as mget:
             mget.side_effect = [EMPTY, FULL]
             client = kc.KrakenClient()
-            self.assertIsNone(client.pair_info("HYPEUSD"))       # gol -> None
-            info = client.pair_info("HYPEUSD")                   # re-fetch -> plin
+            self.assertIsNone(client.pair_info("HYPEUSD"))       # Empty response becomes None.
+            info = client.pair_info("HYPEUSD")  # Refetch returns a complete result.
             self.assertEqual(info.get("ordermin"), "0.1")
 
     def test_ohlc_closes_excludes_potentially_incomplete_last_candle(self):
         response = {
             "HYPEUSD": [
                 [1, "9", "11", "8", "10", "10", "1", 1],
-                [2, "10", "12", "9", "11", "11", "1", 1],
-                [3, "11", "99", "1", "42", "42", "1", 1],
+                [14401, "10", "12", "9", "11", "11", "1", 1],
+                [28801, "11", "99", "1", "42", "42", "1", 1],
             ],
-            "last": 3,
+            "last": 28801,
         }
         client = kc.KrakenClient()
         with mock.patch.object(client, "_public", return_value=response):
-            closes = client.ohlc_closes("HYPEUSD", 240)
+            closes, last_closed_at = client.ohlc_closes_with_timestamp(
+                "HYPEUSD", 240)
+            all_closes, timestamps = client.ohlc_closes_with_timestamps(
+                "HYPEUSD", 240)
 
         self.assertEqual(closes, [10.0, 11.0])
+        self.assertEqual(last_closed_at, 14401 + 240 * 60)
+        self.assertEqual(all_closes, closes)
+        self.assertEqual(timestamps, (14401.0, 28801.0))
+
+    def test_ohlc_cache_ttl_is_interval_aware(self):
+        self.assertEqual(kc._read_ttl("OHLC", {"interval": 1}), 30.0)
+        self.assertEqual(kc._read_ttl("OHLC", {"interval": 5}), 150.0)
+        self.assertEqual(kc._read_ttl("OHLC", {"interval": 240}), 900.0)
 
     def test_cache_prunes_expired_and_enforces_hard_cap(self):
         with mock.patch.object(kc, "_CACHE_MAX", 2), \

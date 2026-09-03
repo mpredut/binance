@@ -63,6 +63,129 @@ class CompositeMarketRegimeDecision:
     components: tuple
 
 
+@dataclass(frozen=True)
+class ClosedPriceSeries:
+    """Completed closes with the timestamp of the newest completed candle."""
+
+    closes: tuple
+    interval_min: int
+    last_closed_at: Optional[float] = None
+    timestamps: tuple = ()
+
+
+@dataclass(frozen=True)
+class MarketRegimeEvidence:
+    """One classified source with explicit provenance and temporal quality."""
+
+    role: str
+    family: str
+    classifier: str
+    provider: str
+    symbol: str
+    decision: MarketRegimeDecision
+    evaluated_at: float
+    observed_at: Optional[float] = None
+    interval_min: Optional[int] = None
+    max_age_seconds: Optional[float] = None
+    closed_candles: Optional[bool] = None
+    continuous_candles: Optional[bool] = None
+    correlation_key: str = ""
+
+    @property
+    def age_seconds(self) -> Optional[float]:
+        if self.observed_at is None:
+            return None
+        return self.evaluated_at - self.observed_at
+
+    @property
+    def temporal_state(self) -> str:
+        """Return fresh, stale, future, unbounded, or unknown timestamp state."""
+        age = self.age_seconds
+        if age is None:
+            return "unknown"
+        if age < -5.0:
+            return "future"
+        if self.max_age_seconds is not None and age > self.max_age_seconds:
+            return "stale"
+        if self.max_age_seconds is None:
+            return "unbounded"
+        return "fresh"
+
+    @property
+    def usable(self) -> bool:
+        """Reject invalid or explicitly stale timing while preserving legacy data."""
+        if not self.decision.fresh:
+            return False
+        if self.continuous_candles is False:
+            return False
+        if self.max_age_seconds is not None:
+            return self.temporal_state == "fresh"
+        return self.temporal_state in {"fresh", "unbounded", "unknown"}
+
+    @property
+    def time_verified(self) -> bool:
+        """Return whether the source exposes an in-range observation timestamp."""
+        return self.decision.fresh and self.temporal_state == "fresh"
+
+    @property
+    def availability_reason(self) -> str:
+        """Explain why this evidence can or cannot participate in a decision."""
+        if not self.decision.fresh:
+            return self.decision.reason
+        if self.continuous_candles is False:
+            return "candle_gap"
+        if not self.usable:
+            return f"{self.temporal_state}_source"
+        return self.decision.reason
+
+
+@dataclass(frozen=True)
+class MarketRegimeResolution:
+    """Selected same-venue source plus every source examined for that horizon."""
+
+    decision: MarketRegimeDecision
+    evidence: tuple[MarketRegimeEvidence, ...]
+    selected_index: Optional[int] = None
+
+    def __post_init__(self):
+        index = self.selected_index
+        if index is not None and not 0 <= index < len(self.evidence):
+            raise ValueError("selected_index must identify an evidence item")
+        if index is not None:
+            selected = self.evidence[index]
+            if not selected.usable:
+                raise ValueError("selected evidence must be usable")
+            if selected.decision != self.decision:
+                raise ValueError("selected evidence must match the resolution")
+        elif self.decision.fresh:
+            raise ValueError("a fresh resolution must identify its selected source")
+
+    @property
+    def primary(self) -> Optional[MarketRegimeEvidence]:
+        index = self.selected_index
+        if index is None:
+            return None
+        return self.evidence[index]
+
+
+@dataclass(frozen=True)
+class MarketRegimeBundle:
+    """Asset horizons, optional benchmark context, and their full evidence."""
+
+    composite: CompositeMarketRegimeDecision
+    asset_short: MarketRegimeResolution
+    asset_long: MarketRegimeResolution
+    benchmarks: tuple
+
+    @property
+    def evidence(self) -> tuple[MarketRegimeEvidence, ...]:
+        items = list(self.asset_short.evidence) + list(self.asset_long.evidence)
+        for _name, short, long in self.benchmarks:
+            items.extend(short.evidence)
+            items.extend(long.evidence)
+        return tuple(items)
+
+
 class MarketRegimeEvaluator:
     """Transform a common snapshot into a deterministic decision."""
 
@@ -80,15 +203,33 @@ class MarketRegimeEvaluator:
     def evaluate(self, snapshot: Optional[Mapping]) -> MarketRegimeDecision:
         if not snapshot:
             return self.unknown()
+        if "gradient_recent" not in snapshot or "epsilon" not in snapshot:
+            return self.unknown("missing_signal_fields")
         try:
-            gradient = float(snapshot.get("gradient_recent", 0.0) or 0.0)
-            epsilon = abs(float(snapshot.get("epsilon", 0.0) or 0.0))
+            gradient = float(snapshot["gradient_recent"])
+            epsilon = abs(float(snapshot["epsilon"]))
         except (TypeError, ValueError):
             return self.unknown("invalid_signal")
         if not math.isfinite(gradient) or not math.isfinite(epsilon):
             return self.unknown("non_finite_signal")
         samples = snapshot.get("n_samples")
         window = snapshot.get("window_seconds")
+        try:
+            if samples is not None:
+                parsed_samples = int(samples)
+                if (
+                    isinstance(samples, bool)
+                    or float(samples) != parsed_samples
+                    or parsed_samples < 3
+                ):
+                    return self.unknown("invalid_sample_metadata")
+                samples = parsed_samples
+            if window is not None:
+                window = float(window)
+                if not math.isfinite(window) or window <= 0:
+                    return self.unknown("invalid_window_metadata")
+        except (TypeError, ValueError, OverflowError):
+            return self.unknown("invalid_signal_metadata")
         if epsilon <= 0:
             regime, strength, reason = "sideways", None, "noise_floor_zero"
         else:
@@ -101,8 +242,8 @@ class MarketRegimeEvaluator:
         return MarketRegimeDecision(
             regime=regime, gradient=gradient, epsilon=epsilon,
             strength=strength, fresh=True, reason=reason,
-            n_samples=(int(samples) if samples is not None else None),
-            window_seconds=(float(window) if window is not None else None),
+            n_samples=samples,
+            window_seconds=window,
         )
 
 
@@ -125,6 +266,16 @@ class MarketRegimeHorizon(str, Enum):
 _HORIZON_SOURCES = {
     MarketRegimeHorizon.SHORT: ((1, 900.0), (5, 1800.0)),
     MarketRegimeHorizon.LONG: ((240, 7 * 86400.0), (1440, 30 * 86400.0)),
+}
+
+# Each bound includes the natural age of a just-closed candle plus bounded
+# publication and network delay. Legacy decision-only calls stay permissive.
+_DEFAULT_SNAPSHOT_MAX_AGE_SECONDS = 120.0
+_DEFAULT_OHLC_MAX_AGE_SECONDS = {
+    1: 180.0,
+    5: 600.0,
+    240: 6 * 3600.0,
+    1440: 36 * 3600.0,
 }
 
 _COMPOSITE_PROFILES = {
@@ -151,14 +302,27 @@ class MarketRegimeService:
     retains ownership of the financial decision.
     """
 
-    def __init__(self, strength_threshold: float = 2.0, *, cache_ttl_sec=30.0,
-                 cache_max=256, clock=time.monotonic):
+    def __init__(
+        self,
+        strength_threshold: float = 2.0,
+        *,
+        cache_ttl_sec=30.0,
+        negative_cache_ttl_sec=2.0,
+        cache_max=256,
+        clock=time.monotonic,
+    ):
         self.evaluator = MarketRegimeEvaluator(strength_threshold)
         self.cache_ttl_sec = float(cache_ttl_sec)
+        self.negative_cache_ttl_sec = float(negative_cache_ttl_sec)
         self.cache_max = max(1, int(cache_max))
         self.clock = clock
         if not math.isfinite(self.cache_ttl_sec) or self.cache_ttl_sec < 0:
             raise ValueError("cache_ttl_sec must be finite and >= 0")
+        if (
+            not math.isfinite(self.negative_cache_ttl_sec)
+            or self.negative_cache_ttl_sec < 0
+        ):
+            raise ValueError("negative_cache_ttl_sec must be finite and >= 0")
         self._cache = OrderedDict()
         self._lock = threading.Lock()
 
@@ -170,44 +334,242 @@ class MarketRegimeService:
         return replace(decision, horizon=horizon.value, source=str(source),
                        fallback_used=bool(fallback_used))
 
-    def resolve(self, provider, symbol: str, *, horizon="short", snapshot=None,
-                interval_min=None, window_seconds=None, allow_fallback=True):
-        """Resolve a regime from ordered, same-venue sources.
+    @staticmethod
+    def _snapshot_observed_at(snapshot: Optional[Mapping]) -> Optional[float]:
+        if not snapshot or not isinstance(snapshot, Mapping):
+            return None
+        for field in ("observed_at", "ts"):
+            try:
+                value = float(snapshot.get(field))
+            except (TypeError, ValueError, OverflowError):
+                continue
+            if math.isfinite(value) and value > 0:
+                return value / 1000.0 if value > 100_000_000_000 else value
+        return None
 
-        A valid snapshot is preferred. Unknown/invalid primary data falls back to
-        completed OHLC candles for the requested horizon. Sources are never mixed
-        across venues implicitly.
+    @staticmethod
+    def _correlation_key(provider, symbol, horizon) -> str:
+        return (
+            f"{str(getattr(provider, 'name', 'unknown')).lower()}:"
+            f"{str(symbol).upper()}:price_trend:{horizon.value}"
+        )
+
+    @staticmethod
+    def default_snapshot_max_age_seconds() -> float:
+        """Return the strict freshness bound used by the evidence bundle."""
+        return _DEFAULT_SNAPSHOT_MAX_AGE_SECONDS
+
+    @staticmethod
+    def default_ohlc_max_age_seconds() -> dict:
+        """Return strict interval-specific freshness bounds for closed candles."""
+        return dict(_DEFAULT_OHLC_MAX_AGE_SECONDS)
+
+    @staticmethod
+    def _age_limit(value, horizon, interval_min=None):
+        """Resolve a scalar or horizon/interval freshness configuration."""
+        if value is None or not isinstance(value, Mapping):
+            return value
+        keys = []
+        if interval_min is not None:
+            keys.extend((int(interval_min), str(int(interval_min))))
+        keys.extend((horizon, horizon.value, "default"))
+        for key in keys:
+            if key in value:
+                return value[key]
+        return None
+
+    def _evidence(
+        self,
+        provider,
+        symbol,
+        decision,
+        *,
+        role,
+        horizon,
+        evaluated_at,
+        observed_at=None,
+        max_age_seconds=None,
+        closed_candles=None,
+        continuous_candles=None,
+        interval_min=None,
+        family="price_trend",
+        classifier="linear_noise_v1",
+        correlation_key=None,
+    ):
+        if max_age_seconds is not None:
+            max_age_seconds = float(max_age_seconds)
+            if not math.isfinite(max_age_seconds) or max_age_seconds <= 0:
+                raise ValueError("max_age_seconds must be finite and positive")
+        return MarketRegimeEvidence(
+            role=str(role),
+            family=str(family),
+            classifier=str(classifier),
+            provider=str(getattr(provider, "name", "unknown")),
+            symbol=str(symbol),
+            decision=decision,
+            evaluated_at=float(evaluated_at),
+            observed_at=observed_at,
+            interval_min=(int(interval_min) if interval_min is not None else None),
+            max_age_seconds=max_age_seconds,
+            closed_candles=closed_candles,
+            continuous_candles=continuous_candles,
+            correlation_key=(
+                str(correlation_key)
+                if correlation_key
+                else self._correlation_key(provider, symbol, horizon)
+            ),
+        )
+
+    def resolve(self, provider, symbol: str, *, horizon="short", snapshot=None,
+                interval_min=None, window_seconds=None, allow_fallback=True,
+                snapshot_source="snapshot", snapshot_max_age_seconds=None,
+                ohlc_max_age_seconds=None):
+        """Resolve the selected regime while preserving the legacy return type."""
+        return self.resolve_with_evidence(
+            provider,
+            symbol,
+            horizon=horizon,
+            snapshot=snapshot,
+            interval_min=interval_min,
+            window_seconds=window_seconds,
+            allow_fallback=allow_fallback,
+            snapshot_source=snapshot_source,
+            snapshot_max_age_seconds=snapshot_max_age_seconds,
+            ohlc_max_age_seconds=ohlc_max_age_seconds,
+        ).decision
+
+    def resolve_with_evidence(
+        self,
+        provider,
+        symbol: str,
+        *,
+        horizon="short",
+        snapshot=None,
+        interval_min=None,
+        window_seconds=None,
+        allow_fallback=True,
+        snapshot_source="snapshot",
+        snapshot_max_age_seconds=None,
+        ohlc_max_age_seconds=None,
+        include_alternates=False,
+        role=None,
+        now=None,
+    ) -> MarketRegimeResolution:
+        """Resolve one horizon and retain every examined same-venue source.
+
+        Source selection and composition are deliberately separate. By default the
+        method stops after the first usable source, preserving existing provider
+        call counts. Alternative collection is intended for diagnostics and shadow
+        evaluation; alternatives never replace the first usable source.
         """
         parsed = MarketRegimeHorizon.parse(horizon)
-        attempts = []
+        role = role or f"asset_{parsed.value}"
+        evaluated_at = time.time() if now is None else float(now)
+        if not math.isfinite(evaluated_at) or evaluated_at <= 0:
+            raise ValueError("now must be a positive finite Unix timestamp")
+
+        evidence = []
+        selected_index = None
         if snapshot is not None:
             decision = self._annotate(
-                self.evaluate_snapshot(snapshot), horizon=parsed, source="snapshot")
-            attempts.append(decision)
-            if decision.fresh or not allow_fallback:
-                return decision
+                self.evaluate_snapshot(snapshot),
+                horizon=parsed,
+                source=snapshot_source,
+            )
+            metadata = snapshot if isinstance(snapshot, Mapping) else {}
+            item = self._evidence(
+                provider,
+                symbol,
+                decision,
+                role=role,
+                horizon=parsed,
+                evaluated_at=evaluated_at,
+                observed_at=self._snapshot_observed_at(snapshot),
+                max_age_seconds=self._age_limit(
+                    snapshot_max_age_seconds, parsed),
+                closed_candles=None,
+                family=metadata.get("family", "price_trend"),
+                classifier=metadata.get("classifier", snapshot_source),
+                correlation_key=metadata.get("correlation_key"),
+            )
+            evidence.append(item)
+            if item.usable:
+                selected_index = 0
+                if not include_alternates or not allow_fallback:
+                    return MarketRegimeResolution(decision, tuple(evidence), 0)
+            elif not allow_fallback:
+                unavailable = decision
+                if decision.fresh:
+                    unavailable = self._annotate(
+                        self.evaluator.unknown(item.availability_reason),
+                        horizon=parsed,
+                        source=decision.source,
+                    )
+                return MarketRegimeResolution(
+                    unavailable, tuple(evidence), selected_index=None)
 
         configured = _HORIZON_SOURCES[parsed]
         if interval_min is not None or window_seconds is not None:
-            primary = (int(interval_min or configured[0][0]),
-                       float(window_seconds or configured[0][1]))
-            configured = (primary,) + tuple(item for item in configured if item != primary)
+            primary = (
+                int(interval_min or configured[0][0]),
+                float(window_seconds or configured[0][1]),
+            )
+            configured = (primary,) + tuple(
+                item for item in configured if item != primary
+            )
         if not allow_fallback:
             configured = configured[:1]
 
         for index, (interval, window) in enumerate(configured):
+            raw_decision, observed_at, continuous = self._evaluate_provider_source(
+                provider,
+                symbol,
+                interval_min=interval,
+                window_seconds=window,
+            )
             decision = self._annotate(
-                self.evaluate_provider(provider, symbol, interval_min=interval,
-                                       window_seconds=window),
-                horizon=parsed, source=f"ohlc:{interval}m",
-                fallback_used=bool(attempts or index))
-            attempts.append(decision)
-            if decision.fresh:
-                return decision
-        reason = ",".join(f"{item.source}={item.reason}" for item in attempts)
-        return self._annotate(
+                raw_decision,
+                horizon=parsed,
+                source=f"ohlc:{interval}m",
+                fallback_used=selected_index is None and bool(evidence or index),
+            )
+            item = self._evidence(
+                provider,
+                symbol,
+                decision,
+                role=role,
+                horizon=parsed,
+                evaluated_at=evaluated_at,
+                observed_at=observed_at,
+                max_age_seconds=self._age_limit(
+                    ohlc_max_age_seconds, parsed, interval),
+                closed_candles=True,
+                continuous_candles=continuous,
+                interval_min=interval,
+            )
+            evidence.append(item)
+            if selected_index is None and item.usable:
+                selected_index = len(evidence) - 1
+                if not include_alternates:
+                    return MarketRegimeResolution(
+                        decision, tuple(evidence), selected_index)
+
+        if selected_index is not None:
+            selected = evidence[selected_index]
+            return MarketRegimeResolution(
+                selected.decision, tuple(evidence), selected_index)
+
+        reason = ",".join(
+            f"{item.decision.source}={item.availability_reason}"
+            for item in evidence
+        )
+        decision = self._annotate(
             self.evaluator.unknown(f"all_sources_failed:{reason}"),
-            horizon=parsed, source="none", fallback_used=len(attempts) > 1)
+            horizon=parsed,
+            source="none",
+            fallback_used=len(evidence) > 1,
+        )
+        return MarketRegimeResolution(decision, tuple(evidence))
 
     @staticmethod
     def _signed_score(decision, strength_cap):
@@ -247,21 +609,25 @@ class MarketRegimeService:
 
         benchmark_pairs = tuple(benchmarks or ())
         components = []
-        weighted_score = confidence = 0.0
+        weighted_score = asset_weighted_score = confidence = 0.0
         asset_scores = []
         benchmark_scores = []
 
-        def add(label, decision, weight, bucket):
-            nonlocal weighted_score, confidence
+        def add(label, decision, weight, bucket, *, asset=False):
+            nonlocal weighted_score, asset_weighted_score, confidence
             score = self._signed_score(decision, strength_cap)
             components.append((label, decision.regime, decision.source, score))
             if score is not None:
                 weighted_score += weight * score
+                if asset:
+                    asset_weighted_score += weight * score
                 confidence += weight
                 bucket.append(score)
 
-        add("asset_short", asset_short, normalized["asset_short"], asset_scores)
-        add("asset_long", asset_long, normalized["asset_long"], asset_scores)
+        add("asset_short", asset_short, normalized["asset_short"], asset_scores,
+            asset=True)
+        add("asset_long", asset_long, normalized["asset_long"], asset_scores,
+            asset=True)
         count = len(benchmark_pairs)
         for name, short, long in benchmark_pairs:
             add(f"{name}_short", short,
@@ -277,6 +643,13 @@ class MarketRegimeService:
         market_conflict = bool(asset_scores and benchmark_scores and
                                asset_mean * benchmark_mean < 0)
         conflict = asset_conflict or market_conflict
+        # Context can reinforce or veto local evidence, but it cannot manufacture
+        # an asset direction or reverse one. This keeps benchmarks contextual.
+        if math.isclose(asset_weighted_score, 0.0, abs_tol=1e-12):
+            weighted_score = asset_weighted_score
+        elif weighted_score * asset_weighted_score < 0:
+            weighted_score = 0.0
+
         if not actionable:
             regime, pattern, reason = (
                 "unknown", "insufficient_asset_data", "asset_signal_unavailable")
@@ -293,7 +666,7 @@ class MarketRegimeService:
             if len(asset_scores) > 1 and asset_scores[1] < 0 < asset_scores[0]:
                 pattern = "bearish_rebound"
             elif market_conflict:
-                pattern = "asset_bear_market_tailwind"
+                pattern = "asset_bear_market_headwind"
             else:
                 pattern = "aligned_bear"
         else:
@@ -309,32 +682,214 @@ class MarketRegimeService:
             pattern=pattern, use_case=use_case, reason=reason,
             components=tuple(components))
 
-    def evaluate_provider(self, provider, symbol: str, *, interval_min=1,
-                          window_seconds=900.0) -> MarketRegimeDecision:
+    def compose_evidence(
+        self,
+        evidence,
+        *,
+        asset_symbol=None,
+        use_case="balanced",
+        weights=None,
+        strength_cap=6.0,
+        directional_threshold=0.15,
+    ):
+        """Compose only usable directional evidence, once per symbol and role.
+
+        Other families such as persistence, volatility, and liquidity remain
+        observable context. They cannot become directional votes without a
+        separately validated policy.
+        """
+        items = tuple(evidence or ())
+        if any(not isinstance(item, MarketRegimeEvidence) for item in items):
+            raise TypeError("compose_evidence requires MarketRegimeEvidence items")
+        directional = [
+            item for item in items
+            if item.usable and item.family == "price_trend"
+        ]
+        if asset_symbol is None:
+            asset_symbol = next(
+                (
+                    item.symbol
+                    for item in directional
+                    if item.role in {"asset_short", "asset_long"}
+                ),
+                "",
+            )
+        asset_key = str(asset_symbol or "").upper()
+        selected = {}
+        for item in directional:
+            key = (item.symbol.upper(), item.role)
+            selected.setdefault(key, item)
+
+        unknown = self.evaluator.unknown("evidence_unavailable")
+        asset_short = selected.get((asset_key, "asset_short"))
+        asset_long = selected.get((asset_key, "asset_long"))
+        benchmark_symbols = tuple(dict.fromkeys(
+            item.symbol
+            for item in directional
+            if item.symbol.upper() != asset_key
+            and item.role in {"benchmark_short", "benchmark_long"}
+        ))
+        benchmarks = tuple(
+            (
+                symbol,
+                selected.get(
+                    (symbol.upper(), "benchmark_short"),
+                    None,
+                ),
+                selected.get(
+                    (symbol.upper(), "benchmark_long"),
+                    None,
+                ),
+            )
+            for symbol in benchmark_symbols
+        )
+        return self.compose(
+            asset_short.decision if asset_short else unknown,
+            asset_long.decision if asset_long else unknown,
+            tuple(
+                (
+                    symbol,
+                    short.decision if short else unknown,
+                    long.decision if long else unknown,
+                )
+                for symbol, short, long in benchmarks
+            ),
+            use_case=use_case,
+            weights=weights,
+            strength_cap=strength_cap,
+            directional_threshold=directional_threshold,
+        )
+
+    @staticmethod
+    def _closed_series(provider, symbol, interval_min) -> ClosedPriceSeries:
+        reader = getattr(provider, "ohlc_series", None)
+        if callable(reader):
+            series = reader(symbol, interval_min)
+            if isinstance(series, Mapping):
+                series = ClosedPriceSeries(
+                    tuple(series.get("closes") or ()),
+                    int(series.get("interval_min", interval_min)),
+                    series.get("last_closed_at"),
+                    tuple(series.get("timestamps") or ()),
+                )
+            if not isinstance(series, ClosedPriceSeries):
+                raise TypeError("ohlc_series must return ClosedPriceSeries")
+            if int(series.interval_min) != interval_min:
+                raise ValueError("ohlc_series returned the wrong interval")
+            return series
+        return ClosedPriceSeries(
+            tuple(provider.ohlc_closes(symbol, interval_min) or ()),
+            interval_min,
+        )
+
+    @staticmethod
+    def _timestamp_seconds(value) -> float:
+        value = float(value)
+        if value > 100_000_000_000:
+            value /= 1000.0
+        if not math.isfinite(value) or value <= 0:
+            raise ValueError("invalid closed-candle timestamp")
+        return value
+
+    @classmethod
+    def _series_timing(cls, series: ClosedPriceSeries):
+        """Return newest close time and whether all supplied bars are continuous."""
+        timestamps = tuple(series.timestamps or ())
+        observed_at = series.last_closed_at
+        if not timestamps:
+            if observed_at is not None:
+                observed_at = cls._timestamp_seconds(observed_at)
+            return observed_at, None
+
+        normalized = tuple(cls._timestamp_seconds(value) for value in timestamps)
+        if len(normalized) != len(series.closes):
+            return normalized[-1], False
+        expected = int(series.interval_min) * 60.0
+        tolerance = max(1.0, expected * 0.02)
+        continuous = all(
+            abs((right - left) - expected) <= tolerance
+            for left, right in zip(normalized, normalized[1:])
+        )
+        if observed_at is not None:
+            declared = cls._timestamp_seconds(observed_at)
+            continuous = continuous and abs(declared - normalized[-1]) <= tolerance
+        return normalized[-1], continuous
+
+    def _evaluate_provider_source(self, provider, symbol: str, *,
+                                  interval_min=1, window_seconds=900.0):
         interval_min = int(interval_min)
         window_seconds = float(window_seconds)
         if interval_min <= 0 or not math.isfinite(window_seconds) or window_seconds <= 0:
             raise ValueError("the regime interval and window must be positive")
-        key = (str(getattr(provider, "name", "unknown")).lower(),
-               str(symbol), interval_min, window_seconds)
-        now = self.clock()
+        key = (
+            str(getattr(provider, "name", "unknown")).lower(),
+            str(symbol),
+            interval_min,
+            window_seconds,
+        )
+        cache_now = self.clock()
         with self._lock:
             cached = self._cache.get(key)
-            if cached and now - cached[0] <= self.cache_ttl_sec:
-                self._cache.move_to_end(key)
-                return cached[1]
+            if cached:
+                ttl = (
+                    self.cache_ttl_sec
+                    if cached[1].fresh
+                    else self.negative_cache_ttl_sec
+                )
+                if ttl > 0 and cache_now - cached[0] <= ttl:
+                    self._cache.move_to_end(key)
+                    return cached[1:]
+        observed_at = None
+        continuous = None
         try:
-            closes = provider.ohlc_closes(symbol, interval_min) or []
+            series = self._closed_series(provider, symbol, interval_min)
+            closes = tuple(series.closes)
+            timestamps = tuple(series.timestamps or ())
+            needed = max(
+                3,
+                int(math.ceil(window_seconds / (interval_min * 60))),
+            )
+            if not timestamps or len(timestamps) == len(closes):
+                closes = closes[-needed:]
+                timestamps = timestamps[-needed:]
+            consumed = ClosedPriceSeries(
+                closes,
+                interval_min,
+                series.last_closed_at,
+                timestamps,
+            )
+            observed_at, continuous = self._series_timing(consumed)
             decision = self.evaluate_closes(
-                closes, interval_min=interval_min, window_seconds=window_seconds)
-        except Exception as exc:  # Unavailable data yields explicit unknown, not blind trading.
+                consumed.closes,
+                interval_min=interval_min,
+                window_seconds=window_seconds,
+            )
+        except Exception as exc:  # Unavailable data remains explicit unknown.
             decision = self.evaluator.unknown(
-                f"source_error:{exc.__class__.__name__}")
-        with self._lock:
-            self._cache[key] = (now, decision)
-            self._cache.move_to_end(key)
-            while len(self._cache) > self.cache_max:
-                self._cache.popitem(last=False)
+                f"source_error:{exc.__class__.__name__}"
+            )
+        ttl = (
+            self.cache_ttl_sec
+            if decision.fresh
+            else self.negative_cache_ttl_sec
+        )
+        if ttl > 0:
+            with self._lock:
+                self._cache[key] = (
+                    cache_now, decision, observed_at, continuous)
+                self._cache.move_to_end(key)
+                while len(self._cache) > self.cache_max:
+                    self._cache.popitem(last=False)
+        return decision, observed_at, continuous
+
+    def evaluate_provider(self, provider, symbol: str, *, interval_min=1,
+                          window_seconds=900.0) -> MarketRegimeDecision:
+        decision, _observed_at, _continuous = self._evaluate_provider_source(
+            provider,
+            symbol,
+            interval_min=interval_min,
+            window_seconds=window_seconds,
+        )
         return decision
 
     @staticmethod

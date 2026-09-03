@@ -113,6 +113,17 @@ class BinanceExecutorContractTest(unittest.TestCase):
     def test_ohlc_closes_exclude_forming_bar(self):
         self.assertEqual(self.p.ohlc_closes("BTCUSDC", 240), [10.0, 11.0])
 
+    def test_ohlc_series_preserves_last_completed_timestamp(self):
+        self.fake.client.get_klines = lambda **_kwargs: [
+            [0, "1", "1", "1", "10", "0", 1_000],
+            [0, "1", "1", "1", "11", "0", 2_000],
+            [0, "1", "1", "1", "12", "0", 3_000],
+        ]
+        series = self.p.ohlc_series("BTCUSDC", 240)
+        self.assertEqual(series.closes, (10.0, 11.0))
+        self.assertEqual(series.last_closed_at, 2.0)
+        self.assertEqual(series.timestamps, (1.0, 2.0))
+
     def test_order_status_filled(self):
         st = self.p.order_status("BTCUSDC", "42")
         self.assertEqual(st.status, "closed")
