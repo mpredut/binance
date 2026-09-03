@@ -282,6 +282,11 @@ def _projection(report: dict) -> dict:
     strategy_params.setdefault("dca_vol_ref", 2.0)
     strategy_params.setdefault("dca_vol_interval", 240)
     strategy_params.setdefault("tp_trail_profit_floor_pct", 0.0)
+    strategy_params.setdefault("tp_regime_gate", False)
+    # The common classifier superseded the overlay-only confirmation field. Its
+    # shared warm-up is inactive while all regime gates are disabled.
+    strategy_params.pop("trend_confirm_bars", None)
+    strategy_params.setdefault("regime_min_samples", 20)
     # Percentage-sizing fields were added after the baseline artefact. Normalise
     # their disabled all-zero state so metadata-only differences do not fail.
     strategy_params.setdefault("total_budget", 0.0)

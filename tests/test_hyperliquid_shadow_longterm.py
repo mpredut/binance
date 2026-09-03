@@ -25,10 +25,12 @@ class HyperliquidLongtermShadowTest(unittest.TestCase):
     def test_variants_are_fixed_and_paper_only_parameters(self):
         variants = module._variants(240)
         self.assertEqual(list(variants), [
-            "current", "long_tp3_trail3", "reentry4",
-            "trail_profit_floor_sl18", "overlay650t8",
+            "current", "tp_regime_gate", "long_tp3_trail3", "reentry4",
+            "trail_profit_floor_sl18", "overlay650t8_regime_v2",
+            "B_dcabrake_regime_v2",
         ])
         candidate = variants["long_tp3_trail3"]
+        self.assertTrue(variants["tp_regime_gate"].tp_regime_gate)
         self.assertEqual(candidate.takeprofit_pct, 3.0)
         self.assertTrue(candidate.tp_trend_hold)
         self.assertFalse(candidate.tp_trail_adaptive)
@@ -37,11 +39,12 @@ class HyperliquidLongtermShadowTest(unittest.TestCase):
         floor = variants["trail_profit_floor_sl18"]
         self.assertEqual(floor.tp_trail_profit_floor_pct, 1.0)
         self.assertEqual(floor.stop_loss_pct, 18.0)
-        overlay = variants["overlay650t8"]
+        overlay = variants["overlay650t8_regime_v2"]
         self.assertTrue(overlay.trend_overlay)
         self.assertEqual(overlay.trend_topup, 650.0)
         self.assertEqual(overlay.trend_trail_pct, 8.0)
         self.assertFalse(overlay.trend_exit_break)
+        self.assertTrue(variants["B_dcabrake_regime_v2"].dca_trend_brake)
 
     def test_rejects_non_native_interval(self):
         with self.assertRaisesRegex(ValueError, "240m"):

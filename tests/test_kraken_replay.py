@@ -185,6 +185,19 @@ class ReplayEngineTest(unittest.TestCase):
                 fee_pct=0.26, bar_minutes=60,
             )
 
+    def test_tp_regime_gate_requires_configured_trend_interval(self):
+        with self.assertRaisesRegex(ValueError, "trend_interval"):
+            rp.run_replay(
+                _series(),
+                _params(
+                    tp_trend_hold=True,
+                    tp_regime_gate=True,
+                    trend_interval=240,
+                ),
+                fee_pct=0.26,
+                bar_minutes=60,
+            )
+
     def test_adaptive_features_require_their_configured_bar_interval(self):
         with self.assertRaisesRegex(ValueError, "tp_trail_vol_interval"):
             rp.run_replay(

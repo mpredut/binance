@@ -394,6 +394,13 @@ class CorePercentageValidationTest(unittest.TestCase):
             (0.8, 1.25, 5.0, 12.5, 650.0),
         )
 
+    def test_regime_warmup_must_fit_the_canonical_window(self):
+        for invalid in (2, 43):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(
+                ValueError, "STRAT_REGIME_MIN_SAMPLES",
+            ):
+                _strategy(FakeExecutor(), regime_min_samples=invalid)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -21,6 +21,7 @@ from botcore import (
     are_close, float_env, log, defined_env, required_env,
     required_float_env, required_int_env, required_bool_env,
 )
+from market_regime import MarketRegimeDecision, MarketRegimeService
 from providers.execution_audit import intent_client_order_id
 from providers.strategy_executor import ProviderError, StrategyExecutor
 from order_retry import (
@@ -35,6 +36,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _LEGACY_STATE_DIR = os.path.join(_ROOT, "kraken")
 _DEFAULT_FEE_NOTE = "fee Kraken ~0.26% taker / ~0.16% maker per leg"
 _PLACEMENT_BACKOFF_CAP_SEC = 3600.0
+_REGIME_BAR_SETTLE_MAX_SEC = 900.0
 
 
 notify = bind_notify(("SYMBOL_LABEL", "KRAKEN_PAIR"), "CRYPTO")
@@ -69,18 +71,18 @@ class StratParams:
     reentry_sl_bounce_pct: float  # After stop-loss, reenter on a bounce from the post-sale low.
     tp_tranches: list        # Gradual ``(percentage, share)`` sales; empty means one full TP.
     # --- TP trend-aware (EXPERIMENTAL, default OFF) -------------------------------
-    tp_trend_hold: bool = False       # Hold during a short uptrend and exit near market on reversal.
-    tp_trend_min_pct: float = 0.5     # Legacy v1 shadow-price trend threshold.
+    tp_trend_hold: bool = False       # Use trailing instead of a fixed TP after the target is reached.
+    tp_regime_gate: bool = False      # Let the common regime classifier gate new TP trailing.
+    tp_trend_min_pct: float = 0.5     # Minimum fitted bullish move required by the TP policy.
     tp_trail_pct: float = 2.0         # Above TP, exit after this pullback from the peak.
     tp_trail_profit_floor_pct: float = 0.0  # 0 preserves live compatibility; >0 allows MARKET trailing only
                                       # when the order reference is >= average*(1+floor%);
                                       # the MARKET hard stop retains priority.
     # --- TREND OVERLAY (combine strategies by regime; EXPERIMENTAL, default OFF) ---
     trend_overlay: bool = False       # Use top-up and trailing in confirmed uptrends; classic in ranges.
-    trend_sma_n: int = 30             # SMA bar count for the long-trend signal.
-    trend_interval: int = 240         # minutes per trend-signal bar (live: Kraken OHLC;
-                                      # backtest: injected bars). 240=4h -> SMA(30)=~5 days.
-    trend_confirm_bars: int = 3       # consecutive uptrend bars required to avoid false confirmation
+    trend_sma_n: int = 30             # SMA lookback for the optional overlay exit break.
+    trend_interval: int = 240         # Common regime cadence in live and replay; 240 means 4h.
+    regime_min_samples: int = 20      # Shared warm-up floor before any regime policy can act.
     trend_topup: float = 2000.0       # amount bought on trend entry; larger values capture more trend
     trend_trail_pct: float = 5.0      # Trend-position exit pullback from peak.
     trend_exit_break: bool = False    # False: trailing only; True: trailing or price below SMA.
@@ -93,7 +95,7 @@ class StratParams:
     tp_trail_max: float = 8.0         # upper clamp (%) prevents giving all profit back
     tp_trail_vol_interval: int = 240  # Minutes per volatility bar; fixed in live and replay.
     dca_trend_brake: bool = False     # Skip DCA in confirmed downtrends to reduce risk.
-    dca_brake_min_pct: float = 1.5    # Minimum recent/old slope percentage for downtrend.
+    dca_brake_min_pct: float = 1.5    # Minimum fitted bearish move required by the DCA policy.
     dca_spacing_growth_pct: float = 0.0  # Increase the threshold after every filled DCA;
                                          # Zero preserves byte-identical live behavior.
     # --- #2: VOLATILITY-SCALED DCA SIZING (default OFF) ---
@@ -134,6 +136,11 @@ class StratParams:
             raise ValueError("STRAT_TAKEPROFIT_PCT must be > 0 when take-profit is enabled")
         if self.stop_loss_pct < 0:
             raise ValueError("STRAT_STOP_LOSS_PCT must be >= 0")
+        regime_capacity = MarketRegimeService.horizon_sample_capacity(
+            "long", self.trend_interval,
+        )
+        if not 3 <= self.regime_min_samples <= regime_capacity:
+            raise ValueError(f"STRAT_REGIME_MIN_SAMPLES must be in [3, {regime_capacity}]")
 
         percentage_names = (
             "STRAT_TOTAL_BUDGET", "STRAT_ALLOC_PCT",
@@ -199,6 +206,7 @@ class StratParams:
             reentry_sl_bounce_pct = required_float_env("STRAT_REENTRY_SL_BOUNCE_PCT"),
             tp_tranches        = _parse_tranches(defined_env("STRAT_TP_TRANCHES")),
             tp_trend_hold      = required_bool_env("STRAT_TP_TREND_HOLD"),
+            tp_regime_gate     = required_bool_env("STRAT_TP_REGIME_GATE"),
             tp_trend_min_pct   = required_float_env("STRAT_TP_TREND_MIN_PCT"),
             tp_trail_pct       = required_float_env("STRAT_TP_TRAIL_PCT"),
             tp_trail_profit_floor_pct = max(
@@ -207,7 +215,7 @@ class StratParams:
             trend_overlay      = required_bool_env("STRAT_TREND_OVERLAY"),
             trend_sma_n        = required_int_env("STRAT_TREND_SMA_N"),
             trend_interval     = required_int_env("STRAT_TREND_INTERVAL"),
-            trend_confirm_bars = required_int_env("STRAT_TREND_CONFIRM_BARS"),
+            regime_min_samples = required_int_env("STRAT_REGIME_MIN_SAMPLES"),
             trend_topup        = required_float_env("STRAT_TREND_TOPUP"),
             trend_trail_pct    = required_float_env("STRAT_TREND_TRAIL_PCT"),
             trend_exit_break   = required_bool_env("STRAT_TREND_EXIT_BREAK"),
@@ -279,7 +287,8 @@ class Strategy:
                  replay_mode: bool = False, state_dir: str | None = None,
                  notifier: Callable[..., None] | None = None,
                  notification_source: str = "kraken", venue_label: str = "Kraken",
-                 fee_note: str = _DEFAULT_FEE_NOTE):
+                 fee_note: str = _DEFAULT_FEE_NOTE,
+                 regime_service: MarketRegimeService | None = None):
         self.client = client
         self.pair = pair
         self.p = params
@@ -293,6 +302,8 @@ class Strategy:
         self.notification_source = notification_source
         self.venue_label = venue_label
         self.fee_note = fee_note
+        self._regime_service = regime_service or MarketRegimeService()
+        self._regime_bar_context = None
         # Keep the legacy one-argument call so existing replays can replace
         # state_path_for and guarantee zero I/O.
         self.state_file = (
@@ -965,22 +976,6 @@ class Strategy:
             return None
         return std * math.sqrt(3600.0 / mean_dt) * 100.0
 
-    def _trend_up(self, min_pts: int = 20) -> bool:
-        """Detect a short uptrend from local price history.
-
-        The recent-half mean must exceed the old-half mean by ``tp_trend_min_pct``.
-        This deterministic rule is identical in live and replay and returns False during warm-up.
-        """
-        pts = [p for _, p in self._shadow_prices]
-        if len(pts) < min_pts:
-            return False
-        half = len(pts) // 2
-        old = sum(pts[:half]) / half
-        new = sum(pts[half:]) / (len(pts) - half)
-        if old <= 0:
-            return False
-        return (new - old) / old * 100.0 >= self.p.tp_trend_min_pct
-
     def _shadow_reentry_line(self, price: float, lsp: float, prag_fix: float) -> None:
         try:
             k_re = float_env("SHADOW_K_REENTRY") or 2.0
@@ -1067,55 +1062,68 @@ class Strategy:
             return None
         return std * math.sqrt(60.0 / interval_minutes) * 100.0
 
-    def _trend_down(self, min_pts: int = 20) -> bool:
-        """Detect the fixed-OHLC downtrend on the same time scale in live and replay."""
-        pts = self._trend_closes()[-90:]
-        if len(pts) < min_pts:
-            return False
-        half = len(pts) // 2
-        old = sum(pts[:half]) / half
-        new = sum(pts[half:]) / (len(pts) - half)
-        if old <= 0:
-            return False
-        return (new - old) / old * 100.0 <= -self.p.dca_brake_min_pct
-
-    # -- TREND OVERLAY ---------------------------------------------------------
+    # -- Common market regime and trend overlay --------------------------------
     def _trend_closes(self) -> list:
         """Return long-trend closes at the same cadence in live and replay.
 
         Replay uses injected bar closes; live and paper-live use provider OHLC at
-        ``trend_interval``. Thus SMA(N) has the same meaning in both modes.
+        ``trend_interval``. The optional exit SMA therefore keeps the same cadence.
         """
         if self.replay_mode:
             return [p for _, p in self._shadow_prices]
         try:
             return self.client.ohlc_closes(self.pair, self.p.trend_interval)
-        except Exception as e:  # noqa: BLE001 — no signal simply means no trend entry.
-            log(f"  [STRAT] trend OHLC fetch failed ({e}) — trend undetermined")
+        except Exception as e:  # noqa: BLE001 - unavailable data yields an unknown regime.
+            log(f"  [STRAT] regime OHLC fetch failed ({e}) - regime unavailable")
             return []
 
-    def _trend_up_series(self, closes: list) -> bool:
-        """Confirm uptrend when recent closes exceed a rising SMA for the required bars."""
-        n = self.p.trend_sma_n
-        k = max(1, self.p.trend_confirm_bars)
-        if len(closes) < n + k:
-            return False
-        for j in range(k):
-            i = len(closes) - 1 - j
-            sma = sum(closes[i - n + 1:i + 1]) / n
-            sma_prev = sum(closes[i - n:i]) / n
-            if not (closes[i] > sma and sma > sma_prev):
-                return False
-        return True
+    def _regime_context(self) -> tuple[MarketRegimeDecision, list]:
+        """Classify and reuse one completed-bar snapshot across regime policies."""
+        if not self.replay_mode:
+            now = time.time()
+            interval_sec = max(60, self.p.trend_interval * 60)
+            slot = int(now // interval_sec)
+            settle_sec = min(_REGIME_BAR_SETTLE_MAX_SEC, interval_sec / 4)
+            refresh_epoch = slot * interval_sec + settle_sec
+            cached = self._regime_bar_context
+            if cached and cached[0] == slot:
+                _, stable, decision, closes = cached
+                if stable or now < refresh_epoch:
+                    return decision, closes
+        closes = self._trend_closes()
+        decision = self._regime_service.evaluate_closes_for_horizon(
+            closes,
+            horizon="long",
+            interval_min=self.p.trend_interval,
+        )
+        if not self.replay_mode and decision.fresh:
+            # Refresh a boundary read once after upstream candle caches settle;
+            # the stable result is then reused until the next completed-bar slot.
+            self._regime_bar_context = (slot, now >= refresh_epoch, decision, closes)
+        return decision, closes
 
-    def _overlay_step(self, price: float) -> bool:
+    @staticmethod
+    def _regime_matches(decision: MarketRegimeDecision | None, expected: str, *,
+                        min_move_pct: float = 0.0, min_samples: int = 3) -> bool:
+        """Apply policy thresholds without changing the shared classification."""
+        if (decision is None or not decision.fresh or decision.regime != expected
+                or (decision.n_samples or 0) < min_samples):
+            return False
+        move = decision.fitted_move_pct
+        return min_move_pct <= 0 or (move is not None and abs(move) >= min_move_pct)
+
+    def _overlay_step(self, price: float, regime: MarketRegimeDecision,
+                      closes: list) -> bool:
         """Apply the regime overlay and return whether it handled the tick.
 
         Confirmed uptrend uses top-up, hold, and trailing or SMA-break exit. A range
         returns False so classic DCA/TP logic runs.
         """
-        closes = self._trend_closes()
-        up = self._trend_up_series(closes)
+        up = self._regime_matches(
+            regime,
+            "bull",
+            min_samples=self.p.regime_min_samples,
+        )
         pending_trend_entry = next(
             (o for o in self.s["orders"]
              if o["side"] == "buy" and o.get("kind") == "TREND_ENTRY"),
@@ -1146,7 +1154,7 @@ class Strategy:
                 return True                         # Wait for the top-up fill.
             self._cancel_open("buy")                # Signal disappeared before fill.
             log("  [STRAT] TREND ENTER cancelled: the signal vanished before the fill")
-            return False                            # revine la strategia range
+            return False                            # Return to the range strategy.
         if up and self.s["spent"] + self.p.trend_topup <= self._effective_max_budget():
             self._cancel_orders("buy")              # Cancel pending range orders.
             self._cancel_orders("sell")
@@ -1155,7 +1163,7 @@ class Strategy:
             self._place("buy", self._qty_for(self.p.trend_topup, price), price,
                         kind="TREND_ENTRY", amount=self.p.trend_topup)
             log(f"  [STRAT] TREND ENTER pending: top-up {self.p.trend_topup} {self.ccy} @ {price} "
-                f"(SMA{self.p.trend_sma_n} up, confirmat)")
+                f"(common {regime.horizon} regime: {regime.regime})")
             return True
         return False
 
@@ -1205,8 +1213,20 @@ class Strategy:
         if self._has_pending_market_exit():
             return
 
+        regime = None
+        regime_closes = []
+        needs_regime = self.p.trend_overlay or (
+            held > 1e-12 and (
+                self.p.dca_trend_brake
+                or (self.p.tp_trend_hold and self.p.tp_regime_gate)
+            )
+        )
+        if needs_regime:
+            regime, regime_closes = self._regime_context()
+
         # Combine range DCA/TP with trend hold/trailing behavior.
-        if self.p.trend_overlay and self._overlay_step(price):
+        if (self.p.trend_overlay
+                and self._overlay_step(price, regime, regime_closes)):
             return
 
         if held <= 1e-12:
@@ -1250,7 +1270,17 @@ class Strategy:
 
         avg = self._avg()
         trail_armed = self.s.get("trail_peak") is not None
-        if (self.p.enable_takeprofit and avg and self.p.tp_trend_hold
+        regime_allows_tp_hold = (
+            not self.p.tp_regime_gate
+            or self._regime_matches(
+                regime, "bull", min_move_pct=self.p.tp_trend_min_pct,
+                min_samples=self.p.regime_min_samples,
+            )
+        )
+        trend_hold_active = self.p.tp_trend_hold and (
+            trail_armed or regime_allows_tp_hold
+        )
+        if (self.p.enable_takeprofit and avg and trend_hold_active
                 and (trail_armed or price >= sr.tp_price(avg, self.p.takeprofit_pct))):
             # Arm trailing at the first TP crossing and keep it armed through exit, even
             # if price later falls below TP, so the target pullback does not reset the peak.
@@ -1288,7 +1318,7 @@ class Strategy:
                 self._cancel_orders("sell", exclude_market=True)
                 log(f"  [STRAT] above the TP, RIDING IT (peak {peak:.{self.price_dec}f}, "
                     f"trail-stop {trail_stop:.{self.price_dec}f})")
-        elif self.p.enable_takeprofit and avg and self.p.tp_trend_hold:
+        elif self.p.enable_takeprofit and avg and trend_hold_active:
             # Below TP with ride enabled, do not place a fixed TP. Wait to cross TP and
             # arm trailing; stop-loss remains the safety exit.
             self.s["trail_peak"] = None
@@ -1338,7 +1368,13 @@ class Strategy:
                     self.p.reentry_tolerance_pct,
                 )
                 and self.s["spent"] + effective_dca_amount <= self._effective_max_budget()
-                and not (self.p.dca_trend_brake and self._trend_down())  # B: DCA brake in a downtrend
+                and not (
+                    self.p.dca_trend_brake
+                    and self._regime_matches(
+                        regime, "bear", min_move_pct=self.p.dca_brake_min_pct,
+                        min_samples=self.p.regime_min_samples,
+                    )
+                )
                 and not self._has_open("buy")):
             log(
                 f"  [STRAT] dip {price} <= {self.s['last_buy_price']}"

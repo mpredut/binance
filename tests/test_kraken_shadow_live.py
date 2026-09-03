@@ -65,6 +65,7 @@ class ShadowLiveTest(unittest.TestCase):
             trend_topup: float = 2000.0
             trend_trail_pct: float = 5.0
             trend_exit_break: bool = False
+            tp_regime_gate: bool = False
 
         with patch(
             "strategies.spot_dca.StratParams.from_env", return_value=Params(),
@@ -84,7 +85,8 @@ class ShadowLiveTest(unittest.TestCase):
             [
                 "current", "tp4", "dca15", "dca_progressive025",
                 "reentry4", "trail_profit_floor_sl18", "trail_profit_floor_sl125",
-                "A_trail", "dca_vol_m1", "overlay650t8", "B_dcabrake",
+                "A_trail", "dca_vol_m1", "tp_regime_gate",
+                "overlay650t8_regime_v2", "B_dcabrake_regime_v2",
             ],
         )
         progressive = variants_60["dca_progressive025"]
@@ -104,9 +106,10 @@ class ShadowLiveTest(unittest.TestCase):
         vol_scaled = variants_240["dca_vol_m1"]
         self.assertEqual(vol_scaled.dca_vol_scale_k, -1.0)
         self.assertEqual(vol_scaled.dca_vol_ref, 2.0)
-        candidate = variants_240["overlay650t8"]
+        self.assertTrue(variants_240["tp_regime_gate"].tp_regime_gate)
+        candidate = variants_240["overlay650t8_regime_v2"]
         self.assertTrue(candidate.trend_overlay)
-        brake = variants_240["B_dcabrake"]
+        brake = variants_240["B_dcabrake_regime_v2"]
         self.assertTrue(brake.dca_trend_brake)
         self.assertEqual(candidate.trend_topup, 650.0)
         self.assertEqual(candidate.trend_trail_pct, 8.0)

@@ -33,6 +33,14 @@ class MarketRegimeDecision:
     def directional(self) -> bool:
         return self.regime in {"bull", "bear"}
 
+    @property
+    def fitted_move_pct(self) -> Optional[float]:
+        """Return the fitted move across the classified sample window."""
+        if self.gradient is None or self.n_samples is None or self.n_samples < 2:
+            return None
+        move = float(self.gradient) * (self.n_samples - 1) * 100.0
+        return move if math.isfinite(move) else None
+
     def adverse_to(self, exposure_side: str) -> bool:
         side = str(exposure_side or "").upper()
         return ((side == "LONG" and self.regime == "bear") or
@@ -328,6 +336,32 @@ class MarketRegimeService:
             while len(self._cache) > self.cache_max:
                 self._cache.popitem(last=False)
         return decision
+
+    @staticmethod
+    def horizon_sample_capacity(horizon="short", interval_min=None) -> int:
+        """Return the maximum samples in the canonical horizon window."""
+        parsed = MarketRegimeHorizon.parse(horizon)
+        configured_interval, window_seconds = _HORIZON_SOURCES[parsed][0]
+        interval = configured_interval if interval_min is None else int(interval_min)
+        if interval <= 0:
+            raise ValueError("the regime interval must be positive")
+        return max(3, int(math.ceil(window_seconds / (interval * 60))))
+
+    def evaluate_closes_for_horizon(self, closes, *, horizon="short",
+                                    interval_min=None) -> MarketRegimeDecision:
+        """Classify supplied closes with the canonical window for one horizon."""
+        parsed = MarketRegimeHorizon.parse(horizon)
+        configured_interval, window_seconds = _HORIZON_SOURCES[parsed][0]
+        interval = (
+            configured_interval if interval_min is None else int(interval_min)
+        )
+        return self._annotate(
+            self.evaluate_closes(
+                closes, interval_min=interval, window_seconds=window_seconds,
+            ),
+            horizon=parsed,
+            source=f"closes:{interval}m",
+        )
 
     def evaluate_closes(self, closes, *, interval_min=1,
                         window_seconds=900.0) -> MarketRegimeDecision:

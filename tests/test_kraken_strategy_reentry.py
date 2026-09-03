@@ -184,6 +184,26 @@ class TestTrailingTakeProfit(unittest.TestCase):
         s.s["last_buy_price"] = 100.0
         return s
 
+    def test_regime_gate_uses_classic_tp_until_bullish(self):
+        s = self._positioned_strategy(tp_regime_gate=True)
+        s.client.ohlc_closes.return_value = [100.0 - index for index in range(40)]
+
+        s.step(105.5)
+
+        sell = s._find_open("sell")
+        self.assertIsNotNone(sell)
+        self.assertFalse(sell["market"])
+        self.assertIsNone(s.s["trail_peak"])
+
+    def test_regime_gate_arms_trailing_on_common_bull_signal(self):
+        s = self._positioned_strategy(tp_regime_gate=True)
+        s.client.ohlc_closes.return_value = [100.0 + index for index in range(40)]
+
+        s.step(105.5)
+
+        self.assertEqual(s.s["trail_peak"], 105.5)
+        self.assertFalse(s._has_open("sell"))
+
     def test_pullback_below_tp_after_arming_still_exits(self):
         s = self._positioned_strategy()
 
@@ -193,7 +213,27 @@ class TestTrailingTakeProfit(unittest.TestCase):
 
         s.step(102.0)       # A pullback of 3.32%; it is below the TP, but the trailing is already armed.
         sell = s._find_open("sell")
-        self.assertIsNotNone(sell, "the armed trailing must still exit after falling back below the TP")
+        self.assertIsNotNone(
+            sell,
+            "the armed trailing must still exit after falling back below the TP",
+        )
+        self.assertEqual(sell["kind"], "TP")
+
+    def test_armed_trailing_survives_a_later_bear_regime(self):
+        s = self._positioned_strategy(tp_regime_gate=True)
+        s.client.ohlc_closes.return_value = [
+            100.0 + index for index in range(40)
+        ]
+        s.step(105.5)
+
+        s.client.ohlc_closes.return_value = [
+            140.0 - index for index in range(40)
+        ]
+        s.step(102.0)
+
+        sell = s._find_open("sell")
+        self.assertIsNotNone(sell)
+        self.assertTrue(sell["market"])
         self.assertEqual(sell["kind"], "TP")
 
     def test_trailing_exit_does_not_open_dca_in_same_tick(self):

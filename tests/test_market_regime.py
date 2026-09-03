@@ -19,6 +19,7 @@ class MarketRegimeEvaluatorTest(unittest.TestCase):
         self.assertEqual(bear.regime, "bear")
         self.assertEqual(flat.regime, "sideways")
         self.assertEqual((bull.n_samples, bull.window_seconds), (40, 900.0))
+        self.assertEqual(bull.fitted_move_pct, 1950.0)
 
     def test_exposure_adversity_is_symmetric(self):
         bull = self.evaluator.evaluate({"gradient_recent": 0.5, "epsilon": 0.1})
@@ -36,15 +37,36 @@ class MarketRegimeEvaluatorTest(unittest.TestCase):
 
     def test_common_service_derives_regime_from_provider_ohlc(self):
         class Provider:
-            name = "Kraken"
+            def __init__(self, name):
+                self.name = name
+
             def ohlc_closes(self, _symbol, _interval):
                 return [100, 101, 102, 103, 104, 105]
 
         service = MarketRegimeService(2.0, cache_ttl_sec=30)
-        decision = service.evaluate_provider(
-            Provider(), "HYPEUSD", interval_min=1, window_seconds=360)
+        decisions = [
+            service.evaluate_provider(
+                Provider(name), "HYPEUSD", interval_min=1, window_seconds=360,
+            )
+            for name in ("Kraken", "Hyperliquid")
+        ]
+        self.assertEqual(decisions[0], decisions[1])
+        decision = decisions[0]
         self.assertEqual(decision.regime, "bull")
         self.assertEqual(decision.n_samples, 6)
+
+    def test_closes_horizon_uses_the_canonical_window_and_annotation(self):
+        decision = MarketRegimeService().evaluate_closes_for_horizon(
+            list(range(100, 142)),
+            horizon="long",
+            interval_min=240,
+        )
+        self.assertEqual(decision.regime, "bull")
+        self.assertEqual(decision.window_seconds, 7 * 86400.0)
+        self.assertEqual((decision.horizon, decision.source), ("long", "closes:240m"))
+        self.assertEqual(
+            MarketRegimeService.horizon_sample_capacity("long", 240), 42,
+        )
 
     def test_common_service_is_bounded_and_unknown_on_provider_error(self):
         class Provider:

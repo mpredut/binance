@@ -30,7 +30,7 @@ def _make_strategy(*, replay_mode=False, **overrides):
         adopt_cost=0.0, adopt_qty=0.0, reentry_drop_pct=0.0,
         reentry_tolerance_pct=0.0, reentry_adaptive=False,
         reentry_sl_bounce_pct=1.5, tp_tranches=[], trend_overlay=True,
-        trend_sma_n=2, trend_interval=240, trend_confirm_bars=1,
+        trend_sma_n=2, trend_interval=240, regime_min_samples=3,
         trend_topup=400.0, trend_trail_pct=5.0, trend_exit_break=False,
     )
     defaults.update(overrides)
@@ -161,7 +161,7 @@ class TrendOverlayTest(unittest.TestCase):
         with patch.object(s, "_trail_vol_1h", return_value=10.0):
             self.assertEqual(s._effective_trail_pct(), 8.0)
 
-    def test_dca_brake_uses_fixed_ohlc_in_paper_live(self):
+    def test_dca_brake_uses_common_regime_from_fixed_ohlc_in_paper_live(self):
         s = _make_strategy(
             replay_mode=False,
             trend_overlay=False,
@@ -171,9 +171,98 @@ class TrendOverlayTest(unittest.TestCase):
         s.client.ohlc_closes.return_value = [100.0 - index for index in range(20)]
         s._shadow_prices.extend((float(index), 100.0 + index) for index in range(20))
 
-        self.assertTrue(s._trend_down())
+        decision, _ = s._regime_context()
+        self.assertTrue(s._regime_matches(
+            decision, "bear", min_move_pct=s.p.dca_brake_min_pct,
+            min_samples=20,
+        ))
         s.client.ohlc_closes.assert_called_once_with("TESTPAIR_OVERLAY", 240)
 
+    def test_bear_regime_blocks_actual_dca(self):
+        s = _make_strategy(
+            replay_mode=False,
+            trend_overlay=False,
+            dca_trend_brake=True,
+            dca_brake_min_pct=1.5,
+        )
+        s.s.update({
+            "qty": 1.0,
+            "cost": 100.0,
+            "spent": 100.0,
+            "entry_price": 100.0,
+            "last_buy_price": 100.0,
+        })
+        s.client.ohlc_closes.return_value = [100.0 - index for index in range(20)]
+
+        s.step(95.0)
+
+        self.assertFalse(s._has_open("buy"))
+
+    def test_unknown_regime_preserves_classic_dca_policy(self):
+        s = _make_strategy(
+            replay_mode=False,
+            trend_overlay=False,
+            dca_trend_brake=True,
+        )
+        s.s.update({
+            "qty": 1.0,
+            "cost": 100.0,
+            "spent": 100.0,
+            "entry_price": 100.0,
+            "last_buy_price": 100.0,
+        })
+        s.client.ohlc_closes.return_value = []
+
+        s.step(95.0)
+
+        self.assertEqual(s._find_open("buy")["kind"], "DCA")
+
+    def test_all_enabled_policies_share_one_ohlc_read_per_step(self):
+        s = _make_strategy(
+            replay_mode=False,
+            tp_trend_hold=True,
+            tp_regime_gate=True,
+            dca_trend_brake=True,
+        )
+        s.s.update({
+            "qty": 1.0,
+            "cost": 100.0,
+            "spent": 100.0,
+            "entry_price": 100.0,
+            "last_buy_price": 100.0,
+        })
+        s.client.ohlc_closes.return_value = [100.0] * 40
+
+        s.step(105.5)
+
+        s.client.ohlc_closes.assert_called_once_with("TESTPAIR_OVERLAY", 240)
+
+    def test_live_regime_context_reuses_a_bar_and_refreshes_after_settle(self):
+        s = _make_strategy(replay_mode=False)
+        s.client.ohlc_closes.return_value = [100.0 + index for index in range(42)]
+        interval_sec = s.p.trend_interval * 60
+        slot_start = 10 * interval_sec
+
+        with patch.object(strat.time, "time", return_value=slot_start + 1) as clock:
+            first, _ = s._regime_context()
+            clock.return_value = slot_start + 600
+            cached, _ = s._regime_context()
+            clock.return_value = slot_start + 901
+            refreshed, _ = s._regime_context()
+            clock.return_value = slot_start + 1200
+            stable, _ = s._regime_context()
+
+        self.assertEqual(first, cached)
+        self.assertEqual(refreshed, stable)
+        self.assertEqual(s.client.ohlc_closes.call_count, 2)
+
+    def test_unavailable_regime_context_is_not_cached_for_the_whole_bar(self):
+        s = _make_strategy(replay_mode=False)
+        s.client.ohlc_closes.return_value = []
+        with patch.object(strat.time, "time", return_value=1_000_000):
+            s._regime_context()
+            s._regime_context()
+        self.assertEqual(s.client.ohlc_closes.call_count, 2)
 
     def test_trend_topup_rejects_non_finite_or_non_positive_sizing(self):
         for invalid in (float("nan"), float("inf"), float("-inf"), 0.0, -1.0):

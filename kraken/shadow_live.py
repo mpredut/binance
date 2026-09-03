@@ -19,8 +19,10 @@ candidates preregistered from research before risking real money:
     isolates the floor from stop widening (~78% of sl18's gain came from the stop)
   - dca_vol_m1 (240m only): volatility-scaled DCA amount reduces tail risk/drawdown but
     loses most active windows and remains defensive
-  - overlay650t8 (240m only): 650 top-up with an 8% trail; an EXPLORATORY forward
-    candidate not approved for live use
+  - tp_regime_gate (240m only): use the common classifier to gate newly armed TP
+    trailing while leaving an already armed exit intact
+  - overlay650t8_regime_v2 (240m only): 650 top-up with an 8% trail; an EXPLORATORY
+    forward candidate using the common classifier and not approved for live use
 
 Given the same OHLC, results are deterministic and reproducible. Closed forward bars are
 stored locally so the anchored window continues growing beyond Kraken's 720-bar limit.
@@ -109,20 +111,21 @@ def _variants(interval: int):
             dca_vol_ref=2.0,
         )
     # The overlay uses a 240m OHLC signal; do not simulate it artificially at 60m.
-    # Values were preregistered after historical analysis and remain fixed forward.
+    # Versioned IDs prevent evidence from the former private classifier being mixed in.
     if interval == base.trend_interval:
-        variants["overlay650t8"] = dataclasses.replace(
+        variants["tp_regime_gate"] = dataclasses.replace(
+            base, tp_regime_gate=True,
+        )
+        variants["overlay650t8_regime_v2"] = dataclasses.replace(
             base,
             trend_overlay=True,
             trend_topup=650.0,
             trend_trail_pct=8.0,
             trend_exit_break=False,
         )
-    # B: DCA brake during a confirmed downtrend. It reduces tail risk/drawdown, but central
-    # and stress financial benchmarks consistently sacrifice returns; observational only.
-    # Like A, it uses the fixed-OHLC trend signal and runs only at the trend interval.
-    if interval == base.trend_interval:
-        variants["B_dcabrake"] = dataclasses.replace(
+        # The DCA brake reduces historical tail risk but sacrifices returns, so it
+        # also stays observational on the native regime cadence.
+        variants["B_dcabrake_regime_v2"] = dataclasses.replace(
             base,
             dca_trend_brake=True,
             dca_brake_min_pct=1.5,
