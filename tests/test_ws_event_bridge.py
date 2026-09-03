@@ -1,15 +1,14 @@
 """
-Bridge-ul event-driven WS -> cache (28 iul: fost test_session_changes.py, un
-nume vag de "modificari de sesiune"; redenumit + curatat).
+Event-driven WebSocket-to-cache bridge (renamed and cleaned up from the
+ambiguously named test_session_changes.py on July 28).
 
-Pastrat AICI (unic, neacoperit altundeva):
-  1. bapi_ws — subscriber pattern (subscribe/unsubscribe/_notify_subscribers).
-  4. Integrare end-to-end: BinanceWebSocketManager -> CacheCurrentPriceManager
-     -> Cache24PriceManager (propagarea unui eveniment WS pe tot lantul).
+Coverage kept here because it is unique:
+  1. The bapi_ws subscriber pattern (subscribe/unsubscribe/_notify_subscribers).
+  2. End-to-end propagation from BinanceWebSocketManager through
+     CacheCurrentPriceManager to Cache24PriceManager.
 
-ELIMINAT de aici (era REDUNDANT): testele izolate pt CacheCurrentPriceManager
-and Cache24PriceManager — test_cache_manager_full.py has SUPERSET versions of
-them (they cover the same behaviours plus many more). No coverage is lost.
+The isolated manager tests were removed because test_cache_manager_full.py
+covers the same behavior and additional cases. No coverage is lost.
 """
 import os, sys, tempfile, unittest
 from unittest.mock import MagicMock, patch
@@ -31,7 +30,7 @@ SYMBOLS = ["BTCUSDC"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 1. bapi_ws — subscriber pattern (UNIC — neacoperit in test_bapi_ws.py)
+# 1. bapi_ws subscriber pattern (unique and not covered in test_bapi_ws.py)
 # ═══════════════════════════════════════════════════════════════════════════════
 class TestBapiWsSubscriber(unittest.TestCase):
 
@@ -79,7 +78,7 @@ class TestBapiWsSubscriber(unittest.TestCase):
         good.on_items_update.assert_called_once()
 
 
-# ─── Helpers pt integrare ─────────────────────────────────────────────────────
+# ─── Integration helpers ──────────────────────────────────────────────────────
 def _make_current_price_manager(tmp_dir, price=50000.0):
     mock_bapi.get_current_price.return_value = price
     mgr = cm.CacheCurrentPriceManager(
@@ -91,34 +90,35 @@ def _make_current_price_manager(tmp_dir, price=50000.0):
     return mgr
 
 
-def _make_cache24_manager(tmp_dir):
-    mgr = cm.Cache24PriceManager(
-        sync_ts=9999, symbols=SYMBOLS,
-        filename=os.path.join(tmp_dir, "cache_24price_BTCUSDC.json"),
-        api_client=mock_bapi,
-    )
+def _make_cache24_manager(tmp_dir, current_price_manager):
+    with patch.object(
+        cm,
+        "get_current_price_manager",
+        return_value=current_price_manager,
+    ):
+        mgr = cm.Cache24PriceManager(
+            sync_ts=9999, symbols=SYMBOLS,
+            filename=os.path.join(tmp_dir, "cache_24price_BTCUSDC.json"),
+            api_client=mock_bapi,
+        )
     mgr.enable_save_state_to_file()
     return mgr
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 2. End-to-end integration: WS -> CurrentPrice -> Cache24 (UNIQUE — it is not in
-#    test_cache_manager_full.py, which tests the managers IN ISOLATION)
+# 2. End-to-end integration: WS -> CurrentPrice -> Cache24. This is not covered
+#    by test_cache_manager_full.py, which tests the managers in isolation.
 # ═══════════════════════════════════════════════════════════════════════════════
 class TestIntegration(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
-        cm._current_price_instance = None
         mock_bapi.get_current_price.return_value = 50000.0
         self.ws = BinanceWebSocketManager(symbols=["BTCUSDC"])
         self.cur = _make_current_price_manager(self.tmp)
-        self.h24 = _make_cache24_manager(self.tmp)
+        self.h24 = _make_cache24_manager(self.tmp, self.cur)
         self.ws.subscribe(self.cur)
         self.cur.subscribe_price(self.h24)
-
-    def tearDown(self):
-        cm._current_price_instance = None
 
     def test_ws_event_updates_current_price(self):
         self.ws._notify_subscribers("BTCUSDC", [55000.0])
@@ -140,14 +140,13 @@ class TestIntegration(unittest.TestCase):
             self.assertIn(p, recorded)
 
     def test_current_price_snapshot_not_history(self):
-        """CacheCurrentPriceManager e snapshot (append_mode=False) -> 1 entry;
-        Cache24PriceManager e history (append_mode=True)."""
+        """CurrentPrice is a snapshot while Cache24 retains price history."""
         self.ws._notify_subscribers("BTCUSDC", [57000.0])
         with self.cur.lock:
             self.assertEqual(len(self.cur.cache.get("BTCUSDC", [])), 1)
 
     def test_persistence_currentprice(self):
-        """After a restart, the cache is loaded from the file."""
+        """Load the cache from its file after a simulated restart."""
         self.cur.enable_save_state_to_file()
         self.ws._notify_subscribers("BTCUSDC", [58000.0])
         self.cur.save_state_to_file_if_enabled()

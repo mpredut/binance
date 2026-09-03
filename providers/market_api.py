@@ -452,8 +452,12 @@ class MarketApi:
         self._route[symbol] = default
         return default
 
-    def get_current_price(self, symbol: str) -> Optional[float]:
-        return self._provider_for(symbol).get_current_price(symbol)
+    def get_current_price(
+        self, symbol: str, *, provider_name=None,
+    ) -> Optional[float]:
+        """Read a quote through explicit venue routing when it is configured."""
+        provider = self._provider_explicit_or_routed(symbol, provider_name)
+        return provider.get_current_price(symbol)
 
     def get_price_history(self, symbol: str, lookback_h: float) -> Optional[List]:
         return self._provider_for(symbol).get_price_history(symbol, lookback_h)

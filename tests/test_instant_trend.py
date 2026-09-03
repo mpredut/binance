@@ -75,10 +75,23 @@ class TestStore(unittest.TestCase):
 
     def test_is_snapshot_fresh(self):
         m = cm.CachePriceShortTrendManager(["BTCUSDT"], os.path.join(self.tmp, "f.json"), writer=True)
-        m.update_snapshot("BTCUSDT", gradient_recent=0.1, ts=time.time())
+        m.update_snapshot(
+            "BTCUSDT", gradient_recent=0.1,
+            current_price=60000.0, ts=time.time())
         self.assertTrue(m.is_snapshot_fresh("BTCUSDT", max_age_sec=10))
-        m.update_snapshot("BTCUSDT", gradient_recent=0.1, ts=time.time() - 100)
+        m.update_snapshot(
+            "BTCUSDT", gradient_recent=0.1,
+            current_price=60000.0, ts=time.time() - 100)
         self.assertFalse(m.is_snapshot_fresh("BTCUSDT", max_age_sec=10))
+
+    def test_zero_price_snapshot_is_not_fresh(self):
+        m = cm.CachePriceShortTrendManager(
+            ["BTCUSDT"], os.path.join(self.tmp, "zero.json"), writer=True)
+        m.update_snapshot(
+            "BTCUSDT", gradient_recent=0.1,
+            current_price=0.0, ts=time.time())
+        self.assertFalse(m.is_snapshot_fresh("BTCUSDT", max_age_sec=10))
+        self.assertIsNone(m.fresh_snapshot("BTCUSDT"))
 
     def test_is_snapshot_fresh_no_data(self):
         m = cm.CachePriceShortTrendManager(["BTCUSDT"], os.path.join(self.tmp, "g.json"))
@@ -96,7 +109,9 @@ class TestStore(unittest.TestCase):
     def test_resilient_uses_file_when_fresh(self):
         fname = os.path.join(self.tmp, "res1.json")
         writer = cm.CachePriceShortTrendManager(["BTCUSDT"], fname, writer=True)
-        writer.update_snapshot("BTCUSDT", gradient_recent=-0.4, ts=time.time())
+        writer.update_snapshot(
+            "BTCUSDT", gradient_recent=-0.4,
+            current_price=60000.0, ts=time.time())
         reader = cm.CachePriceShortTrendManager(["BTCUSDT"], fname)
         snap = reader.get_snapshot_resilient("BTCUSDT", max_age_sec=10)
         self.assertEqual(snap["gradient_recent"], -0.4)
@@ -119,7 +134,8 @@ class TestStore(unittest.TestCase):
     def _cpm(self):
         fname = os.path.join(self.tmp, "cp_res.json")
         c = cm.CacheCurrentPriceManager(sync_ts=9999, symbols=["BTCUSDT"],
-                                        filename=fname, ws_manager=None, api_client=mock_api)
+                                        filename=fname, ws_manager=None, api_client=mock_api,
+                                        market_api=mock_api)
         c.on_items_update("BTCUSDT", [60000.0])
         return c
 
@@ -169,7 +185,8 @@ class TestGate(unittest.TestCase):
 
     def _pub(self, **f):
         f.setdefault("ts", time.time())
-        f.setdefault("current_price", 0.0)   # eps=0 tests direction without noise.
+        f.setdefault("current_price", 60000.0)
+        f.setdefault("epsilon", 1e-12)   # Direction tests use a negligible noise floor.
         self.m.update_snapshot("BTCUSDT", **f)
 
     def test_mode_gradient_vs_full(self):
@@ -218,12 +235,12 @@ class TestGate(unittest.TestCase):
         self.assertEqual(calls, [])
 
     def test_wait_stops_when_flips(self):
-        self._pub(gradient_recent=-0.5, epsilon=0.0)
+        self._pub(gradient_recent=-0.5, epsilon=1e-12)
         st = {"n": 0}
         def fake_sleep(_):
             st["n"] += 1
             if st["n"] >= 2:
-                self._pub(gradient_recent=0.5, epsilon=0.0)
+                self._pub(gradient_recent=0.5, epsilon=1e-12)
         waited = self.m.wait_for_favorable_entry("BUY", "BTCUSDT", max_wait_sec=60,
                                                  poll_sec=1.0, sleep_fn=fake_sleep)
         self.assertGreaterEqual(waited, 2.0)
@@ -239,7 +256,8 @@ class TestComputation(unittest.TestCase):
         self.cache24 = _make_cache24("BTCUSDT", _entries_now(60), self.tmp)
         fname = os.path.join(self.tmp, "cp.json")
         self.cpm = cm.CacheCurrentPriceManager(sync_ts=9999, symbols=["BTCUSDT"],
-                                               filename=fname, ws_manager=None, api_client=mock_api)
+                                               filename=fname, ws_manager=None, api_client=mock_api,
+                                               market_api=mock_api)
         self.m = _mgr(self.tmp)
         self.m.start_computation({"BTCUSDT": self.cache24}, self.cpm)
 
@@ -256,12 +274,14 @@ class TestComputation(unittest.TestCase):
         # The fast path writes gradient_recent_fast/trend_fast. The slow
         # evaluate_full path exclusively owns gradient_recent/final_trend, avoiding
         # the empirically measured fast/slow race on real data.
-        self.m.on_price_update("BTCUSDT", int(time.time() * 1000), 60500.0)
+        ts_ms = int(time.time() * 1000)
+        self.m.on_price_update("BTCUSDT", ts_ms, 60500.0)
         snap = self.m.get_snapshot("BTCUSDT")
         self.assertIsNotNone(snap)
         self.assertIn("gradient_recent_fast", snap)
         self.assertIn("epsilon", snap)
         self.assertEqual(snap["current_price"], 60500.0)
+        self.assertEqual(snap["ts_fast"], ts_ms / 1000.0)
 
     def test_cache24_tick_updates_window_and_snapshot(self):
         win = self.m.get_window("BTCUSDT")
@@ -289,6 +309,7 @@ class TestComputation(unittest.TestCase):
         self.assertEqual(m.window_small_sec, 60.0)
         self.assertEqual(m.window_big_sec, 3600.0)
         m.start_computation({"BTCUSDT": self.cache24}, self.cpm)
+        self.cpm._push_price("BTCUSDT", 50000.0)
         for sec in (60, 600, 3600):
             self.assertIsNotNone(m.get_window("BTCUSDT", sec))
         m.evaluate_full("BTCUSDT")
@@ -339,12 +360,57 @@ class TestComputation(unittest.TestCase):
 
     def test_evaluate_full_writes_complete_snapshot(self):
         # Full calculation without trading logic yields every snapshot metric.
+        self.cpm._push_price("BTCUSDT", 50000.0)
         self.m.evaluate_full("BTCUSDT")
         snap = self.m.get_snapshot("BTCUSDT")
         self.assertIsNotNone(snap)
         for key in ("final_trend", "slope_full", "gradient_recent",
                     "slope_small", "slope_big", "slope_max_min", "pos", "epsilon"):
             self.assertIn(key, snap)
+
+    def test_failed_full_eval_preserves_primed_stale_snapshot(self):
+        filename = os.path.join(self.tmp, "stale_trend.json")
+        stale_ts = time.time() - 120.0
+        stale = {
+            "BTCUSDT": {
+                "symbol": "BTCUSDT",
+                "current_price": 60400.0,
+                "gradient_recent": -0.25,
+                "ts": stale_ts,
+            },
+        }
+        with open(filename, "w", encoding="utf-8") as handle:
+            json.dump(stale, handle)
+        cpm = MagicMock()
+        cpm.cached_price_observation.return_value = None
+        cpm.get_price_value.return_value = None
+        manager = cm.CachePriceShortTrendManager(
+            ["BTCUSDT"], filename, writer=True)
+        self.addCleanup(manager.shutdown)
+        manager.start_computation({"BTCUSDT": self.cache24}, cpm)
+
+        manager.evaluate_full("BTCUSDT")
+        snapshot = manager.get_snapshot("BTCUSDT")
+
+        self.assertEqual(snapshot["current_price"], 60400.0)
+        self.assertNotEqual(snapshot["current_price"], 0.0)
+        self.assertEqual(snapshot["gradient_recent"], -0.25)
+        self.assertEqual(snapshot["ts"], stale_ts)
+        cpm.cached_price_observation.assert_called_with(
+            "BTCUSDT", manager.TREND_STALE_SEC)
+        cpm.get_price_value.assert_not_called()
+
+    def test_valid_push_full_eval_uses_price_observation_timestamp(self):
+        self.cpm._push_price("BTCUSDT", 61234.5)
+        observed_at_ms = int((time.time() - 2.0) * 1000)
+        with self.cpm.lock:
+            self.cpm.cache["BTCUSDT"][0][0] = observed_at_ms
+
+        self.m.evaluate_full("BTCUSDT")
+        snapshot = self.m.get_snapshot("BTCUSDT")
+
+        self.assertEqual(snapshot["current_price"], 61234.5)
+        self.assertEqual(snapshot["ts"], observed_at_ms / 1000.0)
 
     def test_full_eval_loop_thread_started(self):
         m2 = cm.CachePriceShortTrendManager(["BTCUSDT"], os.path.join(self.tmp, "t2.json"))
@@ -383,7 +449,8 @@ class TestDynamicWindow(unittest.TestCase):
         m = _mgr(self.tmp, name=f"dyn_{id(cache24)}.json")
         cpm_fname = os.path.join(self.tmp, f"cp_{id(cache24)}.json")
         cpm = cm.CacheCurrentPriceManager(sync_ts=9999, symbols=["BTCUSDT"],
-                                          filename=cpm_fname, ws_manager=None, api_client=mock_api)
+                                          filename=cpm_fname, ws_manager=None, api_client=mock_api,
+                                          market_api=mock_api)
         m.start_computation({"BTCUSDT": cache24}, cpm)
         return m
 

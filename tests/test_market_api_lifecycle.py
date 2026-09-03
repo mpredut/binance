@@ -109,6 +109,20 @@ class MarketApiLifecycleTest(unittest.TestCase):
 
         self.assertEqual(selected, "Second")
 
+    def test_current_price_explicit_provider_does_not_pollute_implicit_route(self):
+        implicit = FakeProvider()
+        implicit.name = "Binance"
+        explicit = FakeProvider()
+        explicit.name = "Kraken"
+        explicit.get_current_price = lambda symbol: 85.49
+        api = MarketApi([implicit, explicit])
+
+        self.assertEqual(
+            api.get_current_price("HYPEUSD", provider_name="Kraken"),
+            85.49,
+        )
+        self.assertEqual(api.provider_name_for("HYPEUSD"), "Binance")
+
     def test_unsupported_reconciliation_operations_fail_closed(self):
         capabilities = self.api.reconciliation_capabilities("ABCUSD")
         self.assertTrue(capabilities.status_by_order_id)

@@ -2623,7 +2623,7 @@ class CacheCurrentPriceManager(CacheManagerInterface):
     FREQ_WINDOW_SEC    = 60     # Window used to measure update frequency.
 
     def __init__(self, sync_ts, symbols, filename, ws_manager=None, api_client=api,
-                 market_api=None):
+                 market_api=None, provider_names=None):
         self._ws_manager        = ws_manager
         self._ws_last_event_ts  = 0.0      # Set before the base initializer.
         self._price_subscribers = []       # The base initializer preserves existing values.
@@ -2632,11 +2632,34 @@ class CacheCurrentPriceManager(CacheManagerInterface):
         # The injectable market-data facade defaults to the global singleton. Set it before
         # the base initializer because load_state may immediately call get_remote_items.
         self.market_api = market_api or _market_api.api
+        self._provider_names = {}
+        self.bind_providers(provider_names)
         super().__init__(sync_ts, symbols, filename, append_mode=False, api_client=api_client)
         if ws_manager is not None:
             ws_manager.subscribe(self)
 
     # ── WS health ────────────────────────────────────────────────────────────
+
+    def bind_provider(self, symbol: str, provider_name: str) -> None:
+        """Bind one symbol to its configured venue and reject ambiguity."""
+        key = str(symbol or "").strip().upper()
+        value = str(provider_name or "").strip()
+        if not key or not value:
+            raise ValueError("symbol and provider_name must be non-empty")
+        previous = self._provider_names.get(key)
+        if previous is not None and previous.lower() != value.lower():
+            raise ValueError(
+                f"conflicting providers for {key}: {previous} and {value}"
+            )
+        self._provider_names[key] = value
+
+    def bind_providers(self, provider_names) -> None:
+        """Merge configured symbol-to-venue bindings without implicit fallback."""
+        for symbol, provider_name in dict(provider_names or {}).items():
+            self.bind_provider(symbol, provider_name)
+
+    def provider_name_for(self, symbol: str):
+        return self._provider_names.get(str(symbol or "").strip().upper())
 
     def _ws_is_healthy(self):
         return (time.time() - self._ws_last_event_ts) < self.WS_TIMEOUT_SEC
@@ -2679,7 +2702,12 @@ class CacheCurrentPriceManager(CacheManagerInterface):
     def get_remote_items(self, symbol, startTime):
         """Fetch current price through the market-data facade."""
         try:
-            price = self.market_api.get_current_price(symbol=symbol)
+            provider_name = self.provider_name_for(symbol)
+            if provider_name is None:
+                price = self.market_api.get_current_price(symbol=symbol)
+            else:
+                price = self.market_api.get_current_price(
+                    symbol=symbol, provider_name=provider_name)
             if price is None:
                 return []
             ts_ms = int(time.time() * 1000)
@@ -2726,6 +2754,33 @@ class CacheCurrentPriceManager(CacheManagerInterface):
             return 0.0
         return len(dq) / self.FREQ_WINDOW_SEC
 
+    def cached_price_observation(self, symbol: str, max_age_sec: float):
+        """Return a fresh cached timestamp and price without fetching."""
+        max_age = float(max_age_sec)
+        if not math.isfinite(max_age) or max_age <= 0:
+            raise ValueError("max_age_sec must be finite and positive")
+        with self.lock:
+            entries = self.cache.get(symbol)
+            entry = list(entries[0]) if entries else None
+        if not entry or len(entry) < 2:
+            return None
+        try:
+            observed_at = float(entry[0]) / 1000.0
+            price = float(entry[1])
+        except (TypeError, ValueError, OverflowError):
+            return None
+        age = time.time() - observed_at
+        if (
+            not math.isfinite(observed_at)
+            or observed_at <= 0
+            or not math.isfinite(price)
+            or price <= 0
+            or age < -5.0
+            or age > max_age
+        ):
+            return None
+        return observed_at, price
+
     def get_price(self, symbol: str):
         """Return ``[timestamp_ms, price]``, forcing HTTP when missing or stale."""
         with self.lock:
@@ -2765,7 +2820,8 @@ _current_price_instance: Optional[CacheCurrentPriceManager] = None
 _current_price_lock = threading.Lock()
 
 def get_current_price_manager(ws_manager=None, symbols=None, sync_ts=None,
-                              start_sync=True) -> CacheCurrentPriceManager:
+                              start_sync=True,
+                              provider_names=None) -> CacheCurrentPriceManager:
     """Return or lazily create the CacheCurrentPriceManager singleton.
 
     ``sync_ts=None`` preserves the current interval and uses the configured default on
@@ -2776,6 +2832,8 @@ def get_current_price_manager(ws_manager=None, symbols=None, sync_ts=None,
     if _current_price_instance is not None:
         if sync_ts is not None:
             _current_price_instance.sync_ts = sync_ts   # Live update.
+        if provider_names:
+            _current_price_instance.bind_providers(provider_names)
         if ws_manager is not None:
             _current_price_instance.attach_ws_manager(ws_manager)
         if start_sync:
@@ -2785,6 +2843,8 @@ def get_current_price_manager(ws_manager=None, symbols=None, sync_ts=None,
         if _current_price_instance is not None:
             if sync_ts is not None:
                 _current_price_instance.sync_ts = sync_ts
+            if provider_names:
+                _current_price_instance.bind_providers(provider_names)
             if ws_manager is not None:
                 _current_price_instance.attach_ws_manager(ws_manager)
             if start_sync:
@@ -2796,6 +2856,7 @@ def get_current_price_manager(ws_manager=None, symbols=None, sync_ts=None,
             symbols     = _syms,
             filename    = "cache_currentprice.json",
             ws_manager  = ws_manager,
+            provider_names = provider_names,
             api_client  = api,
         )
         if start_sync:
@@ -2894,6 +2955,8 @@ class CachePriceShortTrendManager:
                 self._start_full_eval_loop()
             return
         self._stop_event.clear()
+        if self.writer:
+            self.prime_from_file(symbols=self.symbols, overwrite=False)
         import pricewindow as pw
         if cache24_managers is None:
             cache24_managers = get_cache_manager("Price24")
@@ -2916,7 +2979,10 @@ class CachePriceShortTrendManager:
             c24.subscribe_price(self)                       # tick signal to the fast channel
             print(f"[InstantTrend][{s}] " + " ".join(parts))
           except Exception as _e:
-            builtins.print(f"[InstantTrend][{s}] setup failed ({_e}) — skipping, Binance neafectat")
+            builtins.print(
+                f"[InstantTrend][{s}] setup failed ({_e}) — skipping; "
+                "Binance is unaffected"
+            )
         self._computing = True
         self._start_flush_loop()        # Decouple file I/O into a background thread.
         if run_full_eval:
@@ -2931,9 +2997,13 @@ class CachePriceShortTrendManager:
         primary = self.window_seconds[0]
         if primary not in wins:
             return None
-        current_price = None
-        if self.current_price_mgr is not None:
-            current_price = self.current_price_mgr.get_price_value(symbol)
+        if self.current_price_mgr is None:
+            return None
+        observation = self.current_price_mgr.cached_price_observation(
+            symbol, self.TREND_STALE_SEC)
+        if observation is None:
+            return None
+        observed_at, current_price = observation
 
         # Calculate slopes for every window, keyed by seconds.
         slopes = {}
@@ -2957,8 +3027,8 @@ class CachePriceShortTrendManager:
             slopes={f"{int(s)}": v for s, v in slopes.items()},
             slope_max_min=pan.calculate_slope_max_min(),
             pos=primary_pos, epsilon=pwin.get_noise_epsilon(self.EPSILON_K),
-            current_price=(current_price if current_price is not None else 0.0),
-            ts=time.time(),
+            current_price=current_price,
+            ts=observed_at,
         )
 
     def _start_full_eval_loop(self):
@@ -2990,7 +3060,7 @@ class CachePriceShortTrendManager:
             eps = win.get_noise_epsilon(self.EPSILON_K)
             self._set_mem(symbol, gradient_recent_fast=g, epsilon=eps,
                           trend_fast=(1 if g > 0 else -1 if g < 0 else 0),
-                          current_price=price, ts=time.time())
+                          current_price=price, ts_fast=float(ts_ms) / 1000.0)
         except Exception as e:
             print(f"[CachePriceShortTrendManager] on_price_update {symbol}: {e}")
 
@@ -3140,12 +3210,21 @@ class CachePriceShortTrendManager:
                    for manager in list(cls._live_instances)]
         return all(results) if results else True
 
-    def prime_from_file(self):
+    def prime_from_file(self, symbols=None, *, overwrite=True):
         """Prime memory from startup data so a reader can calculate fresh trends locally."""
         data = self._read_file()
+        allowed = (
+            None
+            if symbols is None
+            else {str(symbol) for symbol in symbols}
+        )
         with self._lock:
             for symbol, snap in data.items():
-                if isinstance(snap, dict):
+                if (
+                    isinstance(snap, dict)
+                    and (allowed is None or symbol in allowed)
+                    and (overwrite or symbol not in self._mem)
+                ):
                     self._mem[symbol] = dict(snap)
         return len(self._mem)
 
@@ -3156,13 +3235,32 @@ class CachePriceShortTrendManager:
                 return dict(self._mem[symbol])
         return self._read_file().get(symbol)
 
+    @staticmethod
+    def _snapshot_is_usable(snap, now, max_age_sec):
+        """Validate the common full-snapshot price and observation timestamp."""
+        if not isinstance(snap, dict):
+            return False
+        try:
+            observed_at = float(snap["ts"])
+            price = float(snap["current_price"])
+            age = float(now) - observed_at
+        except (KeyError, TypeError, ValueError, OverflowError):
+            return False
+        return (
+            math.isfinite(observed_at)
+            and observed_at > 0
+            and math.isfinite(price)
+            and price > 0
+            and -5.0 <= age <= float(max_age_sec)
+        )
+
     def is_snapshot_fresh(self, symbol=None, max_age_sec=None):
         """Return whether memory or file state is fresh enough to trust the writer."""
         max_age_sec = max_age_sec if max_age_sec is not None else self.TREND_STALE_SEC
         now = time.time()
         if symbol is not None:
             snap = self.get_snapshot(symbol)
-            return bool(snap) and (now - snap.get("ts", 0)) <= max_age_sec
+            return self._snapshot_is_usable(snap, now, max_age_sec)
         allt = self.get_all_snapshots()
         if not allt:
             return False
@@ -3186,8 +3284,10 @@ class CachePriceShortTrendManager:
         if self.is_snapshot_fresh(symbol, max_age_sec):
             return self._read_file().get(symbol)
         # A stale file triggers autonomous local calculation and writer failover.
-        builtins.print(f"[CachePriceShortTrendManager][WARN] stale file -> "
-                       f"failover la calcul propriu ({symbol})")
+        builtins.print(
+            f"[CachePriceShortTrendManager][WARN] stale file -> "
+            f"local-computation failover ({symbol})"
+        )
         self.prime_from_file()
         self.start_computation(cache24_managers, current_price_mgr)
         self.become_writer()
@@ -3224,10 +3324,8 @@ class CachePriceShortTrendManager:
         This is the shared public staleness check used by both trend and wait decisions.
         """
         snap = self.get_snapshot(symbol)
-        if snap is None:
-            return None
         now = now if now is not None else time.time()
-        if now - snap.get("ts", 0) > self.TREND_STALE_SEC:
+        if not self._snapshot_is_usable(snap, now, self.TREND_STALE_SEC):
             return None
         return snap
 
@@ -3376,9 +3474,11 @@ class CacheFactory:
     }
 
     @classmethod
-    def get(cls, name, symbols=None, *, start_sync=True):
+    def get(cls, name, symbols=None, *, start_sync=True, provider_names=None):
         if name not in cls._CONFIG:
             raise ValueError(f"Unknown cache type: {name}")
+        if provider_names is not None and name != "CurrentPrice":
+            raise ValueError("provider_names is supported only for CurrentPrice")
 
         # This name-keyed singleton fixes symbols on first creation. Warn explicitly
         # when a later call requests a different set that will be ignored.
@@ -3395,6 +3495,8 @@ class CacheFactory:
                     f"the request for {sorted(requested)} is IGNORED"
                     + (f" (missing: {sorted(missing)})" if missing else "")
                     + ". Singleton per name — the first instance is used.")
+        if name == "CurrentPrice" and name in cls._instances:
+            cls._instances[name].bind_providers(provider_names)
 
         created = name not in cls._instances
         if created:
@@ -3408,7 +3510,18 @@ class CacheFactory:
             if symbols is None:
                 symbols = ["TOTAL"] if name == "AssetValue" else sym.symbols
 
-            if name in ("Price", "Price24"):
+            if name == "CurrentPrice":
+                current_price_sync_ts = (
+                    None if _current_price_instance is not None else sync_ts
+                )
+                cls._instances[name] = get_current_price_manager(
+                    symbols=symbols,
+                    sync_ts=current_price_sync_ts,
+                    start_sync=False,
+                    provider_names=provider_names,
+                )
+                sync_ts = cls._instances[name].sync_ts
+            elif name in ("Price", "Price24"):
                 # Price is append-JSONL history; Price24 is a bounded full-rewrite cache.
                 prefix, ext = ("cache_price_", "jsonl") if name == "Price" else ("cache_24price_", "json")
                 cls._instances[name] = {
@@ -3451,11 +3564,18 @@ class CacheFactory:
     @classmethod
     def shutdown_all(cls, timeout=5.0):
         """Stop every factory-owned synchronization loop and clear the registry."""
+        global _current_price_instance
+        current_price = cls._instances.get("CurrentPrice")
         managers = []
         for value in cls._instances.values():
             managers.extend(value.values() if isinstance(value, dict) else (value,))
         results = [manager.shutdown(timeout=timeout) for manager in managers
                    if hasattr(manager, "shutdown")]
+        if (
+            current_price is _current_price_instance
+            and getattr(current_price, "thread", None) is None
+        ):
+            _current_price_instance = None
         cls._instances = {}
         cls._sync_started = set()
         return all(results) if results else True
@@ -3463,6 +3583,7 @@ class CacheFactory:
     @classmethod
     def remove(cls, name, timeout=5.0):
         """Remove a singleton cleanly after stopping all threads it owns."""
+        global _current_price_instance
         value = cls._instances.pop(name, None)
         cls._sync_started.discard(name)
         if value is None:
@@ -3470,7 +3591,10 @@ class CacheFactory:
         managers = value.values() if isinstance(value, dict) else (value,)
         results = [manager.shutdown(timeout=timeout) for manager in managers
                    if hasattr(manager, "shutdown")]
-        return all(results) if results else True
+        stopped = all(results) if results else True
+        if name == "CurrentPrice" and value is _current_price_instance and stopped:
+            _current_price_instance = None
+        return stopped
         
 def get_cache_manager(name, symbols=None, *, start_sync=True):
     return CacheFactory.get(name, symbols, start_sync=start_sync)
@@ -3689,16 +3813,28 @@ def _initialize_once():
 
 import concurrent.futures as _futures
 
-# A hard deadline protects non-Binance price polling from DNS/connect/read hangs that
-# request read timeouts may not cover. A separate worker and Future timeout keep the
-# poller alive and let it recover when the network returns.
-_NB_FETCH_DEADLINE_SEC = 15   # Shorter than the 20-second interval, so hangs do not extend a cycle.
+# A poll deadline prevents the loop from waiting on one slow provider call. The
+# provider's own network timeout still owns the worker lifecycle.
+_NB_FETCH_DEADLINE_SEC = 8   # Shorter than the poll interval, so hangs do not extend a cycle.
 
 
-def _fetch_price_with_deadline(market_api, symbol, pool, deadline_sec=_NB_FETCH_DEADLINE_SEC):
-    """Fetch current price with a hard deadline across DNS, connect, and read stages."""
-    fut = pool.submit(market_api.get_current_price, symbol=symbol)
-    return fut.result(timeout=deadline_sec)
+def _fetch_price_with_deadline(
+    market_api,
+    symbol,
+    pool,
+    deadline_sec=_NB_FETCH_DEADLINE_SEC,
+    provider_name=None,
+):
+    """Bound the poller's wait while the provider owns the network-call timeout."""
+    kwargs = {"symbol": symbol}
+    if provider_name is not None:
+        kwargs["provider_name"] = provider_name
+    fut = pool.submit(market_api.get_current_price, **kwargs)
+    try:
+        return fut.result(timeout=deadline_sec)
+    except _futures.TimeoutError:
+        fut.cancel()
+        raise
 
 
 class _NonBinanceTrendPoller:
@@ -3716,30 +3852,56 @@ class _NonBinanceTrendPoller:
         return not self.thread.is_alive()
 
 
-def _start_nonbinance_trend_poller(cpm, symbols, interval_sec=20,
-                                   fetch_deadline_sec=_NB_FETCH_DEADLINE_SEC):
+def _start_nonbinance_trend_poller(cpm, symbols, interval_sec=10,
+                                   fetch_deadline_sec=_NB_FETCH_DEADLINE_SEC,
+                                   provider_names=None):
     """Feed instant trends for non-WebSocket, non-Binance symbols.
 
     Poll through the facade and push into the CurrentPrice/Cache24/InstantTrend chain.
-    Per-symbol failures do not affect Binance. A hard deadline and at least two workers
-    keep one blocked fetch from freezing the poller; repeated failures remain visible.
+    Per-symbol failures do not affect Binance. A bounded poll wait and at least two
+    workers keep one slow fetch from freezing the poller; provider timeouts remain visible.
     """
+    symbols = tuple(str(symbol or "").strip() for symbol in symbols)
+    bindings = {
+        str(symbol or "").strip().upper(): str(provider_name or "").strip()
+        for symbol, provider_name in dict(provider_names or {}).items()
+    }
+    missing = [
+        symbol for symbol in symbols
+        if (
+            not symbol
+            or not bindings.get(symbol.upper())
+            or bindings[symbol.upper()].lower() == "binance"
+        )
+    ]
+    if missing:
+        raise ValueError(
+            "explicit provider bindings are required for non-Binance symbols: "
+            + ", ".join(missing)
+        )
+    cpm.bind_providers(bindings)
     pool = _futures.ThreadPoolExecutor(
-        max_workers=max(2, len(list(symbols))), thread_name_prefix="NBTrendFetch")
+        max_workers=max(2, len(symbols)), thread_name_prefix="NBTrendFetch")
     stop_event = threading.Event()
 
     def run():
         while not stop_event.is_set():
-            for s in list(symbols):
+            for s in symbols:
                 if stop_event.is_set():
                     break
                 try:
-                    p = _fetch_price_with_deadline(cpm.market_api, s, pool, fetch_deadline_sec)
+                    p = _fetch_price_with_deadline(
+                        cpm.market_api,
+                        s,
+                        pool,
+                        fetch_deadline_sec,
+                        provider_name=bindings[s.upper()],
+                    )
                     if p is not None and float(p) > 0:
                         cpm._push_price(s, float(p))
                 except _futures.TimeoutError:
                     builtins.print(f"[NB-trend] {s}: fetch BLOCKED >{fetch_deadline_sec}s "
-                                   f"(hard deadline — probably DNS or the network) — skipping, retrying next cycle")
+                                   f"(poll deadline — probably DNS or the network) — skipping, retrying next cycle")
                 except Exception as _e:
                     builtins.print(f"[NB-trend] {s}: {_e}")
             stop_event.wait(interval_sec)
@@ -3762,26 +3924,46 @@ if __name__ == "__main__":
     _nb_poller = None
     _trend_mgr = None
 
-    # Add non-Binance instruments that need cached instant trends. Binance symbols still
-    # come from sym.symbols through WebSocket; configuration errors fall back to Binance only.
+    # Add configured non-Binance instruments that need cached instant trends. Preserve
+    # venue identity because the same symbol cannot be routed safely by spelling alone.
     _nb_syms = []
-    try:
-        from instruments_config import load_for
-        for _inst in load_for("mt").values():
-            if _inst.provider_name != "binance" and _inst.symbol not in sym.symbols:
-                _nb_syms.append(_inst.symbol)
-        _nb_syms = list(dict.fromkeys(_nb_syms))
-    except Exception as _e:
-        builtins.print(f"[cacheManager] non-Binance trend instruments unavailable: {_e}")
-        _nb_syms = []
+    _nb_provider_names = {}
+    _binance_symbol_keys = {
+        str(_symbol).strip().upper() for _symbol in sym.symbols
+    }
+    from instruments_config import load_for
+    for _inst in load_for("mt").values():
+        _provider_name = str(_inst.provider_name).strip()
+        _symbol = str(_inst.symbol).strip()
+        if not _provider_name or not _symbol:
+            raise RuntimeError("configured provider and symbol must be non-empty")
+        _key = _symbol.upper()
+        if _provider_name.lower() == "binance":
+            continue
+        if _key in _binance_symbol_keys:
+            raise RuntimeError(
+                f"ambiguous current-price cache symbol {_symbol}: Binance and "
+                f"{_provider_name}"
+            )
+        _previous = _nb_provider_names.get(_key)
+        if _previous is not None and _previous.lower() != _provider_name.lower():
+            raise RuntimeError(
+                f"conflicting providers for {_symbol}: {_previous} and {_provider_name}"
+            )
+        _nb_provider_names[_key] = _provider_name
+        _nb_syms.append(_symbol)
+    _nb_syms = list(dict.fromkeys(_nb_syms))
     _trend_syms = list(dict.fromkeys(list(sym.symbols) + _nb_syms))
     # Register non-Binance Price24 managers before the generic loop so trend computation
     # can find a raw buffer for every symbol.
     if _nb_syms:
+        # Create the venue-bound source before Price24 can request initialization data.
+        CacheFactory.get(
+            "CurrentPrice",
+            symbols=_trend_syms,
+            provider_names=_nb_provider_names,
+        )
         CacheFactory.get("Price24", symbols=_trend_syms)
-        # Extend the persisted CurrentPrice factory instance with non-Binance symbols
-        # polled through the facade, keeping cache_currentprice.json coherent.
-        CacheFactory.get("CurrentPrice", symbols=_trend_syms)
         builtins.print(f"[cacheManager] instant-trend extended with non-Binance: {_nb_syms}")
         # LONGTREND_NONBINANCE optionally starts accumulating sparse history and long-trend
         # data. It is disabled by default until enough lookback data exists.
@@ -3807,13 +3989,22 @@ if __name__ == "__main__":
     try:
         from binance_api import bapi_ws
         _trend_cpm = get_current_price_manager(
-            ws_manager=bapi_ws.get_ws_manager(), symbols=_trend_syms, sync_ts=0.8)
+            ws_manager=bapi_ws.get_ws_manager(),
+            symbols=_trend_syms,
+            sync_ts=0.8,
+            provider_names=_nb_provider_names,
+        )
         _trend_cache24 = CacheFactory.get("Price24")
         _trend_mgr = get_short_trend_manager(symbols=_trend_syms, writer=True)   # Sole file writer.
         _trend_mgr.start_computation(_trend_cache24, _trend_cpm, run_full_eval=True)
         print("⚙️ cacheManager: full trend computation started (cache_instant_trend.json).")
         if _nb_syms:   # WebSocket covers Binance only; push other prices manually.
-            _nb_poller = _start_nonbinance_trend_poller(_trend_cpm, _nb_syms, interval_sec=20)
+            _nb_poller = _start_nonbinance_trend_poller(
+                _trend_cpm,
+                _nb_syms,
+                interval_sec=10,
+                provider_names=_nb_provider_names,
+            )
     except Exception as e:
         print(f"[cacheManager] Cannot start the trend computation: {e}")
 

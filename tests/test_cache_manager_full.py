@@ -862,14 +862,15 @@ class TestCacheCurrentPriceManager(unittest.TestCase):
     def tearDown(self):
         cm._current_price_instance = None
 
-    def _make(self, price=50000.0):
+    def _make(self, price=50000.0, provider_names=None):
         api_mock = MagicMock()
         api_mock.get_current_price.return_value = price
         fname = _tmp_file(self.tmp, "cache_currentprice.json")
         # Inject market_api so HTTP fetching uses the testable market-data facade.
         return cm.CacheCurrentPriceManager(
             sync_ts=9999, symbols=["BTC"], filename=fname,
-            ws_manager=None, api_client=api_mock, market_api=api_mock
+            ws_manager=None, api_client=api_mock, market_api=api_mock,
+            provider_names=provider_names,
         ), api_mock
 
     # ── on_items_update ───────────────────────────────────────────────────────
@@ -959,6 +960,59 @@ class TestCacheCurrentPriceManager(unittest.TestCase):
         api_mock.get_current_price.assert_called()
         with mgr.lock:
             self.assertEqual([stale], mgr.cache["BTC"])
+
+    def test_unbound_remote_price_keeps_implicit_provider_routing(self):
+        mgr, api_mock = self._make(price=51000.0)
+        api_mock.get_current_price.reset_mock()
+
+        rows = mgr.get_remote_items("BTC", None)
+
+        self.assertEqual(rows[0][1], 51000.0)
+        call = api_mock.get_current_price.call_args
+        self.assertEqual(call.kwargs["symbol"], "BTC")
+        self.assertIsNone(call.kwargs.get("provider_name"))
+        self.assertIsNone(mgr.provider_name_for("BTC"))
+
+    def test_bound_remote_price_uses_explicit_provider(self):
+        mgr, api_mock = self._make(
+            price=85.49,
+            provider_names={"BTC": "Kraken"},
+        )
+        api_mock.get_current_price.reset_mock()
+
+        rows = mgr.get_remote_items("BTC", None)
+
+        self.assertEqual(rows[0][1], 85.49)
+        api_mock.get_current_price.assert_called_once_with(
+            symbol="BTC",
+            provider_name="Kraken",
+        )
+        self.assertEqual(mgr.provider_name_for("BTC"), "Kraken")
+
+    def test_conflicting_provider_binding_is_rejected(self):
+        mgr, _ = self._make(provider_names={"BTC": "Kraken"})
+
+        mgr.bind_provider("BTC", "kraken")
+        with self.assertRaisesRegex(ValueError, r"conflicting provider"):
+            mgr.bind_provider("BTC", "Hyperliquid")
+
+    def test_cached_price_observation_never_fetches(self):
+        mgr, api_mock = self._make()
+        mgr.on_items_update("BTC", [55000.0])
+        api_mock.get_current_price.reset_mock()
+
+        observed_at, price = mgr.cached_price_observation(
+            "BTC", max_age_sec=10.0)
+
+        self.assertAlmostEqual(observed_at, time.time(), delta=1.0)
+        self.assertEqual(price, 55000.0)
+        api_mock.get_current_price.assert_not_called()
+
+        with mgr.lock:
+            mgr.cache["BTC"][0][0] = int((time.time() - 20.0) * 1000)
+        self.assertIsNone(
+            mgr.cached_price_observation("BTC", max_age_sec=10.0))
+        api_mock.get_current_price.assert_not_called()
 
     # ── subscribe_price / unsubscribe_price ───────────────────────────────────
 
@@ -1090,10 +1144,15 @@ class TestCacheFactory(unittest.TestCase):
     def setUp(self):
         # Reset singletons.
         cm.CacheFactory.shutdown_all()
+        if cm._current_price_instance is not None:
+            cm._current_price_instance.shutdown()
         cm._current_price_instance = None
 
     def tearDown(self):
         cm.CacheFactory.shutdown_all()
+        if cm._current_price_instance is not None:
+            cm._current_price_instance.shutdown()
+        cm._current_price_instance = None
 
     def test_read_only_creation_can_be_promoted_to_periodic_sync(self):
         with patch.object(cm.CacheTradeManager, "periodic_sync") as periodic, \
@@ -1114,6 +1173,32 @@ class TestCacheFactory(unittest.TestCase):
             i1 = cm.CacheFactory.get("CurrentPrice", symbols=["BTC"])
             i2 = cm.CacheFactory.get("CurrentPrice", symbols=["BTC"])
         self.assertIs(i1, i2)
+
+    def test_factory_and_current_price_getter_share_identity_factory_first(self):
+        with patch.object(
+                cm.CacheCurrentPriceManager, "load_state", return_value=None):
+            factory_manager = cm.CacheFactory.get(
+                "CurrentPrice", symbols=["BTC"], start_sync=False)
+            singleton_manager = cm.get_current_price_manager(
+                symbols=["BTC"], start_sync=False)
+        self.assertIs(factory_manager, singleton_manager)
+        self.assertEqual(
+            singleton_manager.sync_ts,
+            cm.CURRENTPRICE_SYNC_INTERVAL_SEC,
+        )
+
+    def test_factory_and_current_price_getter_share_identity_getter_first(self):
+        with patch.object(
+                cm.CacheCurrentPriceManager, "load_state", return_value=None), \
+             patch.object(
+                cm.CacheCurrentPriceManager, "periodic_sync") as periodic:
+            singleton_manager = cm.get_current_price_manager(
+                symbols=["BTC"], sync_ts=0.8, start_sync=False)
+            factory_manager = cm.CacheFactory.get(
+                "CurrentPrice", symbols=["BTC"])
+        self.assertIs(factory_manager, singleton_manager)
+        self.assertEqual(factory_manager.sync_ts, 0.8)
+        periodic.assert_called_once_with(0.8, False)
 
     def test_price_factories_return_per_symbol_managers_and_filenames(self):
         cur_mock = MagicMock()
@@ -1139,10 +1224,12 @@ class TestCacheFactory(unittest.TestCase):
             ("CurrentPrice", cm.CacheCurrentPriceManager),
         )
         with patch("binance_api.bapi_allorders.paginate_my_trades", return_value=[]), \
-             patch("binance_api.bapi_allorders.get_filled_orders", return_value=[]):
+             patch("binance_api.bapi_allorders.get_filled_orders", return_value=[]), \
+             patch.object(cm.CacheCurrentPriceManager, "load_state", return_value=None):
             for name, expected_class in cases:
                 with self.subTest(factory=name):
-                    result = cm.CacheFactory.get(name, symbols=["BTC"])
+                    result = cm.CacheFactory.get(
+                        name, symbols=["BTC"], start_sync=False)
                     self.assertIsInstance(result, expected_class)
 
     def test_get_cache_manager_delegates_to_factory(self):

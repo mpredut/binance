@@ -1,11 +1,10 @@
 """
-A test for the hard deadline of the non-Binance price fetch (28 Jul).
+Tests for the bounded wait used by non-Binance price polling.
 
-Incident: NonBinanceTrendPoller in cacheManager froze for 5.5h when
-get_current_price(HYPEUSD) blocked on a DNS getaddrinfo (not covered by
-the read timeout in hl_client). Fix: _fetch_price_with_deadline runs
-the fetch in a separate worker with future.result(timeout) -> any blockage
-raises TimeoutError instead of freezing the poller.
+NonBinanceTrendPoller once froze when get_current_price(HYPEUSD) blocked
+during DNS resolution. The fetch now runs in a separate worker, while
+future.result(timeout) prevents the poller itself from waiting indefinitely.
+The provider client remains responsible for ending the network call.
 """
 import os
 import sys
@@ -26,9 +25,11 @@ class _FakeApi:
         self.hang = hang
         self.price = price
         self.calls = 0
+        self.provider_names = []
 
-    def get_current_price(self, symbol=None):
+    def get_current_price(self, symbol=None, *, provider_name=None):
         self.calls += 1
+        self.provider_names.append(provider_name)
         # A TRANSIENT blockage: it stays blocked while the flag is True, and unblocks
         # when the network "comes back" (hang=False) — like a DNS/socket recovering.
         waited = 0.0
@@ -51,15 +52,57 @@ class TestFetchDeadline(unittest.TestCase):
         p = cm._fetch_price_with_deadline(api, "HYPEUSD", self.pool, deadline_sec=2)
         self.assertEqual(p, 55.5)
 
+    def test_explicit_provider_is_forwarded_inside_deadline(self):
+        api = _FakeApi(hang=False, price=85.49)
+        p = cm._fetch_price_with_deadline(
+            api, "HYPEUSD", self.pool, deadline_sec=2,
+            provider_name="Kraken")
+        self.assertEqual(p, 85.49)
+        self.assertEqual(api.provider_names, ["Kraken"])
+
     def test_hung_fetch_raises_timeout_not_blocks(self):
         api = _FakeApi(hang=True)
         self.blocked_api = api
         t0 = time.time()
         with self.assertRaises(futures.TimeoutError):
             cm._fetch_price_with_deadline(api, "HYPEUSD", self.pool, deadline_sec=1)
-        # must return at ~the deadline (1s), NOT wait out the 30s hang
-        self.assertLess(time.time() - t0, 5,
-                        "the hard deadline must return in ~1s, not wait for the 30s hang")
+        # The poller wait returns near its deadline without waiting out the worker.
+        self.assertLess(
+            time.time() - t0,
+            5,
+            "the poll wait must return in about 1s, not wait for the 30s hang",
+        )
+
+    def test_poller_requires_a_provider_for_every_symbol(self):
+        api = _FakeApi()
+
+        class _Cpm:
+            market_api = api
+
+            def __init__(self):
+                self.bind_called = False
+
+            def bind_providers(self, _provider_names):
+                self.bind_called = True
+
+        invalid_bindings = (
+            None,
+            {"HYPEUSD": "Kraken"},
+            {"HYPEUSD": "Kraken", "TAOUSD": "Binance"},
+        )
+        for provider_names in invalid_bindings:
+            with self.subTest(provider_names=provider_names):
+                cpm = _Cpm()
+                with self.assertRaisesRegex(
+                    ValueError, "explicit provider bindings are required"
+                ):
+                    cm._start_nonbinance_trend_poller(
+                        cpm,
+                        ["HYPEUSD", "TAOUSD"],
+                        provider_names=provider_names,
+                    )
+                self.assertFalse(cpm.bind_called)
+                self.assertEqual(api.calls, 0)
 
     def test_poller_survives_a_hang_and_recovers(self):
         """The poller, with a fetch that hangs and then recovers, must NOT
@@ -69,13 +112,24 @@ class TestFetchDeadline(unittest.TestCase):
 
         class _Cpm:
             market_api = api
-            def _push_price(self, s, p):  # noqa: N802 (semnatura ca in cacheManager)
+
+            def __init__(self):
+                self.bindings = {}
+
+            def bind_providers(self, provider_names):
+                self.bindings.update(provider_names or {})
+
+            def provider_name_for(self, symbol):
+                return self.bindings.get(symbol)
+
+            def _push_price(self, s, p):
                 pushed.append((s, p))
 
         cpm = _Cpm()
         # A small interval plus a short deadline, so we can observe the timeout and the recovery in the test.
         poller = cm._start_nonbinance_trend_poller(
-            cpm, ["HYPEUSD"], interval_sec=0.3, fetch_deadline_sec=0.5)
+            cpm, ["HYPEUSD"], interval_sec=0.3, fetch_deadline_sec=0.5,
+            provider_names={"HYPEUSD": "Kraken"})
         self.addCleanup(poller.stop)
         time.sleep(2)            # while the fetch is blocked -> timeouts, NOT pushes
         self.assertEqual(pushed, [], "while the fetch is blocked nothing must be pushed")
@@ -83,6 +137,9 @@ class TestFetchDeadline(unittest.TestCase):
         time.sleep(3)            # A few cycles -> it should push the price.
         self.assertTrue(any(s == "HYPEUSD" for s, _ in pushed),
                         "once the network returns, the poller must recover and push the price")
+        self.assertEqual(cpm.bindings, {"HYPEUSD": "Kraken"})
+        self.assertTrue(api.provider_names)
+        self.assertEqual(set(api.provider_names), {"Kraken"})
 
 
 if __name__ == "__main__":
