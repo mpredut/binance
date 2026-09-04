@@ -1162,7 +1162,10 @@ class AccountCacheReaderSyncTest(unittest.TestCase):
         manager.fetchtime_time_per_symbol["ETHUSDC"] = 1000
         with (
             patch.object(manager, "get_remote_items", return_value=[]),
-            patch.object(cm.time, "time", side_effect=[2.0, 13.0]),
+            # Each symbol reads time.time() twice: the request high-water (used for the
+            # sync/fetch times asserted below) and the empty-result log's timestamp
+            # formatter (value irrelevant). Sequence per symbol: [high-water, log].
+            patch.object(cm.time, "time", side_effect=[2.0, 0.0, 13.0, 0.0]),
         ):
             self.assertTrue(manager.query_remote_and_update_cache())
 
@@ -1209,7 +1212,11 @@ class AccountCacheReaderSyncTest(unittest.TestCase):
                 patch.object(
                     manager, "get_remote_items",
                     side_effect=[[], RuntimeError("second symbol failed")]),
-                patch.object(cm.time, "time", side_effect=[3.0, 4.0]),
+                # The cycle reads time.time() more than once per symbol (the request
+                # high-water plus the empty-result log's timestamp formatter). Values
+                # are irrelevant here: the cycle raises on the second symbol, so this
+                # only needs to never exhaust before that RuntimeError.
+                patch.object(cm.time, "time", side_effect=lambda: 3.0),
             ):
                 with self.assertRaisesRegex(RuntimeError, "second symbol failed"):
                     manager.query_remote_and_update_cache()

@@ -4,7 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -188,6 +188,11 @@ class InstrumentBinancePermitIntegrationTest(unittest.TestCase):
                 order_guard, "daily_limit_guard", return_value=(True, None)),
             patch.object(order_guard, "margin_for", return_value=0.01),
             patch.object(order_guard, "profit_guard", return_value=True),
+            # Isolate the placement from the live short-trend cache: the legacy
+            # place_safe_order path does not pass wait_for_trend=False, so without
+            # this it defers on whatever the production trend state happens to be.
+            patch("cacheManager.get_short_trend_manager",
+                  return_value=Mock(should_wait=Mock(return_value=False))),
             patch.object(
                 instrument_module._outcomes_log, "log_order_outcome"),
             patch.object(

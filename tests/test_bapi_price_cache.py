@@ -34,9 +34,13 @@ class BinanceRestPriceCacheTest(unittest.TestCase):
             "ticker unavailable")
         with (
             mock.patch.object(bapi, "client", client),
+            # Constant stale clock: get_current_price now calls time.time() both
+            # directly and inside update_price (even on a failed refresh), so a fixed
+            # two-element list exhausted mid-call. A lambda never exhausts and keeps
+            # every read past the TTL, which is all this staleness check needs.
             mock.patch.object(
                 bapi.time, "time",
-                side_effect=[10.0 + ttl + 1, 10.0 + ttl + 2],
+                side_effect=lambda: 10.0 + ttl + 1,
             ),
         ):
             self.assertIsNone(bapi.get_current_price(self.SYMBOL))
