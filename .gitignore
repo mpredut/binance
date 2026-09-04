@@ -68,3 +68,4 @@ plot_*.png
 /commit
 /*.patch
 *:Zone.Identifier
+.env.bak*
