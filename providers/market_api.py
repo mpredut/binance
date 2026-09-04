@@ -72,6 +72,11 @@ def _step_decimals(step: str) -> int:
     return len(s.split(".")[1]) if "." in s and s.split(".", 1)[1] else 0
 
 
+# Cache of Binance NOTIONAL minimums keyed by symbol. Exchange filters change
+# rarely and min_order_notional runs on every quantity decision.
+_BINANCE_MIN_NOTIONAL_CACHE: dict[str, float] = {}
+
+
 class BinanceProvider(MarketDataProvider):
     """Adapt Binance market data, account reads, and execution mechanics.
 
@@ -267,6 +272,24 @@ class BinanceProvider(MarketDataProvider):
             volume_decimals=decimal_places(rules.lot_step),
             order_min=float(rules.lot_min), base_asset=rules.base_asset,
         )
+
+    def min_order_notional(self, symbol: str) -> float:
+        """Binance minimum order notional (quote value) from the NOTIONAL filter.
+
+        Cached per symbol: exchange filters change rarely and this runs on every
+        quantity decision. A fetch/parse failure returns 0.0 (guard disabled),
+        never blocking an order on transient metadata trouble.
+        """
+        cached = _BINANCE_MIN_NOTIONAL_CACHE.get(symbol)
+        if cached is not None:
+            return cached
+        try:
+            info = _get_bapi().client.get_symbol_info(symbol)
+            value = float(BinanceOrderRules.from_symbol_info(info).min_notional)
+        except Exception:  # noqa: BLE001
+            return 0.0
+        _BINANCE_MIN_NOTIONAL_CACHE[symbol] = value
+        return value
 
     def ohlc_series(self, symbol: str, interval_min: int) -> ClosedPriceSeries:
         iv = candle_interval(interval_min)

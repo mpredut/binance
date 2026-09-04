@@ -114,6 +114,10 @@ class MarketDataProvider(ABC):
     def min_order_qty(self, symbol: str) -> float:
         return 0.0
 
+    def min_order_notional(self, symbol: str) -> float:
+        """Venue minimum order notional (quote value); 0 means no known minimum."""
+        return 0.0
+
     def policy_cap_quantity(self, symbol: str, side: str, price: float,
                             qty: float, available_qty: float, **kwargs) -> float:
         import order_guard

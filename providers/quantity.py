@@ -99,5 +99,16 @@ def decide_quantity(provider, symbol: str, side: str, price: float,
         symbol, side, price, balance_cap)))
     final = min(requested, balance_cap, policy_cap, fee_cap)
     reason = None if final > 0 else "qty_zero_after_policy"
+    # An order below the venue minimum notional can never fill, so refuse it here
+    # (final_qty=0) instead of letting the pipeline persist a dust intent that would
+    # clog the retry queue on every attempt. A 0/absent minimum disables the guard.
+    if final > 0 and math.isfinite(price) and price > 0:
+        try:
+            min_notional = float(provider.min_order_notional(symbol) or 0.0)
+        except Exception:  # noqa: BLE001
+            min_notional = 0.0
+        if min_notional > 0 and final * float(price) < min_notional:
+            return QuantityDecision(requested, balance_cap, policy_cap, fee_cap,
+                                    0.0, "below_min_notional", asset)
     return QuantityDecision(requested, balance_cap, policy_cap, fee_cap,
                             final, reason, asset)
