@@ -126,6 +126,25 @@ class TestTrailing(Base):
             "the protective exit must bypass the profit guard explicitly",
         )
 
+    def test_typed_filter_refusal_does_not_enter_order_recovery(self):
+        class RefusingPo(FakePo):
+            def place(self, symbol, side, price, qty, force=False, **kwargs):
+                kwargs["_outcome_context"].update(
+                    state="refused", reason="below_min_notional")
+                return None
+
+        self.po = RefusingPo()
+        ts = self.ts(FakeApi(190.0))
+        persisted = []
+        result = ts.execute_sell(
+            "TAOUSDC", "TAO", "TAOUSDC", 0.2, 190.0,
+            250.0, 22.0, persisted.append)
+
+        self.assertEqual(result.outcome, "refused")
+        self.assertEqual(
+            result.intent["submit_status"], "refused_before_submit")
+        self.assertIsNone(persisted[-1])
+
     def test_a_refused_sell_keeps_the_peak_and_does_not_arm_a_rebuy(self):
         api = FakeApi(250.0)
         ts = self.ts(api)

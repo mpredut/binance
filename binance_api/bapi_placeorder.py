@@ -676,16 +676,30 @@ def adjust_price_and_cancel_opposite(order_type, symbol, price,
     return price
 
 
+def order_candidate_price(order_type, requested_price, current_price, *, market=False):
+    """Return the exact price used by Binance filter normalization."""
+    if market:
+        return None
+    side = str(order_type).upper()
+    if side == "SELL":
+        return max(requested_price, current_price)
+    if side == "BUY":
+        return min(requested_price, current_price)
+    raise ValueError("order_type must be BUY or SELL")
+
+
 def place_order_mechanics(order_type, symbol, price, qty, force=False,
                           client_order_id=None, cache_permit=None,
                           permit_requested_price=None, kind=None,
-                          cancel_opposite_requested_price=None):
+                          cancel_opposite_requested_price=None,
+                          enforce_business_minimum=True):
     """Execute Binance-specific submission mechanics.
 
-    Clamp to real balance after fees, enforce the 100 USDC minimum notional, round,
+    Clamp to real balance after fees, enforce configured order filters, round,
     and dispatch a limit or market order. ``qty`` already comes from QuantityDecision.
     Weight, trend, cooldown, and other guards belong to the agnostic layer.
-    Instrument.place holds the RAII cooldown around this call. Return an order or None.
+    Instrument.place holds the RAII cooldown around this call. Return an accepted
+    order, or raise ``SubmissionRefused`` for a deterministic filter violation.
     """
     order_type = order_type.upper()
     sym.validate_params(order_type, symbol, price, qty)
@@ -709,25 +723,27 @@ def place_order_mechanics(order_type, symbol, price, qty, force=False,
             qty = fee_cap
 
         current_price = api.get_current_price(symbol)
-        from providers.binance_filters import BinanceFilterError, BinanceOrderRules
+        from providers.binance_filters import (
+            BinanceFilterError,
+            BinanceOrderRules,
+            binance_filter_refusal_reason,
+        )
         rules = BinanceOrderRules.from_symbol_info(client.get_symbol_info(symbol))
-        candidate_price = None
-        if not force:
-            candidate_price = (
-                max(price, current_price) if order_type == "SELL"
-                else min(price, current_price)
-            )
+        candidate_price = order_candidate_price(
+            order_type, price, current_price, market=bool(force))
         try:
             normalized_qty, normalized_price = rules.normalize(
                 quantity=qty,
                 price=candidate_price,
                 market=bool(force),
                 reference_price=current_price,
-                business_min_notional=PLACE_ORDER_MIN_NOTIONAL,
+                business_min_notional=(
+                    PLACE_ORDER_MIN_NOTIONAL
+                    if enforce_business_minimum else 0),
             )
         except BinanceFilterError as exc:
-            print(f"Binance filters refused {order_type} {symbol}: {exc}")
-            return None
+            raise SubmissionRefused(
+                binance_filter_refusal_reason(exc)) from exc
         qty = float(normalized_qty)
         if normalized_price is not None:
             price = float(normalized_price)

@@ -25,9 +25,9 @@ from providers.quantity import decide_quantity
 from providers.strategy_executor import ProviderError, SubmissionRefused
 from market_regime import MarketRegimeDecision
 from order_retry import (
-    OrderSubmissionRefused,
     StrategyExecutorLifecycleApi,
     TrackedOrderLifecycle,
+    propagate_submission_refusal,
 )
 from rtrade_pair_store import RTradePairStore, rtrade_client_order_id
 from strategies.rtrade_pair import (
@@ -352,10 +352,7 @@ class _LivePairVenue:
                 _outcome_context=outcome_context,
                 cache_permit=cache_permit,
             )
-            reason = str(outcome_context.get("reason") or "").strip()
-            if response is None and reason and reason != "response_without_order_id":
-                raise OrderSubmissionRefused(reason)
-            return response
+            return propagate_submission_refusal(response, outcome_context)
 
         result = self.order_lifecycle.submit(
             intent, persist=persist,
@@ -752,8 +749,12 @@ class _LivePairVenue:
         if price <= 0:
             print(f"[{self.symbol}] {side} hard-stop BLOCKED: price unavailable")
             return None
+        # This audited protective path follows venue filters only. The business
+        # notional floor belongs to ordinary Instrument orders, not risk reduction.
         decision = decide_quantity(
-            self.executor, self.symbol, side, price, qty, apply_policy=False)
+            self.executor, self.symbol, side, price, qty,
+            apply_policy=False, market=True,
+            enforce_business_minimum=False)
         final_qty = float(decision.final_qty)
         if final_qty <= 0:
             print(f"[{self.symbol}] {side} hard-stop BLOCKED: "

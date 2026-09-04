@@ -17,7 +17,12 @@ import time
 from typing import Any, List, Optional
 
 from .base import MarketDataProvider, _normalize_order, env_value
-from .binance_filters import BinanceFilterError, BinanceOrderRules, decimal_places
+from .binance_filters import (
+    BinanceFilterError,
+    BinanceOrderRules,
+    binance_filter_refusal_reason,
+    decimal_places,
+)
 from .strategy_executor import (
     OrderReconciliationCapabilities,
     OrderStatus,
@@ -70,11 +75,6 @@ def _step_decimals(step: str) -> int:
     """Return significant decimals in a Binance stepSize/tickSize."""
     s = str(step).rstrip("0")
     return len(s.split(".")[1]) if "." in s and s.split(".", 1)[1] else 0
-
-
-# Cache of Binance NOTIONAL minimums keyed by symbol. Exchange filters change
-# rarely and min_order_notional runs on every quantity decision.
-_BINANCE_MIN_NOTIONAL_CACHE: dict[str, float] = {}
 
 
 class BinanceProvider(MarketDataProvider):
@@ -186,12 +186,16 @@ class BinanceProvider(MarketDataProvider):
 
     def place_order(self, symbol: str, side: str, price: float, qty: float,
                     force: bool = False, cache_permit=None,
-                    permit_requested_price=None, **kwargs):
+                    permit_requested_price=None,
+                    enforce_business_minimum: bool = True, **kwargs):
         # Mechanics only: fee/balance, minimum notional, and dispatch. Instrument.place
         # applies daily, profit, quantity, trend, cooldown, and logging policies via
         # provider-neutral hooks. Only force affects market versus limit here.
         from binance_api import bapi_placeorder as _po
-        mechanics_kwargs = {"force": force}
+        mechanics_kwargs = {
+            "force": force,
+            "enforce_business_minimum": enforce_business_minimum,
+        }
         if kwargs.get("client_order_id") is not None:
             mechanics_kwargs["client_order_id"] = kwargs["client_order_id"]
         cancel_requested_price = kwargs.get(
@@ -273,23 +277,33 @@ class BinanceProvider(MarketDataProvider):
             order_min=float(rules.lot_min), base_asset=rules.base_asset,
         )
 
-    def min_order_notional(self, symbol: str) -> float:
-        """Binance minimum order notional (quote value) from the NOTIONAL filter.
-
-        Cached per symbol: exchange filters change rarely and this runs on every
-        quantity decision. A fetch/parse failure returns 0.0 (guard disabled),
-        never blocking an order on transient metadata trouble.
-        """
-        cached = _BINANCE_MIN_NOTIONAL_CACHE.get(symbol)
-        if cached is not None:
-            return cached
+    def order_filter_refusal(self, symbol: str, side: str, price: float,
+                             qty: float, *, market: bool = False,
+                             enforce_business_minimum: bool = True
+                             ) -> Optional[str]:
+        """Validate the candidate with the authoritative Binance filter parser."""
+        from binance_api import bapi_placeorder as _po
         try:
             info = _get_bapi().client.get_symbol_info(symbol)
-            value = float(BinanceOrderRules.from_symbol_info(info).min_notional)
-        except Exception:  # noqa: BLE001
-            return 0.0
-        _BINANCE_MIN_NOTIONAL_CACHE[symbol] = value
-        return value
+            rules = BinanceOrderRules.from_symbol_info(info)
+            current_price = price if market else _get_bapi().get_current_price(symbol)
+            candidate_price = _po.order_candidate_price(
+                side, price, current_price, market=market)
+        except Exception as exc:  # noqa: BLE001
+            raise ProviderError(f"order rules unavailable for {symbol}: {exc}") from exc
+        try:
+            rules.normalize(
+                quantity=qty,
+                price=candidate_price,
+                market=market,
+                reference_price=price if market else None,
+                business_min_notional=(
+                    _po.PLACE_ORDER_MIN_NOTIONAL
+                    if enforce_business_minimum else 0),
+            )
+        except BinanceFilterError as exc:
+            return binance_filter_refusal_reason(exc)
+        return None
 
     def ohlc_series(self, symbol: str, interval_min: int) -> ClosedPriceSeries:
         iv = candle_interval(interval_min)
@@ -327,10 +341,15 @@ class BinanceProvider(MarketDataProvider):
             client = _get_bapi().client
             rules = BinanceOrderRules.from_symbol_info(client.get_symbol_info(symbol))
             reference_price = _get_bapi().get_current_price(symbol)
-            normalized_qty, normalized_price = rules.normalize(
-                quantity=qty, price=price, market=bool(market or price is None),
-                reference_price=reference_price,
-            )
+            try:
+                normalized_qty, normalized_price = rules.normalize(
+                    quantity=qty, price=price,
+                    market=bool(market or price is None),
+                    reference_price=reference_price,
+                )
+            except BinanceFilterError as exc:
+                raise SubmissionRefused(
+                    binance_filter_refusal_reason(exc)) from exc
             qty = float(normalized_qty)
             price = None if normalized_price is None else float(normalized_price)
             from binance_api import bapi_placeorder as _po
@@ -852,6 +871,28 @@ class MarketApi:
         provider = self._provider_explicit_or_routed(symbol, provider_name)
         return provider.preflight_order(
             symbol, side, qty, price, market=market, kind=kind)
+
+    def order_filter_refusal(
+        self,
+        symbol: str,
+        side: str,
+        price: float,
+        qty: float,
+        *,
+        market: bool = False,
+        enforce_business_minimum: bool = True,
+        provider_name=None,
+    ) -> Optional[str]:
+        """Return a routed deterministic venue-filter refusal, if any."""
+        provider = self._provider_explicit_or_routed(symbol, provider_name)
+        return provider.order_filter_refusal(
+            symbol,
+            side,
+            price,
+            qty,
+            market=market,
+            enforce_business_minimum=enforce_business_minimum,
+        )
 
     def place_order(self, symbol: str, side: str, price: float, qty: float, **kwargs):
         # Mechanics-only provider dispatch without guards. Real placement must use

@@ -11,7 +11,8 @@ automatic re-enqueue. Provider acceptance keeps the leased revision as ``accepte
 the worker then polls normalized status without resubmitting open/partial orders. A
 fill removes it. REJECTED/EXPIRED creates a new revision for only the unfilled
 remainder; CANCELED is terminal and is never blindly resubmitted. Failure increments
-attempts and releases the lease while retaining it.
+attempts and releases the lease while retaining it. A deterministic venue-filter
+refusal is terminal and removes the unchanged intent instead of clogging the queue.
 Trend deferral releases without consuming attempts or TTL. Exceeding active TTL or the
 attempt limit removes it and sends an alert for manual intervention.
 
@@ -526,10 +527,11 @@ def process_once(mkt, now=None):
                     "pre_submit_refused"
                     if submission_state == "refused"
                     else "submit_ambiguous")
-            if (refusal_reason in {"execution_disabled", "trading_disabled"}
+            if ((refusal_reason in {"execution_disabled", "trading_disabled"}
+                    or oq.is_terminal_filter_refusal(refusal_reason))
                     and submission_state == "refused"):
-                # A durable dry intent must not become live after a later switch
-                # change. Remove it under the exact worker claim without submitting.
+                # A durable dry or venue-invalid intent cannot become executable
+                # unchanged. Remove it under the worker's exact claim.
                 oq.complete_claim(r, "success", now)
                 terminal_failed += 1
             elif oq.is_non_failure_deferral(refusal_reason):

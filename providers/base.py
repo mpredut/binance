@@ -114,9 +114,12 @@ class MarketDataProvider(ABC):
     def min_order_qty(self, symbol: str) -> float:
         return 0.0
 
-    def min_order_notional(self, symbol: str) -> float:
-        """Venue minimum order notional (quote value); 0 means no known minimum."""
-        return 0.0
+    def order_filter_refusal(self, symbol: str, side: str, price: float,
+                             qty: float, *, market: bool = False,
+                             enforce_business_minimum: bool = True
+                             ) -> Optional[str]:
+        """Return a provider-specific pre-submit refusal, if one is known."""
+        return None
 
     def policy_cap_quantity(self, symbol: str, side: str, price: float,
                             qty: float, available_qty: float, **kwargs) -> float:

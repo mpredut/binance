@@ -4,7 +4,11 @@ import unittest
 from unittest import mock
 
 from providers.strategy_executor import OrderStatus, SubmissionOutcome
-from order_retry import OrderSubmissionRefused, TrackedOrderLifecycle
+from order_retry import (
+    OrderSubmissionRefused,
+    TrackedOrderLifecycle,
+    propagate_submission_refusal,
+)
 
 
 class FakeMarketApi:
@@ -122,6 +126,26 @@ class TrackedOrderLifecycleTest(unittest.TestCase):
         self.assertFalse(result.order_known)
         self.assertEqual(result.intent["submission_outcome"], "unknown")
         self.assertEqual(result.intent["submit_error"], "socket timeout")
+
+    def test_instrument_outcome_bridge_preserves_refused_vs_unknown(self):
+        with self.assertRaisesRegex(
+                OrderSubmissionRefused, "below_min_notional"):
+            propagate_submission_refusal(
+                None,
+                {"state": "refused", "reason": "below_min_notional"},
+            )
+        self.assertIsNone(propagate_submission_refusal(
+            None,
+            {"state": "unknown", "reason": "response_without_order_id"},
+        ))
+        accepted = {"orderId": "9"}
+        self.assertIs(
+            propagate_submission_refusal(
+                accepted,
+                {"state": "accepted", "reason": None},
+            ),
+            accepted,
+        )
 
     def test_pre_submit_refusal_is_not_classified_as_ambiguous(self):
         result = self.lifecycle.submit(

@@ -9,6 +9,16 @@ class BinanceFilterError(ValueError):
     """Symbol metadata or a requested order violates Binance exchange filters."""
 
 
+def binance_filter_refusal_reason(error: Exception) -> str:
+    """Map an exact Binance filter error to a stable pre-submit reason."""
+    text = str(error)
+    if "below minimum" in text:
+        return "below_min_notional"
+    if text.startswith("invalid reference_price:"):
+        return f"binance_filter_unavailable:{text}"
+    return f"binance_filter_refused:{text}"
+
+
 def _decimal(value, *, name: str, allow_zero: bool = True) -> Decimal:
     try:
         parsed = Decimal(str(value))

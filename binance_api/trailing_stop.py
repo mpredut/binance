@@ -45,7 +45,10 @@ if _ROOT not in sys.path:
 
 from providers.quantity import resolve_assets
 from providers.execution_audit import intent_client_order_id
-from order_retry import TrackedOrderLifecycle
+from order_retry import (
+    TrackedOrderLifecycle,
+    propagate_submission_refusal,
+)
 
 from trailing_core import TrailingCore, should_sell  # noqa: E402  (re-export should_sell for tests/compatibility)
 from botcore import (load_dotenv, required_bool_env, required_float_env,
@@ -227,6 +230,27 @@ class TrailingStop:
     def reconcile_pending(self, pending, persist):
         return self.order_lifecycle.reconcile(pending, persist=persist)
 
+    def _submit_lifecycle_order(self, intent, persist, pair, side, price, qty):
+        """Submit through Instrument without losing its typed refusal state."""
+        outcome_context = {}
+
+        def submit_once():
+            response = self.po.place(
+                pair, side, price, qty, force=True,
+                bypass_profit_guard=True, smart=False,
+                caller_owns_retry=True, wait_for_trend=False,
+                client_order_id=intent["client_order_id"],
+                _outcome_context=outcome_context)
+            return propagate_submission_refusal(response, outcome_context)
+
+        result = self.order_lifecycle.submit(
+            intent, persist=persist, submit=submit_once)
+        if result.outcome == "refused":
+            # No venue order exists; clear the lifecycle slot so the strategy can
+            # make a fresh decision on a later tick instead of entering recovery.
+            persist(None)
+        return result
+
     def execute_sell(self, key, asset, pair, qty, price, peak, trail, persist):
         # July 30: use the single guarded proxy (self.po = market_api.api, .place()).
         # force=True sells at MARKET for reliable crash execution.
@@ -235,18 +259,17 @@ class TrailingStop:
         # and cooldown remain active as before; the bypass skips only profit and weighting.
         intent = self._order_intent(
             "SELL", key, asset, pair, qty, price, anchor=peak, trail=trail)
-        result = self.order_lifecycle.submit(
-            intent, persist=persist,
-            submit=lambda: self.po.place(
-                pair, "SELL", price, qty, force=True,
-                bypass_profit_guard=True, smart=False,
-                caller_owns_retry=True, wait_for_trend=False,
-                client_order_id=intent["client_order_id"]),
-        )
-        self.log(
-            f"  🛑 [TRAIL] SELL PENDING {pair} {qty} @ ~{price:.4f} "
-            f"(varf {peak:.4f}, -{trail}%, orderId={result.intent.get('order_id')})"
-        )
+        result = self._submit_lifecycle_order(
+            intent, persist, pair, "SELL", price, qty)
+        if result.outcome == "refused":
+            self.log(
+                f"  🛑 [TRAIL] SELL REFUSED {pair} {qty} @ ~{price:.4f} "
+                f"({result.intent.get('refusal_reason')})")
+        else:
+            self.log(
+                f"  🛑 [TRAIL] SELL PENDING {pair} {qty} @ ~{price:.4f} "
+                f"(peak {peak:.4f}, -{trail}%, "
+                f"orderId={result.intent.get('order_id')})")
         return result
 
     def execute_rebuy(self, key, asset, pair, qty, price, rb, persist):
@@ -254,18 +277,16 @@ class TrailingStop:
             "REBUY", key, asset, pair, qty, price,
             anchor=float(rb.get("low") or price),
             sell_price=float(rb.get("sell_price") or 0.0))
-        result = self.order_lifecycle.submit(
-            intent, persist=persist,
-            submit=lambda: self.po.place(
-                pair, "BUY", price, qty, force=True,
-                bypass_profit_guard=True, smart=False,
-                caller_owns_retry=True, wait_for_trend=False,
-                client_order_id=intent["client_order_id"]),
-        )
-        self.log(
-            f"  🟢 [TRAIL] RE-BUY PENDING {pair} {qty} @ ~{price:.4f} "
-            f"(orderId={result.intent.get('order_id')})"
-        )
+        result = self._submit_lifecycle_order(
+            intent, persist, pair, "BUY", price, qty)
+        if result.outcome == "refused":
+            self.log(
+                f"  🟢 [TRAIL] RE-BUY REFUSED {pair} {qty} @ ~{price:.4f} "
+                f"({result.intent.get('refusal_reason')})")
+        else:
+            self.log(
+                f"  🟢 [TRAIL] RE-BUY PENDING {pair} {qty} @ ~{price:.4f} "
+                f"(orderId={result.intent.get('order_id')})")
         return result
 
     def log_dry_sell(self, key, asset, pair, qty, price, peak, trail) -> None:

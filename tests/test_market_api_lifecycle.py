@@ -37,6 +37,13 @@ class FakeProvider(MarketDataProvider):
                         kind=None):
         self.preflighted = (symbol, side, qty, price, market, kind)
 
+    def order_filter_refusal(
+            self, symbol, side, price, qty, *, market=False,
+            enforce_business_minimum=True):
+        self.filter_checked = (
+            symbol, side, price, qty, market, enforce_business_minimum)
+        return getattr(self, "filter_reason", None)
+
     def get_trades(self, symbol, since_s):
         return [
             {"side": "BUY", "price": 9, "qty": 2, "timestamp": 1},
@@ -95,6 +102,29 @@ class MarketApiLifecycleTest(unittest.TestCase):
         self.assertEqual(
             self.provider.preflighted,
             ("ABCUSD", "SELL", 2.0, 11.0, False, "replacement"))
+
+    def test_order_filter_refusal_honors_explicit_provider(self):
+        second = FakeProvider()
+        second.name = "Second"
+        second.filter_reason = "below_min_notional"
+        api = MarketApi([self.provider, second])
+
+        refusal = api.order_filter_refusal(
+            "ABCUSD",
+            "SELL",
+            11.0,
+            2.0,
+            market=False,
+            enforce_business_minimum=True,
+            provider_name="Second",
+        )
+
+        self.assertEqual(refusal, "below_min_notional")
+        self.assertFalse(hasattr(self.provider, "filter_checked"))
+        self.assertEqual(
+            second.filter_checked,
+            ("ABCUSD", "SELL", 11.0, 2.0, False, True),
+        )
 
     def test_place_honors_explicit_provider_for_overlapping_symbol(self):
         second = FakeProvider()

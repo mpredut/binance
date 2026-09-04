@@ -105,7 +105,9 @@ class _BinancePermitProvider(MarketDataProvider):
         return price - 1.0 if side == "BUY" else price + 1.0
 
     def quantity_decision(self, symbol, side, price, qty, **kwargs):
-        self.events.append(("quantity", side, price, qty))
+        self.events.append((
+            "quantity", side, price, qty, kwargs.get("market"),
+            kwargs.get("enforce_business_minimum")))
         return SimpleNamespace(
             final_qty=self.final_qty,
             refuse_reason=None,
@@ -396,6 +398,11 @@ class InstrumentCachePreflightTest(unittest.TestCase):
                 _outcome_context=outcome)
 
         self.assertIsNone(result)
+        quantity = next(event for event in provider.events
+                        if event[0] == "quantity")
+        self.assertTrue(quantity[4])
+        self.assertTrue(quantity[5])
+        self.assertEqual(quantity[2], 110.0)
         self.assertTrue(any(event[0] == "preflight" for event in provider.events))
         self.assertFalse(any(event[0] == "submit" for event in provider.events))
         self.assertEqual(outcome["reason"], "profit_guard")

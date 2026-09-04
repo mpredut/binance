@@ -108,9 +108,9 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders=None):
                 continue
 
             # Persist and lease the exact replacement before canceling the live
-            # order. Any later policy refusal or response loss therefore leaves a
-            # durable intent for the shared worker instead of silently removing
-            # protection/exposure from the venue.
+            # order. Response loss and transient refusals therefore leave a
+            # durable intent for the shared worker; deterministic venue filters
+            # are checked while the existing order is still active.
             replacement_id = order_retry.enqueue(
                 symbol, order_type, quantity,
                 {"smart": False, "kind": "monitor_order_replace"},
@@ -147,6 +147,17 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders=None):
             # Issue the one-shot permit only after the durable intent exists, so
             # permit acquisition stays immediately adjacent to cancel and submit.
             try:
+                filter_refusal = mkt.order_filter_refusal(
+                    symbol,
+                    order_type,
+                    new_price,
+                    quantity,
+                    market=False,
+                    enforce_business_minimum=True,
+                    provider_name="Binance",
+                )
+                if filter_refusal:
+                    raise SubmissionRefused(filter_refusal)
                 cache_permit = mkt.preflight_order(
                     symbol, order_type, quantity, new_price,
                     market=False, kind="monitor_order_replace")
@@ -266,12 +277,14 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders=None):
                     "refused" if outcome.get("state") == "refused"
                     else "unknown"
                 )
-                terminal_execution_refusal = (
+                terminal_pre_submit_refusal = (
                     submission_state == "refused"
-                    and failure_reason in {
-                        "execution_disabled", "trading_disabled"})
+                    and (failure_reason in {
+                        "execution_disabled", "trading_disabled"}
+                        or order_retry.is_terminal_filter_refusal(
+                            failure_reason)))
                 claim_outcome = (
-                    "success" if terminal_execution_refusal else
+                    "success" if terminal_pre_submit_refusal else
                     "deferred"
                     if order_retry.is_non_failure_deferral(failure_reason)
                     else "failure"
@@ -280,12 +293,12 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders=None):
                     replacement_claim, claim_outcome,
                     failure_reason=failure_reason,
                     submission_state=submission_state)
-                if terminal_execution_refusal:
+                if terminal_pre_submit_refusal:
                     initial_prices.pop(order_id, None)
                     print(
-                        f"The {order_type} replacement was canceled by the "
-                        f"execution gate after old order {order_id} was canceled; "
-                        "the stale replacement intent was removed.")
+                        f"The {order_type} replacement was refused before submit "
+                        f"after old order {order_id} was canceled; the stale "
+                        f"replacement intent was removed ({failure_reason}).")
             
             if new_order:
                 orders[new_order['orderId']] = {
@@ -295,7 +308,7 @@ def monitor_open_orders_by_type(symbol, order_type, failed_orders=None):
                 _remember_initial_price(
                     initial_prices, new_order['orderId'], initial_prices.pop(order_id))
                 print(f"Updated order from {price} to {new_price}. New ID: {new_order['orderId']}")
-            else:
+            elif not terminal_pre_submit_refusal:
                 print(
                     f"The {order_type} replacement was not accepted immediately; "
                     "the persisted intent stays in the shared outbox for a retry."

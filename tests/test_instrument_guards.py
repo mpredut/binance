@@ -21,7 +21,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
 from providers.market_api import MarketApi, MarketDataProvider
-from providers.strategy_executor import OrderReconciliationCapabilities
+from providers.strategy_executor import (
+    OrderReconciliationCapabilities, SubmissionRefused,
+)
 from instrument import Instrument
 import order_outcomes_log as outcomes_log
 from lock import trade_cooldown as tc
@@ -476,13 +478,16 @@ class InstrumentGuardsTestCase(unittest.TestCase):
         inst = self._inst(p)
 
         buy = inst.place(
-            "BUY", 99.0, 1.0, smart=False,
+            "BUY", 99.0, 1.0, smart=False, wait_for_trend=False,
+            bypass_profit_guard=True,
             cooldown_pair_id="pair-1", caller_owns_retry=True)
         sell = inst.place(
-            "SELL", 101.0, 1.0, smart=False,
+            "SELL", 101.0, 1.0, smart=False, wait_for_trend=False,
+            bypass_profit_guard=True,
             cooldown_pair_id="pair-1", caller_owns_retry=True)
         duplicate = inst.place(
-            "SELL", 102.0, 1.0, smart=False,
+            "SELL", 102.0, 1.0, smart=False, wait_for_trend=False,
+            bypass_profit_guard=True,
             cooldown_pair_id="pair-1", caller_owns_retry=True)
 
         self.assertIsNotNone(buy)
@@ -626,6 +631,63 @@ class InstrumentGuardsTestCase(unittest.TestCase):
 
         self.assertIsNotNone(order)
         self.assertTrue(p.placed[0][4]["force"])
+
+    def test_protective_bypass_still_applies_terminal_venue_filter(self):
+        import order_retry as oq
+
+        business_minimum_flags = []
+
+        class _DustProvider(_FakeProvider):
+            def order_filter_refusal(self, *_args, **kwargs):
+                business_minimum_flags.append(
+                    kwargs["enforce_business_minimum"])
+                return "below_min_notional"
+
+        p = _DustProvider(price=90.0)
+        p.seed_trade("BUY", age_sec=400.0, price=100.0)
+        outcome = {}
+        order = self._inst(p).place(
+            "SELL", 102.0, 0.01, force=True, smart=False,
+            bypass_profit_guard=True, _outcome_context=outcome)
+
+        self.assertIsNone(order)
+        self.assertEqual(p.placed, [])
+        self.assertEqual(oq.load_all(), [])
+        self.assertEqual(outcome["reason"], "below_min_notional")
+        self.assertEqual(business_minimum_flags, [False])
+
+    def test_profit_bypass_buy_keeps_the_business_minimum(self):
+        business_minimum_flags = []
+
+        class _PolicySpyProvider(_FakeProvider):
+            def order_filter_refusal(self, *_args, **kwargs):
+                business_minimum_flags.append(
+                    kwargs["enforce_business_minimum"])
+                return None
+
+        p = _PolicySpyProvider(price=90.0)
+        order = self._inst(p).place(
+            "BUY", 90.0, 0.5, force=True, smart=False,
+            bypass_profit_guard=True, wait_for_trend=False,
+            caller_owns_retry=True)
+
+        self.assertIsNotNone(order)
+        self.assertEqual(business_minimum_flags, [True])
+
+    def test_terminal_filter_refusal_after_prequeue_removes_claim(self):
+        import order_retry as oq
+
+        class _LateDustProvider(_FakeProvider):
+            def place_order(self, *_args, **_kwargs):
+                raise SubmissionRefused(
+                    "binance_filter_refused:quantity below lot size")
+
+        p = _LateDustProvider()
+        order = self._inst(p).place(
+            "BUY", 100.0, 0.01, smart=False, wait_for_trend=False)
+
+        self.assertIsNone(order)
+        self.assertEqual(oq.load_all(), [])
 
     def test_market_order_allowed_only_when_current_price_meets_margin(self):
         p = _FakeProvider(price=102.0)

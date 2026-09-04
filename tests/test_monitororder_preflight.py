@@ -6,7 +6,11 @@ from unittest import mock
 
 import monitororder
 import order_retry_worker
-from providers.strategy_executor import OrderStatus, SubmissionRefused
+from providers.strategy_executor import (
+    OrderStatus,
+    ProviderError,
+    SubmissionRefused,
+)
 
 
 class MonitorOrderPreflightTest(unittest.TestCase):
@@ -24,6 +28,9 @@ class MonitorOrderPreflightTest(unittest.TestCase):
             self._temp_dir.name, "order_retry_queue.lock")
         monitororder.order_retry.RETRY_ENABLED = True
         monitororder.order_retry.RETRY_DEDUP = False
+        self._filter_patcher = mock.patch.object(
+            monitororder.mkt, "order_filter_refusal", return_value=None)
+        self.filter_check = self._filter_patcher.start()
 
     def tearDown(self):
         monitororder.initial_sell_prices.clear()
@@ -32,7 +39,57 @@ class MonitorOrderPreflightTest(unittest.TestCase):
         monitororder.order_retry.LOCK_FILE = self._old_queue_lock
         monitororder.order_retry.RETRY_ENABLED = self._old_retry_enabled
         monitororder.order_retry.RETRY_DEDUP = self._old_retry_dedup
+        self._filter_patcher.stop()
         self._temp_dir.cleanup()
+
+    def test_filter_refusal_or_metadata_failure_preserves_live_order(self):
+        for label, filter_result in (
+            ("deterministic-refusal", "below_min_notional"),
+            ("metadata-failure", ProviderError("rules unavailable")),
+        ):
+            with self.subTest(label=label):
+                monitororder.order_retry.rewrite([])
+                self.filter_check.reset_mock()
+                self.filter_check.side_effect = None
+                self.filter_check.return_value = None
+                if isinstance(filter_result, Exception):
+                    self.filter_check.side_effect = filter_result
+                else:
+                    self.filter_check.return_value = filter_result
+                orders = {101: {"price": 100.0, "quantity": 2.0}}
+
+                with (
+                    mock.patch.object(
+                        monitororder.api, "get_open_orders",
+                        return_value=orders),
+                    mock.patch.object(
+                        monitororder.api, "get_current_price",
+                        return_value=100.0),
+                    mock.patch.object(
+                        monitororder.u, "are_close", return_value=True),
+                    mock.patch.object(
+                        monitororder.mkt, "preflight_order") as preflight,
+                    mock.patch.object(
+                        monitororder.api, "cancel_order") as cancel,
+                    mock.patch.object(monitororder.mkt, "place") as place,
+                    mock.patch("builtins.print"),
+                ):
+                    monitororder.monitor_open_orders_by_type(
+                        "BTCUSDC", "SELL")
+
+                self.filter_check.assert_called_once_with(
+                    "BTCUSDC",
+                    "SELL",
+                    101.1,
+                    2.0,
+                    market=False,
+                    enforce_business_minimum=True,
+                    provider_name="Binance",
+                )
+                preflight.assert_not_called()
+                cancel.assert_not_called()
+                place.assert_not_called()
+                self.assertEqual(monitororder.order_retry.load_all(), [])
 
     def test_stale_cache_refusal_preserves_live_order_and_tracking(self):
         monitororder.initial_sell_prices[101] = 95.0
@@ -313,42 +370,55 @@ class MonitorOrderPreflightTest(unittest.TestCase):
             "response_without_order_id")
         self.assertNotIn("cache_permit", json.dumps(persisted))
 
-    def test_post_cancel_execution_disable_is_terminal_and_never_replayed(self):
-        orders = {101: {"price": 100.0, "quantity": 2.0}}
+    def test_post_cancel_terminal_refusal_is_never_replayed(self):
+        for refusal_reason in (
+                "execution_disabled",
+                "below_min_notional",
+                "binance_filter_refused:quantity below lot size"):
+            with self.subTest(refusal_reason=refusal_reason):
+                monitororder.order_retry.rewrite([])
+                monitororder.initial_sell_prices.clear()
+                orders = {101: {"price": 100.0, "quantity": 2.0}}
 
-        def execution_disabled(*args, **kwargs):
-            kwargs["_outcome_context"].update(
-                accepted=False,
-                reason="execution_disabled",
-                state="refused",
-            )
-            return None
+                def terminal_refusal(*args, **kwargs):
+                    kwargs["_outcome_context"].update(
+                        accepted=False,
+                        reason=refusal_reason,
+                        state="refused",
+                    )
+                    return None
 
-        with (
-            mock.patch.object(
-                monitororder.api, "get_open_orders", return_value=orders),
-            mock.patch.object(
-                monitororder.api, "get_current_price", return_value=100.0),
-            mock.patch.object(
-                monitororder.u, "are_close", return_value=True),
-            mock.patch.object(
-                monitororder.mkt, "preflight_order", return_value=object()),
-            mock.patch.object(
-                monitororder.api, "cancel_order", return_value=True),
-            mock.patch.object(
-                monitororder.mkt, "order_status",
-                return_value=OrderStatus(
-                    status="canceled", filled_qty=0.0, cost=0.0, fee=0.0,
-                    venue_status="CANCELED")),
-            mock.patch.object(
-                monitororder.mkt, "place",
-                side_effect=execution_disabled) as place,
-            mock.patch("builtins.print"),
-        ):
-            monitororder.monitor_open_orders_by_type("BTCUSDC", "SELL")
+                with (
+                    mock.patch.object(
+                        monitororder.api, "get_open_orders",
+                        return_value=orders),
+                    mock.patch.object(
+                        monitororder.api, "get_current_price",
+                        return_value=100.0),
+                    mock.patch.object(
+                        monitororder.u, "are_close", return_value=True),
+                    mock.patch.object(
+                        monitororder.mkt, "preflight_order",
+                        return_value=object()),
+                    mock.patch.object(
+                        monitororder.api, "cancel_order", return_value=True),
+                    mock.patch.object(
+                        monitororder.mkt, "order_status",
+                        return_value=OrderStatus(
+                            status="canceled", filled_qty=0.0,
+                            cost=0.0, fee=0.0,
+                            venue_status="CANCELED")),
+                    mock.patch.object(
+                        monitororder.mkt, "place",
+                        side_effect=terminal_refusal) as place,
+                    mock.patch("builtins.print"),
+                ):
+                    monitororder.monitor_open_orders_by_type(
+                        "BTCUSDC", "SELL")
 
-        place.assert_called_once()
-        self.assertEqual(monitororder.order_retry.load_all(), [])
+                place.assert_called_once()
+                self.assertEqual(
+                    monitororder.order_retry.load_all(), [])
 
         class RecoveryMarket:
             def __init__(self):

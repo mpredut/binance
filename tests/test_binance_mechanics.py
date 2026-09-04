@@ -19,7 +19,11 @@ sys.modules.setdefault("bapi_allorders", MagicMock())
 from binance_api import bapi_placeorder as po
 from binance_api import bapi
 from providers.market_api import BinanceProvider
-from providers.strategy_executor import SubmissionRefused
+from providers.strategy_executor import (
+    ProviderError,
+    SubmissionRefused,
+    capture_submission,
+)
 
 SYMBOL = "BTCUSDC"
 
@@ -142,6 +146,20 @@ class TestPlaceOrderMechanics(unittest.TestCase):
         self.assertEqual(
             submit.call_args.kwargs["client_order_id"], client_id)
 
+    def test_legacy_positional_client_order_id_keeps_its_slot(self):
+        client_id = "SD_0123456789abcdef0123456789abcdef"
+        with patch.object(po.api, "get_current_price", return_value=100.0), \
+             patch.object(po.api, "get_free_balance", return_value=1000.0), \
+             patch.object(
+                 po, "_submit_binance_order",
+                 return_value={"orderId": 42}) as submit:
+            po.place_order_mechanics(
+                "BUY", SYMBOL, 100.0, 5.0, False, client_id,
+            )
+
+        self.assertEqual(
+            submit.call_args.kwargs["client_order_id"], client_id)
+
     def test_sell_market_when_force(self):
         with patch.object(po.api, "get_current_price", return_value=100.0), \
              patch.object(po.api, "get_free_balance", return_value=10.0), \
@@ -153,14 +171,33 @@ class TestPlaceOrderMechanics(unittest.TestCase):
         submit.assert_called_once()
         self.assertTrue(submit.call_args.kwargs["market"])
 
-    def test_min_notional_rejected(self):
-        # qty*price below 100 -> a refusal (None), without dispatch.
+    def test_min_notional_rejected_before_submit_with_typed_reason(self):
+        # qty*price below 100 is terminal before any venue submission.
         with patch.object(po.api, "get_current_price", return_value=100.0), \
              patch.object(po.api, "get_free_balance", return_value=1000.0), \
+             patch.object(po, "PLACE_ORDER_MIN_NOTIONAL", 100.0), \
              patch.object(po, "place_BUY_order", return_value={"orderId": 1}) as pbuy:
-            order = po.place_order_mechanics("BUY", SYMBOL, 100.0, 0.5, force=False)  # 0.5*100=50 < 100
-        self.assertIsNone(order)
+            with self.assertRaisesRegex(SubmissionRefused, "below_min_notional"):
+                po.place_order_mechanics(
+                    "BUY", SYMBOL, 100.0, 0.5, force=False)
         pbuy.assert_not_called()
+
+    def test_protective_market_skips_only_the_business_minimum(self):
+        with patch.object(po.api, "get_current_price", return_value=100.0), \
+             patch.object(po.api, "get_free_balance", return_value=10.0), \
+             patch.object(po, "PLACE_ORDER_MIN_NOTIONAL", 100.0), \
+             patch.object(
+                 po, "_submit_binance_order",
+                 return_value={"orderId": 8}) as submit:
+            order = po.place_order_mechanics(
+                "SELL", SYMBOL, 100.0, 0.2, force=True,
+                enforce_business_minimum=False)
+            with self.assertRaisesRegex(SubmissionRefused, "below_min_notional"):
+                po.place_order_mechanics(
+                    "SELL", SYMBOL, 100.0, 0.05, force=True,
+                    enforce_business_minimum=False)
+        self.assertEqual(order, {"orderId": 8})
+        submit.assert_called_once()
 
     def test_zero_available_returns_none(self):
         with patch.object(po.api, "get_current_price", return_value=100.0), \
@@ -179,6 +216,108 @@ class TestBinanceProviderHooks(unittest.TestCase):
         # THE FLIP: Binance now goes through the agnostic Instrument.place() pipeline.
         self.assertFalse(self.p.guards_internally())
 
+    @staticmethod
+    def _symbol_info(*, apply_to_market):
+        return {
+            "baseAsset": "BTC", "quoteAsset": "USDC", "filters": [
+                {"filterType": "PRICE_FILTER", "tickSize": "0.01"},
+                {"filterType": "LOT_SIZE", "stepSize": "0.1", "minQty": "0.1"},
+                {"filterType": "MIN_NOTIONAL", "minNotional": "10",
+                 "applyToMarket": apply_to_market},
+            ],
+        }
+
+    def _rules_client(self, *, apply_to_market):
+        module = MagicMock()
+        module.get_current_price.return_value = 100.0
+        module.client.get_symbol_info.return_value = self._symbol_info(
+            apply_to_market=apply_to_market)
+        return module
+
+    def test_order_filter_uses_normalized_limit_notional(self):
+        module = self._rules_client(apply_to_market=False)
+        with patch("providers.market_api._get_bapi", return_value=module):
+            refusal = self.p.order_filter_refusal(
+                SYMBOL, "BUY", 99.1, 0.101, market=False)
+        self.assertEqual(refusal, "below_min_notional")
+
+    def test_order_filter_uses_sell_candidate_price(self):
+        module = self._rules_client(apply_to_market=False)
+        with patch("providers.market_api._get_bapi", return_value=module), \
+             patch.object(po, "PLACE_ORDER_MIN_NOTIONAL", 0):
+            refusal = self.p.order_filter_refusal(
+                SYMBOL, "SELL", 50.0, 0.1, market=False)
+        self.assertIsNone(refusal)
+
+    def test_order_filter_uses_buy_candidate_price(self):
+        module = self._rules_client(apply_to_market=False)
+        module.get_current_price.return_value = 90.0
+        with patch("providers.market_api._get_bapi", return_value=module), \
+             patch.object(po, "PLACE_ORDER_MIN_NOTIONAL", 0):
+            refusal = self.p.order_filter_refusal(
+                SYMBOL, "BUY", 150.0, 0.1, market=False)
+        self.assertEqual(refusal, "below_min_notional")
+
+    def test_order_filter_respects_market_applicability(self):
+        module = self._rules_client(apply_to_market=False)
+        with patch("providers.market_api._get_bapi", return_value=module), \
+             patch.object(po, "PLACE_ORDER_MIN_NOTIONAL", 0):
+            refusal = self.p.order_filter_refusal(
+                SYMBOL, "SELL", 50.0, 0.1, market=True)
+        self.assertIsNone(refusal)
+
+    def test_order_filter_applies_enabled_market_minimum(self):
+        module = self._rules_client(apply_to_market=True)
+        with patch("providers.market_api._get_bapi", return_value=module), \
+             patch.object(po, "PLACE_ORDER_MIN_NOTIONAL", 0):
+            refusal = self.p.order_filter_refusal(
+                SYMBOL, "SELL", 50.0, 0.1, market=True)
+        self.assertEqual(refusal, "below_min_notional")
+
+    def test_order_filter_applies_shared_business_minimum(self):
+        module = self._rules_client(apply_to_market=False)
+        with patch("providers.market_api._get_bapi", return_value=module), \
+             patch.object(po, "PLACE_ORDER_MIN_NOTIONAL", 25):
+            refusal = self.p.order_filter_refusal(
+                SYMBOL, "SELL", 100.0, 0.2, market=True)
+        self.assertEqual(refusal, "below_min_notional")
+
+    def test_order_filter_can_skip_business_minimum_for_protective_exit(self):
+        module = self._rules_client(apply_to_market=True)
+        with patch("providers.market_api._get_bapi", return_value=module), \
+             patch.object(po, "PLACE_ORDER_MIN_NOTIONAL", 25):
+            refusal = self.p.order_filter_refusal(
+                SYMBOL, "SELL", 100.0, 0.2, market=True,
+                enforce_business_minimum=False)
+        self.assertIsNone(refusal)
+
+    def test_order_filter_fails_closed_when_rules_are_unavailable(self):
+        module = MagicMock()
+        module.client.get_symbol_info.side_effect = RuntimeError("offline")
+        with patch("providers.market_api._get_bapi", return_value=module):
+            with self.assertRaisesRegex(ProviderError, "rules unavailable"):
+                self.p.order_filter_refusal(
+                    SYMBOL, "SELL", 100.0, 1.0, market=True)
+
+    def test_audited_submit_maps_normalization_filter_to_refusal(self):
+        module = self._rules_client(apply_to_market=True)
+        with patch("providers.market_api._get_bapi", return_value=module), \
+             patch.object(po, "_submit_binance_order") as submit:
+            outcome = capture_submission(
+                lambda: self.p.submit_order(
+                    SYMBOL, "SELL", 0.01, price=None, market=True))
+        self.assertEqual(outcome.state, "refused")
+        self.assertTrue(outcome.reason.startswith("binance_filter_refused:"))
+        submit.assert_not_called()
+
+    def test_audited_submit_keeps_metadata_failure_non_terminal(self):
+        module = MagicMock()
+        module.client.get_symbol_info.return_value = None
+        with patch("providers.market_api._get_bapi", return_value=module):
+            with self.assertRaisesRegex(ProviderError, "submit_order"):
+                self.p.submit_order(
+                    SYMBOL, "SELL", 1.0, price=None, market=True)
+
     def test_adjust_order_price_delegates(self):
         with patch.object(po, "adjust_price_and_cancel_opposite", return_value=99.0) as f:
             out = self.p.adjust_order_price(SYMBOL, "BUY", 100.0, cancel_opposite=True)
@@ -189,7 +328,21 @@ class TestBinanceProviderHooks(unittest.TestCase):
         with patch.object(po, "place_order_mechanics", return_value={"orderId": 5}) as f:
             out = self.p.place_order(SYMBOL, "BUY", 100.0, 5.0, force=True, safeback_seconds=999, pair=None)
         self.assertEqual(out, {"orderId": 5})
-        f.assert_called_once_with("BUY", SYMBOL, 100.0, 5.0, force=True)
+        f.assert_called_once_with(
+            "BUY", SYMBOL, 100.0, 5.0, force=True,
+            enforce_business_minimum=True)
+
+    def test_place_order_propagates_protective_minimum_policy(self):
+        with patch.object(
+                po, "place_order_mechanics",
+                return_value={"orderId": 6}) as mechanics:
+            out = self.p.place_order(
+                SYMBOL, "SELL", 100.0, 0.2, force=True,
+                enforce_business_minimum=False)
+        self.assertEqual(out, {"orderId": 6})
+        mechanics.assert_called_once_with(
+            "SELL", SYMBOL, 100.0, 0.2, force=True,
+            enforce_business_minimum=False)
 
     def test_profit_guard_window_ref_uses_safeback(self):
         import order_guard

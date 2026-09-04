@@ -49,6 +49,12 @@ def _order_id_from_payload(payload):
     return None if native_id is None else str(native_id)
 
 
+def _is_terminal_filter_refusal(reason) -> bool:
+    """Use the retry subsystem's shared deterministic-refusal classification."""
+    import order_retry
+    return order_retry.is_terminal_filter_refusal(reason)
+
+
 class Instrument:
     """Provider-bound symbol with namespaced consumer parameters.
 
@@ -116,7 +122,9 @@ class Instrument:
         # order_guard, trade_cooldown, cacheManager, and outcome-log components.
         #
         # bypass_profit_guard skips both profit and weight guards for emergency
-        # flows. bypass_profit_reference skips only the historical price-reference
+        # flows. A protective market SELL also uses venue-only order minima so an
+        # internal business floor cannot prevent risk reduction.
+        # bypass_profit_reference skips only the historical price-reference
         # check while retaining quantity/weight policy and every other guard.
         # bypass_quantity_policy skips only the dynamic quantity/weight policy;
         # balance, fee, profit, daily-cap, cooldown, and trend guards stay active.
@@ -236,6 +244,8 @@ class Instrument:
         # force-market sell from passing at +1% then executing below the validated
         # margin, a financial time-of-check/time-of-use issue.
         is_market = bool(kwargs.get("force", False))
+        enforce_business_minimum = not (
+            bypass and side_u == "SELL" and is_market)
         profit_margin = None
         profit_window_ref = None
         retry_requested_price = None
@@ -307,23 +317,34 @@ class Instrument:
                     if not ok:
                         reason = "profit_guard"
                         return None
-                # Cap quantity in both directions through the provider hook so the
-                # full balance is not traded at once. SELL uses base balance; BUY
-                # uses quote balance divided by price. Provider hooks retain
-                # cancelorders/hours metadata without rereading or reserving balance.
-                decision = self._provider.quantity_decision(
-                    self.symbol, side_u, price, qty,
-                    base=self.base, quote=self.quote,
-                    cancelorders=bool(kwargs.get("cancelorders", False)),
-                    hours=float(kwargs.get("hours", 5) or 5),
-                    apply_policy=not bypass_quantity_policy,
-                )
-                qty = decision.final_qty
-                if qty <= 0:
-                    print(f"[{self.symbol}] {side_u} qty refused: "
-                          f"{decision.refuse_reason} asset={decision.balance_asset}")
-                    reason = decision.refuse_reason or "qty_zero_after_weight"
+            # Balance, fee, and venue filters are mechanics, not optional profit
+            # policy. Apply them even when an emergency flow bypasses profit/weight.
+            quantity_price = price
+            if is_market:
+                quantity_price = self._provider.get_current_price(self.symbol)
+                try:
+                    quantity_price = float(quantity_price)
+                except (TypeError, ValueError, OverflowError):
+                    quantity_price = float("nan")
+                if not math.isfinite(quantity_price) or quantity_price <= 0:
+                    print(f"[{self.symbol}] {side_u} MARKET BLOCKED: current price unavailable")
+                    reason = "market_price_unavailable"
                     return None
+            decision = self._provider.quantity_decision(
+                self.symbol, side_u, quantity_price, qty,
+                base=self.base, quote=self.quote,
+                cancelorders=bool(kwargs.get("cancelorders", False)),
+                hours=float(kwargs.get("hours", 5) or 5),
+                apply_policy=not (bypass or bypass_quantity_policy),
+                market=is_market,
+                enforce_business_minimum=enforce_business_minimum,
+            )
+            qty = decision.final_qty
+            if qty <= 0:
+                print(f"[{self.symbol}] {side_u} qty refused: "
+                      f"{decision.refuse_reason} asset={decision.balance_asset}")
+                reason = decision.refuse_reason or "qty_zero_after_weight"
+                return None
 
             # 2. Optional provider-agnostic trend gate is instantaneous.  Placement
             # must never sleep or poll: a negative decision returns immediately and
@@ -347,15 +368,7 @@ class Instrument:
             # boundary because cooldown, persistence, and cache validation can take
             # long enough for a market quote to move.
             if not bypass and not bypass_profit_reference and is_market:
-                guard_price = self._provider.get_current_price(self.symbol)
-                try:
-                    guard_price = float(guard_price)
-                except (TypeError, ValueError, OverflowError):
-                    guard_price = float("nan")
-                if not math.isfinite(guard_price) or guard_price <= 0:
-                    print(f"[{self.symbol}] {side_u} MARKET BLOCKED: current price unavailable")
-                    reason = "market_price_unavailable"
-                    return None
+                guard_price = quantity_price
                 ok = order_guard.profit_guard(
                     self._provider, self.symbol, side_u, guard_price, profit_margin,
                     window_ref=profit_window_ref)
@@ -496,6 +509,9 @@ class Instrument:
                 reason = "submit_ambiguous"
                 submit_attempted = True
                 provider_kwargs = dict(kwargs)
+                if is_binance:
+                    provider_kwargs["enforce_business_minimum"] = (
+                        enforce_business_minimum)
                 if cache_permit is not None:
                     provider_kwargs["permit_requested_price"] = permit_requested_price
                     provider_kwargs["cache_permit"] = cache_permit
@@ -540,6 +556,9 @@ class Instrument:
                 "accepted" if order is not None else
                 "unknown" if submit_attempted else "refused"
             )
+            terminal_filter_refusal = bool(
+                reason and not submit_attempted
+                and _is_terminal_filter_refusal(reason))
             _outcomes_log.log_order_outcome(
                 self.symbol, side_u, price, qty, submission_state,
                 None if order else reason, kwargs.get("motivation"), caller=caller)
@@ -576,7 +595,8 @@ class Instrument:
             # is best effort and never changes the placement return value.
             elif (order is None and not caller_owns_retry
                   and (prequeued_record_id is not None
-                       or reason != "account_cache_not_fresh")):
+                       or (reason != "account_cache_not_fresh"
+                           and not terminal_filter_refusal))):
                 try:
                     import order_retry
                     if prequeued_intent_id:
@@ -593,8 +613,9 @@ class Instrument:
                     if order_retry.RETRY_ENABLED:
                         if prequeued_claim is not None:
                             claim_outcome = (
-                                "success" if reason in {
-                                    "execution_disabled", "trading_disabled"} else
+                                "success" if (
+                                    terminal_filter_refusal or reason in {
+                                        "execution_disabled", "trading_disabled"}) else
                                 "deferred" if order_retry.is_non_failure_deferral(reason)
                                 else "failure")
                             order_retry.complete_claim(

@@ -189,6 +189,76 @@ class ProcessOnceTest(unittest.TestCase):
         self.assertEqual(
             record["last_failure_reason"], "retry_price_unfavorable")
 
+    def test_protective_market_retry_reconstructs_venue_only_minimum_policy(self):
+        class ProtectiveProvider(MarketDataProvider):
+            name = "Protective"
+
+            def __init__(self):
+                self.business_minimum_flags = []
+                self.submit_calls = []
+
+            def supports_symbol(self, symbol):
+                return symbol == "BTCUSDC"
+
+            def get_current_price(self, symbol):
+                return 100.0
+
+            def free_balance(self, asset):
+                return 1.0
+
+            def policy_cap_quantity(self, *args, **kwargs):
+                raise AssertionError("protective SELL must bypass quantity policy")
+
+            def order_filter_refusal(
+                    self, symbol, side, price, qty, *, market=False,
+                    enforce_business_minimum=True):
+                self.business_minimum_flags.append(
+                    enforce_business_minimum)
+                return None
+
+            def place_order(self, symbol, side, price, qty, **kwargs):
+                self.submit_calls.append((symbol, side, price, qty, kwargs))
+                return {"orderId": "protective-retry"}
+
+        class AllowedSlot:
+            allowed = True
+            info = {}
+
+            def commit(self, order_id=None):
+                return None
+
+        class SlotContext:
+            def __enter__(self):
+                return AllowedSlot()
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        provider = ProtectiveProvider()
+        market = MarketApi([provider])
+        oq.enqueue(
+            "BTCUSDC", "SELL", 0.2,
+            {"force": True, "smart": False, "wait_for_trend": False,
+             "bypass_profit_guard": True},
+            requested_price=100.0, failure_reason="profit_guard",
+            provider_name="Protective", now=1000.0)
+
+        with (
+            patch(
+                "instrument.order_guard.daily_limit_guard",
+                return_value=(True, None)),
+            patch(
+                "instrument.trade_cooldown.trade_slot",
+                return_value=SlotContext()),
+        ):
+            stats = worker.process_once(market, now=1400.0)
+
+        self.assertEqual(stats["attempted"], 1)
+        self.assertEqual(stats["succeeded"], 1)
+        self.assertEqual(provider.business_minimum_flags, [False])
+        self.assertEqual(len(provider.submit_calls), 1)
+        self.assertTrue(provider.submit_calls[0][4]["force"])
+
     def test_trend_refusal_is_retried_without_attempt_or_ttl_consumption(self):
         oq.enqueue("BTCUSDC", "BUY", 1.0, {}, requested_price=100.0, now=1000.0)
 
@@ -782,6 +852,32 @@ class ProcessOnceTest(unittest.TestCase):
         self.assertEqual(stats["terminal_failed"], 1)
         self.assertEqual(len(market.calls), 1)
         self.assertEqual(oq.load_all(), [])
+
+    def test_filter_refusal_is_terminal_for_existing_retry(self):
+        for refusal_reason in (
+                "below_min_notional",
+                "binance_filter_refused:quantity below lot size"):
+            with self.subTest(refusal_reason=refusal_reason):
+                oq.rewrite([])
+                oq.enqueue(
+                    "BTCUSDC", "BUY", 0.01, {}, requested_price=100.0,
+                    failure_reason="profit_guard", now=1000.0)
+
+                class FilterRefusedMkt(FakeMkt):
+                    def place(self, symbol, side, price, qty, **kw):
+                        self.calls.append((symbol, side, price, qty))
+                        kw["_outcome_context"].update(
+                            accepted=False, state="refused",
+                            reason=refusal_reason)
+                        return None
+
+                market = FilterRefusedMkt(price=100.0)
+                stats = worker.process_once(market, now=1400.0)
+
+                self.assertEqual(stats["attempted"], 1)
+                self.assertEqual(stats["terminal_failed"], 1)
+                self.assertEqual(len(market.calls), 1)
+                self.assertEqual(oq.load_all(), [])
 
     def test_confirmed_client_id_absence_allows_exactly_one_submit(self):
         oq.enqueue(

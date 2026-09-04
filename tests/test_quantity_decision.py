@@ -17,11 +17,18 @@ class Provider(MarketDataProvider):
     def __init__(self, balances, policy=999):
         self.balances = balances
         self.policy = policy
+        self.filter_refusal = None
+        self.filter_calls = []
     def get_current_price(self, symbol): return 100.0
     def supports_symbol(self, symbol): return True
     def free_balance(self, asset): return self.balances.get(asset, 0.0)
     def policy_cap_quantity(self, symbol, side, price, qty, available_qty, **kwargs):
         return min(qty, self.policy)
+    def order_filter_refusal(self, symbol, side, price, qty, *, market=False,
+                             enforce_business_minimum=True):
+        self.filter_calls.append((
+            symbol, side, price, qty, market, enforce_business_minimum))
+        return self.filter_refusal
 
 
 class QuantityDecisionTest(unittest.TestCase):
@@ -63,6 +70,41 @@ class QuantityDecisionTest(unittest.TestCase):
             provider, "TAOUSDC", "SELL", 100.0, 2.0,
             apply_policy=False)
         self.assertEqual(decision.final_qty, 0.39)
+
+    def test_provider_filter_refuses_before_submission(self):
+        provider = Provider({"TAO": 1.0})
+        provider.filter_refusal = "below_min_notional"
+        decision = decide_quantity(
+            provider, "TAOUSDC", "SELL", 100.0, 0.01)
+        self.assertEqual(decision.final_qty, 0.0)
+        self.assertEqual(decision.refuse_reason, "below_min_notional")
+        self.assertEqual(
+            provider.filter_calls,
+            [("TAOUSDC", "SELL", 100.0, 0.01, False, True)],
+        )
+
+    def test_market_flag_reaches_filter_when_policy_is_disabled(self):
+        provider = Provider({"TAO": 1.0}, policy=0.0)
+        decision = decide_quantity(
+            provider, "TAOUSDC", "SELL", 100.0, 0.5,
+            apply_policy=False, market=True)
+        self.assertEqual(decision.final_qty, 0.5)
+        self.assertTrue(provider.filter_calls[0][-2])
+
+    def test_business_minimum_context_reaches_provider_filter(self):
+        provider = Provider({"TAO": 1.0})
+        decision = decide_quantity(
+            provider, "TAOUSDC", "SELL", 100.0, 0.5,
+            enforce_business_minimum=False)
+        self.assertEqual(decision.final_qty, 0.5)
+        self.assertFalse(provider.filter_calls[0][-1])
+
+    def test_filter_failure_is_not_silently_bypassed(self):
+        provider = Provider({"TAO": 1.0})
+        provider.order_filter_refusal = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("rules unavailable"))
+        with self.assertRaisesRegex(RuntimeError, "rules unavailable"):
+            decide_quantity(provider, "TAOUSDC", "SELL", 100.0, 0.5)
 
     def test_none_is_error_but_zero_is_real_insufficient_balance(self):
         unavailable = decide_quantity(

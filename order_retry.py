@@ -97,6 +97,19 @@ NON_FAILURE_DEFERRAL_REASONS = frozenset({
     "retry_price_unfavorable",
 })
 
+TERMINAL_FILTER_REFUSAL_REASONS = frozenset({"below_min_notional"})
+TERMINAL_FILTER_REFUSAL_PREFIXES = ("binance_filter_refused:",)
+
+
+def is_terminal_filter_refusal(reason) -> bool:
+    """Return whether unchanged order data can never pass its venue filters."""
+    value = str(reason or "")
+    return (
+        value in TERMINAL_FILTER_REFUSAL_REASONS
+        or value.startswith(TERMINAL_FILTER_REFUSAL_PREFIXES)
+    )
+
+
 POSSIBLY_SUBMITTED_REASONS = frozenset({
     "",
     "submit_pending",
@@ -1533,6 +1546,21 @@ def _status_from_terminal_payload(payload) -> Optional[OrderStatus]:
     except (KeyError, TypeError, ValueError, OverflowError):
         return None
     return status if status.terminal else None
+
+
+def propagate_submission_refusal(response, outcome_context):
+    """Bridge Instrument's result channel into the strict lifecycle contract.
+
+    A known pre-submit refusal becomes ``SubmissionRefused``. An ambiguous result
+    remains unchanged so ``capture_submission`` keeps it recoverable.
+    """
+    if response is None and isinstance(outcome_context, dict):
+        state = str(outcome_context.get("state") or "").strip().lower()
+        if state == "refused":
+            reason = str(
+                outcome_context.get("reason") or "pre_submit_refused").strip()
+            raise SubmissionRefused(reason)
+    return response
 
 
 # Backwards-compatible import name for existing providers and external scripts.

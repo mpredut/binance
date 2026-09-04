@@ -21,6 +21,9 @@ def isolated_retry_queue(tmp_path, monkeypatch):
         monitororder.order_retry, "LOCK_FILE",
         str(tmp_path / "order_retry_queue.lock"))
     monkeypatch.setattr(monitororder.order_retry, "RETRY_ENABLED", True)
+    monkeypatch.setattr(
+        monitororder.mkt, "order_filter_refusal",
+        lambda *_args, **_kwargs: None)
     monitororder.initial_sell_prices.clear()
     monitororder.initial_buy_prices.clear()
     yield

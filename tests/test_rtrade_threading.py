@@ -522,7 +522,7 @@ class RTradeThreadingTest(unittest.TestCase):
 
         def refuse(*_args, **kwargs):
             kwargs["_outcome_context"].update(
-                accepted=False, reason="trend_deferred")
+                accepted=False, reason="trend_deferred", state="refused")
             return None
 
         with tempfile.TemporaryDirectory(prefix="rtrade-refusal-") as root:
@@ -851,6 +851,7 @@ class RTradeThreadingTest(unittest.TestCase):
             name="Binance",
             free_balance=lambda _asset: 0.4,
             fee_cap_quantity=lambda *_args: 0.39,
+            order_filter_refusal=Mock(return_value=None),
             pair_precision=lambda _symbol: precision,
             preflight_order=lambda *args, **kwargs: None,
             submit_order=lambda *args, **kwargs: "M9")
@@ -870,6 +871,9 @@ class RTradeThreadingTest(unittest.TestCase):
         self.assertEqual(args[:4], ("TAOUSDC", "SELL", 0.39, None))
         self.assertTrue(kwargs["market"])
         self.assertIn("rtrade:fast_fill_hard_stop:pair-9", kwargs["kind"])
+        executor.order_filter_refusal.assert_called_once_with(
+            "TAOUSDC", "SELL", 90.0, 0.39, market=True,
+            enforce_business_minimum=False)
 
     def test_hard_stop_preflight_refusal_does_not_persist_intent(self):
         with tempfile.TemporaryDirectory(prefix="rtrade-preflight-refusal-") as root:
