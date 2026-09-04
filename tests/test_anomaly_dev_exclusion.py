@@ -20,6 +20,10 @@ class DevLogExclusionTest(unittest.TestCase):
             (True, "logs/refresh_dev.log"),
             (True, "logs/trigger_backtest_dev.log"),
             (True, "logs/backtest_pilot.log"),
+            # Ad-hoc `python -c` / `python -m` one-liner logs (diagnostics/probes,
+            # tagged [unknown]) are not supervised bots — excluded from fleet alerts.
+            (True, "logger/-c_2026-09-05.log"),
+            (True, "logger/-m_2026-09-05.log"),
             (False, "logs/monitortrades.log"),
             (False, "logs/tradeall.log"),
             (False, "kraken/kraken_bot.log"),

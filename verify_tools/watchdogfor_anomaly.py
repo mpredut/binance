@@ -70,8 +70,13 @@ _EXCLUDE_BASENAMES = {"backtest_cycle.log", "refresh_dev.log", "trigger_backtest
 
 def _is_dev_log(path):
     b = os.path.basename(path)
+    # "-c_<date>.log" / "-m_<date>.log": ad-hoc `python -c` / `python -m` one-liner
+    # invocations (diagnostics, probes) tagged [unknown]. They are not supervised
+    # bots — a traceback from importing a module without its config is expected and
+    # must not raise a fleet alert. Real bot errors go to that bot's own log.
     return (b in _EXCLUDE_BASENAMES or b.startswith("backtest")
-            or "unittest" in b or "pytest" in b)
+            or "unittest" in b or "pytest" in b
+            or b.startswith("-c_") or b.startswith("-m_"))
 
 
 def _active_logs():
