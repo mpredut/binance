@@ -27,11 +27,10 @@ _ROOT = os.path.dirname(os.path.abspath(__file__))
 load_env_stack(os.path.join(_ROOT, ".env"))
 ALERT_NEW_COIN = required_bool_env("ALERT_NEW_COIN")
 
-# Route price alerts to their dedicated topic when configured. PHONE_ALERT_URL has
-# precedence in the batch notifier, so this process overrides it locally.
+# Price alerts route to their dedicated ntfy topic, passed explicitly to the batch
+# notifier (no PHONE_ALERT_URL indirection).
 _price_topic = os.environ.get("NTFY_TOPIC_PRICE")
-if _price_topic:
-    os.environ["PHONE_ALERT_URL"] = f"https://ntfy.sh/{_price_topic}"
+PRICE_WEBHOOK_URL = f"https://ntfy.sh/{_price_topic}" if _price_topic else None
 
 CMC_API_KEY = os.environ.get('CMC_API_KEY')
 TIME_INTERVAL_CLEANUP = 6 * 60 * 60  # 6 hours in seconds
@@ -44,8 +43,8 @@ def validate_required_env():
         if not os.environ.get(key):
             missing.append(key)
 
-    if not os.environ.get("PHONE_ALERT_URL") and not os.environ.get("NTFY_TOPIC"):
-        missing.append("PHONE_ALERT_URL or NTFY_TOPIC")
+    if not os.environ.get("NTFY_TOPIC_PRICE"):
+        missing.append("NTFY_TOPIC_PRICE")
 
     if missing:
         raise RuntimeError(
@@ -57,13 +56,10 @@ CMC_API_KEY = os.environ.get('CMC_API_KEY')
 
 def print_notification_channels_status():
     print("ENV CONFIGURATION:")
-    phone_url = os.environ.get("PHONE_ALERT_URL")
-    ntfy_topic = os.environ.get("NTFY_TOPIC")
-    if phone_url or ntfy_topic:
-        target = phone_url if phone_url else f"ntfy topic '{ntfy_topic}'"
-        print(f"   ✅ Phone webhook: ENABLED -> {target[:40]}...")
+    if PRICE_WEBHOOK_URL:
+        print(f"   ✅ Phone webhook: ENABLED -> {PRICE_WEBHOOK_URL[:40]}...")
     else:
-        print("   ❌ Phone webhook: DISABLED (PHONE_ALERT_URL or NTFY_TOPIC is missing)")
+        print("   ❌ Phone webhook: DISABLED (NTFY_TOPIC_PRICE is missing)")
 
     tg_token = os.environ.get("TELEGRAM_BOT_TOKEN")
     tg_chat = os.environ.get("TELEGRAM_CHAT_ID")
@@ -98,7 +94,7 @@ print_notification_channels_status()
 
 
 def alert_handler(alert):
-    AlertNotifier.send(alert, enable_phone_webhook=True)
+    AlertNotifier.send(alert, enable_phone_webhook=True, webhook_url=PRICE_WEBHOOK_URL)
 
 def new_coin_alerts_handler(alerts):
     if not alerts:
@@ -139,7 +135,8 @@ def new_coin_alerts_handler(alerts):
     # Send one notification containing the whole coin batch.
     AlertNotifier.send(
         alerts,
-        enable_phone_webhook=True
+        enable_phone_webhook=True,
+        webhook_url=PRICE_WEBHOOK_URL
     )
 
 def print_new_coin_status(cachePriceAll, new_coins_checker):

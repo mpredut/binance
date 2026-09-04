@@ -389,11 +389,8 @@ class AlertNotifier:
             return False
 
         print(f"[Notifier] Phone webhook batch for {len(alerts)} alert(s)")
-        webhook_url = webhook_url or os.environ.get("PHONE_ALERT_URL")
-        if not webhook_url and os.environ.get("NTFY_TOPIC"):
-            webhook_url = f"https://ntfy.sh/{os.environ['NTFY_TOPIC']}"
         if not webhook_url:
-            print("[Notifier] Phone webhook: PHONE_ALERT_URL or NTFY_TOPIC is missing")
+            print("[Notifier] Phone webhook: no target topic (webhook_url missing)")
             return False
 
         alerts = list(alerts)
@@ -497,8 +494,8 @@ class AlertNotifier:
 
     #Combined handler that sends alerts through multiple channels.    
     @staticmethod
-    def send(alert, enable_console=True, enable_file=True, 
-             enable_email=False, enable_phone_webhook=False):
+    def send(alert, enable_console=True, enable_file=True,
+             enable_email=False, enable_phone_webhook=False, webhook_url=None):
         alerts = [alert] if not isinstance(alert, list) else alert
         if enable_console:
             for item in alerts:
@@ -509,7 +506,7 @@ class AlertNotifier:
         if enable_email:
             AlertNotifier.send_email_batch(alerts)
         if enable_phone_webhook:
-            AlertNotifier.send_phone_webhook_batch(alerts)
+            AlertNotifier.send_phone_webhook_batch(alerts, webhook_url=webhook_url)
 
 
 def _topic_for(title: str, source: str) -> Optional[str]:

@@ -6,6 +6,10 @@ from unittest import mock
 
 from alertnotifiers import AlertNotifier
 
+# send_phone_webhook_batch now takes the target topic explicitly (no PHONE_ALERT_URL
+# / NTFY_TOPIC env fallback). These delivery-policy tests just need any valid URL.
+_WEBHOOK = "https://ntfy.sh/test-topic"
+
 
 class _Response:
     status_code = 200
@@ -45,8 +49,8 @@ class NotificationDeliveryPolicyTest(unittest.TestCase):
 
     @mock.patch("alertnotifiers.requests.post", return_value=_Response())
     def test_identical_ntfy_event_is_deduplicated_across_calls(self, post):
-        first = AlertNotifier.send_phone_webhook_batch([_event()])
-        second = AlertNotifier.send_phone_webhook_batch([_event()])
+        first = AlertNotifier.send_phone_webhook_batch([_event()], webhook_url=_WEBHOOK)
+        second = AlertNotifier.send_phone_webhook_batch([_event()], webhook_url=_WEBHOOK)
 
         self.assertTrue(first)
         self.assertTrue(second)
@@ -54,11 +58,11 @@ class NotificationDeliveryPolicyTest(unittest.TestCase):
 
     @mock.patch("alertnotifiers.requests.post", return_value=_Response())
     def test_normal_messages_cannot_consume_urgent_reserve(self, post):
-        self.assertTrue(AlertNotifier.send_phone_webhook_batch([_event("FILL A")]))
-        self.assertFalse(AlertNotifier.send_phone_webhook_batch([_event("FILL B")]))
+        self.assertTrue(AlertNotifier.send_phone_webhook_batch([_event("FILL A")], webhook_url=_WEBHOOK))
+        self.assertFalse(AlertNotifier.send_phone_webhook_batch([_event("FILL B")], webhook_url=_WEBHOOK))
         self.assertTrue(AlertNotifier.send_phone_webhook_batch([
             _event("ERORI WATCHDOG", source="watchdog"),
-        ]))
+        ], webhook_url=_WEBHOOK))
 
         self.assertEqual(post.call_count, 2)
         with open(os.environ["NOTIFICATION_STATE_FILE"], encoding="utf-8") as handle:
@@ -69,7 +73,7 @@ class NotificationDeliveryPolicyTest(unittest.TestCase):
     @mock.patch("alertnotifiers.requests.post",
                 side_effect=[_RejectedResponse(), _Response()])
     def test_rejected_ntfy_token_retries_once_without_credentials(self, post, token):
-        self.assertTrue(AlertNotifier.send_phone_webhook_batch([_event()]))
+        self.assertTrue(AlertNotifier.send_phone_webhook_batch([_event()], webhook_url=_WEBHOOK))
         self.assertEqual(post.call_count, 2)
         self.assertEqual(
             post.call_args_list[0].kwargs["headers"]["Authorization"],
