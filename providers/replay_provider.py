@@ -160,20 +160,23 @@ class ReplayMarketDataProvider(MarketDataProvider):
         price = float(price)
         qty = float(qty)
         ts_ms = int(self.now(symbol) * 1000)
-        self._orders.setdefault(symbol, []).append(
-            {"side": side, "price": price, "qty": qty, "timestamp": ts_ms})
-
         pos_qty, pos_cost = self._positions.get(symbol, (0.0, 0.0))
         if side == "BUY":
-            pos_qty += qty
-            pos_cost += qty * price
+            executed_qty = qty
+            pos_qty += executed_qty
+            pos_cost += executed_qty * price
         else:
-            sell_qty = min(qty, pos_qty)
+            executed_qty = min(qty, pos_qty)
+            if executed_qty <= 0:
+                return None
             if pos_qty > 1e-12:
-                pos_cost -= (pos_cost / pos_qty) * sell_qty
-            pos_qty -= sell_qty
+                pos_cost -= (pos_cost / pos_qty) * executed_qty
+            pos_qty -= executed_qty
             pos_qty = max(pos_qty, 0.0)
             pos_cost = max(pos_cost, 0.0)
+        self._orders.setdefault(symbol, []).append(
+            {"side": side, "price": price, "qty": executed_qty,
+             "timestamp": ts_ms})
         self._positions[symbol] = (pos_qty, pos_cost)
         return {"orderId": -1, "backtest": True}
 

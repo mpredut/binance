@@ -82,6 +82,7 @@ class Instrument:
             raise ValueError(
                 f"Instrument {name!r} ({symbol}): unknown provider {provider!r}. "
                 "Is it registered in market_api?")
+        self._provider.validate_symbol(self.symbol)
 
     # -- Provider identity and access. -----------------------------------------
     @property

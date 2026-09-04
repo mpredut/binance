@@ -100,6 +100,25 @@ class TestReplayMarketDataProvider(unittest.TestCase):
         p.place_order(SYMBOL, "SELL", 110.0, 2.0)
         self.assertEqual(p.free_balance("ZZZTEST"), 0.0)
 
+    def test_oversized_sell_records_only_the_executed_quantity(self):
+        p = _make_provider([100.0, 110.0])
+        p.advance(SYMBOL)
+        p.place_order(SYMBOL, "BUY", 100.0, 1.0)
+        p.advance(SYMBOL)
+        p.place_order(SYMBOL, "SELL", 110.0, 2.0)
+
+        sells = p.get_orders(SYMBOL, "SELL", since_s=1e9)
+        self.assertEqual(sells[0]["qty"], 1.0)
+        self.assertEqual(p.position(SYMBOL), (0.0, 0.0))
+
+    def test_sell_without_holdings_is_refused_and_not_recorded(self):
+        p = _make_provider([110.0])
+        p.advance(SYMBOL)
+
+        self.assertIsNone(p.place_order(SYMBOL, "SELL", 110.0, 1.0))
+        self.assertEqual(p.get_orders(SYMBOL, "SELL", since_s=1e9), [])
+        self.assertEqual(p.position(SYMBOL), (0.0, 0.0))
+
     def test_get_orders_filters_by_side_and_window(self):
         p = _make_provider([100.0] * 5, start_ts=1_000_000.0, step_s=3600.0)  # 1h/pas
         p.advance(SYMBOL)                       # ts=1_000_000

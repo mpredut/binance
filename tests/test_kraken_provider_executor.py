@@ -74,6 +74,9 @@ class FakeClient:
     def balance(self):
         return {"HYPE": "2.5", "ZUSD": "1000"}
 
+    def last_price(self, pair):
+        return 60.0
+
     def ohlc_closes(self, pair, interval):
         return [10.0, 11.0, 12.0]
 

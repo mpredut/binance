@@ -134,11 +134,59 @@ class HLExecutorContractTest(unittest.TestCase):
         self.assertEqual(calls, [])
 
     def test_exact_hyperliquid_spot_aliases_are_supported(self):
-        self.assertTrue(self.p.supports_symbol("HYPE"))
-        self.assertTrue(self.p.supports_symbol("HYPEUSDC"))
-        self.assertTrue(self.p.supports_symbol("HYPE/USDC"))
-        self.assertFalse(self.p.supports_symbol("HYPEUSD"))
-        self.assertFalse(self.p.supports_symbol("HYPEFAKE"))
+        for symbol in (
+                "HYPE", "hype", "HYPEUSDC", "HYPE/USDC", "HYPE-USDC"):
+            with self.subTest(symbol=symbol):
+                self.assertTrue(self.p.supports_symbol(symbol))
+        for symbol in (
+                "HYPEUSD", "HYPEFAKE", "H/Y/P/E", "HY-PE-US-DC",
+                "HYPE//USDC", "HYPE USDC"):
+            with self.subTest(symbol=symbol):
+                self.assertFalse(self.p.supports_symbol(symbol))
+
+        purr = HyperliquidProvider(token="PURR")
+        self.assertTrue(purr.supports_symbol("PURR/USDC"))
+        self.assertFalse(purr.supports_symbol("HYPE/USDC"))
+
+    def test_pair_scoped_entrypoints_reject_a_mismatched_symbol(self):
+        os.environ["HL_LIVE_ORDERS"] = "true"
+        calls = {
+            "price": lambda: self.p.get_current_price("BTCUSDC"),
+            "history": lambda: self.p.get_price_history("BTCUSDC", 1),
+            "orders": lambda: self.p.get_orders("BTCUSDC", "BUY", 60),
+            "trades": lambda: self.p.get_trades("BTCUSDC", 60),
+            "open_orders": lambda: self.p.open_orders("BTCUSDC"),
+            "place": lambda: self.p.place_order(
+                "BTCUSDC", "BUY", 60.0, 1.0),
+            "precision": lambda: self.p.pair_precision("BTCUSDC"),
+            "preflight_buy": lambda: self.p.preflight_order(
+                "BTCUSDC", "BUY", 1.0, 60.0),
+            "preflight_sell": lambda: self.p.preflight_order(
+                "BTCUSDC", "SELL", 1.0, 60.0),
+            "submit_limit": lambda: self.p.submit_order(
+                "BTCUSDC", "buy", 1.0, price=60.0),
+            "submit_market": lambda: self.p.submit_order(
+                "BTCUSDC", "sell", 1.0, market=True),
+            "lookup": lambda: self.p.order_by_client_id(
+                "BTCUSDC", "client-id"),
+            "status": lambda: self.p.order_status("BTCUSDC", "1"),
+            "cancel": lambda: self.p.cancel_order("BTCUSDC", "1"),
+        }
+        for name, call in calls.items():
+            with self.subTest(entrypoint=name):
+                with self.assertRaisesRegex(ProviderError, "unsupported"):
+                    call()
+        self.assertEqual(self.signer.calls, [])
+
+    def test_instrument_and_explicit_facade_validate_the_symbol(self):
+        market_api = MarketApi([self.p])
+        with self.assertRaisesRegex(ProviderError, "unsupported"):
+            Instrument(
+                "BTC", "BTCUSDC", "Hyperliquid",
+                base="BTC", quote="USDC", api=market_api)
+        with self.assertRaisesRegex(ProviderError, "unsupported"):
+            market_api.get_current_price(
+                "BTCUSDC", provider_name="Hyperliquid")
 
     def test_submit_order_is_gated_by_hl_live_orders(self):
         # by default HL_LIVE_ORDERS is missing -> a refusal (DN co-mingling safety)

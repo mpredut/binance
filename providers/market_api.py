@@ -472,10 +472,12 @@ class MarketApi:
 
     def _provider_explicit_or_routed(self, symbol: str, provider_name=None):
         if provider_name is None:
-            return self._provider_for(symbol)
-        provider = self.provider_by_name(provider_name)
-        if provider is None:
-            raise ValueError(f"Unknown provider: {provider_name!r}")
+            provider = self._provider_for(symbol)
+        else:
+            provider = self.provider_by_name(provider_name)
+            if provider is None:
+                raise ValueError(f"Unknown provider: {provider_name!r}")
+        provider.validate_symbol(symbol)
         return provider
 
     def _provider_for(self, symbol: str) -> MarketDataProvider:

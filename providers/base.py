@@ -55,6 +55,10 @@ class MarketDataProvider(ABC):
     def supports_symbol(self, symbol: str) -> bool:
         ...
 
+    def validate_symbol(self, symbol: str) -> None:
+        """Reject a symbol incompatible with this configured provider instance."""
+        return None
+
     @property
     @abstractmethod
     def name(self) -> str:

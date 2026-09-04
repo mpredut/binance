@@ -49,13 +49,18 @@ def _mainnet_setting() -> bool:
     return raw == "true"
 
 
-def _hype_symbol(symbol: str, token: str = "HYPE") -> bool:
+def _spot_symbol_alias(symbol: str, token: str = "HYPE") -> bool:
     """Return whether a symbol is an exact alias of the configured USDC pair."""
     if not symbol or not token:
         return False
-    normalized = str(symbol).upper().replace("/", "").replace("-", "")
-    base = str(token).upper()
-    return normalized in {base, f"{base}USDC"}
+    normalized = str(symbol).strip().upper()
+    base = str(token).strip().upper()
+    return normalized in {
+        base,
+        f"{base}USDC",
+        f"{base}/USDC",
+        f"{base}-USDC",
+    }
 
 
 _CLOID_RE = re.compile(r"^0x[0-9a-fA-F]{32}$")
@@ -107,7 +112,15 @@ class HyperliquidProvider(MarketDataProvider):
 
     def supports_symbol(self, symbol: str) -> bool:
         # Claim only exact aliases of this provider's configured USDC spot pair.
-        return _hype_symbol(symbol, self._token)
+        return _spot_symbol_alias(symbol, self._token)
+
+    def validate_symbol(self, symbol: str) -> None:
+        """Reject a symbol that cannot represent this provider's configured pair."""
+        if not self.supports_symbol(symbol):
+            raise ProviderError(
+                f"unsupported Hyperliquid {self._token}/USDC spot symbol: "
+                f"{symbol!r}"
+            )
 
     # -- Lazy infrastructure. --------------------------------------------------
     def _load_env(self) -> None:
@@ -166,6 +179,7 @@ class HyperliquidProvider(MarketDataProvider):
 
     # -- Public market data without a key. -------------------------------------
     def get_current_price(self, symbol: str) -> Optional[float]:
+        self.validate_symbol(symbol)
         c = self._hl()
         pair = self._pair()
         if c is None or pair is None:
@@ -178,6 +192,7 @@ class HyperliquidProvider(MarketDataProvider):
 
     def get_price_history(self, symbol: str, lookback_h: float) -> Optional[List]:
         """Return ascending granular spot closes over the last ``lookback_h`` hours."""
+        self.validate_symbol(symbol)
         c = self._hl()
         pair = self._pair()
         if c is None or pair is None:
@@ -225,6 +240,7 @@ class HyperliquidProvider(MarketDataProvider):
 
         Exclude perpetual HYPE fills to avoid mixing delta-neutral activity.
         """
+        self.validate_symbol(symbol)
         c = self._hl()
         pair = self._pair()
         if c is None or pair is None:
@@ -259,6 +275,7 @@ class HyperliquidProvider(MarketDataProvider):
 
     def open_orders(self, symbol: str) -> List[dict]:
         """Return normalized resting spot orders for the resolved pair."""
+        self.validate_symbol(symbol)
         c = self._hl()
         pair = self._pair()
         if c is None or pair is None:
@@ -284,6 +301,7 @@ class HyperliquidProvider(MarketDataProvider):
         Live mode is the final gate after dry-run validation and resolution of
         delta-neutral wallet co-mingling, which could otherwise unwind its spot leg.
         """
+        self.validate_symbol(symbol)
         side = (side or "").upper()
         live = self.execution_enabled()
         if not live:
@@ -325,6 +343,7 @@ class HyperliquidProvider(MarketDataProvider):
         return self._new_client(secret)
 
     def pair_precision(self, symbol: str):
+        self.validate_symbol(symbol)
         c = self._hl()
         if c is None:
             return None
@@ -339,9 +358,7 @@ class HyperliquidProvider(MarketDataProvider):
                              order_min=0.0, base_asset=self._token)
 
     def ohlc_series(self, symbol: str, interval_min: int) -> ClosedPriceSeries:
-        if not self.supports_symbol(symbol):
-            raise ProviderError(
-                f"ohlc_series({symbol}): unsupported Hyperliquid spot symbol")
+        self.validate_symbol(symbol)
         client = self._hl()
         pair = self._pair()
         if client is None or pair is None:
@@ -377,6 +394,7 @@ class HyperliquidProvider(MarketDataProvider):
                      price: Optional[float] = None, *, market: bool = False,
                      kind: Optional[str] = None,
                      client_order_id: Optional[str] = None) -> str:
+        self.validate_symbol(symbol)
         # Safety: real orders require HL_LIVE_ORDERS due to spot/DN co-mingling.
         if not self.execution_enabled():
             raise ProviderError(f"HL_LIVE_ORDERS=false — refusing a real order on HL ({side} {symbol})")
@@ -425,6 +443,7 @@ class HyperliquidProvider(MarketDataProvider):
         consuming a DCA round for a fraction of its intended amount. submit_order
         repeats this check to close the race after engine preflight.
         """
+        self.validate_symbol(symbol)
         if not (side or "").lower().startswith("b"):
             return
         if price is None:
@@ -447,6 +466,7 @@ class HyperliquidProvider(MarketDataProvider):
 
     def order_by_client_id(self, symbol: str, client_order_id: str):
         """Recover a Hyperliquid spot order by CLOID when supported by the SDK."""
+        self.validate_symbol(symbol)
         c = self._hl()
         pair = self._pair()
         addr = os.environ.get("HL_ACCOUNT_ADDRESS")
@@ -483,6 +503,7 @@ class HyperliquidProvider(MarketDataProvider):
                 f"order_by_client_id({symbol},{client_order_id}): {e}") from e
 
     def order_status(self, symbol: str, order_id: str):
+        self.validate_symbol(symbol)
         c = self._hl()
         pair = self._pair()
         if c is None or pair is None:
@@ -561,6 +582,7 @@ class HyperliquidProvider(MarketDataProvider):
             raise ProviderError(f"order_status({order_id}): {e}") from e
 
     def cancel_order(self, symbol: str, order_id: str) -> None:
+        self.validate_symbol(symbol)
         pair = self._pair()
         if pair is None:
             raise ProviderError(
