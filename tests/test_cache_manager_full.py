@@ -74,6 +74,18 @@ class TestCacheManagerInterface(unittest.TestCase):
         with mgr.lock:
             self.assertEqual(mgr.cache["SYM"], [[1000, 50.0]])
 
+    def test_missing_cache_uses_the_bounded_default_start_time(self):
+        fname = _tmp_file(self.tmp, "missing.json")
+        mgr = ConcreteTestManager(9999, ["SYM"], fname, remote_items={"SYM": []})
+        mgr.cache = {}
+        mgr.fetchtime_time_per_symbol = {}
+        mgr.fallback_time_default = 123_456
+
+        with patch.object(cm.os.path, "exists", return_value=False):
+            result = mgr._CacheManagerInterface__rebuild_fetchtime_times()
+
+        self.assertEqual(result, {"SYM": 123_456})
+
     def test_load_state_missing_file_calls_remote(self):
         fname = _tmp_file(self.tmp, "nonexistent.json")
         remote = {"SYM": [[int(time.time()*1000), 100.0]]}
@@ -793,6 +805,34 @@ class TestCachePriceLongTrendManager(unittest.TestCase):
             with patch("os.path.exists", return_value=True):
                 result = mgr.get_remote_items("BTC", 0)
         self.assertEqual(result, [])
+
+    def test_explicit_neutral_trend_clears_the_snapshot(self):
+        mgr = self._make()
+        with patch("builtins.open", unittest.mock.mock_open(
+                read_data=json.dumps({"BTC": None}))):
+            with patch("os.path.exists", return_value=True):
+                self.assertEqual(mgr.get_remote_items("BTC", 0), [None])
+
+        mgr.cache = {"BTC": [{"timestamp": 500, "direction": "up"}]}
+        mgr.update_cache_per_symbol("BTC", [None])
+        self.assertEqual(mgr.cache["BTC"], [None])
+        self.assertEqual(mgr.rebuild_fetchtime_times(), {})
+
+    def test_rebuild_skips_neutral_and_malformed_trend_entries(self):
+        mgr = self._make()
+        mgr.cache = {
+            "BTC": [
+                None,
+                "not-a-trend",
+                {"timestamp": None},
+                {"timestamp": "invalid"},
+                {"timestamp": 500},
+            ],
+        }
+        self.assertEqual(
+            mgr.rebuild_fetchtime_times(),
+            {"BTC": 440_000},
+        )
 
     def test_get_remote_items_returns_symbol_data(self):
         mgr = self._make()

@@ -277,9 +277,9 @@ class CacheManagerInterface(ABC):
             for symbol in last_times_per_sym:
                 last_times_per_sym[symbol] = max(0, last_times_per_sym[symbol] - 60_000)                
         if not last_times_per_sym:
-            # Fall back to the file modification time.
-            fallback_time_file = 0
-            if os.path.exists(self.filename): # TODO: distinguish an existing file with no data.
+            # A missing cache starts at the configured bounded history horizon.
+            fallback_time_file = self.fallback_time_default
+            if os.path.exists(self.filename):
                 fallback_time_file = int(os.path.getmtime(self.filename) * 1000) - 60_000
             fallback_time = min(self.fallback_time_default, fallback_time_file)
             return {symbol: fallback_time for symbol in self.symbols}
@@ -2529,32 +2529,38 @@ class CachePriceLongTrendManager(CacheManagerInterface):
         last_times = defaultdict(int)
         for symbol, items in self.cache.items():
             for item in items:
-                ts = item.get("timestamp", 0) * 1000
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    timestamp = float(item.get("timestamp", 0))
+                except (TypeError, ValueError, OverflowError):
+                    continue
+                if not math.isfinite(timestamp) or timestamp <= 0:
+                    continue
+                ts = int(timestamp * 1000)
                 if ts > last_times[symbol]:
                     last_times[symbol] = ts
         for symbol in last_times:
             last_times[symbol] = max(0, last_times[symbol] - 60_000)
         return dict(last_times)
-        
+
     def get_remote_items(self, symbol, startTime):
-        # TODO : import priceanalysis name file
-        filename = "priceanalysis.json"
-        if not os.path.exists(filename):
-            print(f"[{self.cls_name}] File {self.filename} does not exist.")
+        trend_filename = os.path.join(_CONFIG_ROOT, "priceanalysis.json")
+        if not os.path.exists(trend_filename):
+            print(f"[{self.cls_name}] File {trend_filename} does not exist.")
             return []
 
         try:
-            with open(filename, "r") as f:
-                data = json.load(f)
-        except Exception as e:
-            print(f"[{self.cls_name}] Could not read {self.filename}: {e}")
+            with open(trend_filename, "r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except Exception as exc:
+            print(f"[{self.cls_name}] Could not read {trend_filename}: {exc}")
             return []
 
-        if symbol not in data:
+        if not isinstance(data, dict) or symbol not in data:
             return []
-
-        trend = data.get(symbol) 
-        if trend is None: return []
+        # An explicitly published null is a neutral snapshot, distinct from a
+        # missing symbol. Preserve it so stale in-memory trends are cleared.
         return [data[symbol]]
         
 

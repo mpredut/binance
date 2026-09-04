@@ -1,9 +1,10 @@
-import os, sys, time, unittest
+import json, os, sys, tempfile, time, unittest
 
 os.environ.setdefault("MPLBACKEND", "Agg")   # No GUI backend when importing matplotlib
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
+from unittest.mock import patch
 import priceAnalysis as pa
 
 
@@ -61,6 +62,43 @@ class TestTimeBasedTrend(unittest.TestCase):
         r = pa.detect_long_term_trend(ts, pr, window_hours=16, step_hours=8)
         for lo, hi in r["blocks"]:
             self.assertTrue(0 <= lo < hi <= len(ts))
+
+
+class TestTrendPersistence(unittest.TestCase):
+    def test_write_all_trends_uses_the_shared_atomic_json_writer(self):
+        payload = {
+            "BTCUSDC": {
+                "direction": "up",
+                "start_timestamp": 1,
+                "duration_seconds": 3600,
+                "estimated_future_hours": 2,
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            filename = os.path.join(directory, "trends.json")
+            with patch.object(pa, "atomic_write_json") as writer:
+                self.assertEqual(pa.write_all_trends(payload, filename), payload)
+
+        writer.assert_called_once_with(filename, payload, indent=2)
+
+    def test_failed_atomic_write_preserves_the_previous_generation(self):
+        previous = {"BTCUSDC": {"direction": "down"}}
+        payload = {
+            "BTCUSDC": {
+                "direction": "up",
+                "start_timestamp": 1,
+                "duration_seconds": 3600,
+                "estimated_future_hours": 2,
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            filename = os.path.join(directory, "trends.json")
+            with open(filename, "w", encoding="utf-8") as handle:
+                json.dump(previous, handle)
+            with patch.object(pa, "atomic_write_json", side_effect=OSError("disk full")):
+                self.assertEqual(pa.write_all_trends(payload, filename), payload)
+            with open(filename, encoding="utf-8") as handle:
+                self.assertEqual(json.load(handle), previous)
 
 
 class TestBoundedPlotIndices(unittest.TestCase):

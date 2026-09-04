@@ -2,7 +2,6 @@
 import os
 import math
 import time
-import json
 import psutil
 
 import numpy as np
@@ -18,6 +17,7 @@ import utils as u
 import symbols as sym
 from botcore import (load_dotenv as _load_dotenv, required_bool_env,
                      required_int_env)
+from state_io import atomic_write_json
 
 _CONFIG_ROOT = os.path.dirname(os.path.abspath(__file__))
 _load_dotenv(os.path.join(_CONFIG_ROOT, "cachemanager_config.env"))
@@ -522,11 +522,12 @@ def getTrendLongTerm_fixed(symbol: str, window_hours: int = 24, step_hours: int 
     }
 
 # Persist all trend results with human-readable output.
-def write_all_trends(all_trends, filename="priceanalysis.json"):
-    """Write results as JSON and display a human-readable summary."""
-    
+def write_all_trends(all_trends, filename=None):
+    """Atomically write trend results and display a human-readable summary."""
+    filename = filename or os.path.join(_CONFIG_ROOT, "priceanalysis.json")
+
     print("\n" + "="*80)
-    print("SUMAR TRENDURI".center(80))
+    print("TREND SUMMARY".center(80))
     print("="*80)
     
     for symbol, trend_data in all_trends.items():
@@ -549,16 +550,15 @@ def write_all_trends(all_trends, filename="priceanalysis.json"):
         print(f"  {emoji} {direction.upper()}")
         print(f"  Start:    {start_str}")
         print(f"  Duration: {duration_str} ({duration_days:.1f} days)")
-        print(f"  Estimat:  ~{future_str} ({future_days:.1f} zile)")
+        print(f"  Estimate: ~{future_str} ({future_days:.1f} days)")
     
     print("\n" + "="*80 + "\n")
     
     try:
-        with open(filename, "w") as f:
-            json.dump(all_trends, f, indent=2)
-        print(f"✅ Results were written to {filename}")
-    except Exception as e:
-        print(f"❌ Eroare scriere {filename}: {e}")
+        atomic_write_json(filename, all_trends, indent=2)
+        print(f"Results were written to {filename}")
+    except Exception as exc:
+        print(f"Could not write {filename}: {exc}")
     
     return all_trends
     
