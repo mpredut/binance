@@ -52,6 +52,7 @@ class FakeInstrument(mt._Instrument):
         # Deliberately do not call Instrument.__init__: no provider registry/API.
         self.symbol = SYMBOL
         self.name = "CHAR"
+        self.isolation = "own_ledger"
         self._price = float(price)
         self._free = float(free)
         self._fills = list(fills)

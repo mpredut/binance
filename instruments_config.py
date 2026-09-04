@@ -7,7 +7,8 @@ own configuration files and do not import this loader.
 
 Each section's core fields are ``provider``, ``symbol``, ``base``, ``quote``,
 ``enabled``, ``isolation``, and ``market_hours``. Other values remain strings in
-``Instrument.params``. A missing file returns an empty mapping.
+Instrument.params. The registry is authoritative: a missing or malformed
+configuration raises instead of silently creating an incomplete instrument.
 """
 import os
 import configparser
@@ -17,42 +18,76 @@ from instrument import Instrument
 
 DEFAULT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "instruments.conf")
 
-# Chei tratate ca metadate CORE (restul -> params namespaced).
+# Keys treated as core metadata; every other key is a namespaced parameter.
 _CORE = {"provider", "symbol", "base", "quote", "enabled", "isolation", "market_hours"}
 
-_TRUE = {"1", "yes", "true", "da", "on"}
+_TRUE = {"1", "yes", "true", "on"}
+_FALSE = {"0", "no", "false", "off"}
+_ISOLATION_VALUES = {"own_ledger", "dedicated"}
+_MARKET_HOURS_VALUES = {"24x7", "rth"}
 
 
-def _as_bool(s, default=True) -> bool:
-    if s is None:
-        return default
-    return str(s).strip().lower() in _TRUE
+def _as_bool(value: str, *, section: str, key: str) -> bool:
+    normalized = str(value).strip().casefold()
+    if normalized in _TRUE:
+        return True
+    if normalized in _FALSE:
+        return False
+    allowed = ", ".join(sorted(_TRUE | _FALSE))
+    raise ValueError(
+        f"instruments.conf [{section}]: {key!r} must be one of {allowed}; "
+        f"got {value!r}")
+
+
+def _required(d: dict, section: str, key: str) -> str:
+    value = str(d.get(key) or "").strip()
+    if not value:
+        raise ValueError(f"instruments.conf [{section}]: missing required {key!r}")
+    return value
 
 
 def load_instruments(path: Optional[str] = None, api=None) -> Dict[str, Instrument]:
     """Build instruments keyed by configuration section name."""
     path = path or DEFAULT_PATH
-    out: Dict[str, Instrument] = {}
     if not os.path.exists(path):
-        return out
-    cp = configparser.ConfigParser()
-    # Keep the keys exactly as written (configparser lowercases them anyway; ours
-    # are already lowercase, so this is fine).
+        raise FileNotFoundError(f"Instrument registry does not exist: {path}")
+    out: Dict[str, Instrument] = {}
+    seen_venue_symbols = set()
+    cp = configparser.ConfigParser(inline_comment_prefixes=("#", ";"))
     cp.read(path)
     for section in cp.sections():
         d = dict(cp.items(section))
-        if "provider" not in d or "symbol" not in d:
-            raise ValueError(f"instruments.conf [{section}]: is missing 'provider' or 'symbol'")
+        provider = _required(d, section, "provider")
+        symbol = _required(d, section, "symbol")
+        base = _required(d, section, "base")
+        quote = _required(d, section, "quote")
+        enabled = _as_bool(_required(d, section, "enabled"), section=section, key="enabled")
+        isolation = _required(d, section, "isolation").casefold()
+        market_hours = _required(d, section, "market_hours").casefold()
+        if isolation not in _ISOLATION_VALUES:
+            raise ValueError(
+                f"instruments.conf [{section}]: unsupported isolation {isolation!r}; "
+                f"expected one of {sorted(_ISOLATION_VALUES)}")
+        if market_hours not in _MARKET_HOURS_VALUES:
+            raise ValueError(
+                f"instruments.conf [{section}]: unsupported market_hours {market_hours!r}; "
+                f"expected one of {sorted(_MARKET_HOURS_VALUES)}")
+        venue_symbol = (provider.casefold(), symbol.casefold())
+        if venue_symbol in seen_venue_symbols:
+            raise ValueError(
+                f"instruments.conf [{section}]: duplicate provider/symbol "
+                f"{provider!r}/{symbol!r}")
+        seen_venue_symbols.add(venue_symbol)
         params = {k: v for k, v in d.items() if k not in _CORE}
         out[section] = Instrument(
             name=section,
-            symbol=d["symbol"].strip(),
-            provider=d["provider"].strip(),
-            base=(d.get("base") or "").strip() or None,
-            quote=(d.get("quote") or "").strip() or None,
-            enabled=_as_bool(d.get("enabled"), True),
-            isolation=(d.get("isolation") or "own_ledger").strip(),
-            market_hours=(d.get("market_hours") or "24x7").strip(),
+            symbol=symbol,
+            provider=provider,
+            base=base,
+            quote=quote,
+            enabled=enabled,
+            isolation=isolation,
+            market_hours=market_hours,
             params=params,
             api=api,
         )

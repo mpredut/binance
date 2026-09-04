@@ -498,7 +498,7 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
         print(f"Invalid available balance for {symbol}: {avail_qty} — skip")
         return
     min_qty = inst.min_qty() or 0.0  # Venue minimum-volume rejection guard.
-    isolation = str(inst.param("mt", "isolation", "own_ledger") or "own_ledger").lower()
+    isolation = inst.isolation
     owned_qty = max(float(position["net_qty"]), 0.0)
     sellable_qty = min(avail_qty, owned_qty) if isolation == "own_ledger" else avail_qty
 
@@ -592,6 +592,10 @@ def monitor_price_and_trade(inst, sbs, maxage_trade_s=None, gain_threshold=None,
     #    print(f"An error occurred while monitoring the price: {e}")
 
 def main():
+    instruments = load_for("mt")
+    if not instruments:
+        raise RuntimeError("No enabled monitortrades instruments are configured")
+
     # Explicit user-data bridge lets each process update Order/Trade memory through
     # its own WebSocket and polling without rereading files.
     import cacheManager as cm
@@ -626,19 +630,20 @@ def main():
         print_number_of_orders(maxage_trade_s)
         print_number_of_trades(maxage_trade_s)
         
+        # Reload the authoritative registry so deliberate configuration changes take
+        # effect without restart. Validation errors propagate and stop the service
+        # rather than leaving a trading loop alive with an unknown configuration.
         # Iterate enabled instruments from the ``mt`` namespace and route each explicitly
         # to its provider. Non-Binance orders remain dry until their live gates are enabled.
-        try:
-            _instruments = load_for("mt")   # Enabled instruments with mt parameters only.
-        except Exception as _e:
-            print(f"[instruments.conf] {_e} — skipping this cycle")
-            _instruments = {}
-        for _inst in _instruments.values():
+        instruments = load_for("mt")
+        if not instruments:
+            raise RuntimeError("No enabled monitortrades instruments are configured")
+        for _inst in instruments.values():
             print(f"-----{_inst.name} ({_inst.symbol}@{_inst.provider_label})------")
             try:
                 monitor_price_and_trade(_inst, sbs=d*24*3600+60)
             except Exception as _e:
-                print(f"[{_inst.name}] eroare in monitor: {_e}")
+                print(f"[{_inst.name}] monitoring error: {_e}")
             print("--------------")
   
         # Removed a recommendation block consumed only by commented legacy functions.
