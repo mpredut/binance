@@ -68,6 +68,14 @@ KrakenError`. The backtest (`replay.py`) uses `MagicMock`, so it is almost untou
   auditing already exists through `AuditedStrategyExecutor`; without a new requirement for a
   global cross-strategy limit, Phase 6 adds no financial or operational value.
 
+  Update, 5 September 2026: a *targeted* slice of the intent-aware guard was added inside the
+  engine instead of routing through `place()` — `spot_dca._place` refuses a non-urgent limit
+  SELL priced below the average cost (a stale/miscomputed take-profit would otherwise realise a
+  loss). Urgent MARKET exits (STOP, trailing) stay exempt, preserving the "STOP/trailing cannot
+  be blocked" invariant. This closes the loss-on-mispriced-TP gap for HL/Kraken with no cross-
+  strategy coupling; the full Phase 6 (cap/cooldown/trend on the engine) stays deferred.
+  Guarded by the byte-identical golden and `tests/test_spot_dca_profit_floor_guard.py`.
+
 ## Closing state
 
 Phases 0-5c are merged into `main` at `f5ac673`, validated by the byte-identical golden, the
