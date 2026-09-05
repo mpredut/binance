@@ -48,7 +48,7 @@ def _scenario_summary(report: dict) -> dict:
 
 def build_comparison(args) -> dict:
     baseline_report = _load_json(args.baseline)
-    base_params = StratParams(**baseline_report["strategy_params"])
+    base_params = benchmark.strat_params_from_dict(baseline_report["strategy_params"])
     candidates = financial_priority_candidates()
     selected = set(args.candidate or [])
     if selected:

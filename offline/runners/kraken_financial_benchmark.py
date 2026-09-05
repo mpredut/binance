@@ -73,6 +73,18 @@ def _load_expected_dataset(manifest_path: Path, interval: int) -> dict:
     return {"manifest": manifest, "expected": expected}
 
 
+def strat_params_from_dict(values: dict) -> StratParams:
+    """Build StratParams from a stored report, dropping fields that no longer exist
+    on the dataclass. Versioned baselines can carry parameters removed in later
+    refactors (e.g. trend_confirm_bars); ignoring them lets an old artefact still
+    reproduce against the current engine instead of raising a TypeError."""
+    valid = {f.name for f in dataclasses.fields(StratParams)}
+    dropped = sorted(set(values) - valid)
+    if dropped:
+        print(f"[params] ignoring parameters removed from StratParams: {dropped}")
+    return StratParams(**{k: v for k, v in values.items() if k in valid})
+
+
 def _load_params(args) -> StratParams:
     load_dotenv(args.env_file)
     load_dotenv(args.config_file)
@@ -83,7 +95,7 @@ def _load_params(args) -> StratParams:
     values = payload.get("strategy_params", payload)
     if not isinstance(values, dict):
         raise ValueError("--params-report must contain strategy_params or an object")
-    return StratParams(**values)
+    return strat_params_from_dict(values)
 
 
 def _scenario_windows(records: list[dict], params: StratParams, scenario, *,
