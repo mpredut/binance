@@ -170,7 +170,22 @@ class TrailingCore:
         is_new = key not in state
         st = state.setdefault(key, {"peak": price})
         if is_new and self.min_profit_pct > 0:
-            st["warmup_at"] = price * (1 + self.min_profit_pct / 100.0)  # first tick: set activation threshold
+            # Arm the warm-up relative to the REAL entry when the provider can supply
+            # it (the Binance adapter reads recent fills), so an already-profitable
+            # MANUAL position activates immediately instead of only after a further
+            # +min_profit% above the first observed price — no state pre-seed needed.
+            # Fallback to the first-tick price (previous behaviour) for a provider
+            # without a cost basis (Kraken) or a position not bought here.
+            ref = price
+            basis_getter = getattr(self.a, "cost_basis", None)
+            if basis_getter is not None:
+                try:
+                    basis = basis_getter(pair)
+                except Exception:
+                    basis = None
+                if isinstance(basis, (int, float)) and not isinstance(basis, bool) and basis > 0:
+                    ref = float(basis)
+            st["warmup_at"] = ref * (1 + self.min_profit_pct / 100.0)  # activation threshold
         if self._reconcile_pending(state, st, price):
             return
         if self.rebuy_enabled and st.get("rebuy"):            # handle pending re-buy BEFORE notional check (free~0 after sale)

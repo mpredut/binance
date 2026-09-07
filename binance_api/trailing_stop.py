@@ -73,6 +73,10 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "trailing.c
 from instruments_config import trail_pct_map as _trail_pct_map
 TRAIL_PCT = _trail_pct_map()
 DEFAULT_TRAIL_PCT = 22.0
+# Lookback for reading a manual position's real entry (average BUY) to arm the
+# warm-up relative to the true cost basis. Generous: a manual hold may be weeks or
+# months old. Only consulted once, on a NEW position the bot did not itself buy.
+_COST_BASIS_LOOKBACK_S = 120 * 24 * 3600
 TRAILING_ENABLED = required_bool_env("TRAILING_ENABLED")
 SELL_FRACTION = required_float_env("TRAILING_SELL_FRACTION")
 MIN_NOTIONAL_USD = 11.0
@@ -158,6 +162,24 @@ class TrailingStop:
 
     def trail_pct_for(self, symbol: str) -> float:
         return TRAIL_PCT.get(symbol, DEFAULT_TRAIL_PCT)
+
+    def cost_basis(self, pair: str):
+        """Average BUY price of the current holding from recent Binance fills, or None
+        if unknown. TrailingCore consults this on a NEW position to arm the warm-up
+        relative to the REAL entry, so an already-profitable MANUAL position (e.g. a
+        coin bought by hand) activates immediately without a state pre-seed. Failure
+        is non-fatal: the core then falls back to the first observed price."""
+        try:
+            buys = self.po.get_orders(pair, "BUY", _COST_BASIS_LOOKBACK_S) or []
+            qty = sum(float(o["qty"]) for o in buys)
+            value = sum(float(o["price"]) * float(o["qty"]) for o in buys)
+            if qty <= 0 or value <= 0:
+                return None
+            avg = value / qty
+            return avg if math.isfinite(avg) and avg > 0 else None
+        except Exception as e:  # noqa: BLE001
+            self.log(f"  [TRAIL] cost_basis({pair}) unavailable ({e}) — warm-up from current price")
+            return None
 
     def _free_qty(self, balances: list, asset: str) -> float:
         for bal in balances or []:

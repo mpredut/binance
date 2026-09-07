@@ -274,6 +274,27 @@ class TestMinProfit(Base):
         sells = [o for o in self.po.orders if o["side"] == "SELL"]
         self.assertEqual(len(sells), 1, "the second crash does not trigger a sell (warming up after the rebuy)")
 
+    def test_warmup_arms_from_real_cost_basis(self):
+        """A MANUAL position already in profit arms immediately from the real entry.
+
+        Real entry 200 (read from fills), price 250 (+25%): the warm-up sits at
+        200*1.05=210 < 250, so it is armed on the first tick and a later crash sells —
+        with NO state pre-seed. Contrast test_warming_up_does_not_sell_below_the_
+        threshold, where without a cost basis the warm-up sits at 250*1.05 and a crash
+        to 190 does not sell. This is the fix that removes the manual seed / warm-up
+        gap for an already-profitable position."""
+        class PoWithFills(FakePo):
+            def get_orders(self, symbol, side, since_s):
+                return [{"price": 200.0, "qty": 5.0}] if side == "BUY" else []
+        self.po = PoWithFills()
+        api = FakeApi(250.0)
+        ts = self.ts(api, min_profit_pct=5.0)
+        ts.check_once()                    # is_new: cost_basis=200 -> warmup 210 < 250 -> ARMED, peak=250
+        api.price = 190.0                  # -24% from peak 250, below the 22% TAO stop (195)
+        ts.check_once()
+        self.assertEqual(len(self.po.orders), 1, "armed via real cost basis -> the crash sells")
+        self.assertEqual(self.po.orders[0]["side"], "SELL")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
