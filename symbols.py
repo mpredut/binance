@@ -4,6 +4,9 @@ import math
 
 ####MYLIB
 from binance_api.bapi_client import client
+# The Binance symbol list is DERIVED from instruments.conf (the single registry).
+# instruments_config is import-light (no provider chain), so this is safe fleet-wide.
+from instruments_config import binance_symbols as _binance_symbols
 
 
 btcsymbol = 'BTCUSDC'
@@ -13,11 +16,11 @@ taosymbol = 'TAOUSDC'
 # list): Binance validation and loops must never process it. It is only a symbol
 # label that monitortrades passes to the facade.
 hypesymbol = 'HYPEUSDC'
-#symbols = ["BTCUSDC", "TAOUSDC"]
-# ARBUSDC is a manual spot position monitored by the Binance trailing stop
-# (binance_api/trailing_stop.py, which only trails coins listed here). tradeall
-# deliberately does NOT trade it: see TRADEALL_FIRE_SYMBOLS in tradeall_config.env.
-symbols = ["BTCUSDC",  "TAOUSDC", "ARBUSDC"]
+# Enabled Binance sections from instruments.conf, in registry order. Today this is
+# [BTCUSDC, TAOUSDC, ARBUSDC] (BTC/TAO traded by tradeall; ARB is a manual position
+# guarded only by the trailing stop, tradeall.trade=no). To add a coin, add ONE
+# section to instruments.conf — no edit here, in trailing_stop.py or tradeall.py.
+symbols = _binance_symbols()
 forcesellsymbol = ["TAOUSDC", "BTCUSDC"]
 def validate_ordertype(order_type):
     if order_type not in [None, 'BUY', 'SELL']:

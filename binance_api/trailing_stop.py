@@ -65,15 +65,13 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "trailing.c
 # trailing stops (8-12%) do not beat holding because violent rebounds cause whipsaw
 # and fees. The useful role is protection against a sustained collapse: a wide
 # threshold (~22%) triggers only on a catastrophic fall, not market noise.
-TRAIL_PCT = {
-    "BTCUSDC": 20.0,
-    "TAOUSDC": 22.0,
-    # ARBUSDC: manual position, entered 0.1351, ~+29% on 7 Sep. A tighter trail
-    # (vs the ~22% catastrophe default) to protect the existing gain: at a ~0.174
-    # peak the stop sits near 0.152 (~+12% vs entry). The state is pre-seeded with
-    # this peak and no warm-up, so protection is armed immediately, not after +5%.
-    "ARBUSDC": 13.0,
-}
+# Per-coin trail % is DERIVED from instruments.conf (trail.pct on each enabled
+# Binance section with trail.enabled) — the single registry. Today: BTCUSDC 20,
+# TAOUSDC 22, ARBUSDC 13 (ARB tighter to protect an existing manual gain, entered
+# 0.1351 on 3 Sep). To add or retune a coin, edit that one section; nothing here
+# changes. DEFAULT_TRAIL_PCT stays the ~22% catastrophe fallback for anything absent.
+from instruments_config import trail_pct_map as _trail_pct_map
+TRAIL_PCT = _trail_pct_map()
 DEFAULT_TRAIL_PCT = 22.0
 TRAILING_ENABLED = required_bool_env("TRAILING_ENABLED")
 SELL_FRACTION = required_float_env("TRAILING_SELL_FRACTION")

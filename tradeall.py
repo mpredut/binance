@@ -177,13 +177,14 @@ KALMAN_PRIMARY_SYMBOLS = set(
     s.strip() for s in required_env("KALMAN_PRIMARY_SYMBOLS").split(",") if s.strip())
 
 
-# Symbols tradeall MAY place orders on. A symbol present in symbols.py but absent
-# here is still trend-tracked (so other consumers — trailing stop, monitortrades,
-# is_trend_up — get its snapshot) but is NEVER traded by tradeall. Empty = trade
-# nothing. This lets a manual position (for example ARBUSDC, held by the trailing
-# stop) be observed without tradeall competing for its exits.
-TRADEALL_FIRE_SYMBOLS = set(
-    s.strip() for s in required_env("TRADEALL_FIRE_SYMBOLS").split(",") if s.strip())
+# Symbols tradeall MAY place orders on — DERIVED from instruments.conf (the single
+# registry): every enabled Binance section with tradeall.trade=yes. A Binance coin
+# that is trend-tracked but has tradeall.trade=no (for example ARBUSDC, a manual
+# position held by the trailing stop) is observed without tradeall competing for its
+# exits. instruments_config is import-light (no provider chain), so importing it here
+# is safe. To let tradeall trade a new coin, set tradeall.trade=yes on its section.
+from instruments_config import tradeall_trade_symbols as _tradeall_trade_symbols
+TRADEALL_FIRE_SYMBOLS = _tradeall_trade_symbols()
 
 
 def _kalman_gate_blocks(symbol, action):
