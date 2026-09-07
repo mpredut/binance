@@ -15,8 +15,7 @@ class RuntimeImportSafetyTest(unittest.TestCase):
             import types
             import importlib
 
-            # It simulates the CI checkout: the keys package may exist, but the file
-            # The secret keys/apikeys.py is not versioned.
+            # Simulate a minimal installation where the optional keys shim is absent.
             keys = types.ModuleType("keys")
             keys.__path__ = []
             sys.modules["keys"] = keys
@@ -72,7 +71,8 @@ class RuntimeImportSafetyTest(unittest.TestCase):
                 raise AssertionError(f"thread-uri pornite la import: {leaked}")
             """
         )
-        env = dict(os.environ, BINANCE_AUTO_START_WEBSOCKETS="0")
+        env = dict(os.environ, BINANCE_AUTO_START_WEBSOCKETS="0",
+                   BINANCE_API_KEY="", BINANCE_API_SECRET="", BINANCE_API_KEY_WS="")
         result = subprocess.run(
             [sys.executable, "-c", code],
             cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
@@ -81,6 +81,29 @@ class RuntimeImportSafetyTest(unittest.TestCase):
             text=True,
             timeout=20,
         )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_missing_rest_credentials_fail_before_client_construction(self):
+        code = textwrap.dedent('''
+            from unittest.mock import patch
+            from binance_api import bapi_client
+            from keys import apikeys
+            assert apikeys.api_key_ws == "", "REST key must not substitute for the Ed25519 key"
+            with patch.object(bapi_client, "Client") as client:
+                try:
+                    bapi_client.getClient()
+                except ValueError as exc:
+                    assert "BINANCE_API_SECRET" in str(exc)
+                else:
+                    raise AssertionError("Missing credentials were accepted")
+                client.assert_not_called()
+        ''')
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            env=dict(os.environ, BINANCE_API_KEY="test-only", BINANCE_API_SECRET="",
+                     BINANCE_API_KEY_WS="", BINANCE_AUTO_START_WEBSOCKETS="0"),
+            text=True, capture_output=True, timeout=20)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 

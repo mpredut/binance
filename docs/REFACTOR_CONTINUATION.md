@@ -1,6 +1,10 @@
 # Refactor continuation handoff
 
-Last updated: 2026-09-01
+Last updated: 2026-09-07
+
+Latest local handoff: [Binance instrument onboarding](BINANCE_INSTRUMENT_ONBOARDING.md).
+This supersedes the older symbol-onboarding assumptions below. Production was
+unavailable during this batch; deployment and live ARB state still need verification.
 
 Use this document only if the remaining work is still relevant when the refactor resumes.
 Re-check `main`, production behavior, tests and current call sites before implementing it.

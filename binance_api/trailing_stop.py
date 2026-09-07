@@ -22,7 +22,7 @@ logging). See tests/test_trailing_stop.py for behavior coverage.
 
 SAFETY:
   * TRAILING_ENABLED=false (default) enables DRY-RUN and only logs proposed sales.
-  * It operates only on coins listed in symbols.py.
+  * Only enabled instruments with role.trailing in instruments.conf are managed.
   * The peak is persisted across restarts and is not reset.
   * Orders below the minimum notional are skipped.
 
@@ -43,7 +43,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # binance_a
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)   # also support direct execution (python binance_api/trailing_stop.py)
 
-from providers.quantity import resolve_assets
+from instrument_registry import select_instruments
 from providers.execution_audit import intent_client_order_id
 from order_retry import (
     TrackedOrderLifecycle,
@@ -65,17 +65,14 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "trailing.c
 # trailing stops (8-12%) do not beat holding because violent rebounds cause whipsaw
 # and fees. The useful role is protection against a sustained collapse: a wide
 # threshold (~22%) triggers only on a catastrophic fall, not market noise.
-# Per-coin trail % is DERIVED from instruments.conf (trail.pct on each enabled
-# Binance section with trail.enabled) — the single registry. Today: BTCUSDC 20,
-# TAOUSDC 22, ARBUSDC 13 (ARB tighter to protect an existing manual gain, entered
-# 0.1351 on 3 Sep). To add or retune a coin, edit that one section; nothing here
-# changes. DEFAULT_TRAIL_PCT stays the ~22% catastrophe fallback for anything absent.
-from instruments_config import trail_pct_map as _trail_pct_map
-TRAIL_PCT = _trail_pct_map()
-DEFAULT_TRAIL_PCT = 22.0
-# Lookback for reading a manual position's real entry (average BUY) to arm the
-# warm-up relative to the true cost basis. Generous: a manual hold may be weeks or
-# months old. Only consulted once, on a NEW position the bot did not itself buy.
+# Membership and thresholds are explicit; adding market data alone never arms a
+# trailing exit. Historical peaks and warm-up remain exclusively in runtime state.
+TRAILING_INSTRUMENTS = {
+    spec.symbol: spec for spec in select_instruments("binance", "trailing").values()
+}
+TRAIL_PCT = {symbol: spec.number("trailing.pct")
+             for symbol, spec in TRAILING_INSTRUMENTS.items()}
+# Recent history is usable only when it explains the currently held inventory.
 _COST_BASIS_LOOKBACK_S = 120 * 24 * 3600
 TRAILING_ENABLED = required_bool_env("TRAILING_ENABLED")
 SELL_FRACTION = required_float_env("TRAILING_SELL_FRACTION")
@@ -91,7 +88,7 @@ REBUY_ENABLED = required_bool_env("TRAILING_REBUY_ENABLED")
 REBUY_BOUNCE_PCT = required_float_env("TRAILING_REBUY_BOUNCE_PCT")
 REBUY_TRANCHES = required_int_env("TRAILING_REBUY_TRANCHES")
 # Trend filters read cache_instant_trend through cacheManager. They act only on a
-# CLEAR opposing signal; neutral/unknown does not block, safely degrading to behavior
+# CLEAR opposing signal; neutral/unknown does not block, reverting to behavior
 # without a filter. Skip re-buy on a clear downtrend. Crash sells are unfiltered by
 # default so the circuit breaker remains reliable; enable the sell filter to avoid
 # selling while the instant trend is clearly up (anti-wick behavior).
@@ -161,7 +158,7 @@ class TrailingStop:
         self.core.save(state)
 
     def trail_pct_for(self, symbol: str) -> float:
-        return TRAIL_PCT.get(symbol, DEFAULT_TRAIL_PCT)
+        return TRAIL_PCT[symbol]
 
     def cost_basis(self, pair: str):
         """Average BUY price of the current holding from recent Binance fills, or None
@@ -194,7 +191,7 @@ class TrailingStop:
     # -- instant trend from cacheManager for optional filters ------------------
     def _trend_value(self, symbol: str) -> float:
         """Return instant-trend slope (>0 up, <0 down, 0 neutral/unknown).
-        Errors return 0, making trend filters a safe no-op."""
+        Errors return 0: optional filters do not block, but this is not a safety guarantee."""
         try:
             import cacheManager as cm
             snap = cm.get_short_trend_manager().get_snapshot(symbol)
@@ -207,8 +204,9 @@ class TrailingStop:
     # == TrailingCore ADAPTER contract ========================================
     def assets(self):
         for symbol in self.sym.symbols:
-            asset = resolve_assets(symbol)[0]
-            yield (symbol, asset, symbol, self.trail_pct_for(symbol))  # key=pair=symbol on Binance
+            if symbol in TRAILING_INSTRUMENTS:
+                asset = TRAILING_INSTRUMENTS[symbol].base
+                yield (symbol, asset, symbol, self.trail_pct_for(symbol))
 
     def begin_tick(self) -> bool:
         try:
@@ -344,7 +342,7 @@ class TrailingStop:
         mode = "⚠ ACTIVE (it really sells)" if self.enabled else "DRY RUN (it only logs)"
         self.log(f"=== TRAILING STOP started — {mode} ===")
         self.log(f"    coins/thresholds: " +
-                 ", ".join(f"{s}={self.trail_pct_for(s)}%" for s in self.sym.symbols))
+                 ", ".join(f"{symbol}={trail}%" for symbol, _asset, _pair, trail in self.assets()))
         while True:
             try:
                 self.check_once()
@@ -356,7 +354,7 @@ class TrailingStop:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Trailing stop per-moneda (Binance).")
+    ap = argparse.ArgumentParser(description="Per-instrument trailing stop (Binance).")
     ap.add_argument("--once", action="store_true", help="one check, then exit")
     ap.add_argument("--status", action="store_true", help="the current peaks and thresholds")
     args = ap.parse_args()
@@ -370,12 +368,17 @@ def main() -> int:
 
     if args.status:
         state = ts._load()
-        for s in sym.symbols:
+        for s, _asset, _pair, tr in ts.assets():
             st = state.get(s, {})
-            tr = ts.trail_pct_for(s)
             peak = st.get("peak")
-            print(f"{s}: varf={peak}  trailing={tr}%  "
-                  f"sells below {peak * (1 - tr / 100):.4f}" if peak else f"{s}: no peak yet")
+            mode = ("pending order" if st.get("pending_order") else
+                    "warming up" if "warmup_at" in st else
+                    "waiting for rebuy" if st.get("rebuy") else
+                    "tracking" if peak else "uninitialized")
+            stop = peak * (1 - tr / 100) if peak else None
+            print(f"{s}: state={mode} peak={peak} trailing={tr}% threshold={stop} "
+                  f"warmup_at={st.get('warmup_at')}")
+        print("Persisted state only; this does not confirm a running bot or a fresh price.")
         print(f"ENABLED={ts.enabled} (a dry run if False)")
         return 0
     if args.once:

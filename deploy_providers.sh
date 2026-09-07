@@ -1,55 +1,82 @@
 #!/usr/bin/env bash
-# deploy_providers.sh — DEPLOY sigur de cod: git pull -> GATE de import (facada) -> restart
-# fleet -> verification. The only script that deploys (flota_start/bots_start are launchers,
-# healthcheck is the supervisor). The fleet list comes from procs.conf (role=fleet), not hardcoded.
-# A fleet restart = pkill the role=fleet processes; flota_start (systemd) brings them back in <=30s with the new code.
-set -uo pipefail
+# Deploy the checkout and refresh BOTH fleet processes and independent bots.
+# --check is strictly local/offline: validate imports/configuration and print scope.
+set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-PY="$ROOT/myenv/bin/python"; [ -x "$PY" ] || PY="$ROOT/.venv/bin/python"
 MANIFEST="$ROOT/procs.conf"
-cd "$ROOT" || exit 1
+cd "$ROOT"
+case "${1:-}" in ""|--check) ;; *) echo "Usage: $0 [--check]"; exit 2;; esac
+PY=""
+for candidate in .venv myenv; do
+    if [ -x "$ROOT/$candidate/bin/python" ]; then PY="$ROOT/$candidate/bin/python"; break; fi
+done
+[ -n "$PY" ] || { echo "No virtual environment found"; exit 1; }
+source "$ROOT/process_control.sh"
 
-echo "=== PULL ==="
-git pull --ff-only origin main 2>&1 | tail -5
+if [ "${1:-}" != --check ]; then
+    # pipefail + errexit: an unsuccessful pull must never be followed by a restart.
+    git pull --ff-only | tail -5
+fi
+"$PY" instrument_registry.py
+BINANCE_AUTO_START_WEBSOCKETS=0 "$PY" -c 'from providers.market_api import api; import tradeall, assetguardian; from binance_api import trailing_stop; print("Import preflight OK")'
 
-echo "=== SANITY (structura providers) ==="
-ls providers/market_api.py binance_api/trailing_stop.py >/dev/null && echo "  providers ok"
-ls market_api.py 2>/dev/null && echo "  ⚠ ROOT STILL has market_api.py" || echo "  root is clean, ok"
-
-echo "=== facade import GATE (no restart if it does not load) ==="
-"$PY" -c 'from providers.market_api import api; print("  facade OK -", len(api._providers), "providers:", [p.name for p in api._providers])' || { echo "  GATE FAILED — NOT restarting"; exit 1; }
-
-# The fleet list comes from the SINGLE manifest (role=fleet), not hardcoded.
-fleet="$(awk -F'|' '!/^#/ && $7=="fleet" {print $1}' "$MANIFEST")"
-[ -n "$fleet" ] || { echo "no role=fleet in $MANIFEST"; exit 1; }
-
-echo "=== RESTART FLOTA (pkill; flota_start le reia) ==="
-for p in $fleet; do pkill -f "$p" 2>/dev/null || true; done
-echo "  killed; waiting 95s..."; sleep 95
-
-# Bots (role=bot) are NOT under systemd, so the fleet restart above leaves them on
-# OLD code — the trailing stop kept running the pre-change revision until a manual
-# pkill. Reload them the sanctioned way: pkill + bots_start.sh (single-instance safe;
-# each bot reloads its own persisted state, so this is a CODE reload, not a state
-# reset — see bots_start.sh). This closes the gap where a pulled bot never ran the
-# new code after a deploy.
-bots="$(awk -F'|' '!/^#/ && $7=="bot" {print $1}' "$MANIFEST")"
-if [ -n "$bots" ]; then
-  echo "=== RELOAD BOTS (pkill; bots_start.sh le reia cu codul nou) ==="
-  for p in $bots; do pkill -f "$p" 2>/dev/null || true; done
-  echo "  killed; waiting 8s..."; sleep 8
-  # Redirect to a FILE, not a pipe. bots_start launches daemons that inherit stdout;
-  # piping it (| tail) leaves the pipe's write end open in those daemons, so tail
-  # never sees EOF and the deploy hangs. A file has no such semantics; timeout guards
-  # a genuinely stuck launcher.
-  timeout 60 bash "$ROOT/bots_start.sh" >/tmp/deploy_bots_start.log 2>&1 || true
-  tail -3 /tmp/deploy_bots_start.log 2>/dev/null
-  sleep 6
+declare -a patterns=() directories=() roles=() old_pids=()
+while IFS='|' read -r pat dir cmd label hblog hbstale role; do
+    [ -z "$pat" ] && continue
+    case "$pat" in \#*) continue;; esac
+    case "$role" in fleet|bot) ;; *) echo "Invalid role for $label"; exit 1;; esac
+    dir=$(eval echo "$dir")
+    [ -d "$dir" ] || { echo "Missing directory for $label"; exit 1; }
+    if [ "$pat" = rtrade.py ]; then
+        "$PY" -c 'from instrument_registry import single_symbol_for; single_symbol_for("binance", "rtrade")'
+    fi
+    patterns+=("$pat"); directories+=("$dir"); roles+=("$role")
+    old_pids+=("$(manifest_pids "$pat" "$dir")")
+    printf '  %-18s role=%s\n' "$label" "$role"
+done < "$MANIFEST"
+[ "${#patterns[@]}" -gt 0 ] || { echo "Empty process manifest"; exit 1; }
+if [ "${1:-}" = --check ]; then
+    echo "Preflight only: no pull, stop, launch, API call, or production health claim."
+    exit 0
 fi
 
-echo "=== VERIFICARE ==="
-"$PY" verify_tools/check_cache_coherence.py >/tmp/coh.log 2>&1 || true
-echo "  coherence: $(tail -1 /tmp/coh.log 2>/dev/null)"
-for p in $fleet; do printf '  %-24s viu=%s\n' "$p" "$(pgrep -fc "$p")"; done
-for p in $bots;  do printf '  %-24s viu=%s\n' "$p" "$(pgrep -fc "$p")"; done
-echo "  Traceback (monitortrades/cacheManager): $(grep -a -c Traceback logs/monitortrades.log logs/cacheManager.log 2>/dev/null | paste -sd' ')"
+# The active fleet supervisor revives role=fleet processes. Do not launch a second
+# supervisor or delete caches/state. A missing supervisor will fail verification.
+for index in "${!patterns[@]}"; do
+    if [ "${roles[$index]}" = fleet ]; then
+        stop_manifest_process "${patterns[$index]}" "${directories[$index]}"
+    fi
+done
+bash "$ROOT/bots_start.sh"
+
+# Require one replacement per manifest entry and fresh caches on three consecutive
+# checks. Presence alone, an old trailing PID, or an old success log is insufficient.
+stable=0
+deadline=$((SECONDS + 90))
+while [ "$SECONDS" -lt "$deadline" ]; do
+    ready=1
+    for index in "${!patterns[@]}"; do
+        current="$(manifest_pids "${patterns[$index]}" "${directories[$index]}")"
+        count=$(printf '%s\n' "$current" | awk 'NF {n++} END {print n+0}')
+        if [ "$count" -ne 1 ]; then ready=0; continue; fi
+        state="$(ps -o stat= -p "$current" 2>/dev/null)" || { ready=0; continue; }
+        case "$state" in Z*|T*) ready=0; continue;; esac
+        while read -r previous; do
+            [ -z "$previous" ] && continue
+            [ "$current" != "$previous" ] || ready=0
+        done <<< "${old_pids[$index]}"
+    done
+    if [ "$ready" -eq 1 ] && "$PY" verify_tools/check_cache_coherence.py; then
+        stable=$((stable + 1))
+        if [ "$stable" -ge 3 ]; then
+            echo "Deployment verified: replacement processes and fresh disk caches."
+            echo "This does not prove fills, account health, or trailing activation; inspect runtime state."
+            exit 0
+        fi
+    else
+        stable=0
+    fi
+    sleep 2
+done
+echo "Deployment verification FAILED: process replacement or cache freshness not confirmed." >&2
+exit 1

@@ -17,6 +17,7 @@ import log
 import alertnotifiers as alert
 import utils as u
 import symbols as sym
+from instrument_registry import single_symbol_for
 from binance_api import bapi as api
 from binance_api import bapi_placeorder as po   # Retained for the dead-safe WeightLimitBlock path.
 from providers.market_api import api as mkt      # Single guarded Instrument.place proxy.
@@ -1592,18 +1593,20 @@ print(f"[INFO] DEFAULT_ADJUSTMENT_PERCENT = {DEFAULT_ADJUSTMENT_PERCENT}")
 # Fleet startup executes ``python rtrade.py``, so production behavior remains unchanged
 # while importing the module is safe.
 if __name__ == "__main__":
+    # This bot owns one pair. Switching it requires an explicit registry selection;
+    # silently choosing the first of several pairs would leave assets unmanaged.
+    symbol = single_symbol_for("binance", "rtrade")
     # Explicit user-data bridge: placement guards inspect order/fill history, so the WS
     # keeps that cache fresh instead of relying solely on three-minute polling.
     import cacheManager as cm
     cm.enable_real_ws_event_sync()
 
-    initial_price = float(api.get_current_price(sym.taosymbol) or 0.0)
+    initial_price = float(api.get_current_price(symbol) or 0.0)
     if initial_price <= 0:
-        raise RuntimeError(f"Price unavailable for {sym.taosymbol}")
+        raise RuntimeError(f"Price unavailable for {symbol}")
     initial_qty = RTRADE_NOTIONAL_USDC / initial_price
-    bot = TradingBot(sym.taosymbol, initial_qty,
+    bot = TradingBot(symbol, initial_qty,
                      DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
-    #bot = TradingBot(sym.taosymbol, api.quantities[sym.taosymbol], DEFAULT_ADJUSTMENT_PERCENT=DEFAULT_ADJUSTMENT_PERCENT)
     bot.run()
 
     

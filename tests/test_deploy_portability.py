@@ -8,6 +8,8 @@ DEPLOY_FILES = [
     "backup_remote.sh",
     "backup_secrets.sh",
     "bots_start.sh",
+    "deploy_providers.sh",
+    "process_control.sh",
     "flota_start.sh",
     "healthcheck.sh",
     "local_watch_start.sh",

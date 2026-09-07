@@ -481,8 +481,11 @@ class TestPriceWindowMinMax(unittest.TestCase):
 
 class TestTrendState(unittest.TestCase):
 
+    def setUp(self):
+        self.now = 1000.0
+
     def _ts(self, exp_time=9999, fresh_time=60):
-        return ta.TrendState(3600, exp_time, fresh_time)
+        return ta.TrendState(3600, exp_time, fresh_time, now_fn=lambda: self.now)
 
     def test_initial_state(self):
         ts = self._ts()
@@ -507,7 +510,7 @@ class TestTrendState(unittest.TestCase):
     def test_trend_expiration(self):
         ts = self._ts(exp_time=1)
         ts.start_trend("UP")
-        time.sleep(1.1)
+        self.now += 1.1
         self.assertTrue(ts.check_trend_expiration())
 
     def test_freshness_window(self):
@@ -516,13 +519,13 @@ class TestTrendState(unittest.TestCase):
         fresh.start_trend("UP")
         stale.start_trend("UP")
         self.assertTrue(fresh.is_trend_fresh())
-        time.sleep(1.1)
+        self.now += 1.1
         self.assertFalse(stale.is_trend_fresh())
 
     def test_older_than(self):
         ts = self._ts()
         ts.start_trend("UP")
-        time.sleep(0.1)
+        self.now += 0.1
         self.assertTrue(ts.is_started_trend_older_than(0.05))
         self.assertFalse(ts.is_started_trend_older_than(9999))
 

@@ -220,11 +220,39 @@ class TestTrailing(Base):
 
 
 class TestPerMoneda(Base):
+    def test_market_data_only_symbol_is_not_trailed_or_logged_as_managed(self):
+        from types import SimpleNamespace
+        ts = TrailingStop(FakeApi(1), self.po,
+                          SimpleNamespace(symbols=["TAOUSDC", "DATAONLYUSDC"]),
+                          state_file=self.sf, log=lambda *_args: None)
+        self.assertEqual([row[0] for row in ts.assets()], ["TAOUSDC"])
+        def stop():
+            raise KeyboardInterrupt
+        ts.check_once = stop
+        ts.run()
+
+    def test_new_arb_state_is_not_implicitly_preseeded_or_armed(self):
+        from types import SimpleNamespace
+        ts = TrailingStop(FakeApi(0.17, free=100, asset="ARB"), self.po,
+                          SimpleNamespace(symbols=["ARBUSDC"]), enabled=True,
+                          state_file=self.sf, min_profit_pct=5, log=lambda *_args: None)
+        ts.check_once()
+        state = ts._load()["ARBUSDC"]
+        self.assertAlmostEqual(state["warmup_at"], 0.17 * 1.05)
+        self.assertEqual(self.po.orders, [])
+        saved = {"ARBUSDC": {"peak": 0.174}}
+        ts._save(saved)
+        restarted = TrailingStop(ts.api, self.po, ts.sym, enabled=True,
+                                 state_file=self.sf, min_profit_pct=5, log=lambda *_args: None)
+        self.assertEqual(restarted._load(), saved)
+
     def test_prag_diferentiat(self):
         ts = self.ts(FakeApi(1.0))
         self.assertEqual(ts.trail_pct_for("BTCUSDC"), 20.0)
         self.assertEqual(ts.trail_pct_for("TAOUSDC"), 22.0)
-        self.assertEqual(ts.trail_pct_for("XYZUSDC"), 22.0)   # default
+        self.assertEqual(ts.trail_pct_for("ARBUSDC"), 13.0)
+        with self.assertRaises(KeyError):
+            ts.trail_pct_for("XYZUSDC")  # No invented policy for an unconfigured asset.
 
     def test_sell_fraction_invalid_esueaza_la_start(self):
         with self.assertRaises(ValueError):

@@ -8,6 +8,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT); os.chdir(ROOT)
 from binance_api import bapi_allorders as ao
 from binance_api import bapi
+from instrument_registry import symbols_for
 
 WINDOW_D = 120
 
@@ -39,7 +40,7 @@ print(f"\n=== RAPORT P&L FLOTA ({time.strftime('%Y-%m-%d %H:%M')}) ===")
 print(f"{'sursa':<22}{'realized':>11}{'unrealized':>12}{'pozitie':>12}")
 tot_r = tot_u = 0.0
 
-for sym in ("BTCUSDC", "TAOUSDC"):
+for sym in symbols_for("binance"):
     try:
         d = binance_symbol(sym)
         tot_r += d["realized"]; tot_u += d["unreal"]
@@ -118,7 +119,7 @@ def per_bot(symbol):
 
 
 print("\n=== ATTRIBUTION PER BOT (clientOrderId; realized_own = only its own round trips) ===")
-for _sym in ("BTCUSDC", "TAOUSDC"):
+for _sym in symbols_for("binance"):
     per_bot(_sym)
 print("Note: bots that trade inventory between themselves (tradeall buys / rtrade sells the same TAO)")
 print("have no cleanly separable realized — net_qty shows who accumulates (+) versus who distributes (-).")

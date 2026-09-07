@@ -42,6 +42,7 @@ sys.path.insert(0, ROOT)
 import cacheManager as cm
 from binance_api import bapi_ws
 from botcore import single_instance
+from instrument_registry import symbols_for
 
 CACHEDB_DIR = os.path.join(ROOT, "cachedb")
 _SYMBOL_RE = re.compile(r"^[A-Z0-9]{3,24}$")
@@ -82,8 +83,8 @@ def _shutdown(caches, current_price_mgr, ws_module=bapi_ws):
 
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--symbols", default="BTCUSDC,TAOUSDC",
-                    help="comma-separated list (default: BTCUSDC,TAOUSDC)")
+    p.add_argument("--symbols", default=None,
+                    help="explicit override; otherwise use instruments.conf role.archive")
     p.add_argument("--months", type=float, default=cm.CM_LONG_ARCHIVE_MONTHS,
                     help="retention in months (default from cachemanager_config.env)")
     p.add_argument("--sync-ts", type=float, default=cm.CM_LONG_ARCHIVE_SAMPLE_SEC,
@@ -92,7 +93,8 @@ def main():
                     help="disk flush cadence (default from cachemanager_config.env)")
     args = p.parse_args()
     try:
-        symbols = _symbols(args.symbols)
+        symbols = _symbols(args.symbols if args.symbols is not None
+                           else ",".join(symbols_for("binance", "archive")))
         months = _positive_finite(args.months, "--months")
         sync_ts = _positive_finite(args.sync_ts, "--sync-ts", minimum=0.1)
         save_every = _positive_finite(args.save_every, "--save-every", minimum=1.0)

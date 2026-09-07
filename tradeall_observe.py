@@ -927,8 +927,10 @@ setInterval(function() {{
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                       formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--symbols", default="BTCUSDC,TAOUSDC",
-                         help="comma-separated list (default: BTCUSDC,TAOUSDC)")
+    from instrument_registry import symbols_for
+
+    parser.add_argument("--symbols", default=None,
+                         help="explicit override; otherwise all enabled Binance instruments")
     parser.add_argument("--interval", type=float, default=2.0,
                          help="seconds between cycles (live plus the analysis state; default 2)")
     parser.add_argument("--live-minutes", type=float, default=60.0,
@@ -951,7 +953,8 @@ def main():
                               "sliding as offline/backtests/tradeall.py writes new data in parallel; "
                               "the events appear on the frame exactly when the backtester reaches them)")
     args = parser.parse_args()
-    symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
+    symbols = (symbols_for("binance") if args.symbols is None else
+               [s.strip() for s in args.symbols.split(",") if s.strip()])
 
     if args.backtest_dir and args.frame_hours:
         directory = os.path.abspath(args.backtest_dir)

@@ -75,6 +75,7 @@ py-modules = [
     "drawprices",
     "generateweb",
     "instrument",
+    "instrument_registry",
     "instruments_config",
     "log",
     "market_alerts",

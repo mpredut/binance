@@ -12,6 +12,7 @@ import log
 import alertnotifiers as alert
 import utils as u
 import symbols as sym
+from instrument_registry import select_instruments, symbols_for
 from binance_api import bapi as api
 from binance_api import bapi_placeorder as po   # Retained for _log_order_outcome (Kalman gate).
 from providers.market_api import api as mkt      # Single guarded proxy (Instrument.place).
@@ -37,7 +38,7 @@ from pricewindow import (PriceTrendAnalyzer, PriceWindow, WindowAnalyzer,
 # tradeall_config.env before reading any environment variables below.
 # botcore.load_dotenv does not overwrite variables already set by the real
 # environment (for example, a systemd EnvironmentFile); it only fills gaps.
-from botcore import (load_dotenv as _load_dotenv, required_env,
+from botcore import (load_dotenv as _load_dotenv,
                      required_float_env, required_int_env)
 _load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                           "tradeall_config.env"))
@@ -152,7 +153,7 @@ def log_decision(symbol, event, **fields):
 
 
 # Kalman gate (approved July 19): determine whether model orders reach real funds.
-# KALMAN_GATE_MODE is read for each order. ``strict`` allows BUY only on Kalman UP
+# The registry mode controls each order. ``strict`` allows BUY only on Kalman UP
 # and SELL only on DOWN; ``permissive`` blocks only countertrend orders; ``off``
 # restores the previous behavior. Fail open when the shadow signal is missing or
 # older than five minutes so a signal failure cannot stop trading.
@@ -161,36 +162,20 @@ GATE_OUTCOME_LOG = None                 # Backtests redirect this away from the 
 GATE_STALE_SEC = 300
 
 
-# Per-symbol mode precedence: KALMAN_GATE_MODE_<SYMBOL>, global environment mode,
-# this mapping, then strict. A four-day A/B test found TAO's Kalman signal almost
-# always FLAT because $0.10 quantization creates high uncertainty. Strict mode
-# would suppress all TAO buys, so permissive blocks only a confirmed DOWN signal.
-KALMAN_GATE_MODE = required_env("KALMAN_GATE_MODE").lower()
-KALMAN_GATE_MODE_TAOUSDC = required_env("KALMAN_GATE_MODE_TAOUSDC").lower()
-
-# Primary Kalman (July 19): in a four-day A/B test BTC returned +$6.62 versus $0
-# for the current model and -$3.97 buy-and-hold. Kalman initiates transition
-# orders only for the symbols below. Existing monitortrades/trailing/profit-guard
-# mechanisms still handle exits, and _fire_order retains every safety guard.
-# Set KALMAN_PRIMARY_SYMBOLS to a comma-separated list or empty to disable it.
-KALMAN_PRIMARY_SYMBOLS = set(
-    s.strip() for s in required_env("KALMAN_PRIMARY_SYMBOLS").split(",") if s.strip())
-
-
-# Symbols tradeall MAY place orders on — DERIVED from instruments.conf (the single
-# registry): every enabled Binance section with tradeall.trade=yes. A Binance coin
-# that is trend-tracked but has tradeall.trade=no (for example ARBUSDC, a manual
-# position held by the trailing stop) is observed without tradeall competing for its
-# exits. instruments_config is import-light (no provider chain), so importing it here
-# is safe. To let tradeall trade a new coin, set tradeall.trade=yes on its section.
-from instruments_config import tradeall_trade_symbols as _tradeall_trade_symbols
-TRADEALL_FIRE_SYMBOLS = _tradeall_trade_symbols()
+# All per-coin execution choices come from instruments.conf. An enabled Binance
+# instrument is trend-tracked even when it opts out of TradeAll order attempts.
+# No opted-in symbols means no TradeAll orders; it is not a missing configuration.
+KALMAN_MODES = {
+    spec.symbol: spec.setting("tradeall.kalman_mode")
+    for spec in select_instruments("binance", "tradeall_fire").values()
+}
+TRADEALL_FIRE_SYMBOLS = set(KALMAN_MODES)
+KALMAN_PRIMARY_SYMBOLS = set(symbols_for("binance", "kalman_primary"))
 
 
 def _kalman_gate_blocks(symbol, action):
-    # The symbol-specific mode is an intentional policy override; all other symbols
-    # use the explicitly configured global mode.
-    mode = KALMAN_GATE_MODE_TAOUSDC if symbol == "TAOUSDC" else KALMAN_GATE_MODE
+    # An allowed symbol must have an explicit mode; there is no default policy.
+    mode = KALMAN_MODES[symbol]
     if mode == "off" or _shadow_ref is None:
         return False, mode, None
     try:
@@ -703,7 +688,7 @@ class TrendCoordinator:
         # shadow_signals originally combined a Kalman trend and adaptive volatility.
         # Only adaptive values remain observational because tradeall has no
         # reentry/DCA consumer. The Kalman trend moved to real trading on July 19:
-        # KALMAN_GATE_MODE gates every order and primary Kalman starts orders for
+        # KALMAN_MODES gates every order and primary Kalman starts orders for
         # KALMAN_PRIMARY_SYMBOLS. Guard setup and calls so a failure cannot stop trading.
         try:
             import shadow_signals
@@ -711,7 +696,7 @@ class TrendCoordinator:
                 state_path=os.path.join("cachedb", "shadow_state.json"))
             global _shadow_ref
             _shadow_ref = self._shadow   # _fire_order's gate reads this signal.
-            print(f"[KALMAN-GATE] active, mode={KALMAN_GATE_MODE}")
+            print(f"[KALMAN-GATE] active, modes={KALMAN_MODES}")
         except Exception as _e:  # noqa: BLE001
             print(f"[TrendCoordinator] shadow_signals unavailable (continuing without it): {_e}")
             self._shadow = None

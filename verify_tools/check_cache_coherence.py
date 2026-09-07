@@ -25,18 +25,15 @@ def load(name):
 
 
 def expected_symbols():
-    """Return sym.symbols (Binance) plus enabled non-Binance symbols from instruments.conf."""
-    syms = []
-    try:
-        sys.path.insert(0, ROOT)
-        import symbols as sym
-        syms = list(sym.symbols)
-        from instruments_config import load_for
-        for inst in load_for("mt").values():
-            if inst.provider_name != "binance" and inst.symbol not in syms:
-                syms.append(inst.symbol)
-    except Exception as e:  # noqa: BLE001
-        print(f"  [warn] cannot derive the expected symbols: {e}")
+    """Use the registry without credentials; invalid configuration must fail the check."""
+    sys.path.insert(0, ROOT)
+    from instrument_registry import select_instruments, symbols_for
+    syms = symbols_for("binance")
+    for inst in select_instruments(role="mt").values():
+        if inst.provider != "binance" and inst.symbol not in syms:
+            syms.append(inst.symbol)
+    if not syms:
+        raise ValueError("No configured symbols to verify")
     return syms
 
 

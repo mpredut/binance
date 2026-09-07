@@ -61,7 +61,6 @@ class AssetGuardianTest(unittest.TestCase):
                 "AG_SELL_TIERS",
                 "AG_SELL_REARM_GROWTH_PCT",
                 "AG_ORDER_MAX_AGE_SEC",
-                "AG_SYMBOLS",
                 "AG_RECOVERY_RESET_PCT",
                 "AG_NEAR_TRIGGER_SEC",
                 "AG_ACTIVE_TRIGGER_SEC",

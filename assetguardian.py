@@ -10,6 +10,7 @@ from providers.quantity import resolve_assets
 from assetguardian_state import AssetGuardianState
 import cacheManager as cm
 import symbols as sym
+from instrument_registry import symbols_for
 
 # Load tunable parameters from the versioned, secret-free config before reading
 # environment variables below. load_dotenv does not overwrite real environment.
@@ -25,7 +26,6 @@ REQUIRED_CONFIG_KEYS = (
     "AG_SELL_TIERS",
     "AG_SELL_REARM_GROWTH_PCT",
     "AG_ORDER_MAX_AGE_SEC",
-    "AG_SYMBOLS",
     "AG_RECOVERY_RESET_PCT",
     "AG_NEAR_TRIGGER_SEC",
     "AG_ACTIVE_TRIGGER_SEC",
@@ -84,7 +84,6 @@ SELL_TIERS_RAW = _required_config("AG_SELL_TIERS")
 SELL_REARM_GROWTH_PERCENT = _required_float_config(
     "AG_SELL_REARM_GROWTH_PCT")
 ORDER_MAX_AGE_SECONDS = _required_float_config("AG_ORDER_MAX_AGE_SEC")
-TRACKED_SYMBOLS_RAW = _required_config("AG_SYMBOLS")
 RECOVERY_RESET_PERCENT = _required_float_config("AG_RECOVERY_RESET_PCT")
 NEAR_TRIGGER_SECONDS = _required_float_config("AG_NEAR_TRIGGER_SEC")
 ACTIVE_TRIGGER_SECONDS = _required_float_config("AG_ACTIVE_TRIGGER_SEC")
@@ -102,11 +101,6 @@ def _parse_tiers(raw):
     return tuple(tiers)
 
 
-def _parse_symbols(raw):
-    return tuple(dict.fromkeys(
-        item.strip().upper() for item in str(raw).split(",") if item.strip()))
-
-
 BUY_TIERS = _parse_tiers(BUY_TIERS_RAW)
 SELL_TIERS = _parse_tiers(SELL_TIERS_RAW)
 # Only the shallowest buy tier (the first, smallest drawdown) respects the historical
@@ -114,8 +108,8 @@ SELL_TIERS = _parse_tiers(SELL_TIERS_RAW)
 # recent high (as happened on the 241 TAO buy). Deeper tiers keep bypassing it: a large
 # drawdown is a genuine entry regardless of the recent-sell reference window.
 GUARDED_BUY_THRESHOLD = min((t for t, _ in BUY_TIERS), default=None)
-TRACKED_SYMBOLS = _parse_symbols(TRACKED_SYMBOLS_RAW)
-LEGACY_BUY_SYMBOL = "BTCUSDC"
+TRACKED_SYMBOLS = tuple(symbols_for("binance", "assetguardian"))
+LEGACY_BUY_SYMBOL = sym.btcsymbol
 ORDER_MISSING_CONFIRMATIONS = _required_int_config(
     "AG_ORDER_MISSING_CONFIRMATIONS")
 STATE = AssetGuardianState()
@@ -163,11 +157,7 @@ def _validate_config():
         raise ValueError("AG_ORDER_MAX_AGE_SEC must be finite and > 0")
     if ORDER_MISSING_CONFIRMATIONS <= 0:
         raise ValueError("AG_ORDER_MISSING_CONFIRMATIONS must be an integer and > 0")
-    if not TRACKED_SYMBOLS:
-        raise ValueError("AG_SYMBOLS must contain at least one symbol")
-    unsupported = [symbol for symbol in TRACKED_SYMBOLS if symbol not in sym.symbols]
-    if unsupported:
-        raise ValueError(f"AG_SYMBOLS contine simboluri nepermise: {unsupported}")
+    # An empty explicit role selection disables evaluations without adding assets.
     for value, name in (
             (RECOVERY_RESET_PERCENT, "AG_RECOVERY_RESET_PCT"),
             (NEAR_TRIGGER_SECONDS, "AG_NEAR_TRIGGER_SEC"),

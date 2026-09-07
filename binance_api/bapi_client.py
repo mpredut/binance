@@ -110,6 +110,8 @@ def getClient():
     global _client
     if _client is None:
         from keys.apikeys import api_key, api_secret
+        if not api_key or not api_secret:
+            raise ValueError("BINANCE_API_KEY and BINANCE_API_SECRET are required for the REST client")
         _client = Client(api_key, api_secret, requests_params={"timeout": REQUEST_TIMEOUT_SEC})
         _install_retry(_client)      # Retry transient GET failures, never POST/order placement.
         sync_time()                 # Initial server-time alignment.

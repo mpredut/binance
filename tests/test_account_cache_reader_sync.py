@@ -1157,15 +1157,21 @@ class AccountCacheReaderSyncTest(unittest.TestCase):
         )
 
     def test_multi_symbol_health_time_uses_earliest_request_start(self):
+        from types import SimpleNamespace
+
         manager = self._trade_manager([_trade(1, 1000)], 1000)
         manager.symbols = ["BTCUSDC", "ETHUSDC"]
         manager.fetchtime_time_per_symbol["ETHUSDC"] = 1000
+        clock = SimpleNamespace(now=2.0)
+
+        def fetch(*_args, **_kwargs):
+            clock.now = 13.0
+            return []
+
         with (
-            patch.object(manager, "get_remote_items", return_value=[]),
-            # Each symbol reads time.time() twice: the request high-water (used for the
-            # sync/fetch times asserted below) and the empty-result log's timestamp
-            # formatter (value irrelevant). Sequence per symbol: [high-water, log].
-            patch.object(cm.time, "time", side_effect=[2.0, 0.0, 13.0, 0.0]),
+            patch.object(manager, "get_remote_items", side_effect=fetch),
+            # Replace only this module's clock, not the logging module's time source.
+            patch.object(cm, "time", SimpleNamespace(time=lambda: clock.now)),
         ):
             self.assertTrue(manager.query_remote_and_update_cache())
 

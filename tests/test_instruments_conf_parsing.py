@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("BINANCE_AUTO_START_WEBSOCKETS", "0")
 
 import instruments_config as ic
+from instrument_registry import ROLES
 
 
 NUMERIC_MT_KEYS = [
@@ -57,12 +58,13 @@ quote = USD
 enabled = yes
 isolation = own_ledger
 market_hours = 24x7
+{chr(10).join('role.' + role + ' = no' for role in sorted(ROLES))}
 {extra}
 """
 
     def test_missing_registry_fails_closed(self):
         missing = str(Path(self._temp_dir.name) / "missing.conf")
-        with self.assertRaisesRegex(FileNotFoundError, "does not exist"):
+        with self.assertRaises(FileNotFoundError):
             ic.load_instruments(missing, api=_Api())
 
     def test_missing_core_field_fails_closed(self):

@@ -179,7 +179,6 @@ class TestModuleSpecifics(unittest.TestCase):
             "AG_ORDER_MAX_AGE_SEC",
             "AG_ORDER_MISSING_CONFIRMATIONS",
             "AG_TREND_DEFER_MAX_SEC",
-            "AG_SYMBOLS",
             "AG_RECOVERY_RESET_PCT",
             "AG_NEAR_TRIGGER_SEC",
             "AG_ACTIVE_TRIGGER_SEC",
