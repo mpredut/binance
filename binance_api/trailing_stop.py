@@ -161,19 +161,23 @@ class TrailingStop:
         return TRAIL_PCT[symbol]
 
     def cost_basis(self, pair: str):
-        """Average BUY price of the current holding from recent Binance fills, or None
-        if unknown. TrailingCore consults this on a NEW position to arm the warm-up
-        relative to the REAL entry, so an already-profitable MANUAL position (e.g. a
-        coin bought by hand) activates immediately without a state pre-seed. Failure
-        is non-fatal: the core then falls back to the first observed price."""
+        """Use reconciled BUY/SELL inventory for new-position warm-up, when known.
+
+        Include locked quantity when matching the account to fills. On missing,
+        stale, or inconsistent evidence, retain the core's first-observation fallback.
+        Existing peaks, warm-up thresholds, and pending orders are never rewritten.
+        """
         try:
-            buys = self.po.get_orders(pair, "BUY", _COST_BASIS_LOOKBACK_S) or []
-            qty = sum(float(o["qty"]) for o in buys)
-            value = sum(float(o["price"]) * float(o["qty"]) for o in buys)
-            if qty <= 0 or value <= 0:
+            asset = TRAILING_INSTRUMENTS[pair].base
+            balances = [row for row in self._balances if row.get("asset") == asset]
+            if len(balances) != 1:
                 return None
-            avg = value / qty
-            return avg if math.isfinite(avg) and avg > 0 else None
+            balance = balances[0]
+            free, locked = float(balance["free"]), float(balance["locked"])
+            if not all(math.isfinite(v) and v >= 0 for v in (free, locked)):
+                return None
+            return self.po.position_cost_basis(
+                pair, free + locked, _COST_BASIS_LOOKBACK_S, provider_name="binance")
         except Exception as e:  # noqa: BLE001
             self.log(f"  [TRAIL] cost_basis({pair}) unavailable ({e}) — warm-up from current price")
             return None

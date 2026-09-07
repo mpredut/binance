@@ -18,7 +18,7 @@ class FakeApi:
         self.free = free
         self.asset = asset
     def get_account_assets_balances(self):
-        return [{"asset": self.asset, "free": str(self.free)}]
+        return [{"asset": self.asset, "free": str(self.free), "locked": "0"}]
     def get_current_price(self, symbol):
         return self.price
     def split_symbol(self, symbol):
@@ -264,6 +264,28 @@ class TestPerMoneda(Base):
 class TestMinProfit(Base):
     """The minimum profit threshold before the trailing activates."""
 
+    def test_non_finite_provider_basis_does_not_make_warmup_unreachable(self):
+        for basis in (float("inf"), float("nan"), -1, True):
+            with self.subTest(basis=basis):
+                ts = self.ts(FakeApi(250), min_profit_pct=5)
+                ts.cost_basis = lambda _pair: basis
+                ts._save({})
+                ts.check_once()
+                self.assertAlmostEqual(ts._load()["TAOUSDC"]["warmup_at"], 262.5)
+
+    def test_cost_basis_uses_total_balance_and_preserves_existing_warmup(self):
+        from unittest.mock import Mock
+        ts = self.ts(FakeApi(250), min_profit_pct=5)
+        ts._balances = [{"asset": "TAO", "free": "3", "locked": "2"}]
+        self.po.position_cost_basis = Mock(return_value=200)
+        self.assertEqual(ts.cost_basis("TAOUSDC"), 200)
+        self.assertEqual(self.po.position_cost_basis.call_args.args[1], 5)
+        ts._save({"TAOUSDC": {"peak": 250, "warmup_at": 262.5}})
+        self.po.position_cost_basis.reset_mock()
+        ts.check_once()
+        self.po.position_cost_basis.assert_not_called()
+        self.assertEqual(ts._load()["TAOUSDC"]["warmup_at"], 262.5)
+
     def test_warming_up_does_not_sell_below_the_threshold(self):
         api = FakeApi(250.0)
         ts = self.ts(api, min_profit_pct=5.0)
@@ -311,10 +333,10 @@ class TestMinProfit(Base):
         threshold, where without a cost basis the warm-up sits at 250*1.05 and a crash
         to 190 does not sell. This is the fix that removes the manual seed / warm-up
         gap for an already-profitable position."""
-        class PoWithFills(FakePo):
-            def get_orders(self, symbol, side, since_s):
-                return [{"price": 200.0, "qty": 5.0}] if side == "BUY" else []
-        self.po = PoWithFills()
+        class PoWithBasis(FakePo):
+            def position_cost_basis(self, symbol, held_qty, since_s, **kwargs):
+                return 200.0 if held_qty == 5 else None
+        self.po = PoWithBasis()
         api = FakeApi(250.0)
         ts = self.ts(api, min_profit_pct=5.0)
         ts.check_once()                    # is_new: cost_basis=200 -> warmup 210 < 250 -> ARMED, peak=250

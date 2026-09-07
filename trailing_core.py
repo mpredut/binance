@@ -32,6 +32,7 @@ ADAPTER contract (duck typing; see the two adapter classes):
 from __future__ import annotations
 
 import os
+import math
 from state_io import atomic_write_json, load_json_state
 
 
@@ -183,7 +184,8 @@ class TrailingCore:
                     basis = basis_getter(pair)
                 except Exception:
                     basis = None
-                if isinstance(basis, (int, float)) and not isinstance(basis, bool) and basis > 0:
+                if (isinstance(basis, (int, float)) and not isinstance(basis, bool)
+                        and math.isfinite(basis) and basis > 0):
                     ref = float(basis)
             st["warmup_at"] = ref * (1 + self.min_profit_pct / 100.0)  # activation threshold
         if self._reconcile_pending(state, st, price):

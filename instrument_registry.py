@@ -83,6 +83,9 @@ def load_registry(path=None):
             raise ValueError(f"instruments.conf [{name}]: duplicate provider/symbol {identity}")
         seen.add(identity)
         params = {key: value for key, value in values.items() if key not in CORE}
+        legacy = {"trail.enabled", "trail.pct", "tradeall.trade"} & params.keys()
+        if legacy:
+            raise ValueError(f"instruments.conf [{name}]: migrate obsolete keys {sorted(legacy)} to role.* / trailing.pct")
         unknown = {key[5:] for key in params if key.startswith("role.")} - ROLES
         if unknown:
             raise ValueError(f"instruments.conf [{name}]: unknown roles {sorted(unknown)}")

@@ -128,6 +128,43 @@ class BinanceProvider(MarketDataProvider):
         raw = _get_allorders().get_trade_orders(side, symbol, since_s) or []
         return [_normalize_order(o) for o in raw]
 
+    def position_cost_basis(self, symbol: str, held_qty: float, since_s: float) -> Optional[float]:
+        """Use current immutable fills, not order aggregates or a BUY-only average."""
+        import binance_cache_health as health
+        import cacheManager as cm
+        from instrument_registry import select_instruments
+        from .quantity import remaining_average_cost
+
+        if not math.isfinite(since_s) or since_s <= 0:
+            raise ValueError("since_s must be finite and positive")
+        spec = next(item for item in select_instruments("binance").values()
+                    if item.symbol == symbol)
+        status = health.require_fresh_account_cache()
+        cm.ensure_account_cache_readers(status)
+        manager = cm.get_cache_manager("Trade", start_sync=False)
+        with manager.lock:
+            rows = [dict(row) for row in manager.cache.get(symbol, [])]
+        now_ms = time.time() * 1000
+        cutoff = now_ms - since_s * 1000
+        normalized = []
+        for row in rows:
+            if (not manager._is_valid_trade(row) or row["symbol"] != symbol
+                    or row["time"] > now_ms):
+                return None
+            if row["time"] < cutoff:
+                continue
+            # Missing commission metadata is unknown history, not an invented zero fee.
+            fee, fee_asset = float(row["commission"]), row["commissionAsset"]
+            if not math.isfinite(fee) or fee < 0 or (fee > 0 and not fee_asset):
+                return None
+            normalized.append(dict(
+                id=row["id"], timestamp=row["time"], qty=row["qty"], price=row["price"],
+                side="BUY" if row["isBuyer"] else "SELL",
+                base_fee=fee if fee_asset == spec.base else 0.0,
+                quote_fee=fee if fee_asset == spec.quote else 0.0))
+        normalized.sort(key=lambda row: (int(row["timestamp"]), int(row["id"])))
+        return remaining_average_cost(normalized, held_qty)
+
     def open_orders(self, symbol: str) -> List[dict]:
         try:
             raw = _get_bapi().client.get_open_orders(symbol=symbol) or []
@@ -529,6 +566,11 @@ class MarketApi:
                    provider_name=None) -> List[dict]:
         provider = self._provider_explicit_or_routed(symbol, provider_name)
         return provider.get_trades(symbol, since_s)
+
+    def position_cost_basis(self, symbol: str, held_qty: float, since_s: float, *,
+                            provider_name=None) -> Optional[float]:
+        provider = self._provider_explicit_or_routed(symbol, provider_name)
+        return provider.position_cost_basis(symbol, held_qty, since_s)
 
     def latest_fill_price(self, symbol: str, side: str, since_s: float, *,
                           provider_name=None, min_notional=None,

@@ -68,6 +68,12 @@ This change centralizes **Binance onboarding**. The registry already selects
 cross-venue monitortrades records, but standalone Kraken/Hyperliquid/T212 strategy
 configurations are not migrated into this file by this batch.
 
+Legacy implicit venue routing still reserves HYPE-prefixed symbols for
+Hyperliquid. A Binance symbol overlapping that alias family needs explicit venue
+routing work before activation; it is not covered by the generic USDC example.
+The current BTC/TAO/ARB selections do not overlap. This consolidation does not
+silently reassign an existing cross-venue symbol to a different exchange.
+
 ## Preserved current selections
 
 - BTC: TradeAll strict mode, primary Kalman, trailing 20%, AssetGuardian,
@@ -123,8 +129,31 @@ After deployment, inspect:
 4. The REST price accessor uses bounded-age cached quotes and refreshes over REST;
    it does not necessarily make a new network call on every tick.
 
-If ARB runtime state is absent, the normal configured warm-up applies. Do not
-assert that ARB is already armed or automatically pre-seed a historical peak.
+If runtime state is absent, warm-up uses the provider's inventory-reconciled
+acquisition cost when available. Binance reads fresh, version-matched immutable
+BUY/SELL fills, includes base/quote commission effects, and requires the resulting
+quantity to match free + locked holdings. Fully sold cycles no longer pollute the
+new position's average. Unsupported providers, inconsistent history, or stale
+caches retain the first-observed-price fallback. Non-finite cost references are
+rejected. Fees paid in third-party assets are not converted into quote cost;
+matching quantities does not prove a complete external transfer history.
+
+Existing saved warm-up, peak, rebuy, and pending-order state is not recalculated.
+Do not assert that ARB is already armed or automatically pre-seed a historical peak.
+
+## Consolidated upstream work
+
+The local refactor is rebased on upstream through `41a34ed`, preserving the
+`232ffc4`, `4490754`, `3de6737`, and `41a34ed` history. The upstream
+`binance_symbols`, `trail_pct_map`, and `tradeall_trade_symbols` APIs remain
+thin compatibility wrappers over the one registry. Obsolete keys `trail.enabled`,
+`trail.pct`, and `tradeall.trade` must be migrated to `role.trailing`,
+`trailing.pct`, and `role.tradeall_fire`; they are rejected if left behind,
+not silently used as a second source. The committed registry is already migrated.
+
+The upstream bot-launcher pipe fix is preserved: deployment redirects the launcher
+to `logs/deploy_bots_start.log` and checks its exit status before verification.
+Financial-floor review: [Profit-floor assessment](PROFIT_FLOOR_REVIEW_2026-09-07.md).
 
 ## Additional findings to review separately
 

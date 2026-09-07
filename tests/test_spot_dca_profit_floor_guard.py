@@ -1,9 +1,8 @@
 """Intent-aware profit-floor guard in the spot DCA engine.
 
-A non-urgent limit SELL must not execute below the average cost (a stale or
-miscomputed take-profit reference would otherwise realise a loss). Urgent MARKET
-exits (STOP, trailing) are exempt and must always run — the "STOP/trailing cannot
-be blocked" invariant from the provider-unification plan. Buys are unaffected.
+A new non-STOP limit SELL below known average cost is refused at placement.
+MARKET exits bypass this particular guard, not every execution safeguard.
+This is a gross-price check, not a net-profit or fill guarantee.
 """
 import os
 import sys
@@ -40,6 +39,23 @@ def _make_strategy(**overrides):
 
 
 class ProfitFloorGuardTest(unittest.TestCase):
+    def test_equal_cost_is_allowed_without_a_fee_profit_guarantee(self):
+        self.assertTrue(_make_strategy()._place("sell", 1.0, 100.0, kind="TP"))
+
+    def test_unknown_cost_is_not_a_proven_profitable_exit(self):
+        s = _make_strategy()
+        s.s["qty"] = 0
+        self.assertIsNone(s._avg())
+        self.assertTrue(s._place("sell", 1.0, 95.0, kind="TP"))
+
+    def test_stop_exemption_is_by_intent_even_for_limit_orders(self):
+        self.assertTrue(_make_strategy()._place("sell", 1.0, 90.0, kind="STOP"))
+
+    def test_rounding_can_turn_a_nominally_profitable_tp_into_equal_cost(self):
+        s = _make_strategy()
+        self.assertTrue(s._place("sell", 1.0, 100.004, kind="TP"))
+        self.assertEqual(s.s["orders"][-1]["price"], 100.0)
+
     def test_avg_is_the_reference(self):
         self.assertEqual(_make_strategy()._avg(), 100.0)
 

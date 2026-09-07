@@ -74,6 +74,10 @@ class MarketDataProvider(ABC):
     def get_trades(self, symbol: str, since_s: float) -> List[dict]:
         return self.get_orders(symbol, None, since_s)
 
+    def position_cost_basis(self, symbol: str, held_qty: float, since_s: float) -> Optional[float]:
+        """Return inventory-reconciled acquisition cost, or unknown when unsupported."""
+        return None
+
     def open_orders(self, symbol: str) -> List[dict]:
         return []
 

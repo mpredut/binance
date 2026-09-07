@@ -9,6 +9,58 @@ from typing import Callable, Optional
 QUOTE_SUFFIXES = ("USDC", "EUR", "RON", "BTC", "ETH", "USD")
 
 
+def remaining_average_cost(fills, held_qty):
+    """Reconstruct moving-average acquisition cost from chronological real fills.
+
+    Normalized rows require id, timestamp, side, qty, price, base_fee and quote_fee.
+    Reject incomplete/inconsistent history instead of treating all historic BUYs as
+    the current position. Fees in other assets are not converted into quote cost.
+    Matching inventory is necessary evidence, not proof of complete transfer history.
+    """
+    try:
+        if isinstance(held_qty, bool):
+            return None
+        held_qty = float(held_qty)
+        if not math.isfinite(held_qty) or held_qty <= 0:
+            return None
+        qty, cost, last_ts = 0.0, 0.0, 0.0
+        seen = set()
+        for row in fills:
+            fields = ("timestamp", "qty", "price", "base_fee", "quote_fee")
+            if any(isinstance(row[key], bool) for key in fields):
+                return None
+            ts, amount, price, base_fee, quote_fee = (float(row[key]) for key in fields)
+            identity = str(row["id"])
+            side = row["side"]
+            if (not identity or identity in seen or side not in {"BUY", "SELL"}
+                    or not all(math.isfinite(v) for v in (ts, amount, price, base_fee, quote_fee))
+                    or ts <= 0 or ts < last_ts or amount <= 0 or price <= 0
+                    or min(base_fee, quote_fee) < 0):
+                return None
+            seen.add(identity)
+            last_ts = ts
+            if side == "BUY":
+                if base_fee >= amount:
+                    return None
+                qty += amount - base_fee
+                cost += amount * price + quote_fee
+            else:
+                removed = amount + base_fee
+                if qty <= 0 or removed > qty + 1e-8:
+                    return None
+                remaining = max(0.0, qty - removed)
+                cost *= remaining / qty
+                qty = remaining
+            if not math.isfinite(qty) or not math.isfinite(cost):
+                return None
+        if qty <= 0 or not math.isclose(qty, held_qty, rel_tol=1e-9, abs_tol=1e-8):
+            return None
+        avg = cost / qty
+        return avg if math.isfinite(avg) and avg > 0 else None
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return None
+
+
 @dataclass(frozen=True)
 class QuantityDecision:
     requested_qty: float

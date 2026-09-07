@@ -503,13 +503,12 @@ class Strategy:
         if vol <= 0 or (self.ordermin and vol < self.ordermin):
             log(f"  ! [STRAT] volume {vol} < minimum order {self.ordermin} — skipping")
             return False
-        # Intent-aware profit-floor guard: a non-urgent limit SELL must not execute
-        # below the average cost. A stale or miscomputed take-profit reference would
-        # otherwise realise a loss (e.g. a TP limit priced under the real entry).
-        # Urgent MARKET exits (STOP, trailing) are deliberately exempt and must always
-        # run — matching the "STOP/trailing cannot be blocked" invariant. Only
-        # non-market sells other than STOP are checked; buys and the golden's
-        # above-average TPs are unaffected.
+        # Refuse a new non-STOP limit SELL below known average cost after rounding.
+        # This gross-price check is not a net-profit or fill guarantee: fees are not
+        # added, equality is allowed, and unknown average cost does not block here.
+        # MARKET and STOP intents bypass this guard, but still pass the remaining
+        # lifecycle, cancellation, balance, and venue checks. The optional soft
+        # trailing floor is a separate strategy policy applied before this method.
         if not market and str(side).lower() == "sell" and str(kind).upper() != "STOP":
             _avg = self._avg()
             if _avg is not None and price < _avg:

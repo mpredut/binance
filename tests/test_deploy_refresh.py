@@ -56,12 +56,14 @@ def test_successful_deploy_refreshes_both_roles_before_reporting_success(tmp_pat
 manifest_pids() { if [ -f "$ROOT/bots-refreshed" ]; then echo 7; fi; }
 stop_manifest_process() { printf '%s\\n' "$1" >> "$ROOT/fleet-refreshed"; }
 ''')
-    (tmp_path / "bots_start.sh").write_text('touch "$(dirname "$0")/bots-refreshed"\n')
+    (tmp_path / "bots_start.sh").write_text(
+        'touch "$(dirname "$0")/bots-refreshed"\necho launcher-ready\n')
     result = subprocess.run(["bash", "deploy_providers.sh"], cwd=tmp_path,
                             env=env, capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stdout + result.stderr
     assert (tmp_path / "fleet-refreshed").read_text().strip() == "cacheManager.py"
     assert (tmp_path / "bots-refreshed").exists()
+    assert (tmp_path / "logs/deploy_bots_start.log").read_text().strip() == "launcher-ready"
     assert "Deployment verified" in result.stdout
 
 

@@ -47,7 +47,14 @@ for index in "${!patterns[@]}"; do
         stop_manifest_process "${patterns[$index]}" "${directories[$index]}"
     fi
 done
-bash "$ROOT/bots_start.sh"
+# Keep daemon-inherited descriptors off the caller's output pipe (upstream fix).
+# Do not mask launcher failure: successful import/pull is not successful deployment.
+mkdir -p "$ROOT/logs"
+if ! bash "$ROOT/bots_start.sh" >"$ROOT/logs/deploy_bots_start.log" 2>&1; then
+    tail -20 "$ROOT/logs/deploy_bots_start.log"
+    exit 1
+fi
+tail -3 "$ROOT/logs/deploy_bots_start.log"
 
 # Require one replacement per manifest entry and fresh caches on three consecutive
 # checks. Presence alone, an old trailing PID, or an old success log is insufficient.
