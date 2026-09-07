@@ -27,9 +27,24 @@ echo "=== RESTART FLOTA (pkill; flota_start le reia) ==="
 for p in $fleet; do pkill -f "$p" 2>/dev/null || true; done
 echo "  killed; waiting 95s..."; sleep 95
 
+# Bots (role=bot) are NOT under systemd, so the fleet restart above leaves them on
+# OLD code — the trailing stop kept running the pre-change revision until a manual
+# pkill. Reload them the sanctioned way: pkill + bots_start.sh (single-instance safe;
+# each bot reloads its own persisted state, so this is a CODE reload, not a state
+# reset — see bots_start.sh). This closes the gap where a pulled bot never ran the
+# new code after a deploy.
+bots="$(awk -F'|' '!/^#/ && $7=="bot" {print $1}' "$MANIFEST")"
+if [ -n "$bots" ]; then
+  echo "=== RELOAD BOTS (pkill; bots_start.sh le reia cu codul nou) ==="
+  for p in $bots; do pkill -f "$p" 2>/dev/null || true; done
+  echo "  killed; waiting 8s..."; sleep 8
+  bash "$ROOT/bots_start.sh" 2>&1 | tail -3
+  sleep 6
+fi
+
 echo "=== VERIFICARE ==="
 "$PY" verify_tools/check_cache_coherence.py >/tmp/coh.log 2>&1 || true
 echo "  coherence: $(tail -1 /tmp/coh.log 2>/dev/null)"
-for p in $fleet; do printf '  %-22s viu=%s\n' "$p" "$(pgrep -fc "$p")"; done
+for p in $fleet; do printf '  %-24s viu=%s\n' "$p" "$(pgrep -fc "$p")"; done
+for p in $bots;  do printf '  %-24s viu=%s\n' "$p" "$(pgrep -fc "$p")"; done
 echo "  Traceback (monitortrades/cacheManager): $(grep -a -c Traceback logs/monitortrades.log logs/cacheManager.log 2>/dev/null | paste -sd' ')"
-echo "  trailing alive=$(pgrep -fc trailing_stop.py)"
