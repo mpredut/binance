@@ -38,7 +38,12 @@ if [ -n "$bots" ]; then
   echo "=== RELOAD BOTS (pkill; bots_start.sh le reia cu codul nou) ==="
   for p in $bots; do pkill -f "$p" 2>/dev/null || true; done
   echo "  killed; waiting 8s..."; sleep 8
-  bash "$ROOT/bots_start.sh" 2>&1 | tail -3
+  # Redirect to a FILE, not a pipe. bots_start launches daemons that inherit stdout;
+  # piping it (| tail) leaves the pipe's write end open in those daemons, so tail
+  # never sees EOF and the deploy hangs. A file has no such semantics; timeout guards
+  # a genuinely stuck launcher.
+  timeout 60 bash "$ROOT/bots_start.sh" >/tmp/deploy_bots_start.log 2>&1 || true
+  tail -3 /tmp/deploy_bots_start.log 2>/dev/null
   sleep 6
 fi
 
