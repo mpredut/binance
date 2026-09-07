@@ -68,6 +68,11 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), "trailing.c
 TRAIL_PCT = {
     "BTCUSDC": 20.0,
     "TAOUSDC": 22.0,
+    # ARBUSDC: manual position, entered 0.1351, ~+29% on 7 Sep. A tighter trail
+    # (vs the ~22% catastrophe default) to protect the existing gain: at a ~0.174
+    # peak the stop sits near 0.152 (~+12% vs entry). The state is pre-seeded with
+    # this peak and no warm-up, so protection is armed immediately, not after +5%.
+    "ARBUSDC": 13.0,
 }
 DEFAULT_TRAIL_PCT = 22.0
 TRAILING_ENABLED = required_bool_env("TRAILING_ENABLED")

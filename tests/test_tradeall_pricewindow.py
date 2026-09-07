@@ -99,10 +99,25 @@ class TestTradeallOrderBoundary(unittest.TestCase):
 
     def test_strategy_preserves_common_persistent_retry_policy(self):
         with (patch.object(ta, "_kalman_gate_blocks", return_value=(False, "off", None)),
+              patch.object(ta, "TRADEALL_FIRE_SYMBOLS", {"BTCUSDT"}),
               patch.object(ta.mkt, "place", return_value={"orderId": "accepted"}) as place):
             result = ta._fire_order("BTCUSDT", "BUY", 100.0, "test")
         self.assertIsNotNone(result)
         self.assertNotIn("caller_owns_retry", place.call_args.kwargs)
+
+    def test_symbol_outside_fire_allowlist_is_never_traded(self):
+        # A coin can be trend-tracked (present in symbols.py) without tradeall
+        # trading it: a manual position guarded by the trailing stop. The gate is
+        # the single choke point, so neither logic() nor Kalman-primary can fire.
+        with (patch.object(ta, "_kalman_gate_blocks", return_value=(False, "off", None)),
+              patch.object(ta, "TRADEALL_FIRE_SYMBOLS", {"BTCUSDT"}),
+              patch.object(ta.mkt, "place", return_value={"orderId": "accepted"}) as place):
+            blocked = ta._fire_order("ARBUSDC", "SELL", 0.17, "test")
+            allowed = ta._fire_order("BTCUSDT", "SELL", 100.0, "test")
+        self.assertIsNone(blocked)
+        self.assertIsNotNone(allowed)
+        self.assertEqual(place.call_count, 1)
+        self.assertEqual(place.call_args.args[0], "BTCUSDT")
 
     def test_invalid_side_or_price_never_reaches_executor(self):
         invalid = (("HOLD", 100.0), ("BUY", None), ("SELL", float("nan")),

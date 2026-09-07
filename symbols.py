@@ -14,7 +14,10 @@ taosymbol = 'TAOUSDC'
 # label that monitortrades passes to the facade.
 hypesymbol = 'HYPEUSDC'
 #symbols = ["BTCUSDC", "TAOUSDC"]
-symbols = ["BTCUSDC",  "TAOUSDC"]
+# ARBUSDC is a manual spot position monitored by the Binance trailing stop
+# (binance_api/trailing_stop.py, which only trails coins listed here). tradeall
+# deliberately does NOT trade it: see TRADEALL_FIRE_SYMBOLS in tradeall_config.env.
+symbols = ["BTCUSDC",  "TAOUSDC", "ARBUSDC"]
 forcesellsymbol = ["TAOUSDC", "BTCUSDC"]
 def validate_ordertype(order_type):
     if order_type not in [None, 'BUY', 'SELL']:

@@ -177,6 +177,15 @@ KALMAN_PRIMARY_SYMBOLS = set(
     s.strip() for s in required_env("KALMAN_PRIMARY_SYMBOLS").split(",") if s.strip())
 
 
+# Symbols tradeall MAY place orders on. A symbol present in symbols.py but absent
+# here is still trend-tracked (so other consumers — trailing stop, monitortrades,
+# is_trend_up — get its snapshot) but is NEVER traded by tradeall. Empty = trade
+# nothing. This lets a manual position (for example ARBUSDC, held by the trailing
+# stop) be observed without tradeall competing for its exits.
+TRADEALL_FIRE_SYMBOLS = set(
+    s.strip() for s in required_env("TRADEALL_FIRE_SYMBOLS").split(",") if s.strip())
+
+
 def _kalman_gate_blocks(symbol, action):
     # The symbol-specific mode is an intentional policy override; all other symbols
     # use the explicitly configured global mode.
@@ -216,6 +225,14 @@ def _fire_order(symbol, action, price, reason, **kwargs):
         return None
     if not math.isfinite(price) or price <= 0:
         print(f"[TRADEALL] order refused: price invalid {price!r}")
+        return None
+
+    # Symbol allowlist: a coin can be trend-tracked without being traded here
+    # (for example a manual position guarded by the trailing stop). This is the
+    # single choke point for both the logic() and Kalman-primary firing paths.
+    if symbol not in TRADEALL_FIRE_SYMBOLS:
+        print(f"[TRADEALL] {action} {symbol} skipped: not in TRADEALL_FIRE_SYMBOLS "
+              f"(trend-tracked only; exit managed elsewhere)")
         return None
 
     blocked, mode, trend = _kalman_gate_blocks(symbol, action)
