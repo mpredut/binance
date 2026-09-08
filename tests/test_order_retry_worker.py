@@ -433,6 +433,61 @@ class ProcessOnceTest(unittest.TestCase):
         self.assertEqual(len(mkt.calls), 0)          # NOT retried (expired).
         self.assertEqual(len(alerts), 1)             # give-up alert
 
+    def test_giveup_batch_audited_individually_and_summary_flushes_empty_queue(self):
+        oq.RETRY_DEDUP = False
+        mkt = FakeMkt()
+        with patch.object(worker._AUDIT, "record") as audit:
+            for created, count, now in ((1000, 3, 87401), (1030, 2, 87431)):
+                for _ in range(count):
+                    oq.enqueue("TAOUSDC", "SELL", 1.0, {}, now=created,
+                               failure_reason="weight_policy_unavailable")
+                stats = worker.process_once(mkt, now=now)
+                self.assertEqual(stats["expired"], count)
+                self.assertEqual(oq.load_all(), [])
+            self.assertEqual(len(self.alerts), 1)
+            self.assertIn("3 intent(s) expired", self.alerts[0]["body"])
+            self.assertEqual(audit.call_count, 5)
+            self.assertTrue(all(c.args[0] == "retry_giveup" for c in audit.call_args_list))
+            self.assertEqual(len({c.kwargs["intent_id"] for c in audit.call_args_list}), 5)
+            worker.process_once(mkt, now=88301)
+            self.assertEqual(len(self.alerts), 2)
+            self.assertIn("summary", self.alerts[1]["title"])
+            self.assertIn("2 intent(s) expired", self.alerts[1]["body"])
+            self.assertEqual(audit.call_count, 5)
+        self.assertEqual(mkt.calls, [])
+        self.assertEqual(mkt.lookup_calls, [])
+
+    def test_giveup_digest_corruption_does_not_abort_financial_processing(self):
+        from pathlib import Path
+        Path(self.tmp, "order_retry_giveup_alerts.json").write_text("broken")
+        oq.enqueue("BTCUSDC", "BUY", 1.0, {}, now=1000,
+                   requested_price=100.0)
+        mkt = FakeMkt()
+        self.assertEqual(worker.process_once(mkt, now=1400)["succeeded"], 1)
+        self.assertEqual(len(mkt.calls), 1)
+        self.assertEqual(self.alerts, [])
+
+    def test_giveup_delivery_error_does_not_hide_another_incident(self):
+        for symbol in ("TAOUSDC", "BTCUSDC"):
+            oq.enqueue(symbol, "BUY", 1.0, {}, now=1000,
+                       failure_reason="weight_policy_unavailable")
+        with patch.object(worker.alert, "notify", side_effect=[OSError("offline"), None]) as notify:
+            stats = worker.process_once(FakeMkt(), now=87401)
+        self.assertEqual(stats["expired"], 2)
+        self.assertEqual(notify.call_count, 2)
+
+    def test_giveup_attempt_limit_is_not_mislabeled_as_ttl(self):
+        oq.RETRY_MAX_ATTEMPTS = 1
+        oq.enqueue("BTCUSDC", "BUY", 1.0, {}, now=1000,
+                   failure_reason="weight_policy_unavailable")
+        records = oq.load_all()
+        records[0]["attempts"] = 1
+        oq.rewrite(records)
+        mkt = FakeMkt()
+        self.assertEqual(worker.process_once(mkt, now=1001)["expired"], 1)
+        self.assertIn("expiry=attempt_limit", self.alerts[0]["body"])
+        self.assertEqual(mkt.calls, [])
+
     def test_semantically_invalid_record_fails_closed_without_submit(self):
         oq.rewrite([{
             "id": "legacy", "symbol": "BTCUSDC", "side": "BUY", "qty": None,

@@ -37,10 +37,14 @@ import order_retry as oq
 import alertnotifiers as alert
 from botcore import required_float_env, single_instance
 from providers.execution_audit import ExecutionAudit
+from notification_digest import IncidentDigest
 
 WORKER_POLL_SEC = required_float_env("RETRY_WORKER_POLL_SEC")
 if not math.isfinite(WORKER_POLL_SEC) or WORKER_POLL_SEC <= 0:
     raise ValueError("RETRY_WORKER_POLL_SEC must be finite and > 0")
+GIVEUP_SUMMARY_SEC = required_float_env("RETRY_GIVEUP_SUMMARY_SEC")
+if not math.isfinite(GIVEUP_SUMMARY_SEC) or GIVEUP_SUMMARY_SEC <= 0:
+    raise ValueError("RETRY_GIVEUP_SUMMARY_SEC must be finite and > 0")
 
 _AUDIT = ExecutionAudit()
 _RECONCILE_FOUND = "found"
@@ -256,8 +260,9 @@ def process_once(mkt, now=None):
         + [r["id"] for r in to_reconcile_cancel],
         now)
 
-    for r in expired:
-        _alert_giveup(r, now)   # already removed from the queue
+    # Notification aggregation is independent of order lifecycle processing.
+    # Empty passes also flush the final pending summary after the queue drains.
+    _alert_giveups(expired, now)
 
     succeeded = 0
     reconciled = 0
@@ -668,17 +673,54 @@ def _alert_terminal(rec, status):
         print(f"[order_retry] the terminal alert failed (ignored): {exc}")
 
 
-def _alert_giveup(rec, now):
-    """Notify when TTL or the attempt cap is exceeded and manual action is required."""
-    age_h = (now - float(rec.get("created_ts", now))) / 3600.0
+def _alert_giveups(records, now):
+    """Audit each expiry, but notify once per incident and summary interval."""
     try:
-        alert.notify(
-            title=f"🛑 order-retry GIVE UP {rec.get('side')} {rec.get('symbol')}",
-            body=(f"Order not replaced after {rec.get('attempts', 0)} attempts / {age_h:.1f}h "
-                  f"(the TTL was exceeded). qty={rec.get('qty')}. Check by hand."),
-            source="order_retry", symbol=str(rec.get("symbol")))
-    except Exception as e:  # noqa: BLE001
-        print(f"[order_retry] the giveup alert failed (ignored): {e}")
+        events = []
+        for rec in records:
+            reason = ("attempt_limit" if oq.RETRY_MAX_ATTEMPTS > 0
+                      and rec.get("attempts", 0) >= oq.RETRY_MAX_ATTEMPTS
+                      else "active_ttl")
+            _audit_event(
+                rec, "retry_giveup", expiry_reason=reason, expired_ts=now,
+                qty=rec.get("qty"), attempts=rec.get("attempts"),
+                requested_price=rec.get("requested_price"),
+                last_attempt_ts=rec.get("last_attempt_ts"),
+                created_ts=rec.get("created_ts"),
+                ttl_started_ts=rec.get("ttl_started_ts"),
+                last_failure_reason=rec.get("last_failure_reason"))
+            events.append({
+                "labels": {
+                    "provider": str(rec.get("provider_name") or "routed"),
+                    "symbol": str(rec.get("symbol")), "side": str(rec.get("side")),
+                    "kind": str(rec.get("kind") or "unspecified"),
+                    "reason": str(rec.get("last_failure_reason") or "unspecified"),
+                    "expiry": reason,
+                },
+                "quantity": rec["qty"],
+                "sample_id": rec.get("intent_id") or rec["id"],
+            })
+        digest = IncidentDigest(
+            os.path.join(os.path.dirname(oq.QUEUE_FILE), "order_retry_giveup_alerts.json"),
+            GIVEUP_SUMMARY_SEC)
+        for report in digest.collect(events, now=now):
+            labels = report["labels"]
+            suffix = " summary" if report["reported"] else ""
+            try:
+                alert.notify(
+                    title=f"🛑 order-retry GIVE UP{suffix} {labels['side']} {labels['symbol']}",
+                    body=(f"{report['count']} intent(s) expired; no order submitted for these expiries. "
+                          f"Total requested qty={report['quantity']:.8g}. "
+                          f"Provider={labels['provider']}; kind={labels['kind']}; "
+                          f"last refusal={labels['reason']}; expiry={labels['expiry']}. "
+                          f"Further expiries for this incident are summarized every "
+                          f"{GIVEUP_SUMMARY_SEC / 60:g} minutes. "
+                          f"Per-intent details: execution audit; sample={report['sample_id']}."),
+                    source="order_retry", symbol=labels["symbol"])
+            except Exception as exc:  # One transport failure must not skip other incidents.
+                print(f"[order_retry] the giveup delivery failed (ignored): {exc}")
+    except Exception as exc:  # Notification failure must not change order processing.
+        print(f"[order_retry] the giveup digest failed (ignored): {exc}")
 
 
 def main():
