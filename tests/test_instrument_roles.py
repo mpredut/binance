@@ -38,6 +38,9 @@ def test_current_execution_policy_is_preserved():
     trails = {item.symbol: item.number("trailing.pct") for item in
               registry.select_instruments("binance", "trailing").values()}
     assert trails == {"BTCUSDC": 20, "TAOUSDC": 22, "ARBUSDC": 13}
+    rebuys = {item.symbol: item.flag("trailing.rebuy") for item in
+              registry.select_instruments("binance", "trailing").values()}
+    assert rebuys == {"BTCUSDC": True, "TAOUSDC": True, "ARBUSDC": True}
     assert set(registry.select_instruments(role="mt")) == {
         "BINANCE_BTC", "BINANCE_TAO", "KRAKEN_HYPE"}
 
@@ -46,6 +49,8 @@ def test_current_execution_policy_is_preserved():
     {"role.trailing": "perhaps"}, {"role.trailng": "yes"},
     {"role.trailing": "yes"}, {"role.trailing": "yes", "trailing.pct": "nan"},
     {"role.trailing": "yes", "trailing.pct": "100"},
+    {"role.trailing": "yes", "trailing.pct": "13"},   # valid pct but missing trailing.rebuy
+    {"role.trailing": "yes", "trailing.pct": "13", "trailing.rebuy": "maybe"},
     {"role.tradeall_fire": "yes"},
     {"role.tradeall_fire": "yes", "tradeall.kalman_mode": "typo"},
     {"role.kalman_primary": "yes"}, {"symbol": "testusdc"}, {"quote": "USD"},
@@ -67,7 +72,8 @@ def test_missing_role_is_not_an_implicit_opt_out(tmp_path):
 
 def test_disabled_instrument_is_excluded_from_every_consumer(tmp_path):
     path = tmp_path / "instruments.conf"
-    path.write_text(section(enabled="no", **{"role.trailing": "yes", "trailing.pct": "13"}),
+    path.write_text(section(enabled="no", **{"role.trailing": "yes", "trailing.pct": "13",
+                                             "trailing.rebuy": "yes"}),
                     encoding="utf-8")
     assert registry.symbols_for("binance", path=path) == []
     for role in registry.ROLES:
@@ -100,6 +106,7 @@ def test_one_new_section_reaches_real_consumers_without_source_edits(tmp_path):
     path.write_text((ROOT / "instruments.conf").read_text() + section(**{
         "role.tradeall_fire": "yes", "tradeall.kalman_mode": "off",
         "role.kalman_primary": "yes", "role.trailing": "yes", "trailing.pct": "18",
+        "trailing.rebuy": "yes",
         "role.assetguardian": "yes", "role.archive": "yes", "role.force_sell": "yes",
         "role.mt": "yes", "mt.gain": "9", "mt.lost": "5", "mt.maxage_days": "10",
     }), encoding="utf-8")

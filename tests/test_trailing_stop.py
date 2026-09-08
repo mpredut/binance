@@ -219,6 +219,46 @@ class TestTrailing(Base):
         self.assertEqual(self.po.orders, [])
 
 
+class TestPerCoinRebuy(Base):
+    """Re-buy is now per-coin (registry trailing.rebuy), not one global switch."""
+
+    def _sell_then_confirm(self, ts, api):
+        ts.check_once()                                # arm + track (min_profit=0)
+        api.price = 190.0; ts.check_once()             # trailing sells
+        ts.check_once()                                # terminal fill confirmed
+        import json
+        return json.load(open(self.sf))["TAOUSDC"]
+
+    def test_rebuy_disabled_per_coin_does_not_arm_a_rebuy(self):
+        api = FakeApi(250.0)
+        ts = self.ts(api)
+        ts.rebuy_enabled_for = lambda symbol: False    # per-coin OFF (overrides registry)
+        st = self._sell_then_confirm(ts, api)
+        self.assertNotIn("rebuy", st, "rebuy must NOT arm when disabled for the coin")
+        api.price = 210.0; ts.check_once()             # a recovery must not re-buy
+        self.assertTrue(all(o["side"] != "BUY" for o in self.po.orders))
+
+    def test_rebuy_enabled_per_coin_arms_a_rebuy(self):
+        api = FakeApi(250.0)
+        ts = self.ts(api)
+        ts.rebuy_enabled_for = lambda symbol: True     # per-coin ON
+        st = self._sell_then_confirm(ts, api)
+        self.assertIn("rebuy", st, "rebuy must arm when enabled for the coin")
+
+    def test_core_rebuy_for_falls_back_to_global_without_adapter_method(self):
+        # An adapter (e.g. Kraken) without rebuy_enabled_for uses the constructor global.
+        from trailing_core import TrailingCore
+        class Bare:  # no rebuy_enabled_for attribute
+            pass
+        core = TrailingCore(Bare(), log=lambda *_: None, enabled=True, state_file=self.sf,
+                            min_notional=11.0, rebuy_enabled=True, rebuy_bounce_pct=1.2,
+                            rebuy_skip_if_trend_down=True, sell_skip_if_trend_up=False,
+                            sell_fraction=1.0, item_isolation=True, min_profit_pct=0.0)
+        self.assertTrue(core._rebuy_for("XUSD"))
+        core.rebuy_enabled = False
+        self.assertFalse(core._rebuy_for("XUSD"))
+
+
 class TestPerMoneda(Base):
     def test_market_data_only_symbol_is_not_trailed_or_logged_as_managed(self):
         from types import SimpleNamespace

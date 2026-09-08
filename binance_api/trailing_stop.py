@@ -72,6 +72,11 @@ TRAILING_INSTRUMENTS = {
 }
 TRAIL_PCT = {symbol: spec.number("trailing.pct")
              for symbol, spec in TRAILING_INSTRUMENTS.items()}
+# Per-coin re-buy switch (registry trailing.rebuy), replacing the single global.
+# Re-buy after a stop rides continuations in an uptrend but bleeds in a downtrend
+# (backtested), so it is now decided per instrument.
+REBUY_ENABLED_BY_SYMBOL = {symbol: spec.flag("trailing.rebuy")
+                           for symbol, spec in TRAILING_INSTRUMENTS.items()}
 # Recent history is usable only when it explains the currently held inventory.
 _COST_BASIS_LOOKBACK_S = 120 * 24 * 3600
 TRAILING_ENABLED = required_bool_env("TRAILING_ENABLED")
@@ -159,6 +164,11 @@ class TrailingStop:
 
     def trail_pct_for(self, symbol: str) -> float:
         return TRAIL_PCT[symbol]
+
+    def rebuy_enabled_for(self, symbol: str) -> bool:
+        """Per-coin re-buy switch from the registry (trailing.rebuy). Falls back to the
+        global TRAILING_REBUY_ENABLED for any symbol not in the trailing registry."""
+        return REBUY_ENABLED_BY_SYMBOL.get(symbol, REBUY_ENABLED)
 
     def cost_basis(self, pair: str):
         """Use reconciled BUY/SELL inventory for new-position warm-up, when known.

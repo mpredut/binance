@@ -57,6 +57,9 @@ class InstrumentSpec:
             raise ValueError(f"instruments.conf [{self.name}]: {key} must be finite")
         return value
 
+    def flag(self, key):
+        return _boolean(self.setting(key), key, self.name)
+
 
 def load_registry(path=None):
     """Validate the complete registry before returning any instrument."""
@@ -100,8 +103,10 @@ def load_registry(path=None):
         if "tradeall_fire" in roles and spec.setting("tradeall.kalman_mode") not in {
                 "strict", "permissive", "off"}:
             raise ValueError(f"instruments.conf [{name}]: invalid tradeall.kalman_mode")
-        if "trailing" in roles and not 0 < spec.number("trailing.pct") < 100:
-            raise ValueError(f"instruments.conf [{name}]: trailing.pct must be in (0, 100)")
+        if "trailing" in roles:
+            if not 0 < spec.number("trailing.pct") < 100:
+                raise ValueError(f"instruments.conf [{name}]: trailing.pct must be in (0, 100)")
+            spec.flag("trailing.rebuy")   # required boolean: per-coin re-buy switch
         result[name] = spec
     return result
 

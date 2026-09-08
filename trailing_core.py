@@ -92,7 +92,7 @@ class TrailingCore:
                 raise RuntimeError("the pending trailing state could not be persisted")
         return persist
 
-    def _finish_pending(self, st: dict, result, price: float) -> None:
+    def _finish_pending(self, st: dict, result, price: float, pair) -> None:
         """Apply one terminal fill exactly once, then acknowledge pending state."""
         status = result.status
         pending = result.intent
@@ -102,7 +102,7 @@ class TrailingCore:
                if filled > 0 and float(status.cost or 0.0) > 0 else price)
         if action == "SELL" and filled > 0:
             st["peak"] = avg
-            if self.rebuy_enabled:
+            if self._rebuy_for(pair):
                 st["rebuy"] = {"qty": filled, "sell_price": avg, "low": avg}
         elif action == "REBUY" and filled > 0:
             rb = st.get("rebuy") or {}
@@ -117,7 +117,7 @@ class TrailingCore:
                 st["warmup_at"] = avg * (1 + self.min_profit_pct / 100.0)
         st.pop("pending_order", None)
 
-    def _reconcile_pending(self, state: dict, st: dict, price: float) -> bool:
+    def _reconcile_pending(self, state: dict, st: dict, price: float, pair) -> bool:
         """Return true when this tick is consumed by a persisted order lifecycle."""
         pending = st.get("pending_order")
         if not pending:
@@ -125,12 +125,26 @@ class TrailingCore:
         persist = self._pending_persist(state, st)
         result = self.a.reconcile_pending(pending, persist)
         if result.outcome == "terminal":
-            self._finish_pending(st, result, price)
+            self._finish_pending(st, result, price, pair)
             if not self.save(state):
                 raise RuntimeError("the trailing terminal status could not be saved")
         # active waits; absent/retryable were already cleared by lifecycle and the
         # strategy may recreate the same deterministic intent on a later tick.
         return True
+
+    def _rebuy_for(self, pair) -> bool:
+        """Per-coin re-buy switch: an adapter may expose rebuy_enabled_for(pair)
+        (the Binance adapter reads the registry); otherwise the constructor-level
+        global applies (Kraken, tests). A non-bool result falls back to the global."""
+        getter = getattr(self.a, "rebuy_enabled_for", None)
+        if getter is not None:
+            try:
+                value = getter(pair)
+            except Exception:
+                value = None
+            if isinstance(value, bool):
+                return value
+        return self.rebuy_enabled
 
     # -- re-buy after a crash sale --------------------------------------------
     def _handle_rebuy(self, key, asset, pair, st: dict, price: float,
@@ -188,9 +202,9 @@ class TrailingCore:
                         and math.isfinite(basis) and basis > 0):
                     ref = float(basis)
             st["warmup_at"] = ref * (1 + self.min_profit_pct / 100.0)  # activation threshold
-        if self._reconcile_pending(state, st, price):
+        if self._reconcile_pending(state, st, price, pair):
             return
-        if self.rebuy_enabled and st.get("rebuy"):            # handle pending re-buy BEFORE notional check (free~0 after sale)
+        if self._rebuy_for(pair) and st.get("rebuy"):         # handle pending re-buy BEFORE notional check (free~0 after sale)
             self._handle_rebuy(key, asset, pair, st, price, state)
             if st.get("pending_order"):
                 return
