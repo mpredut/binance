@@ -124,26 +124,16 @@ def _dedup_seconds(alerts: list[Any], urgent: bool) -> int:
 def _reserve_delivery(channel: str, alerts: list[Any], *, urgent: bool) -> tuple[bool, str, bool]:
     """Atomically reserve one delivery across processes.
 
-    Return ``(allowed, reason, warn_once)``. A network attempt conservatively consumes
-    local budget because a timeout can occur after the provider has already accepted
-    the message.
+    Return ``(allowed, reason, warn_once)``. Only routine ntfy deliveries have a
+    local daily cap. Urgent ntfy and all email bypass that cap, but still deduplicate.
+    A network attempt counts conservatively because a timeout can follow acceptance.
+    An actual ntfy provider quota remains binding and requires an email fallback.
     """
     now = time.time()
     today = datetime.fromtimestamp(now, timezone.utc).date().isoformat()
     path = _delivery_state_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     fingerprint = _delivery_fingerprint(alerts)
-    budget = _positive_int_env(
-        "NTFY_DAILY_BUDGET" if channel == "ntfy" else "EMAIL_DAILY_BUDGET",
-        100 if channel == "ntfy" else 40,
-    )
-    reserve = min(
-        budget,
-        _positive_int_env(
-            "NTFY_URGENT_RESERVE" if channel == "ntfy" else "EMAIL_URGENT_RESERVE",
-            20 if channel == "ntfy" else 10,
-        ),
-    )
     lock_path = path.with_suffix(path.suffix + ".lock")
     with FileLock(lock_path):
         state = _load_delivery_state(path, today)
@@ -151,7 +141,7 @@ def _reserve_delivery(channel: str, alerts: list[Any], *, urgent: bool) -> tuple
             channel,
             {"sent": 0, "last": {}, "blocked": False, "budget_warning_sent": False},
         )
-        if channel_state.get("blocked"):
+        if channel == "ntfy" and channel_state.get("blocked"):
             return False, "provider_daily_limit", False
 
         last = channel_state.setdefault("last", {})
@@ -165,12 +155,16 @@ def _reserve_delivery(channel: str, alerts: list[Any], *, urgent: bool) -> tuple
             return False, "duplicate", False
 
         sent = int(channel_state.get("sent", 0))
-        allowed_count = budget if urgent else max(0, budget - reserve)
-        if sent >= allowed_count:
-            warn = not bool(channel_state.get("budget_warning_sent"))
-            channel_state["budget_warning_sent"] = True
-            _save_delivery_state(path, state)
-            return False, "local_daily_budget", warn
+        if channel == "ntfy" and not urgent:
+            # Preserve the existing routine allowance and provider-quota headroom.
+            # The reserve no longer places a ceiling on urgent delivery attempts.
+            budget = _positive_int_env("NTFY_DAILY_BUDGET", 100)
+            reserve = _positive_int_env("NTFY_URGENT_RESERVE", 20)
+            if sent >= max(0, budget - reserve):
+                warn = not bool(channel_state.get("budget_warning_sent"))
+                channel_state["budget_warning_sent"] = True
+                _save_delivery_state(path, state)
+                return False, "local_daily_budget", warn
 
         channel_state["sent"] = sent + 1
         channel_state["last"][fingerprint] = now
@@ -361,7 +355,7 @@ class AlertNotifier:
         urgent = _alerts_are_urgent(alerts)
         allowed, reason, _warn = _reserve_delivery("email", alerts, urgent=urgent)
         if not allowed:
-            print(f"[Notifier] Email omis de politica de livrare: {reason}")
+            print(f"[Notifier] Email skipped by delivery policy: {reason}")
             return reason == "duplicate"
 
         symbols = ", ".join(AlertNotifier.alert_symbol(alert) for alert in alerts)
@@ -410,9 +404,11 @@ class AlertNotifier:
             urgent = _alerts_are_urgent(alerts)
             allowed, reason, warn = _reserve_delivery("ntfy", alerts, urgent=urgent)
             if not allowed:
-                print(f"[Notifier] ntfy omis de politica de livrare: {reason}")
+                print(f"[Notifier] ntfy skipped by delivery policy: {reason}")
                 if warn:
                     AlertNotifier._send_budget_warning("ntfy", reason)
+                if urgent and reason == "provider_daily_limit":
+                    AlertNotifier._send_urgent_email_fallback(alerts)
                 return reason == "duplicate"
 
         try:
@@ -456,11 +452,14 @@ class AlertNotifier:
                         headers=anonymous_headers,
                         timeout=10,
                     )
-                if _is_provider_daily_limit(response):
+                provider_limited = _is_provider_daily_limit(response)
+                if provider_limited:
                     if _mark_provider_daily_limit("ntfy"):
                         AlertNotifier._send_budget_warning("ntfy", "provider_daily_limit")
                 if response.status_code >= 400:
                     print(f"[Notifier] ntfy batch error: {response.status_code} {response.text}")
+                    if urgent and provider_limited:
+                        AlertNotifier._send_urgent_email_fallback(alerts)
                     return False
                 print(f"[Notifier] ntfy batch sent successfully for {len(alerts)} symbols")
                 return True
@@ -476,19 +475,37 @@ class AlertNotifier:
             return False
 
     @staticmethod
+    def _send_urgent_email_fallback(alerts) -> None:
+        """Preserve the actual urgent incident when ntfy has exhausted its quota.
+
+        Email keeps its own deduplication. Phone failure remains False even when
+        SMTP accepts the fallback; SMTP acceptance is not proof of inbox receipt.
+        """
+        sent = AlertNotifier.send_email_batch(
+            alerts, subject="Urgent trading alert: ntfy quota exhausted")
+        print(f"[Notifier] Urgent email fallback {'accepted' if sent else 'failed'}")
+
+    @staticmethod
     def _send_budget_warning(channel: str, reason: str) -> None:
         """Send one email fallback rather than compensating for every suppressed message."""
+        if reason == "local_daily_budget":
+            body = (
+                f"Routine {channel} notifications reached the local daily allowance. "
+                "Urgent ntfy alerts and all email remain exempt from local volume caps."
+            )
+        else:
+            body = (
+                f"Channel {channel} reached its provider daily quota. "
+                "Urgent incidents use email fallback, subject to SMTP availability."
+            )
         alert = {
             "type": "bot_event", "symbol": "SYSTEM",
-            "name": f"ERORI LIMITA {channel.upper()}", "source": "notifier",
-            "body": (
-                f"Channel {channel} was stopped for the rest of the UTC day: {reason}. "
-                "Urgent alerts continue on the other available channels."
-            ),
+            "name": f"ERROR: {channel.upper()} notification limit", "source": "notifier",
+            "body": body,
             "added_at": datetime.now(),
         }
         AlertNotifier.send_email_batch(
-            [alert], subject=f"Trading alerts: limita {channel} atinsa",
+            [alert], subject=f"Trading alerts: {channel} limit reached",
         )
 
 
@@ -564,9 +581,9 @@ def notify(title: str, body: str, source: str, symbol: str,
     label. Notification failures never interrupt trading. ``print`` works both in the
     fleet, where log.py captures it, and in standalone bots whose stdout goes to their log.
 
-    Set ``email=True`` only for urgent stop-loss, trailing, crash, liquidation, and error
-    events. Informational fills, available-balance messages, and price alerts use ntfy only
-    to avoid flooding email. This replaces the formerly duplicated venue wrappers.
+    By default, urgent stop-loss, trailing, crash, liquidation, error, and watchdog
+    events also use email. Informational fills, available-balance messages, and price
+    alerts use ntfy only unless explicitly overridden. This is shared by all venues.
     """
     # Tests and offline replays can exercise the same paths as live execution.
     # This central kill switch prevents external effects if a test forgets to inject
@@ -596,8 +613,8 @@ def notify(title: str, body: str, source: str, symbol: str,
         AlertNotifier.send_phone_webhook_batch([alert], webhook_url=ntfy_url)
     except Exception as e:  # noqa: BLE001
         print(f"  ! notify ntfy failed: {e}")
-    if email is None:   # Automatic email requires an urgent marker; fills/balances/prices do not qualify.
-        email = any(m in title.upper() for m in _URGENT_MARKERS)
+    if email is None:   # Use the same urgency as ntfy, including watchdog-source incidents.
+        email = _alerts_are_urgent([alert])
     if email and os.environ.get("ALERT_TO_EMAIL"):
         try:
             AlertNotifier.send_email_batch([alert])

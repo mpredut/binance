@@ -4,12 +4,15 @@ Cross-cutting documentation for the trading system. Component READMEs live next 
 their code (a deliberate convention — they are linked below).
 
 ## Operational / runbook
+
 - [OPERATIONS.md](OPERATIONS.md) — how it works (architecture, manifest, supervision) plus
   **pitfalls and lessons** (fd lock leak, hang vs crash, DN co-mingling, the execute bit, quoting) and diagnostics.
 - [DISASTER_RECOVERY.md](DISASTER_RECOVERY.md) — full rebuild on a new VM (the DR seed,
   secret backups, restore.sh), periodic backups, what is and is not in git.
 - [VERIFICATION_STATUS.md](VERIFICATION_STATUS.md) — the last reproducible verification,
   the limits of the local environment, and the intentional ownership overlaps.
+- [NOTIFICATION_DELIVERY_POLICY.md](NOTIFICATION_DELIVERY_POLICY.md) — routine ntfy
+  limits, uncapped urgent alerts/email, deduplication, and provider-quota fallback.
 
 ## Design and strategy (the durable whys)
 - [STRATEGY.md](STRATEGY.md) — the trading logic: trend detection (+48h lag, survival
