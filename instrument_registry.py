@@ -60,6 +60,14 @@ class InstrumentSpec:
     def flag(self, key):
         return _boolean(self.setting(key), key, self.name)
 
+    def rebuy_mode(self):
+        """trailing.rebuy tri-state: 'on' | 'off' | 'auto' (follow the long-term
+        trend). Any boolean spelling maps to on/off; 'auto' is explicit."""
+        raw = self.setting("trailing.rebuy").casefold()
+        if raw == "auto":
+            return "auto"
+        return "on" if _boolean(raw, "trailing.rebuy", self.name) else "off"
+
 
 def load_registry(path=None):
     """Validate the complete registry before returning any instrument."""
@@ -106,7 +114,7 @@ def load_registry(path=None):
         if "trailing" in roles:
             if not 0 < spec.number("trailing.pct") < 100:
                 raise ValueError(f"instruments.conf [{name}]: trailing.pct must be in (0, 100)")
-            spec.flag("trailing.rebuy")   # required boolean: per-coin re-buy switch
+            spec.rebuy_mode()   # required: per-coin re-buy switch (on/off/auto)
         result[name] = spec
     return result
 

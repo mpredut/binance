@@ -75,8 +75,8 @@ TRAIL_PCT = {symbol: spec.number("trailing.pct")
 # Per-coin re-buy switch (registry trailing.rebuy), replacing the single global.
 # Re-buy after a stop rides continuations in an uptrend but bleeds in a downtrend
 # (backtested), so it is now decided per instrument.
-REBUY_ENABLED_BY_SYMBOL = {symbol: spec.flag("trailing.rebuy")
-                           for symbol, spec in TRAILING_INSTRUMENTS.items()}
+REBUY_MODE_BY_SYMBOL = {symbol: spec.rebuy_mode()
+                        for symbol, spec in TRAILING_INSTRUMENTS.items()}
 # Recent history is usable only when it explains the currently held inventory.
 _COST_BASIS_LOOKBACK_S = 120 * 24 * 3600
 TRAILING_ENABLED = required_bool_env("TRAILING_ENABLED")
@@ -102,6 +102,11 @@ SELL_SKIP_IF_TREND_UP = required_bool_env("TRAILING_SELL_SKIP_IF_TREND_UP")
 # Minimum profit before trailing activates (0 means immediate activation as before).
 # This prevents selling at a loss after a normal dip immediately following a purchase.
 MIN_PROFIT_PCT = required_float_env("TRAILING_MIN_PROFIT_PCT")
+# `trailing.rebuy = auto` follows a long-term trend: re-buy only while price is above
+# its N-day SMA. N = TRAILING_REBUY_TREND_DAYS (calendar days of DAILY closes). The
+# result is cached per symbol (a 100-day SMA barely moves) and fails closed.
+REBUY_TREND_DAYS = required_int_env("TRAILING_REBUY_TREND_DAYS")
+_REBUY_TREND_TTL_S = 6 * 3600
 
 
 def _finite(value, *, name: str, minimum=None, maximum=None) -> float:
@@ -141,6 +146,7 @@ class TrailingStop:
             raise ValueError("TRAILING_REBUY_TRANCHES currently supports only the value 1")
         self.state_file = state_file
         self._balances = []
+        self._long_trend_cache = {}   # symbol -> (is_up, ts) for `trailing.rebuy = auto`
         self.core = TrailingCore(
             self, log=log, enabled=self.enabled, state_file=state_file,
             min_notional=MIN_NOTIONAL_USD, rebuy_enabled=REBUY_ENABLED,
@@ -166,9 +172,48 @@ class TrailingStop:
         return TRAIL_PCT[symbol]
 
     def rebuy_enabled_for(self, symbol: str) -> bool:
-        """Per-coin re-buy switch from the registry (trailing.rebuy). Falls back to the
-        global TRAILING_REBUY_ENABLED for any symbol not in the trailing registry."""
-        return REBUY_ENABLED_BY_SYMBOL.get(symbol, REBUY_ENABLED)
+        """Per-coin re-buy switch (registry trailing.rebuy): on/off, or 'auto' to follow
+        the long-term trend. A symbol not in the trailing registry uses the global
+        default (TRAILING_REBUY_ENABLED)."""
+        mode = REBUY_MODE_BY_SYMBOL.get(symbol)
+        if mode is None:
+            return REBUY_ENABLED
+        if mode == "on":
+            return True
+        if mode == "off":
+            return False
+        return self._long_trend_up(symbol)                    # auto
+
+    def _long_trend_up(self, symbol: str) -> bool:
+        """True only while the coin is in a long-term uptrend: current price above its
+        REBUY_TREND_DAYS-day SMA (daily closes). Cached (the SMA is slow) and fails
+        closed — without a confirmed secular uptrend, auto re-buy stays OFF."""
+        now = time.time()
+        cached = self._long_trend_cache.get(symbol)
+        if cached and now - cached[1] < _REBUY_TREND_TTL_S:
+            return cached[0]
+        up = False
+        try:
+            # Daily closes directly (the provider's ohlc_closes caps at ~90 candles,
+            # too few for a 100-day SMA). Drop the last, still-forming daily candle.
+            klines = self.api.client.get_klines(
+                symbol=symbol, interval="1d", limit=REBUY_TREND_DAYS + 1) or []
+            closes = [float(k[4]) for k in klines[:-1]]
+            if len(closes) >= REBUY_TREND_DAYS:
+                sma = sum(closes[-REBUY_TREND_DAYS:]) / REBUY_TREND_DAYS
+                price = self.api.get_current_price(symbol)
+                up = bool(price and price > 0 and sma > 0 and price > sma)
+                self.log(f"  [TRAIL] {symbol} long-trend {'UP' if up else 'DOWN'}: "
+                         f"price {price} vs SMA{REBUY_TREND_DAYS} {sma:.6g} -> "
+                         f"auto rebuy {'ON' if up else 'OFF'}")
+            else:
+                self.log(f"  [TRAIL] {symbol}: only {len(closes)} daily closes "
+                         f"(<{REBUY_TREND_DAYS}) — auto rebuy OFF (no long trend yet)")
+        except Exception as e:  # noqa: BLE001
+            self.log(f"  [TRAIL] long-trend({symbol}) unavailable ({e}) — auto rebuy OFF")
+            up = False
+        self._long_trend_cache[symbol] = (up, now)
+        return up
 
     def cost_basis(self, pair: str):
         """Use reconciled BUY/SELL inventory for new-position warm-up, when known.

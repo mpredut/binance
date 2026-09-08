@@ -258,6 +258,32 @@ class TestPerCoinRebuy(Base):
         core.rebuy_enabled = False
         self.assertFalse(core._rebuy_for("XUSD"))
 
+    def test_auto_mode_delegates_to_the_long_term_trend(self):
+        import binance_api.trailing_stop as m
+        api = FakeApi(250.0); ts = self.ts(api)
+        saved = dict(m.REBUY_MODE_BY_SYMBOL)
+        m.REBUY_MODE_BY_SYMBOL["TAOUSDC"] = "auto"
+        try:
+            ts._long_trend_up = lambda s: True
+            self.assertTrue(ts.rebuy_enabled_for("TAOUSDC"))
+            ts._long_trend_up = lambda s: False
+            self.assertFalse(ts.rebuy_enabled_for("TAOUSDC"))
+        finally:
+            m.REBUY_MODE_BY_SYMBOL.clear(); m.REBUY_MODE_BY_SYMBOL.update(saved)
+
+    def test_long_trend_up_uses_the_configured_sma_and_fails_closed(self):
+        import binance_api.trailing_stop as m
+        from types import SimpleNamespace
+        api = FakeApi(250.0); ts = self.ts(api)
+        kl = lambda n: [[0, 0, 0, 0, "100.0", 0, 0]] * n     # daily klines, close=100
+        ts.api.client = SimpleNamespace(get_klines=lambda **kw: kl(m.REBUY_TREND_DAYS + 1))
+        self.assertTrue(ts._long_trend_up("TAOUSDC"))          # price 250 > SMA 100 -> up
+        ts._long_trend_cache.clear(); api.price = 90.0
+        self.assertFalse(ts._long_trend_up("TAOUSDC"))         # price 90 < SMA 100 -> down
+        ts._long_trend_cache.clear()
+        ts.api.client = SimpleNamespace(get_klines=lambda **kw: kl(4))   # <N -> fail closed
+        self.assertFalse(ts._long_trend_up("TAOUSDC"))
+
 
 class TestPerMoneda(Base):
     def test_market_data_only_symbol_is_not_trailed_or_logged_as_managed(self):
