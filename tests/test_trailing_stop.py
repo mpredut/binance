@@ -316,7 +316,7 @@ class TestPerMoneda(Base):
         ts = self.ts(FakeApi(1.0))
         self.assertEqual(ts.trail_pct_for("BTCUSDC"), 20.0)
         self.assertEqual(ts.trail_pct_for("TAOUSDC"), 22.0)
-        self.assertEqual(ts.trail_pct_for("ARBUSDC"), 13.0)
+        self.assertEqual(ts.trail_pct_for("ARBUSDC"), 26.0)
         with self.assertRaises(KeyError):
             ts.trail_pct_for("XYZUSDC")  # No invented policy for an unconfigured asset.
 
