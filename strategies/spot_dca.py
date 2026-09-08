@@ -1388,16 +1388,30 @@ class Strategy:
                     )
                 )
                 and not self._has_open("buy")):
-            log(
-                f"  [STRAT] dip {price} <= {self.s['last_buy_price']}"
-                f"×(1-{effective_dca_drop}%) "
-                f"(tol {self.p.reentry_tolerance_pct}%) — "
-                f"DCA {effective_dca_amount:.0f}"
-            )
-            self._place(
-                "buy", self._qty_for(effective_dca_amount, entry_px), entry_px,
-                kind="DCA", amount=effective_dca_amount,
-            )
+            # Partial fill: spend what is available rather than skipping the DCA when
+            # the full size is unaffordable. Cap to the free quote balance; skip only if
+            # even that rounds to a non-positive quantity (the venue preflight still
+            # enforces the true minimum notional). A non-numeric balance (replay's mock,
+            # or an unavailable read) leaves the full amount unchanged, so the golden
+            # trace and normal fully-funded behaviour are untouched.
+            spend = effective_dca_amount
+            free_quote = self.client.free_balance(self.ccy)
+            if (isinstance(free_quote, (int, float)) and not isinstance(free_quote, bool)
+                    and math.isfinite(free_quote) and 0.0 <= free_quote < spend):
+                spend = float(free_quote)
+            qty = self._qty_for(spend, entry_px)
+            if qty <= 0:
+                log(f"  [STRAT] dip {price}: DCA skipped — available {spend:.2f} "
+                    f"{self.ccy} too small for a fill")
+            else:
+                partial = " (partial: capped to available)" if spend < effective_dca_amount else ""
+                log(
+                    f"  [STRAT] dip {price} <= {self.s['last_buy_price']}"
+                    f"×(1-{effective_dca_drop}%) "
+                    f"(tol {self.p.reentry_tolerance_pct}%) — "
+                    f"DCA {spend:.0f}{partial}"
+                )
+                self._place("buy", qty, entry_px, kind="DCA", amount=spend)
 
     # -- main loop -------------------------------------------------------------
     def run(self) -> None:

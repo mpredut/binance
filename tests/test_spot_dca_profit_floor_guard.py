@@ -77,5 +77,46 @@ class ProfitFloorGuardTest(unittest.TestCase):
         self.assertTrue(_make_strategy()._place("buy", 1.0, 90.0, kind="DCA"))
 
 
+class DcaPartialFillTest(unittest.TestCase):
+    """DCA spends what is available instead of skipping when underfunded."""
+
+    def _dca_ready(self, free_quote):
+        s = _make_strategy(dca_amount=50.0, dca_drop_pct=2.0, stop_loss_pct=0.0,
+                           takeprofit_pct=1.9, max_budget=1000.0, max_dca_buys=10)
+        s.s["qty"] = 10.0; s.s["cost"] = 1000.0            # avg 100
+        s.s["last_buy_price"] = 100.0
+        s.s["dca_buys"] = 0; s.s["spent"] = 0.0
+        s.client.free_balance.return_value = free_quote
+        s.client.ohlc_closes.return_value = []             # regime unavailable -> no brake
+        return s
+
+    def _dcas(self, s):
+        return [o for o in s.s["orders"] if o.get("kind") == "DCA"]
+
+    def test_full_dca_when_funded(self):
+        s = self._dca_ready(500.0)                         # >= 50
+        s.step(97.0, timestamp=0.0)                        # dip 97 <= 100*(1-2%)
+        self.assertEqual(len(self._dcas(s)), 1)
+        self.assertAlmostEqual(self._dcas(s)[-1]["amount"], 50.0)
+
+    def test_dca_capped_to_available_when_short(self):
+        s = self._dca_ready(20.0)                          # < 50 -> spend 20, not skip
+        s.step(97.0, timestamp=0.0)
+        self.assertEqual(len(self._dcas(s)), 1)
+        self.assertAlmostEqual(self._dcas(s)[-1]["amount"], 20.0)
+
+    def test_dca_skipped_only_when_available_is_effectively_zero(self):
+        s = self._dca_ready(0.0)
+        s.step(97.0, timestamp=0.0)
+        self.assertEqual(len(self._dcas(s)), 0)            # qty rounds to 0 -> skip
+
+    def test_non_numeric_balance_leaves_full_amount(self):
+        # A mock/unavailable balance (e.g. replay) must not cap -> preserves the golden.
+        s = self._dca_ready(MagicMock())
+        s.step(97.0, timestamp=0.0)
+        self.assertEqual(len(self._dcas(s)), 1)
+        self.assertAlmostEqual(self._dcas(s)[-1]["amount"], 50.0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
