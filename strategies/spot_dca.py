@@ -271,6 +271,7 @@ def _new_state() -> dict:
         "trend_confirm_count": 0, # consecutive uptrend bars confirming the signal
         "orders": [],           # {txid, side, vol, price, amount, kind, ts}
         "pending_intent": None, # durable pre-submit boundary before venue acceptance
+        "pending_exit": None,   # Triggered exit retained through cancellation and restart.
         # Per side/kind operational cooldown after a deterministic funds refusal.
         # This survives restarts but never blocks urgent MARKET protection.
         "placement_backoffs": {},
@@ -672,9 +673,66 @@ class Strategy:
     def _has_pending_market_exit(self) -> bool:
         return any(o["side"] == "sell" and o.get("market") for o in self.s["orders"])
 
+    def _request_market_exit(self, price: float, kind: str, *, soft_floor: bool = False) -> bool:
+        """Persist exit ownership before cancellation, then sell reconciled holdings.
+
+        A cancel acknowledgement is not terminal venue truth. Do not submit a
+        competing SELL or leave a DCA capable of filling after exit. The next
+        reconcile/step resumes this request, even after restart or a rebound.
+        """
+        pending = self.s.get("pending_exit")
+        if pending is None or (kind == "STOP" and pending["kind"] != "STOP"):
+            self.s["pending_exit"] = {"kind": kind, "soft_floor": soft_floor}
+        return self._continue_market_exit(price)
+
+    def _continue_market_exit(self, price: float) -> bool:
+        pending = self.s["pending_exit"]
+        if self.s.get("pending_intent") or self._has_pending_market_exit():
+            return False
+        # This boundary also covers resumption after an earlier failed save.
+        self._save()
+        if self._state_write_failed:
+            return False
+        if not self._cancel_orders() or self.s["orders"]:
+            log("  [STRAT] exit pending: waiting for terminal cancellation and fill reconciliation")
+            return False
+        if self.s["qty"] <= 1e-12:
+            if "fill_price" in pending:
+                self._finalize_cycle_if_flat(pending, pending["fill_price"])
+            return False
+        kind = pending["kind"]
+        factor = 0.995 if kind == "STOP" else 0.999
+        reference = round(price * factor, self.price_dec)
+        if pending.get("soft_floor") and kind != "STOP":
+            floor = self._trail_profit_floor_price(self._avg() or 0.0)
+            if floor is not None and reference < floor:
+                log("  [STRAT] soft exit pending: current reference is below the configured floor")
+                return False
+        placed = self._place(
+            "sell", self._dust_safe_qty(self.s["qty"]),
+            reference, kind=kind, market=True)
+        if placed and kind == "STOP":
+            self._emit(
+                title=f"🛑 SL {self.pair}",
+                body="Protective MARKET exit accepted; waiting for confirmed execution.",
+                source=self.notification_source, price=price, desktop=self.desktop)
+        return placed
+
     # -- Reconciliation --------------------------------------------------------
     def reconcile(self, price: float) -> None:
         self._reconcile_pending_submit()
+        if not self.s.get("pending_exit"):
+            # Preserve ownership of an accepted exit restored from pre-marker
+            # state (or recovered by client ID) before applying a racing BUY.
+            exit_order = next((o for o in self.s["orders"]
+                               if o["side"] == "sell" and o.get("market")), None)
+            if exit_order:
+                self.s["pending_exit"] = {
+                    "kind": exit_order.get("kind") or "TP",
+                    "soft_floor": (self.s.get("trail_peak") is not None
+                                   and not self.s.get("trend_mode")),
+                }
+                self._save()
         for side in ("buy", "sell"):
             for o in [x for x in self.s["orders"] if x["side"] == side]:
                 if o not in self.s["orders"]:
@@ -800,7 +858,9 @@ class Strategy:
                        body=(f"{o.get('kind')} | q{self.s['qty']:.2f} a{avg:.2f} | "
                              f"desf{self.s['spent']:.0f}{self.ccy}"),
                        source=self.notification_source, price=price, desktop=self.desktop)
-            self._cancel_orders("sell")
+            # Reprice LIMIT take-profits after a BUY, but never revoke an already
+            # submitted protective MARKET exit when a late BUY fill is reconciled.
+            self._cancel_orders("sell", exclude_market=True)
         else:  # sell
             avg = self._avg() or price
             gross = (price - avg) * vol
@@ -830,6 +890,16 @@ class Strategy:
             self.s["cost"] = 0.0
         if self.s["qty"] > 1e-12:
             return
+        if self.s["orders"] or self.s.get("pending_intent"):
+            # A terminal SELL can race an earlier DCA/TP. Closing the cycle here
+            # would erase that order and lose a later fill. Freeze new entries,
+            # resolve the remaining orders, then either exit their net remainder
+            # or finish this cycle once. Keep the actual sale reference for reentry.
+            pending = self.s.get("pending_exit") or {"kind": o.get("kind") or "TP"}
+            pending["fill_price"] = price
+            self.s["pending_exit"] = pending
+            self._save()
+            return
         keep = (self.s["realized_gross"], self.s["realized_net"],
                 self.s["fees_total"], self.s.get("cycle", 1) + 1)
         self.s = _new_state()
@@ -838,7 +908,7 @@ class Strategy:
         self.s["last_sell_price"] = price   # reentry rule must not buy back higher
         self.s["last_exit_kind"] = o.get("kind")   # TP/STOP enables stop-aware reentry
         self.s["sl_low"] = price            # Initial low for post-stop bounce reentry.
-        log(f"  [STRAT] === ciclu inchis, reincep (ciclu {self.s['cycle']}) ===")
+        log(f"  [STRAT] === cycle closed; restarting (cycle {self.s['cycle']}) ===")
 
     # -- Decision logic --------------------------------------------------------
     def _check_stop_loss(self, price: float) -> bool:
@@ -854,19 +924,9 @@ class Strategy:
             if self._has_pending_market_exit():
                 return True
             log(f"  🛑 [STRAT] STOP-LOSS: loss {loss_pct:.2f}% >= {self.p.stop_loss_pct}% — SELLING EVERYTHING (cutting the loss)")
-            # Retain orders after failed cancellation because a ghost DCA/TP can fill
-            # after exit. Submit exit only when all cancellations are accepted.
-            if not self._cancel_orders():
-                log("  ! [STRAT] STOP deferred: at least one order could not be cancelled")
-                return True
-            placed = self._place("sell", self._dust_safe_qty(self.s["qty"]),
-                                 round(price * 0.995, self.price_dec), kind="STOP", market=True)
+            placed = self._request_market_exit(price, "STOP")
             if not placed:
-                log("  ! [STRAT] STOP triggered, but the MARKET order was not accepted — retrying")
-                return True
-            self._emit(title=f"🛑 SL {self.pair} -{loss_pct:.1f}%",
-                       body=f"loss {loss_pct:.1f}% >=threshold{self.p.stop_loss_pct}% — selling everything",
-                       source=self.notification_source, price=price, desktop=self.desktop)
+                log("  [STRAT] STOP triggered; exit remains pending reconciliation or submission")
             return True
         return False
 
@@ -1150,14 +1210,9 @@ class Strategy:
             broke = self.p.trend_exit_break and sma is not None and price < sma
             if (price <= trail_stop or broke) and self.s["qty"] > 1e-12:
                 exit_px = round(price * 0.999, self.price_dec)
-                if not self._has_pending_market_exit():
-                    if not self._cancel_orders("sell", exclude_market=True):
-                        log("  ! [STRAT] TREND EXIT deferred: un SELL could not be cancelled")
-                        return True
-                    if self._place("sell", self._dust_safe_qty(self.s["qty"]), exit_px,
-                                   kind="TP", market=True):
-                        log(f"  [STRAT] TREND EXIT ({'break' if broke else 'trailing'} "
-                            f"{self.p.trend_trail_pct}%) varf {peak:.{self.price_dec}f} -> IES la {exit_px}")
+                if self._request_market_exit(price, "TP"):
+                    log(f"  [STRAT] TREND EXIT ({'break' if broke else 'trailing'} "
+                        f"{self.p.trend_trail_pct}%) peak {peak:.{self.price_dec}f} -> reference {exit_px}")
             else:
                 self._cancel_orders("sell", exclude_market=True)  # Ride the trend; do not sell.
             return True
@@ -1223,6 +1278,9 @@ class Strategy:
         # Reconcile a MARKET exit from an earlier tick before any new TP/DCA decision,
         # even if price has recovered meanwhile.
         if self._has_pending_market_exit():
+            return
+        if self.s.get("pending_exit"):
+            self._continue_market_exit(price)
             return
 
         regime = None
@@ -1317,13 +1375,9 @@ class Strategy:
                 # a contradictory DCA on the tick that triggered trailing.
                 return
             if price <= trail_stop:
-                if not self._cancel_orders("sell", exclude_market=True):
-                    log("  ! [STRAT] trailing exit deferred: un SELL could not be cancelled")
-                    return
-                if self._place("sell", self._dust_safe_qty(self.s["qty"]), exit_px,
-                               kind="TP", market=True):
-                    log(f"  [STRAT] trailing: pullback {eff_trail:.2f}% de la varf "
-                        f"{peak:.{self.price_dec}f} -> IES la {exit_px} (calarit trendul)")
+                if self._request_market_exit(price, "TP", soft_floor=True):
+                    log(f"  [STRAT] trailing: pullback {eff_trail:.2f}% from peak "
+                        f"{peak:.{self.price_dec}f} -> exit reference {exit_px}")
                 # Do not open a contradictory DCA on the exit tick.
                 return
             else:

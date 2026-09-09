@@ -15,6 +15,9 @@ their code (a deliberate convention — they are linked below).
   limits, uncapped urgent alerts/email, deduplication, and provider-quota fallback.
 
 ## Design and strategy (the durable whys)
+
+- [STRATEGY_REVIEW_2026-09-08.md](STRATEGY_REVIEW_2026-09-08.md) — shared spot exit
+  ownership fixes, reproduced Hyperliquid reentry evidence and explicit baseline drift.
 - [STRATEGY.md](STRATEGY.md) — the trading logic: trend detection (+48h lag, survival
   curve, lindy plateau), the profit guard, trailing re-buy, the T212 profit guard/ladder, xStocks.
 - [RTRADE.md](RTRADE.md) — the rtrade policy, the BUY/SELL cycle, financial evaluation,

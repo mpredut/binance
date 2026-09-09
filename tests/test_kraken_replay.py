@@ -55,6 +55,24 @@ def _params(**over):
 
 
 class ReplayEngineTest(unittest.TestCase):
+    def test_trailing_cancels_unfilled_entry_remainder_before_market_exit(self):
+        bars = [(100, 101, 99, 100), (100, 107, 99, 106),
+                (106, 107, 102, 102), (102, 103, 95, 102)]
+        for policy in ("buy_first", "sell_first"):
+            with self.subTest(policy=policy), patch.object(strat, "log"):
+                result = rp.run_replay(
+                    bars, _params(tp_trend_hold=True, tp_trail_pct=3.0,
+                                  reentry_drop_pct=2.2), bar_minutes=240,
+                    execution=rp.ExecutionModel(
+                        partial_fill_ratio=0.5, intrabar_policy=policy),
+                    include_decision_trace=True)
+            self.assertEqual(result["ambiguous_bars"], 0)
+            self.assertEqual(result["fills"], 2)  # One partial BUY and one full MARKET SELL.
+            self.assertEqual(result["open_qty"], 0.0)
+            exits = [o for o in result["decision_trace"] if o["side"] == "sell"]
+            self.assertEqual(len(exits), 1)
+            self.assertTrue(exits[0]["market"])
+
     def test_partial_limit_fill_remains_for_the_next_bar(self):
         bars = [(100, 101, 99, 100), (100, 101, 99, 100)]
         full = rp.run_replay(bars, _params(), fee_pct=0.26)
