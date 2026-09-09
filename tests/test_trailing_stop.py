@@ -275,14 +275,72 @@ class TestPerCoinRebuy(Base):
         import binance_api.trailing_stop as m
         from types import SimpleNamespace
         api = FakeApi(250.0); ts = self.ts(api)
-        kl = lambda n: [[0, 0, 0, 0, "100.0", 0, 0]] * n     # daily klines, close=100
+        day = int(m.time.time() // 86400)
+        kl = lambda n: [[d * 86400000, 0, 0, 0, "100.0", 0,
+                         (d + 1) * 86400000 - 1] for d in range(day - n + 1, day + 1)]
         ts.api.client = SimpleNamespace(get_klines=lambda **kw: kl(m.REBUY_TREND_DAYS + 1))
         self.assertTrue(ts._long_trend_up("TAOUSDC"))          # price 250 > SMA 100 -> up
-        ts._long_trend_cache.clear(); api.price = 90.0
+        api.price = 90.0  # The cached average must not freeze yesterday's verdict.
         self.assertFalse(ts._long_trend_up("TAOUSDC"))         # price 90 < SMA 100 -> down
         ts._long_trend_cache.clear()
         ts.api.client = SimpleNamespace(get_klines=lambda **kw: kl(4))   # <N -> fail closed
         self.assertFalse(ts._long_trend_up("TAOUSDC"))
+
+    def test_auto_keeps_recovery_intent_while_down_then_buys_after_recovery(self):
+        import binance_api.trailing_stop as m
+        from unittest.mock import patch
+        api = FakeApi(250.0); ts = self.ts(api)
+        with patch.dict(m.REBUY_MODE_BY_SYMBOL, TAOUSDC="auto"):
+            ts._long_trend_up = lambda symbol: False
+            state = self._sell_then_confirm(ts, api)
+            self.assertIn("rebuy", state)
+            api.free = 0.0
+            api.price = 150.0; ts.check_once()
+            self.assertEqual(ts._load()["TAOUSDC"]["rebuy"]["low"], 150.0)
+            self.assertFalse(any(o["side"] == "BUY" for o in self.po.orders))
+            ts._long_trend_up = lambda symbol: True
+            api.price = 160.0; ts.check_once()
+            self.assertEqual(len([o for o in self.po.orders if o["side"] == "BUY"]), 1)
+
+    def test_declared_policy_failure_never_falls_back_to_global_true(self):
+        from unittest.mock import Mock
+        ts = self.ts(FakeApi(250.0))
+        ts.rebuy_enabled_for = Mock(side_effect=RuntimeError("unavailable"))
+        self.assertFalse(ts.core._rebuy_for("TAOUSDC"))
+        ts.rebuy_enabled_for = Mock(return_value=None)
+        self.assertFalse(ts.core._rebuy_for("TAOUSDC"))
+
+    def test_below_minimum_recovery_is_not_treated_as_a_completed_buy(self):
+        ts = self.ts(FakeApi(100.0))
+        state = {"TAOUSDC": {"peak": 100.0, "rebuy": {"qty": 0.01, "low": 90.0, "sell_price": 100.0}}}
+        ts.core._handle_rebuy("TAOUSDC", "TAO", "TAOUSDC", state["TAOUSDC"], 100.0, state)
+        self.assertIn("rebuy", state["TAOUSDC"])
+        self.assertEqual(self.po.orders, [])
+
+    def test_auto_rejects_stale_gapped_and_nonfinite_candles(self):
+        import binance_api.trailing_stop as m
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        day = 20000
+        good = [[d * 86400000, 0, 0, 0, "100", 0, (d + 1) * 86400000 - 1]
+                for d in range(day - 3, day + 1)]
+        bad_sets = [good[:-2], good[1:] + [good[-1]],
+                    [good[0], good[0], good[2], good[3]]]
+        bad_close = [row[:] for row in good]; bad_close[1][4] = "nan"
+        bad_sets.append(bad_close)
+        with patch.object(m, "REBUY_TREND_DAYS", 3), patch.object(m.time, "time", return_value=day * 86400 + 60):
+            for candles in bad_sets:
+                ts = self.ts(FakeApi(250.0))
+                ts.api.client = SimpleNamespace(get_klines=lambda **kw: candles)
+                self.assertFalse(ts._long_trend_up("TAOUSDC"))
+            ts.api.client = SimpleNamespace(get_klines=lambda **kw: good)
+            self.assertTrue(ts._long_trend_up("TAOUSDC"))
+            ts.api.price = float("inf")
+            self.assertFalse(ts._long_trend_up("TAOUSDC"))
+            ts.api.price = 250.0
+            ts.api.client = SimpleNamespace(get_klines=lambda **kw: good[:-1])
+            with patch.object(m.time, "time", return_value=(day + 1) * 86400 + 60):
+                self.assertFalse(ts._long_trend_up("TAOUSDC"))
 
 
 class TestPerMoneda(Base):

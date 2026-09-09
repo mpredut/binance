@@ -16,6 +16,8 @@ their code (a deliberate convention — they are linked below).
 
 ## Design and strategy (the durable whys)
 
+- [STRATEGY_REVIEW_2026-09-09.md](STRATEGY_REVIEW_2026-09-09.md) — finite-cash profile
+  comparison, automatic re-buy corrections and unpromoted financial candidates.
 - [STRATEGY_REVIEW_2026-09-08.md](STRATEGY_REVIEW_2026-09-08.md) — shared spot exit
   ownership fixes, reproduced Hyperliquid reentry evidence and explicit baseline drift.
 - [STRATEGY.md](STRATEGY.md) — the trading logic: trend detection (+48h lag, survival

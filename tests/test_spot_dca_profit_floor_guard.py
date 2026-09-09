@@ -110,12 +110,39 @@ class DcaPartialFillTest(unittest.TestCase):
         s.step(97.0, timestamp=0.0)
         self.assertEqual(len(self._dcas(s)), 0)            # qty rounds to 0 -> skip
 
-    def test_non_numeric_balance_leaves_full_amount(self):
-        # A mock/unavailable balance (e.g. replay) must not cap -> preserves the golden.
-        s = self._dca_ready(MagicMock())
+    def test_unknown_or_invalid_balance_does_not_authorize_a_buy(self):
+        for balance in (None, MagicMock(), True, -1, float("nan"), float("inf")):
+            with self.subTest(balance=balance):
+                s = self._dca_ready(balance)
+                s.step(97.0, timestamp=0.0)
+                self.assertEqual(self._dcas(s), [])
+
+    def test_balance_outage_does_not_submit_or_crash(self):
+        s = self._dca_ready(50.0)
+        s.client.free_balance.side_effect = RuntimeError("offline")
         s.step(97.0, timestamp=0.0)
-        self.assertEqual(len(self._dcas(s)), 1)
-        self.assertAlmostEqual(self._dcas(s)[-1]["amount"], 50.0)
+        self.assertEqual(self._dcas(s), [])
+
+    def test_remaining_cycle_budget_can_fund_a_smaller_dca(self):
+        s = self._dca_ready(500.0)
+        s.s["spent"] = 985.0
+        s.step(97.0, timestamp=0.0)
+        order = self._dcas(s)[0]
+        self.assertEqual(order["amount"], 15.0)
+        self.assertLessEqual(order["vol"] * order["price"], 15.0)
+
+    def test_rounding_does_not_exceed_capped_balance(self):
+        s = self._dca_ready(20.0)
+        s.vol_dec = 2
+        s.step(97.0, timestamp=0.0)
+        order = self._dcas(s)[0]
+        self.assertLessEqual(order["vol"] * order["price"], 20.0)
+
+    def test_exact_nominal_balance_is_still_binding_after_price_rounding(self):
+        s = self._dca_ready(50.0)
+        s.step(97.0, timestamp=0.0)
+        order = self._dcas(s)[0]
+        self.assertLessEqual(order["vol"] * order["price"], 50.0)
 
 
 if __name__ == "__main__":

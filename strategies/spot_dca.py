@@ -1433,7 +1433,7 @@ class Strategy:
                     price, self.s["last_buy_price"], effective_dca_drop,
                     self.p.reentry_tolerance_pct,
                 )
-                and self.s["spent"] + effective_dca_amount <= self._effective_max_budget()
+                and self.s["spent"] < self._effective_max_budget()
                 and not (
                     self.p.dca_trend_brake
                     and self._regime_matches(
@@ -1442,23 +1442,30 @@ class Strategy:
                     )
                 )
                 and not self._has_open("buy")):
-            # Partial fill: spend what is available rather than skipping the DCA when
-            # the full size is unaffordable. Cap to the free quote balance; skip only if
-            # even that rounds to a non-positive quantity (the venue preflight still
-            # enforces the true minimum notional). A non-numeric balance (replay's mock,
-            # or an unavailable read) leaves the full amount unchanged, so the golden
-            # trace and normal fully-funded behaviour are untouched.
-            spend = effective_dca_amount
-            free_quote = self.client.free_balance(self.ccy)
-            if (isinstance(free_quote, (int, float)) and not isinstance(free_quote, bool)
-                    and math.isfinite(free_quote) and 0.0 <= free_quote < spend):
-                spend = float(free_quote)
+            # Resize the request, not an already accepted order. Unknown funding
+            # cannot justify a new BUY. Venue preflight still owns fee/minimum rules.
+            try:
+                free_quote = self.client.free_balance(self.ccy)
+            except Exception as exc:
+                log(f"  [STRAT] DCA deferred: quote balance unavailable ({exc})")
+                return
+            if (not isinstance(free_quote, (int, float)) or isinstance(free_quote, bool)
+                    or not math.isfinite(free_quote) or free_quote < 0):
+                log("  [STRAT] DCA deferred: quote balance is not a finite non-negative number")
+                return
+            available = min(float(free_quote), self._effective_max_budget() - self.s["spent"])
+            spend = min(effective_dca_amount, available)
             qty = self._qty_for(spend, entry_px)
-            if qty <= 0:
+            if spend < effective_dca_amount or qty * round(entry_px, self.price_dec) > available:
+                # Round down when funds or the remaining cycle budget are binding.
+                entry_px = round(entry_px, self.price_dec)
+                qty = (math.floor(spend / entry_px * 10 ** self.vol_dec) / 10 ** self.vol_dec
+                       if entry_px > 0 else 0.0)
+            if qty <= 0 or qty < self.ordermin:
                 log(f"  [STRAT] dip {price}: DCA skipped — available {spend:.2f} "
                     f"{self.ccy} too small for a fill")
             else:
-                partial = " (partial: capped to available)" if spend < effective_dca_amount else ""
+                partial = " (resized to available funds/budget)" if spend < effective_dca_amount else ""
                 log(
                     f"  [STRAT] dip {price} <= {self.s['last_buy_price']}"
                     f"×(1-{effective_dca_drop}%) "

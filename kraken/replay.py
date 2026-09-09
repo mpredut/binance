@@ -6,6 +6,7 @@ ambiguity without network, notifications, or persistent state.
 
 from __future__ import annotations
 
+import math
 from unittest.mock import MagicMock
 
 from offline.backtests.execution import (
@@ -60,9 +61,18 @@ def run_replay(
     execution: ExecutionModel | None = None,
     fee_model: FeeModel | None = None,
     include_decision_trace: bool = False,
+    initial_cash: float | None = None,
 ) -> dict:
-    """Run replay with defaults that preserve the previous baseline."""
+    """Replay decisions, optionally enforcing a finite cash account and fee reserves.
+
+    Omitted cash retains legacy funding assumptions for baseline compatibility.
+    Explicit cash rejects unaffordable requests, reserves open BUYs, and settles
+    fill notional/fees; it does not inject capital after losses or cycle resets.
+    """
     _validate_replay(ohlc, params, bar_minutes)
+    if initial_cash is not None and (isinstance(initial_cash, bool)
+            or not math.isfinite(initial_cash) or initial_cash <= 0):
+        raise ValueError("initial_cash must be finite and positive")
     model = execution or ExecutionModel()
     fees = fee_model or FeeModel(fee_pct, fee_pct)
     return choose_intrabar_scenario(
@@ -75,6 +85,7 @@ def run_replay(
             warmup_ohlc=warmup_ohlc,
             execution=scenario,
             include_decision_trace=include_decision_trace,
+            initial_cash=initial_cash,
         ),
     )
 
@@ -88,11 +99,15 @@ def _run_once(
     warmup_ohlc,
     execution: ExecutionModel,
     include_decision_trace: bool,
+    initial_cash: float | None,
 ) -> dict:
     client = MagicMock()
     # Replay declares its synthetic execution precision explicitly; live engines
     # must obtain this metadata from the venue.
     client.pair_precision.return_value = PairPrecision(5, 8, 0.0, "REPLAY")
+    # Legacy replay explicitly assumes funding up to the configured cycle cap.
+    # A mock or unavailable live balance must never imply unlimited buying power.
+    client.free_balance.return_value = float(params.effective_max_budget())
     original_notify = _strat.notify
     _strat.notify = _silent
     try:
@@ -112,8 +127,27 @@ def _run_once(
         decision_trace = []
         current_bar = -1
         original_place = strategy._place
+        cash = float(initial_cash) if initial_cash is not None else None
+        min_cash = cash
+        cash_refusals = 0
+
+        def free_quote(_asset):
+            reserved = sum(o["vol"] * o["price"] *
+                           (1 + fee_model.rate_pct(market=bool(o.get("market"))) / 100)
+                           for o in strategy.s["orders"] if o["side"] == "buy")
+            return max(0.0, cash - reserved)
+
+        if cash is not None:
+            client.free_balance.side_effect = free_quote
 
         def traced_place(side, vol, price, kind, amount=0.0, market=False):
+            nonlocal cash_refusals
+            if cash is not None and side == "buy":
+                required = round(vol, strategy.vol_dec) * round(price, strategy.price_dec)
+                required *= 1 + fee_model.rate_pct(market=market) / 100
+                if required > free_quote(params.currency) + 1e-9:
+                    cash_refusals += 1
+                    return False
             accepted = original_place(
                 side, vol, price, kind, amount=amount, market=market,
             )
@@ -128,14 +162,14 @@ def _run_once(
                 })
             return accepted
 
-        if include_decision_trace:
+        if include_decision_trace or cash is not None:
             strategy._place = traced_place
         cycle0 = strategy.s.get("cycle", 1)
         wins = fill_count = ambiguous_bars = 0
         turnover_notional = 0.0
         trade_pnls = []
         cycle_net_start = strategy.s["realized_net"]
-        initial_capital = float(params.effective_max_budget())
+        initial_capital = float(params.effective_max_budget() if cash is None else cash)
         equity_curve = [initial_capital]
         exposure = []
 
@@ -184,6 +218,11 @@ def _run_once(
                         fill_order["vol"] = volume
                         gross_before = strategy.s["realized_gross"]
                     fee = fee_model.rate_pct(market=market) / 100.0 * volume * price
+                    if cash is not None:
+                        cash += (-1 if side == "buy" else 1) * volume * price - fee
+                        min_cash = min(min_cash, cash)
+                        if cash < -1e-8:
+                            raise ValueError("cash account overdrawn by simulated execution")
                     strategy._apply_fill(
                         fill_order, volume, price, fee=fee, final=complete,
                     )
@@ -242,4 +281,7 @@ def _run_once(
     })
     if include_decision_trace:
         result["decision_trace"] = decision_trace
+    if cash is not None:
+        result["funding"] = {"initial_cash": initial_cash, "final_cash": rounded(cash),
+                             "minimum_cash": rounded(min_cash), "refused_buys": cash_refusals}
     return result

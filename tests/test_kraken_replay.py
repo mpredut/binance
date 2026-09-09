@@ -55,6 +55,25 @@ def _params(**over):
 
 
 class ReplayEngineTest(unittest.TestCase):
+    def test_cash_account_rejects_entry_that_cannot_pay_its_fee(self):
+        result = rp.run_replay([(100, 101, 99, 100)] * 3, _params(), initial_cash=100)
+        self.assertEqual(result["fills"], 0)
+        self.assertGreater(result["funding"]["refused_buys"], 0)
+        self.assertEqual(result["funding"]["final_cash"], 100)
+
+    def test_cash_account_rejects_invalid_capital(self):
+        for cash in (0, -1, True, float("nan"), float("inf")):
+            with self.subTest(cash=cash), self.assertRaises(ValueError):
+                rp.run_replay([(100, 101, 99, 100)], _params(), initial_cash=cash)
+
+    def test_cash_account_equity_matches_cash_plus_marked_inventory(self):
+        bars = [(100, 101, 99, 100), (100, 101, 90, 94), (94, 95, 89, 90)]
+        result = rp.run_replay(bars, _params(), initial_cash=120,
+                               execution=rp.ExecutionModel(partial_fill_ratio=0.5))
+        self.assertGreaterEqual(result["funding"]["minimum_cash"], 0)
+        self.assertAlmostEqual(result["funding"]["final_cash"] + result["open_qty"] * 90,
+                               120 + result["total"], places=6)
+
     def test_trailing_cancels_unfilled_entry_remainder_before_market_exit(self):
         bars = [(100, 101, 99, 100), (100, 107, 99, 106),
                 (106, 107, 102, 102), (102, 103, 95, 102)]

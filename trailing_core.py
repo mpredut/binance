@@ -102,7 +102,7 @@ class TrailingCore:
                if filled > 0 and float(status.cost or 0.0) > 0 else price)
         if action == "SELL" and filled > 0:
             st["peak"] = avg
-            if self._rebuy_for(pair):
+            if self._rebuy_for(pair, arm=True):
                 st["rebuy"] = {"qty": filled, "sell_price": avg, "low": avg}
         elif action == "REBUY" and filled > 0:
             rb = st.get("rebuy") or {}
@@ -132,11 +132,15 @@ class TrailingCore:
         # strategy may recreate the same deterministic intent on a later tick.
         return True
 
-    def _rebuy_for(self, pair) -> bool:
-        """Per-coin re-buy switch: an adapter may expose rebuy_enabled_for(pair)
-        (the Binance adapter reads the registry); otherwise the constructor-level
-        global applies (Kraken, tests). A non-bool result falls back to the global."""
-        getter = getattr(self.a, "rebuy_enabled_for", None)
+    def _rebuy_for(self, pair, *, arm=False) -> bool:
+        """Preserve configured recovery intent; check dynamic policy before buying.
+
+        Only an absent adapter policy uses the constructor-level setting. An
+        unavailable or malformed declared policy cannot authorize a BUY.
+        """
+        getter = getattr(self.a, "rebuy_configured_for", None) if arm else None
+        if getter is None:
+            getter = getattr(self.a, "rebuy_enabled_for", None)
         if getter is not None:
             try:
                 value = getter(pair)
@@ -144,6 +148,7 @@ class TrailingCore:
                 value = None
             if isinstance(value, bool):
                 return value
+            return False
         return self.rebuy_enabled
 
     # -- re-buy after a crash sale --------------------------------------------
@@ -164,7 +169,9 @@ class TrailingCore:
         if qty <= 0:
             st.pop("rebuy", None)
             return
-        if self.enabled and qty * price >= self.min_notional:
+        if self.enabled:
+            if qty * price < self.min_notional:
+                return  # No order was sent; retain recovery intent for a later tick.
             self.a.execute_rebuy(
                 key, asset, pair, qty, price, rb,
                 self._pending_persist(state, st),
@@ -204,10 +211,14 @@ class TrailingCore:
             st["warmup_at"] = ref * (1 + self.min_profit_pct / 100.0)  # activation threshold
         if self._reconcile_pending(state, st, price, pair):
             return
-        if self._rebuy_for(pair) and st.get("rebuy"):         # handle pending re-buy BEFORE notional check (free~0 after sale)
-            self._handle_rebuy(key, asset, pair, st, price, state)
-            if st.get("pending_order"):
-                return
+        if st.get("rebuy"):
+            # Keep the low while a dynamic gate is closed, so later recovery can
+            # resume the existing intent without forgetting the intervening dip.
+            st["rebuy"]["low"] = min(st["rebuy"].get("low", price), price)
+            if self._rebuy_for(pair):
+                self._handle_rebuy(key, asset, pair, st, price, state)
+                if st.get("pending_order"):
+                    return
         if free * price < self.min_notional:
             return                                            # nothing to protect
         if "warmup_at" in st:

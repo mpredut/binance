@@ -333,6 +333,7 @@ class TestProgressiveDcaSpacing(unittest.TestCase):
 
         s.step(97.5)  # progressive threshold = 2% + 2x0.5% = 3%; it still does not buy
         self.assertFalse(s._has_open("buy"))
+        s.client.free_balance.return_value = 1000.0
         s.step(97.0)
         self.assertTrue(s._has_open("buy"))
 

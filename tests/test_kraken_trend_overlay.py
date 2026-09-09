@@ -212,6 +212,7 @@ class TrendOverlayTest(unittest.TestCase):
             "last_buy_price": 100.0,
         })
         s.client.ohlc_closes.return_value = []
+        s.client.free_balance.return_value = 1000.0
 
         s.step(95.0)
 
