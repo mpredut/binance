@@ -68,6 +68,23 @@ def _force_timeout(api_obj, seconds: float = 30.0) -> None:
             return orig(*a, **kw)
 
         sess.request = _req
+
+        # Retry ONLY connection-establishment failures (connect), notably the
+        # intermittent 'Failed to resolve api.hyperliquid.xyz' during VPN/resolver
+        # blips: those happen BEFORE the request is sent, so a retry cannot double-
+        # submit an order. read/status/redirect stay 0 so a POST that may already
+        # have reached the exchange is never replayed. This shrinks the "blind" ticks
+        # the systemd-resolved cache alone cannot fully prevent.
+        try:
+            from requests.adapters import HTTPAdapter
+            from urllib3.util.retry import Retry
+            retry = Retry(total=3, connect=3, read=0, status=0, redirect=0,
+                          backoff_factor=0.4, raise_on_status=False)
+            adapter = HTTPAdapter(max_retries=retry)
+            sess.mount("https://", adapter)
+            sess.mount("http://", adapter)
+        except Exception:  # noqa: BLE001 — retries are best-effort
+            pass
     except Exception:  # noqa: BLE001 — do not block startup if SDK internals change
         pass
 
