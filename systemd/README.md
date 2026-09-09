@@ -26,6 +26,12 @@ of a stopped fleet (`pubip` is not the exit IP, `connect` silently ignored witho
 `background enable`, logging out deletes the dedicated IP), and how the self-healing
 works.
 
+`DNS_RESILIENCE.md` documents the two defences against the intermittent
+`api.hyperliquid.xyz` resolution failures seen during VPN blips: the systemd-resolved
+cache (`/etc/systemd/resolved.conf`: `Cache`/`StaleRetentionSec`/`FallbackDNS`) and the
+connect-only retry in `hyperliquid/hl_client.py`. Recreate BOTH on a rebuild — the cache
+needs `sudo`, the retry ships with the code.
+
 `binance.service` keeps `flota_start.sh` alive. The fleet checks its processes every
 30s, restarts dead/zombie ones, and sends `SIGCONT` to stopped ones. Cron
 additionally runs `healthcheck.sh --supervise` every three minutes and alerts on

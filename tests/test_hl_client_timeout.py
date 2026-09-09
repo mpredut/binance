@@ -80,6 +80,19 @@ class HyperliquidTimeoutTest(unittest.TestCase):
         self.assertEqual(api.timeout, 3)
         self.assertEqual(api.session.request("POST", "/info", timeout=2), 2)
 
+    def test_connect_only_retries_are_mounted_for_dns_blips(self):
+        # Intermittent 'Failed to resolve api.hyperliquid.xyz' should retry within the
+        # call (connect failures happen before the request is sent). read/status stay 0
+        # so a POST that may have reached the exchange is never replayed (no double order).
+        import requests
+        api = _Api(timeout=None)
+        api.session = requests.Session()
+        module._force_timeout(api, seconds=10)
+        retries = api.session.get_adapter("https://api.hyperliquid.xyz").max_retries
+        self.assertEqual(retries.connect, 3)
+        self.assertEqual(retries.read, 0)
+        self.assertEqual(retries.status, 0)
+
 
 if __name__ == "__main__":
     unittest.main()
