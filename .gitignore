@@ -69,3 +69,4 @@ plot_*.png
 /*.patch
 *:Zone.Identifier
 .env.bak*
+*.bak_*
