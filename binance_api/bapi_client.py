@@ -29,20 +29,15 @@ def _install_retry(cl):
     """Retry transient DNS/connection/5xx/429 failures on idempotent methods only.
 
     Never retry POST order placement: if the request succeeds but its response is lost,
-    retrying could duplicate a real-money order. Leaving ``allowed_methods`` unset uses
-    urllib3's idempotent-method default and excludes POST. Together with the timeout, a
-    transient fault fails quickly and GET requests retry internally instead of hanging.
+    retrying could duplicate a real-money order. urllib3's idempotent-method default
+    (kept by the shared helper) excludes POST. Together with the timeout, a transient
+    fault fails quickly and GET requests retry internally instead of hanging.
     """
-    try:
-        from requests.adapters import HTTPAdapter
-        from urllib3.util.retry import Retry
-        retry = Retry(total=3, connect=3, read=3, backoff_factor=1.0,
-                      status_forcelist=[429, 502, 503, 504])
-        adapter = HTTPAdapter(max_retries=retry)
-        cl.session.mount("https://", adapter)
-        cl.session.mount("http://", adapter)
-    except Exception as e:  # noqa: BLE001 — a timeout still provides protection if setup fails.
-        print(f"[bapi_client] _install_retry failed (ignor, ramane timeout): {e}")
+    from providers.http_resilience import mount_connect_retry
+    if not mount_connect_retry(cl.session, attempts=3, backoff=1.0, read=3,
+                               status_forcelist=[429, 502, 503, 504],
+                               raise_on_status=True):
+        print("[bapi_client] _install_retry: adapter mount failed (timeout still guards)")
 
 
 def sync_time(safety_margin_ms=TIME_SAFETY_MARGIN_MS):
