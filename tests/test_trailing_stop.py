@@ -292,6 +292,11 @@ class TestPerCoinRebuy(Base):
         api = FakeApi(250.0); ts = self.ts(api)
         with patch.dict(m.REBUY_MODE_BY_SYMBOL, TAOUSDC="auto"):
             ts._long_trend_up = lambda symbol: False
+            # Isolate the LONG-term gate under test (auto's _long_trend_up). The
+            # orthogonal instant-trend knife-catch filter (rebuy_skip_if_trend_down)
+            # is exercised elsewhere; keep it satisfied so it does not mask the
+            # long-term recovery this test asserts.
+            ts.trend = lambda pair: 1.0
             state = self._sell_then_confirm(ts, api)
             self.assertIn("rebuy", state)
             api.free = 0.0
