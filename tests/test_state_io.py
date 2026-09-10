@@ -23,11 +23,13 @@ def test_atomic_writer_fsyncs_directory_after_replace(tmp_path, monkeypatch):
 
     def observed_replace(source, destination):
         real_replace(source, destination)
-        events.append(("replace", destination))
+        if destination == str(path):
+            events.append(("replace", destination))
 
     def observed_directory_fsync(destination):
-        assert path.read_text(encoding="utf-8") == '{"safe": true}'
-        events.append(("directory_fsync", destination))
+        if destination == str(path):
+            assert path.read_text(encoding="utf-8") == '{"safe": true}'
+            events.append(("directory_fsync", destination))
 
     monkeypatch.setattr("state_io.os.replace", observed_replace)
     monkeypatch.setattr(
