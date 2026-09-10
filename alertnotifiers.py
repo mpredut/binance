@@ -480,9 +480,22 @@ class AlertNotifier:
 
         Email keeps its own deduplication. Phone failure remains False even when
         SMTP accepts the fallback; SMTP acceptance is not proof of inbox receipt.
+
+        The subject names the actual incident (bot-event name, or the symbols) so it
+        is legible at a glance on a phone; the ntfy-quota note is trailing context,
+        not the headline. The full incident stays in the body.
         """
-        sent = AlertNotifier.send_email_batch(
-            alerts, subject="Urgent trading alert: ntfy quota exhausted")
+        alerts = list(alerts)
+        if len(alerts) == 1 and isinstance(alerts[0], dict) and alerts[0].get("name"):
+            headline = str(alerts[0]["name"])
+        else:
+            symbols = ", ".join(dict.fromkeys(
+                AlertNotifier.alert_symbol(a) for a in alerts)) or "?"
+            headline = f"{len(alerts)} alert(s): {symbols}"
+        if len(headline) > 90:
+            headline = headline[:87] + "..."
+        subject = f"Urgent: {headline} (ntfy quota exhausted -> email)"
+        sent = AlertNotifier.send_email_batch(alerts, subject=subject)
         print(f"[Notifier] Urgent email fallback {'accepted' if sent else 'failed'}")
 
     @staticmethod

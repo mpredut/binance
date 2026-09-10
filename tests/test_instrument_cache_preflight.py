@@ -345,6 +345,36 @@ class InstrumentCachePreflightTest(unittest.TestCase):
                     placeorder.apply_weight_limit(
                         "TESTUSDC", "BUY", price, qty, 10.0)
 
+    def test_policy_downtime_fails_open_for_sell_but_not_buy(self):
+        # Policy DOWNTIME (the weight fetch or the trade-stats source raises) must
+        # never trap a SELL/exit: it fails open to the balance cap so a position can
+        # always leave. A BUY still fails closed (do not add unverified exposure).
+        available = 5.0
+        for label, reason, weight_patch, stats_patch in (
+                ("weight-policy-down", "weight_policy_unavailable",
+                 patch.object(placeorder.pa,
+                              "get_weight_for_cash_permission_at_quant_time",
+                              side_effect=RuntimeError("pa down")),
+                 patch("binance_api.bapi_allorders.get_total_traded_stats",
+                       return_value={"SELL": {"total_value": 0.0},
+                                     "BUY": {"total_value": 0.0}})),
+                ("trade-stats-down", "trade_stats_unavailable",
+                 patch.object(placeorder.pa,
+                              "get_weight_for_cash_permission_at_quant_time",
+                              return_value=0.03),
+                 patch("binance_api.bapi_allorders.get_total_traded_stats",
+                       side_effect=RuntimeError("stats down"))),
+        ):
+            with self.subTest(label=label):
+                with weight_patch, stats_patch:
+                    self.assertEqual(
+                        placeorder.apply_weight_limit(
+                            "TAOUSDC", "SELL", 260.0, 1.5827, available),
+                        available)
+                    with self.assertRaisesRegex(SubmissionRefused, reason):
+                        placeorder.apply_weight_limit(
+                            "TAOUSDC", "BUY", 260.0, 1.5827, available)
+
     def test_qty_none_remains_supported_by_valid_real_weight_policy(self):
         provider = _WeightedBinanceProvider()
         instrument = self._binance_instrument(provider)

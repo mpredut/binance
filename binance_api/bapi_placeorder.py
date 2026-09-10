@@ -168,13 +168,28 @@ def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
     if auto_qty:
         required_qty = available_qty
 
+    is_sell = str(order_type).upper() == "SELL"
+
+    def _fail_open_or_refuse(reason, exc):
+        # An UNAVAILABLE policy is infrastructure downtime, not a legitimate cap of
+        # zero. Failing closed is prudent for a BUY (never add exposure we cannot
+        # verify), but trapping a SELL for the whole retry TTL is dangerous -- it can
+        # leave a position unable to exit for a full day. A STOP/trailing exit is
+        # already exempt upstream (apply_policy=False); a plain SELL is likewise
+        # exposure-reducing, so fail OPEN to the already-validated balance cap. The
+        # per-side throttle still applies whenever the policy returns a usable value;
+        # only downtime is prevented from blocking an exit.
+        if is_sell:
+            print(f"apply_weight_limit -> SELL {symbol}: {reason} ({exc}); failing "
+                  f"OPEN to balance cap {available_qty:.8f} so the exit is not trapped.")
+            return available_qty
+        raise SubmissionRefused(reason) from exc
+
     try:
         weight = float(pa.get_weight_for_cash_permission_at_quant_time(
             symbol, order_type))
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise SubmissionRefused("weight_policy_unavailable") from exc
     except Exception as exc:
-        raise SubmissionRefused("weight_policy_unavailable") from exc
+        return _fail_open_or_refuse("weight_policy_unavailable", exc)
     if not math.isfinite(weight) or not 0 < weight <= 1:
         raise SubmissionRefused("invalid_weight_policy_weight")
 
@@ -182,10 +197,8 @@ def apply_weight_limit(symbol, order_type, price, required_qty, available_qty):
         stats = apiorders.get_total_traded_stats(symbol)
         side_stats = stats[order_type.upper()]
         traded_value = float(side_stats["total_value"])
-    except (KeyError, TypeError, ValueError, OverflowError) as exc:
-        raise SubmissionRefused("trade_stats_unavailable") from exc
     except Exception as exc:
-        raise SubmissionRefused("trade_stats_unavailable") from exc
+        return _fail_open_or_refuse("trade_stats_unavailable", exc)
     if not math.isfinite(traded_value) or traded_value < 0:
         raise SubmissionRefused("invalid_trade_stats")
 

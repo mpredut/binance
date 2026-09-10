@@ -117,7 +117,7 @@ class NotificationDeliveryPolicyTest(unittest.TestCase):
         self.assertFalse(AlertNotifier.send_phone_webhook_batch([second], webhook_url=_WEBHOOK))
         self.assertEqual(post.call_count, 1)  # Honor the actual provider quota after its rejection.
         fallback_calls = [call for call in email.call_args_list
-                          if call.kwargs.get("subject") == "Urgent trading alert: ntfy quota exhausted"]
+                          if "ntfy quota exhausted -> email" in (call.kwargs.get("subject") or "")]
         self.assertEqual([call.args[0] for call in fallback_calls], [[first], [second]])
 
     @mock.patch.object(AlertNotifier, "send_email_batch", return_value=False)

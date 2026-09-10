@@ -191,6 +191,25 @@ def _count_events(paths, offsets):
     return counts, samples, files_hit, scanned
 
 
+def _humanize_sample(sample):
+    """Render one raw pipe-delimited outcome sample as a readable one-liner.
+
+    Outcome lines are ``ts|symbol|side|price|qty|status|reason|source``. When the
+    shape matches we print e.g. ``SELL TAOUSDC qty 1.5827 @ 262.0 -- refused:
+    weight_policy_unavailable (market_api.py)`` so the alert names the pair, side and
+    reason in plain words rather than a raw log line. The pair identifies the venue
+    (a ...USDC pair is the Binance book) and the source module confirms it. Anything that does
+    not match the shape (free-text log lines) is returned unchanged.
+    """
+    parts = sample.split("|")
+    if len(parts) < 7 or not parts[1] or not parts[2]:
+        return sample
+    _ts, symbol, side, price, qty, status, reason = parts[:7]
+    source = parts[7] if len(parts) > 7 and parts[7] else ""
+    tail = f" ({source})" if source else ""
+    return f"{side.upper()} {symbol} qty {qty} @ {price} -- {status}: {reason}{tail}"
+
+
 def check_once(now=None):
     now = now if now is not None else time.time()
     state = wc.load_state(STATE_FILE)
@@ -230,7 +249,7 @@ def check_once(now=None):
         lines.append(f"  • {label}: {counts[cat]} occurrences (threshold {thr:.0f}) in "
                      f"{', '.join(sorted(files_hit[cat])) or '?'}")
         if cat in samples:
-            lines.append(f"      ex: {samples[cat]}")
+            lines.append(f"      e.g. {_humanize_sample(samples[cat])}")
     title = "⚠️ Log anomaly threshold exceeded"
     message = ("The error rate has been above the threshold since the last check:\n" + "\n".join(lines)
                + "\nCheck the affected bots.")
