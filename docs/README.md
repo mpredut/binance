@@ -16,6 +16,9 @@ their code (a deliberate convention — they are linked below).
 
 ## Design and strategy (the durable whys)
 
+- [RSI_BOLLINGER_REVIEW_2026-09-14.md](RSI_BOLLINGER_REVIEW_2026-09-14.md) — RSI and
+  Bollinger tested as a trigger (Exp 8) and as a DCA filter (Exp 9); both rejected on 329
+  days with an overfit split. Do not add them; the existing signal stack covers it better.
 - [STRATEGY_REVIEW_2026-09-09.md](STRATEGY_REVIEW_2026-09-09.md) — finite-cash profile
   comparison, automatic re-buy corrections and unpromoted financial candidates.
 - [STRATEGY_REVIEW_2026-09-08.md](STRATEGY_REVIEW_2026-09-08.md) — shared spot exit
