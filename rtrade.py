@@ -865,19 +865,24 @@ class _LivePairVenue:
 
 
 def _trend_too_strong(symbol):
-    """Return whether a clear trend should keep the spread bot idle.
+    """Return whether the regime should keep the spread bot idle.
 
-    A clear trend means ``|gradient_recent| > K * epsilon`` and risks adverse selection.
-    Missing or failed trend data fails open, matching the pipeline's trend wait.
+    Stand aside on a clear trend (``|gradient_recent| > K * epsilon``; adverse-selection
+    risk) AND when trend data is UNAVAILABLE (regime ``unknown``). With no data we cannot
+    tell a safe flat market from a trend, so we do nothing rather than trade blind: a data
+    outage must never be read as "flat" and green-light spread rounds. Only a CONFIRMED
+    ``sideways`` regime lets the bot run. Fail-CLOSED on no data (deliberately unlike the
+    pipeline's trend wait, which fails open).
     """
     if not RTRADE_TREND_FILTER_ENABLED:
         return False
     decision = _market_regime_decision(symbol)
-    if decision.directional:
+    stand_aside = decision.directional or decision.regime == "unknown"
+    if stand_aside:
         print(f"[{symbol}] rtrade STANDING ASIDE: regime {decision.regime} "
               f"strength={decision.strength} reason={decision.reason} "
               f"window={RTRADE_TREND_WINDOW_SEC:.0f}s")
-    return decision.directional
+    return stand_aside
 
 
 def _market_regime_decision(symbol) -> MarketRegimeDecision:
@@ -986,15 +991,21 @@ def _followup_force(symbol, side):
     """Choose MARKET force for a post-fill flip only when trend is not adverse.
 
     Selling into a clear decline or buying into a clear rise is adverse, so return False
-    and leave a patient limit at the flip price. Weak, flat, favorable, or unavailable
-    trend data retains immediate market behavior. This prevents desperate execution
-    against the trend.
+    and leave a patient limit at the flip price. A confirmed flat (``sideways``) or
+    favorable trend keeps immediate market behavior. UNAVAILABLE trend data (regime
+    ``unknown``) also returns False: with no data we do not fire an aggressive market
+    flip blind -- leave a patient limit instead. This prevents desperate execution
+    against the trend or during a data outage.
     """
     if not RTRADE_TREND_FILTER_ENABLED:
         return True
     decision = _market_regime_decision(symbol)
+    if decision.regime == "unknown":
+        print(f"[{symbol}] follow-up {(side or '').upper()}: trend data unavailable "
+              "-> patient limit, NOT a market order")
+        return False
     if not decision.directional:
-        return True   # A weak or flat trend permits an immediate flip.
+        return True   # A confirmed flat (sideways) regime permits an immediate flip.
     su = (side or "").upper()
     exposure = "LONG" if su == "SELL" else "SOLD"
     adverse = decision.adverse_to(exposure)

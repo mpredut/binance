@@ -46,7 +46,7 @@ class TrendFilterTest(unittest.TestCase):
         cases = (
             ("strong", {"gradient_recent": 0.5, "epsilon": 0.1}, True),
             ("weak", {"gradient_recent": 0.15, "epsilon": 0.1}, False),
-            ("unavailable", None, False),
+            ("unavailable", None, True),   # no data -> stand aside (fail-closed)
             ("flat", {"gradient_recent": 0.0, "epsilon": 0.0}, False),
         )
         for label, snapshot, expected in cases:
@@ -54,14 +54,14 @@ class TrendFilterTest(unittest.TestCase):
                 self._fake_cm(snapshot)
                 self.assertEqual(rtrade._trend_too_strong("TAOUSDC"), expected)
 
-    def test_exception_fail_open(self):
+    def test_exception_fails_closed(self):
         m = types.ModuleType("cacheManager")
 
         def boom():
             raise RuntimeError("cm down")
         m.get_short_trend_manager = boom
         sys.modules["cacheManager"] = m
-        self.assertFalse(rtrade._trend_too_strong("TAOUSDC"))         # An error -> it does not block.
+        self.assertTrue(rtrade._trend_too_strong("TAOUSDC"))          # An error -> stand aside (fail-closed).
 
 class FollowupForceTest(unittest.TestCase):
     """Follow-up (flip after a fill): force=market ONLY if the trend is not adverse. Adverse:
@@ -103,13 +103,13 @@ class FollowupForceTest(unittest.TestCase):
                 self._fake_cm({"gradient_recent": gradient, "epsilon": 0.1})
                 self.assertEqual(rtrade._followup_force("TAOUSDC", side), expected)
 
-    def test_disabled_or_unavailable_forces(self):
+    def test_disabled_forces_but_no_data_uses_patient_limit(self):
         rtrade.RTRADE_TREND_FILTER_ENABLED = False
         self._fake_cm({"gradient_recent": -0.5, "epsilon": 0.1})
         self.assertTrue(rtrade._followup_force("TAOUSDC", "SELL"))    # kill switch off -> as before
         rtrade.RTRADE_TREND_FILTER_ENABLED = True
         self._fake_cm(None)
-        self.assertTrue(rtrade._followup_force("TAOUSDC", "SELL"))    # indisponibil -> force (fail-open)
+        self.assertFalse(rtrade._followup_force("TAOUSDC", "SELL"))   # no data -> patient limit (fail-closed)
 
 
 class MarketRegimeTest(unittest.TestCase):
@@ -148,6 +148,32 @@ class MarketRegimeTest(unittest.TestCase):
         self._fake_cm(None)
         self.assertEqual(
             rtrade._market_regime_decision("TAOUSDC").regime, "unknown")
+
+    def test_trend_too_strong_stands_aside_on_no_data_but_trades_when_flat(self):
+        # No trend data (regime "unknown") must fail CLOSED -> stand aside, not trade
+        # blind. A data outage must never be read as "flat".
+        self._fake_cm(None)
+        self.assertTrue(rtrade._trend_too_strong("TAOUSDC"))
+        # A CONFIRMED flat (sideways) market is the spread bot's home -> run.
+        self._fake_cm({"gradient_recent": 0.15, "epsilon": 0.1})
+        self.assertFalse(rtrade._trend_too_strong("TAOUSDC"))
+        # A clear trend -> stand aside (adverse selection).
+        for gradient in (0.5, -0.5):
+            self._fake_cm({"gradient_recent": gradient, "epsilon": 0.1})
+            self.assertTrue(rtrade._trend_too_strong("TAOUSDC"))
+
+    def test_followup_force_uses_patient_limit_on_no_data(self):
+        # No trend data (regime "unknown") -> patient limit (False), never a blind
+        # market flip.
+        self._fake_cm(None)
+        self.assertFalse(rtrade._followup_force("TAOUSDC", "SELL"))
+        self.assertFalse(rtrade._followup_force("TAOUSDC", "BUY"))
+        # Confirmed flat -> an immediate market flip is still permitted.
+        self._fake_cm({"gradient_recent": 0.15, "epsilon": 0.1})
+        self.assertTrue(rtrade._followup_force("TAOUSDC", "SELL"))
+        # Adverse directional -> patient limit (pre-existing behavior preserved).
+        self._fake_cm({"gradient_recent": -0.5, "epsilon": 0.1})   # bear
+        self.assertFalse(rtrade._followup_force("TAOUSDC", "SELL"))
 
 
 if __name__ == "__main__":
